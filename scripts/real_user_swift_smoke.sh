@@ -210,6 +210,7 @@ PY
 cat > "$tmp_dir/swift_intake.py" <<'PY'
 import json
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -242,13 +243,34 @@ class Handler(BaseHTTPRequestHandler):
 
 
 server = HTTPServer(("127.0.0.1", port), Handler)
+server.timeout = 1
 ready_path.write_text("ready", encoding="utf-8")
-while Handler.count < 2:
+deadline = time.monotonic() + 90
+while Handler.count < 2 and time.monotonic() < deadline:
     server.handle_request()
+if Handler.count < 2:
+    print(f"swift intake timed out after {Handler.count} request(s)", file=sys.stderr)
+    sys.exit(1)
 PY
 intake_ready="$tmp_dir/intake.ready"
 intake_log="$tmp_dir/intake.jsonl"
-python3 "$tmp_dir/swift_intake.py" "$intake_port" "$intake_ready" "$intake_log" &
+intake_stdout="$tmp_dir/intake.stdout"
+intake_stderr="$tmp_dir/intake.stderr"
+
+dump_consumer_diagnostics() {
+  echo "swift real-user smoke: consumer stderr" >&2
+  sed -n '1,160p' "$tmp_dir/consumer.stderr.json" >&2 || true
+  echo "swift real-user smoke: consumer stdout" >&2
+  sed -n '1,80p' "$tmp_dir/consumer.stdout.json" >&2 || true
+  echo "swift real-user smoke: intake stderr" >&2
+  sed -n '1,80p' "$intake_stderr" >&2 || true
+  echo "swift real-user smoke: intake stdout" >&2
+  sed -n '1,80p' "$intake_stdout" >&2 || true
+  echo "swift real-user smoke: intake requests" >&2
+  sed -n '1,20p' "$intake_log" >&2 || true
+}
+
+python3 "$tmp_dir/swift_intake.py" "$intake_port" "$intake_ready" "$intake_log" > "$intake_stdout" 2> "$intake_stderr" &
 intake_pid="$!"
 for _attempt in {1..200}; do
   if [[ -f "$intake_ready" ]]; then
@@ -260,6 +282,7 @@ if [[ ! -f "$intake_ready" ]]; then
   if ! kill -0 "$intake_pid" 2>/dev/null; then
     echo "swift intake server exited before becoming ready" >&2
   fi
+  dump_consumer_diagnostics
   exit 1
 fi
 
@@ -272,17 +295,36 @@ swift package --package-path "$consumer_dir" --scratch-path "$tmp_dir/consumer-d
 grep -q '"identity": "logbrew-swift"' "$tmp_dir/consumer-dependencies.json"
 grep -q '"name": "logbrew-swift"' "$tmp_dir/consumer-dependencies.json"
 
-if ! LOGBREW_SWIFT_HTTP_ENDPOINT="http://127.0.0.1:$intake_port/v1/events" \
-  swift run --package-path "$consumer_dir" --scratch-path "$tmp_dir/consumer-run-build" SmokeApp > "$tmp_dir/consumer.stdout.json" 2> "$tmp_dir/consumer.stderr.json"; then
+if ! python3 - "$consumer_dir" "$tmp_dir/consumer-run-build" "http://127.0.0.1:$intake_port/v1/events" "$tmp_dir/consumer.stdout.json" "$tmp_dir/consumer.stderr.json" <<'PY'
+import os
+import subprocess
+import sys
+
+consumer_dir, scratch_path, endpoint, stdout_path, stderr_path = sys.argv[1:]
+env = os.environ.copy()
+env["LOGBREW_SWIFT_HTTP_ENDPOINT"] = endpoint
+with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
+    try:
+        result = subprocess.run(
+            ["swift", "run", "--package-path", consumer_dir, "--scratch-path", scratch_path, "SmokeApp"],
+            env=env,
+            stderr=stderr,
+            stdout=stdout,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        print("swift consumer app timed out after 120 seconds", file=sys.stderr)
+        raise SystemExit(124)
+raise SystemExit(result.returncode)
+PY
+then
   echo "swift real-user smoke: installed consumer app failed" >&2
-  sed -n '1,160p' "$tmp_dir/consumer.stderr.json" >&2 || true
-  sed -n '1,80p' "$tmp_dir/consumer.stdout.json" >&2 || true
-  sed -n '1,20p' "$intake_log" >&2 || true
+  dump_consumer_diagnostics
   exit 1
 fi
 if ! wait "$intake_pid"; then
   echo "swift real-user smoke: intake server exited nonzero" >&2
-  sed -n '1,20p' "$intake_log" >&2 || true
+  dump_consumer_diagnostics
   exit 1
 fi
 intake_pid=""
