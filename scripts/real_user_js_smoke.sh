@@ -914,6 +914,7 @@ case "$package_manager" in
     ;;
   pnpm)
     pnpm init --init-type module >/dev/null
+    pnpm --version > .pnpm-version
     ;;
   *)
     echo "unsupported package manager: $package_manager" >&2
@@ -929,6 +930,9 @@ const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 packageJson.name = "smoke-app";
 packageJson.private = true;
 packageJson.type = "module";
+if (packageJson.packageManager?.startsWith("pnpm@")) {
+  packageJson.packageManager = `pnpm@${fs.readFileSync(".pnpm-version", "utf8").trim()}`;
+}
 packageJson.scripts = {
   ...(packageJson.scripts ?? {}),
   "smoke-test": "node --test installed-user.test.mjs",
