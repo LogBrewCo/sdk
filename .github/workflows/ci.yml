@@ -266,7 +266,6 @@ jobs:
   swift-checks:
     name: Swift SDK checks
     runs-on: macos-latest
-    if: ${{ hashFiles('swift/logbrew-swift/Package.swift') != '' }}
     timeout-minutes: 15
 
     steps:
@@ -296,7 +295,6 @@ jobs:
   objc-checks:
     name: Objective-C SDK checks
     runs-on: macos-latest
-    if: ${{ hashFiles('objc/logbrew-objc/include/LogBrew.h') != '' }}
     timeout-minutes: 15
 
     steps:
@@ -317,7 +315,6 @@ jobs:
   kotlin-checks:
     name: Kotlin SDK checks
     runs-on: macos-latest
-    if: ${{ hashFiles('kotlin/logbrew-kotlin/pom.xml') != '' }}
     timeout-minutes: 15
 
     steps:
