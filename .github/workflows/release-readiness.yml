@@ -510,7 +510,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: current
-          cache-provider: basic
+          cache-disabled: true
 
       - name: Run Java package checks
         run: bash scripts/check_java_static.sh && bash scripts/check_java_package.sh

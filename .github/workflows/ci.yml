@@ -62,7 +62,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: current
-          cache-provider: basic
+          cache-disabled: true
 
       - name: Set up .NET
         if: ${{ hashFiles('dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj') != '' || hashFiles('unity/logbrew-unity/tests/LogBrew.Unity.Tests/LogBrew.Unity.Tests.csproj') != '' }}
