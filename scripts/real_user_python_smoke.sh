@@ -3,7 +3,26 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
+
+on_error() {
+    local status=$?
+    echo "real_user_python_smoke failed at line ${BASH_LINENO[0]} while running: ${BASH_COMMAND}" >&2
+    for diagnostic in \
+        "$tmp_dir/pip-freeze.txt" \
+        "$tmp_dir/pip-direct-requirements.txt" \
+        "$tmp_dir/sdist-pip-freeze.txt" \
+        "$tmp_dir/sdist-direct-requirements.txt" \
+        "$tmp_dir/sdist-contents.txt"; do
+        if [[ -f "$diagnostic" ]]; then
+            echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
+            sed -n '1,80p' "$diagnostic" >&2
+        fi
+    done
+    exit "$status"
+}
+
 trap 'rm -rf "$tmp_dir"' EXIT
+trap on_error ERR
 
 run_readme_example() {
     local make_target="$1"
