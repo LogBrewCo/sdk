@@ -27,11 +27,15 @@ on_error() {
 trap 'rm -rf "$tmp_dir"' EXIT
 trap on_error ERR
 
+run_make() {
+    make --no-print-directory -C "$tmp_dir" "$@"
+}
+
 run_readme_example() {
     local make_target="$1"
     local output_prefix="$2"
 
-    make -C "$tmp_dir" "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
+    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "issue"' "$tmp_dir/$output_prefix.stdout.json"
@@ -48,7 +52,7 @@ run_packaged_example_module() {
     local make_target="$1"
     local output_prefix="$2"
 
-    make -C "$tmp_dir" "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
+    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "issue"' "$tmp_dir/$output_prefix.stdout.json"
@@ -65,7 +69,7 @@ run_packaged_real_user_module() {
     local make_target="$1"
     local output_prefix="$2"
 
-    make -C "$tmp_dir" "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
+    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "issue"' "$tmp_dir/$output_prefix.stdout.json"
@@ -82,7 +86,7 @@ run_packaged_examples_entrypoint() {
     local make_target="$1"
     local output_prefix="$2"
 
-    make -C "$tmp_dir" "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
+    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "issue"' "$tmp_dir/$output_prefix.stdout.json"
@@ -99,7 +103,7 @@ check_packaged_examples_listing() {
     local make_target="$1"
     local output_prefix="$2"
 
-    make -C "$tmp_dir" "$make_target" > "$tmp_dir/$output_prefix.stdout.txt"
+    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.txt"
     grep -qx 'readme-example -> python -m logbrew_sdk.examples readme-example' <(sed -n '1p' "$tmp_dir/$output_prefix.stdout.txt")
     grep -qx 'real-user-smoke -> python -m logbrew_sdk.examples real-user-smoke' <(sed -n '2p' "$tmp_dir/$output_prefix.stdout.txt")
     grep -qx 'default (real-user-smoke) -> python -m logbrew_sdk.examples' <(sed -n '3p' "$tmp_dir/$output_prefix.stdout.txt")
@@ -110,7 +114,7 @@ check_packaged_examples_help() {
     local make_target="$1"
     local output_prefix="$2"
 
-    make -C "$tmp_dir" "$make_target" > "$tmp_dir/$output_prefix.stdout.txt"
+    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.txt"
     grep -q '^usage:' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q 'Run the packaged LogBrew SDK examples' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q 'installed Python' "$tmp_dir/$output_prefix.stdout.txt"
@@ -127,7 +131,7 @@ check_packaged_examples_help() {
 check_makefile_help() {
     local output_prefix="$1"
 
-    make -C "$tmp_dir" > "$tmp_dir/$output_prefix.stdout.txt"
+    run_make > "$tmp_dir/$output_prefix.stdout.txt"
     grep -qx 'smoke-types -> make smoke-types' <(sed -n '1p' "$tmp_dir/$output_prefix.stdout.txt")
     grep -qx 'smoke-test -> make smoke-test' <(sed -n '2p' "$tmp_dir/$output_prefix.stdout.txt")
     grep -qx 'smoke-readme -> make smoke-readme' <(sed -n '3p' "$tmp_dir/$output_prefix.stdout.txt")
@@ -145,7 +149,7 @@ run_smoke_script() {
     local make_target="$1"
     local output_prefix="$2"
 
-    make -C "$tmp_dir" "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
+    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"type": "issue"' "$tmp_dir/$output_prefix.stdout.json"
@@ -212,7 +216,7 @@ run_reinstall_from_freeze() {
 
     python "$tmp_dir/module_doc.py"
     check_makefile_help "$output_prefix-freeze-make-help"
-    make -C "$tmp_dir" smoke-types >/dev/null
+    run_make smoke-types >/dev/null
     python "$tmp_dir/metadata.py" "$expected_suffix" "$report_path" "$inspect_path" "$pip_show_path" "$pip_show_files_path" "$pip_list_path"
     run_readme_example "smoke-readme" "$output_prefix-freeze-readme-example"
     run_packaged_example_module "smoke-packaged-example" "$output_prefix-freeze-packaged-example"
@@ -255,8 +259,8 @@ run_reinstall_from_direct_requirement() {
 
     python "$tmp_dir/module_doc.py"
     check_makefile_help "$output_prefix-direct-make-help"
-    make -C "$tmp_dir" smoke-types >/dev/null
-    make -C "$tmp_dir" smoke-test >/dev/null
+    run_make smoke-types >/dev/null
+    run_make smoke-test >/dev/null
     python "$tmp_dir/metadata.py" "$expected_suffix" "$report_path" "$inspect_path" "$pip_show_path" "$pip_show_files_path" "$pip_list_path"
     run_readme_example "smoke-readme" "$output_prefix-direct-readme-example"
     run_packaged_example_module "smoke-packaged-example" "$output_prefix-direct-packaged-example"
@@ -1261,8 +1265,8 @@ grep -q '^smoke-packaged-examples:$' "$tmp_dir/Makefile"
 grep -q '^smoke-run:$' "$tmp_dir/Makefile"
 
 check_makefile_help "wheel-make-help"
-make -C "$tmp_dir" smoke-types >/dev/null
-make -C "$tmp_dir" smoke-test >/dev/null
+run_make smoke-types >/dev/null
+run_make smoke-test >/dev/null
 run_readme_example "smoke-readme" "wheel-readme-example"
 run_packaged_example_module "smoke-packaged-example" "wheel-packaged-example"
 run_packaged_real_user_module "smoke-packaged-smoke" "wheel-packaged-smoke"
@@ -1286,8 +1290,8 @@ python -m pip inspect > "$tmp_dir/pip-reinstall-inspect.json"
 
 python "$tmp_dir/module_doc.py"
 check_makefile_help "wheel-reinstall-make-help"
-make -C "$tmp_dir" smoke-types >/dev/null
-make -C "$tmp_dir" smoke-test >/dev/null
+run_make smoke-types >/dev/null
+run_make smoke-test >/dev/null
 python "$tmp_dir/metadata.py" "logbrew_sdk-0.1.0-py3-none-any.whl" "$tmp_dir/pip-reinstall-report.json" "$tmp_dir/pip-reinstall-inspect.json" "$tmp_dir/pip-reinstall-show.txt" "$tmp_dir/pip-reinstall-show-files.txt" "$tmp_dir/pip-reinstall-list.json"
 run_readme_example "smoke-readme" "wheel-reinstall-readme-example"
 run_packaged_example_module "smoke-packaged-example" "wheel-reinstall-packaged-example"
@@ -1322,8 +1326,8 @@ python -m pip inspect > "$tmp_dir/sdist-pip-inspect.json"
 
 python "$tmp_dir/module_doc.py"
 check_makefile_help "sdist-make-help"
-make -C "$tmp_dir" smoke-types >/dev/null
-make -C "$tmp_dir" smoke-test >/dev/null
+run_make smoke-types >/dev/null
+run_make smoke-test >/dev/null
 python "$tmp_dir/metadata.py" "logbrew_sdk-0.1.0.tar.gz" "$tmp_dir/sdist-pip-install-report.json" "$tmp_dir/sdist-pip-inspect.json" "$tmp_dir/sdist-pip-show.txt" "$tmp_dir/sdist-pip-show-files.txt" "$tmp_dir/sdist-pip-list.json"
 run_readme_example "smoke-readme" "sdist-readme-example"
 run_packaged_example_module "smoke-packaged-example" "sdist-packaged-example"
@@ -1348,8 +1352,8 @@ python -m pip inspect > "$tmp_dir/sdist-pip-reinstall-inspect.json"
 
 python "$tmp_dir/module_doc.py"
 check_makefile_help "sdist-reinstall-make-help"
-make -C "$tmp_dir" smoke-types >/dev/null
-make -C "$tmp_dir" smoke-test >/dev/null
+run_make smoke-types >/dev/null
+run_make smoke-test >/dev/null
 python "$tmp_dir/metadata.py" "logbrew_sdk-0.1.0.tar.gz" "$tmp_dir/sdist-pip-reinstall-report.json" "$tmp_dir/sdist-pip-reinstall-inspect.json" "$tmp_dir/sdist-pip-reinstall-show.txt" "$tmp_dir/sdist-pip-reinstall-show-files.txt" "$tmp_dir/sdist-pip-reinstall-list.json"
 run_readme_example "smoke-readme" "sdist-reinstall-readme-example"
 run_packaged_example_module "smoke-packaged-example" "sdist-reinstall-packaged-example"
