@@ -20,6 +20,10 @@ if [[ -z "$cc_command" ]]; then
   fi
 fi
 
+run_examples_make() {
+    make --no-print-directory -C "$package_dir/examples"
+}
+
 cflags=(-std=c99 -Wall -Wextra -Wpedantic -Werror -I"$package_dir/include")
 
 mkdir -p "$tmp_dir/build"
@@ -38,7 +42,7 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/smoke.stderr.json"
 
-make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
+run_examples_make > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
@@ -58,7 +62,7 @@ grep -qx 'tests/test_logbrew.c' "$tmp_dir/archive-contents.txt"
 extracted_dir="$tmp_dir/extracted"
 mkdir -p "$extracted_dir"
 tar -xzf "$archive" -C "$extracted_dir"
-make -C "$extracted_dir" CC="$cc_command"
+make --no-print-directory -C "$extracted_dir" CC="$cc_command"
 
 python3 - "$archive" <<'PY'
 import sys

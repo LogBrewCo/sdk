@@ -9,7 +9,27 @@ remove_tmp_dir() {
   rm -rf "$tmp_dir"
 }
 
+on_error() {
+  local status=$?
+  echo "real_user_cpp_smoke failed at line ${BASH_LINENO[0]} while running: ${BASH_COMMAND}" >&2
+  for diagnostic in \
+    "$tmp_dir/examples-help.txt" \
+    "$tmp_dir/native-app.stdout.json" \
+    "$tmp_dir/native-app.stderr.json" \
+    "$tmp_dir/readme-example.stdout.json" \
+    "$tmp_dir/readme-example.stderr.json" \
+    "$tmp_dir/real-user-smoke.stdout.json" \
+    "$tmp_dir/real-user-smoke.stderr.json"; do
+    if [[ -f "$diagnostic" ]]; then
+      echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
+      sed -n '1,80p' "$diagnostic" >&2
+    fi
+  done
+  exit "$status"
+}
+
 trap remove_tmp_dir EXIT
+trap on_error ERR
 
 cxx_command="${CXX:-}"
 if [[ -z "$cxx_command" ]]; then
@@ -19,6 +39,10 @@ if [[ -z "$cxx_command" ]]; then
     cxx_command="c++"
   fi
 fi
+
+run_examples_make() {
+  make --no-print-directory -C "$sdk_dir/examples" CXX="$cxx_command" "$@"
+}
 
 archive="$tmp_dir/logbrew-cpp-0.1.0.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
@@ -161,14 +185,14 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/native-app.stdout.js
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/native-app.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/native-app.stderr.json"
 
-make -C "$sdk_dir/examples" CXX="$cxx_command" > "$tmp_dir/examples-help.txt"
+run_examples_make > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
-make -C "$sdk_dir/examples" CXX="$cxx_command" run-readme-example > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
+run_examples_make run-readme-example > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
-make -C "$sdk_dir/examples" CXX="$cxx_command" run-real-user-smoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
+run_examples_make run-real-user-smoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 
