@@ -65,6 +65,29 @@ if dependency_name in manifest.get("dependencies", {}):
 PY
 }
 
+assert_cargo_tree_package() {
+	local tree_path="$1"
+	local package_name="$2"
+	local expected_version="$3"
+	local expected_path_suffix="${4:-}"
+	python3 - "$tree_path" "$package_name" "$expected_version" "$expected_path_suffix" <<'PY'
+import sys
+from pathlib import Path
+
+tree_path, package_name, expected_version, expected_path_suffix = sys.argv[1:]
+tree_text = Path(tree_path).read_text()
+needle = f"{package_name} v{expected_version}"
+matches = [line for line in tree_text.splitlines() if needle in line]
+if not matches:
+    raise SystemExit(f"expected cargo tree to contain {needle!r}\n{tree_text}")
+if expected_path_suffix and not any(expected_path_suffix in line for line in matches):
+    raise SystemExit(
+        f"expected {needle!r} cargo tree line to include {expected_path_suffix!r}\n"
+        + "\n".join(matches)
+    )
+PY
+}
+
 cargo package --allow-dirty --no-verify --manifest-path "$repo_root/rust/logbrew/Cargo.toml" --target-dir "$tmp_dir/cargo-package" >/dev/null
 crate_path="$tmp_dir/cargo-package/package/logbrew-0.1.0.crate"
 test -f "$crate_path"
@@ -238,7 +261,7 @@ if not dependency_path.endswith("/extracted-crate/logbrew-0.1.0"):
 PY
 cargo tree --locked --depth 1 --charset ascii > lifecycle-cargo-tree.txt
 grep -q '^lifecycle-app v0.1.0 (' lifecycle-cargo-tree.txt
-grep -q '^`-- logbrew v0.1.0 (.*/extracted-crate/logbrew-0.1.0)$' lifecycle-cargo-tree.txt
+assert_cargo_tree_package lifecycle-cargo-tree.txt logbrew 0.1.0 "/extracted-crate/logbrew-0.1.0"
 
 cargo remove logbrew >/dev/null
 assert_cargo_manifest_without_dependency Cargo.toml lifecycle-app logbrew
@@ -282,7 +305,7 @@ assert_cargo_manifest_dependency Cargo.toml lifecycle-app logbrew "/extracted-cr
 grep -q '^name = "logbrew"$' Cargo.lock
 grep -q '^version = "0.1.0"$' Cargo.lock
 cargo tree --locked --depth 1 --charset ascii > lifecycle-cargo-tree-readded.txt
-grep -q '^`-- logbrew v0.1.0 (.*/extracted-crate/logbrew-0.1.0)$' lifecycle-cargo-tree-readded.txt
+assert_cargo_tree_package lifecycle-cargo-tree-readded.txt logbrew 0.1.0 "/extracted-crate/logbrew-0.1.0"
 
 cd "$tmp_dir"
 cargo new --quiet smoke-app
@@ -509,7 +532,7 @@ cargo smoke-build
 cargo smoke-test
 cargo tree --locked --depth 1 --charset ascii > cargo-tree.txt
 grep -q '^smoke-app v0.1.0 (' cargo-tree.txt
-grep -q '^`-- logbrew v0.1.0 (.*/extracted-crate/logbrew-0.1.0)$' cargo-tree.txt
+assert_cargo_tree_package cargo-tree.txt logbrew 0.1.0 "/extracted-crate/logbrew-0.1.0"
 cargo smoke-doc
 test -f target/doc/logbrew/index.html
 grep -q 'Public Rust client for building, validating, previewing, and flushing LogBrew event batches\.' target/doc/logbrew/index.html
@@ -881,8 +904,8 @@ if not dependency_path.endswith("/extracted-crate/logbrew-0.1.0"):
 PY
 cargo tree --locked --charset ascii > http-cargo-tree.txt
 grep -q '^http-app v0.1.0 (' http-cargo-tree.txt
-grep -q '^`-- logbrew v0.1.0 (.*/extracted-crate/logbrew-0.1.0)$' http-cargo-tree.txt
-grep -q 'ureq v3.3.0' http-cargo-tree.txt
+assert_cargo_tree_package http-cargo-tree.txt logbrew 0.1.0 "/extracted-crate/logbrew-0.1.0"
+assert_cargo_tree_package http-cargo-tree.txt ureq 3.3.0
 
 cat > src/main.rs <<'EOF'
 use logbrew::{HttpTransport, HttpTransportConfig, LogBrewClient, ReleaseEvent};

@@ -272,9 +272,19 @@ swift package --package-path "$consumer_dir" --scratch-path "$tmp_dir/consumer-d
 grep -q '"identity": "logbrew-swift"' "$tmp_dir/consumer-dependencies.json"
 grep -q '"name": "logbrew-swift"' "$tmp_dir/consumer-dependencies.json"
 
-LOGBREW_SWIFT_HTTP_ENDPOINT="http://127.0.0.1:$intake_port/v1/events" \
-  swift run --package-path "$consumer_dir" --scratch-path "$tmp_dir/consumer-run-build" SmokeApp > "$tmp_dir/consumer.stdout.json" 2> "$tmp_dir/consumer.stderr.json"
-wait "$intake_pid"
+if ! LOGBREW_SWIFT_HTTP_ENDPOINT="http://127.0.0.1:$intake_port/v1/events" \
+  swift run --package-path "$consumer_dir" --scratch-path "$tmp_dir/consumer-run-build" SmokeApp > "$tmp_dir/consumer.stdout.json" 2> "$tmp_dir/consumer.stderr.json"; then
+  echo "swift real-user smoke: installed consumer app failed" >&2
+  sed -n '1,160p' "$tmp_dir/consumer.stderr.json" >&2 || true
+  sed -n '1,80p' "$tmp_dir/consumer.stdout.json" >&2 || true
+  sed -n '1,20p' "$intake_log" >&2 || true
+  exit 1
+fi
+if ! wait "$intake_pid"; then
+  echo "swift real-user smoke: intake server exited nonzero" >&2
+  sed -n '1,20p' "$intake_log" >&2 || true
+  exit 1
+fi
 intake_pid=""
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/consumer.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/consumer.stdout.json" >/dev/null
