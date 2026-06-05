@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
@@ -8,11 +8,14 @@ on_error() {
     local status=$?
     echo "real_user_python_smoke failed at line ${BASH_LINENO[0]} while running: ${BASH_COMMAND}" >&2
     for diagnostic in \
+        "$tmp_dir/build.log" \
         "$tmp_dir/pip-freeze.txt" \
         "$tmp_dir/pip-direct-requirements.txt" \
         "$tmp_dir/sdist-pip-freeze.txt" \
         "$tmp_dir/sdist-direct-requirements.txt" \
-        "$tmp_dir/sdist-contents.txt"; do
+        "$tmp_dir/sdist-contents.txt" \
+        "$tmp_dir/sdist-README.md" \
+        "$tmp_dir/sdist-pyproject.toml"; do
         if [[ -f "$diagnostic" ]]; then
             echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
             sed -n '1,80p' "$diagnostic" >&2
@@ -294,7 +297,7 @@ EOF
 
 python3 -m venv "$tmp_dir/build-venv"
 "$tmp_dir/build-venv/bin/python" -m pip install --upgrade pip build >/dev/null
-"$tmp_dir/build-venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/dist" "$repo_root/python/logbrew_py" >/dev/null
+"$tmp_dir/build-venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/dist" "$repo_root/python/logbrew_py" > "$tmp_dir/build.log" 2>&1
 wheel_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.whl' | head -n 1)"
 export LOGBREW_WHEEL_PATH="$wheel_path"
 python3 - <<'PY'
@@ -335,25 +338,65 @@ for needle in (
         raise SystemExit(f"missing wheel metadata guidance: {needle}")
 PY
 sdist_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.tar.gz' | head -n 1)"
-tar -tzf "$sdist_path" > "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_sdk-0.1.0/README.md$' "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_sdk-0.1.0/pyproject.toml$' "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_sdk-0.1.0/src/logbrew_sdk/py.typed$' "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_sdk-0.1.0/src/logbrew_sdk/examples/__init__.py$' "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_sdk-0.1.0/src/logbrew_sdk/examples/__main__.py$' "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_sdk-0.1.0/src/logbrew_sdk/examples/readme_example.py$' "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_sdk-0.1.0/src/logbrew_sdk/examples/real_user_smoke.py$' "$tmp_dir/sdist-contents.txt"
-tar -xOf "$sdist_path" logbrew_sdk-0.1.0/README.md > "$tmp_dir/sdist-README.md"
-tar -xOf "$sdist_path" logbrew_sdk-0.1.0/pyproject.toml > "$tmp_dir/sdist-pyproject.toml"
-grep -q 'python3 -m pip install logbrew-sdk' "$tmp_dir/sdist-README.md"
-grep -q 'LOGBREW_API_KEY' "$tmp_dir/sdist-README.md"
-grep -q 'preview_json()' "$tmp_dir/sdist-README.md"
-grep -q 'HttpTransport' "$tmp_dir/sdist-README.md"
-grep -q 'LogBrewLoggingHandler' "$tmp_dir/sdist-README.md"
-grep -q 'parse_traceparent' "$tmp_dir/sdist-README.md"
-grep -q 'span_attributes_from_traceparent' "$tmp_dir/sdist-README.md"
-grep -q '^readme = "README.md"$' "$tmp_dir/sdist-pyproject.toml"
-grep -q '^name = "logbrew-sdk"$' "$tmp_dir/sdist-pyproject.toml"
+export LOGBREW_SDIST_PATH="$sdist_path"
+export LOGBREW_TMP_DIR="$tmp_dir"
+python3 - <<'PY'
+from pathlib import Path
+import os
+import tarfile
+
+sdist_path = Path(os.environ["LOGBREW_SDIST_PATH"])
+tmp_dir = Path(os.environ["LOGBREW_TMP_DIR"])
+
+with tarfile.open(sdist_path, "r:gz") as archive:
+    members = {member.name.lstrip("./"): member for member in archive.getmembers()}
+    names = set(members)
+    (tmp_dir / "sdist-contents.txt").write_text("\n".join(sorted(names)) + "\n")
+
+    required = {
+        "logbrew_sdk-0.1.0/README.md",
+        "logbrew_sdk-0.1.0/pyproject.toml",
+        "logbrew_sdk-0.1.0/src/logbrew_sdk/py.typed",
+        "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/__init__.py",
+        "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/__main__.py",
+        "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/readme_example.py",
+        "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/real_user_smoke.py",
+    }
+    missing = sorted(required - names)
+    if missing:
+        raise SystemExit(f"missing sdist payload files: {missing}")
+
+    def read_text(member_name: str) -> str:
+        extracted = archive.extractfile(members[member_name])
+        if extracted is None:
+            raise SystemExit(f"sdist member is not a regular file: {member_name}")
+        return extracted.read().decode("utf-8")
+
+    readme = read_text("logbrew_sdk-0.1.0/README.md")
+    pyproject = read_text("logbrew_sdk-0.1.0/pyproject.toml")
+
+(tmp_dir / "sdist-README.md").write_text(readme)
+(tmp_dir / "sdist-pyproject.toml").write_text(pyproject)
+
+for needle in (
+    "python3 -m pip install logbrew-sdk",
+    "LOGBREW_API_KEY",
+    "preview_json()",
+    "HttpTransport",
+    "LogBrewLoggingHandler",
+    "parse_traceparent",
+    "span_attributes_from_traceparent",
+):
+    if needle not in readme:
+        raise SystemExit(f"missing sdist README guidance: {needle}")
+
+for needle in (
+    'readme = "README.md"',
+    'name = "logbrew-sdk"',
+):
+    if needle not in pyproject.splitlines():
+        raise SystemExit(f"missing sdist pyproject metadata: {needle}")
+PY
 
 python3 -m venv "$tmp_dir/venv"
 source "$tmp_dir/venv/bin/activate"
