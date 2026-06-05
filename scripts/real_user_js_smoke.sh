@@ -913,8 +913,8 @@ case "$package_manager" in
     npm init -y >/dev/null
     ;;
   pnpm)
-    pnpm init --init-type module >/dev/null
     pnpm --version > .pnpm-version
+    pnpm init --init-type module >/dev/null
     ;;
   *)
     echo "unsupported package manager: $package_manager" >&2
