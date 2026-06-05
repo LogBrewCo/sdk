@@ -1,6 +1,8 @@
 #include "logbrew.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <functional>
 #include <iomanip>
 #include <sstream>
 
