@@ -273,7 +273,9 @@ if any(item.get("name") == "logbrew-sdk" for item in packages):
 EOF
 }
 
-python3 -m build --wheel --sdist --outdir "$tmp_dir/dist" "$repo_root/python/logbrew_py" >/dev/null
+python3 -m venv "$tmp_dir/build-venv"
+"$tmp_dir/build-venv/bin/python" -m pip install --upgrade pip build >/dev/null
+"$tmp_dir/build-venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/dist" "$repo_root/python/logbrew_py" >/dev/null
 wheel_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.whl' | head -n 1)"
 export LOGBREW_WHEEL_PATH="$wheel_path"
 python3 - <<'PY'
