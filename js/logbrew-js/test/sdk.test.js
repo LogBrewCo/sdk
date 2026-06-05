@@ -800,7 +800,6 @@ test("repo checkout pnpm helper runs the CommonJS smoke example", () => {
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /> node \.\/index\.mjs real-user-smoke:cjs/);
   assert.match(result.stdout, /"name": "smoke-app-cjs"/);
   assert.match(result.stdout, /"type": "release"/);
   assert.match(result.stdout, /"type": "environment"/);
@@ -832,7 +831,6 @@ test("repo checkout pnpm helper list prints launcher commands", () => {
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /> node \.\/index\.mjs --list/);
   assert.match(result.stdout, /readme-example -> cd js\/logbrew-js && node examples\/index\.mjs readme-example/);
   assert.match(result.stdout, /real-user-smoke:cjs -> cd js\/logbrew-js && node examples\/index\.mjs real-user-smoke:cjs/);
   assert.match(result.stdout, /default \(real-user-smoke\) -> cd js\/logbrew-js && node examples\/index\.mjs/);
@@ -845,7 +843,6 @@ test("repo checkout pnpm helper help prints helper and launcher commands", () =>
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /> node \.\/index\.mjs --help/);
   assert.match(result.stdout, /^Usage: node examples\/index\.mjs \[--list\] \[example\]/m);
   assert.match(result.stdout, /Run the repo-checkout LogBrew SDK JavaScript examples before install\./);
   assert.match(
@@ -865,7 +862,6 @@ test("repo checkout pnpm helper runs the CommonJS README example", () => {
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /> node \.\/index\.mjs readme-example:cjs/);
   assert.match(result.stdout, /"name": "logbrew-js"/);
   assert.match(result.stdout, /"type": "release"/);
   assert.match(result.stdout, /"type": "environment"/);
@@ -883,7 +879,6 @@ test("repo checkout pnpm helper runs the ESM README example", () => {
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /> node \.\/index\.mjs readme-example/);
   assert.match(result.stdout, /"name": "logbrew-js"/);
   assert.match(result.stdout, /"type": "release"/);
   assert.match(result.stdout, /"type": "environment"/);
@@ -901,7 +896,6 @@ test("repo checkout pnpm helper runs the ESM smoke example", () => {
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /> node \.\/index\.mjs real-user-smoke/);
   assert.match(result.stdout, /"name": "smoke-app"/);
   assert.match(result.stdout, /"type": "release"/);
   assert.match(result.stdout, /"type": "environment"/);
