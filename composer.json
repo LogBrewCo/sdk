@@ -1,0 +1,30 @@
+{
+  "name": "logbrew/sdk",
+  "description": "Public LogBrew PHP SDK for building, validating, and flushing event batches.",
+  "type": "library",
+  "license": "MIT",
+  "keywords": [
+    "logbrew",
+    "logging",
+    "observability",
+    "psr-3"
+  ],
+  "homepage": "https://github.com/LogBrewCo/sdk/tree/main/php/logbrew-php",
+  "readme": "php/logbrew-php/README.md",
+  "support": {
+    "issues": "https://github.com/LogBrewCo/sdk/issues",
+    "source": "https://github.com/LogBrewCo/sdk/tree/main/php/logbrew-php"
+  },
+  "require": {
+    "php": "^8.2",
+    "psr/log": "^3.0"
+  },
+  "require-dev": {
+    "monolog/monolog": "^3.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "LogBrew\\": "php/logbrew-php/src/"
+    }
+  }
+}
