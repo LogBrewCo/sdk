@@ -258,6 +258,10 @@ intake_stdout="$tmp_dir/intake.stdout"
 intake_stderr="$tmp_dir/intake.stderr"
 
 dump_consumer_diagnostics() {
+  if [[ -n "$intake_pid" ]]; then
+    echo "swift real-user smoke: intake process" >&2
+    ps -p "$intake_pid" -o pid,ppid,stat,etime,command >&2 || true
+  fi
   echo "swift real-user smoke: consumer stderr" >&2
   sed -n '1,160p' "$tmp_dir/consumer.stderr.json" >&2 || true
   echo "swift real-user smoke: consumer stdout" >&2
@@ -272,13 +276,14 @@ dump_consumer_diagnostics() {
 
 python3 "$tmp_dir/swift_intake.py" "$intake_port" "$intake_ready" "$intake_log" > "$intake_stdout" 2> "$intake_stderr" &
 intake_pid="$!"
-for _attempt in {1..200}; do
+for _attempt in {1..1200}; do
   if [[ -f "$intake_ready" ]]; then
     break
   fi
   sleep 0.1
 done
 if [[ ! -f "$intake_ready" ]]; then
+  echo "swift intake server did not become ready after 120 seconds" >&2
   if ! kill -0 "$intake_pid" 2>/dev/null; then
     echo "swift intake server exited before becoming ready" >&2
   fi
