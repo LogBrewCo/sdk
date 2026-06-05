@@ -15,10 +15,13 @@ cleanup() {
 }
 
 trap cleanup EXIT
+trap 'echo "swift real-user smoke failed near line $LINENO" >&2' ERR
 
+echo "swift real-user smoke: package build/test" >&2
 swift build --package-path "$package_dir" --scratch-path "$tmp_dir/package-build" >/dev/null
 swift test --package-path "$package_dir" --scratch-path "$tmp_dir/package-test" >/dev/null
 
+echo "swift real-user smoke: archive source" >&2
 archive_path="$tmp_dir/logbrew-swift-source.zip"
 swift package --package-path "$package_dir" --scratch-path "$tmp_dir/package-archive" archive-source --output "$archive_path" >/dev/null
 test -f "$archive_path"
@@ -39,12 +42,14 @@ grep -q '/Sources/RealUserSmoke/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/LogBrewTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/examples/Makefile$' "$tmp_dir/archive-contents.txt"
 
+echo "swift real-user smoke: packaged README example" >&2
 swift run --package-path "$package_dir" --scratch-path "$tmp_dir/readme-run-build" ReadmeExample > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 grep -q '"events":6' "$tmp_dir/readme.stderr.json"
 
+echo "swift real-user smoke: packaged real-user example" >&2
 swift run --package-path "$package_dir" --scratch-path "$tmp_dir/smoke-run-build" RealUserSmoke > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
@@ -53,6 +58,7 @@ grep -q '"attempts":2' "$tmp_dir/smoke.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/smoke.stderr.json"
 grep -q '"events":6' "$tmp_dir/smoke.stderr.json"
 
+echo "swift real-user smoke: example Makefile commands" >&2
 (cd "$package_dir/examples" && make) > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' "$tmp_dir/examples-help.txt")
 grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' "$tmp_dir/examples-help.txt")
@@ -71,6 +77,7 @@ grep -q 'RealUserSmoke' "$tmp_dir/make-smoke-plan.txt"
 grep -q 'swift run --package-path .. --scratch-path' "$tmp_dir/make-alias-plan.txt"
 grep -q 'RealUserSmoke' "$tmp_dir/make-alias-plan.txt"
 
+echo "swift real-user smoke: installed consumer app" >&2
 consumer_dir="$tmp_dir/smoke-app"
 mkdir -p "$consumer_dir/Sources/SmokeApp"
 cat > "$consumer_dir/Package.swift" <<EOF

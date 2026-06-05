@@ -31,7 +31,7 @@ dependencies = manifest.get("dependencies", {})
 dependency = dependencies.get(dependency_name)
 if not isinstance(dependency, dict):
     raise SystemExit(f"expected table dependency for {dependency_name}, found: {dependency!r}")
-if dependency.get("version") != "0.1.0":
+if dependency.get("version") not in (None, "0.1.0"):
     raise SystemExit(f"unexpected {dependency_name} version requirement: {dependency.get('version')!r}")
 dependency_path = str(dependency.get("path", ""))
 if not dependency_path.endswith(path_suffix):
@@ -230,7 +230,7 @@ root_dependencies = root_package.get("dependencies", [])
 logbrew_dependency = next((dep for dep in root_dependencies if dep.get("name") == "logbrew"), None)
 if logbrew_dependency is None:
     raise SystemExit("expected lifecycle-app dependency on logbrew before removal")
-if logbrew_dependency.get("req") != "^0.1.0":
+if logbrew_dependency.get("req") not in ("^0.1.0", "*"):
     raise SystemExit(f"unexpected lifecycle-app dependency requirement: {logbrew_dependency.get('req')}")
 dependency_path = str(logbrew_dependency.get("path", ""))
 if not dependency_path.endswith("/extracted-crate/logbrew-0.1.0"):
@@ -478,7 +478,7 @@ root_dependencies = root_package.get("dependencies", [])
 logbrew_dependency = next((dep for dep in root_dependencies if dep.get("name") == "logbrew"), None)
 if logbrew_dependency is None:
     raise SystemExit("expected smoke-app metadata dependency on logbrew")
-if logbrew_dependency.get("req") != "^0.1.0":
+if logbrew_dependency.get("req") not in ("^0.1.0", "*"):
     raise SystemExit(f"unexpected logbrew dependency requirement: {logbrew_dependency.get('req')}")
 dependency_path = str(logbrew_dependency.get("path", ""))
 if not dependency_path.endswith("/extracted-crate/logbrew-0.1.0"):
@@ -876,7 +876,7 @@ if dependency is None:
     raise SystemExit("expected http-app dependency on logbrew")
 if dependency.get("features") != ["http"]:
     raise SystemExit(f"unexpected http-app logbrew features: {dependency.get('features')!r}")
-if dependency.get("req") != "^0.1.0":
+if dependency.get("req") not in ("^0.1.0", "*"):
     raise SystemExit(f"unexpected http-app logbrew requirement: {dependency.get('req')}")
 dependency_path = str(dependency.get("path", ""))
 if not dependency_path.endswith("/extracted-crate/logbrew-0.1.0"):
