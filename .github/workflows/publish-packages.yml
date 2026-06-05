@@ -331,5 +331,6 @@ jobs:
         if: ${{ ! inputs.dry_run }}
         run: |
           echo "Maven Central does not currently offer first-party GitHub OIDC trusted publishing."
+          echo "The co.logbrew Maven Central namespace is verified."
           echo "The Java and Kotlin SDKs pass package preflight, but real Maven Central publish still needs Central Portal credentials, signing keys, source/javadoc artifacts, and a repository release profile."
           exit 1

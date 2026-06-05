@@ -63,4 +63,6 @@ Packagist does not use GitHub OIDC trusted publishing. Submit `https://github.co
 
 ## Maven Central
 
+The `co.logbrew` namespace is verified in Maven Central. Keep the public TXT record on `logbrew.co` in place through the first Central release.
+
 Maven Central does not currently offer the same first-party GitHub OIDC trusted publisher flow. The workflow runs Java and Kotlin package preflight on Blacksmith, but real Maven Central deployment remains gated until Central Portal credentials, signing keys, source/javadoc artifacts, and a release profile are added.
