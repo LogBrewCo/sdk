@@ -250,13 +250,18 @@ intake_ready="$tmp_dir/intake.ready"
 intake_log="$tmp_dir/intake.jsonl"
 python3 "$tmp_dir/swift_intake.py" "$intake_port" "$intake_ready" "$intake_log" &
 intake_pid="$!"
-for _attempt in {1..50}; do
+for _attempt in {1..200}; do
   if [[ -f "$intake_ready" ]]; then
     break
   fi
   sleep 0.1
 done
-test -f "$intake_ready"
+if [[ ! -f "$intake_ready" ]]; then
+  if ! kill -0 "$intake_pid" 2>/dev/null; then
+    echo "swift intake server exited before becoming ready" >&2
+  fi
+  exit 1
+fi
 
 swift package --package-path "$consumer_dir" --scratch-path "$tmp_dir/consumer-describe" describe --type json > "$tmp_dir/consumer-package.json"
 grep -q '"name" : "SmokeApp"' "$tmp_dir/consumer-package.json"
