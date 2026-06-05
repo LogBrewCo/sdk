@@ -190,9 +190,7 @@ jobs:
           import json
           from pathlib import Path
 
-          for manifest in sorted(Path("js").rglob("package.json")):
-              if "node_modules" in manifest.parts:
-                  continue
+          for manifest in sorted(Path("js").glob("logbrew-*/package.json")):
               payload = json.loads(manifest.read_text())
               if payload.get("private"):
                   continue
@@ -221,9 +219,7 @@ jobs:
           import json
           from pathlib import Path
 
-          for manifest in sorted(Path("js").rglob("package.json")):
-              if "node_modules" in manifest.parts:
-                  continue
+          for manifest in sorted(Path("js").glob("logbrew-*/package.json")):
               payload = json.loads(manifest.read_text())
               if payload.get("private"):
                   continue
@@ -279,9 +275,7 @@ jobs:
           import json
           from pathlib import Path
 
-          for manifest in sorted(Path("js").rglob("package.json")):
-              if "node_modules" in manifest.parts:
-                  continue
+          for manifest in sorted(Path("js").glob("logbrew-*/package.json")):
               payload = json.loads(manifest.read_text())
               if payload.get("private"):
                   continue
