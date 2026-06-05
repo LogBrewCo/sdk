@@ -17,7 +17,7 @@ export GOMODCACHE="$tmp_dir/pkg/mod"
 export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
 mkdir -p "$GOBIN" "$GOCACHE" "$GOMODCACHE"
 
-go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+go install honnef.co/go/tools/cmd/staticcheck@v0.6.1
 
 (cd "$repo_root/go/logbrew" && "$GOBIN/staticcheck" ./...)
 
