@@ -485,25 +485,56 @@ def validate_ruby(root: Path, failures: list[str]) -> None:
     require("examples/Makefile" in text, failures, f"{location}: files must include examples/Makefile")
 
 
-def validate_php(root: Path, failures: list[str]) -> None:
-    composer_path = require_path(root, "php/logbrew-php/composer.json", failures)
-    require_path(root, "php/logbrew-php/README.md", failures)
+def validate_php_manifest(
+    root: Path,
+    relative_path: str,
+    readme_path: str,
+    autoload_path: str,
+    failures: list[str],
+) -> dict[str, Any]:
+    composer_path = require_path(root, relative_path, failures)
+    require_path(root, readme_path, failures)
     if not composer_path.exists():
-        return
+        return {}
     manifest = read_json(composer_path, failures)
-    location = "php/logbrew-php/composer.json"
+    location = relative_path
     require_equal(failures, location, "name", manifest.get("name"), "logbrew/sdk")
     require_equal(failures, location, "type", manifest.get("type"), "library")
     require_equal(failures, location, "license", manifest.get("license"), PUBLIC_LICENSE)
     require_equal(failures, location, "require.php", manifest.get("require", {}).get("php"), "^8.2")
+    require_equal(failures, location, "require.psr/log", manifest.get("require", {}).get("psr/log"), "^3.0")
     require_equal(
         failures,
         location,
         "autoload.psr-4.LogBrew\\",
         manifest.get("autoload", {}).get("psr-4", {}).get("LogBrew\\"),
-        "src/",
+        autoload_path,
     )
     require_contains(failures, location, "description", manifest.get("description"), "LogBrew")
+    return manifest
+
+
+def validate_php(root: Path, failures: list[str]) -> None:
+    validate_php_manifest(
+        root,
+        "php/logbrew-php/composer.json",
+        "php/logbrew-php/README.md",
+        "src/",
+        failures,
+    )
+    root_manifest = validate_php_manifest(
+        root,
+        "composer.json",
+        "php/logbrew-php/README.md",
+        "php/logbrew-php/src/",
+        failures,
+    )
+    location = "composer.json"
+    require_equal(failures, location, "readme", root_manifest.get("readme"), "php/logbrew-php/README.md")
+    require_equal(failures, location, "homepage", root_manifest.get("homepage"), f"{REPO_URL}/tree/main/php/logbrew-php")
+    require_equal(failures, location, "support.issues", root_manifest.get("support", {}).get("issues"), f"{REPO_URL}/issues")
+    require_equal(failures, location, "support.source", root_manifest.get("support", {}).get("source"), f"{REPO_URL}/tree/main/php/logbrew-php")
+    require("logbrew" in root_manifest.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
 
 
 def validate_swift(root: Path, failures: list[str]) -> None:

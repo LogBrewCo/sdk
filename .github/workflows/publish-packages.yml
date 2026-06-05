@@ -284,8 +284,12 @@ jobs:
           php-version: "8.4"
           tools: composer
 
-      - name: Validate Composer package
-        run: composer validate --strict php/logbrew-php/composer.json
+      - name: Validate Composer packages
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          composer validate --strict composer.json
+          composer validate --strict php/logbrew-php/composer.json
 
       - name: Trigger Packagist update
         if: ${{ ! inputs.dry_run }}
