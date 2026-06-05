@@ -913,8 +913,25 @@ case "$package_manager" in
     npm init -y >/dev/null
     ;;
   pnpm)
-    pnpm --version > .pnpm-version
-    pnpm init --init-type module >/dev/null
+    # pnpm 11.5.x can generate a range-style packageManager value that
+    # Corepack rejects before the temporary app can be normalized.
+    node <<'EOF'
+const fs = require("node:fs");
+
+fs.writeFileSync(
+  "package.json",
+  `${JSON.stringify(
+    {
+      name: "smoke-app",
+      version: "1.0.0",
+      private: true,
+      type: "module"
+    },
+    null,
+    2
+  )}\n`
+);
+EOF
     ;;
   *)
     echo "unsupported package manager: $package_manager" >&2
@@ -930,9 +947,6 @@ const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 packageJson.name = "smoke-app";
 packageJson.private = true;
 packageJson.type = "module";
-if (packageJson.packageManager?.startsWith("pnpm@")) {
-  packageJson.packageManager = `pnpm@${fs.readFileSync(".pnpm-version", "utf8").trim()}`;
-}
 packageJson.scripts = {
   ...(packageJson.scripts ?? {}),
   "smoke-test": "node --test installed-user.test.mjs",
