@@ -1,0 +1,13 @@
+{
+  "name": "@logbrew/browser-examples",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "help": "node index.mjs --help",
+    "list": "node index.mjs --list",
+    "readme-example": "node readme-example.mjs",
+    "real-user-smoke": "node real-user-smoke.mjs",
+    "start": "node index.mjs"
+  }
+}

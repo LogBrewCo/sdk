@@ -1,0 +1,707 @@
+name: Release Readiness
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-readiness-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  detect-ecosystems:
+    name: Detect package ecosystems
+    runs-on: ubuntu-latest
+    outputs:
+      has_node: ${{ steps.detect.outputs.has_node }}
+      has_python: ${{ steps.detect.outputs.has_python }}
+      has_rust: ${{ steps.detect.outputs.has_rust }}
+      has_go: ${{ steps.detect.outputs.has_go }}
+      has_c: ${{ steps.detect.outputs.has_c }}
+      has_cpp: ${{ steps.detect.outputs.has_cpp }}
+      has_objc: ${{ steps.detect.outputs.has_objc }}
+      has_java: ${{ steps.detect.outputs.has_java }}
+      has_dotnet: ${{ steps.detect.outputs.has_dotnet }}
+      has_unity: ${{ steps.detect.outputs.has_unity }}
+      has_kotlin: ${{ steps.detect.outputs.has_kotlin }}
+      has_ruby: ${{ steps.detect.outputs.has_ruby }}
+      has_swift: ${{ steps.detect.outputs.has_swift }}
+      has_php: ${{ steps.detect.outputs.has_php }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - id: detect
+        name: Detect manifests
+        shell: bash
+        run: |
+          if find ./js -name package.json -not -path '*/node_modules/*' | grep -q .; then
+            echo "has_node=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_node=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find . \( -name pyproject.toml -o -name setup.py \) | grep -q .; then
+            echo "has_python=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_python=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find . -name Cargo.toml | grep -q .; then
+            echo "has_rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_rust=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find . -name go.mod | grep -q .; then
+            echo "has_go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_go=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find ./c -path './c/logbrew-c/include/logbrew.h' | grep -q .; then
+            echo "has_c=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_c=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find ./cpp -path './cpp/logbrew-cpp/include/logbrew.hpp' | grep -q .; then
+            echo "has_cpp=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_cpp=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find ./objc -path './objc/logbrew-objc/include/LogBrew.h' | grep -q .; then
+            echo "has_objc=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_objc=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find . -name pom.xml -path './java/*' | grep -q .; then
+            echo "has_java=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_java=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find . -name '*.csproj' -path './dotnet/*' | grep -q .; then
+            echo "has_dotnet=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_dotnet=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find . -name package.json -path './unity/*' | grep -q .; then
+            echo "has_unity=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_unity=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find . -name pom.xml -path './kotlin/*' | grep -q .; then
+            echo "has_kotlin=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_kotlin=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find . -name '*.gemspec' -path './ruby/*' | grep -q .; then
+            echo "has_ruby=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_ruby=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find . -name Package.swift -path './swift/*' | grep -q .; then
+            echo "has_swift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_swift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find . -name composer.json | grep -q .; then
+            echo "has_php=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_php=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  contract-checks:
+    name: Contract checks
+    runs-on: ubuntu-latest
+    needs: detect-ecosystems
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Validate fixtures
+        run: |
+          python3 scripts/validate_fixtures.py fixtures/valid-batch.json
+          python3 scripts/validate_fixtures.py fixtures/invalid-batch.json --expect-invalid
+          python3 scripts/validate_fixtures.py fixtures/valid-batch.json --json
+
+      - name: Check release metadata
+        run: python3 scripts/check_release_metadata.py
+
+      - name: Check Markdown links
+        run: python3 scripts/check_markdown_links.py
+
+      - name: Run shell static analysis
+        run: bash scripts/check_shell_static.sh
+
+      - name: Leak scan
+        run: python3 scripts/check_confidentiality_scan.py
+
+  node-dry-run:
+    name: Node package dry-run
+    runs-on: ubuntu-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_node == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: "**/package-lock.json"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          mapfile -t package_dirs < <(
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          for manifest in sorted(Path("js").rglob("package.json")):
+              if "node_modules" in manifest.parts:
+                  continue
+              payload = json.loads(manifest.read_text())
+              if payload.get("private"):
+                  continue
+              print(manifest.parent)
+          PY
+          )
+          for dir in "${package_dirs[@]}"; do
+            if [ -f "$dir/package-lock.json" ]; then
+              (cd "$dir" && npm ci)
+            elif [ -f "$dir/pnpm-lock.yaml" ]; then
+              (cd "$dir" && pnpm install --frozen-lockfile)
+            elif [ -f "$dir/yarn.lock" ]; then
+              (cd "$dir" && yarn install --immutable)
+            else
+              (cd "$dir" && npm install --package-lock-only --legacy-peer-deps)
+            fi
+          done
+
+      - name: Run Node package tests
+        shell: bash
+        run: |
+          python3 scripts/check_js_sources.py
+          bash scripts/check_js_lint.sh
+          mapfile -t package_dirs < <(
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          for manifest in sorted(Path("js").rglob("package.json")):
+              if "node_modules" in manifest.parts:
+                  continue
+              payload = json.loads(manifest.read_text())
+              if payload.get("private"):
+                  continue
+              print(manifest.parent)
+          PY
+          )
+          for dir in "${package_dirs[@]}"; do
+            (cd "$dir" && npm test)
+          done
+
+      - name: Run JavaScript real-user smoke test
+        run: bash scripts/real_user_js_smoke.sh
+
+      - name: Run Browser real-user smoke test
+        run: bash scripts/real_user_browser_smoke.sh
+
+      - name: Run Node.js real-user smoke test
+        run: bash scripts/real_user_node_smoke.sh
+
+      - name: Run Express real-user smoke test
+        run: bash scripts/real_user_express_smoke.sh
+
+      - name: Run Fastify real-user smoke test
+        run: bash scripts/real_user_fastify_smoke.sh
+
+      - name: Run NestJS real-user smoke test
+        run: bash scripts/real_user_nestjs_smoke.sh
+
+      - name: Run Angular real-user smoke test
+        run: bash scripts/real_user_angular_smoke.sh
+
+      - name: Run Vue real-user smoke test
+        run: bash scripts/real_user_vue_smoke.sh
+
+      - name: Run Svelte real-user smoke test
+        run: bash scripts/real_user_svelte_smoke.sh
+
+      - name: Run React real-user smoke test
+        run: bash scripts/real_user_react_smoke.sh
+
+      - name: Run React Native real-user smoke test
+        run: bash scripts/real_user_react_native_smoke.sh
+
+      - name: Run Next.js real-user smoke test
+        run: bash scripts/real_user_next_smoke.sh
+
+      - name: Package dry-run
+        shell: bash
+        run: |
+          bash scripts/check_js_package.sh
+          mapfile -t package_dirs < <(
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          for manifest in sorted(Path("js").rglob("package.json")):
+              if "node_modules" in manifest.parts:
+                  continue
+              payload = json.loads(manifest.read_text())
+              if payload.get("private"):
+                  continue
+              print(manifest.parent)
+          PY
+          )
+          for dir in "${package_dirs[@]}"; do
+            (cd "$dir" && npm pack --dry-run)
+          done
+
+  python-dry-run:
+    name: Python package dry-run
+    runs-on: ubuntu-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_python == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install build tooling
+        run: python3 -m pip install --upgrade build twine
+
+      - name: Run Python package tests
+        shell: bash
+        run: |
+          python3 scripts/check_python_sources.py
+          bash scripts/check_python_static.sh
+          PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
+          bash scripts/check_fastapi_package.sh
+          bash scripts/check_django_package.sh
+
+      - name: Run Python real-user smoke test
+        run: bash scripts/real_user_python_smoke.sh
+
+      - name: Run FastAPI real-user smoke test
+        run: bash scripts/real_user_fastapi_smoke.sh
+
+      - name: Run Django real-user smoke test
+        run: bash scripts/real_user_django_smoke.sh
+
+      - name: Build package
+        shell: bash
+        run: |
+          mapfile -t python_dirs < <(
+            find . \( -name pyproject.toml -o -name setup.py \) -exec dirname {} \; | sort -u
+          )
+          for dir in "${python_dirs[@]}"; do
+            (cd "$dir" && python3 -m build)
+          done
+
+      - name: Check distribution metadata
+        shell: bash
+        run: |
+          mapfile -t python_dirs < <(
+            find . \( -name pyproject.toml -o -name setup.py \) -exec dirname {} \; | sort -u
+          )
+          for dir in "${python_dirs[@]}"; do
+            (cd "$dir" && python3 -m twine check dist/*)
+          done
+
+  rust-dry-run:
+    name: Rust crate dry-run
+    runs-on: ubuntu-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_rust == 'true'
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Run Rust tests
+        run: cd rust/logbrew && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+
+      - name: Run Rust real-user smoke test
+        run: bash scripts/real_user_rust_smoke.sh
+
+      - name: Dry-run publish
+        shell: bash
+        run: |
+          mapfile -t cargo_dirs < <(find . -name Cargo.toml -exec dirname {} \; | sort -u)
+          for dir in "${cargo_dirs[@]}"; do
+            (cd "$dir" && cargo publish --dry-run)
+          done
+
+  go-dry-run:
+    name: Go module checks
+    runs-on: ubuntu-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_go == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+
+      - name: Run Go tests
+        shell: bash
+        run: |
+          mapfile -t go_dirs < <(find . -name go.mod -exec dirname {} \; | sort -u)
+          for dir in "${go_dirs[@]}"; do
+            (cd "$dir" && test -z "$(gofmt -l .)" && go vet ./... && go test ./...)
+          done
+          bash scripts/check_go_static.sh
+
+      - name: Run Go real-user smoke test
+        run: bash scripts/real_user_go_smoke.sh
+
+  c-dry-run:
+    name: C package checks
+    runs-on: ubuntu-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_c == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Run C package checks
+        run: bash scripts/check_c_package.sh
+
+      - name: Run C real-user smoke test
+        run: bash scripts/real_user_c_smoke.sh
+
+  cpp-dry-run:
+    name: C++ package checks
+    runs-on: ubuntu-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_cpp == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Run C++ package checks
+        run: bash scripts/check_cpp_package.sh
+
+      - name: Run C++ real-user smoke test
+        run: bash scripts/real_user_cpp_smoke.sh
+
+  objc-dry-run:
+    name: Objective-C package checks
+    runs-on: macos-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_objc == 'true'
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Run Objective-C package checks
+        run: bash scripts/check_objc_package.sh
+
+      - name: Run Objective-C real-user smoke test
+        run: bash scripts/real_user_objc_smoke.sh
+
+  java-dry-run:
+    name: Java package checks
+    runs-on: ubuntu-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_java == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: current
+          cache-provider: basic
+
+      - name: Run Java package checks
+        run: bash scripts/check_java_static.sh && bash scripts/check_java_package.sh
+
+      - name: Run Java real-user smoke test
+        run: bash scripts/real_user_java_smoke.sh
+
+      - name: Run Spring Boot real-user smoke test
+        run: bash scripts/real_user_spring_boot_smoke.sh
+
+  dotnet-dry-run:
+    name: .NET package checks
+    runs-on: ubuntu-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_dotnet == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Run .NET package checks
+        run: bash scripts/check_dotnet_package.sh
+
+      - name: Run .NET real-user smoke test
+        run: bash scripts/real_user_dotnet_smoke.sh
+
+  unity-dry-run:
+    name: Unity package checks
+    runs-on: ubuntu-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_unity == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Run Unity package checks
+        run: bash scripts/check_unity_package.sh
+
+      - name: Run Unity real-user smoke test
+        run: bash scripts/real_user_unity_smoke.sh
+
+  kotlin-dry-run:
+    name: Kotlin package checks
+    runs-on: macos-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_kotlin == 'true'
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: "17"
+
+      - name: Install Kotlin tooling
+        run: |
+          if ! command -v kotlinc >/dev/null 2>&1 || ! command -v gradle >/dev/null 2>&1; then
+            brew install kotlin gradle
+          fi
+
+      - name: Run Kotlin package checks
+        run: bash scripts/check_kotlin_style.sh && bash scripts/check_kotlin_package.sh
+
+      - name: Run Kotlin real-user smoke test
+        run: bash scripts/real_user_kotlin_smoke.sh
+
+  ruby-dry-run:
+    name: Ruby gem checks
+    runs-on: ubuntu-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_ruby == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Run Ruby package checks
+        run: bash scripts/check_ruby_package.sh
+
+      - name: Run Ruby real-user smoke test
+        run: bash scripts/real_user_ruby_smoke.sh
+
+  php-dry-run:
+    name: PHP package checks
+    runs-on: ubuntu-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_php == 'true'
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+
+      - name: Validate composer metadata
+        shell: bash
+        run: |
+          mapfile -t composer_dirs < <(find . -name composer.json -exec dirname {} \; | sort -u)
+          for dir in "${composer_dirs[@]}"; do
+            (cd "$dir" && composer validate --no-check-publish --strict)
+          done
+
+      - name: Install PHP package dependencies
+        shell: bash
+        run: |
+          mapfile -t composer_dirs < <(find . -name composer.json -exec dirname {} \; | sort -u)
+          for dir in "${composer_dirs[@]}"; do
+            (cd "$dir" && composer update --no-interaction)
+          done
+
+      - name: Run PHP package tests
+        shell: bash
+        run: |
+          python3 scripts/check_php_sources.py
+          bash scripts/check_php_static.sh
+          mapfile -t composer_dirs < <(find . -name composer.json -exec dirname {} \; | sort -u)
+          for dir in "${composer_dirs[@]}"; do
+            if [ -f "$dir/tests/run.php" ]; then
+              (cd "$dir" && php tests/run.php)
+            fi
+          done
+
+      - name: Run PHP real-user smoke test
+        run: bash scripts/real_user_php_smoke.sh
+
+  swift-dry-run:
+    name: Swift package checks
+    runs-on: macos-latest
+    needs:
+      - detect-ecosystems
+      - contract-checks
+    if: needs.detect-ecosystems.outputs.has_swift == 'true'
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install Swift lint tooling
+        run: |
+          if ! command -v swiftformat >/dev/null 2>&1 || ! command -v swiftlint >/dev/null 2>&1; then
+            brew install swiftformat swiftlint
+          fi
+
+      - name: Run Swift style checks
+        run: bash scripts/check_swift_style.sh
+
+      - name: Run Swift package checks
+        run: bash scripts/check_swift_package.sh
+
+      - name: Run Swift real-user smoke test
+        run: bash scripts/real_user_swift_smoke.sh

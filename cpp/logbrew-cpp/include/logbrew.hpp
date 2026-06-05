@@ -1,0 +1,162 @@
+#ifndef LOGBREW_CPP_HPP
+#define LOGBREW_CPP_HPP
+
+#include <cstddef>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace logbrew {
+
+inline constexpr const char *version = "0.1.0";
+
+class SdkException final : public std::runtime_error {
+public:
+  SdkException(std::string code, std::string message);
+
+  [[nodiscard]] const std::string &code() const noexcept;
+
+private:
+  std::string code_;
+};
+
+class TransportError final : public std::runtime_error {
+public:
+  TransportError(std::string code, std::string message, bool retryable);
+
+  [[nodiscard]] const std::string &code() const noexcept;
+  [[nodiscard]] bool retryable() const noexcept;
+
+private:
+  std::string code_;
+  bool retryable_;
+};
+
+struct TransportResponse {
+  int status_code = 0;
+  std::size_t attempts = 0;
+};
+
+class Transport {
+public:
+  virtual ~Transport() = default;
+  virtual TransportResponse send(const std::string &api_key, const std::string &body) = 0;
+};
+
+struct Config {
+  std::string api_key;
+  std::string sdk_name = "logbrew-cpp";
+  std::string sdk_version = version;
+  std::size_t max_retries = 2;
+};
+
+struct ReleaseAttributes {
+  std::string version;
+  std::optional<std::string> commit;
+  std::optional<std::string> notes;
+};
+
+struct EnvironmentAttributes {
+  std::string name;
+  std::optional<std::string> region;
+};
+
+struct IssueAttributes {
+  std::string title;
+  std::string level;
+  std::optional<std::string> message;
+};
+
+struct LogAttributes {
+  std::string message;
+  std::string level;
+  std::optional<std::string> logger;
+};
+
+struct SpanAttributes {
+  std::string name;
+  std::string trace_id;
+  std::string span_id;
+  std::optional<std::string> parent_span_id;
+  std::string status;
+  std::optional<double> duration_ms;
+};
+
+struct ActionAttributes {
+  std::string name;
+  std::string status;
+};
+
+class RecordingTransport final : public Transport {
+public:
+  struct Step {
+    enum class Kind {
+      status,
+      error,
+    };
+
+    Kind kind;
+    int status_code = 0;
+    std::string code;
+    std::string message;
+    bool retryable = false;
+
+    static Step status_code_step(int status_code);
+    static Step network_failure(std::string message);
+  };
+
+  explicit RecordingTransport(std::vector<Step> steps = {});
+
+  TransportResponse send(const std::string &api_key, const std::string &body) override;
+
+  [[nodiscard]] const std::vector<std::string> &sent_bodies() const noexcept;
+  [[nodiscard]] const std::string *last_body() const noexcept;
+
+private:
+  std::vector<Step> steps_;
+  std::size_t cursor_ = 0;
+  std::vector<std::string> sent_bodies_;
+};
+
+class LogBrewClient final {
+public:
+  explicit LogBrewClient(Config config);
+
+  [[nodiscard]] std::size_t pending_events() const noexcept;
+  [[nodiscard]] std::string preview_json() const;
+
+  TransportResponse flush(Transport &transport);
+  TransportResponse shutdown(Transport &transport);
+
+  void release(std::string id, std::string timestamp, ReleaseAttributes attributes);
+  void environment(std::string id, std::string timestamp, EnvironmentAttributes attributes);
+  void issue(std::string id, std::string timestamp, IssueAttributes attributes);
+  void log(std::string id, std::string timestamp, LogAttributes attributes);
+  void span(std::string id, std::string timestamp, SpanAttributes attributes);
+  void action(std::string id, std::string timestamp, ActionAttributes attributes);
+
+private:
+  struct Event {
+    std::string type;
+    std::string timestamp;
+    std::string id;
+    std::string attributes_json;
+  };
+
+  [[nodiscard]] static std::string event_json(const Event &event);
+  void push_event(std::string type, std::string id, std::string timestamp, std::string attributes_json);
+  [[nodiscard]] TransportResponse flush_internal(Transport &transport);
+
+  std::string api_key_;
+  std::string sdk_name_;
+  std::string sdk_version_;
+  std::size_t max_retries_;
+  bool closed_ = false;
+  std::vector<Event> events_;
+};
+
+} // namespace logbrew
+
+#endif

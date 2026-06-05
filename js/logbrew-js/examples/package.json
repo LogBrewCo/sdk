@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "help": "node ./index.mjs --help",
+    "list": "node ./index.mjs --list",
+    "readme-example": "node ./index.mjs readme-example",
+    "readme-example:esm": "node ./index.mjs readme-example:esm",
+    "readme-example:cjs": "node ./index.mjs readme-example:cjs",
+    "real-user-smoke": "node ./index.mjs real-user-smoke",
+    "real-user-smoke:esm": "node ./index.mjs real-user-smoke:esm",
+    "real-user-smoke:cjs": "node ./index.mjs real-user-smoke:cjs"
+  }
+}

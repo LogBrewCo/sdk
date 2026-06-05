@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisMode>All</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+    <PackageId>LogBrew</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>LogBrew</Authors>
+    <Company>LogBrew</Company>
+    <Description>Public LogBrew .NET SDK for building, validating, and flushing event batches.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/LogBrewCo/LogBrewCo-sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/LogBrewCo/LogBrewCo-sdk</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="\" />
+    <None Include="../../examples/ReadmeExample.cs" Pack="true" PackagePath="examples/" />
+    <None Include="../../examples/RealUserSmoke.cs" Pack="true" PackagePath="examples/" />
+    <None Include="../../examples/Makefile" Pack="true" PackagePath="examples/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.1" />
+  </ItemGroup>
+</Project>

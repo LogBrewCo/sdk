@@ -1,0 +1,343 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-checks:
+    name: Contract checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node.js
+        if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack
+        if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
+        run: corepack enable
+
+      - name: Set up Rust
+        if: ${{ hashFiles('Cargo.toml') != '' }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Set up Go
+        if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+
+      - name: Set up Java
+        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle for Java smoke tests
+        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: current
+          cache-provider: basic
+
+      - name: Set up .NET
+        if: ${{ hashFiles('dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj') != '' || hashFiles('unity/logbrew-unity/tests/LogBrew.Unity.Tests/LogBrew.Unity.Tests.csproj') != '' }}
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Ruby
+        if: ${{ hashFiles('ruby/logbrew-ruby/*.gemspec') != '' }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Set up PHP
+        if: ${{ hashFiles('php/logbrew-php/composer.json') != '' }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Validate happy-path fixture
+        run: python3 scripts/validate_fixtures.py fixtures/valid-batch.json
+
+      - name: Validate expected failure fixture
+        run: python3 scripts/validate_fixtures.py fixtures/invalid-batch.json --expect-invalid
+
+      - name: Validate JSON output shape
+        run: python3 scripts/validate_fixtures.py fixtures/valid-batch.json --json
+
+      - name: Check release metadata
+        run: python3 scripts/check_release_metadata.py
+
+      - name: Check Markdown links
+        run: python3 scripts/check_markdown_links.py
+
+      - name: Run shell static analysis
+        run: bash scripts/check_shell_static.sh
+
+      - name: Run Rust SDK tests
+        if: ${{ hashFiles('Cargo.toml') != '' }}
+        run: cd rust/logbrew && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+
+      - name: Run Rust real-user smoke test
+        if: ${{ hashFiles('Cargo.toml') != '' }}
+        run: bash scripts/real_user_rust_smoke.sh
+
+      - name: Run JavaScript SDK tests
+        if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
+        run: python3 scripts/check_js_sources.py && bash scripts/check_js_lint.sh && bash scripts/check_js_package.sh && cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test
+
+      - name: Run JavaScript real-user smoke test
+        if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
+        run: bash scripts/real_user_js_smoke.sh
+
+      - name: Run Browser real-user smoke test
+        if: ${{ hashFiles('js/logbrew-browser/package.json') != '' }}
+        run: bash scripts/real_user_browser_smoke.sh
+
+      - name: Run Node.js real-user smoke test
+        if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
+        run: bash scripts/real_user_node_smoke.sh
+
+      - name: Run Express real-user smoke test
+        if: ${{ hashFiles('js/logbrew-express/package.json') != '' }}
+        run: bash scripts/real_user_express_smoke.sh
+
+      - name: Run Fastify real-user smoke test
+        if: ${{ hashFiles('js/logbrew-fastify/package.json') != '' }}
+        run: bash scripts/real_user_fastify_smoke.sh
+
+      - name: Run NestJS real-user smoke test
+        if: ${{ hashFiles('js/logbrew-nestjs/package.json') != '' }}
+        run: bash scripts/real_user_nestjs_smoke.sh
+
+      - name: Run Angular real-user smoke test
+        if: ${{ hashFiles('js/logbrew-angular/package.json') != '' }}
+        run: bash scripts/real_user_angular_smoke.sh
+
+      - name: Run Vue real-user smoke test
+        if: ${{ hashFiles('js/logbrew-vue/package.json') != '' }}
+        run: bash scripts/real_user_vue_smoke.sh
+
+      - name: Run Svelte real-user smoke test
+        if: ${{ hashFiles('js/logbrew-svelte/package.json') != '' }}
+        run: bash scripts/real_user_svelte_smoke.sh
+
+      - name: Run React real-user smoke test
+        if: ${{ hashFiles('js/logbrew-react/package.json') != '' }}
+        run: bash scripts/real_user_react_smoke.sh
+
+      - name: Run React Native real-user smoke test
+        if: ${{ hashFiles('js/logbrew-react-native/package.json') != '' }}
+        run: bash scripts/real_user_react_native_smoke.sh
+
+      - name: Run Next.js real-user smoke test
+        if: ${{ hashFiles('js/logbrew-next/package.json') != '' }}
+        run: bash scripts/real_user_next_smoke.sh
+
+      - name: Run Python SDK tests
+        if: ${{ hashFiles('python/logbrew_py/pyproject.toml') != '' }}
+        run: python3 scripts/check_python_sources.py && bash scripts/check_python_static.sh && PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
+
+      - name: Run FastAPI package checks
+        if: ${{ hashFiles('python/logbrew_fastapi/pyproject.toml') != '' }}
+        run: bash scripts/check_fastapi_package.sh
+
+      - name: Run Django package checks
+        if: ${{ hashFiles('python/logbrew_django/pyproject.toml') != '' }}
+        run: bash scripts/check_django_package.sh
+
+      - name: Run Python real-user smoke test
+        if: ${{ hashFiles('python/logbrew_py/pyproject.toml') != '' }}
+        run: bash scripts/real_user_python_smoke.sh
+
+      - name: Run FastAPI real-user smoke test
+        if: ${{ hashFiles('python/logbrew_fastapi/pyproject.toml') != '' }}
+        run: bash scripts/real_user_fastapi_smoke.sh
+
+      - name: Run Django real-user smoke test
+        if: ${{ hashFiles('python/logbrew_django/pyproject.toml') != '' }}
+        run: bash scripts/real_user_django_smoke.sh
+
+      - name: Run Go SDK tests
+        if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
+        run: cd go/logbrew && test -z "$(gofmt -l .)" && go vet ./... && go test ./... && cd ../.. && bash scripts/check_go_static.sh
+
+      - name: Run Go real-user smoke test
+        if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
+        run: bash scripts/real_user_go_smoke.sh
+
+      - name: Run C SDK tests
+        if: ${{ hashFiles('c/logbrew-c/include/logbrew.h') != '' }}
+        run: bash scripts/check_c_package.sh
+
+      - name: Run C real-user smoke test
+        if: ${{ hashFiles('c/logbrew-c/include/logbrew.h') != '' }}
+        run: bash scripts/real_user_c_smoke.sh
+
+      - name: Run C++ SDK tests
+        if: ${{ hashFiles('cpp/logbrew-cpp/include/logbrew.hpp') != '' }}
+        run: bash scripts/check_cpp_package.sh
+
+      - name: Run C++ real-user smoke test
+        if: ${{ hashFiles('cpp/logbrew-cpp/include/logbrew.hpp') != '' }}
+        run: bash scripts/real_user_cpp_smoke.sh
+
+      - name: Run Java SDK tests
+        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        run: bash scripts/check_java_static.sh && bash scripts/check_java_package.sh
+
+      - name: Run Java real-user smoke test
+        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        run: bash scripts/real_user_java_smoke.sh
+
+      - name: Run Spring Boot real-user smoke test
+        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        run: bash scripts/real_user_spring_boot_smoke.sh
+
+      - name: Run .NET SDK tests
+        if: ${{ hashFiles('dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj') != '' }}
+        run: bash scripts/check_dotnet_package.sh
+
+      - name: Run .NET real-user smoke test
+        if: ${{ hashFiles('dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj') != '' }}
+        run: bash scripts/real_user_dotnet_smoke.sh
+
+      - name: Run Unity SDK tests
+        if: ${{ hashFiles('unity/logbrew-unity/package.json') != '' }}
+        run: bash scripts/check_unity_package.sh
+
+      - name: Run Unity real-user smoke test
+        if: ${{ hashFiles('unity/logbrew-unity/package.json') != '' }}
+        run: bash scripts/real_user_unity_smoke.sh
+
+      - name: Run Ruby SDK tests
+        if: ${{ hashFiles('ruby/logbrew-ruby/*.gemspec') != '' }}
+        run: bash scripts/check_ruby_package.sh
+
+      - name: Run Ruby real-user smoke test
+        if: ${{ hashFiles('ruby/logbrew-ruby/*.gemspec') != '' }}
+        run: bash scripts/real_user_ruby_smoke.sh
+
+      - name: Install PHP SDK dependencies
+        if: ${{ hashFiles('php/logbrew-php/composer.json') != '' }}
+        run: cd php/logbrew-php && composer update --no-interaction
+
+      - name: Run PHP SDK tests
+        if: ${{ hashFiles('php/logbrew-php/composer.json') != '' }}
+        run: python3 scripts/check_php_sources.py && bash scripts/check_php_static.sh && cd php/logbrew-php && php tests/run.php
+
+      - name: Run PHP real-user smoke test
+        if: ${{ hashFiles('php/logbrew-php/composer.json') != '' }}
+        run: bash scripts/real_user_php_smoke.sh
+
+      - name: Leak scan
+        run: python3 scripts/check_confidentiality_scan.py
+
+  swift-checks:
+    name: Swift SDK checks
+    runs-on: macos-latest
+    if: ${{ hashFiles('swift/logbrew-swift/Package.swift') != '' }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install Swift lint tooling
+        run: |
+          if ! command -v swiftformat >/dev/null 2>&1 || ! command -v swiftlint >/dev/null 2>&1; then
+            brew install swiftformat swiftlint
+          fi
+
+      - name: Run Swift style checks
+        run: bash scripts/check_swift_style.sh
+
+      - name: Run Swift package checks
+        run: bash scripts/check_swift_package.sh
+
+      - name: Run Swift real-user smoke test
+        run: bash scripts/real_user_swift_smoke.sh
+
+  objc-checks:
+    name: Objective-C SDK checks
+    runs-on: macos-latest
+    if: ${{ hashFiles('objc/logbrew-objc/include/LogBrew.h') != '' }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Run Objective-C package checks
+        run: bash scripts/check_objc_package.sh
+
+      - name: Run Objective-C real-user smoke test
+        run: bash scripts/real_user_objc_smoke.sh
+
+  kotlin-checks:
+    name: Kotlin SDK checks
+    runs-on: macos-latest
+    if: ${{ hashFiles('kotlin/logbrew-kotlin/pom.xml') != '' }}
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: "17"
+
+      - name: Install Kotlin tooling
+        run: |
+          if ! command -v kotlinc >/dev/null 2>&1 || ! command -v gradle >/dev/null 2>&1; then
+            brew install kotlin gradle
+          fi
+
+      - name: Run Kotlin package checks
+        run: bash scripts/check_kotlin_style.sh && bash scripts/check_kotlin_package.sh
+
+      - name: Run Kotlin real-user smoke test
+        run: bash scripts/real_user_kotlin_smoke.sh

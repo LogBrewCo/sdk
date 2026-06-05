@@ -1,0 +1,16 @@
+{
+  "sdk": {
+    "name": "logbrew-js",
+    "language": "typescript",
+    "version": "0.1.0"
+  },
+  "events": [
+    {
+      "type": "log",
+      "timestamp": "2026-06-02T10:00:03Z",
+      "id": "evt_log_001",
+      "attributes": {
+        "message": "missing closing braces"
+      }
+    }
+  ]

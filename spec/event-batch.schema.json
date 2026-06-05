@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/logbrew/sdk/event-batch.schema.json",
+  "title": "LogBrew Event Batch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sdk", "events"],
+  "properties": {
+    "sdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "language", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "null"]
+      }
+    },
+    "eventBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "timestamp", "id", "attributes"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["release", "environment", "issue", "log", "span", "action"]
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attributes": {
+          "type": "object"
+        }
+      }
+    },
+    "releaseEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "release" },
+            "attributes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["version"],
+              "properties": {
+                "version": { "type": "string", "minLength": 1 },
+                "commit": { "type": "string", "minLength": 1 },
+                "notes": { "type": "string" },
+                "metadata": { "$ref": "#/$defs/metadata" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "environmentEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "environment" },
+            "attributes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "region": { "type": "string" },
+                "metadata": { "$ref": "#/$defs/metadata" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "issueEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "issue" },
+            "attributes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["title", "level"],
+              "properties": {
+                "title": { "type": "string", "minLength": 1 },
+                "level": {
+                  "type": "string",
+                  "enum": ["info", "warning", "error", "critical"]
+                },
+                "message": { "type": "string" },
+                "metadata": { "$ref": "#/$defs/metadata" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "logEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "log" },
+            "attributes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["message", "level"],
+              "properties": {
+                "message": { "type": "string", "minLength": 1 },
+                "level": {
+                  "type": "string",
+                  "enum": ["debug", "info", "warning", "error"]
+                },
+                "logger": { "type": "string" },
+                "metadata": { "$ref": "#/$defs/metadata" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "spanEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "span" },
+            "attributes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "traceId", "spanId", "status"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "traceId": { "type": "string", "minLength": 1 },
+                "spanId": { "type": "string", "minLength": 1 },
+                "parentSpanId": { "type": "string", "minLength": 1 },
+                "status": {
+                  "type": "string",
+                  "enum": ["ok", "error"]
+                },
+                "durationMs": { "type": "number", "minimum": 0 },
+                "metadata": { "$ref": "#/$defs/metadata" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "actionEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "action" },
+            "attributes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "status"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "status": {
+                  "type": "string",
+                  "enum": ["queued", "running", "success", "failure"]
+                },
+                "metadata": { "$ref": "#/$defs/metadata" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "event": {
+      "oneOf": [
+        { "$ref": "#/$defs/releaseEvent" },
+        { "$ref": "#/$defs/environmentEvent" },
+        { "$ref": "#/$defs/issueEvent" },
+        { "$ref": "#/$defs/logEvent" },
+        { "$ref": "#/$defs/spanEvent" },
+        { "$ref": "#/$defs/actionEvent" }
+      ]
+    }
+  }
+}

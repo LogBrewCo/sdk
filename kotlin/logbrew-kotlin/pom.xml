@@ -1,0 +1,26 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>co.logbrew</groupId>
+  <artifactId>logbrew-kotlin</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+  <name>LogBrew Kotlin SDK</name>
+  <description>Public LogBrew Kotlin SDK for building, validating, and flushing event batches.</description>
+  <url>https://github.com/LogBrewCo/LogBrewCo-sdk</url>
+  <licenses>
+    <license>
+      <name>MIT</name>
+      <url>https://opensource.org/license/mit</url>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <name>LogBrew</name>
+    </developer>
+  </developers>
+  <scm>
+    <url>https://github.com/LogBrewCo/LogBrewCo-sdk</url>
+  </scm>
+</project>

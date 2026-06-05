@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logbrew-sdk"
+version = "0.1.0"
+description = "Public LogBrew Python SDK for building, validating, and flushing event batches."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+  { name = "LogBrew" }
+]
+keywords = ["logbrew", "observability", "logs", "traces", "events"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+logbrew_sdk = ["py.typed"]

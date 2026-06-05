@@ -1,0 +1,17 @@
+{
+  "sdk": {
+    "name": "logbrew-python",
+    "language": "python",
+    "version": "0.1.0"
+  },
+  "events": [
+    {
+      "type": "log",
+      "timestamp": "not-a-timestamp",
+      "id": "",
+      "attributes": {
+        "level": "verbose"
+      }
+    }
+  ]
+}

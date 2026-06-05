@@ -1,0 +1,573 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+json_mode=false
+json_output_path=""
+current_step_number=0
+current_step_label="startup"
+failure_json_emitted=false
+steps_completed=0
+schema_version="1"
+lock_dir="${TMPDIR:-/tmp}/logbrewco-sdk-public-checks.lock"
+lock_pid_file="$lock_dir/pid"
+run_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+run_started_epoch="$(python3 - <<'PY'
+import time
+print(f"{time.time():.6f}")
+PY
+)"
+STEP_LABELS=(
+  "Root contract tests"
+  "Rust tests"
+  "Rust package dry-run"
+  "JavaScript tests"
+  "JavaScript package dry-run"
+  "Python tests"
+  "FastAPI package checks"
+  "Django package checks"
+  "Go tests"
+  "C package checks"
+  "C++ package checks"
+  "Java package checks"
+  ".NET package checks"
+  "Unity package checks"
+  "Kotlin package checks"
+  "Ruby package checks"
+  "Swift package checks"
+  "Rust real-user smoke"
+  "JavaScript real-user smoke"
+  "Browser real-user smoke"
+  "Node.js real-user smoke"
+  "Express real-user smoke"
+  "Fastify real-user smoke"
+  "NestJS real-user smoke"
+  "Angular real-user smoke"
+  "Vue real-user smoke"
+  "Svelte real-user smoke"
+  "React real-user smoke"
+  "React Native real-user smoke"
+  "Next.js real-user smoke"
+  "Python real-user smoke"
+  "FastAPI real-user smoke"
+  "Django real-user smoke"
+  "Go real-user smoke"
+  "C real-user smoke"
+  "C++ real-user smoke"
+  "Java real-user smoke"
+  "Spring Boot real-user smoke"
+  ".NET real-user smoke"
+  "Unity real-user smoke"
+  "Kotlin real-user smoke"
+  "Ruby real-user smoke"
+  "Swift real-user smoke"
+  "PHP package metadata"
+  "PHP package install"
+  "PHP package tests"
+  "PHP real-user smoke"
+  "Python package build checks"
+  "Objective-C package checks"
+  "Objective-C real-user smoke"
+  "Release metadata checks"
+  "Markdown link checks"
+  "Shell static analysis"
+  "Workflow YAML validation"
+  "Confidentiality leak scan"
+)
+steps_total="${#STEP_LABELS[@]}"
+
+json_array_from_args() {
+  python3 - "$@" <<'PY'
+import json
+import sys
+
+print(json.dumps(sys.argv[1:], separators=(",", ":")))
+PY
+}
+
+toolchain_versions_json() {
+  python3 <<'PY'
+import json
+import subprocess
+
+commands = {
+    "node": ["node", "--version"],
+    "npm": ["npm", "--version"],
+    "pnpm": ["pnpm", "--version"],
+    "cc": ["cc", "--version"],
+    "clang": ["clang", "--version"],
+    "objc": ["clang", "--version"],
+    "c++": ["c++", "--version"],
+    "clang++": ["clang++", "--version"],
+    "make": ["make", "--version"],
+    "python3": ["python3", "--version"],
+    "pip": ["python3", "-m", "pip", "--version"],
+    "go": ["go", "version"],
+    "java": ["java", "-version"],
+    "javac": ["javac", "-version"],
+    "jar": ["jar", "--version"],
+    "jdeps": ["jdeps", "--version"],
+    "dotnet": ["dotnet", "--version"],
+    "kotlinc": ["kotlinc", "-version"],
+    "gradle": ["gradle", "--version"],
+    "swift": ["swift", "--version"],
+    "swiftformat": ["swiftformat", "--version"],
+    "swiftlint": ["swiftlint", "version"],
+    "cargo": ["cargo", "--version"],
+    "rustc": ["rustc", "--version"],
+    "php": ["php", "--version"],
+    "composer": ["composer", "--version"],
+    "ruby": ["ruby", "--version"],
+    "gem": ["gem", "--version"],
+    "bundler": ["bundle", "--version"],
+}
+
+payload = {}
+for name, command in commands.items():
+    try:
+        completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    except FileNotFoundError:
+        payload[name] = "not installed"
+        continue
+    output = completed.stdout.strip() or completed.stderr.strip()
+    first_line = output.splitlines()[0] if output else ""
+    payload[name] = first_line
+
+print(json.dumps(payload, separators=(",", ":")))
+PY
+}
+
+write_summary_json() {
+  local ok="$1"
+  local message="$2"
+  local failed_step_number="${3:-}"
+  local failed_step_label="${4:-}"
+  local failure_reason="${5:-}"
+  local exit_code="${6:-}"
+  local step_labels_json
+  local completed_step_labels_json
+  local toolchain_versions_json_payload
+  local finished_at
+  local duration_ms
+
+  step_labels_json="$(json_array_from_args "${STEP_LABELS[@]}")"
+  if (( steps_completed > 0 )); then
+    completed_step_labels_json="$(json_array_from_args "${STEP_LABELS[@]:0:steps_completed}")"
+  else
+    completed_step_labels_json="[]"
+  fi
+  toolchain_versions_json_payload="$(toolchain_versions_json)"
+  finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  duration_ms="$(
+    python3 - "$run_started_epoch" <<'PY'
+import sys
+import time
+
+started = float(sys.argv[1])
+print(int(round((time.time() - started) * 1000)))
+PY
+  )"
+
+  local json_payload
+  json_payload="$(
+    python3 - "$ok" "$steps_completed" "$steps_total" "$message" "$failed_step_number" "$failed_step_label" "$step_labels_json" "$completed_step_labels_json" "$toolchain_versions_json_payload" "$run_started_at" "$finished_at" "$duration_ms" "$failure_reason" "$exit_code" "$schema_version" <<'PY'
+import json
+import sys
+
+ok = sys.argv[1] == "true"
+steps_completed = int(sys.argv[2])
+steps_total = int(sys.argv[3])
+message = sys.argv[4]
+failed_step_number = sys.argv[5]
+failed_step_label = sys.argv[6]
+step_labels = json.loads(sys.argv[7])
+completed_step_labels = json.loads(sys.argv[8])
+toolchain_versions = json.loads(sys.argv[9])
+started_at = sys.argv[10]
+finished_at = sys.argv[11]
+duration_ms = int(sys.argv[12])
+failure_reason = sys.argv[13]
+exit_code = sys.argv[14]
+schema_version = sys.argv[15]
+
+payload = {
+    "schema_version": schema_version,
+    "ok": ok,
+    "steps_completed": steps_completed,
+    "steps_total": steps_total,
+    "message": message,
+    "step_labels": step_labels,
+    "completed_step_labels": completed_step_labels,
+    "toolchain_versions": toolchain_versions,
+    "started_at": started_at,
+    "finished_at": finished_at,
+    "duration_ms": duration_ms,
+}
+if failure_reason:
+    payload["failure_reason"] = failure_reason
+if exit_code:
+    payload["exit_code"] = int(exit_code)
+if failed_step_number:
+    payload["failed_step_number"] = int(failed_step_number)
+if failed_step_label:
+    payload["failed_step_label"] = failed_step_label
+
+print(json.dumps(payload, separators=(",", ":")))
+PY
+  )"
+
+  if [[ -n "$json_output_path" ]]; then
+    printf '%s' "$json_payload" > "$json_output_path"
+  else
+    printf '%s\n' "$json_payload"
+  fi
+}
+
+emit_failure_json() {
+  local message="$1"
+  local failure_reason="${2:-step_failure}"
+  local exit_code="${3:-1}"
+  if [[ "$json_mode" == true && "$failure_json_emitted" == false ]]; then
+    write_summary_json false "$message" "$current_step_number" "$current_step_label" "$failure_reason" "$exit_code"
+    failure_json_emitted=true
+  fi
+}
+
+on_error() {
+  local exit_code="$1"
+  emit_failure_json "public SDK checks failed" "step_failure" "$exit_code"
+  exit "$exit_code"
+}
+
+trap 'on_error "$?"' ERR
+
+for arg in "$@"; do
+  case "$arg" in
+    --json)
+      json_mode=true
+      ;;
+    --json-out=*)
+      json_mode=true
+      json_output_path="${arg#--json-out=}"
+      ;;
+    *)
+      if [[ "$json_mode" == true ]]; then
+        write_summary_json false "unknown argument: $arg" "" "" "invalid_argument" "1"
+      fi
+      echo "unknown argument: $arg" >&2
+      exit 1
+      ;;
+  esac
+done
+
+acquire_lock() {
+  if mkdir "$lock_dir" 2>/dev/null; then
+    printf '%s\n' "$$" > "$lock_pid_file"
+    return 0
+  fi
+
+  local existing_pid=""
+  if [[ -f "$lock_pid_file" ]]; then
+    existing_pid="$(tr -d '[:space:]' < "$lock_pid_file")"
+  fi
+
+  if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+    return 1
+  fi
+
+  rm -rf "$lock_dir"
+  mkdir "$lock_dir"
+  printf '%s\n' "$$" > "$lock_pid_file"
+}
+
+if ! acquire_lock; then
+  if [[ "$json_mode" == true ]]; then
+    write_summary_json false "another public SDK verifier run is already in progress" "" "" "concurrent_run" "1"
+  fi
+  echo "another public SDK verifier run is already in progress" >&2
+  exit 1
+fi
+
+cleanup_generated_artifacts() {
+  rm -rf \
+    php/logbrew-php/vendor \
+    php/logbrew-php/composer.lock \
+    .mypy_cache \
+    .ruff_cache \
+    java/logbrew-java/build \
+    python/logbrew_py/build \
+    python/logbrew_py/dist \
+    python/logbrew_py/src/logbrew_sdk.egg-info \
+    python/logbrew_fastapi/build \
+    python/logbrew_fastapi/dist \
+    python/logbrew_fastapi/src/logbrew_fastapi.egg-info \
+    python/logbrew_django/build \
+    python/logbrew_django/dist \
+    python/logbrew_django/src/logbrew_django.egg-info \
+    swift/logbrew-swift/.build
+  rm -rf c/logbrew-c/build c/logbrew-c/examples/build
+  rm -rf cpp/logbrew-cpp/build cpp/logbrew-cpp/examples/build
+  rm -rf objc/logbrew-objc/build objc/logbrew-objc/examples/build
+  find scripts tests python/logbrew_py python/logbrew_fastapi python/logbrew_django -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+  find dotnet/logbrew-dotnet -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
+  find unity/logbrew-unity -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
+  find kotlin/logbrew-kotlin -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + 2>/dev/null || true
+  rmdir "$lock_dir" 2>/dev/null || true
+}
+
+trap cleanup_generated_artifacts EXIT
+
+log_line() {
+  if [[ "$json_mode" == true && -z "$json_output_path" ]]; then
+    printf '%s\n' "$1" >&2
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+run_shell_step() {
+  local command="$1"
+  if [[ "$json_mode" == true && -z "$json_output_path" ]]; then
+    bash -lc "$command" >&2
+  else
+    bash -lc "$command"
+  fi
+}
+
+mark_step_complete() {
+  steps_completed=$((steps_completed + 1))
+}
+
+begin_step() {
+  current_step_number="$1"
+  current_step_label="$2"
+  log_line "[$1/$steps_total] $2"
+}
+
+begin_step 1 "Root contract tests"
+run_shell_step "python3 -m unittest discover -s tests -p 'test_*.py'"
+mark_step_complete
+
+begin_step 2 "Rust tests"
+run_shell_step "cd rust/logbrew && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo clippy --all-targets --features http -- -D warnings && cargo test && cargo test --features http && bash tests/run.sh"
+mark_step_complete
+
+begin_step 3 "Rust package dry-run"
+run_shell_step "cd rust/logbrew && cargo publish --dry-run --allow-dirty"
+mark_step_complete
+
+begin_step 4 "JavaScript tests"
+run_shell_step "python3 scripts/check_js_sources.py && bash scripts/check_js_lint.sh && cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test"
+mark_step_complete
+
+begin_step 5 "JavaScript package dry-run"
+run_shell_step "bash scripts/check_js_package.sh && cd js/logbrew-js && npm pack --dry-run >/dev/null && cd ../logbrew-browser && npm pack --dry-run >/dev/null && cd ../logbrew-node && npm pack --dry-run >/dev/null && cd ../logbrew-express && npm pack --dry-run >/dev/null && cd ../logbrew-fastify && npm pack --dry-run >/dev/null && cd ../logbrew-nestjs && npm pack --dry-run >/dev/null && cd ../logbrew-angular && npm pack --dry-run >/dev/null && cd ../logbrew-vue && npm pack --dry-run >/dev/null && cd ../logbrew-svelte && npm pack --dry-run >/dev/null && cd ../logbrew-react && npm pack --dry-run >/dev/null && cd ../logbrew-react-native && npm pack --dry-run >/dev/null && cd ../logbrew-next && npm pack --dry-run >/dev/null"
+mark_step_complete
+
+begin_step 6 "Python tests"
+run_shell_step "python3 scripts/check_python_sources.py && bash scripts/check_python_static.sh && PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'"
+mark_step_complete
+
+begin_step 7 "FastAPI package checks"
+run_shell_step "bash scripts/check_fastapi_package.sh"
+mark_step_complete
+
+begin_step 8 "Django package checks"
+run_shell_step "bash scripts/check_django_package.sh"
+mark_step_complete
+
+begin_step 9 "Go tests"
+run_shell_step "cd go/logbrew && test -z \"\$(gofmt -l .)\" && go vet ./... && go test ./... && cd ../.. && bash scripts/check_go_static.sh"
+mark_step_complete
+
+begin_step 10 "C package checks"
+run_shell_step "bash scripts/check_c_package.sh"
+mark_step_complete
+
+begin_step 11 "C++ package checks"
+run_shell_step "bash scripts/check_cpp_package.sh"
+mark_step_complete
+
+begin_step 12 "Java package checks"
+run_shell_step "bash scripts/check_java_static.sh && bash scripts/check_java_package.sh"
+mark_step_complete
+
+begin_step 13 ".NET package checks"
+run_shell_step "bash scripts/check_dotnet_package.sh"
+mark_step_complete
+
+begin_step 14 "Unity package checks"
+run_shell_step "bash scripts/check_unity_package.sh"
+mark_step_complete
+
+begin_step 15 "Kotlin package checks"
+run_shell_step "bash scripts/check_kotlin_style.sh && bash scripts/check_kotlin_package.sh"
+mark_step_complete
+
+begin_step 16 "Ruby package checks"
+run_shell_step "bash scripts/check_ruby_package.sh"
+mark_step_complete
+
+begin_step 17 "Swift package checks"
+run_shell_step "bash scripts/check_swift_style.sh && bash scripts/check_swift_package.sh"
+mark_step_complete
+
+begin_step 18 "Rust real-user smoke"
+run_shell_step "bash scripts/real_user_rust_smoke.sh"
+mark_step_complete
+
+begin_step 19 "JavaScript real-user smoke"
+run_shell_step "bash scripts/real_user_js_smoke.sh"
+mark_step_complete
+
+begin_step 20 "Browser real-user smoke"
+run_shell_step "bash scripts/real_user_browser_smoke.sh"
+mark_step_complete
+
+begin_step 21 "Node.js real-user smoke"
+run_shell_step "bash scripts/real_user_node_smoke.sh"
+mark_step_complete
+
+begin_step 22 "Express real-user smoke"
+run_shell_step "bash scripts/real_user_express_smoke.sh"
+mark_step_complete
+
+begin_step 23 "Fastify real-user smoke"
+run_shell_step "bash scripts/real_user_fastify_smoke.sh"
+mark_step_complete
+
+begin_step 24 "NestJS real-user smoke"
+run_shell_step "bash scripts/real_user_nestjs_smoke.sh"
+mark_step_complete
+
+begin_step 25 "Angular real-user smoke"
+run_shell_step "bash scripts/real_user_angular_smoke.sh"
+mark_step_complete
+
+begin_step 26 "Vue real-user smoke"
+run_shell_step "bash scripts/real_user_vue_smoke.sh"
+mark_step_complete
+
+begin_step 27 "Svelte real-user smoke"
+run_shell_step "bash scripts/real_user_svelte_smoke.sh"
+mark_step_complete
+
+begin_step 28 "React real-user smoke"
+run_shell_step "bash scripts/real_user_react_smoke.sh"
+mark_step_complete
+
+begin_step 29 "React Native real-user smoke"
+run_shell_step "bash scripts/real_user_react_native_smoke.sh"
+mark_step_complete
+
+begin_step 30 "Next.js real-user smoke"
+run_shell_step "bash scripts/real_user_next_smoke.sh"
+mark_step_complete
+
+begin_step 31 "Python real-user smoke"
+run_shell_step "bash scripts/real_user_python_smoke.sh"
+mark_step_complete
+
+begin_step 32 "FastAPI real-user smoke"
+run_shell_step "bash scripts/real_user_fastapi_smoke.sh"
+mark_step_complete
+
+begin_step 33 "Django real-user smoke"
+run_shell_step "bash scripts/real_user_django_smoke.sh"
+mark_step_complete
+
+begin_step 34 "Go real-user smoke"
+run_shell_step "bash scripts/real_user_go_smoke.sh"
+mark_step_complete
+
+begin_step 35 "C real-user smoke"
+run_shell_step "bash scripts/real_user_c_smoke.sh"
+mark_step_complete
+
+begin_step 36 "C++ real-user smoke"
+run_shell_step "bash scripts/real_user_cpp_smoke.sh"
+mark_step_complete
+
+begin_step 37 "Java real-user smoke"
+run_shell_step "bash scripts/real_user_java_smoke.sh"
+mark_step_complete
+
+begin_step 38 "Spring Boot real-user smoke"
+run_shell_step "bash scripts/real_user_spring_boot_smoke.sh"
+mark_step_complete
+
+begin_step 39 ".NET real-user smoke"
+run_shell_step "bash scripts/real_user_dotnet_smoke.sh"
+mark_step_complete
+
+begin_step 40 "Unity real-user smoke"
+run_shell_step "bash scripts/real_user_unity_smoke.sh"
+mark_step_complete
+
+begin_step 41 "Kotlin real-user smoke"
+run_shell_step "bash scripts/real_user_kotlin_smoke.sh"
+mark_step_complete
+
+begin_step 42 "Ruby real-user smoke"
+run_shell_step "bash scripts/real_user_ruby_smoke.sh"
+mark_step_complete
+
+begin_step 43 "Swift real-user smoke"
+run_shell_step "bash scripts/real_user_swift_smoke.sh"
+mark_step_complete
+
+begin_step 44 "PHP package metadata"
+run_shell_step "cd php/logbrew-php && composer validate --no-check-publish --strict"
+mark_step_complete
+
+begin_step 45 "PHP package install"
+run_shell_step "cd php/logbrew-php && composer update --no-interaction"
+mark_step_complete
+
+begin_step 46 "PHP package tests"
+run_shell_step "python3 scripts/check_php_sources.py && bash scripts/check_php_static.sh && cd php/logbrew-php && php tests/run.php"
+mark_step_complete
+
+begin_step 47 "PHP real-user smoke"
+run_shell_step "bash scripts/real_user_php_smoke.sh"
+mark_step_complete
+
+begin_step 48 "Python package build checks"
+run_shell_step "cd python/logbrew_py && python3 -m build && python3 -m twine check 'dist/*' && cd ../logbrew_fastapi && python3 -m build && python3 -m twine check 'dist/*' && cd ../logbrew_django && python3 -m build && python3 -m twine check 'dist/*'"
+mark_step_complete
+
+begin_step 49 "Objective-C package checks"
+run_shell_step "bash scripts/check_objc_package.sh"
+mark_step_complete
+
+begin_step 50 "Objective-C real-user smoke"
+run_shell_step "bash scripts/real_user_objc_smoke.sh"
+mark_step_complete
+
+begin_step 51 "Release metadata checks"
+run_shell_step "python3 scripts/check_release_metadata.py"
+mark_step_complete
+
+begin_step 52 "Markdown link checks"
+run_shell_step "python3 scripts/check_markdown_links.py"
+mark_step_complete
+
+begin_step 53 "Shell static analysis"
+run_shell_step "bash scripts/check_shell_static.sh"
+mark_step_complete
+
+begin_step 54 "Workflow YAML validation"
+run_shell_step "ruby -e 'require \"yaml\"; YAML.load_file(\".github/workflows/ci.yml\"); YAML.load_file(\".github/workflows/release-readiness.yml\"); puts \"yaml ok\"'"
+mark_step_complete
+
+begin_step 55 "Confidentiality leak scan"
+run_shell_step "python3 scripts/check_confidentiality_scan.py"
+mark_step_complete
+
+log_line "all public SDK checks passed"
+
+if [[ "$json_mode" == true ]]; then
+  write_summary_json true "all public SDK checks passed"
+fi

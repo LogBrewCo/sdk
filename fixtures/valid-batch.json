@@ -1,0 +1,69 @@
+{
+  "sdk": {
+    "name": "logbrew-js",
+    "language": "typescript",
+    "version": "0.1.0"
+  },
+  "events": [
+    {
+      "type": "release",
+      "timestamp": "2026-06-02T10:00:00Z",
+      "id": "evt_release_001",
+      "attributes": {
+        "version": "1.2.3",
+        "commit": "abc123def456",
+        "notes": "Public release marker"
+      }
+    },
+    {
+      "type": "environment",
+      "timestamp": "2026-06-02T10:00:01Z",
+      "id": "evt_environment_001",
+      "attributes": {
+        "name": "production",
+        "region": "global"
+      }
+    },
+    {
+      "type": "issue",
+      "timestamp": "2026-06-02T10:00:02Z",
+      "id": "evt_issue_001",
+      "attributes": {
+        "title": "Checkout timeout",
+        "level": "error",
+        "message": "Request timed out after retry budget"
+      }
+    },
+    {
+      "type": "log",
+      "timestamp": "2026-06-02T10:00:03Z",
+      "id": "evt_log_001",
+      "attributes": {
+        "message": "worker started",
+        "level": "info",
+        "logger": "job-runner"
+      }
+    },
+    {
+      "type": "span",
+      "timestamp": "2026-06-02T10:00:04Z",
+      "id": "evt_span_001",
+      "attributes": {
+        "name": "GET /health",
+        "traceId": "trace_001",
+        "spanId": "span_001",
+        "status": "ok",
+        "durationMs": 12.5
+      }
+    },
+    {
+      "type": "action",
+      "timestamp": "2026-06-02T10:00:05Z",
+      "id": "evt_action_001",
+      "attributes": {
+        "name": "deploy",
+        "status": "success"
+      }
+    }
+  ]
+}

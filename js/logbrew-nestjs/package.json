@@ -1,0 +1,57 @@
+{
+  "name": "@logbrew/nestjs",
+  "version": "0.1.0",
+  "description": "NestJS interceptor helpers for the public LogBrew JavaScript SDK.",
+  "type": "module",
+  "main": "./index.cjs",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./index.d.ts",
+        "default": "./index.js"
+      },
+      "require": {
+        "types": "./index.d.cts",
+        "default": "./index.cjs"
+      },
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.cjs",
+    "index.js",
+    "index.d.ts",
+    "index.d.cts",
+    "README.md",
+    "examples"
+  ],
+  "keywords": [
+    "logbrew",
+    "nestjs",
+    "nest",
+    "node",
+    "interceptor",
+    "observability",
+    "logs",
+    "traces",
+    "events"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LogBrewCo/LogBrewCo-sdk.git"
+  },
+  "peerDependencies": {
+    "@logbrew/sdk": "^0.1.0",
+    "@nestjs/common": ">=10",
+    "rxjs": ">=7"
+  },
+  "scripts": {
+    "test": "node --check index.js && node --check index.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
+  }
+}

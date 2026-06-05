@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+
+ALLOWED_TYPES = {"release", "environment", "issue", "log", "span", "action"}
+SDK_KEYS = {"name", "language", "version"}
+EVENT_KEYS = {"type", "timestamp", "id", "attributes"}
+REQUIRED_ATTRIBUTES = {
+    "release": {"version"},
+    "environment": {"name"},
+    "issue": {"title", "level"},
+    "log": {"message", "level"},
+    "span": {"name", "traceId", "spanId", "status"},
+    "action": {"name", "status"},
+}
+ENUMS = {
+    ("issue", "level"): {"info", "warning", "error", "critical"},
+    ("log", "level"): {"debug", "info", "warning", "error"},
+    ("span", "status"): {"ok", "error"},
+    ("action", "status"): {"queued", "running", "success", "failure"},
+}
+OPTIONAL_ATTRIBUTES = {
+    "release": {"commit", "notes", "metadata"},
+    "environment": {"region", "metadata"},
+    "issue": {"message", "metadata"},
+    "log": {"logger", "metadata"},
+    "span": {"parentSpanId", "durationMs", "metadata"},
+    "action": {"metadata"},
+}
+OPTIONAL_STRING_ATTRIBUTES = {
+    ("release", "commit"): True,
+    ("release", "notes"): False,
+    ("environment", "region"): False,
+    ("issue", "message"): False,
+    ("log", "logger"): False,
+    ("span", "parentSpanId"): True,
+}
+
+
+class ValidationError(Exception):
+    pass
+
+
+def _parse_timestamp(value: str) -> None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValidationError(f"invalid timestamp: {value}") from exc
+    if parsed.tzinfo is None:
+        raise ValidationError(f"timestamp must include a timezone offset: {value}")
+
+
+def _require_non_empty_string(obj: dict[str, Any], key: str) -> None:
+    value = obj.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValidationError(f"{key} must be a non-empty string")
+
+
+def _reject_unknown_keys(obj: dict[str, Any], allowed_keys: set[str], label: str) -> None:
+    extra_keys = set(obj) - allowed_keys
+    if extra_keys:
+        extras = ", ".join(sorted(extra_keys))
+        raise ValidationError(f"{label} has unsupported fields: {extras}")
+
+
+def _validate_metadata(index: int, attributes: dict[str, Any]) -> None:
+    metadata = attributes.get("metadata")
+    if metadata is None:
+        return
+    if not isinstance(metadata, dict):
+        raise ValidationError(f"event {index} attribute metadata must be an object")
+    for key, value in metadata.items():
+        if not isinstance(key, str):
+            raise ValidationError(f"event {index} metadata keys must be strings")
+        if not isinstance(value, (str, int, float, bool)) and value is not None:
+            raise ValidationError(
+                f"event {index} metadata value for {key} must be a string, number, boolean, or null"
+            )
+
+
+def _validate_optional_attributes(index: int, event_type: str, attributes: dict[str, Any]) -> None:
+    for (expected_type, key), require_non_empty in OPTIONAL_STRING_ATTRIBUTES.items():
+        if expected_type != event_type or key not in attributes:
+            continue
+        value = attributes[key]
+        if not isinstance(value, str):
+            raise ValidationError(f"event {index} attribute {key} must be a string")
+        if require_non_empty and not value:
+            raise ValidationError(f"event {index} attribute {key} must be a non-empty string")
+
+
+def validate_payload(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValidationError("payload must be an object")
+    _reject_unknown_keys(payload, {"sdk", "events"}, "payload")
+
+    sdk = payload.get("sdk")
+    if not isinstance(sdk, dict):
+        raise ValidationError("sdk must be an object")
+    _reject_unknown_keys(sdk, SDK_KEYS, "sdk")
+    for key in SDK_KEYS:
+        _require_non_empty_string(sdk, key)
+
+    events = payload.get("events")
+    if not isinstance(events, list) or not events:
+        raise ValidationError("events must be a non-empty array")
+
+    for index, event in enumerate(events):
+        if not isinstance(event, dict):
+            raise ValidationError(f"event {index} must be an object")
+        _reject_unknown_keys(event, EVENT_KEYS, f"event {index}")
+        _require_non_empty_string(event, "type")
+        _require_non_empty_string(event, "timestamp")
+        _require_non_empty_string(event, "id")
+
+        event_type = event["type"]
+        if event_type not in ALLOWED_TYPES:
+            raise ValidationError(f"event {index} has unsupported type: {event_type}")
+        _parse_timestamp(event["timestamp"])
+
+        attributes = event.get("attributes")
+        if not isinstance(attributes, dict):
+            raise ValidationError(f"event {index} attributes must be an object")
+
+        missing = REQUIRED_ATTRIBUTES[event_type] - attributes.keys()
+        if missing:
+            missing_keys = ", ".join(sorted(missing))
+            raise ValidationError(f"event {index} missing attributes: {missing_keys}")
+
+        for key in REQUIRED_ATTRIBUTES[event_type]:
+            if not isinstance(attributes.get(key), str) or not attributes[key]:
+                raise ValidationError(f"event {index} attribute {key} must be a non-empty string")
+
+        allowed_attribute_keys = REQUIRED_ATTRIBUTES[event_type] | OPTIONAL_ATTRIBUTES[event_type]
+        _reject_unknown_keys(attributes, allowed_attribute_keys, f"event {index} attributes")
+
+        for enum_key, allowed_values in ENUMS.items():
+            if enum_key[0] != event_type:
+                continue
+            value = attributes.get(enum_key[1])
+            if value not in allowed_values:
+                allowed_display = ", ".join(sorted(allowed_values))
+                raise ValidationError(
+                    f"event {index} attribute {enum_key[1]} must be one of: {allowed_display}"
+                )
+
+        if event_type == "span" and "durationMs" in attributes:
+            duration = attributes["durationMs"]
+            if isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0:
+                raise ValidationError(f"event {index} attribute durationMs must be a non-negative number")
+
+        _validate_optional_attributes(index, event_type, attributes)
+        _validate_metadata(index, attributes)
+
+
+def _result_payload(ok: bool, message: str, fixture: Path) -> dict[str, Any]:
+    return {
+        "ok": ok,
+        "fixture": str(fixture),
+        "message": message,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate LogBrew public SDK fixtures.")
+    parser.add_argument("fixture", type=Path)
+    parser.add_argument("--expect-invalid", action="store_true")
+    parser.add_argument("--json", action="store_true", dest="json_output")
+    args = parser.parse_args()
+
+    def emit(ok: bool, message: str) -> int:
+        if args.json_output:
+            print(json.dumps(_result_payload(ok=ok, message=message, fixture=args.fixture)))
+        else:
+            print(message)
+        return 0 if ok else 1
+
+    try:
+        payload = json.loads(args.fixture.read_text())
+    except FileNotFoundError:
+        return emit(False, f"fixture not found: {args.fixture}")
+    except json.JSONDecodeError as exc:
+        return emit(False, f"invalid JSON: {exc.msg}")
+
+    try:
+        validate_payload(payload)
+    except ValidationError as exc:
+        if args.expect_invalid:
+            return emit(True, f"invalid as expected: {exc}")
+        return emit(False, f"validation failed: {exc}")
+
+    if args.expect_invalid:
+        return emit(False, "expected fixture to be invalid, but validation passed")
+
+    return emit(True, "valid")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

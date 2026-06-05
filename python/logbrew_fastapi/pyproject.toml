@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logbrew-fastapi"
+version = "0.1.0"
+description = "FastAPI integration for capturing LogBrew request spans and exceptions."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+  { name = "LogBrew" }
+]
+keywords = ["logbrew", "observability", "fastapi", "asgi", "logs"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed"
+]
+dependencies = [
+  "fastapi>=0.115",
+  "httpx2>=2.3",
+  "logbrew-sdk==0.1.0"
+]
+
+[project.urls]
+Repository = "https://github.com/LogBrewCo/LogBrewCo-sdk"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+logbrew_fastapi = ["py.typed"]

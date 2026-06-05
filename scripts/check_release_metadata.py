@@ -1,0 +1,576 @@
+#!/usr/bin/env python3
+"""Validate publish-facing metadata across every public SDK package."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+import tomllib
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Any
+
+
+PUBLIC_VERSION = "0.1.0"
+PUBLIC_LICENSE = "MIT"
+REPO_URL = "https://github.com/LogBrewCo/LogBrewCo-sdk"
+NPM_REPO_URL = "git+https://github.com/LogBrewCo/LogBrewCo-sdk.git"
+MIT_LICENSE_URL = "https://opensource.org/license/mit"
+
+JS_PACKAGES = {
+    "js/logbrew-angular": "@logbrew/angular",
+    "js/logbrew-browser": "@logbrew/browser",
+    "js/logbrew-express": "@logbrew/express",
+    "js/logbrew-fastify": "@logbrew/fastify",
+    "js/logbrew-js": "@logbrew/sdk",
+    "js/logbrew-nestjs": "@logbrew/nestjs",
+    "js/logbrew-next": "@logbrew/next",
+    "js/logbrew-node": "@logbrew/node",
+    "js/logbrew-react": "@logbrew/react",
+    "js/logbrew-react-native": "@logbrew/react-native",
+    "js/logbrew-svelte": "@logbrew/svelte",
+    "js/logbrew-vue": "@logbrew/vue",
+}
+
+PYTHON_PACKAGES = {
+    "python/logbrew_django": {
+        "name": "logbrew-django",
+        "description": "Django integration",
+        "dependencies": {"Django>=5.2", "logbrew-sdk==0.1.0"},
+        "package": "logbrew_django",
+    },
+    "python/logbrew_fastapi": {
+        "name": "logbrew-fastapi",
+        "description": "FastAPI integration",
+        "dependencies": {"fastapi>=0.115", "httpx2>=2.3", "logbrew-sdk==0.1.0"},
+        "package": "logbrew_fastapi",
+    },
+    "python/logbrew_py": {
+        "name": "logbrew-sdk",
+        "description": "Public LogBrew Python SDK",
+        "dependencies": set(),
+        "package": "logbrew_sdk",
+    },
+}
+
+
+def require(condition: bool, failures: list[str], message: str) -> None:
+    if not condition:
+        failures.append(message)
+
+
+def require_path(root: Path, relative: str, failures: list[str]) -> Path:
+    path = root / relative
+    require(path.exists(), failures, f"missing required path: {relative}")
+    return path
+
+
+def require_equal(failures: list[str], location: str, field: str, actual: Any, expected: Any) -> None:
+    require(
+        actual == expected,
+        failures,
+        f"{location}: expected {field} {expected!r}, got {actual!r}",
+    )
+
+
+def require_contains(failures: list[str], location: str, field: str, actual: str | None, needle: str) -> None:
+    require(
+        actual is not None and needle in actual,
+        failures,
+        f"{location}: expected {field} to include {needle!r}, got {actual!r}",
+    )
+
+
+def read_json(path: Path, failures: list[str]) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        failures.append(f"{path}: invalid JSON: {exc}")
+        return {}
+    require(isinstance(payload, dict), failures, f"{path}: expected a JSON object")
+    return payload if isinstance(payload, dict) else {}
+
+
+def read_toml(path: Path, failures: list[str]) -> dict[str, Any]:
+    try:
+        payload = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        failures.append(f"{path}: invalid TOML: {exc}")
+        return {}
+    return payload
+
+
+def local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def child(element: ET.Element, name: str) -> ET.Element | None:
+    for candidate in element:
+        if local_name(candidate.tag) == name:
+            return candidate
+    return None
+
+
+def child_text(element: ET.Element, name: str) -> str | None:
+    node = child(element, name)
+    if node is None or node.text is None:
+        return None
+    return node.text.strip()
+
+
+def path_text(element: ET.Element, *names: str) -> str | None:
+    node: ET.Element | None = element
+    for name in names:
+        if node is None:
+            return None
+        node = child(node, name)
+    if node is None or node.text is None:
+        return None
+    return node.text.strip()
+
+
+def direct_children(element: ET.Element, name: str) -> list[ET.Element]:
+    return [candidate for candidate in element if local_name(candidate.tag) == name]
+
+
+def parse_xml(path: Path, failures: list[str]) -> ET.Element | None:
+    try:
+        return ET.parse(path).getroot()
+    except ET.ParseError as exc:
+        failures.append(f"{path}: invalid XML: {exc}")
+        return None
+
+
+def validate_js_package(root: Path, relative_dir: str, expected_name: str, failures: list[str]) -> None:
+    location = f"{relative_dir}/package.json"
+    package_dir = require_path(root, relative_dir, failures)
+    manifest_path = package_dir / "package.json"
+    require(manifest_path.exists(), failures, f"missing required path: {location}")
+    if not manifest_path.exists():
+        return
+
+    manifest = read_json(manifest_path, failures)
+    require_path(root, f"{relative_dir}/README.md", failures)
+    require_equal(failures, location, "name", manifest.get("name"), expected_name)
+    require_equal(failures, location, "version", manifest.get("version"), PUBLIC_VERSION)
+    require_equal(failures, location, "license", manifest.get("license"), PUBLIC_LICENSE)
+    require(manifest.get("private") is not True, failures, f"{location}: public SDK package must not be private")
+    require_contains(failures, location, "description", manifest.get("description"), "LogBrew")
+    require_equal(failures, location, "repository.type", manifest.get("repository", {}).get("type"), "git")
+    require_equal(failures, location, "repository.url", manifest.get("repository", {}).get("url"), NPM_REPO_URL)
+    require_equal(failures, location, "engines.node", manifest.get("engines", {}).get("node"), ">=18")
+    require_equal(failures, location, "sideEffects", manifest.get("sideEffects"), False)
+    require_equal(failures, location, "type", manifest.get("type"), "module")
+    require_equal(failures, location, "main", manifest.get("main"), "./index.cjs")
+    if manifest.get("module") is not None:
+        require_equal(failures, location, "module", manifest.get("module"), "./index.js")
+    require_equal(failures, location, "types", manifest.get("types"), "./index.d.ts")
+
+    files = set(manifest.get("files", []))
+    for expected_file in ("README.md", "examples", "index.js", "index.cjs", "index.d.ts", "index.d.cts"):
+        require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
+    if expected_name == "@logbrew/react-native":
+        require("index.native.js" in files, failures, f"{location}: files must include 'index.native.js'")
+
+    exports = manifest.get("exports", {}).get(".")
+    require(isinstance(exports, dict), failures, f"{location}: exports['.'] must be an object")
+    if isinstance(exports, dict):
+        require_equal(failures, location, "exports['.'].import.types", path_text_from_dict(exports, "import", "types"), "./index.d.ts")
+        require_equal(failures, location, "exports['.'].import.default", path_text_from_dict(exports, "import", "default"), "./index.js")
+        require_equal(failures, location, "exports['.'].require.types", path_text_from_dict(exports, "require", "types"), "./index.d.cts")
+        require_equal(failures, location, "exports['.'].require.default", path_text_from_dict(exports, "require", "default"), "./index.cjs")
+
+
+def path_text_from_dict(payload: dict[str, Any], *keys: str) -> Any:
+    value: Any = payload
+    for key in keys:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value
+
+
+def validate_js_packages(root: Path, failures: list[str]) -> None:
+    actual_public_packages = {
+        str(path.parent.relative_to(root))
+        for path in root.glob("js/logbrew-*/package.json")
+        if "examples" not in path.parts
+    }
+    require_equal(
+        failures,
+        "js",
+        "public package directories",
+        actual_public_packages,
+        set(JS_PACKAGES),
+    )
+    for relative_dir, expected_name in JS_PACKAGES.items():
+        validate_js_package(root, relative_dir, expected_name, failures)
+
+
+def validate_rust(root: Path, failures: list[str]) -> None:
+    manifest_path = require_path(root, "rust/logbrew/Cargo.toml", failures)
+    require_path(root, "rust/logbrew/README.md", failures)
+    if not manifest_path.exists():
+        return
+    package = read_toml(manifest_path, failures).get("package", {})
+    location = "rust/logbrew/Cargo.toml"
+    require_equal(failures, location, "package.name", package.get("name"), "logbrew")
+    require_equal(failures, location, "package.version", package.get("version"), PUBLIC_VERSION)
+    require_equal(failures, location, "package.license", package.get("license"), PUBLIC_LICENSE)
+    require_equal(failures, location, "package.repository", package.get("repository"), REPO_URL)
+    require_equal(failures, location, "package.readme", package.get("readme"), "README.md")
+    require_contains(failures, location, "package.description", package.get("description"), "LogBrew")
+    require("logbrew" in package.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
+
+
+def validate_python_package(root: Path, relative_dir: str, expected: dict[str, Any], failures: list[str]) -> None:
+    manifest_path = require_path(root, f"{relative_dir}/pyproject.toml", failures)
+    require_path(root, f"{relative_dir}/README.md", failures)
+    if not manifest_path.exists():
+        return
+    project = read_toml(manifest_path, failures).get("project", {})
+    package_name = expected["package"]
+    location = f"{relative_dir}/pyproject.toml"
+    require_equal(failures, location, "project.name", project.get("name"), expected["name"])
+    require_equal(failures, location, "project.version", project.get("version"), PUBLIC_VERSION)
+    require_equal(failures, location, "project.license", project.get("license"), PUBLIC_LICENSE)
+    require_equal(failures, location, "project.readme", project.get("readme"), "README.md")
+    require_equal(failures, location, "project.requires-python", project.get("requires-python"), ">=3.11")
+    require_contains(failures, location, "project.description", project.get("description"), expected["description"])
+    authors = project.get("authors", [])
+    require({"name": "LogBrew"} in authors, failures, f"{location}: authors must include LogBrew")
+    require("logbrew" in project.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
+    require_equal(failures, location, "project.dependencies", set(project.get("dependencies", [])), expected["dependencies"])
+    urls = project.get("urls", {})
+    if urls:
+        require_equal(failures, location, "project.urls.Repository", urls.get("Repository"), REPO_URL)
+    require_path(root, f"{relative_dir}/src/{package_name}/py.typed", failures)
+    require_path(root, f"{relative_dir}/src/{package_name}/examples/__main__.py", failures)
+
+
+def validate_python(root: Path, failures: list[str]) -> None:
+    actual_public_packages = {
+        str(path.parent.relative_to(root))
+        for path in root.glob("python/logbrew_*/pyproject.toml")
+    }
+    require_equal(
+        failures,
+        "python",
+        "public package directories",
+        actual_public_packages,
+        set(PYTHON_PACKAGES),
+    )
+    for relative_dir, expected in PYTHON_PACKAGES.items():
+        validate_python_package(root, relative_dir, expected, failures)
+
+
+def validate_go(root: Path, failures: list[str]) -> None:
+    go_mod_path = require_path(root, "go/logbrew/go.mod", failures)
+    require_path(root, "go/logbrew/README.md", failures)
+    if not go_mod_path.exists():
+        return
+    content = go_mod_path.read_text(encoding="utf-8")
+    require(
+        re.search(r"^module github\.com/LogBrewCo/LogBrewCo-sdk/go/logbrew$", content, re.MULTILINE) is not None,
+        failures,
+        "go/logbrew/go.mod: unexpected module path",
+    )
+    require(
+        re.search(r"^go 1\.24\.0$", content, re.MULTILINE) is not None,
+        failures,
+        "go/logbrew/go.mod: expected go 1.24.0",
+    )
+
+
+def validate_c(root: Path, failures: list[str]) -> None:
+    require_path(root, "c/logbrew-c/README.md", failures)
+    header_path = require_path(root, "c/logbrew-c/include/logbrew.h", failures)
+    source_path = require_path(root, "c/logbrew-c/src/logbrew.c", failures)
+    require_path(root, "c/logbrew-c/Makefile", failures)
+    require_path(root, "c/logbrew-c/examples/Makefile", failures)
+    require_path(root, "c/logbrew-c/examples/readme_example.c", failures)
+    require_path(root, "c/logbrew-c/examples/real_user_smoke.c", failures)
+    require_path(root, "c/logbrew-c/tests/test_logbrew.c", failures)
+    if not header_path.exists() or not source_path.exists():
+        return
+    header = header_path.read_text(encoding="utf-8")
+    readme = (root / "c/logbrew-c/README.md").read_text(encoding="utf-8")
+    location = "c/logbrew-c/include/logbrew.h"
+    for needle in (
+        '#define LOGBREW_C_VERSION "0.1.0"',
+        "typedef struct LogBrewClient LogBrewClient;",
+        "logbrew_client_flush",
+        "LogBrewRecordingTransport",
+    ):
+        require(needle in header, failures, f"{location}: missing public C SDK symbol {needle}")
+    for needle in (
+        "Public C99 SDK",
+        "LOGBREW_API_KEY",
+        "logbrew_client_flush",
+        "make -C c/logbrew-c/examples run-real-user-smoke",
+    ):
+        require(needle in readme, failures, f"c/logbrew-c/README.md: missing guidance {needle}")
+
+
+def validate_cpp(root: Path, failures: list[str]) -> None:
+    require_path(root, "cpp/logbrew-cpp/README.md", failures)
+    header_path = require_path(root, "cpp/logbrew-cpp/include/logbrew.hpp", failures)
+    source_path = require_path(root, "cpp/logbrew-cpp/src/logbrew.cpp", failures)
+    require_path(root, "cpp/logbrew-cpp/Makefile", failures)
+    require_path(root, "cpp/logbrew-cpp/examples/Makefile", failures)
+    require_path(root, "cpp/logbrew-cpp/examples/readme_example.cpp", failures)
+    require_path(root, "cpp/logbrew-cpp/examples/real_user_smoke.cpp", failures)
+    require_path(root, "cpp/logbrew-cpp/tests/test_logbrew.cpp", failures)
+    if not header_path.exists() or not source_path.exists():
+        return
+    header = header_path.read_text(encoding="utf-8")
+    readme = (root / "cpp/logbrew-cpp/README.md").read_text(encoding="utf-8")
+    location = "cpp/logbrew-cpp/include/logbrew.hpp"
+    for needle in (
+        'inline constexpr const char *version = "0.1.0"',
+        "class LogBrewClient",
+        "class RecordingTransport",
+        "class SdkException",
+    ):
+        require(needle in header, failures, f"{location}: missing public C++ SDK symbol {needle}")
+    for needle in (
+        "Public C++17 SDK",
+        "LOGBREW_API_KEY",
+        "client.flush",
+        "make -C cpp/logbrew-cpp/examples run-real-user-smoke",
+    ):
+        require(needle in readme, failures, f"cpp/logbrew-cpp/README.md: missing guidance {needle}")
+
+
+def validate_objc(root: Path, failures: list[str]) -> None:
+    require_path(root, "objc/logbrew-objc/README.md", failures)
+    header_path = require_path(root, "objc/logbrew-objc/include/LogBrew.h", failures)
+    source_path = require_path(root, "objc/logbrew-objc/src/LogBrew.m", failures)
+    require_path(root, "objc/logbrew-objc/Makefile", failures)
+    require_path(root, "objc/logbrew-objc/examples/Makefile", failures)
+    require_path(root, "objc/logbrew-objc/examples/readme_example.m", failures)
+    require_path(root, "objc/logbrew-objc/examples/real_user_smoke.m", failures)
+    require_path(root, "objc/logbrew-objc/tests/test_logbrew.m", failures)
+    if not header_path.exists() or not source_path.exists():
+        return
+    header = header_path.read_text(encoding="utf-8")
+    readme = (root / "objc/logbrew-objc/README.md").read_text(encoding="utf-8")
+    location = "objc/logbrew-objc/include/LogBrew.h"
+    for needle in (
+        "LogBrewObjectiveCVersion",
+        "LBWClient",
+        "LBWRecordingTransport",
+        "LBWErrorStableCodeKey",
+    ):
+        require(needle in header, failures, f"{location}: missing public Objective-C SDK symbol {needle}")
+    for needle in (
+        "Public Objective-C SDK",
+        "LOGBREW_API_KEY",
+        "flushWithTransport",
+        "make -C objc/logbrew-objc/examples run-real-user-smoke",
+    ):
+        require(needle in readme, failures, f"objc/logbrew-objc/README.md: missing guidance {needle}")
+
+
+def validate_maven_pom(
+    root: Path,
+    relative_path: str,
+    expected_artifact: str,
+    expected_name: str,
+    failures: list[str],
+    require_compiler_release: bool = False,
+) -> None:
+    pom_path = require_path(root, relative_path, failures)
+    require_path(root, str(Path(relative_path).parent / "README.md"), failures)
+    if not pom_path.exists():
+        return
+    project = parse_xml(pom_path, failures)
+    if project is None:
+        return
+
+    require_equal(failures, relative_path, "groupId", child_text(project, "groupId"), "co.logbrew")
+    require_equal(failures, relative_path, "artifactId", child_text(project, "artifactId"), expected_artifact)
+    require_equal(failures, relative_path, "version", child_text(project, "version"), PUBLIC_VERSION)
+    require_equal(failures, relative_path, "packaging", child_text(project, "packaging"), "jar")
+    require_equal(failures, relative_path, "name", child_text(project, "name"), expected_name)
+    require_equal(failures, relative_path, "url", child_text(project, "url"), REPO_URL)
+    require_contains(failures, relative_path, "description", child_text(project, "description"), "LogBrew")
+    require_equal(failures, relative_path, "licenses.license.name", path_text(project, "licenses", "license", "name"), PUBLIC_LICENSE)
+    require_equal(failures, relative_path, "licenses.license.url", path_text(project, "licenses", "license", "url"), MIT_LICENSE_URL)
+    require_equal(failures, relative_path, "developers.developer.name", path_text(project, "developers", "developer", "name"), "LogBrew")
+    require_equal(failures, relative_path, "scm.url", path_text(project, "scm", "url"), REPO_URL)
+    if require_compiler_release:
+        require_equal(failures, relative_path, "properties.maven.compiler.release", path_text(project, "properties", "maven.compiler.release"), "11")
+
+
+def validate_dotnet(root: Path, failures: list[str]) -> None:
+    project_path = require_path(root, "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj", failures)
+    require_path(root, "dotnet/logbrew-dotnet/README.md", failures)
+    if not project_path.exists():
+        return
+    project = parse_xml(project_path, failures)
+    if project is None:
+        return
+    property_groups = direct_children(project, "PropertyGroup")
+    properties = property_groups[0] if property_groups else ET.Element("PropertyGroup")
+    location = "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj"
+    expected = {
+        "TargetFramework": "netstandard2.0",
+        "PackageId": "LogBrew",
+        "Version": PUBLIC_VERSION,
+        "Authors": "LogBrew",
+        "Company": "LogBrew",
+        "PackageLicenseExpression": PUBLIC_LICENSE,
+        "PackageProjectUrl": REPO_URL,
+        "RepositoryUrl": REPO_URL,
+        "PackageReadmeFile": "README.md",
+    }
+    for field, value in expected.items():
+        require_equal(failures, location, field, child_text(properties, field), value)
+    require_contains(failures, location, "Description", child_text(properties, "Description"), "LogBrew")
+
+
+def validate_unity(root: Path, failures: list[str]) -> None:
+    manifest_path = require_path(root, "unity/logbrew-unity/package.json", failures)
+    require_path(root, "unity/logbrew-unity/README.md", failures)
+    if not manifest_path.exists():
+        return
+    manifest = read_json(manifest_path, failures)
+    location = "unity/logbrew-unity/package.json"
+    expected = {
+        "name": "co.logbrew.unity",
+        "version": PUBLIC_VERSION,
+        "displayName": "LogBrew Unity SDK",
+        "unity": "2021.3",
+        "license": PUBLIC_LICENSE,
+    }
+    for field, value in expected.items():
+        require_equal(failures, location, field, manifest.get(field), value)
+    require_contains(failures, location, "description", manifest.get("description"), "LogBrew")
+    require_equal(failures, location, "author.name", manifest.get("author", {}).get("name"), "LogBrew")
+    require("logbrew" in manifest.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
+    samples = {sample.get("path") for sample in manifest.get("samples", []) if isinstance(sample, dict)}
+    require_equal(
+        failures,
+        location,
+        "samples paths",
+        samples,
+        {"Samples~/ReadmeExample", "Samples~/RealUserSmoke"},
+    )
+
+
+def validate_ruby(root: Path, failures: list[str]) -> None:
+    gemspec_path = require_path(root, "ruby/logbrew-ruby/logbrew-sdk.gemspec", failures)
+    require_path(root, "ruby/logbrew-ruby/README.md", failures)
+    if not gemspec_path.exists():
+        return
+    text = gemspec_path.read_text(encoding="utf-8")
+    location = "ruby/logbrew-ruby/logbrew-sdk.gemspec"
+    required_patterns = {
+        "name": r'spec\.name\s*=\s*"logbrew-sdk"',
+        "version": rf'spec\.version\s*=\s*"{re.escape(PUBLIC_VERSION)}"',
+        "license": rf'spec\.license\s*=\s*"{PUBLIC_LICENSE}"',
+        "author": r'spec\.authors\s*=\s*\["LogBrew"\]',
+        "homepage": rf'spec\.homepage\s*=\s*"{re.escape(REPO_URL)}"',
+        "source_code_uri": rf'"source_code_uri"\s*=>\s*"{re.escape(REPO_URL)}"',
+        "required_ruby_version": r'spec\.required_ruby_version\s*=\s*">= 2\.6"',
+    }
+    for field, pattern in required_patterns.items():
+        require(re.search(pattern, text) is not None, failures, f"{location}: missing {field} metadata")
+    require("README.md" in text, failures, f"{location}: files must include README.md")
+    require("examples/Makefile" in text, failures, f"{location}: files must include examples/Makefile")
+
+
+def validate_php(root: Path, failures: list[str]) -> None:
+    composer_path = require_path(root, "php/logbrew-php/composer.json", failures)
+    require_path(root, "php/logbrew-php/README.md", failures)
+    if not composer_path.exists():
+        return
+    manifest = read_json(composer_path, failures)
+    location = "php/logbrew-php/composer.json"
+    require_equal(failures, location, "name", manifest.get("name"), "logbrew/sdk")
+    require_equal(failures, location, "type", manifest.get("type"), "library")
+    require_equal(failures, location, "license", manifest.get("license"), PUBLIC_LICENSE)
+    require_equal(failures, location, "require.php", manifest.get("require", {}).get("php"), "^8.2")
+    require_equal(
+        failures,
+        location,
+        "autoload.psr-4.LogBrew\\",
+        manifest.get("autoload", {}).get("psr-4", {}).get("LogBrew\\"),
+        "src/",
+    )
+    require_contains(failures, location, "description", manifest.get("description"), "LogBrew")
+
+
+def validate_swift(root: Path, failures: list[str]) -> None:
+    manifest_path = require_path(root, "swift/logbrew-swift/Package.swift", failures)
+    require_path(root, "swift/logbrew-swift/README.md", failures)
+    if not manifest_path.exists():
+        return
+    text = manifest_path.read_text(encoding="utf-8")
+    location = "swift/logbrew-swift/Package.swift"
+    for needle in (
+        'name: "logbrew-swift"',
+        '.macOS(.v13)',
+        '.iOS(.v15)',
+        '.library(name: "LogBrew", targets: ["LogBrew"])',
+        '.executable(name: "ReadmeExample", targets: ["ReadmeExample"])',
+        '.executable(name: "RealUserSmoke", targets: ["RealUserSmoke"])',
+        '.target(name: "LogBrew")',
+        '.testTarget(name: "LogBrewTests", dependencies: ["LogBrew"])',
+    ):
+        require(needle in text, failures, f"{location}: missing manifest entry {needle}")
+
+
+def validate_root(root: Path, failures: list[str]) -> None:
+    require_path(root, "README.md", failures)
+    require_path(root, "LICENSE", failures)
+    license_text = (root / "LICENSE").read_text(encoding="utf-8") if (root / "LICENSE").exists() else ""
+    require("MIT License" in license_text, failures, "LICENSE: expected MIT License text")
+
+
+def validate(root: Path) -> list[str]:
+    failures: list[str] = []
+    validate_root(root, failures)
+    validate_js_packages(root, failures)
+    validate_rust(root, failures)
+    validate_python(root, failures)
+    validate_go(root, failures)
+    validate_c(root, failures)
+    validate_cpp(root, failures)
+    validate_objc(root, failures)
+    validate_maven_pom(
+        root,
+        "java/logbrew-java/pom.xml",
+        "logbrew-sdk",
+        "LogBrew Java SDK",
+        failures,
+        require_compiler_release=True,
+    )
+    validate_dotnet(root, failures)
+    validate_unity(root, failures)
+    validate_maven_pom(root, "kotlin/logbrew-kotlin/pom.xml", "logbrew-kotlin", "LogBrew Kotlin SDK", failures)
+    validate_ruby(root, failures)
+    validate_php(root, failures)
+    validate_swift(root, failures)
+    return failures
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate release metadata across public SDK packages.")
+    parser.add_argument("--root", default=Path(__file__).resolve().parents[1], type=Path)
+    args = parser.parse_args()
+
+    failures = validate(args.root.resolve())
+    if failures:
+        for failure in failures:
+            print(failure, file=sys.stderr)
+        return 1
+    print("release metadata ok")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

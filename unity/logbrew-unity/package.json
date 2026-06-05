@@ -1,0 +1,31 @@
+{
+  "name": "co.logbrew.unity",
+  "version": "0.1.0",
+  "displayName": "LogBrew Unity SDK",
+  "description": "Unity SDK for building, validating, previewing, and flushing LogBrew event batches.",
+  "unity": "2021.3",
+  "license": "MIT",
+  "author": {
+    "name": "LogBrew"
+  },
+  "keywords": [
+    "logbrew",
+    "observability",
+    "logs",
+    "traces",
+    "events",
+    "unity"
+  ],
+  "samples": [
+    {
+      "displayName": "README Example",
+      "description": "Minimal Unity-friendly event batch example.",
+      "path": "Samples~/ReadmeExample"
+    },
+    {
+      "displayName": "Real User Smoke",
+      "description": "Retry and lifecycle example for Unity projects.",
+      "path": "Samples~/RealUserSmoke"
+    }
+  ]
+}

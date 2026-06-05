@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>co.logbrew</groupId>
+  <artifactId>logbrew-sdk</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+  <name>LogBrew Java SDK</name>
+  <description>Public LogBrew Java SDK for building, validating, and flushing event batches.</description>
+  <url>https://github.com/LogBrewCo/LogBrewCo-sdk</url>
+  <licenses>
+    <license>
+      <name>MIT</name>
+      <url>https://opensource.org/license/mit</url>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <name>LogBrew</name>
+    </developer>
+  </developers>
+  <scm>
+    <url>https://github.com/LogBrewCo/LogBrewCo-sdk</url>
+  </scm>
+  <properties>
+    <maven.compiler.release>11</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>2.0.18</version>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <version>1.5.34</version>
+      <optional>true</optional>
+    </dependency>
+  </dependencies>
+</project>

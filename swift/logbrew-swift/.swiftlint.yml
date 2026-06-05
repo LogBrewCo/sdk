@@ -1,0 +1,21 @@
+included:
+  - Package.swift
+  - Sources
+  - Tests
+
+excluded:
+  - .build
+
+disabled_rules:
+  - trailing_comma
+
+line_length:
+  warning: 120
+  error: 120
+  ignores_comments: false
+  ignores_urls: false
+
+identifier_name:
+  excluded:
+    - id
+    - ok

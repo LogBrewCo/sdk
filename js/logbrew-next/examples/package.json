@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "help": "node ./index.mjs --help",
+    "list": "node ./index.mjs --list",
+    "readme-example": "node ./index.mjs readme-example",
+    "real-user-smoke": "node ./index.mjs real-user-smoke"
+  }
+}

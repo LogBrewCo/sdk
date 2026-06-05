@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+SCRIPT = ROOT / "scripts" / "check_public_sdks.sh"
+LOCK_DIR = Path(os.environ.get("TMPDIR", "/tmp")) / "logbrewco-sdk-public-checks.lock"
+LOCK_PID_FILE = LOCK_DIR / "pid"
+EXPECTED_TOOLCHAIN_KEYS = {
+    "node",
+    "npm",
+    "pnpm",
+    "cc",
+    "clang",
+    "objc",
+    "c++",
+    "clang++",
+    "make",
+    "python3",
+    "pip",
+    "go",
+    "java",
+    "javac",
+    "jar",
+    "jdeps",
+    "dotnet",
+    "kotlinc",
+    "gradle",
+    "swift",
+    "swiftformat",
+    "swiftlint",
+    "cargo",
+    "rustc",
+    "php",
+    "composer",
+    "ruby",
+    "gem",
+    "bundler",
+}
+
+
+class CheckPublicSdksJsonContractTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        shutil.rmtree(LOCK_DIR, ignore_errors=True)
+
+    def run_script(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", str(SCRIPT), *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+        )
+
+    def assert_toolchain_versions_shape(self, payload: dict[str, object]) -> None:
+        self.assertIn("toolchain_versions", payload)
+        toolchain_versions = payload["toolchain_versions"]
+        self.assertIsInstance(toolchain_versions, dict)
+        self.assertEqual(set(toolchain_versions), EXPECTED_TOOLCHAIN_KEYS)
+        for key in EXPECTED_TOOLCHAIN_KEYS:
+            self.assertIsInstance(toolchain_versions[key], str)
+            self.assertTrue(toolchain_versions[key], f"expected non-empty toolchain version for {key}")
+
+    def test_json_invalid_argument_is_structured(self) -> None:
+        result = self.run_script("--json", "--bad-arg")
+
+        self.assertEqual(result.returncode, 1)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["schema_version"], "1")
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["steps_completed"], 0)
+        self.assertEqual(payload["steps_total"], len(payload["step_labels"]))
+        self.assertEqual(payload["completed_step_labels"], [])
+        self.assertEqual(payload["failure_reason"], "invalid_argument")
+        self.assertEqual(payload["exit_code"], 1)
+        self.assertEqual(payload["message"], "unknown argument: --bad-arg")
+        self.assert_toolchain_versions_shape(payload)
+        self.assertIn("started_at", payload)
+        self.assertIn("finished_at", payload)
+        self.assertIn("duration_ms", payload)
+
+    def test_json_reports_concurrent_run_cleanly(self) -> None:
+        LOCK_DIR.mkdir(parents=True, exist_ok=True)
+        LOCK_PID_FILE.write_text(str(os.getpid()))
+
+        result = self.run_script("--json")
+
+        self.assertEqual(result.returncode, 1)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["schema_version"], "1")
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["steps_completed"], 0)
+        self.assertEqual(payload["steps_total"], len(payload["step_labels"]))
+        self.assertEqual(payload["completed_step_labels"], [])
+        self.assertEqual(payload["failure_reason"], "concurrent_run")
+        self.assertEqual(payload["exit_code"], 1)
+        self.assertEqual(
+            payload["message"],
+            "another public SDK verifier run is already in progress",
+        )
+        self.assert_toolchain_versions_shape(payload)
+        self.assertIn("started_at", payload)
+        self.assertIn("finished_at", payload)
+        self.assertIn("duration_ms", payload)
+
+    def test_json_recovers_from_stale_lock(self) -> None:
+        LOCK_DIR.mkdir(parents=True, exist_ok=True)
+        LOCK_PID_FILE.write_text("999999")
+
+        result = self.run_script("--json", "--bad-arg")
+
+        self.assertEqual(result.returncode, 1)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["schema_version"], "1")
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["failure_reason"], "invalid_argument")
+        self.assertEqual(payload["exit_code"], 1)
+        self.assertEqual(payload["message"], "unknown argument: --bad-arg")
+        self.assert_toolchain_versions_shape(payload)
+
+
+if __name__ == "__main__":
+    unittest.main()

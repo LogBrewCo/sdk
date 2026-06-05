@@ -1,0 +1,5 @@
+root = false
+
+[tests/**/*.cs]
+# Test harness output is intentionally fixed and not localized.
+dotnet_diagnostic.CA1303.severity = none

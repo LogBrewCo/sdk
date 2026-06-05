@@ -1,0 +1,49 @@
+{
+  "name": "@logbrew/sdk",
+  "version": "0.1.0",
+  "description": "Public LogBrew JavaScript SDK for building, validating, and flushing event batches.",
+  "type": "module",
+  "main": "./index.cjs",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./index.d.ts",
+        "default": "./index.js"
+      },
+      "require": {
+        "types": "./index.d.cts",
+        "default": "./index.cjs"
+      },
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.cjs",
+    "index.js",
+    "index.d.ts",
+    "index.d.cts",
+    "README.md",
+    "examples"
+  ],
+  "keywords": [
+    "logbrew",
+    "observability",
+    "logs",
+    "traces",
+    "events"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LogBrewCo/LogBrewCo-sdk.git"
+  },
+  "scripts": {
+    "test": "node --test",
+    "smoke": "node ./smoke.js"
+  }
+}

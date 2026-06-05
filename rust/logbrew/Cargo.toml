@@ -1,0 +1,19 @@
+[package]
+name = "logbrew"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Public LogBrew Rust SDK for building, validating, and flushing event batches."
+repository = "https://github.com/LogBrewCo/LogBrewCo-sdk"
+readme = "README.md"
+keywords = ["logbrew", "observability", "logs", "traces", "events"]
+categories = ["api-bindings", "development-tools"]
+
+[features]
+default = []
+http = ["dep:ureq"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ureq = { version = "3.3", optional = true }

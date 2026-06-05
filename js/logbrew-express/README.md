@@ -1,0 +1,82 @@
+# @logbrew/express
+
+Express middleware helpers for the public LogBrew JavaScript SDK.
+
+This package is intentionally thin. It adds request and error middleware UX while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+
+## Install
+
+```bash
+npm install @logbrew/sdk @logbrew/express express
+pnpm add @logbrew/sdk @logbrew/express express
+```
+
+## Request Middleware
+
+```js
+import express from "express";
+import { RecordingTransport } from "@logbrew/sdk";
+import { logbrewMiddleware } from "@logbrew/express";
+
+const app = express();
+
+app.use(logbrewMiddleware({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  transport: RecordingTransport.alwaysAccept()
+}));
+
+app.get("/health", (req, res) => {
+  req.logbrew.client.log("evt_log_001", "2026-06-02T10:00:03Z", {
+    message: "health check reached",
+    level: "info",
+    logger: "express"
+  });
+  res.json({ ok: true });
+});
+```
+
+Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request and error metadata records the path without query text by default.
+
+When an incoming request has a valid W3C `traceparent` header, the default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when tests or edge runtimes need deterministic child span IDs:
+
+```js
+app.use(logbrewMiddleware({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  spanIdFactory: () => "b7ad6b7169203331",
+  transport: RecordingTransport.alwaysAccept()
+}));
+```
+
+## Error Middleware
+
+```js
+import { logbrewErrorHandler } from "@logbrew/express";
+
+app.use(logbrewErrorHandler({
+  serverApiKey: "LOGBREW_SERVER_API_KEY"
+}));
+
+app.use((err, _req, res, _next) => {
+  res.status(500).json({ error: err.message });
+});
+```
+
+Express error-handling middleware uses four arguments: `(err, req, res, next)`. In Express 5, route handlers and middleware that return rejected promises are forwarded to error handlers automatically, so `logbrewErrorHandler()` is designed to capture and then pass the error onward to your existing response handler.
+
+## Packaged Examples
+
+After install, these commands are available from a consumer app:
+
+```bash
+node node_modules/@logbrew/express/examples/index.mjs --help
+node node_modules/@logbrew/express/examples/index.mjs --list
+node node_modules/@logbrew/express/examples/index.mjs readme-example
+node node_modules/@logbrew/express/examples/index.mjs real-user-smoke
+node node_modules/@logbrew/express/examples/index.mjs
+npm --prefix node_modules/@logbrew/express/examples run help
+npm --prefix node_modules/@logbrew/express/examples run list
+npm --prefix node_modules/@logbrew/express/examples run readme-example
+npm --prefix node_modules/@logbrew/express/examples run real-user-smoke
+```
+
+The default launcher path runs `real-user-smoke`.

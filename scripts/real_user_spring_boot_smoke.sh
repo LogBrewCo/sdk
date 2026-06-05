@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+package_dir="$repo_root/java/logbrew-java"
+tmp_dir="$(mktemp -d)"
+spring_boot_version="${LOGBREW_SPRING_BOOT_VERSION:-4.0.6}"
+
+# shellcheck source=scripts/java_logback_deps.sh
+source "$repo_root/scripts/java_logback_deps.sh"
+
+remove_tmp_dir() {
+  rm -rf "$tmp_dir"
+}
+
+trap remove_tmp_dir EXIT
+
+if ! command -v gradle >/dev/null 2>&1; then
+  echo "gradle is required for the Spring Boot real-user smoke" >&2
+  exit 1
+fi
+
+main_sources="$tmp_dir/main-sources.txt"
+find "$package_dir/src/main/java" -name '*.java' | sort > "$main_sources"
+
+mkdir -p "$tmp_dir/classes" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk"
+java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
+
+javac -Xlint:all -Werror --release 11 -cp "$java_logback_classpath" -d "$tmp_dir/classes" @"$main_sources"
+cp "$package_dir/pom.xml" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk/pom.xml"
+cp "$package_dir/README.md" "$tmp_dir/jar-stage/README.md"
+cp -R "$tmp_dir/classes/co" "$tmp_dir/jar-stage/co"
+jar --create --file "$tmp_dir/logbrew-sdk-0.1.0.jar" -C "$tmp_dir/jar-stage" .
+
+maven_dir="$tmp_dir/maven/co/logbrew/logbrew-sdk/0.1.0"
+mkdir -p "$maven_dir"
+cp "$tmp_dir/logbrew-sdk-0.1.0.jar" "$maven_dir/logbrew-sdk-0.1.0.jar"
+cp "$package_dir/pom.xml" "$maven_dir/logbrew-sdk-0.1.0.pom"
+
+gradle_app="$tmp_dir/spring-boot-app"
+gradle_home="$tmp_dir/gradle-home"
+mkdir -p "$gradle_app/src/main/java/app" "$gradle_home"
+cat > "$gradle_app/settings.gradle" <<'EOF'
+rootProject.name = "logbrew-spring-boot-smoke"
+EOF
+cat > "$gradle_app/build.gradle" <<EOF
+plugins {
+    id 'application'
+}
+
+repositories {
+    maven {
+        url = uri('$tmp_dir/maven')
+    }
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'co.logbrew:logbrew-sdk:0.1.0'
+    implementation 'org.springframework.boot:spring-boot-starter:$spring_boot_version'
+}
+
+application {
+    mainClass = 'app.Main'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+    options.compilerArgs.addAll(['-Xlint:all', '-Werror'])
+}
+EOF
+cat > "$gradle_app/src/main/java/app/Main.java" <<'JAVA'
+package app;
+
+import ch.qos.logback.classic.LoggerContext;
+import co.logbrew.sdk.LogBrewClient;
+import co.logbrew.sdk.LogBrewLogbackAppender;
+import co.logbrew.sdk.RecordingTransport;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.SpringBootVersion;
+import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.core.env.Environment;
+
+@SpringBootApplication
+public final class Main implements CommandLineRunner {
+    private static final LogBrewClient CLIENT = LogBrewClient.create("LOGBREW_API_KEY", "spring-boot-smoke", "0.1.0");
+    private static final RecordingTransport TRANSPORT = RecordingTransport.alwaysAccept();
+
+    private final Environment environment;
+
+    public Main(Environment environment) {
+        this.environment = environment;
+    }
+
+    public static void main(String[] args) {
+        SpringApplication app = new SpringApplication(Main.class);
+        app.setWebApplicationType(WebApplicationType.NONE);
+        app.setDefaultProperties(Map.of(
+            "spring.application.name", "checkout-service",
+            "spring.main.banner-mode", "off",
+            "logging.level.root", "off"
+        ));
+        app.run(args).close();
+
+        String body = TRANSPORT.lastBody().orElseThrow(() -> new AssertionError("expected LogBrew batch"));
+        require(CLIENT.pendingEvents() == 0, "Spring Boot appender stop flush clears queue");
+        require(TRANSPORT.sentBodies().size() == 1, "Spring Boot appender sends one batch");
+        require(occurrences(body, "\"type\": \"log\"") == 2, "Spring Boot appender captures two logs");
+        require(body.contains("\"logger\": \"app.checkout\""), "captures app logger");
+        require(body.contains("\"source\": \"logback\""), "records Logback source");
+        require(body.contains("\"springApplicationName\": \"checkout-service\""), "captures Spring application name");
+        require(body.contains("\"mdc.traceId\": \"trace_123\""), "captures MDC trace id");
+        require(body.contains("\"kv.cartId\": 42"), "captures SLF4J key value pair");
+        require(body.contains("\"level\": \"warning\""), "maps warn level");
+        require(body.contains("\"level\": \"error\""), "maps error level");
+        require(body.contains("\"exceptionType\": \"IllegalStateException\""), "captures exception type");
+        require(!body.contains("logbackStackTrace"), "omits stack text by default");
+        System.out.println(body);
+        System.err.println("{\"ok\":true,\"springBootVersion\":\"" + SpringBootVersion.getVersion() + "\",\"events\":2}");
+    }
+
+    @Override
+    public void run(String... args) {
+        ch.qos.logback.classic.Logger logger = logbackLogger("app.checkout");
+        ch.qos.logback.classic.Level originalLevel = logger.getLevel();
+        boolean originalAdditive = logger.isAdditive();
+        LogBrewLogbackAppender appender = new LogBrewLogbackAppender(CLIENT, TRANSPORT, false);
+        appender.setName("LOGBREW");
+        appender.setEventIdPrefix("spring_boot_logback");
+        appender.setMetadata(springMetadata());
+        appender.start();
+        try {
+            logger.setAdditive(false);
+            logger.setLevel(ch.qos.logback.classic.Level.TRACE);
+            logger.addAppender(appender);
+            MDC.put("traceId", "trace_123");
+            logger.atWarn().addKeyValue("cartId", Integer.valueOf(42)).log("spring boot checkout");
+            logger.error("spring boot checkout failed", new IllegalStateException("database unavailable"));
+        } finally {
+            MDC.remove("traceId");
+            logger.detachAppender(appender);
+            logger.setLevel(originalLevel);
+            logger.setAdditive(originalAdditive);
+            appender.stop();
+        }
+    }
+
+    private Map<String, Object> springMetadata() {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("springApplicationName", environment.getProperty("spring.application.name", "application"));
+        String[] activeProfiles = environment.getActiveProfiles();
+        if (activeProfiles.length > 0) {
+            values.put("springActiveProfiles", String.join(",", activeProfiles));
+        }
+        return values;
+    }
+
+    private static ch.qos.logback.classic.Logger logbackLogger(String name) {
+        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+        return context.getLogger(name);
+    }
+
+    private static void require(boolean condition, String label) {
+        if (!condition) {
+            throw new AssertionError(label);
+        }
+    }
+
+    private static int occurrences(String value, String needle) {
+        int count = 0;
+        int cursor = 0;
+        while (true) {
+            int index = value.indexOf(needle, cursor);
+            if (index < 0) {
+                return count;
+            }
+            count++;
+            cursor = index + needle.length();
+        }
+    }
+}
+JAVA
+
+run_gradle() {
+  (cd "$gradle_app" && GRADLE_USER_HOME="$gradle_home" gradle --no-daemon -q "$@")
+}
+
+run_gradle dependencies --configuration runtimeClasspath > "$tmp_dir/gradle-deps.txt"
+grep -q 'co.logbrew:logbrew-sdk:0.1.0' "$tmp_dir/gradle-deps.txt"
+grep -q "org.springframework.boot:spring-boot-starter:$spring_boot_version" "$tmp_dir/gradle-deps.txt"
+grep -q 'ch.qos.logback:logback-classic' "$tmp_dir/gradle-deps.txt"
+
+run_gradle compileJava
+run_gradle run > "$tmp_dir/spring-boot.stdout.json" 2> "$tmp_dir/spring-boot.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/spring-boot.stdout.json" >/dev/null
+grep -q '"source": "logback"' "$tmp_dir/spring-boot.stdout.json"
+grep -q '"springApplicationName": "checkout-service"' "$tmp_dir/spring-boot.stdout.json"
+grep -q '"mdc.traceId": "trace_123"' "$tmp_dir/spring-boot.stdout.json"
+grep -q '"kv.cartId": 42' "$tmp_dir/spring-boot.stdout.json"
+grep -q '"ok":true' "$tmp_dir/spring-boot.stderr.json"
+grep -q '"events":2' "$tmp_dir/spring-boot.stderr.json"
+
+echo "spring boot real-user smoke passed with spring-boot@$spring_boot_version"

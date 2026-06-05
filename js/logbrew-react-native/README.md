@@ -1,0 +1,133 @@
+# @logbrew/react-native
+
+React Native helpers for the public LogBrew JavaScript SDK.
+
+This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, handled JavaScript errors, provider/hook usage, and explicit W3C trace propagation for mobile fetch calls.
+
+## Install
+
+```bash
+npm install @logbrew/sdk @logbrew/react-native react react-native
+pnpm add @logbrew/sdk @logbrew/react-native react react-native
+```
+
+## Basic Usage
+
+```js
+import { AppState, Platform } from "react-native";
+import {
+  captureScreenView,
+  createAppStateListener,
+  createLogBrewReactNativeClient
+} from "@logbrew/react-native";
+
+const client = createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "my-mobile-app",
+  sdkVersion: "0.1.0"
+});
+
+captureScreenView(client, "Checkout", {
+  platform: Platform,
+  appState: AppState,
+  timestamp: "2026-06-02T10:00:03Z"
+});
+
+const stopListening = createAppStateListener(client, AppState, {
+  platform: Platform
+});
+```
+
+For mobile apps, prefer an app-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples and tests.
+
+## Error Capture
+
+Use `captureReactNativeError()` in app-owned error boundaries, route handlers, async catch blocks, or global handlers. It records handled JavaScript errors as LogBrew issue events with React Native context and omits stack text by default:
+
+```js
+import { captureReactNativeError } from "@logbrew/react-native";
+
+try {
+  await checkout();
+} catch (error) {
+  captureReactNativeError(client, error, {
+    platform: Platform,
+    appState: AppState,
+    screen: "Checkout",
+    metadata: { flow: "checkout" }
+  });
+  throw error;
+}
+```
+
+Set `includeStack: true` only when your app has decided stack text is safe to send. Non-`Error` thrown values are accepted and converted into issue messages so app error handlers do not need custom guards.
+
+## Provider And Hooks
+
+```js
+import { AppState, Platform } from "react-native";
+import {
+  LogBrewNativeProvider,
+  useLogBrewNativeActions
+} from "@logbrew/react-native";
+
+function CheckoutScreen() {
+  const { captureScreenView } = useLogBrewNativeActions();
+  captureScreenView("Checkout");
+  return null;
+}
+
+export function App({ client }) {
+  return (
+    <LogBrewNativeProvider client={client} platform={Platform} appState={AppState}>
+      <CheckoutScreen />
+    </LogBrewNativeProvider>
+  );
+}
+```
+
+The package ships a `react-native` entry that imports `AppState` and `Platform` for Metro, while the default Node entry accepts those dependencies explicitly. That keeps packaged examples and CI smoke tests runnable without pretending a Node process is a native runtime.
+
+## Trace Propagation
+
+Use `createTraceparentFetch()` when a React Native app should connect mobile fetch work to backend traces. Propagation is target-scoped by default: no `traceparent` header is attached unless the request URL matches `tracePropagationTargets`.
+
+```js
+import {
+  createReactNativeTraceparent,
+  createTraceparentFetch
+} from "@logbrew/react-native";
+
+const tracedFetch = createTraceparentFetch({
+  traceparentFactory: () => createReactNativeTraceparent(),
+  tracePropagationTargets: [
+    "https://api.example.com/",
+    /^\/mobile-api\//
+  ]
+});
+
+await tracedFetch("https://api.example.com/checkout", {
+  method: "POST",
+  headers: { accept: "application/json" }
+});
+```
+
+`tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. Match narrowly so mobile requests do not send tracing headers to unrelated origins. If the API is cross-origin or behind a gateway, allow the `traceparent` request header there too.
+
+## Packaged Examples
+
+After install, these commands are available from a consumer app:
+
+```bash
+node node_modules/@logbrew/react-native/examples/index.mjs --help
+node node_modules/@logbrew/react-native/examples/index.mjs --list
+node node_modules/@logbrew/react-native/examples/index.mjs readme-example
+node node_modules/@logbrew/react-native/examples/index.mjs real-user-smoke
+node node_modules/@logbrew/react-native/examples/index.mjs
+npm --prefix node_modules/@logbrew/react-native/examples run help
+npm --prefix node_modules/@logbrew/react-native/examples run list
+npm --prefix node_modules/@logbrew/react-native/examples run readme-example
+npm --prefix node_modules/@logbrew/react-native/examples run real-user-smoke
+```
+
+The default launcher path runs `real-user-smoke`.

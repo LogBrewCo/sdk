@@ -1,0 +1,4 @@
+--swiftversion 6.3
+--maxwidth 120
+--exclude .build
+--disable redundantSwiftTestingSuite,swiftTestingTestCaseNames

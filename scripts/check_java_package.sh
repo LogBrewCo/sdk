@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+package_dir="$repo_root/java/logbrew-java"
+tmp_dir="$(mktemp -d)"
+
+# shellcheck source=scripts/java_logback_deps.sh
+source "$repo_root/scripts/java_logback_deps.sh"
+
+remove_tmp_dir() {
+  rm -rf "$tmp_dir"
+}
+
+trap remove_tmp_dir EXIT
+
+main_sources="$tmp_dir/main-sources.txt"
+test_sources="$tmp_dir/test-sources.txt"
+example_sources="$tmp_dir/example-sources.txt"
+
+find "$package_dir/src/main/java" -name '*.java' | sort > "$main_sources"
+find "$package_dir/src/test/java" -name '*.java' | sort > "$test_sources"
+find "$package_dir/examples" -name '*.java' | sort > "$example_sources"
+
+mkdir -p "$tmp_dir/classes" "$tmp_dir/test-classes" "$tmp_dir/example-classes" "$tmp_dir/javadoc" "$tmp_dir/jar-stage"
+java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
+
+javac -Xlint:all -Werror --release 11 -cp "$java_logback_classpath" -d "$tmp_dir/classes" @"$main_sources"
+javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/classes:$java_logback_classpath" -d "$tmp_dir/test-classes" @"$test_sources"
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_logback_classpath" co.logbrew.sdk.LogBrewClientTest
+
+javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$java_logback_classpath" -d "$tmp_dir/javadoc" @"$main_sources"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewClient.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/HttpTransport.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewJulHandler.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewLogbackAppender.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/RecordingTransport.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/SdkException.html"
+
+mkdir -p "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk"
+cp "$package_dir/pom.xml" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk/pom.xml"
+cp "$package_dir/README.md" "$tmp_dir/jar-stage/README.md"
+cp -R "$tmp_dir/classes/co" "$tmp_dir/jar-stage/co"
+jar --create --file "$tmp_dir/logbrew-sdk-0.1.0.jar" -C "$tmp_dir/jar-stage" .
+jar --list --file "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/HttpTransport\$Builder.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewJulHandler.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewLogbackAppender.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/RecordingTransport.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/SdkException.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^META-INF/maven/co.logbrew/logbrew-sdk/pom.xml$' "$tmp_dir/jar-contents.txt"
+grep -q '^README.md$' "$tmp_dir/jar-contents.txt"
+
+javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_logback_classpath" -d "$tmp_dir/example-classes" @"$example_sources"
+java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" ReadmeExample > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
+grep -q '"ok":true' "$tmp_dir/readme-example.stderr.json"
+grep -q '"status":202' "$tmp_dir/readme-example.stderr.json"
+
+java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" RealUserSmoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+grep -q '"ok":true' "$tmp_dir/real-user-smoke.stderr.json"
+grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
+
+make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
+grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
+grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
+grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
+
+echo "java package checks passed"
