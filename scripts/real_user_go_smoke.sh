@@ -14,13 +14,14 @@ mkdir -p "$GOMODCACHE"
 proxy_dir="$tmp_dir/proxy"
 mkdir -p "$proxy_dir"
 export LOGBREW_GO_PROXY_DIR="$proxy_dir"
+export LOGBREW_REPO_ROOT="$repo_root"
 python3 - <<'PY'
 from pathlib import Path
 import json
 import os
 import zipfile
 
-repo = Path("/Users/furkan/Documents/GitHub/LogBrewCo-sdk/go/logbrew")
+repo = Path(os.environ["LOGBREW_REPO_ROOT"]) / "go/logbrew"
 proxy = Path(os.environ["LOGBREW_GO_PROXY_DIR"])
 module_path = "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
 version = "v0.1.0"
