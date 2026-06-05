@@ -7,6 +7,63 @@ trap 'rm -rf "$tmp_dir"' EXIT
 export CARGO_HOME="$tmp_dir/cargo-home"
 mkdir -p "$CARGO_HOME"
 
+assert_cargo_manifest_dependency() {
+	local manifest_path="$1"
+	local package_name="$2"
+	local dependency_name="$3"
+	local path_suffix="$4"
+	local expected_features="${5:-}"
+	python3 - "$manifest_path" "$package_name" "$dependency_name" "$path_suffix" "$expected_features" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+manifest_path, package_name, dependency_name, path_suffix, expected_features = sys.argv[1:]
+manifest = tomllib.loads(Path(manifest_path).read_text())
+package = manifest.get("package", {})
+if package.get("name") != package_name:
+    raise SystemExit(f"unexpected Cargo package name: {package.get('name')!r}")
+edition = str(package.get("edition", ""))
+if not edition:
+    raise SystemExit("expected generated Cargo package to declare an edition")
+
+dependencies = manifest.get("dependencies", {})
+dependency = dependencies.get(dependency_name)
+if not isinstance(dependency, dict):
+    raise SystemExit(f"expected table dependency for {dependency_name}, found: {dependency!r}")
+if dependency.get("version") != "0.1.0":
+    raise SystemExit(f"unexpected {dependency_name} version requirement: {dependency.get('version')!r}")
+dependency_path = str(dependency.get("path", ""))
+if not dependency_path.endswith(path_suffix):
+    raise SystemExit(f"unexpected {dependency_name} path: {dependency_path!r}")
+features = dependency.get("features", [])
+expected = [] if not expected_features else expected_features.split(",")
+if features != expected:
+    raise SystemExit(f"unexpected {dependency_name} features: {features!r}")
+PY
+}
+
+assert_cargo_manifest_without_dependency() {
+	local manifest_path="$1"
+	local package_name="$2"
+	local dependency_name="$3"
+	python3 - "$manifest_path" "$package_name" "$dependency_name" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+manifest_path, package_name, dependency_name = sys.argv[1:]
+manifest = tomllib.loads(Path(manifest_path).read_text())
+package = manifest.get("package", {})
+if package.get("name") != package_name:
+    raise SystemExit(f"unexpected Cargo package name: {package.get('name')!r}")
+if not str(package.get("edition", "")):
+    raise SystemExit("expected generated Cargo package to declare an edition")
+if dependency_name in manifest.get("dependencies", {}):
+    raise SystemExit(f"expected Cargo.toml to remove {dependency_name} dependency")
+PY
+}
+
 cargo package --allow-dirty --no-verify --manifest-path "$repo_root/rust/logbrew/Cargo.toml" --target-dir "$tmp_dir/cargo-package" >/dev/null
 crate_path="$tmp_dir/cargo-package/package/logbrew-0.1.0.crate"
 test -f "$crate_path"
@@ -152,9 +209,7 @@ cargo new --quiet lifecycle-app
 cd lifecycle-app
 
 cargo add logbrew --path "$crate_dir" >/dev/null
-grep -q '^edition = "2024"$' Cargo.toml
-grep -q '^logbrew = { version = "0.1.0", path = "' Cargo.toml
-grep -q 'extracted-crate/logbrew-0.1.0" }$' Cargo.toml
+assert_cargo_manifest_dependency Cargo.toml lifecycle-app logbrew "/extracted-crate/logbrew-0.1.0"
 grep -q '^name = "lifecycle-app"$' Cargo.lock
 grep -q '^name = "logbrew"$' Cargo.lock
 grep -q '^version = "0.1.0"$' Cargo.lock
@@ -186,11 +241,7 @@ grep -q '^lifecycle-app v0.1.0 (' lifecycle-cargo-tree.txt
 grep -q '^`-- logbrew v0.1.0 (.*/extracted-crate/logbrew-0.1.0)$' lifecycle-cargo-tree.txt
 
 cargo remove logbrew >/dev/null
-grep -q '^edition = "2024"$' Cargo.toml
-if grep -q '^logbrew = ' Cargo.toml; then
-	echo "expected Cargo.toml to remove logbrew dependency after cargo remove" >&2
-	exit 1
-fi
+assert_cargo_manifest_without_dependency Cargo.toml lifecycle-app logbrew
 grep -q '^name = "lifecycle-app"$' Cargo.lock
 if grep -q '^name = "logbrew"$' Cargo.lock; then
 	echo "expected Cargo.lock to remove logbrew package after cargo remove" >&2
@@ -228,8 +279,7 @@ if grep -q 'logbrew v0.1.0' lifecycle-cargo-tree-removed.txt; then
 fi
 
 cargo add logbrew --path "$crate_dir" >/dev/null
-grep -q '^logbrew = { version = "0.1.0", path = "' Cargo.toml
-grep -q 'extracted-crate/logbrew-0.1.0" }$' Cargo.toml
+assert_cargo_manifest_dependency Cargo.toml lifecycle-app logbrew "/extracted-crate/logbrew-0.1.0"
 grep -q '^name = "logbrew"$' Cargo.lock
 grep -q '^version = "0.1.0"$' Cargo.lock
 cargo tree --locked --depth 1 --charset ascii > lifecycle-cargo-tree-readded.txt
@@ -240,9 +290,7 @@ cargo new --quiet smoke-app
 cd smoke-app
 
 cargo add logbrew --path "$crate_dir" >/dev/null
-grep -q '^edition = "2024"$' Cargo.toml
-grep -q '^logbrew = { version = "0.1.0", path = "' Cargo.toml
-grep -q 'extracted-crate/logbrew-0.1.0" }$' Cargo.toml
+assert_cargo_manifest_dependency Cargo.toml smoke-app logbrew "/extracted-crate/logbrew-0.1.0"
 
 mkdir -p .cargo
 cat > .cargo/config.toml <<'EOF'
@@ -809,9 +857,7 @@ cargo new --quiet http-app
 cd http-app
 
 cargo add logbrew --path "$crate_dir" --features http >/dev/null
-grep -q '^edition = "2024"$' Cargo.toml
-grep -q '^logbrew = { version = "0.1.0", path = "' Cargo.toml
-grep -q 'extracted-crate/logbrew-0.1.0", features = \["http"\] }$' Cargo.toml
+assert_cargo_manifest_dependency Cargo.toml http-app logbrew "/extracted-crate/logbrew-0.1.0" http
 
 grep -q '^name = "http-app"$' Cargo.lock
 grep -q '^name = "logbrew"$' Cargo.lock
