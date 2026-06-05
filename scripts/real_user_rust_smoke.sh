@@ -135,7 +135,7 @@ if package.get("version") != "0.1.0":
     raise SystemExit(f"unexpected packaged crate version: {package.get('version')!r}")
 if package.get("license") != "MIT":
     raise SystemExit(f"unexpected packaged crate license: {package.get('license')!r}")
-if package.get("repository") != "https://github.com/LogBrewCo/LogBrewCo-sdk":
+if package.get("repository") != "https://github.com/LogBrewCo/sdk":
     raise SystemExit(f"unexpected packaged crate repository: {package.get('repository')!r}")
 if package.get("readme") != "README.md":
     raise SystemExit(f"unexpected packaged crate readme path: {package.get('readme')!r}")

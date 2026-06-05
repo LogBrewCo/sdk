@@ -5,7 +5,7 @@ Public Swift SDK for creating LogBrew event batches, validating them locally, an
 ## Install
 
 ```swift
-.package(url: "https://github.com/LogBrewCo/LogBrewCo-sdk.git", from: "0.1.0")
+.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.0")
 ```
 
 Use the `LogBrew` product from the `swift/logbrew-swift` package directory.

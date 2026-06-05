@@ -8,6 +8,10 @@
   "author": {
     "name": "LogBrew"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LogBrewCo/sdk.git"
+  },
   "keywords": [
     "logbrew",
     "observability",

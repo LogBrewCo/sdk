@@ -23,7 +23,7 @@ import zipfile
 
 repo = Path(os.environ["LOGBREW_REPO_ROOT"]) / "go/logbrew"
 proxy = Path(os.environ["LOGBREW_GO_PROXY_DIR"])
-module_path = "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+module_path = "github.com/LogBrewCo/sdk/go/logbrew"
 version = "v0.1.0"
 
 
@@ -54,11 +54,11 @@ with zipfile.ZipFile(
         if path.is_file() and ".git" not in path.parts:
             archive.write(path, zip_prefix + path.relative_to(repo).as_posix())
 PY
-info_file="$proxy_dir/github.com/!log!brew!co/!log!brew!co-sdk/go/logbrew/@v/v0.1.0.info"
-mod_file="$proxy_dir/github.com/!log!brew!co/!log!brew!co-sdk/go/logbrew/@v/v0.1.0.mod"
+info_file="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.0.info"
+mod_file="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.0.mod"
 test -f "$info_file"
 test -f "$mod_file"
-grep -q '^module github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew$' "$mod_file"
+grep -q '^module github.com/LogBrewCo/sdk/go/logbrew$' "$mod_file"
 grep -q '^go 1.24.0$' "$mod_file"
 python3 - "$info_file" <<'PY'
 import json
@@ -71,7 +71,7 @@ if payload.get("Version") != "v0.1.0":
 if payload.get("Time") != "2026-06-03T00:00:00Z":
     raise SystemExit(f"unexpected proxy module time: {payload.get('Time')!r}")
 PY
-test -f "$proxy_dir/github.com/!log!brew!co/!log!brew!co-sdk/go/logbrew/@v/v0.1.0.zip"
+test -f "$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.0.zip"
 python3 - <<'PY'
 from pathlib import Path
 import os
@@ -79,28 +79,28 @@ import zipfile
 
 zip_path = (
     Path(os.environ["LOGBREW_GO_PROXY_DIR"])
-    / "github.com/!log!brew!co/!log!brew!co-sdk/go/logbrew/@v/v0.1.0.zip"
+    / "github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.0.zip"
 )
 with zipfile.ZipFile(zip_path) as archive:
     names = set(archive.namelist())
-    readme_path = "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew@v0.1.0/README.md"
+    readme_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/README.md"
     if readme_path not in names:
         raise SystemExit("missing README.md in proxy module zip")
-    readme_example_path = "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew@v0.1.0/examples/readme_example/main.go"
+    readme_example_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/readme_example/main.go"
     if readme_example_path not in names:
         raise SystemExit("missing examples/readme_example/main.go in proxy module zip")
-    examples_makefile_path = "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew@v0.1.0/examples/Makefile"
+    examples_makefile_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/Makefile"
     if examples_makefile_path not in names:
         raise SystemExit("missing examples/Makefile in proxy module zip")
-    example_path = "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew@v0.1.0/examples/real_user_smoke/main.go"
+    example_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/real_user_smoke/main.go"
     if example_path not in names:
         raise SystemExit("missing examples/real_user_smoke/main.go in proxy module zip")
-    makefile_path = "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew@v0.1.0/examples/real_user_smoke/Makefile"
+    makefile_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/real_user_smoke/Makefile"
     if makefile_path not in names:
         raise SystemExit("missing examples/real_user_smoke/Makefile in proxy module zip")
     readme = archive.read(readme_path).decode("utf-8")
 for needle in (
-    "go get github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew",
+    "go get github.com/LogBrewCo/sdk/go/logbrew",
     "LOGBREW_API_KEY",
     "PreviewJSON",
     "ParseTraceparent",
@@ -127,13 +127,13 @@ import zipfile
 
 zip_path = (
     Path(os.environ["LOGBREW_GO_PROXY_DIR"])
-    / "github.com/!log!brew!co/!log!brew!co-sdk/go/logbrew/@v/v0.1.0.zip"
+    / "github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.0.zip"
 )
 extract_root = Path(os.environ["LOGBREW_GO_EXTRACT_DIR"])
 with zipfile.ZipFile(zip_path) as archive:
     archive.extractall(extract_root)
 PY
-module_dir="$module_src_root/github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew@v0.1.0"
+module_dir="$module_src_root/github.com/LogBrewCo/sdk/go/logbrew@v0.1.0"
 test -f "$module_dir/go.mod"
 test -f "$module_dir/examples/Makefile"
 test -f "$module_dir/examples/readme_example/main.go"
@@ -246,30 +246,30 @@ export GOSUMDB=off
 
 go mod init lifecycle-app >/dev/null
 go mod edit -go=1.24.0
-go get github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew@v0.1.0 >/dev/null
+go get github.com/LogBrewCo/sdk/go/logbrew@v0.1.0 >/dev/null
 grep -q '^module lifecycle-app$' go.mod
 grep -q '^go 1.24.0$' go.mod
-grep -q '^require github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0 // indirect$' go.mod
+grep -q '^require github.com/LogBrewCo/sdk/go/logbrew v0.1.0 // indirect$' go.mod
 go list -m all > lifecycle-module-graph.txt
 grep -q '^lifecycle-app$' lifecycle-module-graph.txt
-grep -q '^github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0$' lifecycle-module-graph.txt
-go get github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew@none >/dev/null
+grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.0$' lifecycle-module-graph.txt
+go get github.com/LogBrewCo/sdk/go/logbrew@none >/dev/null
 grep -q '^module lifecycle-app$' go.mod
 grep -q '^go 1.24.0$' go.mod
-if grep -q 'github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew' go.mod; then
+if grep -q 'github.com/LogBrewCo/sdk/go/logbrew' go.mod; then
 	echo "expected go.mod to remove SDK dependency after go get @none" >&2
 	exit 1
 fi
 go list -m all > lifecycle-module-graph-removed.txt
 grep -q '^lifecycle-app$' lifecycle-module-graph-removed.txt
-if grep -q '^github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0$' lifecycle-module-graph-removed.txt; then
+if grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.0$' lifecycle-module-graph-removed.txt; then
 	echo "expected go list -m all to omit SDK module after go get @none" >&2
 	exit 1
 fi
-go get github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew@v0.1.0 >/dev/null
-grep -q '^require github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0 // indirect$' go.mod
+go get github.com/LogBrewCo/sdk/go/logbrew@v0.1.0 >/dev/null
+grep -q '^require github.com/LogBrewCo/sdk/go/logbrew v0.1.0 // indirect$' go.mod
 go list -m all > lifecycle-module-graph-readded.txt
-grep -q '^github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0$' lifecycle-module-graph-readded.txt
+grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.0$' lifecycle-module-graph-readded.txt
 
 cd "$tmp_dir"
 mkdir smoke-app
@@ -288,7 +288,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func main() {
@@ -364,7 +364,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func main() {
@@ -469,7 +469,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func TestInstalledClientPreview(t *testing.T) {
@@ -563,7 +563,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func main() {
@@ -611,23 +611,23 @@ func must(err error) {
 }
 EOF
 
-go get github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew@v0.1.0 >/dev/null
-grep -q '^require github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0 // indirect$' go.mod
+go get github.com/LogBrewCo/sdk/go/logbrew@v0.1.0 >/dev/null
+grep -q '^require github.com/LogBrewCo/sdk/go/logbrew v0.1.0 // indirect$' go.mod
 go mod tidy
 grep -q '^module smoke-app$' go.mod
 grep -q '^go 1.24.0$' go.mod
-grep -q '^require github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0$' go.mod
+grep -q '^require github.com/LogBrewCo/sdk/go/logbrew v0.1.0$' go.mod
 test -f go.sum
-grep -q '^github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0 h1:' go.sum
-grep -q '^github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0/go.mod h1:' go.sum
+grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.0 h1:' go.sum
+grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.0/go.mod h1:' go.sum
 go mod verify >/dev/null
-GOFLAGS=-mod=readonly go mod download -json github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew@v0.1.0 > sdk-download.json
+GOFLAGS=-mod=readonly go mod download -json github.com/LogBrewCo/sdk/go/logbrew@v0.1.0 > sdk-download.json
 python3 - <<'PY'
 import json
 from pathlib import Path
 
 payload = json.loads(Path("sdk-download.json").read_text())
-if payload.get("Path") != "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew":
+if payload.get("Path") != "github.com/LogBrewCo/sdk/go/logbrew":
     raise SystemExit(f"unexpected Go download path: {payload.get('Path')}")
 if payload.get("Version") != "v0.1.0":
     raise SystemExit(f"unexpected Go download version: {payload.get('Version')}")
@@ -651,8 +651,8 @@ if not go_mod_sum.startswith("h1:"):
     raise SystemExit(f"unexpected Go download go.mod sum: {go_mod_sum}")
 
 go_sum_lines = Path("go.sum").read_text().splitlines()
-module_sum_line = f"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0 {sum_value}"
-go_mod_sum_line = f"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0/go.mod {go_mod_sum}"
+module_sum_line = f"github.com/LogBrewCo/sdk/go/logbrew v0.1.0 {sum_value}"
+go_mod_sum_line = f"github.com/LogBrewCo/sdk/go/logbrew v0.1.0/go.mod {go_mod_sum}"
 if module_sum_line not in go_sum_lines:
     raise SystemExit("go mod download sum did not match go.sum")
 if go_mod_sum_line not in go_sum_lines:
@@ -660,7 +660,7 @@ if go_mod_sum_line not in go_sum_lines:
 PY
 GOFLAGS=-mod=readonly go list -m all > module-graph.txt
 grep -q '^smoke-app$' module-graph.txt
-grep -q '^github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew v0.1.0$' module-graph.txt
+grep -q '^github.com/LogBrewCo/sdk/go/logbrew v0.1.0$' module-graph.txt
 GOFLAGS=-mod=readonly go list -m -json all > module-graph.json
 python3 - <<'PY'
 import json
@@ -690,7 +690,7 @@ if root.get("GoVersion") != "1.24.0":
     raise SystemExit(f"unexpected root Go version: {root.get('GoVersion')!r}")
 
 sdk = next(
-    (item for item in modules if item.get("Path") == "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"),
+    (item for item in modules if item.get("Path") == "github.com/LogBrewCo/sdk/go/logbrew"),
     None,
 )
 if sdk is None:
@@ -713,16 +713,16 @@ go version -m smoke-app-bin > binary-version.txt
 grep -q $'^smoke-app-bin:' binary-version.txt
 grep -q $'^\tpath\tsmoke-app$' binary-version.txt
 grep -q $'^\tmod\tsmoke-app\t(devel)\t$' binary-version.txt
-grep -q $'^\tdep\tgithub.com/LogBrewCo/LogBrewCo-sdk/go/logbrew\tv0.1.0\th1:' binary-version.txt
+grep -q $'^\tdep\tgithub.com/LogBrewCo/sdk/go/logbrew\tv0.1.0\th1:' binary-version.txt
 make smoke-test >/dev/null
 make smoke-vet >/dev/null
-GOFLAGS=-mod=readonly go list -m -json github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew > sdk-module.json
+GOFLAGS=-mod=readonly go list -m -json github.com/LogBrewCo/sdk/go/logbrew > sdk-module.json
 python3 - <<'PY'
 import json
 from pathlib import Path
 
 payload = json.loads(Path("sdk-module.json").read_text())
-if payload.get("Path") != "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew":
+if payload.get("Path") != "github.com/LogBrewCo/sdk/go/logbrew":
     raise SystemExit("unexpected Go module path")
 if payload.get("Version") != "v0.1.0":
     raise SystemExit(f"unexpected Go module version: {payload.get('Version')}")
@@ -736,7 +736,7 @@ if not readme_path.is_file():
     raise SystemExit(f"missing installed Go module README: {readme_path}")
 readme = readme_path.read_text()
 for needle in (
-    "go get github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew",
+    "go get github.com/LogBrewCo/sdk/go/logbrew",
     "LOGBREW_API_KEY",
     "PreviewJSON",
     "ParseTraceparent",
@@ -776,20 +776,20 @@ grep -q '"sampled":true' traceparent.stdout.json
 grep -q '"created":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' traceparent.stdout.json
 grep -q '"durationMs":8.5' traceparent.stdout.json
 grep -q '"hasNested":false' traceparent.stdout.json
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew > package-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew > package-doc.txt
 grep -q '^package logbrew' package-doc.txt
 grep -q 'provides a small public client for building, validating,' package-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.NewClient > constructor-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.NewClient > constructor-doc.txt
 grep -q '^func NewClient(config Config) (\*Client, error)$' constructor-doc.txt
 grep -q 'creates a public LogBrew client from user-supplied SDK identity' constructor-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.Config > config-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Config > config-doc.txt
 grep -q '^type Config struct {' config-doc.txt
 grep -q 'describes the public SDK identity, API key, and retry behavior' config-doc.txt
 grep -q 'APIKey is the public LogBrew API key sent to the transport' config-doc.txt
 grep -q 'SDKName identifies the calling SDK or application in emitted payloads' config-doc.txt
 grep -q 'SDKVersion identifies the calling SDK or application version' config-doc.txt
 grep -q 'MaxRetries sets the retry budget for retryable transport failures' config-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.Event > event-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Event > event-doc.txt
 grep -q '^type Event struct {' event-doc.txt
 grep -q 'Event is the public event shape buffered, previewed, and flushed by the' event-doc.txt
 grep -q 'client' event-doc.txt
@@ -797,81 +797,81 @@ grep -q 'Type is the stable LogBrew event type such as release or span' event-do
 grep -q 'Timestamp is the RFC 3339 event timestamp with timezone information' event-doc.txt
 grep -q 'ID is the caller-supplied stable identifier for the event' event-doc.txt
 grep -q 'Attributes contains the event payload fields for the given event type' event-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.ReleaseAttributes > release-attributes-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.ReleaseAttributes > release-attributes-doc.txt
 grep -q '^type ReleaseAttributes struct {' release-attributes-doc.txt
 grep -q 'ReleaseAttributes describes the public payload fields for a release' release-attributes-doc.txt
 grep -q 'event' release-attributes-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.EnvironmentAttributes > environment-attributes-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.EnvironmentAttributes > environment-attributes-doc.txt
 grep -q '^type EnvironmentAttributes struct {' environment-attributes-doc.txt
 grep -q 'EnvironmentAttributes describes the public payload fields for an' environment-attributes-doc.txt
 grep -q 'environment' environment-attributes-doc.txt
 grep -q 'event' environment-attributes-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.IssueAttributes > issue-attributes-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.IssueAttributes > issue-attributes-doc.txt
 grep -q '^type IssueAttributes struct {' issue-attributes-doc.txt
 grep -q 'IssueAttributes describes the public payload fields for an issue' issue-attributes-doc.txt
 grep -q 'event' issue-attributes-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.LogAttributes > log-attributes-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.LogAttributes > log-attributes-doc.txt
 grep -q '^type LogAttributes struct {' log-attributes-doc.txt
 grep -q 'LogAttributes describes the public payload fields for a log' log-attributes-doc.txt
 grep -q 'event' log-attributes-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.SpanAttributes > span-attributes-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SpanAttributes > span-attributes-doc.txt
 grep -q '^type SpanAttributes struct {' span-attributes-doc.txt
 grep -q 'SpanAttributes describes the public payload fields for a span' span-attributes-doc.txt
 grep -q 'event' span-attributes-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.TraceparentContext > traceparent-context-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.TraceparentContext > traceparent-context-doc.txt
 grep -q '^type TraceparentContext struct {' traceparent-context-doc.txt
 grep -q 'TraceparentContext describes an incoming W3C traceparent header after' traceparent-context-doc.txt
 grep -q 'validation and normalization' traceparent-context-doc.txt
 grep -q 'Sampled reports whether the W3C sampled flag is set' traceparent-context-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.TraceparentSpanInput > traceparent-span-input-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.TraceparentSpanInput > traceparent-span-input-doc.txt
 grep -q '^type TraceparentSpanInput struct {' traceparent-span-input-doc.txt
 grep -q 'TraceparentSpanInput describes a LogBrew span derived from an incoming W3C' traceparent-span-input-doc.txt
 grep -q 'traceparent header' traceparent-span-input-doc.txt
 grep -q 'Metadata is copied with primitive values only' traceparent-span-input-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.ParseTraceparent > parse-traceparent-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.ParseTraceparent > parse-traceparent-doc.txt
 grep -q '^func ParseTraceparent(traceparent string) (TraceparentContext, error)$' parse-traceparent-doc.txt
 grep -q 'ParseTraceparent validates and normalizes a W3C traceparent header' parse-traceparent-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.CreateTraceparent > create-traceparent-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.CreateTraceparent > create-traceparent-doc.txt
 grep -q '^func CreateTraceparent(traceID, spanID, traceFlags string) (string, error)$' create-traceparent-doc.txt
 grep -q 'CreateTraceparent creates a normalized W3C traceparent header from explicit' create-traceparent-doc.txt
 grep -q 'trace, span, and flags values' create-traceparent-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.SpanAttributesFromTraceparent > span-from-traceparent-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SpanAttributesFromTraceparent > span-from-traceparent-doc.txt
 grep -q '^func SpanAttributesFromTraceparent(input TraceparentSpanInput) (SpanAttributes, error)$' span-from-traceparent-doc.txt
 grep -q 'SpanAttributesFromTraceparent returns LogBrew span attributes that continue' span-from-traceparent-doc.txt
 grep -q 'an incoming W3C traceparent as a child span' span-from-traceparent-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.ActionAttributes > action-attributes-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.ActionAttributes > action-attributes-doc.txt
 grep -q '^type ActionAttributes struct {' action-attributes-doc.txt
 grep -q 'ActionAttributes describes the public payload fields for an action' action-attributes-doc.txt
 grep -q 'event' action-attributes-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.SdkError > sdk-error-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SdkError > sdk-error-doc.txt
 grep -q '^type SdkError struct {' sdk-error-doc.txt
 grep -q 'SdkError describes a stable public SDK failure with parseable code' sdk-error-doc.txt
 grep -q 'and' sdk-error-doc.txt
 grep -q 'message fields' sdk-error-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.TransportResponse > response-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.TransportResponse > response-doc.txt
 grep -q '^type TransportResponse struct {' response-doc.txt
 grep -q 'TransportResponse is returned after a transport accepts or skips a queued' response-doc.txt
 grep -q 'flush' response-doc.txt
 grep -q 'StatusCode is the final HTTP-like status returned by the transport' response-doc.txt
 grep -q 'Attempts is the number of transport attempts used for the flush' response-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.Transport > transport-interface-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Transport > transport-interface-doc.txt
 grep -q '^type Transport interface {' transport-interface-doc.txt
 grep -q 'Transport is the public interface used by Flush and Shutdown transport' transport-interface-doc.txt
 grep -q 'calls' transport-interface-doc.txt
 grep -q 'Send(apiKey string, body \[\]byte) (\*TransportResponse, error)' transport-interface-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.TransportError > transport-error-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.TransportError > transport-error-doc.txt
 grep -q '^type TransportError struct {' transport-error-doc.txt
 grep -q 'TransportError describes a transport-layer failure with a stable public code' transport-error-doc.txt
 grep -q 'and retry hint' transport-error-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.NetworkError > network-error-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.NetworkError > network-error-doc.txt
 grep -q '^func NetworkError(message string) \*TransportError$' network-error-doc.txt
 grep -q 'NetworkError creates a retryable network failure that preserves queued' network-error-doc.txt
 grep -q 'events' network-error-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.DefaultHTTPEndpoint > http-endpoint-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.DefaultHTTPEndpoint > http-endpoint-doc.txt
 grep -Fq 'DefaultHTTPEndpoint = "https://api.logbrew.com/v1/events"' http-endpoint-doc.txt
 grep -q 'DefaultHTTPEndpoint is the production LogBrew event intake URL used by' http-endpoint-doc.txt
 grep -q 'NewHTTPTransport when no endpoint is supplied' http-endpoint-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.HTTPTransportConfig > http-config-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.HTTPTransportConfig > http-config-doc.txt
 grep -q '^type HTTPTransportConfig struct {' http-config-doc.txt
 grep -q 'HTTPTransportConfig configures the dependency-free HTTP transport' http-config-doc.txt
 grep -q 'Endpoint is the URL that receives serialized LogBrew event batches' http-config-doc.txt
@@ -879,47 +879,47 @@ grep -q 'Headers are added to every HTTP delivery request after default headers'
 grep -Fq 'Client sends requests. When nil, Send uses a shared default client unless' http-config-doc.txt
 grep -Fq 'Timeout asks NewHTTPTransport to create one.' http-config-doc.txt
 grep -q 'Timeout' http-config-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.HTTPTransport > http-transport-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.HTTPTransport > http-transport-doc.txt
 grep -q '^type HTTPTransport struct {' http-transport-doc.txt
 grep -q "HTTPTransport sends queued batches through Go's standard net/http client" http-transport-doc.txt
 grep -q 'Client sends requests. When nil, a shared default client is used' http-transport-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.NewHTTPTransport > new-http-transport-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.NewHTTPTransport > new-http-transport-doc.txt
 grep -q '^func NewHTTPTransport(config HTTPTransportConfig) (\*HTTPTransport, error)$' new-http-transport-doc.txt
 grep -q 'NewHTTPTransport creates a dependency-free HTTP transport with safe' new-http-transport-doc.txt
 grep -q 'defaults' new-http-transport-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.HTTPTransport.Send > http-send-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.HTTPTransport.Send > http-send-doc.txt
 grep -Fq 'func (t *HTTPTransport) Send(apiKey string, body []byte) (*TransportResponse, error)' http-send-doc.txt
 grep -q 'Send posts one serialized event batch and returns the HTTP status' http-send-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.RecordingTransport > transport-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.RecordingTransport > transport-doc.txt
 grep -q '^type RecordingTransport struct {' transport-doc.txt
 grep -q 'RecordingTransport scripts transport outcomes for previewing, accepting,' transport-doc.txt
 grep -q 'or failing queued event flushes in tests and local runs' transport-doc.txt
 grep -q 'SentBodies records every request body sent through this transport' transport-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.RecordingTransport.LastBody > last-body-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.RecordingTransport.LastBody > last-body-doc.txt
 grep -Fq 'func (t *RecordingTransport) LastBody() []byte' last-body-doc.txt
 grep -q 'LastBody returns the most recent request body sent through this' last-body-doc.txt
 grep -q 'transport' last-body-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.AlwaysAcceptTransport > accept-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.AlwaysAcceptTransport > accept-doc.txt
 grep -q '^func AlwaysAcceptTransport() \*RecordingTransport$' accept-doc.txt
 grep -q 'AlwaysAcceptTransport creates a transport that accepts every queued flush' accept-doc.txt
 grep -q 'request with a 202 response' accept-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.AsTransportError > as-transport-error-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.AsTransportError > as-transport-error-doc.txt
 grep -q '^func AsTransportError(err error, target \*\*TransportError) bool$' as-transport-error-doc.txt
 grep -q 'AsTransportError extracts a public transport failure for retry-aware' as-transport-error-doc.txt
 grep -q 'callers' as-transport-error-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.Client.PendingEvents > pending-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Client.PendingEvents > pending-doc.txt
 grep -Fq 'func (c *Client) PendingEvents() int' pending-doc.txt
 grep -q 'PendingEvents returns the number of validated events currently buffered' pending-doc.txt
 grep -q 'in' pending-doc.txt
 grep -q 'memory' pending-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.Client.PreviewJSON > preview-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Client.PreviewJSON > preview-doc.txt
 grep -Fq 'func (c *Client) PreviewJSON() (string, error)' preview-doc.txt
 grep -q 'PreviewJSON returns the queued event batch as stable, pretty-printed JSON' preview-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.Client.Flush > flush-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Client.Flush > flush-doc.txt
 grep -Fq 'func (c *Client) Flush(transport Transport) (*TransportResponse, error)' flush-doc.txt
 grep -q 'Flush sends queued events through a transport while preserving retry' flush-doc.txt
 grep -q 'semantics' flush-doc.txt
-GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew.Client.Shutdown > shutdown-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Client.Shutdown > shutdown-doc.txt
 grep -Fq 'func (c *Client) Shutdown(transport Transport) (*TransportResponse, error)' shutdown-doc.txt
 grep -q 'Shutdown flushes queued events, then marks the client closed so later' shutdown-doc.txt
 grep -q 'writes' shutdown-doc.txt
@@ -949,11 +949,11 @@ if root.get("Name") != "main":
     raise SystemExit(f"unexpected root package name: {root.get('Name')!r}")
 if str(root.get("Dir", "")).endswith("/smoke-app") is False:
     raise SystemExit(f"unexpected root package dir: {root.get('Dir')!r}")
-if "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew" not in root.get("Deps", []):
+if "github.com/LogBrewCo/sdk/go/logbrew" not in root.get("Deps", []):
     raise SystemExit("root package deps missing installed SDK package")
 
 sdk = next(
-    (item for item in packages if item.get("ImportPath") == "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"),
+    (item for item in packages if item.get("ImportPath") == "github.com/LogBrewCo/sdk/go/logbrew"),
     None,
 )
 if sdk is None:
@@ -963,7 +963,7 @@ if sdk.get("Name") != "logbrew":
 if sdk.get("Standard") is True:
     raise SystemExit("SDK package incorrectly reported as a standard-library package")
 module = sdk.get("Module") or {}
-if module.get("Path") != "github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew":
+if module.get("Path") != "github.com/LogBrewCo/sdk/go/logbrew":
     raise SystemExit(f"unexpected SDK package module path: {module.get('Path')!r}")
 if module.get("Version") != "v0.1.0":
     raise SystemExit(f"unexpected SDK package module version: {module.get('Version')!r}")
@@ -998,7 +998,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func main() {
@@ -1053,7 +1053,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func main() {
@@ -1105,7 +1105,7 @@ import (
 	"net/http/httptest"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 type receivedRequest struct {
@@ -1236,7 +1236,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func main() {
@@ -1291,7 +1291,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func main() {
@@ -1332,7 +1332,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func main() {
@@ -1381,7 +1381,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func main() {
@@ -1435,7 +1435,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func main() {

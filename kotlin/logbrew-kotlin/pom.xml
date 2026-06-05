@@ -8,7 +8,7 @@
   <packaging>jar</packaging>
   <name>LogBrew Kotlin SDK</name>
   <description>Public LogBrew Kotlin SDK for building, validating, and flushing event batches.</description>
-  <url>https://github.com/LogBrewCo/LogBrewCo-sdk</url>
+  <url>https://github.com/LogBrewCo/sdk</url>
   <licenses>
     <license>
       <name>MIT</name>
@@ -21,6 +21,6 @@
     </developer>
   </developers>
   <scm>
-    <url>https://github.com/LogBrewCo/LogBrewCo-sdk</url>
+    <url>https://github.com/LogBrewCo/sdk</url>
   </scm>
 </project>

@@ -6,9 +6,9 @@ Gem::Specification.new do |spec|
   spec.authors = ["LogBrew"]
   spec.license = "MIT"
   spec.required_ruby_version = ">= 2.6"
-  spec.homepage = "https://github.com/LogBrewCo/LogBrewCo-sdk"
+  spec.homepage = "https://github.com/LogBrewCo/sdk"
   spec.metadata = {
-    "source_code_uri" => "https://github.com/LogBrewCo/LogBrewCo-sdk"
+    "source_code_uri" => "https://github.com/LogBrewCo/sdk"
   }
   spec.files = Dir[
     "README.md",

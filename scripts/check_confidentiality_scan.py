@@ -13,6 +13,7 @@ SENSITIVE_RE = re.compile(
 )
 
 SKIPPED_DIRS = {
+    ".agents",
     ".git",
     ".mypy_cache",
     ".pytest_cache",
@@ -74,6 +75,12 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if relative_text == "docs/github-actions.md" and "long-lived registry tokens" in lower_line:
         return True
 
+    if is_public_publishing_guidance(relative_text, line):
+        return True
+
+    if is_github_actions_oidc_or_secret_placeholder(relative_text, line):
+        return True
+
     if is_angular_injection_token_reference(relative_text, line):
         return True
 
@@ -87,6 +94,51 @@ def is_allowed_match(relative: Path, line: str) -> bool:
         return True
 
     return False
+
+
+def is_public_publishing_guidance(relative_text: str, line: str) -> bool:
+    if relative_text != ".github/publishing/trusted-publishers.md":
+        return False
+
+    allowed_fragments = (
+        "after adding packagist secrets",
+        "rubygems/configure-rubygems-credentials",
+        "nuget_user",
+        "release environment secret",
+        "packagist_username",
+        "packagist_api_token",
+        "environment secrets",
+        "maven central signing",
+        "central portal credentials",
+        "signing keys",
+        "trusted publishing",
+        "trusted publisher",
+    )
+    lower_line = line.lower()
+    return any(fragment in lower_line for fragment in allowed_fragments)
+
+
+def is_github_actions_oidc_or_secret_placeholder(relative_text: str, line: str) -> bool:
+    if not relative_text.startswith(".github/workflows/"):
+        return False
+
+    lower_line = line.lower()
+    allowed_fragments = (
+        "id-token: write",
+        "persist-credentials: false",
+        "cargo_registry_token",
+        "configure rubygems trusted publishing credentials",
+        "rubygems/configure-rubygems-credentials",
+        "secrets.nuget_user",
+        "packagist_username: ${{ secrets.packagist_username }}",
+        "packagist_api_token: ${{ secrets.packagist_api_token }}",
+        "packagist_username:?set packagist_username",
+        "packagist_api_token:?set packagist_api_token",
+        "apitoken=${packagist_api_token}",
+        "central portal credentials",
+        "signing keys",
+    )
+    return any(fragment in lower_line for fragment in allowed_fragments)
 
 
 def is_angular_injection_token_reference(relative_text: str, line: str) -> bool:

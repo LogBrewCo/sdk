@@ -60,6 +60,11 @@ expected = {
 for key, value in expected.items():
     if manifest.get(key) != value:
         raise SystemExit(f"unexpected package.json {key}: {manifest.get(key)!r}")
+repository = manifest.get("repository", {})
+if repository.get("type") != "git":
+    raise SystemExit(f"unexpected package.json repository.type: {repository.get('type')!r}")
+if repository.get("url") != "git+https://github.com/LogBrewCo/sdk.git":
+    raise SystemExit(f"unexpected package.json repository.url: {repository.get('url')!r}")
 samples = {sample["path"] for sample in manifest.get("samples", [])}
 if samples != {"Samples~/ReadmeExample", "Samples~/RealUserSmoke"}:
     raise SystemExit(f"unexpected sample paths: {sorted(samples)}")

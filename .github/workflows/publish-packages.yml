@@ -1,0 +1,331 @@
+name: Publish Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Release tag or commit SHA to publish"
+        required: true
+        default: "v0.1.0"
+      target:
+        description: "Registry target"
+        required: true
+        type: choice
+        default: "all"
+        options:
+          - all
+          - npm
+          - pypi
+          - crates
+          - rubygems
+          - nuget
+          - packagist
+          - maven
+      dry_run:
+        description: "Validate and package without publishing"
+        required: true
+        type: boolean
+        default: true
+      include_unity_npm:
+        description: "Include the Unity UPM-compatible npm package"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-packages-${{ inputs.ref }}-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  npm:
+    name: npm packages
+    if: ${{ inputs.target == 'all' || inputs.target == 'npm' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DRY_RUN: ${{ inputs.dry_run }}
+      INCLUDE_UNITY_NPM: ${{ inputs.include_unity_npm }}
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Verify publish metadata
+        run: python3 scripts/check_release_metadata.py
+
+      - name: Publish npm packages
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          package_dirs=(
+            js/logbrew-js
+            js/logbrew-browser
+            js/logbrew-node
+            js/logbrew-express
+            js/logbrew-fastify
+            js/logbrew-nestjs
+            js/logbrew-angular
+            js/logbrew-vue
+            js/logbrew-svelte
+            js/logbrew-react
+            js/logbrew-react-native
+            js/logbrew-next
+          )
+
+          if [[ "$INCLUDE_UNITY_NPM" == "true" ]]; then
+            package_dirs+=(unity/logbrew-unity)
+          fi
+
+          for package_dir in "${package_dirs[@]}"; do
+            package_name="$(node -p "require('./${package_dir}/package.json').name")"
+            publish_args=()
+            if [[ "$DRY_RUN" == "true" ]]; then
+              publish_args+=(--dry-run)
+            fi
+            if [[ "$package_name" == @*/* ]]; then
+              publish_args+=(--access public)
+            fi
+
+            echo "Publishing ${package_name} from ${package_dir}"
+            (cd "$package_dir" && npm publish "${publish_args[@]}")
+          done
+
+  pypi:
+    name: PyPI packages
+    if: ${{ inputs.target == 'all' || inputs.target == 'pypi' }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Build Python distributions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pip install --upgrade build twine
+          for package_dir in python/logbrew_py python/logbrew_fastapi python/logbrew_django; do
+            output_dir="dist/pypi/$(basename "$package_dir")"
+            python -m build --sdist --wheel --outdir "$output_dir" "$package_dir"
+            python -m twine check "$output_dir"/*
+          done
+
+      - name: Publish logbrew-sdk to PyPI
+        if: ${{ ! inputs.dry_run }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/pypi/logbrew_py
+
+      - name: Publish logbrew-fastapi to PyPI
+        if: ${{ ! inputs.dry_run }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/pypi/logbrew_fastapi
+
+      - name: Publish logbrew-django to PyPI
+        if: ${{ ! inputs.dry_run }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/pypi/logbrew_django
+
+  crates:
+    name: crates.io package
+    if: ${{ inputs.target == 'all' || inputs.target == 'crates' }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Dry-run crate package
+        working-directory: rust/logbrew
+        run: cargo publish --dry-run
+
+      - name: Authenticate to crates.io
+        if: ${{ ! inputs.dry_run }}
+        id: crates-auth
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish crate
+        if: ${{ ! inputs.dry_run }}
+        working-directory: rust/logbrew
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
+        run: cargo publish
+
+  rubygems:
+    name: RubyGems package
+    if: ${{ inputs.target == 'all' || inputs.target == 'rubygems' }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Build gem
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p dist/rubygems
+          (
+            cd ruby/logbrew-ruby
+            gem build logbrew-sdk.gemspec --strict --output "$GITHUB_WORKSPACE/dist/rubygems/logbrew-sdk-0.1.0.gem"
+          )
+
+      - name: Configure RubyGems trusted publishing credentials
+        if: ${{ ! inputs.dry_run }}
+        uses: rubygems/configure-rubygems-credentials@v2.0.0
+
+      - name: Publish gem
+        if: ${{ ! inputs.dry_run }}
+        run: gem push dist/rubygems/logbrew-sdk-0.1.0.gem
+
+  nuget:
+    name: NuGet package
+    if: ${{ inputs.target == 'all' || inputs.target == 'nuget' }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Pack NuGet package
+        run: dotnet pack dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj --configuration Release --output dist/nuget
+
+      - name: Authenticate to NuGet
+        if: ${{ ! inputs.dry_run }}
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Publish NuGet package
+        if: ${{ ! inputs.dry_run }}
+        run: dotnet nuget push dist/nuget/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json
+
+  packagist:
+    name: Packagist package
+    if: ${{ inputs.target == 'packagist' || (inputs.target == 'all' && inputs.dry_run) }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: release
+    env:
+      PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+      PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer
+
+      - name: Validate Composer package
+        run: composer validate --strict php/logbrew-php/composer.json
+
+      - name: Trigger Packagist update
+        if: ${{ ! inputs.dry_run }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          : "${PACKAGIST_USERNAME:?Set PACKAGIST_USERNAME as a release environment secret.}"
+          : "${PACKAGIST_API_TOKEN:?Set PACKAGIST_API_TOKEN as a release environment secret.}"
+          curl -fsS \
+            -X POST \
+            -H "content-type: application/json" \
+            "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_API_TOKEN}" \
+            -d '{"repository":{"url":"https://github.com/LogBrewCo/sdk"}}'
+
+  maven:
+    name: Maven Central preflight
+    if: ${{ inputs.target == 'maven' || (inputs.target == 'all' && inputs.dry_run) }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: release
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Run Java and Kotlin package preflight
+        run: |
+          bash scripts/check_java_package.sh
+          bash scripts/check_kotlin_package.sh
+
+      - name: Explain Maven Central publish state
+        if: ${{ ! inputs.dry_run }}
+        run: |
+          echo "Maven Central does not currently offer first-party GitHub OIDC trusted publishing."
+          echo "The Java and Kotlin SDKs pass package preflight, but real Maven Central publish still needs Central Portal credentials, signing keys, source/javadoc artifacts, and a repository release profile."
+          exit 1

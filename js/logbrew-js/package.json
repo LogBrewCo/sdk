@@ -40,7 +40,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LogBrewCo/LogBrewCo-sdk.git"
+    "url": "git+https://github.com/LogBrewCo/sdk.git"
   },
   "scripts": {
     "test": "node --test",

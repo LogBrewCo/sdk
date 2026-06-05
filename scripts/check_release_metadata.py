@@ -15,8 +15,8 @@ from typing import Any
 
 PUBLIC_VERSION = "0.1.0"
 PUBLIC_LICENSE = "MIT"
-REPO_URL = "https://github.com/LogBrewCo/LogBrewCo-sdk"
-NPM_REPO_URL = "git+https://github.com/LogBrewCo/LogBrewCo-sdk.git"
+REPO_URL = "https://github.com/LogBrewCo/sdk"
+NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"
 MIT_LICENSE_URL = "https://opensource.org/license/mit"
 
 JS_PACKAGES = {
@@ -273,7 +273,7 @@ def validate_go(root: Path, failures: list[str]) -> None:
         return
     content = go_mod_path.read_text(encoding="utf-8")
     require(
-        re.search(r"^module github\.com/LogBrewCo/LogBrewCo-sdk/go/logbrew$", content, re.MULTILINE) is not None,
+        re.search(r"^module github\.com/LogBrewCo/sdk/go/logbrew$", content, re.MULTILINE) is not None,
         failures,
         "go/logbrew/go.mod: unexpected module path",
     )
@@ -450,6 +450,8 @@ def validate_unity(root: Path, failures: list[str]) -> None:
         require_equal(failures, location, field, manifest.get(field), value)
     require_contains(failures, location, "description", manifest.get("description"), "LogBrew")
     require_equal(failures, location, "author.name", manifest.get("author", {}).get("name"), "LogBrew")
+    require_equal(failures, location, "repository.type", manifest.get("repository", {}).get("type"), "git")
+    require_equal(failures, location, "repository.url", manifest.get("repository", {}).get("url"), NPM_REPO_URL)
     require("logbrew" in manifest.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
     samples = {sample.get("path") for sample in manifest.get("samples", []) if isinstance(sample, dict)}
     require_equal(

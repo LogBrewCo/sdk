@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/LogBrewCo/LogBrewCo-sdk"
+Repository = "https://github.com/LogBrewCo/sdk"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -14,6 +14,7 @@ This repository should start with GitHub-hosted Actions rather than custom runne
 
 - `ci.yml`: runs on every push to `main` and every pull request
 - `release-readiness.yml`: runs manually or on version tags and performs package dry-runs only for ecosystems detected in the repository
+- `publish-packages.yml`: manual-only registry publishing with trusted publishing where registries support OIDC
 
 ## Best practices
 
@@ -28,10 +29,11 @@ This repository should start with GitHub-hosted Actions rather than custom runne
 - If a real-user smoke script exercises `pnpm` or `yarn`, enable Corepack before the smoke step even when the repo itself does not check in that package manager's lockfile
 - Keep local and CI release-readiness checks aligned: if local smoke tests install packaged artifacts, CI should continue to exercise those same artifact-oriented paths
 - Prefer verifiers with a machine-readable summary mode so CI and automation can consume pass/fail plus step metadata without scraping logs
+- Use Blacksmith runners for publish preflight and OIDC-capable registry jobs where supported, but keep npm's final trusted-publishing job on GitHub-hosted runners because npm does not currently support self-hosted runners for trusted publishing.
 
 ## What to do next
 
 1. Enable branch protection for `main` and require the `CI / Contract checks` job.
-2. Add protected GitHub environments for each registry publish target before enabling publish jobs.
-3. When a real SDK package lands, extend `release-readiness.yml` with the package's install/build/test steps before any publish action.
-4. Add publish workflows only after dry-runs are consistently green.
+2. Add protected GitHub environments for each registry publish target before running `publish-packages.yml` with `dry_run=false`.
+3. Keep `.github/publishing/trusted-publishers.md` aligned with registry-side trusted publisher records.
+4. Run publish workflow dry-runs before every external publish.

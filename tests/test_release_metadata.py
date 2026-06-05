@@ -38,7 +38,7 @@ class ReleaseMetadataTests(unittest.TestCase):
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LogBrewCo/LogBrewCo-sdk.git"
+    "url": "git+https://github.com/LogBrewCo/sdk.git"
   },
   "engines": {
     "node": ">=18"
@@ -85,7 +85,7 @@ class ReleaseMetadataTests(unittest.TestCase):
   <packaging>jar</packaging>
   <name>LogBrew Java SDK</name>
   <description>Public LogBrew Java SDK.</description>
-  <url>https://github.com/LogBrewCo/LogBrewCo-sdk</url>
+  <url>https://github.com/LogBrewCo/sdk</url>
   <licenses>
     <license>
       <name>MIT</name>
@@ -143,7 +143,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/LogBrewCo/LogBrewCo-sdk"
+Repository = "https://github.com/LogBrewCo/sdk"
 """.strip()
                 + "\n",
                 encoding="utf-8",
@@ -188,7 +188,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/LogBrewCo/LogBrewCo-sdk"
+Repository = "https://github.com/LogBrewCo/sdk"
 """.strip()
                 + "\n",
                 encoding="utf-8",

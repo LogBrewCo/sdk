@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/LogBrewCo/LogBrewCo-sdk/go/logbrew"
+	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
 func main() {
