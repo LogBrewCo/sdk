@@ -19,7 +19,7 @@ Run the package workflow in dry-run mode before any real publish:
 gh workflow run publish-packages.yml -R LogBrewCo/sdk -f ref=v0.1.0 -f target=all -f dry_run=true -f include_unity_npm=false -f include_pypi_extras=false -f include_crates_publish=false -f include_go_module=false
 ```
 
-For `dry_run=false`, `target=all` publishes the OIDC-capable registries only, then verifies the public registry versions it actually published. Run `target=verify` to check already-published public registry versions without uploading anything. Run `target=packagist` explicitly after adding Packagist secrets. Run `target=maven` only after Maven Central signing and release profile work is complete.
+For `dry_run=false`, `target=all` publishes the OIDC-capable registries plus Packagist and Maven Central when `include_packagist_update=true` and `include_maven_publish=true`, then verifies the public registry versions it actually published. Published GitHub Releases enable those flags automatically. Manual dispatch defaults stay dry-run-safe, so use explicit include flags when proving a targeted real publish.
 
 ## npm
 
@@ -67,21 +67,21 @@ Create a nuget.org trusted publishing policy with the shared GitHub identity abo
 
 ## Packagist
 
-Packagist does not use GitHub OIDC trusted publishing. Submit `https://github.com/LogBrewCo/sdk` as the VCS repository for `logbrew/sdk`, enable the Packagist GitHub hook, or add `PACKAGIST_USERNAME` and `PACKAGIST_API_TOKEN` as `release` environment secrets so the workflow can trigger the official update-package endpoint after tags move.
+Packagist does not use GitHub OIDC trusted publishing. The public `logbrew/sdk` package is auto-updated from `https://github.com/LogBrewCo/sdk`, so the workflow validates Composer metadata and then verifies Packagist's public version after tags move. `PACKAGIST_USERNAME` and `PACKAGIST_API_TOKEN` are optional `release` environment secrets for triggering the official update-package endpoint sooner; when they are absent, the workflow relies on Packagist auto-update instead of skipping the registry.
 
 ## Maven Central
 
 The `co.logbrew` namespace is verified in Maven Central. Keep the public TXT record on `logbrew.co` in place through the first Central release.
 
-Maven Central does not currently offer the same first-party GitHub OIDC trusted publisher flow. The workflow builds a Central Portal deployment bundle with Java and Kotlin jars, source jars, javadoc jars, POMs, and checksums during dry-runs. Real Maven Central upload is only available through explicit `target=maven` runs after adding these `release` environment secrets:
+Maven Central does not currently offer the same first-party GitHub OIDC trusted publisher flow. The workflow builds a Central Portal deployment bundle with Java and Kotlin jars, source jars, javadoc jars, POMs, and checksums during dry-runs. Real Maven Central upload runs from published GitHub Releases after adding these `release` environment secrets:
 
 - `CENTRAL_PORTAL_USERNAME`
 - `CENTRAL_PORTAL_PASSWORD`
 - `MAVEN_GPG_PRIVATE_KEY`
-- `MAVEN_GPG_PASSPHRASE`
 - `MAVEN_GPG_KEY_ID`
+- `MAVEN_GPG_PASSPHRASE` only when the signing key requires one
 
-Do not include Maven in automatic release dispatch until a next-version `target=maven` run has proven signing, Central Portal upload, and public Maven metadata verification.
+Published GitHub Releases pass `include_maven_publish=true`, so Maven Central participates in `target=all` once the release settings above exist. A next-version release is still the first real proof of Central Portal upload and public Maven metadata verification because Maven Central will not accept re-uploading the existing `0.1.0` artifacts.
 
 ## OpenUPM
 

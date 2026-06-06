@@ -135,6 +135,7 @@ def is_github_actions_oidc_or_secret_placeholder(relative_text: str, line: str) 
         "packagist_api_token: ${{ secrets.packagist_api_token }}",
         "packagist_username:?set packagist_username",
         "packagist_api_token:?set packagist_api_token",
+        "packagist_api_token:-",
         "apitoken=${packagist_api_token}",
         "central portal credentials",
         "maven_gpg_private_key: ${{ secrets.maven_gpg_private_key }}",

@@ -45,6 +45,16 @@ on:
         required: true
         type: boolean
         default: true
+      include_packagist_update:
+        description: "Trigger Packagist update hook"
+        required: true
+        type: boolean
+        default: false
+      include_maven_publish:
+        description: "Include real Maven Central publishing"
+        required: true
+        type: boolean
+        default: false
       include_go_module:
         description: "Verify the Go module from public tags"
         required: true
@@ -76,6 +86,8 @@ jobs:
           INPUT_INCLUDE_UNITY_NPM: ${{ inputs.include_unity_npm }}
           INPUT_INCLUDE_PYPI_EXTRAS: ${{ inputs.include_pypi_extras }}
           INPUT_INCLUDE_CRATES_PUBLISH: ${{ inputs.include_crates_publish }}
+          INPUT_INCLUDE_PACKAGIST_UPDATE: ${{ inputs.include_packagist_update }}
+          INPUT_INCLUDE_MAVEN_PUBLISH: ${{ inputs.include_maven_publish }}
           INPUT_INCLUDE_GO_MODULE: ${{ inputs.include_go_module }}
         run: |
           set -Eeuo pipefail
@@ -87,6 +99,8 @@ jobs:
             include_unity_npm="false"
             include_pypi_extras="true"
             include_crates_publish="true"
+            include_packagist_update="true"
+            include_maven_publish="true"
             include_go_module="false"
           else
             ref="$INPUT_REF"
@@ -95,6 +109,8 @@ jobs:
             include_unity_npm="$INPUT_INCLUDE_UNITY_NPM"
             include_pypi_extras="$INPUT_INCLUDE_PYPI_EXTRAS"
             include_crates_publish="$INPUT_INCLUDE_CRATES_PUBLISH"
+            include_packagist_update="$INPUT_INCLUDE_PACKAGIST_UPDATE"
+            include_maven_publish="$INPUT_INCLUDE_MAVEN_PUBLISH"
             include_go_module="$INPUT_INCLUDE_GO_MODULE"
           fi
 
@@ -105,6 +121,8 @@ jobs:
             echo "include_unity_npm=$include_unity_npm"
             echo "include_pypi_extras=$include_pypi_extras"
             echo "include_crates_publish=$include_crates_publish"
+            echo "include_packagist_update=$include_packagist_update"
+            echo "include_maven_publish=$include_maven_publish"
             echo "include_go_module=$include_go_module"
           } >> "$GITHUB_OUTPUT"
 
@@ -117,6 +135,8 @@ jobs:
           INCLUDE_UNITY_NPM: ${{ steps.release.outputs.include_unity_npm }}
           INCLUDE_PYPI_EXTRAS: ${{ steps.release.outputs.include_pypi_extras }}
           INCLUDE_CRATES_PUBLISH: ${{ steps.release.outputs.include_crates_publish }}
+          INCLUDE_PACKAGIST_UPDATE: ${{ steps.release.outputs.include_packagist_update }}
+          INCLUDE_MAVEN_PUBLISH: ${{ steps.release.outputs.include_maven_publish }}
           INCLUDE_GO_MODULE: ${{ steps.release.outputs.include_go_module }}
         run: |
           set -Eeuo pipefail
@@ -128,6 +148,8 @@ jobs:
             -f include_unity_npm="$INCLUDE_UNITY_NPM" \
             -f include_pypi_extras="$INCLUDE_PYPI_EXTRAS" \
             -f include_crates_publish="$INCLUDE_CRATES_PUBLISH" \
+            -f include_packagist_update="$INCLUDE_PACKAGIST_UPDATE" \
+            -f include_maven_publish="$INCLUDE_MAVEN_PUBLISH" \
             -f include_go_module="$INCLUDE_GO_MODULE"
 
       - name: Summarize dispatched publish
@@ -138,6 +160,8 @@ jobs:
           INCLUDE_UNITY_NPM: ${{ steps.release.outputs.include_unity_npm }}
           INCLUDE_PYPI_EXTRAS: ${{ steps.release.outputs.include_pypi_extras }}
           INCLUDE_CRATES_PUBLISH: ${{ steps.release.outputs.include_crates_publish }}
+          INCLUDE_PACKAGIST_UPDATE: ${{ steps.release.outputs.include_packagist_update }}
+          INCLUDE_MAVEN_PUBLISH: ${{ steps.release.outputs.include_maven_publish }}
           INCLUDE_GO_MODULE: ${{ steps.release.outputs.include_go_module }}
         run: |
           {
@@ -148,5 +172,7 @@ jobs:
             echo "- include_unity_npm: \`$INCLUDE_UNITY_NPM\`"
             echo "- include_pypi_extras: \`$INCLUDE_PYPI_EXTRAS\`"
             echo "- include_crates_publish: \`$INCLUDE_CRATES_PUBLISH\`"
+            echo "- include_packagist_update: \`$INCLUDE_PACKAGIST_UPDATE\`"
+            echo "- include_maven_publish: \`$INCLUDE_MAVEN_PUBLISH\`"
             echo "- include_go_module: \`$INCLUDE_GO_MODULE\`"
           } >> "$GITHUB_STEP_SUMMARY"

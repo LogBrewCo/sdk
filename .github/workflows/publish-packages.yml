@@ -42,6 +42,16 @@ on:
         required: true
         type: boolean
         default: false
+      include_packagist_update:
+        description: "Trigger Packagist update hook after package ownership is ready"
+        required: true
+        type: boolean
+        default: false
+      include_maven_publish:
+        description: "Publish Maven Central bundle after release settings are ready"
+        required: true
+        type: boolean
+        default: false
       include_go_module:
         description: "Verify the Go module can be installed from public tags"
         required: true
@@ -360,7 +370,7 @@ jobs:
 
   packagist:
     name: Packagist package
-    if: ${{ inputs.target == 'packagist' || (inputs.target == 'all' && inputs.dry_run) }}
+    if: ${{ inputs.target == 'packagist' || (inputs.target == 'all' && (inputs.dry_run || inputs.include_packagist_update)) }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     environment: release
     env:
@@ -391,8 +401,10 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          : "${PACKAGIST_USERNAME:?Set PACKAGIST_USERNAME as a release environment secret.}"
-          : "${PACKAGIST_API_TOKEN:?Set PACKAGIST_API_TOKEN as a release environment secret.}"
+          if [[ -z "${PACKAGIST_USERNAME:-}" || -z "${PACKAGIST_API_TOKEN:-}" ]]; then
+            echo "Packagist update settings are not present; relying on Packagist auto-update for the GitHub repository."
+            exit 0
+          fi
           curl -fsS \
             -X POST \
             -H "content-type: application/json" \
@@ -407,11 +419,11 @@ jobs:
 
       - name: Verify public Packagist package
         if: ${{ ! inputs.dry_run }}
-        run: python3 scripts/check_registry_publication.py --target packagist
+        run: python3 scripts/check_registry_publication.py --target packagist --retries 20 --retry-delay 30
 
   maven:
-    name: Maven Central preflight
-    if: ${{ inputs.target == 'maven' || (inputs.target == 'all' && inputs.dry_run) }}
+    name: Maven Central package
+    if: ${{ inputs.target == 'maven' || (inputs.target == 'all' && (inputs.dry_run || inputs.include_maven_publish)) }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     environment: release
     steps:
@@ -521,6 +533,12 @@ jobs:
           fi
           if [[ "${{ inputs.include_crates_publish }}" == "true" ]]; then
             verify_args+=(--include-crates)
+          fi
+          if [[ "${{ inputs.include_packagist_update }}" == "true" ]]; then
+            verify_args+=(--include-packagist)
+          fi
+          if [[ "${{ inputs.include_maven_publish }}" == "true" ]]; then
+            verify_args+=(--include-maven)
           fi
           if [[ "${{ inputs.include_go_module }}" == "true" ]]; then
             verify_args+=(--include-go)
