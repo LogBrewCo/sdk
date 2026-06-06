@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -45,12 +46,20 @@ CRATES = ("logbrew",)
 MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin")
 OPENUPM_PACKAGES = ("co.logbrew.unity",)
 
+def decode_json(raw: bytes) -> Any:
+    return json.loads(raw.decode("utf-8"))
+
+
+def decode_text(raw: bytes) -> str:
+    return raw.decode("utf-8")
+
 
 @dataclass(frozen=True)
 class RegistryCheck:
     label: str
     url: str
     extractor: Callable[[Any], set[str]]
+    decoder: Callable[[bytes], Any] = decode_json
 
 
 def maybe_string(value: Any) -> set[str]:
@@ -113,6 +122,20 @@ def packagist_versions(package_name: str) -> Callable[[Any], set[str]]:
 
 
 def crates_versions(payload: Any) -> set[str]:
+    if isinstance(payload, str):
+        versions: set[str] = set()
+        for line in payload.splitlines():
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if (
+                isinstance(entry, dict)
+                and isinstance(entry.get("vers"), str)
+                and not entry.get("yanked", False)
+            ):
+                versions.add(entry["vers"])
+        return versions
     if not isinstance(payload, dict):
         return set()
     versions = maybe_string(dict_value(payload, "crate").get("newest_version"))
@@ -126,17 +149,33 @@ def crates_versions(payload: Any) -> set[str]:
     return versions
 
 
+def crates_index_path(crate_name: str) -> str:
+    if len(crate_name) == 1:
+        return f"1/{crate_name}"
+    if len(crate_name) == 2:
+        return f"2/{crate_name}"
+    if len(crate_name) == 3:
+        return f"3/{crate_name[0]}/{crate_name}"
+    return f"{crate_name[:2]}/{crate_name[2:4]}/{crate_name}"
+
+
 def maven_versions(payload: Any) -> set[str]:
-    if not isinstance(payload, dict):
+    if not isinstance(payload, str):
         return set()
-    docs = dict_value(payload, "response").get("docs", [])
-    if not isinstance(docs, list):
+    try:
+        root = ET.fromstring(payload)
+    except ET.ParseError:
         return set()
-    return {
-        doc.get("latestVersion")
-        for doc in docs
-        if isinstance(doc, dict) and isinstance(doc.get("latestVersion"), str)
+    versions = {
+        text
+        for text in (
+            root.findtext("./versioning/latest"),
+            root.findtext("./versioning/release"),
+        )
+        if text
     }
+    versions.update(version.text for version in root.findall("./versioning/versions/version") if version.text)
+    return versions
 
 
 def npm_check(package_name: str) -> RegistryCheck:
@@ -149,28 +188,45 @@ def pypi_check(package_name: str) -> RegistryCheck:
 
 
 def rubygems_check(package_name: str) -> RegistryCheck:
-    return RegistryCheck(package_name, f"https://rubygems.org/api/v1/gems/{package_name}.json", rubygems_versions)
+    return RegistryCheck(
+        package_name,
+        f"https://rubygems.org/api/v1/gems/{package_name}.json",
+        rubygems_versions,
+    )
 
 
 def nuget_check(package_name: str) -> RegistryCheck:
     lowered = package_name.lower()
-    return RegistryCheck(package_name, f"https://api.nuget.org/v3-flatcontainer/{lowered}/index.json", nuget_versions)
+    return RegistryCheck(
+        package_name,
+        f"https://api.nuget.org/v3-flatcontainer/{lowered}/index.json",
+        nuget_versions,
+    )
 
 
 def packagist_check(package_name: str) -> RegistryCheck:
-    return RegistryCheck(package_name, f"https://repo.packagist.org/p2/{package_name}.json", packagist_versions(package_name))
+    return RegistryCheck(
+        package_name,
+        f"https://repo.packagist.org/p2/{package_name}.json",
+        packagist_versions(package_name),
+    )
 
 
 def crates_check(crate_name: str) -> RegistryCheck:
-    return RegistryCheck(crate_name, f"https://crates.io/api/v1/crates/{crate_name}", crates_versions)
+    return RegistryCheck(
+        crate_name,
+        f"https://index.crates.io/{crates_index_path(crate_name)}",
+        crates_versions,
+        decode_text,
+    )
 
 
 def maven_check(artifact_id: str) -> RegistryCheck:
-    query = urllib.parse.quote(f'g:"co.logbrew" AND a:"{artifact_id}"')
     return RegistryCheck(
         f"co.logbrew:{artifact_id}",
-        f"https://search.maven.org/solrsearch/select?q={query}&rows=20&wt=json",
+        f"https://repo1.maven.org/maven2/co/logbrew/{artifact_id}/maven-metadata.xml",
         maven_versions,
+        decode_text,
     )
 
 
@@ -221,11 +277,11 @@ def expected_versions(version: str) -> set[str]:
     return {stripped, f"v{stripped}"}
 
 
-def fetch_json(url: str, timeout: float) -> Any:
+def fetch_payload(url: str, timeout: float, decoder: Callable[[bytes], Any]) -> Any:
     request = urllib.request.Request(url, headers={"User-Agent": "LogBrew public registry verifier"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+            return decoder(response.read())
     except urllib.error.HTTPError:
         raise
     except urllib.error.URLError as exc:
@@ -233,14 +289,19 @@ def fetch_json(url: str, timeout: float) -> Any:
             raise
         result = subprocess.run(
             ["curl", "-fsSL", "--max-time", str(timeout), url],
-            text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
         )
         if result.returncode != 0:
-            raise OSError(result.stderr.strip() or result.stdout.strip()) from exc
-        return json.loads(result.stdout)
+            error = result.stderr.decode("utf-8", errors="replace").strip()
+            fallback = result.stdout.decode("utf-8", errors="replace").strip()
+            raise OSError(error or fallback) from exc
+        return decoder(result.stdout)
+
+
+def fetch_json(url: str, timeout: float) -> Any:
+    return fetch_payload(url, timeout, decode_json)
 
 
 def validate_check(
@@ -249,15 +310,18 @@ def validate_check(
     timeout: float,
     retries: int = 0,
     retry_delay: float = 5.0,
-    fetcher: Callable[[str, float], Any] = fetch_json,
+    fetcher: Callable[[str, float], Any] | None = None,
 ) -> list[str]:
     last_failure: list[str] = []
     for attempt in range(retries + 1):
         try:
-            payload = fetcher(check.url, timeout)
+            if fetcher:
+                payload = fetcher(check.url, timeout)
+            else:
+                payload = fetch_payload(check.url, timeout, check.decoder)
         except urllib.error.HTTPError as exc:
             last_failure = [f"{check.label}: registry returned HTTP {exc.code} for {check.url}"]
-        except (OSError, TimeoutError, json.JSONDecodeError) as exc:
+        except (OSError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError, ET.ParseError) as exc:
             last_failure = [f"{check.label}: failed to read {check.url}: {exc}"]
         else:
             found = check.extractor(payload)

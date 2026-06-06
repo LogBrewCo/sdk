@@ -34,8 +34,26 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertIn("0.1.0", check_registry_publication.crates_versions({"crate": {"newest_version": "0.1.0"}}))
         self.assertIn(
             "0.1.0",
+            check_registry_publication.crates_versions('{"vers":"0.1.0","yanked":false}\n'),
+        )
+        self.assertNotIn(
+            "0.1.0",
+            check_registry_publication.crates_versions('{"vers":"0.1.0","yanked":true}\n'),
+        )
+        self.assertIn(
+            "0.1.0",
             check_registry_publication.maven_versions(
-                {"response": {"docs": [{"latestVersion": "0.1.0"}]}}
+                """
+                <metadata>
+                  <versioning>
+                    <latest>0.1.0</latest>
+                    <release>0.1.0</release>
+                    <versions>
+                      <version>0.1.0</version>
+                    </versions>
+                  </versioning>
+                </metadata>
+                """
             ),
         )
 
@@ -145,6 +163,12 @@ class RegistryPublicationTests(unittest.TestCase):
     def test_go_module_version_uses_go_semver_prefix(self) -> None:
         self.assertEqual(check_registry_publication.go_module_version("0.1.0"), "v0.1.0")
         self.assertEqual(check_registry_publication.go_module_version("v0.1.0"), "v0.1.0")
+
+    def test_crates_index_path_matches_sparse_index_layout(self) -> None:
+        self.assertEqual(check_registry_publication.crates_index_path("a"), "1/a")
+        self.assertEqual(check_registry_publication.crates_index_path("ab"), "2/ab")
+        self.assertEqual(check_registry_publication.crates_index_path("abc"), "3/a/abc")
+        self.assertEqual(check_registry_publication.crates_index_path("logbrew"), "lo/gb/logbrew")
 
 
 if __name__ == "__main__":
