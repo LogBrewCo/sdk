@@ -29,6 +29,12 @@ javac -Xlint:all -Werror --release 11 -cp "$java_logback_classpath" -d "$tmp_dir
 javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/classes:$java_logback_classpath" -d "$tmp_dir/test-classes" @"$test_sources"
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_logback_classpath" co.logbrew.sdk.LogBrewClientTest
 
+python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
+  "$package_dir/pom.xml" \
+  --group-id co.logbrew \
+  --artifact-id logbrew-sdk \
+  --version 0.1.0
+
 javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$java_logback_classpath" -d "$tmp_dir/javadoc" @"$main_sources"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewClient.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/HttpTransport.html"
@@ -36,6 +42,18 @@ test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewJulHandler.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewLogbackAppender.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/RecordingTransport.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/SdkException.html"
+
+jar --create --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" -C "$package_dir/src/main/java" .
+jar --list --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/package-info.java$' "$tmp_dir/sources-jar-contents.txt"
+
+jar --create --file "$tmp_dir/logbrew-sdk-0.1.0-javadoc.jar" -C "$tmp_dir/javadoc" .
+jar --list --file "$tmp_dir/logbrew-sdk-0.1.0-javadoc.jar" > "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^index.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewClient.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/HttpTransport.html$' "$tmp_dir/javadoc-jar-contents.txt"
 
 mkdir -p "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk"
 cp "$package_dir/pom.xml" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk/pom.xml"

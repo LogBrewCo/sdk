@@ -60,6 +60,24 @@ kotlinc "$package_dir"/src/main/kotlin/co/logbrew/sdk/*.kt "$package_dir/tests/L
   -d "$tmp_dir/logbrew-kotlin-tests.jar"
 java -jar "$tmp_dir/logbrew-kotlin-tests.jar"
 
+python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
+  "$package_dir/pom.xml" \
+  --group-id co.logbrew \
+  --artifact-id logbrew-kotlin \
+  --version 0.1.0
+
+jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0-sources.jar" -C "$package_dir/src/main/kotlin" .
+jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewClient.kt$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewAndroid.kt$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/PublicTypes.kt$' "$tmp_dir/sources-jar-contents.txt"
+
+mkdir -p "$tmp_dir/javadoc-stage"
+cp "$package_dir/README.md" "$tmp_dir/javadoc-stage/README.md"
+jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0-javadoc.jar" -C "$tmp_dir/javadoc-stage" README.md
+jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0-javadoc.jar" > "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^README.md$' "$tmp_dir/javadoc-jar-contents.txt"
+
 cp "$package_dir/pom.xml" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-kotlin/pom.xml"
 cp "$package_dir/README.md" "$tmp_dir/jar-stage/README.md"
 mkdir -p "$tmp_dir/jar-stage/examples"
