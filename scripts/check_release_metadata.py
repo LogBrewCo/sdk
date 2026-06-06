@@ -34,6 +34,8 @@ JS_PACKAGES = {
     "js/logbrew-vue": "@logbrew/vue",
 }
 
+OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
+
 PYTHON_PACKAGES = {
     "python/logbrew_django": {
         "name": "logbrew-django",
@@ -100,6 +102,53 @@ def read_toml(path: Path, failures: list[str]) -> dict[str, Any]:
         failures.append(f"{path}: invalid TOML: {exc}")
         return {}
     return payload
+
+
+def read_simple_yaml(path: Path, failures: list[str]) -> dict[str, Any]:
+    """Parse the simple string/list/null shape used by release metadata YAML."""
+
+    payload: dict[str, Any] = {}
+    active_list: list[str] | None = None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        failures.append(f"{path}: failed to read YAML: {exc}")
+        return payload
+
+    for line_number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if active_list is not None and line.startswith("  - "):
+            active_list.append(unquote_yaml_value(line[4:].strip()))
+            continue
+        active_list = None
+        if ":" not in line or line.startswith(" "):
+            failures.append(f"{path}:{line_number}: unsupported YAML shape")
+            continue
+        key, value = line.split(":", 1)
+        active_key = key.strip()
+        value = value.strip()
+        if value == "":
+            active_list = []
+            payload[active_key] = active_list
+        else:
+            payload[active_key] = parse_simple_yaml_value(value)
+    return payload
+
+
+def parse_simple_yaml_value(value: str) -> Any:
+    if value == "null":
+        return None
+    if value == "[]":
+        return []
+    return unquote_yaml_value(value)
+
+
+def unquote_yaml_value(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
 
 
 def local_name(tag: str) -> str:
@@ -435,6 +484,7 @@ def validate_dotnet(root: Path, failures: list[str]) -> None:
 def validate_unity(root: Path, failures: list[str]) -> None:
     manifest_path = require_path(root, "unity/logbrew-unity/package.json", failures)
     require_path(root, "unity/logbrew-unity/README.md", failures)
+    openupm_path = require_path(root, OPENUPM_UNITY_METADATA, failures)
     if not manifest_path.exists():
         return
     manifest = read_json(manifest_path, failures)
@@ -460,6 +510,43 @@ def validate_unity(root: Path, failures: list[str]) -> None:
         "samples paths",
         samples,
         {"Samples~/ReadmeExample", "Samples~/RealUserSmoke"},
+    )
+    validate_unity_openupm(manifest, openupm_path, failures)
+
+
+def validate_unity_openupm(manifest: dict[str, Any], openupm_path: Path, failures: list[str]) -> None:
+    if not openupm_path.exists():
+        return
+    metadata = read_simple_yaml(openupm_path, failures)
+    location = OPENUPM_UNITY_METADATA
+    expected = {
+        "name": manifest.get("name"),
+        "displayName": manifest.get("displayName"),
+        "description": manifest.get("description"),
+        "repoUrl": REPO_URL,
+        "trackingMode": "git",
+        "parentRepoUrl": None,
+        "licenseSpdxId": manifest.get("license"),
+        "licenseName": "MIT License",
+        "hunter": "furkanerday",
+        "gitTagPrefix": "co.logbrew.unity/",
+        "gitTagIgnore": "",
+        "minVersion": manifest.get("version"),
+        "image": "",
+        "readme": "main:unity/logbrew-unity/README.md",
+        "readme_zhCN": "",
+        "displayName_zhCN": "",
+        "description_zhCN": "",
+    }
+    for field, value in expected.items():
+        require_equal(failures, location, field, metadata.get(field), value)
+    require_equal(failures, location, "aliases", metadata.get("aliases"), [])
+    require_equal(
+        failures,
+        location,
+        "topics",
+        metadata.get("topics"),
+        ["debugging-and-logging", "integration", "services", "testing", "utilities"],
     )
 
 

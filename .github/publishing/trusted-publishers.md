@@ -70,3 +70,9 @@ Packagist does not use GitHub OIDC trusted publishing. Submit `https://github.co
 The `co.logbrew` namespace is verified in Maven Central. Keep the public TXT record on `logbrew.co` in place through the first Central release.
 
 Maven Central does not currently offer the same first-party GitHub OIDC trusted publisher flow. The workflow runs Java and Kotlin package preflight on Blacksmith, but real Maven Central deployment remains gated until Central Portal credentials, signing keys, source/javadoc artifacts, and a release profile are added.
+
+## OpenUPM
+
+OpenUPM is not an OIDC registry. Use `.github/publishing/openupm-co.logbrew.unity.yml` as the draft package submission metadata for `co.logbrew.unity`.
+
+Prefer a package-root release tag before submitting. Create a release commit or branch whose root contains the contents of `unity/logbrew-unity`, tag that content with the `co.logbrew.unity/` prefix, and keep the tag version aligned with `unity/logbrew-unity/package.json`. The draft metadata intentionally uses `gitTagPrefix: 'co.logbrew.unity/'` so general repository tags such as `v0.1.0` do not queue the wrong monorepo content.
