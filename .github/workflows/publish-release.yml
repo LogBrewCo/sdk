@@ -1,0 +1,152 @@
+name: Publish Release
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Release tag, branch, or commit SHA to publish"
+        required: true
+        default: "main"
+      target:
+        description: "Registry target passed to publish-packages.yml"
+        required: true
+        type: choice
+        default: "all"
+        options:
+          - all
+          - npm
+          - pypi
+          - crates
+          - rubygems
+          - nuget
+          - packagist
+          - maven
+          - verify
+      dry_run:
+        description: "Dispatch publish-packages.yml in dry-run mode"
+        required: true
+        type: boolean
+        default: true
+      include_unity_npm:
+        description: "Include the Unity UPM-compatible npm package"
+        required: true
+        type: boolean
+        default: false
+      include_pypi_extras:
+        description: "Include FastAPI and Django PyPI packages"
+        required: true
+        type: boolean
+        default: true
+      include_crates_publish:
+        description: "Include real crates.io publishing"
+        required: true
+        type: boolean
+        default: true
+      include_go_module:
+        description: "Verify the Go module from public tags"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: publish-release-${{ github.event.release.tag_name || inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch-publish:
+    name: Dispatch package publishing
+    runs-on: ubuntu-latest
+    steps:
+      - id: release
+        name: Resolve release publish inputs
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_REF: ${{ inputs.ref }}
+          INPUT_TARGET: ${{ inputs.target }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_INCLUDE_UNITY_NPM: ${{ inputs.include_unity_npm }}
+          INPUT_INCLUDE_PYPI_EXTRAS: ${{ inputs.include_pypi_extras }}
+          INPUT_INCLUDE_CRATES_PUBLISH: ${{ inputs.include_crates_publish }}
+          INPUT_INCLUDE_GO_MODULE: ${{ inputs.include_go_module }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            ref="$RELEASE_TAG"
+            target="all"
+            dry_run="false"
+            include_unity_npm="false"
+            include_pypi_extras="true"
+            include_crates_publish="true"
+            include_go_module="false"
+          else
+            ref="$INPUT_REF"
+            target="$INPUT_TARGET"
+            dry_run="$INPUT_DRY_RUN"
+            include_unity_npm="$INPUT_INCLUDE_UNITY_NPM"
+            include_pypi_extras="$INPUT_INCLUDE_PYPI_EXTRAS"
+            include_crates_publish="$INPUT_INCLUDE_CRATES_PUBLISH"
+            include_go_module="$INPUT_INCLUDE_GO_MODULE"
+          fi
+
+          {
+            echo "ref=$ref"
+            echo "target=$target"
+            echo "dry_run=$dry_run"
+            echo "include_unity_npm=$include_unity_npm"
+            echo "include_pypi_extras=$include_pypi_extras"
+            echo "include_crates_publish=$include_crates_publish"
+            echo "include_go_module=$include_go_module"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch publish-packages.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ steps.release.outputs.ref }}
+          TARGET: ${{ steps.release.outputs.target }}
+          DRY_RUN: ${{ steps.release.outputs.dry_run }}
+          INCLUDE_UNITY_NPM: ${{ steps.release.outputs.include_unity_npm }}
+          INCLUDE_PYPI_EXTRAS: ${{ steps.release.outputs.include_pypi_extras }}
+          INCLUDE_CRATES_PUBLISH: ${{ steps.release.outputs.include_crates_publish }}
+          INCLUDE_GO_MODULE: ${{ steps.release.outputs.include_go_module }}
+        run: |
+          set -Eeuo pipefail
+          gh workflow run publish-packages.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            -f ref="$REF" \
+            -f target="$TARGET" \
+            -f dry_run="$DRY_RUN" \
+            -f include_unity_npm="$INCLUDE_UNITY_NPM" \
+            -f include_pypi_extras="$INCLUDE_PYPI_EXTRAS" \
+            -f include_crates_publish="$INCLUDE_CRATES_PUBLISH" \
+            -f include_go_module="$INCLUDE_GO_MODULE"
+
+      - name: Summarize dispatched publish
+        env:
+          REF: ${{ steps.release.outputs.ref }}
+          TARGET: ${{ steps.release.outputs.target }}
+          DRY_RUN: ${{ steps.release.outputs.dry_run }}
+          INCLUDE_UNITY_NPM: ${{ steps.release.outputs.include_unity_npm }}
+          INCLUDE_PYPI_EXTRAS: ${{ steps.release.outputs.include_pypi_extras }}
+          INCLUDE_CRATES_PUBLISH: ${{ steps.release.outputs.include_crates_publish }}
+          INCLUDE_GO_MODULE: ${{ steps.release.outputs.include_go_module }}
+        run: |
+          {
+            echo "Dispatched package publishing:"
+            echo "- ref: \`$REF\`"
+            echo "- target: \`$TARGET\`"
+            echo "- dry_run: \`$DRY_RUN\`"
+            echo "- include_unity_npm: \`$INCLUDE_UNITY_NPM\`"
+            echo "- include_pypi_extras: \`$INCLUDE_PYPI_EXTRAS\`"
+            echo "- include_crates_publish: \`$INCLUDE_CRATES_PUBLISH\`"
+            echo "- include_go_module: \`$INCLUDE_GO_MODULE\`"
+          } >> "$GITHUB_STEP_SUMMARY"

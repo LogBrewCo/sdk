@@ -9,7 +9,11 @@ Use these exact values when creating registry-side trusted publisher records for
 - Workflow filename: `publish-packages.yml`
 - GitHub environment: `release`
 
-Run the workflow in dry-run mode before any real publish:
+`publish-release.yml` is the release-level dispatcher. Publishing a GitHub Release dispatches
+`publish-packages.yml` for that release tag with the configured OIDC-capable registries enabled.
+Use its manual `workflow_dispatch` path for a safe dry run or a targeted registry publish.
+
+Run the package workflow in dry-run mode before any real publish:
 
 ```bash
 gh workflow run publish-packages.yml -R LogBrewCo/sdk -f ref=v0.1.0 -f target=all -f dry_run=true -f include_unity_npm=false -f include_pypi_extras=false -f include_crates_publish=false -f include_go_module=false
@@ -45,13 +49,13 @@ Create GitHub trusted publishers for these PyPI projects:
 - `logbrew-fastapi`
 - `logbrew-django`
 
-Keep `include_pypi_extras=false` until `logbrew-fastapi` and `logbrew-django` have matching PyPI publisher entries for this workflow. The workflow always builds and checks those distributions, but real publishing only includes them when `include_pypi_extras=true`.
+`logbrew-django` was initially created with the temporary `publish-pypi-django.yml` identity to avoid a pending-publisher collision with `logbrew-fastapi`. The project now also trusts the shared `publish-packages.yml` identity, and the main workflow has proven it can publish or skip all three Python packages with `include_pypi_extras=true`. The workflow always builds and checks those distributions, but real publishing only includes them when `include_pypi_extras=true`.
 
 ## crates.io
 
-Create a trusted publisher for crate `logbrew`. The workflow job uses `rust-lang/crates-io-auth-action@v1` and `cargo publish`.
+The `logbrew` crate exists and has a crates.io GitHub Actions trusted publisher for `LogBrewCo/sdk`, workflow `publish-packages.yml`, environment `release`. The workflow job uses `rust-lang/crates-io-auth-action@v1` and `cargo publish`.
 
-Keep `include_crates_publish=false` until the `logbrew` crate exists and the crates.io ownership/trusted publishing path is configured. The workflow always runs `cargo publish --dry-run`; real crates.io upload only runs when `include_crates_publish=true`.
+The workflow always runs `cargo publish --dry-run`; real crates.io upload only runs when `include_crates_publish=true`.
 
 ## RubyGems
 
@@ -73,6 +77,6 @@ Maven Central does not currently offer the same first-party GitHub OIDC trusted 
 
 ## OpenUPM
 
-OpenUPM is not an OIDC registry. Use `.github/publishing/openupm-co.logbrew.unity.yml` as the draft package submission metadata for `co.logbrew.unity`.
+OpenUPM is not an OIDC registry. Use `.github/publishing/openupm-co.logbrew.unity.yml` as the package submission metadata for `co.logbrew.unity`.
 
-Current OpenUPM docs support UPM packages in repository subfolders and recommend `gitTagPrefix` for monorepos or duplicate tag families. Submit the root repository with the draft metadata first, keep Unity release tags under the `co.logbrew.unity/` prefix, and keep the tag version aligned with `unity/logbrew-unity/package.json`. If the add form or build queue cannot process the subfolder package, fall back to a package-root release branch or GitHub Release asset approach whose root contains the contents of `unity/logbrew-unity`.
+Current OpenUPM docs support UPM packages in repository subfolders and recommend `gitTagPrefix` for monorepos or duplicate tag families. The package submission PR for `co.logbrew.unity` has merged; keep Unity release tags under the `co.logbrew.unity/` prefix and keep the tag version aligned with `unity/logbrew-unity/package.json`. If OpenUPM indexing cannot process the subfolder package, fall back to a package-root release branch or GitHub Release asset approach whose root contains the contents of `unity/logbrew-unity`.

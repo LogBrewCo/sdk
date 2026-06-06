@@ -142,6 +142,8 @@ def parse_simple_yaml_value(value: str) -> Any:
         return None
     if value == "[]":
         return []
+    if re.fullmatch(r"\d+", value):
+        return int(value)
     return unquote_yaml_value(value)
 
 
@@ -540,6 +542,12 @@ def validate_unity_openupm(manifest: dict[str, Any], openupm_path: Path, failure
     }
     for field, value in expected.items():
         require_equal(failures, location, field, metadata.get(field), value)
+    created_at = metadata.get("createdAt")
+    require(
+        isinstance(created_at, int) and created_at > 0,
+        failures,
+        f"{location}: createdAt must be a positive Unix timestamp in milliseconds",
+    )
     require_equal(failures, location, "aliases", metadata.get("aliases"), [])
     require_equal(
         failures,

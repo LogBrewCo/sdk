@@ -290,7 +290,10 @@ jobs:
           mkdir -p dist/rubygems
           (
             cd ruby/logbrew-ruby
-            gem build logbrew-sdk.gemspec --strict --output "$GITHUB_WORKSPACE/dist/rubygems/logbrew-sdk-0.1.0.gem"
+            gem_file="$(
+              ruby -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "failed to load logbrew-sdk.gemspec"; print "#{spec.name}-#{spec.version}.gem"'
+            )"
+            gem build logbrew-sdk.gemspec --strict --output "$GITHUB_WORKSPACE/dist/rubygems/$gem_file"
           )
 
       - name: Configure RubyGems trusted publishing credentials
@@ -299,7 +302,7 @@ jobs:
 
       - name: Publish gem
         if: ${{ ! inputs.dry_run }}
-        run: gem push dist/rubygems/logbrew-sdk-0.1.0.gem
+        run: gem push dist/rubygems/*.gem
 
       - name: Set up Python for registry verification
         if: ${{ ! inputs.dry_run }}
