@@ -12,7 +12,7 @@ Use these exact values when creating registry-side trusted publisher records for
 Run the workflow in dry-run mode before any real publish:
 
 ```bash
-gh workflow run publish-packages.yml -R LogBrewCo/sdk -f ref=v0.1.0 -f target=all -f dry_run=true -f include_unity_npm=false
+gh workflow run publish-packages.yml -R LogBrewCo/sdk -f ref=v0.1.0 -f target=all -f dry_run=true -f include_unity_npm=false -f include_pypi_extras=false
 ```
 
 For `dry_run=false`, `target=all` publishes the OIDC-capable registries only. Run `target=packagist` explicitly after adding Packagist secrets. Run `target=maven` only after Maven Central signing and release profile work is complete.
@@ -44,6 +44,8 @@ Create GitHub trusted publishers for these PyPI projects:
 - `logbrew-sdk`
 - `logbrew-fastapi`
 - `logbrew-django`
+
+Keep `include_pypi_extras=false` until `logbrew-fastapi` and `logbrew-django` have matching PyPI publisher entries for this workflow. The workflow always builds and checks those distributions, but real publishing only includes them when `include_pypi_extras=true`.
 
 ## crates.io
 

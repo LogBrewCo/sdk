@@ -31,6 +31,11 @@ on:
         required: true
         type: boolean
         default: false
+      include_pypi_extras:
+        description: "Publish FastAPI/Django PyPI packages after their publishers are configured"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -144,16 +149,22 @@ jobs:
           packages-dir: dist/pypi/logbrew_py
 
       - name: Publish logbrew-fastapi to PyPI
-        if: ${{ ! inputs.dry_run }}
+        if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/pypi/logbrew_fastapi
 
       - name: Publish logbrew-django to PyPI
-        if: ${{ ! inputs.dry_run }}
+        if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/pypi/logbrew_django
+
+      - name: Explain skipped PyPI extras
+        if: ${{ ! inputs.dry_run && ! inputs.include_pypi_extras }}
+        run: |
+          echo "Published core logbrew-sdk only."
+          echo "Set include_pypi_extras=true after logbrew-fastapi and logbrew-django PyPI publishers are configured."
 
   crates:
     name: crates.io package
