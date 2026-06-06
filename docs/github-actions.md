@@ -14,7 +14,7 @@ This repository should start with GitHub-hosted Actions rather than custom runne
 
 - `ci.yml`: runs on every push to `main` and every pull request
 - `release-readiness.yml`: runs manually or on version tags and performs package dry-runs only for ecosystems detected in the repository
-- `publish-packages.yml`: manual-only registry publishing with trusted publishing where registries support OIDC
+- `publish-packages.yml`: manual-only registry publishing with trusted publishing where registries support OIDC, plus public registry version verification after real publishes
 
 ## Best practices
 
@@ -30,6 +30,7 @@ This repository should start with GitHub-hosted Actions rather than custom runne
 - Keep local and CI release-readiness checks aligned: if local smoke tests install packaged artifacts, CI should continue to exercise those same artifact-oriented paths
 - Prefer verifiers with a machine-readable summary mode so CI and automation can consume pass/fail plus step metadata without scraping logs
 - Use Blacksmith runners for publish preflight and OIDC-capable registry jobs where supported, but keep npm's final trusted-publishing job on GitHub-hosted runners because npm does not currently support self-hosted runners for trusted publishing.
+- After publishing, verify public registry metadata through `python3 scripts/check_registry_publication.py` or the `publish-packages.yml` `target=verify` mode before treating a release as externally available.
 
 ## What to do next
 
@@ -37,3 +38,4 @@ This repository should start with GitHub-hosted Actions rather than custom runne
 2. Add protected GitHub environments for each registry publish target before running `publish-packages.yml` with `dry_run=false`.
 3. Keep `.github/publishing/trusted-publishers.md` aligned with registry-side trusted publisher records.
 4. Run publish workflow dry-runs before every external publish.
+5. Run `target=verify` after registry publishes or when marketplace state is unclear.

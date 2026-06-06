@@ -1,0 +1,361 @@
+#!/usr/bin/env python3
+"""Verify that public registries expose the expected LogBrew package versions."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable
+
+try:
+    from check_release_metadata import PUBLIC_VERSION
+except ImportError:
+    PUBLIC_VERSION = "0.1.0"
+
+
+NPM_PACKAGES = (
+    "@logbrew/sdk",
+    "@logbrew/browser",
+    "@logbrew/node",
+    "@logbrew/express",
+    "@logbrew/fastify",
+    "@logbrew/nestjs",
+    "@logbrew/angular",
+    "@logbrew/vue",
+    "@logbrew/svelte",
+    "@logbrew/react",
+    "@logbrew/react-native",
+    "@logbrew/next",
+)
+PYPI_PACKAGES = ("logbrew-sdk",)
+PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-django")
+RUBYGEMS_PACKAGES = ("logbrew-sdk",)
+NUGET_PACKAGES = ("LogBrew",)
+CRATES = ("logbrew",)
+MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin")
+OPENUPM_PACKAGES = ("co.logbrew.unity",)
+
+
+@dataclass(frozen=True)
+class RegistryCheck:
+    label: str
+    url: str
+    extractor: Callable[[Any], set[str]]
+
+
+def maybe_string(value: Any) -> set[str]:
+    return {value} if isinstance(value, str) and value else set()
+
+
+def dict_value(payload: Any, key: str) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    value = payload.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def npm_versions(payload: Any) -> set[str]:
+    if not isinstance(payload, dict):
+        return set()
+    versions = maybe_string(dict_value(payload, "dist-tags").get("latest"))
+    raw_versions = payload.get("versions", {})
+    if isinstance(raw_versions, dict):
+        versions.update(raw_versions.keys())
+    return versions
+
+
+def pypi_versions(payload: Any) -> set[str]:
+    if not isinstance(payload, dict):
+        return set()
+    versions = maybe_string(dict_value(payload, "info").get("version"))
+    raw_releases = payload.get("releases", {})
+    if isinstance(raw_releases, dict):
+        versions.update(raw_releases.keys())
+    return versions
+
+
+def rubygems_versions(payload: Any) -> set[str]:
+    if not isinstance(payload, dict):
+        return set()
+    return maybe_string(payload.get("version"))
+
+
+def nuget_versions(payload: Any) -> set[str]:
+    if not isinstance(payload, dict):
+        return set()
+    return {version for version in payload.get("versions", []) if isinstance(version, str)}
+
+
+def packagist_versions(package_name: str) -> Callable[[Any], set[str]]:
+    def extract(payload: Any) -> set[str]:
+        if not isinstance(payload, dict):
+            return set()
+        packages = payload.get("packages", {}).get(package_name, [])
+        if not isinstance(packages, list):
+            return set()
+        return {
+            entry.get("version")
+            for entry in packages
+            if isinstance(entry, dict) and isinstance(entry.get("version"), str)
+        }
+
+    return extract
+
+
+def crates_versions(payload: Any) -> set[str]:
+    if not isinstance(payload, dict):
+        return set()
+    versions = maybe_string(dict_value(payload, "crate").get("newest_version"))
+    raw_versions = payload.get("versions", [])
+    if isinstance(raw_versions, list):
+        versions.update(
+            version.get("num")
+            for version in raw_versions
+            if isinstance(version, dict) and isinstance(version.get("num"), str)
+        )
+    return versions
+
+
+def maven_versions(payload: Any) -> set[str]:
+    if not isinstance(payload, dict):
+        return set()
+    docs = dict_value(payload, "response").get("docs", [])
+    if not isinstance(docs, list):
+        return set()
+    return {
+        doc.get("latestVersion")
+        for doc in docs
+        if isinstance(doc, dict) and isinstance(doc.get("latestVersion"), str)
+    }
+
+
+def npm_check(package_name: str) -> RegistryCheck:
+    encoded = urllib.parse.quote(package_name, safe="")
+    return RegistryCheck(package_name, f"https://registry.npmjs.org/{encoded}", npm_versions)
+
+
+def pypi_check(package_name: str) -> RegistryCheck:
+    return RegistryCheck(package_name, f"https://pypi.org/pypi/{package_name}/json", pypi_versions)
+
+
+def rubygems_check(package_name: str) -> RegistryCheck:
+    return RegistryCheck(package_name, f"https://rubygems.org/api/v1/gems/{package_name}.json", rubygems_versions)
+
+
+def nuget_check(package_name: str) -> RegistryCheck:
+    lowered = package_name.lower()
+    return RegistryCheck(package_name, f"https://api.nuget.org/v3-flatcontainer/{lowered}/index.json", nuget_versions)
+
+
+def packagist_check(package_name: str) -> RegistryCheck:
+    return RegistryCheck(package_name, f"https://repo.packagist.org/p2/{package_name}.json", packagist_versions(package_name))
+
+
+def crates_check(crate_name: str) -> RegistryCheck:
+    return RegistryCheck(crate_name, f"https://crates.io/api/v1/crates/{crate_name}", crates_versions)
+
+
+def maven_check(artifact_id: str) -> RegistryCheck:
+    query = urllib.parse.quote(f'g:"co.logbrew" AND a:"{artifact_id}"')
+    return RegistryCheck(
+        f"co.logbrew:{artifact_id}",
+        f"https://search.maven.org/solrsearch/select?q={query}&rows=20&wt=json",
+        maven_versions,
+    )
+
+
+def openupm_check(package_name: str) -> RegistryCheck:
+    encoded = urllib.parse.quote(package_name, safe="")
+    return RegistryCheck(package_name, f"https://package.openupm.com/{encoded}", npm_versions)
+
+
+def checks_for(args: argparse.Namespace) -> list[RegistryCheck]:
+    requested = set(args.target)
+    if "all" in requested:
+        requested.update({"npm", "pypi", "rubygems", "nuget"})
+        if args.include_crates:
+            requested.add("crates")
+        if args.include_packagist:
+            requested.add("packagist")
+        if args.include_maven:
+            requested.add("maven")
+        if args.include_openupm:
+            requested.add("openupm")
+
+    checks: list[RegistryCheck] = []
+    if "npm" in requested:
+        checks.extend(npm_check(package_name) for package_name in NPM_PACKAGES)
+        if args.include_unity_npm:
+            checks.append(npm_check("co.logbrew.unity"))
+    if "pypi" in requested:
+        checks.extend(pypi_check(package_name) for package_name in PYPI_PACKAGES)
+        if args.include_pypi_extras:
+            checks.extend(pypi_check(package_name) for package_name in PYPI_EXTRA_PACKAGES)
+    if "rubygems" in requested:
+        checks.extend(rubygems_check(package_name) for package_name in RUBYGEMS_PACKAGES)
+    if "nuget" in requested:
+        checks.extend(nuget_check(package_name) for package_name in NUGET_PACKAGES)
+    if "packagist" in requested:
+        checks.extend(packagist_check(package_name) for package_name in ("logbrew/sdk",))
+    if "crates" in requested:
+        checks.extend(crates_check(crate_name) for crate_name in CRATES)
+    if "maven" in requested:
+        checks.extend(maven_check(artifact_id) for artifact_id in MAVEN_ARTIFACTS)
+    if "openupm" in requested:
+        checks.extend(openupm_check(package_name) for package_name in OPENUPM_PACKAGES)
+    return checks
+
+
+def expected_versions(version: str) -> set[str]:
+    stripped = version.removeprefix("v")
+    return {stripped, f"v{stripped}"}
+
+
+def fetch_json(url: str, timeout: float) -> Any:
+    request = urllib.request.Request(url, headers={"User-Agent": "LogBrew public registry verifier"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError:
+        raise
+    except urllib.error.URLError as exc:
+        if "CERTIFICATE_VERIFY_FAILED" not in str(exc) or shutil.which("curl") is None:
+            raise
+        result = subprocess.run(
+            ["curl", "-fsSL", "--max-time", str(timeout), url],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise OSError(result.stderr.strip() or result.stdout.strip()) from exc
+        return json.loads(result.stdout)
+
+
+def validate_check(
+    check: RegistryCheck,
+    expected: set[str],
+    timeout: float,
+    retries: int = 0,
+    retry_delay: float = 5.0,
+    fetcher: Callable[[str, float], Any] = fetch_json,
+) -> list[str]:
+    last_failure: list[str] = []
+    for attempt in range(retries + 1):
+        try:
+            payload = fetcher(check.url, timeout)
+        except urllib.error.HTTPError as exc:
+            last_failure = [f"{check.label}: registry returned HTTP {exc.code} for {check.url}"]
+        except (OSError, TimeoutError, json.JSONDecodeError) as exc:
+            last_failure = [f"{check.label}: failed to read {check.url}: {exc}"]
+        else:
+            found = check.extractor(payload)
+            if found.intersection(expected):
+                return []
+            last_failure = [f"{check.label}: expected one of {sorted(expected)}, found {sorted(found)}"]
+
+        if attempt < retries:
+            time.sleep(retry_delay)
+
+    return last_failure
+
+
+def go_module_version(version: str) -> str:
+    stripped = version.removeprefix("v")
+    return f"v{stripped}"
+
+
+def validate_go_module(version: str) -> list[str]:
+    if shutil.which("go") is None:
+        return ["go: command not found"]
+
+    module_version = go_module_version(version)
+    with tempfile.TemporaryDirectory(prefix="logbrew-go-registry-") as tmp:
+        tmp_path = Path(tmp)
+        init_result = subprocess.run(
+            ["go", "mod", "init", "logbrew.registry.verify"],
+            cwd=tmp_path,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        if init_result.returncode != 0:
+            return [f"go mod init failed: {init_result.stdout.strip()}"]
+
+        get_result = subprocess.run(
+            ["go", "get", f"github.com/LogBrewCo/sdk/go/logbrew@{module_version}"],
+            cwd=tmp_path,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        if get_result.returncode != 0:
+            return [
+                f"go get github.com/LogBrewCo/sdk/go/logbrew@{module_version} failed: "
+                f"{get_result.stdout.strip()}"
+            ]
+    return []
+
+
+def validate(args: argparse.Namespace) -> list[str]:
+    failures: list[str] = []
+    expected = expected_versions(args.version)
+    for check in checks_for(args):
+        failures.extend(validate_check(check, expected, args.timeout, args.retries, args.retry_delay))
+    if "go" in args.target or ("all" in args.target and args.include_go):
+        failures.extend(validate_go_module(args.version))
+    return failures
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Verify public registry package versions.")
+    parser.add_argument("--version", default=PUBLIC_VERSION, help="Expected public package version.")
+    parser.add_argument(
+        "--target",
+        action="append",
+        choices=("all", "npm", "pypi", "rubygems", "nuget", "packagist", "crates", "maven", "openupm", "go"),
+        default=[],
+        help="Registry family to verify. May be passed more than once.",
+    )
+    parser.add_argument("--include-unity-npm", action="store_true")
+    parser.add_argument("--include-pypi-extras", action="store_true")
+    parser.add_argument("--include-crates", action="store_true")
+    parser.add_argument("--include-packagist", action="store_true")
+    parser.add_argument("--include-maven", action="store_true")
+    parser.add_argument("--include-openupm", action="store_true")
+    parser.add_argument("--include-go", action="store_true")
+    parser.add_argument("--timeout", type=float, default=20.0)
+    parser.add_argument("--retries", type=int, default=6)
+    parser.add_argument("--retry-delay", type=float, default=10.0)
+    args = parser.parse_args(argv)
+    if not args.target:
+        args.target = ["all"]
+    return args
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    failures = validate(args)
+    if failures:
+        print("\n".join(failures), file=sys.stderr)
+        return 1
+    targets = ", ".join(args.target)
+    print(f"public registry versions ok for {targets} at {args.version}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

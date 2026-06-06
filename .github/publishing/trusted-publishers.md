@@ -12,10 +12,10 @@ Use these exact values when creating registry-side trusted publisher records for
 Run the workflow in dry-run mode before any real publish:
 
 ```bash
-gh workflow run publish-packages.yml -R LogBrewCo/sdk -f ref=v0.1.0 -f target=all -f dry_run=true -f include_unity_npm=false -f include_pypi_extras=false -f include_crates_publish=false
+gh workflow run publish-packages.yml -R LogBrewCo/sdk -f ref=v0.1.0 -f target=all -f dry_run=true -f include_unity_npm=false -f include_pypi_extras=false -f include_crates_publish=false -f include_go_module=false
 ```
 
-For `dry_run=false`, `target=all` publishes the OIDC-capable registries only. Run `target=packagist` explicitly after adding Packagist secrets. Run `target=maven` only after Maven Central signing and release profile work is complete.
+For `dry_run=false`, `target=all` publishes the OIDC-capable registries only, then verifies the public registry versions it actually published. Run `target=verify` to check already-published public registry versions without uploading anything. Run `target=packagist` explicitly after adding Packagist secrets. Run `target=maven` only after Maven Central signing and release profile work is complete.
 
 ## npm
 

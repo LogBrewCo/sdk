@@ -9,6 +9,15 @@ This checklist is public-facing and intentionally excludes private systems and o
 - Document event contracts, validation rules, retries, flush behavior, shutdown behavior, and error shapes.
 - Ensure all emitted payloads are machine-parseable JSON.
 
+## Signal readiness
+
+Treat logs, issues/errors, traces/spans, and metrics as distinct observability signals with different safety and proof needs.
+
+- Do not describe metrics support as release-ready until the SDK has an explicit metric event or helper contract with name validation, numeric value validation, unit guidance, aggregation kind guidance such as counter, gauge, or histogram, temporality, timestamp behavior, and low-cardinality attribute rules.
+- Keep automatic metric capture opt-in until the source, frequency, and attribute set are bounded. Avoid query strings, raw stack text, document titles, user agents, and unbounded labels by default.
+- When metrics helpers exist, prove them from installed artifacts with counters, gauges, histogram-like values, invalid values, omitted optional fields, batching, retry behavior, flush/shutdown behavior, and machine-parseable JSON separate from trace/log parity fixtures.
+- Treat profiling, native debug-symbol, and source-map workflows as separate release capabilities, not implied by error or trace capture. Document setup and installed-artifact proof before advertising them as supported.
+
 ## Real-user QA
 
 Each SDK should include a runnable example that installs like a real user and exercises:
@@ -106,6 +115,7 @@ For PHP packages specifically, prefer a smoke path that creates a fresh Composer
 ## Release checks
 
 - Shared release metadata: `python3 scripts/check_release_metadata.py`
+- Public registry versions after real publishes: `python3 scripts/check_registry_publication.py --target all`
 - Shared Markdown docs: `python3 scripts/check_markdown_links.py`
 - Shared shell smoke/package scripts: `bash scripts/check_shell_static.sh`
 - JavaScript, Browser, Node.js, Express, Fastify, NestJS, Angular, Vue, Svelte, React, React Native, or Next.js: `python3 scripts/check_js_sources.py`, `bash scripts/check_js_lint.sh`, `bash scripts/check_js_package.sh`, package `npm test`, framework smoke scripts, and `npm pack --dry-run`
