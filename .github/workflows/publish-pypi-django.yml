@@ -1,0 +1,60 @@
+name: Publish PyPI Django
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Release tag or commit SHA to publish"
+        required: true
+        default: "main"
+      dry_run:
+        description: "Build and check without publishing"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-pypi-django-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pypi-django:
+    name: PyPI Django package
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Build Django distribution
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pip install --upgrade build twine
+          python -m build --sdist --wheel --outdir dist/pypi/logbrew_django python/logbrew_django
+          python -m twine check dist/pypi/logbrew_django/*
+
+      - name: Publish logbrew-django to PyPI
+        if: ${{ ! inputs.dry_run }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/pypi/logbrew_django
+          skip-existing: true
+
+      - name: Verify public PyPI packages
+        if: ${{ ! inputs.dry_run }}
+        run: python3 scripts/check_registry_publication.py --target pypi --include-pypi-extras
