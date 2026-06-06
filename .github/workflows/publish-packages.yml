@@ -104,10 +104,12 @@ jobs:
 
           for package_dir in "${package_dirs[@]}"; do
             package_name="$(node -p "require('./${package_dir}/package.json').name")"
-            publish_args=()
             if [[ "$DRY_RUN" == "true" ]]; then
-              publish_args+=(--dry-run)
+              echo "Packing ${package_name} from ${package_dir}"
+              (cd "$package_dir" && npm pack --dry-run)
+              continue
             fi
+            publish_args=()
             if [[ "$package_name" == @*/* ]]; then
               publish_args+=(--access public)
             fi
