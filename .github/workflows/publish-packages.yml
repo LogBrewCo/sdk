@@ -36,6 +36,11 @@ on:
         required: true
         type: boolean
         default: false
+      include_crates_publish:
+        description: "Publish the Rust crate after crates.io ownership/trusted publishing is configured"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -191,16 +196,29 @@ jobs:
         run: cargo publish --dry-run
 
       - name: Authenticate to crates.io
-        if: ${{ ! inputs.dry_run }}
+        if: ${{ ! inputs.dry_run && inputs.include_crates_publish }}
         id: crates-auth
         uses: rust-lang/crates-io-auth-action@v1
 
       - name: Publish crate
-        if: ${{ ! inputs.dry_run }}
+        if: ${{ ! inputs.dry_run && inputs.include_crates_publish }}
         working-directory: rust/logbrew
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: cargo publish
+
+      - name: Explain skipped crate publish
+        if: ${{ ! inputs.dry_run && ! inputs.include_crates_publish && inputs.target == 'all' }}
+        run: |
+          echo "Validated the Rust crate dry-run only."
+          echo "Set include_crates_publish=true after the logbrew crate ownership/trusted publishing path is configured."
+
+      - name: Refuse implicit crate-only publish
+        if: ${{ ! inputs.dry_run && ! inputs.include_crates_publish && inputs.target == 'crates' }}
+        run: |
+          echo "Refusing a real crates.io publish without include_crates_publish=true."
+          echo "Configure the logbrew crate ownership/trusted publishing path first, then rerun target=crates with include_crates_publish=true."
+          exit 1
 
   rubygems:
     name: RubyGems package

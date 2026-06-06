@@ -12,7 +12,7 @@ Use these exact values when creating registry-side trusted publisher records for
 Run the workflow in dry-run mode before any real publish:
 
 ```bash
-gh workflow run publish-packages.yml -R LogBrewCo/sdk -f ref=v0.1.0 -f target=all -f dry_run=true -f include_unity_npm=false -f include_pypi_extras=false
+gh workflow run publish-packages.yml -R LogBrewCo/sdk -f ref=v0.1.0 -f target=all -f dry_run=true -f include_unity_npm=false -f include_pypi_extras=false -f include_crates_publish=false
 ```
 
 For `dry_run=false`, `target=all` publishes the OIDC-capable registries only. Run `target=packagist` explicitly after adding Packagist secrets. Run `target=maven` only after Maven Central signing and release profile work is complete.
@@ -50,6 +50,8 @@ Keep `include_pypi_extras=false` until `logbrew-fastapi` and `logbrew-django` ha
 ## crates.io
 
 Create a trusted publisher for crate `logbrew`. The workflow job uses `rust-lang/crates-io-auth-action@v1` and `cargo publish`.
+
+Keep `include_crates_publish=false` until the `logbrew` crate exists and the crates.io ownership/trusted publishing path is configured. The workflow always runs `cargo publish --dry-run`; real crates.io upload only runs when `include_crates_publish=true`.
 
 ## RubyGems
 
