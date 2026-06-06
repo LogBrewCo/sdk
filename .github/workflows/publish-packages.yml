@@ -171,18 +171,21 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/pypi/logbrew_py
+          skip-existing: true
 
       - name: Publish logbrew-fastapi to PyPI
         if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/pypi/logbrew_fastapi
+          skip-existing: true
 
       - name: Publish logbrew-django to PyPI
         if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/pypi/logbrew_django
+          skip-existing: true
 
       - name: Explain skipped PyPI extras
         if: ${{ ! inputs.dry_run && ! inputs.include_pypi_extras }}
@@ -350,7 +353,7 @@ jobs:
 
       - name: Verify public NuGet package
         if: ${{ ! inputs.dry_run }}
-        run: python3 scripts/check_registry_publication.py --target nuget
+        run: python3 scripts/check_registry_publication.py --target nuget --retries 20 --retry-delay 30
 
   packagist:
     name: Packagist package
