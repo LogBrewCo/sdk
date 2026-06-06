@@ -49,7 +49,7 @@ Create GitHub trusted publishers for these PyPI projects:
 - `logbrew-fastapi`
 - `logbrew-django`
 
-`logbrew-django` was initially created with the temporary `publish-pypi-django.yml` identity to avoid a pending-publisher collision with `logbrew-fastapi`. The project now also trusts the shared `publish-packages.yml` identity, and the main workflow has proven it can publish or skip all three Python packages with `include_pypi_extras=true`. The workflow always builds and checks those distributions, but real publishing only includes them when `include_pypi_extras=true`.
+`logbrew-django` was initially created with a temporary one-off workflow identity to avoid a pending-publisher collision with `logbrew-fastapi`. The project now trusts the shared `publish-packages.yml` identity, and the temporary workflow has been removed so repeat updates use one audited PyPI path. The workflow always builds and checks all three distributions, but real publishing only includes the FastAPI and Django packages when `include_pypi_extras=true`.
 
 ## crates.io
 
