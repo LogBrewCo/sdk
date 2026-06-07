@@ -122,6 +122,8 @@ foreach ([
     "composer require logbrew/sdk" => "missing composer archive README install command\n",
     "LOGBREW_API_KEY" => "missing composer archive fake API key placeholder\n",
     "previewJson()" => "missing composer archive previewJson guidance\n",
+    "MetricAttributes" => "missing composer archive metric guidance\n",
+    "This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet." => "missing composer archive metric auto-capture guidance\n",
     "HttpTransport" => "missing composer archive HTTP transport guidance\n",
     "HTTP Delivery" => "missing composer archive HTTP delivery heading\n",
     "HttpTransport::DEFAULT_ENDPOINT" => "missing composer archive HTTP endpoint guidance\n",
@@ -348,6 +350,8 @@ foreach ([
     "composer require logbrew/sdk" => "missing installed README composer install command\n",
     "LOGBREW_API_KEY" => "missing installed README fake API key placeholder\n",
     "previewJson()" => "missing installed README previewJson guidance\n",
+    "MetricAttributes" => "missing installed README metric guidance\n",
+    "This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet." => "missing installed README metric auto-capture guidance\n",
     "HttpTransport" => "missing installed README HTTP transport guidance\n",
     "HTTP Delivery" => "missing installed README HTTP delivery heading\n",
     "HttpTransport::DEFAULT_ENDPOINT" => "missing installed README HTTP endpoint guidance\n",
@@ -1525,6 +1529,10 @@ if (!str_contains($classDoc, 'SpanAttributes describes the public payload fields
     fwrite(STDERR, "missing SpanAttributes class doc summary\n");
     exit(1);
 }
+if (!str_contains($classDoc, 'MetricAttributes describes the public payload fields for an explicit metric event.')) {
+    fwrite(STDERR, "missing MetricAttributes class doc summary\n");
+    exit(1);
+}
 if (!str_contains($classDoc, 'ActionAttributes describes the public payload fields for an action event.')) {
     fwrite(STDERR, "missing ActionAttributes class doc summary\n");
     exit(1);
@@ -1549,6 +1557,10 @@ if (!str_contains($classDoc, '@phpstan-type SpanAttributes array{')) {
     fwrite(STDERR, "missing SpanAttributes alias definition\n");
     exit(1);
 }
+if (!str_contains($classDoc, '@phpstan-type MetricAttributes array{')) {
+    fwrite(STDERR, "missing MetricAttributes alias definition\n");
+    exit(1);
+}
 if (!str_contains($classDoc, '@phpstan-type ActionAttributes array{')) {
     fwrite(STDERR, "missing ActionAttributes alias definition\n");
     exit(1);
@@ -1557,6 +1569,12 @@ if (!str_contains($classDoc, '@phpstan-type ActionAttributes array{')) {
 $release = $class->getMethod('release')->getDocComment() ?: '';
 if (!str_contains($release, '@param ReleaseAttributes $attributes')) {
     fwrite(STDERR, "missing release method docblock\n");
+    exit(1);
+}
+
+$metric = $class->getMethod('metric')->getDocComment() ?: '';
+if (!str_contains($metric, '@param MetricAttributes $attributes')) {
+    fwrite(STDERR, "missing metric method docblock\n");
     exit(1);
 }
 
@@ -1776,6 +1794,14 @@ $client->span('evt_span_001', '2026-06-02T10:00:04Z', [
     'status' => 'ok',
     'durationMs' => 12.5,
 ]);
+$client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [
+    'name' => 'queue.depth',
+    'kind' => 'gauge',
+    'value' => 42,
+    'unit' => '{items}',
+    'temporality' => 'instant',
+    'metadata' => ['queue' => 'default'],
+]);
 $client->action('evt_action_001', '2026-06-02T10:00:05Z', [
     'name' => 'deploy',
     'status' => 'success',
@@ -1894,6 +1920,87 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"events":6' smoke.stderr.json
 grep -q '"ok":true' smoke.stderr.json
 composer run --no-interaction --quiet smoke-run >/dev/null
+
+cat > metric.php <<'EOF'
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/vendor/autoload.php';
+
+use LogBrew\LogBrewClient;
+use LogBrew\SdkError;
+
+function requireMetric(bool $condition, string $message): void
+{
+    if (!$condition) {
+        fwrite(STDERR, $message . PHP_EOL);
+        exit(1);
+    }
+}
+
+function expectMetricError(callable $callback, string $needle): void
+{
+    try {
+        $callback();
+    } catch (SdkError $error) {
+        requireMetric(str_contains($error->getMessage(), $needle), "expected metric error containing {$needle}");
+        return;
+    }
+
+    fwrite(STDERR, "expected metric error containing {$needle}" . PHP_EOL);
+    exit(1);
+}
+
+$client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app-metrics', '0.1.0');
+$client->metric('evt_metric_queue_depth', '2026-06-02T10:00:06Z', [
+    'name' => 'queue.depth',
+    'kind' => 'gauge',
+    'value' => -2.0,
+    'unit' => '{items}',
+    'temporality' => 'instant',
+    'metadata' => ['service' => 'worker', 'queue' => 'default'],
+]);
+$preview = $client->previewJson();
+requireMetric($client->pendingEvents() === 1, 'expected metric event to queue');
+foreach ([
+    '"type": "metric"',
+    '"name": "queue.depth"',
+    '"kind": "gauge"',
+    '"value": -2',
+    '"unit": "{items}"',
+    '"temporality": "instant"',
+    '"queue": "default"',
+] as $needle) {
+    requireMetric(str_contains($preview, $needle), "missing metric payload {$needle}");
+}
+expectMetricError(static fn () => LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app-metrics', '0.1.0')->metric('evt_metric_invalid_value', '2026-06-02T10:00:06Z', [
+    'name' => 'queue.depth',
+    'kind' => 'gauge',
+    'value' => NAN,
+    'unit' => '{items}',
+    'temporality' => 'instant',
+]), 'metric value must be a finite number');
+expectMetricError(static fn () => LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app-metrics', '0.1.0')->metric('evt_metric_invalid_counter', '2026-06-02T10:00:06Z', [
+    'name' => 'jobs.completed',
+    'kind' => 'counter',
+    'value' => -1,
+    'unit' => '1',
+    'temporality' => 'delta',
+]), 'metric counter value must be non-negative');
+expectMetricError(static fn () => LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app-metrics', '0.1.0')->metric('evt_metric_invalid_temporality', '2026-06-02T10:00:06Z', [
+    'name' => 'queue.depth',
+    'kind' => 'gauge',
+    'value' => 2,
+    'unit' => '{items}',
+    'temporality' => 'delta',
+]), 'metric temporality for gauge must be one of');
+fwrite(STDERR, json_encode(['metricEvents' => 1], JSON_THROW_ON_ERROR) . PHP_EOL);
+EOF
+
+php metric.php > metric.stdout.txt 2> metric.stderr.json
+test ! -s metric.stdout.txt
+grep -q '"metricEvents":1' metric.stderr.json
 
 cat > unauth.php <<'EOF'
 <?php

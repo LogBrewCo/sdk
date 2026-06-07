@@ -71,6 +71,30 @@ fwrite(STDERR, json_encode([
 ], JSON_THROW_ON_ERROR) . PHP_EOL);
 ```
 
+## Explicit Metrics
+
+Use the `MetricAttributes` shaped array when your application already knows the measurement it wants to report:
+
+```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use LogBrew\LogBrewClient;
+
+$client = LogBrewClient::create('LOGBREW_API_KEY', 'my-php-app', '1.0.0');
+$client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [
+    'name' => 'queue.depth',
+    'kind' => 'gauge',
+    'value' => 42,
+    'unit' => '{items}',
+    'temporality' => 'instant',
+    'metadata' => ['queue' => 'default'],
+]);
+```
+
+Metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. Prefer stable, low-cardinality primitive metadata such as service, region, queue, or route pattern. This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:

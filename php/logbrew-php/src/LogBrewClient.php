@@ -11,6 +11,7 @@ namespace LogBrew;
  * IssueAttributes describes the public payload fields for an issue event.
  * LogAttributes describes the public payload fields for a log event.
  * SpanAttributes describes the public payload fields for a span event.
+ * MetricAttributes describes the public payload fields for an explicit metric event.
  * ActionAttributes describes the public payload fields for an action event.
  *
  * @phpstan-type MetadataValue string|int|float|bool|null
@@ -47,6 +48,14 @@ namespace LogBrew;
  *   durationMs?: int|float,
  *   metadata?: Metadata
  * }
+ * @phpstan-type MetricAttributes array{
+ *   name: string,
+ *   kind: 'counter'|'gauge'|'histogram',
+ *   value: int|float,
+ *   unit: string,
+ *   temporality: 'delta'|'cumulative'|'instant',
+ *   metadata?: Metadata
+ * }
  * @phpstan-type ActionAttributes array{
  *   name: string,
  *   status: 'queued'|'running'|'success'|'failure',
@@ -59,6 +68,10 @@ final class LogBrewClient
     private const LOG_LEVELS = ['debug', 'info', 'warning', 'error'];
     private const SPAN_STATUSES = ['ok', 'error'];
     private const ACTION_STATUSES = ['queued', 'running', 'success', 'failure'];
+    private const METRIC_KINDS = ['counter', 'gauge', 'histogram'];
+    private const DELTA_CUMULATIVE_TEMPORALITIES = ['delta', 'cumulative'];
+    private const INSTANT_TEMPORALITY = ['instant'];
+    private const NON_NEGATIVE_METRIC_KINDS = ['counter', 'histogram'];
 
     /** @var list<array<string, mixed>> */
     private array $events = [];
@@ -138,6 +151,12 @@ final class LogBrewClient
     public function span(string $id, string $timestamp, array $attributes): void
     {
         $this->pushEvent('span', $id, $timestamp, $this->validateSpan($attributes));
+    }
+
+    /** @param MetricAttributes $attributes */
+    public function metric(string $id, string $timestamp, array $attributes): void
+    {
+        $this->pushEvent('metric', $id, $timestamp, $this->validateMetric($attributes));
     }
 
     /** @param ActionAttributes $attributes */
@@ -317,6 +336,35 @@ final class LogBrewClient
     }
 
     /**
+     * @param MetricAttributes $attributes
+     * @return array<string, mixed>
+     */
+    private function validateMetric(array $attributes): array
+    {
+        self::requireNonEmpty('metric name', (string) ($attributes['name'] ?? ''));
+        $kind = (string) ($attributes['kind'] ?? '');
+        self::requireAllowedValue('metric kind', $kind, self::METRIC_KINDS);
+        $value = self::requireFiniteNumber('metric value', $attributes['value'] ?? null);
+        self::requireNonEmpty('metric unit', (string) ($attributes['unit'] ?? ''));
+        self::requireAllowedValue(
+            sprintf('metric temporality for %s', $kind),
+            (string) ($attributes['temporality'] ?? ''),
+            $kind === 'gauge' ? self::INSTANT_TEMPORALITY : self::DELTA_CUMULATIVE_TEMPORALITIES
+        );
+        if (in_array($kind, self::NON_NEGATIVE_METRIC_KINDS, true) && $value < 0) {
+            throw new SdkError('validation_error', sprintf('metric %s value must be non-negative', $kind));
+        }
+
+        return $this->withMetadata([
+            'name' => $attributes['name'],
+            'kind' => $kind,
+            'value' => $value,
+            'unit' => $attributes['unit'],
+            'temporality' => $attributes['temporality'],
+        ], $attributes['metadata'] ?? null);
+    }
+
+    /**
      * @param ActionAttributes $attributes
      * @return array<string, mixed>
      */
@@ -360,6 +408,18 @@ final class LogBrewClient
         if (!in_array($value, $allowedValues, true)) {
             throw new SdkError('validation_error', sprintf('%s must be one of: %s', $label, implode(', ', $allowedValues)));
         }
+    }
+
+    private static function requireFiniteNumber(string $label, mixed $value): int|float
+    {
+        if (!is_int($value) && !is_float($value)) {
+            throw new SdkError('validation_error', sprintf('%s must be a finite number', $label));
+        }
+        if (is_float($value) && !is_finite($value)) {
+            throw new SdkError('validation_error', sprintf('%s must be a finite number', $label));
+        }
+
+        return $value;
     }
 
     private static function requireTimestamp(string $timestamp): void

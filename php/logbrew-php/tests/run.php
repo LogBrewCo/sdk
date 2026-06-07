@@ -349,6 +349,59 @@ expectThrows(
 );
 
 $client = sampleClient();
+$client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [
+    'name' => 'queue.depth',
+    'kind' => 'gauge',
+    'value' => -2.0,
+    'unit' => '{items}',
+    'temporality' => 'instant',
+    'metadata' => ['service' => 'worker', 'queue' => 'default'],
+]);
+$metricPreview = $client->previewJson();
+assertTrue($client->pendingEvents() === 1, 'expected metric event to queue');
+foreach ([
+    '"type": "metric"',
+    '"name": "queue.depth"',
+    '"kind": "gauge"',
+    '"value": -2',
+    '"unit": "{items}"',
+    '"temporality": "instant"',
+    '"queue": "default"',
+] as $needle) {
+    assertTrue(str_contains($metricPreview, $needle), "missing metric payload: {$needle}");
+}
+expectThrows(
+    fn () => sampleClient()->metric('evt_metric_invalid_value', '2026-06-02T10:00:06Z', [
+        'name' => 'queue.depth',
+        'kind' => 'gauge',
+        'value' => NAN,
+        'unit' => '{items}',
+        'temporality' => 'instant',
+    ]),
+    'metric value must be a finite number'
+);
+expectThrows(
+    fn () => sampleClient()->metric('evt_metric_invalid_counter', '2026-06-02T10:00:06Z', [
+        'name' => 'jobs.completed',
+        'kind' => 'counter',
+        'value' => -1,
+        'unit' => '1',
+        'temporality' => 'delta',
+    ]),
+    'metric counter value must be non-negative'
+);
+expectThrows(
+    fn () => sampleClient()->metric('evt_metric_invalid_temporality', '2026-06-02T10:00:06Z', [
+        'name' => 'queue.depth',
+        'kind' => 'gauge',
+        'value' => 2,
+        'unit' => '{items}',
+        'temporality' => 'delta',
+    ]),
+    'metric temporality for gauge must be one of'
+);
+
+$client = sampleClient();
 enqueueAll($client);
 expectThrows(
     fn () => $client->flush(new RecordingTransport([401])),
