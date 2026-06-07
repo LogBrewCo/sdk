@@ -2,6 +2,13 @@ const ISSUE_LEVELS = new Set(["info", "warning", "error", "critical"]);
 const LOG_LEVELS = new Set(["debug", "info", "warning", "error"]);
 const SPAN_STATUSES = new Set(["ok", "error"]);
 const ACTION_STATUSES = new Set(["queued", "running", "success", "failure"]);
+const METRIC_KINDS = new Set(["counter", "gauge", "histogram"]);
+const NON_NEGATIVE_METRIC_KINDS = new Set(["counter", "histogram"]);
+const METRIC_TEMPORALITIES_BY_KIND = new Map([
+  ["counter", new Set(["delta", "cumulative"])],
+  ["gauge", new Set(["instant"])],
+  ["histogram", new Set(["delta", "cumulative"])]
+]);
 const CONSOLE_METHODS = new Set(["debug", "info", "log", "warn", "error"]);
 const DEFAULT_CONSOLE_LEVELS = ["debug", "info", "log", "warn", "error"];
 const PINO_HOST_FIELD = ["host", "name"].join("");
@@ -117,6 +124,10 @@ class LogBrewClient {
 
   action(id, timestamp, attributes) {
     this.#pushEvent("action", id, timestamp, validateAction(attributes));
+  }
+
+  metric(id, timestamp, attributes) {
+    this.#pushEvent("metric", id, timestamp, validateMetric(attributes));
   }
 
   async flush(transport) {
@@ -881,6 +892,12 @@ function requireAllowedValue(label, value, allowedValues) {
   }
 }
 
+function requireFiniteNumber(label, value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new SdkError("validation_error", `${label} must be a finite number`);
+  }
+}
+
 function requireTraceId(traceId) {
   if (typeof traceId !== "string" || !/^[0-9a-fA-F]{32}$/u.test(traceId)) {
     throw new SdkError("validation_error", "traceId must be 32 lowercase or uppercase hex characters");
@@ -999,6 +1016,27 @@ function validateAction(attributes) {
   return withMetadata({
     name: attributes.name,
     status: attributes.status
+  }, attributes.metadata);
+}
+
+function validateMetric(attributes) {
+  requireNonEmpty("metric name", attributes.name);
+  requireAllowedValue("metric kind", attributes.kind, METRIC_KINDS);
+  requireFiniteNumber("metric value", attributes.value);
+  requireNonEmpty("metric unit", attributes.unit);
+
+  const allowedTemporalities = METRIC_TEMPORALITIES_BY_KIND.get(attributes.kind);
+  requireAllowedValue(`metric temporality for ${attributes.kind}`, attributes.temporality, allowedTemporalities);
+  if (NON_NEGATIVE_METRIC_KINDS.has(attributes.kind) && attributes.value < 0) {
+    throw new SdkError("validation_error", `metric ${attributes.kind} value must be non-negative`);
+  }
+
+  return withMetadata({
+    name: attributes.name,
+    kind: attributes.kind,
+    value: attributes.value,
+    unit: attributes.unit,
+    temporality: attributes.temporality
   }, attributes.metadata);
 }
 

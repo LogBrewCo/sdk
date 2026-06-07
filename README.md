@@ -2,7 +2,7 @@
 
 Public foundation for LogBrew SDKs. This repository currently defines:
 
-- A language-neutral event contract for releases, environments, issues, logs, traces/spans, and actions
+- A language-neutral event contract for releases, environments, issues, logs, traces/spans, actions, and explicit metrics
 - Public fixtures for valid and invalid payloads
 - A small validation script and tests that future SDKs can reuse in CI
 - The first public Rust SDK package with buffered event capture, transport-friendly flush/shutdown semantics, and optional HTTP delivery
@@ -53,6 +53,7 @@ Supported event types:
 - `log`
 - `span`
 - `action`
+- `metric`
 
 ## Public QA fixtures
 

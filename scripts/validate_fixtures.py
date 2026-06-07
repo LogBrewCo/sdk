@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 
-ALLOWED_TYPES = {"release", "environment", "issue", "log", "span", "action"}
+ALLOWED_TYPES = {"release", "environment", "issue", "log", "span", "action", "metric"}
 SDK_KEYS = {"name", "language", "version"}
 EVENT_KEYS = {"type", "timestamp", "id", "attributes"}
 REQUIRED_ATTRIBUTES = {
@@ -19,13 +20,21 @@ REQUIRED_ATTRIBUTES = {
     "log": {"message", "level"},
     "span": {"name", "traceId", "spanId", "status"},
     "action": {"name", "status"},
+    "metric": {"name", "kind", "value", "unit", "temporality"},
 }
 ENUMS = {
     ("issue", "level"): {"info", "warning", "error", "critical"},
     ("log", "level"): {"debug", "info", "warning", "error"},
     ("span", "status"): {"ok", "error"},
     ("action", "status"): {"queued", "running", "success", "failure"},
+    ("metric", "kind"): {"counter", "gauge", "histogram"},
 }
+METRIC_TEMPORALITIES_BY_KIND = {
+    "counter": {"delta", "cumulative"},
+    "gauge": {"instant"},
+    "histogram": {"delta", "cumulative"},
+}
+NON_NEGATIVE_METRIC_KINDS = {"counter", "histogram"}
 OPTIONAL_ATTRIBUTES = {
     "release": {"commit", "notes", "metadata"},
     "environment": {"region", "metadata"},
@@ -33,6 +42,11 @@ OPTIONAL_ATTRIBUTES = {
     "log": {"logger", "metadata"},
     "span": {"parentSpanId", "durationMs", "metadata"},
     "action": {"metadata"},
+    "metric": {"metadata"},
+}
+REQUIRED_STRING_ATTRIBUTES = {
+    event_type: required_attributes - {"value"}
+    for event_type, required_attributes in REQUIRED_ATTRIBUTES.items()
 }
 OPTIONAL_STRING_ATTRIBUTES = {
     ("release", "commit"): True,
@@ -96,6 +110,23 @@ def _validate_optional_attributes(index: int, event_type: str, attributes: dict[
             raise ValidationError(f"event {index} attribute {key} must be a non-empty string")
 
 
+def _validate_metric_attributes(index: int, attributes: dict[str, Any]) -> None:
+    value = attributes["value"]
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValidationError(f"event {index} attribute value must be a finite number")
+
+    kind = attributes["kind"]
+    temporality = attributes["temporality"]
+    allowed_temporalities = METRIC_TEMPORALITIES_BY_KIND[kind]
+    if temporality not in allowed_temporalities:
+        allowed_display = ", ".join(sorted(allowed_temporalities))
+        raise ValidationError(
+            f"event {index} attribute temporality for {kind} must be one of: {allowed_display}"
+        )
+    if kind in NON_NEGATIVE_METRIC_KINDS and value < 0:
+        raise ValidationError(f"event {index} attribute value for {kind} must be non-negative")
+
+
 def validate_payload(payload: dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         raise ValidationError("payload must be an object")
@@ -134,7 +165,7 @@ def validate_payload(payload: dict[str, Any]) -> None:
             missing_keys = ", ".join(sorted(missing))
             raise ValidationError(f"event {index} missing attributes: {missing_keys}")
 
-        for key in REQUIRED_ATTRIBUTES[event_type]:
+        for key in REQUIRED_STRING_ATTRIBUTES[event_type]:
             if not isinstance(attributes.get(key), str) or not attributes[key]:
                 raise ValidationError(f"event {index} attribute {key} must be a non-empty string")
 
@@ -155,6 +186,9 @@ def validate_payload(payload: dict[str, Any]) -> None:
             duration = attributes["durationMs"]
             if isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0:
                 raise ValidationError(f"event {index} attribute durationMs must be a non-negative number")
+
+        if event_type == "metric":
+            _validate_metric_attributes(index, attributes)
 
         _validate_optional_attributes(index, event_type, attributes)
         _validate_metadata(index, attributes)

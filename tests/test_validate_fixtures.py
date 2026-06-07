@@ -81,6 +81,34 @@ class ValidateFixturesTests(unittest.TestCase):
         ):
             validate_payload(payload)
 
+    def test_rejects_boolean_metric_value(self) -> None:
+        payload = self.load_valid_payload()
+        payload["events"][6]["attributes"]["value"] = True
+        with self.assertRaisesRegex(
+            ValidationError,
+            "event 6 attribute value must be a finite number",
+        ):
+            validate_payload(payload)
+
+    def test_rejects_negative_counter_value(self) -> None:
+        payload = self.load_valid_payload()
+        payload["events"][6]["attributes"]["value"] = -1
+        with self.assertRaisesRegex(
+            ValidationError,
+            "event 6 attribute value for counter must be non-negative",
+        ):
+            validate_payload(payload)
+
+    def test_rejects_metric_temporality_for_kind(self) -> None:
+        payload = self.load_valid_payload()
+        payload["events"][6]["attributes"]["kind"] = "gauge"
+        payload["events"][6]["attributes"]["temporality"] = "delta"
+        with self.assertRaisesRegex(
+            ValidationError,
+            "event 6 attribute temporality for gauge must be one of: instant",
+        ):
+            validate_payload(payload)
+
     def test_rejects_non_string_optional_attribute(self) -> None:
         payload = self.load_valid_payload()
         payload["events"][3]["attributes"]["logger"] = {"name": "job-runner"}
@@ -172,6 +200,17 @@ class ValidateFixturesTests(unittest.TestCase):
                 allowed_values,
                 msg=f"schema enum drifted for {event_type}.{attribute_name}",
             )
+
+    def test_schema_metric_temporalities_match_validator(self) -> None:
+        schema = self.load_schema()
+        temporalities_by_kind = validate_payload.__globals__["METRIC_TEMPORALITIES_BY_KIND"]
+        validator_temporalities = set().union(*temporalities_by_kind.values())
+        schema_temporalities = set(
+            schema["$defs"]["metricEvent"]["allOf"][1]["properties"]["attributes"]["properties"]["temporality"][
+                "enum"
+            ]
+        )
+        self.assertEqual(schema_temporalities, validator_temporalities)
 
 
 if __name__ == "__main__":

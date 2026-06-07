@@ -47,7 +47,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["release", "environment", "issue", "log", "span", "action"]
+          "enum": ["release", "environment", "issue", "log", "span", "action", "metric"]
         },
         "timestamp": {
           "type": "string",
@@ -201,6 +201,69 @@
         }
       ]
     },
+    "metricEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "metric" },
+            "attributes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "kind", "value", "unit", "temporality"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "kind": {
+                  "type": "string",
+                  "enum": ["counter", "gauge", "histogram"]
+                },
+                "value": { "type": "number" },
+                "unit": { "type": "string", "minLength": 1 },
+                "temporality": {
+                  "type": "string",
+                  "enum": ["delta", "cumulative", "instant"]
+                },
+                "metadata": { "$ref": "#/$defs/metadata" }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "counter" } }
+                  },
+                  "then": {
+                    "properties": {
+                      "value": { "minimum": 0 },
+                      "temporality": { "enum": ["delta", "cumulative"] }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "histogram" } }
+                  },
+                  "then": {
+                    "properties": {
+                      "value": { "minimum": 0 },
+                      "temporality": { "enum": ["delta", "cumulative"] }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "gauge" } }
+                  },
+                  "then": {
+                    "properties": {
+                      "temporality": { "const": "instant" }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
     "event": {
       "oneOf": [
         { "$ref": "#/$defs/releaseEvent" },
@@ -208,7 +271,8 @@
         { "$ref": "#/$defs/issueEvent" },
         { "$ref": "#/$defs/logEvent" },
         { "$ref": "#/$defs/spanEvent" },
-        { "$ref": "#/$defs/actionEvent" }
+        { "$ref": "#/$defs/actionEvent" },
+        { "$ref": "#/$defs/metricEvent" }
       ]
     }
   }

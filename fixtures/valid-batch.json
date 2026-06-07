@@ -64,6 +64,21 @@
         "name": "deploy",
         "status": "success"
       }
+    },
+    {
+      "type": "metric",
+      "timestamp": "2026-06-02T10:00:06Z",
+      "id": "evt_metric_001",
+      "attributes": {
+        "name": "checkout.requests",
+        "kind": "counter",
+        "value": 42,
+        "unit": "{request}",
+        "temporality": "delta",
+        "metadata": {
+          "service": "checkout"
+        }
+      }
     }
   ]
 }

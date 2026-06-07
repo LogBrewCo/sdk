@@ -177,6 +177,23 @@ export type ActionAttributes = {
   metadata?: Metadata;
 };
 
+/** Public metric event attributes. Use low-cardinality metadata only. */
+export type MetricAttributes = {
+  name: string;
+  kind: "counter" | "histogram";
+  value: number;
+  unit: string;
+  temporality: "delta" | "cumulative";
+  metadata?: Metadata;
+} | {
+  name: string;
+  kind: "gauge";
+  value: number;
+  unit: string;
+  temporality: "instant";
+  metadata?: Metadata;
+};
+
 /** Public event union used in preview and transport payloads. */
 export type Event =
   | { type: "release"; id: string; timestamp: string; attributes: ReleaseAttributes }
@@ -184,7 +201,8 @@ export type Event =
   | { type: "issue"; id: string; timestamp: string; attributes: IssueAttributes }
   | { type: "log"; id: string; timestamp: string; attributes: LogAttributes }
   | { type: "span"; id: string; timestamp: string; attributes: SpanAttributes }
-  | { type: "action"; id: string; timestamp: string; attributes: ActionAttributes };
+  | { type: "action"; id: string; timestamp: string; attributes: ActionAttributes }
+  | { type: "metric"; id: string; timestamp: string; attributes: MetricAttributes };
 
 /** Stable transport response returned from flush and shutdown operations. */
 export type TransportResponse = {
@@ -245,6 +263,7 @@ export declare class LogBrewClient {
   log(id: string, timestamp: string, attributes: LogAttributes): void;
   span(id: string, timestamp: string, attributes: SpanAttributes): void;
   action(id: string, timestamp: string, attributes: ActionAttributes): void;
+  metric(id: string, timestamp: string, attributes: MetricAttributes): void;
   /** Flush queued events through a transport while preserving retry semantics. */
   flush(transport: Transport): Promise<TransportResponse>;
   /** Flush queued events, then mark the client closed so later writes fail. */

@@ -14,9 +14,10 @@ grep -q '"type": "issue"' "$output_prefix.stdout.json"
 grep -q '"type": "log"' "$output_prefix.stdout.json"
 grep -q '"type": "span"' "$output_prefix.stdout.json"
 grep -q '"type": "action"' "$output_prefix.stdout.json"
+grep -q '"type": "metric"' "$output_prefix.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$output_prefix.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$output_prefix.stdout.json" >/dev/null
-grep -q '"events":6' "$output_prefix.stderr.json"
+grep -q '"events":7' "$output_prefix.stderr.json"
 grep -q '"ok":true' "$output_prefix.stderr.json"
 }
 
@@ -35,9 +36,10 @@ grep -q '"type": "issue"' "$output_prefix.stdout.json"
 grep -q '"type": "log"' "$output_prefix.stdout.json"
 grep -q '"type": "span"' "$output_prefix.stdout.json"
 grep -q '"type": "action"' "$output_prefix.stdout.json"
+grep -q '"type": "metric"' "$output_prefix.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$output_prefix.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$output_prefix.stdout.json" >/dev/null
-grep -q '"events":6' "$output_prefix.stderr.json"
+grep -q '"events":7' "$output_prefix.stderr.json"
 grep -q '"ok":true' "$output_prefix.stderr.json"
 }
 
@@ -99,9 +101,10 @@ grep -q '"type": "issue"' "$output_prefix.stdout.json"
 grep -q '"type": "log"' "$output_prefix.stdout.json"
 grep -q '"type": "span"' "$output_prefix.stdout.json"
 grep -q '"type": "action"' "$output_prefix.stdout.json"
+grep -q '"type": "metric"' "$output_prefix.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$output_prefix.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$output_prefix.stdout.json" >/dev/null
-grep -q '"events":6' "$output_prefix.stderr.json"
+grep -q '"events":7' "$output_prefix.stderr.json"
 grep -q '"ok":true' "$output_prefix.stderr.json"
 }
 
@@ -581,6 +584,9 @@ if (!declarations.includes("Public span event attributes.")) {
 }
 if (!declarations.includes("Public action event attributes.")) {
   throw new Error("missing installed ActionAttributes declaration docs");
+}
+if (!declarations.includes("Public metric event attributes. Use low-cardinality metadata only.")) {
+  throw new Error("missing installed MetricAttributes declaration docs");
 }
 if (!declarations.includes("Public event union used in preview and transport payloads.")) {
   throw new Error("missing installed Event declaration docs");
@@ -1250,6 +1256,9 @@ if (!declarations.includes("Public span event attributes.")) {
 if (!declarations.includes("Public action event attributes.")) {
   throw new Error("missing packed ActionAttributes declaration docs");
 }
+if (!declarations.includes("Public metric event attributes. Use low-cardinality metadata only.")) {
+  throw new Error("missing packed MetricAttributes declaration docs");
+}
 if (!declarations.includes("Public event union used in preview and transport payloads.")) {
   throw new Error("missing packed Event declaration docs");
 }
@@ -1583,6 +1592,7 @@ import {
   type EnvironmentAttributes,
   type IssueAttributes,
   type LogAttributes,
+  type MetricAttributes,
   type PinoDestinationConfig,
   type PinoDestinationHandle,
   type PinoLogRecord,
@@ -1626,6 +1636,14 @@ const action: ActionAttributes = {
   name: "deploy",
   status: "success"
 };
+const metric: MetricAttributes = {
+  name: "checkout.requests",
+  kind: "counter",
+  value: 42,
+  unit: "{request}",
+  temporality: "delta",
+  metadata: { service: "checkout" }
+};
 
 async function main() {
   const client = LogBrewClient.create({
@@ -1639,6 +1657,7 @@ async function main() {
   client.log("evt_log_001", "2026-06-02T10:00:03Z", log);
   client.span("evt_span_001", "2026-06-02T10:00:04Z", span);
   client.action("evt_action_001", "2026-06-02T10:00:05Z", action);
+  client.metric("evt_metric_001", "2026-06-02T10:00:06Z", metric);
   const response: TransportResponse = await client.flush(RecordingTransport.alwaysAccept());
   if (response.statusCode !== 202) {
     throw new Error("unexpected status");
@@ -1730,6 +1749,14 @@ const traceSpan: sdk.SpanAttributes = sdk.spanAttributesFromTraceparent(tracepar
 if (traceSpan.traceId !== traceContext.traceId) {
   throw new Error("unexpected trace context");
 }
+const metric: sdk.MetricAttributes = {
+  name: "checkout.requests",
+  kind: "counter",
+  value: 42,
+  unit: "{request}",
+  temporality: "delta"
+};
+client.metric("evt_metric_001", "2026-06-02T10:00:06Z", metric);
 const consoleLevel: sdk.ConsoleMethodName = "error";
 const capture = sdk.installLogBrewConsoleCapture({
   client,
@@ -2082,12 +2109,20 @@ client.action("evt_action_001", "2026-06-02T10:00:05Z", {
   name: "deploy",
   status: "success"
 });
+client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
+  name: "checkout.requests",
+  kind: "counter",
+  value: 42,
+  unit: "{request}",
+  temporality: "delta",
+  metadata: { service: "checkout" }
+});
 
 console.log(client.previewJson());
 
 const transport = RecordingTransport.alwaysAccept();
 const response = await client.shutdown(transport);
-console.error(JSON.stringify({ ok: true, status: response.statusCode, attempts: response.attempts, events: 6 }));
+console.error(JSON.stringify({ ok: true, status: response.statusCode, attempts: response.attempts, events: 7 }));
 EOF
 
 run_package_manager_script "$package_manager" smoke-readme > readme-example.stdout.json 2> readme-example.stderr.json
@@ -2097,9 +2132,10 @@ grep -q '"type": "issue"' readme-example.stdout.json
 grep -q '"type": "log"' readme-example.stdout.json
 grep -q '"type": "span"' readme-example.stdout.json
 grep -q '"type": "action"' readme-example.stdout.json
+grep -q '"type": "metric"' readme-example.stdout.json
 python3 "$repo_root/scripts/validate_fixtures.py" readme-example.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" readme-example.stdout.json >/dev/null
-grep -q '"events":6' readme-example.stderr.json
+grep -q '"events":7' readme-example.stderr.json
 grep -q '"ok":true' readme-example.stderr.json
 
 run_package_manager_script "$package_manager" smoke-readme > readme-example-reinstall.stdout.json 2> readme-example-reinstall.stderr.json
@@ -2109,9 +2145,10 @@ grep -q '"type": "issue"' readme-example-reinstall.stdout.json
 grep -q '"type": "log"' readme-example-reinstall.stdout.json
 grep -q '"type": "span"' readme-example-reinstall.stdout.json
 grep -q '"type": "action"' readme-example-reinstall.stdout.json
+grep -q '"type": "metric"' readme-example-reinstall.stdout.json
 python3 "$repo_root/scripts/validate_fixtures.py" readme-example-reinstall.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" readme-example-reinstall.stdout.json >/dev/null
-grep -q '"events":6' readme-example-reinstall.stderr.json
+grep -q '"events":7' readme-example-reinstall.stderr.json
 grep -q '"ok":true' readme-example-reinstall.stderr.json
 
 run_installed_package_example "node_modules/@logbrew/sdk/examples/readme-example.mjs" installed-example-esm
@@ -2194,12 +2231,20 @@ client.action("evt_action_001", "2026-06-02T10:00:05Z", {
   name: "deploy",
   status: "success"
 });
+client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
+  name: "checkout.requests",
+  kind: "counter",
+  value: 42,
+  unit: "{request}",
+  temporality: "delta",
+  metadata: { service: "checkout" }
+});
 
 console.log(client.previewJson());
 
 const transport = RecordingTransport.alwaysAccept();
 const response = await client.shutdown(transport);
-console.error(JSON.stringify({ ok: true, status: response.statusCode, attempts: response.attempts, events: 6 }));
+console.error(JSON.stringify({ ok: true, status: response.statusCode, attempts: response.attempts, events: 7 }));
 EOF
 
 run_package_manager_script "$package_manager" smoke-esm > smoke.stdout.json 2> smoke.stderr.json
@@ -2209,9 +2254,10 @@ grep -q '"type": "issue"' smoke.stdout.json
 grep -q '"type": "log"' smoke.stdout.json
 grep -q '"type": "span"' smoke.stdout.json
 grep -q '"type": "action"' smoke.stdout.json
+grep -q '"type": "metric"' smoke.stdout.json
 python3 "$repo_root/scripts/validate_fixtures.py" smoke.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" smoke.stdout.json >/dev/null
-grep -q '"events":6' smoke.stderr.json
+grep -q '"events":7' smoke.stderr.json
 grep -q '"ok":true' smoke.stderr.json
 
 cat > smoke-require.cjs <<'EOF'
@@ -2253,12 +2299,20 @@ client.action("evt_action_001", "2026-06-02T10:00:05Z", {
   name: "deploy",
   status: "success"
 });
+client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
+  name: "checkout.requests",
+  kind: "counter",
+  value: 42,
+  unit: "{request}",
+  temporality: "delta",
+  metadata: { service: "checkout" }
+});
 
 console.log(client.previewJson());
 
 const transport = RecordingTransport.alwaysAccept();
 client.shutdown(transport).then((response) => {
-  console.error(JSON.stringify({ ok: true, status: response.statusCode, attempts: response.attempts, events: 6 }));
+  console.error(JSON.stringify({ ok: true, status: response.statusCode, attempts: response.attempts, events: 7 }));
 }).catch((error) => {
   console.error(error);
   process.exit(1);
@@ -2272,9 +2326,10 @@ grep -q '"type": "issue"' smoke-require.stdout.json
 grep -q '"type": "log"' smoke-require.stdout.json
 grep -q '"type": "span"' smoke-require.stdout.json
 grep -q '"type": "action"' smoke-require.stdout.json
+grep -q '"type": "metric"' smoke-require.stdout.json
 python3 "$repo_root/scripts/validate_fixtures.py" smoke-require.stdout.json >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" smoke-require.stdout.json >/dev/null
-grep -q '"events":6' smoke-require.stderr.json
+grep -q '"events":7' smoke-require.stderr.json
 grep -q '"ok":true' smoke-require.stderr.json
 
 cat > unauth.mjs <<'EOF'

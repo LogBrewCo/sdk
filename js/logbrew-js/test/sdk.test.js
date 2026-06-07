@@ -20,6 +20,9 @@ import {
   TransportError
 } from "../index.js";
 
+const SUPPORTED_EVENT_TYPES = ["release", "environment", "issue", "log", "span", "action", "metric"];
+const EXPECTED_EVENT_COUNT = SUPPORTED_EVENT_TYPES.length;
+
 function parseLastJsonObject(text) {
   const lines = text.trim().split("\n");
   for (let index = 0; index < lines.length; index += 1) {
@@ -38,6 +41,32 @@ function parseLastJsonLine(text) {
     }
   }
   throw new Error(`no JSON line found in output:\n${text}`);
+}
+
+function assertEventTypes(payload) {
+  assert.deepEqual(payload.events.map((event) => event.type), SUPPORTED_EVENT_TYPES);
+}
+
+function assertSuccessSummary(summary) {
+  assert.deepEqual(summary, {
+    ok: true,
+    status: 202,
+    attempts: 1,
+    events: EXPECTED_EVENT_COUNT
+  });
+}
+
+function assertCompactSuccessSummary(output) {
+  assert.match(
+    output,
+    new RegExp(`\\{"ok":true,"status":202,"attempts":1,"events":${EXPECTED_EVENT_COUNT}\\}`)
+  );
+}
+
+function assertOutputIncludesEventTypes(output) {
+  for (const eventType of SUPPORTED_EVENT_TYPES) {
+    assert.match(output, new RegExp(`"type": "${eventType}"`));
+  }
 }
 
 function sampleClient() {
@@ -79,16 +108,21 @@ function enqueueAll(client) {
     name: "deploy",
     status: "success"
   });
+  client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
+    name: "checkout.requests",
+    kind: "counter",
+    value: 42,
+    unit: "{request}",
+    temporality: "delta",
+    metadata: { service: "checkout" }
+  });
 }
 
 test("previewJson contains all supported event types", () => {
   const client = sampleClient();
   enqueueAll(client);
   const payload = JSON.parse(client.previewJson());
-  assert.deepEqual(
-    payload.events.map((event) => event.type),
-    ["release", "environment", "issue", "log", "span", "action"]
-  );
+  assertEventTypes(payload);
 });
 
 test("flush success clears the queue", async () => {
@@ -134,13 +168,74 @@ test("negative span duration fails validation", () => {
   );
 });
 
+test("metric helper validates explicit metric attributes", () => {
+  const client = sampleClient();
+  client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
+    name: "queue.depth",
+    kind: "gauge",
+    value: -3,
+    unit: "{item}",
+    temporality: "instant",
+    metadata: { service: "checkout" }
+  });
+
+  const payload = JSON.parse(client.previewJson());
+  assert.deepEqual(payload.events[0], {
+    type: "metric",
+    id: "evt_metric_001",
+    timestamp: "2026-06-02T10:00:06Z",
+    attributes: {
+      name: "queue.depth",
+      kind: "gauge",
+      value: -3,
+      unit: "{item}",
+      temporality: "instant",
+      metadata: { service: "checkout" }
+    }
+  });
+});
+
+test("metric helper rejects unsafe values", () => {
+  const client = sampleClient();
+  assert.throws(
+    () => client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
+      name: "checkout.requests",
+      kind: "counter",
+      value: Number.NaN,
+      unit: "{request}",
+      temporality: "delta"
+    }),
+    /metric value must be a finite number/
+  );
+  assert.throws(
+    () => client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
+      name: "checkout.requests",
+      kind: "counter",
+      value: -1,
+      unit: "{request}",
+      temporality: "delta"
+    }),
+    /metric counter value must be non-negative/
+  );
+  assert.throws(
+    () => client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
+      name: "checkout.queue_depth",
+      kind: "gauge",
+      value: 3,
+      unit: "{item}",
+      temporality: "delta"
+    }),
+    /metric temporality for gauge must be one of: instant/
+  );
+});
+
 test("unauthenticated response surfaces clean error", async () => {
   const client = sampleClient();
   enqueueAll(client);
   const transport = new RecordingTransport([{ statusCode: 401 }]);
 
   await assert.rejects(client.flush(transport), /transport rejected the API key/);
-  assert.equal(client.pendingEvents(), 6);
+  assert.equal(client.pendingEvents(), EXPECTED_EVENT_COUNT);
 });
 
 test("network failure retries before succeeding", async () => {
@@ -550,16 +645,8 @@ test("repo checkout CommonJS README example runs directly", () => {
 
   assert.equal(result.status, 0);
   const payload = JSON.parse(result.stdout);
-  assert.deepEqual(
-    payload.events.map((event) => event.type),
-    ["release", "environment", "issue", "log", "span", "action"]
-  );
-  assert.deepEqual(JSON.parse(result.stderr), {
-    ok: true,
-    status: 202,
-    attempts: 1,
-    events: 6
-  });
+  assertEventTypes(payload);
+  assertSuccessSummary(JSON.parse(result.stderr));
 });
 
 test("repo checkout ESM README example runs directly", () => {
@@ -570,16 +657,8 @@ test("repo checkout ESM README example runs directly", () => {
 
   assert.equal(result.status, 0);
   const payload = JSON.parse(result.stdout);
-  assert.deepEqual(
-    payload.events.map((event) => event.type),
-    ["release", "environment", "issue", "log", "span", "action"]
-  );
-  assert.deepEqual(JSON.parse(result.stderr), {
-    ok: true,
-    status: 202,
-    attempts: 1,
-    events: 6
-  });
+  assertEventTypes(payload);
+  assertSuccessSummary(JSON.parse(result.stderr));
 });
 
 test("repo checkout launcher runs the ESM README example", () => {
@@ -590,16 +669,8 @@ test("repo checkout launcher runs the ESM README example", () => {
 
   assert.equal(result.status, 0);
   const payload = JSON.parse(result.stdout);
-  assert.deepEqual(
-    payload.events.map((event) => event.type),
-    ["release", "environment", "issue", "log", "span", "action"]
-  );
-  assert.deepEqual(JSON.parse(result.stderr), {
-    ok: true,
-    status: 202,
-    attempts: 1,
-    events: 6
-  });
+  assertEventTypes(payload);
+  assertSuccessSummary(JSON.parse(result.stderr));
 });
 
 test("repo checkout raw ESM smoke example runs directly", () => {
@@ -611,16 +682,8 @@ test("repo checkout raw ESM smoke example runs directly", () => {
   assert.equal(result.status, 0);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.sdk.name, "smoke-app");
-  assert.deepEqual(
-    payload.events.map((event) => event.type),
-    ["release", "environment", "issue", "log", "span", "action"]
-  );
-  assert.deepEqual(JSON.parse(result.stderr), {
-    ok: true,
-    status: 202,
-    attempts: 1,
-    events: 6
-  });
+  assertEventTypes(payload);
+  assertSuccessSummary(JSON.parse(result.stderr));
 });
 
 test("repo checkout launcher runs the CommonJS smoke example", () => {
@@ -631,16 +694,8 @@ test("repo checkout launcher runs the CommonJS smoke example", () => {
 
   assert.equal(result.status, 0);
   const payload = JSON.parse(result.stdout);
-  assert.deepEqual(
-    payload.events.map((event) => event.type),
-    ["release", "environment", "issue", "log", "span", "action"]
-  );
-  assert.deepEqual(JSON.parse(result.stderr), {
-    ok: true,
-    status: 202,
-    attempts: 1,
-    events: 6
-  });
+  assertEventTypes(payload);
+  assertSuccessSummary(JSON.parse(result.stderr));
 });
 
 test("repo checkout launcher default runs the ESM smoke example", () => {
@@ -652,16 +707,8 @@ test("repo checkout launcher default runs the ESM smoke example", () => {
   assert.equal(result.status, 0);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.sdk.name, "smoke-app");
-  assert.deepEqual(
-    payload.events.map((event) => event.type),
-    ["release", "environment", "issue", "log", "span", "action"]
-  );
-  assert.deepEqual(JSON.parse(result.stderr), {
-    ok: true,
-    status: 202,
-    attempts: 1,
-    events: 6
-  });
+  assertEventTypes(payload);
+  assertSuccessSummary(JSON.parse(result.stderr));
 });
 
 test("repo checkout npm helper discovery lists available scripts", () => {
@@ -719,16 +766,8 @@ test("repo checkout npm helper runs the ESM README example", () => {
 
   assert.equal(result.status, 0);
   const payload = parseLastJsonObject(result.stdout);
-  assert.deepEqual(
-    payload.events.map((event) => event.type),
-    ["release", "environment", "issue", "log", "span", "action"]
-  );
-  assert.deepEqual(parseLastJsonLine(result.stderr), {
-    ok: true,
-    status: 202,
-    attempts: 1,
-    events: 6
-  });
+  assertEventTypes(payload);
+  assertSuccessSummary(parseLastJsonLine(result.stderr));
 });
 
 test("repo checkout npm helper runs the ESM smoke example", () => {
@@ -740,16 +779,8 @@ test("repo checkout npm helper runs the ESM smoke example", () => {
   assert.equal(result.status, 0);
   const payload = parseLastJsonObject(result.stdout);
   assert.equal(payload.sdk.name, "smoke-app");
-  assert.deepEqual(
-    payload.events.map((event) => event.type),
-    ["release", "environment", "issue", "log", "span", "action"]
-  );
-  assert.deepEqual(parseLastJsonLine(result.stderr), {
-    ok: true,
-    status: 202,
-    attempts: 1,
-    events: 6
-  });
+  assertEventTypes(payload);
+  assertSuccessSummary(parseLastJsonLine(result.stderr));
 });
 
 test("repo checkout npm helper runs the CommonJS README example", () => {
@@ -760,16 +791,8 @@ test("repo checkout npm helper runs the CommonJS README example", () => {
 
   assert.equal(result.status, 0);
   const payload = parseLastJsonObject(result.stdout);
-  assert.deepEqual(
-    payload.events.map((event) => event.type),
-    ["release", "environment", "issue", "log", "span", "action"]
-  );
-  assert.deepEqual(parseLastJsonLine(result.stderr), {
-    ok: true,
-    status: 202,
-    attempts: 1,
-    events: 6
-  });
+  assertEventTypes(payload);
+  assertSuccessSummary(parseLastJsonLine(result.stderr));
 });
 
 test("repo checkout npm helper runs the CommonJS smoke example", () => {
@@ -781,16 +804,8 @@ test("repo checkout npm helper runs the CommonJS smoke example", () => {
   assert.equal(result.status, 0);
   const payload = parseLastJsonObject(result.stdout);
   assert.equal(payload.sdk.name, "smoke-app-cjs");
-  assert.deepEqual(
-    payload.events.map((event) => event.type),
-    ["release", "environment", "issue", "log", "span", "action"]
-  );
-  assert.deepEqual(parseLastJsonLine(result.stderr), {
-    ok: true,
-    status: 202,
-    attempts: 1,
-    events: 6
-  });
+  assertEventTypes(payload);
+  assertSuccessSummary(parseLastJsonLine(result.stderr));
 });
 
 test("repo checkout pnpm helper runs the CommonJS smoke example", () => {
@@ -801,13 +816,8 @@ test("repo checkout pnpm helper runs the CommonJS smoke example", () => {
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /"name": "smoke-app-cjs"/);
-  assert.match(result.stdout, /"type": "release"/);
-  assert.match(result.stdout, /"type": "environment"/);
-  assert.match(result.stdout, /"type": "issue"/);
-  assert.match(result.stdout, /"type": "log"/);
-  assert.match(result.stdout, /"type": "span"/);
-  assert.match(result.stdout, /"type": "action"/);
-  assert.match(`${result.stdout}${result.stderr}`, /\{"ok":true,"status":202,"attempts":1,"events":6\}/);
+  assertOutputIncludesEventTypes(result.stdout);
+  assertCompactSuccessSummary(`${result.stdout}${result.stderr}`);
 });
 
 test("repo checkout pnpm helper discovery lists available scripts", () => {
@@ -863,13 +873,8 @@ test("repo checkout pnpm helper runs the CommonJS README example", () => {
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /"name": "logbrew-js"/);
-  assert.match(result.stdout, /"type": "release"/);
-  assert.match(result.stdout, /"type": "environment"/);
-  assert.match(result.stdout, /"type": "issue"/);
-  assert.match(result.stdout, /"type": "log"/);
-  assert.match(result.stdout, /"type": "span"/);
-  assert.match(result.stdout, /"type": "action"/);
-  assert.match(`${result.stdout}${result.stderr}`, /\{"ok":true,"status":202,"attempts":1,"events":6\}/);
+  assertOutputIncludesEventTypes(result.stdout);
+  assertCompactSuccessSummary(`${result.stdout}${result.stderr}`);
 });
 
 test("repo checkout pnpm helper runs the ESM README example", () => {
@@ -880,13 +885,8 @@ test("repo checkout pnpm helper runs the ESM README example", () => {
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /"name": "logbrew-js"/);
-  assert.match(result.stdout, /"type": "release"/);
-  assert.match(result.stdout, /"type": "environment"/);
-  assert.match(result.stdout, /"type": "issue"/);
-  assert.match(result.stdout, /"type": "log"/);
-  assert.match(result.stdout, /"type": "span"/);
-  assert.match(result.stdout, /"type": "action"/);
-  assert.match(`${result.stdout}${result.stderr}`, /\{"ok":true,"status":202,"attempts":1,"events":6\}/);
+  assertOutputIncludesEventTypes(result.stdout);
+  assertCompactSuccessSummary(`${result.stdout}${result.stderr}`);
 });
 
 test("repo checkout pnpm helper runs the ESM smoke example", () => {
@@ -897,11 +897,6 @@ test("repo checkout pnpm helper runs the ESM smoke example", () => {
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /"name": "smoke-app"/);
-  assert.match(result.stdout, /"type": "release"/);
-  assert.match(result.stdout, /"type": "environment"/);
-  assert.match(result.stdout, /"type": "issue"/);
-  assert.match(result.stdout, /"type": "log"/);
-  assert.match(result.stdout, /"type": "span"/);
-  assert.match(result.stdout, /"type": "action"/);
-  assert.match(`${result.stdout}${result.stderr}`, /\{"ok":true,"status":202,"attempts":1,"events":6\}/);
+  assertOutputIncludesEventTypes(result.stdout);
+  assertCompactSuccessSummary(`${result.stdout}${result.stderr}`);
 });
