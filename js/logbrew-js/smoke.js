@@ -36,19 +36,11 @@ client.action("evt_action_001", "2026-06-02T10:00:05Z", {
   name: "deploy",
   status: "success"
 });
-client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
-  name: "checkout.requests",
-  kind: "counter",
-  value: 42,
-  unit: "{request}",
-  temporality: "delta",
-  metadata: { service: "checkout" }
-});
 
 process.stdout.write(`${client.previewJson()}\n`);
 
 const transport = RecordingTransport.alwaysAccept();
 const response = await client.shutdown(transport);
 process.stderr.write(
-  `${JSON.stringify({ ok: true, status: response.statusCode, attempts: response.attempts, events: 7 })}\n`
+  `${JSON.stringify({ ok: true, status: response.statusCode, attempts: response.attempts, events: 6 })}\n`
 );

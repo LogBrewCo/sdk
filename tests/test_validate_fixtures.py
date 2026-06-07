@@ -19,6 +19,21 @@ class ValidateFixturesTests(unittest.TestCase):
     def load_valid_payload(self) -> dict:
         return json.loads((ROOT / "fixtures" / "valid-batch.json").read_text())
 
+    def metric_event(self) -> dict:
+        return {
+            "type": "metric",
+            "timestamp": "2026-06-02T10:00:06Z",
+            "id": "evt_metric_001",
+            "attributes": {
+                "name": "checkout.requests",
+                "kind": "counter",
+                "value": 42,
+                "unit": "{request}",
+                "temporality": "delta",
+                "metadata": {"service": "checkout"},
+            },
+        }
+
     def test_valid_fixture_passes(self) -> None:
         payload = self.load_valid_payload()
         validate_payload(payload)
@@ -81,8 +96,14 @@ class ValidateFixturesTests(unittest.TestCase):
         ):
             validate_payload(payload)
 
+    def test_metric_event_passes(self) -> None:
+        payload = self.load_valid_payload()
+        payload["events"].append(self.metric_event())
+        validate_payload(payload)
+
     def test_rejects_boolean_metric_value(self) -> None:
         payload = self.load_valid_payload()
+        payload["events"].append(self.metric_event())
         payload["events"][6]["attributes"]["value"] = True
         with self.assertRaisesRegex(
             ValidationError,
@@ -92,6 +113,7 @@ class ValidateFixturesTests(unittest.TestCase):
 
     def test_rejects_negative_counter_value(self) -> None:
         payload = self.load_valid_payload()
+        payload["events"].append(self.metric_event())
         payload["events"][6]["attributes"]["value"] = -1
         with self.assertRaisesRegex(
             ValidationError,
@@ -101,6 +123,7 @@ class ValidateFixturesTests(unittest.TestCase):
 
     def test_rejects_metric_temporality_for_kind(self) -> None:
         payload = self.load_valid_payload()
+        payload["events"].append(self.metric_event())
         payload["events"][6]["attributes"]["kind"] = "gauge"
         payload["events"][6]["attributes"]["temporality"] = "delta"
         with self.assertRaisesRegex(

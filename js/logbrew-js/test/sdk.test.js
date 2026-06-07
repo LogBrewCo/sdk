@@ -20,7 +20,7 @@ import {
   TransportError
 } from "../index.js";
 
-const SUPPORTED_EVENT_TYPES = ["release", "environment", "issue", "log", "span", "action", "metric"];
+const SUPPORTED_EVENT_TYPES = ["release", "environment", "issue", "log", "span", "action"];
 const EXPECTED_EVENT_COUNT = SUPPORTED_EVENT_TYPES.length;
 
 function parseLastJsonObject(text) {
@@ -107,14 +107,6 @@ function enqueueAll(client) {
   client.action("evt_action_001", "2026-06-02T10:00:05Z", {
     name: "deploy",
     status: "success"
-  });
-  client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
-    name: "checkout.requests",
-    kind: "counter",
-    value: 42,
-    unit: "{request}",
-    temporality: "delta",
-    metadata: { service: "checkout" }
   });
 }
 

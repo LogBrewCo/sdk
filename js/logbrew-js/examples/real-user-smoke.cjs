@@ -47,20 +47,12 @@ client.action("evt_action_001", "2026-06-02T10:00:05Z", {
   name: "deploy",
   status: "success"
 });
-client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
-  name: "checkout.requests",
-  kind: "counter",
-  value: 42,
-  unit: "{request}",
-  temporality: "delta",
-  metadata: { service: "checkout" }
-});
 
 console.log(client.previewJson());
 
 const transport = RecordingTransport.alwaysAccept();
 client.shutdown(transport).then((response) => {
-  console.error(JSON.stringify({ ok: true, status: response.statusCode, attempts: response.attempts, events: 7 }));
+  console.error(JSON.stringify({ ok: true, status: response.statusCode, attempts: response.attempts, events: 6 }));
 }).catch((error) => {
   console.error(error);
   process.exit(1);
