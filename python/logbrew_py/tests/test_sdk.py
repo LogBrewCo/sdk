@@ -148,6 +148,85 @@ class LogBrewSdkTests(unittest.TestCase):
                 },
             )
 
+    def test_metric_event_validates_explicit_contract(self) -> None:
+        client = sample_client()
+
+        client.metric(
+            "evt_metric_001",
+            "2026-06-02T10:00:06Z",
+            {
+                "name": "queue.depth",
+                "kind": "gauge",
+                "value": -2,
+                "unit": "{items}",
+                "temporality": "instant",
+                "metadata": {"service": "worker", "queue": "critical"},
+            },
+        )
+
+        payload = json.loads(client.preview_json())
+        event = payload["events"][0]
+        self.assertEqual(event["type"], "metric")
+        self.assertEqual(
+            event["attributes"],
+            {
+                "name": "queue.depth",
+                "kind": "gauge",
+                "value": -2,
+                "unit": "{items}",
+                "temporality": "instant",
+                "metadata": {"service": "worker", "queue": "critical"},
+            },
+        )
+
+    def test_metric_rejects_non_finite_value(self) -> None:
+        client = sample_client()
+
+        with self.assertRaisesRegex(SdkError, "metric value must be a finite number"):
+            client.metric(
+                "evt_metric_001",
+                "2026-06-02T10:00:06Z",
+                {
+                    "name": "queue.depth",
+                    "kind": "gauge",
+                    "value": float("nan"),
+                    "unit": "{items}",
+                    "temporality": "instant",
+                },
+            )
+
+    def test_metric_rejects_negative_counter_value(self) -> None:
+        client = sample_client()
+
+        with self.assertRaisesRegex(SdkError, "metric counter value must be non-negative"):
+            client.metric(
+                "evt_metric_001",
+                "2026-06-02T10:00:06Z",
+                {
+                    "name": "jobs.completed",
+                    "kind": "counter",
+                    "value": -1,
+                    "unit": "1",
+                    "temporality": "delta",
+                },
+            )
+
+    def test_metric_rejects_invalid_temporality_for_kind(self) -> None:
+        client = sample_client()
+
+        with self.assertRaisesRegex(SdkError, "metric temporality for gauge must be one of: instant"):
+            client.metric(
+                "evt_metric_001",
+                "2026-06-02T10:00:06Z",
+                {
+                    "name": "queue.depth",
+                    "kind": "gauge",
+                    "value": 2,
+                    "unit": "{items}",
+                    "temporality": "delta",
+                },
+            )
+
     def test_traceparent_helpers_parse_create_and_continue_w3c_trace_context(self) -> None:
         traceparent = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01"
         context = parse_traceparent(traceparent)

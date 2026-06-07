@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Any, Protocol, TypeAlias, TypedDict
+from typing import Annotated, Any, Literal, Protocol, TypeAlias, TypedDict
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -65,6 +66,16 @@ class ActionAttributes(TypedDict, total=False):
     metadata: Metadata
 
 
+class MetricAttributes(TypedDict, total=False):
+    """Public metric event attributes."""
+    name: str
+    kind: Literal["counter", "gauge", "histogram"]
+    value: float
+    unit: str
+    temporality: Literal["delta", "cumulative", "instant"]
+    metadata: Metadata
+
+
 class ScriptedTransportResponse(TypedDict):
     status_code: int
 
@@ -80,6 +91,13 @@ ISSUE_LEVELS = {"info", "warning", "error", "critical"}
 LOG_LEVELS = {"debug", "info", "warning", "error"}
 SPAN_STATUSES = {"ok", "error"}
 ACTION_STATUSES = {"queued", "running", "success", "failure"}
+METRIC_TEMPORALITIES_BY_KIND = {
+    "counter": {"delta", "cumulative"},
+    "gauge": {"instant"},
+    "histogram": {"delta", "cumulative"},
+}
+METRIC_KINDS = set(METRIC_TEMPORALITIES_BY_KIND)
+NON_NEGATIVE_METRIC_KINDS = {"counter", "histogram"}
 DEFAULT_HTTP_ENDPOINT = "https://api.logbrew.com/v1/events"
 TRACEPARENT_PATTERN = re.compile(r"^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$")
 ZERO_TRACE_ID = "00000000000000000000000000000000"
@@ -279,6 +297,9 @@ class LogBrewClient:
 
     def action(self, event_id: str, timestamp: str, attributes: ActionAttributes) -> None:
         self._push_event("action", event_id, timestamp, validate_action(attributes))
+
+    def metric(self, event_id: str, timestamp: str, attributes: MetricAttributes) -> None:
+        self._push_event("metric", event_id, timestamp, validate_metric(attributes))
 
     def flush(self, transport: Transport) -> TransportResponse:
         """Flush queued events through a transport while preserving retry semantics."""
@@ -616,6 +637,11 @@ def require_allowed_value(label: str, value: Any, allowed_values: set[str]) -> N
         raise SdkError("validation_error", f"{label} must be one of: {allowed}")
 
 
+def require_finite_number(label: str, value: Any) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise SdkError("validation_error", f"{label} must be a finite number")
+
+
 def require_timestamp(timestamp: Any) -> None:
     require_non_empty("timestamp", timestamp)
     if timestamp.endswith("Z"):
@@ -733,6 +759,32 @@ def validate_action(attributes: ActionAttributes) -> dict[str, Any]:
     )
 
 
+def validate_metric(attributes: MetricAttributes) -> dict[str, Any]:
+    require_non_empty("metric name", attributes.get("name"))
+    require_allowed_value("metric kind", attributes.get("kind"), METRIC_KINDS)
+    require_finite_number("metric value", attributes.get("value"))
+    require_non_empty("metric unit", attributes.get("unit"))
+    kind = attributes["kind"]
+    value = attributes["value"]
+    require_allowed_value(
+        f"metric temporality for {kind}",
+        attributes.get("temporality"),
+        METRIC_TEMPORALITIES_BY_KIND[kind],
+    )
+    if kind in NON_NEGATIVE_METRIC_KINDS and value < 0:
+        raise SdkError("validation_error", f"metric {kind} value must be non-negative")
+    return with_metadata(
+        {
+            "name": attributes["name"],
+            "kind": kind,
+            "value": value,
+            "unit": attributes["unit"],
+            "temporality": attributes["temporality"],
+        },
+        attributes.get("metadata"),
+    )
+
+
 __all__ = [
     "ActionAttributes",
     "EnvironmentAttributes",
@@ -741,6 +793,7 @@ __all__ = [
     "LogAttributes",
     "LogBrewClient",
     "LogBrewLoggingHandler",
+    "MetricAttributes",
     "Metadata",
     "MetadataValue",
     "RecordingTransport",

@@ -443,6 +443,10 @@ log_doc = inspect.getdoc(logbrew_sdk.LogAttributes)
 if log_doc != "Public log event attributes.":
     raise SystemExit(f"unexpected LogAttributes docstring: {log_doc!r}")
 
+metric_doc = inspect.getdoc(logbrew_sdk.MetricAttributes)
+if metric_doc != "Public metric event attributes.":
+    raise SystemExit(f"unexpected MetricAttributes docstring: {metric_doc!r}")
+
 span_doc = inspect.getdoc(logbrew_sdk.SpanAttributes)
 if span_doc != "Public span event attributes.":
     raise SystemExit(f"unexpected SpanAttributes docstring: {span_doc!r}")
@@ -607,6 +611,7 @@ from logbrew_sdk import (
     LogAttributes,
     LogBrewClient,
     LogBrewLoggingHandler,
+    MetricAttributes,
     RecordingTransport,
     ReleaseAttributes,
     SpanAttributes,
@@ -635,6 +640,14 @@ log: LogAttributes = {
     "message": "worker started",
     "level": "info",
     "logger": "job-runner",
+}
+metric: MetricAttributes = {
+    "name": "queue.depth",
+    "kind": "gauge",
+    "value": 42,
+    "unit": "{items}",
+    "temporality": "instant",
+    "metadata": {"service": "worker"},
 }
 span: SpanAttributes = {
     "name": "GET /health",
@@ -673,6 +686,7 @@ client.log("evt_log_001", "2026-06-02T10:00:03Z", log)
 client.span("evt_span_001", "2026-06-02T10:00:04Z", span)
 client.span("evt_span_002", "2026-06-02T10:00:04Z", continued_span)
 client.action("evt_action_001", "2026-06-02T10:00:05Z", action)
+client.metric("evt_metric_001", "2026-06-02T10:00:06Z", metric)
 response: TransportResponse = client.flush(RecordingTransport.always_accept())
 if response.status_code != 202:
     raise RuntimeError("unexpected status")
@@ -724,6 +738,28 @@ class InstalledUserTest(unittest.TestCase):
         )
         payload = client.preview_json()
         self.assertIn('"type": "release"', payload)
+
+    def test_preview_contains_metric(self) -> None:
+        client = LogBrewClient.create(
+            api_key="LOGBREW_API_KEY",
+            sdk_name="smoke-app-test",
+            sdk_version="0.1.0",
+        )
+        client.metric(
+            "evt_metric_test",
+            "2026-06-02T10:00:06Z",
+            {
+                "name": "queue.depth",
+                "kind": "gauge",
+                "value": 42,
+                "unit": "{items}",
+                "temporality": "instant",
+                "metadata": {"service": "worker"},
+            },
+        )
+        payload = client.preview_json()
+        self.assertIn('"type": "metric"', payload)
+        self.assertIn('"temporality": "instant"', payload)
 
 
 if __name__ == "__main__":
