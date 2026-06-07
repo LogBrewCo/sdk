@@ -26,6 +26,7 @@ go doc github.com/LogBrewCo/sdk/go/logbrew EnvironmentAttributes
 go doc github.com/LogBrewCo/sdk/go/logbrew IssueAttributes
 go doc github.com/LogBrewCo/sdk/go/logbrew LogAttributes
 go doc github.com/LogBrewCo/sdk/go/logbrew SpanAttributes
+go doc github.com/LogBrewCo/sdk/go/logbrew MetricAttributes
 go doc github.com/LogBrewCo/sdk/go/logbrew TraceparentContext
 go doc github.com/LogBrewCo/sdk/go/logbrew TraceparentSpanInput
 go doc github.com/LogBrewCo/sdk/go/logbrew ParseTraceparent
@@ -49,6 +50,7 @@ go doc github.com/LogBrewCo/sdk/go/logbrew Client.PendingEvents
 go doc github.com/LogBrewCo/sdk/go/logbrew Client.PreviewJSON
 go doc github.com/LogBrewCo/sdk/go/logbrew Client.Flush
 go doc github.com/LogBrewCo/sdk/go/logbrew Client.Shutdown
+go doc github.com/LogBrewCo/sdk/go/logbrew Client.Metric
 ```
 
 ## Example
@@ -128,6 +130,23 @@ func must(err error) {
 ```
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in local examples and tests. Call `Flush` or `Shutdown` to send queued events through a transport, and use `PreviewJSON` when you want a stable local JSON preview without sending anything.
+
+## Metrics
+
+Use `Metric` for explicit, application-owned measurements. LogBrew validates the metric name, kind, value, unit, temporality, and optional metadata before queueing the event:
+
+```go
+must(client.Metric("evt_metric_queue_depth", "2026-06-02T10:00:06Z", logbrew.MetricAttributes{
+  Name:        "queue.depth",
+  Kind:        "gauge",
+  Value:       42,
+  Unit:        "{items}",
+  Temporality: "instant",
+  Metadata:    map[string]any{"service": "worker"},
+}))
+```
+
+Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality and may be negative. Keep metadata low-cardinality and primitive. This SDK does not automatically collect runtime or framework metrics yet.
 
 ## Trace Context
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -136,6 +137,95 @@ func TestNegativeSpanDurationFailsValidation(t *testing.T) {
 	duration := -1.0
 	err := client.Span("evt_span_001", "2026-06-02T10:00:04Z", SpanAttributes{Name: "GET /health", TraceID: "trace_001", SpanID: "span_001", Status: "ok", DurationMs: &duration})
 	if err == nil || !strings.Contains(err.Error(), "span durationMs must be non-negative") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMetricEventValidatesExplicitContract(t *testing.T) {
+	client := sampleClient(t)
+
+	err := client.Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes{
+		Name:        "queue.depth",
+		Kind:        "gauge",
+		Value:       -2,
+		Unit:        "{items}",
+		Temporality: "instant",
+		Metadata:    map[string]any{"service": "worker", "queue": "critical"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	events := parsed["events"].([]any)
+	event := events[0].(map[string]any)
+	attributes := event["attributes"].(map[string]any)
+	if event["type"] != "metric" {
+		t.Fatalf("unexpected event type: %#v", event["type"])
+	}
+	expected := map[string]any{
+		"name":        "queue.depth",
+		"kind":        "gauge",
+		"value":       -2.0,
+		"unit":        "{items}",
+		"temporality": "instant",
+	}
+	for key, want := range expected {
+		if attributes[key] != want {
+			t.Fatalf("unexpected metric %s: got %#v want %#v", key, attributes[key], want)
+		}
+	}
+	metadata := attributes["metadata"].(map[string]any)
+	if metadata["service"] != "worker" || metadata["queue"] != "critical" {
+		t.Fatalf("unexpected metric metadata: %#v", metadata)
+	}
+}
+
+func TestMetricRejectsNonFiniteValue(t *testing.T) {
+	client := sampleClient(t)
+	err := client.Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes{
+		Name:        "queue.depth",
+		Kind:        "gauge",
+		Value:       math.NaN(),
+		Unit:        "{items}",
+		Temporality: "instant",
+	})
+	if err == nil || !strings.Contains(err.Error(), "metric value must be a finite number") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMetricRejectsNegativeCounterValue(t *testing.T) {
+	client := sampleClient(t)
+	err := client.Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes{
+		Name:        "jobs.completed",
+		Kind:        "counter",
+		Value:       -1,
+		Unit:        "1",
+		Temporality: "delta",
+	})
+	if err == nil || !strings.Contains(err.Error(), "metric counter value must be non-negative") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMetricRejectsInvalidTemporalityForKind(t *testing.T) {
+	client := sampleClient(t)
+	err := client.Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes{
+		Name:        "queue.depth",
+		Kind:        "gauge",
+		Value:       2,
+		Unit:        "{items}",
+		Temporality: "delta",
+	})
+	if err == nil || !strings.Contains(err.Error(), "metric temporality for gauge must be one of: instant") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

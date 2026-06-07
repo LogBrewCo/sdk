@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -14,10 +15,17 @@ import (
 )
 
 var (
-	issueLevels  = []string{"info", "warning", "error", "critical"}
-	logLevels    = []string{"debug", "info", "warning", "error"}
-	spanStatuses = []string{"ok", "error"}
-	actionStatus = []string{"queued", "running", "success", "failure"}
+	issueLevels               = []string{"info", "warning", "error", "critical"}
+	logLevels                 = []string{"debug", "info", "warning", "error"}
+	spanStatuses              = []string{"ok", "error"}
+	actionStatus              = []string{"queued", "running", "success", "failure"}
+	metricKinds               = []string{"counter", "gauge", "histogram"}
+	metricTemporalitiesByKind = map[string][]string{
+		"counter":   {"delta", "cumulative"},
+		"gauge":     {"instant"},
+		"histogram": {"delta", "cumulative"},
+	}
+	nonNegativeMetricKinds = []string{"counter", "histogram"}
 )
 
 const (
@@ -404,6 +412,17 @@ type ActionAttributes struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+// MetricAttributes describes the public payload fields for an explicit metric
+// event.
+type MetricAttributes struct {
+	Name        string         `json:"name"`
+	Kind        string         `json:"kind"`
+	Value       float64        `json:"value"`
+	Unit        string         `json:"unit"`
+	Temporality string         `json:"temporality"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
 func (c *Client) Release(id, timestamp string, attributes ReleaseAttributes) error {
 	validated, err := validateRelease(attributes)
 	if err != nil {
@@ -450,6 +469,16 @@ func (c *Client) Action(id, timestamp string, attributes ActionAttributes) error
 		return err
 	}
 	return c.pushEvent("action", id, timestamp, validated)
+}
+
+// Metric queues an explicit, application-owned metric event after validating
+// name, kind, value, unit, temporality, and optional metadata.
+func (c *Client) Metric(id, timestamp string, attributes MetricAttributes) error {
+	validated, err := validateMetric(attributes)
+	if err != nil {
+		return err
+	}
+	return c.pushEvent("metric", id, timestamp, validated)
 }
 
 func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[string]any) error {
@@ -839,6 +868,42 @@ func validateAction(attributes ActionAttributes) (map[string]any, error) {
 		return nil, err
 	}
 	result := map[string]any{"name": attributes.Name, "status": attributes.Status}
+	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
+		result["metadata"] = metadata
+	}
+	return result, nil
+}
+
+func validateMetric(attributes MetricAttributes) (map[string]any, error) {
+	if err := requireNonEmpty("metric name", attributes.Name); err != nil {
+		return nil, err
+	}
+	if err := requireAllowedValue("metric kind", attributes.Kind, metricKinds); err != nil {
+		return nil, err
+	}
+	if math.IsNaN(attributes.Value) || math.IsInf(attributes.Value, 0) {
+		return nil, &SdkError{Code: "validation_error", Message: "metric value must be a finite number"}
+	}
+	if err := requireNonEmpty("metric unit", attributes.Unit); err != nil {
+		return nil, err
+	}
+	if err := requireAllowedValue(
+		fmt.Sprintf("metric temporality for %s", attributes.Kind),
+		attributes.Temporality,
+		metricTemporalitiesByKind[attributes.Kind],
+	); err != nil {
+		return nil, err
+	}
+	if slices.Contains(nonNegativeMetricKinds, attributes.Kind) && attributes.Value < 0 {
+		return nil, &SdkError{Code: "validation_error", Message: fmt.Sprintf("metric %s value must be non-negative", attributes.Kind)}
+	}
+	result := map[string]any{
+		"name":        attributes.Name,
+		"kind":        attributes.Kind,
+		"value":       attributes.Value,
+		"unit":        attributes.Unit,
+		"temporality": attributes.Temporality,
+	}
 	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
 		result["metadata"] = metadata
 	}

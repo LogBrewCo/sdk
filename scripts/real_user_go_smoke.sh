@@ -108,6 +108,8 @@ for needle in (
     "SpanAttributesFromTraceparent",
     "HTTPTransport",
     "NewHTTPTransport",
+    "MetricAttributes",
+    "Client.Metric",
     "cd examples && make",
     "cd examples && make run-readme-example",
     "cd examples && make run",
@@ -499,6 +501,43 @@ func TestInstalledClientPreview(t *testing.T) {
 	}
 }
 
+func TestInstalledClientMetricPreview(t *testing.T) {
+	client, err := logbrew.NewClient(logbrew.Config{
+		APIKey:     "LOGBREW_API_KEY",
+		SDKName:    "smoke-app-test",
+		SDKVersion: "0.1.0",
+	})
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+
+	if err := client.Metric(
+		"evt_metric_test",
+		"2026-06-02T10:00:06Z",
+		logbrew.MetricAttributes{
+			Name:        "queue.depth",
+			Kind:        "gauge",
+			Value:       42,
+			Unit:        "{items}",
+			Temporality: "instant",
+			Metadata:    map[string]any{"service": "worker"},
+		},
+	); err != nil {
+		t.Fatalf("queue metric: %v", err)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatalf("preview json: %v", err)
+	}
+	if !strings.Contains(payload, "\"type\": \"metric\"") {
+		t.Fatalf("preview missing metric event: %s", payload)
+	}
+	if !strings.Contains(payload, "\"temporality\": \"instant\"") {
+		t.Fatalf("preview missing metric temporality: %s", payload)
+	}
+}
+
 func TestInstalledTraceparentHelpers(t *testing.T) {
 	traceparent := "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01"
 	context, err := logbrew.ParseTraceparent(traceparent)
@@ -818,6 +857,10 @@ GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SpanAttributes 
 grep -q '^type SpanAttributes struct {' span-attributes-doc.txt
 grep -q 'SpanAttributes describes the public payload fields for a span' span-attributes-doc.txt
 grep -q 'event' span-attributes-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.MetricAttributes > metric-attributes-doc.txt
+grep -q '^type MetricAttributes struct {' metric-attributes-doc.txt
+grep -q 'MetricAttributes describes the public payload fields for an explicit metric' metric-attributes-doc.txt
+grep -q 'event' metric-attributes-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.TraceparentContext > traceparent-context-doc.txt
 grep -q '^type TraceparentContext struct {' traceparent-context-doc.txt
 grep -q 'TraceparentContext describes an incoming W3C traceparent header after' traceparent-context-doc.txt
@@ -924,6 +967,10 @@ grep -Fq 'func (c *Client) Shutdown(transport Transport) (*TransportResponse, er
 grep -q 'Shutdown flushes queued events, then marks the client closed so later' shutdown-doc.txt
 grep -q 'writes' shutdown-doc.txt
 grep -q 'fail' shutdown-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Client.Metric > metric-doc.txt
+grep -Fq 'func (c *Client) Metric(id, timestamp string, attributes MetricAttributes) error' metric-doc.txt
+grep -q 'Metric queues an explicit, application-owned metric event after validating' metric-doc.txt
+grep -q 'name, kind, value, unit, temporality, and optional metadata' metric-doc.txt
 GOFLAGS=-mod=readonly go list -deps -json ./... > dependency-list.json
 python3 - <<'PY'
 import json
