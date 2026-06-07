@@ -90,6 +90,8 @@ for needle in (
     "dotnet add package LogBrew",
     "LOGBREW_API_KEY",
     "PreviewJson()",
+    "MetricAttributes",
+    "This SDK does not automatically collect CLR, runtime, or framework metrics yet.",
     "HttpTransport",
     "System.Net.Http",
     "AddLogBrew(client",
@@ -287,6 +289,34 @@ if (empty.StatusCode != 204 || empty.Attempts != 0)
     throw new InvalidOperationException("unexpected empty flush");
 }
 
+var metrics = NewClient();
+metrics.Metric(
+    "evt_metric_queue_depth",
+    "2026-06-02T10:00:06Z",
+    MetricAttributes.Create("queue.depth", "gauge", -2.0, "{items}", "instant")
+        .WithMetadata(new Dictionary<string, object?> { ["service"] = "worker", ["queue"] = "default" }));
+var metricPayload = metrics.PreviewJson();
+Require(metrics.PendingEvents() == 1, "metric queues one event");
+Require(metricPayload.Contains("\"type\": \"metric\"", StringComparison.Ordinal), "metric event type");
+Require(metricPayload.Contains("\"name\": \"queue.depth\"", StringComparison.Ordinal), "metric name");
+Require(metricPayload.Contains("\"kind\": \"gauge\"", StringComparison.Ordinal), "metric kind");
+Require(metricPayload.Contains("\"value\": -2", StringComparison.Ordinal), "metric value");
+Require(metricPayload.Contains("\"unit\": \"{items}\"", StringComparison.Ordinal), "metric unit");
+Require(metricPayload.Contains("\"temporality\": \"instant\"", StringComparison.Ordinal), "metric temporality");
+Require(metricPayload.Contains("\"queue\": \"default\"", StringComparison.Ordinal), "metric metadata");
+Expect("validation_error", () => metrics.Metric(
+    "evt_metric_invalid_value",
+    "2026-06-02T10:00:06Z",
+    MetricAttributes.Create("queue.depth", "gauge", double.NaN, "{items}", "instant")));
+Expect("validation_error", () => metrics.Metric(
+    "evt_metric_invalid_counter",
+    "2026-06-02T10:00:06Z",
+    MetricAttributes.Create("jobs.completed", "counter", -1.0, "1", "delta")));
+Expect("validation_error", () => metrics.Metric(
+    "evt_metric_invalid_temporality",
+    "2026-06-02T10:00:06Z",
+    MetricAttributes.Create("queue.depth", "gauge", 2.0, "{items}", "delta")));
+
 Expect("validation_error", () => happy.Log("evt_bad", "2026-06-02T10:00:03", LogAttributes.Create("worker started", "info")));
 
 var unauthenticated = NewClient();
@@ -362,6 +392,7 @@ Expect("shutdown_error", () => closed.Action("evt_action_002", "2026-06-02T10:00
 Console.Error.WriteLine(
     "{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"httpAttempts\":"
     + httpAttempts.ToString(CultureInfo.InvariantCulture)
+    + ",\"metricEvents\":1"
     + ",\"httpRequests\":"
     + httpRequests.ToString(CultureInfo.InvariantCulture)
     + "}");
@@ -512,6 +543,7 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke-app.stdout.jso
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 
 echo "dotnet real-user smoke passed"

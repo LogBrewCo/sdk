@@ -75,6 +75,8 @@ for needle in (
     "dotnet add package LogBrew",
     "LOGBREW_API_KEY",
     "PreviewJson()",
+    "MetricAttributes",
+    "This SDK does not automatically collect CLR, runtime, or framework metrics yet.",
     "HttpTransport",
     "System.Net.Http",
     "AddLogBrew(client",

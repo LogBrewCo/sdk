@@ -92,6 +92,32 @@ ExpectSdkError("validation_error", "span durationMs must be non-negative", () =>
     SampleClient().Span("evt_span_001", "2026-06-02T10:00:04Z", SpanAttributes.Create("GET /health", "trace_001", "span_001", "ok").WithDurationMs(-1)));
 tests++;
 
+var metricClient = SampleClient();
+metricClient.Metric(
+    "evt_metric_001",
+    "2026-06-02T10:00:06Z",
+    MetricAttributes.Create("queue.depth", "gauge", -2.0, "{items}", "instant")
+        .WithMetadata(new Dictionary<string, object?> { ["service"] = "worker", ["queue"] = "default" }));
+var metricPreview = metricClient.PreviewJson();
+AssertTrue(metricClient.PendingEvents() == 1, "expected metric to queue one event");
+AssertTrue(metricPreview.Contains("\"type\": \"metric\"", StringComparison.Ordinal), "expected metric event type");
+AssertTrue(metricPreview.Contains("\"name\": \"queue.depth\"", StringComparison.Ordinal), "expected metric name");
+AssertTrue(metricPreview.Contains("\"kind\": \"gauge\"", StringComparison.Ordinal), "expected metric kind");
+AssertTrue(metricPreview.Contains("\"value\": -2", StringComparison.Ordinal), "expected gauge value");
+AssertTrue(metricPreview.Contains("\"unit\": \"{items}\"", StringComparison.Ordinal), "expected metric unit");
+AssertTrue(metricPreview.Contains("\"temporality\": \"instant\"", StringComparison.Ordinal), "expected metric temporality");
+AssertTrue(metricPreview.Contains("\"service\": \"worker\"", StringComparison.Ordinal), "expected metric metadata");
+AssertTrue(metricPreview.Contains("\"queue\": \"default\"", StringComparison.Ordinal), "expected metric metadata label");
+tests++;
+
+ExpectSdkError("validation_error", "metric value must be a finite number", () =>
+    SampleClient().Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes.Create("queue.depth", "gauge", double.NaN, "{items}", "instant")));
+ExpectSdkError("validation_error", "metric counter value must be non-negative", () =>
+    SampleClient().Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes.Create("jobs.completed", "counter", -1.0, "1", "delta")));
+ExpectSdkError("validation_error", "metric temporality for gauge must be one of", () =>
+    SampleClient().Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes.Create("queue.depth", "gauge", 2.0, "{items}", "delta")));
+tests++;
+
 var unauthorizedClient = SampleClient();
 EnqueueAll(unauthorizedClient);
 ExpectSdkError("unauthenticated", "transport rejected the API key", () =>

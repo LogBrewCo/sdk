@@ -629,6 +629,9 @@ namespace LogBrew
         internal static readonly string[] LogLevels = { "debug", "info", "warning", "error" };
         internal static readonly string[] SpanStatuses = { "ok", "error" };
         internal static readonly string[] ActionStatuses = { "queued", "running", "success", "failure" };
+        internal static readonly string[] MetricKinds = { "counter", "gauge", "histogram" };
+        internal static readonly string[] DeltaCumulativeTemporalities = { "delta", "cumulative" };
+        internal static readonly string[] InstantTemporality = { "instant" };
 
         private readonly string apiKey;
         private readonly OrderedJsonObject sdk;
@@ -695,6 +698,11 @@ namespace LogBrew
         public void Span(string id, string timestamp, SpanAttributes attributes)
         {
             PushEvent("span", id, timestamp, attributes.ToJsonObject());
+        }
+
+        public void Metric(string id, string timestamp, MetricAttributes attributes)
+        {
+            PushEvent("metric", id, timestamp, attributes.ToJsonObject());
         }
 
         public void Action(string id, string timestamp, ActionAttributes attributes)
@@ -857,6 +865,14 @@ namespace LogBrew
             if (!allowedValues.Contains(value))
             {
                 throw new SdkException("validation_error", label + " must be one of: " + string.Join(", ", allowedValues));
+            }
+        }
+
+        internal static void RequireFiniteNumber(string label, double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value))
+            {
+                throw new SdkException("validation_error", label + " must be a finite number");
             }
         }
 

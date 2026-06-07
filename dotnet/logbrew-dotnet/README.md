@@ -41,6 +41,24 @@ TransportResponse response = client.Shutdown(RecordingTransport.AlwaysAccept());
 Console.Error.WriteLine(response.StatusCode);
 ```
 
+## Explicit Metrics
+
+Use `MetricAttributes` when your application already knows the measurement it wants to report:
+
+```csharp
+using System.Collections.Generic;
+using LogBrew;
+
+var client = LogBrewClient.Create("LOGBREW_API_KEY", "my-dotnet-app", "1.0.0");
+client.Metric(
+    "evt_metric_001",
+    "2026-06-02T10:00:06Z",
+    MetricAttributes.Create("queue.depth", "gauge", 42, "{items}", "instant")
+        .WithMetadata(new Dictionary<string, object?> { ["queue"] = "default" }));
+```
+
+Metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. Prefer stable, low-cardinality primitive metadata such as service, region, queue, or route pattern. This SDK does not automatically collect CLR, runtime, or framework metrics yet.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:
