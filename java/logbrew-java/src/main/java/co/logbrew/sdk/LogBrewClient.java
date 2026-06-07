@@ -14,6 +14,9 @@ public final class LogBrewClient {
     static final String[] LOG_LEVELS = {"debug", "info", "warning", "error"};
     static final String[] SPAN_STATUSES = {"ok", "error"};
     static final String[] ACTION_STATUSES = {"queued", "running", "success", "failure"};
+    static final String[] METRIC_KINDS = {"counter", "gauge", "histogram"};
+    static final String[] DELTA_CUMULATIVE_TEMPORALITIES = {"delta", "cumulative"};
+    static final String[] INSTANT_TEMPORALITY = {"instant"};
 
     private final String apiKey;
     private final Map<String, Object> sdk;
@@ -112,6 +115,13 @@ public final class LogBrewClient {
      */
     public void action(String id, String timestamp, ActionAttributes attributes) {
         pushEvent("action", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
+    }
+
+    /**
+     * Adds an explicit, application-owned metric event to the queue.
+     */
+    public void metric(String id, String timestamp, MetricAttributes attributes) {
+        pushEvent("metric", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**

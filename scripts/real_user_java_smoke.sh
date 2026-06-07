@@ -39,6 +39,7 @@ jar --list --file "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/binary-jar-conten
 grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport\$Builder.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/MetricAttributes.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewJulHandler.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewLogbackAppender.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/Transport.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -51,6 +52,7 @@ grep -q '^pom.xml$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^README.md$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/MetricAttributes.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewJulHandler.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewLogbackAppender.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^examples/ReadmeExample.java$' "$tmp_dir/source-jar-contents.txt"
@@ -62,6 +64,8 @@ grep -q '<artifactId>logbrew-sdk</artifactId>' "$package_dir/pom.xml"
 grep -q '<version>0.1.0</version>' "$package_dir/pom.xml"
 grep -q 'LogBrewClient.create' "$package_dir/README.md"
 grep -q 'HttpTransport' "$package_dir/README.md"
+grep -q 'MetricAttributes' "$package_dir/README.md"
+grep -q 'This SDK does not automatically collect JVM, runtime, or framework metrics yet.' "$package_dir/README.md"
 grep -q 'java.net.http' "$package_dir/README.md"
 grep -q 'LogBrewJulHandler' "$package_dir/README.md"
 grep -q 'LogBrewLogbackAppender' "$package_dir/README.md"
@@ -136,6 +140,7 @@ import co.logbrew.sdk.LogAttributes;
 import co.logbrew.sdk.LogBrewClient;
 import co.logbrew.sdk.LogBrewJulHandler;
 import co.logbrew.sdk.LogBrewLogbackAppender;
+import co.logbrew.sdk.MetricAttributes;
 import co.logbrew.sdk.RecordingTransport;
 import co.logbrew.sdk.ReleaseAttributes;
 import co.logbrew.sdk.SdkException;
@@ -173,6 +178,36 @@ public final class Main {
 
         TransportResponse empty = client.flush(RecordingTransport.alwaysAccept());
         require(empty.statusCode() == 204 && empty.attempts() == 0, "empty flush");
+
+        LogBrewClient metrics = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
+        metrics.metric(
+            "evt_metric_queue_depth",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("queue.depth", "gauge", -2.0, "{items}", "instant")
+                .metadata(Collections.singletonMap("service", "worker"))
+        );
+        String metricPayload = metrics.previewJson();
+        require(metrics.pendingEvents() == 1, "metric queues one event");
+        require(metricPayload.contains("\"type\": \"metric\""), "metric event type");
+        require(metricPayload.contains("\"name\": \"queue.depth\""), "metric name");
+        require(metricPayload.contains("\"kind\": \"gauge\""), "metric kind");
+        require(metricPayload.contains("\"value\": -2.0"), "metric value");
+        require(metricPayload.contains("\"temporality\": \"instant\""), "metric temporality");
+        expect("validation_error", () -> metrics.metric(
+            "evt_metric_invalid_value",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("queue.depth", "gauge", Double.NaN, "{items}", "instant")
+        ));
+        expect("validation_error", () -> metrics.metric(
+            "evt_metric_invalid_counter",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("jobs.completed", "counter", -1.0, "1", "delta")
+        ));
+        expect("validation_error", () -> metrics.metric(
+            "evt_metric_invalid_temporality",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("queue.depth", "gauge", 2.0, "{items}", "delta")
+        ));
 
         expect("validation_error", () -> client.log(
             "evt_log_bad",
@@ -298,7 +333,7 @@ public final class Main {
 
         runHttpTransportSmoke();
 
-        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
+        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
     }
 
     private static void runHttpTransportSmoke() {
@@ -443,6 +478,7 @@ grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"logbackEvents":2' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 
 jdeps --multi-release 11 --class-path "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_logback_classpath" "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jdeps.txt"
 grep -q 'java.base' "$tmp_dir/jdeps.txt"

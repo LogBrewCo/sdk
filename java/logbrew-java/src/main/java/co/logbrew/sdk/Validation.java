@@ -83,6 +83,12 @@ final class Validation {
         }
     }
 
+    static void requireFiniteNumber(String label, double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            throw new SdkException("validation_error", label + " must be a finite number");
+        }
+    }
+
     private static SdkException timestampError(String timestamp) {
         return new SdkException("validation_error", "timestamp must include a timezone offset: " + timestamp);
     }

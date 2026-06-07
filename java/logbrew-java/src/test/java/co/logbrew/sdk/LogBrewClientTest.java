@@ -46,6 +46,10 @@ public final class LogBrewClientTest {
         testInvalidTimestampFailsValidation();
         testInvalidIssueLevelFailsValidation();
         testNegativeSpanDurationFailsValidation();
+        testMetricEventValidatesExplicitContract();
+        testMetricRejectsNonFiniteValue();
+        testMetricRejectsNegativeCounterValue();
+        testMetricRejectsInvalidTemporalityForKind();
         testMetadataIsDefensivelyCopied();
         testUnauthenticatedResponseSurfacesCleanError();
         testNetworkFailureRetriesBeforeSucceeding();
@@ -132,6 +136,60 @@ public final class LogBrewClientTest {
             SpanAttributes.create("GET /health", "trace_001", "span_001", "ok").durationMs(-1.0)
         ));
         assertContains(error.getMessage(), "span durationMs must be non-negative");
+        testsRun++;
+    }
+
+    private void testMetricEventValidatesExplicitContract() {
+        LogBrewClient client = sampleClient();
+        client.metric(
+            "evt_metric_001",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("queue.depth", "gauge", -2.0, "{items}", "instant")
+                .metadata(Map.of("service", "worker", "queue", "critical"))
+        );
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"type\": \"metric\"");
+        assertContains(payload, "\"name\": \"queue.depth\"");
+        assertContains(payload, "\"kind\": \"gauge\"");
+        assertContains(payload, "\"value\": -2.0");
+        assertContains(payload, "\"unit\": \"{items}\"");
+        assertContains(payload, "\"temporality\": \"instant\"");
+        assertContains(payload, "\"service\": \"worker\"");
+        assertContains(payload, "\"queue\": \"critical\"");
+        testsRun++;
+    }
+
+    private void testMetricRejectsNonFiniteValue() {
+        LogBrewClient client = sampleClient();
+        SdkException error = expectSdkException(() -> client.metric(
+            "evt_metric_001",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("queue.depth", "gauge", Double.NaN, "{items}", "instant")
+        ));
+        assertContains(error.getMessage(), "metric value must be a finite number");
+        testsRun++;
+    }
+
+    private void testMetricRejectsNegativeCounterValue() {
+        LogBrewClient client = sampleClient();
+        SdkException error = expectSdkException(() -> client.metric(
+            "evt_metric_001",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("jobs.completed", "counter", -1.0, "1", "delta")
+        ));
+        assertContains(error.getMessage(), "metric counter value must be non-negative");
+        testsRun++;
+    }
+
+    private void testMetricRejectsInvalidTemporalityForKind() {
+        LogBrewClient client = sampleClient();
+        SdkException error = expectSdkException(() -> client.metric(
+            "evt_metric_001",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("queue.depth", "gauge", 2.0, "{items}", "delta")
+        ));
+        assertContains(error.getMessage(), "metric temporality for gauge must be one of: instant");
         testsRun++;
     }
 

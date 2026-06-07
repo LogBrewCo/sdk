@@ -65,6 +65,24 @@ public final class App {
 }
 ```
 
+## Metrics
+
+Use `metric` for explicit, application-owned measurements:
+
+```java
+import co.logbrew.sdk.MetricAttributes;
+import java.util.Map;
+
+client.metric(
+    "evt_metric_queue_depth",
+    "2026-06-02T10:00:06Z",
+    MetricAttributes.create("queue.depth", "gauge", 42.0, "{items}", "instant")
+        .metadata(Map.of("service", "worker"))
+);
+```
+
+Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality and may be negative. Keep metadata low-cardinality and primitive. This SDK does not automatically collect JVM, runtime, or framework metrics yet.
+
 ## HTTP Delivery
 
 Use `HttpTransport` for real outbound delivery from server-side Java apps:
@@ -198,6 +216,7 @@ cd examples && make run-real-user-smoke
 ## Behavior
 
 - `previewJson()` returns the queued batch as pretty JSON.
+- `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
 - `isClosed()` returns whether `shutdown(transport)` has closed the client.
