@@ -2,7 +2,7 @@
 
 Public Java SDK for building, validating, previewing, and flushing LogBrew event batches.
 
-The core client, `HttpTransport`, and `java.util.logging` handler use only the JDK at runtime. The optional Logback appender integrates with app-owned SLF4J/Logback setups when those libraries are already present. The repository checks run temp-owned SpotBugs bytecode analysis, compile everything with `javac`, package it with `jar`, and run examples from a fresh classpath app so a broken build surface is caught before release.
+The core client, `HttpTransport`, and `java.util.logging` handler use only the JDK at runtime. The optional Logback appender integrates with app-owned SLF4J/Logback setups when those libraries are already present.
 
 ## Install
 
@@ -24,15 +24,6 @@ If you attach the optional Logback appender, also include Logback in your app:
   <artifactId>logback-classic</artifactId>
   <version>1.5.34</version>
 </dependency>
-```
-
-For local testing from this repository:
-
-```bash
-bash scripts/check_java_static.sh
-bash scripts/check_java_package.sh
-bash scripts/real_user_java_smoke.sh
-bash scripts/real_user_spring_boot_smoke.sh
 ```
 
 ## Usage
@@ -198,8 +189,6 @@ MDC.remove("traceId");
 appender.stop();
 ```
 
-The repository smoke test builds the SDK jar, installs it into a fresh Gradle Spring Boot app, resolves current Spring Boot dependencies from Maven Central, and proves the appender captures Boot's Logback events with MDC and SLF4J key/value metadata while keeping stack text opt-in.
-
 ## Examples
 
 From `java/logbrew-java`:
@@ -212,6 +201,12 @@ cd examples && make run-real-user-smoke
 ```
 
 `make run` is the shorter alias for the stronger real-user smoke example.
+
+## For Automation Agents
+
+- Compile a consumer app with the Maven coordinate above, then run the README example from the installed classpath.
+- Use `cd examples && make` to print packaged example commands, `make run-readme-example` for the README payload, and `make run` or `make run-real-user-smoke` for the fuller local flow.
+- For Spring Boot apps, attach `LogBrewLogbackAppender` to an app-owned Logback logger and keep full stack-trace text disabled unless the app explicitly opts in.
 
 ## Behavior
 

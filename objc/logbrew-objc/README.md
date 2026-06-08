@@ -43,17 +43,18 @@ make -C objc/logbrew-objc/examples run
 make -C objc/logbrew-objc/examples run-real-user-smoke
 ```
 
-`run-readme-example` prints a contract-valid event batch as JSON on stdout. `run-real-user-smoke` also exercises empty flush, validation failure, unauthenticated response, retry recovery, retry-budget failure, non-retryable status handling, graceful shutdown, and post-shutdown rejection.
+`run-readme-example` prints a contract-valid event batch as JSON on stdout. `run-real-user-smoke` exercises delivery and lifecycle behavior such as validation failure, retry recovery, graceful shutdown, and post-shutdown rejection.
 
 ## Error Shape
 
 SDK failures are returned as `NSError` values using `LBWErrorDomain`. The stable machine-readable code is stored in `error.userInfo[LBWErrorStableCodeKey]`, with values such as `validation_error`, `unauthenticated`, `network_failure`, `transport_error`, and `shutdown_error`.
 
-## Package Checks
+## For Automation Agents
 
 ```bash
-bash scripts/check_objc_package.sh
-bash scripts/real_user_objc_smoke.sh
+make -C objc/logbrew-objc/examples
+make -C objc/logbrew-objc/examples run-readme-example
+make -C objc/logbrew-objc/examples run-real-user-smoke
 ```
 
-The package checker compiles tests and examples with `-fobjc-arc -Wall -Wextra -Wpedantic -Werror`, validates example JSON against the shared contract/parity fixtures, inspects the source archive, and builds the extracted package. The real-user smoke installs that archive into a fresh temp native app under `vendor/logbrew-objc`, proves source package remove/add behavior, runs a consumer app, and verifies shipped examples from the installed package.
+Compile the source with ARC and Foundation, run the README example to inspect the JSON payload, and run the real-user example when you need the broader delivery/lifecycle path.

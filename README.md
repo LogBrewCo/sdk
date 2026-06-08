@@ -157,7 +157,7 @@ python3 scripts/validate_fixtures.py fixtures/valid-batch.json --json
 Agents should work like real SDK users first:
 
 - Read the relevant package README before editing the SDK.
-- Prefer a fresh temporary app and the ecosystem package manager when testing install behavior.
+- Prefer a clean disposable app and the ecosystem package manager when testing install behavior.
 - Use fake placeholders such as `LOGBREW_API_KEY` or frontend `LOGBREW_CLIENT_KEY`.
 - Keep public docs focused on what the product does, how users install it, how they send signals, and what defaults protect them.
 - Keep validation-process details in scripts, checklists, CI logs, or commit evidence instead of turning user READMEs into release-process logs.
