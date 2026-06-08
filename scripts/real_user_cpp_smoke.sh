@@ -63,12 +63,15 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/logbrew.hpp"
 test -f "$sdk_dir/src/logbrew.cpp"
+grep -q 'capture_product_action' "$sdk_dir/include/logbrew.hpp"
+grep -q 'capture_network_milestone' "$sdk_dir/include/logbrew.hpp"
 
 cat > "$app_dir/main.cpp" <<'EOF'
 #include "logbrew.hpp"
 
 #include <cstdlib>
 #include <iostream>
+#include <string>
 
 namespace {
 
@@ -90,6 +93,37 @@ void require_condition(bool condition, const char *message) {
     std::cerr << message << '\n';
     std::exit(1);
   }
+}
+
+void exercise_timeline_helpers() {
+  auto timeline_client = new_client();
+  logbrew::ProductTimelineContext context;
+  context.session_id = "session_123";
+  context.screen = "Checkout";
+  context.trace_id = "trace_001";
+  context.funnel = "checkout";
+  context.step = "submit";
+
+  logbrew::ProductActionAttributes action;
+  action.name = "checkout submit";
+  action.context = context;
+  action.metadata = {{"component", "pay-button"}, {"attempt", 2}};
+  timeline_client.capture_product_action("evt_product_action_001", "2026-06-02T10:00:06Z", action);
+
+  logbrew::NetworkMilestoneAttributes network;
+  network.method = "POST";
+  network.route_template = "https://api.example.com/checkout/confirm?view=ignored#fragment";
+  network.status_code = 503;
+  network.duration_ms = 42.75;
+  network.context = context;
+  timeline_client.capture_network_milestone("evt_network_001", "2026-06-02T10:00:07Z", network);
+
+  const std::string preview = timeline_client.preview_json();
+  require_condition(preview.find("\"source\":\"cpp.product_action\"") != std::string::npos, "product action source missing");
+  require_condition(preview.find("\"source\":\"cpp.network\"") != std::string::npos, "network source missing");
+  require_condition(preview.find("\"routeTemplate\":\"/checkout/confirm\"") != std::string::npos, "route template missing");
+  require_condition(preview.find("view=ignored") == std::string::npos, "network query leaked");
+  require_condition(preview.find("#fragment") == std::string::npos, "network hash leaked");
 }
 
 void exercise_failure_paths() {
@@ -166,6 +200,7 @@ int main() {
     const logbrew::TransportResponse response = client.flush(transport);
     std::cerr << "{\"ok\":true,\"status\":" << response.status_code << ",\"retryAttempts\":" << response.attempts
               << ",\"sentBodies\":" << transport.sent_bodies().size() << "}\n";
+    exercise_timeline_helpers();
     exercise_failure_paths();
     return 0;
   } catch (const logbrew::SdkException &error) {

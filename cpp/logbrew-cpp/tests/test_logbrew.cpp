@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <string>
 
 namespace {
@@ -61,6 +62,51 @@ void preview_json_contains_all_supported_event_types() {
   EXPECT_TRUE(json.find("\"type\":\"action\"") != std::string::npos);
 }
 
+void product_timeline_helpers_capture_safe_metadata() {
+  auto client = new_client();
+
+  logbrew::ProductTimelineContext context;
+  context.session_id = "session_123";
+  context.screen = "Checkout";
+  context.trace_id = "trace_001";
+  context.funnel = "checkout";
+  context.step = "submit";
+
+  logbrew::ProductActionAttributes product_action;
+  product_action.name = "checkout submit";
+  product_action.context = context;
+  product_action.metadata = {
+      {"component", "pay-button"},
+      {"attempt", 2},
+      {"retryable", false},
+  };
+  client.capture_product_action("evt_product_action_001", "2026-06-02T10:00:06Z", product_action);
+
+  logbrew::NetworkMilestoneAttributes network;
+  network.method = " post ";
+  network.route_template = "https://api.example.com/checkout/confirm?view=ignored#fragment";
+  network.status_code = 503;
+  network.duration_ms = 42.75;
+  network.context = context;
+  network.metadata = {{"provider", "stripe"}};
+  client.capture_network_milestone("evt_network_001", "2026-06-02T10:00:07Z", network);
+
+  const std::string json = client.preview_json();
+  EXPECT_TRUE(json.find("\"name\":\"checkout submit\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"source\":\"cpp.product_action\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"sessionId\":\"session_123\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"screen\":\"Checkout\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"attempt\":2") != std::string::npos);
+  EXPECT_TRUE(json.find("\"retryable\":false") != std::string::npos);
+  EXPECT_TRUE(json.find("\"name\":\"POST /checkout/confirm\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"source\":\"cpp.network\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"routeTemplate\":\"/checkout/confirm\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"statusCode\":503") != std::string::npos);
+  EXPECT_TRUE(json.find("\"durationMs\":42.75") != std::string::npos);
+  EXPECT_TRUE(json.find("view=ignored") == std::string::npos);
+  EXPECT_TRUE(json.find("#fragment") == std::string::npos);
+}
+
 void flush_success_clears_queue() {
   auto client = new_client();
   queue_fixture_events(client);
@@ -92,6 +138,34 @@ void validation_failures_are_stable() {
   }
   try {
     client.release("evt_release_bad", "2026-06-02T10:00:00", logbrew::ReleaseAttributes{"1.2.3", std::nullopt, std::nullopt});
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
+  try {
+    logbrew::NetworkMilestoneAttributes network;
+    network.method = "GET";
+    network.route_template = "?view=ignored";
+    client.capture_network_milestone("evt_network_bad_route", "2026-06-02T10:00:07Z", network);
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
+  try {
+    logbrew::NetworkMilestoneAttributes network;
+    network.method = "GET";
+    network.route_template = "/health";
+    network.status_code = 99;
+    client.capture_network_milestone("evt_network_bad_status", "2026-06-02T10:00:07Z", network);
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
+  try {
+    logbrew::ProductActionAttributes product_action;
+    product_action.name = "checkout submit";
+    product_action.metadata = {{"bad", std::numeric_limits<double>::quiet_NaN()}};
+    client.capture_product_action("evt_product_action_bad", "2026-06-02T10:00:06Z", product_action);
     EXPECT_TRUE(false);
   } catch (const logbrew::SdkException &error) {
     EXPECT_TRUE(error.code() == "validation_error");
@@ -168,6 +242,7 @@ void non_retryable_status_and_shutdown_are_stable() {
 
 int main() {
   preview_json_contains_all_supported_event_types();
+  product_timeline_helpers_capture_safe_metadata();
   flush_success_clears_queue();
   empty_flush_is_no_op();
   validation_failures_are_stable();

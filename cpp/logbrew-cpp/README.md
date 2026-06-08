@@ -27,6 +27,35 @@ logbrew::TransportResponse response = client.flush(transport);
 
 `logbrew::SdkException` exposes a stable `code()` plus the exception message. `logbrew::Transport` is an abstract callback surface for real HTTP transports, while `logbrew::RecordingTransport` lets your app inspect queued JSON before network delivery.
 
+## Product Timelines
+
+Use product timeline helpers when you want LogBrew and AI coding assistants to understand what happened inside a user flow without recording the screen or collecting request payloads.
+
+```cpp
+logbrew::ProductTimelineContext context;
+context.session_id = "session_123";
+context.screen = "Checkout";
+context.trace_id = "trace_001";
+context.funnel = "checkout";
+context.step = "submit";
+
+logbrew::ProductActionAttributes action;
+action.name = "checkout submit";
+action.context = context;
+action.metadata = {{"component", "pay-button"}};
+client.capture_product_action("evt_action_checkout_submit", "2026-06-02T10:00:06Z", action);
+
+logbrew::NetworkMilestoneAttributes network;
+network.method = "POST";
+network.route_template = "/checkout/confirm";
+network.status_code = 503;
+network.duration_ms = 42.75;
+network.context = context;
+client.capture_network_milestone("evt_network_checkout_confirm", "2026-06-02T10:00:07Z", network);
+```
+
+Timeline helpers are app-owned and explicit. They do not patch HTTP clients, auto-capture clicks, collect request or response bodies, capture headers, or include URL query strings and hashes. Keep metadata primitive and low-cardinality, such as `sessionId`, `screen`, `traceId`, `funnel`, `step`, status codes, durations, and stable route templates.
+
 ## Example Source
 
 The `examples/readme_example.cpp` source shows a complete six-event payload and recording transport setup that you can copy into your own native application.

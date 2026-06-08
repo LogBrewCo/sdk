@@ -73,10 +73,26 @@ archive_path = Path(sys.argv[1])
 with tarfile.open(archive_path, "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
     header = archive.extractfile("include/logbrew.hpp").read().decode()
-for needle in ("LOGBREW_API_KEY", "copy into your own native application", "client.flush"):
+for needle in (
+    "LOGBREW_API_KEY",
+    "Product Timelines",
+    "capture_product_action",
+    "capture_network_milestone",
+    "do not patch HTTP clients",
+    "copy into your own native application",
+    "client.flush",
+):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
-for needle in ("class LogBrewClient", "RecordingTransport", "SdkException"):
+for needle in (
+    "class LogBrewClient",
+    "MetadataValue",
+    "ProductTimelineContext",
+    "capture_product_action",
+    "capture_network_milestone",
+    "RecordingTransport",
+    "SdkException",
+):
     if needle not in header:
         raise SystemExit(f"missing public header symbol: {needle}")
 PY

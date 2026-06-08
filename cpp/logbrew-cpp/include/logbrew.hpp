@@ -2,6 +2,7 @@
 #define LOGBREW_CPP_HPP
 
 #include <cstddef>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -84,9 +85,72 @@ struct SpanAttributes {
   std::optional<double> duration_ms;
 };
 
+class MetadataValue final {
+public:
+  enum class Kind {
+    null_value,
+    boolean,
+    number,
+    string,
+  };
+
+  MetadataValue();
+  MetadataValue(std::nullptr_t);
+  MetadataValue(bool value);
+  MetadataValue(int value);
+  MetadataValue(long value);
+  MetadataValue(long long value);
+  MetadataValue(unsigned int value);
+  MetadataValue(unsigned long value);
+  MetadataValue(unsigned long long value);
+  MetadataValue(double value);
+  MetadataValue(const char *value);
+  MetadataValue(std::string value);
+
+  [[nodiscard]] Kind kind() const noexcept;
+  [[nodiscard]] bool bool_value() const noexcept;
+  [[nodiscard]] double number_value() const noexcept;
+  [[nodiscard]] const std::string &string_value() const noexcept;
+
+private:
+  Kind kind_ = Kind::null_value;
+  bool bool_value_ = false;
+  double number_value_ = 0.0;
+  std::string string_value_;
+};
+
+using Metadata = std::map<std::string, MetadataValue>;
+
 struct ActionAttributes {
   std::string name;
   std::string status;
+  Metadata metadata = {};
+};
+
+struct ProductTimelineContext {
+  std::optional<std::string> session_id;
+  std::optional<std::string> screen;
+  std::optional<std::string> trace_id;
+  std::optional<std::string> funnel;
+  std::optional<std::string> step;
+  Metadata metadata = {};
+};
+
+struct ProductActionAttributes {
+  std::string name;
+  std::optional<std::string> status;
+  ProductTimelineContext context = {};
+  Metadata metadata = {};
+};
+
+struct NetworkMilestoneAttributes {
+  std::string method;
+  std::string route_template;
+  std::optional<int> status_code;
+  std::optional<double> duration_ms;
+  std::optional<std::string> status;
+  ProductTimelineContext context = {};
+  Metadata metadata = {};
 };
 
 class RecordingTransport final : public Transport {
@@ -136,6 +200,8 @@ public:
   void log(std::string id, std::string timestamp, LogAttributes attributes);
   void span(std::string id, std::string timestamp, SpanAttributes attributes);
   void action(std::string id, std::string timestamp, ActionAttributes attributes);
+  void capture_product_action(std::string id, std::string timestamp, ProductActionAttributes attributes);
+  void capture_network_milestone(std::string id, std::string timestamp, NetworkMilestoneAttributes attributes);
 
 private:
   struct Event {

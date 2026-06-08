@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <functional>
 #include <iomanip>
 #include <sstream>
@@ -13,6 +14,19 @@ namespace {
   return std::all_of(value.begin(), value.end(), [](unsigned char character) {
     return std::isspace(character) != 0;
   });
+}
+
+[[nodiscard]] std::string trim_copy(const std::string &value) {
+  const auto begin = std::find_if_not(value.begin(), value.end(), [](unsigned char character) {
+    return std::isspace(character) != 0;
+  });
+  if (begin == value.end()) {
+    return {};
+  }
+  const auto end = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char character) {
+                     return std::isspace(character) != 0;
+                   }).base();
+  return std::string(begin, end);
 }
 
 void require_non_empty(const std::string &label, const std::string &value) {
@@ -43,6 +57,56 @@ void require_allowed(const std::string &label, const std::string &value, const s
     return;
   }
   throw SdkException("validation_error", label + " has unsupported value: " + value);
+}
+
+void require_finite(const std::string &label, double value) {
+  if (!std::isfinite(value)) {
+    throw SdkException("validation_error", label + " must be finite");
+  }
+}
+
+[[nodiscard]] std::string normalized_method(const std::string &method) {
+  std::string normalized = trim_copy(method);
+  require_non_empty("network method", normalized);
+  std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char character) {
+    return static_cast<char>(std::toupper(character));
+  });
+  return normalized;
+}
+
+[[nodiscard]] bool starts_with(const std::string &value, const std::string &prefix) {
+  return value.size() >= prefix.size() && value.compare(0, prefix.size(), prefix) == 0;
+}
+
+[[nodiscard]] std::string strip_query_and_fragment(std::string route) {
+  const auto query = route.find('?');
+  const auto fragment = route.find('#');
+  const auto first_sensitive_offset = std::min(
+      query == std::string::npos ? route.size() : query,
+      fragment == std::string::npos ? route.size() : fragment);
+  route.erase(first_sensitive_offset);
+  return route;
+}
+
+[[nodiscard]] std::string sanitized_route_template(const std::string &route_template) {
+  std::string route = trim_copy(route_template);
+  require_non_empty("network route_template", route);
+  if (starts_with(route, "http://") || starts_with(route, "https://")) {
+    const auto authority_start = route.find("://") + 3U;
+    const auto path_start = route.find_first_of("/?#", authority_start);
+    if (path_start == std::string::npos) {
+      route = "/";
+    } else if (route[path_start] == '/') {
+      route = route.substr(path_start);
+    } else {
+      route = "/";
+    }
+  } else if (route.find("://") != std::string::npos) {
+    throw SdkException("validation_error", "network route_template must be an HTTP path or URL");
+  }
+  route = strip_query_and_fragment(route);
+  require_non_empty("network route_template", route);
+  return route;
 }
 
 [[nodiscard]] std::string json_string(const std::string &value) {
@@ -112,9 +176,88 @@ void append_optional_field(
 }
 
 [[nodiscard]] std::string double_json(double value) {
+  require_finite("number", value);
   std::ostringstream output;
   output << std::setprecision(15) << value;
   return output.str();
+}
+
+[[nodiscard]] std::string metadata_value_json(const MetadataValue &value) {
+  switch (value.kind()) {
+    case MetadataValue::Kind::null_value:
+      return "null";
+    case MetadataValue::Kind::boolean:
+      return value.bool_value() ? "true" : "false";
+    case MetadataValue::Kind::number:
+      return double_json(value.number_value());
+    case MetadataValue::Kind::string:
+      return json_string(value.string_value());
+  }
+  return "null";
+}
+
+void append_metadata_field(
+    std::ostringstream &output,
+    bool &needs_comma,
+    const std::string &key,
+    const MetadataValue &value) {
+  require_non_empty("metadata key", key);
+  if (value.kind() == MetadataValue::Kind::number) {
+    require_finite("metadata value", value.number_value());
+  }
+  if (needs_comma) {
+    output << ',';
+  }
+  output << json_string(key) << ':' << metadata_value_json(value);
+  needs_comma = true;
+}
+
+void append_metadata_object(std::ostringstream &output, bool &needs_comma, const Metadata &metadata) {
+  if (metadata.empty()) {
+    return;
+  }
+  if (needs_comma) {
+    output << ',';
+  }
+  bool metadata_needs_comma = false;
+  output << "\"metadata\":{";
+  for (const auto &entry : metadata) {
+    append_metadata_field(output, metadata_needs_comma, entry.first, entry.second);
+  }
+  output << '}';
+  needs_comma = true;
+}
+
+[[nodiscard]] Metadata timeline_metadata(
+    const std::string &source,
+    const ProductTimelineContext &context,
+    const Metadata &metadata) {
+  Metadata merged = context.metadata;
+  for (const auto &entry : metadata) {
+    merged[entry.first] = entry.second;
+  }
+  if (context.session_id.has_value()) {
+    require_non_empty("session_id", *context.session_id);
+    merged["sessionId"] = *context.session_id;
+  }
+  if (context.screen.has_value()) {
+    require_non_empty("screen", *context.screen);
+    merged["screen"] = *context.screen;
+  }
+  if (context.trace_id.has_value()) {
+    require_non_empty("trace_id", *context.trace_id);
+    merged["traceId"] = *context.trace_id;
+  }
+  if (context.funnel.has_value()) {
+    require_non_empty("funnel", *context.funnel);
+    merged["funnel"] = *context.funnel;
+  }
+  if (context.step.has_value()) {
+    require_non_empty("step", *context.step);
+    merged["step"] = *context.step;
+  }
+  merged["source"] = source;
+  return merged;
 }
 
 } // namespace
@@ -135,6 +278,47 @@ const std::string &TransportError::code() const noexcept {
 
 bool TransportError::retryable() const noexcept {
   return retryable_;
+}
+
+MetadataValue::MetadataValue() = default;
+
+MetadataValue::MetadataValue(std::nullptr_t) : kind_(Kind::null_value) {}
+
+MetadataValue::MetadataValue(bool value) : kind_(Kind::boolean), bool_value_(value) {}
+
+MetadataValue::MetadataValue(int value) : MetadataValue(static_cast<long long>(value)) {}
+
+MetadataValue::MetadataValue(long value) : MetadataValue(static_cast<long long>(value)) {}
+
+MetadataValue::MetadataValue(long long value) : kind_(Kind::number), number_value_(static_cast<double>(value)) {}
+
+MetadataValue::MetadataValue(unsigned int value) : MetadataValue(static_cast<unsigned long long>(value)) {}
+
+MetadataValue::MetadataValue(unsigned long value) : MetadataValue(static_cast<unsigned long long>(value)) {}
+
+MetadataValue::MetadataValue(unsigned long long value)
+    : kind_(Kind::number), number_value_(static_cast<double>(value)) {}
+
+MetadataValue::MetadataValue(double value) : kind_(Kind::number), number_value_(value) {}
+
+MetadataValue::MetadataValue(const char *value) : MetadataValue(std::string(value == nullptr ? "" : value)) {}
+
+MetadataValue::MetadataValue(std::string value) : kind_(Kind::string), string_value_(std::move(value)) {}
+
+MetadataValue::Kind MetadataValue::kind() const noexcept {
+  return kind_;
+}
+
+bool MetadataValue::bool_value() const noexcept {
+  return bool_value_;
+}
+
+double MetadataValue::number_value() const noexcept {
+  return number_value_;
+}
+
+const std::string &MetadataValue::string_value() const noexcept {
+  return string_value_;
 }
 
 RecordingTransport::Step RecordingTransport::Step::status_code_step(int status_code) {
@@ -262,6 +446,9 @@ void LogBrewClient::span(std::string id, std::string timestamp, SpanAttributes a
   require_non_empty("span trace_id", attributes.trace_id);
   require_non_empty("span span_id", attributes.span_id);
   require_allowed("span status", attributes.status, {"ok", "error"});
+  if (attributes.duration_ms.has_value()) {
+    require_finite("span duration_ms", *attributes.duration_ms);
+  }
   if (attributes.duration_ms.has_value() && *attributes.duration_ms < 0.0) {
     throw SdkException("validation_error", "span duration_ms must be non-negative");
   }
@@ -287,7 +474,57 @@ void LogBrewClient::action(std::string id, std::string timestamp, ActionAttribut
   push_event("action", std::move(id), std::move(timestamp), object_json([&](std::ostringstream &output, bool &needs_comma) {
                append_field(output, needs_comma, "name", attributes.name);
                append_field(output, needs_comma, "status", attributes.status);
+               append_metadata_object(output, needs_comma, attributes.metadata);
              }));
+}
+
+void LogBrewClient::capture_product_action(
+    std::string id,
+    std::string timestamp,
+    ProductActionAttributes attributes) {
+  require_non_empty("product action name", attributes.name);
+  action(
+      std::move(id),
+      std::move(timestamp),
+      ActionAttributes{
+          attributes.name,
+          attributes.status.value_or("success"),
+          timeline_metadata("cpp.product_action", attributes.context, attributes.metadata),
+      });
+}
+
+void LogBrewClient::capture_network_milestone(
+    std::string id,
+    std::string timestamp,
+    NetworkMilestoneAttributes attributes) {
+  const std::string method = normalized_method(attributes.method);
+  const std::string route_template = sanitized_route_template(attributes.route_template);
+  Metadata metadata = attributes.metadata;
+  metadata["method"] = method;
+  metadata["routeTemplate"] = route_template;
+  if (attributes.status_code.has_value()) {
+    if (*attributes.status_code < 100 || *attributes.status_code > 599) {
+      throw SdkException("validation_error", "network status_code must be between 100 and 599");
+    }
+    metadata["statusCode"] = *attributes.status_code;
+  }
+  if (attributes.duration_ms.has_value()) {
+    require_finite("network duration_ms", *attributes.duration_ms);
+    if (*attributes.duration_ms < 0.0) {
+      throw SdkException("validation_error", "network duration_ms must be non-negative");
+    }
+    metadata["durationMs"] = *attributes.duration_ms;
+  }
+  const std::string status = attributes.status.value_or(
+      attributes.status_code.has_value() && *attributes.status_code >= 400 ? "failure" : "success");
+  action(
+      std::move(id),
+      std::move(timestamp),
+      ActionAttributes{
+          method + " " + route_template,
+          status,
+          timeline_metadata("cpp.network", attributes.context, metadata),
+      });
 }
 
 std::string LogBrewClient::event_json(const Event &event) {
