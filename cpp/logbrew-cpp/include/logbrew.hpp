@@ -12,6 +12,7 @@
 namespace logbrew {
 
 inline constexpr const char *version = "0.1.0";
+inline constexpr const char *http_transport_default_endpoint = "https://api.logbrew.com/v1/events";
 
 class SdkException final : public std::runtime_error {
 public:
@@ -44,6 +45,26 @@ class Transport {
 public:
   virtual ~Transport() = default;
   virtual TransportResponse send(const std::string &api_key, const std::string &body) = 0;
+};
+
+struct HttpHeader {
+  std::string name;
+  std::string value;
+};
+
+class HttpTransport final : public Transport {
+public:
+  explicit HttpTransport(
+      std::string endpoint = http_transport_default_endpoint,
+      std::vector<HttpHeader> headers = {},
+      long timeout_ms = 10000L);
+
+  TransportResponse send(const std::string &api_key, const std::string &body) override;
+
+private:
+  std::string endpoint_;
+  std::vector<HttpHeader> headers_;
+  long timeout_ms_;
 };
 
 struct Config {

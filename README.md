@@ -49,7 +49,7 @@ Install only the package your application needs. The package names below are reg
 | Kotlin | [`co.logbrew:logbrew-kotlin`](kotlin/logbrew-kotlin) | Kotlin/JVM client, Android-style helper APIs, HTTP delivery |
 | Unity | [`co.logbrew.unity`](unity/logbrew-unity) | Unity package with runtime helpers and HTTP delivery |
 | C | [`logbrew-c`](c/logbrew-c) | C source/header client |
-| C++ | [`logbrew-cpp`](cpp/logbrew-cpp) | C++ RAII source/header client |
+| C++ | [`logbrew-cpp`](cpp/logbrew-cpp) | C++ RAII source/header client with optional HTTP delivery |
 | Objective-C | [`logbrew-objc`](objc/logbrew-objc) | Foundation source/header client |
 
 ## Quick Start

@@ -238,6 +238,35 @@ void non_retryable_status_and_shutdown_are_stable() {
   }
 }
 
+#ifdef LOGBREW_CPP_TEST_HTTP_TRANSPORT
+void http_transport_validates_configuration() {
+  try {
+    logbrew::HttpTransport transport("ftp://example.com/v1/events", {}, 1000L);
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "configuration_error");
+  }
+  try {
+    logbrew::HttpTransport transport("https://example.com/v1/events", {}, 0L);
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "configuration_error");
+  }
+  try {
+    logbrew::HttpTransport transport("https://example.com/v1/events", {{"authorization", "bad"}}, 1000L);
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "configuration_error");
+  }
+  logbrew::HttpTransport transport(
+      "https://example.com/v1/events",
+      {{"x-logbrew-source", "cpp-test"}},
+      1000L);
+  (void)transport;
+  EXPECT_TRUE(std::string(logbrew::http_transport_default_endpoint) == "https://api.logbrew.com/v1/events");
+}
+#endif
+
 } // namespace
 
 int main() {
@@ -249,6 +278,9 @@ int main() {
   unauthenticated_response_surfaces_clean_error();
   retry_recovery_and_retry_budget_are_observable();
   non_retryable_status_and_shutdown_are_stable();
+#ifdef LOGBREW_CPP_TEST_HTTP_TRANSPORT
+  http_transport_validates_configuration();
+#endif
   std::cout << "c++ package tests ok (" << tests_run << " checks)\n";
   return 0;
 }

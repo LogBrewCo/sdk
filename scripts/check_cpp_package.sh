@@ -30,6 +30,26 @@ mkdir -p "$tmp_dir/build"
 "$cxx_command" "${cxxflags[@]}" "$package_dir/src/logbrew.cpp" "$package_dir/tests/test_logbrew.cpp" -o "$tmp_dir/build/test_logbrew"
 "$tmp_dir/build/test_logbrew"
 
+if command -v curl-config >/dev/null 2>&1; then
+  curl_cflags=()
+  curl_libs=()
+  curl_cflags_output="$(curl-config --cflags)"
+  curl_libs_output="$(curl-config --libs)"
+  if [[ -n "$curl_cflags_output" ]]; then
+    read -r -a curl_cflags <<<"$curl_cflags_output"
+  fi
+  if [[ -n "$curl_libs_output" ]]; then
+    read -r -a curl_libs <<<"$curl_libs_output"
+  fi
+  "$cxx_command" "${cxxflags[@]}" -DLOGBREW_CPP_TEST_HTTP_TRANSPORT ${curl_cflags[@]+"${curl_cflags[@]}"} \
+    "$package_dir/src/logbrew.cpp" \
+    "$package_dir/src/logbrew_http_transport.cpp" \
+    "$package_dir/tests/test_logbrew.cpp" \
+    ${curl_libs[@]+"${curl_libs[@]}"} \
+    -o "$tmp_dir/build/test_logbrew_http"
+  "$tmp_dir/build/test_logbrew_http" >/dev/null
+fi
+
 "$cxx_command" "${cxxflags[@]}" "$package_dir/src/logbrew.cpp" "$package_dir/examples/readme_example.cpp" -o "$tmp_dir/build/readme_example"
 "$tmp_dir/build/readme_example" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
@@ -54,6 +74,7 @@ grep -qx 'README.md' "$tmp_dir/archive-contents.txt"
 grep -qx 'Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'include/logbrew.hpp' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew.cpp' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/logbrew_http_transport.cpp' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/readme_example.cpp' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/real_user_smoke.cpp' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/Makefile' "$tmp_dir/archive-contents.txt"
@@ -76,8 +97,10 @@ with tarfile.open(archive_path, "r:gz") as archive:
 for needle in (
     "LOGBREW_API_KEY",
     "Product Timelines",
+    "Sending To LogBrew",
     "capture_product_action",
     "capture_network_milestone",
+    "HttpTransport",
     "do not patch HTTP clients",
     "copy into your own native application",
     "client.flush",
@@ -90,6 +113,8 @@ for needle in (
     "ProductTimelineContext",
     "capture_product_action",
     "capture_network_milestone",
+    "HttpTransport",
+    "http_transport_default_endpoint",
     "RecordingTransport",
     "SdkException",
 ):

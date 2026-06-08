@@ -369,6 +369,7 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
     require_path(root, "cpp/logbrew-cpp/README.md", failures)
     header_path = require_path(root, "cpp/logbrew-cpp/include/logbrew.hpp", failures)
     source_path = require_path(root, "cpp/logbrew-cpp/src/logbrew.cpp", failures)
+    require_path(root, "cpp/logbrew-cpp/src/logbrew_http_transport.cpp", failures)
     require_path(root, "cpp/logbrew-cpp/Makefile", failures)
     require_path(root, "cpp/logbrew-cpp/examples/Makefile", failures)
     require_path(root, "cpp/logbrew-cpp/examples/readme_example.cpp", failures)
@@ -382,13 +383,17 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
     for needle in (
         'inline constexpr const char *version = "0.1.0"',
         "class LogBrewClient",
+        "class HttpTransport",
         "class RecordingTransport",
+        "http_transport_default_endpoint",
         "class SdkException",
     ):
         require(needle in header, failures, f"{location}: missing public C++ SDK symbol {needle}")
     for needle in (
         "Public C++17 SDK",
         "LOGBREW_API_KEY",
+        "Sending To LogBrew",
+        "HttpTransport",
         "client.flush",
         "copy into your own native application",
     ):

@@ -1,6 +1,6 @@
 # LogBrew C++ SDK
 
-Public C++17 SDK for building, validating, previewing, and flushing LogBrew event batches from native applications.
+Public C++17 SDK for building, validating, previewing, and sending LogBrew event batches from native applications.
 
 The SDK is dependency-free and ships as source plus header. Add `include/logbrew.hpp` and `src/logbrew.cpp` to your application build:
 
@@ -25,7 +25,32 @@ logbrew::RecordingTransport transport;
 logbrew::TransportResponse response = client.flush(transport);
 ```
 
-`logbrew::SdkException` exposes a stable `code()` plus the exception message. `logbrew::Transport` is an abstract callback surface for real HTTP transports, while `logbrew::RecordingTransport` lets your app inspect queued JSON before network delivery.
+`logbrew::SdkException` exposes a stable `code()` plus the exception message. `logbrew::Transport` is an abstract callback surface for app-owned delivery, while `logbrew::RecordingTransport` lets your app inspect queued JSON before network delivery.
+
+## Sending To LogBrew
+
+Use `logbrew::HttpTransport` when your application is ready to send events to the hosted LogBrew intake:
+
+```cpp
+logbrew::HttpTransport transport(
+    logbrew::http_transport_default_endpoint,
+    {{"x-logbrew-source", "native-cpp-app"}},
+    10000L);
+
+logbrew::TransportResponse response = client.flush(transport);
+```
+
+The HTTP transport is optional and uses libcurl. Keep the default source build dependency-free if your app only previews payloads or supplies its own transport:
+
+```bash
+c++ -std=c++17 -Wall -Wextra -Wpedantic \
+  -Iinclude $(curl-config --cflags) \
+  src/logbrew.cpp src/logbrew_http_transport.cpp your_app.cpp \
+  $(curl-config --libs) \
+  -o your_app
+```
+
+`HttpTransport` validates `http://` and `https://` endpoints, sends `authorization: Bearer <api key>` and `content-type: application/json`, rejects custom overrides for those reserved headers, supports safe additional headers, and maps libcurl request failures into retryable transport errors. It does not patch global HTTP clients, inspect application traffic, collect request or response payloads, or capture arbitrary headers from your app.
 
 ## Product Timelines
 
