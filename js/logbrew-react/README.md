@@ -9,13 +9,18 @@ npm install @logbrew/sdk @logbrew/react react
 pnpm add @logbrew/sdk @logbrew/react react
 ```
 
-The package ships plain ESM and CommonJS entrypoints, `.d.ts` and `.d.cts` declarations, a `LogBrewProvider`, `LogBrewErrorBoundary`, `useLogBrew`, `useLogBrewActions`, `createLogBrewReactClient`, handled React error helpers, and explicit W3C trace propagation helpers for frontend-to-backend fetch calls. It keeps `@logbrew/sdk` and `react` as peer dependencies so app owners control their React/runtime versions.
+The package ships plain ESM and CommonJS entrypoints, `.d.ts` and `.d.cts` declarations, a `LogBrewProvider`, `LogBrewErrorBoundary`, `useLogBrew`, `useLogBrewActions`, `useLogBrewAction`, `useLogBrewNetwork`, `createLogBrewReactClient`, handled React error helpers, and explicit W3C trace propagation helpers for frontend-to-backend fetch calls. It keeps `@logbrew/sdk` and `react` as peer dependencies so app owners control their React/runtime versions.
 
 ## Example
 
 ```js
 import React from "react";
-import { LogBrewProvider, createLogBrewReactClient, useLogBrewActions } from "@logbrew/react";
+import {
+  LogBrewProvider,
+  createLogBrewReactClient,
+  useLogBrewAction,
+  useLogBrewNetwork
+} from "@logbrew/react";
 
 const client = createLogBrewReactClient({
   clientKey: "LOGBREW_CLIENT_KEY",
@@ -24,12 +29,29 @@ const client = createLogBrewReactClient({
 });
 
 function CheckoutButton() {
-  const logbrew = useLogBrewActions();
+  const captureAction = useLogBrewAction({
+    metadata: {
+      funnel: "checkout",
+      routeTemplate: "/checkout",
+      sessionId: "sess_123"
+    }
+  });
+  const captureNetwork = useLogBrewNetwork({
+    routeTemplate: "/api/checkout",
+    sessionId: "sess_123"
+  });
 
-  function onClick() {
-    logbrew.action("evt_action_001", new Date().toISOString(), {
+  async function onClick() {
+    captureAction({
       name: "checkout-click",
-      status: "success"
+      metadata: { step: "submit" }
+    });
+
+    captureNetwork({
+      durationMs: 124,
+      method: "POST",
+      statusCode: 202,
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
     });
   }
 
@@ -46,6 +68,12 @@ export function App() {
 ```
 
 For browser React apps, prefer a browser-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples. Call `flush` or `shutdown` on the underlying client to send queued events through a transport, and use `previewJson()` when you want a stable local JSON preview before sending anything.
+
+## Product Actions And Network Milestones
+
+Use `useLogBrewAction()` for product steps your React app already understands, such as route changes, clicks, form submits, retry decisions, and funnel steps. Use `useLogBrewNetwork()` for important API milestones that should be correlated with the same session or trace. Both helpers enqueue LogBrew `action` events, which gives LogBrew and AI agents a structured timeline across many app sessions without requiring visual replay.
+
+Keep metadata low-cardinality and privacy-safe. Prefer route templates such as `/checkout` or `/api/orders/:id`; avoid raw selectors, full URLs, query strings, user-entered text, headers, request bodies, response bodies, screenshots, and replay payloads unless your application owns an explicit opt-in and redaction policy. `useLogBrewNetwork()` strips query strings and hashes from `routeTemplate`, records method/status/duration/session/trace metadata, and does not patch `fetch` automatically.
 
 ## Error Boundary
 

@@ -130,6 +130,99 @@ export function useLogBrewActions() {
   };
 }
 
+export function createReactActionEvent({
+  id,
+  idFactory = defaultActionEventId,
+  metadata = {},
+  name,
+  now = () => new Date().toISOString(),
+  sessionId,
+  status = "success",
+  timestamp,
+  traceId
+} = {}) {
+  return {
+    id: id ?? idFactory({ name }),
+    timestamp: timestamp ?? now(),
+    attributes: {
+      name,
+      status,
+      metadata: compactMetadata({
+        source: "react.action",
+        sessionId,
+        traceId,
+        ...metadata
+      })
+    }
+  };
+}
+
+export function captureReactAction(client, input = {}) {
+  if (!client) {
+    throw new SdkError("configuration_error", "captureReactAction requires a client");
+  }
+  const event = createReactActionEvent(input);
+  client.action(event.id, event.timestamp, event.attributes);
+  return event;
+}
+
+export function useLogBrewAction(defaults = {}) {
+  const client = useLogBrew();
+  return (input = {}) => captureReactAction(client, mergeEventInput(defaults, input));
+}
+
+export function createReactNetworkEvent({
+  durationMs,
+  id,
+  idFactory = defaultNetworkEventId,
+  metadata = {},
+  method,
+  name,
+  now = () => new Date().toISOString(),
+  routeTemplate,
+  sessionId,
+  status,
+  statusCode,
+  timestamp,
+  traceId
+} = {}) {
+  const safeRouteTemplate = stripQueryAndHash(routeTemplate);
+  const safeMethod = method === undefined ? undefined : String(method).toUpperCase();
+  const actionName = name ?? [safeMethod, safeRouteTemplate].filter(Boolean).join(" ");
+  return {
+    id: id ?? idFactory({ method: safeMethod, routeTemplate: safeRouteTemplate }),
+    timestamp: timestamp ?? now(),
+    attributes: {
+      name: actionName,
+      status: status ?? statusFromStatusCode(statusCode),
+      metadata: compactMetadata({
+        source: "react.network",
+        durationMs,
+        method: safeMethod,
+        routeTemplate: safeRouteTemplate,
+        sessionId,
+        statusCode,
+        traceId,
+        ...metadata
+      })
+    }
+  };
+}
+
+export function captureReactNetwork(client, input = {}) {
+  if (!client) {
+    throw new SdkError("configuration_error", "captureReactNetwork requires a client");
+  }
+  const event = createReactNetworkEvent(input);
+  client.action(event.id, event.timestamp, event.attributes);
+  return event;
+}
+
+export function useLogBrewNetwork(defaults = {}) {
+  const client = useLogBrew();
+  return (input = {}) => captureReactNetwork(client, mergeEventInput(defaults, input));
+}
+
 export function createReactErrorEvent(error, {
   componentStack,
   id,
@@ -324,6 +417,17 @@ function compactMetadata(metadata) {
   return compacted;
 }
 
+function mergeEventInput(defaults, input) {
+  return {
+    ...defaults,
+    ...input,
+    metadata: {
+      ...(defaults.metadata ?? {}),
+      ...(input.metadata ?? {})
+    }
+  };
+}
+
 function errorDetails(error, includeStack) {
   const message = errorMessage(error);
   return {
@@ -361,11 +465,33 @@ function defaultErrorEventId({ message }) {
   return `evt_react_error_${slugify(message)}`;
 }
 
+function defaultActionEventId({ name }) {
+  return `evt_react_action_${slugify(name ?? "event")}`;
+}
+
+function defaultNetworkEventId({ method, routeTemplate }) {
+  return `evt_react_network_${slugify([method, routeTemplate].filter(Boolean).join("_") || "request")}`;
+}
+
 function slugify(value) {
-  return value
+  return String(value)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "") || "event";
+}
+
+function statusFromStatusCode(statusCode) {
+  if (typeof statusCode === "number" && Number.isFinite(statusCode) && statusCode >= 400) {
+    return "failure";
+  }
+  return "success";
+}
+
+function stripQueryAndHash(value) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return String(value).split(/[?#]/u, 1)[0];
 }
 
 function traceparentForRequest({
@@ -387,12 +513,18 @@ function traceparentForRequest({
 export default {
   LogBrewErrorBoundary,
   LogBrewProvider,
+  captureReactAction,
   captureReactError,
+  captureReactNetwork,
   createLogBrewReactClient,
+  createReactActionEvent,
   createReactErrorEvent,
+  createReactNetworkEvent,
   createReactTraceparent,
   createTraceparentFetch,
   shouldPropagateTraceparent,
   useLogBrew,
-  useLogBrewActions
+  useLogBrewAction,
+  useLogBrewActions,
+  useLogBrewNetwork
 };

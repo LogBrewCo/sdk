@@ -75,6 +75,49 @@ export type CaptureReactErrorOptions = {
   timestamp?: string;
 };
 
+export type ReactActionIdFactoryContext = {
+  name?: string;
+};
+
+export type ReactActionInput = {
+  id?: string;
+  idFactory?: (context: ReactActionIdFactoryContext) => string;
+  metadata?: Metadata;
+  name: string;
+  now?: () => string;
+  sessionId?: string;
+  status?: ActionAttributes["status"];
+  timestamp?: string;
+  traceId?: string;
+};
+
+export type ReactNetworkIdFactoryContext = {
+  method?: string;
+  routeTemplate?: string;
+};
+
+export type ReactNetworkInput = {
+  durationMs?: number;
+  id?: string;
+  idFactory?: (context: ReactNetworkIdFactoryContext) => string;
+  metadata?: Metadata;
+  method?: string;
+  name?: string;
+  now?: () => string;
+  routeTemplate?: string;
+  sessionId?: string;
+  status?: ActionAttributes["status"];
+  statusCode?: number;
+  timestamp?: string;
+  traceId?: string;
+};
+
+export type ReactActionEvent = {
+  id: string;
+  timestamp: string;
+  attributes: ActionAttributes;
+};
+
 export type LogBrewErrorBoundaryFallbackProps = {
   error: unknown;
   componentStack: string;
@@ -121,20 +164,34 @@ export declare function captureReactError(
   error: unknown,
   options?: CaptureReactErrorOptions
 ): ReactErrorEvent;
+export declare function createReactActionEvent(input: ReactActionInput): ReactActionEvent;
+export declare function captureReactAction(client: LogBrewClient, input: ReactActionInput): ReactActionEvent;
+export declare function useLogBrewAction(defaults?: Partial<ReactActionInput>): (input?: Partial<ReactActionInput>) => ReactActionEvent;
+export declare function createReactNetworkEvent(input: ReactNetworkInput): ReactActionEvent;
+export declare function captureReactNetwork(client: LogBrewClient, input: ReactNetworkInput): ReactActionEvent;
+export declare function useLogBrewNetwork(
+  defaults?: Partial<ReactNetworkInput>
+): (input?: Partial<ReactNetworkInput>) => ReactActionEvent;
 export declare function useLogBrew(): LogBrewClient;
 export declare function useLogBrewActions(): LogBrewActions;
 
 declare const defaultExport: {
   LogBrewErrorBoundary: typeof LogBrewErrorBoundary;
   LogBrewProvider: typeof LogBrewProvider;
+  captureReactAction: typeof captureReactAction;
   captureReactError: typeof captureReactError;
+  captureReactNetwork: typeof captureReactNetwork;
   createLogBrewReactClient: typeof createLogBrewReactClient;
+  createReactActionEvent: typeof createReactActionEvent;
   createReactErrorEvent: typeof createReactErrorEvent;
+  createReactNetworkEvent: typeof createReactNetworkEvent;
   createReactTraceparent: typeof createReactTraceparent;
   createTraceparentFetch: typeof createTraceparentFetch;
   shouldPropagateTraceparent: typeof shouldPropagateTraceparent;
   useLogBrew: typeof useLogBrew;
+  useLogBrewAction: typeof useLogBrewAction;
   useLogBrewActions: typeof useLogBrewActions;
+  useLogBrewNetwork: typeof useLogBrewNetwork;
 };
 
 export default defaultExport;

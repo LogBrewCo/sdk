@@ -50,6 +50,8 @@ grep -q 'LOGBREW_CLIENT_KEY' "$tmp_dir/react-readme.md"
 grep -q 'LogBrewProvider' "$tmp_dir/react-readme.md"
 grep -q 'LogBrewErrorBoundary' "$tmp_dir/react-readme.md"
 grep -q 'useLogBrewActions' "$tmp_dir/react-readme.md"
+grep -q 'useLogBrewAction' "$tmp_dir/react-readme.md"
+grep -q 'useLogBrewNetwork' "$tmp_dir/react-readme.md"
 grep -q 'captureReactError' "$tmp_dir/react-readme.md"
 grep -q 'createTraceparentFetch' "$tmp_dir/react-readme.md"
 grep -q 'createReactTraceparent' "$tmp_dir/react-readme.md"
@@ -106,14 +108,20 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   LogBrewErrorBoundary,
   LogBrewProvider,
+  captureReactAction,
   captureReactError,
+  captureReactNetwork,
   createLogBrewReactClient,
+  createReactActionEvent,
   createReactErrorEvent,
+  createReactNetworkEvent,
   createReactTraceparent,
   createTraceparentFetch,
   shouldPropagateTraceparent,
   useLogBrew,
-  useLogBrewActions
+  useLogBrewAction,
+  useLogBrewActions,
+  useLogBrewNetwork
 } from "@logbrew/react";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -161,11 +169,130 @@ function SmokeComponent() {
   return React.createElement("output", { "data-pending": logbrew.pendingEvents() }, "ready");
 }
 
+function TimelineComponent() {
+  const logbrew = useLogBrew();
+  const captureAction = useLogBrewAction({
+    metadata: {
+      funnel: "checkout",
+      routeTemplate: "/checkout",
+      sessionId: "sess_123"
+    },
+    timestamp: "2026-06-02T10:00:06Z",
+    traceId: "trace_001"
+  });
+  const captureNetwork = useLogBrewNetwork({
+    routeTemplate: "/api/checkout?email=hidden#receipt",
+    sessionId: "sess_123",
+    timestamp: "2026-06-02T10:00:07Z",
+    traceId: "trace_001"
+  });
+  captureAction({
+    id: "evt_action_checkout_click",
+    metadata: { ignoredNested: { value: "nested" }, step: "submit" },
+    name: "checkout-click"
+  });
+  captureNetwork({
+    durationMs: 124,
+    id: "evt_action_checkout_api",
+    method: "post",
+    metadata: { ignoredNested: { value: "nested" } },
+    statusCode: 503
+  });
+  return React.createElement("output", { "data-pending": logbrew.pendingEvents() }, "timeline");
+}
+
 const markup = renderToStaticMarkup(
   React.createElement(LogBrewProvider, { client }, React.createElement(SmokeComponent))
 );
 if (!markup.includes('data-pending="6"')) {
   throw new Error(`provider did not expose queued events: ${markup}`);
+}
+
+const timelineClient = createLogBrewReactClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-timeline-smoke-app",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+const timelineMarkup = renderToStaticMarkup(
+  React.createElement(LogBrewProvider, { client: timelineClient }, React.createElement(TimelineComponent))
+);
+if (!timelineMarkup.includes('data-pending="2"')) {
+  throw new Error(`timeline hooks did not queue two events: ${timelineMarkup}`);
+}
+const timelinePreview = JSON.parse(timelineClient.previewJson());
+if (timelinePreview.events.length !== 2) {
+  throw new Error(`expected two timeline events, got ${timelinePreview.events.length}`);
+}
+const checkoutAction = timelinePreview.events.find((event) => event.id === "evt_action_checkout_click");
+if (checkoutAction?.attributes.metadata.source !== "react.action") {
+  throw new Error("expected React action source metadata");
+}
+if (checkoutAction.attributes.metadata.funnel !== "checkout" || checkoutAction.attributes.metadata.step !== "submit") {
+  throw new Error("expected React action funnel and step metadata");
+}
+if ("ignoredNested" in checkoutAction.attributes.metadata) {
+  throw new Error("expected React action helper to drop nested metadata");
+}
+const networkAction = timelinePreview.events.find((event) => event.id === "evt_action_checkout_api");
+if (networkAction?.attributes.name !== "POST /api/checkout") {
+  throw new Error(`unexpected React network action name: ${networkAction?.attributes.name}`);
+}
+if (networkAction.attributes.status !== "failure") {
+  throw new Error("expected 5xx React network helper status to be failure");
+}
+if (networkAction.attributes.metadata.routeTemplate !== "/api/checkout") {
+  throw new Error(`expected React network route without query/hash, got ${networkAction.attributes.metadata.routeTemplate}`);
+}
+if (networkAction.attributes.metadata.method !== "POST" || networkAction.attributes.metadata.durationMs !== 124) {
+  throw new Error("expected React network method and duration metadata");
+}
+if ("ignoredNested" in networkAction.attributes.metadata) {
+  throw new Error("expected React network helper to drop nested metadata");
+}
+
+const directClient = createLogBrewReactClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-direct-action-smoke-app",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+const directAction = createReactActionEvent({
+  id: "evt_action_direct",
+  metadata: { step: "open" },
+  name: "checkout-panel-opened",
+  sessionId: "sess_456",
+  timestamp: "2026-06-02T10:00:08Z"
+});
+if (directAction.attributes.metadata.source !== "react.action") {
+  throw new Error("expected direct React action source metadata");
+}
+captureReactAction(directClient, {
+  id: "evt_action_direct_capture",
+  metadata: { step: "confirm" },
+  name: "checkout-confirmed",
+  timestamp: "2026-06-02T10:00:09Z"
+});
+const directNetwork = createReactNetworkEvent({
+  id: "evt_action_direct_network",
+  method: "GET",
+  routeTemplate: "/api/orders?email=hidden",
+  statusCode: 200,
+  timestamp: "2026-06-02T10:00:10Z"
+});
+if (directNetwork.attributes.metadata.routeTemplate !== "/api/orders") {
+  throw new Error("expected direct React network helper to strip query text");
+}
+captureReactNetwork(directClient, {
+  id: "evt_action_direct_network_capture",
+  method: "GET",
+  routeTemplate: "/api/orders#receipt",
+  statusCode: 200,
+  timestamp: "2026-06-02T10:00:11Z"
+});
+const directPreview = JSON.parse(directClient.previewJson());
+if (directPreview.events.length !== 2) {
+  throw new Error(`expected two direct helper events, got ${directPreview.events.length}`);
 }
 
 try {
@@ -317,6 +444,7 @@ console.error(JSON.stringify({
   events: 6,
   errorAttempts: errorResponse.attempts,
   errorEvents: errorPreview.events.length,
+  networkAction: networkAction.attributes.name,
   propagatedTraceparent,
   rendered: true
 }));
@@ -333,6 +461,7 @@ grep -q '"ok":true' "$tmp_dir/react-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/react-smoke.stderr.json"
 grep -q '"errorAttempts":2' "$tmp_dir/react-smoke.stderr.json"
 grep -q '"errorEvents":3' "$tmp_dir/react-smoke.stderr.json"
+grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/react-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/react-smoke.stderr.json"
 grep -q '"rendered":true' "$tmp_dir/react-smoke.stderr.json"
 
@@ -342,15 +471,23 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   LogBrewErrorBoundary,
   LogBrewProvider,
+  captureReactAction,
   captureReactError,
+  captureReactNetwork,
   createLogBrewReactClient,
+  createReactActionEvent,
   createReactErrorEvent,
+  createReactNetworkEvent,
   createReactTraceparent,
   createTraceparentFetch,
   useLogBrew,
+  useLogBrewAction,
   useLogBrewActions,
+  useLogBrewNetwork,
   type LogBrewActions,
+  type ReactActionEvent,
   type ReactErrorEvent,
+  type ReactNetworkInput,
   type TracePropagationTarget
 } from "@logbrew/react";
 
@@ -372,22 +509,56 @@ void tracedFetch("/api/ping");
 const typedErrorEvent: ReactErrorEvent = createReactErrorEvent(new Error("typed react error"), {
   componentStack: "\n    at Component"
 });
+const typedActionEvent: ReactActionEvent = createReactActionEvent({
+  id: "evt_action_typed",
+  name: "typed-action",
+  timestamp: "2026-06-02T10:00:08Z"
+});
+const typedNetworkInput: ReactNetworkInput = {
+  method: "POST",
+  routeTemplate: "/api/typed?email=hidden",
+  statusCode: 202
+};
+const typedNetworkEvent: ReactActionEvent = createReactNetworkEvent(typedNetworkInput);
 captureReactError(client, new Error("typed handled error"), {
   componentStack: "\n    at Component"
+});
+captureReactAction(client, {
+  name: typedActionEvent.attributes.name,
+  timestamp: "2026-06-02T10:00:09Z"
+});
+captureReactNetwork(client, {
+  ...typedNetworkInput,
+  timestamp: "2026-06-02T10:00:10Z"
 });
 
 function Component(): React.ReactElement {
   const directClient = useLogBrew();
   const actions: LogBrewActions = useLogBrewActions();
+  const captureAction = useLogBrewAction({ sessionId: "sess_typed" });
+  const captureNetwork = useLogBrewNetwork({ routeTemplate: "/api/typed" });
   actions.log("evt_log_001", "2026-06-02T10:00:03Z", {
     message: "worker started",
     level: "info"
+  });
+  captureAction({
+    name: "typed-hook-action",
+    timestamp: "2026-06-02T10:00:11Z"
+  });
+  captureNetwork({
+    method: "GET",
+    statusCode: 200,
+    timestamp: "2026-06-02T10:00:12Z"
   });
   actions.captureReactError(new Error("typed hook error"), {
     componentStack: "\n    at Component"
   });
   void actions.flush(RecordingTransport.alwaysAccept());
-  return React.createElement("span", { "data-pending": directClient.pendingEvents(), "data-event": typedErrorEvent.id }, "typed");
+  return React.createElement(
+    "span",
+    { "data-network": typedNetworkEvent.id, "data-pending": directClient.pendingEvents(), "data-event": typedErrorEvent.id },
+    "typed"
+  );
 }
 
 export const app = React.createElement(
@@ -431,6 +602,12 @@ if (typeof react.LogBrewErrorBoundary !== "function") {
 if (typeof react.captureReactError !== "function" || typeof react.createReactErrorEvent !== "function") {
   throw new Error("missing CommonJS React error helpers");
 }
+if (typeof react.captureReactAction !== "function" || typeof react.createReactActionEvent !== "function") {
+  throw new Error("missing CommonJS React action helpers");
+}
+if (typeof react.captureReactNetwork !== "function" || typeof react.createReactNetworkEvent !== "function") {
+  throw new Error("missing CommonJS React network helpers");
+}
 if (!react.shouldPropagateTraceparent("https://api.example.test/ping", ["https://api.example.test/"])) {
   throw new Error("CommonJS trace target helper did not match");
 }
@@ -444,6 +621,24 @@ const cjsEvent = react.captureReactError(cjsClient, new Error("cjs react error")
 });
 if (cjsEvent.attributes.metadata.source !== "react.error") {
   throw new Error("CommonJS React error helper did not attach source metadata");
+}
+const cjsAction = react.captureReactAction(cjsClient, {
+  id: "evt_action_cjs",
+  name: "cjs-action",
+  timestamp: "2026-06-02T10:00:08Z"
+});
+if (cjsAction.attributes.metadata.source !== "react.action") {
+  throw new Error("CommonJS React action helper did not attach source metadata");
+}
+const cjsNetwork = react.captureReactNetwork(cjsClient, {
+  id: "evt_action_cjs_network",
+  method: "POST",
+  routeTemplate: "/api/cjs?email=hidden#receipt",
+  statusCode: 503,
+  timestamp: "2026-06-02T10:00:09Z"
+});
+if (cjsNetwork.attributes.metadata.routeTemplate !== "/api/cjs" || cjsNetwork.attributes.status !== "failure") {
+  throw new Error("CommonJS React network helper did not sanitize route/status metadata");
 }
 EOF
 node cjs-smoke.cjs

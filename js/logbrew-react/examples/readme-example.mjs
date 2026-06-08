@@ -16,7 +16,11 @@ const reactSdk = await import("@logbrew/react").catch(async (error) => {
 });
 
 const { RecordingTransport } = sdk;
-const { LogBrewProvider, createLogBrewReactClient, useLogBrew } = reactSdk;
+const {
+  LogBrewProvider,
+  createLogBrewReactClient,
+  useLogBrew
+} = reactSdk;
 
 const client = createLogBrewReactClient({
   clientKey: "LOGBREW_CLIENT_KEY",

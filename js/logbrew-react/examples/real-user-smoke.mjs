@@ -18,14 +18,20 @@ const reactSdk = await import("@logbrew/react").catch(async (error) => {
 const { RecordingTransport } = sdk;
 const {
   LogBrewProvider,
+  captureReactAction,
   captureReactError,
+  captureReactNetwork,
   createLogBrewReactClient,
+  createReactActionEvent,
   createReactErrorEvent,
+  createReactNetworkEvent,
   createReactTraceparent,
   createTraceparentFetch,
   shouldPropagateTraceparent,
   useLogBrew,
-  useLogBrewActions
+  useLogBrewAction,
+  useLogBrewActions,
+  useLogBrewNetwork
 } = reactSdk;
 
 const client = createLogBrewReactClient({
@@ -71,6 +77,38 @@ function HookSmoke() {
   return React.createElement("span", { "data-logbrew-pending": logbrew.pendingEvents() }, "pending events");
 }
 
+function TimelineSmoke() {
+  const logbrew = useLogBrew();
+  const captureAction = useLogBrewAction({
+    metadata: {
+      funnel: "checkout",
+      routeTemplate: "/checkout",
+      sessionId: "sess_123"
+    },
+    timestamp: "2026-06-02T10:00:06Z",
+    traceId: "trace_001"
+  });
+  const captureNetwork = useLogBrewNetwork({
+    routeTemplate: "/api/checkout?email=hidden#receipt",
+    sessionId: "sess_123",
+    timestamp: "2026-06-02T10:00:07Z",
+    traceId: "trace_001"
+  });
+  captureAction({
+    id: "evt_action_checkout_click",
+    metadata: { ignoredNested: { value: "nested" }, step: "submit" },
+    name: "checkout-click"
+  });
+  captureNetwork({
+    durationMs: 124,
+    id: "evt_action_checkout_api",
+    method: "post",
+    metadata: { ignoredNested: { value: "nested" } },
+    statusCode: 503
+  });
+  return React.createElement("span", { "data-logbrew-pending": logbrew.pendingEvents() }, "pending events");
+}
+
 const markup = renderToStaticMarkup(
   React.createElement(
     LogBrewProvider,
@@ -80,6 +118,97 @@ const markup = renderToStaticMarkup(
 );
 if (!markup.includes('data-logbrew-pending="6"')) {
   throw new Error(`expected hook actions to create six pending events, got ${markup}`);
+}
+
+const timelineClient = createLogBrewReactClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "logbrew-react-timeline",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+const timelineMarkup = renderToStaticMarkup(
+  React.createElement(
+    LogBrewProvider,
+    { client: timelineClient },
+    React.createElement(TimelineSmoke)
+  )
+);
+if (!timelineMarkup.includes('data-logbrew-pending="2"')) {
+  throw new Error(`expected React timeline hooks to create two pending events, got ${timelineMarkup}`);
+}
+const timelinePreview = JSON.parse(timelineClient.previewJson());
+if (timelinePreview.events.length !== 2) {
+  throw new Error(`expected two React timeline events, got ${timelinePreview.events.length}`);
+}
+const checkoutAction = timelinePreview.events.find((event) => event.id === "evt_action_checkout_click");
+if (checkoutAction?.attributes.metadata.source !== "react.action") {
+  throw new Error("expected React action source metadata");
+}
+if (checkoutAction.attributes.metadata.funnel !== "checkout" || checkoutAction.attributes.metadata.step !== "submit") {
+  throw new Error("expected React action funnel and step metadata");
+}
+if ("ignoredNested" in checkoutAction.attributes.metadata) {
+  throw new Error("expected React action helper to drop nested metadata");
+}
+const networkAction = timelinePreview.events.find((event) => event.id === "evt_action_checkout_api");
+if (networkAction?.attributes.name !== "POST /api/checkout") {
+  throw new Error(`unexpected React network action name: ${networkAction?.attributes.name}`);
+}
+if (networkAction.attributes.status !== "failure") {
+  throw new Error("expected 5xx React network helper status to be failure");
+}
+if (networkAction.attributes.metadata.routeTemplate !== "/api/checkout") {
+  throw new Error(`expected React network route template without query/hash, got ${networkAction.attributes.metadata.routeTemplate}`);
+}
+if (networkAction.attributes.metadata.method !== "POST" || networkAction.attributes.metadata.durationMs !== 124) {
+  throw new Error("expected React network method and duration metadata");
+}
+if ("ignoredNested" in networkAction.attributes.metadata) {
+  throw new Error("expected React network helper to drop nested metadata");
+}
+
+const directClient = createLogBrewReactClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "logbrew-react-direct-actions",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+const directAction = createReactActionEvent({
+  id: "evt_action_direct",
+  metadata: { step: "open" },
+  name: "checkout-panel-opened",
+  sessionId: "sess_456",
+  timestamp: "2026-06-02T10:00:08Z"
+});
+if (directAction.attributes.metadata.source !== "react.action") {
+  throw new Error("expected direct React action source metadata");
+}
+captureReactAction(directClient, {
+  id: "evt_action_direct_capture",
+  metadata: { step: "confirm" },
+  name: "checkout-confirmed",
+  timestamp: "2026-06-02T10:00:09Z"
+});
+const directNetwork = createReactNetworkEvent({
+  id: "evt_action_direct_network",
+  method: "GET",
+  routeTemplate: "/api/orders?email=hidden",
+  statusCode: 200,
+  timestamp: "2026-06-02T10:00:10Z"
+});
+if (directNetwork.attributes.metadata.routeTemplate !== "/api/orders") {
+  throw new Error("expected direct React network helper to strip query text");
+}
+captureReactNetwork(directClient, {
+  id: "evt_action_direct_network_capture",
+  method: "GET",
+  routeTemplate: "/api/orders#receipt",
+  statusCode: 200,
+  timestamp: "2026-06-02T10:00:11Z"
+});
+const directPreview = JSON.parse(directClient.previewJson());
+if (directPreview.events.length !== 2) {
+  throw new Error(`expected two direct React helper events, got ${directPreview.events.length}`);
 }
 
 try {
@@ -202,6 +331,7 @@ console.error(JSON.stringify({
   events: 6,
   manualErrorAttempts: errorResponse.attempts,
   manualErrorEvents: errorPreview.events.length,
+  networkAction: networkAction.attributes.name,
   propagatedTraceparent,
   rendered: true
 }));
