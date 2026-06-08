@@ -70,6 +70,10 @@ public final class LogBrewClient {
         try pushEvent(.action(validateAction(attributes)), id: id, timestamp: timestamp)
     }
 
+    public func metric(_ id: String, timestamp: String, attributes: MetricAttributes) throws {
+        try pushEvent(.metric(validateMetric(attributes)), id: id, timestamp: timestamp)
+    }
+
     public func flush(transport: any Transport) throws -> TransportResponse {
         if closed {
             throw SdkError(code: "shutdown_error", message: "client is already shut down")

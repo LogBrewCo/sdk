@@ -1,6 +1,6 @@
 # LogBrew Swift SDK
 
-Public Swift SDK for creating LogBrew event batches, validating them locally, and flushing them through a transport.
+Public Swift SDK for sending logs, errors, spans, actions, releases, environments, and explicit metrics from your Swift or Apple-platform app to the hosted LogBrew observability service.
 
 ## Install
 
@@ -10,7 +10,7 @@ Public Swift SDK for creating LogBrew event batches, validating them locally, an
 
 Use the `LogBrew` product from the `swift/logbrew-swift` package directory.
 
-The package ships a `LogBrew` library product plus copyable examples for creating a client, previewing queued JSON, flushing through a transport, and using the Swift logger facade in your own app.
+The package ships a `LogBrew` library product plus copyable examples for creating a client, previewing queued JSON, flushing through a transport, and using the Swift logger facade in your own app. If you use an AI coding assistant, ask it to install the `LogBrew` product, create one app-owned client, wire your chosen signals, and keep personally sensitive values out of messages and metadata.
 
 ## Example
 
@@ -33,6 +33,18 @@ try client.log(
     timestamp: "2026-06-02T10:00:03Z",
     attributes: LogAttributes(message: "worker started", level: .info, logger: "job-runner")
 )
+try client.metric(
+    "evt_metric_001",
+    timestamp: "2026-06-02T10:00:06Z",
+    attributes: MetricAttributes(
+        name: "queue.depth",
+        kind: .gauge,
+        value: 42,
+        unit: "items",
+        temporality: .instant,
+        metadata: ["queue": "checkout"]
+    )
+)
 
 let logger = try LogBrewLogger(
     client: client,
@@ -50,6 +62,29 @@ print("status=\(response.statusCode) attempts=\(response.attempts)")
 ```
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush(transport:)` or `shutdown(transport:)` to send queued events through a transport, and use `previewJSON()` when you want a stable local JSON preview before sending anything.
+
+## Metrics
+
+Use `client.metric(...)` when your app owns a numeric measurement you want to send to LogBrew:
+
+```swift
+try client.metric(
+    "evt_metric_001",
+    timestamp: "2026-06-02T10:00:06Z",
+    attributes: MetricAttributes(
+        name: "checkout.queue.depth",
+        kind: .gauge,
+        value: 12,
+        unit: "items",
+        temporality: .instant,
+        metadata: ["queue": "checkout"]
+    )
+)
+```
+
+Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Gauges use `instant` temporality and may be negative. Keep metric metadata low-cardinality and primitive, such as service, route template, queue name, plan, or region. Avoid user ids, raw URLs, query strings, stack traces, and unbounded labels.
+
+The Swift SDK does not automatically collect app runtime, URLSession, SwiftUI, or database metrics. Add explicit measurements where they are meaningful for your product, or keep those signals in framework-owned integrations when you add them.
 
 ## HTTP Delivery
 

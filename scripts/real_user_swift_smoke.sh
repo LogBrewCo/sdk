@@ -57,6 +57,7 @@ grep -q '"ok":true' "$tmp_dir/smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/smoke.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/smoke.stderr.json"
 grep -q '"events":6' "$tmp_dir/smoke.stderr.json"
+grep -q '"metricEvents":1' "$tmp_dir/smoke.stderr.json"
 
 echo "swift real-user smoke: example Makefile commands" >&2
 (cd "$package_dir/examples" && make) > "$tmp_dir/examples-help.txt"
@@ -169,6 +170,86 @@ precondition(loggerPreview.contains(#""swiftSubsystem" : "co.logbrew.app""#))
 precondition(loggerPreview.contains(#""swiftCategory" : "checkout""#))
 precondition(loggerPreview.contains(#""screen" : "Checkout""#))
 
+let metricClient = try LogBrewClient.create(
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "swift-consumer-metrics",
+    sdkVersion: "0.1.0"
+)
+try metricClient.metric(
+    "evt_metric_001",
+    timestamp: "2026-06-02T10:00:06Z",
+    attributes: MetricAttributes(
+        name: "queue.depth",
+        kind: .gauge,
+        value: 42,
+        unit: "items",
+        temporality: .instant,
+        metadata: ["queue": "checkout"]
+    )
+)
+let metricPreview = try metricClient.previewJSON()
+precondition(metricPreview.contains(#""type" : "metric""#))
+precondition(metricPreview.contains(#""name" : "queue.depth""#))
+precondition(metricPreview.contains(#""kind" : "gauge""#))
+precondition(metricPreview.contains(#""value" : 42"#))
+precondition(metricPreview.contains(#""unit" : "items""#))
+precondition(metricPreview.contains(#""temporality" : "instant""#))
+precondition(metricPreview.contains(#""queue" : "checkout""#))
+
+var rejectedInfiniteMetric = false
+do {
+    try metricClient.metric(
+        "evt_metric_infinite",
+        timestamp: "2026-06-02T10:00:06Z",
+        attributes: MetricAttributes(
+            name: "queue.depth",
+            kind: .gauge,
+            value: Double.infinity,
+            unit: "items",
+            temporality: .instant
+        )
+    )
+} catch let error as SdkError {
+    rejectedInfiniteMetric = error.code == "validation_error" && error.message.contains("finite")
+}
+precondition(rejectedInfiniteMetric)
+
+var rejectedNegativeCounter = false
+do {
+    try metricClient.metric(
+        "evt_metric_negative_counter",
+        timestamp: "2026-06-02T10:00:06Z",
+        attributes: MetricAttributes(
+            name: "jobs.processed",
+            kind: .counter,
+            value: -1,
+            unit: "jobs",
+            temporality: .delta
+        )
+    )
+} catch let error as SdkError {
+    rejectedNegativeCounter = error.code == "validation_error" && error.message.contains("non-negative")
+}
+precondition(rejectedNegativeCounter)
+
+var rejectedGaugeTemporality = false
+do {
+    try metricClient.metric(
+        "evt_metric_gauge_delta",
+        timestamp: "2026-06-02T10:00:06Z",
+        attributes: MetricAttributes(
+            name: "queue.depth",
+            kind: .gauge,
+            value: 42,
+            unit: "items",
+            temporality: .delta
+        )
+    )
+} catch let error as SdkError {
+    rejectedGaugeTemporality = error.code == "validation_error" && error.message.contains("instant")
+}
+precondition(rejectedGaugeTemporality)
+
 let httpEndpointValue = ProcessInfo.processInfo.environment["LOGBREW_SWIFT_HTTP_ENDPOINT"] ?? ""
 let httpEndpoint = URL(string: httpEndpointValue)!
 let httpClient = try LogBrewClient.create(
@@ -193,7 +274,7 @@ precondition(httpResponse.attempts == 2)
 
 print(preview)
 let summary = """
-{"ok":true,"status":\(response.statusCode),"attempts":\(response.attempts),"events":6,"loggerEvents":1,"httpAttempts":\(httpResponse.attempts)}
+{"ok":true,"status":\(response.statusCode),"attempts":\(response.attempts),"events":6,"loggerEvents":1,"metricEvents":1,"httpAttempts":\(httpResponse.attempts)}
 
 """
 FileHandle.standardError.write(Data(summary.utf8))
@@ -339,6 +420,7 @@ grep -q '"ok":true' "$tmp_dir/consumer.stderr.json"
 grep -q '"attempts":1' "$tmp_dir/consumer.stderr.json"
 grep -q '"events":6' "$tmp_dir/consumer.stderr.json"
 grep -q '"loggerEvents":1' "$tmp_dir/consumer.stderr.json"
+grep -q '"metricEvents":1' "$tmp_dir/consumer.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/consumer.stderr.json"
 python3 - "$intake_log" <<'PY'
 import json

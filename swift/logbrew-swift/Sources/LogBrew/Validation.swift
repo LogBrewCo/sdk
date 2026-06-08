@@ -41,6 +41,37 @@ func validateAction(_ attributes: ActionAttributes) throws -> ActionAttributes {
     return attributes
 }
 
+func validateMetric(_ attributes: MetricAttributes) throws -> MetricAttributes {
+    try requireNonEmpty("metric name", attributes.name)
+    try requireNonEmpty("metric unit", attributes.unit)
+    guard attributes.value.isFinite else {
+        throw SdkError(code: "validation_error", message: "metric value must be finite")
+    }
+    switch attributes.kind {
+    case .counter, .histogram:
+        if attributes.value < 0 {
+            throw SdkError(
+                code: "validation_error",
+                message: "\(attributes.kind.rawValue) metric value must be non-negative",
+            )
+        }
+        guard attributes.temporality == .delta || attributes.temporality == .cumulative else {
+            throw SdkError(
+                code: "validation_error",
+                message: "\(attributes.kind.rawValue) metric temporality must be cumulative or delta",
+            )
+        }
+    case .gauge:
+        guard attributes.temporality == .instant else {
+            throw SdkError(
+                code: "validation_error",
+                message: "gauge metric temporality must be instant",
+            )
+        }
+    }
+    return attributes
+}
+
 func requireNonEmpty(_ label: String, _ value: String) throws {
     if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         throw SdkError(code: "validation_error", message: "\(label) must be non-empty")

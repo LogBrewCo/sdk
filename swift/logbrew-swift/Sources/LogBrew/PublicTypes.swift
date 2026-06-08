@@ -24,6 +24,18 @@ public enum ActionStatus: String, Codable, Sendable {
     case failure
 }
 
+public enum MetricKind: String, Codable, Sendable {
+    case counter
+    case gauge
+    case histogram
+}
+
+public enum MetricTemporality: String, Codable, Sendable {
+    case delta
+    case cumulative
+    case instant
+}
+
 public struct ClientConfig: Equatable, Sendable {
     public let apiKey: String
     public let sdkName: String
@@ -143,6 +155,31 @@ public struct ActionAttributes: Codable, Equatable, Sendable {
     public init(name: String, status: ActionStatus, metadata: Metadata? = nil) {
         self.name = name
         self.status = status
+        self.metadata = metadata
+    }
+}
+
+public struct MetricAttributes: Codable, Equatable, Sendable {
+    public let name: String
+    public let kind: MetricKind
+    public let value: Double
+    public let unit: String
+    public let temporality: MetricTemporality
+    public let metadata: Metadata?
+
+    public init(
+        name: String,
+        kind: MetricKind,
+        value: Double,
+        unit: String,
+        temporality: MetricTemporality,
+        metadata: Metadata? = nil,
+    ) {
+        self.name = name
+        self.kind = kind
+        self.value = value
+        self.unit = unit
+        self.temporality = temporality
         self.metadata = metadata
     }
 }

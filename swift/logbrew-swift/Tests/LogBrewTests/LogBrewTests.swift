@@ -335,8 +335,3 @@ private func makeFullClient() throws -> LogBrewClient {
     )
     return client
 }
-
-private func parsePayload(_ json: String) throws -> [String: Any] {
-    let value = try JSONSerialization.jsonObject(with: Data(json.utf8))
-    return try #require(value as? [String: Any])
-}

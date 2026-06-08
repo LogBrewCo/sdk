@@ -40,6 +40,8 @@ struct Event: Encodable, Equatable {
             try container.encode(value, forKey: .attributes)
         case let .action(value):
             try container.encode(value, forKey: .attributes)
+        case let .metric(value):
+            try container.encode(value, forKey: .attributes)
         }
     }
 }
@@ -51,6 +53,7 @@ enum EventAttributes: Equatable {
     case log(LogAttributes)
     case span(SpanAttributes)
     case action(ActionAttributes)
+    case metric(MetricAttributes)
 
     var eventType: String {
         switch self {
@@ -66,6 +69,8 @@ enum EventAttributes: Equatable {
             "span"
         case .action:
             "action"
+        case .metric:
+            "metric"
         }
     }
 }

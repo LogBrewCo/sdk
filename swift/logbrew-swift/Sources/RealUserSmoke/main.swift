@@ -81,9 +81,37 @@ let httpResponse = try httpClient.flush(transport: httpTransport)
 precondition(capturedAuthorization == "Bearer LOGBREW_API_KEY")
 let httpAttempts = httpResponse.attempts
 
-print(preview)
-let summary = """
-{"ok":true,"status":\(response.statusCode),"attempts":\(response.attempts),"events":6,"httpAttempts":\(httpAttempts)}
+let metricClient = try LogBrewClient.create(
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-swift-metrics",
+    sdkVersion: "0.1.0",
+)
+try metricClient.metric(
+    "evt_metric_001",
+    timestamp: "2026-06-02T10:00:06Z",
+    attributes: MetricAttributes(
+        name: "queue.depth",
+        kind: .gauge,
+        value: 42,
+        unit: "items",
+        temporality: .instant,
+        metadata: ["queue": "checkout"],
+    ),
+)
+let metricPreview = try metricClient.previewJSON()
+precondition(metricPreview.contains(#""type" : "metric""#))
+precondition(metricPreview.contains(#""name" : "queue.depth""#))
+precondition(metricPreview.contains(#""temporality" : "instant""#))
 
-"""
+print(preview)
+let flushAttempts = response.attempts
+let summaryFields = [
+    #""ok":true"#,
+    #""status":\#(response.statusCode)"#,
+    #""attempts":\#(flushAttempts)"#,
+    #""events":6"#,
+    #""metricEvents":1"#,
+    #""httpAttempts":\#(httpAttempts)"#,
+]
+let summary = "{\(summaryFields.joined(separator: ","))}\n"
 FileHandle.standardError.write(Data(summary.utf8))

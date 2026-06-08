@@ -31,6 +31,8 @@ grep -q '/examples/Makefile$' "$tmp_dir/archive-contents.txt"
 unzip -p "$archive_path" '*/README.md' > "$tmp_dir/archive-readme.md"
 grep -q 'HTTPTransport' "$tmp_dir/archive-readme.md"
 grep -q 'LogBrewLogger' "$tmp_dir/archive-readme.md"
+grep -q 'client.metric' "$tmp_dir/archive-readme.md"
+grep -q 'MetricAttributes' "$tmp_dir/archive-readme.md"
 grep -q 'LOGBREW_API_KEY' "$tmp_dir/archive-readme.md"
 
 echo "swift package checks passed"
