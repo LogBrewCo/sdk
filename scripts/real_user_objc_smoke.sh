@@ -9,7 +9,29 @@ remove_tmp_dir() {
   rm -rf "$tmp_dir"
 }
 
+on_error() {
+  local status=$?
+  echo "real_user_objc_smoke failed at line ${BASH_LINENO[0]} while running: ${BASH_COMMAND}" >&2
+  for diagnostic in \
+    "$tmp_dir/native-app.stdout.json" \
+    "$tmp_dir/native-app.stderr.json" \
+    "$tmp_dir/http-app.stdout.json" \
+    "$tmp_dir/http-app.stderr.json" \
+    "$tmp_dir/http-intake.stderr" \
+    "$tmp_dir/readme-example.stdout.json" \
+    "$tmp_dir/readme-example.stderr.json" \
+    "$tmp_dir/real-user-smoke.stdout.json" \
+    "$tmp_dir/real-user-smoke.stderr.json"; do
+    if [[ -f "$diagnostic" ]]; then
+      echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
+      sed -n '1,80p' "$diagnostic" >&2
+    fi
+  done
+  exit "$status"
+}
+
 trap remove_tmp_dir EXIT
+trap on_error ERR
 
 objc_command="${OBJC:-}"
 if [[ -z "$objc_command" ]]; then
@@ -30,6 +52,8 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
+test -f "$sdk_dir/src/LBWHTTPTransport.m"
+grep -q 'LBWHTTPTransport' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
 
@@ -42,6 +66,8 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
+test -f "$sdk_dir/src/LBWHTTPTransport.m"
+grep -q 'LBWHTTPTransport' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
 
@@ -265,6 +291,159 @@ EOF
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/native-app.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/native-app.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/native-app.stderr.json"
+
+cat > "$app_dir/http_app.m" <<'EOF'
+#import "LogBrew.h"
+
+static void LBWDie(NSString *message) {
+  fprintf(stderr, "%s\n", [message UTF8String]);
+  exit(1);
+}
+
+int main(void) {
+  @autoreleasepool {
+    NSError *error = nil;
+    NSString *endpoint = [[[NSProcessInfo processInfo] environment] objectForKey:@"LOGBREW_OBJC_HTTP_ENDPOINT"];
+    LBWConfig *config = [LBWConfig configWithAPIKey:@"LOGBREW_API_KEY"];
+    config.sdkName = @"native-objc-http-app";
+    config.maxRetries = 1U;
+    LBWClient *client = [[LBWClient alloc] initWithConfig:config error:&error];
+    if (client == nil) {
+      LBWDie([error localizedDescription]);
+    }
+    if (![client logWithID:@"evt_objc_http_transport"
+                 timestamp:@"2026-06-02T10:00:06Z"
+                attributes:@{
+                  @"message": @"objc http transport sent",
+                  @"level": @"info",
+                  @"logger": @"objc-http"
+                }
+                     error:&error]) {
+      LBWDie([error localizedDescription]);
+    }
+    LBWHTTPTransport *transport = [[LBWHTTPTransport alloc] initWithEndpoint:endpoint
+                                                                    headers:@{@"x-logbrew-source": @"objc-consumer"}
+                                                                    timeout:5.0
+                                                                      error:&error];
+    if (transport == nil) {
+      LBWDie([error localizedDescription]);
+    }
+    LBWTransportResponse *response = [client flushWithTransport:transport error:&error];
+    if (response == nil) {
+      LBWDie([error localizedDescription]);
+    }
+    if (response.statusCode != 202 || response.attempts != 2U || client.pendingEvents != 0U) {
+      LBWDie([NSString stringWithFormat:@"unexpected HTTP response status=%ld attempts=%lu pending=%lu",
+                                        (long)response.statusCode,
+                                        (unsigned long)response.attempts,
+                                        (unsigned long)client.pendingEvents]);
+    }
+    fprintf(stderr, "{\"ok\":true,\"httpAttempts\":%lu}\n", (unsigned long)response.attempts);
+  }
+  return 0;
+}
+EOF
+
+http_port="$(python3 - <<'PY'
+import socket
+
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)"
+cat > "$tmp_dir/objc_intake.py" <<'PY'
+import json
+import sys
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+port = int(sys.argv[1])
+ready_path = Path(sys.argv[2])
+log_path = Path(sys.argv[3])
+
+
+class Handler(BaseHTTPRequestHandler):
+    count = 0
+
+    def do_POST(self):
+        content_length = int(self.headers.get("content-length", "0"))
+        body = self.rfile.read(content_length).decode("utf-8")
+        Handler.count += 1
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "authorization": self.headers.get("authorization"),
+                "body": body,
+                "contentType": self.headers.get("content-type"),
+                "path": self.path,
+                "source": self.headers.get("x-logbrew-source"),
+            }) + "\n")
+        self.send_response(503 if Handler.count == 1 else 202)
+        self.end_headers()
+        self.wfile.write(b"accepted")
+
+    def log_message(self, _format, *_args):
+        return
+
+
+server = HTTPServer(("127.0.0.1", port), Handler)
+server.timeout = 1
+ready_path.write_text("ready", encoding="utf-8")
+deadline = time.monotonic() + 90
+while Handler.count < 2 and time.monotonic() < deadline:
+    server.handle_request()
+if Handler.count < 2:
+    print(f"objc intake timed out after {Handler.count} request(s)", file=sys.stderr)
+    sys.exit(1)
+PY
+intake_ready="$tmp_dir/http-intake.ready"
+intake_log="$tmp_dir/http-intake.jsonl"
+python3 "$tmp_dir/objc_intake.py" "$http_port" "$intake_ready" "$intake_log" \
+  > "$tmp_dir/http-intake.stdout" 2> "$tmp_dir/http-intake.stderr" &
+intake_pid="$!"
+for _attempt in {1..600}; do
+  if [[ -f "$intake_ready" ]]; then
+    break
+  fi
+  sleep 0.1
+done
+if [[ ! -f "$intake_ready" ]]; then
+  echo "objc intake server did not become ready" >&2
+  exit 1
+fi
+
+"$objc_command" -fobjc-arc -Wall -Wextra -Wpedantic -Werror \
+  -I"$sdk_dir/include" \
+  "$sdk_dir/src/LogBrew.m" \
+  "$sdk_dir/src/LBWHTTPTransport.m" \
+  "$app_dir/http_app.m" \
+  -framework Foundation \
+  -o "$app_dir/http_app"
+LOGBREW_OBJC_HTTP_ENDPOINT="http://127.0.0.1:$http_port/v1/events" \
+  "$app_dir/http_app" > "$tmp_dir/http-app.stdout.json" 2> "$tmp_dir/http-app.stderr.json"
+wait "$intake_pid"
+grep -q '"httpAttempts":2' "$tmp_dir/http-app.stderr.json"
+python3 - "$intake_log" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+requests = [json.loads(line) for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()]
+if len(requests) != 2:
+    raise SystemExit(f"expected 2 Objective-C HTTP delivery attempts, got {len(requests)}")
+for request in requests:
+    if request["authorization"] != "Bearer LOGBREW_API_KEY":
+        raise SystemExit(f"unexpected authorization header: {request['authorization']}")
+    if request["contentType"] != "application/json":
+        raise SystemExit(f"unexpected content type: {request['contentType']}")
+    if request["source"] != "objc-consumer":
+        raise SystemExit(f"unexpected source header: {request['source']}")
+    if request["path"] != "/v1/events":
+        raise SystemExit(f"unexpected path: {request['path']}")
+if "evt_objc_http_transport" not in requests[1]["body"]:
+    raise SystemExit("missing Objective-C HTTP transport event in final request body")
+PY
 
 make -C "$sdk_dir/examples" OBJC="$objc_command" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"

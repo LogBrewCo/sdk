@@ -6,6 +6,7 @@
 NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString *const LogBrewObjectiveCVersion;
+FOUNDATION_EXPORT NSString *const LBWHTTPTransportDefaultEndpoint;
 FOUNDATION_EXPORT NSString *const LBWErrorDomain;
 FOUNDATION_EXPORT NSString *const LBWErrorStableCodeKey;
 FOUNDATION_EXPORT NSString *const LBWErrorRetryableKey;
@@ -43,6 +44,16 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 - (nullable LBWTransportResponse *)sendWithAPIKey:(NSString *)apiKey
                                              body:(NSString *)body
                                             error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
+@interface LBWHTTPTransport : NSObject <LBWTransport>
+
+- (instancetype)init;
+- (nullable instancetype)initWithEndpoint:(nullable NSString *)endpoint
+                                  headers:(nullable NSDictionary<NSString *, NSString *> *)headers
+                                  timeout:(NSTimeInterval)timeout
+                                    error:(NSError *_Nullable *_Nullable)error NS_DESIGNATED_INITIALIZER;
 
 @end
 

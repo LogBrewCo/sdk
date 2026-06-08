@@ -29,7 +29,7 @@ objcflags=(-fobjc-arc -Wall -Wextra -Wpedantic -Werror -I"$package_dir/include")
 ldflags=(-framework Foundation)
 
 mkdir -p "$tmp_dir/build"
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/tests/test_logbrew.m" \
+"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LBWHTTPTransport.m" "$package_dir/tests/test_logbrew.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/test_logbrew"
 "$tmp_dir/build/test_logbrew"
 
@@ -59,6 +59,7 @@ grep -qx 'README.md' "$tmp_dir/archive-contents.txt"
 grep -qx 'Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'include/LogBrew.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LogBrew.m' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/LBWHTTPTransport.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/readme_example.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/real_user_smoke.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/Makefile' "$tmp_dir/archive-contents.txt"
@@ -78,12 +79,14 @@ archive_path = Path(sys.argv[1])
 with tarfile.open(archive_path, "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
     header = archive.extractfile("include/LogBrew.h").read().decode()
-for needle in ("LOGBREW_API_KEY", "copyable source", "flushWithTransport"):
+for needle in ("LOGBREW_API_KEY", "Sending To LogBrew", "LBWHTTPTransport", "copyable source", "flushWithTransport"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
 for needle in (
     "LogBrewObjectiveCVersion",
+    "LBWHTTPTransportDefaultEndpoint",
     "LBWClient",
+    "LBWHTTPTransport",
     "LBWRecordingTransport",
     "LBWErrorStableCodeKey",
     "captureProductActionWithID",

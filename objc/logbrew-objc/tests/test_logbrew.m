@@ -229,6 +229,32 @@ static void LBWExerciseTimelineHelpers(void) {
   LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"nested metadata failed");
 }
 
+static void LBWExerciseHTTPTransportValidation(void) {
+  NSError *error = nil;
+  LBWHTTPTransport *transport = [[LBWHTTPTransport alloc] initWithEndpoint:@"ftp://example.com/v1/events"
+                                                                   headers:nil
+                                                                   timeout:1.0
+                                                                     error:&error];
+  LBWAssert(transport == nil && [LBWStableCode(error) isEqualToString:@"configuration_error"], @"bad endpoint failed");
+  transport = [[LBWHTTPTransport alloc] initWithEndpoint:@"https://example.com/v1/events"
+                                                 headers:nil
+                                                 timeout:0.0
+                                                   error:&error];
+  LBWAssert(transport == nil && [LBWStableCode(error) isEqualToString:@"configuration_error"], @"bad timeout failed");
+  transport = [[LBWHTTPTransport alloc] initWithEndpoint:@"https://example.com/v1/events"
+                                                 headers:@{@"authorization": @"bad"}
+                                                 timeout:1.0
+                                                   error:&error];
+  LBWAssert(transport == nil && [LBWStableCode(error) isEqualToString:@"configuration_error"], @"reserved header failed");
+  transport = [[LBWHTTPTransport alloc] initWithEndpoint:@"https://example.com/v1/events"
+                                                 headers:@{@"x-logbrew-source": @"objc-test"}
+                                                 timeout:1.0
+                                                   error:&error];
+  LBWAssert(transport != nil, @"valid HTTP transport failed");
+  LBWAssert([LBWHTTPTransportDefaultEndpoint isEqualToString:@"https://api.logbrew.com/v1/events"],
+            @"default endpoint failed");
+}
+
 int main(void) {
   @autoreleasepool {
     NSError *error = nil;
@@ -250,6 +276,7 @@ int main(void) {
     LBWAssert(client.pendingEvents == 0U, @"flush did not clear events");
     LBWExerciseFailurePaths();
     LBWExerciseTimelineHelpers();
+    LBWExerciseHTTPTransportValidation();
   }
   return 0;
 }

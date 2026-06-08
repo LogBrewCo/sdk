@@ -10,8 +10,8 @@ all: test examples
 $(BUILD_DIR):
 	@mkdir -p "$(BUILD_DIR)"
 
-$(BUILD_DIR)/test_logbrew: src/LogBrew.m tests/test_logbrew.m include/LogBrew.h | $(BUILD_DIR)
-	@$(OBJC) $(OBJCFLAGS) src/LogBrew.m tests/test_logbrew.m $(LDFLAGS) -o "$@"
+$(BUILD_DIR)/test_logbrew: src/LogBrew.m src/LBWHTTPTransport.m tests/test_logbrew.m include/LogBrew.h | $(BUILD_DIR)
+	@$(OBJC) $(OBJCFLAGS) src/LogBrew.m src/LBWHTTPTransport.m tests/test_logbrew.m $(LDFLAGS) -o "$@"
 
 test: $(BUILD_DIR)/test_logbrew
 	@$(BUILD_DIR)/test_logbrew

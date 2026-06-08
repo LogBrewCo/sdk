@@ -404,6 +404,7 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     require_path(root, "objc/logbrew-objc/README.md", failures)
     header_path = require_path(root, "objc/logbrew-objc/include/LogBrew.h", failures)
     source_path = require_path(root, "objc/logbrew-objc/src/LogBrew.m", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWHTTPTransport.m", failures)
     require_path(root, "objc/logbrew-objc/Makefile", failures)
     require_path(root, "objc/logbrew-objc/examples/Makefile", failures)
     require_path(root, "objc/logbrew-objc/examples/readme_example.m", failures)
@@ -416,7 +417,9 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     location = "objc/logbrew-objc/include/LogBrew.h"
     for needle in (
         "LogBrewObjectiveCVersion",
+        "LBWHTTPTransportDefaultEndpoint",
         "LBWClient",
+        "LBWHTTPTransport",
         "LBWRecordingTransport",
         "LBWErrorStableCodeKey",
     ):
@@ -424,6 +427,8 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     for needle in (
         "Public Objective-C SDK",
         "LOGBREW_API_KEY",
+        "Sending To LogBrew",
+        "LBWHTTPTransport",
         "flushWithTransport",
         "copyable source",
     ):

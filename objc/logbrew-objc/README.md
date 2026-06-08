@@ -45,6 +45,31 @@ LBWRecordingTransport *transport = [[LBWRecordingTransport alloc] init];
 [client flushWithTransport:transport error:&error];
 ```
 
+## Sending To LogBrew
+
+Use `LBWHTTPTransport` when your application is ready to send events to the hosted LogBrew intake:
+
+```bash
+clang -fobjc-arc -Iobjc/logbrew-objc/include \
+  objc/logbrew-objc/src/LogBrew.m \
+  objc/logbrew-objc/src/LBWHTTPTransport.m \
+  your_app.m \
+  -framework Foundation \
+  -o your_app
+```
+
+```objective-c
+LBWHTTPTransport *transport =
+    [[LBWHTTPTransport alloc] initWithEndpoint:LBWHTTPTransportDefaultEndpoint
+                                      headers:@{@"x-logbrew-source": @"objc-app"}
+                                      timeout:10.0
+                                        error:&error];
+
+[client flushWithTransport:transport error:&error];
+```
+
+`LBWHTTPTransport` uses Foundation `NSURLSession`, so it does not add third-party dependencies. It validates `http://` and `https://` endpoints, sends `authorization: Bearer <api key>` and `content-type: application/json`, rejects custom overrides for those reserved headers, supports safe additional headers, and maps request failures into retryable transport errors. It does not patch global `NSURLSession` behavior, inspect application traffic, collect request or response payloads, or capture arbitrary headers from your app.
+
 ## Example Source
 
 The `examples` directory contains copyable source for creating a client, previewing queued JSON, flushing through a transport, and handling SDK `NSError` values in your own Apple app.
