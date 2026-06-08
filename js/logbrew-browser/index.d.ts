@@ -68,7 +68,19 @@ export type BrowserActionInput = string | {
   metadata?: Metadata;
 };
 
-export type BrowserMetadataKind = "page_view" | "action" | "error" | "unhandledrejection";
+export type BrowserNetworkInput = string | {
+  name?: string;
+  method?: string;
+  routeTemplate: string;
+  status?: ActionAttributes["status"];
+  statusCode?: number;
+  durationMs?: number;
+  sessionId?: string;
+  traceId?: string;
+  metadata?: Metadata;
+};
+
+export type BrowserMetadataKind = "page_view" | "action" | "network" | "error" | "unhandledrejection";
 
 export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTransportConfig & {
   browserWindow?: Window;
@@ -104,11 +116,16 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
     action: BrowserActionInput,
     context: { browserWindow?: Window; client: LogBrewClient }
   ) => LogBrewBrowserEvent<ActionAttributes>;
+  networkEvent?: (
+    request: BrowserNetworkInput,
+    context: { browserWindow?: Window; client: LogBrewClient }
+  ) => LogBrewBrowserEvent<ActionAttributes>;
   idFactory?: (context: {
     action?: BrowserActionInput;
     browserWindow?: Window;
     error?: unknown;
     message?: string;
+    request?: BrowserNetworkInput;
     path: string;
     source?: string;
   }) => string;
@@ -177,6 +194,12 @@ export declare function captureBrowserAction(
   options?: LogBrewBrowserOptions
 ): Promise<TransportResponse | undefined>;
 
+export declare function captureBrowserNetwork(
+  request: BrowserNetworkInput,
+  context: LogBrewBrowserContext,
+  options?: LogBrewBrowserOptions
+): Promise<TransportResponse | undefined>;
+
 export declare function createPageViewEvent(
   browserWindow?: Window,
   options?: LogBrewBrowserOptions
@@ -184,6 +207,12 @@ export declare function createPageViewEvent(
 
 export declare function createBrowserActionEvent(
   action: BrowserActionInput,
+  browserWindow?: Window,
+  options?: LogBrewBrowserOptions
+): LogBrewBrowserEvent<ActionAttributes>;
+
+export declare function createBrowserNetworkEvent(
+  request: BrowserNetworkInput,
   browserWindow?: Window,
   options?: LogBrewBrowserOptions
 ): LogBrewBrowserEvent<ActionAttributes>;
@@ -203,6 +232,7 @@ export declare function createUnhandledRejectionEvent(
 declare const defaultExport: {
   captureBrowserAction: typeof captureBrowserAction;
   captureBrowserError: typeof captureBrowserError;
+  captureBrowserNetwork: typeof captureBrowserNetwork;
   capturePageView: typeof capturePageView;
   captureUnhandledRejection: typeof captureUnhandledRejection;
   createBrowserTraceparent: typeof createBrowserTraceparent;
@@ -211,6 +241,7 @@ declare const defaultExport: {
   createFetchTransport: typeof createFetchTransport;
   createLogBrewBrowserClient: typeof createLogBrewBrowserClient;
   createLogBrewBrowserContext: typeof createLogBrewBrowserContext;
+  createBrowserNetworkEvent: typeof createBrowserNetworkEvent;
   createPageViewEvent: typeof createPageViewEvent;
   createTraceparentFetch: typeof createTraceparentFetch;
   createUnhandledRejectionEvent: typeof createUnhandledRejectionEvent;

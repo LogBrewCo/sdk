@@ -241,6 +241,15 @@ async function captureBrowserAction(action, context, options = {}) {
   return flushAfterCapture(context, options);
 }
 
+async function captureBrowserNetwork(request, context, options = {}) {
+  const event = typeof options.networkEvent === "function"
+    ? options.networkEvent(request, { browserWindow: context.browserWindow, client: context.client })
+    : createBrowserNetworkEvent(request, context.browserWindow, options);
+
+  context.client.action(event.id, event.timestamp, event.attributes);
+  return flushAfterCapture(context, options);
+}
+
 function createPageViewEvent(browserWindow = defaultWindow(), {
   idFactory = defaultPageViewEventId,
   includeDocumentTitle = false,
@@ -297,6 +306,47 @@ function createBrowserActionEvent(action, browserWindow = defaultWindow(), {
   );
   return {
     id: idFactory({ action, browserWindow, message: details.name, path, source: "action" }),
+    timestamp: now(),
+    attributes: {
+      metadata: safeMetadata,
+      name: details.name,
+      status: details.status
+    }
+  };
+}
+
+function createBrowserNetworkEvent(request, browserWindow = defaultWindow(), {
+  idFactory = defaultNetworkEventId,
+  includeDocumentTitle = false,
+  includeHash = false,
+  includeQueryString = false,
+  includeUserAgent = false,
+  metadata,
+  now = () => new Date().toISOString(),
+  sanitizeMetadata = defaultSanitizeMetadata
+} = {}) {
+  const details = networkDetails(request);
+  const path = browserPath(browserWindow, { includeHash, includeQueryString });
+  const baseMetadata = browserMetadata(browserWindow, {
+    includeDocumentTitle,
+    includeUserAgent,
+    path,
+    source: "browser.network"
+  });
+  const networkMetadata = compactMetadata({
+    durationMs: details.durationMs,
+    method: details.method,
+    routeTemplate: details.routeTemplate,
+    sessionId: details.sessionId,
+    statusCode: details.statusCode,
+    traceId: details.traceId
+  });
+  const safeMetadata = sanitizeMetadata(
+    mergeMetadata(mergeMetadata(mergeMetadata(baseMetadata, metadata), networkMetadata), details.metadata),
+    "network"
+  );
+  return {
+    id: idFactory({ browserWindow, message: details.name, path, request, source: "network" }),
     timestamp: now(),
     attributes: {
       metadata: safeMetadata,
@@ -507,6 +557,29 @@ function actionDetails(action) {
   };
 }
 
+function networkDetails(request) {
+  const routeTemplate = routeTemplatePath(typeof request === "string" ? request : request?.routeTemplate);
+  const method = networkMethod(request);
+  const statusCode = numberOrUndefined(request?.statusCode);
+  const status = typeof request?.status === "string"
+    ? request.status
+    : statusCode !== undefined && statusCode >= 400 ? "failure" : "success";
+  const name = typeof request?.name === "string" && request.name.trim() !== ""
+    ? request.name
+    : `network.${method.toLowerCase()} ${routeTemplate}`;
+  return {
+    durationMs: nonNegativeNumberOrUndefined(request?.durationMs),
+    metadata: safeMetadata(request?.metadata),
+    method,
+    name,
+    routeTemplate,
+    sessionId: stringOrUndefined(request?.sessionId),
+    status,
+    statusCode,
+    traceId: stringOrUndefined(request?.traceId)
+  };
+}
+
 function errorDetails(error) {
   const candidate = error?.error ?? error;
   const message = error?.message ?? errorMessage(candidate);
@@ -552,6 +625,33 @@ function numberOrUndefined(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function nonNegativeNumberOrUndefined(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function stringOrUndefined(value) {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+function networkMethod(request) {
+  const method = typeof request?.method === "string" && request.method.trim() !== ""
+    ? request.method
+    : "GET";
+  return method.trim().toUpperCase();
+}
+
+function routeTemplatePath(routeTemplate) {
+  if (typeof routeTemplate !== "string" || routeTemplate.trim() === "") {
+    return "/";
+  }
+  try {
+    const url = new URL(routeTemplate, "https://logbrew.example");
+    return url.pathname || "/";
+  } catch {
+    return "/";
+  }
+}
+
 function defaultPageViewEventId({ path }) {
   return `evt_browser_page_${slugify(path)}`;
 }
@@ -562,6 +662,10 @@ function defaultErrorEventId({ message, path, source }) {
 
 function defaultActionEventId({ message, path }) {
   return `evt_browser_action_${slugify(`${path}_${message}`)}`;
+}
+
+function defaultNetworkEventId({ message, path }) {
+  return `evt_browser_network_${slugify(`${path}_${message}`)}`;
 }
 
 function defaultFetch() {
@@ -673,6 +777,7 @@ module.exports = {
   RecordingTransport,
   captureBrowserAction,
   captureBrowserError,
+  captureBrowserNetwork,
   capturePageView,
   captureUnhandledRejection,
   createBrowserTraceparent,
@@ -681,6 +786,7 @@ module.exports = {
   createFetchTransport,
   createLogBrewBrowserClient,
   createLogBrewBrowserContext,
+  createBrowserNetworkEvent,
   createPageViewEvent,
   createTraceparentFetch,
   createUnhandledRejectionEvent,

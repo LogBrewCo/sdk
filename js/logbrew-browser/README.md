@@ -2,7 +2,7 @@
 
 Browser helpers for the public LogBrew JavaScript SDK.
 
-This package captures page views, synchronous browser errors, and unhandled Promise rejections while keeping validation, buffering, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+This package captures page views, synchronous browser errors, unhandled Promise rejections, product actions, and app-owned network milestones while keeping validation, buffering, retry, flush, and shutdown behavior in `@logbrew/sdk`.
 
 ## Install
 
@@ -37,10 +37,14 @@ Set `flushOnPageHide: false` or `flushOnVisibilityHidden: false` if your app wan
 
 ## Structured Actions
 
-Use `captureBrowserAction()` for the product steps your app already understands, such as clicks, form submits, route changes, retry decisions, or funnel steps. These action events give LogBrew and AI agents a session timeline that can be analyzed across many users without requiring a person to watch individual recordings.
+Use `captureBrowserAction()` for the product steps your app already understands, such as clicks, form submits, route changes, retry decisions, or funnel steps. Use `captureBrowserNetwork()` for important API milestones that should be correlated with the same session or trace. These action events give LogBrew and AI agents a session timeline that can be analyzed across many users without requiring a person to watch individual recordings.
 
 ```js
-import { captureBrowserAction, installLogBrewBrowser } from "@logbrew/browser";
+import {
+  captureBrowserAction,
+  captureBrowserNetwork,
+  installLogBrewBrowser
+} from "@logbrew/browser";
 
 const logbrew = installLogBrewBrowser({
   clientKey: "LOGBREW_BROWSER_KEY"
@@ -56,9 +60,22 @@ await captureBrowserAction({
     step: 2
   }
 }, logbrew);
+
+await captureBrowserNetwork({
+  method: "POST",
+  routeTemplate: "/api/checkout",
+  statusCode: 503,
+  durationMs: 842,
+  sessionId: "sess_123",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  metadata: {
+    funnel: "checkout",
+    retryAttempt: 1
+  }
+}, logbrew);
 ```
 
-Action metadata is sanitized to primitive values. Keep it low-cardinality and avoid raw selectors, full URLs, user-entered text, screenshots, or replay payloads unless your application owns a clear opt-in and redaction policy.
+Action and network metadata is sanitized to primitive values. Keep it low-cardinality and avoid raw selectors, full URLs, query strings, headers, request or response bodies, user-entered text, screenshots, or replay payloads unless your application owns a clear opt-in and redaction policy. `captureBrowserNetwork()` records route templates, methods, status codes, durations, trace IDs, session IDs, and your own primitive metadata; it does not patch `fetch` or inspect network payloads automatically.
 
 ## Fetch Transport
 

@@ -1,5 +1,9 @@
 import { RecordingTransport } from "@logbrew/sdk";
-import { captureBrowserAction, installLogBrewBrowser } from "@logbrew/browser";
+import {
+  captureBrowserAction,
+  captureBrowserNetwork,
+  installLogBrewBrowser
+} from "@logbrew/browser";
 
 const transport = RecordingTransport.alwaysAccept();
 const browserWindow = createExampleWindow("https://app.example.test/dashboard?email=dev@example.test#section");
@@ -28,6 +32,21 @@ await captureBrowserAction({
     routeTemplate: "/dashboard",
     sessionId: "sess_browser_001",
     step: 2
+  }
+}, logbrew, {
+  flushOnCapture: false
+});
+
+await captureBrowserNetwork({
+  method: "POST",
+  routeTemplate: "/api/checkout",
+  statusCode: 503,
+  durationMs: 842,
+  sessionId: "sess_browser_001",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  metadata: {
+    funnel: "checkout",
+    retryAttempt: 1
   }
 }, logbrew, {
   flushOnCapture: false

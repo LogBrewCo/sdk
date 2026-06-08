@@ -1,6 +1,7 @@
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
+  captureBrowserNetwork,
   createBrowserTraceparent,
   createTraceparentFetch,
   installLogBrewBrowser,
@@ -34,9 +35,25 @@ await captureBrowserAction({
   flushOnCapture: false,
   now: nextTimestamp
 });
+await captureBrowserNetwork({
+  method: "POST",
+  routeTemplate: "/api/checkout?email=dev@example.test#retry",
+  statusCode: 503,
+  durationMs: 842,
+  sessionId: "sess_browser_001",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  metadata: {
+    funnel: "checkout",
+    ignoredNested: { value: "nested" },
+    retryAttempt: 1
+  }
+}, logbrew, {
+  flushOnCapture: false,
+  now: nextTimestamp
+});
 
-if (logbrew.client.pendingEvents() !== 4) {
-  throw new Error(`expected 4 captured events, got ${logbrew.client.pendingEvents()}`);
+if (logbrew.client.pendingEvents() !== 5) {
+  throw new Error(`expected 5 captured events, got ${logbrew.client.pendingEvents()}`);
 }
 
 logbrew.client.log("evt_browser_pagehide_001", nextTimestamp(), {
@@ -79,6 +96,16 @@ if (action?.attributes.metadata?.sessionId !== "sess_browser_001") {
 }
 if (action.attributes.metadata.ignoredNested !== undefined) {
   throw new Error(`nested action metadata should be dropped: ${payload}`);
+}
+const network = parsed.events.find((event) => event.type === "action" && event.attributes.metadata?.source === "browser.network");
+if (network?.attributes.metadata?.routeTemplate !== "/api/checkout") {
+  throw new Error(`expected query-free network route template, got ${payload}`);
+}
+if (network.attributes.metadata.statusCode !== 503 || network.attributes.status !== "failure") {
+  throw new Error(`expected failed network metadata, got ${payload}`);
+}
+if (network.attributes.metadata.ignoredNested !== undefined) {
+  throw new Error(`nested network metadata should be dropped: ${payload}`);
 }
 const visibilityPayload = JSON.parse(transport.sentBodies[1]);
 if (visibilityPayload.events[0].id !== "evt_browser_hidden_001") {
@@ -131,6 +158,7 @@ console.error(JSON.stringify({
   ok: true,
   events: parsed.events.length,
   hiddenFlushEvents: visibilityPayload.events.length,
+  networkAction: network.attributes.metadata.routeTemplate,
   pageView: parsed.events[0].attributes.name,
   pagehideFlushEvents: parsed.events.length,
   propagatedTraceparent: firstTraceparent,
