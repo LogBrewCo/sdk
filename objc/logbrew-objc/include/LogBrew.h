@@ -107,6 +107,25 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
           attributes:(NSDictionary<NSString *, id> *)attributes
                error:(NSError *_Nullable *_Nullable)error;
 
+- (BOOL)captureProductActionWithID:(NSString *)eventID
+                          timestamp:(NSString *)timestamp
+                               name:(NSString *)name
+                             status:(nullable NSString *)status
+                            context:(nullable NSDictionary<NSString *, id> *)context
+                           metadata:(nullable NSDictionary<NSString *, id> *)metadata
+                              error:(NSError *_Nullable *_Nullable)error;
+
+- (BOOL)captureNetworkMilestoneWithID:(NSString *)eventID
+                             timestamp:(NSString *)timestamp
+                                method:(NSString *)method
+                         routeTemplate:(NSString *)routeTemplate
+                            statusCode:(nullable NSNumber *)statusCode
+                            durationMs:(nullable NSNumber *)durationMs
+                                status:(nullable NSString *)status
+                               context:(nullable NSDictionary<NSString *, id> *)context
+                              metadata:(nullable NSDictionary<NSString *, id> *)metadata
+                                 error:(NSError *_Nullable *_Nullable)error;
+
 @end
 
 NS_ASSUME_NONNULL_END

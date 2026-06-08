@@ -81,7 +81,14 @@ with tarfile.open(archive_path, "r:gz") as archive:
 for needle in ("LOGBREW_API_KEY", "copyable source", "flushWithTransport"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
-for needle in ("LogBrewObjectiveCVersion", "LBWClient", "LBWRecordingTransport", "LBWErrorStableCodeKey"):
+for needle in (
+    "LogBrewObjectiveCVersion",
+    "LBWClient",
+    "LBWRecordingTransport",
+    "LBWErrorStableCodeKey",
+    "captureProductActionWithID",
+    "captureNetworkMilestoneWithID",
+):
     if needle not in header:
         raise SystemExit(f"missing public header symbol: {needle}")
 PY

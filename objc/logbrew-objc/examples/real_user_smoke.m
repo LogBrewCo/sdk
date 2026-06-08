@@ -140,6 +140,45 @@ static void LBWExerciseFailurePaths(void) {
   LBWRequireCode(error, @"shutdown_error", @"post-shutdown failure used wrong code");
 }
 
+static void LBWExerciseTimelineHelpers(void) {
+  NSError *error = nil;
+  LBWClient *timelineClient = LBWNewClient();
+  NSDictionary<NSString *, id> *context = @{
+    @"sessionId": @"session_123",
+    @"screen": @"Checkout",
+    @"traceId": @"trace_abc",
+    @"funnel": @"checkout",
+    @"step": @"payment"
+  };
+  LBWMust([timelineClient captureProductActionWithID:@"evt_product_action_001"
+                                           timestamp:@"2026-06-02T10:00:07Z"
+                                                name:@"checkout.pay_tapped"
+                                              status:nil
+                                             context:context
+                                            metadata:@{@"component": @"pay-button"}
+                                               error:&error], error);
+  LBWMust([timelineClient captureNetworkMilestoneWithID:@"evt_network_milestone_001"
+                                              timestamp:@"2026-06-02T10:00:08Z"
+                                                 method:@"post"
+                                          routeTemplate:@"https://mobile.example.test/api/checkout?itemId=123#pay"
+                                             statusCode:@503
+                                             durationMs:@184.5
+                                                 status:nil
+                                                context:context
+                                               metadata:@{@"retryable": @YES}
+                                                  error:&error], error);
+  NSString *preview = [timelineClient previewJSONWithError:&error];
+  LBWMust(preview != nil, error);
+  if ([preview rangeOfString:@"\"source\":\"objc.action\""].location == NSNotFound ||
+      [preview rangeOfString:@"\"source\":\"objc.network\""].location == NSNotFound ||
+      [preview rangeOfString:@"\"name\":\"POST \\/api\\/checkout\""].location == NSNotFound ||
+      [preview rangeOfString:@"\"status\":\"failure\""].location == NSNotFound ||
+      [preview rangeOfString:@"itemId"].location != NSNotFound ||
+      [preview rangeOfString:@"#pay"].location != NSNotFound) {
+    LBWDie(@"timeline helper preview failed");
+  }
+}
+
 int main(void) {
   @autoreleasepool {
     NSError *error = nil;
@@ -161,6 +200,7 @@ int main(void) {
             (unsigned long)response.attempts,
             (unsigned long)[transport.sentBodies count]);
     LBWExerciseFailurePaths();
+    LBWExerciseTimelineHelpers();
   }
   return 0;
 }

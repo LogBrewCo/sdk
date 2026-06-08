@@ -134,6 +134,101 @@ static void LBWExerciseFailurePaths(void) {
   LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"shutdown_error"], @"post-shutdown code failed");
 }
 
+static void LBWExerciseTimelineHelpers(void) {
+  NSError *error = nil;
+  LBWClient *client = LBWNewClient();
+  NSDictionary<NSString *, id> *context = @{
+    @"sessionId": @"session_123",
+    @"screen": @"Checkout",
+    @"traceId": @"trace_abc",
+    @"funnel": @"checkout",
+    @"step": @"payment"
+  };
+  LBWAssert([client captureProductActionWithID:@"evt_product_action_001"
+                                     timestamp:@"2026-06-02T10:00:07Z"
+                                          name:@"checkout.pay_tapped"
+                                        status:nil
+                                       context:context
+                                      metadata:@{@"component": @"pay-button"}
+                                         error:&error], @"product action helper failed");
+  LBWAssert([client captureNetworkMilestoneWithID:@"evt_network_milestone_001"
+                                        timestamp:@"2026-06-02T10:00:08Z"
+                                           method:@"post"
+                                    routeTemplate:@"https://mobile.example.test/api/checkout?itemId=123#pay"
+                                       statusCode:@503
+                                       durationMs:@184.5
+                                           status:nil
+                                          context:context
+                                         metadata:@{@"retryable": @YES}
+                                            error:&error], @"network milestone helper failed");
+
+  NSString *preview = [client previewJSONWithError:&error];
+  LBWAssert(preview != nil, @"timeline preview failed");
+  NSDictionary<NSString *, id> *payload = LBWJSON(preview);
+  NSArray<NSDictionary<NSString *, id> *> *events = payload[@"events"];
+  NSDictionary<NSString *, id> *actionAttributes = events[0][@"attributes"];
+  NSDictionary<NSString *, id> *actionMetadata = actionAttributes[@"metadata"];
+  NSDictionary<NSString *, id> *networkAttributes = events[1][@"attributes"];
+  NSDictionary<NSString *, id> *networkMetadata = networkAttributes[@"metadata"];
+
+  LBWAssert([actionAttributes[@"name"] isEqualToString:@"checkout.pay_tapped"], @"action name failed");
+  LBWAssert([actionAttributes[@"status"] isEqualToString:@"success"], @"action status failed");
+  LBWAssert([actionMetadata[@"source"] isEqualToString:@"objc.action"], @"action source failed");
+  LBWAssert([actionMetadata[@"sessionId"] isEqualToString:@"session_123"], @"action session failed");
+  LBWAssert([actionMetadata[@"component"] isEqualToString:@"pay-button"], @"action metadata failed");
+  LBWAssert([networkAttributes[@"name"] isEqualToString:@"POST /api/checkout"], @"network name failed");
+  LBWAssert([networkAttributes[@"status"] isEqualToString:@"failure"], @"network status failed");
+  LBWAssert([networkMetadata[@"source"] isEqualToString:@"objc.network"], @"network source failed");
+  LBWAssert([networkMetadata[@"method"] isEqualToString:@"POST"], @"network method failed");
+  LBWAssert([networkMetadata[@"routeTemplate"] isEqualToString:@"/api/checkout"], @"network route failed");
+  LBWAssert([networkMetadata[@"statusCode"] integerValue] == 503, @"network status code failed");
+  LBWAssert([networkMetadata[@"durationMs"] doubleValue] == 184.5, @"network duration failed");
+  LBWAssert([preview rangeOfString:@"itemId"].location == NSNotFound, @"query text leaked");
+  LBWAssert([preview rangeOfString:@"#pay"].location == NSNotFound, @"fragment text leaked");
+
+  BOOL ok = [client captureNetworkMilestoneWithID:@"evt_bad_duration"
+                                        timestamp:@"2026-06-02T10:00:08Z"
+                                           method:@"GET"
+                                    routeTemplate:@"/api/checkout"
+                                       statusCode:nil
+                                       durationMs:@-1
+                                           status:nil
+                                          context:nil
+                                         metadata:nil
+                                            error:&error];
+  LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"bad duration failed");
+  ok = [client captureNetworkMilestoneWithID:@"evt_query_only"
+                                   timestamp:@"2026-06-02T10:00:08Z"
+                                      method:@"GET"
+                               routeTemplate:@"?private=value"
+                                  statusCode:nil
+                                  durationMs:nil
+                                      status:nil
+                                     context:nil
+                                    metadata:nil
+                                       error:&error];
+  LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"query-only route failed");
+  ok = [client captureNetworkMilestoneWithID:@"evt_fractional_status"
+                                   timestamp:@"2026-06-02T10:00:08Z"
+                                      method:@"GET"
+                               routeTemplate:@"/api/checkout"
+                                  statusCode:@202.5
+                                  durationMs:nil
+                                      status:nil
+                                     context:nil
+                                    metadata:nil
+                                       error:&error];
+  LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"fractional status failed");
+  ok = [client captureProductActionWithID:@"evt_nested_metadata"
+                                timestamp:@"2026-06-02T10:00:07Z"
+                                     name:@"checkout.pay_tapped"
+                                   status:nil
+                                  context:nil
+                                 metadata:@{@"nested": @{@"bad": @"value"}}
+                                    error:&error];
+  LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"nested metadata failed");
+}
+
 int main(void) {
   @autoreleasepool {
     NSError *error = nil;
@@ -154,6 +249,7 @@ int main(void) {
     LBWAssert([transport.sentBodies count] == 3U && transport.lastBody != nil, @"recording transport failed");
     LBWAssert(client.pendingEvents == 0U, @"flush did not clear events");
     LBWExerciseFailurePaths();
+    LBWExerciseTimelineHelpers();
   }
   return 0;
 }

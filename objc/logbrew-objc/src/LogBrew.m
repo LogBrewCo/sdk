@@ -1,5 +1,7 @@
 #import "LogBrew.h"
 
+#import <math.h>
+
 NSString *const LogBrewObjectiveCVersion = @"0.1.0";
 NSString *const LBWErrorDomain = @"co.logbrew.sdk";
 NSString *const LBWErrorStableCodeKey = @"LBWStableCode";
@@ -151,6 +153,142 @@ static NSNumber *_Nullable LBWNumberAttribute(
     return nil;
   }
   return numberValue;
+}
+
+static NSDictionary<NSString *, id> *_Nullable LBWMetadataAttribute(
+    NSDictionary<NSString *, id> *attributes,
+    NSString *key,
+    NSString *label,
+    NSError *_Nullable *_Nullable error) {
+  id value = attributes[key];
+  if (value == nil) {
+    return nil;
+  }
+  if (![value isKindOfClass:[NSDictionary class]]) {
+    NSString *message = [NSString stringWithFormat:@"%@ must be a dictionary", label];
+    LBWSetError(error, LBWMakeError(LBWErrorKindValidation, @"validation_error", message, NO));
+    return nil;
+  }
+  NSMutableDictionary<NSString *, id> *clean = [NSMutableDictionary dictionary];
+  NSDictionary *metadata = (NSDictionary *)value;
+  for (id rawKey in metadata) {
+    if (![rawKey isKindOfClass:[NSString class]] || LBWIsBlank(rawKey)) {
+      LBWSetError(error, LBWMakeError(
+          LBWErrorKindValidation, @"validation_error", @"metadata keys must be non-empty strings", NO));
+      return nil;
+    }
+    id rawValue = metadata[rawKey];
+    if (rawValue == nil) {
+      clean[rawKey] = [NSNull null];
+    } else if ([rawValue isKindOfClass:[NSNull class]] || [rawValue isKindOfClass:[NSString class]]) {
+      clean[rawKey] = rawValue;
+    } else if ([rawValue isKindOfClass:[NSNumber class]]) {
+      double doubleValue = [(NSNumber *)rawValue doubleValue];
+      if (!isfinite(doubleValue)) {
+        NSString *message = [NSString stringWithFormat:@"metadata value for %@ must be finite", rawKey];
+        LBWSetError(error, LBWMakeError(LBWErrorKindValidation, @"validation_error", message, NO));
+        return nil;
+      }
+      clean[rawKey] = rawValue;
+    } else {
+      NSString *message = [NSString stringWithFormat:@"%@ values must be primitive", label];
+      LBWSetError(error, LBWMakeError(LBWErrorKindValidation, @"validation_error", message, NO));
+      return nil;
+    }
+  }
+  return clean;
+}
+
+static BOOL LBWCopyMetadata(
+    NSMutableDictionary<NSString *, id> *target,
+    NSDictionary<NSString *, id> *_Nullable metadata,
+    NSString *label,
+    NSError *_Nullable *_Nullable error) {
+  if (metadata == nil) {
+    return YES;
+  }
+  NSDictionary<NSString *, id> *clean = LBWMetadataAttribute(@{@"metadata": metadata}, @"metadata", label, error);
+  if (clean == nil) {
+    return NO;
+  }
+  [target addEntriesFromDictionary:clean];
+  return YES;
+}
+
+static NSString *LBWTrimmedString(NSString *value) {
+  return [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+static NSString *_Nullable LBWNormalizedNetworkMethod(NSString *method, NSError *_Nullable *_Nullable error) {
+  if (!LBWRequireNonEmpty(@"network method", method, error)) {
+    return nil;
+  }
+  return [LBWTrimmedString(method) uppercaseString];
+}
+
+static NSString *LBWStripQueryAndFragment(NSString *value) {
+  NSString *withoutQuery = [value componentsSeparatedByString:@"?"][0];
+  return [withoutQuery componentsSeparatedByString:@"#"][0];
+}
+
+static NSString *_Nullable LBWNormalizedRouteTemplate(NSString *routeTemplate, NSError *_Nullable *_Nullable error) {
+  if (!LBWRequireNonEmpty(@"network routeTemplate", routeTemplate, error)) {
+    return nil;
+  }
+  NSString *trimmed = LBWTrimmedString(routeTemplate);
+  NSURLComponents *components = [NSURLComponents componentsWithString:trimmed];
+  NSString *scheme = [[components scheme] lowercaseString];
+  if ([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"]) {
+    NSString *path = [[components path] length] == 0U ? @"/" : [components path];
+    return LBWStripQueryAndFragment(path);
+  }
+  if ([trimmed rangeOfString:@"://"].location != NSNotFound) {
+    LBWSetError(error, LBWMakeError(
+        LBWErrorKindValidation,
+        @"validation_error",
+        @"network routeTemplate must be a route template or HTTP(S) URL",
+        NO));
+    return nil;
+  }
+  NSString *sanitized = LBWStripQueryAndFragment(trimmed);
+  if (!LBWRequireNonEmpty(@"network routeTemplate", sanitized, error)) {
+    return nil;
+  }
+  return sanitized;
+}
+
+static NSNumber *_Nullable LBWValidatedStatusCode(NSNumber *_Nullable statusCode, NSError *_Nullable *_Nullable error) {
+  if (statusCode == nil) {
+    return nil;
+  }
+  double doubleValue = [statusCode doubleValue];
+  NSInteger integerValue = [statusCode integerValue];
+  if (!isfinite(doubleValue) || doubleValue != (double)integerValue || integerValue < 100 || integerValue > 599) {
+    LBWSetError(error, LBWMakeError(
+        LBWErrorKindValidation, @"validation_error", @"network statusCode must be an integer between 100 and 599", NO));
+    return nil;
+  }
+  return @(integerValue);
+}
+
+static NSNumber *_Nullable LBWValidatedDurationMs(NSNumber *_Nullable durationMs, NSError *_Nullable *_Nullable error) {
+  if (durationMs == nil) {
+    return nil;
+  }
+  double value = [durationMs doubleValue];
+  if (!isfinite(value) || value < 0.0) {
+    LBWSetError(error, LBWMakeError(
+        LBWErrorKindValidation, @"validation_error", @"network durationMs must be finite and non-negative", NO));
+    return nil;
+  }
+  return durationMs;
+}
+
+static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
+  if (statusCode != nil && [statusCode integerValue] >= 400) {
+    return @"failure";
+  }
+  return @"success";
 }
 
 @implementation LBWConfig
@@ -459,7 +597,81 @@ static NSNumber *_Nullable LBWNumberAttribute(
   }
   clean[@"name"] = name;
   clean[@"status"] = status;
+  NSDictionary<NSString *, id> *metadata = LBWMetadataAttribute(attributes, @"metadata", @"action metadata", error);
+  if (metadata == nil && attributes[@"metadata"] != nil) {
+    return NO;
+  }
+  if (metadata != nil) {
+    clean[@"metadata"] = metadata;
+  }
   return [self pushEventWithType:@"action" eventID:eventID timestamp:timestamp attributes:clean error:error];
+}
+
+- (BOOL)captureProductActionWithID:(NSString *)eventID
+                          timestamp:(NSString *)timestamp
+                               name:(NSString *)name
+                             status:(NSString *)status
+                            context:(NSDictionary<NSString *, id> *)context
+                           metadata:(NSDictionary<NSString *, id> *)metadata
+                              error:(NSError **)error {
+  NSMutableDictionary<NSString *, id> *timelineMetadata = [NSMutableDictionary dictionary];
+  if (!LBWCopyMetadata(timelineMetadata, context, @"product action context", error) ||
+      !LBWCopyMetadata(timelineMetadata, metadata, @"product action metadata", error)) {
+    return NO;
+  }
+  timelineMetadata[@"source"] = @"objc.action";
+  return [self actionWithID:eventID
+                 timestamp:timestamp
+                attributes:@{
+                  @"name": name,
+                  @"status": status != nil ? status : @"success",
+                  @"metadata": timelineMetadata
+                }
+                     error:error];
+}
+
+- (BOOL)captureNetworkMilestoneWithID:(NSString *)eventID
+                             timestamp:(NSString *)timestamp
+                                method:(NSString *)method
+                         routeTemplate:(NSString *)routeTemplate
+                            statusCode:(NSNumber *)statusCode
+                            durationMs:(NSNumber *)durationMs
+                                status:(NSString *)status
+                               context:(NSDictionary<NSString *, id> *)context
+                              metadata:(NSDictionary<NSString *, id> *)metadata
+                                 error:(NSError **)error {
+  NSString *normalizedMethod = LBWNormalizedNetworkMethod(method, error);
+  NSString *normalizedRoute = LBWNormalizedRouteTemplate(routeTemplate, error);
+  NSNumber *checkedStatusCode = LBWValidatedStatusCode(statusCode, error);
+  NSNumber *checkedDurationMs = LBWValidatedDurationMs(durationMs, error);
+  if (normalizedMethod == nil || normalizedRoute == nil ||
+      (statusCode != nil && checkedStatusCode == nil) ||
+      (durationMs != nil && checkedDurationMs == nil)) {
+    return NO;
+  }
+  NSMutableDictionary<NSString *, id> *timelineMetadata = [NSMutableDictionary dictionary];
+  if (!LBWCopyMetadata(timelineMetadata, context, @"network milestone context", error) ||
+      !LBWCopyMetadata(timelineMetadata, metadata, @"network milestone metadata", error)) {
+    return NO;
+  }
+  timelineMetadata[@"source"] = @"objc.network";
+  timelineMetadata[@"method"] = normalizedMethod;
+  timelineMetadata[@"routeTemplate"] = normalizedRoute;
+  if (checkedStatusCode != nil) {
+    timelineMetadata[@"statusCode"] = checkedStatusCode;
+  }
+  if (checkedDurationMs != nil) {
+    timelineMetadata[@"durationMs"] = checkedDurationMs;
+  }
+  NSString *name = [NSString stringWithFormat:@"%@ %@", normalizedMethod, normalizedRoute];
+  return [self actionWithID:eventID
+                 timestamp:timestamp
+                attributes:@{
+                  @"name": name,
+                  @"status": status != nil ? status : LBWStatusFromStatusCode(checkedStatusCode),
+                  @"metadata": timelineMetadata
+                }
+                     error:error];
 }
 
 - (BOOL)pushEventWithType:(NSString *)type
