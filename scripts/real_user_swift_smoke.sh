@@ -34,13 +34,19 @@ grep -q '/Sources/LogBrew/EventEncoding.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/LogBrewClient.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/LogBrewLogger.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/Metadata.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/ProductTimeline.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/PublicTypes.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/Transport.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/Validation.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/ReadmeExample/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/RealUserSmoke/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/LogBrewTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/ProductTimelineTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/examples/Makefile$' "$tmp_dir/archive-contents.txt"
+unzip -p "$archive_path" '*/README.md' > "$tmp_dir/archive-readme.md"
+grep -q 'captureProductAction' "$tmp_dir/archive-readme.md"
+grep -q 'captureNetworkMilestone' "$tmp_dir/archive-readme.md"
+grep -q 'ProductTimelineContext' "$tmp_dir/archive-readme.md"
 
 echo "swift real-user smoke: packaged README example" >&2
 swift run --package-path "$package_dir" --scratch-path "$tmp_dir/readme-run-build" ReadmeExample > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
@@ -58,6 +64,8 @@ grep -q '"attempts":2' "$tmp_dir/smoke.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/smoke.stderr.json"
 grep -q '"events":6' "$tmp_dir/smoke.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke.stderr.json"
+grep -q '"timelineEvents":2' "$tmp_dir/smoke.stderr.json"
+grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/smoke.stderr.json"
 
 echo "swift real-user smoke: example Makefile commands" >&2
 (cd "$package_dir/examples" && make) > "$tmp_dir/examples-help.txt"
@@ -250,6 +258,75 @@ do {
 }
 precondition(rejectedGaugeTemporality)
 
+let timelineClient = try LogBrewClient.create(
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "swift-consumer-timeline",
+    sdkVersion: "0.1.0"
+)
+let timelineContext = ProductTimelineContext(
+    sessionId: "session_123",
+    screen: "Checkout",
+    traceId: "trace_abc",
+    funnel: "checkout",
+    step: "payment",
+    metadata: ["platform": "ios"]
+)
+try timelineClient.captureProductAction(
+    "evt_product_action_001",
+    timestamp: "2026-06-02T10:00:07Z",
+    name: "checkout.pay_tapped",
+    context: timelineContext,
+    metadata: ["component": "pay-button"]
+)
+try timelineClient.captureNetworkMilestone(
+    "evt_network_milestone_001",
+    timestamp: "2026-06-02T10:00:08Z",
+    method: "post",
+    routeTemplate: "https://mobile.example.test/api/checkout?itemId=123#pay",
+    statusCode: 503,
+    durationMs: 184.5,
+    context: timelineContext,
+    metadata: ["retryable": true]
+)
+let timelinePreview = try timelineClient.previewJSON()
+precondition(timelinePreview.contains(#""source" : "swift.action""#))
+precondition(timelinePreview.contains(#""source" : "swift.network""#))
+precondition(timelinePreview.contains(#""method" : "POST""#))
+precondition(timelinePreview.contains(#""routeTemplate" : "\/api\/checkout""#) || timelinePreview.contains(#""routeTemplate" : "/api/checkout""#))
+precondition(timelinePreview.contains(#""statusCode" : 503"#))
+precondition(timelinePreview.contains(#""durationMs" : 184.5"#))
+precondition(timelinePreview.contains(#""status" : "failure""#))
+precondition(!timelinePreview.contains("itemId"))
+precondition(!timelinePreview.contains("#pay"))
+
+var rejectedNegativeDuration = false
+do {
+    try timelineClient.captureNetworkMilestone(
+        "evt_network_bad_duration",
+        timestamp: "2026-06-02T10:00:08Z",
+        method: "GET",
+        routeTemplate: "/api/checkout",
+        durationMs: -1
+    )
+} catch let error as SdkError {
+    rejectedNegativeDuration = error.code == "validation_error" && error.message.contains("durationMs")
+}
+precondition(rejectedNegativeDuration)
+
+var rejectedBadStatusCode = false
+do {
+    try timelineClient.captureNetworkMilestone(
+        "evt_network_bad_status",
+        timestamp: "2026-06-02T10:00:08Z",
+        method: "GET",
+        routeTemplate: "/api/checkout",
+        statusCode: 99
+    )
+} catch let error as SdkError {
+    rejectedBadStatusCode = error.code == "validation_error" && error.message.contains("statusCode")
+}
+precondition(rejectedBadStatusCode)
+
 let httpEndpointValue = ProcessInfo.processInfo.environment["LOGBREW_SWIFT_HTTP_ENDPOINT"] ?? ""
 let httpEndpoint = URL(string: httpEndpointValue)!
 let httpClient = try LogBrewClient.create(
@@ -274,7 +351,7 @@ precondition(httpResponse.attempts == 2)
 
 print(preview)
 let summary = """
-{"ok":true,"status":\(response.statusCode),"attempts":\(response.attempts),"events":6,"loggerEvents":1,"metricEvents":1,"httpAttempts":\(httpResponse.attempts)}
+{"ok":true,"status":\(response.statusCode),"attempts":\(response.attempts),"events":6,"loggerEvents":1,"metricEvents":1,"timelineEvents":2,"networkAction":"POST /api/checkout","httpAttempts":\(httpResponse.attempts)}
 
 """
 FileHandle.standardError.write(Data(summary.utf8))
@@ -421,6 +498,8 @@ grep -q '"attempts":1' "$tmp_dir/consumer.stderr.json"
 grep -q '"events":6' "$tmp_dir/consumer.stderr.json"
 grep -q '"loggerEvents":1' "$tmp_dir/consumer.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/consumer.stderr.json"
+grep -q '"timelineEvents":2' "$tmp_dir/consumer.stderr.json"
+grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/consumer.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/consumer.stderr.json"
 python3 - "$intake_log" <<'PY'
 import json

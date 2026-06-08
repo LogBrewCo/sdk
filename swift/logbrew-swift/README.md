@@ -45,6 +45,15 @@ try client.metric(
         metadata: ["queue": "checkout"]
     )
 )
+try client.captureNetworkMilestone(
+    "evt_network_milestone_001",
+    timestamp: "2026-06-02T10:00:08Z",
+    method: "POST",
+    routeTemplate: "/api/checkout",
+    statusCode: 202,
+    durationMs: 184.5,
+    context: ProductTimelineContext(sessionId: "session_123", screen: "Checkout")
+)
 
 let logger = try LogBrewLogger(
     client: client,
@@ -85,6 +94,45 @@ try client.metric(
 Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Gauges use `instant` temporality and may be negative. Keep metric metadata low-cardinality and primitive, such as service, route template, queue name, plan, or region. Avoid user ids, raw URLs, query strings, stack traces, and unbounded labels.
 
 The Swift SDK does not automatically collect app runtime, URLSession, SwiftUI, or database metrics. Add explicit measurements where they are meaningful for your product, or keep those signals in framework-owned integrations when you add them.
+
+## Product Timelines
+
+Use `captureProductAction(...)` when your Swift, iOS, macOS, watchOS, or tvOS app owns a meaningful product step:
+
+```swift
+let context = ProductTimelineContext(
+    sessionId: "session_123",
+    screen: "Checkout",
+    traceId: "trace_abc",
+    funnel: "checkout",
+    step: "payment"
+)
+
+try client.captureProductAction(
+    "evt_product_action_001",
+    timestamp: "2026-06-02T10:00:07Z",
+    name: "checkout.pay_tapped",
+    context: context,
+    metadata: ["component": "pay-button"]
+)
+```
+
+Use `captureNetworkMilestone(...)` for app-owned API milestones that should line up with actions, errors, logs, and traces:
+
+```swift
+try client.captureNetworkMilestone(
+    "evt_network_milestone_001",
+    timestamp: "2026-06-02T10:00:08Z",
+    method: "POST",
+    routeTemplate: "/api/checkout",
+    statusCode: 503,
+    durationMs: 184.5,
+    context: context,
+    metadata: ["retryable": true]
+)
+```
+
+Network helpers normalize the method, strip query strings and fragments from route templates, default HTTP `4xx` and `5xx` milestones to `failure`, and store primitive metadata such as `sessionId`, `screen`, `traceId`, `funnel`, and `step`. They do not patch `URLSession`, record visual replay, collect headers, or capture request or response bodies. Keep user-entered text, raw URLs, query strings, headers, and payloads out of timeline metadata.
 
 ## HTTP Delivery
 

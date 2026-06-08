@@ -103,6 +103,44 @@ precondition(metricPreview.contains(#""type" : "metric""#))
 precondition(metricPreview.contains(#""name" : "queue.depth""#))
 precondition(metricPreview.contains(#""temporality" : "instant""#))
 
+let timelineClient = try LogBrewClient.create(
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-swift-timeline",
+    sdkVersion: "0.1.0",
+)
+let timelineContext = ProductTimelineContext(
+    sessionId: "session_123",
+    screen: "Checkout",
+    traceId: "trace_abc",
+    funnel: "checkout",
+    step: "payment",
+    metadata: ["platform": "ios"],
+)
+try timelineClient.captureProductAction(
+    "evt_product_action_001",
+    timestamp: "2026-06-02T10:00:07Z",
+    name: "checkout.pay_tapped",
+    context: timelineContext,
+    metadata: ["component": "pay-button"],
+)
+try timelineClient.captureNetworkMilestone(
+    "evt_network_milestone_001",
+    timestamp: "2026-06-02T10:00:08Z",
+    method: "post",
+    routeTemplate: "https://mobile.example.test/api/checkout?itemId=123#pay",
+    statusCode: 503,
+    durationMs: 184.5,
+    context: timelineContext,
+)
+let timelinePreview = try timelineClient.previewJSON()
+precondition(timelinePreview.contains(#""source" : "swift.action""#))
+precondition(timelinePreview.contains(#""source" : "swift.network""#))
+precondition(timelinePreview.contains(#""name" : "POST \/api\/checkout""#))
+precondition(timelinePreview.contains(#""routeTemplate" : "\/api\/checkout""#))
+precondition(timelinePreview.contains(#""status" : "failure""#))
+precondition(!timelinePreview.contains("itemId"))
+precondition(!timelinePreview.contains("#pay"))
+
 print(preview)
 let flushAttempts = response.attempts
 let summaryFields = [
@@ -111,6 +149,8 @@ let summaryFields = [
     #""attempts":\#(flushAttempts)"#,
     #""events":6"#,
     #""metricEvents":1"#,
+    #""timelineEvents":2"#,
+    #""networkAction":"POST /api/checkout""#,
     #""httpAttempts":\#(httpAttempts)"#,
 ]
 let summary = "{\(summaryFields.joined(separator: ","))}\n"
