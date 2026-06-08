@@ -1,4 +1,5 @@
 import type {
+  ActionAttributes,
   IssueAttributes,
   LogBrewClient,
   Metadata,
@@ -61,7 +62,13 @@ export type LogBrewBrowserEvent<TAttributes> = {
   attributes: TAttributes;
 };
 
-export type BrowserMetadataKind = "page_view" | "error" | "unhandledrejection";
+export type BrowserActionInput = string | {
+  name: string;
+  status?: ActionAttributes["status"];
+  metadata?: Metadata;
+};
+
+export type BrowserMetadataKind = "page_view" | "action" | "error" | "unhandledrejection";
 
 export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTransportConfig & {
   browserWindow?: Window;
@@ -93,7 +100,12 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
     rejection: unknown,
     context: { browserWindow?: Window; client: LogBrewClient }
   ) => LogBrewBrowserEvent<IssueAttributes>;
+  actionEvent?: (
+    action: BrowserActionInput,
+    context: { browserWindow?: Window; client: LogBrewClient }
+  ) => LogBrewBrowserEvent<ActionAttributes>;
   idFactory?: (context: {
+    action?: BrowserActionInput;
     browserWindow?: Window;
     error?: unknown;
     message?: string;
@@ -159,10 +171,22 @@ export declare function captureUnhandledRejection(
   options?: LogBrewBrowserOptions
 ): Promise<TransportResponse | undefined>;
 
+export declare function captureBrowserAction(
+  action: BrowserActionInput,
+  context: LogBrewBrowserContext,
+  options?: LogBrewBrowserOptions
+): Promise<TransportResponse | undefined>;
+
 export declare function createPageViewEvent(
   browserWindow?: Window,
   options?: LogBrewBrowserOptions
 ): LogBrewBrowserEvent<SpanAttributes>;
+
+export declare function createBrowserActionEvent(
+  action: BrowserActionInput,
+  browserWindow?: Window,
+  options?: LogBrewBrowserOptions
+): LogBrewBrowserEvent<ActionAttributes>;
 
 export declare function createBrowserErrorEvent(
   error: unknown,
@@ -177,10 +201,12 @@ export declare function createUnhandledRejectionEvent(
 ): LogBrewBrowserEvent<IssueAttributes>;
 
 declare const defaultExport: {
+  captureBrowserAction: typeof captureBrowserAction;
   captureBrowserError: typeof captureBrowserError;
   capturePageView: typeof capturePageView;
   captureUnhandledRejection: typeof captureUnhandledRejection;
   createBrowserTraceparent: typeof createBrowserTraceparent;
+  createBrowserActionEvent: typeof createBrowserActionEvent;
   createBrowserErrorEvent: typeof createBrowserErrorEvent;
   createFetchTransport: typeof createFetchTransport;
   createLogBrewBrowserClient: typeof createLogBrewBrowserClient;

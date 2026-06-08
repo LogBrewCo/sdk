@@ -130,6 +130,14 @@ SDK trace helpers follow W3C `traceparent` conventions where supported. They val
 
 Framework integrations that capture inbound requests omit query strings from automatic request/error metadata by default. Frontend and mobile integrations use `clientKey` wording for public keys and only send tracing headers to configured targets.
 
+## Agent-Readable Sessions
+
+LogBrew is designed for structured analysis across many app sessions, not only one-at-a-time inspection. Capture important product steps as `action` events, connect frontend and backend work with `traceparent`, and use shared low-cardinality metadata such as `sessionId`, `routeTemplate`, `funnel`, `step`, `feature`, and `region`.
+
+For browser and mobile apps, prefer explicit action helpers for clicks, form submits, route changes, funnel steps, and retry decisions that your app already understands. Avoid raw selectors, full URLs, user-entered text, screenshots, and visual replay data unless your team has a clear privacy policy and opt-in path.
+
+If you use an AI coding assistant, ask it to wire LogBrew into your app's logger, request lifecycle, and important product actions so agents can analyze timelines made of logs, issues, spans, actions, and metrics. The assistant should keep keys in app configuration and avoid query strings, stack text, and high-cardinality metadata unless your team opts in.
+
 ## Privacy Defaults
 
 LogBrew SDKs favor conservative defaults:
@@ -145,8 +153,6 @@ LogBrew SDKs favor conservative defaults:
 Every core SDK supports local JSON preview or recording transports so you can inspect the queued batch before sending anything to LogBrew. This is useful while deciding which logs, spans, issues, releases, actions, environments, or explicit metrics your application should send.
 
 The canonical schema is [`spec/event-batch.schema.json`](spec/event-batch.schema.json). Public fixtures live in [`fixtures/`](fixtures/).
-
-If you use an AI coding assistant, ask it to install the package for your language or framework, keep the LogBrew key in your app configuration, wire the SDK into your existing logger or request lifecycle, and avoid sending query strings, stack text, or high-cardinality metadata unless your team opts in.
 
 ## Maintainer References
 

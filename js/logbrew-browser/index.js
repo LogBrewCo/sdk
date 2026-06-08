@@ -230,6 +230,15 @@ export async function captureUnhandledRejection(rejection, context, options = {}
   return flushAfterCapture(context, options);
 }
 
+export async function captureBrowserAction(action, context, options = {}) {
+  const event = typeof options.actionEvent === "function"
+    ? options.actionEvent(action, { browserWindow: context.browserWindow, client: context.client })
+    : createBrowserActionEvent(action, context.browserWindow, options);
+
+  context.client.action(event.id, event.timestamp, event.attributes);
+  return flushAfterCapture(context, options);
+}
+
 export function createPageViewEvent(browserWindow = defaultWindow(), {
   idFactory = defaultPageViewEventId,
   includeDocumentTitle = false,
@@ -258,6 +267,39 @@ export function createPageViewEvent(browserWindow = defaultWindow(), {
       spanId: `span_browser_${slugify(path)}`,
       status: "ok",
       traceId: `trace_browser_${slugify(path)}`
+    }
+  };
+}
+
+export function createBrowserActionEvent(action, browserWindow = defaultWindow(), {
+  idFactory = defaultActionEventId,
+  includeDocumentTitle = false,
+  includeHash = false,
+  includeQueryString = false,
+  includeUserAgent = false,
+  metadata,
+  now = () => new Date().toISOString(),
+  sanitizeMetadata = defaultSanitizeMetadata
+} = {}) {
+  const details = actionDetails(action);
+  const path = browserPath(browserWindow, { includeHash, includeQueryString });
+  const baseMetadata = browserMetadata(browserWindow, {
+    includeDocumentTitle,
+    includeUserAgent,
+    path,
+    source: "browser.action"
+  });
+  const safeMetadata = sanitizeMetadata(
+    mergeMetadata(mergeMetadata(baseMetadata, metadata), details.metadata),
+    "action"
+  );
+  return {
+    id: idFactory({ action, browserWindow, message: details.name, path, source: "action" }),
+    timestamp: now(),
+    attributes: {
+      metadata: safeMetadata,
+      name: details.name,
+      status: details.status
     }
   };
 }
@@ -452,6 +494,17 @@ function browserPath(browserWindow, { includeHash = false, includeQueryString = 
   }
 }
 
+function actionDetails(action) {
+  if (typeof action === "string") {
+    return { metadata: undefined, name: action, status: "success" };
+  }
+  return {
+    metadata: safeMetadata(action?.metadata),
+    name: typeof action?.name === "string" ? action.name : String(action?.name ?? ""),
+    status: typeof action?.status === "string" ? action.status : "success"
+  };
+}
+
 function errorDetails(error) {
   const candidate = error?.error ?? error;
   const message = error?.message ?? errorMessage(candidate);
@@ -503,6 +556,10 @@ function defaultPageViewEventId({ path }) {
 
 function defaultErrorEventId({ message, path, source }) {
   return `evt_browser_${source}_${slugify(`${path}_${message}`)}`;
+}
+
+function defaultActionEventId({ message, path }) {
+  return `evt_browser_action_${slugify(`${path}_${message}`)}`;
 }
 
 function defaultFetch() {
@@ -613,10 +670,12 @@ function traceparentForRequest({
 export { RecordingTransport };
 
 export default {
+  captureBrowserAction,
   captureBrowserError,
   capturePageView,
   captureUnhandledRejection,
   createBrowserTraceparent,
+  createBrowserActionEvent,
   createBrowserErrorEvent,
   createFetchTransport,
   createLogBrewBrowserClient,

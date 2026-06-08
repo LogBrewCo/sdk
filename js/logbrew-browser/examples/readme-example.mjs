@@ -1,5 +1,5 @@
 import { RecordingTransport } from "@logbrew/sdk";
-import { installLogBrewBrowser } from "@logbrew/browser";
+import { captureBrowserAction, installLogBrewBrowser } from "@logbrew/browser";
 
 const transport = RecordingTransport.alwaysAccept();
 const browserWindow = createExampleWindow("https://app.example.test/dashboard?email=dev@example.test#section");
@@ -20,12 +20,26 @@ logbrew.client.log("evt_log_001", "2026-06-02T10:00:00Z", {
   }
 });
 
+await captureBrowserAction({
+  name: "checkout.clicked",
+  status: "success",
+  metadata: {
+    funnel: "checkout",
+    routeTemplate: "/dashboard",
+    sessionId: "sess_browser_001",
+    step: 2
+  }
+}, logbrew, {
+  flushOnCapture: false
+});
+
 const payload = logbrew.previewJson();
 const response = await logbrew.flush();
 console.log(payload);
 console.error(JSON.stringify({
   ok: response.statusCode === 202,
   attempts: response.attempts,
+  events: JSON.parse(payload).events.length,
   path: JSON.parse(payload).events[0].attributes.metadata.path
 }));
 

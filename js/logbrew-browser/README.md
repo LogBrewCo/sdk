@@ -35,6 +35,31 @@ By default, browser metadata keeps the current path without query string or hash
 
 Set `flushOnPageHide: false` or `flushOnVisibilityHidden: false` if your app wants to own page lifecycle delivery itself.
 
+## Structured Actions
+
+Use `captureBrowserAction()` for the product steps your app already understands, such as clicks, form submits, route changes, retry decisions, or funnel steps. These action events give LogBrew and AI agents a session timeline that can be analyzed across many users without requiring a person to watch individual recordings.
+
+```js
+import { captureBrowserAction, installLogBrewBrowser } from "@logbrew/browser";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+
+await captureBrowserAction({
+  name: "checkout.clicked",
+  status: "success",
+  metadata: {
+    funnel: "checkout",
+    routeTemplate: "/checkout",
+    sessionId: "sess_123",
+    step: 2
+  }
+}, logbrew);
+```
+
+Action metadata is sanitized to primitive values. Keep it low-cardinality and avoid raw selectors, full URLs, user-entered text, screenshots, or replay payloads unless your application owns a clear opt-in and redaction policy.
+
 ## Fetch Transport
 
 ```js

@@ -1,5 +1,6 @@
 import { RecordingTransport } from "@logbrew/sdk";
 import {
+  captureBrowserAction,
   createBrowserTraceparent,
   createTraceparentFetch,
   installLogBrewBrowser,
@@ -19,9 +20,23 @@ const logbrew = installLogBrewBrowser({
 
 browserWindow.dispatchEvent(createErrorEvent("Checkout exploded", "/assets/app.js", 12, 4));
 browserWindow.dispatchEvent(createRejectionEvent(new Error("Async checkout failed")));
+await captureBrowserAction({
+  name: "checkout.clicked",
+  status: "success",
+  metadata: {
+    funnel: "checkout",
+    ignoredNested: { email: "dev@example.test" },
+    routeTemplate: "/settings",
+    sessionId: "sess_browser_001",
+    step: 2
+  }
+}, logbrew, {
+  flushOnCapture: false,
+  now: nextTimestamp
+});
 
-if (logbrew.client.pendingEvents() !== 3) {
-  throw new Error(`expected 3 captured events, got ${logbrew.client.pendingEvents()}`);
+if (logbrew.client.pendingEvents() !== 4) {
+  throw new Error(`expected 4 captured events, got ${logbrew.client.pendingEvents()}`);
 }
 
 logbrew.client.log("evt_browser_pagehide_001", nextTimestamp(), {
@@ -57,6 +72,13 @@ const paths = parsed.events
   .filter((path) => path !== undefined);
 if (paths.some((path) => path !== "/settings")) {
   throw new Error(`expected query/hash-free paths, got ${JSON.stringify(paths)}`);
+}
+const action = parsed.events.find((event) => event.type === "action");
+if (action?.attributes.metadata?.sessionId !== "sess_browser_001") {
+  throw new Error(`expected action session metadata, got ${payload}`);
+}
+if (action.attributes.metadata.ignoredNested !== undefined) {
+  throw new Error(`nested action metadata should be dropped: ${payload}`);
 }
 const visibilityPayload = JSON.parse(transport.sentBodies[1]);
 if (visibilityPayload.events[0].id !== "evt_browser_hidden_001") {
