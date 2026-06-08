@@ -19,7 +19,12 @@ on_error() {
     "$tmp_dir/readme-example.stdout.json" \
     "$tmp_dir/readme-example.stderr.json" \
     "$tmp_dir/real-user-smoke.stdout.json" \
-    "$tmp_dir/real-user-smoke.stderr.json"; do
+    "$tmp_dir/real-user-smoke.stderr.json" \
+    "$tmp_dir/http-app.stdout.json" \
+    "$tmp_dir/http-app.stderr.json" \
+    "$tmp_dir/http-intake.stdout" \
+    "$tmp_dir/http-intake.stderr" \
+    "$tmp_dir/http-intake.jsonl"; do
     if [[ -f "$diagnostic" ]]; then
       echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
       sed -n '1,80p' "$diagnostic" >&2
@@ -53,6 +58,7 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/logbrew.h"
 test -f "$sdk_dir/src/logbrew.c"
+test -f "$sdk_dir/src/logbrew_http_transport.c"
 test -f "$sdk_dir/src/logbrew_internal.h"
 test -f "$sdk_dir/src/logbrew_recording_transport.c"
 test -f "$sdk_dir/src/logbrew_timeline.c"
@@ -66,11 +72,13 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/logbrew.h"
 test -f "$sdk_dir/src/logbrew.c"
+test -f "$sdk_dir/src/logbrew_http_transport.c"
 test -f "$sdk_dir/src/logbrew_internal.h"
 test -f "$sdk_dir/src/logbrew_recording_transport.c"
 test -f "$sdk_dir/src/logbrew_timeline.c"
 grep -q 'logbrew_client_product_action' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_client_network_milestone' "$sdk_dir/include/logbrew.h"
+grep -q 'logbrew_http_transport_init' "$sdk_dir/include/logbrew.h"
 
 cat > "$app_dir/main.c" <<'EOF'
 #include "logbrew.h"
@@ -287,6 +295,164 @@ EOF
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/native-app.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/native-app.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/native-app.stderr.json"
+
+if command -v curl-config >/dev/null 2>&1; then
+  intake_pid=""
+  cat > "$app_dir/http_app.c" <<'EOF'
+#include "logbrew.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+
+static void must(LogBrewStatus status, const LogBrewError *error) {
+  if (status != LOGBREW_OK) {
+    fprintf(stderr, "%s: %s\n", error->code, error->message);
+    exit(1);
+  }
+}
+
+int main(void) {
+  const char *endpoint = getenv("LOGBREW_C_HTTP_ENDPOINT");
+  LogBrewClient *client = NULL;
+  LogBrewError error;
+  LogBrewTransportResponse response;
+  LogBrewHttpHeader headers[] = {{"x-logbrew-source", "c-consumer"}};
+  LogBrewHttpTransport transport;
+  LogBrewConfig config = {"LOGBREW_API_KEY", "native-http-app", LOGBREW_C_VERSION, 1U};
+
+  logbrew_error_clear(&error);
+  must(logbrew_client_new(config, &client, &error), &error);
+  must(logbrew_client_log(client, "evt_c_http_transport", "2026-06-02T10:00:06Z",
+      (LogBrewLogAttributes){"c http transport sent", "info", "c-http"}, &error), &error);
+  must(logbrew_http_transport_init(&transport, endpoint, headers, sizeof(headers) / sizeof(headers[0]), 5000L, &error), &error);
+  must(logbrew_client_flush(client, logbrew_http_transport_as_transport(&transport), &response, &error), &error);
+  if (response.status_code != 202 || response.attempts != 2U || logbrew_client_pending_events(client) != 0U) {
+    fprintf(stderr, "unexpected HTTP response status=%d attempts=%zu pending=%zu\n",
+            response.status_code,
+            response.attempts,
+            logbrew_client_pending_events(client));
+    exit(1);
+  }
+  fprintf(stderr, "{\"ok\":true,\"httpAttempts\":%zu}\n", response.attempts);
+  logbrew_http_transport_free(&transport);
+  logbrew_client_free(client);
+  return 0;
+}
+EOF
+
+  http_port="$(python3 - <<'PY'
+import socket
+
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)"
+  cat > "$tmp_dir/c_intake.py" <<'PY'
+import json
+import sys
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+port = int(sys.argv[1])
+ready_path = Path(sys.argv[2])
+log_path = Path(sys.argv[3])
+
+
+class Handler(BaseHTTPRequestHandler):
+    count = 0
+
+    def do_POST(self):
+        content_length = int(self.headers.get("content-length", "0"))
+        body = self.rfile.read(content_length).decode("utf-8")
+        Handler.count += 1
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "authorization": self.headers.get("authorization"),
+                "body": body,
+                "contentType": self.headers.get("content-type"),
+                "path": self.path,
+                "source": self.headers.get("x-logbrew-source"),
+            }) + "\n")
+        self.send_response(503 if Handler.count == 1 else 202)
+        self.end_headers()
+        self.wfile.write(b"accepted")
+
+    def log_message(self, _format, *_args):
+        return
+
+
+server = HTTPServer(("127.0.0.1", port), Handler)
+server.timeout = 1
+ready_path.write_text("ready", encoding="utf-8")
+deadline = time.monotonic() + 90
+while Handler.count < 2 and time.monotonic() < deadline:
+    server.handle_request()
+if Handler.count < 2:
+    print(f"c intake timed out after {Handler.count} request(s)", file=sys.stderr)
+    sys.exit(1)
+PY
+  intake_ready="$tmp_dir/http-intake.ready"
+  intake_log="$tmp_dir/http-intake.jsonl"
+  python3 "$tmp_dir/c_intake.py" "$http_port" "$intake_ready" "$intake_log" \
+    > "$tmp_dir/http-intake.stdout" 2> "$tmp_dir/http-intake.stderr" &
+  intake_pid="$!"
+  for _attempt in {1..600}; do
+    if [[ -f "$intake_ready" ]]; then
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ ! -f "$intake_ready" ]]; then
+    echo "c intake server did not become ready" >&2
+    exit 1
+  fi
+
+  curl_cflags=()
+  curl_libs=()
+  curl_cflags_output="$(curl-config --cflags)"
+  curl_libs_output="$(curl-config --libs)"
+  if [[ -n "$curl_cflags_output" ]]; then
+    read -r -a curl_cflags <<<"$curl_cflags_output"
+  fi
+  if [[ -n "$curl_libs_output" ]]; then
+    read -r -a curl_libs <<<"$curl_libs_output"
+  fi
+  "$cc_command" -std=c99 -Wall -Wextra -Wpedantic -Werror \
+    -I"$sdk_dir/include" ${curl_cflags[@]+"${curl_cflags[@]}"} \
+    "$sdk_dir/src/logbrew.c" \
+    "$sdk_dir/src/logbrew_recording_transport.c" \
+    "$sdk_dir/src/logbrew_timeline.c" \
+    "$sdk_dir/src/logbrew_http_transport.c" \
+    "$app_dir/http_app.c" \
+    ${curl_libs[@]+"${curl_libs[@]}"} \
+    -o "$app_dir/http_app"
+  LOGBREW_C_HTTP_ENDPOINT="http://127.0.0.1:$http_port/v1/events" \
+    "$app_dir/http_app" > "$tmp_dir/http-app.stdout.json" 2> "$tmp_dir/http-app.stderr.json"
+  wait "$intake_pid"
+  grep -q '"httpAttempts":2' "$tmp_dir/http-app.stderr.json"
+  python3 - "$intake_log" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+requests = [json.loads(line) for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()]
+if len(requests) != 2:
+    raise SystemExit(f"expected 2 C HTTP delivery attempts, got {len(requests)}")
+for request in requests:
+    if request["authorization"] != "Bearer LOGBREW_API_KEY":
+        raise SystemExit(f"unexpected authorization header: {request['authorization']}")
+    if request["contentType"] != "application/json":
+        raise SystemExit(f"unexpected content type: {request['contentType']}")
+    if request["source"] != "c-consumer":
+        raise SystemExit(f"unexpected source header: {request['source']}")
+    if request["path"] != "/v1/events":
+        raise SystemExit(f"unexpected path: {request['path']}")
+if "evt_c_http_transport" not in requests[1]["body"]:
+    raise SystemExit("missing C HTTP transport event in final request body")
+PY
+fi
 
 run_examples_make > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"

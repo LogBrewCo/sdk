@@ -2,7 +2,7 @@
 
 Public C99 SDK for building, validating, previewing, and flushing LogBrew event batches from native applications.
 
-The SDK is dependency-free and ships as source plus header. Add `include/logbrew.h` and the files under `src/` to your application build:
+The SDK ships as source plus header. Add `include/logbrew.h` and the core files under `src/` to your application build:
 
 ```bash
 cc -std=c99 -Wall -Wextra -Wpedantic -Iinclude src/logbrew.c src/logbrew_recording_transport.c src/logbrew_timeline.c your_app.c -o your_app
@@ -95,3 +95,35 @@ Network helpers normalize the method, strip query strings and fragments from rou
 ## Example Source
 
 The `examples/readme_example.c` source shows a complete six-event payload and recording transport setup that you can copy into your own native application.
+
+## Sending To LogBrew
+
+Use `logbrew_http_transport_init()` when a native app is ready to send queued batches to the hosted LogBrew intake. The built-in HTTP transport is optional: compile `src/logbrew_http_transport.c` and link libcurl only in apps that want this transport. Apps that already own networking can keep using the `LogBrewTransport` callback seam instead.
+
+```c
+LogBrewHttpHeader headers[] = {
+  {"x-logbrew-source", "checkout-native"}
+};
+LogBrewHttpTransport http_transport;
+LogBrewTransportResponse response;
+
+logbrew_http_transport_init(
+    &http_transport,
+    LOGBREW_HTTP_TRANSPORT_DEFAULT_ENDPOINT,
+    headers,
+    sizeof(headers) / sizeof(headers[0]),
+    10000L,
+    &error);
+logbrew_client_flush(client, logbrew_http_transport_as_transport(&http_transport), &response, &error);
+logbrew_http_transport_free(&http_transport);
+```
+
+Compile the optional transport with libcurl:
+
+```bash
+cc -std=c99 -Wall -Wextra -Wpedantic -Iinclude \
+  src/logbrew.c src/logbrew_recording_transport.c src/logbrew_timeline.c src/logbrew_http_transport.c \
+  your_app.c -o your_app $(curl-config --libs)
+```
+
+The HTTP transport posts JSON, passes the SDK key through the `authorization` header, supports custom endpoints, non-reserved custom request headers, and a timeout, and maps libcurl request failures to retryable `network_failure` transport errors so `logbrew_client_flush()` can preserve queued events and retry. Do not put user-entered text, raw URLs, request payloads, response payloads, or private headers into LogBrew event metadata.

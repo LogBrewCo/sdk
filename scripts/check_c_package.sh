@@ -31,6 +31,23 @@ mkdir -p "$tmp_dir/build"
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/tests/test_logbrew.c" -o "$tmp_dir/build/test_logbrew"
 "$tmp_dir/build/test_logbrew"
 
+if command -v curl-config >/dev/null 2>&1; then
+  curl_cflags=()
+  curl_libs=()
+  curl_cflags_output="$(curl-config --cflags)"
+  curl_libs_output="$(curl-config --libs)"
+  if [[ -n "$curl_cflags_output" ]]; then
+    read -r -a curl_cflags <<<"$curl_cflags_output"
+  fi
+  if [[ -n "$curl_libs_output" ]]; then
+    read -r -a curl_libs <<<"$curl_libs_output"
+  fi
+  "$cc_command" "${cflags[@]}" ${curl_cflags[@]+"${curl_cflags[@]}"} -DLOGBREW_C_TEST_HTTP_TRANSPORT \
+    "${sdk_sources[@]}" "$package_dir/src/logbrew_http_transport.c" "$package_dir/tests/test_logbrew.c" \
+    ${curl_libs[@]+"${curl_libs[@]}"} -o "$tmp_dir/build/test_logbrew_http"
+  "$tmp_dir/build/test_logbrew_http" >/dev/null
+fi
+
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/examples/readme_example.c" -o "$tmp_dir/build/readme_example"
 "$tmp_dir/build/readme_example" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
@@ -55,6 +72,7 @@ grep -qx 'README.md' "$tmp_dir/archive-contents.txt"
 grep -qx 'Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'include/logbrew.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew.c' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/logbrew_http_transport.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_internal.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_recording_transport.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_timeline.c' "$tmp_dir/archive-contents.txt"
@@ -77,10 +95,10 @@ archive_path = Path(sys.argv[1])
 with tarfile.open(archive_path, "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
     header = archive.extractfile("include/logbrew.h").read().decode()
-for needle in ("LOGBREW_API_KEY", "copy into your own native application", "logbrew_client_flush", "logbrew_client_product_action", "logbrew_client_network_milestone"):
+for needle in ("LOGBREW_API_KEY", "copy into your own native application", "logbrew_client_flush", "logbrew_client_product_action", "logbrew_client_network_milestone", "logbrew_http_transport_init"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
-for needle in ("LOGBREW_C_VERSION", "LogBrewClient", "LogBrewRecordingTransport", "LogBrewProductTimelineContext", "logbrew_client_product_action", "logbrew_client_network_milestone"):
+for needle in ("LOGBREW_C_VERSION", "LogBrewClient", "LogBrewRecordingTransport", "LogBrewProductTimelineContext", "logbrew_client_product_action", "logbrew_client_network_milestone", "LogBrewHttpTransport", "logbrew_http_transport_init"):
     if needle not in header:
         raise SystemExit(f"missing public header symbol: {needle}")
 PY

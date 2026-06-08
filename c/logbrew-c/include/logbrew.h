@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 #define LOGBREW_C_VERSION "0.1.0"
+#define LOGBREW_HTTP_TRANSPORT_DEFAULT_ENDPOINT "https://api.logbrew.com/v1/events"
 
 typedef enum {
   LOGBREW_OK = 0,
@@ -42,6 +43,18 @@ typedef struct {
   LogBrewSendFn send;
   void *user_data;
 } LogBrewTransport;
+
+typedef struct {
+  const char *name;
+  const char *value;
+} LogBrewHttpHeader;
+
+typedef struct {
+  char *endpoint;
+  LogBrewHttpHeader *headers;
+  size_t header_count;
+  long timeout_ms;
+} LogBrewHttpTransport;
 
 typedef struct {
   const char *api_key;
@@ -265,6 +278,16 @@ void logbrew_recording_transport_free(LogBrewRecordingTransport *transport);
 LogBrewTransport logbrew_recording_transport_as_transport(LogBrewRecordingTransport *transport);
 const char *logbrew_recording_transport_last_body(const LogBrewRecordingTransport *transport);
 size_t logbrew_recording_transport_sent_count(const LogBrewRecordingTransport *transport);
+
+LogBrewStatus logbrew_http_transport_init(
+    LogBrewHttpTransport *transport,
+    const char *endpoint,
+    const LogBrewHttpHeader *headers,
+    size_t header_count,
+    long timeout_ms,
+    LogBrewError *error);
+void logbrew_http_transport_free(LogBrewHttpTransport *transport);
+LogBrewTransport logbrew_http_transport_as_transport(LogBrewHttpTransport *transport);
 
 #ifdef __cplusplus
 }

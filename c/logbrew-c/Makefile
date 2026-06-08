@@ -2,6 +2,7 @@ CC ?= cc
 CFLAGS ?= -std=c99 -Wall -Wextra -Wpedantic -Werror -Iinclude
 BUILD_DIR ?= build
 SDK_SRC = src/logbrew.c src/logbrew_recording_transport.c src/logbrew_timeline.c
+HTTP_SDK_SRC = $(SDK_SRC) src/logbrew_http_transport.c
 
 .PHONY: all test examples clean
 

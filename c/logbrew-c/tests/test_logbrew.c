@@ -277,6 +277,27 @@ static void non_retryable_status_and_shutdown_are_stable(void) {
   logbrew_client_free(client);
 }
 
+#ifdef LOGBREW_C_TEST_HTTP_TRANSPORT
+static void http_transport_validates_configuration(void) {
+  LogBrewHttpTransport transport;
+  LogBrewError error;
+  LogBrewHttpHeader headers[] = {{"x-logbrew-source", "c-test"}};
+  logbrew_error_clear(&error);
+  EXPECT_TRUE(logbrew_http_transport_init(&transport, "ftp://example.com/v1/events", NULL, 0U, 1000L, &error) == LOGBREW_CONFIG_ERROR);
+  EXPECT_TRUE(strcmp(error.code, "configuration_error") == 0);
+  EXPECT_TRUE(logbrew_http_transport_init(&transport, "https://example.com/v1/events", NULL, 0U, 0L, &error) == LOGBREW_CONFIG_ERROR);
+  headers[0].name = "authorization";
+  EXPECT_TRUE(logbrew_http_transport_init(&transport, "https://example.com/v1/events", headers, 1U, 1000L, &error) == LOGBREW_CONFIG_ERROR);
+  headers[0].name = "x-logbrew-source";
+  EXPECT_TRUE(logbrew_http_transport_init(&transport, "https://example.com/v1/events", headers, 1U, 1000L, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strcmp(transport.endpoint, "https://example.com/v1/events") == 0);
+  EXPECT_TRUE(transport.header_count == 1U);
+  EXPECT_TRUE(strcmp(transport.headers[0].name, "x-logbrew-source") == 0);
+  EXPECT_TRUE(strcmp(transport.headers[0].value, "c-test") == 0);
+  logbrew_http_transport_free(&transport);
+}
+#endif
+
 int main(void) {
   preview_json_contains_all_supported_event_types();
   product_timeline_helpers_capture_safe_metadata();
@@ -286,6 +307,9 @@ int main(void) {
   unauthenticated_response_surfaces_clean_error();
   retry_recovery_and_retry_budget_are_observable();
   non_retryable_status_and_shutdown_are_stable();
+#ifdef LOGBREW_C_TEST_HTTP_TRANSPORT
+  http_transport_validates_configuration();
+#endif
   printf("c package tests ok (%d checks)\n", tests_run);
   return 0;
 }

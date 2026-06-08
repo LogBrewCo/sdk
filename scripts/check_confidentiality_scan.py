@@ -118,6 +118,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if relative_text.startswith("scripts/") and terms == {"cleanup"}:
         return True
 
+    if relative_text.endswith((".c", ".h")) and "curl_easy_cleanup" in line:
+        return True
+
     return False
 
 
