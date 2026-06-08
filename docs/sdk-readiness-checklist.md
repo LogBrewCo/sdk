@@ -11,7 +11,7 @@ This checklist is public-facing and intentionally excludes private systems and o
 
 ## Public documentation requirements
 
-Public READMEs should explain what LogBrew is for, which package to install, how users send logs/errors/traces/metrics, how framework or logger integrations are wired, what privacy defaults protect users, and how automation agents can validate examples. Keep maintainer-only verifier detail, CI internals, registry mechanics, run IDs, package artifact inspection prose, and "prove this smoke path" language in scripts, checklists, release notes, or commit evidence instead of user-facing README pages.
+Public READMEs should explain what LogBrew is for, which package to install, how users send logs/errors/traces/metrics, how framework or logger integrations are wired, what privacy defaults protect users, and how automation agents can validate examples. Recommend installing only the runtime package and framework integrations the user's own app needs; never imply that all published packages should be installed together. Keep maintainer-only verifier detail, CI internals, registry mechanics, run IDs, package artifact inspection prose, and "prove this smoke path" language in scripts, checklists, release notes, or commit evidence instead of user-facing README pages.
 
 ## Signal readiness
 

@@ -2,7 +2,7 @@
 
 LogBrew SDKs help applications send logs, errors, traces, releases, environments, actions, and explicit metrics to LogBrew with small, dependency-light clients.
 
-This repository contains the public SDK packages, framework integrations, event contract, fixtures, examples, and validation scripts used to keep the developer experience consistent across ecosystems.
+This repository contains the public SDK packages, framework integrations, event contract, examples, and shared guidance used to keep the developer experience consistent across ecosystems.
 
 ## What You Can Capture
 
@@ -14,6 +14,13 @@ This repository contains the public SDK packages, framework integrations, event 
 - Explicit metrics when your application already knows the measurement name, value, unit, kind, and temporality.
 
 ## Packages
+
+Install only the package your application needs. The package names below are registry-specific entry points, not a bundle to install together:
+
+- Use the core package for your runtime first, such as `@logbrew/sdk`, `logbrew-sdk`, `LogBrew`, or `co.logbrew:logbrew-sdk`.
+- Add framework packages only when your app uses that framework, such as `@logbrew/react`, `@logbrew/express`, `logbrew-fastapi`, or `logbrew-django`.
+- Frontend and mobile packages use public `clientKey` setup. Server packages should use server-side keys from app configuration.
+- A change to one ecosystem package should not require developers in other ecosystems to update unless their package also changed.
 
 | Ecosystem | Package | Use it for |
 | --- | --- | --- |
@@ -112,7 +119,7 @@ $client->log('evt_log_001', '2026-06-02T10:00:03Z', [
 $client->flush(RecordingTransport::alwaysAccept());
 ```
 
-Each package README has ecosystem-specific install commands, logger integration examples, framework setup, packaged examples, and transport details.
+Each package README has ecosystem-specific install commands, logger integration examples, framework setup, copyable examples, and transport details. If your app does not use a framework integration, skip that package.
 
 ## Metrics
 
