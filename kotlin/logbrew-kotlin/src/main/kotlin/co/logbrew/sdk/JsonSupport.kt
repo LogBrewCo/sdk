@@ -69,6 +69,15 @@ internal object Validation {
         }
     }
 
+    fun requireFiniteNumber(
+        label: String,
+        value: Double,
+    ) {
+        if (value.isNaN() || value.isInfinite()) {
+            throw SdkException("validation_error", "$label must be finite")
+        }
+    }
+
     fun requireMetadataValue(
         key: String,
         value: Any?,

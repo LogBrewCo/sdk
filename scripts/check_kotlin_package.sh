@@ -91,6 +91,7 @@ grep -q '^co/logbrew/sdk/LogBrewAndroid.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequester.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/MetricAttributes.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidLogPriority.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/RecordingTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^META-INF/maven/co.logbrew/logbrew-kotlin/pom.xml$' "$tmp_dir/jar-contents.txt"
@@ -112,6 +113,8 @@ for needle in (
     "HttpTransport",
     "https://api.logbrew.com/v1/events",
     "LOGBREW_API_KEY",
+    "MetricAttributes",
+    "metric(...)",
     "LogBrewAndroid.captureActivityStarted",
     "LogBrewAndroid.captureAndroidLog",
     "LogBrewAndroid.captureThrowable",
@@ -162,6 +165,7 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdo
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"androidHelperEvents":3' "$tmp_dir/real-user-smoke.stderr.json"
+grep -q '"metricEvents":1' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/real-user-smoke.stderr.json"
 
 make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"

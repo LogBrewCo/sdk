@@ -9,6 +9,7 @@ import co.logbrew.sdk.IssueAttributes
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.MetricAttributes
 import co.logbrew.sdk.RecordingTransport
 import co.logbrew.sdk.ReleaseAttributes
 import co.logbrew.sdk.SdkException
@@ -23,6 +24,8 @@ fun main() {
     run("invalid_timestamp_shape_fails_validation", ::invalidTimestampShapeFailsValidation)
     run("invalid_issue_level_fails_validation", ::invalidIssueLevelFailsValidation)
     run("negative_span_duration_fails_validation", ::negativeSpanDurationFailsValidation)
+    run("metric_event_validates_and_serializes_attributes", ::metricEventValidatesAndSerializesAttributes)
+    run("metric_value_and_temporality_validation_fails_cleanly", ::metricValueAndTemporalityValidationFailsCleanly)
     run("unauthenticated_response_surfaces_clean_error", ::unauthenticatedResponseSurfacesCleanError)
     run("network_failure_retries_before_succeeding", ::networkFailureRetriesBeforeSucceeding)
     run(
@@ -36,7 +39,7 @@ fun main() {
     run("android_helpers_add_context_metadata", ::androidHelpersAddContextMetadata)
     run("android_log_priority_helper_captures_throwable_safely", ::androidLogPriorityHelperCapturesThrowableSafely)
     run("android_throwable_helper_keeps_stack_trace_opt_in", ::androidThrowableHelperKeepsStackTraceOptIn)
-    println("kotlin package tests ok (17 tests)")
+    println("kotlin package tests ok (19 tests)")
 }
 
 private fun run(
@@ -95,6 +98,11 @@ private fun expect(
 private fun previewJsonContainsAllSupportedEventTypes() {
     val client = newClient()
     enqueueAll(client)
+    client.metric(
+        "evt_metric_001",
+        "2026-06-02T10:00:06Z",
+        MetricAttributes.create("queue.depth", "gauge", 42.0, "{items}", "instant"),
+    )
     val body = client.previewJson()
     check("\"language\": \"kotlin\"" in body)
     check("\"type\": \"release\"" in body)
@@ -102,7 +110,51 @@ private fun previewJsonContainsAllSupportedEventTypes() {
     check("\"type\": \"issue\"" in body)
     check("\"type\": \"log\"" in body)
     check("\"type\": \"span\"" in body)
+    check("\"type\": \"metric\"" in body)
     check("\"type\": \"action\"" in body)
+}
+
+private fun metricEventValidatesAndSerializesAttributes() {
+    val client = newClient()
+    client.metric(
+        "evt_metric_001",
+        "2026-06-02T10:00:06Z",
+        MetricAttributes
+            .create("queue.depth", "gauge", 42.0, "{items}", "instant")
+            .withMetadata(mapOf("queue" to "checkout", "shard" to 1)),
+    )
+    val body = client.previewJson()
+    check("\"type\": \"metric\"" in body)
+    check("\"name\": \"queue.depth\"" in body)
+    check("\"kind\": \"gauge\"" in body)
+    check("\"value\": 42.0" in body)
+    check("\"unit\": \"{items}\"" in body)
+    check("\"temporality\": \"instant\"" in body)
+    check("\"queue\": \"checkout\"" in body)
+}
+
+private fun metricValueAndTemporalityValidationFailsCleanly() {
+    expect("validation_error") {
+        newClient().metric(
+            "evt_metric_bad_value",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("jobs.completed", "counter", -1.0, "1", "delta"),
+        )
+    }
+    expect("validation_error") {
+        newClient().metric(
+            "evt_metric_bad_temporality",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("queue.depth", "gauge", 2.0, "{items}", "delta"),
+        )
+    }
+    expect("validation_error") {
+        newClient().metric(
+            "evt_metric_bad_finite",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("queue.depth", "gauge", Double.NaN, "{items}", "instant"),
+        )
+    }
 }
 
 private fun flushSuccessClearsQueue() {

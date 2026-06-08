@@ -380,6 +380,55 @@ data class SpanAttributes(
     }
 }
 
+data class MetricAttributes(
+    val name: String,
+    val kind: String,
+    val value: Double,
+    val unit: String,
+    val temporality: String,
+    val metadata: Map<String, Any?> = emptyMap(),
+) {
+    fun withMetadata(metadata: Map<String, Any?>): MetricAttributes = copy(metadata = metadata)
+
+    internal fun toJsonObject(): OrderedJsonObject {
+        Validation.requireNonEmpty("metric name", name)
+        Validation.requireAllowedValue("metric kind", kind, LogBrewClient.metricKinds)
+        Validation.requireFiniteNumber("metric value", value)
+        Validation.requireNonEmpty("metric unit", unit)
+        Validation.requireAllowedValue("metric temporality for $kind", temporality, allowedTemporalities())
+        if (requiresNonNegativeValue() && value < 0.0) {
+            throw SdkException("validation_error", "metric $kind value must be non-negative")
+        }
+
+        return OrderedJsonObject()
+            .add("name", name)
+            .add("kind", kind)
+            .add("value", value)
+            .add("unit", unit)
+            .add("temporality", temporality)
+            .addMetadata(metadata)
+    }
+
+    private fun allowedTemporalities(): Set<String> =
+        if (kind == "gauge") {
+            LogBrewClient.instantTemporality
+        } else {
+            LogBrewClient.deltaCumulativeTemporalities
+        }
+
+    private fun requiresNonNegativeValue(): Boolean = kind == "counter" || kind == "histogram"
+
+    companion object {
+        fun create(
+            name: String,
+            kind: String,
+            value: Double,
+            unit: String,
+            temporality: String,
+        ): MetricAttributes = MetricAttributes(name, kind, value, unit, temporality)
+    }
+}
+
 data class ActionAttributes(
     val name: String,
     val status: String,

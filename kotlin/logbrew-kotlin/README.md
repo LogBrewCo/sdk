@@ -19,6 +19,7 @@ import co.logbrew.sdk.AndroidLogPriority
 import co.logbrew.sdk.HttpTransport
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.MetricAttributes
 import co.logbrew.sdk.RecordingTransport
 import co.logbrew.sdk.ReleaseAttributes
 
@@ -32,6 +33,14 @@ client.release(
     id = "evt_release_001",
     timestamp = "2026-06-02T10:00:00Z",
     attributes = ReleaseAttributes.create("1.2.3").withCommit("abc123def456"),
+)
+
+client.metric(
+    id = "evt_metric_001",
+    timestamp = "2026-06-02T10:00:06Z",
+    attributes = MetricAttributes
+        .create("checkout.duration", "histogram", 120.0, "ms", "delta")
+        .withMetadata(mapOf("route" to "/checkout")),
 )
 
 LogBrewAndroid.captureActivityStarted(
@@ -79,6 +88,22 @@ val response = client.flush(transport)
 
 Keep personally sensitive values out of event messages and metadata before calling `flush(transport)`. Use `RecordingTransport.alwaysAccept()` when you want to inspect queued JSON before network delivery.
 
+## Metrics
+
+Use `metric(...)` when your application already owns a numeric measurement. LogBrew validates the metric name, kind, value, unit, temporality, and optional primitive metadata before queueing the event:
+
+```kotlin
+client.metric(
+    id = "evt_metric_001",
+    timestamp = "2026-06-02T10:00:06Z",
+    attributes = MetricAttributes
+        .create("queue.depth", "gauge", 42.0, "{items}", "instant")
+        .withMetadata(mapOf("queue" to "checkout")),
+)
+```
+
+Use low-cardinality metadata such as route templates, queue names, feature names, or region names. Avoid raw URLs, user identifiers, stack traces, or high-cardinality labels.
+
 ## Examples
 
 The `examples` directory contains copyable snippets for creating a client, sending through `HttpTransport`, and capturing Android activity/log/exception events in your own app.
@@ -86,6 +111,7 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 ## Behavior
 
 - `previewJson()` returns the queued batch as pretty JSON.
+- `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
 - `HttpTransport` uses JDK `HttpURLConnection`, supports endpoint/header/connect-timeout/read-timeout settings, and maps request failures to retryable `TransportException.network(...)` failures.

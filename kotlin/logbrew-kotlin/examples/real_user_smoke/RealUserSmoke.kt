@@ -5,6 +5,7 @@ import co.logbrew.sdk.HttpTransportRequester
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.MetricAttributes
 import co.logbrew.sdk.RecordingTransport
 import co.logbrew.sdk.TransportException
 
@@ -61,6 +62,20 @@ fun main() {
     check("\"throwableStackTrace\"" !in helperPreview)
     check("\"source\": \"android\"" in helperPreview)
 
+    val metricClient = LogBrewClient.create("LOGBREW_API_KEY", "logbrew-kotlin-metrics", "0.1.0")
+    metricClient.metric(
+        "evt_metric_001",
+        "2026-06-02T10:00:06Z",
+        MetricAttributes
+            .create("queue.depth", "gauge", 42.0, "{items}", "instant")
+            .withMetadata(mapOf("queue" to "checkout")),
+    )
+    val metricPreview = metricClient.previewJson()
+    check("\"type\": \"metric\"" in metricPreview)
+    check("\"name\": \"queue.depth\"" in metricPreview)
+    check("\"temporality\": \"instant\"" in metricPreview)
+    check("\"queue\": \"checkout\"" in metricPreview)
+
     val httpClient =
         LogBrewClient.create(
             apiKey = "LOGBREW_API_KEY",
@@ -92,6 +107,6 @@ fun main() {
     check(capturedAuthorization == "Bearer LOGBREW_API_KEY")
 
     System.err.println(
-        """{"ok":true,"status":${response.statusCode},"retryAttempts":${response.attempts},"androidHelperEvents":3,"httpAttempts":${httpResponse.attempts}}""",
+        """{"ok":true,"status":${response.statusCode},"retryAttempts":${response.attempts},"androidHelperEvents":3,"metricEvents":1,"httpAttempts":${httpResponse.attempts}}""",
     )
 }

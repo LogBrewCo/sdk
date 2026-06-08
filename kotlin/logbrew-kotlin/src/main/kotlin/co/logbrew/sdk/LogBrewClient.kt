@@ -63,6 +63,14 @@ class LogBrewClient private constructor(
         pushEvent("span", id, timestamp, attributes.toJsonObject())
     }
 
+    fun metric(
+        id: String,
+        timestamp: String,
+        attributes: MetricAttributes,
+    ) {
+        pushEvent("metric", id, timestamp, attributes.toJsonObject())
+    }
+
     fun action(
         id: String,
         timestamp: String,
@@ -138,6 +146,9 @@ class LogBrewClient private constructor(
         internal val logLevels = setOf("debug", "info", "warning", "error")
         internal val spanStatuses = setOf("ok", "error")
         internal val actionStatuses = setOf("queued", "running", "success", "failure")
+        internal val metricKinds = setOf("counter", "gauge", "histogram")
+        internal val instantTemporality = setOf("instant")
+        internal val deltaCumulativeTemporalities = setOf("delta", "cumulative")
 
         fun create(
             apiKey: String,

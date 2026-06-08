@@ -66,6 +66,7 @@ jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" > "$tmp_dir/jar-contents.t
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequester.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/MetricAttributes.class$' "$tmp_dir/jar-contents.txt"
 
 maven_dir="$tmp_dir/maven/co/logbrew/logbrew-kotlin/0.1.0"
 mkdir -p "$maven_dir"
@@ -186,6 +187,7 @@ import co.logbrew.sdk.IssueAttributes
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.MetricAttributes
 import co.logbrew.sdk.RecordingTransport
 import co.logbrew.sdk.ReleaseAttributes
 import co.logbrew.sdk.SdkException
@@ -257,6 +259,24 @@ fun main() {
     }
     check(nonRetryable.pendingEvents() == 6)
 
+    val metric = newClient()
+    metric.metric(
+        "evt_metric_001",
+        "2026-06-02T10:00:06Z",
+        MetricAttributes.create("queue.depth", "gauge", 42.0, "{items}", "instant").withMetadata(mapOf("queue" to "checkout")),
+    )
+    val metricPreview = metric.previewJson()
+    check("\"type\": \"metric\"" in metricPreview)
+    check("\"name\": \"queue.depth\"" in metricPreview)
+    check("\"queue\": \"checkout\"" in metricPreview)
+    expect("validation_error") {
+        metric.metric(
+            "evt_metric_bad_temporality",
+            "2026-06-02T10:00:06Z",
+            MetricAttributes.create("queue.depth", "gauge", 2.0, "{items}", "delta"),
+        )
+    }
+
     val helper = newClient()
     val context = AndroidContext.create()
         .withActivityName("MainActivity")
@@ -315,7 +335,7 @@ fun main() {
         closed.action("evt_action_002", "2026-06-02T10:00:06Z", ActionAttributes.create("deploy", "success"))
     }
 
-    System.err.println("""{"ok":true,"status":202,"attempts":1,"events":6,"androidHelperEvents":3,"httpAttempts":${httpResponse.attempts}}""")
+    System.err.println("""{"ok":true,"status":202,"attempts":1,"events":6,"metricEvents":1,"androidHelperEvents":3,"httpAttempts":${httpResponse.attempts}}""")
 }
 KT
 
@@ -390,6 +410,7 @@ intake_pid=""
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"androidHelperEvents":3' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/smoke-app.stderr.json"
 python3 - "$intake_log" <<'PY'
