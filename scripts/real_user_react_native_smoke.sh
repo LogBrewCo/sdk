@@ -54,6 +54,8 @@ grep -q 'createTraceparentFetch' "$tmp_dir/native-readme.md"
 grep -q 'createReactNativeTraceparent' "$tmp_dir/native-readme.md"
 grep -q 'tracePropagationTargets' "$tmp_dir/native-readme.md"
 grep -q 'captureReactNativeError' "$tmp_dir/native-readme.md"
+grep -q 'captureReactNativeAction' "$tmp_dir/native-readme.md"
+grep -q 'captureReactNativeNetwork' "$tmp_dir/native-readme.md"
 
 app_dir="$tmp_dir/react-native-smoke-app"
 mkdir -p "$app_dir"
@@ -100,7 +102,7 @@ for name in ("@logbrew/react-native", "@logbrew/sdk", "react", "react-native"):
         raise SystemExit(f"missing npm dependency entry: {name}")
 PY
 node --check node_modules/@logbrew/react-native/index.native.js
-node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.default !== "object") process.exit(1)'
+node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.default !== "object") process.exit(1)'
 
 cat > smoke.mjs <<'EOF'
 import React from "react";
@@ -109,10 +111,14 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   LogBrewNativeProvider,
   captureAppStateChange,
+  captureReactNativeAction,
   captureReactNativeError,
+  captureReactNativeNetwork,
   captureScreenView,
   createAppStateListener,
   createLogBrewReactNativeClient,
+  createReactNativeActionEvent,
+  createReactNativeNetworkEvent,
   createReactNativeTraceparent,
   createTraceparentFetch,
   getReactNativeContext,
@@ -284,6 +290,117 @@ if (tracedFetchRequests[2].init.headers.traceparent !== propagatedTraceparent) {
   throw new Error("relative target should receive traceparent");
 }
 
+const timelineClient = createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-native-timeline-smoke",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+
+function TimelineComponent() {
+  const actions = useLogBrewNativeActions();
+  actions.captureReactNativeAction({
+    id: "evt_native_action_checkout_submit",
+    timestamp: "2026-06-02T10:00:12Z",
+    name: "checkout.submit",
+    screen: "Checkout",
+    sessionId: "session_mobile_001",
+    traceId: "trace_mobile_001",
+    metadata: {
+      funnel: "checkout",
+      step: "submit",
+      nested: { dropped: true }
+    }
+  });
+  actions.captureReactNativeNetwork({
+    id: "evt_native_network_checkout",
+    timestamp: "2026-06-02T10:00:13Z",
+    method: "post",
+    routeTemplate: "/api/checkout?email=dev@example.test#pay",
+    statusCode: 503,
+    durationMs: 241,
+    screen: "Checkout",
+    sessionId: "session_mobile_001",
+    traceId: "trace_mobile_001"
+  });
+  return React.createElement("logbrew-timeline", { pending: actions.pendingEvents() });
+}
+
+await act(async () => {
+  TestRenderer.create(
+    React.createElement(
+      LogBrewNativeProvider,
+      { client: timelineClient, platform, appState },
+      React.createElement(TimelineComponent)
+    )
+  );
+});
+const directAction = createReactNativeActionEvent({
+  id: "evt_native_action_direct",
+  timestamp: "2026-06-02T10:00:14Z",
+  platform,
+  appState,
+  name: "checkout.retry",
+  screen: "Checkout",
+  metadata: { funnel: "checkout", step: "retry" }
+});
+timelineClient.action(directAction.id, directAction.timestamp, directAction.attributes);
+captureReactNativeAction(timelineClient, {
+  id: "evt_native_action_direct_capture",
+  timestamp: "2026-06-02T10:00:15Z",
+  platform,
+  appState,
+  name: "checkout.cancel",
+  screen: "Checkout"
+});
+const directNetwork = createReactNativeNetworkEvent({
+  id: "evt_native_network_direct",
+  timestamp: "2026-06-02T10:00:16Z",
+  platform,
+  appState,
+  method: "get",
+  routeTemplate: "/api/cart?itemId=123#items",
+  statusCode: 200,
+  durationMs: 42,
+  screen: "Checkout"
+});
+timelineClient.action(directNetwork.id, directNetwork.timestamp, directNetwork.attributes);
+captureReactNativeNetwork(timelineClient, {
+  id: "evt_native_network_direct_capture",
+  timestamp: "2026-06-02T10:00:17Z",
+  platform,
+  appState,
+  method: "delete",
+  routeTemplate: "/api/cart/item?itemId=123#remove",
+  statusCode: 204,
+  durationMs: 36,
+  screen: "Checkout"
+});
+const timelineEvents = JSON.parse(timelineClient.previewJson()).events;
+if (timelineEvents.length !== 6) {
+  throw new Error(`expected six timeline events, got ${timelineEvents.length}`);
+}
+const timelineAction = timelineEvents[0].attributes;
+if (timelineAction.metadata.source !== "react-native.action" || timelineAction.metadata.platform !== "ios") {
+  throw new Error(`unexpected action metadata: ${JSON.stringify(timelineAction.metadata)}`);
+}
+if (timelineAction.metadata.nested !== undefined) {
+  throw new Error("nested action metadata should be dropped");
+}
+const timelineNetwork = timelineEvents[1].attributes;
+if (timelineNetwork.name !== "POST /api/checkout" || timelineNetwork.status !== "failure") {
+  throw new Error(`unexpected network timeline event: ${JSON.stringify(timelineNetwork)}`);
+}
+if (timelineNetwork.metadata.routeTemplate !== "/api/checkout" || timelineNetwork.metadata.method !== "POST") {
+  throw new Error(`expected sanitized network metadata: ${JSON.stringify(timelineNetwork.metadata)}`);
+}
+if (timelineEvents[4].attributes.metadata.routeTemplate !== "/api/cart") {
+  throw new Error("direct network event should strip query and hash");
+}
+if (timelineEvents[5].attributes.metadata.routeTemplate !== "/api/cart/item") {
+  throw new Error("captured network event should strip query and hash");
+}
+
 const preview = client.previewJson();
 const transport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
 const response = await client.shutdown(transport);
@@ -293,6 +410,8 @@ console.error(JSON.stringify({
   status: response.statusCode,
   attempts: response.attempts,
   events: 12,
+  timelineEvents: timelineEvents.length,
+  networkAction: timelineNetwork.name,
   listenerRemoved: appStateListener === null,
   propagatedTraceparent
 }));
@@ -337,6 +456,8 @@ PY
 grep -q '"ok":true' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"listenerRemoved":true' "$tmp_dir/native-smoke.stderr.json"
+grep -q '"timelineEvents":6' "$tmp_dir/native-smoke.stderr.json"
+grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/native-smoke.stderr.json"
 
 cat > consumer.ts <<'EOF'
@@ -349,8 +470,12 @@ import {
   captureScreenView,
   createAppStateListener,
   createLogBrewReactNativeClient,
+  captureReactNativeAction,
   captureReactNativeError,
+  captureReactNativeNetwork,
+  createReactNativeActionEvent,
   createReactNativeErrorEvent,
+  createReactNativeNetworkEvent,
   createReactNativeTraceparent,
   createTraceparentFetch,
   useLogBrewNativeActions,
@@ -391,6 +516,30 @@ void tracedFetch("/mobile-api/ping");
 
 captureScreenView(client, "Checkout", { platform, appState });
 captureAppStateChange(client, state, { platform, appState });
+const actionEvent = createReactNativeActionEvent({
+  name: "checkout.submit",
+  screen: "Checkout",
+  sessionId: "session_123",
+  traceId: "trace_123"
+});
+captureReactNativeAction(client, {
+  name: actionEvent.attributes.name,
+  screen: "Checkout",
+  metadata: actionEvent.attributes.metadata
+});
+const networkEvent = createReactNativeNetworkEvent({
+  method: "POST",
+  routeTemplate: "/api/checkout?email=hidden",
+  statusCode: 202,
+  durationMs: 128,
+  screen: "Checkout"
+});
+captureReactNativeNetwork(client, {
+  name: networkEvent.attributes.name,
+  method: "POST",
+  routeTemplate: "/api/checkout",
+  statusCode: 202
+});
 const errorEvent = createReactNativeErrorEvent(new Error("typed native error"), {
   platform,
   appState,
@@ -407,6 +556,18 @@ function Component(): React.ReactElement {
     level: "info"
   });
   actions.captureReactNativeError(new Error("hook handled error"));
+  actions.captureReactNativeAction({
+    name: "checkout.view",
+    screen: "Checkout",
+    metadata: { funnel: "checkout", step: "view" }
+  });
+  actions.captureReactNativeNetwork({
+    method: "GET",
+    routeTemplate: "/api/cart",
+    statusCode: 200,
+    durationMs: 42,
+    screen: "Checkout"
+  });
   void actions.flush(RecordingTransport.alwaysAccept());
   return React.createElement("span", { pending: actions.pendingEvents(), issue: errorEvent.attributes.title }, "typed");
 }
@@ -445,6 +606,8 @@ node node_modules/@logbrew/react-native/examples/index.mjs > "$tmp_dir/example-d
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q '"events":8' "$tmp_dir/example-default.stderr.json"
+grep -q '"timelineEvents":2' "$tmp_dir/example-default.stderr.json"
+grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/example-default.stderr.json"
 grep -q '"listenerRemoved":true' "$tmp_dir/example-default.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/react-native/examples run list > "$tmp_dir/npm-helper-list.txt"
@@ -454,6 +617,8 @@ grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run real-user-
 npm --prefix node_modules/@logbrew/react-native/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"timelineEvents":2' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/npm-helper-smoke.stderr.json"
 
 echo "react native real-user smoke passed with react-native@$react_native_version react@$react_version react-test-renderer@$renderer_version"

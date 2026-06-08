@@ -1,7 +1,9 @@
 import { AppState, Platform } from "react-native";
 import {
   captureAppStateChange,
+  captureReactNativeAction,
   captureReactNativeError,
+  captureReactNativeNetwork,
   captureScreenView,
   createAppStateListener,
   createLogBrewReactNativeClient,
@@ -31,6 +33,22 @@ export function captureDefaultAppStateChange(client, state, options = {}) {
     platform: Platform,
     appState: AppState,
     ...options
+  });
+}
+
+export function captureDefaultReactNativeAction(client, input = {}) {
+  return captureReactNativeAction(client, {
+    platform: Platform,
+    appState: AppState,
+    ...input
+  });
+}
+
+export function captureDefaultReactNativeNetwork(client, input = {}) {
+  return captureReactNativeNetwork(client, {
+    platform: Platform,
+    appState: AppState,
+    ...input
   });
 }
 

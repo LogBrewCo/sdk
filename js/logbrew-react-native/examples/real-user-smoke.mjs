@@ -1,6 +1,8 @@
 import { RecordingTransport } from "@logbrew/sdk";
 import {
+  captureReactNativeAction,
   captureReactNativeError,
+  captureReactNativeNetwork,
   captureScreenView,
   createAppStateListener,
   createLogBrewReactNativeClient,
@@ -98,6 +100,56 @@ if (propagatedRequests[2].init.headers.traceparent !== propagatedTraceparent) {
   throw new Error("relative matched requests should receive traceparent");
 }
 
+const timelineClient = createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "logbrew-react-native-timeline-smoke",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+captureReactNativeAction(timelineClient, {
+  id: "evt_native_action_checkout_submit",
+  timestamp: "2026-06-02T10:00:08Z",
+  platform: fakePlatform,
+  appState: fakeAppState,
+  name: "checkout.submit",
+  screen: "Checkout",
+  sessionId: "session_mobile_001",
+  traceId: "trace_mobile_001",
+  metadata: {
+    funnel: "checkout",
+    step: "submit",
+    nested: { dropped: true }
+  }
+});
+captureReactNativeNetwork(timelineClient, {
+  id: "evt_native_network_checkout",
+  timestamp: "2026-06-02T10:00:09Z",
+  platform: fakePlatform,
+  appState: fakeAppState,
+  method: "post",
+  routeTemplate: "/api/checkout?email=dev@example.test#pay",
+  statusCode: 503,
+  durationMs: 241,
+  screen: "Checkout",
+  sessionId: "session_mobile_001",
+  traceId: "trace_mobile_001"
+});
+const timelineEvents = JSON.parse(timelineClient.previewJson()).events;
+if (timelineEvents.length !== 2) {
+  throw new Error(`expected two timeline events, got ${timelineEvents.length}`);
+}
+const timelineAction = timelineEvents[0].attributes;
+if (timelineAction.metadata.source !== "react-native.action" || timelineAction.metadata.nested !== undefined) {
+  throw new Error(`unexpected action timeline metadata: ${JSON.stringify(timelineAction.metadata)}`);
+}
+const timelineNetwork = timelineEvents[1].attributes;
+if (timelineNetwork.name !== "POST /api/checkout" || timelineNetwork.status !== "failure") {
+  throw new Error(`unexpected network timeline event: ${JSON.stringify(timelineNetwork)}`);
+}
+if (timelineNetwork.metadata.routeTemplate !== "/api/checkout" || timelineNetwork.metadata.method !== "POST") {
+  throw new Error(`expected sanitized network metadata: ${JSON.stringify(timelineNetwork.metadata)}`);
+}
+
 const preview = client.previewJson();
 const transport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
 const response = await client.shutdown(transport);
@@ -108,6 +160,8 @@ console.error(JSON.stringify({
   attempts: response.attempts,
   events: 8,
   listenerRemoved: appStateListener === null,
+  timelineEvents: timelineEvents.length,
+  networkAction: timelineNetwork.name,
   propagatedTraceparent
 }));
 

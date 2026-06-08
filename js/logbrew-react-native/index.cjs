@@ -152,6 +152,95 @@ function captureAppStateChange(client, state, {
   });
 }
 
+function createReactNativeActionEvent({
+  id,
+  idFactory = defaultActionEventId,
+  metadata = {},
+  name,
+  now = () => new Date().toISOString(),
+  platform,
+  appState,
+  screen,
+  sessionId,
+  status = "success",
+  timestamp,
+  traceId
+} = {}) {
+  return {
+    id: id ?? idFactory({ name, screen }),
+    timestamp: timestamp ?? now(),
+    attributes: {
+      name,
+      status,
+      metadata: compactMetadata({
+        ...getReactNativeContext({ platform, appState }),
+        source: "react-native.action",
+        screen,
+        sessionId,
+        traceId,
+        ...metadata
+      })
+    }
+  };
+}
+
+function captureReactNativeAction(client, input = {}) {
+  requireClient(client);
+  const event = createReactNativeActionEvent(input);
+  client.action(event.id, event.timestamp, event.attributes);
+  return event;
+}
+
+function createReactNativeNetworkEvent({
+  durationMs,
+  id,
+  idFactory = defaultNetworkEventId,
+  metadata = {},
+  method,
+  name,
+  now = () => new Date().toISOString(),
+  platform,
+  appState,
+  routeTemplate,
+  screen,
+  sessionId,
+  status,
+  statusCode,
+  timestamp,
+  traceId
+} = {}) {
+  const safeRouteTemplate = stripQueryAndHash(routeTemplate);
+  const safeMethod = method === undefined ? undefined : String(method).toUpperCase();
+  const actionName = name ?? [safeMethod, safeRouteTemplate].filter(Boolean).join(" ");
+  return {
+    id: id ?? idFactory({ method: safeMethod, routeTemplate: safeRouteTemplate, screen }),
+    timestamp: timestamp ?? now(),
+    attributes: {
+      name: actionName,
+      status: status ?? statusFromStatusCode(statusCode),
+      metadata: compactMetadata({
+        ...getReactNativeContext({ platform, appState }),
+        source: "react-native.network",
+        durationMs,
+        method: safeMethod,
+        routeTemplate: safeRouteTemplate,
+        screen,
+        sessionId,
+        statusCode,
+        traceId,
+        ...metadata
+      })
+    }
+  };
+}
+
+function captureReactNativeNetwork(client, input = {}) {
+  requireClient(client);
+  const event = createReactNativeNetworkEvent(input);
+  client.action(event.id, event.timestamp, event.attributes);
+  return event;
+}
+
 function createReactNativeErrorEvent(error, {
   id,
   idFactory = defaultErrorEventId,
@@ -256,6 +345,16 @@ function useLogBrewNativeActions() {
       appState,
       ...options
     }),
+    captureReactNativeAction: (input = {}) => captureReactNativeAction(client, {
+      platform,
+      appState,
+      ...input
+    }),
+    captureReactNativeNetwork: (input = {}) => captureReactNativeNetwork(client, {
+      platform,
+      appState,
+      ...input
+    }),
     captureReactNativeError: (error, options = {}) => captureReactNativeError(client, error, {
       platform,
       appState,
@@ -335,6 +434,14 @@ function errorMessage(error) {
 
 function defaultErrorEventId({ message, screen }) {
   return `evt_native_error_${slugify(`${screen ?? "app"}_${message}`)}`;
+}
+
+function defaultActionEventId({ name, screen }) {
+  return `evt_native_action_${slugify(`${screen ?? "app"}_${name ?? "event"}`)}`;
+}
+
+function defaultNetworkEventId({ method, routeTemplate, screen }) {
+  return `evt_native_network_${slugify([screen, method, routeTemplate].filter(Boolean).join("_") || "request")}`;
 }
 
 function defaultFetch() {
@@ -417,10 +524,24 @@ function requestUrl(input) {
 }
 
 function slugify(value) {
-  return value
+  return String(value)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "") || "event";
+}
+
+function statusFromStatusCode(statusCode) {
+  if (typeof statusCode === "number" && Number.isFinite(statusCode) && statusCode >= 400) {
+    return "failure";
+  }
+  return "success";
+}
+
+function stripQueryAndHash(value) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return String(value).split(/[?#]/u, 1)[0];
 }
 
 function traceparentForRequest({
@@ -442,11 +563,15 @@ function traceparentForRequest({
 const defaultExport = {
   LogBrewNativeProvider,
   captureAppStateChange,
+  captureReactNativeAction,
   captureReactNativeError,
+  captureReactNativeNetwork,
   captureScreenView,
   createAppStateListener,
   createLogBrewReactNativeClient,
+  createReactNativeActionEvent,
   createReactNativeErrorEvent,
+  createReactNativeNetworkEvent,
   createReactNativeTraceparent,
   createTraceparentFetch,
   getReactNativeContext,
@@ -458,11 +583,15 @@ const defaultExport = {
 module.exports = {
   LogBrewNativeProvider,
   captureAppStateChange,
+  captureReactNativeAction,
   captureReactNativeError,
+  captureReactNativeNetwork,
   captureScreenView,
   createAppStateListener,
   createLogBrewReactNativeClient,
+  createReactNativeActionEvent,
   createReactNativeErrorEvent,
+  createReactNativeNetworkEvent,
   createReactNativeTraceparent,
   createTraceparentFetch,
   default: defaultExport,

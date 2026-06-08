@@ -81,6 +81,51 @@ export type CaptureAppStateChangeOptions = ReactNativeContextOptions & {
   timestamp?: string;
 };
 
+export type ReactNativeActionEvent = {
+  id: string;
+  timestamp: string;
+  attributes: ActionAttributes;
+};
+
+export type ReactNativeActionInput = ReactNativeContextOptions & {
+  id?: string;
+  idFactory?: (context: ReactNativeActionIdFactoryContext) => string;
+  name?: string;
+  now?: () => string;
+  screen?: string;
+  sessionId?: string;
+  status?: ActionAttributes["status"];
+  timestamp?: string;
+  traceId?: string;
+};
+
+export type ReactNativeActionIdFactoryContext = {
+  name?: string;
+  screen?: string;
+};
+
+export type ReactNativeNetworkInput = ReactNativeContextOptions & {
+  durationMs?: number;
+  id?: string;
+  idFactory?: (context: ReactNativeNetworkIdFactoryContext) => string;
+  method?: string;
+  name?: string;
+  now?: () => string;
+  routeTemplate?: string;
+  screen?: string;
+  sessionId?: string;
+  status?: ActionAttributes["status"];
+  statusCode?: number;
+  timestamp?: string;
+  traceId?: string;
+};
+
+export type ReactNativeNetworkIdFactoryContext = {
+  method?: string;
+  routeTemplate?: string;
+  screen?: string;
+};
+
 export type ReactNativeErrorEvent = {
   id: string;
   timestamp: string;
@@ -129,6 +174,8 @@ export type LogBrewNativeActions = {
   pendingEvents(): number;
   captureScreenView(screenName: string, options?: CaptureScreenViewOptions): void;
   captureAppStateChange(state: string, options?: CaptureAppStateChangeOptions): void;
+  captureReactNativeAction(input?: ReactNativeActionInput): ReactNativeActionEvent;
+  captureReactNativeNetwork(input?: ReactNativeNetworkInput): ReactNativeActionEvent;
   captureReactNativeError(error: unknown, options?: CaptureReactNativeErrorOptions): ReactNativeErrorEvent;
 };
 
@@ -154,6 +201,20 @@ export declare function captureAppStateChange(
   state: string,
   options?: CaptureAppStateChangeOptions
 ): void;
+export declare function createReactNativeActionEvent(
+  input?: ReactNativeActionInput
+): ReactNativeActionEvent;
+export declare function captureReactNativeAction(
+  client: LogBrewClient,
+  input?: ReactNativeActionInput
+): ReactNativeActionEvent;
+export declare function createReactNativeNetworkEvent(
+  input?: ReactNativeNetworkInput
+): ReactNativeActionEvent;
+export declare function captureReactNativeNetwork(
+  client: LogBrewClient,
+  input?: ReactNativeNetworkInput
+): ReactNativeActionEvent;
 export declare function createReactNativeErrorEvent(
   error: unknown,
   options?: CaptureReactNativeErrorOptions
@@ -186,6 +247,14 @@ export declare function captureDefaultAppStateChange(
   state: string,
   options?: Omit<CaptureAppStateChangeOptions, "platform" | "appState">
 ): void;
+export declare function captureDefaultReactNativeAction(
+  client: LogBrewClient,
+  input?: Omit<ReactNativeActionInput, "platform" | "appState">
+): ReactNativeActionEvent;
+export declare function captureDefaultReactNativeNetwork(
+  client: LogBrewClient,
+  input?: Omit<ReactNativeNetworkInput, "platform" | "appState">
+): ReactNativeActionEvent;
 export declare function captureDefaultReactNativeError(
   client: LogBrewClient,
   error: unknown,
@@ -199,11 +268,15 @@ export declare function createDefaultAppStateListener(
 declare const defaultExport: {
   LogBrewNativeProvider: typeof LogBrewNativeProvider;
   captureAppStateChange: typeof captureAppStateChange;
+  captureReactNativeAction: typeof captureReactNativeAction;
   captureReactNativeError: typeof captureReactNativeError;
+  captureReactNativeNetwork: typeof captureReactNativeNetwork;
   captureScreenView: typeof captureScreenView;
   createAppStateListener: typeof createAppStateListener;
   createLogBrewReactNativeClient: typeof createLogBrewReactNativeClient;
+  createReactNativeActionEvent: typeof createReactNativeActionEvent;
   createReactNativeErrorEvent: typeof createReactNativeErrorEvent;
+  createReactNativeNetworkEvent: typeof createReactNativeNetworkEvent;
   createReactNativeTraceparent: typeof createReactNativeTraceparent;
   createTraceparentFetch: typeof createTraceparentFetch;
   getReactNativeContext: typeof getReactNativeContext;

@@ -2,7 +2,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, handled JavaScript errors, provider/hook usage, and explicit W3C trace propagation for mobile fetch calls.
+This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, and explicit W3C trace propagation for mobile fetch calls.
 
 ## Install
 
@@ -40,6 +40,40 @@ const stopListening = createAppStateListener(client, AppState, {
 
 For mobile apps, prefer an app-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples.
 
+## Product Actions And API Milestones
+
+Use explicit action and network helpers for important mobile funnel steps your app already understands. These events are designed for timelines and agent analysis without enabling broad automatic replay:
+
+```js
+import {
+  captureReactNativeAction,
+  captureReactNativeNetwork
+} from "@logbrew/react-native";
+
+captureReactNativeAction(client, {
+  name: "checkout.submit",
+  screen: "Checkout",
+  sessionId: "session_123",
+  traceId: "trace_123",
+  metadata: {
+    funnel: "checkout",
+    step: "submit"
+  }
+});
+
+captureReactNativeNetwork(client, {
+  method: "POST",
+  routeTemplate: "/api/checkout",
+  statusCode: 202,
+  durationMs: 128,
+  screen: "Checkout",
+  sessionId: "session_123",
+  traceId: "trace_123"
+});
+```
+
+`routeTemplate` is stripped of query strings and hashes before capture. Keep metadata low-cardinality and primitive-only, such as screen names, route templates, funnel names, step names, status codes, durations, session IDs, or trace IDs. Do not send request bodies, response bodies, authorization headers, user-entered form values, or full URLs with private query text. LogBrew does not patch global `fetch` or record visual replay from this package.
+
 ## Error Capture
 
 Use `captureReactNativeError()` in app-owned error boundaries, route handlers, async catch blocks, or global handlers. It records handled JavaScript errors as LogBrew issue events with React Native context and omits stack text by default:
@@ -72,8 +106,24 @@ import {
 } from "@logbrew/react-native";
 
 function CheckoutScreen() {
-  const { captureScreenView } = useLogBrewNativeActions();
+  const {
+    captureReactNativeAction,
+    captureReactNativeNetwork,
+    captureScreenView
+  } = useLogBrewNativeActions();
   captureScreenView("Checkout");
+  captureReactNativeAction({
+    name: "checkout.view",
+    screen: "Checkout",
+    metadata: { funnel: "checkout", step: "view" }
+  });
+  captureReactNativeNetwork({
+    method: "GET",
+    routeTemplate: "/api/cart",
+    statusCode: 200,
+    durationMs: 42,
+    screen: "Checkout"
+  });
   return null;
 }
 
