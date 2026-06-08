@@ -2,10 +2,10 @@
 
 Public C99 SDK for building, validating, previewing, and flushing LogBrew event batches from native applications.
 
-The SDK is dependency-free and ships as source plus header. Add `include/logbrew.h` and `src/logbrew.c` to your application build:
+The SDK is dependency-free and ships as source plus header. Add `include/logbrew.h` and the files under `src/` to your application build:
 
 ```bash
-cc -std=c99 -Wall -Wextra -Wpedantic -Iinclude src/logbrew.c your_app.c -o your_app
+cc -std=c99 -Wall -Wextra -Wpedantic -Iinclude src/logbrew.c src/logbrew_recording_transport.c src/logbrew_timeline.c your_app.c -o your_app
 ```
 
 ## Minimal Usage
@@ -42,6 +42,55 @@ logbrew_recording_transport_free(&transport);
 
 logbrew_client_free(client);
 ```
+
+## Product Timelines
+
+Use product timeline helpers when your native app owns meaningful user-flow steps or API milestones that should line up with logs, errors, spans, and traces. They enqueue normal LogBrew `action` events with primitive metadata so LogBrew and AI agents can analyze many sessions without visual replay:
+
+```c
+LogBrewMetadataEntry metadata[] = {
+  LOGBREW_METADATA_NUMBER_VALUE("cartValue", 42.5),
+  LOGBREW_METADATA_BOOL_VALUE("retry", false)
+};
+LogBrewProductTimelineContext context = {
+  "session_123",
+  "trace_001",
+  "/checkout",
+  "Checkout",
+  "checkout",
+  "submit"
+};
+
+logbrew_client_product_action(
+    client,
+    "evt_action_checkout_submit",
+    "2026-06-02T10:00:06Z",
+    (LogBrewProductActionAttributes){
+      "checkout.submit",
+      "success",
+      context,
+      {metadata, sizeof(metadata) / sizeof(metadata[0])}
+    },
+    &error);
+
+logbrew_client_network_milestone(
+    client,
+    "evt_network_checkout_api",
+    "2026-06-02T10:00:07Z",
+    (LogBrewNetworkMilestoneAttributes){
+      "post",
+      "https://api.example.com/api/checkout?sku=123#pay",
+      503,
+      true,
+      184.5,
+      true,
+      context,
+      {metadata, sizeof(metadata) / sizeof(metadata[0])}
+    },
+    &error);
+```
+
+Network helpers normalize the method, strip query strings and fragments from route templates, reduce HTTP(S) URLs to paths, default HTTP `4xx` and `5xx` milestones to `failure`, and keep metadata primitive. They do not patch HTTP clients, record visual replay, collect headers, or capture request or response bodies. Keep user-entered text, raw URLs, query strings, headers, and payloads out of timeline metadata.
 
 ## Example Source
 

@@ -91,6 +91,61 @@ typedef struct {
 } LogBrewActionAttributes;
 
 typedef enum {
+  LOGBREW_METADATA_STRING,
+  LOGBREW_METADATA_NUMBER,
+  LOGBREW_METADATA_BOOL
+} LogBrewMetadataValueKind;
+
+typedef struct {
+  const char *key;
+  LogBrewMetadataValueKind kind;
+  const char *string_value;
+  double number_value;
+  bool bool_value;
+} LogBrewMetadataEntry;
+
+typedef struct {
+  const LogBrewMetadataEntry *entries;
+  size_t count;
+} LogBrewMetadata;
+
+#define LOGBREW_METADATA_STRING_VALUE(key_value, value) \
+  ((LogBrewMetadataEntry){(key_value), LOGBREW_METADATA_STRING, (value), 0.0, false})
+
+#define LOGBREW_METADATA_NUMBER_VALUE(key_value, value) \
+  ((LogBrewMetadataEntry){(key_value), LOGBREW_METADATA_NUMBER, NULL, (value), false})
+
+#define LOGBREW_METADATA_BOOL_VALUE(key_value, value) \
+  ((LogBrewMetadataEntry){(key_value), LOGBREW_METADATA_BOOL, NULL, 0.0, (value)})
+
+typedef struct {
+  const char *session_id;
+  const char *trace_id;
+  const char *route_template;
+  const char *screen;
+  const char *funnel;
+  const char *step;
+} LogBrewProductTimelineContext;
+
+typedef struct {
+  const char *name;
+  const char *status;
+  LogBrewProductTimelineContext context;
+  LogBrewMetadata metadata;
+} LogBrewProductActionAttributes;
+
+typedef struct {
+  const char *method;
+  const char *route_template;
+  int status_code;
+  bool has_status_code;
+  double duration_ms;
+  bool has_duration_ms;
+  LogBrewProductTimelineContext context;
+  LogBrewMetadata metadata;
+} LogBrewNetworkMilestoneAttributes;
+
+typedef enum {
   LOGBREW_RECORD_STATUS,
   LOGBREW_RECORD_ERROR
 } LogBrewRecordingStepKind;
@@ -186,6 +241,20 @@ LogBrewStatus logbrew_client_action(
     const char *id,
     const char *timestamp,
     LogBrewActionAttributes attributes,
+    LogBrewError *error);
+
+LogBrewStatus logbrew_client_product_action(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewProductActionAttributes attributes,
+    LogBrewError *error);
+
+LogBrewStatus logbrew_client_network_milestone(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewNetworkMilestoneAttributes attributes,
     LogBrewError *error);
 
 void logbrew_recording_transport_init(

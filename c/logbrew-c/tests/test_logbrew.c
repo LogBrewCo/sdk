@@ -1,5 +1,6 @@
 #include "logbrew.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -121,6 +122,80 @@ static void validation_failures_are_stable(void) {
   logbrew_client_free(client);
 }
 
+static void product_timeline_helpers_capture_safe_metadata(void) {
+  LogBrewClient *client = new_client();
+  LogBrewError error;
+  char *json = NULL;
+  LogBrewMetadataEntry metadata[] = {
+    LOGBREW_METADATA_NUMBER_VALUE("cartValue", 42.5),
+    LOGBREW_METADATA_BOOL_VALUE("retry", false)
+  };
+  LogBrewProductTimelineContext context = {
+    "session_123",
+    "trace_001",
+    "/checkout?sku=123#pay",
+    "Checkout",
+    "checkout",
+    "submit"
+  };
+  LogBrewProductActionAttributes product_action = {
+    "checkout.submit",
+    "success",
+    context,
+    {metadata, sizeof(metadata) / sizeof(metadata[0])}
+  };
+  LogBrewNetworkMilestoneAttributes network = {
+    "post",
+    "https://api.example.com/api/checkout?sku=123#pay",
+    503,
+    true,
+    184.5,
+    true,
+    context,
+    {metadata, sizeof(metadata) / sizeof(metadata[0])}
+  };
+  logbrew_error_clear(&error);
+  EXPECT_TRUE(logbrew_client_product_action(client, "evt_product_action_001", "2026-06-02T10:00:06Z",
+      product_action, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_network_milestone(client, "evt_network_milestone_001", "2026-06-02T10:00:07Z",
+      network, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_preview_json(client, &json, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strstr(json, "\"source\":\"c.action\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"source\":\"c.network\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"name\":\"POST /api/checkout\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"status\":\"failure\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"routeTemplate\":\"/api/checkout\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"durationMs\":184.5") != NULL);
+  EXPECT_TRUE(strstr(json, "\"cartValue\":42.5") != NULL);
+  EXPECT_TRUE(strstr(json, "\"retry\":false") != NULL);
+  EXPECT_TRUE(strstr(json, "sku=") == NULL);
+  EXPECT_TRUE(strstr(json, "#pay") == NULL);
+  logbrew_free_string(json);
+  logbrew_client_free(client);
+
+  client = new_client();
+  logbrew_error_clear(&error);
+  network.status_code = 99;
+  EXPECT_TRUE(logbrew_client_network_milestone(client, "evt_bad_status", "2026-06-02T10:00:07Z",
+      network, &error) == LOGBREW_VALIDATION_ERROR);
+  network.status_code = 200;
+  network.duration_ms = -1.0;
+  EXPECT_TRUE(logbrew_client_network_milestone(client, "evt_bad_duration", "2026-06-02T10:00:07Z",
+      network, &error) == LOGBREW_VALIDATION_ERROR);
+  network.duration_ms = NAN;
+  EXPECT_TRUE(logbrew_client_network_milestone(client, "evt_nan_duration", "2026-06-02T10:00:07Z",
+      network, &error) == LOGBREW_VALIDATION_ERROR);
+  network.duration_ms = 1.0;
+  network.route_template = "?sku=123";
+  EXPECT_TRUE(logbrew_client_network_milestone(client, "evt_query_only", "2026-06-02T10:00:07Z",
+      network, &error) == LOGBREW_VALIDATION_ERROR);
+  product_action.metadata.entries = NULL;
+  product_action.metadata.count = 1U;
+  EXPECT_TRUE(logbrew_client_product_action(client, "evt_bad_metadata", "2026-06-02T10:00:06Z",
+      product_action, &error) == LOGBREW_VALIDATION_ERROR);
+  logbrew_client_free(client);
+}
+
 static void unauthenticated_response_surfaces_clean_error(void) {
   LogBrewClient *client = new_client();
   LogBrewRecordingStep steps[] = {LOGBREW_RECORD_STATUS_CODE(401)};
@@ -204,6 +279,7 @@ static void non_retryable_status_and_shutdown_are_stable(void) {
 
 int main(void) {
   preview_json_contains_all_supported_event_types();
+  product_timeline_helpers_capture_safe_metadata();
   flush_success_clears_queue();
   empty_flush_is_no_op();
   validation_failures_are_stable();

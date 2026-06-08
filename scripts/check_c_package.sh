@@ -25,18 +25,19 @@ run_examples_make() {
 }
 
 cflags=(-std=c99 -Wall -Wextra -Wpedantic -Werror -I"$package_dir/include")
+sdk_sources=("$package_dir/src/logbrew.c" "$package_dir/src/logbrew_recording_transport.c" "$package_dir/src/logbrew_timeline.c")
 
 mkdir -p "$tmp_dir/build"
-"$cc_command" "${cflags[@]}" "$package_dir/src/logbrew.c" "$package_dir/tests/test_logbrew.c" -o "$tmp_dir/build/test_logbrew"
+"$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/tests/test_logbrew.c" -o "$tmp_dir/build/test_logbrew"
 "$tmp_dir/build/test_logbrew"
 
-"$cc_command" "${cflags[@]}" "$package_dir/src/logbrew.c" "$package_dir/examples/readme_example.c" -o "$tmp_dir/build/readme_example"
+"$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/examples/readme_example.c" -o "$tmp_dir/build/readme_example"
 "$tmp_dir/build/readme_example" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 
-"$cc_command" "${cflags[@]}" "$package_dir/src/logbrew.c" "$package_dir/examples/real_user_smoke.c" -o "$tmp_dir/build/real_user_smoke"
+"$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/examples/real_user_smoke.c" -o "$tmp_dir/build/real_user_smoke"
 "$tmp_dir/build/real_user_smoke" > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
@@ -54,6 +55,9 @@ grep -qx 'README.md' "$tmp_dir/archive-contents.txt"
 grep -qx 'Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'include/logbrew.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew.c' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/logbrew_internal.h' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/logbrew_recording_transport.c' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/logbrew_timeline.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/readme_example.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/real_user_smoke.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/Makefile' "$tmp_dir/archive-contents.txt"
@@ -73,10 +77,10 @@ archive_path = Path(sys.argv[1])
 with tarfile.open(archive_path, "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
     header = archive.extractfile("include/logbrew.h").read().decode()
-for needle in ("LOGBREW_API_KEY", "copy into your own native application", "logbrew_client_flush"):
+for needle in ("LOGBREW_API_KEY", "copy into your own native application", "logbrew_client_flush", "logbrew_client_product_action", "logbrew_client_network_milestone"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
-for needle in ("LOGBREW_C_VERSION", "LogBrewClient", "LogBrewRecordingTransport"):
+for needle in ("LOGBREW_C_VERSION", "LogBrewClient", "LogBrewRecordingTransport", "LogBrewProductTimelineContext", "logbrew_client_product_action", "logbrew_client_network_milestone"):
     if needle not in header:
         raise SystemExit(f"missing public header symbol: {needle}")
 PY

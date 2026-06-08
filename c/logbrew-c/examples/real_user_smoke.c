@@ -133,6 +133,55 @@ static void exercise_failure_paths(void) {
   logbrew_client_free(client);
 }
 
+static void exercise_timeline_helpers(void) {
+  LogBrewClient *client = new_client();
+  LogBrewError error;
+  char *preview = NULL;
+  LogBrewMetadataEntry metadata[] = {
+    LOGBREW_METADATA_NUMBER_VALUE("cartValue", 42.5),
+    LOGBREW_METADATA_BOOL_VALUE("retry", false)
+  };
+  LogBrewProductTimelineContext context = {
+    "session_123",
+    "trace_001",
+    "/checkout?sku=123#pay",
+    "Checkout",
+    "checkout",
+    "submit"
+  };
+  logbrew_error_clear(&error);
+  must(logbrew_client_product_action(client, "evt_product_action_001", "2026-06-02T10:00:06Z",
+      (LogBrewProductActionAttributes){
+        "checkout.submit",
+        "success",
+        context,
+        {metadata, sizeof(metadata) / sizeof(metadata[0])}
+      }, &error), &error);
+  must(logbrew_client_network_milestone(client, "evt_network_milestone_001", "2026-06-02T10:00:07Z",
+      (LogBrewNetworkMilestoneAttributes){
+        "post",
+        "https://api.example.com/api/checkout?sku=123#pay",
+        503,
+        true,
+        184.5,
+        true,
+        context,
+        {metadata, sizeof(metadata) / sizeof(metadata[0])}
+      }, &error), &error);
+  must(logbrew_client_preview_json(client, &preview, &error), &error);
+  if (strstr(preview, "\"source\":\"c.action\"") == NULL ||
+      strstr(preview, "\"source\":\"c.network\"") == NULL ||
+      strstr(preview, "\"name\":\"POST /api/checkout\"") == NULL ||
+      strstr(preview, "\"status\":\"failure\"") == NULL ||
+      strstr(preview, "sku=") != NULL ||
+      strstr(preview, "#pay") != NULL) {
+    fprintf(stderr, "timeline helper preview failed\n");
+    exit(1);
+  }
+  logbrew_free_string(preview);
+  logbrew_client_free(client);
+}
+
 int main(void) {
   LogBrewClient *client = new_client();
   LogBrewRecordingStep steps[] = {
@@ -159,6 +208,7 @@ int main(void) {
   logbrew_recording_transport_free(&transport);
   logbrew_client_free(client);
 
+  exercise_timeline_helpers();
   exercise_failure_paths();
   return 0;
 }

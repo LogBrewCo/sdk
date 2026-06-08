@@ -1,6 +1,6 @@
 CC ?= cc
 CFLAGS ?= -std=c99 -Wall -Wextra -Wpedantic -Werror -I../include
-SDK_SRC ?= ../src/logbrew.c
+SDK_SRC ?= ../src/logbrew.c ../src/logbrew_recording_transport.c ../src/logbrew_timeline.c
 BUILD_DIR ?= build
 
 .PHONY: help run run-readme-example run-real-user-smoke clean
@@ -14,12 +14,12 @@ run: run-real-user-smoke
 
 run-readme-example:
 	@mkdir -p "$(BUILD_DIR)"
-	@$(CC) $(CFLAGS) readme_example.c "$(SDK_SRC)" -o "$(BUILD_DIR)/readme_example"
+	@$(CC) $(CFLAGS) readme_example.c $(SDK_SRC) -o "$(BUILD_DIR)/readme_example"
 	@"$(BUILD_DIR)/readme_example"
 
 run-real-user-smoke:
 	@mkdir -p "$(BUILD_DIR)"
-	@$(CC) $(CFLAGS) real_user_smoke.c "$(SDK_SRC)" -o "$(BUILD_DIR)/real_user_smoke"
+	@$(CC) $(CFLAGS) real_user_smoke.c $(SDK_SRC) -o "$(BUILD_DIR)/real_user_smoke"
 	@"$(BUILD_DIR)/real_user_smoke"
 
 clean:
