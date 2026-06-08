@@ -9,6 +9,10 @@ This checklist is public-facing and intentionally excludes private systems and o
 - Document event contracts, validation rules, retries, flush behavior, shutdown behavior, and error shapes.
 - Ensure all emitted payloads are machine-parseable JSON.
 
+## Public documentation requirements
+
+Public READMEs should explain what LogBrew is for, which package to install, how users send logs/errors/traces/metrics, how framework or logger integrations are wired, what privacy defaults protect users, and how automation agents can validate examples. Keep maintainer-only verifier detail, CI internals, registry mechanics, run IDs, package artifact inspection prose, and "prove this smoke path" language in scripts, checklists, release notes, or commit evidence instead of user-facing README pages.
+
 ## Signal readiness
 
 Treat logs, issues/errors, traces/spans, and metrics as distinct observability signals with different safety and proof needs.
