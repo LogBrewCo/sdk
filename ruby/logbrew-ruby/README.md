@@ -39,6 +39,25 @@ response = client.shutdown(LogBrew::RecordingTransport.always_accept)
 warn response.status_code
 ```
 
+## Metrics
+
+Use `metric` for explicit, application-owned measurements. LogBrew validates the metric name, kind, value, unit, temporality, and optional metadata before queueing the event:
+
+```ruby
+client.metric(
+  "evt_metric_queue_depth",
+  "2026-06-02T10:00:06Z",
+  name: "queue.depth",
+  kind: "gauge",
+  value: 42,
+  unit: "{items}",
+  temporality: "instant",
+  metadata: { service: "worker", queue: "checkout" }
+)
+```
+
+Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality and may be negative. Keep metadata low-cardinality and primitive. This SDK does not automatically collect Ruby runtime, Rack, Rails, or database metrics yet.
+
 ## HTTP Delivery
 
 Use `LogBrew::HttpTransport` when you want the SDK to POST queued batches to LogBrew:
@@ -161,6 +180,7 @@ The subscriber implements `report(error, handled:, severity:, context:, source:,
 
 - `preview_json` returns the queued batch as pretty JSON.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
+- `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `LogBrew::HttpTransport` sends queued batches through Ruby's standard `Net::HTTP` with configurable endpoint, headers, timeout, and app-owned HTTP client support.
 - `LogBrew::RackMiddleware` captures Rack request spans and unhandled app exceptions without requiring Rails or Rack at runtime.
 - `LogBrew::RailsErrorSubscriber` captures handled/manual Rails error reports without requiring Rails at runtime.

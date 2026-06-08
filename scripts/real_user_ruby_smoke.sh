@@ -31,6 +31,8 @@ test -f "$unpacked_dir/examples/Makefile"
 grep -q 'gem install logbrew-sdk' "$unpacked_dir/README.md"
 grep -q 'LOGBREW_API_KEY' "$unpacked_dir/README.md"
 grep -q 'preview_json' "$unpacked_dir/README.md"
+grep -q 'client.metric' "$unpacked_dir/README.md"
+grep -q 'Metric' "$unpacked_dir/README.md"
 grep -q 'LogBrew::HttpTransport' "$unpacked_dir/README.md"
 grep -q 'Net::HTTP' "$unpacked_dir/README.md"
 grep -q 'LogBrew::Logger' "$unpacked_dir/README.md"
@@ -73,6 +75,8 @@ test -f "$gem_dir/examples/readme_example.rb"
 test -f "$gem_dir/examples/real_user_smoke.rb"
 test -f "$gem_dir/examples/Makefile"
 grep -q 'LogBrew::RackMiddleware' "$gem_dir/README.md"
+grep -q 'client.metric' "$gem_dir/README.md"
+grep -q 'Metric' "$gem_dir/README.md"
 grep -q 'Rack And Rails Middleware' "$gem_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$gem_dir/README.md"
 grep -q 'Rails Error Subscriber' "$gem_dir/README.md"
@@ -208,6 +212,36 @@ empty = happy.flush(LogBrew::RecordingTransport.always_accept)
 raise "unexpected empty flush" unless empty.status_code == 204 && empty.attempts.zero?
 
 expect("validation_error") { happy.log("evt_bad", "2026-06-02T10:00:03", message: "worker started", level: "info") }
+
+metric_client = client
+metric_client.metric(
+  "evt_metric_001",
+  "2026-06-02T10:00:06Z",
+  name: "queue.depth",
+  kind: "gauge",
+  value: -2.0,
+  unit: "{items}",
+  temporality: "instant",
+  metadata: { service: "worker", queue: "checkout" }
+)
+metric_event = JSON.parse(metric_client.preview_json).fetch("events")[0]
+metric_attributes = metric_event.fetch("attributes")
+raise "expected metric event type" unless metric_event.fetch("type") == "metric"
+raise "expected metric name" unless metric_attributes.fetch("name") == "queue.depth"
+raise "expected metric kind" unless metric_attributes.fetch("kind") == "gauge"
+raise "expected metric value" unless metric_attributes.fetch("value") == -2.0
+raise "expected metric unit" unless metric_attributes.fetch("unit") == "{items}"
+raise "expected metric temporality" unless metric_attributes.fetch("temporality") == "instant"
+raise "expected metric metadata" unless metric_attributes.fetch("metadata").fetch("queue") == "checkout"
+expect("validation_error") do
+  metric_client.metric("evt_metric_invalid_value", "2026-06-02T10:00:06Z", name: "queue.depth", kind: "gauge", value: Float::NAN, unit: "{items}", temporality: "instant")
+end
+expect("validation_error") do
+  metric_client.metric("evt_metric_invalid_counter", "2026-06-02T10:00:06Z", name: "jobs.completed", kind: "counter", value: -1, unit: "1", temporality: "delta")
+end
+expect("validation_error") do
+  metric_client.metric("evt_metric_invalid_temporality", "2026-06-02T10:00:06Z", name: "queue.depth", kind: "gauge", value: 2, unit: "{items}", temporality: "delta")
+end
 
 unauthenticated = client
 enqueue_all(unauthenticated)

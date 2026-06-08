@@ -108,6 +108,26 @@ assert(payload.fetch("events").map { |event| event.fetch("type") } == %w[release
 tests += 1
 
 client = sample_client
+client.metric(
+  "evt_metric_001",
+  "2026-06-02T10:00:06Z",
+  name: "queue.depth",
+  kind: "gauge",
+  value: -2.0,
+  unit: "{items}",
+  temporality: "instant",
+  metadata: { service: "worker", queue: "checkout" }
+)
+metric_payload = client.preview_json
+assert(metric_payload.include?('"type": "metric"'), "expected metric event type")
+assert(metric_payload.include?('"kind": "gauge"'), "expected metric kind")
+assert(metric_payload.include?('"value": -2.0'), "expected gauge value")
+assert(metric_payload.include?('"unit": "{items}"'), "expected metric unit")
+assert(metric_payload.include?('"temporality": "instant"'), "expected metric temporality")
+assert(metric_payload.include?('"queue": "checkout"'), "expected metric metadata")
+tests += 1
+
+client = sample_client
 enqueue_all(client)
 transport = LogBrew::RecordingTransport.always_accept
 response = client.flush(transport)
@@ -135,6 +155,21 @@ tests += 1
 
 expect_error("validation_error", "span durationMs must be non-negative") do
   sample_client.span("evt_span_001", "2026-06-02T10:00:04Z", name: "GET /health", traceId: "trace_001", spanId: "span_001", status: "ok", durationMs: -1)
+end
+tests += 1
+
+expect_error("validation_error", "metric value must be a finite number") do
+  sample_client.metric("evt_metric_001", "2026-06-02T10:00:06Z", name: "queue.depth", kind: "gauge", value: Float::NAN, unit: "{items}", temporality: "instant")
+end
+tests += 1
+
+expect_error("validation_error", "metric counter value must be non-negative") do
+  sample_client.metric("evt_metric_001", "2026-06-02T10:00:06Z", name: "jobs.completed", kind: "counter", value: -1, unit: "1", temporality: "delta")
+end
+tests += 1
+
+expect_error("validation_error", "metric temporality for gauge must be one of: instant") do
+  sample_client.metric("evt_metric_001", "2026-06-02T10:00:06Z", name: "queue.depth", kind: "gauge", value: 2, unit: "{items}", temporality: "delta")
 end
 tests += 1
 

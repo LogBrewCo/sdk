@@ -13,6 +13,13 @@ module LogBrew
   LOG_LEVELS = %w[debug info warning error].freeze
   SPAN_STATUSES = %w[ok error].freeze
   ACTION_STATUSES = %w[queued running success failure].freeze
+  METRIC_TEMPORALITIES_BY_KIND = {
+    "counter" => %w[delta cumulative].freeze,
+    "gauge" => %w[instant].freeze,
+    "histogram" => %w[delta cumulative].freeze
+  }.freeze
+  METRIC_KINDS = METRIC_TEMPORALITIES_BY_KIND.keys.freeze
+  NON_NEGATIVE_METRIC_KINDS = %w[counter histogram].freeze
 
   class SdkError < StandardError
     attr_reader :code
@@ -699,6 +706,15 @@ module LogBrew
       end
     end
 
+    def require_finite_number(label, value)
+      unless value.is_a?(Integer) || value.is_a?(Float)
+        raise SdkError.new("validation_error", "#{label} must be a finite number")
+      end
+      raise SdkError.new("validation_error", "#{label} must be a finite number") if numeric_nan?(value)
+
+      value
+    end
+
     def read(attributes, key)
       return nil unless attributes.is_a?(Hash)
 
@@ -762,6 +778,10 @@ module LogBrew
 
     def span(id, timestamp, attributes)
       push_event("span", id, timestamp, validate_span(attributes))
+    end
+
+    def metric(id, timestamp, attributes)
+      push_event("metric", id, timestamp, validate_metric(attributes))
     end
 
     def action(id, timestamp, attributes)
@@ -915,6 +935,32 @@ module LogBrew
           payload["status"] = status
           payload["durationMs"] = duration_ms unless duration_ms.nil?
         end,
+        attributes
+      )
+    end
+
+    def validate_metric(attributes)
+      name = Validation.read(attributes, "name")
+      kind = Validation.read(attributes, "kind")
+      unit = Validation.read(attributes, "unit")
+      temporality = Validation.read(attributes, "temporality")
+      Validation.require_non_empty("metric name", name)
+      Validation.require_allowed_value("metric kind", kind, METRIC_KINDS)
+      value = Validation.require_finite_number("metric value", Validation.read(attributes, "value"))
+      Validation.require_non_empty("metric unit", unit)
+      Validation.require_allowed_value("metric temporality for #{kind}", temporality, METRIC_TEMPORALITIES_BY_KIND[kind])
+      if NON_NEGATIVE_METRIC_KINDS.include?(kind) && value.negative?
+        raise SdkError.new("validation_error", "metric #{kind} value must be non-negative")
+      end
+
+      with_metadata(
+        {
+          "name" => name,
+          "kind" => kind,
+          "value" => value,
+          "unit" => unit,
+          "temporality" => temporality
+        },
         attributes
       )
     end
