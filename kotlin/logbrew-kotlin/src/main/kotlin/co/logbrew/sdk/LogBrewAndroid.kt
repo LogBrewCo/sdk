@@ -1,5 +1,8 @@
 package co.logbrew.sdk
 
+import java.net.URI
+import java.net.URISyntaxException
+
 object AndroidLogPriority {
     const val VERBOSE: Int = 2
     const val DEBUG: Int = 3
@@ -43,6 +46,56 @@ object LogBrewAndroid {
         Validation.requireNonEmpty("android screenName", screenName)
         val metadata = context.toMetadata() + mapOf("screenName" to screenName)
         client.action(id, timestamp, ActionAttributes.create("screen_view", "success").withMetadata(metadata))
+    }
+
+    fun captureProductAction(
+        client: LogBrewClient,
+        id: String,
+        timestamp: String,
+        name: String,
+        status: String = "success",
+        context: AndroidContext = AndroidContext.create(),
+        metadata: Map<String, Any?> = emptyMap(),
+    ) {
+        val safeMetadata =
+            context.toMetadata() +
+                compactMetadata(metadata) +
+                mapOf("source" to "android.action")
+        client.action(id, timestamp, ActionAttributes.create(name, status).withMetadata(safeMetadata))
+    }
+
+    fun captureNetworkMilestone(
+        client: LogBrewClient,
+        id: String,
+        timestamp: String,
+        method: String,
+        routeTemplate: String,
+        statusCode: Int? = null,
+        durationMs: Double? = null,
+        status: String? = null,
+        context: AndroidContext = AndroidContext.create(),
+        metadata: Map<String, Any?> = emptyMap(),
+    ) {
+        val safeMethod = normalizedMethod(method)
+        val safeRouteTemplate = routeTemplatePath(routeTemplate)
+        val safeStatusCode = checkedStatusCode(statusCode)
+        val safeDurationMs = checkedDurationMs(durationMs)
+        val actionStatus = status ?: statusFromStatusCode(safeStatusCode)
+        val timelineMetadata =
+            context.toMetadata() +
+                compactMetadata(metadata) +
+                mapOf(
+                    "source" to "android.network",
+                    "method" to safeMethod,
+                    "routeTemplate" to safeRouteTemplate,
+                ) +
+                optionalMetadata("statusCode", safeStatusCode) +
+                optionalMetadata("durationMs", safeDurationMs)
+        client.action(
+            id,
+            timestamp,
+            ActionAttributes.create("$safeMethod $safeRouteTemplate", actionStatus).withMetadata(timelineMetadata),
+        )
     }
 
     fun captureLogcat(
@@ -161,6 +214,59 @@ object LogBrewAndroid {
             AndroidLogPriority.ASSERT -> "ASSERT"
             else -> "UNKNOWN"
         }
+
+    private fun normalizedMethod(method: String): String {
+        Validation.requireNonEmpty("android network method", method)
+        return method.trim().uppercase()
+    }
+
+    private fun routeTemplatePath(routeTemplate: String): String {
+        Validation.requireNonEmpty("android network routeTemplate", routeTemplate)
+        val withoutQueryOrHash =
+            routeTemplate
+                .trim()
+                .substringBefore("#")
+                .substringBefore("?")
+        val path =
+            if (withoutQueryOrHash.startsWith("http://") || withoutQueryOrHash.startsWith("https://")) {
+                try {
+                    URI(withoutQueryOrHash)
+                        .rawPath
+                        .takeIf { it.isNotBlank() } ?: "/"
+                } catch (error: URISyntaxException) {
+                    throw SdkException("validation_error", "android network routeTemplate must be a path or URL")
+                }
+            } else {
+                withoutQueryOrHash
+            }
+        val normalized = if (path.startsWith("/")) path else "/$path"
+        Validation.requireNonEmpty("android network routeTemplate", normalized)
+        return normalized
+    }
+
+    private fun checkedStatusCode(statusCode: Int?): Int? {
+        if (statusCode != null && statusCode !in 100..599) {
+            throw SdkException("validation_error", "android network statusCode must be an HTTP status code")
+        }
+        return statusCode
+    }
+
+    private fun checkedDurationMs(durationMs: Double?): Double? {
+        if (durationMs != null && (durationMs < 0 || durationMs.isNaN() || durationMs.isInfinite())) {
+            throw SdkException("validation_error", "android network durationMs must be non-negative")
+        }
+        return durationMs
+    }
+
+    private fun statusFromStatusCode(statusCode: Int?): String = if (statusCode != null && statusCode >= 400) "failure" else "success"
+
+    private fun compactMetadata(metadata: Map<String, Any?>): Map<String, Any?> =
+        metadata.mapValues { (key, value) -> Validation.requireMetadataValue(key, value) }
+
+    private fun optionalMetadata(
+        key: String,
+        value: Any?,
+    ): Map<String, Any?> = if (value == null) emptyMap() else mapOf(key to value)
 
     private fun throwableTitle(throwable: Throwable): String =
         throwable::class.java.simpleName.takeIf { it.isNotBlank() } ?: throwable::class.java.name

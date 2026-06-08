@@ -67,6 +67,16 @@ LogBrewAndroid.captureThrowable(
     throwable = IllegalStateException("payment failed"),
 )
 
+LogBrewAndroid.captureNetworkMilestone(
+    client = client,
+    id = "evt_android_network_001",
+    timestamp = "2026-06-02T10:00:09Z",
+    method = "POST",
+    routeTemplate = "/api/checkout",
+    statusCode = 503,
+    durationMs = 42.5,
+)
+
 println(client.previewJson())
 val response = client.flush(RecordingTransport.alwaysAccept())
 ```
@@ -104,9 +114,45 @@ client.metric(
 
 Use low-cardinality metadata such as route templates, queue names, feature names, or region names. Avoid raw URLs, user identifiers, stack traces, or high-cardinality labels.
 
+## Android Product Timelines
+
+Use `LogBrewAndroid.captureProductAction(...)` for product steps your Android app already understands, such as screen-level funnel steps, taps, retries, and submit decisions. Use `LogBrewAndroid.captureNetworkMilestone(...)` for important API milestones that should be correlated with the same screen, session, or trace:
+
+```kotlin
+val context =
+    AndroidContext
+        .create()
+        .withActivityName("CheckoutActivity")
+        .withScreenName("Checkout")
+        .withSessionId("session_123")
+
+LogBrewAndroid.captureProductAction(
+    client = client,
+    id = "evt_android_action_001",
+    timestamp = "2026-06-02T10:00:09Z",
+    name = "checkout.submit",
+    context = context,
+    metadata = mapOf("funnel" to "checkout", "step" to "submit"),
+)
+
+LogBrewAndroid.captureNetworkMilestone(
+    client = client,
+    id = "evt_android_network_001",
+    timestamp = "2026-06-02T10:00:10Z",
+    method = "POST",
+    routeTemplate = "/api/checkout",
+    statusCode = 503,
+    durationMs = 42.5,
+    context = context,
+    metadata = mapOf("funnel" to "checkout", "traceId" to "trace_123"),
+)
+```
+
+`routeTemplate` is stripped of query strings and hashes before capture. Keep metadata primitive and low-cardinality: screen names, route templates, funnel names, step names, status codes, durations, session IDs, and trace IDs are appropriate. Do not send request bodies, response bodies, headers, user-entered form values, or full URLs with private query text. These helpers do not patch HTTP clients or record visual replay.
+
 ## Examples
 
-The `examples` directory contains copyable snippets for creating a client, sending through `HttpTransport`, and capturing Android activity/log/exception events in your own app.
+The `examples` directory contains copyable snippets for creating a client, sending through `HttpTransport`, and capturing Android activity, product action, API milestone, log, and exception events in your own app.
 
 ## Behavior
 
@@ -118,5 +164,6 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 - `RecordingTransport.alwaysAccept()` is useful when you want to inspect queued JSON before network delivery.
 - `SdkException` exposes stable `code` and `detailMessage` values.
 - `LogBrewAndroid` helpers capture activity lifecycle, screen views, Android `Log` priority-style messages, caught `Throwable`s, and logcat-style messages without importing Android classes.
+- `captureProductAction()` and `captureNetworkMilestone()` enqueue explicit Android `action` events for app-owned product and API milestones with primitive metadata, query/hash-free route templates, and no automatic HTTP patching.
 - `captureAndroidLog()` accepts Android-compatible priority integers such as `AndroidLogPriority.WARN`, records the tag as the LogBrew logger, captures primitive Android context metadata, and records throwable type/message without stack text by default.
 - `captureThrowable()` turns caught exceptions into issue events with throwable type/message metadata and keeps stack text opt-in through `includeStackTrace = true`.

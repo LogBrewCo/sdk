@@ -37,9 +37,10 @@ fun main() {
     run("non_retryable_status_preserves_queue", ::nonRetryableStatusPreservesQueue)
     run("shutdown_flushes_and_prevents_future_events", ::shutdownFlushesAndPreventsFutureEvents)
     run("android_helpers_add_context_metadata", ::androidHelpersAddContextMetadata)
+    run("android_timeline_helpers_sanitize_product_and_network_metadata", ::androidTimelineHelpersSanitizeProductAndNetworkMetadata)
     run("android_log_priority_helper_captures_throwable_safely", ::androidLogPriorityHelperCapturesThrowableSafely)
     run("android_throwable_helper_keeps_stack_trace_opt_in", ::androidThrowableHelperKeepsStackTraceOptIn)
-    println("kotlin package tests ok (19 tests)")
+    println("kotlin package tests ok (20 tests)")
 }
 
 private fun run(
@@ -331,6 +332,79 @@ private fun androidHelpersAddContextMetadata() {
     check("\"deviceModel\": \"Pixel\"" in body)
     check("\"androidPriority\": \"WARN\"" in body)
     check("\"source\": \"android\"" in body)
+}
+
+private fun androidTimelineHelpersSanitizeProductAndNetworkMetadata() {
+    val client = newClient()
+    val context =
+        AndroidContext
+            .create()
+            .withActivityName("CheckoutActivity")
+            .withScreenName("Checkout")
+            .withDeviceModel("Pixel")
+            .withOsVersion("Android 15")
+            .withSessionId("session_android_001")
+    LogBrewAndroid.captureProductAction(
+        client = client,
+        id = "evt_android_action_001",
+        timestamp = "2026-06-02T10:00:10Z",
+        name = "checkout.submit",
+        context = context,
+        metadata = mapOf("funnel" to "checkout", "step" to "submit", "traceId" to "trace_android_001"),
+    )
+    LogBrewAndroid.captureNetworkMilestone(
+        client = client,
+        id = "evt_android_network_001",
+        timestamp = "2026-06-02T10:00:11Z",
+        method = "post",
+        routeTemplate = "/api/checkout?itemId=123#pay",
+        statusCode = 503,
+        durationMs = 42.5,
+        context = context,
+        metadata = mapOf("funnel" to "checkout", "traceId" to "trace_android_001"),
+    )
+    val body = client.previewJson()
+    check("\"name\": \"checkout.submit\"" in body)
+    check("\"source\": \"android.action\"" in body)
+    check("\"source\": \"android.network\"" in body)
+    check("\"name\": \"POST /api/checkout\"" in body)
+    check("\"status\": \"failure\"" in body)
+    check("\"method\": \"POST\"" in body)
+    check("\"routeTemplate\": \"/api/checkout\"" in body)
+    check("\"durationMs\": 42.5" in body)
+    check("\"sessionId\": \"session_android_001\"" in body)
+    check("?itemId" !in body)
+    check("#pay" !in body)
+
+    expect("validation_error") {
+        LogBrewAndroid.captureNetworkMilestone(
+            client = newClient(),
+            id = "evt_android_network_bad_duration",
+            timestamp = "2026-06-02T10:00:12Z",
+            method = "GET",
+            routeTemplate = "/api/cart",
+            durationMs = -1.0,
+        )
+    }
+    expect("validation_error") {
+        LogBrewAndroid.captureNetworkMilestone(
+            client = newClient(),
+            id = "evt_android_network_bad_status",
+            timestamp = "2026-06-02T10:00:12Z",
+            method = "GET",
+            routeTemplate = "/api/cart",
+            statusCode = 99,
+        )
+    }
+    expect("validation_error") {
+        LogBrewAndroid.captureProductAction(
+            client = newClient(),
+            id = "evt_android_action_bad_metadata",
+            timestamp = "2026-06-02T10:00:13Z",
+            name = "checkout.submit",
+            metadata = mapOf("nested" to mapOf("unsafe" to true)),
+        )
+    }
 }
 
 private fun androidLogPriorityHelperCapturesThrowableSafely() {

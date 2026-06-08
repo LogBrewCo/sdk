@@ -135,6 +135,8 @@ test -f "$extract_dir/examples/readme_example/ReadmeExample.kt"
 test -f "$extract_dir/examples/real_user_smoke/RealUserSmoke.kt"
 test -f "$extract_dir/examples/Makefile"
 grep -q 'HttpTransport' "$extract_dir/README.md"
+grep -q 'captureProductAction' "$extract_dir/README.md"
+grep -q 'captureNetworkMilestone' "$extract_dir/README.md"
 
 run_app() {
   local name="$1"
@@ -174,6 +176,8 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-smoke.stdo
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"androidHelperEvents":3' "$tmp_dir/installed-smoke.stderr.json"
+grep -q '"androidTimelineEvents":2' "$tmp_dir/installed-smoke.stderr.json"
+grep -q '"androidNetworkAction":"POST /api/checkout"' "$tmp_dir/installed-smoke.stderr.json"
 
 smoke_app="$tmp_dir/smoke-app"
 mkdir -p "$smoke_app"
@@ -309,6 +313,65 @@ fun main() {
     check("\"throwableName\": \"IllegalStateException\"" in helperPreview)
     check("\"throwableStackTrace\"" !in helperPreview)
 
+    val timeline = newClient()
+    LogBrewAndroid.captureProductAction(
+        timeline,
+        "evt_android_action_001",
+        "2026-06-02T10:00:09Z",
+        "checkout.submit",
+        context = context,
+        metadata = mapOf("funnel" to "checkout", "step" to "submit", "traceId" to "trace_android_001"),
+    )
+    LogBrewAndroid.captureNetworkMilestone(
+        timeline,
+        "evt_android_network_001",
+        "2026-06-02T10:00:10Z",
+        "post",
+        "https://mobile.example.test/api/checkout?itemId=123#pay",
+        statusCode = 503,
+        durationMs = 42.5,
+        context = context,
+        metadata = mapOf("funnel" to "checkout", "traceId" to "trace_android_001"),
+    )
+    val timelinePreview = timeline.previewJson()
+    check("\"source\": \"android.action\"" in timelinePreview)
+    check("\"source\": \"android.network\"" in timelinePreview)
+    check("\"name\": \"POST /api/checkout\"" in timelinePreview)
+    check("\"status\": \"failure\"" in timelinePreview)
+    check("\"routeTemplate\": \"/api/checkout\"" in timelinePreview)
+    check("\"durationMs\": 42.5" in timelinePreview)
+    check("?itemId" !in timelinePreview)
+    check("#pay" !in timelinePreview)
+    expect("validation_error") {
+        LogBrewAndroid.captureProductAction(
+            newClient(),
+            "evt_android_action_bad_metadata",
+            "2026-06-02T10:00:11Z",
+            "checkout.submit",
+            metadata = mapOf("nested" to mapOf("unsafe" to true)),
+        )
+    }
+    expect("validation_error") {
+        LogBrewAndroid.captureNetworkMilestone(
+            newClient(),
+            "evt_android_network_bad_duration",
+            "2026-06-02T10:00:12Z",
+            "GET",
+            "/api/cart",
+            durationMs = -1.0,
+        )
+    }
+    expect("validation_error") {
+        LogBrewAndroid.captureNetworkMilestone(
+            newClient(),
+            "evt_android_network_bad_status",
+            "2026-06-02T10:00:12Z",
+            "GET",
+            "/api/cart",
+            statusCode = 99,
+        )
+    }
+
     val httpEndpoint = System.getenv("LOGBREW_KOTLIN_HTTP_ENDPOINT") ?: error("missing HTTP endpoint")
     val http = newClient(maxRetries = 1)
     http.log(
@@ -335,7 +398,7 @@ fun main() {
         closed.action("evt_action_002", "2026-06-02T10:00:06Z", ActionAttributes.create("deploy", "success"))
     }
 
-    System.err.println("""{"ok":true,"status":202,"attempts":1,"events":6,"metricEvents":1,"androidHelperEvents":3,"httpAttempts":${httpResponse.attempts}}""")
+    System.err.println("""{"ok":true,"status":202,"attempts":1,"events":6,"metricEvents":1,"androidHelperEvents":3,"androidTimelineEvents":2,"androidNetworkAction":"POST /api/checkout","httpAttempts":${httpResponse.attempts}}""")
 }
 KT
 
@@ -412,6 +475,8 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"androidHelperEvents":3' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"androidTimelineEvents":2' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"androidNetworkAction":"POST /api/checkout"' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/smoke-app.stderr.json"
 python3 - "$intake_log" <<'PY'
 import json

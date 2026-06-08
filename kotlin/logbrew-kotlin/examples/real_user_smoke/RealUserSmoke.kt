@@ -62,6 +62,36 @@ fun main() {
     check("\"throwableStackTrace\"" !in helperPreview)
     check("\"source\": \"android\"" in helperPreview)
 
+    val timelineClient = LogBrewAndroid.createClient("LOGBREW_API_KEY", "android-timeline")
+    LogBrewAndroid.captureProductAction(
+        timelineClient,
+        "evt_android_action_001",
+        "2026-06-02T10:00:09Z",
+        "checkout.submit",
+        context = context,
+        metadata = mapOf("funnel" to "checkout", "step" to "submit", "traceId" to "trace_android_001"),
+    )
+    LogBrewAndroid.captureNetworkMilestone(
+        timelineClient,
+        "evt_android_network_001",
+        "2026-06-02T10:00:10Z",
+        "post",
+        "/api/checkout?itemId=123#pay",
+        statusCode = 503,
+        durationMs = 42.5,
+        context = context,
+        metadata = mapOf("funnel" to "checkout", "traceId" to "trace_android_001"),
+    )
+    val timelinePreview = timelineClient.previewJson()
+    check("\"source\": \"android.action\"" in timelinePreview)
+    check("\"source\": \"android.network\"" in timelinePreview)
+    check("\"name\": \"POST /api/checkout\"" in timelinePreview)
+    check("\"status\": \"failure\"" in timelinePreview)
+    check("\"routeTemplate\": \"/api/checkout\"" in timelinePreview)
+    check("\"durationMs\": 42.5" in timelinePreview)
+    check("?itemId" !in timelinePreview)
+    check("#pay" !in timelinePreview)
+
     val metricClient = LogBrewClient.create("LOGBREW_API_KEY", "logbrew-kotlin-metrics", "0.1.0")
     metricClient.metric(
         "evt_metric_001",
@@ -107,6 +137,6 @@ fun main() {
     check(capturedAuthorization == "Bearer LOGBREW_API_KEY")
 
     System.err.println(
-        """{"ok":true,"status":${response.statusCode},"retryAttempts":${response.attempts},"androidHelperEvents":3,"metricEvents":1,"httpAttempts":${httpResponse.attempts}}""",
+        """{"ok":true,"status":${response.statusCode},"retryAttempts":${response.attempts},"androidHelperEvents":3,"androidTimelineEvents":2,"androidNetworkAction":"POST /api/checkout","metricEvents":1,"httpAttempts":${httpResponse.attempts}}""",
     )
 }
