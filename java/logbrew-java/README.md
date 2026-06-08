@@ -103,7 +103,7 @@ TransportResponse response = client.shutdown(transport);
 System.err.println(response.statusCode());
 ```
 
-`HttpTransport` uses Java 11's standard `java.net.http.HttpClient`, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint/header/client/timeout settings, discards response bodies, and maps client delivery failures into retryable `TransportException.network(...)` values so `LogBrewClient.flush(...)` can preserve queued events and retry. Inject a custom `HttpClient` when a service already owns proxy, TLS, timeout, executor, or test transport settings.
+`HttpTransport` uses Java 11's standard `java.net.http.HttpClient`, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint/header/client/timeout settings, discards response bodies, and maps client delivery failures into retryable `TransportException.network(...)` values so `LogBrewClient.flush(...)` can preserve queued events and retry. Inject a custom `HttpClient` when a service already owns proxy, TLS, timeout, executor, or transport settings.
 
 ## Standard Java Logging
 
@@ -193,20 +193,7 @@ appender.stop();
 
 From `java/logbrew-java`:
 
-```bash
-cd examples && make
-cd examples && make run-readme-example
-cd examples && make run
-cd examples && make run-real-user-smoke
-```
-
-`make run` is the shorter alias for the stronger real-user smoke example.
-
-## For Automation Agents
-
-- Compile a consumer app with the Maven coordinate above, then run the README example from the installed classpath.
-- Use `cd examples && make` to print packaged example commands, `make run-readme-example` for the README payload, and `make run` or `make run-real-user-smoke` for the fuller local flow.
-- For Spring Boot apps, attach `LogBrewLogbackAppender` to an app-owned Logback logger and keep full stack-trace text disabled unless the app explicitly opts in.
+The `examples` directory contains copyable snippets for creating a client, sending through `HttpTransport`, attaching `java.util.logging`, and configuring the optional Logback appender in your own Java service.
 
 ## Behavior
 
@@ -216,7 +203,7 @@ cd examples && make run-real-user-smoke
 - `shutdown(transport)` flushes queued events and rejects later writes.
 - `isClosed()` returns whether `shutdown(transport)` has closed the client.
 - `HttpTransport` sends queued batches through dependency-free `java.net.http` delivery for server-side apps.
-- `RecordingTransport.alwaysAccept()` is useful for local examples and tests.
+- `RecordingTransport.alwaysAccept()` is useful when you want to inspect queued JSON before network delivery.
 - `LogBrewJulHandler` queues standard `java.util.logging` records without mutating global logging configuration.
 - `LogBrewLogbackAppender` queues app-owned SLF4J/Logback records, including MDC and fluent key/value metadata, without changing global logger setup.
 - Spring Boot apps can attach `LogBrewLogbackAppender` to app-owned Logback loggers without adding a required Spring runtime dependency to the SDK.

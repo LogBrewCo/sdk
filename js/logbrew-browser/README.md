@@ -29,7 +29,7 @@ logbrew.client.log("evt_log_001", new Date().toISOString(), {
 
 `installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, flushes queued events when the page becomes hidden or receives `pagehide`, and returns a handle with `client`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`.
 
-For browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples and tests.
+For browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples.
 
 By default, browser metadata keeps the current path without query string or hash. It does not include document title or user agent unless `includeDocumentTitle` or `includeUserAgent` is enabled. Pass `sanitizeMetadata(metadata, kind)` to remove or rewrite metadata before events are queued.
 
@@ -48,7 +48,7 @@ installLogBrewBrowser({
 });
 ```
 
-For tests and local examples, use `RecordingTransport.alwaysAccept()` from `@logbrew/sdk` so no network call is made.
+Use `RecordingTransport.alwaysAccept()` from `@logbrew/sdk` when you want to inspect queued browser events before network delivery.
 
 ## Trace Propagation
 
@@ -76,20 +76,6 @@ await tracedFetch("/api/checkout", {
 
 `tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. Match as narrowly as possible so browser requests do not send tracing headers to unrelated origins. If the API is on another origin, configure that backend's CORS policy to allow the `traceparent` request header.
 
-## Packaged Examples
+## Example Source
 
-After install, these commands are available from a consumer app:
-
-```bash
-node node_modules/@logbrew/browser/examples/index.mjs --help
-node node_modules/@logbrew/browser/examples/index.mjs --list
-node node_modules/@logbrew/browser/examples/index.mjs readme-example
-node node_modules/@logbrew/browser/examples/index.mjs real-user-smoke
-node node_modules/@logbrew/browser/examples/index.mjs
-npm --prefix node_modules/@logbrew/browser/examples run help
-npm --prefix node_modules/@logbrew/browser/examples run list
-npm --prefix node_modules/@logbrew/browser/examples run readme-example
-npm --prefix node_modules/@logbrew/browser/examples run real-user-smoke
-```
-
-The default launcher path runs `real-user-smoke`.
+The package includes example source for browser setup, page-view capture, error listeners, visibility flushing, and target-scoped trace propagation. Use the snippets above as the starting point for wiring LogBrew into your browser application.

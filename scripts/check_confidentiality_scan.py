@@ -11,6 +11,13 @@ SENSITIVE_RE = re.compile(
     r"launch state|cleanup|hostnames?|internal path|ssh|terraform|dns|backup|restore)",
     re.IGNORECASE,
 )
+PUBLIC_README_FORBIDDEN_RE = re.compile(
+    r"(real[-_ ]user|smoke|\bproof\b|\bprove\b|\bverif(?:y|ied|ier|ication)\b|"
+    r"\btests?\b|\btesting\b|temporary app|temp app|disposable app|fresh app|fresh temporary app|"
+    r"package checks?|repository checks?|artifact inspection|ci run|registry mechanics|"
+    r"automation agents?|for automation agents|agent-facing)",
+    re.IGNORECASE,
+)
 
 SKIPPED_DIRS = {
     ".agents",
@@ -64,6 +71,24 @@ def validate(root: Path) -> list[str]:
             if is_allowed_match(relative, line):
                 continue
             failures.append(f"./{relative.as_posix()}:{line_number}:{line}")
+    failures.extend(validate_public_readme_language(root))
+    return failures
+
+
+def validate_public_readme_language(root: Path) -> list[str]:
+    failures: list[str] = []
+    for path in sorted(root.rglob("README.md")):
+        relative = path.relative_to(root)
+        if any(part in SKIPPED_DIRS for part in relative.parts):
+            continue
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not PUBLIC_README_FORBIDDEN_RE.search(line):
+                continue
+            failures.append(
+                f"./{relative.as_posix()}:{line_number}:"
+                "public README should describe LogBrew service integration, not SDK verification: "
+                f"{line}"
+            )
     return failures
 
 

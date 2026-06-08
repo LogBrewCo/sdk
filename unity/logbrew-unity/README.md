@@ -2,7 +2,7 @@
 
 Unity package for building, validating, previewing, and flushing LogBrew event batches from games and realtime apps.
 
-The package is source-only, targets Unity `2021.3` or newer through UPM, and has no runtime package dependencies. The repository checks pack the Unity package, inspect the artifact, compile the runtime with nullable reference types, warnings as errors, and built-in .NET analyzers in `AnalysisMode=All`, run shipped samples, and exercise failure/lifecycle paths without requiring the Unity Editor.
+The package is source-only, targets Unity `2021.3` or newer through UPM, and has no runtime package dependencies.
 
 ## Install
 
@@ -43,7 +43,7 @@ TransportResponse response = client.Flush(RecordingTransport.AlwaysAccept());
 
 ## HTTP Delivery
 
-Use `HttpTransport` when the game or realtime app is ready to send queued batches to LogBrew. It posts JSON to the production intake by default, passes the SDK key through the `authorization` header, and supports custom endpoints, headers, and timeouts for local collectors, proxies, and tests:
+Use `HttpTransport` when the game or realtime app is ready to send queued batches to LogBrew. It posts JSON to the production intake by default, passes the SDK key through the `authorization` header, and supports custom endpoints, headers, and timeouts for local collectors or proxies:
 
 ```csharp
 var transport = new HttpTransport(
@@ -54,20 +54,11 @@ var transport = new HttpTransport(
 TransportResponse response = client.Flush(transport);
 ```
 
-Keep personally sensitive values out of event messages and metadata before calling `Flush(transport)`. Use `RecordingTransport.AlwaysAccept()` in tests when you want deterministic local JSON without network delivery.
+Keep personally sensitive values out of event messages and metadata before calling `Flush(transport)`. Use `RecordingTransport.AlwaysAccept()` when you want to inspect queued JSON before network delivery.
 
-## Samples
+## Sample Source
 
-From `unity/logbrew-unity`:
-
-```bash
-cd examples && make
-cd examples && make run-readme-example
-cd examples && make run
-cd examples && make run-real-user-smoke
-```
-
-`make run` is the shorter alias for the stronger real-user smoke sample.
+The package includes sample source for creating a client, sending through `HttpTransport`, recording scene transitions, mapping Unity logs, and capturing exceptions in your own game or realtime app.
 
 ## Behavior
 
@@ -78,4 +69,4 @@ cd examples && make run-real-user-smoke
 - `LogBrewUnity.CaptureSceneLoaded()` records Unity scene transitions as action events.
 - `LogBrewUnity.CaptureLogMessage()` maps Unity log types to LogBrew log levels.
 - `LogBrewUnity.CaptureException()` records Unity exception details as issue events.
-- `UnityContext` adds scene, object, platform, session, and frame metadata without requiring `UnityEngine` in tests.
+- `UnityContext` adds scene, object, platform, session, and frame metadata while keeping the core event builders independent from `UnityEngine`.

@@ -6,22 +6,9 @@ Public Python SDK for creating LogBrew event batches, validating them locally, a
 
 ```bash
 python3 -m pip install logbrew-sdk
-python3 -m logbrew_sdk.examples --help
-python3 -m logbrew_sdk.examples --list
-python3 -m logbrew_sdk.examples readme-example
-python3 -m logbrew_sdk.examples real-user-smoke
-python3 -m logbrew_sdk.examples
-python3 -m logbrew_sdk.examples.readme_example
-python3 -m logbrew_sdk.examples.real_user_smoke
 ```
 
-The package includes `py.typed`, public type aliases such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, and `TraceparentContext`, and packaged example entrypoints that can be run after install. Use `pip show logbrew-sdk`, `python -m pip check`, and `python -c 'import logbrew_sdk; print(logbrew_sdk.__version__)'` when you want quick install metadata checks.
-
-For Automation Agents
-
-- Run `python3 -m logbrew_sdk.examples --help` and `python3 -m logbrew_sdk.examples --list` to discover the packaged examples.
-- Run `python3 -m logbrew_sdk.examples readme-example` for the README payload and `python3 -m logbrew_sdk.examples real-user-smoke` for the fuller local flow.
-- Use `help(logbrew_sdk.LogBrewClient)` or `help(logbrew_sdk.HttpTransport)` to inspect the installed API surface from a consumer environment.
+The package includes `py.typed`, public type aliases such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, and `TraceparentContext`, and copyable examples for wiring LogBrew into your Python service. Keep the real key in your app configuration and use `preview_json()` when you want to inspect queued JSON before sending.
 
 ## Example
 
@@ -94,7 +81,7 @@ print(
 )
 ```
 
-Use a clearly fake placeholder like `LOGBREW_API_KEY` in local examples and tests. Call `flush()` or `shutdown()` to send queued events through a transport, and use `preview_json()` when you want a stable local JSON preview without sending anything.
+Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush()` or `shutdown()` to send queued events through a transport, and use `preview_json()` when you want a stable local JSON preview before sending anything.
 
 ## Metrics
 

@@ -37,7 +37,7 @@ app.get("/health", async (request) => {
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request and error metadata records the path without query text by default.
 
-When an incoming request has a valid W3C `traceparent` header, the default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when tests or edge runtimes need deterministic child span IDs:
+When an incoming request has a valid W3C `traceparent` header, the default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
 
 ```js
 await app.register(logbrewFastifyPlugin, {
@@ -67,20 +67,6 @@ app.setErrorHandler((error, _request, reply) => {
 
 The plugin uses Fastify's `onRequest`, `onResponse`, and `onError` hooks. `onResponse` runs after the response has been sent, which makes it a good place to flush request telemetry without changing the response body; `onError` captures thrown route errors before your normal error response handler finishes the request.
 
-## Packaged Examples
+## Example Source
 
-After install, these commands are available from a consumer app:
-
-```bash
-node node_modules/@logbrew/fastify/examples/index.mjs --help
-node node_modules/@logbrew/fastify/examples/index.mjs --list
-node node_modules/@logbrew/fastify/examples/index.mjs readme-example
-node node_modules/@logbrew/fastify/examples/index.mjs real-user-smoke
-node node_modules/@logbrew/fastify/examples/index.mjs
-npm --prefix node_modules/@logbrew/fastify/examples run help
-npm --prefix node_modules/@logbrew/fastify/examples run list
-npm --prefix node_modules/@logbrew/fastify/examples run readme-example
-npm --prefix node_modules/@logbrew/fastify/examples run real-user-smoke
-```
-
-The default launcher path runs `real-user-smoke`.
+The package includes example source for the request plugin, `onResponse` flushing, `onError` capture, and app-owned error responses. Use the snippets above as the starting point for wiring LogBrew into your Fastify application.

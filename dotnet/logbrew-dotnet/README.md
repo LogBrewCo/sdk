@@ -2,19 +2,12 @@
 
 Public .NET SDK for building, validating, previewing, and flushing LogBrew event batches, with `System.Net.Http` delivery and opt-in `Microsoft.Extensions.Logging` provider support.
 
-The library targets `netstandard2.0`, uses `System.Net.Http` for built-in HTTP delivery, depends on `Microsoft.Extensions.Logging` for the standard .NET logging provider surface, and is verified with the current .NET SDK by packing a NuGet package and installing it into fresh console apps.
+The library targets `netstandard2.0`, uses `System.Net.Http` for built-in HTTP delivery, and depends on `Microsoft.Extensions.Logging` for the standard .NET logging provider surface.
 
 ## Install
 
 ```bash
 dotnet add package LogBrew
-```
-
-For local testing from this repository:
-
-```bash
-bash scripts/check_dotnet_package.sh
-bash scripts/real_user_dotnet_smoke.sh
 ```
 
 ## Usage
@@ -118,14 +111,7 @@ client.Flush(transport);
 
 From `dotnet/logbrew-dotnet`:
 
-```bash
-cd examples && make
-cd examples && make run-readme-example
-cd examples && make run
-cd examples && make run-real-user-smoke
-```
-
-`make run` is the shorter alias for the stronger real-user smoke example.
+The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, sending through `HttpTransport`, and attaching the `ILogger` provider in your own .NET service.
 
 ## Behavior
 
@@ -134,5 +120,5 @@ cd examples && make run-real-user-smoke
 - `HttpTransport` sends queued batches through `System.Net.Http` with configurable endpoint, headers, timeout, and app-owned `HttpClient` support.
 - `Shutdown(transport)` flushes queued events and rejects later writes.
 - `AddLogBrew(client, options)` connects existing `ILogger` calls to LogBrew without global logging side effects.
-- `RecordingTransport.AlwaysAccept()` is useful for local examples and tests.
+- `RecordingTransport.AlwaysAccept()` is useful when you want to inspect queued JSON before network delivery.
 - `SdkException` exposes stable `Code` and `DetailMessage` values for user-facing failure handling.

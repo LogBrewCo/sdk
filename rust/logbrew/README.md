@@ -7,24 +7,11 @@ Public Rust SDK for creating LogBrew event batches, validating them locally, and
 ```bash
 cargo add logbrew
 cargo add logbrew --features http
-cargo check
-cargo tree --depth 1
-cargo doc --package logbrew --no-deps
-cd examples && make
-cd examples && make run-readme-example
-cd examples && make run
-cd examples && make run-real-user-smoke
-cargo run --example readme_example -p logbrew
-cargo run --example real_user_smoke -p logbrew
 ```
 
 `cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`.
 
-For Automation Agents
-
-- Run `cargo tree --depth 1` to confirm the app depends on `logbrew`.
-- Run `cd examples && make` to print available example commands, `make run-readme-example` for the README payload, and `make run` or `make run-real-user-smoke` for the fuller local flow.
-- In a consumer app, `cargo check --locked`, `cargo test --locked`, and `cargo run --locked` are practical checks for install, examples, and lockfile consistency.
+The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
 ## Example
 
@@ -86,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Use a clearly fake placeholder like `LOGBREW_API_KEY` in local examples and tests. Call `flush` or `shutdown` to send queued events through a transport, and use `preview_json` when you want a stable local JSON preview without sending anything.
+Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush` or `shutdown` to send queued events through a transport, and use `preview_json` when you want a stable local JSON preview before sending anything.
 
 ## HTTP Delivery
 

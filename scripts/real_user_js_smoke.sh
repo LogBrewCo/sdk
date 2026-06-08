@@ -465,59 +465,15 @@ if (!readme.includes("createLogBrewPinoDestination")) {
 if (!readme.includes("createLogBrewWinstonTransport")) {
   throw new Error("missing installed README Winston transport guidance");
 }
-if (!readme.includes("examples/readme-example.mjs")) {
-  throw new Error("missing installed README ESM example guidance");
-}
-if (!readme.includes("examples/readme-example.cjs")) {
-  throw new Error("missing installed README CommonJS example guidance");
-}
-if (!readme.includes("examples/real-user-smoke.mjs")) {
-  throw new Error("missing installed README ESM real-user smoke example guidance");
-}
-if (!readme.includes("examples/real-user-smoke.cjs")) {
-  throw new Error("missing installed README CommonJS real-user smoke example guidance");
-}
-if (!readme.includes("node node_modules/@logbrew/sdk/examples/index.mjs --help")) {
-  throw new Error("missing installed README launcher help command guidance");
-}
-if (!readme.includes("node node_modules/@logbrew/sdk/examples/index.mjs --list")) {
-  throw new Error("missing installed README launcher list command guidance");
-}
-if (!readme.includes("node node_modules/@logbrew/sdk/examples/index.mjs")) {
-  throw new Error("missing installed README launcher default command guidance");
-}
-if (!readme.includes("node node_modules/@logbrew/sdk/examples/index.mjs readme-example")) {
-  throw new Error("missing installed README launcher readme-example guidance");
-}
-if (!readme.includes("node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke")) {
-  throw new Error("missing installed README launcher real-user-smoke guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run readme-example:esm") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run readme-example:esm")) {
-  throw new Error("missing installed README ESM helper command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run readme-example:cjs") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run readme-example:cjs")) {
-  throw new Error("missing installed README CommonJS helper command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run real-user-smoke") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run real-user-smoke")) {
-  throw new Error("missing installed README default real-user smoke helper command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run real-user-smoke:esm") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run real-user-smoke:esm")) {
-  throw new Error("missing installed README ESM real-user smoke helper command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run real-user-smoke:cjs") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run real-user-smoke:cjs")) {
-  throw new Error("missing installed README CommonJS real-user smoke helper command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run help")) {
-  throw new Error("missing installed README examples help command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run")) {
-  throw new Error("missing installed README examples listing command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run list") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run list")) {
-  throw new Error("missing installed README examples list command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run readme-example") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run readme-example")) {
-  throw new Error("missing installed README default helper command guidance");
+for (const needle of [
+  "copyable examples",
+  "keep the real key in your app configuration",
+  "before sending",
+  "Type declarations document payload shapes",
+]) {
+  if (!readme.includes(needle)) {
+    throw new Error(`missing installed README service guidance: ${needle}`);
+  }
 }
 if (!declarations.includes("Metadata values that can be attached to public LogBrew event payloads.")) {
   throw new Error("missing installed MetadataValue declaration docs");
@@ -1136,59 +1092,15 @@ if (!readme.includes("createLogBrewPinoDestination")) {
 if (!readme.includes("createLogBrewWinstonTransport")) {
   throw new Error("missing packed README Winston transport guidance");
 }
-if (!readme.includes("examples/readme-example.mjs")) {
-  throw new Error("missing packed README ESM example guidance");
-}
-if (!readme.includes("examples/readme-example.cjs")) {
-  throw new Error("missing packed README CommonJS example guidance");
-}
-if (!readme.includes("examples/real-user-smoke.mjs")) {
-  throw new Error("missing packed README ESM real-user smoke example guidance");
-}
-if (!readme.includes("examples/real-user-smoke.cjs")) {
-  throw new Error("missing packed README CommonJS real-user smoke example guidance");
-}
-if (!readme.includes("node node_modules/@logbrew/sdk/examples/index.mjs --help")) {
-  throw new Error("missing packed README launcher help command guidance");
-}
-if (!readme.includes("node node_modules/@logbrew/sdk/examples/index.mjs --list")) {
-  throw new Error("missing packed README launcher list command guidance");
-}
-if (!readme.includes("node node_modules/@logbrew/sdk/examples/index.mjs")) {
-  throw new Error("missing packed README launcher default command guidance");
-}
-if (!readme.includes("node node_modules/@logbrew/sdk/examples/index.mjs readme-example")) {
-  throw new Error("missing packed README launcher readme-example guidance");
-}
-if (!readme.includes("node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke")) {
-  throw new Error("missing packed README launcher real-user-smoke guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run readme-example:esm") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run readme-example:esm")) {
-  throw new Error("missing packed README ESM helper command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run readme-example:cjs") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run readme-example:cjs")) {
-  throw new Error("missing packed README CommonJS helper command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run real-user-smoke") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run real-user-smoke")) {
-  throw new Error("missing packed README default real-user smoke helper command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run real-user-smoke:esm") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run real-user-smoke:esm")) {
-  throw new Error("missing packed README ESM real-user smoke helper command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run real-user-smoke:cjs") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run real-user-smoke:cjs")) {
-  throw new Error("missing packed README CommonJS real-user smoke helper command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run help")) {
-  throw new Error("missing packed README examples help command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run")) {
-  throw new Error("missing packed README examples listing command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run list") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run list")) {
-  throw new Error("missing packed README examples list command guidance");
-}
-if (!readme.includes("npm --prefix node_modules/@logbrew/sdk/examples run readme-example") || !readme.includes("pnpm --dir node_modules/@logbrew/sdk/examples run readme-example")) {
-  throw new Error("missing packed README default helper command guidance");
+for (const needle of [
+  "copyable examples",
+  "keep the real key in your app configuration",
+  "before sending",
+  "Type declarations document payload shapes",
+]) {
+  if (!readme.includes(needle)) {
+    throw new Error(`missing packed README service guidance: ${needle}`);
+  }
 }
 if (!declarations.includes("Metadata values that can be attached to public LogBrew event payloads.")) {
   throw new Error("missing packed MetadataValue declaration docs");

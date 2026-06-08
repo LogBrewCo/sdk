@@ -2,19 +2,12 @@
 
 Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with standard-library `Net::HTTP` delivery, opt-in standard-library `Logger` support, Rack-compatible middleware, and a Rails error subscriber for Rails apps.
 
-The package uses only Ruby standard-library features at runtime. The repository checks build the gem, inspect the artifact, install it into a fresh gem home, run shipped examples, and exercise HTTP delivery plus failure/lifecycle paths like a real user.
+The package uses only Ruby standard-library features at runtime.
 
 ## Install
 
 ```bash
 gem install logbrew-sdk
-```
-
-For local testing from this repository:
-
-```bash
-bash scripts/check_ruby_package.sh
-bash scripts/real_user_ruby_smoke.sh
 ```
 
 ## Usage
@@ -72,20 +65,9 @@ warn response.status_code
 
 `HttpTransport` sends JSON with the SDK key in the `authorization` header, supports a custom endpoint, headers, timeout, and app-owned HTTP client object, maps HTTP statuses through the client's retry rules, and converts request/time-out failures into retryable transport errors.
 
-## Examples
+## Example Source
 
-From `ruby/logbrew-ruby`:
-
-```bash
-cd examples && make
-cd examples && make run-readme-example
-cd examples && make run
-cd examples && make run-real-user-smoke
-ruby examples/readme_example.rb
-ruby examples/real_user_smoke.rb
-```
-
-`make run` is the shorter alias for the stronger real-user smoke example.
+The `examples` directory contains copyable snippets for creating a client, sending through `HttpTransport`, using the standard logger wrapper, attaching Rack middleware, and subscribing to Rails errors in your own Ruby app.
 
 ## Standard Logger
 
@@ -183,5 +165,5 @@ The subscriber implements `report(error, handled:, severity:, context:, source:,
 - `LogBrew::RackMiddleware` captures Rack request spans and unhandled app exceptions without requiring Rails or Rack at runtime.
 - `LogBrew::RailsErrorSubscriber` captures handled/manual Rails error reports without requiring Rails at runtime.
 - `shutdown(transport)` flushes queued events and rejects later writes.
-- `LogBrew::RecordingTransport.always_accept` is useful for local examples and tests.
+- `LogBrew::RecordingTransport.always_accept` is useful when you want to inspect queued JSON before network delivery.
 - `LogBrew::SdkError` exposes stable `code` and `message` values for user-facing failure handling.

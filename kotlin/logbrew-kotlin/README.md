@@ -2,7 +2,7 @@
 
 Public Kotlin/JVM SDK for building, validating, previewing, and flushing LogBrew event batches.
 
-The package is dependency-light, uses the Kotlin standard library only, and keeps Android helpers free of Android SDK imports so the core event behavior can be checked without a full Android toolchain.
+The package is dependency-light, uses the Kotlin standard library only, and keeps Android helpers separate from the core JVM event builders.
 
 ## Install
 
@@ -10,13 +10,6 @@ For Maven or Gradle publishing, use the package coordinates:
 
 ```text
 co.logbrew:logbrew-kotlin:0.1.0
-```
-
-Repository checks build a normal jar and install it into fresh temp Kotlin apps:
-
-```bash
-bash scripts/check_kotlin_package.sh
-bash scripts/real_user_kotlin_smoke.sh
 ```
 
 ## Usage
@@ -71,7 +64,7 @@ val response = client.flush(RecordingTransport.alwaysAccept())
 
 ## HTTP Delivery
 
-Use `HttpTransport` when a JVM or Android app is ready to send queued batches to LogBrew. It posts JSON to the production intake by default, passes the SDK key through the `authorization` header, and supports custom endpoints, headers, and timeouts for local collectors, proxies, and tests:
+Use `HttpTransport` when a JVM or Android app is ready to send queued batches to LogBrew. It posts JSON to the production intake by default, passes the SDK key through the `authorization` header, and supports custom endpoints, headers, and timeouts for local collectors or proxies:
 
 ```kotlin
 val transport = HttpTransport(
@@ -84,20 +77,11 @@ val transport = HttpTransport(
 val response = client.flush(transport)
 ```
 
-Keep personally sensitive values out of event messages and metadata before calling `flush(transport)`. Use `RecordingTransport.alwaysAccept()` in tests when you want deterministic local JSON without network delivery.
+Keep personally sensitive values out of event messages and metadata before calling `flush(transport)`. Use `RecordingTransport.alwaysAccept()` when you want to inspect queued JSON before network delivery.
 
 ## Examples
 
-From `kotlin/logbrew-kotlin`:
-
-```bash
-cd examples && make
-cd examples && make run-readme-example
-cd examples && make run
-cd examples && make run-real-user-smoke
-```
-
-`make run` is the shorter alias for the stronger real-user smoke example.
+The `examples` directory contains copyable snippets for creating a client, sending through `HttpTransport`, and capturing Android activity/log/exception events in your own app.
 
 ## Behavior
 
@@ -105,7 +89,7 @@ cd examples && make run-real-user-smoke
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
 - `HttpTransport` uses JDK `HttpURLConnection`, supports endpoint/header/connect-timeout/read-timeout settings, and maps request failures to retryable `TransportException.network(...)` failures.
-- `RecordingTransport.alwaysAccept()` is useful for local examples and tests.
+- `RecordingTransport.alwaysAccept()` is useful when you want to inspect queued JSON before network delivery.
 - `SdkException` exposes stable `code` and `detailMessage` values.
 - `LogBrewAndroid` helpers capture activity lifecycle, screen views, Android `Log` priority-style messages, caught `Throwable`s, and logcat-style messages without importing Android classes.
 - `captureAndroidLog()` accepts Android-compatible priority integers such as `AndroidLogPriority.WARN`, records the tag as the LogBrew logger, captures primitive Android context metadata, and records throwable type/message without stack text by default.

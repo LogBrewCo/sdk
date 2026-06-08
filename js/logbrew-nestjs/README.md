@@ -54,22 +54,8 @@ The interceptor uses Nest's HTTP `ExecutionContext`, adds `request.logbrew` befo
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK.
 
-When an incoming HTTP request has a valid W3C `traceparent` header, default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break the controller. Automatic request metadata uses the path without query text by default. Use `captureRequests: false` when a controller should only flush manual events, and use `spanIdFactory` when tests or edge runtimes need deterministic child span IDs.
+When an incoming HTTP request has a valid W3C `traceparent` header, default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break the controller. Automatic request metadata uses the path without query text by default. Use `captureRequests: false` when a controller should only flush manual events, and use `spanIdFactory` when your runtime needs app-provided child span IDs.
 
 ## Packaged Examples
 
-After install, these commands are available from a consumer app:
-
-```bash
-node node_modules/@logbrew/nestjs/examples/index.mjs --help
-node node_modules/@logbrew/nestjs/examples/index.mjs --list
-node node_modules/@logbrew/nestjs/examples/index.mjs readme-example
-node node_modules/@logbrew/nestjs/examples/index.mjs real-user-smoke
-node node_modules/@logbrew/nestjs/examples/index.mjs
-npm --prefix node_modules/@logbrew/nestjs/examples run help
-npm --prefix node_modules/@logbrew/nestjs/examples run list
-npm --prefix node_modules/@logbrew/nestjs/examples run readme-example
-npm --prefix node_modules/@logbrew/nestjs/examples run real-user-smoke
-```
-
-The default launcher path runs `real-user-smoke`.
+The package includes example source for the interceptor, controller access, and app-owned response handling. Use the snippets above as the starting point for wiring LogBrew into your NestJS application.

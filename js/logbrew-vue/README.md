@@ -27,7 +27,7 @@ createApp(App)
   .mount("#app");
 ```
 
-For Vue browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with lower-level SDK examples and server-side tests.
+For Vue browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with lower-level SDK examples and server-side use.
 
 ## Composable
 
@@ -69,20 +69,6 @@ await tracedFetch("/api/cart");
 
 `tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. Match as narrowly as possible so Vue does not send tracing headers to unrelated origins. If the API is on another origin, configure that backend's CORS policy to allow the `traceparent` request header.
 
-## Packaged Examples
+## Example Source
 
-After install, these commands are available from a consumer app:
-
-```bash
-node node_modules/@logbrew/vue/examples/index.mjs --help
-node node_modules/@logbrew/vue/examples/index.mjs --list
-node node_modules/@logbrew/vue/examples/index.mjs readme-example
-node node_modules/@logbrew/vue/examples/index.mjs real-user-smoke
-node node_modules/@logbrew/vue/examples/index.mjs
-npm --prefix node_modules/@logbrew/vue/examples run help
-npm --prefix node_modules/@logbrew/vue/examples run list
-npm --prefix node_modules/@logbrew/vue/examples run readme-example
-npm --prefix node_modules/@logbrew/vue/examples run real-user-smoke
-```
-
-The default launcher path runs `real-user-smoke`.
+The package includes example source for plugin setup, composables, view events, Vue error capture, and target-scoped trace propagation. Use the snippets above as the starting point for wiring LogBrew into your Vue application.

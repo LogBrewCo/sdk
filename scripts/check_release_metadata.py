@@ -360,7 +360,7 @@ def validate_c(root: Path, failures: list[str]) -> None:
         "Public C99 SDK",
         "LOGBREW_API_KEY",
         "logbrew_client_flush",
-        "make -C c/logbrew-c/examples run-real-user-smoke",
+        "copy into your own native application",
     ):
         require(needle in readme, failures, f"c/logbrew-c/README.md: missing guidance {needle}")
 
@@ -390,7 +390,7 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
         "Public C++17 SDK",
         "LOGBREW_API_KEY",
         "client.flush",
-        "make -C cpp/logbrew-cpp/examples run-real-user-smoke",
+        "copy into your own native application",
     ):
         require(needle in readme, failures, f"cpp/logbrew-cpp/README.md: missing guidance {needle}")
 
@@ -420,7 +420,7 @@ def validate_objc(root: Path, failures: list[str]) -> None:
         "Public Objective-C SDK",
         "LOGBREW_API_KEY",
         "flushWithTransport",
-        "make -C objc/logbrew-objc/examples run-real-user-smoke",
+        "copyable source",
     ):
         require(needle in readme, failures, f"objc/logbrew-objc/README.md: missing guidance {needle}")
 

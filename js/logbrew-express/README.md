@@ -37,7 +37,7 @@ app.get("/health", (req, res) => {
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request and error metadata records the path without query text by default.
 
-When an incoming request has a valid W3C `traceparent` header, the default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when tests or edge runtimes need deterministic child span IDs:
+When an incoming request has a valid W3C `traceparent` header, the default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
 
 ```js
 app.use(logbrewMiddleware({
@@ -63,20 +63,6 @@ app.use((err, _req, res, _next) => {
 
 Express error-handling middleware uses four arguments: `(err, req, res, next)`. In Express 5, route handlers and middleware that return rejected promises are forwarded to error handlers automatically, so `logbrewErrorHandler()` is designed to capture and then pass the error onward to your existing response handler.
 
-## Packaged Examples
+## Example Source
 
-After install, these commands are available from a consumer app:
-
-```bash
-node node_modules/@logbrew/express/examples/index.mjs --help
-node node_modules/@logbrew/express/examples/index.mjs --list
-node node_modules/@logbrew/express/examples/index.mjs readme-example
-node node_modules/@logbrew/express/examples/index.mjs real-user-smoke
-node node_modules/@logbrew/express/examples/index.mjs
-npm --prefix node_modules/@logbrew/express/examples run help
-npm --prefix node_modules/@logbrew/express/examples run list
-npm --prefix node_modules/@logbrew/express/examples run readme-example
-npm --prefix node_modules/@logbrew/express/examples run real-user-smoke
-```
-
-The default launcher path runs `real-user-smoke`.
+The package includes example source for request middleware, error middleware, and app-owned response handling. Use the snippets above as the starting point for wiring LogBrew into your Express application.

@@ -109,11 +109,9 @@ for needle in (
     "HTTPTransport",
     "NewHTTPTransport",
     "MetricAttributes",
-    "Client.Metric",
-    "cd examples && make",
-    "cd examples && make run-readme-example",
-    "cd examples && make run",
-    "cd examples && make run-real-user-smoke",
+    "client.Metric",
+    "copyable snippets",
+    "your own Go service",
 ):
     if needle not in readme:
         raise SystemExit(f"missing proxy README guidance: {needle}")
@@ -783,10 +781,8 @@ for needle in (
     "SpanAttributesFromTraceparent",
     "HTTPTransport",
     "NewHTTPTransport",
-    "cd examples && make",
-    "cd examples && make run-readme-example",
-    "cd examples && make run",
-    "cd examples && make run-real-user-smoke",
+    "copyable snippets",
+    "your own Go service",
 ):
     if needle not in readme:
         raise SystemExit(f"missing installed Go README guidance: {needle}")

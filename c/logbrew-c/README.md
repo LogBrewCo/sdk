@@ -2,21 +2,10 @@
 
 Public C99 SDK for building, validating, previewing, and flushing LogBrew event batches from native applications.
 
-The SDK is dependency-free and ships as source plus header:
+The SDK is dependency-free and ships as source plus header. Add `include/logbrew.h` and `src/logbrew.c` to your application build:
 
 ```bash
-cc -std=c99 -Wall -Wextra -Wpedantic -Werror -Iinclude src/logbrew.c examples/readme_example.c -o readme_example
-./readme_example
-```
-
-From this repository:
-
-```bash
-make -C c/logbrew-c
-make -C c/logbrew-c/examples
-make -C c/logbrew-c/examples run-readme-example
-make -C c/logbrew-c/examples run
-make -C c/logbrew-c/examples run-real-user-smoke
+cc -std=c99 -Wall -Wextra -Wpedantic -Iinclude src/logbrew.c your_app.c -o your_app
 ```
 
 ## Minimal Usage
@@ -54,18 +43,6 @@ logbrew_recording_transport_free(&transport);
 logbrew_client_free(client);
 ```
 
-## Examples
+## Example Source
 
-The package ships two examples:
-
-- `examples/readme_example.c` builds the canonical six-event payload and flushes it through a recording transport.
-- `examples/real_user_smoke.c` exercises success, empty flush, validation failure, unauthenticated response, retry recovery, retry-budget exhaustion, non-retryable transport status, shutdown, and post-shutdown rejection.
-
-The helper Makefile is intentionally small and discoverable:
-
-```bash
-make -C examples
-make -C examples run-readme-example
-make -C examples run
-make -C examples run-real-user-smoke
-```
+The `examples/readme_example.c` source shows a complete six-event payload and recording transport setup that you can copy into your own native application.

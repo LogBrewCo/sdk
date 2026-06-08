@@ -50,7 +50,7 @@ grep -q 'Rack And Rails Middleware' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$unpacked_dir/README.md"
 grep -q 'Rails Error Subscriber' "$unpacked_dir/README.md"
 grep -q 'Rails.error.subscribe' "$unpacked_dir/README.md"
-grep -q 'cd examples && make run-real-user-smoke' "$unpacked_dir/README.md"
+grep -q 'copyable snippets' "$unpacked_dir/README.md"
 
 ruby -I "$package_dir/lib" "$package_dir/examples/readme_example.rb" > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null

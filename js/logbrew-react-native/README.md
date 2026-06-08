@@ -38,7 +38,7 @@ const stopListening = createAppStateListener(client, AppState, {
 });
 ```
 
-For mobile apps, prefer an app-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples and tests.
+For mobile apps, prefer an app-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples.
 
 ## Error Capture
 
@@ -86,7 +86,7 @@ export function App({ client }) {
 }
 ```
 
-The package ships a `react-native` entry that imports `AppState` and `Platform` for Metro, while the default Node entry accepts those dependencies explicitly. That keeps packaged examples and CI smoke tests runnable without pretending a Node process is a native runtime.
+The package ships a `react-native` entry that imports `AppState` and `Platform` for Metro, while the default Node entry accepts those dependencies explicitly. That keeps mobile setup explicit instead of pretending a Node process is a native runtime.
 
 ## Trace Propagation
 
@@ -114,20 +114,6 @@ await tracedFetch("https://api.example.com/checkout", {
 
 `tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. Match narrowly so mobile requests do not send tracing headers to unrelated origins. If the API is cross-origin or behind a gateway, allow the `traceparent` request header there too.
 
-## Packaged Examples
+## Example Source
 
-After install, these commands are available from a consumer app:
-
-```bash
-node node_modules/@logbrew/react-native/examples/index.mjs --help
-node node_modules/@logbrew/react-native/examples/index.mjs --list
-node node_modules/@logbrew/react-native/examples/index.mjs readme-example
-node node_modules/@logbrew/react-native/examples/index.mjs real-user-smoke
-node node_modules/@logbrew/react-native/examples/index.mjs
-npm --prefix node_modules/@logbrew/react-native/examples run help
-npm --prefix node_modules/@logbrew/react-native/examples run list
-npm --prefix node_modules/@logbrew/react-native/examples run readme-example
-npm --prefix node_modules/@logbrew/react-native/examples run real-user-smoke
-```
-
-The default launcher path runs `real-user-smoke`.
+The package includes example source for screen views, app-state metadata, handled JavaScript errors, provider/hooks, and target-scoped trace propagation. Use the snippets above as the starting point for wiring LogBrew into your React Native application.

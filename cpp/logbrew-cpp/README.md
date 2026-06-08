@@ -2,21 +2,10 @@
 
 Public C++17 SDK for building, validating, previewing, and flushing LogBrew event batches from native applications.
 
-The SDK is dependency-free and ships as source plus header:
+The SDK is dependency-free and ships as source plus header. Add `include/logbrew.hpp` and `src/logbrew.cpp` to your application build:
 
 ```bash
-c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror -Iinclude src/logbrew.cpp examples/readme_example.cpp -o readme_example
-./readme_example
-```
-
-From this repository:
-
-```bash
-make -C cpp/logbrew-cpp
-make -C cpp/logbrew-cpp/examples
-make -C cpp/logbrew-cpp/examples run-readme-example
-make -C cpp/logbrew-cpp/examples run
-make -C cpp/logbrew-cpp/examples run-real-user-smoke
+c++ -std=c++17 -Wall -Wextra -Wpedantic -Iinclude src/logbrew.cpp your_app.cpp -o your_app
 ```
 
 ## Minimal Usage
@@ -36,20 +25,8 @@ logbrew::RecordingTransport transport;
 logbrew::TransportResponse response = client.flush(transport);
 ```
 
-`logbrew::SdkException` exposes a stable `code()` plus the exception message. `logbrew::Transport` is an abstract callback surface for real HTTP transports, while `logbrew::RecordingTransport` keeps examples and tests deterministic.
+`logbrew::SdkException` exposes a stable `code()` plus the exception message. `logbrew::Transport` is an abstract callback surface for real HTTP transports, while `logbrew::RecordingTransport` lets your app inspect queued JSON before network delivery.
 
-## Examples
+## Example Source
 
-The package ships two examples:
-
-- `examples/readme_example.cpp` builds the canonical six-event payload and flushes it through a recording transport.
-- `examples/real_user_smoke.cpp` exercises success, empty flush, validation failure, unauthenticated response, retry recovery, retry-budget exhaustion, non-retryable transport status, shutdown, and post-shutdown rejection.
-
-The helper Makefile is intentionally small and discoverable:
-
-```bash
-make -C examples
-make -C examples run-readme-example
-make -C examples run
-make -C examples run-real-user-smoke
-```
+The `examples/readme_example.cpp` source shows a complete six-event payload and recording transport setup that you can copy into your own native application.

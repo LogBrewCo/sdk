@@ -40,7 +40,7 @@ export const POST = withLogBrewRouteHandler(
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with lower-level SDK examples, but Next.js Route Handlers should use server-side keys only. Use the Browser, React, Vue, Svelte, Angular, or React Native packages for frontend `clientKey` setup.
 
-By default, successful Route Handler responses are captured after your handler returns. When the incoming `Request` has a valid W3C `traceparent` header, request capture records a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to a request `log` event so bad client headers do not break your route. Use `captureRequests: false` when a route should only flush manual events, use `spanIdFactory` when tests or edge runtimes need deterministic child span IDs, and use `onCaptureError` to observe telemetry delivery failures without letting observability own the route response.
+By default, successful Route Handler responses are captured after your handler returns. When the incoming `Request` has a valid W3C `traceparent` header, request capture records a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to a request `log` event so bad client headers do not break your route. Use `captureRequests: false` when a route should only flush manual events, use `spanIdFactory` when your runtime needs app-provided child span IDs, and use `onCaptureError` to observe telemetry delivery failures without letting observability own the route response.
 
 Automatic route error events record the method and pathname, but omit query strings by default. Pass `includeSearchParams: true` only when query capture is intentional and safe for the route.
 
@@ -58,20 +58,6 @@ const client = createLogBrewNextClient({
 });
 ```
 
-## Packaged Examples
+## Example Source
 
-After install, these commands are available from a consumer app:
-
-```bash
-node node_modules/@logbrew/next/examples/index.mjs --help
-node node_modules/@logbrew/next/examples/index.mjs --list
-node node_modules/@logbrew/next/examples/index.mjs readme-example
-node node_modules/@logbrew/next/examples/index.mjs real-user-smoke
-node node_modules/@logbrew/next/examples/index.mjs
-npm --prefix node_modules/@logbrew/next/examples run help
-npm --prefix node_modules/@logbrew/next/examples run list
-npm --prefix node_modules/@logbrew/next/examples run readme-example
-npm --prefix node_modules/@logbrew/next/examples run real-user-smoke
-```
-
-The default launcher path runs `real-user-smoke`.
+The package includes example source for App Router Route Handlers, server-side client creation, and app-owned responses. Use the snippets above as the starting point for wiring LogBrew into your Next.js application.

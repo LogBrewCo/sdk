@@ -71,7 +71,7 @@ grep -q 'LogBrewJulHandler' "$package_dir/README.md"
 grep -q 'LogBrewLogbackAppender' "$package_dir/README.md"
 grep -q 'java.util.logging' "$package_dir/README.md"
 grep -q 'Logback' "$package_dir/README.md"
-grep -q 'cd examples && make run-real-user-smoke' "$package_dir/README.md"
+grep -q 'copyable snippets' "$package_dir/README.md"
 
 extract_dir="$tmp_dir/source-extract"
 mkdir -p "$extract_dir"

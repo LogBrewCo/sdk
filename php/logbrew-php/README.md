@@ -6,15 +6,9 @@ Public PHP SDK for creating LogBrew event batches, validating them locally, and 
 
 ```bash
 composer require logbrew/sdk
-cd vendor/logbrew/sdk/examples && make
-cd vendor/logbrew/sdk/examples && make run-readme-example
-cd vendor/logbrew/sdk/examples && make run
-cd vendor/logbrew/sdk/examples && make run-real-user-smoke
-php vendor/logbrew/sdk/examples/readme_example.php
-php vendor/logbrew/sdk/examples/real_user_smoke.php
 ```
 
-The public API is annotated with shaped-array PHPDoc, including `MetricAttributes`, so static-analysis tools can check common consumer calls directly. The package also ships README-sized and fuller example files plus a tiny `examples/Makefile` helper; after installing, use `cd vendor/logbrew/sdk/examples && make run-readme-example` for the short example or `cd vendor/logbrew/sdk/examples && make run-real-user-smoke` for the full local flow. Use the fake `LOGBREW_API_KEY` placeholder in examples, call `previewJson()` when you want to inspect queued JSON without sending, and use `composer show logbrew/sdk` when you want Composer's installed package metadata.
+The public API is annotated with shaped-array PHPDoc, including `MetricAttributes`, so static-analysis tools can understand common consumer calls directly. The package includes copyable examples for PHP services, PSR-3 loggers, Monolog, and Laravel. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in app configuration, and call `previewJson()` when you want to inspect queued JSON before sending.
 
 ## Example
 
@@ -194,4 +188,4 @@ Then include `logbrew` in the Laravel logging stack or write to it directly with
 
 `LogBrewMonologHandler` captures the Monolog channel, level, message template, primitive context fields, primitive `extra` fields, and exception type/message. Exception trace text is omitted unless `includeExceptionTrace` is enabled. The handler preserves normal app logging by default: capture failures are reported through `onError` when provided, and only rethrown when `raiseErrors` is enabled.
 
-Use a clearly fake placeholder like `LOGBREW_API_KEY` in local examples and tests. Call `flush()` or `shutdown()` to send queued events through a transport, and use `previewJson()` when you want a stable local JSON preview without sending anything.
+Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush()` or `shutdown()` to send queued events through a transport, and use `previewJson()` when you want a stable local JSON preview before sending anything.

@@ -7,40 +7,11 @@ Public JavaScript SDK for creating LogBrew event batches, validating them locall
 ```bash
 npm install @logbrew/sdk
 pnpm add @logbrew/sdk
-npm --prefix node_modules/@logbrew/sdk/examples run
-npm --prefix node_modules/@logbrew/sdk/examples run list
-npm --prefix node_modules/@logbrew/sdk/examples run help
-npm --prefix node_modules/@logbrew/sdk/examples run readme-example
-npm --prefix node_modules/@logbrew/sdk/examples run readme-example:esm
-npm --prefix node_modules/@logbrew/sdk/examples run readme-example:cjs
-npm --prefix node_modules/@logbrew/sdk/examples run real-user-smoke
-npm --prefix node_modules/@logbrew/sdk/examples run real-user-smoke:esm
-npm --prefix node_modules/@logbrew/sdk/examples run real-user-smoke:cjs
-pnpm --dir node_modules/@logbrew/sdk/examples run
-pnpm --dir node_modules/@logbrew/sdk/examples run list
-pnpm --dir node_modules/@logbrew/sdk/examples run help
-pnpm --dir node_modules/@logbrew/sdk/examples run readme-example
-pnpm --dir node_modules/@logbrew/sdk/examples run readme-example:esm
-pnpm --dir node_modules/@logbrew/sdk/examples run readme-example:cjs
-pnpm --dir node_modules/@logbrew/sdk/examples run real-user-smoke
-pnpm --dir node_modules/@logbrew/sdk/examples run real-user-smoke:esm
-pnpm --dir node_modules/@logbrew/sdk/examples run real-user-smoke:cjs
-node node_modules/@logbrew/sdk/examples/index.mjs --help
-node node_modules/@logbrew/sdk/examples/index.mjs --list
-node node_modules/@logbrew/sdk/examples/index.mjs readme-example
-node node_modules/@logbrew/sdk/examples/index.mjs readme-example:cjs
-node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke
-node node_modules/@logbrew/sdk/examples/index.mjs
-node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke:cjs
-node node_modules/@logbrew/sdk/examples/readme-example.mjs
-node node_modules/@logbrew/sdk/examples/readme-example.cjs
-node node_modules/@logbrew/sdk/examples/real-user-smoke.mjs
-node node_modules/@logbrew/sdk/examples/real-user-smoke.cjs
 ```
 
 The package supports both ESM `import` and CommonJS `require`.
 The shipped package also includes `.d.ts` and `.d.cts` declarations so ESM and CommonJS TypeScript consumers can install it directly without a separate build step.
-The package ships runnable examples under `node_modules/@logbrew/sdk/examples/` and a small launcher at `node node_modules/@logbrew/sdk/examples/index.mjs`. Use `--help` or `--list` to discover available examples, run `readme-example` for the short flow, or run `real-user-smoke` for a fuller local flow. Use the fake `LOGBREW_API_KEY` placeholder in examples and call `previewJson()` when you want to inspect queued JSON without sending. Type declarations document payload shapes such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, transport responses, SDK errors, lifecycle helpers, W3C trace helpers, console capture, Pino destination, and Winston transport APIs.
+The package ships copyable examples under `node_modules/@logbrew/sdk/examples/`. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in your app configuration, and call `previewJson()` when you want to inspect queued JSON before sending. Type declarations document payload shapes such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, transport responses, SDK errors, lifecycle helpers, W3C trace helpers, console capture, Pino destination, and Winston transport APIs.
 
 ## Example
 
@@ -243,4 +214,4 @@ await logbrewTransport.flush();
 
 The Winston adapter receives Winston `info` objects, maps `debug`/`silly` to `debug`, `warn` to `warning`, `error`/`fatal` to `error`, and other common Winston levels to `info`. It captures primitive info fields as `context.*`, captures nested `err`/`error` objects or formatted error stack name/message, omits stack text unless `includeErrorStack: true` is set, and exposes `onError` for capture failures. It does not mutate Winston globals or replace the app's logger.
 
-Use a clearly fake placeholder like `LOGBREW_API_KEY` in local examples and tests. Call `flush` or `shutdown` to send queued events through a transport, and use `previewJson()` when you want a stable local JSON preview without sending anything.
+Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush` or `shutdown` to send queued events through a transport, and use `previewJson()` when you want a stable local JSON preview before sending anything.

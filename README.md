@@ -140,35 +140,13 @@ LogBrew SDKs favor conservative defaults:
 - No global logger, console, fetch, or framework behavior changes unless the integration explicitly documents that opt-in behavior.
 - App-owned transports, loggers, and framework versions remain under application control.
 
-## Local JSON Preview
+## Local Payload Preview
 
-Every core SDK supports local JSON preview or recording transports so you can inspect the queued batch before sending anything to LogBrew. Use this in tests, examples, and agent workflows when you need deterministic event JSON.
+Every core SDK supports local JSON preview or recording transports so you can inspect the queued batch before sending anything to LogBrew. This is useful while deciding which logs, spans, issues, releases, actions, environments, or explicit metrics your application should send.
 
 The canonical schema is [`spec/event-batch.schema.json`](spec/event-batch.schema.json). Public fixtures live in [`fixtures/`](fixtures/).
 
-```bash
-python3 scripts/validate_fixtures.py fixtures/valid-batch.json
-python3 scripts/validate_fixtures.py fixtures/invalid-batch.json --expect-invalid
-python3 scripts/validate_fixtures.py fixtures/valid-batch.json --json
-```
-
-## For Automation Agents
-
-Agents should work like real SDK users first:
-
-- Read the relevant package README before editing the SDK.
-- Prefer a clean disposable app and the ecosystem package manager when testing install behavior.
-- Use fake placeholders such as `LOGBREW_API_KEY` or frontend `LOGBREW_CLIENT_KEY`.
-- Keep public docs focused on what the product does, how users install it, how they send signals, and what defaults protect them.
-- Keep validation-process details in scripts, checklists, CI logs, or commit evidence instead of turning user READMEs into release-process logs.
-
-Useful agent entry points:
-
-```bash
-python3 scripts/check_markdown_links.py
-python3 scripts/check_confidentiality_scan.py
-bash scripts/check_public_sdks.sh --json
-```
+If you use an AI coding assistant, ask it to install the package for your language or framework, keep the LogBrew key in your app configuration, wire the SDK into your existing logger or request lifecycle, and avoid sending query strings, stack text, or high-cardinality metadata unless your team opts in.
 
 ## Maintainer References
 

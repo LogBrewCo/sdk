@@ -82,7 +82,7 @@ for needle in (
     "AddLogBrew(client",
     "Microsoft.Extensions.Logging",
     "IncludeExceptionStackTrace",
-    "cd examples && make run-real-user-smoke",
+    "copyable snippets",
 ):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")

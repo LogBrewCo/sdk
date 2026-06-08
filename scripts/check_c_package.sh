@@ -73,7 +73,7 @@ archive_path = Path(sys.argv[1])
 with tarfile.open(archive_path, "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
     header = archive.extractfile("include/logbrew.h").read().decode()
-for needle in ("LOGBREW_API_KEY", "make -C examples run-real-user-smoke", "logbrew_client_flush"):
+for needle in ("LOGBREW_API_KEY", "copy into your own native application", "logbrew_client_flush"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
 for needle in ("LOGBREW_C_VERSION", "LogBrewClient", "LogBrewRecordingTransport"):

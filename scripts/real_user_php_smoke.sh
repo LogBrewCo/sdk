@@ -134,12 +134,9 @@ foreach ([
     "config/logging.php" => "missing composer archive Laravel logging config guidance\n",
     "Log::channel" => "missing composer archive Laravel channel guidance\n",
     "warning(...)" => "missing composer archive Laravel warning guidance\n",
-    "cd vendor/logbrew/sdk/examples && make" => "missing composer archive shared helper guidance\n",
-    "cd vendor/logbrew/sdk/examples && make run-readme-example" => "missing composer archive README helper command\n",
-    "cd vendor/logbrew/sdk/examples && make run" => "missing composer archive real-user helper command\n",
-    "cd vendor/logbrew/sdk/examples && make run-real-user-smoke" => "missing composer archive explicit real-user helper command\n",
-    "php vendor/logbrew/sdk/examples/readme_example.php" => "missing composer archive raw README example command\n",
-    "php vendor/logbrew/sdk/examples/real_user_smoke.php" => "missing composer archive raw real-user example command\n",
+    "copyable examples for PHP services" => "missing composer archive copyable examples guidance\n",
+    "keep the real key in app configuration" => "missing composer archive app configuration guidance\n",
+    "before sending" => "missing composer archive local preview guidance\n",
 ] as $needle => $message) {
     if (!str_contains($readme, $needle)) {
         fwrite(STDERR, $message);
@@ -362,12 +359,9 @@ foreach ([
     "config/logging.php" => "missing installed README Laravel logging config guidance\n",
     "Log::channel" => "missing installed README Laravel channel guidance\n",
     "warning(...)" => "missing installed README Laravel warning guidance\n",
-    "cd vendor/logbrew/sdk/examples && make" => "missing installed README shared helper guidance\n",
-    "cd vendor/logbrew/sdk/examples && make run-readme-example" => "missing installed README helper command\n",
-    "cd vendor/logbrew/sdk/examples && make run" => "missing installed README real-user helper command\n",
-    "cd vendor/logbrew/sdk/examples && make run-real-user-smoke" => "missing installed README explicit real-user helper command\n",
-    "php vendor/logbrew/sdk/examples/readme_example.php" => "missing installed README raw README example command\n",
-    "php vendor/logbrew/sdk/examples/real_user_smoke.php" => "missing installed README raw real-user example command\n",
+    "copyable examples for PHP services" => "missing installed README copyable examples guidance\n",
+    "keep the real key in app configuration" => "missing installed README app configuration guidance\n",
+    "before sending" => "missing installed README local preview guidance\n",
 ] as $needle => $message) {
     if (!str_contains($readme, $needle)) {
         fwrite(STDERR, $message);

@@ -39,7 +39,7 @@ grep -q 'Rack And Rails Middleware' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$unpacked_dir/README.md"
 grep -q 'Rails Error Subscriber' "$unpacked_dir/README.md"
 grep -q 'Rails.error.subscribe' "$unpacked_dir/README.md"
-grep -q 'cd examples && make run-real-user-smoke' "$unpacked_dir/README.md"
+grep -q 'copyable snippets' "$unpacked_dir/README.md"
 
 make -C "$unpacked_dir/examples" > "$tmp_dir/unpacked-examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/unpacked-examples-help.txt"

@@ -10,21 +10,7 @@ Public Swift SDK for creating LogBrew event batches, validating them locally, an
 
 Use the `LogBrew` product from the `swift/logbrew-swift` package directory.
 
-## Local Commands
-
-```bash
-swift build
-swift test
-swift package archive-source
-swift run ReadmeExample
-swift run RealUserSmoke
-cd examples && make
-cd examples && make run-readme-example
-cd examples && make run
-cd examples && make run-real-user-smoke
-```
-
-The package ships a `LogBrew` library product plus `ReadmeExample` and `RealUserSmoke` executable targets so users can inspect a README-sized example and a stronger retry-backed smoke path from a normal SwiftPM checkout. The examples use the fake `LOGBREW_API_KEY` placeholder and print `previewJSON()` output before flushing through `RecordingTransport`.
+The package ships a `LogBrew` library product plus copyable examples for creating a client, previewing queued JSON, flushing through a transport, and using the Swift logger facade in your own app.
 
 ## Example
 
@@ -63,11 +49,11 @@ let response = try client.shutdown(transport: transport)
 print("status=\(response.statusCode) attempts=\(response.attempts)")
 ```
 
-Use a clearly fake placeholder like `LOGBREW_API_KEY` in local examples and tests. Call `flush(transport:)` or `shutdown(transport:)` to send queued events through a transport, and use `previewJSON()` when you want a stable local JSON preview without sending anything.
+Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush(transport:)` or `shutdown(transport:)` to send queued events through a transport, and use `previewJSON()` when you want a stable local JSON preview before sending anything.
 
 ## HTTP Delivery
 
-Use `HTTPTransport` when the app is ready to send queued batches to LogBrew. It posts JSON to the production intake by default, passes the SDK key through the `authorization` header, and supports custom endpoints, headers, and timeouts for local collectors, proxies, and tests:
+Use `HTTPTransport` when the app is ready to send queued batches to LogBrew. It posts JSON to the production intake by default, passes the SDK key through the `authorization` header, and supports custom endpoints, headers, and timeouts for local collectors or proxies:
 
 ```swift
 let transport = try HTTPTransport(
@@ -80,6 +66,6 @@ let response = try client.flush(transport: transport)
 print("status=\(response.statusCode) attempts=\(response.attempts)")
 ```
 
-Keep personally sensitive values out of event messages and metadata before calling `flush(transport:)`. Use `RecordingTransport` in tests when you want deterministic local JSON without network delivery.
+Keep personally sensitive values out of event messages and metadata before calling `flush(transport:)`. Use `RecordingTransport` when you want to inspect queued JSON before network delivery.
 
 `LogBrewLogger` is an opt-in logger facade for Swift and Apple-platform apps. It mirrors common Apple logging levels such as `debug`, `info`, `notice`, `warning`, `error`, `fault`, and `critical`, records the category as the LogBrew logger name, adds subsystem/category and exact Swift level metadata, generates event ids and timestamps by default, and reports capture failures through `onError` instead of throwing from normal logging calls.

@@ -16,7 +16,7 @@ clang -fobjc-arc -Iobjc/logbrew-objc/include \
 
 ## Basic Usage
 
-Use a clearly fake placeholder key in examples and tests:
+Use a clearly fake placeholder key in examples:
 
 ```objective-c
 #import "LogBrew.h"
@@ -34,27 +34,10 @@ LBWRecordingTransport *transport = [[LBWRecordingTransport alloc] init];
 [client flushWithTransport:transport error:&error];
 ```
 
-## Examples
+## Example Source
 
-```bash
-make -C objc/logbrew-objc/examples
-make -C objc/logbrew-objc/examples run-readme-example
-make -C objc/logbrew-objc/examples run
-make -C objc/logbrew-objc/examples run-real-user-smoke
-```
-
-`run-readme-example` prints a contract-valid event batch as JSON on stdout. `run-real-user-smoke` exercises delivery and lifecycle behavior such as validation failure, retry recovery, graceful shutdown, and post-shutdown rejection.
+The `examples` directory contains copyable source for creating a client, previewing queued JSON, flushing through a transport, and handling SDK `NSError` values in your own Apple app.
 
 ## Error Shape
 
 SDK failures are returned as `NSError` values using `LBWErrorDomain`. The stable machine-readable code is stored in `error.userInfo[LBWErrorStableCodeKey]`, with values such as `validation_error`, `unauthenticated`, `network_failure`, `transport_error`, and `shutdown_error`.
-
-## For Automation Agents
-
-```bash
-make -C objc/logbrew-objc/examples
-make -C objc/logbrew-objc/examples run-readme-example
-make -C objc/logbrew-objc/examples run-real-user-smoke
-```
-
-Compile the source with ARC and Foundation, run the README example to inspect the JSON payload, and run the real-user example when you need the broader delivery/lifecycle path.

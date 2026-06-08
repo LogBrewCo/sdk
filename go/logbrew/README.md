@@ -6,51 +6,6 @@ Public Go SDK for creating LogBrew event batches, validating them locally, and f
 
 ```bash
 go get github.com/LogBrewCo/sdk/go/logbrew
-go mod tidy
-go mod download -json github.com/LogBrewCo/sdk/go/logbrew
-cd examples && make
-cd examples && make run-readme-example
-cd examples && make run
-cd examples && make run-real-user-smoke
-go run ./examples/readme_example
-go run ./examples/real_user_smoke
-go build -o smoke-app-bin .
-go version -m smoke-app-bin
-go list -m github.com/LogBrewCo/sdk/go/logbrew
-go doc github.com/LogBrewCo/sdk/go/logbrew
-go doc github.com/LogBrewCo/sdk/go/logbrew NewClient
-go doc github.com/LogBrewCo/sdk/go/logbrew Config
-go doc github.com/LogBrewCo/sdk/go/logbrew Event
-go doc github.com/LogBrewCo/sdk/go/logbrew ReleaseAttributes
-go doc github.com/LogBrewCo/sdk/go/logbrew EnvironmentAttributes
-go doc github.com/LogBrewCo/sdk/go/logbrew IssueAttributes
-go doc github.com/LogBrewCo/sdk/go/logbrew LogAttributes
-go doc github.com/LogBrewCo/sdk/go/logbrew SpanAttributes
-go doc github.com/LogBrewCo/sdk/go/logbrew MetricAttributes
-go doc github.com/LogBrewCo/sdk/go/logbrew TraceparentContext
-go doc github.com/LogBrewCo/sdk/go/logbrew TraceparentSpanInput
-go doc github.com/LogBrewCo/sdk/go/logbrew ParseTraceparent
-go doc github.com/LogBrewCo/sdk/go/logbrew CreateTraceparent
-go doc github.com/LogBrewCo/sdk/go/logbrew SpanAttributesFromTraceparent
-go doc github.com/LogBrewCo/sdk/go/logbrew ActionAttributes
-go doc github.com/LogBrewCo/sdk/go/logbrew SdkError
-go doc github.com/LogBrewCo/sdk/go/logbrew Transport
-go doc github.com/LogBrewCo/sdk/go/logbrew TransportResponse
-go doc github.com/LogBrewCo/sdk/go/logbrew TransportError
-go doc github.com/LogBrewCo/sdk/go/logbrew NetworkError
-go doc github.com/LogBrewCo/sdk/go/logbrew DefaultHTTPEndpoint
-go doc github.com/LogBrewCo/sdk/go/logbrew HTTPTransportConfig
-go doc github.com/LogBrewCo/sdk/go/logbrew HTTPTransport
-go doc github.com/LogBrewCo/sdk/go/logbrew NewHTTPTransport
-go doc github.com/LogBrewCo/sdk/go/logbrew RecordingTransport
-go doc github.com/LogBrewCo/sdk/go/logbrew RecordingTransport.LastBody
-go doc github.com/LogBrewCo/sdk/go/logbrew AlwaysAcceptTransport
-go doc github.com/LogBrewCo/sdk/go/logbrew AsTransportError
-go doc github.com/LogBrewCo/sdk/go/logbrew Client.PendingEvents
-go doc github.com/LogBrewCo/sdk/go/logbrew Client.PreviewJSON
-go doc github.com/LogBrewCo/sdk/go/logbrew Client.Flush
-go doc github.com/LogBrewCo/sdk/go/logbrew Client.Shutdown
-go doc github.com/LogBrewCo/sdk/go/logbrew Client.Metric
 ```
 
 ## Example
@@ -129,7 +84,7 @@ func must(err error) {
 }
 ```
 
-Use a clearly fake placeholder like `LOGBREW_API_KEY` in local examples and tests. Call `Flush` or `Shutdown` to send queued events through a transport, and use `PreviewJSON` when you want a stable local JSON preview without sending anything.
+Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `Flush` or `Shutdown` to send queued events through a transport, and use `PreviewJSON` when you want a stable local JSON preview before sending anything.
 
 ## Metrics
 
@@ -205,10 +160,6 @@ if err != nil {
 fmt.Println(response.StatusCode)
 ```
 
-`HTTPTransport` uses Go's standard `net/http` client, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint/header/client/timeout settings, drains and closes response bodies, and maps client delivery failures into retryable `NetworkError(...)` values so `Client.Flush` can preserve queued events and retry. Inject a custom `*http.Client` when a service already owns proxy, TLS, timeout, or test transport settings.
+`HTTPTransport` uses Go's standard `net/http` client, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint/header/client/timeout settings, drains and closes response bodies, and maps client delivery failures into retryable `NetworkError(...)` values so `Client.Flush` can preserve queued events and retry. Inject a custom `*http.Client` when a service already owns proxy, TLS, or timeout settings.
 
-For Automation Agents
-
-- Use `go doc github.com/LogBrewCo/sdk/go/logbrew` and the type-specific `go doc` commands above to inspect the installed API surface.
-- Run `cd examples && make` to print the available example commands, then run `make run-readme-example` for the README payload and `make run` or `make run-real-user-smoke` for a fuller local flow.
-- In a consumer module, `go mod tidy`, `go list -m github.com/LogBrewCo/sdk/go/logbrew`, `go build ./...`, and `go test ./...` are the practical checks that installation, examples, and imports are wired correctly.
+The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, sending through `HTTPTransport`, and using W3C trace propagation in your own Go service.
