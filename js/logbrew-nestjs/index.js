@@ -45,7 +45,7 @@ export class LogBrewInterceptor {
     return next.handle().pipe(
       tap({
         complete: () => {
-          if (this.options.captureRequests !== false) {
+          if (this.options.captureRequests !== false || this.options.captureRequestMetrics === true) {
             void captureRequestFinish(this.options, {
               client,
               executionContext,
@@ -137,6 +137,35 @@ export function createErrorEvent(error, request, {
   };
 }
 
+export function createRequestMetricEvent(request, response, {
+  now = () => new Date().toISOString(),
+  durationMs = 0,
+  idFactory = defaultRequestMetricEventId,
+  metricName = "http.server.duration"
+} = {}) {
+  const method = request.method ?? "GET";
+  const routeTemplate = getRouteTemplate(request);
+  const statusCode = Number(response.statusCode ?? 0);
+  return {
+    id: idFactory(request, response),
+    timestamp: now(),
+    attributes: {
+      name: metricName,
+      kind: "histogram",
+      value: Math.max(0, Number(durationMs)),
+      unit: "ms",
+      temporality: "delta",
+      metadata: {
+        framework: "nestjs",
+        method,
+        routeTemplate,
+        statusCode,
+        statusCodeClass: statusCodeClass(statusCode)
+      }
+    }
+  };
+}
+
 function createRequestContext(client, transport) {
   return {
     client,
@@ -158,10 +187,22 @@ async function captureRequestFinish(options, {
 }) {
   try {
     const durationMs = Math.max(0, Math.round(nowMs(options) - startedAt));
-    const event = typeof options.requestEvent === "function"
-      ? options.requestEvent(request, response, { client, durationMs, executionContext })
-      : createRequestEvent(request, response, { ...options, durationMs });
-    captureRequestEvent(client, event);
+    if (options.captureRequests !== false) {
+      const event = typeof options.requestEvent === "function"
+        ? options.requestEvent(request, response, { client, durationMs, executionContext })
+        : createRequestEvent(request, response, { ...options, durationMs });
+      captureRequestEvent(client, event);
+    }
+    if (options.captureRequestMetrics === true) {
+      const metricEvent = typeof options.requestMetricEvent === "function"
+        ? options.requestMetricEvent(request, response, { client, durationMs, executionContext })
+        : createRequestMetricEvent(request, response, {
+          ...options,
+          durationMs,
+          idFactory: options.metricIdFactory
+        });
+      captureRequestMetricEvent(client, metricEvent);
+    }
     const transportResponse = await client.shutdown(transport);
     await notifyFlush(options, transportResponse, { client, executionContext, request, response });
   } catch (error) {
@@ -232,8 +273,24 @@ function defaultErrorEventId(error, request) {
   return `evt_nestjs_error_${slugify(`${request.method ?? "GET"}_${getRequestPath(request)}_${message}`)}`;
 }
 
+function defaultRequestMetricEventId(request, response) {
+  return `evt_nestjs_metric_${slugify(`${request.method ?? "GET"}_${getRouteTemplate(request)}_${response.statusCode ?? 0}`)}`;
+}
+
 function getRequestPath(request) {
   return pathOnly(request.originalUrl ?? request.url ?? "/");
+}
+
+function getRouteTemplate(request) {
+  const routePath = request.route?.path;
+  if (typeof routePath === "string") {
+    const baseUrl = request.baseUrl ?? "";
+    if (baseUrl && routePath.startsWith(baseUrl)) {
+      return pathOnly(routePath);
+    }
+    return pathOnly(`${baseUrl}${routePath}`);
+  }
+  return getRequestPath(request);
 }
 
 function pathOnly(value) {
@@ -299,6 +356,17 @@ function captureRequestEvent(client, event) {
   client.log(event.id, event.timestamp, event.attributes);
 }
 
+function captureRequestMetricEvent(client, event) {
+  client.metric(event.id, event.timestamp, event.attributes);
+}
+
+function statusCodeClass(statusCode) {
+  if (!Number.isFinite(statusCode) || statusCode <= 0) {
+    return "unknown";
+  }
+  return `${Math.floor(statusCode / 100)}xx`;
+}
+
 function nowMs(options) {
   if (typeof options.nowMs === "function") {
     return options.nowMs();
@@ -337,6 +405,7 @@ function randomHex(byteLength) {
 export default {
   createErrorEvent,
   createLogBrewNestClient,
+  createRequestMetricEvent,
   createRequestEvent,
   LogBrewInterceptor
 };

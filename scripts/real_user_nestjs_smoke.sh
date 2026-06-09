@@ -55,6 +55,9 @@ grep -q 'catchError' "$tmp_dir/nestjs-readme.md"
 grep -q 'traceparent' "$tmp_dir/nestjs-readme.md"
 grep -q 'spanIdFactory' "$tmp_dir/nestjs-readme.md"
 grep -q 'captureRequests: false' "$tmp_dir/nestjs-readme.md"
+grep -q 'captureRequestMetrics' "$tmp_dir/nestjs-readme.md"
+grep -q 'http.server.duration' "$tmp_dir/nestjs-readme.md"
+grep -q 'low-cardinality' "$tmp_dir/nestjs-readme.md"
 
 app_dir="$tmp_dir/nestjs-smoke-app"
 mkdir -p "$app_dir"
@@ -126,6 +129,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   createErrorEvent,
   createLogBrewNestClient,
+  createRequestMetricEvent,
   createRequestEvent,
   LogBrewInterceptor
 } from "@logbrew/nestjs";
@@ -134,6 +138,7 @@ const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCo
 const autoTransport = RecordingTransport.alwaysAccept();
 const errorTransport = RecordingTransport.alwaysAccept();
 const traceTransport = RecordingTransport.alwaysAccept();
+const metricTransport = RecordingTransport.alwaysAccept();
 
 const explicitClient = createLogBrewNestClient({
   apiKey: "LOGBREW_API_KEY",
@@ -310,6 +315,82 @@ if (traceEvent.attributes.metadata.path !== "/trace") {
   throw new Error(`request capture should omit query text: ${traceTransport.lastBody()}`);
 }
 
+@Controller()
+class MetricsController {
+  @Get("/metrics/:id")
+  metrics(): { ok: true } {
+    return { ok: true };
+  }
+}
+
+@Module({ controllers: [MetricsController] })
+class MetricsModule {}
+
+const metricsApp = await NestFactory.create(MetricsModule, { logger: false });
+metricsApp.useGlobalInterceptors(new LogBrewInterceptor({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  captureRequests: false,
+  captureRequestMetrics: true,
+  metricIdFactory: () => "evt_nestjs_metric_001",
+  now: () => "2026-06-02T10:00:10Z",
+  nowMs: (() => {
+    const values = [100, 137];
+    return () => values.shift() ?? 137;
+  })(),
+  sdkName: "nestjs-metric-smoke",
+  sdkVersion: "0.1.0",
+  transport: metricTransport
+}));
+await metricsApp.listen(0, "127.0.0.1");
+const metricResponse = await fetch(`${await metricsApp.getUrl()}/metrics/123?token=secret#ignored`);
+await metricResponse.json();
+await waitFor(() => metricTransport.sentBodies.length === 1);
+await metricsApp.close();
+
+const metricPayload = JSON.parse(metricTransport.lastBody() ?? "");
+if (metricPayload.events.length !== 1 || metricPayload.events[0].type !== "metric") {
+  throw new Error(`metrics-only capture should emit one metric: ${metricTransport.lastBody()}`);
+}
+const metricEvent = metricPayload.events[0];
+if (metricEvent.id !== "evt_nestjs_metric_001") {
+  throw new Error(`unexpected metric id: ${metricTransport.lastBody()}`);
+}
+if (metricEvent.attributes.name !== "http.server.duration" || metricEvent.attributes.kind !== "histogram") {
+  throw new Error(`unexpected metric shape: ${metricTransport.lastBody()}`);
+}
+if (metricEvent.attributes.value !== 37 || metricEvent.attributes.unit !== "ms") {
+  throw new Error(`unexpected metric value: ${metricTransport.lastBody()}`);
+}
+if (metricEvent.attributes.metadata.framework !== "nestjs") {
+  throw new Error(`unexpected metric framework metadata: ${metricTransport.lastBody()}`);
+}
+if (metricEvent.attributes.metadata.routeTemplate !== "/metrics/:id") {
+  throw new Error(`metric should prefer route templates and omit query text: ${metricTransport.lastBody()}`);
+}
+if (metricEvent.attributes.metadata.statusCode !== 200 || metricEvent.attributes.metadata.statusCodeClass !== "2xx") {
+  throw new Error(`unexpected metric status metadata: ${metricTransport.lastBody()}`);
+}
+
+const metricPreview = createRequestMetricEvent(
+  ({
+    method: "POST",
+    originalUrl: "https://example.test/orders/42?token=secret#hash"
+  } as unknown) as Request,
+  { statusCode: 503 } as unknown as Response,
+  {
+    durationMs: 125.4,
+    idFactory: () => "evt_nestjs_metric_preview",
+    now: () => "2026-06-02T10:00:11Z"
+  }
+);
+const metricPreviewMetadata = metricPreview.attributes.metadata ?? {};
+if (metricPreviewMetadata.routeTemplate !== "/orders/42") {
+  throw new Error(`metric preview should omit query and hash text: ${JSON.stringify(metricPreview)}`);
+}
+if (metricPreviewMetadata.statusCodeClass !== "5xx") {
+  throw new Error(`unexpected metric preview status class: ${JSON.stringify(metricPreview)}`);
+}
+
 let spanIdCalls = 0;
 const malformed = createRequestEvent(
   ({
@@ -344,6 +425,8 @@ console.error(JSON.stringify({
   errorCaptured: errorPayload.events[0].attributes.title,
   errorStatus: failResponse.status,
   events: 6,
+  metricCaptured: metricEvent.attributes.name,
+  metricRoute: metricEvent.attributes.metadata.routeTemplate,
   traceCaptured: traceEvent.attributes.name,
   traceId: traceEvent.attributes.traceId,
   status: okResponse.status
@@ -403,8 +486,10 @@ import type { Request } from "express";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   createLogBrewNestClient,
+  createRequestMetricEvent,
   createRequestEvent,
   LogBrewInterceptor,
+  type LogBrewRequestMetricEvent,
   type LogBrewRequestEvent
 } from "@logbrew/nestjs";
 
@@ -433,6 +518,7 @@ async function createApp(): Promise<unknown> {
   const app = await NestFactory.create(TypedModule, { logger: false });
   app.useGlobalInterceptors(new LogBrewInterceptor({
     client,
+    captureRequestMetrics: true,
     requestEvent(request, response, { durationMs }) {
       const event: LogBrewRequestEvent = createRequestEvent(request, response, {
         durationMs,
@@ -444,6 +530,14 @@ async function createApp(): Promise<unknown> {
       } else {
         event.attributes.message.toUpperCase();
       }
+      return event;
+    },
+    requestMetricEvent(request, response, { durationMs }) {
+      const event: LogBrewRequestMetricEvent = createRequestMetricEvent(request, response, {
+        durationMs,
+        now: () => "2026-06-02T10:00:10Z"
+      });
+      event.attributes.metadata?.framework?.toString();
       return event;
     },
     transport: RecordingTransport.alwaysAccept()
@@ -481,6 +575,8 @@ grep -q '"attempts":2' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q '"errorStatus":500' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q 'GET /auto 200' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q 'GET /fail failed' "$tmp_dir/nestjs-smoke.stderr.json"
+grep -q 'http.server.duration' "$tmp_dir/nestjs-smoke.stderr.json"
+grep -q '/metrics/:id' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q 'GET /trace' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/nestjs-smoke.stderr.json"
 

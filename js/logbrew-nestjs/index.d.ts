@@ -5,6 +5,7 @@ import type {
   IssueAttributes,
   LogAttributes,
   LogBrewClient,
+  MetricAttributes,
   SpanAttributes,
   Transport,
   TransportResponse
@@ -59,19 +60,33 @@ export type LogBrewErrorEvent = {
   attributes: IssueAttributes;
 };
 
+export type LogBrewRequestMetricEvent = {
+  id: string;
+  timestamp: string;
+  attributes: MetricAttributes;
+};
+
 export type LogBrewNestOptions = CreateLogBrewNestClientConfig & {
   client?: LogBrewClient | LogBrewClientFactory;
   transport?: Transport | LogBrewTransportFactory;
   captureRequests?: boolean;
+  captureRequestMetrics?: boolean;
   now?: () => string;
   nowMs?: () => number;
   idFactory?: (request: Request, response: Response) => string;
   spanIdFactory?: (request: Request, response: Response) => string;
+  metricName?: string;
+  metricIdFactory?: (request: Request, response: Response) => string;
   requestEvent?: (
     request: Request,
     response: Response,
     context: { client: LogBrewClient; durationMs: number; executionContext: ExecutionContext }
   ) => LogBrewRequestEvent;
+  requestMetricEvent?: (
+    request: Request,
+    response: Response,
+    context: { client: LogBrewClient; durationMs: number; executionContext: ExecutionContext }
+  ) => LogBrewRequestMetricEvent;
   errorEvent?: (error: unknown, context: LogBrewNestRuntimeContext) => LogBrewErrorEvent;
   onFlush?: (response: TransportResponse, context: LogBrewNestRuntimeContext) => void | Promise<void>;
   onCaptureError?: (error: unknown, context: LogBrewNestRuntimeContext) => void | Promise<void>;
@@ -100,6 +115,16 @@ export declare function createErrorEvent(
     idFactory?: (error: unknown, request: Request) => string;
   }
 ): LogBrewErrorEvent;
+export declare function createRequestMetricEvent(
+  request: Request,
+  response: Response,
+  options?: {
+    now?: () => string;
+    durationMs?: number;
+    idFactory?: (request: Request, response: Response) => string;
+    metricName?: string;
+  }
+): LogBrewRequestMetricEvent;
 
 declare global {
   namespace Express {
@@ -112,6 +137,7 @@ declare global {
 declare const defaultExport: {
   createErrorEvent: typeof createErrorEvent;
   createLogBrewNestClient: typeof createLogBrewNestClient;
+  createRequestMetricEvent: typeof createRequestMetricEvent;
   createRequestEvent: typeof createRequestEvent;
   LogBrewInterceptor: typeof LogBrewInterceptor;
 };

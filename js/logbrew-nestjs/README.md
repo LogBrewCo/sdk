@@ -56,6 +56,19 @@ Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_AP
 
 When an incoming HTTP request has a valid W3C `traceparent` header, default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break the controller. Automatic request metadata uses the path without query text by default. Use `captureRequests: false` when a controller should only flush manual events, and use `spanIdFactory` when your runtime needs app-provided child span IDs.
 
+## Request Duration Metrics
+
+Enable request metrics when you want low-cardinality latency histograms from NestJS routes without changing controller behavior:
+
+```ts
+app.useGlobalInterceptors(new LogBrewInterceptor({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  captureRequestMetrics: true
+}));
+```
+
+This emits an explicit `http.server.duration` histogram with primitive metadata for `framework`, `method`, `routeTemplate`, `statusCode`, and `statusCodeClass`. Route templates are preferred when Nest exposes them through the underlying HTTP adapter, and query strings or hashes are omitted by default. Use `captureRequests: false` with `captureRequestMetrics: true` when you only want request metrics.
+
 ## Packaged Examples
 
 The package includes example source for the interceptor, controller access, and app-owned response handling. Use the snippets above as the starting point for wiring LogBrew into your NestJS application.
