@@ -1,6 +1,6 @@
 use logbrew::{
-    ActionEvent, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent, RecordingTransport,
-    ReleaseEvent, SpanEvent,
+    ActionEvent, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent, MetricEvent,
+    RecordingTransport, ReleaseEvent, SpanEvent,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -51,6 +51,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "{{\"ok\":true,\"status\":{},\"attempts\":{},\"events\":6}}",
         response.status_code, response.attempts
     );
+    exercise_metric_helper()?;
 
+    Ok(())
+}
+
+fn exercise_metric_helper() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = LogBrewClient::builder("logbrew-rust", "0.1.0")
+        .api_key("LOGBREW_API_KEY")
+        .build()?;
+    client.metric(
+        "evt_metric_001",
+        "2026-06-02T10:00:06Z",
+        MetricEvent::new(
+            "checkout.request.duration",
+            "histogram",
+            42.5,
+            "ms",
+            "delta",
+        ),
+    )?;
+    let preview = client.preview_json()?;
+    assert!(preview.contains("\"type\": \"metric\""));
+    assert!(preview.contains("\"checkout.request.duration\""));
+    assert!(
+        client
+            .metric(
+                "evt_metric_invalid",
+                "2026-06-02T10:00:06Z",
+                MetricEvent::new("jobs.completed", "counter", -1.0, "1", "delta"),
+            )
+            .is_err()
+    );
     Ok(())
 }

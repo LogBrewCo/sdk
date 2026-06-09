@@ -1,6 +1,6 @@
 use logbrew::{
-    ActionEvent, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent, RecordingTransport,
-    ReleaseEvent, SdkError, SpanEvent, TransportError,
+    ActionEvent, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent, MetricEvent,
+    RecordingTransport, ReleaseEvent, SdkError, SpanEvent, TransportError,
 };
 #[cfg(feature = "http")]
 use logbrew::{HttpTransport, HttpTransportConfig, Transport};
@@ -313,6 +313,85 @@ fn invalid_action_status_fails_validation() {
         error.message,
         "action status must be one of: queued, running, success, failure"
     );
+}
+
+#[test]
+fn metric_event_preview_and_validation() {
+    let mut client = sample_client();
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "routeTemplate".to_string(),
+        Value::String("/checkout".to_string()),
+    );
+    metadata.insert("tier".to_string(), Value::String("api".to_string()));
+
+    client
+        .metric(
+            "evt_metric_001",
+            "2026-06-02T10:00:06Z",
+            MetricEvent::new(
+                "checkout.request.duration",
+                "histogram",
+                42.5,
+                "ms",
+                "delta",
+            )
+            .with_metadata(metadata),
+        )
+        .unwrap();
+
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let event = &payload["events"][0];
+    assert_eq!(event["type"], "metric");
+    assert_eq!(event["attributes"]["kind"], "histogram");
+    assert_eq!(event["attributes"]["value"], 42.5);
+    assert_eq!(event["attributes"]["temporality"], "delta");
+    assert_eq!(
+        event["attributes"]["metadata"]["routeTemplate"],
+        "/checkout"
+    );
+
+    let error = sample_client()
+        .metric(
+            "evt_metric_invalid",
+            "2026-06-02T10:00:06Z",
+            MetricEvent::new("jobs.completed", "counter", -1.0, "1", "delta"),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "counter and histogram metric values must be non-negative"
+    );
+
+    let error = sample_client()
+        .metric(
+            "evt_metric_invalid",
+            "2026-06-02T10:00:06Z",
+            MetricEvent::new("queue.depth", "gauge", 3.0, "1", "delta"),
+        )
+        .unwrap_err();
+    assert_eq!(error.message, "metric temporality must be one of: instant");
+
+    let error = sample_client()
+        .metric(
+            "evt_metric_invalid",
+            "2026-06-02T10:00:06Z",
+            MetricEvent::new("queue.depth", "gauge", f64::INFINITY, "1", "instant"),
+        )
+        .unwrap_err();
+    assert_eq!(error.message, "metric value must be finite");
+
+    let mut nested_metadata = serde_json::Map::new();
+    nested_metadata.insert("user".to_string(), serde_json::json!({"id": "u_123"}));
+    let error = sample_client()
+        .metric(
+            "evt_metric_invalid",
+            "2026-06-02T10:00:06Z",
+            MetricEvent::new("queue.depth", "gauge", 3.0, "1", "instant")
+                .with_metadata(nested_metadata),
+        )
+        .unwrap_err();
+    assert_eq!(error.message, "metric metadata values must be primitive");
 }
 
 #[test]

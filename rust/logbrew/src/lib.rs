@@ -7,6 +7,9 @@ use std::fmt;
 #[cfg(feature = "http")]
 use std::time::Duration;
 
+mod metric;
+pub use metric::MetricEvent;
+
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 /// Public SDK identity emitted with every LogBrew event batch.
 pub struct SdkInfo {
@@ -393,6 +396,16 @@ impl LogBrewClient {
         action: ActionEvent,
     ) -> Result<(), SdkError> {
         self.push_event("action", id.into(), timestamp.into(), action.attributes()?)
+    }
+
+    /// Queue an explicit app-owned metric event with validated low-cardinality fields.
+    pub fn metric(
+        &mut self,
+        id: impl Into<String>,
+        timestamp: impl Into<String>,
+        metric: MetricEvent,
+    ) -> Result<(), SdkError> {
+        self.push_event("metric", id.into(), timestamp.into(), metric.attributes()?)
     }
 
     /// Flush queued events through a transport while preserving retry semantics.

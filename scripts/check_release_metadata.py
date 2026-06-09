@@ -262,7 +262,7 @@ def validate_js_packages(root: Path, failures: list[str]) -> None:
 
 def validate_rust(root: Path, failures: list[str]) -> None:
     manifest_path = require_path(root, "rust/logbrew/Cargo.toml", failures)
-    require_path(root, "rust/logbrew/README.md", failures)
+    readme_path = require_path(root, "rust/logbrew/README.md", failures)
     if not manifest_path.exists():
         return
     package = read_toml(manifest_path, failures).get("package", {})
@@ -274,6 +274,9 @@ def validate_rust(root: Path, failures: list[str]) -> None:
     require_equal(failures, location, "package.readme", package.get("readme"), "README.md")
     require_contains(failures, location, "package.description", package.get("description"), "LogBrew")
     require("logbrew" in package.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
+    readme = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
+    for needle in ("Metrics", "MetricEvent", "client.metric", "low-cardinality"):
+        require(needle in readme, failures, f"rust/logbrew/README.md: missing guidance {needle}")
 
 
 def validate_python_package(root: Path, relative_dir: str, expected: dict[str, Any], failures: list[str]) -> None:

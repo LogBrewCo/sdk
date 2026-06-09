@@ -105,6 +105,9 @@ grep -q 'LOGBREW_API_KEY' "$crate_readme"
 grep -q 'preview_json' "$crate_readme"
 grep -q 'HttpTransport' "$crate_readme"
 grep -q 'DEFAULT_HTTP_ENDPOINT' "$crate_readme"
+grep -q 'MetricEvent' "$crate_readme"
+grep -q 'client.metric' "$crate_readme"
+grep -q 'low-cardinality' "$crate_readme"
 grep -q 'copyable snippets' "$crate_readme"
 grep -q 'optional HTTP transport' "$crate_readme"
 crate_manifest="$tmp_dir/crate-Cargo.toml"
@@ -448,7 +451,7 @@ EOF
 
 mkdir -p tests
 cat > tests/installed_user.rs <<'EOF'
-use logbrew::{LogBrewClient, ReleaseEvent};
+use logbrew::{LogBrewClient, MetricEvent, ReleaseEvent};
 
 #[test]
 fn installed_client_preview_contains_release() {
@@ -469,6 +472,39 @@ fn installed_client_preview_contains_release() {
     assert!(
         payload.contains("\"type\": \"release\""),
         "preview did not contain release event: {payload}"
+    );
+}
+
+#[test]
+fn installed_metric_helper_previews_and_validates_measurements() {
+    let mut client = LogBrewClient::builder("smoke-app-test", "0.1.0")
+        .api_key("LOGBREW_API_KEY")
+        .build()
+        .expect("client should build");
+
+    client
+        .metric(
+            "evt_metric_test",
+            "2026-06-02T10:00:06Z",
+            MetricEvent::new("checkout.request.duration", "histogram", 42.5, "ms", "delta"),
+        )
+        .expect("metric should queue");
+
+    let payload = client.preview_json().expect("preview should succeed");
+    assert!(
+        payload.contains("\"type\": \"metric\""),
+        "preview did not contain metric event: {payload}"
+    );
+    assert!(payload.contains("\"checkout.request.duration\""));
+
+    assert!(
+        client
+            .metric(
+                "evt_metric_invalid",
+                "2026-06-02T10:00:06Z",
+                MetricEvent::new("jobs.completed", "counter", -1.0, "1", "delta"),
+            )
+            .is_err()
     );
 }
 EOF
@@ -541,6 +577,7 @@ grep -q 'Return the queued event count currently buffered in memory\.' target/do
 grep -q 'Return the queued event batch as stable, pretty-printed JSON\.' target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Flush queued events through a transport while preserving retry semantics\.' target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Flush queued events, then mark the client closed so later writes fail\.' target/doc/logbrew/struct.LogBrewClient.html
+grep -q 'Queue an explicit app-owned metric event with validated low-cardinality fields\.' target/doc/logbrew/struct.LogBrewClient.html
 test -f target/doc/logbrew/struct.ClientBuilder.html
 grep -q 'Builder for constructing a public LogBrew client from SDK identity and API key settings\.' target/doc/logbrew/struct.ClientBuilder.html
 grep -q 'Build a buffered LogBrew client from the configured public settings\.' target/doc/logbrew/struct.ClientBuilder.html
@@ -586,6 +623,10 @@ grep -q 'Add an optional non-negative duration to the span payload\.' target/doc
 test -f target/doc/logbrew/struct.ActionEvent.html
 grep -q 'Public action-event builder for stable LogBrew action payload fields\.' target/doc/logbrew/struct.ActionEvent.html
 grep -q 'Create an action event with its required name and status fields\.' target/doc/logbrew/struct.ActionEvent.html
+test -f target/doc/logbrew/struct.MetricEvent.html
+grep -q 'Public metric-event builder for explicit low-cardinality metric measurements\.' target/doc/logbrew/struct.MetricEvent.html
+grep -q 'Create a metric event with name, kind, value, unit, and temporality fields\.' target/doc/logbrew/struct.MetricEvent.html
+grep -q 'Attach primitive, low-cardinality metadata to the metric payload\.' target/doc/logbrew/struct.MetricEvent.html
 test -f target/doc/logbrew/struct.SdkInfo.html
 grep -q 'Public SDK identity emitted with every LogBrew event batch\.' target/doc/logbrew/struct.SdkInfo.html
 grep -q 'SDK or application name attached to emitted batches\.' target/doc/logbrew/struct.SdkInfo.html

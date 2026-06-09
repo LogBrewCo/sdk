@@ -9,7 +9,7 @@ cargo add logbrew
 cargo add logbrew --features http
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -74,6 +74,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush` or `shutdown` to send queued events through a transport, and use `preview_json` when you want a stable local JSON preview before sending anything.
+
+## Metrics
+
+Use `MetricEvent` for explicit app-owned measurements such as counters, gauges, and histograms. Metrics are not captured automatically; keep metadata primitive and low-cardinality, and avoid raw URLs, query strings, user IDs, request or response payloads, headers, and free-form text.
+
+```rust
+use logbrew::{LogBrewClient, MetricEvent};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = LogBrewClient::builder("logbrew-rust", "0.1.0")
+        .api_key("LOGBREW_API_KEY")
+        .build()?;
+
+    client.metric(
+        "evt_metric_001",
+        "2026-06-02T10:00:06Z",
+        MetricEvent::new("checkout.request.duration", "histogram", 42.5, "ms", "delta"),
+    )?;
+
+    println!("{}", client.preview_json()?);
+    Ok(())
+}
+```
+
+Metric kinds are `counter`, `gauge`, and `histogram`. Gauge metrics use `instant` temporality; counter and histogram metrics use `delta` or `cumulative` temporality and must be non-negative.
 
 ## HTTP Delivery
 
