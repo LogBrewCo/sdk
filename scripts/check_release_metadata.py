@@ -441,11 +441,17 @@ def validate_objc(root: Path, failures: list[str]) -> None:
         "LBWHTTPTransport",
         "LBWRecordingTransport",
         "LBWErrorStableCodeKey",
+        "metricWithID",
+        "captureProductActionWithID",
+        "captureNetworkMilestoneWithID",
     ):
         require(needle in header, failures, f"{location}: missing public Objective-C SDK symbol {needle}")
     for needle in (
         "Public Objective-C SDK",
         "LOGBREW_API_KEY",
+        "Metrics",
+        "metricWithID",
+        "low-cardinality",
         "Sending To LogBrew",
         "LBWHTTPTransport",
         "flushWithTransport",

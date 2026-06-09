@@ -89,11 +89,15 @@ for needle in (
     "LBWHTTPTransport",
     "LBWRecordingTransport",
     "LBWErrorStableCodeKey",
+    "metricWithID",
     "captureProductActionWithID",
     "captureNetworkMilestoneWithID",
 ):
     if needle not in header:
         raise SystemExit(f"missing public header symbol: {needle}")
+for needle in ("Metrics", "metricWithID", "low-cardinality"):
+    if needle not in readme:
+        raise SystemExit(f"missing README metric guidance: {needle}")
 PY
 
 echo "objc package checks passed with $($objc_command --version | head -n 1)"

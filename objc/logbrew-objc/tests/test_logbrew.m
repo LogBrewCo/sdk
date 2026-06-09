@@ -229,6 +229,73 @@ static void LBWExerciseTimelineHelpers(void) {
   LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"nested metadata failed");
 }
 
+static void LBWExerciseMetricHelper(void) {
+  NSError *error = nil;
+  LBWClient *client = LBWNewClient();
+  LBWAssert([client metricWithID:@"evt_metric_001"
+                       timestamp:@"2026-06-02T10:00:06Z"
+                      attributes:@{
+                        @"name": @"checkout.latency",
+                        @"kind": @"histogram",
+                        @"value": @184.5,
+                        @"unit": @"ms",
+                        @"temporality": @"delta",
+                        @"metadata": @{
+                          @"routeTemplate": @"/api/checkout",
+                          @"platform": @"ios"
+                        }
+                      }
+                           error:&error], @"metric helper failed");
+  NSString *preview = [client previewJSONWithError:&error];
+  LBWAssert(preview != nil, @"metric preview failed");
+  NSDictionary<NSString *, id> *payload = LBWJSON(preview);
+  NSArray<NSDictionary<NSString *, id> *> *events = payload[@"events"];
+  NSDictionary<NSString *, id> *metricAttributes = events[0][@"attributes"];
+  NSDictionary<NSString *, id> *metadata = metricAttributes[@"metadata"];
+  LBWAssert([events[0][@"type"] isEqualToString:@"metric"], @"metric type failed");
+  LBWAssert([metricAttributes[@"name"] isEqualToString:@"checkout.latency"], @"metric name failed");
+  LBWAssert([metricAttributes[@"kind"] isEqualToString:@"histogram"], @"metric kind failed");
+  LBWAssert([metricAttributes[@"value"] doubleValue] == 184.5, @"metric value failed");
+  LBWAssert([metricAttributes[@"unit"] isEqualToString:@"ms"], @"metric unit failed");
+  LBWAssert([metricAttributes[@"temporality"] isEqualToString:@"delta"], @"metric temporality failed");
+  LBWAssert([metadata[@"routeTemplate"] isEqualToString:@"/api/checkout"], @"metric metadata failed");
+
+  BOOL ok = [client metricWithID:@"evt_bad_counter"
+                       timestamp:@"2026-06-02T10:00:06Z"
+                      attributes:@{
+                        @"name": @"jobs.processed",
+                        @"kind": @"counter",
+                        @"value": @-1,
+                        @"unit": @"1",
+                        @"temporality": @"delta"
+                      }
+                           error:&error];
+  LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"negative counter failed");
+  ok = [client metricWithID:@"evt_bad_gauge"
+                 timestamp:@"2026-06-02T10:00:06Z"
+                attributes:@{
+                  @"name": @"queue.depth",
+                  @"kind": @"gauge",
+                  @"value": @3,
+                  @"unit": @"1",
+                  @"temporality": @"delta"
+                }
+                     error:&error];
+  LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"bad gauge temporality failed");
+  ok = [client metricWithID:@"evt_nested_metric_metadata"
+                 timestamp:@"2026-06-02T10:00:06Z"
+                attributes:@{
+                  @"name": @"queue.depth",
+                  @"kind": @"gauge",
+                  @"value": @3,
+                  @"unit": @"1",
+                  @"temporality": @"instant",
+                  @"metadata": @{@"nested": @{@"bad": @"value"}}
+                }
+                     error:&error];
+  LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"nested metric metadata failed");
+}
+
 static void LBWExerciseHTTPTransportValidation(void) {
   NSError *error = nil;
   LBWHTTPTransport *transport = [[LBWHTTPTransport alloc] initWithEndpoint:@"ftp://example.com/v1/events"
@@ -275,6 +342,7 @@ int main(void) {
     LBWAssert([transport.sentBodies count] == 3U && transport.lastBody != nil, @"recording transport failed");
     LBWAssert(client.pendingEvents == 0U, @"flush did not clear events");
     LBWExerciseFailurePaths();
+    LBWExerciseMetricHelper();
     LBWExerciseTimelineHelpers();
     LBWExerciseHTTPTransportValidation();
   }

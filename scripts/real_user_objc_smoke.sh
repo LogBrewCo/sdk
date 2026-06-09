@@ -54,6 +54,7 @@ test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
 test -f "$sdk_dir/src/LBWHTTPTransport.m"
 grep -q 'LBWHTTPTransport' "$sdk_dir/include/LogBrew.h"
+grep -q 'metricWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
 
@@ -68,6 +69,7 @@ test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
 test -f "$sdk_dir/src/LBWHTTPTransport.m"
 grep -q 'LBWHTTPTransport' "$sdk_dir/include/LogBrew.h"
+grep -q 'metricWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
 
@@ -254,6 +256,49 @@ static void LBWExerciseTimelineHelpers(void) {
   }
 }
 
+static void LBWExerciseMetricHelper(void) {
+  NSError *error = nil;
+  LBWClient *metricClient = LBWNewClient();
+  LBWMust([metricClient metricWithID:@"evt_metric_001"
+                           timestamp:@"2026-06-02T10:00:06Z"
+                          attributes:@{
+                            @"name": @"checkout.latency",
+                            @"kind": @"histogram",
+                            @"value": @184.5,
+                            @"unit": @"ms",
+                            @"temporality": @"delta",
+                            @"metadata": @{
+                              @"routeTemplate": @"/api/checkout",
+                              @"platform": @"ios"
+                            }
+                          }
+                               error:&error], error);
+  NSString *preview = [metricClient previewJSONWithError:&error];
+  LBWMust(preview != nil, error);
+  if ([preview rangeOfString:@"\"type\":\"metric\""].location == NSNotFound ||
+      [preview rangeOfString:@"\"name\":\"checkout.latency\""].location == NSNotFound ||
+      [preview rangeOfString:@"\"kind\":\"histogram\""].location == NSNotFound ||
+      [preview rangeOfString:@"\"temporality\":\"delta\""].location == NSNotFound ||
+      [preview rangeOfString:@"\"routeTemplate\":\"\\/api\\/checkout\""].location == NSNotFound) {
+    LBWDie(@"metric helper preview failed");
+  }
+
+  BOOL ok = [metricClient metricWithID:@"evt_bad_counter"
+                             timestamp:@"2026-06-02T10:00:06Z"
+                            attributes:@{
+                              @"name": @"jobs.processed",
+                              @"kind": @"counter",
+                              @"value": @-1,
+                              @"unit": @"1",
+                              @"temporality": @"delta"
+                            }
+                                 error:&error];
+  if (ok) {
+    LBWDie(@"metric validation failure did not fail");
+  }
+  LBWRequireCode(error, @"validation_error", @"metric validation failure used wrong code");
+}
+
 int main(void) {
   @autoreleasepool {
     NSError *error = nil;
@@ -275,6 +320,7 @@ int main(void) {
             (unsigned long)response.attempts,
             (unsigned long)[transport.sentBodies count]);
     LBWExerciseFailurePaths();
+    LBWExerciseMetricHelper();
     LBWExerciseTimelineHelpers();
   }
   return 0;

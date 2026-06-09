@@ -45,6 +45,29 @@ LBWRecordingTransport *transport = [[LBWRecordingTransport alloc] init];
 [client flushWithTransport:transport error:&error];
 ```
 
+## Metrics
+
+Use `metricWithID:timestamp:attributes:error:` for explicit product, service, or mobile measurements that your app already owns:
+
+```objective-c
+[client metricWithID:@"evt_metric_001"
+           timestamp:@"2026-06-02T10:00:06Z"
+          attributes:@{
+            @"name": @"checkout.latency",
+            @"kind": @"histogram",
+            @"value": @184.5,
+            @"unit": @"ms",
+            @"temporality": @"delta",
+            @"metadata": @{
+              @"routeTemplate": @"/api/checkout",
+              @"platform": @"ios"
+            }
+          }
+               error:&error];
+```
+
+Metric kinds are `counter`, `gauge`, and `histogram`. Gauges use `instant` temporality; counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Keep metric metadata low-cardinality and primitive, such as route templates, feature names, plan tiers, or platform names. Do not place user IDs, session IDs, trace IDs, raw URLs, query strings, headers, payloads, or free-form user text in metric metadata.
+
 ## Sending To LogBrew
 
 Use `LBWHTTPTransport` when your application is ready to send events to the hosted LogBrew intake:

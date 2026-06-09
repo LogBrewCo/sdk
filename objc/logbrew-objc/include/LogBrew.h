@@ -118,6 +118,11 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
           attributes:(NSDictionary<NSString *, id> *)attributes
                error:(NSError *_Nullable *_Nullable)error;
 
+- (BOOL)metricWithID:(NSString *)eventID
+           timestamp:(NSString *)timestamp
+          attributes:(NSDictionary<NSString *, id> *)attributes
+               error:(NSError *_Nullable *_Nullable)error;
+
 - (BOOL)captureProductActionWithID:(NSString *)eventID
                           timestamp:(NSString *)timestamp
                                name:(NSString *)name

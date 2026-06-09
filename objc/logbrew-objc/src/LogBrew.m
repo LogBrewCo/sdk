@@ -147,8 +147,34 @@ static NSNumber *_Nullable LBWNumberAttribute(
     return nil;
   }
   NSNumber *numberValue = (NSNumber *)value;
-  if ([numberValue doubleValue] < 0.0) {
-    NSString *message = [NSString stringWithFormat:@"%@ must be non-negative", label];
+  double doubleValue = [numberValue doubleValue];
+  if (!isfinite(doubleValue) || doubleValue < 0.0) {
+    NSString *message = [NSString stringWithFormat:@"%@ must be finite and non-negative", label];
+    LBWSetError(error, LBWMakeError(LBWErrorKindValidation, @"validation_error", message, NO));
+    return nil;
+  }
+  return numberValue;
+}
+
+static NSNumber *_Nullable LBWFiniteNumberAttribute(
+    NSDictionary<NSString *, id> *attributes,
+    NSString *key,
+    NSString *label,
+    NSError *_Nullable *_Nullable error) {
+  id value = attributes[key];
+  if (value == nil) {
+    NSString *message = [NSString stringWithFormat:@"%@ must be a number", label];
+    LBWSetError(error, LBWMakeError(LBWErrorKindValidation, @"validation_error", message, NO));
+    return nil;
+  }
+  if (![value isKindOfClass:[NSNumber class]]) {
+    NSString *message = [NSString stringWithFormat:@"%@ must be a number", label];
+    LBWSetError(error, LBWMakeError(LBWErrorKindValidation, @"validation_error", message, NO));
+    return nil;
+  }
+  NSNumber *numberValue = (NSNumber *)value;
+  if (!isfinite([numberValue doubleValue])) {
+    NSString *message = [NSString stringWithFormat:@"%@ must be finite", label];
     LBWSetError(error, LBWMakeError(LBWErrorKindValidation, @"validation_error", message, NO));
     return nil;
   }
@@ -605,6 +631,52 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
     clean[@"metadata"] = metadata;
   }
   return [self pushEventWithType:@"action" eventID:eventID timestamp:timestamp attributes:clean error:error];
+}
+
+- (BOOL)metricWithID:(NSString *)eventID
+           timestamp:(NSString *)timestamp
+          attributes:(NSDictionary<NSString *, id> *)attributes
+               error:(NSError **)error {
+  NSMutableDictionary<NSString *, id> *clean = [NSMutableDictionary dictionary];
+  NSString *name = LBWStringAttribute(attributes, @"name", @"metric name", YES, YES, error);
+  NSString *kind = LBWStringAttribute(attributes, @"kind", @"metric kind", YES, YES, error);
+  NSNumber *value = LBWFiniteNumberAttribute(attributes, @"value", @"metric value", error);
+  NSString *unit = LBWStringAttribute(attributes, @"unit", @"metric unit", YES, YES, error);
+  NSString *temporality = LBWStringAttribute(attributes, @"temporality", @"metric temporality", YES, YES, error);
+  if (name == nil || kind == nil || value == nil || unit == nil || temporality == nil ||
+      !LBWRequireAllowed(@"metric kind", kind, @[@"counter", @"gauge", @"histogram"], error)) {
+    return NO;
+  }
+  if ([kind isEqualToString:@"gauge"]) {
+    if (!LBWRequireAllowed(@"metric temporality", temporality, @[@"instant"], error)) {
+      return NO;
+    }
+  } else {
+    if (!LBWRequireAllowed(@"metric temporality", temporality, @[@"delta", @"cumulative"], error)) {
+      return NO;
+    }
+    if ([value doubleValue] < 0.0) {
+      LBWSetError(error, LBWMakeError(
+          LBWErrorKindValidation,
+          @"validation_error",
+          @"metric value must be non-negative for counter and histogram metrics",
+          NO));
+      return NO;
+    }
+  }
+  clean[@"name"] = name;
+  clean[@"kind"] = kind;
+  clean[@"value"] = value;
+  clean[@"unit"] = unit;
+  clean[@"temporality"] = temporality;
+  NSDictionary<NSString *, id> *metadata = LBWMetadataAttribute(attributes, @"metadata", @"metric metadata", error);
+  if (metadata == nil && attributes[@"metadata"] != nil) {
+    return NO;
+  }
+  if (metadata != nil) {
+    clean[@"metadata"] = metadata;
+  }
+  return [self pushEventWithType:@"metric" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
 
 - (BOOL)captureProductActionWithID:(NSString *)eventID
