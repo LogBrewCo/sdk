@@ -182,6 +182,48 @@ static void exercise_timeline_helpers(void) {
   logbrew_client_free(client);
 }
 
+static void exercise_metric_helper(void) {
+  LogBrewClient *client = new_client();
+  LogBrewError error;
+  char *preview = NULL;
+  LogBrewStatus status;
+  LogBrewMetadataEntry metadata[] = {
+    LOGBREW_METADATA_STRING_VALUE("queue", "checkout"),
+    LOGBREW_METADATA_BOOL_VALUE("sampled", true)
+  };
+  logbrew_error_clear(&error);
+  must(logbrew_client_metric(client, "evt_metric_001", "2026-06-02T10:00:06Z",
+      (LogBrewMetricAttributes){
+        "queue.depth",
+        "gauge",
+        42.0,
+        "{items}",
+        "instant",
+        {metadata, sizeof(metadata) / sizeof(metadata[0])}
+      }, &error), &error);
+  must(logbrew_client_preview_json(client, &preview, &error), &error);
+  if (strstr(preview, "\"type\":\"metric\"") == NULL ||
+      strstr(preview, "\"name\":\"queue.depth\"") == NULL ||
+      strstr(preview, "\"kind\":\"gauge\"") == NULL ||
+      strstr(preview, "\"value\":42") == NULL ||
+      strstr(preview, "\"unit\":\"{items}\"") == NULL ||
+      strstr(preview, "\"temporality\":\"instant\"") == NULL ||
+      strstr(preview, "\"queue\":\"checkout\"") == NULL ||
+      strstr(preview, "\"sampled\":true") == NULL) {
+    fprintf(stderr, "metric helper preview failed\n");
+    exit(1);
+  }
+  logbrew_free_string(preview);
+
+  status = logbrew_client_metric(client, "evt_bad_counter", "2026-06-02T10:00:06Z",
+      (LogBrewMetricAttributes){"jobs.processed", "counter", -1.0, "1", "delta", {NULL, 0U}}, &error);
+  if (status != LOGBREW_VALIDATION_ERROR || strcmp(error.code, "validation_error") != 0) {
+    fprintf(stderr, "metric validation failure failed\n");
+    exit(1);
+  }
+  logbrew_client_free(client);
+}
+
 int main(void) {
   LogBrewClient *client = new_client();
   LogBrewRecordingStep steps[] = {
@@ -209,6 +251,7 @@ int main(void) {
   logbrew_client_free(client);
 
   exercise_timeline_helpers();
+  exercise_metric_helper();
   exercise_failure_paths();
   return 0;
 }

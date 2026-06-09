@@ -122,6 +122,15 @@ typedef struct {
   size_t count;
 } LogBrewMetadata;
 
+typedef struct {
+  const char *name;
+  const char *kind;
+  double value;
+  const char *unit;
+  const char *temporality;
+  LogBrewMetadata metadata;
+} LogBrewMetricAttributes;
+
 #define LOGBREW_METADATA_STRING_VALUE(key_value, value) \
   ((LogBrewMetadataEntry){(key_value), LOGBREW_METADATA_STRING, (value), 0.0, false})
 
@@ -247,6 +256,13 @@ LogBrewStatus logbrew_client_span(
     const char *id,
     const char *timestamp,
     LogBrewSpanAttributes attributes,
+    LogBrewError *error);
+
+LogBrewStatus logbrew_client_metric(
+    LogBrewClient *client,
+    const char *id,
+    const char *timestamp,
+    LogBrewMetricAttributes attributes,
     LogBrewError *error);
 
 LogBrewStatus logbrew_client_action(

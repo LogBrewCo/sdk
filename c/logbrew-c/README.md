@@ -5,7 +5,9 @@ Public C99 SDK for building, validating, previewing, and flushing LogBrew event 
 The SDK ships as source plus header. Add `include/logbrew.h` and the core files under `src/` to your application build:
 
 ```bash
-cc -std=c99 -Wall -Wextra -Wpedantic -Iinclude src/logbrew.c src/logbrew_recording_transport.c src/logbrew_timeline.c your_app.c -o your_app
+cc -std=c99 -Wall -Wextra -Wpedantic -Iinclude \
+  src/logbrew.c src/logbrew_metric.c src/logbrew_recording_transport.c src/logbrew_timeline.c \
+  your_app.c -o your_app
 ```
 
 ## Minimal Usage
@@ -42,6 +44,34 @@ logbrew_recording_transport_free(&transport);
 
 logbrew_client_free(client);
 ```
+
+## Metrics
+
+Use `logbrew_client_metric()` for explicit application-owned measurements that should appear alongside logs, errors, traces, and product timelines.
+
+```c
+LogBrewMetadataEntry metric_metadata[] = {
+  LOGBREW_METADATA_STRING_VALUE("queue", "checkout")
+};
+
+logbrew_client_metric(
+    client,
+    "evt_metric_queue_depth",
+    "2026-06-02T10:00:06Z",
+    (LogBrewMetricAttributes){
+      "queue.depth",
+      "gauge",
+      42.0,
+      "{items}",
+      "instant",
+      {metric_metadata, sizeof(metric_metadata) / sizeof(metric_metadata[0])}
+    },
+    &error);
+```
+
+Metric `kind` must be `counter`, `gauge`, or `histogram`. Gauges use `instant` temporality; counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Values must be finite, units must be non-empty, and metadata should stay low-cardinality: service, queue, route template, or feature flag names are appropriate; user IDs, raw URLs, per-session identifiers, request IDs, headers, and payload fields are not.
+
+This SDK does not automatically collect native runtime, process, or framework metrics yet. Add only the measurements your app owns and wants LogBrew to correlate with logs, errors, traces, and product timelines.
 
 ## Product Timelines
 
@@ -122,7 +152,8 @@ Compile the optional transport with libcurl:
 
 ```bash
 cc -std=c99 -Wall -Wextra -Wpedantic -Iinclude \
-  src/logbrew.c src/logbrew_recording_transport.c src/logbrew_timeline.c src/logbrew_http_transport.c \
+  src/logbrew.c src/logbrew_metric.c src/logbrew_recording_transport.c src/logbrew_timeline.c \
+  src/logbrew_http_transport.c \
   your_app.c -o your_app $(curl-config --libs)
 ```
 

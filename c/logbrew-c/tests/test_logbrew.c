@@ -196,6 +196,63 @@ static void product_timeline_helpers_capture_safe_metadata(void) {
   logbrew_client_free(client);
 }
 
+static void metric_helper_validates_and_serializes(void) {
+  LogBrewClient *client = new_client();
+  LogBrewError error;
+  char *json = NULL;
+  LogBrewMetadataEntry metadata[] = {
+    LOGBREW_METADATA_STRING_VALUE("queue", "checkout"),
+    LOGBREW_METADATA_BOOL_VALUE("sampled", true)
+  };
+  LogBrewMetricAttributes metric = {
+    "queue.depth",
+    "gauge",
+    42.0,
+    "{items}",
+    "instant",
+    {metadata, sizeof(metadata) / sizeof(metadata[0])}
+  };
+  logbrew_error_clear(&error);
+  EXPECT_TRUE(logbrew_client_metric(client, "evt_metric_001", "2026-06-02T10:00:06Z",
+      metric, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_preview_json(client, &json, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strstr(json, "\"type\":\"metric\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"name\":\"queue.depth\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"kind\":\"gauge\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"value\":42") != NULL);
+  EXPECT_TRUE(strstr(json, "\"unit\":\"{items}\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"temporality\":\"instant\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"queue\":\"checkout\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"sampled\":true") != NULL);
+  logbrew_free_string(json);
+  logbrew_client_free(client);
+
+  client = new_client();
+  metric.kind = "distribution";
+  EXPECT_TRUE(logbrew_client_metric(client, "evt_bad_kind", "2026-06-02T10:00:06Z",
+      metric, &error) == LOGBREW_VALIDATION_ERROR);
+  metric.kind = "counter";
+  metric.value = -1.0;
+  metric.temporality = "delta";
+  EXPECT_TRUE(logbrew_client_metric(client, "evt_bad_counter", "2026-06-02T10:00:06Z",
+      metric, &error) == LOGBREW_VALIDATION_ERROR);
+  metric.kind = "gauge";
+  metric.value = 42.0;
+  metric.temporality = "delta";
+  EXPECT_TRUE(logbrew_client_metric(client, "evt_bad_temporality", "2026-06-02T10:00:06Z",
+      metric, &error) == LOGBREW_VALIDATION_ERROR);
+  metric.temporality = "instant";
+  metric.value = NAN;
+  EXPECT_TRUE(logbrew_client_metric(client, "evt_bad_value", "2026-06-02T10:00:06Z",
+      metric, &error) == LOGBREW_VALIDATION_ERROR);
+  metric.value = 42.0;
+  metric.metadata.entries = NULL;
+  metric.metadata.count = 1U;
+  EXPECT_TRUE(logbrew_client_metric(client, "evt_bad_metadata", "2026-06-02T10:00:06Z",
+      metric, &error) == LOGBREW_VALIDATION_ERROR);
+  logbrew_client_free(client);
+}
+
 static void unauthenticated_response_surfaces_clean_error(void) {
   LogBrewClient *client = new_client();
   LogBrewRecordingStep steps[] = {LOGBREW_RECORD_STATUS_CODE(401)};
@@ -301,6 +358,7 @@ static void http_transport_validates_configuration(void) {
 int main(void) {
   preview_json_contains_all_supported_event_types();
   product_timeline_helpers_capture_safe_metadata();
+  metric_helper_validates_and_serializes();
   flush_success_clears_queue();
   empty_flush_is_no_op();
   validation_failures_are_stable();

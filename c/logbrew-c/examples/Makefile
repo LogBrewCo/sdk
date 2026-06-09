@@ -1,6 +1,6 @@
 CC ?= cc
 CFLAGS ?= -std=c99 -Wall -Wextra -Wpedantic -Werror -I../include
-SDK_SRC ?= ../src/logbrew.c ../src/logbrew_recording_transport.c ../src/logbrew_timeline.c
+SDK_SRC ?= ../src/logbrew.c ../src/logbrew_metric.c ../src/logbrew_recording_transport.c ../src/logbrew_timeline.c
 BUILD_DIR ?= build
 
 .PHONY: help run run-readme-example run-real-user-smoke clean

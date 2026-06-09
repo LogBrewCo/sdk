@@ -2,6 +2,7 @@
 #include "logbrew_internal.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -322,6 +323,45 @@ static LogBrewStatus append_optional_string(
   return append_named_string(buffer, name, value, needs_comma, error);
 }
 
+static LogBrewStatus require_finite_number(const char *label, double value, LogBrewError *error) {
+  char message[160];
+  if (isfinite(value)) {
+    return LOGBREW_OK;
+  }
+  (void)snprintf(message, sizeof(message), "%s must be finite", label);
+  set_error(error, "validation_error", message, false);
+  return LOGBREW_VALIDATION_ERROR;
+}
+
+static LogBrewStatus append_named_number(
+    LogBrewBuffer *buffer,
+    const char *name,
+    double value,
+    bool *needs_comma,
+    LogBrewError *error) {
+  LogBrewStatus status = require_finite_number(name, value, error);
+  if (status != LOGBREW_OK) {
+    return status;
+  }
+  if (*needs_comma) {
+    status = buffer_append_char(buffer, ',', error);
+    if (status != LOGBREW_OK) {
+      return status;
+    }
+  }
+  status = append_json_string(buffer, name, error);
+  if (status == LOGBREW_OK) {
+    status = buffer_append_char(buffer, ':', error);
+  }
+  if (status == LOGBREW_OK) {
+    status = buffer_append_format(buffer, error, "%.15g", value);
+  }
+  if (status == LOGBREW_OK) {
+    *needs_comma = true;
+  }
+  return status;
+}
+
 static LogBrewStatus build_event_json(
     const char *event_type,
     const char *id,
@@ -431,13 +471,23 @@ static LogBrewStatus push_event(
   return LOGBREW_OK;
 }
 
+LogBrewStatus logbrew_client_push_event_json(
+    LogBrewClient *client,
+    const char *event_type,
+    const char *id,
+    const char *timestamp,
+    char *attributes_json,
+    LogBrewError *error) {
+  return push_event(client, event_type, id, timestamp, attributes_json, error);
+}
+
 LogBrewStatus logbrew_client_push_action_json(
     LogBrewClient *client,
     const char *id,
     const char *timestamp,
     char *attributes_json,
     LogBrewError *error) {
-  return push_event(client, "action", id, timestamp, attributes_json, error);
+  return logbrew_client_push_event_json(client, "action", id, timestamp, attributes_json, error);
 }
 
 LogBrewStatus logbrew_client_new(LogBrewConfig config, LogBrewClient **out_client, LogBrewError *error) {
@@ -830,16 +880,7 @@ LogBrewStatus logbrew_client_span(
     status = append_named_string(&buffer, "status", attributes.status, &needs_comma, error);
   }
   if (status == LOGBREW_OK && attributes.has_duration_ms) {
-    if (needs_comma) {
-      status = buffer_append_char(&buffer, ',', error);
-    }
-    if (status == LOGBREW_OK) {
-      status = buffer_append(&buffer, "\"durationMs\":", error);
-    }
-    if (status == LOGBREW_OK) {
-      status = buffer_append_format(&buffer, error, "%.15g", attributes.duration_ms);
-    }
-    needs_comma = true;
+    status = append_named_number(&buffer, "durationMs", attributes.duration_ms, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = finish_attributes(&buffer, &attributes_json, error);

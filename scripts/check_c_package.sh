@@ -25,7 +25,7 @@ run_examples_make() {
 }
 
 cflags=(-std=c99 -Wall -Wextra -Wpedantic -Werror -I"$package_dir/include")
-sdk_sources=("$package_dir/src/logbrew.c" "$package_dir/src/logbrew_recording_transport.c" "$package_dir/src/logbrew_timeline.c")
+sdk_sources=("$package_dir/src/logbrew.c" "$package_dir/src/logbrew_metric.c" "$package_dir/src/logbrew_recording_transport.c" "$package_dir/src/logbrew_timeline.c")
 
 mkdir -p "$tmp_dir/build"
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/tests/test_logbrew.c" -o "$tmp_dir/build/test_logbrew"
@@ -74,6 +74,7 @@ grep -qx 'include/logbrew.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_http_transport.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_internal.h' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/logbrew_metric.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_recording_transport.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_timeline.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/readme_example.c' "$tmp_dir/archive-contents.txt"
@@ -89,16 +90,14 @@ make --no-print-directory -C "$extracted_dir" CC="$cc_command"
 python3 - "$archive" <<'PY'
 import sys
 import tarfile
-from pathlib import Path
 
-archive_path = Path(sys.argv[1])
-with tarfile.open(archive_path, "r:gz") as archive:
+with tarfile.open(sys.argv[1], "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
     header = archive.extractfile("include/logbrew.h").read().decode()
-for needle in ("LOGBREW_API_KEY", "copy into your own native application", "logbrew_client_flush", "logbrew_client_product_action", "logbrew_client_network_milestone", "logbrew_http_transport_init"):
+for needle in ("LOGBREW_API_KEY", "copy into your own native application", "logbrew_client_flush", "LogBrewMetricAttributes", "logbrew_client_metric", "logbrew_client_product_action", "logbrew_client_network_milestone", "logbrew_http_transport_init"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
-for needle in ("LOGBREW_C_VERSION", "LogBrewClient", "LogBrewRecordingTransport", "LogBrewProductTimelineContext", "logbrew_client_product_action", "logbrew_client_network_milestone", "LogBrewHttpTransport", "logbrew_http_transport_init"):
+for needle in ("LOGBREW_C_VERSION", "LogBrewClient", "LogBrewRecordingTransport", "LogBrewMetricAttributes", "logbrew_client_metric", "LogBrewProductTimelineContext", "logbrew_client_product_action", "logbrew_client_network_milestone", "LogBrewHttpTransport", "logbrew_http_transport_init"):
     if needle not in header:
         raise SystemExit(f"missing public header symbol: {needle}")
 PY

@@ -339,6 +339,7 @@ def validate_c(root: Path, failures: list[str]) -> None:
     require_path(root, "c/logbrew-c/README.md", failures)
     header_path = require_path(root, "c/logbrew-c/include/logbrew.h", failures)
     source_path = require_path(root, "c/logbrew-c/src/logbrew.c", failures)
+    require_path(root, "c/logbrew-c/src/logbrew_metric.c", failures)
     require_path(root, "c/logbrew-c/Makefile", failures)
     require_path(root, "c/logbrew-c/examples/Makefile", failures)
     require_path(root, "c/logbrew-c/examples/readme_example.c", failures)
@@ -354,12 +355,24 @@ def validate_c(root: Path, failures: list[str]) -> None:
         "typedef struct LogBrewClient LogBrewClient;",
         "logbrew_client_flush",
         "LogBrewRecordingTransport",
+        "LogBrewMetricAttributes",
+        "logbrew_client_metric",
+        "LogBrewProductTimelineContext",
+        "logbrew_client_product_action",
+        "logbrew_client_network_milestone",
+        "LogBrewHttpTransport",
+        "logbrew_http_transport_init",
     ):
         require(needle in header, failures, f"{location}: missing public C SDK symbol {needle}")
     for needle in (
         "Public C99 SDK",
         "LOGBREW_API_KEY",
         "logbrew_client_flush",
+        "LogBrewMetricAttributes",
+        "logbrew_client_metric",
+        "logbrew_client_product_action",
+        "logbrew_client_network_milestone",
+        "logbrew_http_transport_init",
         "copy into your own native application",
     ):
         require(needle in readme, failures, f"c/logbrew-c/README.md: missing guidance {needle}")
