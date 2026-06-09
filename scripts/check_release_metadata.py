@@ -383,6 +383,8 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
     for needle in (
         'inline constexpr const char *version = "0.1.0"',
         "class LogBrewClient",
+        "MetricAttributes",
+        "metric(",
         "class HttpTransport",
         "class RecordingTransport",
         "http_transport_default_endpoint",
@@ -392,6 +394,10 @@ def validate_cpp(root: Path, failures: list[str]) -> None:
     for needle in (
         "Public C++17 SDK",
         "LOGBREW_API_KEY",
+        "Metrics",
+        "MetricAttributes",
+        "client.metric",
+        "low-cardinality",
         "Sending To LogBrew",
         "HttpTransport",
         "client.flush",

@@ -52,6 +52,27 @@ c++ -std=c++17 -Wall -Wextra -Wpedantic \
 
 `HttpTransport` validates `http://` and `https://` endpoints, sends `authorization: Bearer <api key>` and `content-type: application/json`, rejects custom overrides for those reserved headers, supports safe additional headers, and maps libcurl request failures into retryable transport errors. It does not patch global HTTP clients, inspect application traffic, collect request or response payloads, or capture arbitrary headers from your app.
 
+## Metrics
+
+Use `client.metric(...)` for explicit application-owned measurements that should appear alongside logs, errors, traces, and product timelines.
+
+```cpp
+client.metric(
+    "evt_metric_queue_depth",
+    "2026-06-02T10:00:06Z",
+    logbrew::MetricAttributes{
+        "queue.depth",
+        "gauge",
+        42.0,
+        "{items}",
+        "instant",
+        {{"queue", "checkout"}}});
+```
+
+Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality. Keep metric metadata primitive and low-cardinality, such as stable route templates, queue names, feature names, regions, or coarse result categories. Do not attach user IDs, request IDs, per-session identifiers, raw URLs, payloads, or unbounded labels as metric metadata.
+
+The C++ SDK does not automatically collect runtime or framework metrics. Add the measurements your application owns, then send them with the same `client.flush(...)` path as other events.
+
 ## Product Timelines
 
 Use product timeline helpers when you want LogBrew and AI coding assistants to understand what happened inside a user flow without recording the screen or collecting request payloads.

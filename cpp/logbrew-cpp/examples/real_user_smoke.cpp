@@ -75,6 +75,27 @@ void exercise_timeline_helpers() {
   require_condition(preview.find("#fragment") == std::string::npos, "network hash leaked");
 }
 
+void exercise_metric_helper() {
+  auto metric_client = new_client();
+  metric_client.metric(
+      "evt_metric_queue_depth",
+      "2026-06-02T10:00:06Z",
+      logbrew::MetricAttributes{
+          "queue.depth",
+          "gauge",
+          42.0,
+          "{items}",
+          "instant",
+          {{"queue", "checkout"}},
+      });
+
+  const std::string preview = metric_client.preview_json();
+  require_condition(preview.find("\"type\":\"metric\"") != std::string::npos, "metric event missing");
+  require_condition(preview.find("\"name\":\"queue.depth\"") != std::string::npos, "metric name missing");
+  require_condition(preview.find("\"temporality\":\"instant\"") != std::string::npos, "metric temporality missing");
+  require_condition(preview.find("\"queue\":\"checkout\"") != std::string::npos, "metric metadata missing");
+}
+
 void exercise_failure_paths() {
   auto empty_client = new_client();
   logbrew::RecordingTransport empty_transport;
@@ -150,6 +171,7 @@ int main() {
     std::cerr << "{\"ok\":true,\"status\":" << response.status_code << ",\"retryAttempts\":" << response.attempts
               << ",\"sentBodies\":" << transport.sent_bodies().size() << "}\n";
     exercise_timeline_helpers();
+    exercise_metric_helper();
     exercise_failure_paths();
     return 0;
   } catch (const logbrew::SdkException &error) {

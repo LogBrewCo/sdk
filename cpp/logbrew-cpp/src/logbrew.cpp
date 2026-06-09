@@ -182,6 +182,14 @@ void append_optional_field(
   return output.str();
 }
 
+void append_number_field(std::ostringstream &output, bool &needs_comma, const std::string &key, double value) {
+  if (needs_comma) {
+    output << ',';
+  }
+  output << json_string(key) << ':' << double_json(value);
+  needs_comma = true;
+}
+
 [[nodiscard]] std::string metadata_value_json(const MetadataValue &value) {
   switch (value.kind()) {
     case MetadataValue::Kind::null_value:
@@ -459,12 +467,31 @@ void LogBrewClient::span(std::string id, std::string timestamp, SpanAttributes a
                append_optional_field(output, needs_comma, "parentSpanId", attributes.parent_span_id, true);
                append_field(output, needs_comma, "status", attributes.status);
                if (attributes.duration_ms.has_value()) {
-                 if (needs_comma) {
-                   output << ',';
-                 }
-                 output << "\"durationMs\":" << double_json(*attributes.duration_ms);
-                 needs_comma = true;
+                 append_number_field(output, needs_comma, "durationMs", *attributes.duration_ms);
                }
+             }));
+}
+
+void LogBrewClient::metric(std::string id, std::string timestamp, MetricAttributes attributes) {
+  require_non_empty("metric name", attributes.name);
+  require_allowed("metric kind", attributes.kind, {"counter", "gauge", "histogram"});
+  require_finite("metric value", attributes.value);
+  require_non_empty("metric unit", attributes.unit);
+  if (attributes.kind == "gauge") {
+    require_allowed("metric temporality", attributes.temporality, {"instant"});
+  } else {
+    require_allowed("metric temporality", attributes.temporality, {"delta", "cumulative"});
+    if (attributes.value < 0.0) {
+      throw SdkException("validation_error", "metric value must be non-negative for counter and histogram");
+    }
+  }
+  push_event("metric", std::move(id), std::move(timestamp), object_json([&](std::ostringstream &output, bool &needs_comma) {
+               append_field(output, needs_comma, "name", attributes.name);
+               append_field(output, needs_comma, "kind", attributes.kind);
+               append_number_field(output, needs_comma, "value", attributes.value);
+               append_field(output, needs_comma, "unit", attributes.unit);
+               append_field(output, needs_comma, "temporality", attributes.temporality);
+               append_metadata_object(output, needs_comma, attributes.metadata);
              }));
 }
 

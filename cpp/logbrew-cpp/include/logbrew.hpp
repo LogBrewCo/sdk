@@ -142,6 +142,15 @@ private:
 
 using Metadata = std::map<std::string, MetadataValue>;
 
+struct MetricAttributes {
+  std::string name;
+  std::string kind;
+  double value = 0.0;
+  std::string unit;
+  std::string temporality;
+  Metadata metadata = {};
+};
+
 struct ActionAttributes {
   std::string name;
   std::string status;
@@ -220,6 +229,7 @@ public:
   void issue(std::string id, std::string timestamp, IssueAttributes attributes);
   void log(std::string id, std::string timestamp, LogAttributes attributes);
   void span(std::string id, std::string timestamp, SpanAttributes attributes);
+  void metric(std::string id, std::string timestamp, MetricAttributes attributes);
   void action(std::string id, std::string timestamp, ActionAttributes attributes);
   void capture_product_action(std::string id, std::string timestamp, ProductActionAttributes attributes);
   void capture_network_milestone(std::string id, std::string timestamp, NetworkMilestoneAttributes attributes);

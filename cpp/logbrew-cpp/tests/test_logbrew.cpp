@@ -107,6 +107,31 @@ void product_timeline_helpers_capture_safe_metadata() {
   EXPECT_TRUE(json.find("#fragment") == std::string::npos);
 }
 
+void metric_helper_validates_and_serializes() {
+  auto client = new_client();
+  client.metric(
+      "evt_metric_001",
+      "2026-06-02T10:00:06Z",
+      logbrew::MetricAttributes{
+          "queue.depth",
+          "gauge",
+          42.0,
+          "{items}",
+          "instant",
+          {{"queue", "checkout"}, {"sampled", true}},
+      });
+
+  const std::string json = client.preview_json();
+  EXPECT_TRUE(json.find("\"type\":\"metric\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"name\":\"queue.depth\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"kind\":\"gauge\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"value\":42") != std::string::npos);
+  EXPECT_TRUE(json.find("\"unit\":\"{items}\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"temporality\":\"instant\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"queue\":\"checkout\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"sampled\":true") != std::string::npos);
+}
+
 void flush_success_clears_queue() {
   auto client = new_client();
   queue_fixture_events(client);
@@ -166,6 +191,39 @@ void validation_failures_are_stable() {
     product_action.name = "checkout submit";
     product_action.metadata = {{"bad", std::numeric_limits<double>::quiet_NaN()}};
     client.capture_product_action("evt_product_action_bad", "2026-06-02T10:00:06Z", product_action);
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
+  try {
+    client.metric(
+        "evt_metric_bad_counter",
+        "2026-06-02T10:00:06Z",
+        logbrew::MetricAttributes{"jobs.processed", "counter", -1.0, "1", "delta"});
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
+  try {
+    client.metric(
+        "evt_metric_bad_gauge",
+        "2026-06-02T10:00:06Z",
+        logbrew::MetricAttributes{"queue.depth", "gauge", 42.0, "{items}", "delta"});
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
+  try {
+    client.metric(
+        "evt_metric_bad_histogram",
+        "2026-06-02T10:00:06Z",
+        logbrew::MetricAttributes{
+            "checkout.duration",
+            "histogram",
+            std::numeric_limits<double>::quiet_NaN(),
+            "ms",
+            "delta",
+        });
     EXPECT_TRUE(false);
   } catch (const logbrew::SdkException &error) {
     EXPECT_TRUE(error.code() == "validation_error");
@@ -272,6 +330,7 @@ void http_transport_validates_configuration() {
 int main() {
   preview_json_contains_all_supported_event_types();
   product_timeline_helpers_capture_safe_metadata();
+  metric_helper_validates_and_serializes();
   flush_success_clears_queue();
   empty_flush_is_no_op();
   validation_failures_are_stable();

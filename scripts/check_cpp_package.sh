@@ -96,6 +96,10 @@ with tarfile.open(archive_path, "r:gz") as archive:
     header = archive.extractfile("include/logbrew.hpp").read().decode()
 for needle in (
     "LOGBREW_API_KEY",
+    "Metrics",
+    "MetricAttributes",
+    "client.metric",
+    "low-cardinality",
     "Product Timelines",
     "Sending To LogBrew",
     "capture_product_action",
@@ -110,6 +114,8 @@ for needle in (
 for needle in (
     "class LogBrewClient",
     "MetadataValue",
+    "MetricAttributes",
+    "metric(",
     "ProductTimelineContext",
     "capture_product_action",
     "capture_network_milestone",
