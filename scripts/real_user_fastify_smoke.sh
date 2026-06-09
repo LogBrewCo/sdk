@@ -54,6 +54,9 @@ grep -q 'onResponse' "$tmp_dir/fastify-readme.md"
 grep -q 'onError' "$tmp_dir/fastify-readme.md"
 grep -q 'traceparent' "$tmp_dir/fastify-readme.md"
 grep -q 'spanIdFactory' "$tmp_dir/fastify-readme.md"
+grep -q 'captureRequestMetrics' "$tmp_dir/fastify-readme.md"
+grep -q 'http.server.duration' "$tmp_dir/fastify-readme.md"
+grep -q 'low-cardinality' "$tmp_dir/fastify-readme.md"
 
 app_dir="$tmp_dir/fastify-smoke-app"
 mkdir -p "$app_dir"
@@ -100,6 +103,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   createErrorEvent,
   createLogBrewFastifyClient,
+  createRequestMetricEvent,
   createRequestEvent,
   logbrewFastifyPlugin
 } from "@logbrew/fastify";
@@ -107,6 +111,7 @@ import {
 const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
 const autoTransport = RecordingTransport.alwaysAccept();
 const errorTransport = RecordingTransport.alwaysAccept();
+const metricOnlyTransport = RecordingTransport.alwaysAccept();
 const app = Fastify();
 
 const explicitClient = createLogBrewFastifyClient({
@@ -117,6 +122,27 @@ const explicitClient = createLogBrewFastifyClient({
 if (explicitClient.pendingEvents() !== 0) {
   throw new Error("expected empty explicit client");
 }
+
+await app.register(async (scope) => {
+  let metricNowMs = 100;
+  await scope.register(logbrewFastifyPlugin, {
+    serverApiKey: "LOGBREW_SERVER_API_KEY",
+    captureRequests: false,
+    captureRequestMetrics: true,
+    metricIdFactory: () => "evt_fastify_metric_001",
+    now: () => "2026-06-02T10:00:09Z",
+    nowMs: () => {
+      const value = metricNowMs;
+      metricNowMs += 25;
+      return value;
+    },
+    sdkName: "fastify-metric-smoke",
+    sdkVersion: "0.1.0",
+    transport: metricOnlyTransport
+  });
+
+  scope.get("/metrics-only/:id", async () => ({ ok: true }));
+});
 
 await app.register(async (scope) => {
   await scope.register(logbrewFastifyPlugin, {
@@ -191,6 +217,9 @@ const autoResponse = await fetch(`${address}/auto?token=secret`, {
 });
 await autoResponse.json();
 await waitFor(() => autoTransport.sentBodies.length === 1);
+const metricResponse = await fetch(`${address}/metrics-only/42?token=secret#hidden`);
+await metricResponse.json();
+await waitFor(() => metricOnlyTransport.sentBodies.length === 1);
 const failResponse = await fetch(`${address}/fail?token=secret`);
 await failResponse.json();
 await waitFor(() => errorTransport.sentBodies.length === 1);
@@ -215,6 +244,29 @@ if (autoPayload.events[0].attributes.metadata.framework !== "fastify") {
 if (autoPayload.events[0].attributes.metadata.path !== "/auto") {
   throw new Error(`request capture should omit query text: ${autoTransport.lastBody()}`);
 }
+const metricPayload = JSON.parse(metricOnlyTransport.lastBody());
+const metricEvent = metricPayload.events[0];
+if (metricPayload.events.length !== 1 || metricEvent.type !== "metric" || metricEvent.id !== "evt_fastify_metric_001") {
+  throw new Error(`unexpected metric payload: ${metricOnlyTransport.lastBody()}`);
+}
+if (metricEvent.attributes.name !== "http.server.duration") {
+  throw new Error(`unexpected metric name: ${metricOnlyTransport.lastBody()}`);
+}
+if (metricEvent.attributes.kind !== "histogram" || metricEvent.attributes.unit !== "ms" || metricEvent.attributes.temporality !== "delta") {
+  throw new Error(`unexpected metric shape: ${metricOnlyTransport.lastBody()}`);
+}
+if (metricEvent.attributes.value !== 25) {
+  throw new Error(`unexpected metric duration: ${metricOnlyTransport.lastBody()}`);
+}
+if (metricEvent.attributes.metadata.framework !== "fastify") {
+  throw new Error(`missing metric framework metadata: ${metricOnlyTransport.lastBody()}`);
+}
+if (metricEvent.attributes.metadata.routeTemplate !== "/metrics-only/:id") {
+  throw new Error(`metric capture should use route template without query/hash: ${metricOnlyTransport.lastBody()}`);
+}
+if (metricEvent.attributes.metadata.statusCode !== 200 || metricEvent.attributes.metadata.statusCodeClass !== "2xx") {
+  throw new Error(`unexpected metric status metadata: ${metricOnlyTransport.lastBody()}`);
+}
 const errorPayload = JSON.parse(errorTransport.lastBody());
 if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "evt_fastify_error_001") {
   throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
@@ -229,6 +281,21 @@ const errorPreview = createErrorEvent(new Error("manual failure"), { method: "PO
 if (errorPreview.attributes.title !== "POST /manual failed") {
   throw new Error(`unexpected error preview: ${JSON.stringify(errorPreview)}`);
 }
+const metricPreview = createRequestMetricEvent(
+  { method: "POST", routeOptions: { url: "/manual/:id?token=secret" }, url: "/manual/42?token=secret" },
+  { statusCode: 503 },
+  {
+    durationMs: 34,
+    idFactory: () => "evt_fastify_metric_preview",
+    now: () => "2026-06-02T10:00:10Z"
+  }
+);
+if (metricPreview.attributes.metadata.routeTemplate !== "/manual/:id") {
+  throw new Error(`unexpected metric preview route: ${JSON.stringify(metricPreview)}`);
+}
+if (metricPreview.attributes.metadata.statusCodeClass !== "5xx") {
+  throw new Error(`unexpected metric preview status class: ${JSON.stringify(metricPreview)}`);
+}
 
 console.log(okText);
 console.error(JSON.stringify({
@@ -239,6 +306,8 @@ console.error(JSON.stringify({
   errorCaptured: errorPayload.events[0].attributes.title,
   errorStatus: failResponse.status,
   events: 6,
+  metricCaptured: metricEvent.attributes.name,
+  metricRouteTemplate: metricEvent.attributes.metadata.routeTemplate,
   status: okResponse.status
 }));
 
@@ -303,6 +372,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   createLogBrewFastifyClient,
+  createRequestMetricEvent,
   createRequestEvent,
   logbrewFastifyPlugin
 } from "@logbrew/fastify";
@@ -316,6 +386,16 @@ const client = createLogBrewFastifyClient({
 
 app.register(logbrewFastifyPlugin, {
   client,
+  captureRequestMetrics: true,
+  metricIdFactory(request, reply) {
+    return `evt_metric_${request.method}_${reply.statusCode}`;
+  },
+  requestMetricEvent(request, reply, { durationMs }) {
+    return createRequestMetricEvent(request, reply, {
+      durationMs,
+      now: () => "2026-06-02T10:00:09Z"
+    });
+  },
   requestEvent(request, reply, { durationMs }) {
     const event = createRequestEvent(request, reply, {
       durationMs,

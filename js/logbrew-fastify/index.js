@@ -39,7 +39,7 @@ async function logbrewFastifyPluginImpl(fastify, options = {}) {
     request.logbrew = createRequestContext(client, transport);
   });
 
-  if (options.captureRequests !== false) {
+  if (options.captureRequests !== false || options.captureRequestMetrics === true) {
     fastify.addHook("onResponse", async (request, reply) => {
       const startedAt = startedAtByRequest.get(request) ?? nowMs(options);
       await captureRequestFinish(options, { request, reply, startedAt });
@@ -122,6 +122,35 @@ export function createErrorEvent(error, request, {
   };
 }
 
+export function createRequestMetricEvent(request, reply, {
+  now = () => new Date().toISOString(),
+  durationMs = 0,
+  idFactory = defaultRequestMetricEventId,
+  metricName = "http.server.duration"
+} = {}) {
+  const method = request.method ?? "GET";
+  const routeTemplate = getRouteTemplate(request);
+  const statusCode = Number(reply.statusCode ?? 0);
+  return {
+    id: idFactory(request, reply),
+    timestamp: now(),
+    attributes: {
+      name: metricName,
+      kind: "histogram",
+      value: durationMs,
+      unit: "ms",
+      temporality: "delta",
+      metadata: {
+        framework: "fastify",
+        method,
+        routeTemplate,
+        statusCode,
+        statusCodeClass: statusCodeClass(statusCode)
+      }
+    }
+  };
+}
+
 function ensureRequestDecorator(fastify) {
   if (typeof fastify.hasRequestDecorator === "function" && fastify.hasRequestDecorator("logbrew")) {
     return;
@@ -154,10 +183,22 @@ async function captureRequestFinish(options, { request, reply, startedAt }) {
   }
   try {
     const durationMs = Math.max(0, Math.round(nowMs(options) - startedAt));
-    const event = typeof options.requestEvent === "function"
-      ? options.requestEvent(request, reply, { client: existing.client, durationMs })
-      : createRequestEvent(request, reply, { ...options, durationMs });
-    captureRequestEvent(existing.client, event);
+    if (options.captureRequests !== false) {
+      const event = typeof options.requestEvent === "function"
+        ? options.requestEvent(request, reply, { client: existing.client, durationMs })
+        : createRequestEvent(request, reply, { ...options, durationMs });
+      captureRequestEvent(existing.client, event);
+    }
+    if (options.captureRequestMetrics === true) {
+      const metricEvent = typeof options.requestMetricEvent === "function"
+        ? options.requestMetricEvent(request, reply, { client: existing.client, durationMs })
+        : createRequestMetricEvent(request, reply, {
+          ...options,
+          durationMs,
+          idFactory: options.metricIdFactory
+        });
+      captureRequestMetricEvent(existing.client, metricEvent);
+    }
     const response = await existing.client.shutdown(existing.transport);
     await notifyFlush(options, response, { request, reply, client: existing.client });
   } catch (error) {
@@ -215,6 +256,10 @@ function defaultRequestEventId(request, reply) {
   return `evt_fastify_request_${slugify(`${request.method ?? "GET"}_${getRequestPath(request)}_${reply.statusCode ?? 0}`)}`;
 }
 
+function defaultRequestMetricEventId(request, reply) {
+  return `evt_fastify_metric_${slugify(`${request.method ?? "GET"}_${getRouteTemplate(request)}_${reply.statusCode ?? 0}`)}`;
+}
+
 function defaultSpanIdFactory() {
   return randomHex(8);
 }
@@ -226,6 +271,16 @@ function defaultErrorEventId(error, request) {
 
 function getRequestPath(request) {
   return pathOnly(request.url ?? "/");
+}
+
+function getRouteTemplate(request) {
+  return pathOnly(
+    request.routeOptions?.url
+    ?? request.routerPath
+    ?? request.routeConfig?.url
+    ?? request.url
+    ?? "/"
+  );
 }
 
 function pathOnly(value) {
@@ -291,6 +346,10 @@ function captureRequestEvent(client, event) {
   client.log(event.id, event.timestamp, event.attributes);
 }
 
+function captureRequestMetricEvent(client, event) {
+  client.metric(event.id, event.timestamp, event.attributes);
+}
+
 function randomHex(byteLength) {
   const bytes = new Uint8Array(byteLength);
   if (typeof globalThis.crypto?.getRandomValues === "function") {
@@ -327,9 +386,17 @@ function slugify(value) {
     .replace(/^_+|_+$/g, "") || "event";
 }
 
+function statusCodeClass(statusCode) {
+  if (!Number.isInteger(statusCode) || statusCode < 100 || statusCode > 999) {
+    return "unknown";
+  }
+  return `${Math.floor(statusCode / 100)}xx`;
+}
+
 export default {
   createErrorEvent,
   createLogBrewFastifyClient,
+  createRequestMetricEvent,
   createRequestEvent,
   logbrewFastifyPlugin,
   logbrewPlugin

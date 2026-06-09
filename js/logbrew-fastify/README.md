@@ -47,6 +47,17 @@ await app.register(logbrewFastifyPlugin, {
 });
 ```
 
+Request metrics are opt-in. Enable `captureRequestMetrics` when you want the plugin to send an explicit `http.server.duration` histogram for each completed request:
+
+```js
+await app.register(logbrewFastifyPlugin, {
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  captureRequestMetrics: true
+});
+```
+
+The metric includes primitive, low-cardinality metadata: `framework`, `method`, `routeTemplate`, `statusCode`, and `statusCodeClass`. Query strings and hashes are omitted. Prefer Fastify route templates such as `/checkout/:id` over raw URLs, and avoid user IDs, request payloads, headers, or free-form text in custom metric metadata. Use `metricName`, `metricIdFactory`, or `requestMetricEvent` when your app needs a different naming or metadata policy. Set `captureRequests: false` with `captureRequestMetrics: true` when you only want the duration metric and not the request log/span.
+
 ## Error Capture
 
 ```js

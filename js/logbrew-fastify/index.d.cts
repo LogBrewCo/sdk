@@ -8,6 +8,7 @@ import type {
   IssueAttributes,
   LogAttributes,
   LogBrewClient,
+  MetricAttributes,
   SpanAttributes,
   Transport,
   TransportResponse
@@ -61,19 +62,33 @@ export type LogBrewErrorEvent = {
   attributes: IssueAttributes;
 };
 
+export type LogBrewRequestMetricEvent = {
+  id: string;
+  timestamp: string;
+  attributes: MetricAttributes;
+};
+
 export type LogBrewFastifyOptions = CreateLogBrewFastifyClientConfig & {
   client?: LogBrewClient | LogBrewClientFactory;
   transport?: Transport | LogBrewTransportFactory;
   captureRequests?: boolean;
+  captureRequestMetrics?: boolean;
   now?: () => string;
   nowMs?: () => number;
   idFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
   spanIdFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
+  metricName?: string;
+  metricIdFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
   requestEvent?: (
     request: FastifyRequest,
     reply: FastifyReply,
     context: { client: LogBrewClient; durationMs: number }
   ) => LogBrewRequestEvent;
+  requestMetricEvent?: (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    context: { client: LogBrewClient; durationMs: number }
+  ) => LogBrewRequestMetricEvent;
   errorEvent?: (error: unknown, context: LogBrewFastifyRuntimeContext) => LogBrewErrorEvent;
   onFlush?: (response: TransportResponse, context: LogBrewFastifyRuntimeContext) => void | Promise<void>;
   onCaptureError?: (error: unknown, context: LogBrewFastifyRuntimeContext) => void | Promise<void>;
@@ -92,6 +107,16 @@ export declare function createRequestEvent(
     spanIdFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
   }
 ): LogBrewRequestEvent;
+export declare function createRequestMetricEvent(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  options?: {
+    now?: () => string;
+    durationMs?: number;
+    idFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
+    metricName?: string;
+  }
+): LogBrewRequestMetricEvent;
 export declare function createErrorEvent(
   error: unknown,
   request: FastifyRequest,
@@ -110,6 +135,7 @@ declare module "fastify" {
 declare const defaultExport: {
   createErrorEvent: typeof createErrorEvent;
   createLogBrewFastifyClient: typeof createLogBrewFastifyClient;
+  createRequestMetricEvent: typeof createRequestMetricEvent;
   createRequestEvent: typeof createRequestEvent;
   logbrewFastifyPlugin: typeof logbrewFastifyPlugin;
   logbrewPlugin: typeof logbrewPlugin;
