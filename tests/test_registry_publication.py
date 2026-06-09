@@ -67,6 +67,8 @@ class RegistryPublicationTests(unittest.TestCase):
             include_maven=False,
             include_openupm=False,
             include_go=False,
+            npm_package=[],
+            npm_versions={},
         )
 
         labels = {check.label for check in check_registry_publication.checks_for(args)}
@@ -90,6 +92,8 @@ class RegistryPublicationTests(unittest.TestCase):
             include_maven=True,
             include_openupm=True,
             include_go=True,
+            npm_package=[],
+            npm_versions={},
         )
 
         labels = {check.label for check in check_registry_publication.checks_for(args)}
@@ -100,6 +104,30 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertIn("logbrew", labels)
         self.assertIn("logbrew/sdk", labels)
         self.assertIn("co.logbrew:logbrew-sdk", labels)
+
+    def test_npm_package_filter_limits_npm_registry_checks(self) -> None:
+        args = argparse.Namespace(
+            target=["npm"],
+            include_unity_npm=False,
+            include_pypi_extras=False,
+            include_crates=False,
+            include_packagist=False,
+            include_maven=False,
+            include_openupm=False,
+            include_go=False,
+            npm_package=["@logbrew/nestjs"],
+            npm_versions={},
+        )
+
+        labels = {check.label for check in check_registry_publication.checks_for(args)}
+
+        self.assertEqual({"@logbrew/nestjs"}, labels)
+
+    def test_parse_npm_package_versions(self) -> None:
+        self.assertEqual(
+            check_registry_publication.parse_package_versions(["@logbrew/nestjs=0.1.1"]),
+            {"@logbrew/nestjs": "0.1.1"},
+        )
 
     def test_validate_check_passes_when_expected_version_is_found(self) -> None:
         check = check_registry_publication.RegistryCheck(

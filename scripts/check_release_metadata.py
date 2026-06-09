@@ -18,6 +18,7 @@ PUBLIC_LICENSE = "MIT"
 REPO_URL = "https://github.com/LogBrewCo/sdk"
 NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"
 MIT_LICENSE_URL = "https://opensource.org/license/mit"
+PUBLIC_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 
 JS_PACKAGES = {
     "js/logbrew-angular": "@logbrew/angular",
@@ -194,7 +195,13 @@ def parse_xml(path: Path, failures: list[str]) -> ET.Element | None:
         return None
 
 
-def validate_js_package(root: Path, relative_dir: str, expected_name: str, failures: list[str]) -> None:
+def validate_js_package(
+    root: Path,
+    relative_dir: str,
+    expected_name: str,
+    failures: list[str],
+    expected_version: str | None = None,
+) -> None:
     location = f"{relative_dir}/package.json"
     package_dir = require_path(root, relative_dir, failures)
     manifest_path = package_dir / "package.json"
@@ -205,7 +212,15 @@ def validate_js_package(root: Path, relative_dir: str, expected_name: str, failu
     manifest = read_json(manifest_path, failures)
     require_path(root, f"{relative_dir}/README.md", failures)
     require_equal(failures, location, "name", manifest.get("name"), expected_name)
-    require_equal(failures, location, "version", manifest.get("version"), PUBLIC_VERSION)
+    actual_version = manifest.get("version")
+    if expected_version is None:
+        require(
+            isinstance(actual_version, str) and PUBLIC_SEMVER_RE.match(actual_version) is not None,
+            failures,
+            f"{location}: expected version to be a public semver, got {actual_version!r}",
+        )
+    else:
+        require_equal(failures, location, "version", actual_version, expected_version)
     require_equal(failures, location, "license", manifest.get("license"), PUBLIC_LICENSE)
     require(manifest.get("private") is not True, failures, f"{location}: public SDK package must not be private")
     require_contains(failures, location, "description", manifest.get("description"), "LogBrew")
@@ -243,7 +258,8 @@ def path_text_from_dict(payload: dict[str, Any], *keys: str) -> Any:
     return value
 
 
-def validate_js_packages(root: Path, failures: list[str]) -> None:
+def validate_js_packages(root: Path, failures: list[str], npm_versions: dict[str, str] | None = None) -> None:
+    npm_versions = npm_versions or {}
     actual_public_packages = {
         str(path.parent.relative_to(root))
         for path in root.glob("js/logbrew-*/package.json")
@@ -257,7 +273,7 @@ def validate_js_packages(root: Path, failures: list[str]) -> None:
         set(JS_PACKAGES),
     )
     for relative_dir, expected_name in JS_PACKAGES.items():
-        validate_js_package(root, relative_dir, expected_name, failures)
+        validate_js_package(root, relative_dir, expected_name, failures, npm_versions.get(expected_name))
 
 
 def validate_rust(root: Path, failures: list[str]) -> None:
@@ -697,10 +713,10 @@ def validate_root(root: Path, failures: list[str]) -> None:
     require("MIT License" in license_text, failures, "LICENSE: expected MIT License text")
 
 
-def validate(root: Path) -> list[str]:
+def validate(root: Path, npm_versions: dict[str, str] | None = None) -> list[str]:
     failures: list[str] = []
     validate_root(root, failures)
-    validate_js_packages(root, failures)
+    validate_js_packages(root, failures, npm_versions)
     validate_rust(root, failures)
     validate_python(root, failures)
     validate_go(root, failures)
@@ -724,12 +740,40 @@ def validate(root: Path) -> list[str]:
     return failures
 
 
+def parse_package_versions(raw_versions: list[str]) -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for raw_version in raw_versions:
+        package_name, separator, version = raw_version.partition("=")
+        package_name = package_name.strip()
+        version = version.strip()
+        if not separator or not package_name or not version:
+            raise argparse.ArgumentTypeError(
+                f"expected npm package version in name=version form, got {raw_version!r}"
+            )
+        if package_name not in JS_PACKAGES.values():
+            raise argparse.ArgumentTypeError(f"unknown npm package: {package_name}")
+        versions[package_name] = version
+    return versions
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate release metadata across public SDK packages.")
     parser.add_argument("--root", default=Path(__file__).resolve().parents[1], type=Path)
+    parser.add_argument(
+        "--npm-version",
+        action="append",
+        default=[],
+        metavar="PACKAGE=VERSION",
+        help="Expected version for one npm package. May be passed more than once.",
+    )
     args = parser.parse_args()
 
-    failures = validate(args.root.resolve())
+    try:
+        npm_versions = parse_package_versions(args.npm_version)
+    except argparse.ArgumentTypeError as exc:
+        parser.error(str(exc))
+
+    failures = validate(args.root.resolve(), npm_versions)
     if failures:
         for failure in failures:
             print(failure, file=sys.stderr)

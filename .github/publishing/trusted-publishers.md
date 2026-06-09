@@ -41,6 +41,12 @@ Configure each npm package with GitHub Actions trusted publishing and allowed ac
 
 Important: npm currently supports trusted publishing only on GitHub-hosted runners, GitLab.com shared runners, or CircleCI cloud. The `npm` job intentionally uses `ubuntu-latest`; the other publish jobs use Blacksmith where compatible.
 
+For a changed JS integration release, manual `target=npm` dispatch can restrict publishing and verification to selected npm packages with `npm_packages`. Use package names or package directories, separated by commas. Leave `npm_packages` empty for the existing all-npm package behavior.
+
+```bash
+gh workflow run publish-packages.yml -R LogBrewCo/sdk -f ref=v0.1.1 -f target=npm -f dry_run=true -f include_unity_npm=false -f npm_packages=@logbrew/nestjs
+```
+
 ## PyPI
 
 Create GitHub trusted publishers for these PyPI projects:

@@ -35,6 +35,11 @@ on:
         required: true
         type: boolean
         default: false
+      npm_packages:
+        description: "Comma-separated npm package names or dirs passed to publish-packages.yml; empty means all"
+        required: false
+        type: string
+        default: ""
       include_pypi_extras:
         description: "Include FastAPI and Django PyPI packages"
         required: true
@@ -84,6 +89,7 @@ jobs:
           INPUT_TARGET: ${{ inputs.target }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
           INPUT_INCLUDE_UNITY_NPM: ${{ inputs.include_unity_npm }}
+          INPUT_NPM_PACKAGES: ${{ inputs.npm_packages }}
           INPUT_INCLUDE_PYPI_EXTRAS: ${{ inputs.include_pypi_extras }}
           INPUT_INCLUDE_CRATES_PUBLISH: ${{ inputs.include_crates_publish }}
           INPUT_INCLUDE_PACKAGIST_UPDATE: ${{ inputs.include_packagist_update }}
@@ -97,6 +103,7 @@ jobs:
             target="all"
             dry_run="false"
             include_unity_npm="false"
+            npm_packages=""
             include_pypi_extras="true"
             include_crates_publish="true"
             include_packagist_update="true"
@@ -107,6 +114,7 @@ jobs:
             target="$INPUT_TARGET"
             dry_run="$INPUT_DRY_RUN"
             include_unity_npm="$INPUT_INCLUDE_UNITY_NPM"
+            npm_packages="$INPUT_NPM_PACKAGES"
             include_pypi_extras="$INPUT_INCLUDE_PYPI_EXTRAS"
             include_crates_publish="$INPUT_INCLUDE_CRATES_PUBLISH"
             include_packagist_update="$INPUT_INCLUDE_PACKAGIST_UPDATE"
@@ -119,6 +127,7 @@ jobs:
             echo "target=$target"
             echo "dry_run=$dry_run"
             echo "include_unity_npm=$include_unity_npm"
+            echo "npm_packages=$npm_packages"
             echo "include_pypi_extras=$include_pypi_extras"
             echo "include_crates_publish=$include_crates_publish"
             echo "include_packagist_update=$include_packagist_update"
@@ -133,6 +142,7 @@ jobs:
           TARGET: ${{ steps.release.outputs.target }}
           DRY_RUN: ${{ steps.release.outputs.dry_run }}
           INCLUDE_UNITY_NPM: ${{ steps.release.outputs.include_unity_npm }}
+          NPM_PACKAGES: ${{ steps.release.outputs.npm_packages }}
           INCLUDE_PYPI_EXTRAS: ${{ steps.release.outputs.include_pypi_extras }}
           INCLUDE_CRATES_PUBLISH: ${{ steps.release.outputs.include_crates_publish }}
           INCLUDE_PACKAGIST_UPDATE: ${{ steps.release.outputs.include_packagist_update }}
@@ -146,6 +156,7 @@ jobs:
             -f target="$TARGET" \
             -f dry_run="$DRY_RUN" \
             -f include_unity_npm="$INCLUDE_UNITY_NPM" \
+            -f npm_packages="$NPM_PACKAGES" \
             -f include_pypi_extras="$INCLUDE_PYPI_EXTRAS" \
             -f include_crates_publish="$INCLUDE_CRATES_PUBLISH" \
             -f include_packagist_update="$INCLUDE_PACKAGIST_UPDATE" \
@@ -158,6 +169,7 @@ jobs:
           TARGET: ${{ steps.release.outputs.target }}
           DRY_RUN: ${{ steps.release.outputs.dry_run }}
           INCLUDE_UNITY_NPM: ${{ steps.release.outputs.include_unity_npm }}
+          NPM_PACKAGES: ${{ steps.release.outputs.npm_packages }}
           INCLUDE_PYPI_EXTRAS: ${{ steps.release.outputs.include_pypi_extras }}
           INCLUDE_CRATES_PUBLISH: ${{ steps.release.outputs.include_crates_publish }}
           INCLUDE_PACKAGIST_UPDATE: ${{ steps.release.outputs.include_packagist_update }}
@@ -170,6 +182,7 @@ jobs:
             echo "- target: \`$TARGET\`"
             echo "- dry_run: \`$DRY_RUN\`"
             echo "- include_unity_npm: \`$INCLUDE_UNITY_NPM\`"
+            echo "- npm_packages: \`$NPM_PACKAGES\`"
             echo "- include_pypi_extras: \`$INCLUDE_PYPI_EXTRAS\`"
             echo "- include_crates_publish: \`$INCLUDE_CRATES_PUBLISH\`"
             echo "- include_packagist_update: \`$INCLUDE_PACKAGIST_UPDATE\`"

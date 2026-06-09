@@ -19,6 +19,12 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_repo_release_metadata_passes(self) -> None:
         self.assertEqual(check_release_metadata.validate(ROOT), [])
 
+    def test_parse_npm_package_versions(self) -> None:
+        self.assertEqual(
+            check_release_metadata.parse_package_versions(["@logbrew/nestjs=0.1.1"]),
+            {"@logbrew/nestjs": "0.1.1"},
+        )
+
     def test_js_package_requires_commonjs_declarations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -68,6 +74,60 @@ class ReleaseMetadataTests(unittest.TestCase):
 
         self.assertTrue(any("index.d.cts" in failure for failure in failures))
         self.assertTrue(any("exports['.'].require.types" in failure for failure in failures))
+
+    def test_js_package_accepts_expected_version_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package_dir = root / "js" / "logbrew-nestjs"
+            package_dir.mkdir(parents=True)
+            (package_dir / "README.md").write_text("# LogBrew NestJS\n", encoding="utf-8")
+            (package_dir / "package.json").write_text(
+                """
+{
+  "name": "@logbrew/nestjs",
+  "version": "0.1.1",
+  "description": "NestJS interceptor helpers for the public LogBrew JavaScript SDK.",
+  "type": "module",
+  "main": "./index.cjs",
+  "types": "./index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LogBrewCo/sdk.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
+  "files": ["README.md", "examples", "index.js", "index.cjs", "index.d.ts", "index.d.cts"],
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./index.d.ts",
+        "default": "./index.js"
+      },
+      "require": {
+        "types": "./index.d.cts",
+        "default": "./index.cjs"
+      }
+    }
+  }
+}
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_js_package(
+                root,
+                "js/logbrew-nestjs",
+                "@logbrew/nestjs",
+                failures,
+                expected_version="0.1.1",
+            )
+
+        self.assertEqual(failures, [])
 
     def test_maven_metadata_requires_license_url_developer_and_scm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

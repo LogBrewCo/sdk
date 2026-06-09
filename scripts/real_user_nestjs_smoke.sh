@@ -95,9 +95,9 @@ grep -q '"@logbrew/nestjs"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
 npm ls @logbrew/sdk @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs >/dev/null
 npm explain @logbrew/nestjs > "$tmp_dir/npm-explain-nestjs.txt"
-grep -q '@logbrew/nestjs@0.1.0' "$tmp_dir/npm-explain-nestjs.txt"
+grep -q '@logbrew/nestjs@0.1.1' "$tmp_dir/npm-explain-nestjs.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/nestjs@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q '@logbrew/nestjs@0.1.1' "$tmp_dir/npm-list-depth0.txt"
 grep -q '@logbrew/sdk@0.1.0' "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'
@@ -143,7 +143,7 @@ const metricTransport = RecordingTransport.alwaysAccept();
 const explicitClient = createLogBrewNestClient({
   apiKey: "LOGBREW_API_KEY",
   sdkName: "nestjs-smoke-explicit",
-  sdkVersion: "0.1.0"
+  sdkVersion: "0.1.1"
 });
 if (explicitClient.pendingEvents() !== 0) {
   throw new Error("expected empty explicit client");
@@ -172,7 +172,7 @@ manualApp.useGlobalInterceptors(new LogBrewInterceptor({
   captureRequests: false,
   maxRetries: 1,
   sdkName: "nestjs-smoke-app",
-  sdkVersion: "0.1.0",
+  sdkVersion: "0.1.1",
   transport: requestTransport
 }));
 await manualApp.listen(0, "127.0.0.1");
@@ -215,7 +215,7 @@ autoApp.useGlobalInterceptors(new LogBrewInterceptor({
     });
   },
   sdkName: "nestjs-auto-smoke",
-  sdkVersion: "0.1.0",
+  sdkVersion: "0.1.1",
   transport({ request }) {
     return request.url?.startsWith("/fail") ? errorTransport : autoTransport;
   }
@@ -274,7 +274,7 @@ traceApp.useGlobalInterceptors(new LogBrewInterceptor({
     return () => values.shift() ?? 119;
   })(),
   sdkName: "nestjs-trace-smoke",
-  sdkVersion: "0.1.0",
+  sdkVersion: "0.1.1",
   spanIdFactory: () => "b7ad6b7169203331",
   transport: traceTransport
 }));
@@ -338,7 +338,7 @@ metricsApp.useGlobalInterceptors(new LogBrewInterceptor({
     return () => values.shift() ?? 137;
   })(),
   sdkName: "nestjs-metric-smoke",
-  sdkVersion: "0.1.0",
+  sdkVersion: "0.1.1",
   transport: metricTransport
 }));
 await metricsApp.listen(0, "127.0.0.1");
@@ -496,7 +496,7 @@ import {
 const client = createLogBrewNestClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "typed-nestjs-smoke",
-  sdkVersion: "0.1.0"
+  sdkVersion: "0.1.1"
 });
 
 @Controller()

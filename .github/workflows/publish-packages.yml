@@ -32,6 +32,11 @@ on:
         required: true
         type: boolean
         default: false
+      npm_packages:
+        description: "Comma-separated npm package names or dirs to publish; empty publishes all npm packages"
+        required: false
+        type: string
+        default: ""
       include_pypi_extras:
         description: "Publish FastAPI/Django PyPI packages after their publishers are configured"
         required: true
@@ -62,7 +67,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: publish-packages-${{ inputs.ref }}-${{ inputs.target }}
+  group: publish-packages-${{ inputs.ref }}-${{ inputs.target }}-${{ inputs.npm_packages }}
   cancel-in-progress: false
 
 jobs:
@@ -77,6 +82,7 @@ jobs:
     env:
       DRY_RUN: ${{ inputs.dry_run }}
       INCLUDE_UNITY_NPM: ${{ inputs.include_unity_npm }}
+      NPM_PACKAGES: ${{ inputs.npm_packages }}
     steps:
       - name: Check out release ref
         uses: actions/checkout@v6
@@ -91,10 +97,8 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
 
-      - name: Verify publish metadata
-        run: python3 scripts/check_release_metadata.py
-
       - name: Publish npm packages
+        id: npm-packages
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -114,9 +118,70 @@ jobs:
             js/logbrew-next
           )
 
+          select_npm_package_dirs() {
+            local selectors="$1"
+            shift
+            local all_package_dirs=("$@")
+            local selected_package_dirs=()
+            local requested_packages=()
+
+            if [[ -z "$selectors" ]]; then
+              printf '%s\n' "${all_package_dirs[@]}"
+              return
+            fi
+
+            IFS=',' read -ra requested_packages <<< "$selectors"
+            for requested_package in "${requested_packages[@]}"; do
+              requested_package="$(printf '%s' "$requested_package" | xargs)"
+              if [[ -z "$requested_package" ]]; then
+                continue
+              fi
+              local matched="false"
+              local package_name
+              for package_dir in "${all_package_dirs[@]}"; do
+                package_name="$(node -p "require('./${package_dir}/package.json').name")"
+                if [[ "$requested_package" != "$package_dir" && "$requested_package" != "$package_name" ]]; then
+                  continue
+                fi
+                matched="true"
+                if [[ " ${selected_package_dirs[*]} " != *" ${package_dir} "* ]]; then
+                  selected_package_dirs+=("$package_dir")
+                fi
+                break
+              done
+              if [[ "$matched" != "true" ]]; then
+                echo "Unknown npm package selector: $requested_package" >&2
+                exit 1
+              fi
+            done
+
+            if [[ "${#selected_package_dirs[@]}" -eq 0 ]]; then
+              echo "npm_packages did not include any package selectors" >&2
+              exit 1
+            fi
+            printf '%s\n' "${selected_package_dirs[@]}"
+          }
+
+          mapfile -t package_dirs < <(select_npm_package_dirs "$NPM_PACKAGES" "${package_dirs[@]}")
+
           if [[ "$INCLUDE_UNITY_NPM" == "true" ]]; then
             package_dirs+=(unity/logbrew-unity)
           fi
+
+          metadata_args=()
+          selected_package_names=()
+          selected_package_versions=()
+          for package_dir in "${package_dirs[@]}"; do
+            package_name="$(node -p "require('./${package_dir}/package.json').name")"
+            package_version="$(node -p "require('./${package_dir}/package.json').version")"
+            selected_package_names+=("$package_name")
+            selected_package_versions+=("$package_name=$package_version")
+            if [[ -n "$NPM_PACKAGES" && "$package_dir" == js/logbrew-* ]]; then
+              metadata_args+=(--npm-version "$package_name=$package_version")
+            fi
+          done
+
+          python3 scripts/check_release_metadata.py "${metadata_args[@]}"
 
           for package_dir in "${package_dirs[@]}"; do
             package_name="$(node -p "require('./${package_dir}/package.json').name")"
@@ -134,12 +199,33 @@ jobs:
             (cd "$package_dir" && npm publish "${publish_args[@]}")
           done
 
+          {
+            echo "selected_packages<<EOF"
+            printf '%s\n' "${selected_package_names[@]}"
+            echo "EOF"
+            echo "selected_package_versions<<EOF"
+            printf '%s\n' "${selected_package_versions[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Verify public npm packages
         if: ${{ ! inputs.dry_run }}
         shell: bash
         run: |
           set -Eeuo pipefail
           verify_args=(--target npm)
+
+          while IFS= read -r package_name; do
+            if [[ -n "$package_name" && "$package_name" != "co.logbrew.unity" ]]; then
+              verify_args+=(--npm-package "$package_name")
+            fi
+          done <<< "${{ steps.npm-packages.outputs.selected_packages }}"
+          while IFS= read -r package_version; do
+            if [[ -n "$package_version" && "$package_version" != co.logbrew.unity=* ]]; then
+              verify_args+=(--npm-version "$package_version")
+            fi
+          done <<< "${{ steps.npm-packages.outputs.selected_package_versions }}"
+
           if [[ "$INCLUDE_UNITY_NPM" == "true" ]]; then
             verify_args+=(--include-unity-npm)
           fi

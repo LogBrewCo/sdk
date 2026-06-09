@@ -250,7 +250,8 @@ def checks_for(args: argparse.Namespace) -> list[RegistryCheck]:
 
     checks: list[RegistryCheck] = []
     if "npm" in requested:
-        checks.extend(npm_check(package_name) for package_name in NPM_PACKAGES)
+        npm_packages = tuple(args.npm_package) if args.npm_package else NPM_PACKAGES
+        checks.extend(npm_check(package_name) for package_name in npm_packages)
         if args.include_unity_npm:
             checks.append(npm_check("co.logbrew.unity"))
     if "pypi" in requested:
@@ -376,12 +377,28 @@ def validate_go_module(version: str) -> list[str]:
 
 def validate(args: argparse.Namespace) -> list[str]:
     failures: list[str] = []
-    expected = expected_versions(args.version)
     for check in checks_for(args):
-        failures.extend(validate_check(check, expected, args.timeout, args.retries, args.retry_delay))
+        version = args.npm_versions.get(check.label, args.version)
+        failures.extend(validate_check(check, expected_versions(version), args.timeout, args.retries, args.retry_delay))
     if "go" in args.target or ("all" in args.target and args.include_go):
         failures.extend(validate_go_module(args.version))
     return failures
+
+
+def parse_package_versions(raw_versions: list[str]) -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for raw_version in raw_versions:
+        package_name, separator, version = raw_version.partition("=")
+        package_name = package_name.strip()
+        version = version.strip()
+        if not separator or not package_name or not version:
+            raise argparse.ArgumentTypeError(
+                f"expected npm package version in name=version form, got {raw_version!r}"
+            )
+        if package_name not in NPM_PACKAGES and package_name != "co.logbrew.unity":
+            raise argparse.ArgumentTypeError(f"unknown npm package: {package_name}")
+        versions[package_name] = version
+    return versions
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -395,6 +412,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Registry family to verify. May be passed more than once.",
     )
     parser.add_argument("--include-unity-npm", action="store_true")
+    parser.add_argument(
+        "--npm-package",
+        action="append",
+        choices=NPM_PACKAGES,
+        default=[],
+        help="Restrict npm registry verification to one package. May be passed more than once.",
+    )
+    parser.add_argument(
+        "--npm-version",
+        action="append",
+        default=[],
+        metavar="PACKAGE=VERSION",
+        help="Expected version for one npm package. May be passed more than once.",
+    )
     parser.add_argument("--include-pypi-extras", action="store_true")
     parser.add_argument("--include-crates", action="store_true")
     parser.add_argument("--include-packagist", action="store_true")
@@ -407,6 +438,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if not args.target:
         args.target = ["all"]
+    if args.npm_package and "npm" not in args.target and "all" not in args.target:
+        parser.error("--npm-package requires --target npm or --target all")
+    try:
+        args.npm_versions = parse_package_versions(args.npm_version)
+    except argparse.ArgumentTypeError as exc:
+        parser.error(str(exc))
     return args
 
 

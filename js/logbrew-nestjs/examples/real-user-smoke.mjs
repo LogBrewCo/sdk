@@ -16,7 +16,7 @@ const errorTransport = RecordingTransport.alwaysAccept();
 const explicitClient = createLogBrewNestClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "nestjs-smoke-explicit",
-  sdkVersion: "0.1.0"
+  sdkVersion: "0.1.1"
 });
 if (explicitClient.pendingEvents() !== 0) {
   throw new Error("expected empty explicit client");
@@ -41,7 +41,7 @@ manualApp.useGlobalInterceptors(new LogBrewInterceptor({
   captureRequests: false,
   maxRetries: 1,
   sdkName: "nestjs-smoke-app",
-  sdkVersion: "0.1.0",
+  sdkVersion: "0.1.1",
   transport: requestTransport
 }));
 await manualApp.listen(0, "127.0.0.1");
@@ -83,7 +83,7 @@ autoApp.useGlobalInterceptors(new LogBrewInterceptor({
     });
   },
   sdkName: "nestjs-auto-smoke",
-  sdkVersion: "0.1.0",
+  sdkVersion: "0.1.1",
   transport({ request }) {
     return request.url?.startsWith("/fail") ? errorTransport : autoTransport;
   }
