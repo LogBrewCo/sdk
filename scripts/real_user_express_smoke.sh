@@ -53,6 +53,9 @@ grep -q 'logbrewMiddleware' "$tmp_dir/express-readme.md"
 grep -q 'logbrewErrorHandler' "$tmp_dir/express-readme.md"
 grep -q 'traceparent' "$tmp_dir/express-readme.md"
 grep -q 'spanIdFactory' "$tmp_dir/express-readme.md"
+grep -q 'captureRequestMetrics' "$tmp_dir/express-readme.md"
+grep -q 'http.server.duration' "$tmp_dir/express-readme.md"
+grep -q 'low-cardinality' "$tmp_dir/express-readme.md"
 
 app_dir="$tmp_dir/express-smoke-app"
 mkdir -p "$app_dir"
@@ -102,12 +105,14 @@ import {
   createErrorEvent,
   createLogBrewExpressClient,
   createRequestEvent,
+  createRequestMetricEvent,
   logbrewErrorHandler,
   logbrewMiddleware
 } from "@logbrew/express";
 
 const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
 const autoTransport = RecordingTransport.alwaysAccept();
+const metricOnlyTransport = RecordingTransport.alwaysAccept();
 const errorTransport = RecordingTransport.alwaysAccept();
 const app = express();
 
@@ -140,8 +145,10 @@ app.use("/auto", logbrewMiddleware({
   sdkName: "express-auto-smoke",
   sdkVersion: "0.1.0",
   transport: autoTransport,
+  captureRequestMetrics: true,
   now: () => "2026-06-02T10:00:06Z",
   nowMs: () => 100,
+  metricIdFactory: () => "evt_express_metric_001",
   requestEvent(req, res, { durationMs }) {
     return createRequestEvent(req, res, {
       now: () => "2026-06-02T10:00:06Z",
@@ -153,6 +160,22 @@ app.use("/auto", logbrewMiddleware({
 }));
 
 app.get("/auto", (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.use("/metrics-only", logbrewMiddleware({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "express-metric-only-smoke",
+  sdkVersion: "0.1.0",
+  transport: metricOnlyTransport,
+  captureRequests: false,
+  captureRequestMetrics: true,
+  metricIdFactory: () => "evt_express_metric_only_001",
+  now: () => "2026-06-02T10:00:06Z",
+  nowMs: () => 150
+}));
+
+app.get("/metrics-only/:id", (_req, res) => {
   res.json({ ok: true });
 });
 
@@ -184,6 +207,9 @@ const autoResponse = await fetch(`http://127.0.0.1:${port}/auto?token=secret`, {
 });
 await autoResponse.json();
 await waitFor(() => autoTransport.sentBodies.length === 1);
+const metricOnlyResponse = await fetch(`http://127.0.0.1:${port}/metrics-only/123?token=secret`);
+await metricOnlyResponse.json();
+await waitFor(() => metricOnlyTransport.sentBodies.length === 1);
 const failResponse = await fetch(`http://127.0.0.1:${port}/fail?token=secret`);
 await failResponse.json();
 await waitFor(() => errorTransport.sentBodies.length === 1);
@@ -210,6 +236,28 @@ if (autoPayload.events[0].attributes.metadata.framework !== "express") {
 if (autoPayload.events[0].attributes.metadata.path !== "/auto") {
   throw new Error(`request capture should omit query text: ${autoTransport.lastBody()}`);
 }
+if (autoPayload.events[1].type !== "metric" || autoPayload.events[1].id !== "evt_express_metric_001") {
+  throw new Error(`unexpected request metric payload: ${autoTransport.lastBody()}`);
+}
+if (autoPayload.events[1].attributes.name !== "http.server.duration") {
+  throw new Error(`unexpected request metric name: ${autoTransport.lastBody()}`);
+}
+if (autoPayload.events[1].attributes.kind !== "histogram" || autoPayload.events[1].attributes.unit !== "ms") {
+  throw new Error(`unexpected request metric shape: ${autoTransport.lastBody()}`);
+}
+if (autoPayload.events[1].attributes.metadata.routeTemplate !== "/auto") {
+  throw new Error(`request metric should use route template without query text: ${autoTransport.lastBody()}`);
+}
+if (autoPayload.events[1].attributes.metadata.statusCodeClass !== "2xx") {
+  throw new Error(`request metric should include status class: ${autoTransport.lastBody()}`);
+}
+const metricOnlyPayload = JSON.parse(metricOnlyTransport.lastBody());
+if (metricOnlyPayload.events.length !== 1 || metricOnlyPayload.events[0].type !== "metric") {
+  throw new Error(`metrics-only capture should send one metric event: ${metricOnlyTransport.lastBody()}`);
+}
+if (metricOnlyPayload.events[0].attributes.metadata.routeTemplate !== "/metrics-only/:id") {
+  throw new Error(`metrics-only capture should prefer Express route templates: ${metricOnlyTransport.lastBody()}`);
+}
 const errorPayload = JSON.parse(errorTransport.lastBody());
 if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "evt_express_error_001") {
   throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
@@ -224,6 +272,18 @@ const errorPreview = createErrorEvent(new Error("manual failure"), { method: "PO
 if (errorPreview.attributes.title !== "POST /manual failed") {
   throw new Error(`unexpected error preview: ${JSON.stringify(errorPreview)}`);
 }
+const metricPreview = createRequestMetricEvent(
+  { method: "POST", originalUrl: "/orders/123?token=secret" },
+  { statusCode: 201 },
+  {
+    now: () => "2026-06-02T10:00:09Z",
+    durationMs: 42,
+    idFactory: () => "evt_express_metric_preview"
+  }
+);
+if (metricPreview.attributes.metadata.routeTemplate !== "/orders/123") {
+  throw new Error(`unexpected metric preview route: ${JSON.stringify(metricPreview)}`);
+}
 
 console.log(okText);
 console.error(JSON.stringify({
@@ -231,6 +291,7 @@ console.error(JSON.stringify({
   status: okResponse.status,
   attempts: requestTransport.sentBodies.length,
   autoCaptured: autoPayload.events[0].attributes.name,
+  metricCaptured: autoPayload.events[1].attributes.name,
   autoTraceId: autoPayload.events[0].attributes.traceId,
   errorStatus: failResponse.status,
   errorCaptured: errorPayload.events[0].attributes.title,
@@ -290,6 +351,7 @@ grep -q '"ok":true' "$tmp_dir/express-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/express-smoke.stderr.json"
 grep -q '"errorStatus":500' "$tmp_dir/express-smoke.stderr.json"
 grep -q 'GET /auto' "$tmp_dir/express-smoke.stderr.json"
+grep -q 'http.server.duration' "$tmp_dir/express-smoke.stderr.json"
 grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/express-smoke.stderr.json"
 grep -q 'GET /fail failed' "$tmp_dir/express-smoke.stderr.json"
 
@@ -299,6 +361,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   createLogBrewExpressClient,
   createRequestEvent,
+  createRequestMetricEvent,
   logbrewErrorHandler,
   logbrewMiddleware
 } from "@logbrew/express";
@@ -313,6 +376,8 @@ const client = createLogBrewExpressClient({
 app.use(logbrewMiddleware({
   client,
   transport: RecordingTransport.alwaysAccept(),
+  captureRequestMetrics: true,
+  metricIdFactory: () => "evt_typed_metric_001",
   requestEvent(req, res, { durationMs }) {
     const event = createRequestEvent(req, res, {
       durationMs,
@@ -322,6 +387,14 @@ app.use(logbrewMiddleware({
     if (event.type === "span") {
       event.attributes.parentSpanId?.toUpperCase();
     }
+    return event;
+  },
+  requestMetricEvent(req, res, { durationMs }) {
+    const event = createRequestMetricEvent(req, res, {
+      durationMs,
+      now: () => "2026-06-02T10:00:06Z"
+    });
+    event.attributes.metadata?.routeTemplate?.toString();
     return event;
   }
 }));

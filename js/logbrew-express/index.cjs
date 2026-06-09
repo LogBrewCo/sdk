@@ -34,7 +34,7 @@ function logbrewMiddleware(options = {}) {
 
     req.logbrew = createRequestContext(client, transport);
 
-    if (options.captureRequests !== false) {
+    if (options.captureRequests !== false || options.captureRequestMetrics === true) {
       res.once("finish", () => {
         void captureRequestFinish(options, { req, res, client, transport, startedAt });
       });
@@ -131,6 +131,35 @@ function createErrorEvent(error, req, {
   };
 }
 
+function createRequestMetricEvent(req, res, {
+  now = () => new Date().toISOString(),
+  durationMs = 0,
+  idFactory = defaultRequestMetricEventId,
+  metricName = "http.server.duration"
+} = {}) {
+  const method = req.method ?? "GET";
+  const routeTemplate = getRouteTemplate(req);
+  const statusCode = Number(res.statusCode ?? 0);
+  return {
+    id: idFactory(req, res),
+    timestamp: now(),
+    attributes: {
+      name: metricName,
+      kind: "histogram",
+      value: Math.max(0, Number(durationMs)),
+      unit: "ms",
+      temporality: "delta",
+      metadata: {
+        framework: "express",
+        method,
+        routeTemplate,
+        statusCode,
+        statusCodeClass: statusCodeClass(statusCode)
+      }
+    }
+  };
+}
+
 function createRequestContext(client, transport) {
   return {
     client,
@@ -145,10 +174,22 @@ function createRequestContext(client, transport) {
 async function captureRequestFinish(options, { req, res, client, transport, startedAt }) {
   try {
     const durationMs = Math.max(0, Math.round(nowMs(options) - startedAt));
-    const event = typeof options.requestEvent === "function"
-      ? options.requestEvent(req, res, { client, durationMs })
-      : createRequestEvent(req, res, { ...options, durationMs });
-    captureRequestEvent(client, event);
+    if (options.captureRequests !== false) {
+      const event = typeof options.requestEvent === "function"
+        ? options.requestEvent(req, res, { client, durationMs })
+        : createRequestEvent(req, res, { ...options, durationMs });
+      captureRequestEvent(client, event);
+    }
+    if (options.captureRequestMetrics === true) {
+      const metricEvent = typeof options.requestMetricEvent === "function"
+        ? options.requestMetricEvent(req, res, { client, durationMs })
+        : createRequestMetricEvent(req, res, {
+          ...options,
+          durationMs,
+          idFactory: options.metricIdFactory
+        });
+      captureRequestMetricEvent(client, metricEvent);
+    }
     const response = await client.shutdown(transport);
     await notifyFlush(options, response, { req, res, client });
   } catch (error) {
@@ -198,8 +239,24 @@ function defaultErrorEventId(error, req) {
   return `evt_express_error_${slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${message}`)}`;
 }
 
+function defaultRequestMetricEventId(req, res) {
+  return `evt_express_metric_${slugify(`${req.method ?? "GET"}_${getRouteTemplate(req)}_${res.statusCode ?? 0}`)}`;
+}
+
 function getRequestPath(req) {
   return pathOnly(req.originalUrl ?? req.url ?? "/");
+}
+
+function getRouteTemplate(req) {
+  const routePath = req.route?.path;
+  if (typeof routePath === "string") {
+    const baseUrl = req.baseUrl ?? "";
+    if (baseUrl && routePath.startsWith(baseUrl)) {
+      return pathOnly(routePath);
+    }
+    return pathOnly(`${baseUrl}${routePath}`);
+  }
+  return getRequestPath(req);
 }
 
 function pathOnly(value) {
@@ -265,6 +322,17 @@ function captureRequestEvent(client, event) {
   client.log(event.id, event.timestamp, event.attributes);
 }
 
+function captureRequestMetricEvent(client, event) {
+  client.metric(event.id, event.timestamp, event.attributes);
+}
+
+function statusCodeClass(statusCode) {
+  if (!Number.isFinite(statusCode) || statusCode <= 0) {
+    return "unknown";
+  }
+  return `${Math.floor(statusCode / 100)}xx`;
+}
+
 function randomHex(byteLength) {
   const bytes = new Uint8Array(byteLength);
   if (typeof globalThis.crypto?.getRandomValues === "function") {
@@ -304,6 +372,7 @@ function slugify(value) {
 module.exports = {
   createErrorEvent,
   createLogBrewExpressClient,
+  createRequestMetricEvent,
   createRequestEvent,
   logbrewErrorHandler,
   logbrewMiddleware

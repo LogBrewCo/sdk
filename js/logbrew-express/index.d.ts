@@ -3,6 +3,7 @@ import type {
   IssueAttributes,
   LogAttributes,
   LogBrewClient,
+  MetricAttributes,
   SpanAttributes,
   Transport,
   TransportResponse
@@ -56,19 +57,33 @@ export type LogBrewErrorEvent = {
   attributes: IssueAttributes;
 };
 
+export type LogBrewRequestMetricEvent = {
+  id: string;
+  timestamp: string;
+  attributes: MetricAttributes;
+};
+
 export type LogBrewExpressOptions = CreateLogBrewExpressClientConfig & {
   client?: LogBrewClient | LogBrewClientFactory;
   transport?: Transport | LogBrewTransportFactory;
   captureRequests?: boolean;
+  captureRequestMetrics?: boolean;
   now?: () => string;
   nowMs?: () => number;
   idFactory?: (req: Request, res: Response) => string;
   spanIdFactory?: (req: Request, res: Response) => string;
+  metricName?: string;
+  metricIdFactory?: (req: Request, res: Response) => string;
   requestEvent?: (
     req: Request,
     res: Response,
     context: { client: LogBrewClient; durationMs: number }
   ) => LogBrewRequestEvent;
+  requestMetricEvent?: (
+    req: Request,
+    res: Response,
+    context: { client: LogBrewClient; durationMs: number }
+  ) => LogBrewRequestMetricEvent;
   errorEvent?: (error: unknown, context: LogBrewExpressRuntimeContext) => LogBrewErrorEvent;
   onFlush?: (response: TransportResponse, context: LogBrewExpressRuntimeContext) => void | Promise<void>;
   onCaptureError?: (error: unknown, context: LogBrewExpressRuntimeContext) => void | Promise<void>;
@@ -95,6 +110,16 @@ export declare function createErrorEvent(
     idFactory?: (error: unknown, req: Request) => string;
   }
 ): LogBrewErrorEvent;
+export declare function createRequestMetricEvent(
+  req: Request,
+  res: Response,
+  options?: {
+    now?: () => string;
+    durationMs?: number;
+    idFactory?: (req: Request, res: Response) => string;
+    metricName?: string;
+  }
+): LogBrewRequestMetricEvent;
 
 declare global {
   namespace Express {
@@ -107,6 +132,7 @@ declare global {
 declare const defaultExport: {
   createErrorEvent: typeof createErrorEvent;
   createLogBrewExpressClient: typeof createLogBrewExpressClient;
+  createRequestMetricEvent: typeof createRequestMetricEvent;
   createRequestEvent: typeof createRequestEvent;
   logbrewErrorHandler: typeof logbrewErrorHandler;
   logbrewMiddleware: typeof logbrewMiddleware;
