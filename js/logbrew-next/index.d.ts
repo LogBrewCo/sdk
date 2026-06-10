@@ -2,6 +2,7 @@ import type {
   IssueAttributes,
   LogAttributes,
   LogBrewClient,
+  MetricAttributes,
   SpanAttributes,
   Transport,
   TransportResponse
@@ -74,22 +75,37 @@ export type LogBrewRouteSpanRequestEvent = {
 export type LogBrewRouteRequestEvent =
   LogBrewRouteLogRequestEvent | LogBrewRouteSpanRequestEvent;
 
+export type LogBrewRouteMetricEvent = {
+  id: string;
+  timestamp: string;
+  attributes: MetricAttributes;
+};
+
 export type LogBrewRouteOptions<TContext = LogBrewRouteContext> = CreateLogBrewNextClientConfig & {
   client?: LogBrewClient | LogBrewClientFactory<TContext>;
   transport?: Transport | LogBrewTransportFactory<TContext>;
   captureRequests?: boolean;
+  captureRequestMetrics?: boolean;
   captureErrors?: boolean;
   includeSearchParams?: boolean;
+  metricName?: string;
+  routeTemplate?: string | ((request: Request, context: TContext) => string | null | undefined);
   now?: () => string;
   nowMs?: () => number;
   idFactory?: (request: Request) => string;
   requestIdFactory?: (request: Request, response: Response) => string;
+  metricIdFactory?: (request: Request, response: Response) => string;
   spanIdFactory?: (request: Request, response: Response) => string;
   requestEvent?: (
     request: Request,
     response: Response,
     context: LogBrewRouteRequestRuntimeContext<TContext>
   ) => LogBrewRouteRequestEvent;
+  requestMetricEvent?: (
+    request: Request,
+    response: Response,
+    context: LogBrewRouteRequestRuntimeContext<TContext>
+  ) => LogBrewRouteMetricEvent;
   errorEvent?: (
     error: unknown,
     context: LogBrewRouteRuntimeContext<TContext>
@@ -124,6 +140,18 @@ export declare function createRouteRequestEvent(
   }
 ): LogBrewRouteRequestEvent;
 
+export declare function createRequestMetricEvent(
+  request: Request,
+  response: Response,
+  options?: {
+    now?: () => string;
+    durationMs?: number;
+    idFactory?: (request: Request, response: Response) => string;
+    metricName?: string;
+    routeTemplate?: string;
+  }
+): LogBrewRouteMetricEvent;
+
 export declare function createRouteErrorEvent(
   error: unknown,
   request: Request,
@@ -136,6 +164,7 @@ export declare function createRouteErrorEvent(
 
 declare const defaultExport: {
   createLogBrewNextClient: typeof createLogBrewNextClient;
+  createRequestMetricEvent: typeof createRequestMetricEvent;
   createRouteErrorEvent: typeof createRouteErrorEvent;
   createRouteRequestEvent: typeof createRouteRequestEvent;
   withLogBrewRouteHandler: typeof withLogBrewRouteHandler;

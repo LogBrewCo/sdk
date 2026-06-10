@@ -44,6 +44,18 @@ By default, successful Route Handler responses are captured after your handler r
 
 Automatic route error events record the method and pathname, but omit query strings by default. Pass `includeSearchParams: true` only when query capture is intentional and safe for the route.
 
+Request metrics are opt-in. Enable `captureRequestMetrics` when you want the route wrapper to emit an explicit `http.server.duration` histogram for completed App Router requests:
+
+```js
+export const GET = withLogBrewRouteHandler(handler, {
+  serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
+  captureRequestMetrics: true,
+  routeTemplate: "/api/orders/[id]"
+});
+```
+
+The metric includes primitive, low-cardinality metadata: `framework`, `method`, `routeTemplate`, `statusCode`, and `statusCodeClass`. Next.js Route Handlers expose standard `Request` and `Response` objects, so pass a stable `routeTemplate` when a route contains dynamic segments. Query strings and hashes are omitted. Avoid user IDs, request payloads, headers, or free-form text in custom metric metadata. Use `metricName`, `metricIdFactory`, or `requestMetricEvent` when your app needs a different naming or metadata policy. Set `captureRequests: false` with `captureRequestMetrics: true` when you only want the duration metric and not the request log/span.
+
 The wrapper expects App Router Route Handlers that return standard `Response` objects. It does not call `NextResponse.next()` and does not use the deprecated `middleware` filename. For Next.js 16 request interception, use the framework's `proxy.js` convention separately and keep LogBrew event creation in server-side route code.
 
 ## Client Helper

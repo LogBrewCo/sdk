@@ -56,6 +56,9 @@ grep -q 'traceparent' "$tmp_dir/next-readme.md"
 grep -q 'captureRequests: false' "$tmp_dir/next-readme.md"
 grep -q 'spanIdFactory' "$tmp_dir/next-readme.md"
 grep -q 'onCaptureError' "$tmp_dir/next-readme.md"
+grep -q 'captureRequestMetrics' "$tmp_dir/next-readme.md"
+grep -q 'http.server.duration' "$tmp_dir/next-readme.md"
+grep -q 'routeTemplate' "$tmp_dir/next-readme.md"
 
 app_dir="$tmp_dir/next-smoke-app"
 mkdir -p "$app_dir/app/api/logbrew"
@@ -202,6 +205,7 @@ cat > capture-check.mjs <<'EOF'
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   createLogBrewNextClient,
+  createRequestMetricEvent,
   createRouteRequestEvent,
   withLogBrewRouteHandler
 } from "@logbrew/next";
@@ -265,6 +269,74 @@ if ("search" in event.attributes.metadata) {
   throw new Error(`request capture should omit query text: ${transport.lastBody()}`);
 }
 
+const metricTransport = RecordingTransport.alwaysAccept();
+const metricClient = createLogBrewNextClient({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "next-metric-smoke",
+  sdkVersion: "0.1.0"
+});
+const METRIC = withLogBrewRouteHandler(
+  async () => new Response("ok", { status: 201 }),
+  {
+    client: metricClient,
+    captureRequests: false,
+    captureRequestMetrics: true,
+    metricIdFactory: () => "evt_next_metric_001",
+    now: () => "2026-06-02T10:00:08Z",
+    nowMs: (() => {
+      const values = [200, 223];
+      return () => values.shift() ?? 223;
+    })(),
+    routeTemplate: () => "https://example.com/api/orders/[id]?debug=true#hash",
+    transport: metricTransport
+  }
+);
+const metricResponse = await METRIC(new Request("https://example.com/api/orders/123?token=secret", {
+  method: "POST"
+}), {});
+if (metricResponse.status !== 201) {
+  throw new Error(`unexpected metric response status: ${metricResponse.status}`);
+}
+const metricPayload = JSON.parse(metricTransport.lastBody());
+if (metricPayload.events.length !== 1) {
+  throw new Error(`expected one metric capture event: ${metricTransport.lastBody()}`);
+}
+const metricEvent = metricPayload.events[0];
+if (metricEvent.type !== "metric" || metricEvent.id !== "evt_next_metric_001") {
+  throw new Error(`unexpected metric event identity: ${metricTransport.lastBody()}`);
+}
+if (metricEvent.attributes.name !== "http.server.duration" || metricEvent.attributes.kind !== "histogram") {
+  throw new Error(`unexpected metric shape: ${metricTransport.lastBody()}`);
+}
+if (metricEvent.attributes.value !== 23 || metricEvent.attributes.unit !== "ms") {
+  throw new Error(`unexpected metric value: ${metricTransport.lastBody()}`);
+}
+if (metricEvent.attributes.metadata.routeTemplate !== "/api/orders/[id]") {
+  throw new Error(`route template should omit query/hash: ${metricTransport.lastBody()}`);
+}
+if (metricEvent.attributes.metadata.statusCode !== 201 || metricEvent.attributes.metadata.statusCodeClass !== "2xx") {
+  throw new Error(`unexpected metric status metadata: ${metricTransport.lastBody()}`);
+}
+if ("search" in metricEvent.attributes.metadata) {
+  throw new Error(`metric metadata should omit query text: ${metricTransport.lastBody()}`);
+}
+
+const metricPreview = createRequestMetricEvent(
+  new Request("https://example.com/api/direct/123?debug=true", { method: "PATCH" }),
+  new Response(null, { status: 503 }),
+  {
+    durationMs: 42.4,
+    idFactory: () => "evt_next_metric_preview",
+    routeTemplate: "https://example.com/api/direct/[id]?debug=true#hash"
+  }
+);
+if (metricPreview.attributes.metadata.routeTemplate !== "/api/direct/[id]") {
+  throw new Error(`preview metric should sanitize route template: ${JSON.stringify(metricPreview)}`);
+}
+if (metricPreview.attributes.metadata.statusCodeClass !== "5xx") {
+  throw new Error(`preview metric should classify status: ${JSON.stringify(metricPreview)}`);
+}
+
 let spanIdCalls = 0;
 const malformed = createRouteRequestEvent(
   new Request("https://example.com/api/bad", {
@@ -315,6 +387,8 @@ console.error(JSON.stringify({
   ok: true,
   requestCaptured: event.attributes.name,
   requestTraceId: event.attributes.traceId,
+  metricCaptured: metricEvent.attributes.name,
+  metricRouteTemplate: metricEvent.attributes.metadata.routeTemplate,
   fallback: malformed.attributes.message
 }));
 EOF
@@ -322,15 +396,19 @@ node capture-check.mjs 2> "$tmp_dir/capture-check.stderr.json"
 grep -q '"ok":true' "$tmp_dir/capture-check.stderr.json"
 grep -q 'POST /api/logbrew' "$tmp_dir/capture-check.stderr.json"
 grep -q '4bf92f3577b34da6a3ce929d0e0e4736' "$tmp_dir/capture-check.stderr.json"
+grep -q 'http.server.duration' "$tmp_dir/capture-check.stderr.json"
+grep -q '/api/orders/\[id\]' "$tmp_dir/capture-check.stderr.json"
 grep -q 'GET /api/bad 200' "$tmp_dir/capture-check.stderr.json"
 
 cat > consumer.ts <<'EOF'
 import { RecordingTransport, type TransportResponse } from "@logbrew/sdk";
 import {
+  createRequestMetricEvent,
   createRouteRequestEvent,
   createLogBrewNextClient,
   withLogBrewRouteHandler,
   type LogBrewRouteHelpers,
+  type LogBrewRouteMetricEvent,
   type LogBrewRouteRequestEvent
 } from "@logbrew/next";
 
@@ -370,6 +448,17 @@ export const POST = withLogBrewRouteHandler(
     client: typedClient,
     includeSearchParams: false,
     transport,
+    captureRequestMetrics: true,
+    routeTemplate: (_request, context) => context.params ? "/api/typed/[id]" : "/api/typed",
+    metricIdFactory: () => "evt_typed_next_metric_001",
+    requestMetricEvent(request, response, { durationMs }) {
+      const event: LogBrewRouteMetricEvent = createRequestMetricEvent(request, response, {
+        durationMs,
+        idFactory: () => "evt_typed_next_metric_custom",
+        routeTemplate: "/api/typed/[id]"
+      });
+      return event;
+    },
     onFlush(response) {
       lastFlush = response;
     },
@@ -456,7 +545,7 @@ grep -q 'GET /api/failure failed' "$tmp_dir/error-check.json"
 grep -q '"defaultSearchCaptured":false' "$tmp_dir/error-check.json"
 grep -q '"optInSearch":"?token=secret"' "$tmp_dir/error-check.json"
 
-node -e 'const next = require("@logbrew/next"); if (typeof next.withLogBrewRouteHandler !== "function" || typeof next.createRouteRequestEvent !== "function") process.exit(1)'
+node -e 'const next = require("@logbrew/next"); if (typeof next.withLogBrewRouteHandler !== "function" || typeof next.createRouteRequestEvent !== "function" || typeof next.createRequestMetricEvent !== "function") process.exit(1)'
 
 node node_modules/@logbrew/next/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/next/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"

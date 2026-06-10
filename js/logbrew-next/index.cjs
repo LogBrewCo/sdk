@@ -117,6 +117,36 @@ function createRouteErrorEvent(error, request, {
   };
 }
 
+function createRequestMetricEvent(request, response, {
+  now = () => new Date().toISOString(),
+  durationMs = 0,
+  idFactory = defaultRouteMetricId,
+  metricName = "http.server.duration",
+  routeTemplate
+} = {}) {
+  const method = request?.method ?? "GET";
+  const resolvedRouteTemplate = routeTemplateOnly(routeTemplate ?? safeUrl(request).pathname);
+  const statusCode = Number(response?.status ?? 0);
+  return {
+    id: idFactory(request, response, resolvedRouteTemplate),
+    timestamp: now(),
+    attributes: {
+      name: metricName,
+      kind: "histogram",
+      value: Math.max(0, Number(durationMs)),
+      unit: "ms",
+      temporality: "delta",
+      metadata: {
+        framework: "nextjs",
+        method,
+        routeTemplate: resolvedRouteTemplate,
+        statusCode,
+        statusCodeClass: statusCodeClass(statusCode)
+      }
+    }
+  };
+}
+
 function resolveClient(options, request, context) {
   if (typeof options.client === "function") {
     return options.client({ request, context });
@@ -164,8 +194,14 @@ async function notifyFailure(options, error, context) {
 
 async function captureRouteSuccess(options, { request, response, context, client, transport, startedAt }) {
   try {
+    const durationMs = (options.captureRequests !== false || options.captureRequestMetrics === true)
+      ? routeDurationMs(options, startedAt)
+      : 0;
     if (options.captureRequests !== false) {
-      recordRouteRequest(options, { request, response, context, client, startedAt });
+      recordRouteRequest(options, { request, response, context, client, durationMs });
+    }
+    if (options.captureRequestMetrics === true) {
+      recordRouteMetric(options, { request, response, context, client, durationMs });
     }
     const flushResponse = await client.shutdown(transport);
     await notifyFlush(options, flushResponse, { request, context, client });
@@ -174,8 +210,7 @@ async function captureRouteSuccess(options, { request, response, context, client
   }
 }
 
-function recordRouteRequest(options, { request, response, context, client, startedAt }) {
-  const durationMs = Math.max(0, Math.round(nowMs(options) - startedAt));
+function recordRouteRequest(options, { request, response, context, client, durationMs }) {
   const event = typeof options.requestEvent === "function"
     ? options.requestEvent(request, response, { client, context, durationMs, request, response })
     : createRouteRequestEvent(request, response, {
@@ -184,6 +219,19 @@ function recordRouteRequest(options, { request, response, context, client, start
       idFactory: options.requestIdFactory
     });
   captureRouteRequestEvent(client, event);
+}
+
+function recordRouteMetric(options, { request, response, context, client, durationMs }) {
+  const routeTemplate = resolveRouteTemplate(options, request, context);
+  const event = typeof options.requestMetricEvent === "function"
+    ? options.requestMetricEvent(request, response, { client, context, durationMs, request, response })
+    : createRequestMetricEvent(request, response, {
+      ...options,
+      durationMs,
+      idFactory: options.metricIdFactory,
+      routeTemplate
+    });
+  captureRouteMetricEvent(client, event);
 }
 
 async function recordRouteError(options, error, { request, context, client, transport }) {
@@ -210,6 +258,10 @@ function captureRouteRequestEvent(client, event) {
   client.log(event.id, event.timestamp, event.attributes);
 }
 
+function captureRouteMetricEvent(client, event) {
+  client.metric(event.id, event.timestamp, event.attributes);
+}
+
 function defaultRouteRequestId(request, response) {
   const url = safeUrl(request);
   const slug = `${request?.method ?? "GET"}-${url.pathname}-${response?.status ?? 0}`
@@ -232,6 +284,15 @@ function defaultRouteErrorId(request) {
   return `evt_next_error_${slug || "route"}`;
 }
 
+function defaultRouteMetricId(request, response, routeTemplate = safeUrl(request).pathname) {
+  const sanitizedRouteTemplate = routeTemplateOnly(routeTemplate);
+  const slug = `${request?.method ?? "GET"}-${sanitizedRouteTemplate}-${response?.status ?? 0}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return `evt_next_metric_${slug || "route"}`;
+}
+
 function safeUrl(request) {
   try {
     return new URL(request?.url ?? "http://localhost/");
@@ -246,6 +307,31 @@ function getTraceparentHeader(request) {
   }
   const value = request.headers.get("traceparent");
   return typeof value === "string" ? value : undefined;
+}
+
+function resolveRouteTemplate(options, request, context) {
+  const value = typeof options.routeTemplate === "function"
+    ? options.routeTemplate(request, context)
+    : options.routeTemplate;
+  return routeTemplateOnly(value ?? safeUrl(request).pathname);
+}
+
+function routeTemplateOnly(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return "/";
+  }
+  try {
+    return new URL(value, "http://localhost").pathname || "/";
+  } catch {
+    return value.split(/[?#]/)[0] || "/";
+  }
+}
+
+function statusCodeClass(statusCode) {
+  if (!Number.isFinite(statusCode) || statusCode <= 0) {
+    return "unknown";
+  }
+  return `${Math.floor(statusCode / 100)}xx`;
 }
 
 function createTraceparentRouteSpan(traceparent, {
@@ -286,6 +372,10 @@ function createTraceparentRouteSpan(traceparent, {
   }
 }
 
+function routeDurationMs(options, startedAt) {
+  return Math.max(0, Math.round(nowMs(options) - startedAt));
+}
+
 function nowMs(options) {
   if (typeof options.nowMs === "function") {
     return options.nowMs();
@@ -316,6 +406,7 @@ function readEnvServerApiKey() {
 
 module.exports = {
   createLogBrewNextClient,
+  createRequestMetricEvent,
   createRouteErrorEvent,
   createRouteRequestEvent,
   withLogBrewRouteHandler
