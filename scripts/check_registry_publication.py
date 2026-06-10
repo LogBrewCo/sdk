@@ -401,6 +401,16 @@ def parse_package_versions(raw_versions: list[str]) -> dict[str, str]:
     return versions
 
 
+def success_summary(args: argparse.Namespace) -> str:
+    targets = ", ".join(args.target)
+    if args.npm_versions:
+        npm_versions = ", ".join(
+            f"{package_name}@{version}" for package_name, version in sorted(args.npm_versions.items())
+        )
+        return f"public registry versions ok for {targets} at {args.version}; npm overrides: {npm_versions}"
+    return f"public registry versions ok for {targets} at {args.version}"
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Verify public registry package versions.")
     parser.add_argument("--version", default=PUBLIC_VERSION, help="Expected public package version.")
@@ -453,8 +463,7 @@ def main(argv: list[str] | None = None) -> int:
     if failures:
         print("\n".join(failures), file=sys.stderr)
         return 1
-    targets = ", ".join(args.target)
-    print(f"public registry versions ok for {targets} at {args.version}")
+    print(success_summary(args))
     return 0
 
 

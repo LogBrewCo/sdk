@@ -129,6 +129,18 @@ class RegistryPublicationTests(unittest.TestCase):
             {"@logbrew/nestjs": "0.1.1"},
         )
 
+    def test_success_summary_reports_npm_version_overrides(self) -> None:
+        args = argparse.Namespace(
+            target=["npm"],
+            version="0.1.0",
+            npm_versions={"@logbrew/nestjs": "0.1.1"},
+        )
+
+        summary = check_registry_publication.success_summary(args)
+
+        self.assertIn("public registry versions ok for npm at 0.1.0", summary)
+        self.assertIn("@logbrew/nestjs@0.1.1", summary)
+
     def test_validate_check_passes_when_expected_version_is_found(self) -> None:
         check = check_registry_publication.RegistryCheck(
             "example",
