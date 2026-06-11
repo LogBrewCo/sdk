@@ -257,12 +257,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           version="$(
-            python - <<'PY'
-import tomllib
-
-with open("python/logbrew_py/pyproject.toml", "rb") as handle:
-    print(tomllib.load(handle)["project"]["version"])
-PY
+            python -c 'import tomllib; print(tomllib.load(open("python/logbrew_py/pyproject.toml", "rb"))["project"]["version"])'
           )"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
