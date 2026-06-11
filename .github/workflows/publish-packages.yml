@@ -251,6 +251,21 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Read core Python package version
+        id: pypi-version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          version="$(
+            python - <<'PY'
+import tomllib
+
+with open("python/logbrew_py/pyproject.toml", "rb") as handle:
+    print(tomllib.load(handle)["project"]["version"])
+PY
+          )"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Build Python distributions
         shell: bash
         run: |
@@ -298,6 +313,7 @@ jobs:
           if [[ "${{ inputs.include_pypi_extras }}" == "true" ]]; then
             verify_args+=(--include-pypi-extras)
           fi
+          verify_args+=(--version "${{ steps.pypi-version.outputs.version }}")
           python3 scripts/check_registry_publication.py "${verify_args[@]}"
 
   crates:

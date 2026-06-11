@@ -55,6 +55,7 @@ PYTHON_PACKAGES = {
         "description": "Public LogBrew Python SDK",
         "dependencies": set(),
         "package": "logbrew_sdk",
+        "version": "0.1.1",
     },
 }
 
@@ -304,7 +305,7 @@ def validate_python_package(root: Path, relative_dir: str, expected: dict[str, A
     package_name = expected["package"]
     location = f"{relative_dir}/pyproject.toml"
     require_equal(failures, location, "project.name", project.get("name"), expected["name"])
-    require_equal(failures, location, "project.version", project.get("version"), PUBLIC_VERSION)
+    require_equal(failures, location, "project.version", project.get("version"), expected.get("version", PUBLIC_VERSION))
     require_equal(failures, location, "project.license", project.get("license"), PUBLIC_LICENSE)
     require_equal(failures, location, "project.readme", project.get("readme"), "README.md")
     require_equal(failures, location, "project.requires-python", project.get("requires-python"), ">=3.11")

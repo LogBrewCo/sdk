@@ -3,6 +3,20 @@ set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
+python_package_version="$(
+    python3 - "$repo_root/python/logbrew_py/pyproject.toml" <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as handle:
+    print(tomllib.load(handle)["project"]["version"])
+PY
+)"
+wheel_artifact="logbrew_sdk-${python_package_version}-py3-none-any.whl"
+sdist_artifact="logbrew_sdk-${python_package_version}.tar.gz"
+dist_info_dir="logbrew_sdk-${python_package_version}.dist-info"
+sdist_root="logbrew_sdk-${python_package_version}"
+export LOGBREW_PYTHON_PACKAGE_VERSION="$python_package_version"
 
 on_error() {
     local status=$?
@@ -340,12 +354,15 @@ python3 -m venv "$tmp_dir/build-venv"
 "$tmp_dir/build-venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/dist" "$repo_root/python/logbrew_py" > "$tmp_dir/build.log" 2>&1
 wheel_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.whl' | head -n 1)"
 export LOGBREW_WHEEL_PATH="$wheel_path"
+export LOGBREW_PYTHON_DIST_INFO_DIR="$dist_info_dir"
 python3 - <<'PY'
 from pathlib import Path
 import os
 import zipfile
 
 wheel_path = Path(os.environ["LOGBREW_WHEEL_PATH"])
+dist_info_dir = os.environ["LOGBREW_PYTHON_DIST_INFO_DIR"]
+package_version = os.environ["LOGBREW_PYTHON_PACKAGE_VERSION"]
 with zipfile.ZipFile(wheel_path) as archive:
     names = set(archive.namelist())
     required = {
@@ -357,17 +374,17 @@ with zipfile.ZipFile(wheel_path) as archive:
         "logbrew_sdk/examples/readme_example.py",
         "logbrew_sdk/examples/real_user_smoke.py",
         "logbrew_sdk/py.typed",
-        "logbrew_sdk-0.1.0.dist-info/METADATA",
-        "logbrew_sdk-0.1.0.dist-info/WHEEL",
-        "logbrew_sdk-0.1.0.dist-info/RECORD",
+        f"{dist_info_dir}/METADATA",
+        f"{dist_info_dir}/WHEEL",
+        f"{dist_info_dir}/RECORD",
     }
     missing = sorted(required - names)
     if missing:
         raise SystemExit(f"missing wheel payload files: {missing}")
-    metadata = archive.read("logbrew_sdk-0.1.0.dist-info/METADATA").decode("utf-8")
+    metadata = archive.read(f"{dist_info_dir}/METADATA").decode("utf-8")
 for needle in (
     "Name: logbrew-sdk",
-    "Version: 0.1.0",
+    f"Version: {package_version}",
     "python3 -m pip install logbrew-sdk",
     "LOGBREW_API_KEY",
     "preview_json()",
@@ -384,6 +401,7 @@ PY
 sdist_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.tar.gz' | head -n 1)"
 export LOGBREW_SDIST_PATH="$sdist_path"
 export LOGBREW_TMP_DIR="$tmp_dir"
+export LOGBREW_PYTHON_SDIST_ROOT="$sdist_root"
 python3 - <<'PY'
 from pathlib import Path
 import os
@@ -391,6 +409,7 @@ import tarfile
 
 sdist_path = Path(os.environ["LOGBREW_SDIST_PATH"])
 tmp_dir = Path(os.environ["LOGBREW_TMP_DIR"])
+sdist_root = os.environ["LOGBREW_PYTHON_SDIST_ROOT"]
 
 with tarfile.open(sdist_path, "r:gz") as archive:
     members = {member.name.lstrip("./"): member for member in archive.getmembers()}
@@ -398,15 +417,15 @@ with tarfile.open(sdist_path, "r:gz") as archive:
     (tmp_dir / "sdist-contents.txt").write_text("\n".join(sorted(names)) + "\n")
 
     required = {
-        "logbrew_sdk-0.1.0/README.md",
-        "logbrew_sdk-0.1.0/pyproject.toml",
-        "logbrew_sdk-0.1.0/src/logbrew_sdk/_timeline.py",
-        "logbrew_sdk-0.1.0/src/logbrew_sdk/py.typed",
-        "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/__init__.py",
-        "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/__main__.py",
-        "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/agent_timeline.py",
-        "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/readme_example.py",
-        "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/real_user_smoke.py",
+        f"{sdist_root}/README.md",
+        f"{sdist_root}/pyproject.toml",
+        f"{sdist_root}/src/logbrew_sdk/_timeline.py",
+        f"{sdist_root}/src/logbrew_sdk/py.typed",
+        f"{sdist_root}/src/logbrew_sdk/examples/__init__.py",
+        f"{sdist_root}/src/logbrew_sdk/examples/__main__.py",
+        f"{sdist_root}/src/logbrew_sdk/examples/agent_timeline.py",
+        f"{sdist_root}/src/logbrew_sdk/examples/readme_example.py",
+        f"{sdist_root}/src/logbrew_sdk/examples/real_user_smoke.py",
     }
     missing = sorted(required - names)
     if missing:
@@ -418,8 +437,8 @@ with tarfile.open(sdist_path, "r:gz") as archive:
             raise SystemExit(f"sdist member is not a regular file: {member_name}")
         return extracted.read().decode("utf-8")
 
-    readme = read_text("logbrew_sdk-0.1.0/README.md")
-    pyproject = read_text("logbrew_sdk-0.1.0/pyproject.toml")
+    readme = read_text(f"{sdist_root}/README.md")
+    pyproject = read_text(f"{sdist_root}/pyproject.toml")
 
 (tmp_dir / "sdist-README.md").write_text(readme)
 (tmp_dir / "sdist-pyproject.toml").write_text(pyproject)
@@ -457,8 +476,8 @@ python -m pip show logbrew-sdk > "$tmp_dir/pip-show.txt"
 python -m pip show -f logbrew-sdk > "$tmp_dir/pip-show-files.txt"
 python -m pip list --format=json > "$tmp_dir/pip-list.json"
 python -m pip freeze > "$tmp_dir/pip-freeze.txt"
-grep -q '^logbrew-sdk @ file://.*logbrew_sdk-0.1.0-py3-none-any.whl#sha256=' "$tmp_dir/pip-freeze.txt"
-grep '^logbrew-sdk @ file://.*logbrew_sdk-0.1.0-py3-none-any.whl#sha256=' "$tmp_dir/pip-freeze.txt" > "$tmp_dir/pip-direct-requirements.txt"
+grep -q "^logbrew-sdk @ file://.*${wheel_artifact}#sha256=" "$tmp_dir/pip-freeze.txt"
+grep "^logbrew-sdk @ file://.*${wheel_artifact}#sha256=" "$tmp_dir/pip-freeze.txt" > "$tmp_dir/pip-direct-requirements.txt"
 test "$(wc -l < "$tmp_dir/pip-direct-requirements.txt" | tr -d ' ')" = "1"
 python -m pip inspect > "$tmp_dir/pip-inspect.json"
 
@@ -1119,9 +1138,13 @@ cat > "$tmp_dir/metadata.py" <<'EOF'
 from importlib.metadata import distribution, files, metadata, version
 from pathlib import Path
 import json
+import os
 import sys
 
-if version("logbrew-sdk") != "0.1.0":
+package_version = os.environ["LOGBREW_PYTHON_PACKAGE_VERSION"]
+dist_info_dir = f"logbrew_sdk-{package_version}.dist-info"
+
+if version("logbrew-sdk") != package_version:
     raise SystemExit("unexpected package version")
 
 package_files = {str(path) for path in files("logbrew-sdk") or []}
@@ -1130,10 +1153,10 @@ required = {
     "logbrew_sdk/examples/__init__.py",
     "logbrew_sdk/examples/__main__.py",
     "logbrew_sdk/examples/readme_example.py",
-    "logbrew_sdk-0.1.0.dist-info/INSTALLER",
-    "logbrew_sdk-0.1.0.dist-info/METADATA",
-    "logbrew_sdk-0.1.0.dist-info/RECORD",
-    "logbrew_sdk-0.1.0.dist-info/direct_url.json",
+    f"{dist_info_dir}/INSTALLER",
+    f"{dist_info_dir}/METADATA",
+    f"{dist_info_dir}/RECORD",
+    f"{dist_info_dir}/direct_url.json",
 }
 missing = sorted(required - package_files)
 if missing:
@@ -1151,7 +1174,7 @@ for needle in (
         raise SystemExit(f"missing installed metadata guidance: {needle}")
 
 dist = distribution("logbrew-sdk")
-dist_info = Path(dist.locate_file("logbrew_sdk-0.1.0.dist-info"))
+dist_info = Path(dist.locate_file(dist_info_dir))
 installer = dist_info.joinpath("INSTALLER").read_text().strip()
 if installer != "pip":
     raise SystemExit(f"unexpected installer: {installer!r}")
@@ -1186,7 +1209,7 @@ if entry is None:
 metadata_block = entry.get("metadata", {})
 if metadata_block.get("name") != "logbrew-sdk":
     raise SystemExit(f"unexpected pip report package name: {metadata_block.get('name')!r}")
-if metadata_block.get("version") != "0.1.0":
+if metadata_block.get("version") != package_version:
     raise SystemExit(f"unexpected pip report package version: {metadata_block.get('version')!r}")
 if entry.get("requested") is not True:
     raise SystemExit(f"unexpected pip report requested flag: {entry.get('requested')!r}")
@@ -1221,7 +1244,7 @@ if inspect_entry is None:
 inspect_metadata = inspect_entry.get("metadata", {})
 if inspect_metadata.get("name") != "logbrew-sdk":
     raise SystemExit(f"unexpected pip inspect package name: {inspect_metadata.get('name')!r}")
-if inspect_metadata.get("version") != "0.1.0":
+if inspect_metadata.get("version") != package_version:
     raise SystemExit(f"unexpected pip inspect package version: {inspect_metadata.get('version')!r}")
 if inspect_entry.get("requested") is not True:
     raise SystemExit(f"unexpected pip inspect requested flag: {inspect_entry.get('requested')!r}")
@@ -1251,7 +1274,7 @@ for line in show_lines:
 expected_summary = "Public LogBrew Python SDK for building, validating, and flushing event batches."
 if show_pairs.get("Name") != "logbrew-sdk":
     raise SystemExit(f"unexpected pip show package name: {show_pairs.get('Name')!r}")
-if show_pairs.get("Version") != "0.1.0":
+if show_pairs.get("Version") != package_version:
     raise SystemExit(f"unexpected pip show package version: {show_pairs.get('Version')!r}")
 if show_pairs.get("Summary") != expected_summary:
     raise SystemExit(f"unexpected pip show summary: {show_pairs.get('Summary')!r}")
@@ -1277,13 +1300,13 @@ listed_files = {
     if line.startswith("  ")
 }
 required_show_files = {
-    "logbrew_sdk-0.1.0.dist-info/INSTALLER",
-    "logbrew_sdk-0.1.0.dist-info/METADATA",
-    "logbrew_sdk-0.1.0.dist-info/RECORD",
-    "logbrew_sdk-0.1.0.dist-info/REQUESTED",
-    "logbrew_sdk-0.1.0.dist-info/WHEEL",
-    "logbrew_sdk-0.1.0.dist-info/direct_url.json",
-    "logbrew_sdk-0.1.0.dist-info/top_level.txt",
+    f"{dist_info_dir}/INSTALLER",
+    f"{dist_info_dir}/METADATA",
+    f"{dist_info_dir}/RECORD",
+    f"{dist_info_dir}/REQUESTED",
+    f"{dist_info_dir}/WHEEL",
+    f"{dist_info_dir}/direct_url.json",
+    f"{dist_info_dir}/top_level.txt",
     "logbrew_sdk/__init__.py",
     "logbrew_sdk/examples/__init__.py",
     "logbrew_sdk/examples/__main__.py",
@@ -1304,11 +1327,11 @@ pip_list_entry = next(
 )
 if pip_list_entry is None:
     raise SystemExit("missing logbrew-sdk entry in pip list output")
-if pip_list_entry.get("version") != "0.1.0":
+if pip_list_entry.get("version") != package_version:
     raise SystemExit(f"unexpected pip list package version: {pip_list_entry.get('version')!r}")
 EOF
 
-python "$tmp_dir/metadata.py" "logbrew_sdk-0.1.0-py3-none-any.whl" "$tmp_dir/pip-install-report.json" "$tmp_dir/pip-inspect.json" "$tmp_dir/pip-show.txt" "$tmp_dir/pip-show-files.txt" "$tmp_dir/pip-list.json"
+python "$tmp_dir/metadata.py" "$wheel_artifact" "$tmp_dir/pip-install-report.json" "$tmp_dir/pip-inspect.json" "$tmp_dir/pip-show.txt" "$tmp_dir/pip-show-files.txt" "$tmp_dir/pip-list.json"
 
 cat > "$tmp_dir/smoke.py" <<'EOF'
 from logbrew_sdk import LogBrewClient, RecordingTransport
@@ -1450,7 +1473,7 @@ python "$tmp_dir/module_doc.py"
 check_makefile_help "wheel-reinstall-make-help"
 run_make smoke-types >/dev/null
 run_make smoke-test >/dev/null
-python "$tmp_dir/metadata.py" "logbrew_sdk-0.1.0-py3-none-any.whl" "$tmp_dir/pip-reinstall-report.json" "$tmp_dir/pip-reinstall-inspect.json" "$tmp_dir/pip-reinstall-show.txt" "$tmp_dir/pip-reinstall-show-files.txt" "$tmp_dir/pip-reinstall-list.json"
+python "$tmp_dir/metadata.py" "$wheel_artifact" "$tmp_dir/pip-reinstall-report.json" "$tmp_dir/pip-reinstall-inspect.json" "$tmp_dir/pip-reinstall-show.txt" "$tmp_dir/pip-reinstall-show-files.txt" "$tmp_dir/pip-reinstall-list.json"
 run_readme_example "smoke-readme" "wheel-reinstall-readme-example"
 run_packaged_example_module "smoke-packaged-example" "wheel-reinstall-packaged-example"
 run_packaged_real_user_module "smoke-packaged-smoke" "wheel-reinstall-packaged-smoke"
@@ -1464,8 +1487,8 @@ run_logging_smoke "wheel-reinstall-logging"
 run_http_transport_smoke "wheel-reinstall-http-transport"
 
 deactivate
-run_reinstall_from_freeze "$tmp_dir/pip-freeze.txt" "logbrew_sdk-0.1.0-py3-none-any.whl" "wheel"
-run_reinstall_from_direct_requirement "$tmp_dir/pip-direct-requirements.txt" "logbrew_sdk-0.1.0-py3-none-any.whl" "wheel"
+run_reinstall_from_freeze "$tmp_dir/pip-freeze.txt" "$wheel_artifact" "wheel"
+run_reinstall_from_direct_requirement "$tmp_dir/pip-direct-requirements.txt" "$wheel_artifact" "wheel"
 
 python3 -m venv "$tmp_dir/sdist-venv"
 source "$tmp_dir/sdist-venv/bin/activate"
@@ -1478,8 +1501,8 @@ python -m pip show logbrew-sdk > "$tmp_dir/sdist-pip-show.txt"
 python -m pip show -f logbrew-sdk > "$tmp_dir/sdist-pip-show-files.txt"
 python -m pip list --format=json > "$tmp_dir/sdist-pip-list.json"
 python -m pip freeze > "$tmp_dir/sdist-pip-freeze.txt"
-grep -q '^logbrew-sdk @ file://.*logbrew_sdk-0.1.0.tar.gz#sha256=' "$tmp_dir/sdist-pip-freeze.txt"
-grep '^logbrew-sdk @ file://.*logbrew_sdk-0.1.0.tar.gz#sha256=' "$tmp_dir/sdist-pip-freeze.txt" > "$tmp_dir/sdist-direct-requirements.txt"
+grep -q "^logbrew-sdk @ file://.*${sdist_artifact}#sha256=" "$tmp_dir/sdist-pip-freeze.txt"
+grep "^logbrew-sdk @ file://.*${sdist_artifact}#sha256=" "$tmp_dir/sdist-pip-freeze.txt" > "$tmp_dir/sdist-direct-requirements.txt"
 test "$(wc -l < "$tmp_dir/sdist-direct-requirements.txt" | tr -d ' ')" = "1"
 python -m pip inspect > "$tmp_dir/sdist-pip-inspect.json"
 
@@ -1487,7 +1510,7 @@ python "$tmp_dir/module_doc.py"
 check_makefile_help "sdist-make-help"
 run_make smoke-types >/dev/null
 run_make smoke-test >/dev/null
-python "$tmp_dir/metadata.py" "logbrew_sdk-0.1.0.tar.gz" "$tmp_dir/sdist-pip-install-report.json" "$tmp_dir/sdist-pip-inspect.json" "$tmp_dir/sdist-pip-show.txt" "$tmp_dir/sdist-pip-show-files.txt" "$tmp_dir/sdist-pip-list.json"
+python "$tmp_dir/metadata.py" "$sdist_artifact" "$tmp_dir/sdist-pip-install-report.json" "$tmp_dir/sdist-pip-inspect.json" "$tmp_dir/sdist-pip-show.txt" "$tmp_dir/sdist-pip-show-files.txt" "$tmp_dir/sdist-pip-list.json"
 run_readme_example "smoke-readme" "sdist-readme-example"
 run_packaged_example_module "smoke-packaged-example" "sdist-packaged-example"
 run_packaged_real_user_module "smoke-packaged-smoke" "sdist-packaged-smoke"
@@ -1514,7 +1537,7 @@ python "$tmp_dir/module_doc.py"
 check_makefile_help "sdist-reinstall-make-help"
 run_make smoke-types >/dev/null
 run_make smoke-test >/dev/null
-python "$tmp_dir/metadata.py" "logbrew_sdk-0.1.0.tar.gz" "$tmp_dir/sdist-pip-reinstall-report.json" "$tmp_dir/sdist-pip-reinstall-inspect.json" "$tmp_dir/sdist-pip-reinstall-show.txt" "$tmp_dir/sdist-pip-reinstall-show-files.txt" "$tmp_dir/sdist-pip-reinstall-list.json"
+python "$tmp_dir/metadata.py" "$sdist_artifact" "$tmp_dir/sdist-pip-reinstall-report.json" "$tmp_dir/sdist-pip-reinstall-inspect.json" "$tmp_dir/sdist-pip-reinstall-show.txt" "$tmp_dir/sdist-pip-reinstall-show-files.txt" "$tmp_dir/sdist-pip-reinstall-list.json"
 run_readme_example "smoke-readme" "sdist-reinstall-readme-example"
 run_packaged_example_module "smoke-packaged-example" "sdist-reinstall-packaged-example"
 run_packaged_real_user_module "smoke-packaged-smoke" "sdist-reinstall-packaged-smoke"
@@ -1776,5 +1799,5 @@ grep -q '"message": "unexpected transport status 400"' "$tmp_dir/transport_statu
 grep -q '"pending": 1' "$tmp_dir/transport_status.stdout.json"
 
 deactivate
-run_reinstall_from_freeze "$tmp_dir/sdist-pip-freeze.txt" "logbrew_sdk-0.1.0.tar.gz" "sdist"
-run_reinstall_from_direct_requirement "$tmp_dir/sdist-direct-requirements.txt" "logbrew_sdk-0.1.0.tar.gz" "sdist"
+run_reinstall_from_freeze "$tmp_dir/sdist-pip-freeze.txt" "$sdist_artifact" "sdist"
+run_reinstall_from_direct_requirement "$tmp_dir/sdist-direct-requirements.txt" "$sdist_artifact" "sdist"
