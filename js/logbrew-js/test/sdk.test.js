@@ -4,6 +4,8 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 
 import {
+  createNetworkMilestoneAttributes,
+  createProductActionAttributes,
   createTraceparent,
   createTraceparentHeaders,
   createLogBrewPinoDestination,
@@ -161,6 +163,76 @@ test("severity aliases normalize before preview", () => {
   );
 });
 
+test("timeline helpers create safe action attributes", () => {
+  const action = createProductActionAttributes({
+    name: "checkout.submit",
+    status: "running",
+    sessionId: "sess_123",
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    routeTemplate: "https://app.example/checkout/:step?email=user@example.com#pay",
+    screen: "Checkout",
+    funnel: "checkout",
+    step: "submit",
+    metadata: { service: "checkout", ignoredObject: { nested: true } }
+  }, {
+    metadata: { region: "global" }
+  });
+  const network = createNetworkMilestoneAttributes({
+    routeTemplate: "https://api.example/v1/orders/:id?debug=true#trace",
+    method: "post",
+    statusCode: 503,
+    durationMs: 82.5,
+    sessionId: "sess_123",
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    metadata: { service: "checkout", ignoredArray: ["ignored"] }
+  }, {
+    metadata: { region: "global" }
+  });
+
+  assert.deepEqual(action, {
+    name: "checkout.submit",
+    status: "running",
+    metadata: {
+      source: "product.action",
+      region: "global",
+      service: "checkout",
+      routeTemplate: "/checkout/:step",
+      sessionId: "sess_123",
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      screen: "Checkout",
+      funnel: "checkout",
+      step: "submit"
+    }
+  });
+  assert.deepEqual(network, {
+    name: "network.post /v1/orders/:id",
+    status: "failure",
+    metadata: {
+      source: "network.milestone",
+      region: "global",
+      service: "checkout",
+      routeTemplate: "/v1/orders/:id",
+      method: "POST",
+      statusCode: 503,
+      durationMs: 82.5,
+      sessionId: "sess_123",
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+    }
+  });
+});
+
+test("timeline helpers reject unsafe milestone values", () => {
+  const cases = [
+    [() => createProductActionAttributes({ name: "checkout.submit", status: "done" }), /product action status must be one of: queued, running, success, failure/],
+    [() => createNetworkMilestoneAttributes({ routeTemplate: "/orders/:id", method: "GET /bad" }), /network milestone method must be a valid HTTP method/],
+    [() => createNetworkMilestoneAttributes({ routeTemplate: "/orders/:id", durationMs: -1 }), /network milestone durationMs must be a non-negative number/],
+    [() => createNetworkMilestoneAttributes({ routeTemplate: "/orders/:id", statusCode: 99 }), /network milestone statusCode must be an integer from 100 to 599/]
+  ];
+  for (const [run, pattern] of cases) {
+    assert.throws(run, pattern);
+  }
+});
+
 test("negative span duration fails validation", () => {
   const client = sampleClient();
   assert.throws(
@@ -286,6 +358,8 @@ test("CommonJS entry exposes the public API", () => {
   });
 
   assert.equal(typeof sdk.RecordingTransport.alwaysAccept, "function");
+  assert.equal(typeof sdk.createProductActionAttributes, "function");
+  assert.equal(typeof sdk.createNetworkMilestoneAttributes, "function");
   assert.equal(typeof sdk.installLogBrewConsoleCapture, "function");
   assert.equal(typeof sdk.parseTraceparent, "function");
   assert.match(client.previewJson(), /"type": "release"/);

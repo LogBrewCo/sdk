@@ -183,6 +183,37 @@ export type ActionAttributes = {
   metadata?: Metadata;
 };
 
+/** App-owned product step input for agent-readable action timelines. */
+export type ProductActionInput = string | {
+  name: string;
+  status?: ActionAttributes["status"];
+  sessionId?: string;
+  traceId?: string;
+  routeTemplate?: string;
+  screen?: string;
+  funnel?: string;
+  step?: string;
+  metadata?: Metadata;
+};
+
+/** App-owned API milestone input for agent-readable network timelines. */
+export type NetworkMilestoneInput = string | {
+  name?: string;
+  routeTemplate: string;
+  method?: string;
+  status?: ActionAttributes["status"];
+  statusCode?: number;
+  durationMs?: number;
+  sessionId?: string;
+  traceId?: string;
+  metadata?: Metadata;
+};
+
+/** Shared timeline helper options for primitive app metadata. */
+export type TimelineAttributesOptions = {
+  metadata?: Metadata;
+};
+
 /** Public metric event attributes. Use low-cardinality metadata only. */
 export type MetricAttributes = {
   name: string;
@@ -278,6 +309,18 @@ export declare class LogBrewClient {
 
 /** Install explicit console capture while preserving the target console's normal output behavior. */
 export declare function installLogBrewConsoleCapture(config: ConsoleCaptureConfig): ConsoleCaptureHandle;
+
+/** Create safe action attributes for an app-owned product step without automatic UI capture. */
+export declare function createProductActionAttributes(
+  action: ProductActionInput,
+  options?: TimelineAttributesOptions
+): ActionAttributes;
+
+/** Create safe action attributes for an app-owned network milestone without HTTP client patching. */
+export declare function createNetworkMilestoneAttributes(
+  request: NetworkMilestoneInput,
+  options?: TimelineAttributesOptions
+): ActionAttributes;
 
 /** Convert console arguments into safe LogBrew log attributes without installing capture. */
 export declare function logAttributesFromConsoleArgs(

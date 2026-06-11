@@ -11,7 +11,7 @@ pnpm add @logbrew/sdk
 
 The package supports both ESM `import` and CommonJS `require`.
 The shipped package also includes `.d.ts` and `.d.cts` declarations so ESM and CommonJS TypeScript consumers can install it directly without a separate build step.
-The package ships copyable examples under `node_modules/@logbrew/sdk/examples/`. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in your app configuration, and call `previewJson()` when you want to inspect queued JSON before sending. Type declarations document payload shapes such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, transport responses, SDK errors, lifecycle helpers, W3C trace helpers, console capture, Pino destination, and Winston transport APIs.
+The package ships copyable examples under `node_modules/@logbrew/sdk/examples/`. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in your app configuration, and call `previewJson()` when you want to inspect queued JSON before sending. Type declarations document payload shapes such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, transport responses, SDK errors, lifecycle helpers, W3C trace helpers, product timeline helpers, console capture, Pino destination, and Winston transport APIs.
 
 ## Example
 
@@ -121,6 +121,47 @@ await client.flush(RecordingTransport.alwaysAccept());
 The helpers validate the W3C `version-traceId-parentSpanId-traceFlags` shape, reject all-zero trace/span ids, normalize valid ids to lowercase, expose the sampled flag from `traceFlags`, and keep span metadata primitive-only. `createTraceparentHeaders()` returns an explicit outbound carrier with only `traceparent`. The helpers do not install OpenTelemetry or patch HTTP clients; use them when you need explicit interop in code you own.
 
 LogBrew severity categories are `info`, `warning`, `error`, and `critical`. The JavaScript SDK accepts common runtime aliases such as `trace`, `debug`, `warn`, and `fatal` for compatibility, then serializes canonical values before queued events are sent.
+
+## Agent-Readable Timelines
+
+Use `createProductActionAttributes()` and `createNetworkMilestoneAttributes()` when a service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that can be analyzed across many sessions without visual replay, global HTTP patching, payload capture, or header capture.
+
+```js
+import {
+  createNetworkMilestoneAttributes,
+  createProductActionAttributes,
+  LogBrewClient
+} from "@logbrew/sdk";
+
+const client = LogBrewClient.create({
+  apiKey: "LOGBREW_API_KEY",
+  sdkName: "checkout-api",
+  sdkVersion: "1.0.0"
+});
+
+client.action("evt_checkout_submit", new Date().toISOString(), createProductActionAttributes({
+  name: "checkout.submit",
+  status: "running",
+  sessionId: "sess_123",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  routeTemplate: "/checkout/:step",
+  funnel: "checkout",
+  step: "submit",
+  metadata: { service: "checkout" }
+}));
+
+client.action("evt_payment_api", new Date().toISOString(), createNetworkMilestoneAttributes({
+  routeTemplate: "/payments/:id",
+  method: "POST",
+  statusCode: 202,
+  durationMs: 94,
+  sessionId: "sess_123",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  metadata: { service: "checkout" }
+}));
+```
+
+Timeline helpers keep only primitive metadata, strip query strings and hashes from route templates, normalize HTTP methods, infer failed network milestones from status codes `400` and above, and serialize through the existing `action` event type. Keep metadata low-cardinality, such as `sessionId`, `traceId`, `routeTemplate`, `method`, `statusCode`, `durationMs`, `screen`, `funnel`, and `step`.
 
 ## Console Capture
 

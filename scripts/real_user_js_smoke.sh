@@ -456,6 +456,12 @@ if (!readme.includes("createTraceparent")) {
 if (!readme.includes("spanAttributesFromTraceparent")) {
   throw new Error("missing installed README traceparent span guidance");
 }
+if (!readme.includes("createProductActionAttributes")) {
+  throw new Error("missing installed README product action timeline guidance");
+}
+if (!readme.includes("createNetworkMilestoneAttributes")) {
+  throw new Error("missing installed README network milestone timeline guidance");
+}
 if (!readme.includes("installLogBrewConsoleCapture")) {
   throw new Error("missing installed README console capture guidance");
 }
@@ -538,6 +544,15 @@ if (!declarations.includes("Public span event attributes.")) {
 if (!declarations.includes("Public action event attributes.")) {
   throw new Error("missing installed ActionAttributes declaration docs");
 }
+if (!declarations.includes("App-owned product step input for agent-readable action timelines.")) {
+  throw new Error("missing installed ProductActionInput declaration docs");
+}
+if (!declarations.includes("App-owned API milestone input for agent-readable network timelines.")) {
+  throw new Error("missing installed NetworkMilestoneInput declaration docs");
+}
+if (!declarations.includes("Shared timeline helper options for primitive app metadata.")) {
+  throw new Error("missing installed TimelineAttributesOptions declaration docs");
+}
 if (!declarations.includes("Public metric event attributes. Use low-cardinality metadata only.")) {
   throw new Error("missing installed MetricAttributes declaration docs");
 }
@@ -564,6 +579,12 @@ if (!declarations.includes("Flush queued events, then mark the client closed so 
 }
 if (!declarations.includes("Install explicit console capture while preserving the target console's normal output behavior.")) {
   throw new Error("missing installed console capture declaration docs");
+}
+if (!declarations.includes("Create safe action attributes for an app-owned product step without automatic UI capture.")) {
+  throw new Error("missing installed product action helper declaration docs");
+}
+if (!declarations.includes("Create safe action attributes for an app-owned network milestone without HTTP client patching.")) {
+  throw new Error("missing installed network milestone helper declaration docs");
 }
 if (!declarations.includes("Convert console arguments into safe LogBrew log attributes without installing capture.")) {
   throw new Error("missing installed console attributes declaration docs");
@@ -1486,6 +1507,8 @@ EOF
 
 cat > types-smoke.ts <<'EOF'
 import {
+  createNetworkMilestoneAttributes,
+  createProductActionAttributes,
   createTraceparent,
   createTraceparentHeaders,
   createLogBrewPinoDestination,
@@ -1503,11 +1526,14 @@ import {
   type IssueAttributes,
   type LogAttributes,
   type MetricAttributes,
+  type NetworkMilestoneInput,
   type PinoDestinationConfig,
   type PinoDestinationHandle,
   type PinoLogRecord,
+  type ProductActionInput,
   type ReleaseAttributes,
   type SpanAttributes,
+  type TimelineAttributesOptions,
   type TraceparentContext,
   type TraceparentInput,
   type TraceparentSpanInput,
@@ -1545,6 +1571,28 @@ const span: SpanAttributes = {
 const action: ActionAttributes = {
   name: "deploy",
   status: "success"
+};
+const productAction: ProductActionInput = {
+  name: "checkout.submit",
+  status: "running",
+  sessionId: "sess_123",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  routeTemplate: "/checkout/:step",
+  funnel: "checkout",
+  step: "submit",
+  metadata: { service: "checkout" }
+};
+const networkMilestone: NetworkMilestoneInput = {
+  routeTemplate: "/payments/:id",
+  method: "POST",
+  statusCode: 202,
+  durationMs: 94,
+  sessionId: "sess_123",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  metadata: { service: "checkout" }
+};
+const timelineOptions: TimelineAttributesOptions = {
+  metadata: { region: "global" }
 };
 const metric: MetricAttributes = {
   name: "checkout.requests",
@@ -1588,6 +1636,14 @@ async function main() {
     continuedSpanInput
   );
   const outgoingHeaders: { traceparent: string } = createTraceparentHeaders(traceInput);
+  const productTimelineAction: ActionAttributes = createProductActionAttributes(productAction, timelineOptions);
+  const networkTimelineAction: ActionAttributes = createNetworkMilestoneAttributes(networkMilestone, timelineOptions);
+  if (productTimelineAction.metadata?.routeTemplate !== "/checkout/:step") {
+    throw new Error("unexpected product timeline route template");
+  }
+  if (networkTimelineAction.metadata?.method !== "POST") {
+    throw new Error("unexpected network timeline method");
+  }
   if (continuedSpan.traceId !== traceContext.traceId || continuedSpan.parentSpanId !== traceInput.spanId) {
     throw new Error("unexpected trace context");
   }
@@ -1666,6 +1722,36 @@ if (traceSpan.traceId !== traceContext.traceId) {
 }
 if (outgoingHeaders.traceparent !== "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01") {
   throw new Error("unexpected traceparent carrier");
+}
+const productAction: sdk.ProductActionInput = {
+  name: "checkout.submit",
+  status: "running",
+  sessionId: "sess_123",
+  traceId: traceContext.traceId,
+  routeTemplate: "/checkout/:step",
+  funnel: "checkout",
+  step: "submit",
+  metadata: { service: "checkout" }
+};
+const networkMilestone: sdk.NetworkMilestoneInput = {
+  routeTemplate: "/payments/:id",
+  method: "POST",
+  statusCode: 202,
+  durationMs: 94,
+  sessionId: "sess_123",
+  traceId: traceContext.traceId,
+  metadata: { service: "checkout" }
+};
+const timelineOptions: sdk.TimelineAttributesOptions = {
+  metadata: { region: "global" }
+};
+const productTimelineAction: sdk.ActionAttributes = sdk.createProductActionAttributes(productAction, timelineOptions);
+const networkTimelineAction: sdk.ActionAttributes = sdk.createNetworkMilestoneAttributes(networkMilestone, timelineOptions);
+if (productTimelineAction.metadata?.routeTemplate !== "/checkout/:step") {
+  throw new Error("unexpected product timeline route template");
+}
+if (networkTimelineAction.metadata?.method !== "POST") {
+  throw new Error("unexpected network timeline method");
 }
 const metric: sdk.MetricAttributes = {
   name: "checkout.requests",

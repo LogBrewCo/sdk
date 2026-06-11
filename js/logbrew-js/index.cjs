@@ -359,6 +359,44 @@ function logbrewLevelFromConsoleMethod(method) {
   }
 }
 
+function createProductActionAttributes(action, options = {}) {
+  const details = productActionDetails(action);
+  return {
+    name: details.name,
+    status: details.status,
+    metadata: compactMetadata({
+      source: "product.action",
+      ...compactMetadata(options.metadata),
+      ...compactMetadata(details.metadata),
+      routeTemplate: sanitizeRouteTemplate(details.routeTemplate),
+      sessionId: stringOrUndefined(details.sessionId),
+      traceId: stringOrUndefined(details.traceId),
+      screen: stringOrUndefined(details.screen),
+      funnel: stringOrUndefined(details.funnel),
+      step: stringOrUndefined(details.step)
+    })
+  };
+}
+
+function createNetworkMilestoneAttributes(request, options = {}) {
+  const details = networkMilestoneDetails(request);
+  return {
+    name: details.name,
+    status: details.status,
+    metadata: compactMetadata({
+      source: "network.milestone",
+      ...compactMetadata(options.metadata),
+      ...compactMetadata(details.metadata),
+      routeTemplate: details.routeTemplate,
+      method: details.method,
+      statusCode: details.statusCode,
+      durationMs: details.durationMs,
+      sessionId: stringOrUndefined(details.sessionId),
+      traceId: stringOrUndefined(details.traceId)
+    })
+  };
+}
+
 function parseTraceparent(traceparent) {
   if (typeof traceparent !== "string" || traceparent.trim() === "") {
     throw new SdkError("validation_error", "traceparent must be non-empty");
@@ -1064,6 +1102,125 @@ function validateMetric(attributes) {
   }, attributes.metadata);
 }
 
+function productActionDetails(action) {
+  if (typeof action === "string") {
+    return { name: action, status: "success" };
+  }
+  if (!action || Array.isArray(action) || typeof action !== "object") {
+    throw new SdkError("validation_error", "product action must be a string or object");
+  }
+  requireNonEmpty("product action name", action.name);
+  const status = action.status === undefined ? "success" : action.status;
+  requireAllowedValue("product action status", status, ACTION_STATUSES);
+  return {
+    funnel: action.funnel,
+    metadata: action.metadata,
+    name: action.name,
+    routeTemplate: action.routeTemplate,
+    screen: action.screen,
+    sessionId: action.sessionId,
+    status,
+    step: action.step,
+    traceId: action.traceId
+  };
+}
+
+function networkMilestoneDetails(request) {
+  if (typeof request === "string") {
+    return networkMilestoneDetails({ routeTemplate: request });
+  }
+  if (!request || Array.isArray(request) || typeof request !== "object") {
+    throw new SdkError("validation_error", "network milestone must be a string or object");
+  }
+
+  const routeTemplate = sanitizeRouteTemplate(request.routeTemplate);
+  requireNonEmpty("network milestone routeTemplate", routeTemplate);
+  const method = normalizeHttpMethod(request.method);
+  const statusCode = statusCodeOrUndefined(request.statusCode);
+  const status = request.status === undefined
+    ? statusFromStatusCode(statusCode)
+    : request.status;
+  requireAllowedValue("network milestone status", status, ACTION_STATUSES);
+  const durationMs = nonNegativeNumberOrUndefined("network milestone durationMs", request.durationMs);
+  const name = typeof request.name === "string" && request.name.trim() !== ""
+    ? request.name
+    : `network.${method.toLowerCase()} ${routeTemplate}`;
+
+  return {
+    durationMs,
+    metadata: request.metadata,
+    method,
+    name,
+    routeTemplate,
+    sessionId: request.sessionId,
+    status,
+    statusCode,
+    traceId: request.traceId
+  };
+}
+
+function sanitizeRouteTemplate(routeTemplate) {
+  if (routeTemplate === undefined) {
+    return undefined;
+  }
+  if (typeof routeTemplate !== "string") {
+    throw new SdkError("validation_error", "routeTemplate must be a string");
+  }
+  const trimmed = routeTemplate.trim();
+  if (trimmed === "") {
+    return "";
+  }
+  try {
+    const url = new URL(trimmed, "https://logbrew.example");
+    return url.pathname || "/";
+  } catch {
+    return trimmed.split(/[?#]/u)[0] || "/";
+  }
+}
+
+function normalizeHttpMethod(method) {
+  const value = method === undefined ? "GET" : method;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new SdkError("validation_error", "network milestone method must be a non-empty string");
+  }
+  const normalized = value.trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9_-]*$/u.test(normalized)) {
+    throw new SdkError("validation_error", "network milestone method must be a valid HTTP method");
+  }
+  return normalized;
+}
+
+function statusCodeOrUndefined(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(value) || value < 100 || value > 599) {
+    throw new SdkError("validation_error", "network milestone statusCode must be an integer from 100 to 599");
+  }
+  return value;
+}
+
+function statusFromStatusCode(statusCode) {
+  if (statusCode !== undefined && statusCode >= 400) {
+    return "failure";
+  }
+  return "success";
+}
+
+function nonNegativeNumberOrUndefined(label, value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new SdkError("validation_error", `${label} must be a non-negative number`);
+  }
+  return value;
+}
+
+function stringOrUndefined(value) {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
 function withMetadata(attributes, metadata) {
   const safeMetadata = cloneMetadata(metadata);
   return safeMetadata === undefined
@@ -1144,6 +1301,8 @@ function formatConsoleArgument(value, includeErrorStack) {
 }
 
 module.exports = {
+  createNetworkMilestoneAttributes,
+  createProductActionAttributes,
   createTraceparent,
   createTraceparentHeaders,
   createLogBrewPinoDestination,
