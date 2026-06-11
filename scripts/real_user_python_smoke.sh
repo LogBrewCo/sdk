@@ -112,9 +112,18 @@ run_agent_timeline_example() {
     grep -q '"method": "POST"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"statusCode": 202' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"durationMs": 94' "$tmp_dir/$output_prefix.stdout.json"
-    ! grep -q 'private@example.test' "$tmp_dir/$output_prefix.stdout.json"
-    ! grep -q '"card"' "$tmp_dir/$output_prefix.stdout.json"
-    ! grep -q '"authorization"' "$tmp_dir/$output_prefix.stdout.json"
+    if grep -q 'private@example.test' "$tmp_dir/$output_prefix.stdout.json"; then
+        echo "agent timeline leaked query text" >&2
+        exit 1
+    fi
+    if grep -q '"card"' "$tmp_dir/$output_prefix.stdout.json"; then
+        echo "agent timeline leaked payload metadata" >&2
+        exit 1
+    fi
+    if grep -q '"authorization"' "$tmp_dir/$output_prefix.stdout.json"; then
+        echo "agent timeline leaked header metadata" >&2
+        exit 1
+    fi
     grep -q '"events": 2' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
     grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/$output_prefix.stderr.json"
