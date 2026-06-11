@@ -99,15 +99,37 @@ run_packaged_examples_entrypoint() {
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
 }
 
+run_agent_timeline_example() {
+    local make_target="$1"
+    local output_prefix="$2"
+
+    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
+    grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"source": "product.action"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"source": "network.milestone"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"routeTemplate": "/checkout/:step"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"routeTemplate": "/payments/:id"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"method": "POST"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"statusCode": 202' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"durationMs": 94' "$tmp_dir/$output_prefix.stdout.json"
+    ! grep -q 'private@example.test' "$tmp_dir/$output_prefix.stdout.json"
+    ! grep -q '"card"' "$tmp_dir/$output_prefix.stdout.json"
+    ! grep -q '"authorization"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 2' "$tmp_dir/$output_prefix.stderr.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
+    grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/$output_prefix.stderr.json"
+}
+
 check_packaged_examples_listing() {
     local make_target="$1"
     local output_prefix="$2"
 
     run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.txt"
-    grep -qx 'readme-example -> python -m logbrew_sdk.examples readme-example' <(sed -n '1p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'real-user-smoke -> python -m logbrew_sdk.examples real-user-smoke' <(sed -n '2p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'default (real-user-smoke) -> python -m logbrew_sdk.examples' <(sed -n '3p' "$tmp_dir/$output_prefix.stdout.txt")
-    test "$(wc -l < "$tmp_dir/$output_prefix.stdout.txt" | tr -d ' ')" = "3"
+    grep -qx 'agent-timeline -> python -m logbrew_sdk.examples agent-timeline' <(sed -n '1p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'readme-example -> python -m logbrew_sdk.examples readme-example' <(sed -n '2p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'real-user-smoke -> python -m logbrew_sdk.examples real-user-smoke' <(sed -n '3p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'default (real-user-smoke) -> python -m logbrew_sdk.examples' <(sed -n '4p' "$tmp_dir/$output_prefix.stdout.txt")
+    test "$(wc -l < "$tmp_dir/$output_prefix.stdout.txt" | tr -d ' ')" = "4"
 }
 
 check_packaged_examples_help() {
@@ -120,9 +142,11 @@ check_packaged_examples_help() {
     grep -q 'installed Python' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q 'package\.' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q -- '--list' "$tmp_dir/$output_prefix.stdout.txt"
+    grep -q 'agent-timeline' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q 'readme-example' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q 'real-user-smoke' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q '^Packaged examples:$' "$tmp_dir/$output_prefix.stdout.txt"
+    grep -q '^  agent-timeline -> python -m logbrew_sdk.examples agent-timeline$' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q '^  readme-example -> python -m logbrew_sdk.examples readme-example$' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q '^  real-user-smoke -> python -m logbrew_sdk.examples real-user-smoke$' "$tmp_dir/$output_prefix.stdout.txt"
     grep -Fqx '  default (real-user-smoke) -> python -m logbrew_sdk.examples' <(grep '^  default ' "$tmp_dir/$output_prefix.stdout.txt")
@@ -138,11 +162,12 @@ check_makefile_help() {
     grep -qx 'smoke-packaged-example -> make smoke-packaged-example' <(sed -n '4p' "$tmp_dir/$output_prefix.stdout.txt")
     grep -qx 'smoke-packaged-smoke -> make smoke-packaged-smoke' <(sed -n '5p' "$tmp_dir/$output_prefix.stdout.txt")
     grep -qx 'smoke-packaged-examples-readme -> make smoke-packaged-examples-readme' <(sed -n '6p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'smoke-packaged-examples-list -> make smoke-packaged-examples-list' <(sed -n '7p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'smoke-packaged-examples-help -> make smoke-packaged-examples-help' <(sed -n '8p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'smoke-packaged-examples (default packaged entrypoint) -> make smoke-packaged-examples' <(sed -n '9p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'smoke-run (real-user-smoke) -> make smoke-run' <(sed -n '10p' "$tmp_dir/$output_prefix.stdout.txt")
-    test "$(wc -l < "$tmp_dir/$output_prefix.stdout.txt" | tr -d ' ')" = "10"
+    grep -qx 'smoke-packaged-examples-agent-timeline -> make smoke-packaged-examples-agent-timeline' <(sed -n '7p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'smoke-packaged-examples-list -> make smoke-packaged-examples-list' <(sed -n '8p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'smoke-packaged-examples-help -> make smoke-packaged-examples-help' <(sed -n '9p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'smoke-packaged-examples (default packaged entrypoint) -> make smoke-packaged-examples' <(sed -n '10p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'smoke-run (real-user-smoke) -> make smoke-run' <(sed -n '11p' "$tmp_dir/$output_prefix.stdout.txt")
+    test "$(wc -l < "$tmp_dir/$output_prefix.stdout.txt" | tr -d ' ')" = "11"
 }
 
 run_smoke_script() {
@@ -222,6 +247,7 @@ run_reinstall_from_freeze() {
     run_packaged_example_module "smoke-packaged-example" "$output_prefix-freeze-packaged-example"
     run_packaged_real_user_module "smoke-packaged-smoke" "$output_prefix-freeze-packaged-smoke"
     run_packaged_example_module "smoke-packaged-examples-readme" "$output_prefix-freeze-packaged-examples-readme"
+    run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "$output_prefix-freeze-packaged-examples-agent-timeline"
     check_packaged_examples_listing "smoke-packaged-examples-list" "$output_prefix-freeze-packaged-examples-list"
     check_packaged_examples_help "smoke-packaged-examples-help" "$output_prefix-freeze-packaged-examples-help"
     run_packaged_examples_entrypoint "smoke-packaged-examples" "$output_prefix-freeze-packaged-examples"
@@ -266,6 +292,7 @@ run_reinstall_from_direct_requirement() {
     run_packaged_example_module "smoke-packaged-example" "$output_prefix-direct-packaged-example"
     run_packaged_real_user_module "smoke-packaged-smoke" "$output_prefix-direct-packaged-smoke"
     run_packaged_example_module "smoke-packaged-examples-readme" "$output_prefix-direct-packaged-examples-readme"
+    run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "$output_prefix-direct-packaged-examples-agent-timeline"
     check_packaged_examples_listing "smoke-packaged-examples-list" "$output_prefix-direct-packaged-examples-list"
     check_packaged_examples_help "smoke-packaged-examples-help" "$output_prefix-direct-packaged-examples-help"
     run_packaged_examples_entrypoint "smoke-packaged-examples" "$output_prefix-direct-packaged-examples"
@@ -314,8 +341,10 @@ with zipfile.ZipFile(wheel_path) as archive:
     names = set(archive.namelist())
     required = {
         "logbrew_sdk/__init__.py",
+        "logbrew_sdk/_timeline.py",
         "logbrew_sdk/examples/__init__.py",
         "logbrew_sdk/examples/__main__.py",
+        "logbrew_sdk/examples/agent_timeline.py",
         "logbrew_sdk/examples/readme_example.py",
         "logbrew_sdk/examples/real_user_smoke.py",
         "logbrew_sdk/py.typed",
@@ -336,6 +365,8 @@ for needle in (
     "HttpTransport",
     "LogBrewLoggingHandler",
     "parse_traceparent",
+    "create_product_action_attributes",
+    "create_network_milestone_attributes",
     "span_attributes_from_traceparent",
 ):
     if needle not in metadata:
@@ -360,9 +391,11 @@ with tarfile.open(sdist_path, "r:gz") as archive:
     required = {
         "logbrew_sdk-0.1.0/README.md",
         "logbrew_sdk-0.1.0/pyproject.toml",
+        "logbrew_sdk-0.1.0/src/logbrew_sdk/_timeline.py",
         "logbrew_sdk-0.1.0/src/logbrew_sdk/py.typed",
         "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/__init__.py",
         "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/__main__.py",
+        "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/agent_timeline.py",
         "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/readme_example.py",
         "logbrew_sdk-0.1.0/src/logbrew_sdk/examples/real_user_smoke.py",
     }
@@ -389,6 +422,8 @@ for needle in (
     "HttpTransport",
     "LogBrewLoggingHandler",
     "parse_traceparent",
+    "create_product_action_attributes",
+    "create_network_milestone_attributes",
     "span_attributes_from_traceparent",
 ):
     if needle not in readme:
@@ -545,6 +580,14 @@ create_traceparent_doc = inspect.getdoc(logbrew_sdk.create_traceparent)
 if create_traceparent_doc != "Create a W3C traceparent header from explicit trace and span ids.":
     raise SystemExit(f"unexpected create_traceparent docstring: {create_traceparent_doc!r}")
 
+product_action_doc = inspect.getdoc(logbrew_sdk.create_product_action_attributes)
+if product_action_doc != "Build privacy-safe action attributes for app-owned product milestones.":
+    raise SystemExit(f"unexpected create_product_action_attributes docstring: {product_action_doc!r}")
+
+network_milestone_doc = inspect.getdoc(logbrew_sdk.create_network_milestone_attributes)
+if network_milestone_doc != "Build privacy-safe action attributes for app-owned network milestones.":
+    raise SystemExit(f"unexpected create_network_milestone_attributes docstring: {network_milestone_doc!r}")
+
 span_from_traceparent_doc = inspect.getdoc(logbrew_sdk.span_attributes_from_traceparent)
 if span_from_traceparent_doc != "Build LogBrew span attributes that continue an incoming W3C traceparent.":
     raise SystemExit(f"unexpected span_attributes_from_traceparent docstring: {span_from_traceparent_doc!r}")
@@ -580,6 +623,48 @@ if attributes != {
     "metadata": {"service": "checkout"},
 }:
     raise SystemExit(f"unexpected continued span attributes: {attributes!r}")
+
+product_action = logbrew_sdk.create_product_action_attributes(
+    {
+        "name": "checkout.submit",
+        "status": "running",
+        "sessionId": "sess_123",
+        "traceId": context.trace_id,
+        "routeTemplate": "/checkout/:step?email=private@example.test#payment",
+        "metadata": {"service": "checkout", "payload": {"card": "private"}},
+    }
+)
+if product_action.get("metadata") != {
+    "source": "product.action",
+    "service": "checkout",
+    "routeTemplate": "/checkout/:step",
+    "sessionId": "sess_123",
+    "traceId": context.trace_id,
+}:
+    raise SystemExit(f"unexpected product action metadata: {product_action!r}")
+
+network_milestone = logbrew_sdk.create_network_milestone_attributes(
+    {
+        "routeTemplate": "https://api.example.test/payments/:id?card=private#receipt",
+        "method": "post",
+        "statusCode": 503,
+        "durationMs": 12,
+        "metadata": {"service": "checkout", "headers": {"authorization": "private"}},
+    }
+)
+if network_milestone != {
+    "name": "network.post /payments/:id",
+    "status": "failure",
+    "metadata": {
+        "source": "network.milestone",
+        "service": "checkout",
+        "routeTemplate": "/payments/:id",
+        "method": "POST",
+        "statusCode": 503,
+        "durationMs": 12.0,
+    },
+}:
+    raise SystemExit(f"unexpected network milestone attributes: {network_milestone!r}")
 
 logging_handler_doc = inspect.getdoc(logbrew_sdk.LogBrewLoggingHandler)
 if logging_handler_doc != "Standard-library logging handler that turns LogRecord objects into LogBrew log events.":
@@ -618,6 +703,8 @@ from logbrew_sdk import (
     TraceparentContext,
     Transport,
     TransportResponse,
+    create_network_milestone_attributes,
+    create_product_action_attributes,
     create_traceparent,
     parse_traceparent,
     span_attributes_from_traceparent,
@@ -673,6 +760,24 @@ action: ActionAttributes = {
     "name": "deploy",
     "status": "success",
 }
+product_action: ActionAttributes = create_product_action_attributes(
+    {
+        "name": "checkout.submit",
+        "sessionId": "sess_123",
+        "traceId": trace_context.trace_id,
+        "routeTemplate": "/checkout/:step?email=private@example.test#payment",
+        "metadata": {"service": "checkout", "payload": {"card": "private"}},
+    }
+)
+network_milestone: ActionAttributes = create_network_milestone_attributes(
+    {
+        "routeTemplate": "https://api.example.test/payments/:id?card=private#receipt",
+        "method": "post",
+        "statusCode": 202,
+        "durationMs": 94,
+        "metadata": {"service": "checkout", "headers": {"authorization": "private"}},
+    }
+)
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
@@ -686,6 +791,8 @@ client.log("evt_log_001", "2026-06-02T10:00:03Z", log)
 client.span("evt_span_001", "2026-06-02T10:00:04Z", span)
 client.span("evt_span_002", "2026-06-02T10:00:04Z", continued_span)
 client.action("evt_action_001", "2026-06-02T10:00:05Z", action)
+client.action("evt_action_002", "2026-06-02T10:00:05Z", product_action)
+client.action("evt_action_003", "2026-06-02T10:00:06Z", network_milestone)
 client.metric("evt_metric_001", "2026-06-02T10:00:06Z", metric)
 response: TransportResponse = client.flush(RecordingTransport.always_accept())
 if response.status_code != 202:
@@ -1241,7 +1348,7 @@ print(f'{{"ok": true, "status": {response.status_code}, "attempts": {response.at
 EOF
 
 cat > "$tmp_dir/Makefile" <<'EOF'
-.PHONY: help smoke-types smoke-test smoke-readme smoke-packaged-example smoke-packaged-smoke smoke-packaged-examples-readme smoke-packaged-examples-list smoke-packaged-examples-help smoke-packaged-examples smoke-run
+.PHONY: help smoke-types smoke-test smoke-readme smoke-packaged-example smoke-packaged-smoke smoke-packaged-examples-readme smoke-packaged-examples-agent-timeline smoke-packaged-examples-list smoke-packaged-examples-help smoke-packaged-examples smoke-run
 
 help:
 	@printf '%s\n' \
@@ -1251,6 +1358,7 @@ help:
 		'smoke-packaged-example -> make smoke-packaged-example' \
 		'smoke-packaged-smoke -> make smoke-packaged-smoke' \
 		'smoke-packaged-examples-readme -> make smoke-packaged-examples-readme' \
+		'smoke-packaged-examples-agent-timeline -> make smoke-packaged-examples-agent-timeline' \
 		'smoke-packaged-examples-list -> make smoke-packaged-examples-list' \
 		'smoke-packaged-examples-help -> make smoke-packaged-examples-help' \
 		'smoke-packaged-examples (default packaged entrypoint) -> make smoke-packaged-examples' \
@@ -1274,6 +1382,9 @@ smoke-packaged-smoke:
 smoke-packaged-examples-readme:
 	@python -m logbrew_sdk.examples readme-example
 
+smoke-packaged-examples-agent-timeline:
+	@python -m logbrew_sdk.examples agent-timeline
+
 smoke-packaged-examples-list:
 	@python -m logbrew_sdk.examples --list
 
@@ -1287,7 +1398,7 @@ smoke-run:
 	@python smoke.py
 EOF
 
-grep -q '^\.PHONY: help smoke-types smoke-test smoke-readme smoke-packaged-example smoke-packaged-smoke smoke-packaged-examples-readme smoke-packaged-examples-list smoke-packaged-examples-help smoke-packaged-examples smoke-run$' "$tmp_dir/Makefile"
+grep -q '^\.PHONY: help smoke-types smoke-test smoke-readme smoke-packaged-example smoke-packaged-smoke smoke-packaged-examples-readme smoke-packaged-examples-agent-timeline smoke-packaged-examples-list smoke-packaged-examples-help smoke-packaged-examples smoke-run$' "$tmp_dir/Makefile"
 grep -q '^help:$' "$tmp_dir/Makefile"
 grep -q '^smoke-types:$' "$tmp_dir/Makefile"
 grep -q '^smoke-test:$' "$tmp_dir/Makefile"
@@ -1295,6 +1406,7 @@ grep -q '^smoke-readme:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-example:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-smoke:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-examples-readme:$' "$tmp_dir/Makefile"
+grep -q '^smoke-packaged-examples-agent-timeline:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-examples-list:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-examples-help:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-examples:$' "$tmp_dir/Makefile"
@@ -1307,6 +1419,7 @@ run_readme_example "smoke-readme" "wheel-readme-example"
 run_packaged_example_module "smoke-packaged-example" "wheel-packaged-example"
 run_packaged_real_user_module "smoke-packaged-smoke" "wheel-packaged-smoke"
 run_packaged_example_module "smoke-packaged-examples-readme" "wheel-packaged-examples-readme"
+run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "wheel-packaged-examples-agent-timeline"
 check_packaged_examples_listing "smoke-packaged-examples-list" "wheel-packaged-examples-list"
 check_packaged_examples_help "smoke-packaged-examples-help" "wheel-packaged-examples-help"
 run_packaged_examples_entrypoint "smoke-packaged-examples" "wheel-packaged-examples"
@@ -1333,6 +1446,7 @@ run_readme_example "smoke-readme" "wheel-reinstall-readme-example"
 run_packaged_example_module "smoke-packaged-example" "wheel-reinstall-packaged-example"
 run_packaged_real_user_module "smoke-packaged-smoke" "wheel-reinstall-packaged-smoke"
 run_packaged_example_module "smoke-packaged-examples-readme" "wheel-reinstall-packaged-examples-readme"
+run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "wheel-reinstall-packaged-examples-agent-timeline"
 check_packaged_examples_listing "smoke-packaged-examples-list" "wheel-reinstall-packaged-examples-list"
 check_packaged_examples_help "smoke-packaged-examples-help" "wheel-reinstall-packaged-examples-help"
 run_packaged_examples_entrypoint "smoke-packaged-examples" "wheel-reinstall-packaged-examples"
@@ -1369,6 +1483,7 @@ run_readme_example "smoke-readme" "sdist-readme-example"
 run_packaged_example_module "smoke-packaged-example" "sdist-packaged-example"
 run_packaged_real_user_module "smoke-packaged-smoke" "sdist-packaged-smoke"
 run_packaged_example_module "smoke-packaged-examples-readme" "sdist-packaged-examples-readme"
+run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "sdist-packaged-examples-agent-timeline"
 check_packaged_examples_listing "smoke-packaged-examples-list" "sdist-packaged-examples-list"
 check_packaged_examples_help "smoke-packaged-examples-help" "sdist-packaged-examples-help"
 run_packaged_examples_entrypoint "smoke-packaged-examples" "sdist-packaged-examples"
@@ -1395,6 +1510,7 @@ run_readme_example "smoke-readme" "sdist-reinstall-readme-example"
 run_packaged_example_module "smoke-packaged-example" "sdist-reinstall-packaged-example"
 run_packaged_real_user_module "smoke-packaged-smoke" "sdist-reinstall-packaged-smoke"
 run_packaged_example_module "smoke-packaged-examples-readme" "sdist-reinstall-packaged-examples-readme"
+run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "sdist-reinstall-packaged-examples-agent-timeline"
 check_packaged_examples_listing "smoke-packaged-examples-list" "sdist-reinstall-packaged-examples-list"
 check_packaged_examples_help "smoke-packaged-examples-help" "sdist-reinstall-packaged-examples-help"
 run_packaged_examples_entrypoint "smoke-packaged-examples" "sdist-reinstall-packaged-examples"

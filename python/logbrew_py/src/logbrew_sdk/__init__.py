@@ -814,6 +814,9 @@ def validate_metric(attributes: MetricAttributes) -> dict[str, Any]:
     )
 
 
+from logbrew_sdk._timeline import create_network_milestone_attributes, create_product_action_attributes  # noqa: E402, I001
+
+
 __all__ = [
     "ActionAttributes",
     "EnvironmentAttributes",
@@ -833,6 +836,8 @@ __all__ = [
     "Transport",
     "TransportError",
     "TransportResponse",
+    "create_network_milestone_attributes",
+    "create_product_action_attributes",
     "create_traceparent",
     "create_traceparent_headers",
     "log_attributes_from_record",

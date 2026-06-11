@@ -70,6 +70,7 @@ class LogBrewExamplesEntrypointTests(unittest.TestCase):
         self.assertEqual(
             stdout.getvalue().splitlines(),
             [
+                "agent-timeline -> python -m logbrew_sdk.examples agent-timeline",
                 "readme-example -> python -m logbrew_sdk.examples readme-example",
                 "real-user-smoke -> python -m logbrew_sdk.examples real-user-smoke",
                 "default (real-user-smoke) -> python -m logbrew_sdk.examples",
@@ -99,8 +100,12 @@ class LogBrewExamplesEntrypointTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("Run the packaged LogBrew SDK examples", output)
         self.assertIn("--list", output)
-        self.assertIn("{readme-example,real-user-smoke}", output)
+        self.assertIn("{agent-timeline,readme-example,real-user-smoke}", output)
         self.assertIn("Packaged examples:", output)
+        self.assertIn(
+            "agent-timeline -> python -m logbrew_sdk.examples agent-timeline",
+            output,
+        )
         self.assertIn(
             "readme-example -> python -m logbrew_sdk.examples readme-example",
             output,
@@ -142,6 +147,7 @@ class LogBrewExamplesEntrypointTests(unittest.TestCase):
         self.assertEqual(
             result.stdout.splitlines(),
             [
+                "agent-timeline -> python -m logbrew_sdk.examples agent-timeline",
                 "readme-example -> python -m logbrew_sdk.examples readme-example",
                 "real-user-smoke -> python -m logbrew_sdk.examples real-user-smoke",
                 "default (real-user-smoke) -> python -m logbrew_sdk.examples",
@@ -186,6 +192,30 @@ class LogBrewExamplesEntrypointTests(unittest.TestCase):
         self.assertEqual(
             json.loads(result.stderr),
             {"ok": True, "status": 202, "attempts": 1, "events": 6},
+        )
+
+    def test_repo_checkout_examples_module_named_agent_timeline_runs(self) -> None:
+        result = run_repo_module("agent-timeline")
+
+        payload = json.loads(result.stdout)
+        self.assertEqual([event["type"] for event in payload["events"]], ["action", "action"])
+        self.assertEqual(
+            [event["attributes"]["metadata"]["source"] for event in payload["events"]],
+            ["product.action", "network.milestone"],
+        )
+        output_text = result.stdout
+        self.assertNotIn("private@example.test", output_text)
+        self.assertNotIn("card", output_text)
+        self.assertNotIn("authorization", output_text)
+        self.assertEqual(
+            json.loads(result.stderr),
+            {
+                "ok": True,
+                "status": 202,
+                "attempts": 1,
+                "events": 2,
+                "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            },
         )
 
     def test_repo_checkout_real_user_smoke_script_runs(self) -> None:

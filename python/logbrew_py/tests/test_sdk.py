@@ -14,6 +14,8 @@ from logbrew_sdk import (
     RecordingTransport,
     SdkError,
     TransportError,
+    create_network_milestone_attributes,
+    create_product_action_attributes,
     create_traceparent,
     create_traceparent_headers,
     parse_traceparent,
@@ -240,6 +242,82 @@ class LogBrewSdkTests(unittest.TestCase):
                     "temporality": "delta",
                 },
             )
+
+    def test_product_action_helper_keeps_agent_readable_primitive_metadata(self) -> None:
+        attributes = create_product_action_attributes(
+            {
+                "name": "checkout.submit",
+                "status": "running",
+                "sessionId": "sess_123",
+                "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+                "routeTemplate": "/checkout/:step?email=private@example.test#payment",
+                "screen": "checkout",
+                "funnel": "checkout",
+                "step": "submit",
+                "metadata": {"service": "checkout", "payload": {"card": "private"}},
+            },
+            metadata={"release": "2026.06.02"},
+        )
+
+        self.assertEqual(
+            attributes,
+            {
+                "name": "checkout.submit",
+                "status": "running",
+                "metadata": {
+                    "source": "product.action",
+                    "release": "2026.06.02",
+                    "service": "checkout",
+                    "routeTemplate": "/checkout/:step",
+                    "sessionId": "sess_123",
+                    "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+                    "screen": "checkout",
+                    "funnel": "checkout",
+                    "step": "submit",
+                },
+            },
+        )
+
+    def test_network_milestone_helper_sanitizes_route_and_infers_status(self) -> None:
+        attributes = create_network_milestone_attributes(
+            {
+                "routeTemplate": "https://api.example.test/payments/:id?card=private#receipt",
+                "method": "post",
+                "statusCode": 503,
+                "durationMs": 94,
+                "sessionId": "sess_123",
+                "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+                "metadata": {"service": "checkout", "headers": {"authorization": "private"}},
+            }
+        )
+
+        self.assertEqual(
+            attributes,
+            {
+                "name": "network.post /payments/:id",
+                "status": "failure",
+                "metadata": {
+                    "source": "network.milestone",
+                    "service": "checkout",
+                    "routeTemplate": "/payments/:id",
+                    "method": "POST",
+                    "statusCode": 503,
+                    "durationMs": 94,
+                    "sessionId": "sess_123",
+                    "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+                },
+            },
+        )
+
+    def test_timeline_helpers_reject_invalid_inputs(self) -> None:
+        with self.assertRaisesRegex(SdkError, "product action must be a string or object"):
+            create_product_action_attributes(123)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(SdkError, "network milestone statusCode must be an integer from 100 to 599"):
+            create_network_milestone_attributes({"routeTemplate": "/payments/:id", "statusCode": 99})
+        with self.assertRaisesRegex(SdkError, "network milestone method must be a valid HTTP method"):
+            create_network_milestone_attributes({"routeTemplate": "/payments/:id", "method": "POST /private"})
+        with self.assertRaisesRegex(SdkError, "network milestone durationMs must be a non-negative number"):
+            create_network_milestone_attributes({"routeTemplate": "/payments/:id", "durationMs": -1})
 
     def test_traceparent_helpers_parse_create_and_continue_w3c_trace_context(self) -> None:
         traceparent = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01"

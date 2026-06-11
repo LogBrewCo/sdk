@@ -138,6 +138,64 @@ headers = create_traceparent_headers(
 
 `parse_traceparent()` validates W3C shape, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `span_attributes_from_traceparent()` returns LogBrew span attributes with `traceId` from the incoming trace and `parentSpanId` from the incoming parent span. `create_traceparent_headers()` returns an explicit outbound carrier with only `traceparent` for app-owned HTTP clients. FastAPI and Django integrations use these helpers automatically for valid inbound `traceparent` headers and start a fresh synthetic span when the header is missing or malformed. The helpers do not patch HTTP clients or capture request payloads.
 
+## Agent-Readable Timelines
+
+Use `create_product_action_attributes()` and `create_network_milestone_attributes()` when your service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.
+
+```python
+from logbrew_sdk import (
+    LogBrewClient,
+    create_network_milestone_attributes,
+    create_product_action_attributes,
+)
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+
+client.action(
+    "evt_checkout_submit",
+    "2026-06-02T10:00:05Z",
+    create_product_action_attributes(
+        {
+            "name": "checkout.submit",
+            "status": "running",
+            "sessionId": "sess_123",
+            "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+            "routeTemplate": "/checkout/:step",
+            "funnel": "checkout",
+            "step": "submit",
+            "metadata": {"service": "checkout"},
+        }
+    ),
+)
+client.action(
+    "evt_payment_api",
+    "2026-06-02T10:00:06Z",
+    create_network_milestone_attributes(
+        {
+            "routeTemplate": "/payments/:id",
+            "method": "POST",
+            "statusCode": 202,
+            "durationMs": 94,
+            "sessionId": "sess_123",
+            "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+            "metadata": {"service": "checkout"},
+        }
+    ),
+)
+```
+
+Timeline helpers keep only primitive metadata, strip query strings and hashes from route templates, normalize HTTP methods, infer failed network milestones from status codes `400` and above, and serialize through the existing `action` event type. Keep metadata low-cardinality, such as `sessionId`, `traceId`, `routeTemplate`, `method`, `statusCode`, `durationMs`, `screen`, `funnel`, and `step`.
+
+The packaged `agent-timeline` example shows a two-event checkout timeline with explicit `traceparent` propagation and sanitized product/network metadata:
+
+```bash
+python -m logbrew_sdk.examples agent-timeline
+```
+
 ## HTTP Delivery
 
 Use `HttpTransport` for real outbound delivery from server-side Python apps:
