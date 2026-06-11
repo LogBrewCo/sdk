@@ -75,6 +75,7 @@ STEP_LABELS=(
   "Shell static analysis"
   "Workflow YAML validation"
   "Confidentiality leak scan"
+  "Generated artifact hygiene"
 )
 steps_total="${#STEP_LABELS[@]}"
 
@@ -290,7 +291,7 @@ if ! acquire_lock; then
   exit 1
 fi
 
-cleanup_generated_artifacts() {
+cleanup_build_artifacts() {
   rm -rf \
     php/logbrew-php/vendor \
     php/logbrew-php/composer.lock \
@@ -314,6 +315,10 @@ cleanup_generated_artifacts() {
   find dotnet/logbrew-dotnet -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
   find unity/logbrew-unity -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
   find kotlin/logbrew-kotlin -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + 2>/dev/null || true
+}
+
+cleanup_generated_artifacts() {
+  cleanup_build_artifacts
   rmdir "$lock_dir" 2>/dev/null || true
 }
 
@@ -564,6 +569,11 @@ mark_step_complete
 
 begin_step 55 "Confidentiality leak scan"
 run_shell_step "python3 scripts/check_confidentiality_scan.py"
+mark_step_complete
+
+begin_step 56 "Generated artifact hygiene"
+cleanup_build_artifacts
+run_shell_step "PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_generated_artifacts.py"
 mark_step_complete
 
 log_line "all public SDK checks passed"
