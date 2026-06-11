@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -83,7 +84,7 @@ npm explain @logbrew/fastify > "$tmp_dir/npm-explain-fastify.txt"
 grep -q '@logbrew/fastify@0.1.0' "$tmp_dir/npm-explain-fastify.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
 grep -q '@logbrew/fastify@0.1.0' "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/sdk@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'
 import json
