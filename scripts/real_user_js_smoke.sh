@@ -45,18 +45,65 @@ grep -q '"events":6' "$output_prefix.stderr.json"
 grep -q '"ok":true' "$output_prefix.stderr.json"
 }
 
+run_installed_agent_timeline_example() {
+local output_prefix="$1"
+shift
+
+"$@" > "$output_prefix.stdout.json" 2> "$output_prefix.stderr.json"
+grep -q '"id": "evt_checkout_started"' "$output_prefix.stdout.json"
+grep -q '"id": "evt_payment_api"' "$output_prefix.stdout.json"
+grep -q '"source": "product.action"' "$output_prefix.stdout.json"
+grep -q '"source": "network.milestone"' "$output_prefix.stdout.json"
+grep -q '"routeTemplate": "/checkout/:step"' "$output_prefix.stdout.json"
+grep -q '"routeTemplate": "/payments/123"' "$output_prefix.stdout.json"
+grep -q '"statusCode": 503' "$output_prefix.stdout.json"
+grep -q '"status": "failure"' "$output_prefix.stdout.json"
+grep -q '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"' "$output_prefix.stdout.json"
+grep -q '"events":2' "$output_prefix.stderr.json"
+grep -q '"ok":true' "$output_prefix.stderr.json"
+grep -q '"traceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$output_prefix.stderr.json"
+if grep -Eq 'card=private|coupon=private|#payment|debug heartbeat' "$output_prefix.stdout.json"; then
+  echo "agent timeline example leaked private or dropped metadata" >&2
+  exit 1
+fi
+python3 "$repo_root/scripts/validate_fixtures.py" "$output_prefix.stdout.json" >/dev/null
+}
+
+run_installed_agent_timeline_example_script() {
+local package_manager="$1"
+local script_name="$2"
+local output_prefix="$3"
+local examples_dir="node_modules/@logbrew/sdk/examples"
+
+case "$package_manager" in
+  npm)
+    run_installed_agent_timeline_example "$output_prefix" npm --prefix "$examples_dir" run --silent "$script_name"
+    ;;
+  pnpm)
+    run_installed_agent_timeline_example "$output_prefix" pnpm --dir "$examples_dir" run --silent "$script_name"
+    ;;
+  *)
+    echo "unsupported package manager: $package_manager" >&2
+    exit 1
+    ;;
+esac
+}
+
 check_installed_package_launcher_listing() {
 local output_file="$1"
 
 node node_modules/@logbrew/sdk/examples/index.mjs --list > "$output_file"
-grep -qx 'readme-example -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example' <(sed -n '1p' "$output_file")
-grep -qx 'readme-example:esm -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example:esm' <(sed -n '2p' "$output_file")
-grep -qx 'readme-example:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example:cjs' <(sed -n '3p' "$output_file")
-grep -qx 'real-user-smoke -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke' <(sed -n '4p' "$output_file")
-grep -qx 'real-user-smoke:esm -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke:esm' <(sed -n '5p' "$output_file")
-grep -qx 'real-user-smoke:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke:cjs' <(sed -n '6p' "$output_file")
-grep -qx 'default (real-user-smoke) -> node node_modules/@logbrew/sdk/examples/index.mjs' <(sed -n '7p' "$output_file")
-test "$(wc -l < "$output_file" | tr -d ' ')" = "7"
+grep -qx 'agent-timeline -> node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline' <(sed -n '1p' "$output_file")
+grep -qx 'agent-timeline:esm -> node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline:esm' <(sed -n '2p' "$output_file")
+grep -qx 'agent-timeline:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline:cjs' <(sed -n '3p' "$output_file")
+grep -qx 'readme-example -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example' <(sed -n '4p' "$output_file")
+grep -qx 'readme-example:esm -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example:esm' <(sed -n '5p' "$output_file")
+grep -qx 'readme-example:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example:cjs' <(sed -n '6p' "$output_file")
+grep -qx 'real-user-smoke -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke' <(sed -n '7p' "$output_file")
+grep -qx 'real-user-smoke:esm -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke:esm' <(sed -n '8p' "$output_file")
+grep -qx 'real-user-smoke:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke:cjs' <(sed -n '9p' "$output_file")
+grep -qx 'default (real-user-smoke) -> node node_modules/@logbrew/sdk/examples/index.mjs' <(sed -n '10p' "$output_file")
+test "$(wc -l < "$output_file" | tr -d ' ')" = "10"
 }
 
 check_installed_package_launcher_help() {
@@ -66,6 +113,9 @@ node node_modules/@logbrew/sdk/examples/index.mjs --help > "$output_file"
 grep -q '^Usage: node node_modules/@logbrew/sdk/examples/index.mjs \[--list\] \[example\]$' "$output_file"
 grep -q '^Run the packaged LogBrew SDK JavaScript examples that ship with the installed package\.$' "$output_file"
 grep -q '^Launcher commands:$' "$output_file"
+grep -q '^  agent-timeline -> node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline$' "$output_file"
+grep -q '^  agent-timeline:esm -> node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline:esm$' "$output_file"
+grep -q '^  agent-timeline:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline:cjs$' "$output_file"
 grep -q '^  readme-example -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example$' "$output_file"
 grep -q '^  readme-example:esm -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example:esm$' "$output_file"
 grep -q '^  readme-example:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example:cjs$' "$output_file"
@@ -74,6 +124,9 @@ grep -q '^  real-user-smoke:esm -> node node_modules/@logbrew/sdk/examples/index
 grep -q '^  real-user-smoke:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke:cjs$' "$output_file"
 grep -Fqx '  default (real-user-smoke) -> node node_modules/@logbrew/sdk/examples/index.mjs' <(grep '^  default ' "$output_file")
 grep -q '^Package-manager helper commands:$' "$output_file"
+grep -q '^  agent-timeline -> npm --prefix node_modules/@logbrew/sdk/examples run agent-timeline | pnpm --dir node_modules/@logbrew/sdk/examples run agent-timeline$' "$output_file"
+grep -q '^  agent-timeline:esm -> npm --prefix node_modules/@logbrew/sdk/examples run agent-timeline:esm | pnpm --dir node_modules/@logbrew/sdk/examples run agent-timeline:esm$' "$output_file"
+grep -q '^  agent-timeline:cjs -> npm --prefix node_modules/@logbrew/sdk/examples run agent-timeline:cjs | pnpm --dir node_modules/@logbrew/sdk/examples run agent-timeline:cjs$' "$output_file"
 grep -q '^  readme-example -> npm --prefix node_modules/@logbrew/sdk/examples run readme-example | pnpm --dir node_modules/@logbrew/sdk/examples run readme-example$' "$output_file"
 grep -q '^  real-user-smoke -> npm --prefix node_modules/@logbrew/sdk/examples run real-user-smoke | pnpm --dir node_modules/@logbrew/sdk/examples run real-user-smoke$' "$output_file"
 }
@@ -128,6 +181,9 @@ case "$package_manager" in
 esac
 
 grep -q '^Package-manager helper commands:$' "$output_file"
+grep -q '^  agent-timeline -> npm --prefix node_modules/@logbrew/sdk/examples run agent-timeline | pnpm --dir node_modules/@logbrew/sdk/examples run agent-timeline$' "$output_file"
+grep -q '^  agent-timeline:esm -> npm --prefix node_modules/@logbrew/sdk/examples run agent-timeline:esm | pnpm --dir node_modules/@logbrew/sdk/examples run agent-timeline:esm$' "$output_file"
+grep -q '^  agent-timeline:cjs -> npm --prefix node_modules/@logbrew/sdk/examples run agent-timeline:cjs | pnpm --dir node_modules/@logbrew/sdk/examples run agent-timeline:cjs$' "$output_file"
 grep -q '^  readme-example -> npm --prefix node_modules/@logbrew/sdk/examples run readme-example | pnpm --dir node_modules/@logbrew/sdk/examples run readme-example$' "$output_file"
 grep -q '^  readme-example:esm -> npm --prefix node_modules/@logbrew/sdk/examples run readme-example:esm | pnpm --dir node_modules/@logbrew/sdk/examples run readme-example:esm$' "$output_file"
 grep -q '^  readme-example:cjs -> npm --prefix node_modules/@logbrew/sdk/examples run readme-example:cjs | pnpm --dir node_modules/@logbrew/sdk/examples run readme-example:cjs$' "$output_file"
@@ -156,15 +212,18 @@ case "$package_manager" in
 esac
 
 filtered_output="$(mktemp)"
-grep -E '^(readme-example|real-user-smoke|default \(real-user-smoke\))' "$output_file" > "$filtered_output"
-grep -qx 'readme-example -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example' <(sed -n '1p' "$filtered_output")
-grep -qx 'readme-example:esm -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example:esm' <(sed -n '2p' "$filtered_output")
-grep -qx 'readme-example:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example:cjs' <(sed -n '3p' "$filtered_output")
-grep -qx 'real-user-smoke -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke' <(sed -n '4p' "$filtered_output")
-grep -qx 'real-user-smoke:esm -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke:esm' <(sed -n '5p' "$filtered_output")
-grep -qx 'real-user-smoke:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke:cjs' <(sed -n '6p' "$filtered_output")
-grep -qx 'default (real-user-smoke) -> node node_modules/@logbrew/sdk/examples/index.mjs' <(sed -n '7p' "$filtered_output")
-test "$(wc -l < "$filtered_output" | tr -d ' ')" = "7"
+grep -E '^(agent-timeline|readme-example|real-user-smoke|default \(real-user-smoke\))' "$output_file" > "$filtered_output"
+grep -qx 'agent-timeline -> node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline' <(sed -n '1p' "$filtered_output")
+grep -qx 'agent-timeline:esm -> node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline:esm' <(sed -n '2p' "$filtered_output")
+grep -qx 'agent-timeline:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline:cjs' <(sed -n '3p' "$filtered_output")
+grep -qx 'readme-example -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example' <(sed -n '4p' "$filtered_output")
+grep -qx 'readme-example:esm -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example:esm' <(sed -n '5p' "$filtered_output")
+grep -qx 'readme-example:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs readme-example:cjs' <(sed -n '6p' "$filtered_output")
+grep -qx 'real-user-smoke -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke' <(sed -n '7p' "$filtered_output")
+grep -qx 'real-user-smoke:esm -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke:esm' <(sed -n '8p' "$filtered_output")
+grep -qx 'real-user-smoke:cjs -> node node_modules/@logbrew/sdk/examples/index.mjs real-user-smoke:cjs' <(sed -n '9p' "$filtered_output")
+grep -qx 'default (real-user-smoke) -> node node_modules/@logbrew/sdk/examples/index.mjs' <(sed -n '10p' "$filtered_output")
+test "$(wc -l < "$filtered_output" | tr -d ' ')" = "10"
 rm -f "$filtered_output"
 }
 
@@ -190,6 +249,9 @@ esac
 
 grep -q '^  help$' "$output_file"
 grep -q '^  list$' "$output_file"
+grep -q '^  agent-timeline$' "$output_file"
+grep -q '^  agent-timeline:esm$' "$output_file"
+grep -q '^  agent-timeline:cjs$' "$output_file"
 grep -q '^  readme-example$' "$output_file"
 grep -q '^  readme-example:esm$' "$output_file"
 grep -q '^  readme-example:cjs$' "$output_file"
@@ -333,6 +395,8 @@ const declarationsPath = path.join("node_modules", "@logbrew", "sdk", "index.d.t
 const commonJsDeclarationsPath = path.join("node_modules", "@logbrew", "sdk", "index.d.cts");
 const examplesPackageJsonPath = path.join("node_modules", "@logbrew", "sdk", "examples", "package.json");
 const examplesLauncherPath = path.join("node_modules", "@logbrew", "sdk", "examples", "index.mjs");
+const agentTimelineEsmExamplePath = path.join("node_modules", "@logbrew", "sdk", "examples", "agent-timeline.mjs");
+const agentTimelineCjsExamplePath = path.join("node_modules", "@logbrew", "sdk", "examples", "agent-timeline.cjs");
 const esmExamplePath = path.join("node_modules", "@logbrew", "sdk", "examples", "readme-example.mjs");
 const cjsExamplePath = path.join("node_modules", "@logbrew", "sdk", "examples", "readme-example.cjs");
 const realUserEsmExamplePath = path.join("node_modules", "@logbrew", "sdk", "examples", "real-user-smoke.mjs");
@@ -351,6 +415,12 @@ if (!fs.existsSync(examplesPackageJsonPath)) {
 }
 if (!fs.existsSync(examplesLauncherPath)) {
   throw new Error("expected installed examples/index.mjs");
+}
+if (!fs.existsSync(agentTimelineEsmExamplePath)) {
+  throw new Error("expected installed ESM agent timeline example");
+}
+if (!fs.existsSync(agentTimelineCjsExamplePath)) {
+  throw new Error("expected installed CommonJS agent timeline example");
 }
 if (!fs.existsSync(esmExamplePath)) {
   throw new Error("expected installed ESM example");
@@ -423,6 +493,15 @@ if (examplesPackageJson.scripts?.help !== "node ./index.mjs --help") {
 if (examplesPackageJson.scripts?.list !== "node ./index.mjs --list") {
   throw new Error(`unexpected installed examples list script: ${examplesPackageJson.scripts?.list}`);
 }
+if (examplesPackageJson.scripts?.["agent-timeline"] !== "node ./index.mjs agent-timeline") {
+  throw new Error(`unexpected installed examples agent timeline helper script: ${examplesPackageJson.scripts?.["agent-timeline"]}`);
+}
+if (examplesPackageJson.scripts?.["agent-timeline:esm"] !== "node ./index.mjs agent-timeline:esm") {
+  throw new Error(`unexpected installed examples agent timeline ESM helper script: ${examplesPackageJson.scripts?.["agent-timeline:esm"]}`);
+}
+if (examplesPackageJson.scripts?.["agent-timeline:cjs"] !== "node ./index.mjs agent-timeline:cjs") {
+  throw new Error(`unexpected installed examples agent timeline CommonJS helper script: ${examplesPackageJson.scripts?.["agent-timeline:cjs"]}`);
+}
 if (examplesPackageJson.scripts?.["readme-example"] !== "node ./index.mjs readme-example") {
   throw new Error(`unexpected installed examples default helper script: ${examplesPackageJson.scripts?.["readme-example"]}`);
 }
@@ -467,6 +546,9 @@ if (!readme.includes("createProductActionAttributes")) {
 }
 if (!readme.includes("createNetworkMilestoneAttributes")) {
   throw new Error("missing installed README network milestone timeline guidance");
+}
+if (!readme.includes("agent-timeline")) {
+  throw new Error("missing installed README agent timeline packaged example guidance");
 }
 if (!readme.includes("installLogBrewConsoleCapture")) {
   throw new Error("missing installed README console capture guidance");
@@ -959,6 +1041,8 @@ grep -q '^package/README.md$' package-contents.txt
 grep -q '^package/index.d.ts$' package-contents.txt
 grep -q '^package/index.d.cts$' package-contents.txt
 grep -q '^package/examples/package.json$' package-contents.txt
+grep -q '^package/examples/agent-timeline.mjs$' package-contents.txt
+grep -q '^package/examples/agent-timeline.cjs$' package-contents.txt
 grep -q '^package/examples/readme-example.mjs$' package-contents.txt
 grep -q '^package/examples/readme-example.cjs$' package-contents.txt
 tar -xOf "$package_tgz" package/package.json > packed-package.json
@@ -993,7 +1077,7 @@ function validatePackMetadata(payload, label) {
     throw new Error(`missing ${label} file list`);
   }
   const packedPaths = new Set(entry.files.map((item) => item.path));
-  for (const requiredPath of ["README.md", "package.json", "index.d.ts", "index.d.cts", "index.js", "index.cjs", "examples/package.json", "examples/index.mjs", "examples/readme-example.mjs", "examples/readme-example.cjs", "examples/real-user-smoke.mjs", "examples/real-user-smoke.cjs"]) {
+  for (const requiredPath of ["README.md", "package.json", "index.d.ts", "index.d.cts", "index.js", "index.cjs", "examples/package.json", "examples/index.mjs", "examples/agent-timeline.mjs", "examples/agent-timeline.cjs", "examples/readme-example.mjs", "examples/readme-example.cjs", "examples/real-user-smoke.mjs", "examples/real-user-smoke.cjs"]) {
     if (!packedPaths.has(requiredPath)) {
       throw new Error(`missing ${label} file metadata for ${requiredPath}`);
     }
@@ -1079,6 +1163,15 @@ if (examplesPackageJson.scripts?.help !== "node ./index.mjs --help") {
 if (examplesPackageJson.scripts?.list !== "node ./index.mjs --list") {
   throw new Error(`unexpected packed examples list script: ${examplesPackageJson.scripts?.list}`);
 }
+if (examplesPackageJson.scripts?.["agent-timeline"] !== "node ./index.mjs agent-timeline") {
+  throw new Error(`unexpected packed examples agent timeline helper script: ${examplesPackageJson.scripts?.["agent-timeline"]}`);
+}
+if (examplesPackageJson.scripts?.["agent-timeline:esm"] !== "node ./index.mjs agent-timeline:esm") {
+  throw new Error(`unexpected packed examples agent timeline ESM helper script: ${examplesPackageJson.scripts?.["agent-timeline:esm"]}`);
+}
+if (examplesPackageJson.scripts?.["agent-timeline:cjs"] !== "node ./index.mjs agent-timeline:cjs") {
+  throw new Error(`unexpected packed examples agent timeline CommonJS helper script: ${examplesPackageJson.scripts?.["agent-timeline:cjs"]}`);
+}
 if (examplesPackageJson.scripts?.["readme-example"] !== "node ./index.mjs readme-example") {
   throw new Error(`unexpected packed examples default helper script: ${examplesPackageJson.scripts?.["readme-example"]}`);
 }
@@ -1117,6 +1210,15 @@ if (!readme.includes("createTraceparent")) {
 }
 if (!readme.includes("spanAttributesFromTraceparent")) {
   throw new Error("missing packed README traceparent span guidance");
+}
+if (!readme.includes("createProductActionAttributes")) {
+  throw new Error("missing packed README product action timeline guidance");
+}
+if (!readme.includes("createNetworkMilestoneAttributes")) {
+  throw new Error("missing packed README network milestone timeline guidance");
+}
+if (!readme.includes("agent-timeline")) {
+  throw new Error("missing packed README agent timeline packaged example guidance");
 }
 if (!readme.includes("installLogBrewConsoleCapture")) {
   throw new Error("missing packed README console capture guidance");
@@ -2172,8 +2274,12 @@ run_installed_package_example "node_modules/@logbrew/sdk/examples/readme-example
 run_installed_package_example "node_modules/@logbrew/sdk/examples/readme-example.cjs" installed-example-cjs
 run_installed_package_example "node_modules/@logbrew/sdk/examples/real-user-smoke.mjs" installed-example-real-user-esm
 run_installed_package_example "node_modules/@logbrew/sdk/examples/real-user-smoke.cjs" installed-example-real-user-cjs
+run_installed_agent_timeline_example installed-agent-timeline-esm node node_modules/@logbrew/sdk/examples/agent-timeline.mjs
+run_installed_agent_timeline_example installed-agent-timeline-cjs node node_modules/@logbrew/sdk/examples/agent-timeline.cjs
 check_installed_package_launcher_listing installed-example-launcher-list.txt
 check_installed_package_launcher_help installed-example-launcher-help.txt
+run_installed_agent_timeline_example installed-agent-timeline-launcher node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline
+run_installed_agent_timeline_example installed-agent-timeline-launcher-cjs node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline:cjs
 run_installed_package_launcher "readme-example" installed-example-launcher-readme
 run_installed_package_launcher "readme-example:cjs" installed-example-launcher-readme-cjs
 run_installed_package_launcher "real-user-smoke" installed-example-launcher-real-user
@@ -2182,6 +2288,9 @@ run_installed_package_launcher "real-user-smoke:cjs" installed-example-launcher-
 write_installed_package_example_script_listing "$package_manager" installed-example-script-list.txt
 run_installed_package_example_list_command "$package_manager" installed-example-list-script.txt
 run_installed_package_example_help_command "$package_manager" installed-example-help-script.txt
+run_installed_agent_timeline_example_script "$package_manager" "agent-timeline" installed-agent-timeline-default-script
+run_installed_agent_timeline_example_script "$package_manager" "agent-timeline:esm" installed-agent-timeline-esm-script
+run_installed_agent_timeline_example_script "$package_manager" "agent-timeline:cjs" installed-agent-timeline-cjs-script
 run_installed_package_example_script "$package_manager" "readme-example" installed-example-default-script
 run_installed_package_example_script "$package_manager" "readme-example:esm" installed-example-esm-script
 run_installed_package_example_script "$package_manager" "readme-example:cjs" installed-example-cjs-script
@@ -2192,8 +2301,12 @@ run_installed_package_example "node_modules/@logbrew/sdk/examples/readme-example
 run_installed_package_example "node_modules/@logbrew/sdk/examples/readme-example.cjs" installed-example-cjs-reinstall
 run_installed_package_example "node_modules/@logbrew/sdk/examples/real-user-smoke.mjs" installed-example-real-user-esm-reinstall
 run_installed_package_example "node_modules/@logbrew/sdk/examples/real-user-smoke.cjs" installed-example-real-user-cjs-reinstall
+run_installed_agent_timeline_example installed-agent-timeline-esm-reinstall node node_modules/@logbrew/sdk/examples/agent-timeline.mjs
+run_installed_agent_timeline_example installed-agent-timeline-cjs-reinstall node node_modules/@logbrew/sdk/examples/agent-timeline.cjs
 check_installed_package_launcher_listing installed-example-launcher-list-reinstall.txt
 check_installed_package_launcher_help installed-example-launcher-help-reinstall.txt
+run_installed_agent_timeline_example installed-agent-timeline-launcher-reinstall node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline
+run_installed_agent_timeline_example installed-agent-timeline-launcher-cjs-reinstall node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline:cjs
 run_installed_package_launcher "readme-example" installed-example-launcher-readme-reinstall
 run_installed_package_launcher "readme-example:cjs" installed-example-launcher-readme-cjs-reinstall
 run_installed_package_launcher "real-user-smoke" installed-example-launcher-real-user-reinstall
@@ -2202,6 +2315,9 @@ run_installed_package_launcher "real-user-smoke:cjs" installed-example-launcher-
 write_installed_package_example_script_listing "$package_manager" installed-example-script-list-reinstall.txt
 run_installed_package_example_list_command "$package_manager" installed-example-list-script-reinstall.txt
 run_installed_package_example_help_command "$package_manager" installed-example-help-script-reinstall.txt
+run_installed_agent_timeline_example_script "$package_manager" "agent-timeline" installed-agent-timeline-default-script-reinstall
+run_installed_agent_timeline_example_script "$package_manager" "agent-timeline:esm" installed-agent-timeline-esm-script-reinstall
+run_installed_agent_timeline_example_script "$package_manager" "agent-timeline:cjs" installed-agent-timeline-cjs-script-reinstall
 run_installed_package_example_script "$package_manager" "readme-example" installed-example-default-script-reinstall
 run_installed_package_example_script "$package_manager" "readme-example:esm" installed-example-esm-script-reinstall
 run_installed_package_example_script "$package_manager" "readme-example:cjs" installed-example-cjs-script-reinstall

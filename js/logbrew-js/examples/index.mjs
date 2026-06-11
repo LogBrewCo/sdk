@@ -10,6 +10,9 @@ const installedLauncherPrefix = "node node_modules/@logbrew/sdk/examples/index.m
 const repoLauncherPrefix = "node examples/index.mjs";
 
 const examples = {
+  "agent-timeline": new URL("./agent-timeline.mjs", import.meta.url),
+  "agent-timeline:esm": new URL("./agent-timeline.mjs", import.meta.url),
+  "agent-timeline:cjs": new URL("./agent-timeline.cjs", import.meta.url),
   "readme-example": new URL("./readme-example.mjs", import.meta.url),
   "readme-example:esm": new URL("./readme-example.mjs", import.meta.url),
   "readme-example:cjs": new URL("./readme-example.cjs", import.meta.url),
@@ -25,6 +28,9 @@ function isInstalledPackageContext() {
 function exampleCommands() {
   if (!isInstalledPackageContext()) {
     return {
+      "agent-timeline": `${repoPrefix} && ${repoLauncherPrefix} agent-timeline`,
+      "agent-timeline:esm": `${repoPrefix} && ${repoLauncherPrefix} agent-timeline:esm`,
+      "agent-timeline:cjs": `${repoPrefix} && ${repoLauncherPrefix} agent-timeline:cjs`,
       "readme-example": `${repoPrefix} && ${repoLauncherPrefix} readme-example`,
       "readme-example:esm": `${repoPrefix} && ${repoLauncherPrefix} readme-example:esm`,
       "readme-example:cjs": `${repoPrefix} && ${repoLauncherPrefix} readme-example:cjs`,
@@ -36,6 +42,9 @@ function exampleCommands() {
   }
 
   return {
+    "agent-timeline": `${installedLauncherPrefix} agent-timeline`,
+    "agent-timeline:esm": `${installedLauncherPrefix} agent-timeline:esm`,
+    "agent-timeline:cjs": `${installedLauncherPrefix} agent-timeline:cjs`,
     "readme-example": `${installedLauncherPrefix} readme-example`,
     "readme-example:esm": `${installedLauncherPrefix} readme-example:esm`,
     "readme-example:cjs": `${installedLauncherPrefix} readme-example:cjs`,
@@ -49,6 +58,9 @@ function exampleCommands() {
 function helperCommands() {
   if (!isInstalledPackageContext()) {
     return {
+      "agent-timeline": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} agent-timeline | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} agent-timeline`,
+      "agent-timeline:esm": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} agent-timeline:esm | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} agent-timeline:esm`,
+      "agent-timeline:cjs": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} agent-timeline:cjs | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} agent-timeline:cjs`,
       "readme-example": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} readme-example | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} readme-example`,
       "readme-example:esm": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} readme-example:esm | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} readme-example:esm`,
       "readme-example:cjs": `${repoExamplesPrefix} && ${repoNpmHelperPrefix} readme-example:cjs | ${repoExamplesPrefix} && ${repoPnpmHelperPrefix} readme-example:cjs`,
@@ -59,6 +71,9 @@ function helperCommands() {
   }
 
   return {
+    "agent-timeline": `${installedHelperPrefix} agent-timeline | ${installedPnpmHelperPrefix} agent-timeline`,
+    "agent-timeline:esm": `${installedHelperPrefix} agent-timeline:esm | ${installedPnpmHelperPrefix} agent-timeline:esm`,
+    "agent-timeline:cjs": `${installedHelperPrefix} agent-timeline:cjs | ${installedPnpmHelperPrefix} agent-timeline:cjs`,
     "readme-example": `${installedHelperPrefix} readme-example | ${installedPnpmHelperPrefix} readme-example`,
     "readme-example:esm": `${installedHelperPrefix} readme-example:esm | ${installedPnpmHelperPrefix} readme-example:esm`,
     "readme-example:cjs": `${installedHelperPrefix} readme-example:cjs | ${installedPnpmHelperPrefix} readme-example:cjs`,

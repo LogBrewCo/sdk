@@ -4,6 +4,9 @@
   "scripts": {
     "help": "node ./index.mjs --help",
     "list": "node ./index.mjs --list",
+    "agent-timeline": "node ./index.mjs agent-timeline",
+    "agent-timeline:esm": "node ./index.mjs agent-timeline:esm",
+    "agent-timeline:cjs": "node ./index.mjs agent-timeline:cjs",
     "readme-example": "node ./index.mjs readme-example",
     "readme-example:esm": "node ./index.mjs readme-example:esm",
     "readme-example:cjs": "node ./index.mjs readme-example:cjs",

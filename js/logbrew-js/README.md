@@ -13,6 +13,14 @@ The package supports both ESM `import` and CommonJS `require`.
 The shipped package also includes `.d.ts` and `.d.cts` declarations so ESM and CommonJS TypeScript consumers can install it directly without a separate build step.
 The package ships copyable examples under `node_modules/@logbrew/sdk/examples/`. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in your app configuration, and call `previewJson()` when you want to inspect queued JSON before sending. Type declarations document payload shapes such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, transport responses, SDK errors, lifecycle helpers, W3C trace helpers, product timeline helpers, console capture, Pino destination, and Winston transport APIs.
 
+After install, discover and run the packaged examples:
+
+```bash
+node node_modules/@logbrew/sdk/examples/index.mjs --list
+node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline
+npm --prefix node_modules/@logbrew/sdk/examples run agent-timeline
+```
+
 ## Example
 
 ```js
@@ -182,6 +190,13 @@ client.action("evt_payment_api", new Date().toISOString(), createNetworkMileston
 ```
 
 Timeline helpers keep only primitive metadata, strip query strings and hashes from route templates, normalize HTTP methods, infer failed network milestones from status codes `400` and above, and serialize through the existing `action` event type. Keep metadata low-cardinality, such as `sessionId`, `traceId`, `routeTemplate`, `method`, `statusCode`, `durationMs`, `screen`, `funnel`, and `step`.
+
+The packaged `agent-timeline` example shows a two-event checkout timeline that an AI assistant can inspect without session replay or payload capture. It combines product action metadata, network milestone metadata, explicit `traceparent` propagation, and a drop-only `eventFilter` that removes low-value info logs:
+
+```bash
+node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline
+node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline:cjs
+```
 
 ## Console Capture
 
