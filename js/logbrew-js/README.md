@@ -122,6 +122,26 @@ The helpers validate the W3C `version-traceId-parentSpanId-traceFlags` shape, re
 
 LogBrew severity categories are `info`, `warning`, `error`, and `critical`. The JavaScript SDK accepts common runtime aliases such as `trace`, `debug`, `warn`, and `fatal` for compatibility, then serializes canonical values before queued events are sent. The shared mapping is documented in the [LogBrew severity contract](../../docs/severity-contract.md).
 
+## Event Filtering
+
+Use `eventFilter` when your app needs a last-mile privacy or sampling gate before events enter the in-memory queue. The filter receives a copy of the already validated event, so severity aliases are already canonical and mutations inside the callback do not alter queued payloads. Return `false` to drop an event; return `true` or nothing to keep it.
+
+```js
+const client = LogBrewClient.create({
+  apiKey: "LOGBREW_API_KEY",
+  sdkName: "checkout-api",
+  sdkVersion: "1.0.0",
+  eventFilter(event) {
+    if (event.type === "log" && event.attributes.level === "info") {
+      return false;
+    }
+    return true;
+  }
+});
+```
+
+Prefer removing sensitive values at the source before calling LogBrew. `eventFilter` is intentionally drop-only: it avoids broad mutable event processing, global scopes, and hidden context that can make observability payloads harder to reason about.
+
 ## Agent-Readable Timelines
 
 Use `createProductActionAttributes()` and `createNetworkMilestoneAttributes()` when a service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that can be analyzed across many sessions without visual replay, global HTTP patching, payload capture, or header capture.

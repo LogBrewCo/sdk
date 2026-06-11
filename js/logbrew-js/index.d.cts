@@ -241,6 +241,9 @@ export type Event =
   | { type: "action"; id: string; timestamp: string; attributes: ActionAttributes }
   | { type: "metric"; id: string; timestamp: string; attributes: MetricAttributes };
 
+/** Drop-only event filter called after validation and before an event is queued. */
+export type EventFilter = (event: Event) => boolean | void;
+
 /** Stable transport response returned from flush and shutdown operations. */
 export type TransportResponse = {
   /** Final HTTP-like status returned by the transport. */
@@ -289,6 +292,7 @@ export declare class LogBrewClient {
     sdkName: string;
     sdkVersion: string;
     maxRetries?: number;
+    eventFilter?: EventFilter;
   }): LogBrewClient;
   /** Return the queued event count currently buffered in memory. */
   pendingEvents(): number;

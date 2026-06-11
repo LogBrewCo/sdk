@@ -1542,6 +1542,7 @@ import {
   type ConsoleCaptureHandle,
   type ConsoleMethodName,
   type EnvironmentAttributes,
+  type EventFilter,
   type IssueAttributes,
   type LogAttributes,
   type MetricAttributes,
@@ -1621,12 +1622,14 @@ const metric: MetricAttributes = {
   temporality: "delta",
   metadata: { service: "checkout" }
 };
+const eventFilter: EventFilter = (event) => event.type !== "log" || event.attributes.level !== "info";
 
 async function main() {
   const client = LogBrewClient.create({
     apiKey: "LOGBREW_API_KEY",
     sdkName: "smoke-app-types",
-    sdkVersion: "0.1.0"
+    sdkVersion: "0.1.0",
+    eventFilter
   });
   client.release("evt_release_001", "2026-06-02T10:00:00Z", release);
   client.environment("evt_environment_001", "2026-06-02T10:00:01Z", environment);
@@ -1720,7 +1723,8 @@ import sdk = require("@logbrew/sdk");
 const client = sdk.LogBrewClient.create({
   apiKey: "LOGBREW_API_KEY",
   sdkName: "smoke-app-cjs-types",
-  sdkVersion: "0.1.0"
+  sdkVersion: "0.1.0",
+  eventFilter: ((event) => event.type !== "log" || event.attributes.level !== "info") satisfies sdk.EventFilter
 });
 const transport = sdk.RecordingTransport.alwaysAccept();
 const traceContext: sdk.TraceparentContext = sdk.parseTraceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");

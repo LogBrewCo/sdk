@@ -79,13 +79,17 @@ class RecordingTransport {
 }
 
 class LogBrewClient {
-  static create({ apiKey, sdkName, sdkVersion, maxRetries = 2 }) {
+  static create({ apiKey, sdkName, sdkVersion, maxRetries = 2, eventFilter }) {
     requireNonEmpty("apiKey", apiKey);
     requireNonEmpty("sdkName", sdkName);
     requireNonEmpty("sdkVersion", sdkVersion);
+    if (eventFilter !== undefined && typeof eventFilter !== "function") {
+      throw new SdkError("validation_error", "eventFilter must be a function");
+    }
 
     return new LogBrewClient({
       apiKey,
+      eventFilter,
       sdk: {
         name: sdkName,
         language: "javascript",
@@ -95,8 +99,9 @@ class LogBrewClient {
     });
   }
 
-  constructor({ apiKey, sdk, maxRetries }) {
+  constructor({ apiKey, sdk, maxRetries, eventFilter }) {
     this.apiKey = apiKey;
+    this.eventFilter = eventFilter;
     this.sdk = sdk;
     this.maxRetries = maxRetries;
     this.events = [];
@@ -161,7 +166,11 @@ class LogBrewClient {
     }
     requireNonEmpty("event id", id);
     requireTimestamp(timestamp);
-    this.events.push({ type: eventType, id, timestamp, attributes });
+    const event = { type: eventType, id, timestamp, attributes };
+    if (this.eventFilter && this.eventFilter(cloneEvent(event)) === false) {
+      return;
+    }
+    this.events.push(event);
   }
 
   async #flushInternal(transport) {
@@ -1002,6 +1011,13 @@ function cloneMetadata(metadata) {
     throw new SdkError("validation_error", "metadata must be an object");
   }
   return { ...metadata };
+}
+
+function cloneEvent(event) {
+  const attributes = event.attributes.metadata === undefined
+    ? { ...event.attributes }
+    : { ...event.attributes, metadata: { ...event.attributes.metadata } };
+  return { ...event, attributes };
 }
 
 function validateRelease(attributes) {
