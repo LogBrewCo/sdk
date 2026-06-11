@@ -162,6 +162,15 @@ const tracedFetch = createTraceparentFetch({
 if (!shouldPropagateTraceparent("https://api.example.test/ping", traceTargets)) {
   throw new Error("expected typed trace target to match");
 }
+if (shouldPropagateTraceparent("https://api.example.test.evil.test/ping", ["https://api.example.test"])) {
+  throw new Error("lookalike origin must not receive traceparent");
+}
+if (!shouldPropagateTraceparent("https://api.example.test/v1/orders", ["https://api.example.test/v1"])) {
+  throw new Error("expected same-origin path prefix to match trace propagation target");
+}
+if (shouldPropagateTraceparent("https://api.example.test/v10/orders", ["https://api.example.test/v1"])) {
+  throw new Error("path prefix must respect segment boundaries");
+}
 void tracedFetch("/api/typed");
 const context: LogBrewSvelteContext = createLogBrewSvelteContext({
   client,

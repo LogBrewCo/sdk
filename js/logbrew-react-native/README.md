@@ -162,7 +162,7 @@ await tracedFetch("https://api.example.com/checkout", {
 });
 ```
 
-`tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. Match narrowly so mobile requests do not send tracing headers to unrelated origins. If the API is cross-origin or behind a gateway, allow the `traceparent` request header there too.
+`tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. String URL targets apply only to the same origin plus a path prefix, so `https://api.example.com/v1` covers `/v1/orders` on that origin but not `https://wrong.example.com` or `/v10`. Keep targets narrow so mobile requests do not send tracing headers to unrelated origins. If the API is cross-origin or behind a gateway, allow the `traceparent` request header there too.
 
 ## Example Source
 

@@ -217,6 +217,15 @@ if (!shouldPropagateTraceparent("https://api.example.test/checkout", ["https://a
 if (shouldPropagateTraceparent("https://cdn.example.test/app.js", ["https://api.example.test/"])) {
   throw new Error("expected CDN request not to match trace propagation target");
 }
+if (shouldPropagateTraceparent("https://api.example.test.evil.test/checkout", ["https://api.example.test"])) {
+  throw new Error("lookalike origin must not receive traceparent");
+}
+if (!shouldPropagateTraceparent("https://api.example.test/v1/orders", ["https://api.example.test/v1"])) {
+  throw new Error("expected same-origin path prefix to match trace propagation target");
+}
+if (shouldPropagateTraceparent("https://api.example.test/v10/orders", ["https://api.example.test/v1"])) {
+  throw new Error("path prefix must respect segment boundaries");
+}
 await tracedFetch("https://api.example.test/checkout", {
   headers: { accept: "application/json", traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01" }
 });

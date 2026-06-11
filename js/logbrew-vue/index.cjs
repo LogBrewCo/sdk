@@ -91,7 +91,7 @@ function shouldPropagateTraceparent(url, tracePropagationTargets = []) {
   }
   return tracePropagationTargets.some((target) => {
     if (typeof target === "string") {
-      return url.includes(target);
+      return shouldPropagateToStringTarget(url, target);
     }
     if (target instanceof RegExp) {
       target.lastIndex = 0;
@@ -318,6 +318,44 @@ function readEnvApiKey() {
 
 function readEnvClientKey() {
   return globalThis.process?.env?.LOGBREW_CLIENT_KEY;
+}
+
+function shouldPropagateToStringTarget(url, target) {
+  const targetText = target.trim();
+  if (targetText === "") {
+    return false;
+  }
+  if (targetText.startsWith("/")) {
+    return url.startsWith(targetText);
+  }
+
+  const URLConstructor = globalThis.URL;
+  if (typeof URLConstructor === "function") {
+    try {
+      const targetUrl = new URLConstructor(targetText);
+      if (!hasUrlScheme(url)) {
+        return false;
+      }
+      const requestUrl = new URLConstructor(url, targetUrl.origin);
+      if (requestUrl.origin !== targetUrl.origin) {
+        return false;
+      }
+      const targetPath = targetUrl.pathname || "/";
+      return requestUrl.pathname === targetPath || requestUrl.pathname.startsWith(pathPrefix(targetPath));
+    } catch {
+      return url.startsWith(targetText);
+    }
+  }
+
+  return url.startsWith(targetText);
+}
+
+function pathPrefix(pathname) {
+  return pathname.endsWith("/") ? pathname : `${pathname}/`;
+}
+
+function hasUrlScheme(url) {
+  return /^[a-z][a-z0-9+.-]*:/iu.test(url);
 }
 
 function requestHeaders(input, init) {
