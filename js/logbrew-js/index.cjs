@@ -390,6 +390,10 @@ function createTraceparent({ traceId, spanId, traceFlags = "01" }) {
   return `00-${traceId.toLowerCase()}-${spanId.toLowerCase()}-${traceFlags.toLowerCase()}`;
 }
 
+function createTraceparentHeaders(input) {
+  return { traceparent: createTraceparent(input) };
+}
+
 function spanAttributesFromTraceparent(traceparent, attributes) {
   if (!attributes || Array.isArray(attributes) || typeof attributes !== "object") {
     throw new SdkError("validation_error", "span attributes must be an object");
@@ -1121,6 +1125,7 @@ function formatConsoleArgument(value, includeErrorStack) {
 
 module.exports = {
   createTraceparent,
+  createTraceparentHeaders,
   createLogBrewPinoDestination,
   createLogBrewWinstonTransport,
   installLogBrewConsoleCapture,

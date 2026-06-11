@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 
 import {
   createTraceparent,
+  createTraceparentHeaders,
   createLogBrewPinoDestination,
   createLogBrewWinstonTransport,
   installLogBrewConsoleCapture,
@@ -294,6 +295,16 @@ test("traceparent helpers parse, create, and continue W3C trace context", () => 
       traceFlags: "00"
     }),
     "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-00"
+  );
+  assert.deepEqual(
+    createTraceparentHeaders({
+      traceId: context.traceId,
+      spanId: "b7ad6b7169203331",
+      traceFlags: "00"
+    }),
+    {
+      traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-00"
+    }
   );
   assert.deepEqual(
     spanAttributesFromTraceparent(traceparent, {

@@ -1487,6 +1487,7 @@ EOF
 cat > types-smoke.ts <<'EOF'
 import {
   createTraceparent,
+  createTraceparentHeaders,
   createLogBrewPinoDestination,
   createLogBrewWinstonTransport,
   installLogBrewConsoleCapture,
@@ -1586,8 +1587,12 @@ async function main() {
     createTraceparent(traceInput),
     continuedSpanInput
   );
+  const outgoingHeaders: { traceparent: string } = createTraceparentHeaders(traceInput);
   if (continuedSpan.traceId !== traceContext.traceId || continuedSpan.parentSpanId !== traceInput.spanId) {
     throw new Error("unexpected trace context");
+  }
+  if (outgoingHeaders.traceparent !== "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01") {
+    throw new Error("unexpected traceparent carrier");
   }
   const consoleMethod: ConsoleMethodName = "warn";
   const consoleConfig: ConsoleCaptureConfig = {
@@ -1649,6 +1654,7 @@ const traceInput: sdk.TraceparentInput = {
   spanId: "b7ad6b7169203331"
 };
 const traceparent = sdk.createTraceparent(traceInput);
+const outgoingHeaders: { traceparent: string } = sdk.createTraceparentHeaders(traceInput);
 const traceSpanInput: sdk.TraceparentSpanInput = {
   name: "GET /checkout",
   spanId: "00f067aa0ba902b7",
@@ -1657,6 +1663,9 @@ const traceSpanInput: sdk.TraceparentSpanInput = {
 const traceSpan: sdk.SpanAttributes = sdk.spanAttributesFromTraceparent(traceparent, traceSpanInput);
 if (traceSpan.traceId !== traceContext.traceId) {
   throw new Error("unexpected trace context");
+}
+if (outgoingHeaders.traceparent !== "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01") {
+  throw new Error("unexpected traceparent carrier");
 }
 const metric: sdk.MetricAttributes = {
   name: "checkout.requests",

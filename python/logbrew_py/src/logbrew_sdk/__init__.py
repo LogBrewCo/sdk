@@ -545,6 +545,18 @@ def create_traceparent(*, trace_id: str, span_id: str, trace_flags: str = "01") 
     return f"00-{trace_id.lower()}-{span_id.lower()}-{trace_flags.lower()}"
 
 
+def create_traceparent_headers(*, trace_id: str, span_id: str, trace_flags: str = "01") -> dict[str, str]:
+    """Create an explicit outbound header carrier containing only traceparent."""
+
+    return {
+        "traceparent": create_traceparent(
+            trace_id=trace_id,
+            span_id=span_id,
+            trace_flags=trace_flags,
+        )
+    }
+
+
 def span_attributes_from_traceparent(
     traceparent: str,
     *,
@@ -805,6 +817,7 @@ __all__ = [
     "TransportError",
     "TransportResponse",
     "create_traceparent",
+    "create_traceparent_headers",
     "log_attributes_from_record",
     "parse_traceparent",
     "span_attributes_from_traceparent",

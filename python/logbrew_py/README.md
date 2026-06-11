@@ -117,7 +117,7 @@ Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and his
 Use the W3C helpers when a Python service needs to interoperate with distributed tracing headers:
 
 ```python
-from logbrew_sdk import parse_traceparent, span_attributes_from_traceparent
+from logbrew_sdk import create_traceparent_headers, parse_traceparent, span_attributes_from_traceparent
 
 traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 context = parse_traceparent(traceparent)
@@ -129,9 +129,14 @@ attributes = span_attributes_from_traceparent(
     duration_ms=12.5,
     metadata={"service": "checkout"},
 )
+headers = create_traceparent_headers(
+    trace_id=attributes["traceId"],
+    span_id=attributes["spanId"],
+    trace_flags="01",
+)
 ```
 
-`parse_traceparent()` validates W3C shape, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `span_attributes_from_traceparent()` returns LogBrew span attributes with `traceId` from the incoming trace and `parentSpanId` from the incoming parent span. FastAPI and Django integrations use these helpers automatically for valid inbound `traceparent` headers and start a fresh synthetic span when the header is missing or malformed.
+`parse_traceparent()` validates W3C shape, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `span_attributes_from_traceparent()` returns LogBrew span attributes with `traceId` from the incoming trace and `parentSpanId` from the incoming parent span. `create_traceparent_headers()` returns an explicit outbound carrier with only `traceparent` for app-owned HTTP clients. FastAPI and Django integrations use these helpers automatically for valid inbound `traceparent` headers and start a fresh synthetic span when the header is missing or malformed. The helpers do not patch HTTP clients or capture request payloads.
 
 ## HTTP Delivery
 

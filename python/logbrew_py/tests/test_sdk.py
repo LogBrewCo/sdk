@@ -15,6 +15,7 @@ from logbrew_sdk import (
     SdkError,
     TransportError,
     create_traceparent,
+    create_traceparent_headers,
     parse_traceparent,
     span_attributes_from_traceparent,
 )
@@ -243,6 +244,16 @@ class LogBrewSdkTests(unittest.TestCase):
                 trace_flags="00",
             ),
             "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-00",
+        )
+        self.assertEqual(
+            create_traceparent_headers(
+                trace_id=context.trace_id,
+                span_id="b7ad6b7169203331",
+                trace_flags="00",
+            ),
+            {
+                "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-00",
+            },
         )
         self.assertEqual(
             span_attributes_from_traceparent(

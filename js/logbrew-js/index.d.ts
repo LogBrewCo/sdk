@@ -293,6 +293,9 @@ export declare function parseTraceparent(traceparent: string): TraceparentContex
 /** Create a W3C traceparent value from explicit trace/span ids. */
 export declare function createTraceparent(input: TraceparentInput): string;
 
+/** Create an explicit outbound header carrier containing only traceparent. */
+export declare function createTraceparentHeaders(input: TraceparentInput): { traceparent: string };
+
 /** Build LogBrew span attributes that continue an incoming W3C traceparent value. */
 export declare function spanAttributesFromTraceparent(
   traceparent: string,

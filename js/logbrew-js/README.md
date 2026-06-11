@@ -85,7 +85,7 @@ Use `parseTraceparent()`, `createTraceparent()`, and `spanAttributesFromTracepar
 
 ```js
 import {
-  createTraceparent,
+  createTraceparentHeaders,
   LogBrewClient,
   RecordingTransport,
   spanAttributesFromTraceparent
@@ -107,19 +107,18 @@ const span = spanAttributesFromTraceparent(incomingTraceparent, {
 });
 client.span("evt_checkout_span", "2026-06-02T10:00:04Z", span);
 
-const downstreamTraceparent = createTraceparent({
-  traceId: span.traceId,
-  spanId: span.spanId,
-  traceFlags: "01"
-});
 await fetch("https://example.invalid/payments", {
-  headers: { traceparent: downstreamTraceparent }
+  headers: createTraceparentHeaders({
+    traceId: span.traceId,
+    spanId: span.spanId,
+    traceFlags: "01"
+  })
 });
 
 await client.flush(RecordingTransport.alwaysAccept());
 ```
 
-The helpers validate the W3C `version-traceId-parentSpanId-traceFlags` shape, reject all-zero trace/span ids, normalize valid ids to lowercase, expose the sampled flag from `traceFlags`, and keep span metadata primitive-only. They do not install OpenTelemetry or patch HTTP clients; use them when you need explicit interop in code you own.
+The helpers validate the W3C `version-traceId-parentSpanId-traceFlags` shape, reject all-zero trace/span ids, normalize valid ids to lowercase, expose the sampled flag from `traceFlags`, and keep span metadata primitive-only. `createTraceparentHeaders()` returns an explicit outbound carrier with only `traceparent`. The helpers do not install OpenTelemetry or patch HTTP clients; use them when you need explicit interop in code you own.
 
 ## Console Capture
 

@@ -9,7 +9,16 @@ try {
   }
 }
 
-const { LogBrewClient, RecordingTransport } = sdk;
+const { createTraceparentHeaders, LogBrewClient, RecordingTransport } = sdk;
+
+const outgoingHeaders = createTraceparentHeaders({
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  spanId: "b7ad6b7169203331",
+  traceFlags: "01"
+});
+if (outgoingHeaders.traceparent !== "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01") {
+  throw new Error("createTraceparentHeaders produced an unexpected carrier");
+}
 
 const client = LogBrewClient.create({
   apiKey: "LOGBREW_API_KEY",

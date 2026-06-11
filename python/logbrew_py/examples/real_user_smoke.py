@@ -3,10 +3,18 @@ from __future__ import annotations
 import json
 import sys
 
-from logbrew_sdk import LogBrewClient, RecordingTransport
+from logbrew_sdk import LogBrewClient, RecordingTransport, create_traceparent_headers
 
 
 def main() -> int:
+    outgoing_headers = create_traceparent_headers(
+        trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+        span_id="b7ad6b7169203331",
+        trace_flags="01",
+    )
+    if outgoing_headers["traceparent"] != "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01":
+        raise RuntimeError("create_traceparent_headers produced an unexpected carrier")
+
     client = LogBrewClient.create(
         api_key="LOGBREW_API_KEY",
         sdk_name="logbrew-python",
