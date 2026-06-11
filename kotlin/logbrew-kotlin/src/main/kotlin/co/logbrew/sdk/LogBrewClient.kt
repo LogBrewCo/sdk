@@ -142,8 +142,7 @@ class LogBrewClient private constructor(
     }
 
     companion object {
-        internal val issueLevels = setOf("info", "warning", "error", "critical")
-        internal val logLevels = setOf("debug", "info", "warning", "error")
+        internal val severityValues = setOf("trace", "debug", "info", "warn", "warning", "error", "fatal", "critical")
         internal val spanStatuses = setOf("ok", "error")
         internal val actionStatuses = setOf("queued", "running", "success", "failure")
         internal val metricKinds = setOf("counter", "gauge", "histogram")

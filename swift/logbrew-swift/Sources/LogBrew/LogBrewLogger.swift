@@ -13,13 +13,15 @@ public enum LogBrewLoggerLevel: String, Sendable {
     var logBrewLevel: LogLevel {
         switch self {
         case .trace, .debug:
-            .debug
+            .info
         case .info, .notice:
             .info
         case .warning:
             .warning
-        case .error, .fault, .critical:
+        case .error, .fault:
             .error
+        case .critical:
+            .critical
         }
     }
 }

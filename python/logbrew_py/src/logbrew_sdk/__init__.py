@@ -88,7 +88,17 @@ class Transport(Protocol):
 
 
 ISSUE_LEVELS = {"info", "warning", "error", "critical"}
-LOG_LEVELS = {"debug", "info", "warning", "error"}
+SEVERITY_ALIASES = {
+    "trace": "info",
+    "debug": "info",
+    "info": "info",
+    "warn": "warning",
+    "warning": "warning",
+    "error": "error",
+    "fatal": "critical",
+    "critical": "critical",
+}
+SEVERITY_VALUES = set(SEVERITY_ALIASES)
 SPAN_STATUSES = {"ok", "error"}
 ACTION_STATUSES = {"queued", "running", "success", "failure"}
 METRIC_TEMPORALITIES_BY_KIND = {
@@ -496,13 +506,15 @@ def default_log_record_event_id(record: logging.LogRecord) -> str:
 
 def logbrew_level(level_number: int) -> str:
     """Map standard-library logging levels to LogBrew log levels."""
+    if level_number >= logging.CRITICAL:
+        return "critical"
     if level_number >= logging.ERROR:
         return "error"
     if level_number >= logging.WARNING:
         return "warning"
     if level_number >= logging.INFO:
         return "info"
-    return "debug"
+    return "info"
 
 
 def parse_traceparent(traceparent: str) -> TraceparentContext:
@@ -649,6 +661,11 @@ def require_allowed_value(label: str, value: Any, allowed_values: set[str]) -> N
         raise SdkError("validation_error", f"{label} must be one of: {allowed}")
 
 
+def normalize_severity(label: str, value: Any) -> str:
+    require_allowed_value(label, value, SEVERITY_VALUES)
+    return SEVERITY_ALIASES[value]
+
+
 def require_finite_number(label: str, value: Any) -> None:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise SdkError("validation_error", f"{label} must be a finite number")
@@ -709,11 +726,11 @@ def validate_environment(attributes: EnvironmentAttributes) -> dict[str, Any]:
 
 def validate_issue(attributes: IssueAttributes) -> dict[str, Any]:
     require_non_empty("issue title", attributes.get("title"))
-    require_allowed_value("issue level", attributes.get("level"), ISSUE_LEVELS)
+    level = normalize_severity("issue level", attributes.get("level"))
     return with_metadata(
         {
             "title": attributes["title"],
-            "level": attributes["level"],
+            "level": level,
             **({"message": attributes["message"]} if "message" in attributes else {}),
         },
         attributes.get("metadata"),
@@ -722,11 +739,11 @@ def validate_issue(attributes: IssueAttributes) -> dict[str, Any]:
 
 def validate_log(attributes: LogAttributes) -> dict[str, Any]:
     require_non_empty("log message", attributes.get("message"))
-    require_allowed_value("log level", attributes.get("level"), LOG_LEVELS)
+    level = normalize_severity("log level", attributes.get("level"))
     return with_metadata(
         {
             "message": attributes["message"],
-            "level": attributes["level"],
+            "level": level,
             **({"logger": attributes["logger"]} if "logger" in attributes else {}),
         },
         attributes.get("metadata"),

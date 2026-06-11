@@ -126,7 +126,7 @@ logger.log(java.util.logging.Level.SEVERE, "checkout failed", new IllegalStateEx
 handler.flush();
 ```
 
-The handler does not change the root logger, replace app-owned handlers, or require SLF4J/Logback/Log4j dependencies. It maps JUL levels to LogBrew levels, captures the logger name, source class/method, thread id, sequence number, and exception type/message, and omits full stack-trace text unless `includeThrownStackTrace` is enabled in the constructor.
+The handler does not change the root logger, replace app-owned handlers, or require SLF4J/Logback/Log4j dependencies. It maps JUL levels into canonical LogBrew severities (`info`, `warning`, `error`, `critical`), captures the logger name, source class/method, thread id, sequence number, and exception type/message, and omits full stack-trace text unless `includeThrownStackTrace` is enabled in the constructor.
 
 ## SLF4J and Logback
 
@@ -156,7 +156,7 @@ MDC.remove("requestId");
 appender.stop();
 ```
 
-The appender maps SLF4J/Logback levels to LogBrew levels, captures the logger name, thread name, SLF4J markers, MDC values as `mdc.*`, fluent key/value pairs as `kv.*`, and exception type/message. Full stack-trace text is omitted unless `includeThrowableStackTrace` is enabled.
+The appender maps SLF4J/Logback levels into canonical LogBrew severities, captures the logger name, thread name, SLF4J markers, MDC values as `mdc.*`, fluent key/value pairs as `kv.*`, and exception type/message. Full stack-trace text is omitted unless `includeThrowableStackTrace` is enabled.
 
 ## Spring Boot
 

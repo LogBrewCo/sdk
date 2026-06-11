@@ -125,13 +125,26 @@ class LogBrewSdkTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             SdkError,
-            "issue level must be one of: critical, error, info, warning",
+            "issue level must be one of: critical, debug, error, fatal, info, trace, warn, warning",
         ):
             client.issue(
                 "evt_issue_001",
                 "2026-06-02T10:00:02Z",
                 {"title": "Checkout timeout", "level": "verbose"},
             )
+
+    def test_severity_aliases_normalize_before_preview(self) -> None:
+        client = sample_client()
+
+        client.issue("evt_issue_001", "2026-06-02T10:00:02Z", {"title": "Checkout timeout", "level": "fatal"})
+        client.log("evt_log_001", "2026-06-02T10:00:03Z", {"message": "verbose runtime detail", "level": "debug"})
+        client.log("evt_log_002", "2026-06-02T10:00:04Z", {"message": "legacy warning alias", "level": "warn"})
+
+        payload = json.loads(client.preview_json())
+        self.assertEqual(
+            [event["attributes"]["level"] for event in payload["events"]],
+            ["critical", "info", "warning"],
+        )
 
     def test_negative_span_duration_fails_validation(self) -> None:
         client = sample_client()
@@ -496,7 +509,7 @@ class LogBrewSdkTests(unittest.TestCase):
 
         self.assertEqual(client.pending_events(), 0)
         payload = json.loads(transport.sent_bodies[0])
-        self.assertEqual(payload["events"][0]["attributes"]["level"], "error")
+        self.assertEqual(payload["events"][0]["attributes"]["level"], "critical")
         self.assertEqual(payload["events"][0]["attributes"]["metadata"]["levelName"], "CRITICAL")
 
 

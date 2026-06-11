@@ -155,7 +155,7 @@ try {
 $client->flush($transport);
 ```
 
-`LogBrewPsrLogger` interpolates PSR-3 placeholders, maps `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, and `emergency` into LogBrew log levels, captures primitive context values under `context.*`, and records exception type/message when the `exception` context value is a `Throwable`. Exception trace text is omitted unless `includeExceptionTrace` is enabled. Logs are queued by default; pass both `transport` and `flushOnLog: true` only when each logger call should flush immediately.
+`LogBrewPsrLogger` interpolates PSR-3 placeholders, maps `debug`/`info`/`notice` to LogBrew `info`, `warning` to `warning`, `error` to `error`, and `critical`/`alert`/`emergency` to `critical`, captures primitive context values under `context.*`, and records exception type/message when the `exception` context value is a `Throwable`. Exception trace text is omitted unless `includeExceptionTrace` is enabled. Logs are queued by default; pass both `transport` and `flushOnLog: true` only when each logger call should flush immediately.
 
 ## Monolog And Laravel
 

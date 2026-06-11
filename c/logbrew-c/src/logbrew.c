@@ -121,6 +121,28 @@ static LogBrewStatus require_allowed(
   return LOGBREW_VALIDATION_ERROR;
 }
 
+static LogBrewStatus normalize_severity(
+    const char *label,
+    const char *value,
+    const char **normalized,
+    LogBrewError *error) {
+  static const char *const values[] = {"trace", "debug", "info", "warn", "warning", "error", "fatal", "critical"};
+  LogBrewStatus status = require_allowed(label, value, values, sizeof(values) / sizeof(values[0]), error);
+  if (status != LOGBREW_OK) {
+    return status;
+  }
+  if (strcmp(value, "trace") == 0 || strcmp(value, "debug") == 0 || strcmp(value, "info") == 0) {
+    *normalized = "info";
+  } else if (strcmp(value, "warn") == 0 || strcmp(value, "warning") == 0) {
+    *normalized = "warning";
+  } else if (strcmp(value, "error") == 0) {
+    *normalized = "error";
+  } else {
+    *normalized = "critical";
+  }
+  return LOGBREW_OK;
+}
+
 static LogBrewStatus require_timestamp(const char *timestamp, LogBrewError *error) {
   const char *time_part;
   LogBrewStatus status = require_non_empty("timestamp", timestamp, error);
@@ -771,13 +793,13 @@ LogBrewStatus logbrew_client_issue(
     const char *timestamp,
     LogBrewIssueAttributes attributes,
     LogBrewError *error) {
-  static const char *const levels[] = {"info", "warning", "error", "critical"};
   LogBrewBuffer buffer = {0};
   bool needs_comma = false;
   char *attributes_json = NULL;
+  const char *level = NULL;
   LogBrewStatus status = require_non_empty("issue title", attributes.title, error);
   if (status == LOGBREW_OK) {
-    status = require_allowed("issue level", attributes.level, levels, sizeof(levels) / sizeof(levels[0]), error);
+    status = normalize_severity("issue level", attributes.level, &level, error);
   }
   if (status == LOGBREW_OK) {
     status = start_attributes(&buffer, error);
@@ -786,7 +808,7 @@ LogBrewStatus logbrew_client_issue(
     status = append_named_string(&buffer, "title", attributes.title, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
-    status = append_named_string(&buffer, "level", attributes.level, &needs_comma, error);
+    status = append_named_string(&buffer, "level", level, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = append_optional_string(&buffer, "message", attributes.message, false, &needs_comma, error);
@@ -807,13 +829,13 @@ LogBrewStatus logbrew_client_log(
     const char *timestamp,
     LogBrewLogAttributes attributes,
     LogBrewError *error) {
-  static const char *const levels[] = {"debug", "info", "warning", "error"};
   LogBrewBuffer buffer = {0};
   bool needs_comma = false;
   char *attributes_json = NULL;
+  const char *level = NULL;
   LogBrewStatus status = require_non_empty("log message", attributes.message, error);
   if (status == LOGBREW_OK) {
-    status = require_allowed("log level", attributes.level, levels, sizeof(levels) / sizeof(levels[0]), error);
+    status = normalize_severity("log level", attributes.level, &level, error);
   }
   if (status == LOGBREW_OK) {
     status = start_attributes(&buffer, error);
@@ -822,7 +844,7 @@ LogBrewStatus logbrew_client_log(
     status = append_named_string(&buffer, "message", attributes.message, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
-    status = append_named_string(&buffer, "level", attributes.level, &needs_comma, error);
+    status = append_named_string(&buffer, "level", level, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = append_optional_string(&buffer, "logger", attributes.logger, false, &needs_comma, error);

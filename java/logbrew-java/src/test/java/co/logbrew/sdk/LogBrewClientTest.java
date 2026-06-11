@@ -45,6 +45,7 @@ public final class LogBrewClientTest {
         testEmptyFlushNoOps();
         testInvalidTimestampFailsValidation();
         testInvalidIssueLevelFailsValidation();
+        testSeverityAliasesNormalizeBeforePreview();
         testNegativeSpanDurationFailsValidation();
         testMetricEventValidatesExplicitContract();
         testMetricRejectsNonFiniteValue();
@@ -124,7 +125,20 @@ public final class LogBrewClientTest {
             "2026-06-02T10:00:02Z",
             IssueAttributes.create("Checkout timeout", "verbose")
         ));
-        assertContains(error.getMessage(), "issue level must be one of: info, warning, error, critical");
+        assertContains(error.getMessage(), "issue level must be one of: trace, debug, info, warn, warning, error, fatal, critical");
+        testsRun++;
+    }
+
+    private void testSeverityAliasesNormalizeBeforePreview() {
+        LogBrewClient client = sampleClient();
+        client.issue("evt_issue_alias", "2026-06-02T10:00:02Z", IssueAttributes.create("Checkout timeout", "fatal"));
+        client.log("evt_log_debug", "2026-06-02T10:00:03Z", LogAttributes.create("verbose runtime detail", "debug"));
+        client.log("evt_log_warn", "2026-06-02T10:00:04Z", LogAttributes.create("legacy warning alias", "warn"));
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"level\": \"critical\"");
+        assertContains(payload, "\"level\": \"info\"");
+        assertContains(payload, "\"level\": \"warning\"");
         testsRun++;
     }
 

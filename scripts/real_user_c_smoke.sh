@@ -140,7 +140,7 @@ static void exercise_failure_paths(void) {
   logbrew_recording_transport_free(&transport);
 
   status = logbrew_client_issue(client, "evt_bad", "2026-06-02T10:00:02Z",
-      (LogBrewIssueAttributes){"Checkout timeout", "fatal", NULL}, &error);
+      (LogBrewIssueAttributes){"Checkout timeout", "verbose", NULL}, &error);
   if (status != LOGBREW_VALIDATION_ERROR || strcmp(error.code, "validation_error") != 0) {
     fprintf(stderr, "validation failure failed\n");
     exit(1);

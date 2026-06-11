@@ -88,6 +88,16 @@ ExpectSdkError("validation_error", "issue level must be one of", () =>
     SampleClient().Issue("evt_issue_001", "2026-06-02T10:00:02Z", IssueAttributes.Create("Checkout timeout", "verbose")));
 tests++;
 
+var severityClient = SampleClient();
+severityClient.Issue("evt_issue_alias", "2026-06-02T10:00:02Z", IssueAttributes.Create("Checkout timeout", "fatal"));
+severityClient.Log("evt_log_debug", "2026-06-02T10:00:03Z", LogAttributes.Create("verbose runtime detail", "debug"));
+severityClient.Log("evt_log_warn", "2026-06-02T10:00:04Z", LogAttributes.Create("legacy warning alias", "warn"));
+var severityPreview = severityClient.PreviewJson();
+AssertTrue(severityPreview.Contains("\"level\": \"critical\"", StringComparison.Ordinal), "expected fatal alias to normalize");
+AssertTrue(severityPreview.Contains("\"level\": \"info\"", StringComparison.Ordinal), "expected debug alias to normalize");
+AssertTrue(severityPreview.Contains("\"level\": \"warning\"", StringComparison.Ordinal), "expected warn alias to normalize");
+tests++;
+
 ExpectSdkError("validation_error", "span durationMs must be non-negative", () =>
     SampleClient().Span("evt_span_001", "2026-06-02T10:00:04Z", SpanAttributes.Create("GET /health", "trace_001", "span_001", "ok").WithDurationMs(-1)));
 tests++;
@@ -288,18 +298,29 @@ using (var factory = LoggerFactory.Create(builder =>
                 new InvalidOperationException("payment failed"),
                 static (_, error) => "checkout failed: " + error?.Message);
         }
+
+        if (logger.IsEnabled(LogLevel.Critical))
+        {
+            logger.Log(
+                LogLevel.Critical,
+                new EventId(44, "CheckoutDown"),
+                new Dictionary<string, object?> { ["region"] = "global" },
+                new InvalidOperationException("checkout down"),
+                static (_, error) => "checkout down: " + error?.Message);
+        }
     }
 }
 
 AssertTrue(providerErrors == 0, "expected logging provider not to report errors");
-AssertTrue(loggingClient.PendingEvents() == 3, "expected logger provider to queue events");
+AssertTrue(loggingClient.PendingEvents() == 4, "expected logger provider to queue events");
 var loggingPreview = loggingClient.PreviewJson();
 AssertTrue(loggingPreview.Contains("\"id\": \"dotnet_test_1\"", StringComparison.Ordinal), "expected deterministic logger event id");
 AssertTrue(loggingPreview.Contains("\"timestamp\": \"2026-06-02T10:00:06.0000000+00:00\"", StringComparison.Ordinal), "expected deterministic logger timestamp");
 AssertTrue(loggingPreview.Contains("\"logger\": \"CheckoutWorker\"", StringComparison.Ordinal), "expected logger category");
-AssertTrue(loggingPreview.Contains("\"level\": \"debug\"", StringComparison.Ordinal), "expected debug level mapping");
+AssertTrue(loggingPreview.Contains("\"level\": \"info\"", StringComparison.Ordinal), "expected debug level alias mapping");
 AssertTrue(loggingPreview.Contains("\"level\": \"warning\"", StringComparison.Ordinal), "expected warning level mapping");
 AssertTrue(loggingPreview.Contains("\"level\": \"error\"", StringComparison.Ordinal), "expected error level mapping");
+AssertTrue(loggingPreview.Contains("\"level\": \"critical\"", StringComparison.Ordinal), "expected critical level mapping");
 AssertTrue(loggingPreview.Contains("\"dotnetLogLevel\": \"Warning\"", StringComparison.Ordinal), "expected native warning level metadata");
 AssertTrue(loggingPreview.Contains("\"dotnetEventId\": 42", StringComparison.Ordinal), "expected event id metadata");
 AssertTrue(loggingPreview.Contains("\"dotnetEventName\": \"CheckoutSlow\"", StringComparison.Ordinal), "expected event name metadata");

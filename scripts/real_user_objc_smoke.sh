@@ -166,7 +166,7 @@ static void LBWExerciseFailurePaths(void) {
 
   BOOL ok = [emptyClient issueWithID:@"evt_bad"
                            timestamp:@"2026-06-02T10:00:02Z"
-                          attributes:@{@"title": @"Checkout timeout", @"level": @"fatal"}
+                          attributes:@{@"title": @"Checkout timeout", @"level": @"verbose"}
                                error:&error];
   if (ok) {
     LBWDie(@"validation failure did not fail");

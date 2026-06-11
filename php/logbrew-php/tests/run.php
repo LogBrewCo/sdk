@@ -343,6 +343,14 @@ expectThrows(
     },
     'issue level must be one of'
 );
+$client = sampleClient();
+$client->issue('evt_issue_alias', '2026-06-02T10:00:02Z', ['title' => 'Checkout timeout', 'level' => 'fatal']);
+$client->log('evt_log_debug', '2026-06-02T10:00:03Z', ['message' => 'verbose runtime detail', 'level' => 'debug']);
+$client->log('evt_log_warn', '2026-06-02T10:00:04Z', ['message' => 'legacy warning alias', 'level' => 'warn']);
+$preview = $client->previewJson();
+foreach (['"level": "critical"', '"level": "info"', '"level": "warning"'] as $needle) {
+    assertTrue(str_contains($preview, $needle), "missing severity alias normalization: {$needle}");
+}
 expectThrows(
     fn () => sampleClient()->span('evt_span_001', '2026-06-02T10:00:04Z', ['name' => 'GET /health', 'traceId' => 'trace_001', 'spanId' => 'span_001', 'status' => 'ok', 'durationMs' => -1]),
     'span durationMs must be non-negative'
@@ -498,15 +506,20 @@ $logger->error('checkout failed for {region}', [
     'region' => 'global',
     'exception' => new RuntimeException('payment failed'),
 ]);
-assertTrue($client->pendingEvents() === 3, 'expected PSR logger to queue events');
+$logger->critical('checkout down for {region}', [
+    'region' => 'global',
+    'exception' => new RuntimeException('checkout down'),
+]);
+assertTrue($client->pendingEvents() === 4, 'expected PSR logger to queue events');
 $preview = $client->previewJson();
 foreach ([
     '"id": "psr_test_1"',
     '"timestamp": "2026-06-02T10:00:06+00:00"',
     '"logger": "checkout"',
-    '"level": "debug"',
+    '"level": "info"',
     '"level": "warning"',
     '"level": "error"',
+    '"level": "critical"',
     '"message": "checkout slow for global"',
     '"psrLevel": "warning"',
     '"messageTemplate": "checkout slow for {region}"',
@@ -563,7 +576,11 @@ $monolog->error('Checkout failed for {region}', [
     'region' => 'global',
     'exception' => new RuntimeException('payment failed'),
 ]);
-assertTrue($client->pendingEvents() === 2, 'expected Monolog handler to queue events');
+$monolog->critical('Checkout down for {region}', [
+    'region' => 'global',
+    'exception' => new RuntimeException('checkout down'),
+]);
+assertTrue($client->pendingEvents() === 3, 'expected Monolog handler to queue events');
 $preview = $client->previewJson();
 foreach ([
     '"id": "monolog_test_1"',
@@ -571,6 +588,7 @@ foreach ([
     '"logger": "checkout.monolog"',
     '"level": "warning"',
     '"level": "error"',
+    '"level": "critical"',
     '"message": "Checkout slow for global"',
     '"monologLevel": "warning"',
     '"monologChannel": "checkout.monolog"',

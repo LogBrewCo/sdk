@@ -105,6 +105,22 @@ static BOOL LBWRequireAllowed(
   return NO;
 }
 
+static NSString *_Nullable LBWNormalizeSeverity(NSString *label, NSString *value, NSError *_Nullable *_Nullable error) {
+  if (!LBWRequireAllowed(label, value, @[@"trace", @"debug", @"info", @"warn", @"warning", @"error", @"fatal", @"critical"], error)) {
+    return nil;
+  }
+  if ([value isEqualToString:@"trace"] || [value isEqualToString:@"debug"] || [value isEqualToString:@"info"]) {
+    return @"info";
+  }
+  if ([value isEqualToString:@"warn"] || [value isEqualToString:@"warning"]) {
+    return @"warning";
+  }
+  if ([value isEqualToString:@"error"]) {
+    return @"error";
+  }
+  return @"critical";
+}
+
 static NSString *_Nullable LBWStringAttribute(
     NSDictionary<NSString *, id> *attributes,
     NSString *key,
@@ -537,12 +553,12 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
   NSMutableDictionary<NSString *, id> *clean = [NSMutableDictionary dictionary];
   NSString *title = LBWStringAttribute(attributes, @"title", @"issue title", YES, YES, error);
   NSString *level = LBWStringAttribute(attributes, @"level", @"issue level", YES, YES, error);
-  if (title == nil || level == nil ||
-      !LBWRequireAllowed(@"issue level", level, @[@"info", @"warning", @"error", @"critical"], error)) {
+  NSString *normalizedLevel = level == nil ? nil : LBWNormalizeSeverity(@"issue level", level, error);
+  if (title == nil || normalizedLevel == nil) {
     return NO;
   }
   clean[@"title"] = title;
-  clean[@"level"] = level;
+  clean[@"level"] = normalizedLevel;
   NSString *message = LBWStringAttribute(attributes, @"message", @"message", NO, NO, error);
   if (message == nil && attributes[@"message"] != nil) {
     return NO;
@@ -560,12 +576,12 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
   NSMutableDictionary<NSString *, id> *clean = [NSMutableDictionary dictionary];
   NSString *message = LBWStringAttribute(attributes, @"message", @"log message", YES, YES, error);
   NSString *level = LBWStringAttribute(attributes, @"level", @"log level", YES, YES, error);
-  if (message == nil || level == nil ||
-      !LBWRequireAllowed(@"log level", level, @[@"debug", @"info", @"warning", @"error"], error)) {
+  NSString *normalizedLevel = level == nil ? nil : LBWNormalizeSeverity(@"log level", level, error);
+  if (message == nil || normalizedLevel == nil) {
     return NO;
   }
   clean[@"message"] = message;
-  clean[@"level"] = level;
+  clean[@"level"] = normalizedLevel;
   NSString *logger = LBWStringAttribute(attributes, @"logger", @"logger", NO, NO, error);
   if (logger == nil && attributes[@"logger"] != nil) {
     return NO;

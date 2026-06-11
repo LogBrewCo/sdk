@@ -120,6 +120,8 @@ await client.flush(RecordingTransport.alwaysAccept());
 
 The helpers validate the W3C `version-traceId-parentSpanId-traceFlags` shape, reject all-zero trace/span ids, normalize valid ids to lowercase, expose the sampled flag from `traceFlags`, and keep span metadata primitive-only. `createTraceparentHeaders()` returns an explicit outbound carrier with only `traceparent`. The helpers do not install OpenTelemetry or patch HTTP clients; use them when you need explicit interop in code you own.
 
+LogBrew severity categories are `info`, `warning`, `error`, and `critical`. The JavaScript SDK accepts common runtime aliases such as `trace`, `debug`, `warn`, and `fatal` for compatibility, then serializes canonical values before queued events are sent.
+
 ## Console Capture
 
 If an app already uses `console.info()`, `console.warn()`, or `console.error()`, install explicit capture on the console object you own:
@@ -177,7 +179,7 @@ logger.error(new Error("payment failed"), "checkout failed");
 await destination.flush();
 ```
 
-The Pino adapter reads JSON log lines, maps `trace`/`debug`/`info`/`warn`/`error`/`fatal` into LogBrew levels, captures primitive Pino fields as `context.*`, captures serialized error name/message, skips noisy runtime defaults, and omits stack text unless `includeErrorStack: true` is set. It does not patch Pino or replace application logger ownership.
+The Pino adapter reads JSON log lines, maps Pino `trace`/`debug` to LogBrew `info`, `warn` to `warning`, `error` to `error`, and `fatal` to `critical`, captures primitive Pino fields as `context.*`, captures serialized error name/message, skips noisy runtime defaults, and omits stack text unless `includeErrorStack: true` is set. It does not patch Pino or replace application logger ownership.
 
 ## Winston Transport
 
@@ -211,6 +213,6 @@ logger.error(new Error("payment failed"));
 await logbrewTransport.flush();
 ```
 
-The Winston adapter receives Winston `info` objects, maps `debug`/`silly` to `debug`, `warn` to `warning`, `error`/`fatal` to `error`, and other common Winston levels to `info`. It captures primitive info fields as `context.*`, captures nested `err`/`error` objects or formatted error stack name/message, omits stack text unless `includeErrorStack: true` is set, and exposes `onError` for capture failures. It does not mutate Winston globals or replace the app's logger.
+The Winston adapter receives Winston `info` objects, maps `debug`/`silly` to LogBrew `info`, `warn` to `warning`, `error` to `error`, `fatal`/`critical` to `critical`, and other common Winston levels to `info`. It captures primitive info fields as `context.*`, captures nested `err`/`error` objects or formatted error stack name/message, omits stack text unless `includeErrorStack: true` is set, and exposes `onError` for capture failures. It does not mutate Winston globals or replace the app's logger.
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush` or `shutdown` to send queued events through a transport, and use `previewJson()` when you want a stable local JSON preview before sending anything.

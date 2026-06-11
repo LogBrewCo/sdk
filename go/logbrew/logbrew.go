@@ -15,8 +15,17 @@ import (
 )
 
 var (
-	issueLevels               = []string{"info", "warning", "error", "critical"}
-	logLevels                 = []string{"debug", "info", "warning", "error"}
+	severityValues  = []string{"trace", "debug", "info", "warn", "warning", "error", "fatal", "critical"}
+	severityAliases = map[string]string{
+		"trace":    "info",
+		"debug":    "info",
+		"info":     "info",
+		"warn":     "warning",
+		"warning":  "warning",
+		"error":    "error",
+		"fatal":    "critical",
+		"critical": "critical",
+	}
 	spanStatuses              = []string{"ok", "error"}
 	actionStatus              = []string{"queued", "running", "success", "failure"}
 	metricKinds               = []string{"counter", "gauge", "histogram"}
@@ -722,6 +731,13 @@ func requireAllowedValue(label, value string, allowed []string) error {
 	return nil
 }
 
+func normalizeSeverity(label, value string) (string, error) {
+	if err := requireAllowedValue(label, value, severityValues); err != nil {
+		return "", err
+	}
+	return severityAliases[value], nil
+}
+
 func requireTimestamp(timestamp string) error {
 	if err := requireNonEmpty("timestamp", timestamp); err != nil {
 		return err
@@ -794,10 +810,11 @@ func validateIssue(attributes IssueAttributes) (map[string]any, error) {
 	if err := requireNonEmpty("issue title", attributes.Title); err != nil {
 		return nil, err
 	}
-	if err := requireAllowedValue("issue level", attributes.Level, issueLevels); err != nil {
+	level, err := normalizeSeverity("issue level", attributes.Level)
+	if err != nil {
 		return nil, err
 	}
-	result := map[string]any{"title": attributes.Title, "level": attributes.Level}
+	result := map[string]any{"title": attributes.Title, "level": level}
 	if attributes.Message != "" {
 		result["message"] = attributes.Message
 	}
@@ -811,10 +828,11 @@ func validateLog(attributes LogAttributes) (map[string]any, error) {
 	if err := requireNonEmpty("log message", attributes.Message); err != nil {
 		return nil, err
 	}
-	if err := requireAllowedValue("log level", attributes.Level, logLevels); err != nil {
+	level, err := normalizeSeverity("log level", attributes.Level)
+	if err != nil {
 		return nil, err
 	}
-	result := map[string]any{"message": attributes.Message, "level": attributes.Level}
+	result := map[string]any{"message": attributes.Message, "level": level}
 	if attributes.Logger != "" {
 		result["logger"] = attributes.Logger
 	}

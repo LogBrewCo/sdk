@@ -92,9 +92,24 @@ static void LBWExerciseFailurePaths(void) {
 
   BOOL ok = [emptyClient issueWithID:@"evt_bad"
                            timestamp:@"2026-06-02T10:00:02Z"
-                          attributes:@{@"title": @"Checkout timeout", @"level": @"fatal"}
+                          attributes:@{@"title": @"Checkout timeout", @"level": @"verbose"}
                                error:&error];
   LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"validation code failed");
+
+  LBWClient *aliasClient = LBWNewClient();
+  LBWAssert([aliasClient issueWithID:@"evt_issue_alias"
+                           timestamp:@"2026-06-02T10:00:02Z"
+                          attributes:@{@"title": @"Checkout timeout", @"level": @"fatal"}
+                               error:&error],
+            @"fatal issue alias failed");
+  LBWAssert([aliasClient logWithID:@"evt_log_debug"
+                         timestamp:@"2026-06-02T10:00:03Z"
+                        attributes:@{@"message": @"verbose runtime detail", @"level": @"debug"}
+                             error:&error],
+            @"debug log alias failed");
+  NSString *aliasPreview = [aliasClient previewJSONWithError:&error];
+  LBWAssert([aliasPreview containsString:@"\"level\":\"critical\""], @"fatal alias did not normalize");
+  LBWAssert([aliasPreview containsString:@"\"level\":\"info\""], @"debug alias did not normalize");
 
   LBWClient *unauthClient = LBWNewClient();
   LBWQueueEvents(unauthClient);

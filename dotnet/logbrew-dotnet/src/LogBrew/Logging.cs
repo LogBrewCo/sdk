@@ -235,14 +235,15 @@ namespace LogBrew
             {
                 case LogLevel.Trace:
                 case LogLevel.Debug:
-                    return "debug";
+                    return "info";
                 case LogLevel.Information:
                     return "info";
                 case LogLevel.Warning:
                     return "warning";
                 case LogLevel.Error:
-                case LogLevel.Critical:
                     return "error";
+                case LogLevel.Critical:
+                    return "critical";
                 default:
                     return "info";
             }

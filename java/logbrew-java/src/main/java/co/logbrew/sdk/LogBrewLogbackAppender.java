@@ -150,7 +150,7 @@ public final class LogBrewLogbackAppender extends AppenderBase<ILoggingEvent> {
         if (level.isGreaterOrEqual(Level.INFO)) {
             return "info";
         }
-        return "debug";
+        return "info";
     }
 
     /**

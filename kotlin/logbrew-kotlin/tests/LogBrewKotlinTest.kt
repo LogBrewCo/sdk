@@ -23,6 +23,7 @@ fun main() {
     run("invalid_timestamp_fails_validation", ::invalidTimestampFailsValidation)
     run("invalid_timestamp_shape_fails_validation", ::invalidTimestampShapeFailsValidation)
     run("invalid_issue_level_fails_validation", ::invalidIssueLevelFailsValidation)
+    run("severity_aliases_normalize_before_preview", ::severityAliasesNormalizeBeforePreview)
     run("negative_span_duration_fails_validation", ::negativeSpanDurationFailsValidation)
     run("metric_event_validates_and_serializes_attributes", ::metricEventValidatesAndSerializesAttributes)
     run("metric_value_and_temporality_validation_fails_cleanly", ::metricValueAndTemporalityValidationFailsCleanly)
@@ -189,8 +190,19 @@ private fun invalidTimestampShapeFailsValidation() {
 
 private fun invalidIssueLevelFailsValidation() {
     expect("validation_error") {
-        newClient().issue("evt_bad", "2026-06-02T10:00:03Z", IssueAttributes.create("bad", "fatal"))
+        newClient().issue("evt_bad", "2026-06-02T10:00:03Z", IssueAttributes.create("bad", "verbose"))
     }
+}
+
+private fun severityAliasesNormalizeBeforePreview() {
+    val client = newClient()
+    client.issue("evt_issue_alias", "2026-06-02T10:00:02Z", IssueAttributes.create("Checkout timeout", "fatal"))
+    client.log("evt_log_debug", "2026-06-02T10:00:03Z", LogAttributes.create("verbose runtime detail", "debug"))
+    client.log("evt_log_warn", "2026-06-02T10:00:04Z", LogAttributes.create("legacy warning alias", "warn"))
+    val body = client.previewJson()
+    check("\"level\": \"critical\"" in body)
+    check("\"level\": \"info\"" in body)
+    check("\"level\": \"warning\"" in body)
 }
 
 private fun negativeSpanDurationFailsValidation() {

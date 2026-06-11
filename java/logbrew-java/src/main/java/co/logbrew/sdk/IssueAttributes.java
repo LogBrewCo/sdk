@@ -42,10 +42,10 @@ public final class IssueAttributes {
 
     Map<String, Object> toMap() {
         Validation.requireNonEmpty("issue title", title);
-        Validation.requireAllowedValue("issue level", level, LogBrewClient.ISSUE_LEVELS);
+        String normalizedLevel = Validation.normalizeSeverity("issue level", level);
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("title", title);
-        value.put("level", level);
+        value.put("level", normalizedLevel);
         Validation.putOptionalString(value, "message", message);
         Validation.putOptionalMetadata(value, metadata);
         return value;

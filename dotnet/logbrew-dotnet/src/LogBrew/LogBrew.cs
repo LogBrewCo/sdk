@@ -457,8 +457,8 @@ namespace LogBrew
         internal OrderedJsonObject ToJsonObject()
         {
             Validation.RequireNonEmpty("issue title", Title);
-            Validation.RequireAllowedValue("issue level", Level, LogBrewClient.IssueLevels);
-            var payload = new OrderedJsonObject().Add("title", Title).Add("level", Level);
+            var level = Validation.NormalizeSeverity("issue level", Level);
+            var payload = new OrderedJsonObject().Add("title", Title).Add("level", level);
             payload.AddIfNotNull("message", Message);
             payload.AddMetadata(Metadata);
             return payload;
@@ -501,8 +501,8 @@ namespace LogBrew
         internal OrderedJsonObject ToJsonObject()
         {
             Validation.RequireNonEmpty("log message", Message);
-            Validation.RequireAllowedValue("log level", Level, LogBrewClient.LogLevels);
-            var payload = new OrderedJsonObject().Add("message", Message).Add("level", Level);
+            var level = Validation.NormalizeSeverity("log level", Level);
+            var payload = new OrderedJsonObject().Add("message", Message).Add("level", level);
             payload.AddIfNotNull("logger", Logger);
             payload.AddMetadata(Metadata);
             return payload;
@@ -625,8 +625,7 @@ namespace LogBrew
 
     public sealed class LogBrewClient
     {
-        internal static readonly string[] IssueLevels = { "info", "warning", "error", "critical" };
-        internal static readonly string[] LogLevels = { "debug", "info", "warning", "error" };
+        internal static readonly string[] SeverityValues = { "trace", "debug", "info", "warn", "warning", "error", "fatal", "critical" };
         internal static readonly string[] SpanStatuses = { "ok", "error" };
         internal static readonly string[] ActionStatuses = { "queued", "running", "success", "failure" };
         internal static readonly string[] MetricKinds = { "counter", "gauge", "histogram" };
@@ -866,6 +865,19 @@ namespace LogBrew
             {
                 throw new SdkException("validation_error", label + " must be one of: " + string.Join(", ", allowedValues));
             }
+        }
+
+        internal static string NormalizeSeverity(string label, string value)
+        {
+            RequireAllowedValue(label, value, LogBrewClient.SeverityValues);
+            return value switch
+            {
+                "trace" or "debug" or "info" => "info",
+                "warn" or "warning" => "warning",
+                "error" => "error",
+                "fatal" or "critical" => "critical",
+                _ => "info",
+            };
         }
 
         internal static void RequireFiniteNumber(string label, double value)

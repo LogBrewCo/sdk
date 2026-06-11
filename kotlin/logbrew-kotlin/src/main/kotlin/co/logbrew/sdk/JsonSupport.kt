@@ -69,6 +69,20 @@ internal object Validation {
         }
     }
 
+    fun normalizeSeverity(
+        label: String,
+        value: String,
+    ): String {
+        requireAllowedValue(label, value, LogBrewClient.severityValues)
+        return when (value) {
+            "trace", "debug", "info" -> "info"
+            "warn", "warning" -> "warning"
+            "error" -> "error"
+            "fatal", "critical" -> "critical"
+            else -> "info"
+        }
+    }
+
     fun requireFiniteNumber(
         label: String,
         value: Double,

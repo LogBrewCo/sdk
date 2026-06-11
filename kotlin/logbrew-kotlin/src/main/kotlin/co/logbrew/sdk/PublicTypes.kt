@@ -288,10 +288,10 @@ data class IssueAttributes(
 
     internal fun toJsonObject(): OrderedJsonObject {
         Validation.requireNonEmpty("issue title", title)
-        Validation.requireAllowedValue("issue level", level, LogBrewClient.issueLevels)
+        val normalizedLevel = Validation.normalizeSeverity("issue level", level)
         return OrderedJsonObject()
             .add("title", title)
-            .add("level", level)
+            .add("level", normalizedLevel)
             .addIfNotNull("message", message)
             .addMetadata(metadata)
     }
@@ -316,10 +316,10 @@ data class LogAttributes(
 
     internal fun toJsonObject(): OrderedJsonObject {
         Validation.requireNonEmpty("log message", message)
-        Validation.requireAllowedValue("log level", level, LogBrewClient.logLevels)
+        val normalizedLevel = Validation.normalizeSeverity("log level", level)
         return OrderedJsonObject()
             .add("message", message)
-            .add("level", level)
+            .add("level", normalizedLevel)
             .addIfNotNull("logger", logger)
             .addMetadata(metadata)
     }

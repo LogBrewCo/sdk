@@ -127,8 +127,41 @@ func TestInvalidTimestampFailsValidation(t *testing.T) {
 func TestInvalidIssueLevelFailsValidation(t *testing.T) {
 	client := sampleClient(t)
 	err := client.Issue("evt_issue_001", "2026-06-02T10:00:02Z", IssueAttributes{Title: "Checkout timeout", Level: "verbose"})
-	if err == nil || !strings.Contains(err.Error(), "issue level must be one of: info, warning, error, critical") {
+	if err == nil || !strings.Contains(err.Error(), "issue level must be one of: trace, debug, info, warn, warning, error, fatal, critical") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSeverityAliasesNormalizeBeforePreview(t *testing.T) {
+	client := sampleClient(t)
+	if err := client.Issue("evt_issue_001", "2026-06-02T10:00:02Z", IssueAttributes{Title: "Checkout timeout", Level: "fatal"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Log("evt_log_001", "2026-06-02T10:00:03Z", LogAttributes{Message: "verbose runtime detail", Level: "debug"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Log("evt_log_002", "2026-06-02T10:00:04Z", LogAttributes{Message: "legacy warning alias", Level: "warn"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		Events []struct {
+			Attributes struct {
+				Level string `json:"level"`
+			} `json:"attributes"`
+		} `json:"events"`
+	}
+	preview, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(preview), &payload); err != nil {
+		t.Fatal(err)
+	}
+	got := []string{payload.Events[0].Attributes.Level, payload.Events[1].Attributes.Level, payload.Events[2].Attributes.Level}
+	want := []string{"critical", "info", "warning"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("unexpected levels: got %v want %v", got, want)
 	}
 }
 

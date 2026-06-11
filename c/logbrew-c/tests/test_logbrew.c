@@ -112,9 +112,18 @@ static void validation_failures_are_stable(void) {
   LogBrewStatus status;
   logbrew_error_clear(&error);
   status = logbrew_client_issue(client, "evt_issue_bad", "2026-06-02T10:00:02Z",
-      (LogBrewIssueAttributes){"Checkout timeout", "fatal", NULL}, &error);
+      (LogBrewIssueAttributes){"Checkout timeout", "verbose", NULL}, &error);
   EXPECT_TRUE(status == LOGBREW_VALIDATION_ERROR);
   EXPECT_TRUE(strcmp(error.code, "validation_error") == 0);
+  EXPECT_TRUE(logbrew_client_issue(client, "evt_issue_alias", "2026-06-02T10:00:02Z",
+      (LogBrewIssueAttributes){"Checkout timeout", "fatal", NULL}, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_log(client, "evt_log_debug", "2026-06-02T10:00:03Z",
+      (LogBrewLogAttributes){"verbose runtime detail", "debug", NULL}, &error) == LOGBREW_OK);
+  char *preview = NULL;
+  EXPECT_TRUE(logbrew_client_preview_json(client, &preview, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strstr(preview, "\"level\":\"critical\"") != NULL);
+  EXPECT_TRUE(strstr(preview, "\"level\":\"info\"") != NULL);
+  free(preview);
   status = logbrew_client_release(client, "evt_release_bad", "2026-06-02T10:00:00",
       (LogBrewReleaseAttributes){"1.2.3", NULL, NULL}, &error);
   EXPECT_TRUE(status == LOGBREW_VALIDATION_ERROR);

@@ -2,6 +2,12 @@
 export type MetadataValue = string | number | boolean | null;
 /** Structured metadata map shared by public LogBrew event attribute types. */
 export type Metadata = Record<string, MetadataValue>;
+/** Canonical user-facing severity categories accepted by LogBrew. */
+export type Severity = "info" | "warning" | "error" | "critical";
+/** Runtime-level aliases accepted for compatibility and normalized before send. */
+export type SeverityAlias = "trace" | "debug" | "warn" | "fatal";
+/** Public severity input accepted by issue and log attributes. */
+export type SeverityInput = Severity | SeverityAlias;
 
 /** Parsed W3C trace context from a traceparent value. */
 export type TraceparentContext = {
@@ -46,7 +52,7 @@ export type EnvironmentAttributes = {
 /** Public issue event attributes. */
 export type IssueAttributes = {
   title: string;
-  level: "info" | "warning" | "error" | "critical";
+  level: SeverityInput;
   message?: string;
   metadata?: Metadata;
 };
@@ -54,7 +60,7 @@ export type IssueAttributes = {
 /** Public log event attributes. */
 export type LogAttributes = {
   message: string;
-  level: "debug" | "info" | "warning" | "error";
+  level: SeverityInput;
   logger?: string;
   metadata?: Metadata;
 };

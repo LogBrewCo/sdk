@@ -532,6 +532,23 @@ fn require_allowed_value(label: &str, value: &str, allowed: &[&str]) -> Result<(
     ))
 }
 
+fn normalize_severity(label: &str, value: &str) -> Result<&'static str, SdkError> {
+    require_allowed_value(
+        label,
+        value,
+        &[
+            "trace", "debug", "info", "warn", "warning", "error", "fatal", "critical",
+        ],
+    )?;
+    Ok(match value {
+        "trace" | "debug" | "info" => "info",
+        "warn" | "warning" => "warning",
+        "error" => "error",
+        "fatal" | "critical" => "critical",
+        _ => "info",
+    })
+}
+
 fn require_timestamp(timestamp: &str) -> Result<(), SdkError> {
     if timestamp.ends_with('Z') {
         return Ok(());
@@ -690,14 +707,10 @@ impl IssueEvent {
 
     fn attributes(self) -> Result<Map<String, Value>, SdkError> {
         require_non_empty("issue title", &self.title)?;
-        require_allowed_value(
-            "issue level",
-            &self.level,
-            &["info", "warning", "error", "critical"],
-        )?;
+        let level = normalize_severity("issue level", &self.level)?;
         let mut map = Map::new();
         map.insert("title".to_string(), Value::String(self.title));
-        map.insert("level".to_string(), Value::String(self.level));
+        map.insert("level".to_string(), Value::String(level.to_string()));
         insert_string(&mut map, "message", self.message);
         metadata_entry(&mut map, self.metadata);
         Ok(map)
@@ -738,14 +751,10 @@ impl LogEvent {
 
     fn attributes(self) -> Result<Map<String, Value>, SdkError> {
         require_non_empty("log message", &self.message)?;
-        require_allowed_value(
-            "log level",
-            &self.level,
-            &["debug", "info", "warning", "error"],
-        )?;
+        let level = normalize_severity("log level", &self.level)?;
         let mut map = Map::new();
         map.insert("message".to_string(), Value::String(self.message));
-        map.insert("level".to_string(), Value::String(self.level));
+        map.insert("level".to_string(), Value::String(level.to_string()));
         insert_string(&mut map, "logger", self.logger);
         metadata_entry(&mut map, self.metadata);
         Ok(map)

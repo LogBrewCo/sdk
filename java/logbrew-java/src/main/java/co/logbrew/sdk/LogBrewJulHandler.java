@@ -138,7 +138,7 @@ public final class LogBrewJulHandler extends Handler {
         if (levelValue >= Level.INFO.intValue()) {
             return "info";
         }
-        return "debug";
+        return "info";
     }
 
     /**

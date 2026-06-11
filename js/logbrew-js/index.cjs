@@ -1,5 +1,14 @@
-const ISSUE_LEVELS = new Set(["info", "warning", "error", "critical"]);
-const LOG_LEVELS = new Set(["debug", "info", "warning", "error"]);
+const SEVERITY_ALIASES = new Map([
+  ["trace", "info"],
+  ["debug", "info"],
+  ["info", "info"],
+  ["warn", "warning"],
+  ["warning", "warning"],
+  ["error", "error"],
+  ["fatal", "critical"],
+  ["critical", "critical"]
+]);
+const SEVERITY_VALUES = new Set(SEVERITY_ALIASES.keys());
 const SPAN_STATUSES = new Set(["ok", "error"]);
 const ACTION_STATUSES = new Set(["queued", "running", "success", "failure"]);
 const METRIC_KINDS = new Set(["counter", "gauge", "histogram"]);
@@ -337,7 +346,7 @@ function logAttributesFromConsoleArgs(method, args, options = {}) {
 function logbrewLevelFromConsoleMethod(method) {
   switch (method) {
     case "debug":
-      return "debug";
+      return "info";
     case "warn":
       return "warning";
     case "error":
@@ -661,15 +670,16 @@ function logbrewLevelFromWinstonLevel(level) {
   switch (String(level).toLowerCase()) {
     case "debug":
     case "silly":
-      return "debug";
+      return "info";
     case "warn":
     case "warning":
       return "warning";
     case "error":
+      return "error";
     case "crit":
     case "critical":
     case "fatal":
-      return "error";
+      return "critical";
     case "http":
     case "verbose":
     case "info":
@@ -772,6 +782,9 @@ function timestampFromPinoRecord(record, fallbackTimestamp) {
 
 function logbrewLevelFromPinoLevel(level) {
   if (typeof level === "number" && Number.isFinite(level)) {
+    if (level >= 60) {
+      return "critical";
+    }
     if (level >= 50) {
       return "error";
     }
@@ -781,19 +794,21 @@ function logbrewLevelFromPinoLevel(level) {
     if (level >= 30) {
       return "info";
     }
-    return "debug";
+    return "info";
   }
 
   switch (String(level).toLowerCase()) {
     case "trace":
     case "debug":
-      return "debug";
+      return "info";
     case "warn":
     case "warning":
       return "warning";
     case "error":
-    case "fatal":
       return "error";
+    case "fatal":
+    case "critical":
+      return "critical";
     case "info":
     default:
       return "info";
@@ -973,22 +988,27 @@ function validateEnvironment(attributes) {
 
 function validateIssue(attributes) {
   requireNonEmpty("issue title", attributes.title);
-  requireAllowedValue("issue level", attributes.level, ISSUE_LEVELS);
+  const level = normalizeSeverity("issue level", attributes.level);
   return withMetadata({
     title: attributes.title,
-    level: attributes.level,
+    level,
     ...(attributes.message !== undefined ? { message: attributes.message } : {})
   }, attributes.metadata);
 }
 
 function validateLog(attributes) {
   requireNonEmpty("log message", attributes.message);
-  requireAllowedValue("log level", attributes.level, LOG_LEVELS);
+  const level = normalizeSeverity("log level", attributes.level);
   return withMetadata({
     message: attributes.message,
-    level: attributes.level,
+    level,
     ...(attributes.logger !== undefined ? { logger: attributes.logger } : {})
   }, attributes.metadata);
+}
+
+function normalizeSeverity(label, value) {
+  requireAllowedValue(label, value, SEVERITY_VALUES);
+  return SEVERITY_ALIASES.get(value);
 }
 
 function validateSpan(attributes) {

@@ -1,15 +1,77 @@
 public enum IssueLevel: String, Codable, Sendable {
+    case trace
+    case debug
     case info
+    case warn
     case warning
     case error
+    case fatal
     case critical
+
+    public var canonicalValue: String {
+        switch self {
+        case .trace, .debug, .info:
+            "info"
+        case .warn, .warning:
+            "warning"
+        case .error:
+            "error"
+        case .fatal, .critical:
+            "critical"
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(canonicalValue)
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        guard let level = IssueLevel(rawValue: value) else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "unsupported issue level")
+        }
+        self = level
+    }
 }
 
 public enum LogLevel: String, Codable, Sendable {
+    case trace
     case debug
     case info
+    case warn
     case warning
     case error
+    case fatal
+    case critical
+
+    public var canonicalValue: String {
+        switch self {
+        case .trace, .debug, .info:
+            "info"
+        case .warn, .warning:
+            "warning"
+        case .error:
+            "error"
+        case .fatal, .critical:
+            "critical"
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(canonicalValue)
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        guard let level = LogLevel(rawValue: value) else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "unsupported log level")
+        }
+        self = level
+    }
 }
 
 public enum SpanStatus: String, Codable, Sendable {

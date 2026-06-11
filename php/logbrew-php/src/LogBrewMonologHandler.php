@@ -122,14 +122,15 @@ final class LogBrewMonologHandler extends AbstractProcessingHandler
         return $metadata;
     }
 
-    /** @return 'debug'|'info'|'warning'|'error' */
+    /** @return 'info'|'warning'|'error'|'critical' */
     private function mapLevel(Level $level): string
     {
         return match ($level->toPsrLogLevel()) {
-            LogLevel::DEBUG => 'debug',
+            LogLevel::DEBUG => 'info',
             LogLevel::INFO, LogLevel::NOTICE => 'info',
             LogLevel::WARNING => 'warning',
-            default => 'error',
+            LogLevel::ERROR => 'error',
+            default => 'critical',
         };
     }
 

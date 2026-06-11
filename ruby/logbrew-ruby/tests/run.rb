@@ -151,6 +151,12 @@ tests += 1
 expect_error("validation_error", "issue level must be one of") do
   sample_client.issue("evt_issue_001", "2026-06-02T10:00:02Z", title: "Checkout timeout", level: "verbose")
 end
+client = sample_client
+client.issue("evt_issue_alias", "2026-06-02T10:00:02Z", title: "Checkout timeout", level: "fatal")
+client.log("evt_log_debug", "2026-06-02T10:00:03Z", message: "verbose runtime detail", level: "debug")
+client.log("evt_log_warn", "2026-06-02T10:00:04Z", message: "legacy warning alias", level: "warn")
+levels = JSON.parse(client.preview_json).fetch("events").map { |event| event.fetch("attributes").fetch("level") }
+assert(levels == %w[critical info warning], "expected severity aliases to normalize")
 tests += 1
 
 expect_error("validation_error", "span durationMs must be non-negative") do
@@ -296,12 +302,13 @@ logger = LogBrew::Logger.new(
 logger.debug("cart loaded")
 logger.warn("checkout slow")
 logger.add(::Logger::ERROR, RuntimeError.new("payment failed"), "payment")
+logger.fatal("checkout down")
 preview = JSON.parse(client.preview_json)
 logger_events = preview.fetch("events")
-assert(logger_events.length == 3, "expected logger events to be queued")
-assert(logger_events.map { |event| event.fetch("id") } == %w[ruby_logger_1 ruby_logger_2 ruby_logger_3], "expected logger event ids")
+assert(logger_events.length == 4, "expected logger events to be queued")
+assert(logger_events.map { |event| event.fetch("id") } == %w[ruby_logger_1 ruby_logger_2 ruby_logger_3 ruby_logger_4], "expected logger event ids")
 assert(logger_events.map { |event| event.fetch("timestamp") }.uniq == ["2026-06-02T10:00:06Z"], "expected logger timestamps")
-assert(logger_events.map { |event| event.fetch("attributes").fetch("level") } == %w[debug warning error], "expected logger level mapping")
+assert(logger_events.map { |event| event.fetch("attributes").fetch("level") } == %w[info warning error critical], "expected logger level mapping")
 assert(logger_events[1].fetch("attributes").fetch("message") == "checkout slow", "expected logger message")
 assert(logger_events[1].fetch("attributes").fetch("logger") == "checkout", "expected configured logger name")
 metadata = logger_events[2].fetch("attributes").fetch("metadata")

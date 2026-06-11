@@ -9,8 +9,17 @@ require "timeout"
 require "uri"
 
 module LogBrew
-  ISSUE_LEVELS = %w[info warning error critical].freeze
-  LOG_LEVELS = %w[debug info warning error].freeze
+  SEVERITY_VALUES = %w[trace debug info warn warning error fatal critical].freeze
+  SEVERITY_ALIASES = {
+    "trace" => "info",
+    "debug" => "info",
+    "info" => "info",
+    "warn" => "warning",
+    "warning" => "warning",
+    "error" => "error",
+    "fatal" => "critical",
+    "critical" => "critical"
+  }.freeze
   SPAN_STATUSES = %w[ok error].freeze
   ACTION_STATUSES = %w[queued running success failure].freeze
   METRIC_TEMPORALITIES_BY_KIND = {
@@ -165,11 +174,11 @@ module LogBrew
   class Logger < ::Logger
     DEFAULT_LOGGER_NAME = "ruby-logger"
     SEVERITY_TO_LOGBREW_LEVEL = {
-      ::Logger::DEBUG => "debug",
+      ::Logger::DEBUG => "info",
       ::Logger::INFO => "info",
       ::Logger::WARN => "warning",
       ::Logger::ERROR => "error",
-      ::Logger::FATAL => "error",
+      ::Logger::FATAL => "critical",
       ::Logger::UNKNOWN => "error"
     }.freeze
 
@@ -282,7 +291,7 @@ module LogBrew
     end
 
     def logbrew_level(severity)
-      SEVERITY_TO_LOGBREW_LEVEL.fetch(severity.to_i, severity.to_i >= ::Logger::WARN ? "error" : "info")
+      SEVERITY_TO_LOGBREW_LEVEL.fetch(severity.to_i, severity.to_i >= ::Logger::FATAL ? "critical" : "info")
     end
 
     def event_logger_name(progname)
@@ -878,7 +887,7 @@ module LogBrew
       title = Validation.read(attributes, "title")
       level = Validation.read(attributes, "level")
       Validation.require_non_empty("issue title", title)
-      Validation.require_allowed_value("issue level", level, ISSUE_LEVELS)
+      level = normalize_severity("issue level", level)
       with_metadata(
         {
           "title" => title,
@@ -895,7 +904,7 @@ module LogBrew
       message = Validation.read(attributes, "message")
       level = Validation.read(attributes, "level")
       Validation.require_non_empty("log message", message)
-      Validation.require_allowed_value("log level", level, LOG_LEVELS)
+      level = normalize_severity("log level", level)
       with_metadata(
         {
           "message" => message,
@@ -906,6 +915,11 @@ module LogBrew
         end,
         attributes
       )
+    end
+
+    def normalize_severity(label, level)
+      Validation.require_allowed_value(label, level, SEVERITY_VALUES)
+      SEVERITY_ALIASES.fetch(level)
     end
 
     def validate_span(attributes)

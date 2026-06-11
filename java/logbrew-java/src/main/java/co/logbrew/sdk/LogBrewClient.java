@@ -10,8 +10,7 @@ import java.util.Objects;
  * Buffered public client for validating, previewing, and flushing LogBrew events.
  */
 public final class LogBrewClient {
-    static final String[] ISSUE_LEVELS = {"info", "warning", "error", "critical"};
-    static final String[] LOG_LEVELS = {"debug", "info", "warning", "error"};
+    static final String[] SEVERITY_VALUES = {"trace", "debug", "info", "warn", "warning", "error", "fatal", "critical"};
     static final String[] SPAN_STATUSES = {"ok", "error"};
     static final String[] ACTION_STATUSES = {"queued", "running", "success", "failure"};
     static final String[] METRIC_KINDS = {"counter", "gauge", "histogram"};

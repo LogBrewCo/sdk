@@ -42,10 +42,10 @@ public final class LogAttributes {
 
     Map<String, Object> toMap() {
         Validation.requireNonEmpty("log message", message);
-        Validation.requireAllowedValue("log level", level, LogBrewClient.LOG_LEVELS);
+        String normalizedLevel = Validation.normalizeSeverity("log level", level);
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("message", message);
-        value.put("level", level);
+        value.put("level", normalizedLevel);
         Validation.putOptionalString(value, "logger", logger);
         Validation.putOptionalMetadata(value, metadata);
         return value;

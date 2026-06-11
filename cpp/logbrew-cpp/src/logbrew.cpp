@@ -59,6 +59,20 @@ void require_allowed(const std::string &label, const std::string &value, const s
   throw SdkException("validation_error", label + " has unsupported value: " + value);
 }
 
+std::string normalize_severity(const std::string &label, const std::string &value) {
+  require_allowed(label, value, {"trace", "debug", "info", "warn", "warning", "error", "fatal", "critical"});
+  if (value == "trace" || value == "debug" || value == "info") {
+    return "info";
+  }
+  if (value == "warn" || value == "warning") {
+    return "warning";
+  }
+  if (value == "error") {
+    return "error";
+  }
+  return "critical";
+}
+
 void require_finite(const std::string &label, double value) {
   if (!std::isfinite(value)) {
     throw SdkException("validation_error", label + " must be finite");
@@ -431,20 +445,20 @@ void LogBrewClient::environment(std::string id, std::string timestamp, Environme
 
 void LogBrewClient::issue(std::string id, std::string timestamp, IssueAttributes attributes) {
   require_non_empty("issue title", attributes.title);
-  require_allowed("issue level", attributes.level, {"info", "warning", "error", "critical"});
+  std::string level = normalize_severity("issue level", attributes.level);
   push_event("issue", std::move(id), std::move(timestamp), object_json([&](std::ostringstream &output, bool &needs_comma) {
                append_field(output, needs_comma, "title", attributes.title);
-               append_field(output, needs_comma, "level", attributes.level);
+               append_field(output, needs_comma, "level", level);
                append_optional_field(output, needs_comma, "message", attributes.message, false);
              }));
 }
 
 void LogBrewClient::log(std::string id, std::string timestamp, LogAttributes attributes) {
   require_non_empty("log message", attributes.message);
-  require_allowed("log level", attributes.level, {"debug", "info", "warning", "error"});
+  std::string level = normalize_severity("log level", attributes.level);
   push_event("log", std::move(id), std::move(timestamp), object_json([&](std::ostringstream &output, bool &needs_comma) {
                append_field(output, needs_comma, "message", attributes.message);
-               append_field(output, needs_comma, "level", attributes.level);
+               append_field(output, needs_comma, "level", level);
                append_optional_field(output, needs_comma, "logger", attributes.logger, false);
              }));
 }

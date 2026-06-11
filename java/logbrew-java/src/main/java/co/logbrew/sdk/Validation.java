@@ -23,6 +23,26 @@ final class Validation {
         throw new SdkException("validation_error", label + " must be one of: " + String.join(", ", allowedValues));
     }
 
+    static String normalizeSeverity(String label, String value) {
+        requireAllowedValue(label, value, LogBrewClient.SEVERITY_VALUES);
+        switch (value) {
+            case "trace":
+            case "debug":
+            case "info":
+                return "info";
+            case "warn":
+            case "warning":
+                return "warning";
+            case "error":
+                return "error";
+            case "fatal":
+            case "critical":
+                return "critical";
+            default:
+                return "info";
+        }
+    }
+
     static void requireTimestamp(String timestamp) {
         requireNonEmpty("timestamp", timestamp);
         if (timestamp.endsWith("Z")) {

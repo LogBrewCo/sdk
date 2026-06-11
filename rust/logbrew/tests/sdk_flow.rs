@@ -260,7 +260,7 @@ fn invalid_issue_level_fails_validation() {
     assert_eq!(error.code, "validation_error");
     assert_eq!(
         error.message,
-        "issue level must be one of: info, warning, error, critical"
+        "issue level must be one of: trace, debug, info, warn, warning, error, fatal, critical"
     );
 }
 
@@ -278,8 +278,39 @@ fn invalid_log_level_fails_validation() {
     assert_eq!(error.code, "validation_error");
     assert_eq!(
         error.message,
-        "log level must be one of: debug, info, warning, error"
+        "log level must be one of: trace, debug, info, warn, warning, error, fatal, critical"
     );
+}
+
+#[test]
+fn severity_aliases_normalize_before_preview() {
+    let mut client = sample_client();
+    client
+        .issue(
+            "evt_issue_alias",
+            "2026-06-02T10:00:02Z",
+            IssueEvent::new("Checkout timeout", "fatal"),
+        )
+        .unwrap();
+    client
+        .log(
+            "evt_log_debug",
+            "2026-06-02T10:00:03Z",
+            LogEvent::new("verbose runtime detail", "debug"),
+        )
+        .unwrap();
+    client
+        .log(
+            "evt_log_warn",
+            "2026-06-02T10:00:04Z",
+            LogEvent::new("legacy warning alias", "warn"),
+        )
+        .unwrap();
+
+    let payload = client.preview_json().unwrap();
+    assert!(payload.contains("\"level\": \"critical\""));
+    assert!(payload.contains("\"level\": \"info\""));
+    assert!(payload.contains("\"level\": \"warning\""));
 }
 
 #[test]

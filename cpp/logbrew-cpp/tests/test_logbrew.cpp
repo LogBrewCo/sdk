@@ -156,11 +156,16 @@ void empty_flush_is_no_op() {
 void validation_failures_are_stable() {
   auto client = new_client();
   try {
-    client.issue("evt_issue_bad", "2026-06-02T10:00:02Z", logbrew::IssueAttributes{"Checkout timeout", "fatal", std::nullopt});
+    client.issue("evt_issue_bad", "2026-06-02T10:00:02Z", logbrew::IssueAttributes{"Checkout timeout", "verbose", std::nullopt});
     EXPECT_TRUE(false);
   } catch (const logbrew::SdkException &error) {
     EXPECT_TRUE(error.code() == "validation_error");
   }
+  client.issue("evt_issue_alias", "2026-06-02T10:00:02Z", logbrew::IssueAttributes{"Checkout timeout", "fatal", std::nullopt});
+  client.log("evt_log_debug", "2026-06-02T10:00:03Z", logbrew::LogAttributes{"verbose runtime detail", "debug", std::nullopt});
+  const std::string preview = client.preview_json();
+  EXPECT_TRUE(preview.find("\"level\":\"critical\"") != std::string::npos);
+  EXPECT_TRUE(preview.find("\"level\":\"info\"") != std::string::npos);
   try {
     client.release("evt_release_bad", "2026-06-02T10:00:00", logbrew::ReleaseAttributes{"1.2.3", std::nullopt, std::nullopt});
     EXPECT_TRUE(false);

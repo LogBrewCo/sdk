@@ -143,7 +143,21 @@ test("invalid issue level fails validation", () => {
   const client = sampleClient();
   assert.throws(
     () => client.issue("evt_issue_001", "2026-06-02T10:00:02Z", { title: "Checkout timeout", level: "verbose" }),
-    /issue level must be one of: info, warning, error, critical/
+    /issue level must be one of: trace, debug, info, warn, warning, error, fatal, critical/
+  );
+});
+
+test("severity aliases normalize before preview", () => {
+  const client = sampleClient();
+
+  client.issue("evt_issue_001", "2026-06-02T10:00:02Z", { title: "Checkout timeout", level: "fatal" });
+  client.log("evt_log_001", "2026-06-02T10:00:03Z", { message: "verbose runtime detail", level: "debug" });
+  client.log("evt_log_002", "2026-06-02T10:00:04Z", { message: "legacy warning alias", level: "warn" });
+
+  const payload = JSON.parse(client.previewJson());
+  assert.deepEqual(
+    payload.events.map((event) => event.attributes.level),
+    ["critical", "info", "warning"]
   );
 });
 
@@ -363,6 +377,7 @@ test("console argument helper maps safe log attributes", () => {
   });
 
   assert.equal(logbrewLevelFromConsoleMethod("log"), "info");
+  assert.equal(logbrewLevelFromConsoleMethod("debug"), "info");
   assert.equal(logbrewLevelFromConsoleMethod("warn"), "warning");
   assert.equal(attributes.level, "warning");
   assert.equal(attributes.logger, "console");
@@ -488,7 +503,7 @@ test("Pino destination queues records and flushes safely", async () => {
     orderId: 42
   })}\n`);
   destination.write(`${JSON.stringify({
-    level: 50,
+    level: 60,
     time: "2026-06-02T10:00:06.000Z",
     msg: "checkout failed",
     err: {
@@ -507,7 +522,7 @@ test("Pino destination queues records and flushes safely", async () => {
 
   const body = JSON.parse(transport.lastBody());
   assert.deepEqual(body.events.map((event) => event.id), ["test_pino_1", "test_pino_2"]);
-  assert.deepEqual(body.events.map((event) => event.attributes.level), ["info", "error"]);
+  assert.deepEqual(body.events.map((event) => event.attributes.level), ["info", "critical"]);
   assert.equal(body.events[0].timestamp, "2026-06-02T10:00:06.000Z");
   assert.equal(body.events[0].attributes.metadata["context.orderId"], 42);
   assert.equal(body.events[1].attributes.metadata.errorName, "Error");

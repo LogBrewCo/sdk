@@ -114,7 +114,7 @@ logger.error(RuntimeError.new("payment failed"))
 client.flush(LogBrew::RecordingTransport.always_accept)
 ```
 
-The adapter respects Ruby logger levels and lazy block messages, maps `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`, and `UNKNOWN` to LogBrew log levels, captures `progname`, primitive base metadata, and exception type/message, and omits exception backtrace text unless `include_exception_backtrace: true` is set. Logs queue by default; pass `transport:` plus `flush_on_log: true` or call `flush_logbrew` for immediate delivery.
+The adapter respects Ruby logger levels and lazy block messages, maps `DEBUG`/`INFO` to LogBrew `info`, `WARN` to `warning`, `ERROR` to `error`, and `FATAL` to `critical`, captures `progname`, primitive base metadata, and exception type/message, and omits exception backtrace text unless `include_exception_backtrace: true` is set. Logs queue by default; pass `transport:` plus `flush_on_log: true` or call `flush_logbrew` for immediate delivery.
 
 ## Rack And Rails Middleware
 

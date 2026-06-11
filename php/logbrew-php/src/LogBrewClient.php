@@ -16,6 +16,8 @@ namespace LogBrew;
  *
  * @phpstan-type MetadataValue string|int|float|bool|null
  * @phpstan-type Metadata array<string, MetadataValue>
+ * @phpstan-type Severity 'info'|'warning'|'error'|'critical'
+ * @phpstan-type SeverityAlias 'trace'|'debug'|'warn'|'fatal'
  * @phpstan-type ReleaseAttributes array{
  *   version: string,
  *   commit?: string,
@@ -29,13 +31,13 @@ namespace LogBrew;
  * }
  * @phpstan-type IssueAttributes array{
  *   title: string,
- *   level: 'info'|'warning'|'error'|'critical',
+ *   level: Severity|SeverityAlias,
  *   message?: string,
  *   metadata?: Metadata
  * }
  * @phpstan-type LogAttributes array{
  *   message: string,
- *   level: 'debug'|'info'|'warning'|'error',
+ *   level: Severity|SeverityAlias,
  *   logger?: string,
  *   metadata?: Metadata
  * }
@@ -64,8 +66,7 @@ namespace LogBrew;
  */
 final class LogBrewClient
 {
-    private const ISSUE_LEVELS = ['info', 'warning', 'error', 'critical'];
-    private const LOG_LEVELS = ['debug', 'info', 'warning', 'error'];
+    private const SEVERITY_VALUES = ['trace', 'debug', 'info', 'warn', 'warning', 'error', 'fatal', 'critical'];
     private const SPAN_STATUSES = ['ok', 'error'];
     private const ACTION_STATUSES = ['queued', 'running', 'success', 'failure'];
     private const METRIC_KINDS = ['counter', 'gauge', 'histogram'];
@@ -280,10 +281,10 @@ final class LogBrewClient
     private function validateIssue(array $attributes): array
     {
         self::requireNonEmpty('issue title', (string) ($attributes['title'] ?? ''));
-        self::requireAllowedValue('issue level', (string) ($attributes['level'] ?? ''), self::ISSUE_LEVELS);
+        $level = self::normalizeSeverity('issue level', (string) ($attributes['level'] ?? ''));
         return $this->withMetadata(array_filter([
             'title' => $attributes['title'],
-            'level' => $attributes['level'],
+            'level' => $level,
             'message' => $attributes['message'] ?? null,
         ], static fn (mixed $value): bool => $value !== null), $attributes['metadata'] ?? null);
     }
@@ -295,10 +296,10 @@ final class LogBrewClient
     private function validateLog(array $attributes): array
     {
         self::requireNonEmpty('log message', (string) ($attributes['message'] ?? ''));
-        self::requireAllowedValue('log level', (string) ($attributes['level'] ?? ''), self::LOG_LEVELS);
+        $level = self::normalizeSeverity('log level', (string) ($attributes['level'] ?? ''));
         return $this->withMetadata(array_filter([
             'message' => $attributes['message'],
-            'level' => $attributes['level'],
+            'level' => $level,
             'logger' => $attributes['logger'] ?? null,
         ], static fn (mixed $value): bool => $value !== null), $attributes['metadata'] ?? null);
     }
@@ -408,6 +409,18 @@ final class LogBrewClient
         if (!in_array($value, $allowedValues, true)) {
             throw new SdkError('validation_error', sprintf('%s must be one of: %s', $label, implode(', ', $allowedValues)));
         }
+    }
+
+    private static function normalizeSeverity(string $label, string $value): string
+    {
+        self::requireAllowedValue($label, $value, self::SEVERITY_VALUES);
+        return match ($value) {
+            'trace', 'debug', 'info' => 'info',
+            'warn', 'warning' => 'warning',
+            'error' => 'error',
+            'fatal', 'critical' => 'critical',
+            default => 'info',
+        };
     }
 
     private static function requireFiniteNumber(string $label, mixed $value): int|float

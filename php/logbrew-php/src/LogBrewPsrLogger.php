@@ -24,14 +24,14 @@ use Throwable;
 final class LogBrewPsrLogger extends AbstractLogger
 {
     private const LEVEL_MAP = [
-        LogLevel::DEBUG => 'debug',
+        LogLevel::DEBUG => 'info',
         LogLevel::INFO => 'info',
         LogLevel::NOTICE => 'info',
         LogLevel::WARNING => 'warning',
         LogLevel::ERROR => 'error',
-        LogLevel::CRITICAL => 'error',
-        LogLevel::ALERT => 'error',
-        LogLevel::EMERGENCY => 'error',
+        LogLevel::CRITICAL => 'critical',
+        LogLevel::ALERT => 'critical',
+        LogLevel::EMERGENCY => 'critical',
     ];
 
     private int $nextEventNumber = 0;

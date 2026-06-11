@@ -188,7 +188,7 @@ object LogBrewAndroid {
 
     private fun mapLogLevel(priority: String): String =
         when (priority.uppercase()) {
-            "VERBOSE", "DEBUG" -> "debug"
+            "VERBOSE", "DEBUG" -> "info"
             "INFO" -> "info"
             "WARN", "WARNING" -> "warning"
             "ERROR", "ASSERT", "WTF" -> "error"
@@ -197,7 +197,7 @@ object LogBrewAndroid {
 
     private fun logLevelFromAndroidPriority(priority: Int): String =
         when (priority) {
-            AndroidLogPriority.VERBOSE, AndroidLogPriority.DEBUG -> "debug"
+            AndroidLogPriority.VERBOSE, AndroidLogPriority.DEBUG -> "info"
             AndroidLogPriority.INFO -> "info"
             AndroidLogPriority.WARN -> "warning"
             AndroidLogPriority.ERROR, AndroidLogPriority.ASSERT -> "error"

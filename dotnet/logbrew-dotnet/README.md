@@ -107,6 +107,8 @@ client.Flush(transport);
 
 `AddLogBrew()` is opt-in and does not replace app-owned logging providers. It captures the logger category, .NET log level, event id/name, structured message values, primitive scope values, and exception type/message. Full exception stack text is omitted unless `IncludeExceptionStackTrace` is enabled. By default provider logs are queued on the client; set both `Transport` and `FlushOnLog = true` only when immediate delivery is the desired behavior.
 
+LogBrew serializes severities as `info`, `warning`, `error`, or `critical`. `Trace` and `Debug` records are captured as `info`, `Warning` as `warning`, `Error` as `error`, and `Critical` as `critical`; the original .NET log level remains in metadata.
+
 ## Examples
 
 From `dotnet/logbrew-dotnet`:

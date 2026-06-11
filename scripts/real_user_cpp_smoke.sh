@@ -162,7 +162,7 @@ void exercise_failure_paths() {
   require_condition(empty_response.status_code == 204 && empty_response.attempts == 0U, "empty flush failed");
 
   try {
-    empty_client.issue("evt_bad", "2026-06-02T10:00:02Z", logbrew::IssueAttributes{"Checkout timeout", "fatal", std::nullopt});
+    empty_client.issue("evt_bad", "2026-06-02T10:00:02Z", logbrew::IssueAttributes{"Checkout timeout", "verbose", std::nullopt});
     require_condition(false, "validation failure did not throw");
   } catch (const logbrew::SdkException &error) {
     require_condition(error.code() == "validation_error", "validation failure used wrong code");
