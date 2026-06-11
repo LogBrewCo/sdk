@@ -13,7 +13,7 @@ This repository contains the public SDK packages, framework integrations, event 
 - Actions for important user or system events.
 - Explicit metrics when your application already knows the measurement name, value, unit, kind, and temporality.
 
-User-facing severity categories are `info`, `warning`, `error`, and `critical`. SDKs keep accepting common runtime aliases where they are idiomatic, such as `trace`, `debug`, `warn`, and `fatal`, but queued payloads normalize those aliases to the canonical categories before they are sent.
+User-facing severity categories are `info`, `warning`, `error`, and `critical`. SDKs keep accepting common runtime aliases where they are idiomatic, such as `trace`, `debug`, `warn`, and `fatal`, but queued payloads normalize those aliases to the canonical categories before they are sent. See the [LogBrew severity contract](docs/severity-contract.md) for the full mapping.
 
 ## Packages
 

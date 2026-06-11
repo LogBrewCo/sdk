@@ -17,6 +17,7 @@ Public READMEs should explain what LogBrew is for, which package to install, how
 
 Treat logs, issues/errors, traces/spans, and metrics as distinct observability signals with different safety and proof needs.
 
+- Keep public severity names aligned with the [LogBrew severity contract](severity-contract.md): `info`, `warning`, `error`, and `critical` are product categories; `trace`, `debug`, `warn`, and `fatal` are compatibility aliases that SDKs may accept and normalize before delivery.
 - Do not describe metrics support as release-ready until the SDK has an explicit metric event or helper contract with name validation, numeric value validation, unit guidance, aggregation kind guidance such as counter, gauge, or histogram, temporality, timestamp behavior, and low-cardinality attribute rules.
 - Keep automatic metric capture opt-in until the source, frequency, and attribute set are bounded. Avoid query strings, raw stack text, document titles, user agents, and unbounded labels by default.
 - When metrics helpers exist, prove them from installed artifacts with counters, gauges, histogram-like values, invalid values, omitted optional fields, batching, retry behavior, flush/shutdown behavior, and machine-parseable JSON separate from trace/log parity fixtures.
