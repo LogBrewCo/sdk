@@ -2,6 +2,10 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+sdk_package_tgz="logbrew-sdk-${sdk_package_version}.tgz"
+export LOGBREW_JS_PACKAGE_TGZ="$sdk_package_tgz"
+export LOGBREW_JS_PACKAGE_VERSION="$sdk_package_version"
 
 run_installed_package_example() {
 local example_path="$1"
@@ -317,7 +321,9 @@ if (!dependency) {
   throw new Error("expected @logbrew/sdk in package tree");
 }
 
-if (dependency.version !== "0.1.0") {
+const expectedSdkVersion = process.env.LOGBREW_JS_PACKAGE_VERSION;
+
+if (dependency.version !== expectedSdkVersion) {
   throw new Error(`unexpected @logbrew/sdk version: ${dependency.version}`);
 }
 
@@ -395,7 +401,7 @@ function assertPackageManifest(packageJson, label) {
 if (packageJson.name !== "@logbrew/sdk") {
   throw new Error(`unexpected installed package name: ${packageJson.name}`);
 }
-if (packageJson.version !== "0.1.0") {
+if (packageJson.version !== expectedSdkVersion) {
   throw new Error(`unexpected installed package version: ${packageJson.version}`);
 }
 if (packageJson.main !== "./index.cjs") {
@@ -649,13 +655,13 @@ local output_file="$2"
 
 case "$package_manager" in
   npm)
-    grep -q '^@logbrew/sdk@0.1.0$' "$output_file"
+    grep -q "^@logbrew/sdk@${sdk_package_version}$" "$output_file"
     grep -q '^node_modules/@logbrew/sdk$' "$output_file"
     grep -q '@logbrew/sdk@"file:' "$output_file"
     grep -q 'from the root project$' "$output_file"
     ;;
   pnpm)
-    grep -q '^@logbrew/sdk@0.1.0$' "$output_file"
+    grep -q "^@logbrew/sdk@${sdk_package_version}$" "$output_file"
     grep -q '└── smoke-app@1.0.0 (dependencies)$' "$output_file"
     grep -q '^Found 1 version of @logbrew/sdk$' "$output_file"
     ;;
@@ -692,10 +698,13 @@ const sdk = dependencies["@logbrew/sdk"];
 if (!sdk) {
   throw new Error(`missing ${packageManager} package-list sdk entry`);
 }
-if (sdk.version !== "0.1.0") {
+const expectedSdkVersion = process.env.LOGBREW_JS_PACKAGE_VERSION;
+const expectedSdkTarball = process.env.LOGBREW_JS_PACKAGE_TGZ;
+
+if (sdk.version !== expectedSdkVersion) {
   throw new Error(`unexpected ${packageManager} sdk version: ${sdk.version}`);
 }
-if (typeof sdk.resolved !== "string" || !sdk.resolved.includes("logbrew-sdk-0.1.0.tgz")) {
+if (typeof sdk.resolved !== "string" || !sdk.resolved.includes(expectedSdkTarball)) {
   throw new Error(`unexpected ${packageManager} sdk resolved value: ${sdk.resolved}`);
 }
 
@@ -730,7 +739,7 @@ local output_file="$2"
 case "$package_manager" in
   npm)
     grep -q '^smoke-app@1\.0\.0 .*$' "$output_file"
-    grep -q '^├── @logbrew/sdk@0\.1\.0$' "$output_file"
+    grep -q "^├── @logbrew/sdk@${sdk_package_version}$" "$output_file"
     grep -q '^├── pino@10\.3\.1$' "$output_file"
     grep -q '^├── typescript@6\.0\.3$' "$output_file"
     grep -q '^└── winston@3\.19\.0$' "$output_file"
@@ -739,7 +748,7 @@ case "$package_manager" in
     grep -q '^Legend: production dependency, optional only, dev only$' "$output_file"
     grep -q '^smoke-app@1\.0\.0 .* (PRIVATE)$' "$output_file"
     grep -q '^│   dependencies:$' "$output_file"
-    grep -q '^├── @logbrew/sdk@0\.1\.0$' "$output_file"
+    grep -q "^├── @logbrew/sdk@${sdk_package_version}$" "$output_file"
     grep -q '^├── pino@10\.3\.1$' "$output_file"
     grep -q '^├── typescript@6\.0\.3$' "$output_file"
     grep -q '^└── winston@3\.19\.0$' "$output_file"
@@ -831,7 +840,7 @@ case "$package_manager" in
     grep -q '^├── pino@10\.3\.1$' "$output_file"
     grep -q '^├── typescript@6\.0\.3$' "$output_file"
     grep -q '^└── winston@3\.19\.0$' "$output_file"
-    if grep -q '@logbrew/sdk@0\.1\.0' "$output_file"; then
+    if grep -q "@logbrew/sdk@${sdk_package_version}" "$output_file"; then
       echo "unexpected npm plain package list still contains @logbrew/sdk after uninstall" >&2
       exit 1
     fi
@@ -844,7 +853,7 @@ case "$package_manager" in
     grep -q '^├── typescript@6\.0\.3$' "$output_file"
     grep -q '^└── winston@3\.19\.0$' "$output_file"
     grep -q '^3 packages$' "$output_file"
-    if grep -q '@logbrew/sdk@0\.1\.0' "$output_file"; then
+    if grep -q "@logbrew/sdk@${sdk_package_version}" "$output_file"; then
       echo "unexpected pnpm plain package list still contains @logbrew/sdk after removal" >&2
       exit 1
     fi
@@ -863,13 +872,13 @@ local output_file="$2"
 case "$package_manager" in
   npm)
     grep -q '^smoke-app@1\.0\.0 .*$' "$output_file"
-    grep -q '^└── @logbrew/sdk@0\.1\.0$' "$output_file"
+    grep -q "^└── @logbrew/sdk@${sdk_package_version}$" "$output_file"
     ;;
   pnpm)
     grep -q '^Legend: production dependency, optional only, dev only$' "$output_file"
     grep -q '^smoke-app@1\.0\.0 .* (PRIVATE)$' "$output_file"
     grep -q '^│   dependencies:$' "$output_file"
-    grep -q '^└── @logbrew/sdk@0\.1\.0$' "$output_file"
+    grep -q "^└── @logbrew/sdk@${sdk_package_version}$" "$output_file"
     grep -q '^1 package$' "$output_file"
     ;;
   *)
@@ -971,10 +980,13 @@ function validatePackMetadata(payload, label) {
   if (entry.name !== "@logbrew/sdk") {
     throw new Error(`unexpected ${label} name: ${entry.name}`);
   }
-  if (entry.version !== "0.1.0") {
+  const expectedSdkVersion = process.env.LOGBREW_JS_PACKAGE_VERSION;
+  const expectedSdkTarball = process.env.LOGBREW_JS_PACKAGE_TGZ;
+
+  if (entry.version !== expectedSdkVersion) {
     throw new Error(`unexpected ${label} version: ${entry.version}`);
   }
-  if (entry.filename !== "logbrew-sdk-0.1.0.tgz") {
+  if (entry.filename !== expectedSdkTarball) {
     throw new Error(`unexpected ${label} filename: ${entry.filename}`);
   }
   if (!Array.isArray(entry.files)) {
@@ -1043,7 +1055,9 @@ function assertPackageManifest(packageJson, label) {
 if (packageJson.name !== "@logbrew/sdk") {
   throw new Error(`unexpected packed package name: ${packageJson.name}`);
 }
-if (packageJson.version !== "0.1.0") {
+const expectedSdkVersion = process.env.LOGBREW_JS_PACKAGE_VERSION;
+
+if (packageJson.version !== expectedSdkVersion) {
   throw new Error(`unexpected packed package version: ${packageJson.version}`);
 }
 if (packageJson.main !== "./index.cjs") {
@@ -1311,7 +1325,10 @@ if (!manifestDeps || typeof manifestDeps["@logbrew/sdk"] !== "string") {
 if (!manifestDeps["@logbrew/sdk"].startsWith("file:")) {
   throw new Error(`unexpected npm manifest specifier: ${manifestDeps["@logbrew/sdk"]}`);
 }
-if (!manifestDeps["@logbrew/sdk"].endsWith("logbrew-sdk-0.1.0.tgz")) {
+const expectedSdkTarball = process.env.LOGBREW_JS_PACKAGE_TGZ;
+const expectedSdkVersion = process.env.LOGBREW_JS_PACKAGE_VERSION;
+
+if (!manifestDeps["@logbrew/sdk"].endsWith(expectedSdkTarball)) {
   throw new Error(`unexpected npm manifest tarball target: ${manifestDeps["@logbrew/sdk"]}`);
 }
 if (manifestDeps.typescript !== "^6.0.3") {
@@ -1335,7 +1352,7 @@ if (!rootDeps || typeof rootDeps["@logbrew/sdk"] !== "string") {
 if (!rootDeps["@logbrew/sdk"].startsWith("file:")) {
   throw new Error(`unexpected npm root specifier: ${rootDeps["@logbrew/sdk"]}`);
 }
-if (!rootDeps["@logbrew/sdk"].endsWith("logbrew-sdk-0.1.0.tgz")) {
+if (!rootDeps["@logbrew/sdk"].endsWith(expectedSdkTarball)) {
   throw new Error(`unexpected npm root tarball target: ${rootDeps["@logbrew/sdk"]}`);
 }
 
@@ -1343,7 +1360,7 @@ const pkg = lock.packages?.["node_modules/@logbrew/sdk"];
 if (!pkg) {
   throw new Error("missing npm lock package entry for @logbrew/sdk");
 }
-if (pkg.version !== "0.1.0") {
+if (pkg.version !== expectedSdkVersion) {
   throw new Error(`unexpected npm lock package version: ${pkg.version}`);
 }
 if (pkg.license !== "MIT") {
@@ -1352,7 +1369,7 @@ if (pkg.license !== "MIT") {
 if (typeof pkg.resolved !== "string" || !pkg.resolved.startsWith("file:")) {
   throw new Error(`unexpected npm lock resolved value: ${pkg.resolved}`);
 }
-if (!pkg.resolved.endsWith("logbrew-sdk-0.1.0.tgz")) {
+if (!pkg.resolved.endsWith(expectedSdkTarball)) {
   throw new Error(`unexpected npm lock resolved tarball: ${pkg.resolved}`);
 }
 if (typeof pkg.integrity !== "string" || !pkg.integrity.startsWith("sha512-")) {
@@ -1405,7 +1422,9 @@ if (!manifestDeps || typeof manifestDeps["@logbrew/sdk"] !== "string") {
 if (!manifestDeps["@logbrew/sdk"].startsWith("file:")) {
   throw new Error(`unexpected pnpm manifest specifier: ${manifestDeps["@logbrew/sdk"]}`);
 }
-if (!manifestDeps["@logbrew/sdk"].endsWith("logbrew-sdk-0.1.0.tgz")) {
+const expectedSdkTarball = process.env.LOGBREW_JS_PACKAGE_TGZ;
+
+if (!manifestDeps["@logbrew/sdk"].endsWith(expectedSdkTarball)) {
   throw new Error(`unexpected pnpm manifest tarball target: ${manifestDeps["@logbrew/sdk"]}`);
 }
 if (manifestDeps.typescript !== "^6.0.3") {
@@ -1430,7 +1449,7 @@ if (!lock.includes("specifier: file:")) {
 if (!lock.includes("version: file:")) {
   throw new Error("missing pnpm file version for @logbrew/sdk");
 }
-if (!lock.includes("logbrew-sdk-0.1.0.tgz")) {
+if (!lock.includes(expectedSdkTarball)) {
   throw new Error("missing pnpm tarball target for @logbrew/sdk");
 }
 if (!lock.includes("resolution: {integrity: sha512-")) {

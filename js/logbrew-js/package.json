@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Public LogBrew JavaScript SDK for building, validating, and flushing event batches.",
   "type": "module",
   "main": "./index.cjs",
