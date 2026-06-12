@@ -251,15 +251,21 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Read core Python package version
+      - name: Read Python package versions
         id: pypi-version
         shell: bash
         run: |
           set -Eeuo pipefail
-          version="$(
-            python -c 'import tomllib; print(tomllib.load(open("python/logbrew_py/pyproject.toml", "rb"))["project"]["version"])'
-          )"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          source scripts/python_package_version.sh
+          core_version="$(python_package_version python/logbrew_py/pyproject.toml)"
+          fastapi_version="$(python_package_version python/logbrew_fastapi/pyproject.toml)"
+          django_version="$(python_package_version python/logbrew_django/pyproject.toml)"
+          {
+            echo "version=$core_version"
+            echo "core_version=$core_version"
+            echo "fastapi_version=$fastapi_version"
+            echo "django_version=$django_version"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build Python distributions
         shell: bash
@@ -307,6 +313,8 @@ jobs:
           verify_args=(--target pypi)
           if [[ "${{ inputs.include_pypi_extras }}" == "true" ]]; then
             verify_args+=(--include-pypi-extras)
+            verify_args+=(--pypi-version "logbrew-fastapi=${{ steps.pypi-version.outputs.fastapi_version }}")
+            verify_args+=(--pypi-version "logbrew-django=${{ steps.pypi-version.outputs.django_version }}")
           fi
           verify_args+=(--version "${{ steps.pypi-version.outputs.version }}")
           python3 scripts/check_registry_publication.py "${verify_args[@]}"

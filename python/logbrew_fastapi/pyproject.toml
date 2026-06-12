@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logbrew-fastapi"
-version = "0.1.1"
+version = "0.1.2"
 description = "FastAPI integration for capturing LogBrew request spans and exceptions."
 readme = "README.md"
 license = "MIT"

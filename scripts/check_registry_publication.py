@@ -38,6 +38,7 @@ NPM_PACKAGES = (
     "@logbrew/react-native",
     "@logbrew/next",
 )
+NPM_VERSION_PACKAGES = NPM_PACKAGES + ("co.logbrew.unity",)
 PYPI_PACKAGES = ("logbrew-sdk",)
 PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-django")
 RUBYGEMS_PACKAGES = ("logbrew-sdk",)
@@ -378,14 +379,19 @@ def validate_go_module(version: str) -> list[str]:
 def validate(args: argparse.Namespace) -> list[str]:
     failures: list[str] = []
     for check in checks_for(args):
-        version = args.npm_versions.get(check.label, args.version)
+        version = args.package_versions.get(check.label, args.version)
         failures.extend(validate_check(check, expected_versions(version), args.timeout, args.retries, args.retry_delay))
     if "go" in args.target or ("all" in args.target and args.include_go):
         failures.extend(validate_go_module(args.version))
     return failures
 
 
-def parse_package_versions(raw_versions: list[str]) -> dict[str, str]:
+def parse_package_versions(
+    raw_versions: list[str],
+    *,
+    allowed_packages: tuple[str, ...] = NPM_VERSION_PACKAGES,
+    package_family: str = "npm",
+) -> dict[str, str]:
     versions: dict[str, str] = {}
     for raw_version in raw_versions:
         package_name, separator, version = raw_version.partition("=")
@@ -393,22 +399,33 @@ def parse_package_versions(raw_versions: list[str]) -> dict[str, str]:
         version = version.strip()
         if not separator or not package_name or not version:
             raise argparse.ArgumentTypeError(
-                f"expected npm package version in name=version form, got {raw_version!r}"
+                f"expected {package_family} package version in name=version form, got {raw_version!r}"
             )
-        if package_name not in NPM_PACKAGES and package_name != "co.logbrew.unity":
-            raise argparse.ArgumentTypeError(f"unknown npm package: {package_name}")
+        if package_name not in allowed_packages:
+            raise argparse.ArgumentTypeError(f"unknown {package_family} package: {package_name}")
         versions[package_name] = version
     return versions
 
 
+def format_overrides(label: str, versions: dict[str, str]) -> str | None:
+    if not versions:
+        return None
+    formatted = ", ".join(f"{package_name}@{version}" for package_name, version in sorted(versions.items()))
+    return f"{label} overrides: {formatted}"
+
+
 def success_summary(args: argparse.Namespace) -> str:
     targets = ", ".join(args.target)
-    if args.npm_versions:
-        npm_versions = ", ".join(
-            f"{package_name}@{version}" for package_name, version in sorted(args.npm_versions.items())
+    overrides = [
+        formatted
+        for formatted in (
+            format_overrides("npm", args.npm_versions),
+            format_overrides("pypi", args.pypi_versions),
         )
-        return f"public registry versions ok for {targets} at {args.version}; npm overrides: {npm_versions}"
-    return f"public registry versions ok for {targets} at {args.version}"
+        if formatted is not None
+    ]
+    suffix = f"; {'; '.join(overrides)}" if overrides else ""
+    return f"public registry versions ok for {targets} at {args.version}{suffix}"
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -436,6 +453,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="PACKAGE=VERSION",
         help="Expected version for one npm package. May be passed more than once.",
     )
+    parser.add_argument(
+        "--pypi-version",
+        action="append",
+        default=[],
+        metavar="PACKAGE=VERSION",
+        help="Expected version for one PyPI package. May be passed more than once.",
+    )
     parser.add_argument("--include-pypi-extras", action="store_true")
     parser.add_argument("--include-crates", action="store_true")
     parser.add_argument("--include-packagist", action="store_true")
@@ -450,10 +474,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         args.target = ["all"]
     if args.npm_package and "npm" not in args.target and "all" not in args.target:
         parser.error("--npm-package requires --target npm or --target all")
+    if args.pypi_version and "pypi" not in args.target and "all" not in args.target:
+        parser.error("--pypi-version requires --target pypi or --target all")
     try:
         args.npm_versions = parse_package_versions(args.npm_version)
+        args.pypi_versions = parse_package_versions(
+            args.pypi_version,
+            allowed_packages=PYPI_PACKAGES + PYPI_EXTRA_PACKAGES,
+            package_family="PyPI",
+        )
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
+    args.package_versions = {**args.npm_versions, **args.pypi_versions}
     return args
 
 

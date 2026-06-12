@@ -129,17 +129,60 @@ class RegistryPublicationTests(unittest.TestCase):
             {"@logbrew/nestjs": "0.1.1"},
         )
 
+    def test_parse_pypi_package_versions(self) -> None:
+        self.assertEqual(
+            check_registry_publication.parse_package_versions(
+                ["logbrew-fastapi=0.1.2"],
+                allowed_packages=check_registry_publication.PYPI_PACKAGES
+                + check_registry_publication.PYPI_EXTRA_PACKAGES,
+                package_family="PyPI",
+            ),
+            {"logbrew-fastapi": "0.1.2"},
+        )
+
     def test_success_summary_reports_npm_version_overrides(self) -> None:
         args = argparse.Namespace(
             target=["npm"],
             version="0.1.0",
             npm_versions={"@logbrew/nestjs": "0.1.1"},
+            pypi_versions={},
         )
 
         summary = check_registry_publication.success_summary(args)
 
         self.assertIn("public registry versions ok for npm at 0.1.0", summary)
         self.assertIn("@logbrew/nestjs@0.1.1", summary)
+
+    def test_success_summary_reports_pypi_version_overrides(self) -> None:
+        args = argparse.Namespace(
+            target=["pypi"],
+            version="0.1.1",
+            npm_versions={},
+            pypi_versions={"logbrew-fastapi": "0.1.2", "logbrew-django": "0.1.2"},
+        )
+
+        summary = check_registry_publication.success_summary(args)
+
+        self.assertIn("public registry versions ok for pypi at 0.1.1", summary)
+        self.assertIn("logbrew-fastapi@0.1.2", summary)
+        self.assertIn("logbrew-django@0.1.2", summary)
+
+    def test_parse_args_combines_npm_and_pypi_version_overrides(self) -> None:
+        args = check_registry_publication.parse_args(
+            [
+                "--target",
+                "all",
+                "--npm-version",
+                "@logbrew/nestjs=0.1.1",
+                "--pypi-version",
+                "logbrew-fastapi=0.1.2",
+            ]
+        )
+
+        self.assertEqual(
+            args.package_versions,
+            {"@logbrew/nestjs": "0.1.1", "logbrew-fastapi": "0.1.2"},
+        )
 
     def test_validate_check_passes_when_expected_version_is_found(self) -> None:
         check = check_registry_publication.RegistryCheck(
