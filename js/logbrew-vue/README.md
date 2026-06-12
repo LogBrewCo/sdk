@@ -1,5 +1,9 @@
 # @logbrew/vue
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+</p>
+
 Vue plugin and composable helpers for the public LogBrew JavaScript SDK.
 
 This package is intentionally thin. It adds Vue 3 `app.use(...)`, app-level provide/inject, a `useLogBrew()` composable, `$logbrew`, view helper events, and Vue error-handler capture while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.

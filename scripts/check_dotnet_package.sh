@@ -60,6 +60,7 @@ with zipfile.ZipFile(nupkg) as archive:
     required = {
         "lib/netstandard2.0/LogBrew.dll",
         "README.md",
+        "logbrew-logo-transparent-128.png",
         "examples/ReadmeExample.cs",
         "examples/RealUserSmoke.cs",
         "examples/Makefile",
@@ -71,6 +72,8 @@ with zipfile.ZipFile(nupkg) as archive:
     nuspec = archive.read("LogBrew.nuspec").decode()
 if 'dependency id="Microsoft.Extensions.Logging"' not in nuspec:
     raise SystemExit("missing Microsoft.Extensions.Logging dependency metadata")
+if "<icon>logbrew-logo-transparent-128.png</icon>" not in nuspec:
+    raise SystemExit("missing NuGet package icon metadata")
 for needle in (
     "dotnet add package LogBrew",
     "LOGBREW_API_KEY",

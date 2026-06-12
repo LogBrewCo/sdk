@@ -1,5 +1,9 @@
 # LogBrew Ruby SDK
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+</p>
+
 Public Ruby SDK for building, validating, previewing, and flushing LogBrew event batches, with standard-library `Net::HTTP` delivery, opt-in standard-library `Logger` support, Rack-compatible middleware, and a Rails error subscriber for Rails apps.
 
 The package uses only Ruby standard-library features at runtime.

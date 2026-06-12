@@ -1,5 +1,9 @@
 # LogBrew C++ SDK
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+</p>
+
 Public C++17 SDK for building, validating, previewing, and sending LogBrew event batches from native applications.
 
 The SDK is dependency-free and ships as source plus header. Add `include/logbrew.hpp` and `src/logbrew.cpp` to your application build:

@@ -1,5 +1,9 @@
 # @logbrew/browser
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+</p>
+
 Browser helpers for the public LogBrew JavaScript SDK.
 
 This package captures page views, synchronous browser errors, unhandled Promise rejections, product actions, and app-owned network milestones while keeping validation, buffering, retry, flush, and shutdown behavior in `@logbrew/sdk`.

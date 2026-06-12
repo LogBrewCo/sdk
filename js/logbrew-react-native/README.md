@@ -1,5 +1,9 @@
 # @logbrew/react-native
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+</p>
+
 React Native helpers for the public LogBrew JavaScript SDK.
 
 This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, and explicit W3C trace propagation for mobile fetch calls.

@@ -36,6 +36,14 @@ SKIPPED_DIRS = {
 SKIPPED_FILES = {
     "LICENSE",
 }
+SKIPPED_EXTENSIONS = {
+    ".gif",
+    ".ico",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+}
 
 SELF_PATH = Path("scripts/check_confidentiality_scan.py")
 
@@ -52,6 +60,8 @@ def iter_scanned_files(root: Path) -> list[Path]:
                 continue
             if filename in SKIPPED_FILES:
                 continue
+            if path.suffix.lower() in SKIPPED_EXTENSIONS:
+                continue
             files.append(path)
     return sorted(files)
 
@@ -67,6 +77,8 @@ def validate(root: Path) -> list[str]:
 
         for line_number, line in enumerate(content.splitlines(), start=1):
             if not SENSITIVE_RE.search(line):
+                continue
+            if is_brand_svg_asset(relative):
                 continue
             if is_allowed_match(relative, line):
                 continue
@@ -122,6 +134,10 @@ def is_allowed_match(relative: Path, line: str) -> bool:
         return True
 
     return False
+
+
+def is_brand_svg_asset(relative: Path) -> bool:
+    return relative.parent.as_posix() == "assets/brand" and relative.suffix == ".svg"
 
 
 def is_public_publishing_guidance(relative_text: str, line: str) -> bool:

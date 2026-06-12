@@ -1,5 +1,9 @@
 # LogBrew Unity SDK
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+</p>
+
 Unity package for building, validating, previewing, and flushing LogBrew event batches from games and realtime apps.
 
 The package is source-only, targets Unity `2021.3` or newer through UPM, and has no runtime package dependencies.

@@ -48,6 +48,19 @@ class ConfidentialityScanTests(unittest.TestCase):
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
+    def test_allows_generated_brand_svg_image_carriers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            brand_dir = root / "assets" / "brand"
+            brand_dir.mkdir(parents=True)
+            sensitive_line = "embedded generated image carrier to" + "ken-shaped base64 text\n"
+            (brand_dir / "logbrew-logo-espresso-bg-512.svg").write_text(
+                sensitive_line,
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
     def test_reports_unexpected_sensitive_terms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

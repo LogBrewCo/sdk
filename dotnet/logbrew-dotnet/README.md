@@ -1,5 +1,9 @@
 # LogBrew .NET SDK
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+</p>
+
 Public .NET SDK for building, validating, previewing, and flushing LogBrew event batches, with `System.Net.Http` delivery and opt-in `Microsoft.Extensions.Logging` provider support.
 
 The library targets `netstandard2.0`, uses `System.Net.Http` for built-in HTTP delivery, and depends on `Microsoft.Extensions.Logging` for the standard .NET logging provider surface.

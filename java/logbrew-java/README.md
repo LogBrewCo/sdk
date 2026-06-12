@@ -1,5 +1,9 @@
 # LogBrew Java SDK
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+</p>
+
 Public Java SDK for building, validating, previewing, and flushing LogBrew event batches.
 
 The core client, `HttpTransport`, and `java.util.logging` handler use only the JDK at runtime. The optional Logback appender integrates with app-owned SLF4J/Logback setups when those libraries are already present.

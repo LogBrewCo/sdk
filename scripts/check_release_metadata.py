@@ -19,6 +19,7 @@ REPO_URL = "https://github.com/LogBrewCo/sdk"
 NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"
 MIT_LICENSE_URL = "https://opensource.org/license/mit"
 PUBLIC_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
+BRAND_LOGO_URL = "https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png"
 
 JS_PACKAGES = {
     "js/logbrew-angular": "@logbrew/angular",
@@ -516,6 +517,7 @@ def validate_maven_pom(
 def validate_dotnet(root: Path, failures: list[str]) -> None:
     project_path = require_path(root, "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj", failures)
     require_path(root, "dotnet/logbrew-dotnet/README.md", failures)
+    require_path(root, "assets/brand/logbrew-logo-transparent-128.png", failures)
     if not project_path.exists():
         return
     project = parse_xml(project_path, failures)
@@ -534,6 +536,7 @@ def validate_dotnet(root: Path, failures: list[str]) -> None:
         "PackageProjectUrl": REPO_URL,
         "RepositoryUrl": REPO_URL,
         "PackageReadmeFile": "README.md",
+        "PackageIcon": "logbrew-logo-transparent-128.png",
     }
     for field, value in expected.items():
         require_equal(failures, location, field, child_text(properties, field), value)
@@ -591,7 +594,7 @@ def validate_unity_openupm(manifest: dict[str, Any], openupm_path: Path, failure
         "gitTagPrefix": "co.logbrew.unity/",
         "gitTagIgnore": "",
         "minVersion": manifest.get("version"),
-        "image": "",
+        "image": BRAND_LOGO_URL,
         "readme": "main:unity/logbrew-unity/README.md",
         "readme_zhCN": "",
         "displayName_zhCN": "",

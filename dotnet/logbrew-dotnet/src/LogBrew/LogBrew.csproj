@@ -17,11 +17,13 @@
     <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
     <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logbrew-logo-transparent-128.png</PackageIcon>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="\" />
+    <None Include="../../../../assets/brand/logbrew-logo-transparent-128.png" Pack="true" PackagePath="\" />
     <None Include="../../examples/ReadmeExample.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/RealUserSmoke.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/Makefile" Pack="true" PackagePath="examples/" />

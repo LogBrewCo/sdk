@@ -1,5 +1,9 @@
 # @logbrew/react
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+</p>
+
 React helpers for the public LogBrew JavaScript SDK.
 
 ## Install

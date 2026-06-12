@@ -1,5 +1,9 @@
 # @logbrew/next
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+</p>
+
 Next.js App Router helpers for the public LogBrew JavaScript SDK.
 
 This package is intentionally thin. It creates server-side LogBrew clients, wraps App Router Route Handlers, captures successful route requests and thrown route errors, and still keeps manual event creation available through the route helpers.
