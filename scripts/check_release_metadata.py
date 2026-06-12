@@ -41,14 +41,16 @@ PYTHON_PACKAGES = {
     "python/logbrew_django": {
         "name": "logbrew-django",
         "description": "Django integration",
-        "dependencies": {"Django>=5.2", "logbrew-sdk==0.1.0"},
+        "dependencies": {"Django>=5.2", "logbrew-sdk>=0.1.1,<0.2.0"},
         "package": "logbrew_django",
+        "version": "0.1.1",
     },
     "python/logbrew_fastapi": {
         "name": "logbrew-fastapi",
         "description": "FastAPI integration",
-        "dependencies": {"fastapi>=0.115", "httpx2>=2.3", "logbrew-sdk==0.1.0"},
+        "dependencies": {"fastapi>=0.115", "httpx2>=2.3", "logbrew-sdk>=0.1.1,<0.2.0"},
         "package": "logbrew_fastapi",
+        "version": "0.1.1",
     },
     "python/logbrew_py": {
         "name": "logbrew-sdk",

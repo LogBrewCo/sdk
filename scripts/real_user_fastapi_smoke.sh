@@ -2,9 +2,14 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/python_package_version.sh"
+
 core_dir="$repo_root/python/logbrew_py"
 package_dir="$repo_root/python/logbrew_fastapi"
 tmp_dir="$(mktemp -d)"
+core_package_version="$(python_package_version "$core_dir/pyproject.toml")"
+fastapi_package_version="$(python_package_version "$package_dir/pyproject.toml")"
+export LOGBREW_FASTAPI_PACKAGE_VERSION="$fastapi_package_version"
 
 remove_tmp_dir() {
   rm -rf "$tmp_dir"
@@ -18,9 +23,9 @@ python3 -m venv "$tmp_dir/build-venv"
 "$tmp_dir/build-venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/core-dist" "$core_dir" >/dev/null
 "$tmp_dir/build-venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/fastapi-dist" "$package_dir" >/dev/null
 
-core_wheel="$tmp_dir/core-dist/logbrew_sdk-0.1.0-py3-none-any.whl"
-fastapi_wheel="$tmp_dir/fastapi-dist/logbrew_fastapi-0.1.0-py3-none-any.whl"
-fastapi_sdist="$tmp_dir/fastapi-dist/logbrew_fastapi-0.1.0.tar.gz"
+core_wheel="$tmp_dir/core-dist/logbrew_sdk-${core_package_version}-py3-none-any.whl"
+fastapi_wheel="$tmp_dir/fastapi-dist/logbrew_fastapi-${fastapi_package_version}-py3-none-any.whl"
+fastapi_sdist="$tmp_dir/fastapi-dist/logbrew_fastapi-${fastapi_package_version}.tar.gz"
 test -f "$core_wheel"
 test -f "$fastapi_wheel"
 test -f "$fastapi_sdist"
@@ -31,11 +36,12 @@ python3 -m venv "$tmp_dir/app"
 "$tmp_dir/app/bin/python" -m pip check >/dev/null
 "$tmp_dir/app/bin/python" -m pip show logbrew-fastapi > "$tmp_dir/pip-show-fastapi.txt"
 grep -q '^Name: logbrew-fastapi$' "$tmp_dir/pip-show-fastapi.txt"
-grep -q '^Version: 0.1.0$' "$tmp_dir/pip-show-fastapi.txt"
+grep -q "^Version: ${fastapi_package_version}$" "$tmp_dir/pip-show-fastapi.txt"
 grep -q '^Summary: FastAPI integration for capturing LogBrew request spans and exceptions\.$' "$tmp_dir/pip-show-fastapi.txt"
 "$tmp_dir/app/bin/python" -m pip list --format=json > "$tmp_dir/pip-list.json"
 python3 - "$tmp_dir/pip-list.json" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -43,7 +49,8 @@ packages = {package["name"].lower(): package["version"] for package in json.load
 for name in ("fastapi", "logbrew-fastapi", "logbrew-sdk", "starlette"):
     if name not in packages:
         raise SystemExit(f"missing installed package: {name}")
-if packages["logbrew-fastapi"] != "0.1.0":
+expected_fastapi_version = os.environ["LOGBREW_FASTAPI_PACKAGE_VERSION"]
+if packages["logbrew-fastapi"] != expected_fastapi_version:
     raise SystemExit(f"unexpected logbrew-fastapi version: {packages['logbrew-fastapi']}")
 PY
 

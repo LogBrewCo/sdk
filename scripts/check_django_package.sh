@@ -2,9 +2,14 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/python_package_version.sh"
+
 package_dir="$repo_root/python/logbrew_django"
 core_dir="$repo_root/python/logbrew_py"
 tmp_dir="$(mktemp -d)"
+core_package_version="$(python_package_version "$core_dir/pyproject.toml")"
+django_package_version="$(python_package_version "$package_dir/pyproject.toml")"
+export LOGBREW_DJANGO_PACKAGE_VERSION="$django_package_version"
 
 remove_tmp_dir() {
   rm -rf "$tmp_dir"
@@ -19,9 +24,9 @@ python3 -m venv "$tmp_dir/venv"
 "$tmp_dir/venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/core-dist" "$core_dir" >/dev/null
 "$tmp_dir/venv/bin/python" -m build --wheel --sdist --outdir "$tmp_dir/django-dist" "$package_dir" >/dev/null
 
-core_wheel="$tmp_dir/core-dist/logbrew_sdk-0.1.0-py3-none-any.whl"
-django_wheel="$tmp_dir/django-dist/logbrew_django-0.1.0-py3-none-any.whl"
-django_sdist="$tmp_dir/django-dist/logbrew_django-0.1.0.tar.gz"
+core_wheel="$tmp_dir/core-dist/logbrew_sdk-${core_package_version}-py3-none-any.whl"
+django_wheel="$tmp_dir/django-dist/logbrew_django-${django_package_version}-py3-none-any.whl"
+django_sdist="$tmp_dir/django-dist/logbrew_django-${django_package_version}.tar.gz"
 test -f "$core_wheel"
 test -f "$django_wheel"
 test -f "$django_sdist"
@@ -29,13 +34,13 @@ test -f "$django_sdist"
 "$tmp_dir/venv/bin/python" -m twine check "$django_wheel" "$django_sdist" >/dev/null
 
 tar -tf "$django_sdist" > "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_django-0.1.0/README.md$' "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_django-0.1.0/pyproject.toml$' "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_django-0.1.0/src/logbrew_django/__init__.py$' "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_django-0.1.0/src/logbrew_django/py.typed$' "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_django-0.1.0/src/logbrew_django/examples/readme_example.py$' "$tmp_dir/sdist-contents.txt"
-grep -q '^logbrew_django-0.1.0/src/logbrew_django/examples/real_user_smoke.py$' "$tmp_dir/sdist-contents.txt"
-tar -xOf "$django_sdist" logbrew_django-0.1.0/README.md > "$tmp_dir/sdist-README.md"
+grep -q "^logbrew_django-${django_package_version}/README.md$" "$tmp_dir/sdist-contents.txt"
+grep -q "^logbrew_django-${django_package_version}/pyproject.toml$" "$tmp_dir/sdist-contents.txt"
+grep -q "^logbrew_django-${django_package_version}/src/logbrew_django/__init__.py$" "$tmp_dir/sdist-contents.txt"
+grep -q "^logbrew_django-${django_package_version}/src/logbrew_django/py.typed$" "$tmp_dir/sdist-contents.txt"
+grep -q "^logbrew_django-${django_package_version}/src/logbrew_django/examples/readme_example.py$" "$tmp_dir/sdist-contents.txt"
+grep -q "^logbrew_django-${django_package_version}/src/logbrew_django/examples/real_user_smoke.py$" "$tmp_dir/sdist-contents.txt"
+tar -xOf "$django_sdist" "logbrew_django-${django_package_version}/README.md" > "$tmp_dir/sdist-README.md"
 grep -q 'traceparent' "$tmp_dir/sdist-README.md"
 grep -q 'span_id_factory' "$tmp_dir/sdist-README.md"
 
