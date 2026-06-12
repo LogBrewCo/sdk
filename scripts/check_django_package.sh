@@ -43,6 +43,7 @@ grep -q "^logbrew_django-${django_package_version}/src/logbrew_django/examples/r
 tar -xOf "$django_sdist" "logbrew_django-${django_package_version}/README.md" > "$tmp_dir/sdist-README.md"
 grep -q 'traceparent' "$tmp_dir/sdist-README.md"
 grep -q 'span_id_factory' "$tmp_dir/sdist-README.md"
+grep -q 'capture_request_metrics' "$tmp_dir/sdist-README.md"
 
 "$tmp_dir/venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check "$core_wheel" "$django_wheel" >/dev/null
 "$tmp_dir/venv/bin/python" -m pip check >/dev/null

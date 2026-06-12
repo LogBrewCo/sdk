@@ -16,12 +16,17 @@ def health(_request: HttpRequest) -> HttpResponse:
     return HttpResponse('{"ok":true}', content_type="application/json")
 
 
+def order_detail(_request: HttpRequest, order_id: int) -> HttpResponse:
+    return HttpResponse(f'{{"orderId":{order_id}}}', content_type="application/json")
+
+
 def boom(_request: HttpRequest) -> HttpResponse:
     raise RuntimeError("broken handler")
 
 
 urlpatterns = [
     path("health/", health, name="health"),
+    path("orders/<int:order_id>/", order_detail, name="order-detail"),
     path("boom/", boom, name="boom"),
 ]
 
@@ -73,6 +78,37 @@ class DjangoIntegrationTests(unittest.TestCase):
         self.assertEqual(attributes["status"], "ok")
         self.assertEqual(attributes["metadata"]["status_code"], 200)
         self.assertEqual(attributes["metadata"]["framework"], "django")
+
+    def test_request_metrics_can_be_captured_without_request_spans(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        configure_logbrew(
+            client=sdk_client,
+            transport=transport,
+            capture_successful_requests=False,
+            capture_request_metrics=True,
+        )
+
+        response = Client().get("/orders/42/?debug=true")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(sdk_client.pending_events(), 0)
+        self.assertEqual(len(transport.sent_bodies), 1)
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["metric"])
+        metric = payload["events"][0]["attributes"]
+        self.assertEqual(metric["name"], "http.server.duration")
+        self.assertEqual(metric["kind"], "histogram")
+        self.assertGreaterEqual(metric["value"], 0)
+        self.assertEqual(metric["unit"], "ms")
+        self.assertEqual(metric["temporality"], "delta")
+        metadata = metric["metadata"]
+        self.assertEqual(metadata["framework"], "django")
+        self.assertEqual(metadata["method"], "GET")
+        self.assertEqual(metadata["routeTemplate"], "/orders/<int:order_id>/")
+        self.assertEqual(metadata["statusCode"], 200)
+        self.assertEqual(metadata["statusCodeClass"], "2xx")
+        self.assertNotIn("debug", json.dumps(metadata))
 
     def test_valid_traceparent_continues_request_span(self) -> None:
         sdk_client = make_client()

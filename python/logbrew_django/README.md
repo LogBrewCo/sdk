@@ -42,6 +42,18 @@ configure_logbrew(
 
 When an incoming request has a valid W3C `traceparent` header, request capture continues that trace by using the incoming `traceId` and parent span id while creating a fresh child span id. Missing or malformed `traceparent` headers keep the existing synthetic request span behavior so bad client headers do not break the project. Automatic metadata uses the request path without query text.
 
+Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests:
+
+```python
+configure_logbrew(
+    client=client,
+    transport=transport,
+    capture_request_metrics=True,
+)
+```
+
+The metric includes primitive, low-cardinality metadata: `framework`, `method`, `routeTemplate`, `statusCode`, and `statusCodeClass`. Query strings and URL hashes are omitted. Set `capture_successful_requests=False` with `capture_request_metrics=True` when you only want duration metrics and not successful request spans. Avoid user IDs, request payloads, headers, or free-form text in custom metric metadata.
+
 By default, transport failures do not break the Django response path. Set `raise_flush_errors=True` only when your project wants delivery failures to surface as request errors.
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples.

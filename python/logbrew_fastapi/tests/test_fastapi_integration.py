@@ -41,6 +41,44 @@ class FastAPIIntegrationTests(unittest.TestCase):
         self.assertEqual(attributes["status"], "ok")
         self.assertEqual(attributes["metadata"]["status_code"], 200)
 
+    def test_request_metrics_can_be_captured_without_request_spans(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        app = FastAPI()
+        add_logbrew_middleware(
+            app,
+            client=sdk_client,
+            transport=transport,
+            capture_successful_requests=False,
+            capture_request_metrics=True,
+        )
+
+        @app.get("/orders/{order_id}")
+        def order_detail(order_id: int) -> dict[str, int]:
+            return {"orderId": order_id}
+
+        with TestClient(app) as http:
+            response = http.get("/orders/42?debug=true#receipt")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(sdk_client.pending_events(), 0)
+        self.assertEqual(len(transport.sent_bodies), 1)
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["metric"])
+        metric = payload["events"][0]["attributes"]
+        self.assertEqual(metric["name"], "http.server.duration")
+        self.assertEqual(metric["kind"], "histogram")
+        self.assertGreaterEqual(metric["value"], 0)
+        self.assertEqual(metric["unit"], "ms")
+        self.assertEqual(metric["temporality"], "delta")
+        metadata = metric["metadata"]
+        self.assertEqual(metadata["framework"], "fastapi")
+        self.assertEqual(metadata["method"], "GET")
+        self.assertEqual(metadata["routeTemplate"], "/orders/{order_id}")
+        self.assertEqual(metadata["statusCode"], 200)
+        self.assertEqual(metadata["statusCodeClass"], "2xx")
+        self.assertNotIn("debug", json.dumps(metadata))
+
     def test_valid_traceparent_continues_request_span(self) -> None:
         sdk_client = make_client()
         transport = RecordingTransport.always_accept()

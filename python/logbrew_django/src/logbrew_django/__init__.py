@@ -14,6 +14,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse
 from logbrew_sdk import (
     LogBrewClient,
+    MetricAttributes,
     RecordingTransport,
     SdkError,
     SpanAttributes,
@@ -30,10 +31,12 @@ class LogBrewDjangoConfig:
     client: LogBrewClient
     transport: RecordingTransport | None = None
     capture_successful_requests: bool = True
+    capture_request_metrics: bool = False
     capture_exceptions: bool = True
     flush_on_response: bool = True
     raise_flush_errors: bool = False
     service_name: str = "django"
+    request_metric_name: str = "http.server.duration"
     span_id_factory: Callable[[], str] | None = None
 
 
@@ -45,10 +48,12 @@ def configure_logbrew(
     client: LogBrewClient,
     transport: RecordingTransport | None = None,
     capture_successful_requests: bool = True,
+    capture_request_metrics: bool = False,
     capture_exceptions: bool = True,
     flush_on_response: bool = True,
     raise_flush_errors: bool = False,
     service_name: str = "django",
+    request_metric_name: str = "http.server.duration",
     span_id_factory: Callable[[], str] | None = None,
 ) -> LogBrewDjangoConfig:
     """Configure LogBrew Django middleware from application startup code."""
@@ -57,10 +62,12 @@ def configure_logbrew(
         client=client,
         transport=transport,
         capture_successful_requests=capture_successful_requests,
+        capture_request_metrics=capture_request_metrics,
         capture_exceptions=capture_exceptions,
         flush_on_response=flush_on_response,
         raise_flush_errors=raise_flush_errors,
         service_name=service_name,
+        request_metric_name=request_metric_name,
         span_id_factory=span_id_factory,
     )
     _configured_state["config"] = config
@@ -92,10 +99,12 @@ def get_logbrew_config() -> LogBrewDjangoConfig:
         client=client,
         transport=transport,
         capture_successful_requests=bool(getattr(settings, "LOGBREW_CAPTURE_SUCCESSFUL_REQUESTS", True)),
+        capture_request_metrics=bool(getattr(settings, "LOGBREW_CAPTURE_REQUEST_METRICS", False)),
         capture_exceptions=bool(getattr(settings, "LOGBREW_CAPTURE_EXCEPTIONS", True)),
         flush_on_response=bool(getattr(settings, "LOGBREW_FLUSH_ON_RESPONSE", True)),
         raise_flush_errors=bool(getattr(settings, "LOGBREW_RAISE_FLUSH_ERRORS", False)),
         service_name=str(getattr(settings, "LOGBREW_SERVICE_NAME", "django")),
+        request_metric_name=str(getattr(settings, "LOGBREW_REQUEST_METRIC_NAME", "http.server.duration")),
         span_id_factory=span_id_factory,
     )
 
@@ -137,6 +146,84 @@ def request_metadata(
     if duration_ms is not None:
         metadata["duration_ms"] = round(duration_ms, 3)
     return metadata
+
+
+def request_route_template(request: HttpRequest) -> str:
+    """Return a low-cardinality Django route template without query strings."""
+
+    resolver_match = getattr(request, "resolver_match", None)
+    route = getattr(resolver_match, "route", None)
+    template = route if isinstance(route, str) and route else request.path
+    return route_template_only(template)
+
+
+def route_template_only(value: str) -> str:
+    """Strip query/hash text from a route template and normalize Django route strings."""
+
+    route_template = value.split("?", 1)[0].split("#", 1)[0].strip()
+    if not route_template:
+        return "/"
+    return route_template if route_template.startswith("/") else f"/{route_template}"
+
+
+def status_code_class(status_code: int) -> str:
+    """Return the coarse HTTP status code class used by request metrics."""
+
+    return f"{status_code // 100}xx" if 100 <= status_code <= 599 else "unknown"
+
+
+def create_request_metric_attributes(
+    request: HttpRequest,
+    *,
+    status_code: int,
+    duration_ms: float,
+    metric_name: str = "http.server.duration",
+) -> MetricAttributes:
+    """Create privacy-safe request duration metric attributes for a completed Django request."""
+
+    duration_value = float(duration_ms)
+    if duration_value < 0:
+        duration_value = 0.0
+    return {
+        "name": metric_name,
+        "kind": "histogram",
+        "value": duration_value,
+        "unit": "ms",
+        "temporality": "delta",
+        "metadata": {
+            "framework": "django",
+            "method": request.method,
+            "routeTemplate": request_route_template(request),
+            "statusCode": status_code,
+            "statusCodeClass": status_code_class(status_code),
+        },
+    }
+
+
+def capture_request_metric(
+    client: LogBrewClient,
+    request: HttpRequest,
+    *,
+    status_code: int,
+    duration_ms: float,
+    event_id: str | None = None,
+    timestamp: str | None = None,
+    metric_name: str = "http.server.duration",
+) -> str:
+    """Capture a Django request duration metric and return its event id."""
+
+    metric_event_id = event_id or f"evt_django_metric_{uuid.uuid4().hex}"
+    client.metric(
+        metric_event_id,
+        timestamp or utc_timestamp(),
+        create_request_metric_attributes(
+            request,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            metric_name=metric_name,
+        ),
+    )
+    return metric_event_id
 
 
 def capture_request_span(
@@ -223,7 +310,10 @@ class LogBrewDjangoMiddleware:
             response = self.get_response(request)
         except Exception as exc:
             duration_ms = (time.perf_counter() - start) * 1000
-            if config.capture_exceptions and request.META.get("logbrew.exception_captured") is not True:
+            should_capture_exception = (
+                config.capture_exceptions and request.META.get("logbrew.exception_captured") is not True
+            )
+            if should_capture_exception:
                 capture_exception(config.client, request, exc)
                 capture_request_span(
                     config.client,
@@ -232,11 +322,21 @@ class LogBrewDjangoMiddleware:
                     duration_ms=duration_ms,
                     span_id_factory=config.span_id_factory,
                 )
+            if config.capture_request_metrics:
+                capture_request_metric(
+                    config.client,
+                    request,
+                    status_code=500,
+                    duration_ms=duration_ms,
+                    metric_name=config.request_metric_name,
+                )
+            if should_capture_exception or config.capture_request_metrics:
                 self._flush_if_configured(config)
             raise
 
         duration_ms = (time.perf_counter() - start) * 1000
-        if config.capture_successful_requests or response.status_code >= 500:
+        should_capture_request_span = config.capture_successful_requests or response.status_code >= 500
+        if should_capture_request_span:
             capture_request_span(
                 config.client,
                 request,
@@ -244,6 +344,15 @@ class LogBrewDjangoMiddleware:
                 duration_ms=duration_ms,
                 span_id_factory=config.span_id_factory,
             )
+        if config.capture_request_metrics:
+            capture_request_metric(
+                config.client,
+                request,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+                metric_name=config.request_metric_name,
+            )
+        if should_capture_request_span or config.capture_request_metrics:
             self._flush_if_configured(config)
         return response
 
@@ -289,10 +398,13 @@ __all__ = [
     "LogBrewDjangoConfig",
     "LogBrewDjangoMiddleware",
     "capture_exception",
+    "capture_request_metric",
     "capture_request_span",
     "configure_logbrew",
+    "create_request_metric_attributes",
     "get_logbrew_config",
     "request_metadata",
     "request_name",
+    "request_route_template",
     "utc_timestamp",
 ]
