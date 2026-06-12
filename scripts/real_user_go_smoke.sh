@@ -89,6 +89,9 @@ with zipfile.ZipFile(zip_path) as archive:
     readme_example_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/readme_example/main.go"
     if readme_example_path not in names:
         raise SystemExit("missing examples/readme_example/main.go in proxy module zip")
+    agent_timeline_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/agent_timeline/main.go"
+    if agent_timeline_path not in names:
+        raise SystemExit("missing examples/agent_timeline/main.go in proxy module zip")
     examples_makefile_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/Makefile"
     if examples_makefile_path not in names:
         raise SystemExit("missing examples/Makefile in proxy module zip")
@@ -106,10 +109,13 @@ for needle in (
     "ParseTraceparent",
     "CreateTraceparent",
     "SpanAttributesFromTraceparent",
+    "CreateProductActionAttributes",
+    "CreateNetworkMilestoneAttributes",
     "HTTPTransport",
     "NewHTTPTransport",
     "MetricAttributes",
     "client.Metric",
+    "examples/agent_timeline",
     "copyable snippets",
     "your own Go service",
 ):
@@ -136,14 +142,17 @@ PY
 module_dir="$module_src_root/github.com/LogBrewCo/sdk/go/logbrew@v0.1.0"
 test -f "$module_dir/go.mod"
 test -f "$module_dir/examples/Makefile"
+test -f "$module_dir/examples/agent_timeline/main.go"
 test -f "$module_dir/examples/readme_example/main.go"
 test -f "$module_dir/examples/real_user_smoke/main.go"
 test -f "$module_dir/examples/real_user_smoke/Makefile"
-grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke$' "$module_dir/examples/Makefile"
+grep -q '^\.PHONY: help run run-agent-timeline run-readme-example run-real-user-smoke$' "$module_dir/examples/Makefile"
 grep -q '^help:$' "$module_dir/examples/Makefile"
 grep -q '^run: run-real-user-smoke$' "$module_dir/examples/Makefile"
+grep -q '^run-agent-timeline:$' "$module_dir/examples/Makefile"
 grep -q '^run-readme-example:$' "$module_dir/examples/Makefile"
 grep -q '^run-real-user-smoke:$' "$module_dir/examples/Makefile"
+grep -q '^	@go run \./agent_timeline$' "$module_dir/examples/Makefile"
 grep -q '^	@go run \./readme_example$' "$module_dir/examples/Makefile"
 grep -q '^	@go run \./real_user_smoke$' "$module_dir/examples/Makefile"
 grep -q '^\.PHONY: help run run-real-user-smoke$' "$module_dir/examples/real_user_smoke/Makefile"
@@ -163,10 +172,21 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"events":' "$tmp_dir/packaged-readme-example.stderr.json"
 grep -q '"ok":' "$tmp_dir/packaged-readme-example.stderr.json"
 (cd "$module_dir/examples" && make) > "$tmp_dir/packaged-examples-make-help.txt"
-grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' "$tmp_dir/packaged-examples-make-help.txt")
-grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' "$tmp_dir/packaged-examples-make-help.txt")
-grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' "$tmp_dir/packaged-examples-make-help.txt")
-test "$(wc -l < "$tmp_dir/packaged-examples-make-help.txt" | tr -d ' ')" = "3"
+grep -qx 'run-agent-timeline -> make run-agent-timeline' <(sed -n '1p' "$tmp_dir/packaged-examples-make-help.txt")
+grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '2p' "$tmp_dir/packaged-examples-make-help.txt")
+grep -qx 'run (real-user-smoke) -> make run' <(sed -n '3p' "$tmp_dir/packaged-examples-make-help.txt")
+grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '4p' "$tmp_dir/packaged-examples-make-help.txt")
+test "$(wc -l < "$tmp_dir/packaged-examples-make-help.txt" | tr -d ' ')" = "4"
+(cd "$module_dir/examples" && make run-agent-timeline) > "$tmp_dir/packaged-agent-timeline.stdout.txt" 2> "$tmp_dir/packaged-agent-timeline.stderr.txt"
+grep -q '"source": "product.action"' "$tmp_dir/packaged-agent-timeline.stdout.txt"
+grep -q '"source": "network.milestone"' "$tmp_dir/packaged-agent-timeline.stdout.txt"
+grep -q '"routeTemplate": "/checkout/:step"' "$tmp_dir/packaged-agent-timeline.stdout.txt"
+grep -q '"routeTemplate": "/v1/payments/:id"' "$tmp_dir/packaged-agent-timeline.stdout.txt"
+grep -q '00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01' "$tmp_dir/packaged-agent-timeline.stdout.txt"
+if grep -Eq 'email=user@example\.com|debug=true|payload|headers' "$tmp_dir/packaged-agent-timeline.stdout.txt"; then
+	echo "packaged agent timeline leaked unsafe route or metadata values" >&2
+	exit 1
+fi
 (cd "$module_dir/examples" && make run-readme-example) > "$tmp_dir/packaged-readme-example-make.stdout.json" 2> "$tmp_dir/packaged-readme-example-make.stderr.json"
 grep -q '"type": "release"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "environment"' "$tmp_dir/packaged-readme-example-make.stdout.json"
@@ -589,6 +609,45 @@ func TestInstalledTraceparentHelpers(t *testing.T) {
 		t.Fatalf("expected malformed traceparent to fail")
 	}
 }
+
+func TestInstalledTimelineHelpers(t *testing.T) {
+	statusCode := 503
+	durationMs := 82.5
+	action, err := logbrew.CreateProductActionAttributes(logbrew.ProductActionInput{
+		Name:          "checkout.submit",
+		RouteTemplate: "https://app.example/checkout/:step?email=user@example.com#pay",
+		Metadata:      map[string]any{"nested": map[string]any{"drop": true}},
+	})
+	if err != nil {
+		t.Fatalf("create product action attributes: %v", err)
+	}
+	network, err := logbrew.CreateNetworkMilestoneAttributes(logbrew.NetworkMilestoneInput{
+		RouteTemplate: "https://api.example/v1/orders/:id?debug=true#trace",
+		Method:        "post",
+		StatusCode:    &statusCode,
+		DurationMs:    &durationMs,
+		SessionID:     "sess_123",
+		TraceID:       "4bf92f3577b34da6a3ce929d0e0e4736",
+	})
+	if err != nil {
+		t.Fatalf("create network milestone attributes: %v", err)
+	}
+	if action.Metadata["routeTemplate"] != "/checkout/:step" ||
+		action.Metadata["source"] != "product.action" {
+		t.Fatalf("unexpected product action metadata: %#v", action.Metadata)
+	}
+	if network.Name != "network.post /v1/orders/:id" ||
+		network.Status != "failure" ||
+		network.Metadata["routeTemplate"] != "/v1/orders/:id" ||
+		network.Metadata["method"] != "POST" ||
+		network.Metadata["statusCode"] != 503 ||
+		network.Metadata["durationMs"] != 82.5 {
+		t.Fatalf("unexpected network milestone attributes: %#v", network)
+	}
+	if _, ok := action.Metadata["nested"]; ok {
+		t.Fatalf("expected nested product action metadata to be filtered: %#v", action.Metadata)
+	}
+}
 EOF
 
 mkdir -p traceparent
@@ -779,8 +838,11 @@ for needle in (
     "ParseTraceparent",
     "CreateTraceparent",
     "SpanAttributesFromTraceparent",
+    "CreateProductActionAttributes",
+    "CreateNetworkMilestoneAttributes",
     "HTTPTransport",
     "NewHTTPTransport",
+    "examples/agent_timeline",
     "copyable snippets",
     "your own Go service",
 ):
@@ -882,6 +944,23 @@ GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.ActionAttribute
 grep -q '^type ActionAttributes struct {' action-attributes-doc.txt
 grep -q 'ActionAttributes describes the public payload fields for an action' action-attributes-doc.txt
 grep -q 'event' action-attributes-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.ProductActionInput > product-action-input-doc.txt
+grep -q '^type ProductActionInput struct {' product-action-input-doc.txt
+grep -q 'ProductActionInput describes an app-owned product step that should be' product-action-input-doc.txt
+grep -q 'captured as an agent-readable action event' product-action-input-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.NetworkMilestoneInput > network-milestone-input-doc.txt
+grep -q '^type NetworkMilestoneInput struct {' network-milestone-input-doc.txt
+grep -q 'NetworkMilestoneInput describes an app-owned API milestone that should be' network-milestone-input-doc.txt
+grep -q 'captured as an agent-readable action event' network-milestone-input-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.CreateProductActionAttributes > create-product-action-doc.txt
+grep -q '^func CreateProductActionAttributes(input ProductActionInput) (ActionAttributes, error)$' create-product-action-doc.txt
+grep -q 'CreateProductActionAttributes builds privacy-safe action attributes for a' create-product-action-doc.txt
+grep -q 'product milestone without automatic click capture or global app mutation' create-product-action-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.CreateNetworkMilestoneAttributes > create-network-milestone-doc.txt
+grep -q '^func CreateNetworkMilestoneAttributes(input NetworkMilestoneInput) (ActionAttributes, error)$' create-network-milestone-doc.txt
+grep -q 'CreateNetworkMilestoneAttributes builds privacy-safe action attributes' create-network-milestone-doc.txt
+grep -q 'for an API milestone without patching HTTP clients or capturing' create-network-milestone-doc.txt
+grep -q 'payloads/headers' create-network-milestone-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SdkError > sdk-error-doc.txt
 grep -q '^type SdkError struct {' sdk-error-doc.txt
 grep -q 'SdkError describes a stable public SDK failure with parseable code' sdk-error-doc.txt

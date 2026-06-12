@@ -1,7 +1,7 @@
 # logbrew
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
 Public Go SDK for creating LogBrew event batches, validating them locally, and flushing them through a transport.
@@ -143,6 +143,49 @@ fmt.Println(outgoing)
 ```
 
 `ParseTraceparent` validates W3C shape, rejects forbidden version `ff`, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `SpanAttributesFromTraceparent` returns LogBrew span attributes with `TraceID` from the incoming trace and `ParentSpanID` from the incoming parent span, while copying only primitive metadata values. `CreateTraceparent` emits a normalized outgoing `traceparent` from explicit IDs and defaults empty flags to sampled `01`.
+
+## Agent-Readable Timelines
+
+Use `CreateProductActionAttributes` and `CreateNetworkMilestoneAttributes` when your Go service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.
+
+```go
+context, err := logbrew.ParseTraceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+if err != nil {
+  panic(err)
+}
+
+action, err := logbrew.CreateProductActionAttributes(logbrew.ProductActionInput{
+  Name:          "checkout.started",
+  SessionID:     "sess_checkout_123",
+  TraceID:       context.TraceID,
+  RouteTemplate: "/checkout/:step?email=user@example.com#pay",
+  Screen:        "Checkout",
+  Funnel:        "checkout",
+  Step:          "started",
+})
+if err != nil {
+  panic(err)
+}
+must(client.Action("evt_checkout_started", "2026-06-02T10:00:00Z", action))
+
+statusCode := 202
+durationMs := 64.5
+network, err := logbrew.CreateNetworkMilestoneAttributes(logbrew.NetworkMilestoneInput{
+  RouteTemplate: "https://api.example.com/v1/payments/:id?debug=true#trace",
+  Method:        "post",
+  StatusCode:    &statusCode,
+  DurationMs:    &durationMs,
+  SessionID:     "sess_checkout_123",
+  TraceID:       context.TraceID,
+  Metadata:      map[string]any{"region": "global"},
+})
+if err != nil {
+  panic(err)
+}
+must(client.Action("evt_payment_api", "2026-06-02T10:00:01Z", network))
+```
+
+Route templates are stripped to path-only values before queueing, nested metadata is dropped, HTTP methods are normalized, and 4xx/5xx status codes default network milestone status to `failure`. The `examples/agent_timeline` package contains a copyable preview that shows product and network milestones correlated by `sessionId` and W3C `traceId`.
 
 ## HTTP Delivery
 

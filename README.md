@@ -1,7 +1,7 @@
 # LogBrew SDKs
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-espresso-bg-512.png" alt="LogBrew logo" width="96" height="96">
+  <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
 LogBrew SDKs help applications send logs, errors, traces, releases, environments, actions, and explicit metrics to LogBrew with small, dependency-light clients.

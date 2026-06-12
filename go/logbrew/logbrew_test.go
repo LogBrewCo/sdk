@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -391,6 +392,154 @@ func TestTraceparentHelpersRejectMalformedW3CTraceContext(t *testing.T) {
 	}
 }
 
+func TestTimelineHelpersCreateSafeActionAttributes(t *testing.T) {
+	statusCode := 503
+	durationMs := 82.5
+
+	action, err := CreateProductActionAttributes(ProductActionInput{
+		Name:          "checkout.submit",
+		Status:        "running",
+		SessionID:     "sess_123",
+		TraceID:       "4bf92f3577b34da6a3ce929d0e0e4736",
+		RouteTemplate: "https://app.example/checkout/:step?email=user@example.com#pay",
+		Screen:        "Checkout",
+		Funnel:        "checkout",
+		Step:          "submit",
+		Metadata: map[string]any{
+			"service":       "checkout",
+			"region":        "global",
+			"ignoredObject": map[string]any{"nested": true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	network, err := CreateNetworkMilestoneAttributes(NetworkMilestoneInput{
+		RouteTemplate: "https://api.example/v1/orders/:id?debug=true#trace",
+		Method:        "post",
+		StatusCode:    &statusCode,
+		DurationMs:    &durationMs,
+		SessionID:     "sess_123",
+		TraceID:       "4bf92f3577b34da6a3ce929d0e0e4736",
+		Metadata: map[string]any{
+			"service":      "checkout",
+			"region":       "global",
+			"ignoredArray": []string{"ignored"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedAction := ActionAttributes{
+		Name:   "checkout.submit",
+		Status: "running",
+		Metadata: map[string]any{
+			"source":        "product.action",
+			"region":        "global",
+			"service":       "checkout",
+			"routeTemplate": "/checkout/:step",
+			"sessionId":     "sess_123",
+			"traceId":       "4bf92f3577b34da6a3ce929d0e0e4736",
+			"screen":        "Checkout",
+			"funnel":        "checkout",
+			"step":          "submit",
+		},
+	}
+	expectedNetwork := ActionAttributes{
+		Name:   "network.post /v1/orders/:id",
+		Status: "failure",
+		Metadata: map[string]any{
+			"source":        "network.milestone",
+			"region":        "global",
+			"service":       "checkout",
+			"routeTemplate": "/v1/orders/:id",
+			"method":        "POST",
+			"statusCode":    503,
+			"durationMs":    82.5,
+			"sessionId":     "sess_123",
+			"traceId":       "4bf92f3577b34da6a3ce929d0e0e4736",
+		},
+	}
+	if !reflect.DeepEqual(action, expectedAction) {
+		t.Fatalf("unexpected action attributes: got %#v want %#v", action, expectedAction)
+	}
+	if !reflect.DeepEqual(network, expectedNetwork) {
+		t.Fatalf("unexpected network attributes: got %#v want %#v", network, expectedNetwork)
+	}
+
+	client := sampleClient(t)
+	if err := client.Action("evt_checkout_submit", "2026-06-02T10:00:05Z", action); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Action("evt_payment_api", "2026-06-02T10:00:06Z", network); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(payload, "email=user@example.com") ||
+		strings.Contains(payload, "debug=true") ||
+		strings.Contains(payload, "ignoredObject") ||
+		strings.Contains(payload, "ignoredArray") {
+		t.Fatalf("preview leaked unsafe timeline metadata: %s", payload)
+	}
+}
+
+func TestTimelineHelpersRejectUnsafeMilestoneValues(t *testing.T) {
+	invalidStatusCode := 99
+	negativeDuration := -1.0
+	cases := []struct {
+		name    string
+		run     func() error
+		message string
+	}{
+		{
+			name: "invalid product action status",
+			run: func() error {
+				_, err := CreateProductActionAttributes(ProductActionInput{Name: "checkout.submit", Status: "done"})
+				return err
+			},
+			message: "product action status must be one of: queued, running, success, failure",
+		},
+		{
+			name: "invalid network method",
+			run: func() error {
+				_, err := CreateNetworkMilestoneAttributes(NetworkMilestoneInput{RouteTemplate: "/orders/:id", Method: "GET /bad"})
+				return err
+			},
+			message: "network milestone method must be a valid HTTP method",
+		},
+		{
+			name: "invalid network duration",
+			run: func() error {
+				_, err := CreateNetworkMilestoneAttributes(NetworkMilestoneInput{RouteTemplate: "/orders/:id", DurationMs: &negativeDuration})
+				return err
+			},
+			message: "network milestone durationMs must be a non-negative number",
+		},
+		{
+			name: "invalid network status code",
+			run: func() error {
+				_, err := CreateNetworkMilestoneAttributes(NetworkMilestoneInput{RouteTemplate: "/orders/:id", StatusCode: &invalidStatusCode})
+				return err
+			},
+			message: "network milestone statusCode must be an integer from 100 to 599",
+		},
+	}
+
+	for _, current := range cases {
+		t.Run(current.name, func(t *testing.T) {
+			err := current.run()
+			if err == nil || !strings.Contains(err.Error(), current.message) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestUnauthenticatedResponseSurfacesCleanError(t *testing.T) {
 	client := sampleClient(t)
 	enqueueAll(t, client)
@@ -606,6 +755,7 @@ func TestRepoCheckoutExamplesMakeListsCommands(t *testing.T) {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
 	expected := []string{
+		"run-agent-timeline -> make run-agent-timeline",
 		"run-readme-example -> make run-readme-example",
 		"run (real-user-smoke) -> make run",
 		"run-real-user-smoke -> make run-real-user-smoke",
@@ -618,6 +768,26 @@ func TestRepoCheckoutExamplesMakeListsCommands(t *testing.T) {
 		if lines[i] != want {
 			t.Fatalf("unexpected make output line %d: got %q want %q", i, lines[i], want)
 		}
+	}
+}
+
+func TestRepoCheckoutExamplesMakeRunAgentTimelineExecutesExample(t *testing.T) {
+	stdout, stderr := runRepoCommand(t, "./examples", "make", "run-agent-timeline")
+	if !strings.Contains(stdout, `"source": "product.action"`) ||
+		!strings.Contains(stdout, `"source": "network.milestone"`) ||
+		!strings.Contains(stdout, `"routeTemplate": "/checkout/:step"`) ||
+		!strings.Contains(stdout, `"routeTemplate": "/v1/payments/:id"`) ||
+		!strings.Contains(stdout, "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01") {
+		t.Fatalf("unexpected stdout: %s", stdout)
+	}
+	if strings.Contains(stdout, "email=user@example.com") ||
+		strings.Contains(stdout, "debug=true") ||
+		strings.Contains(stdout, "payload") ||
+		strings.Contains(stdout, "headers") {
+		t.Fatalf("agent timeline leaked unsafe data: %s", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("unexpected stderr: %s", stderr)
 	}
 }
 
