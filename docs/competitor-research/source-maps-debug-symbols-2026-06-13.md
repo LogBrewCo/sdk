@@ -35,7 +35,7 @@ LogBrew SDKs can capture errors and releases, and stack text is intentionally op
 
 - There is no public artifact upload API for source maps, dSYMs, ProGuard mappings, PDBs, Breakpad symbols, ELF debug files, or Unity symbols.
 - There is no artifact identity field such as `debugId` or `artifactId` in public runtime guidance.
-- There is no build-time uploader, dry-run manifest, framework plugin, or CI example.
+- There is no build-time uploader, framework plugin, or CI example. A repo-local JavaScript dry-run manifest generator now exists, but it does not upload artifacts or prove symbolication.
 - There is no backend symbolication contract tying runtime issue frames to uploaded release artifacts.
 - There is no real-user proof that a minified stack trace can be resolved without exposing source maps publicly.
 
@@ -54,7 +54,7 @@ LogBrew should not copy heavyweight auto-instrumentation or upload raw source by
 ## Concrete LogBrew Work
 
 - Define the backend contract before adding SDK claims: upload, list, delete, validation error, and symbolication lookup shapes.
-- Add a JS build-artifact helper only after the backend contract exists; start with a dry-run manifest and local verifier before real upload.
+- Keep expanding the JS dry-run manifest path before real upload: validate minified files, source maps, debug IDs, sensitive `sourcesContent`, Git metadata, and normalized minified URLs against local fake intake tests.
 - Add runtime docs/API fields for optional `debugId` or `artifactId` only after ingestion and issue lookup can consume them.
 - Add Vite/Next/React Native proof apps that create minified errors, upload artifacts to a local intake, and verify unminified output.
 - Add native follow-up contracts for Swift/Kotlin/Unity/C/C++/Objective-C symbol formats instead of claiming crash symbolication from normal error capture.
