@@ -86,6 +86,9 @@ jobs:
       - name: Run unit tests
         run: python3 -m unittest discover -s tests -p 'test_*.py'
 
+      - name: Check backend contract reports
+        run: python3 scripts/check_backend_contract_reports.py
+
       - name: Validate happy-path fixture
         run: python3 scripts/validate_fixtures.py fixtures/valid-batch.json
 
