@@ -1,6 +1,6 @@
 use logbrew::{
     ActionEvent, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent, MetricEvent,
-    RecordingTransport, ReleaseEvent, SdkError, SpanEvent, TransportError,
+    ProductTimeline, RecordingTransport, ReleaseEvent, SdkError, SpanEvent, TransportError,
 };
 #[cfg(feature = "http")]
 use logbrew::{HttpTransport, HttpTransportConfig, Transport};
@@ -423,6 +423,166 @@ fn metric_event_preview_and_validation() {
         )
         .unwrap_err();
     assert_eq!(error.message, "metric metadata values must be primitive");
+}
+
+#[test]
+fn product_timeline_builds_product_action_event() {
+    let mut client = sample_client();
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("plan".to_string(), Value::String("pro".to_string()));
+    metadata.insert("attempt".to_string(), Value::from(2));
+    metadata.insert("source".to_string(), Value::String("caller".to_string()));
+
+    client
+        .action(
+            "evt_product_timeline",
+            "2026-06-02T10:00:07Z",
+            ProductTimeline::product_action("checkout.submit")
+                .with_status("running")
+                .with_route_template("/checkout?cart=123#pay")
+                .with_session_id("session_123")
+                .with_trace_id("trace_123")
+                .with_screen("Checkout")
+                .with_funnel("purchase")
+                .with_step("submit")
+                .with_metadata(metadata)
+                .build()
+                .unwrap(),
+        )
+        .unwrap();
+
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let attributes = &payload["events"][0]["attributes"];
+    let timeline_metadata = &attributes["metadata"];
+    assert_eq!(attributes["name"], "checkout.submit");
+    assert_eq!(attributes["status"], "running");
+    assert_eq!(timeline_metadata["source"], "product_timeline");
+    assert_eq!(timeline_metadata["routeTemplate"], "/checkout");
+    assert_eq!(timeline_metadata["sessionId"], "session_123");
+    assert_eq!(timeline_metadata["traceId"], "trace_123");
+    assert_eq!(timeline_metadata["screen"], "Checkout");
+    assert_eq!(timeline_metadata["funnel"], "purchase");
+    assert_eq!(timeline_metadata["step"], "submit");
+    assert_eq!(timeline_metadata["plan"], "pro");
+    assert_eq!(timeline_metadata["attempt"], 2);
+}
+
+#[test]
+fn product_timeline_builds_network_milestone_event() {
+    let mut client = sample_client();
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("region".to_string(), Value::String("iad".to_string()));
+    metadata.insert("cached".to_string(), Value::Bool(false));
+
+    client
+        .action(
+            "evt_network_timeline",
+            "2026-06-02T10:00:08Z",
+            ProductTimeline::network_milestone(
+                "https://api.example.test/v1/checkout?cart=123#debug",
+            )
+            .with_method("post")
+            .with_status_code(503)
+            .with_duration_ms(42.5)
+            .with_session_id("session_123")
+            .with_trace_id("trace_123")
+            .with_metadata(metadata)
+            .build()
+            .unwrap(),
+        )
+        .unwrap();
+
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let attributes = &payload["events"][0]["attributes"];
+    let timeline_metadata = &attributes["metadata"];
+    assert_eq!(attributes["name"], "network.post /v1/checkout");
+    assert_eq!(attributes["status"], "failure");
+    assert_eq!(timeline_metadata["source"], "network_timeline");
+    assert_eq!(timeline_metadata["routeTemplate"], "/v1/checkout");
+    assert_eq!(timeline_metadata["method"], "POST");
+    assert_eq!(timeline_metadata["statusCode"], 503);
+    assert_eq!(timeline_metadata["durationMs"], 42.5);
+    assert_eq!(timeline_metadata["sessionId"], "session_123");
+    assert_eq!(timeline_metadata["traceId"], "trace_123");
+    assert_eq!(timeline_metadata["region"], "iad");
+    assert_eq!(timeline_metadata["cached"], false);
+}
+
+#[test]
+fn product_timeline_validates_inputs_before_queueing() {
+    assert_eq!(
+        ProductTimeline::product_action(" ")
+            .build()
+            .unwrap_err()
+            .message,
+        "product action name must be non-empty"
+    );
+    assert_eq!(
+        ProductTimeline::product_action("checkout.submit")
+            .with_status("done")
+            .build()
+            .unwrap_err()
+            .message,
+        "action status must be one of: queued, running, success, failure"
+    );
+    assert_eq!(
+        ProductTimeline::network_milestone(" ")
+            .build()
+            .unwrap_err()
+            .message,
+        "network milestone route_template must be non-empty"
+    );
+    assert_eq!(
+        ProductTimeline::network_milestone("/checkout")
+            .with_method("bad method")
+            .build()
+            .unwrap_err()
+            .message,
+        "network milestone method must be a valid HTTP method"
+    );
+    assert_eq!(
+        ProductTimeline::network_milestone("/checkout")
+            .with_status_code(99)
+            .build()
+            .unwrap_err()
+            .message,
+        "network milestone status_code must be between 100 and 599"
+    );
+    assert_eq!(
+        ProductTimeline::network_milestone("/checkout")
+            .with_duration_ms(f64::INFINITY)
+            .build()
+            .unwrap_err()
+            .message,
+        "network milestone duration_ms must be finite"
+    );
+    assert_eq!(
+        ProductTimeline::network_milestone("/checkout")
+            .with_duration_ms(-1.0)
+            .build()
+            .unwrap_err()
+            .message,
+        "network milestone duration_ms must be non-negative"
+    );
+    assert_eq!(
+        ProductTimeline::network_milestone("/checkout")
+            .with_name(" ")
+            .build()
+            .unwrap_err()
+            .message,
+        "network milestone name must be non-empty"
+    );
+
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("nested".to_string(), serde_json::json!({"id": "u_123"}));
+    assert_eq!(
+        ProductTimeline::product_action("checkout.submit")
+            .with_metadata(metadata)
+            .build()
+            .unwrap_err()
+            .message,
+        "metadata value for nested must be primitive"
+    );
 }
 
 #[test]

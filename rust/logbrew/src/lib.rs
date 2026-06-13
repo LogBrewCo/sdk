@@ -8,7 +8,11 @@ use std::fmt;
 use std::time::Duration;
 
 mod metric;
+mod product_timeline;
 pub use metric::MetricEvent;
+pub use product_timeline::{NetworkMilestoneTimeline, ProductActionTimeline, ProductTimeline};
+
+pub(crate) const ACTION_STATUSES: &[&str] = &["queued", "running", "success", "failure"];
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 /// Public SDK identity emitted with every LogBrew event batch.
@@ -866,11 +870,7 @@ impl ActionEvent {
 
     fn attributes(self) -> Result<Map<String, Value>, SdkError> {
         require_non_empty("action name", &self.name)?;
-        require_allowed_value(
-            "action status",
-            &self.status,
-            &["queued", "running", "success", "failure"],
-        )?;
+        require_allowed_value("action status", &self.status, ACTION_STATUSES)?;
         let mut map = Map::new();
         map.insert("name".to_string(), Value::String(self.name));
         map.insert("status".to_string(), Value::String(self.status));

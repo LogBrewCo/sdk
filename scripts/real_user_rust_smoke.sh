@@ -94,6 +94,7 @@ test -f "$crate_path"
 tar -tf "$crate_path" > "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/README.md$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/Cargo.toml$' "$tmp_dir/crate-contents.txt"
+grep -q '^logbrew-0.1.0/src/product_timeline.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/readme_example.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/real_user_smoke.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/Makefile$' "$tmp_dir/crate-contents.txt"
@@ -108,6 +109,9 @@ grep -q 'DEFAULT_HTTP_ENDPOINT' "$crate_readme"
 grep -q 'MetricEvent' "$crate_readme"
 grep -q 'client.metric' "$crate_readme"
 grep -q 'low-cardinality' "$crate_readme"
+grep -q 'ProductTimeline' "$crate_readme"
+grep -q 'Product And Network Timelines' "$crate_readme"
+grep -q 'do not patch HTTP clients' "$crate_readme"
 grep -q 'copyable snippets' "$crate_readme"
 grep -q 'optional HTTP transport' "$crate_readme"
 crate_manifest="$tmp_dir/crate-Cargo.toml"
@@ -163,6 +167,7 @@ mkdir -p "$crate_src_root"
 tar -xf "$crate_path" -C "$crate_src_root"
 crate_dir="$crate_src_root/logbrew-0.1.0"
 test -f "$crate_dir/Cargo.toml"
+test -f "$crate_dir/src/product_timeline.rs"
 test -f "$crate_dir/examples/readme_example.rs"
 test -f "$crate_dir/examples/real_user_smoke.rs"
 test -f "$crate_dir/examples/Makefile"
@@ -324,6 +329,7 @@ smoke-test = "test --quiet --locked"
 smoke-doc = "doc --quiet --locked --no-deps --package logbrew"
 smoke-run = "run --quiet --locked --bin smoke-app"
 smoke-readme = "run --quiet --locked --bin readme_example"
+smoke-timeline = "run --quiet --locked --bin timeline"
 EOF
 grep -q '^smoke-check = "check --quiet --locked"$' .cargo/config.toml
 grep -q '^smoke-build = "build --quiet --locked"$' .cargo/config.toml
@@ -331,6 +337,7 @@ grep -q '^smoke-test = "test --quiet --locked"$' .cargo/config.toml
 grep -q '^smoke-doc = "doc --quiet --locked --no-deps --package logbrew"$' .cargo/config.toml
 grep -q '^smoke-run = "run --quiet --locked --bin smoke-app"$' .cargo/config.toml
 grep -q '^smoke-readme = "run --quiet --locked --bin readme_example"$' .cargo/config.toml
+grep -q '^smoke-timeline = "run --quiet --locked --bin timeline"$' .cargo/config.toml
 
 cat > src/main.rs <<'EOF'
 use logbrew::{
@@ -445,6 +452,76 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "{{\"ok\":true,\"status\":{},\"attempts\":{},\"events\":6}}",
         response.status_code, response.attempts
     );
+    Ok(())
+}
+EOF
+
+cat > src/bin/timeline.rs <<'EOF'
+use logbrew::{ActionEvent, LogBrewClient, ProductTimeline, SdkError};
+
+fn expect_validation(message_fragment: &str, result: Result<ActionEvent, SdkError>) {
+    let error = result.expect_err("expected validation error");
+    assert_eq!(error.code, "validation_error");
+    assert!(
+        error.message.contains(message_fragment),
+        "unexpected message: {}",
+        error.message
+    );
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = LogBrewClient::builder("smoke-app", "0.1.0")
+        .api_key("LOGBREW_API_KEY")
+        .build()?;
+
+    client.action(
+        "evt_product_timeline",
+        "2026-06-02T10:00:07Z",
+        ProductTimeline::product_action("checkout.submit")
+            .with_status("running")
+            .with_route_template("/checkout?cart=123#pay")
+            .with_session_id("session_123")
+            .with_trace_id("trace_123")
+            .with_screen("Checkout")
+            .with_funnel("purchase")
+            .with_step("submit")
+            .build()?,
+    )?;
+    client.action(
+        "evt_network_timeline",
+        "2026-06-02T10:00:08Z",
+        ProductTimeline::network_milestone("HTTPS://api.example.test/v1/checkout?cart=123#debug")
+            .with_method("post")
+            .with_status_code(503)
+            .with_duration_ms(42.5)
+            .with_session_id("session_123")
+            .with_trace_id("trace_123")
+            .build()?,
+    )?;
+
+    let preview = client.preview_json()?;
+    assert!(preview.contains("\"source\": \"product_timeline\""));
+    assert!(preview.contains("\"source\": \"network_timeline\""));
+    assert!(preview.contains("\"routeTemplate\": \"/checkout\""));
+    assert!(preview.contains("\"routeTemplate\": \"/v1/checkout\""));
+    assert!(preview.contains("\"method\": \"POST\""));
+    assert!(preview.contains("\"statusCode\": 503"));
+    assert!(preview.contains("\"durationMs\": 42.5"));
+    assert!(preview.contains("\"status\": \"failure\""));
+
+    expect_validation(
+        "valid HTTP method",
+        ProductTimeline::network_milestone("/checkout")
+            .with_method("bad method")
+            .build(),
+    );
+    expect_validation(
+        "non-negative",
+        ProductTimeline::network_milestone("/checkout")
+            .with_duration_ms(-1.0)
+            .build(),
+    );
+    println!("{{\"ok\":true,\"timelineEvents\":2}}");
     Ok(())
 }
 EOF
@@ -627,6 +704,18 @@ test -f target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Public metric-event builder for explicit low-cardinality metric measurements\.' target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Create a metric event with name, kind, value, unit, and temporality fields\.' target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Attach primitive, low-cardinality metadata to the metric payload\.' target/doc/logbrew/struct.MetricEvent.html
+test -f target/doc/logbrew/struct.ProductTimeline.html
+grep -q 'App-owned timeline builders for product actions and network milestones\.' target/doc/logbrew/struct.ProductTimeline.html
+grep -q 'Start a product action timeline builder for an app-known product step\.' target/doc/logbrew/struct.ProductTimeline.html
+grep -q 'Start a network milestone timeline builder for an app-owned API milestone\.' target/doc/logbrew/struct.ProductTimeline.html
+test -f target/doc/logbrew/struct.ProductActionTimeline.html
+grep -q 'Builder for product-step timeline action events\.' target/doc/logbrew/struct.ProductActionTimeline.html
+grep -q 'Attach a route template; query strings and hash fragments are stripped\.' target/doc/logbrew/struct.ProductActionTimeline.html
+grep -q 'Build a normal LogBrew action event for queueing with <code>client.action</code>\.' target/doc/logbrew/struct.ProductActionTimeline.html
+test -f target/doc/logbrew/struct.NetworkMilestoneTimeline.html
+grep -q 'Builder for app-owned API or network milestone timeline action events\.' target/doc/logbrew/struct.NetworkMilestoneTimeline.html
+grep -q 'Attach the HTTP method; it is normalized to uppercase\.' target/doc/logbrew/struct.NetworkMilestoneTimeline.html
+grep -q 'Attach an HTTP status code, which also drives the default action status\.' target/doc/logbrew/struct.NetworkMilestoneTimeline.html
 test -f target/doc/logbrew/struct.SdkInfo.html
 grep -q 'Public SDK identity emitted with every LogBrew event batch\.' target/doc/logbrew/struct.SdkInfo.html
 grep -q 'SDK or application name attached to emitted batches\.' target/doc/logbrew/struct.SdkInfo.html
@@ -664,6 +753,10 @@ python3 "$repo_root/scripts/validate_fixtures.py" readme-example.stdout.json >/d
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" readme-example.stdout.json >/dev/null
 grep -q '"events":6' readme-example.stderr.json
 grep -q '"ok":true' readme-example.stderr.json
+
+cargo smoke-timeline > timeline.stdout.json
+grep -q '"ok":true' timeline.stdout.json
+grep -q '"timelineEvents":2' timeline.stdout.json
 
 cat > src/bin/unauth.rs <<'EOF'
 use logbrew::{LogBrewClient, RecordingTransport, ReleaseEvent, SdkError};

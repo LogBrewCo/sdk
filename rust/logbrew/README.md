@@ -13,7 +13,7 @@ cargo add logbrew
 cargo add logbrew --features http
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, timeline builders such as `ProductTimeline`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -103,6 +103,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 Metric kinds are `counter`, `gauge`, and `histogram`. Gauge metrics use `instant` temporality; counter and histogram metrics use `delta` or `cumulative` temporality and must be non-negative.
+
+## Product And Network Timelines
+
+Use `ProductTimeline` when your app already knows the product step or API milestone that matters and you want an agent-readable timeline without recording a visual session replay:
+
+```rust
+use logbrew::{LogBrewClient, ProductTimeline};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = LogBrewClient::builder("logbrew-rust", "0.1.0")
+        .api_key("LOGBREW_API_KEY")
+        .build()?;
+
+    client.action(
+        "evt_checkout_submit",
+        "2026-06-02T10:00:07Z",
+        ProductTimeline::product_action("checkout.submit")
+            .with_route_template("/checkout/:cart_id")
+            .with_session_id("session_123")
+            .with_trace_id("trace_123")
+            .with_screen("Checkout")
+            .with_funnel("purchase")
+            .with_step("submit")
+            .build()?,
+    )?;
+
+    client.action(
+        "evt_checkout_api",
+        "2026-06-02T10:00:08Z",
+        ProductTimeline::network_milestone("/api/checkout/:cart_id")
+            .with_method("POST")
+            .with_status_code(503)
+            .with_duration_ms(42.5)
+            .with_session_id("session_123")
+            .with_trace_id("trace_123")
+            .build()?,
+    )?;
+
+    println!("{}", client.preview_json()?);
+    Ok(())
+}
+```
+
+The builders return normal `ActionEvent` values, so they work with the existing queue, preview, flush, and retry behavior. They accept only primitive metadata, copy it defensively, strip query strings and hashes from route templates, reduce full HTTP URLs to paths, normalize HTTP methods, and infer failed network milestones from `4xx`/`5xx` status codes. They do not patch HTTP clients, capture request or response payloads, capture arbitrary headers, auto-capture clicks, or claim visual replay.
 
 ## HTTP Delivery
 
