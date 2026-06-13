@@ -78,6 +78,41 @@ client.metric(
 
 Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality and may be negative. Keep metadata low-cardinality and primitive. This SDK does not automatically collect JVM, runtime, or framework metrics yet.
 
+## Product and Network Timelines
+
+Use `ProductTimeline` when your Java service already knows important product steps or API milestones. The helpers create normal `action` events with primitive metadata that AI assistants can analyze across sessions without visual replay, HTTP client patching, request/response payload capture, or header capture.
+
+```java
+import co.logbrew.sdk.ProductTimeline;
+import java.util.Map;
+
+client.action(
+    "evt_action_checkout_submit",
+    "2026-06-02T10:00:05Z",
+    ProductTimeline.productAction("checkout.submit")
+        .routeTemplate("/checkout/:step")
+        .sessionId("session_123")
+        .traceId("trace_abc")
+        .screen("Checkout")
+        .funnel("checkout")
+        .step("submit")
+        .metadata(Map.of("cartTier", "gold"))
+        .toActionAttributes()
+);
+
+client.action(
+    "evt_network_payment",
+    "2026-06-02T10:00:06Z",
+    ProductTimeline.networkMilestone("https://api.example.com/v1/payments/:id?debug=sample")
+        .method("POST")
+        .statusCode(202)
+        .durationMs(183.4)
+        .sessionId("session_123")
+        .traceId("trace_abc")
+        .toActionAttributes()
+);
+```
+
 ## HTTP Delivery
 
 Use `HttpTransport` for real outbound delivery from server-side Java apps:
@@ -210,5 +245,6 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 - `RecordingTransport.alwaysAccept()` is useful when you want to inspect queued JSON before network delivery.
 - `LogBrewJulHandler` queues standard `java.util.logging` records without mutating global logging configuration.
 - `LogBrewLogbackAppender` queues app-owned SLF4J/Logback records, including MDC and fluent key/value metadata, without changing global logger setup.
+- `ProductTimeline` queues app-owned product and network action timelines without automatic visual replay, HTTP client patching, payload capture, or header capture.
 - Spring Boot apps can attach `LogBrewLogbackAppender` to app-owned Logback loggers without adding a required Spring runtime dependency to the SDK.
 - `SdkException` exposes a stable `code()` and `detailMessage()` for user-facing failure handling.

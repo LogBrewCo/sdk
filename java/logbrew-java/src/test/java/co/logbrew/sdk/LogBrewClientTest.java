@@ -51,6 +51,8 @@ public final class LogBrewClientTest {
         testMetricRejectsNonFiniteValue();
         testMetricRejectsNegativeCounterValue();
         testMetricRejectsInvalidTemporalityForKind();
+        testProductTimelineActionAttributesSanitizePrimitiveMetadata();
+        testNetworkTimelineAttributesSanitizeAndValidate();
         testMetadataIsDefensivelyCopied();
         testUnauthenticatedResponseSurfacesCleanError();
         testNetworkFailureRetriesBeforeSucceeding();
@@ -204,6 +206,99 @@ public final class LogBrewClientTest {
             MetricAttributes.create("queue.depth", "gauge", 2.0, "{items}", "delta")
         ));
         assertContains(error.getMessage(), "metric temporality for gauge must be one of: instant");
+        testsRun++;
+    }
+
+    private void testProductTimelineActionAttributesSanitizePrimitiveMetadata() {
+        LogBrewClient client = sampleClient();
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("cartTier", "gold");
+        metadata.put("attempt", Integer.valueOf(2));
+        metadata.put("routeTemplate", "/raw?debug=sample");
+
+        client.action(
+            "evt_product_timeline",
+            "2026-06-02T10:00:05Z",
+            ProductTimeline.productAction("checkout.submit")
+                .routeTemplate("https://shop.example/checkout/:step?cart=sample#review")
+                .sessionId("session_123")
+                .traceId("trace_abc")
+                .screen("Checkout")
+                .funnel("checkout")
+                .step("submit")
+                .metadata(metadata)
+                .toActionAttributes()
+        );
+
+        metadata.put("cartTier", "platinum");
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"name\": \"checkout.submit\"");
+        assertContains(payload, "\"status\": \"success\"");
+        assertContains(payload, "\"source\": \"product.action\"");
+        assertContains(payload, "\"routeTemplate\": \"/checkout/:step\"");
+        assertContains(payload, "\"sessionId\": \"session_123\"");
+        assertContains(payload, "\"traceId\": \"trace_abc\"");
+        assertContains(payload, "\"screen\": \"Checkout\"");
+        assertContains(payload, "\"funnel\": \"checkout\"");
+        assertContains(payload, "\"step\": \"submit\"");
+        assertContains(payload, "\"cartTier\": \"gold\"");
+        assertContains(payload, "\"attempt\": 2");
+        assertNotContains(payload, "cart=sample");
+        assertNotContains(payload, "\"cartTier\": \"platinum\"");
+        assertNotContains(payload, "/raw?debug=sample");
+        testsRun++;
+    }
+
+    private void testNetworkTimelineAttributesSanitizeAndValidate() {
+        LogBrewClient client = sampleClient();
+        client.action(
+            "evt_network_timeline",
+            "2026-06-02T10:00:05Z",
+            ProductTimeline.networkMilestone("https://api.example/v1/payments/:id?debug=sample#fragment")
+                .method("post")
+                .statusCode(503)
+                .durationMs(183.4)
+                .sessionId("session_123")
+                .traceId("trace_abc")
+                .metadata(Collections.singletonMap("api", "payments"))
+                .toActionAttributes()
+        );
+
+        LogBrewClient defaultMethodClient = sampleClient();
+        defaultMethodClient.action(
+            "evt_network_default_method",
+            "2026-06-02T10:00:05Z",
+            ProductTimeline.networkMilestone("/health").toActionAttributes()
+        );
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"name\": \"network.post /v1/payments/:id\"");
+        assertContains(payload, "\"status\": \"failure\"");
+        assertContains(payload, "\"source\": \"network.milestone\"");
+        assertContains(payload, "\"routeTemplate\": \"/v1/payments/:id\"");
+        assertContains(payload, "\"method\": \"POST\"");
+        assertContains(payload, "\"statusCode\": 503");
+        assertContains(payload, "\"durationMs\": 183.4");
+        assertContains(payload, "\"api\": \"payments\"");
+        assertNotContains(payload, "debug=sample");
+        assertContains(defaultMethodClient.previewJson(), "\"method\": \"GET\"");
+
+        SdkException invalidMethod = expectSdkException(() ->
+            ProductTimeline.networkMilestone("/orders/:id").method("GET /bad").toActionAttributes());
+        assertContains(invalidMethod.getMessage(), "network milestone method must be a valid HTTP method");
+
+        SdkException invalidStatusCode = expectSdkException(() ->
+            ProductTimeline.networkMilestone("/orders/:id").statusCode(700).toActionAttributes());
+        assertContains(invalidStatusCode.getMessage(), "network milestone statusCode must be an integer from 100 to 599");
+
+        SdkException invalidDuration = expectSdkException(() ->
+            ProductTimeline.networkMilestone("/orders/:id").durationMs(-1.0).toActionAttributes());
+        assertContains(invalidDuration.getMessage(), "network milestone durationMs must be non-negative");
+
+        SdkException missingRoute = expectSdkException(() ->
+            ProductTimeline.networkMilestone("   ").toActionAttributes());
+        assertContains(missingRoute.getMessage(), "network milestone routeTemplate must be non-empty");
         testsRun++;
     }
 

@@ -40,6 +40,9 @@ grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/binary-jar-contents.txt
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport\$Builder.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/ProductTimeline.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/ProductTimeline\$ProductAction.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/ProductTimeline\$NetworkMilestone.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewJulHandler.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewLogbackAppender.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/Transport.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -53,6 +56,7 @@ grep -q '^README.md$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/MetricAttributes.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/ProductTimeline.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewJulHandler.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewLogbackAppender.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^examples/ReadmeExample.java$' "$tmp_dir/source-jar-contents.txt"
@@ -65,6 +69,8 @@ grep -q '<version>0.1.0</version>' "$package_dir/pom.xml"
 grep -q 'LogBrewClient.create' "$package_dir/README.md"
 grep -q 'HttpTransport' "$package_dir/README.md"
 grep -q 'MetricAttributes' "$package_dir/README.md"
+grep -q 'ProductTimeline' "$package_dir/README.md"
+grep -q 'without visual replay, HTTP client patching, request/response payload capture, or header capture' "$package_dir/README.md"
 grep -q 'This SDK does not automatically collect JVM, runtime, or framework metrics yet.' "$package_dir/README.md"
 grep -q 'java.net.http' "$package_dir/README.md"
 grep -q 'LogBrewJulHandler' "$package_dir/README.md"
@@ -141,6 +147,7 @@ import co.logbrew.sdk.LogBrewClient;
 import co.logbrew.sdk.LogBrewJulHandler;
 import co.logbrew.sdk.LogBrewLogbackAppender;
 import co.logbrew.sdk.MetricAttributes;
+import co.logbrew.sdk.ProductTimeline;
 import co.logbrew.sdk.RecordingTransport;
 import co.logbrew.sdk.ReleaseAttributes;
 import co.logbrew.sdk.SdkException;
@@ -208,6 +215,43 @@ public final class Main {
             "2026-06-02T10:00:06Z",
             MetricAttributes.create("queue.depth", "gauge", 2.0, "{items}", "delta")
         ));
+
+        LogBrewClient timeline = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
+        timeline.action(
+            "evt_timeline_action",
+            "2026-06-02T10:00:05Z",
+            ProductTimeline.productAction("checkout.submit")
+                .routeTemplate("https://shop.example/checkout/:step?cart=sample#review")
+                .sessionId("session_123")
+                .traceId("trace_abc")
+                .screen("Checkout")
+                .funnel("checkout")
+                .step("submit")
+                .metadata(Collections.singletonMap("cartTier", "gold"))
+                .toActionAttributes()
+        );
+        timeline.action(
+            "evt_timeline_network",
+            "2026-06-02T10:00:06Z",
+            ProductTimeline.networkMilestone("https://api.example/v1/payments/:id?debug=sample")
+                .method("post")
+                .statusCode(503)
+                .durationMs(183.4)
+                .sessionId("session_123")
+                .traceId("trace_abc")
+                .toActionAttributes()
+        );
+        String timelinePayload = timeline.previewJson();
+        require(timeline.pendingEvents() == 2, "timeline queues two action events");
+        require(timelinePayload.contains("\"source\": \"product.action\""), "product timeline source");
+        require(timelinePayload.contains("\"source\": \"network.milestone\""), "network timeline source");
+        require(timelinePayload.contains("\"routeTemplate\": \"/checkout/:step\""), "product route template");
+        require(timelinePayload.contains("\"routeTemplate\": \"/v1/payments/:id\""), "network route template");
+        require(timelinePayload.contains("\"method\": \"POST\""), "network method");
+        require(timelinePayload.contains("\"statusCode\": 503"), "network status code");
+        require(timelinePayload.contains("\"status\": \"failure\""), "network failure status");
+        require(!timelinePayload.contains("cart=sample"), "timeline strips product query");
+        require(!timelinePayload.contains("debug=sample"), "timeline strips network query");
 
         expect("validation_error", () -> client.log(
             "evt_log_bad",
@@ -333,7 +377,7 @@ public final class Main {
 
         runHttpTransportSmoke();
 
-        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
+        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
     }
 
     private static void runHttpTransportSmoke() {
@@ -479,6 +523,7 @@ grep -q '"httpAttempts":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"logbackEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"timelineEvents":2' "$tmp_dir/smoke-app.stderr.json"
 
 jdeps --multi-release 11 --class-path "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_logback_classpath" "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jdeps.txt"
 grep -q 'java.base' "$tmp_dir/jdeps.txt"
