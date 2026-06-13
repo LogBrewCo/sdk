@@ -994,3 +994,5 @@ module LogBrew
     end
   end
 end
+
+require_relative "logbrew/product_timeline"

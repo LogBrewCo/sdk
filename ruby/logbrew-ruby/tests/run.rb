@@ -128,6 +128,95 @@ assert(metric_payload.include?('"queue": "checkout"'), "expected metric metadata
 tests += 1
 
 client = sample_client
+product_metadata = { "plan" => "pro", "source" => "caller", "attempt" => 2 }
+product_action = LogBrew::ProductTimeline.product_action(
+  name: "checkout.submit",
+  status: "running",
+  route_template: "/checkout?cart=123#pay",
+  session_id: "session_123",
+  trace_id: "trace_123",
+  screen: "Checkout",
+  funnel: "purchase",
+  step: "submit",
+  metadata: product_metadata
+)
+product_metadata["plan"] = "enterprise"
+client.action("evt_product_timeline", "2026-06-02T10:00:07Z", product_action)
+product_event = JSON.parse(client.preview_json).fetch("events")[0]
+product_attributes = product_event.fetch("attributes")
+product_timeline_metadata = product_attributes.fetch("metadata")
+assert(product_attributes.fetch("name") == "checkout.submit", "expected product action name")
+assert(product_attributes.fetch("status") == "running", "expected product action status")
+assert(product_timeline_metadata.fetch("source") == "product_timeline", "expected product timeline source")
+assert(product_timeline_metadata.fetch("routeTemplate") == "/checkout", "expected product route without query or hash")
+assert(product_timeline_metadata.fetch("sessionId") == "session_123", "expected product session")
+assert(product_timeline_metadata.fetch("traceId") == "trace_123", "expected product trace")
+assert(product_timeline_metadata.fetch("screen") == "Checkout", "expected product screen")
+assert(product_timeline_metadata.fetch("funnel") == "purchase", "expected product funnel")
+assert(product_timeline_metadata.fetch("step") == "submit", "expected product step")
+assert(product_timeline_metadata.fetch("plan") == "pro", "expected product metadata copy")
+assert(product_timeline_metadata.fetch("attempt") == 2, "expected product numeric metadata")
+tests += 1
+
+client = sample_client
+network_action = LogBrew::ProductTimeline.network_milestone(
+  route_template: "https://api.example.test/v1/checkout?cart=123#debug",
+  method: "post",
+  status_code: 503,
+  duration_ms: 42.5,
+  session_id: "session_123",
+  trace_id: "trace_123",
+  metadata: { region: "iad", cached: false }
+)
+client.action("evt_network_timeline", "2026-06-02T10:00:08Z", network_action)
+network_attributes = JSON.parse(client.preview_json).fetch("events")[0].fetch("attributes")
+network_metadata = network_attributes.fetch("metadata")
+assert(network_attributes.fetch("name") == "network.post /v1/checkout", "expected default network milestone name")
+assert(network_attributes.fetch("status") == "failure", "expected failed network milestone status")
+assert(network_metadata.fetch("source") == "network_timeline", "expected network timeline source")
+assert(network_metadata.fetch("routeTemplate") == "/v1/checkout", "expected network route path only")
+assert(network_metadata.fetch("method") == "POST", "expected normalized method")
+assert(network_metadata.fetch("statusCode") == 503, "expected status code metadata")
+assert(network_metadata.fetch("durationMs") == 42.5, "expected duration metadata")
+assert(network_metadata.fetch("sessionId") == "session_123", "expected network session")
+assert(network_metadata.fetch("traceId") == "trace_123", "expected network trace")
+assert(network_metadata.fetch("region") == "iad", "expected network metadata")
+assert(network_metadata.fetch("cached") == false, "expected boolean metadata")
+tests += 1
+
+expect_error("validation_error", "product action name must be non-empty") do
+  LogBrew::ProductTimeline.product_action(name: " ")
+end
+expect_error("validation_error", "action status must be one of") do
+  LogBrew::ProductTimeline.product_action(name: "checkout.submit", status: "done")
+end
+expect_error("validation_error", "network milestone route_template must be non-empty") do
+  LogBrew::ProductTimeline.network_milestone(route_template: " ")
+end
+expect_error("validation_error", "network milestone method must be a valid HTTP method") do
+  LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", method: "bad method")
+end
+expect_error("validation_error", "network milestone status_code must be between 100 and 599") do
+  LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", status_code: 99)
+end
+expect_error("validation_error", "network milestone duration_ms must be a finite number") do
+  LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", duration_ms: Float::INFINITY)
+end
+expect_error("validation_error", "network milestone duration_ms must be non-negative") do
+  LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", duration_ms: -1)
+end
+expect_error("validation_error", "network milestone name must be non-empty") do
+  LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", name: " ")
+end
+expect_error("validation_error", "metadata value for nested must be a string, number, boolean, or null") do
+  LogBrew::ProductTimeline.product_action(name: "checkout.submit", metadata: { nested: [] })
+end
+expect_error("validation_error", "metadata key must be non-empty") do
+  LogBrew::ProductTimeline.product_action(name: "checkout.submit", metadata: { "" => "bad" })
+end
+tests += 1
+
+client = sample_client
 enqueue_all(client)
 transport = LogBrew::RecordingTransport.always_accept
 response = client.flush(transport)

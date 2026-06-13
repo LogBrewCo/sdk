@@ -62,6 +62,43 @@ client.metric(
 
 Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms require `delta` or `cumulative` temporality and non-negative values; gauges require `instant` temporality and may be negative. Keep metadata low-cardinality and primitive. This SDK does not automatically collect Ruby runtime, Rack, Rails, or database metrics yet.
 
+## Product And Network Timelines
+
+Use `LogBrew::ProductTimeline` when your app already knows the product step or API milestone that matters and you want an agent-readable timeline without recording a visual session replay:
+
+```ruby
+client.action(
+  "evt_checkout_submit",
+  "2026-06-02T10:00:07Z",
+  LogBrew::ProductTimeline.product_action(
+    name: "checkout.submit",
+    route_template: "/checkout/:cart_id",
+    session_id: "session_123",
+    trace_id: "trace_123",
+    screen: "Checkout",
+    funnel: "purchase",
+    step: "submit",
+    metadata: { plan: "pro" }
+  )
+)
+
+client.action(
+  "evt_checkout_api",
+  "2026-06-02T10:00:08Z",
+  LogBrew::ProductTimeline.network_milestone(
+    route_template: "/api/checkout/:cart_id",
+    method: "POST",
+    status_code: 503,
+    duration_ms: 42.5,
+    session_id: "session_123",
+    trace_id: "trace_123",
+    metadata: { region: "iad" }
+  )
+)
+```
+
+The helpers return normal `action` attributes, so they work with the existing queue, preview, flush, and retry behavior. They accept only primitive metadata, copy it defensively, strip query strings and hashes from route templates, reduce full HTTP URLs to paths, normalize HTTP methods, and infer failed network milestones from `4xx`/`5xx` status codes. They do not patch `Net::HTTP`, capture request or response payloads, capture arbitrary headers, auto-capture clicks, or claim visual replay.
+
 ## HTTP Delivery
 
 Use `LogBrew::HttpTransport` when you want the SDK to POST queued batches to LogBrew:
@@ -185,6 +222,7 @@ The subscriber implements `report(error, handled:, severity:, context:, source:,
 - `preview_json` returns the queued batch as pretty JSON.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
+- `LogBrew::ProductTimeline` builds explicit, application-owned product action and network milestone timeline events with primitive metadata and query/hash-free routes.
 - `LogBrew::HttpTransport` sends queued batches through Ruby's standard `Net::HTTP` with configurable endpoint, headers, timeout, and app-owned HTTP client support.
 - `LogBrew::RackMiddleware` captures Rack request spans and unhandled app exceptions without requiring Rails or Rack at runtime.
 - `LogBrew::RailsErrorSubscriber` captures handled/manual Rails error reports without requiring Rails at runtime.

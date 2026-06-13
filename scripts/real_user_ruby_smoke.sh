@@ -24,6 +24,7 @@ gem unpack "$gem_path" --target "$tmp_dir/unpacked" >/dev/null
 unpacked_dir="$tmp_dir/unpacked/logbrew-sdk-0.1.0"
 test -f "$unpacked_dir/logbrew-sdk.gemspec" || true
 test -f "$unpacked_dir/lib/logbrew.rb"
+test -f "$unpacked_dir/lib/logbrew/product_timeline.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
 test -f "$unpacked_dir/examples/real_user_smoke.rb"
@@ -33,6 +34,9 @@ grep -q 'LOGBREW_API_KEY' "$unpacked_dir/README.md"
 grep -q 'preview_json' "$unpacked_dir/README.md"
 grep -q 'client.metric' "$unpacked_dir/README.md"
 grep -q 'Metric' "$unpacked_dir/README.md"
+grep -q 'LogBrew::ProductTimeline' "$unpacked_dir/README.md"
+grep -q 'Product And Network Timelines' "$unpacked_dir/README.md"
+grep -q 'do not patch `Net::HTTP`' "$unpacked_dir/README.md"
 grep -q 'LogBrew::HttpTransport' "$unpacked_dir/README.md"
 grep -q 'Net::HTTP' "$unpacked_dir/README.md"
 grep -q 'LogBrew::Logger' "$unpacked_dir/README.md"
@@ -69,14 +73,20 @@ GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBr
 grep -qx 'true' "$tmp_dir/installed-rack-middleware.out"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::RailsErrorSubscriber.instance_methods.include?(:report))' > "$tmp_dir/installed-rails-subscriber.out"
 grep -qx 'true' "$tmp_dir/installed-rails-subscriber.out"
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::ProductTimeline.respond_to?(:product_action)); puts(LogBrew::ProductTimeline.respond_to?(:network_milestone))' > "$tmp_dir/installed-product-timeline.out"
+grep -qx 'true' "$tmp_dir/installed-product-timeline.out"
 gem_dir="$(GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "rubygems"; puts Gem::Specification.find_by_name("logbrew-sdk").gem_dir')"
 test -f "$gem_dir/README.md"
+test -f "$gem_dir/lib/logbrew/product_timeline.rb"
 test -f "$gem_dir/examples/readme_example.rb"
 test -f "$gem_dir/examples/real_user_smoke.rb"
 test -f "$gem_dir/examples/Makefile"
 grep -q 'LogBrew::RackMiddleware' "$gem_dir/README.md"
 grep -q 'client.metric' "$gem_dir/README.md"
 grep -q 'Metric' "$gem_dir/README.md"
+grep -q 'LogBrew::ProductTimeline' "$gem_dir/README.md"
+grep -q 'Product And Network Timelines' "$gem_dir/README.md"
+grep -q 'do not patch `Net::HTTP`' "$gem_dir/README.md"
 grep -q 'Rack And Rails Middleware' "$gem_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$gem_dir/README.md"
 grep -q 'Rails Error Subscriber' "$gem_dir/README.md"
@@ -242,6 +252,51 @@ end
 expect("validation_error") do
   metric_client.metric("evt_metric_invalid_temporality", "2026-06-02T10:00:06Z", name: "queue.depth", kind: "gauge", value: 2, unit: "{items}", temporality: "delta")
 end
+
+timeline_client = client
+product_attributes = LogBrew::ProductTimeline.product_action(
+  name: "checkout.submit",
+  status: "running",
+  route_template: "/checkout?cart=123#pay",
+  session_id: "session_123",
+  trace_id: "trace_123",
+  screen: "Checkout",
+  funnel: "purchase",
+  step: "submit",
+  metadata: { plan: "pro", source: "caller" }
+)
+timeline_client.action("evt_product_timeline", "2026-06-02T10:00:07Z", product_attributes)
+network_attributes = LogBrew::ProductTimeline.network_milestone(
+  route_template: "https://api.example.test/v1/checkout?cart=123#debug",
+  method: "post",
+  status_code: 503,
+  duration_ms: 42.5,
+  session_id: "session_123",
+  trace_id: "trace_123",
+  metadata: { region: "iad", cached: false }
+)
+timeline_client.action("evt_network_timeline", "2026-06-02T10:00:08Z", network_attributes)
+timeline_events = JSON.parse(timeline_client.preview_json).fetch("events")
+product_event = timeline_events[0].fetch("attributes")
+product_metadata = product_event.fetch("metadata")
+raise "expected product timeline source" unless product_metadata.fetch("source") == "product_timeline"
+raise "expected product route stripping" unless product_metadata.fetch("routeTemplate") == "/checkout"
+raise "expected product session" unless product_metadata.fetch("sessionId") == "session_123"
+raise "expected product trace" unless product_metadata.fetch("traceId") == "trace_123"
+raise "expected product metadata" unless product_metadata.fetch("plan") == "pro"
+network_event = timeline_events[1].fetch("attributes")
+network_metadata = network_event.fetch("metadata")
+raise "expected network timeline name" unless network_event.fetch("name") == "network.post /v1/checkout"
+raise "expected network failure status" unless network_event.fetch("status") == "failure"
+raise "expected network timeline source" unless network_metadata.fetch("source") == "network_timeline"
+raise "expected network route stripping" unless network_metadata.fetch("routeTemplate") == "/v1/checkout"
+raise "expected network method" unless network_metadata.fetch("method") == "POST"
+raise "expected network status code" unless network_metadata.fetch("statusCode") == 503
+raise "expected network duration" unless network_metadata.fetch("durationMs") == 42.5
+raise "expected network primitive metadata" unless network_metadata.fetch("cached") == false
+expect("validation_error") { LogBrew::ProductTimeline.product_action(name: "checkout.submit", metadata: { nested: [] }) }
+expect("validation_error") { LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", method: "bad method") }
+expect("validation_error") { LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", duration_ms: -1) }
 
 unauthenticated = client
 enqueue_all(unauthenticated)
@@ -493,6 +548,7 @@ $stderr.puts JSON.generate(
   loggerEvents: 2,
   rackEvents: rack_events.length + rack_error_events.length,
   railsErrorEvents: rails_events.length,
+  timelineEvents: timeline_events.length,
   httpAttempts: http_attempts,
   httpRequests: http_requests
 )
@@ -504,6 +560,7 @@ grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"loggerEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"rackEvents":3' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"railsErrorEvents":1' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"timelineEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 
