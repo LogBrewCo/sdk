@@ -2,7 +2,7 @@
 
 ## Status
 
-This is an SDK-originated backend contract request. No SDK currently advertises source-map or native debug-symbol support as release-ready. SDK-side local validation now has `scripts/create_js_release_artifact_manifest.py`, which creates a dry-run JavaScript source-map manifest without uploading or storing artifacts. Backend handoff is pending because no backend automation/thread target is exposed in this session.
+This is an SDK-originated backend contract request. No SDK currently advertises source-map or native debug-symbol support as release-ready. SDK-side local validation now has `scripts/create_js_release_artifact_manifest.py`, which creates a dry-run JavaScript source-map manifest without uploading or storing artifacts, and `scripts/prepare_js_release_artifact_debug_ids.py`, which dry-runs or explicitly writes matching Debug IDs into built JavaScript/source-map pairs. Backend handoff is pending because no backend automation/thread target is exposed in this session.
 
 ## User Impact
 
@@ -48,11 +48,11 @@ Runtime telemetry matching fields:
 
 ## SDK Gap Observed
 
-Current SDKs have no release artifact uploader, no framework build plugin, and no installed-app proof for source-map or debug-symbol lookup. The repo now has a local dry-run manifest generator for JavaScript build artifacts, but it is not a public upload or symbolication workflow. Runtime timeline helpers are strong, but they do not solve minified stack trace readability.
+Current SDKs have no release artifact uploader, no framework build plugin, and no installed-app proof for source-map or debug-symbol lookup. The repo now has local dry-run JavaScript artifact validation plus Debug ID preparation, but it is not a public upload or symbolication workflow. Runtime timeline helpers are strong, but they do not solve minified stack trace readability.
 
 ## Suggested SDK Work After Backend Contract
 
-- Promote the local JavaScript manifest generator into a public artifact tool only after the backend contract exists; keep `upload` disabled until intake validation and auth behavior are proven.
+- Promote the local JavaScript manifest and Debug ID preparation scripts into a public artifact tool only after the backend contract exists; keep `upload` disabled until intake validation and auth behavior are proven.
 - Start with Vite/Next generic build output before React Native debug-ID injection.
 - Keep runtime packages dependency-light; do not add source-map parsing or upload dependencies to `@logbrew/sdk`.
 - Add docs that teach release artifact setup separately from normal SDK install.
@@ -69,5 +69,5 @@ Current SDKs have no release artifact uploader, no framework build plugin, and n
 
 - Backend unit tests for metadata validation, upload storage, duplicate artifact handling, and delete/list behavior.
 - Symbolication tests for debug-ID match, release/environment/service mismatch, path-prefix match, query/hash stripping, and missing artifact fallback.
-- Local fake-intake SDK tests for successful upload, auth failure, validation failure, oversized artifact, and retryable server failure. Dry-run manifest validation now has focused local tests for ready artifacts, missing source maps, sensitive `sourcesContent`, debug-ID mismatch, and CLI nonzero exit on blocked manifests.
+- Local fake-intake SDK tests for successful upload, auth failure, validation failure, oversized artifact, and retryable server failure. Dry-run manifest validation now has focused local tests for ready artifacts, missing source maps, sensitive `sourcesContent`, debug-ID mismatch, and CLI nonzero exit on blocked manifests. Debug ID preparation now has focused local tests for dry-run-only behavior, explicit `--write` mutation, idempotency, map-only Debug ID propagation, mismatch blocking, and CLI nonzero exit on blocked plans.
 - Real temporary apps for Vite, Next, and React Native source maps before public SDK docs advertise support.
