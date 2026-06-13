@@ -9,9 +9,12 @@ Use these exact values when creating registry-side trusted publisher records for
 - Workflow filename: `publish-packages.yml`
 - GitHub environment: `release`
 
-`publish-release.yml` is the release-level dispatcher. Publishing a GitHub Release dispatches
-`publish-packages.yml` for that release tag with the configured OIDC-capable registries enabled.
-Use its manual `workflow_dispatch` path for a safe dry run or a targeted registry publish.
+`publish-release.yml` is the repo-wide release dispatcher. Publishing a GitHub Release with a
+`vMAJOR.MINOR.PATCH` tag dispatches `publish-packages.yml` for that release tag with the configured
+OIDC-capable registries enabled. Scoped GitHub Releases whose tags contain `/`, such as
+`go/logbrew/v0.1.1`, are informational and skip package publishing so the public Releases page can
+show package-specific progress without republishing unrelated SDKs. Use the manual
+`workflow_dispatch` path for a safe dry run or a targeted registry publish.
 
 Run the package workflow in dry-run mode before any real publish:
 
@@ -19,7 +22,7 @@ Run the package workflow in dry-run mode before any real publish:
 gh workflow run publish-packages.yml -R LogBrewCo/sdk -f ref=v0.1.0 -f target=all -f dry_run=true -f include_unity_npm=false -f include_pypi_extras=false -f include_crates_publish=false -f include_go_module=false
 ```
 
-For `dry_run=false`, `target=all` publishes the OIDC-capable registries plus Packagist and Maven Central when `include_packagist_update=true` and `include_maven_publish=true`, then verifies the public registry versions it actually published. Published GitHub Releases enable those flags automatically. Manual dispatch defaults stay dry-run-safe, so use explicit include flags when proving a targeted real publish.
+For `dry_run=false`, `target=all` publishes the OIDC-capable registries plus Packagist and Maven Central when `include_packagist_update=true` and `include_maven_publish=true`, then verifies the public registry versions it actually published. Repo-wide `vMAJOR.MINOR.PATCH` GitHub Releases enable those flags automatically. Manual dispatch defaults stay dry-run-safe, so use explicit include flags when proving a targeted real publish.
 
 ## npm
 

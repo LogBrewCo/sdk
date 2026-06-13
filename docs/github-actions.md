@@ -15,6 +15,13 @@ This repository should start with GitHub-hosted Actions rather than custom runne
 - `ci.yml`: runs on every push to `main` and every pull request
 - `release-readiness.yml`: runs manually or on version tags and performs package dry-runs only for ecosystems detected in the repository
 - `publish-packages.yml`: manual-only registry publishing with trusted publishing where registries support OIDC, plus public registry version verification after real publishes
+- `publish-release.yml`: dispatches package publishing for repo-wide `vMAJOR.MINOR.PATCH` GitHub Releases and intentionally skips package publishing for scoped package tags such as `go/logbrew/v0.1.1`
+
+## GitHub Release tags
+
+Use repo-wide tags such as `v0.1.1` only when the whole SDK repository should run the real `target=all` package publishing path.
+
+Use scoped tags containing `/` for package-specific GitHub Release notes, for example `go/logbrew/v0.1.1` or `co.logbrew.unity/v0.1.1`. These releases are informational and do not dispatch registry publishing; publish the relevant package first through `publish-packages.yml`, verify the public registry, then create the scoped GitHub Release so the Releases page reflects package progress without republishing unrelated SDKs.
 
 ## Best practices
 

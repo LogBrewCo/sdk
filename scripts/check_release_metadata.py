@@ -37,6 +37,7 @@ JS_PACKAGES = {
 }
 
 OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
+PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
 
 PYTHON_PACKAGES = {
     "python/logbrew_django": {
@@ -719,9 +720,29 @@ def validate_root(root: Path, failures: list[str]) -> None:
     require("MIT License" in license_text, failures, "LICENSE: expected MIT License text")
 
 
+def validate_release_workflows(root: Path, failures: list[str]) -> None:
+    workflow_path = require_path(root, PUBLISH_RELEASE_WORKFLOW, failures)
+    if not workflow_path.exists():
+        return
+    text = workflow_path.read_text(encoding="utf-8")
+    required_needles = {
+        "scoped GitHub Release skip guard": 'if [[ "$RELEASE_TAG" == */* ]]; then',
+        "scoped GitHub Release publish disable": 'publish_packages="false"',
+        "repo-wide SemVer release gate": (
+            'elif [[ "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+'
+            '(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$ ]]; then'
+        ),
+        "publish dispatch output guard": "if: ${{ steps.release.outputs.publish_packages == 'true' }}",
+        "scoped GitHub Release summary": "Skipped package publishing for scoped GitHub Release",
+    }
+    for description, needle in required_needles.items():
+        require(needle in text, failures, f"{PUBLISH_RELEASE_WORKFLOW}: missing {description}")
+
+
 def validate(root: Path, npm_versions: dict[str, str] | None = None) -> list[str]:
     failures: list[str] = []
     validate_root(root, failures)
+    validate_release_workflows(root, failures)
     validate_js_packages(root, failures, npm_versions)
     validate_rust(root, failures)
     validate_python(root, failures)

@@ -19,6 +19,33 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_repo_release_metadata_passes(self) -> None:
         self.assertEqual(check_release_metadata.validate(ROOT), [])
 
+    def test_publish_release_workflow_requires_scoped_release_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = root / ".github" / "workflows"
+            workflow_dir.mkdir(parents=True)
+            (workflow_dir / "publish-release.yml").write_text(
+                """
+name: Publish Release
+on:
+  release:
+    types: [published]
+jobs:
+  dispatch-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh workflow run publish-packages.yml -f target=all -f dry_run=false
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("scoped GitHub Release skip guard" in failure for failure in failures))
+        self.assertTrue(any("publish dispatch output guard" in failure for failure in failures))
+
     def test_parse_npm_package_versions(self) -> None:
         self.assertEqual(
             check_release_metadata.parse_package_versions(["@logbrew/nestjs=0.1.1"]),

@@ -98,17 +98,38 @@ jobs:
         run: |
           set -Eeuo pipefail
 
+          publish_packages="true"
+          release_kind="manual"
+
           if [[ "$EVENT_NAME" == "release" ]]; then
             ref="$RELEASE_TAG"
-            target="all"
-            dry_run="false"
-            include_unity_npm="false"
-            npm_packages=""
-            include_pypi_extras="true"
-            include_crates_publish="true"
-            include_packagist_update="true"
-            include_maven_publish="true"
-            include_go_module="false"
+            if [[ "$RELEASE_TAG" == */* ]]; then
+              publish_packages="false"
+              release_kind="scoped"
+              target="verify"
+              dry_run="true"
+              include_unity_npm="false"
+              npm_packages=""
+              include_pypi_extras="false"
+              include_crates_publish="false"
+              include_packagist_update="false"
+              include_maven_publish="false"
+              include_go_module="false"
+            elif [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+              release_kind="repo-wide"
+              target="all"
+              dry_run="false"
+              include_unity_npm="false"
+              npm_packages=""
+              include_pypi_extras="true"
+              include_crates_publish="true"
+              include_packagist_update="true"
+              include_maven_publish="true"
+              include_go_module="false"
+            else
+              echo "Published GitHub Releases must use a repo-wide vMAJOR.MINOR.PATCH tag or a scoped package tag containing '/': $RELEASE_TAG" >&2
+              exit 1
+            fi
           else
             ref="$INPUT_REF"
             target="$INPUT_TARGET"
@@ -123,6 +144,8 @@ jobs:
           fi
 
           {
+            echo "publish_packages=$publish_packages"
+            echo "release_kind=$release_kind"
             echo "ref=$ref"
             echo "target=$target"
             echo "dry_run=$dry_run"
@@ -136,6 +159,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Dispatch publish-packages.yml
+        if: ${{ steps.release.outputs.publish_packages == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           REF: ${{ steps.release.outputs.ref }}
@@ -163,8 +187,10 @@ jobs:
             -f include_maven_publish="$INCLUDE_MAVEN_PUBLISH" \
             -f include_go_module="$INCLUDE_GO_MODULE"
 
-      - name: Summarize dispatched publish
+      - name: Summarize release publish decision
         env:
+          PUBLISH_PACKAGES: ${{ steps.release.outputs.publish_packages }}
+          RELEASE_KIND: ${{ steps.release.outputs.release_kind }}
           REF: ${{ steps.release.outputs.ref }}
           TARGET: ${{ steps.release.outputs.target }}
           DRY_RUN: ${{ steps.release.outputs.dry_run }}
@@ -176,8 +202,15 @@ jobs:
           INCLUDE_MAVEN_PUBLISH: ${{ steps.release.outputs.include_maven_publish }}
           INCLUDE_GO_MODULE: ${{ steps.release.outputs.include_go_module }}
         run: |
+          set -Eeuo pipefail
+
           {
-            echo "Dispatched package publishing:"
+            if [[ "$PUBLISH_PACKAGES" == "true" ]]; then
+              echo "Dispatched package publishing:"
+            else
+              echo "Skipped package publishing for scoped GitHub Release:"
+            fi
+            echo "- release kind: \`$RELEASE_KIND\`"
             echo "- ref: \`$REF\`"
             echo "- target: \`$TARGET\`"
             echo "- dry_run: \`$DRY_RUN\`"
