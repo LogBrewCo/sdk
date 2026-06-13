@@ -32,6 +32,7 @@ $readmeExample = null;
 $example = null;
 $exampleMakefile = null;
 $httpTransport = null;
+$productTimeline = null;
 $psrLogger = null;
 $monologHandler = null;
 for ($i = 0; $i < $zip->numFiles; $i++) {
@@ -56,6 +57,9 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
     }
     if ($name === "src/HttpTransport.php" || str_ends_with($name, "/src/HttpTransport.php")) {
         $httpTransport = $zip->getFromIndex($i);
+    }
+    if ($name === "src/ProductTimeline.php" || str_ends_with($name, "/src/ProductTimeline.php")) {
+        $productTimeline = $zip->getFromIndex($i);
     }
     if ($name === "src/LogBrewPsrLogger.php" || str_ends_with($name, "/src/LogBrewPsrLogger.php")) {
         $psrLogger = $zip->getFromIndex($i);
@@ -87,6 +91,10 @@ if (!is_string($exampleMakefile)) {
 }
 if (!is_string($httpTransport)) {
     fwrite(STDERR, "missing src/HttpTransport.php in composer archive\n");
+    exit(1);
+}
+if (!is_string($productTimeline)) {
+    fwrite(STDERR, "missing src/ProductTimeline.php in composer archive\n");
     exit(1);
 }
 if (!is_string($psrLogger)) {
@@ -124,6 +132,8 @@ foreach ([
     "previewJson()" => "missing composer archive previewJson guidance\n",
     "MetricAttributes" => "missing composer archive metric guidance\n",
     "This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet." => "missing composer archive metric auto-capture guidance\n",
+    "ProductTimeline" => "missing composer archive timeline guidance\n",
+    "without visual replay, HTTP client patching, request/response payload capture, or header capture" => "missing composer archive timeline privacy guidance\n",
     "HttpTransport" => "missing composer archive HTTP transport guidance\n",
     "HTTP Delivery" => "missing composer archive HTTP delivery heading\n",
     "HttpTransport::DEFAULT_ENDPOINT" => "missing composer archive HTTP endpoint guidance\n",
@@ -325,6 +335,7 @@ if (!is_array($psrLog)) {
 test -f vendor/logbrew/sdk/README.md
 test -f vendor/logbrew/sdk/composer.json
 test -f vendor/logbrew/sdk/src/HttpTransport.php
+test -f vendor/logbrew/sdk/src/ProductTimeline.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/logbrew/sdk/examples/readme_example.php
@@ -349,6 +360,8 @@ foreach ([
     "previewJson()" => "missing installed README previewJson guidance\n",
     "MetricAttributes" => "missing installed README metric guidance\n",
     "This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet." => "missing installed README metric auto-capture guidance\n",
+    "ProductTimeline" => "missing installed README timeline guidance\n",
+    "without visual replay, HTTP client patching, request/response payload capture, or header capture" => "missing installed README timeline privacy guidance\n",
     "HttpTransport" => "missing installed README HTTP transport guidance\n",
     "HTTP Delivery" => "missing installed README HTTP delivery heading\n",
     "HttpTransport::DEFAULT_ENDPOINT" => "missing installed README HTTP endpoint guidance\n",
@@ -574,6 +587,7 @@ composer validate --no-check-publish --no-check-version --strict >/dev/null
 test -f vendor/logbrew/sdk/README.md
 test -f vendor/logbrew/sdk/composer.json
 test -f vendor/logbrew/sdk/src/HttpTransport.php
+test -f vendor/logbrew/sdk/src/ProductTimeline.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/composer/installed.json
@@ -1175,12 +1189,107 @@ fwrite(STDERR, json_encode([
 ], JSON_THROW_ON_ERROR) . PHP_EOL);
 EOF
 
+cat > timeline.php <<'EOF'
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/vendor/autoload.php';
+
+use LogBrew\LogBrewClient;
+use LogBrew\ProductTimeline;
+use LogBrew\SdkError;
+
+function requireTimeline(bool $condition, string $message): void
+{
+    if (!$condition) {
+        fwrite(STDERR, $message . PHP_EOL);
+        exit(1);
+    }
+}
+
+function expectTimelineError(callable $callback, string $needle): void
+{
+    try {
+        $callback();
+    } catch (SdkError $error) {
+        requireTimeline(str_contains($error->getMessage(), $needle), "expected timeline error containing {$needle}");
+        return;
+    }
+
+    fwrite(STDERR, "expected timeline error containing {$needle}" . PHP_EOL);
+    exit(1);
+}
+
+$client = LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app-timeline', '0.1.0');
+$productMetadata = ['cartTier' => 'gold', 'attempt' => 2, 'routeTemplate' => '/raw?debug=sample'];
+$client->action('evt_product_timeline', '2026-06-02T10:00:05Z', ProductTimeline::productAction(
+    name: 'checkout.submit',
+    routeTemplate: 'https://shop.example/checkout/:step?cart=sample#review',
+    sessionId: 'session_123',
+    traceId: 'trace_abc',
+    screen: 'Checkout',
+    funnel: 'checkout',
+    step: 'submit',
+    metadata: $productMetadata
+));
+$productMetadata['cartTier'] = 'platinum';
+$client->action('evt_network_timeline', '2026-06-02T10:00:06Z', ProductTimeline::networkMilestone(
+    routeTemplate: 'https://api.example/v1/payments/:id?debug=sample#fragment',
+    method: 'post',
+    statusCode: 503,
+    durationMs: 183.4,
+    sessionId: 'session_123',
+    traceId: 'trace_abc',
+    metadata: ['api' => 'payments']
+));
+$client->action('evt_network_default_timeline', '2026-06-02T10:00:07Z', ProductTimeline::networkMilestone(
+    routeTemplate: '/health',
+    metadata: ['probe' => true]
+));
+
+$body = $client->previewJson();
+foreach ([
+    '"source": "product_timeline"',
+    '"source": "network_timeline"',
+    '"name": "checkout.submit"',
+    '"name": "network.post \/v1\/payments\/:id"',
+    '"name": "network.get \/health"',
+    '"status": "failure"',
+    '"status": "success"',
+    '"routeTemplate": "\/checkout\/:step"',
+    '"routeTemplate": "\/v1\/payments\/:id"',
+    '"method": "POST"',
+    '"statusCode": 503',
+    '"durationMs": 183.4',
+    '"sessionId": "session_123"',
+    '"traceId": "trace_abc"',
+    '"cartTier": "gold"',
+] as $needle) {
+    requireTimeline(str_contains($body, $needle), "missing timeline payload {$needle}");
+}
+foreach (['cart=sample', 'debug=sample', 'fragment', 'platinum'] as $needle) {
+    requireTimeline(!str_contains($body, $needle), "unexpected timeline payload {$needle}");
+}
+expectTimelineError(static fn () => ProductTimeline::productAction(name: 'checkout.submit', status: 'done'), 'action status must be one of');
+expectTimelineError(static fn () => ProductTimeline::networkMilestone(routeTemplate: '/ok', method: 'GET /bad'), 'network milestone method must be a valid HTTP method');
+expectTimelineError(static fn () => ProductTimeline::networkMilestone(routeTemplate: '/ok', statusCode: 700), 'network milestone statusCode must be between 100 and 599');
+expectTimelineError(static fn () => ProductTimeline::networkMilestone(routeTemplate: '/ok', durationMs: -1), 'network milestone durationMs must be non-negative');
+expectTimelineError(static fn () => ProductTimeline::networkMilestone(routeTemplate: '/ok', name: '   '), 'network milestone name must be non-empty');
+expectTimelineError(static fn () => ProductTimeline::productAction(name: 'checkout.submit', metadata: ['bad' => []]), 'metadata value for bad must be a string, number, boolean, or null');
+expectTimelineError(static fn () => ProductTimeline::productAction(name: 'checkout.submit', metadata: ['source' => []]), 'metadata value for source must be a string, number, boolean, or null');
+
+echo $body . PHP_EOL;
+fwrite(STDERR, json_encode(['timelineEvents' => 3], JSON_THROW_ON_ERROR) . PHP_EOL);
+EOF
+
 php -r '
 $path = $argv[1];
 $data = json_decode(file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);
 $data["scripts"]["smoke-test"] = "php installed-user-test.php";
 $data["scripts"]["smoke-readme"] = "php readme-example.php";
 $data["scripts"]["smoke-run"] = "php smoke.php";
+$data["scripts"]["smoke-timeline"] = "php timeline.php";
 $data["scripts"]["smoke-psr-logger"] = "php psr-logger.php";
 $data["scripts"]["smoke-monolog-handler"] = "php monolog-handler.php";
 $data["scripts"]["smoke-http-transport"] = "php http-transport.php";
@@ -1191,6 +1300,10 @@ file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_S
 composer validate --no-check-publish --no-check-version --strict >/dev/null
 composer run --no-interaction --quiet smoke-test >/dev/null
 composer run --no-interaction --quiet smoke-readme >/dev/null
+composer run --no-interaction smoke-timeline > timeline-composer.stdout.json 2> timeline-composer.stderr.json
+grep -q '"source": "product_timeline"' timeline-composer.stdout.json
+grep -q '"source": "network_timeline"' timeline-composer.stdout.json
+grep -q '"timelineEvents":3' timeline-composer.stderr.json
 composer run --no-interaction smoke-psr-logger > psr-logger.stdout.json 2> psr-logger.stderr.json
 grep -q '"type": "log"' psr-logger.stdout.json
 grep -q '"psrLogger":true' psr-logger.stderr.json
@@ -1220,6 +1333,7 @@ composer validate --no-check-publish --no-check-version --strict >/dev/null
 test -f vendor/logbrew/sdk/README.md
 test -f vendor/logbrew/sdk/composer.json
 test -f vendor/logbrew/sdk/src/HttpTransport.php
+test -f vendor/logbrew/sdk/src/ProductTimeline.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/composer/installed.json
@@ -1413,6 +1527,10 @@ if (!str_contains($preview, '"type": "release"')) {
 PHP
 composer run --no-interaction --quiet smoke-test >/dev/null
 composer run --no-interaction --quiet smoke-readme >/dev/null
+composer run --no-interaction smoke-timeline > timeline-reinstall.stdout.json 2> timeline-reinstall.stderr.json
+grep -q '"source": "product_timeline"' timeline-reinstall.stdout.json
+grep -q '"source": "network_timeline"' timeline-reinstall.stdout.json
+grep -q '"timelineEvents":3' timeline-reinstall.stderr.json
 composer run --no-interaction smoke-psr-logger > psr-logger-reinstall.stdout.json 2> psr-logger-reinstall.stderr.json
 grep -q '"type": "log"' psr-logger-reinstall.stdout.json
 grep -q '"psrLogger":true' psr-logger-reinstall.stderr.json
@@ -1557,6 +1675,33 @@ if (!str_contains($classDoc, '@phpstan-type MetricAttributes array{')) {
 }
 if (!str_contains($classDoc, '@phpstan-type ActionAttributes array{')) {
     fwrite(STDERR, "missing ActionAttributes alias definition\n");
+    exit(1);
+}
+
+$productTimeline = new ReflectionClass(\LogBrew\ProductTimeline::class);
+$productTimelineDoc = $productTimeline->getDocComment() ?: '';
+if (!str_contains($productTimelineDoc, 'App-owned product and network timeline helpers.')) {
+    fwrite(STDERR, "missing ProductTimeline class doc summary\n");
+    exit(1);
+}
+
+$productAction = $productTimeline->getMethod('productAction')->getDocComment() ?: '';
+if (!str_contains($productAction, 'Create an action attribute payload for a product step already known by the application.')) {
+    fwrite(STDERR, "missing ProductTimeline::productAction doc summary\n");
+    exit(1);
+}
+if (!str_contains($productAction, '@return ActionAttributes')) {
+    fwrite(STDERR, "missing ProductTimeline::productAction return docblock\n");
+    exit(1);
+}
+
+$networkMilestone = $productTimeline->getMethod('networkMilestone')->getDocComment() ?: '';
+if (!str_contains($networkMilestone, 'Create an action attribute payload for an app-owned API or network milestone.')) {
+    fwrite(STDERR, "missing ProductTimeline::networkMilestone doc summary\n");
+    exit(1);
+}
+if (!str_contains($networkMilestone, '@return ActionAttributes')) {
+    fwrite(STDERR, "missing ProductTimeline::networkMilestone return docblock\n");
     exit(1);
 }
 
@@ -1759,6 +1904,7 @@ use LogBrew\LogBrewClient;
 use LogBrew\LogBrewMonologHandler;
 use LogBrew\LogBrewPsrLogger;
 use LogBrew\HttpTransport;
+use LogBrew\ProductTimeline;
 use LogBrew\RecordingTransport;
 use Monolog\Logger as MonologLogger;
 
@@ -1800,6 +1946,20 @@ $client->action('evt_action_001', '2026-06-02T10:00:05Z', [
     'name' => 'deploy',
     'status' => 'success',
 ]);
+$client->action('evt_product_timeline_001', '2026-06-02T10:00:06Z', ProductTimeline::productAction(
+    name: 'checkout.submit',
+    routeTemplate: '/checkout/:step?cart=sample#review',
+    sessionId: 'session_123',
+    traceId: 'trace_abc',
+    metadata: ['cartTier' => 'gold']
+));
+$client->action('evt_network_timeline_001', '2026-06-02T10:00:07Z', ProductTimeline::networkMilestone(
+    routeTemplate: '/api/payments/:id?debug=sample',
+    method: 'POST',
+    statusCode: 202,
+    durationMs: 42.0,
+    metadata: ['api' => 'payments']
+));
 
 $response = $client->flush(RecordingTransport::alwaysAccept());
 if ($response->statusCode !== 202) {
@@ -1995,6 +2155,12 @@ EOF
 php metric.php > metric.stdout.txt 2> metric.stderr.json
 test ! -s metric.stdout.txt
 grep -q '"metricEvents":1' metric.stderr.json
+
+php timeline.php > timeline.stdout.json 2> timeline.stderr.json
+grep -q '"source": "product_timeline"' timeline.stdout.json
+grep -q '"source": "network_timeline"' timeline.stdout.json
+grep -q '"name": "network.post \\/v1\\/payments\\/:id"' timeline.stdout.json
+grep -q '"timelineEvents":3' timeline.stderr.json
 
 cat > unauth.php <<'EOF'
 <?php

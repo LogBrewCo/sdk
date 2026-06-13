@@ -92,6 +92,43 @@ $client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [
 
 Metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. Prefer stable, low-cardinality primitive metadata such as service, region, queue, or route pattern. This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet.
 
+## Product and Network Timelines
+
+Use `ProductTimeline` when your PHP service already knows important product steps or API milestones. The helpers create normal `action` events with primitive metadata that AI assistants can analyze across sessions without visual replay, HTTP client patching, request/response payload capture, or header capture.
+
+```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use LogBrew\LogBrewClient;
+use LogBrew\ProductTimeline;
+
+$client = LogBrewClient::create('LOGBREW_API_KEY', 'my-php-app', '1.0.0');
+
+$client->action('evt_action_checkout_submit', '2026-06-02T10:00:05Z', ProductTimeline::productAction(
+    name: 'checkout.submit',
+    routeTemplate: '/checkout/:step',
+    sessionId: 'session_123',
+    traceId: 'trace_abc',
+    screen: 'Checkout',
+    funnel: 'checkout',
+    step: 'submit',
+    metadata: ['cartTier' => 'gold']
+));
+
+$client->action('evt_network_payment', '2026-06-02T10:00:06Z', ProductTimeline::networkMilestone(
+    routeTemplate: 'https://api.example.com/v1/payments/:id?debug=sample',
+    method: 'POST',
+    statusCode: 202,
+    durationMs: 183.4,
+    sessionId: 'session_123',
+    traceId: 'trace_abc'
+));
+```
+
+`ProductTimeline` strips query strings and fragments from route templates, keeps metadata primitive-only, infers failed network milestones from 4xx/5xx status codes, and leaves all capture under app control.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:

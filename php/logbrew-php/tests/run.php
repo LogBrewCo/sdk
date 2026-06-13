@@ -9,6 +9,7 @@ use LogBrew\HttpTransport;
 use LogBrew\LogBrewClient;
 use LogBrew\LogBrewMonologHandler;
 use LogBrew\LogBrewPsrLogger;
+use LogBrew\ProductTimeline;
 use LogBrew\RecordingTransport;
 use LogBrew\SdkError;
 use LogBrew\TransportError;
@@ -407,6 +408,99 @@ expectThrows(
         'temporality' => 'delta',
     ]),
     'metric temporality for gauge must be one of'
+);
+
+$productMetadata = [
+    'cartTier' => 'gold',
+    'attempt' => 2,
+    'routeTemplate' => '/raw?debug=sample',
+];
+$client = sampleClient();
+$client->action('evt_product_timeline', '2026-06-02T10:00:05Z', ProductTimeline::productAction(
+    name: 'checkout.submit',
+    routeTemplate: 'https://shop.example/checkout/:step?cart=sample#review',
+    sessionId: 'session_123',
+    traceId: 'trace_abc',
+    screen: 'Checkout',
+    funnel: 'checkout',
+    step: 'submit',
+    metadata: $productMetadata
+));
+$productMetadata['cartTier'] = 'platinum';
+$productPreview = $client->previewJson();
+foreach ([
+    '"name": "checkout.submit"',
+    '"status": "success"',
+    '"source": "product_timeline"',
+    '"routeTemplate": "\/checkout\/:step"',
+    '"sessionId": "session_123"',
+    '"traceId": "trace_abc"',
+    '"screen": "Checkout"',
+    '"funnel": "checkout"',
+    '"step": "submit"',
+    '"cartTier": "gold"',
+    '"attempt": 2',
+] as $needle) {
+    assertTrue(str_contains($productPreview, $needle), "missing product timeline payload: {$needle}");
+}
+assertTrue(!str_contains($productPreview, 'cart=sample'), 'expected product query text to be omitted');
+assertTrue(!str_contains($productPreview, 'debug=sample'), 'expected app metadata route override');
+assertTrue(!str_contains($productPreview, 'platinum'), 'expected product timeline metadata to be copied');
+
+$client = sampleClient();
+$client->action('evt_network_timeline', '2026-06-02T10:00:06Z', ProductTimeline::networkMilestone(
+    routeTemplate: 'https://api.example/v1/payments/:id?debug=sample#fragment',
+    method: 'post',
+    statusCode: 503,
+    durationMs: 183.4,
+    sessionId: 'session_123',
+    traceId: 'trace_abc',
+    metadata: ['api' => 'payments']
+));
+$client->action('evt_network_timeline_default', '2026-06-02T10:00:07Z', ProductTimeline::networkMilestone('/health'));
+$networkPreview = $client->previewJson();
+foreach ([
+    '"name": "network.post \/v1\/payments\/:id"',
+    '"status": "failure"',
+    '"source": "network_timeline"',
+    '"routeTemplate": "\/v1\/payments\/:id"',
+    '"method": "POST"',
+    '"statusCode": 503',
+    '"durationMs": 183.4',
+    '"api": "payments"',
+    '"name": "network.get \/health"',
+    '"status": "success"',
+] as $needle) {
+    assertTrue(str_contains($networkPreview, $needle), "missing network timeline payload: {$needle}");
+}
+assertTrue(!str_contains($networkPreview, 'debug=sample'), 'expected network query text to be omitted');
+expectThrows(
+    fn () => ProductTimeline::networkMilestone('/orders/:id', method: 'GET /bad'),
+    'network milestone method must be a valid HTTP method'
+);
+expectThrows(
+    fn () => ProductTimeline::networkMilestone('/orders/:id', statusCode: 700),
+    'network milestone statusCode must be between 100 and 599'
+);
+expectThrows(
+    fn () => ProductTimeline::networkMilestone('/orders/:id', durationMs: -1),
+    'network milestone durationMs must be non-negative'
+);
+expectThrows(
+    fn () => ProductTimeline::networkMilestone('/orders/:id', name: '   '),
+    'network milestone name must be non-empty'
+);
+expectThrows(
+    fn () => ProductTimeline::networkMilestone('   '),
+    'network milestone routeTemplate must be non-empty'
+);
+expectThrows(
+    fn () => ProductTimeline::productAction('checkout.submit', metadata: ['bad' => []]),
+    'metadata value for bad must be a string, number, boolean, or null'
+);
+expectThrows(
+    fn () => ProductTimeline::productAction('checkout.submit', metadata: ['source' => []]),
+    'metadata value for source must be a string, number, boolean, or null'
 );
 
 $client = sampleClient();
