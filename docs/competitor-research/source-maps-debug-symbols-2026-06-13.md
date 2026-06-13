@@ -54,7 +54,7 @@ LogBrew should not copy heavyweight auto-instrumentation or upload raw source by
 ## Concrete LogBrew Work
 
 - Define the backend contract before adding SDK claims: upload, list, delete, validation error, and symbolication lookup shapes.
-- Keep expanding the JS dry-run path before real upload: validate minified files, source maps, matching Debug IDs, sensitive `sourcesContent`, Git metadata, and normalized minified URLs against local fake intake tests.
+- Keep expanding the JS dry-run path before real upload: validate minified files, source maps, matching Debug IDs, sensitive `sourcesContent`, Git metadata, and normalized minified URLs. A local real-user smoke now proves this against temporary build output, but fake intake/upload proof still depends on the backend contract.
 - Keep Debug ID preparation dry-run-first and explicit; mutation of build output should require a `--write`-style opt-in and should never touch runtime source packages.
 - Add runtime docs/API fields for optional `debugId` or `artifactId` only after ingestion and issue lookup can consume them.
 - Add Vite/Next/React Native proof apps that create minified errors, upload artifacts to a local intake, and verify unminified output.
