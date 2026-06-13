@@ -121,6 +121,7 @@ For PHP packages specifically, prefer a smoke path that creates a fresh Composer
 ## Release checks
 
 - Shared release metadata: `python3 scripts/check_release_metadata.py`
+- SDK-originated backend contract reports: `python3 scripts/check_backend_contract_reports.py`
 - Public registry versions after real publishes: `python3 scripts/check_registry_publication.py --target all`
 - Shared Markdown docs: `python3 scripts/check_markdown_links.py`
 - Shared shell smoke/package scripts: `bash scripts/check_shell_static.sh`
