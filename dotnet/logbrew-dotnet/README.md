@@ -56,6 +56,43 @@ client.Metric(
 
 Metric kinds are `counter`, `gauge`, and `histogram`. Counters and histograms use `delta` or `cumulative` temporality and must be non-negative; gauges use `instant` temporality and may go up or down. Prefer stable, low-cardinality primitive metadata such as service, region, queue, or route pattern. This SDK does not automatically collect CLR, runtime, or framework metrics yet.
 
+## Product and Network Timelines
+
+Use `ProductTimeline` when your .NET service already knows important product steps or API milestones. The helpers create normal `action` events with primitive metadata that AI assistants can analyze across sessions without visual replay, HTTP client patching, request/response payload capture, or header capture.
+
+```csharp
+using System.Collections.Generic;
+using LogBrew;
+
+var client = LogBrewClient.Create("LOGBREW_API_KEY", "my-dotnet-app", "1.0.0");
+
+client.Action(
+    "evt_action_checkout_submit",
+    "2026-06-02T10:00:05Z",
+    ProductTimeline.ProductAction("checkout.submit")
+        .WithRouteTemplate("/checkout/:step")
+        .WithSessionId("session_123")
+        .WithTraceId("trace_abc")
+        .WithScreen("Checkout")
+        .WithFunnel("checkout")
+        .WithStep("submit")
+        .WithMetadata(new Dictionary<string, object?> { ["cartTier"] = "gold" })
+        .ToActionAttributes());
+
+client.Action(
+    "evt_network_payment",
+    "2026-06-02T10:00:06Z",
+    ProductTimeline.NetworkMilestone("https://api.example.com/v1/payments/:id?debug=sample")
+        .WithMethod("POST")
+        .WithStatusCode(202)
+        .WithDurationMs(183.4)
+        .WithSessionId("session_123")
+        .WithTraceId("trace_abc")
+        .ToActionAttributes());
+```
+
+`ProductTimeline` strips query strings and fragments from route templates, keeps metadata primitive-only, and leaves all product action and network milestone capture under app control.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:
@@ -124,6 +161,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 - `PreviewJson()` returns the queued batch as pretty JSON.
 - `Flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `HttpTransport` sends queued batches through `System.Net.Http` with configurable endpoint, headers, timeout, and app-owned `HttpClient` support.
+- `ProductTimeline` queues app-owned product and network milestone events without visual replay, HTTP client patching, payload capture, or header capture.
 - `Shutdown(transport)` flushes queued events and rejects later writes.
 - `AddLogBrew(client, options)` connects existing `ILogger` calls to LogBrew without global logging side effects.
 - `RecordingTransport.AlwaysAccept()` is useful when you want to inspect queued JSON before network delivery.

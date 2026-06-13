@@ -80,6 +80,8 @@ for needle in (
     "PreviewJson()",
     "MetricAttributes",
     "This SDK does not automatically collect CLR, runtime, or framework metrics yet.",
+    "ProductTimeline",
+    "without visual replay, HTTP client patching, request/response payload capture, or header capture",
     "HttpTransport",
     "System.Net.Http",
     "AddLogBrew(client",

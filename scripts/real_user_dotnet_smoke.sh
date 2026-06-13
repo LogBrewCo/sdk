@@ -92,6 +92,8 @@ for needle in (
     "PreviewJson()",
     "MetricAttributes",
     "This SDK does not automatically collect CLR, runtime, or framework metrics yet.",
+    "ProductTimeline",
+    "without visual replay, HTTP client patching, request/response payload capture, or header capture",
     "HttpTransport",
     "System.Net.Http",
     "AddLogBrew(client",
@@ -317,6 +319,57 @@ Expect("validation_error", () => metrics.Metric(
     "2026-06-02T10:00:06Z",
     MetricAttributes.Create("queue.depth", "gauge", 2.0, "{items}", "delta")));
 
+var productMetadata = new Dictionary<string, object?>
+{
+    ["cartTier"] = "gold",
+    ["attempt"] = 2,
+    ["routeTemplate"] = "/raw?debug=sample"
+};
+var timeline = NewClient();
+timeline.Action(
+    "evt_product_timeline",
+    "2026-06-02T10:00:05Z",
+    ProductTimeline.ProductAction("checkout.submit")
+        .WithRouteTemplate("https://shop.example/checkout/:step?cart=sample#review")
+        .WithSessionId("session_123")
+        .WithTraceId("trace_abc")
+        .WithScreen("Checkout")
+        .WithFunnel("checkout")
+        .WithStep("submit")
+        .WithMetadata(productMetadata)
+        .ToActionAttributes());
+productMetadata["cartTier"] = "platinum";
+timeline.Action(
+    "evt_network_timeline",
+    "2026-06-02T10:00:06Z",
+    ProductTimeline.NetworkMilestone("https://api.example/v1/payments/:id?debug=sample#fragment")
+        .WithMethod("post")
+        .WithStatusCode(503)
+        .WithDurationMs(183.4)
+        .WithSessionId("session_123")
+        .WithTraceId("trace_abc")
+        .WithMetadata(new Dictionary<string, object?> { ["api"] = "payments" })
+        .ToActionAttributes());
+var timelinePayload = timeline.PreviewJson();
+Require(timeline.PendingEvents() == 2, "timeline queues two events");
+Require(timelinePayload.Contains("\"source\": \"product_timeline\"", StringComparison.Ordinal), "product timeline source");
+Require(timelinePayload.Contains("\"source\": \"network_timeline\"", StringComparison.Ordinal), "network timeline source");
+Require(timelinePayload.Contains("\"routeTemplate\": \"/checkout/:step\"", StringComparison.Ordinal), "product route sanitization");
+Require(timelinePayload.Contains("\"routeTemplate\": \"/v1/payments/:id\"", StringComparison.Ordinal), "network route sanitization");
+Require(timelinePayload.Contains("\"name\": \"network.post /v1/payments/:id\"", StringComparison.Ordinal), "network action name");
+Require(timelinePayload.Contains("\"status\": \"failure\"", StringComparison.Ordinal), "network failure status");
+Require(timelinePayload.Contains("\"method\": \"POST\"", StringComparison.Ordinal), "network method normalization");
+Require(timelinePayload.Contains("\"statusCode\": 503", StringComparison.Ordinal), "network status code");
+Require(timelinePayload.Contains("\"durationMs\": 183.4", StringComparison.Ordinal), "network duration");
+Require(timelinePayload.Contains("\"cartTier\": \"gold\"", StringComparison.Ordinal), "copied product metadata");
+Require(timelinePayload.Contains("\"api\": \"payments\"", StringComparison.Ordinal), "network metadata");
+Require(!timelinePayload.Contains("debug=sample", StringComparison.Ordinal), "timeline query text should be omitted");
+Require(!timelinePayload.Contains("platinum", StringComparison.Ordinal), "timeline metadata should be copied");
+Expect("validation_error", () => ProductTimeline.NetworkMilestone("/orders/:id").WithMethod("GET /bad").ToActionAttributes());
+Expect("validation_error", () => ProductTimeline.NetworkMilestone("/orders/:id").WithStatusCode(700).ToActionAttributes());
+Expect("validation_error", () => ProductTimeline.NetworkMilestone("/orders/:id").WithDurationMs(-1).ToActionAttributes());
+Expect("validation_error", () => ProductTimeline.NetworkMilestone("   ").ToActionAttributes());
+
 Expect("validation_error", () => happy.Log("evt_bad", "2026-06-02T10:00:03", LogAttributes.Create("worker started", "info")));
 
 var unauthenticated = NewClient();
@@ -393,6 +446,7 @@ Console.Error.WriteLine(
     "{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"httpAttempts\":"
     + httpAttempts.ToString(CultureInfo.InvariantCulture)
     + ",\"metricEvents\":1"
+    + ",\"timelineEvents\":2"
     + ",\"httpRequests\":"
     + httpRequests.ToString(CultureInfo.InvariantCulture)
     + "}");
@@ -544,6 +598,7 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"timelineEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 
 echo "dotnet real-user smoke passed"

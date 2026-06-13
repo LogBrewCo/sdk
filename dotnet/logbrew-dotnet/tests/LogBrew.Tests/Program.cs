@@ -128,6 +128,83 @@ ExpectSdkError("validation_error", "metric temporality for gauge must be one of"
     SampleClient().Metric("evt_metric_001", "2026-06-02T10:00:06Z", MetricAttributes.Create("queue.depth", "gauge", 2.0, "{items}", "delta")));
 tests++;
 
+var productTimelineMetadata = new Dictionary<string, object?>
+{
+    ["cartTier"] = "gold",
+    ["attempt"] = 2,
+    ["routeTemplate"] = "/raw?debug=sample"
+};
+var productTimelineClient = SampleClient();
+productTimelineClient.Action(
+    "evt_product_timeline",
+    "2026-06-02T10:00:05Z",
+    ProductTimeline.ProductAction("checkout.submit")
+        .WithRouteTemplate("https://shop.example/checkout/:step?cart=sample#review")
+        .WithSessionId("session_123")
+        .WithTraceId("trace_abc")
+        .WithScreen("Checkout")
+        .WithFunnel("checkout")
+        .WithStep("submit")
+        .WithMetadata(productTimelineMetadata)
+        .ToActionAttributes());
+productTimelineMetadata["cartTier"] = "platinum";
+var productTimelinePreview = productTimelineClient.PreviewJson();
+AssertTrue(productTimelineClient.PendingEvents() == 1, "expected product timeline event");
+AssertTrue(productTimelinePreview.Contains("\"name\": \"checkout.submit\"", StringComparison.Ordinal), "expected product action name");
+AssertTrue(productTimelinePreview.Contains("\"status\": \"success\"", StringComparison.Ordinal), "expected product action status");
+AssertTrue(productTimelinePreview.Contains("\"source\": \"product_timeline\"", StringComparison.Ordinal), "expected product timeline source");
+AssertTrue(productTimelinePreview.Contains("\"routeTemplate\": \"/checkout/:step\"", StringComparison.Ordinal), "expected sanitized product route template");
+AssertTrue(productTimelinePreview.Contains("\"sessionId\": \"session_123\"", StringComparison.Ordinal), "expected product session id");
+AssertTrue(productTimelinePreview.Contains("\"traceId\": \"trace_abc\"", StringComparison.Ordinal), "expected product trace id");
+AssertTrue(productTimelinePreview.Contains("\"screen\": \"Checkout\"", StringComparison.Ordinal), "expected product screen");
+AssertTrue(productTimelinePreview.Contains("\"funnel\": \"checkout\"", StringComparison.Ordinal), "expected product funnel");
+AssertTrue(productTimelinePreview.Contains("\"step\": \"submit\"", StringComparison.Ordinal), "expected product step");
+AssertTrue(productTimelinePreview.Contains("\"cartTier\": \"gold\"", StringComparison.Ordinal), "expected product metadata copy");
+AssertTrue(productTimelinePreview.Contains("\"attempt\": 2", StringComparison.Ordinal), "expected product primitive metadata");
+AssertTrue(!productTimelinePreview.Contains("cart=sample", StringComparison.Ordinal), "expected product query text to be omitted");
+AssertTrue(!productTimelinePreview.Contains("debug=sample", StringComparison.Ordinal), "expected product metadata route override");
+AssertTrue(!productTimelinePreview.Contains("platinum", StringComparison.Ordinal), "expected product metadata to be copied");
+tests++;
+
+var networkTimelineClient = SampleClient();
+networkTimelineClient.Action(
+    "evt_network_timeline",
+    "2026-06-02T10:00:06Z",
+    ProductTimeline.NetworkMilestone("https://api.example/v1/payments/:id?debug=sample#fragment")
+        .WithMethod("post")
+        .WithStatusCode(503)
+        .WithDurationMs(183.4)
+        .WithSessionId("session_123")
+        .WithTraceId("trace_abc")
+        .WithMetadata(new Dictionary<string, object?> { ["api"] = "payments" })
+        .ToActionAttributes());
+networkTimelineClient.Action(
+    "evt_network_timeline_default",
+    "2026-06-02T10:00:07Z",
+    ProductTimeline.NetworkMilestone("/health").ToActionAttributes());
+var networkTimelinePreview = networkTimelineClient.PreviewJson();
+AssertTrue(networkTimelineClient.PendingEvents() == 2, "expected network timeline events");
+AssertTrue(networkTimelinePreview.Contains("\"name\": \"network.post /v1/payments/:id\"", StringComparison.Ordinal), "expected network action name");
+AssertTrue(networkTimelinePreview.Contains("\"status\": \"failure\"", StringComparison.Ordinal), "expected network failure status");
+AssertTrue(networkTimelinePreview.Contains("\"source\": \"network_timeline\"", StringComparison.Ordinal), "expected network timeline source");
+AssertTrue(networkTimelinePreview.Contains("\"routeTemplate\": \"/v1/payments/:id\"", StringComparison.Ordinal), "expected sanitized network route");
+AssertTrue(networkTimelinePreview.Contains("\"method\": \"POST\"", StringComparison.Ordinal), "expected normalized network method");
+AssertTrue(networkTimelinePreview.Contains("\"statusCode\": 503", StringComparison.Ordinal), "expected network status code");
+AssertTrue(networkTimelinePreview.Contains("\"durationMs\": 183.4", StringComparison.Ordinal), "expected network duration");
+AssertTrue(networkTimelinePreview.Contains("\"api\": \"payments\"", StringComparison.Ordinal), "expected network primitive metadata");
+AssertTrue(networkTimelinePreview.Contains("\"name\": \"network.get /health\"", StringComparison.Ordinal), "expected default network method name");
+AssertTrue(networkTimelinePreview.Contains("\"status\": \"success\"", StringComparison.Ordinal), "expected default network status");
+AssertTrue(!networkTimelinePreview.Contains("debug=sample", StringComparison.Ordinal), "expected network query text to be omitted");
+ExpectSdkError("validation_error", "network milestone method must be a valid HTTP method", () =>
+    ProductTimeline.NetworkMilestone("/orders/:id").WithMethod("GET /bad").ToActionAttributes());
+ExpectSdkError("validation_error", "network milestone statusCode must be between 100 and 599", () =>
+    ProductTimeline.NetworkMilestone("/orders/:id").WithStatusCode(700).ToActionAttributes());
+ExpectSdkError("validation_error", "network milestone durationMs must be non-negative", () =>
+    ProductTimeline.NetworkMilestone("/orders/:id").WithDurationMs(-1).ToActionAttributes());
+ExpectSdkError("validation_error", "network milestone routeTemplate must be non-empty", () =>
+    ProductTimeline.NetworkMilestone("   ").ToActionAttributes());
+tests++;
+
 var unauthorizedClient = SampleClient();
 EnqueueAll(unauthorizedClient);
 ExpectSdkError("unauthenticated", "transport rejected the API key", () =>
