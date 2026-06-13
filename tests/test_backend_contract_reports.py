@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+import importlib.util
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MODULE_PATH = ROOT / "scripts" / "check_backend_contract_reports.py"
+SPEC = importlib.util.spec_from_file_location("check_backend_contract_reports", MODULE_PATH)
+assert SPEC is not None
+check_backend_contract_reports = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(check_backend_contract_reports)
+
+
+VALID_REPORT = """# Backend Contract Report: Example - 2026-06-14
+
+## Status
+
+Backend handoff is pending because no backend automation/thread target is exposed.
+
+## Priority
+
+P1 - Blocks release confidence for the affected SDK workflow.
+
+## User Impact
+
+Developers cannot trust this workflow in production until the backend supports it.
+
+## Expected Backend Capability
+
+Suggested APIs:
+
+- `POST /api/example` with event fields `release`, `environment`, and `service`.
+
+## SDK Gap Observed
+
+The SDK can prepare data locally, but there is no backend endpoint to accept it.
+
+## Verification Needed
+
+- Unit tests for validation failure.
+- Local smoke proof for success and retryable failure.
+"""
+PRIORITY_BLOCK = (
+    "## Priority\n\n"
+    "P1 - Blocks release confidence for the affected SDK workflow.\n\n"
+)
+
+
+class BackendContractReportTests(unittest.TestCase):
+    def test_repo_backend_contract_reports_pass(self) -> None:
+        self.assertEqual(check_backend_contract_reports.validate(ROOT), [])
+
+    def test_valid_report_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_dir = root / "docs" / "backend-contracts"
+            report_dir.mkdir(parents=True)
+            (report_dir / "example.md").write_text(VALID_REPORT, encoding="utf-8")
+
+            failures = check_backend_contract_reports.validate(root)
+
+        self.assertEqual(failures, [])
+
+    def test_missing_priority_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_dir = root / "docs" / "backend-contracts"
+            report_dir.mkdir(parents=True)
+            (report_dir / "example.md").write_text(
+                VALID_REPORT.replace(PRIORITY_BLOCK, ""),
+                encoding="utf-8",
+            )
+
+            failures = check_backend_contract_reports.validate(root)
+
+        self.assertTrue(any("missing required '## Priority'" in failure for failure in failures))
+
+    def test_missing_handoff_status_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_dir = root / "docs" / "backend-contracts"
+            report_dir.mkdir(parents=True)
+            (report_dir / "example.md").write_text(
+                VALID_REPORT.replace(
+                    "Backend handoff is pending because no backend automation/thread target is exposed.",
+                    "This report is ready for backend work.",
+                ),
+                encoding="utf-8",
+            )
+
+            failures = check_backend_contract_reports.validate(root)
+
+        self.assertTrue(any("Status must state backend handoff" in failure for failure in failures))
+
+
+if __name__ == "__main__":
+    unittest.main()

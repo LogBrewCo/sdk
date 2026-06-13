@@ -4,6 +4,10 @@
 
 This is an SDK-originated backend contract request. No SDK currently advertises source-map or native debug-symbol support as release-ready. SDK-side local validation now has `scripts/create_js_release_artifact_manifest.py`, which creates a dry-run JavaScript source-map manifest without uploading or storing artifacts, and `scripts/prepare_js_release_artifact_debug_ids.py`, which dry-runs or explicitly writes matching Debug IDs into built JavaScript/source-map pairs. Backend handoff is pending because no backend automation/thread target is exposed in this session.
 
+## Priority
+
+P1 - This blocks production-grade frontend, mobile, native, and Unity debugging confidence against Sentry/Datadog-class expectations. Runtime SDKs can still ship safely, but LogBrew should not claim release-artifact symbolication support until backend upload, validation, lookup, and symbolicated error proof exist.
+
 ## User Impact
 
 Developers comparing LogBrew with Sentry or Datadog will see a major production triage gap: minified JavaScript errors and native/mobile crashes remain hard to read unless LogBrew can match runtime stack frames to uploaded build artifacts. This weakens trust for frontend, React Native, mobile, Unity, and native SDK adoption even though runtime error capture works.
