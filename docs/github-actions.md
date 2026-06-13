@@ -19,7 +19,7 @@ This repository should start with GitHub-hosted Actions rather than custom runne
 
 ## GitHub Release tags
 
-Use repo-wide tags such as `v0.1.1` only when the whole SDK repository should run the real `target=all` package publishing path.
+Use repo-wide tags such as `v0.1.1` only when the whole SDK repository should run the real `target=all` package publishing path. The repo-wide release workflow checks that every package manifest it would publish already matches the tag version before dispatching registry jobs; if versions are mixed, use scoped/manual changed-package publishing or bump every listed package first.
 
 Use scoped tags containing `/` for package-specific GitHub Release notes, for example `go/logbrew/v0.1.1` or `co.logbrew.unity/v0.1.1`. These releases are informational and do not dispatch registry publishing; publish the relevant package first through `publish-packages.yml`, verify the public registry, then create the scoped GitHub Release so the Releases page reflects package progress without republishing unrelated SDKs.
 
@@ -48,3 +48,4 @@ Important: GitHub evaluates `release` workflows from the release tag's commit, n
 3. Keep `.github/publishing/trusted-publishers.md` aligned with registry-side trusted publisher records.
 4. Run publish workflow dry-runs before every external publish.
 5. Run `target=verify` after registry publishes or when marketplace state is unclear.
+6. Before creating a repo-wide Release, run `python3 scripts/check_repo_wide_release_versions.py vX.Y.Z` and fix any mixed-version output.

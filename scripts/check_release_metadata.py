@@ -730,12 +730,14 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         return
     text = workflow_path.read_text(encoding="utf-8")
     required_needles = {
+        "release ref checkout": "Check out release ref",
         "scoped GitHub Release skip guard": 'if [[ "$RELEASE_TAG" == */* ]]; then',
         "scoped GitHub Release publish disable": 'publish_packages="false"',
         "repo-wide SemVer release gate": (
             'elif [[ "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+'
             '(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$ ]]; then'
         ),
+        "repo-wide version guard": "python3 scripts/check_repo_wide_release_versions.py \"$REF\"",
         "publish dispatch output guard": "if: ${{ steps.release.outputs.publish_packages == 'true' }}",
         "scoped GitHub Release summary": "Skipped package publishing for scoped GitHub Release",
     }
@@ -747,9 +749,11 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             continue
         docs = docs_path.read_text(encoding="utf-8")
         require(
-            "release tag's commit" in docs and "historical tags" in docs,
+            "release tag's commit" in docs
+            and "historical tags" in docs
+            and "check_repo_wide_release_versions.py" in docs,
             failures,
-            f"{relative_path}: missing historical release-tag workflow safety warning",
+            f"{relative_path}: missing release workflow safety warning",
         )
 
 

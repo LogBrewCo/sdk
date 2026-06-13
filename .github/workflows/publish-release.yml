@@ -79,6 +79,11 @@ jobs:
     name: Dispatch package publishing
     runs-on: ubuntu-latest
     steps:
+      - name: Check out release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.ref }}
+
       - id: release
         name: Resolve release publish inputs
         shell: bash
@@ -157,6 +162,12 @@ jobs:
             echo "include_maven_publish=$include_maven_publish"
             echo "include_go_module=$include_go_module"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Guard repo-wide release package versions
+        if: ${{ steps.release.outputs.release_kind == 'repo-wide' }}
+        env:
+          REF: ${{ steps.release.outputs.ref }}
+        run: python3 scripts/check_repo_wide_release_versions.py "$REF"
 
       - name: Dispatch publish-packages.yml
         if: ${{ steps.release.outputs.publish_packages == 'true' }}
