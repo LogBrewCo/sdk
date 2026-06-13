@@ -16,6 +16,10 @@ OIDC-capable registries enabled. Scoped GitHub Releases whose tags contain `/`, 
 show package-specific progress without republishing unrelated SDKs. Use the manual
 `workflow_dispatch` path for a safe dry run or a targeted registry publish.
 
+Important: GitHub evaluates `release` workflows from the release tag's commit. Do not create
+GitHub Releases for historical tags that point to commits before the scoped-release guard unless
+`publish-release.yml` is disabled or the workflow behavior has been audited first.
+
 Run the package workflow in dry-run mode before any real publish:
 
 ```bash

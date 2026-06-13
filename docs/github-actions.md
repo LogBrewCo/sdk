@@ -23,6 +23,8 @@ Use repo-wide tags such as `v0.1.1` only when the whole SDK repository should ru
 
 Use scoped tags containing `/` for package-specific GitHub Release notes, for example `go/logbrew/v0.1.1` or `co.logbrew.unity/v0.1.1`. These releases are informational and do not dispatch registry publishing; publish the relevant package first through `publish-packages.yml`, verify the public registry, then create the scoped GitHub Release so the Releases page reflects package progress without republishing unrelated SDKs.
 
+Important: GitHub evaluates `release` workflows from the release tag's commit, not just from current `main`. Do not create GitHub Releases for historical tags that point to commits before the scoped-release guard unless `publish-release.yml` is disabled or the workflow behavior has been audited first. Prefer creating future scoped release-note tags after the guard is present.
+
 ## Best practices
 
 - Keep default permissions minimal with `contents: read`

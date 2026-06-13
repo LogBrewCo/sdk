@@ -38,6 +38,10 @@ JS_PACKAGES = {
 
 OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
 PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
+RELEASE_SAFETY_DOCS = (
+    "docs/github-actions.md",
+    ".github/publishing/trusted-publishers.md",
+)
 
 PYTHON_PACKAGES = {
     "python/logbrew_django": {
@@ -737,6 +741,16 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
     }
     for description, needle in required_needles.items():
         require(needle in text, failures, f"{PUBLISH_RELEASE_WORKFLOW}: missing {description}")
+    for relative_path in RELEASE_SAFETY_DOCS:
+        docs_path = require_path(root, relative_path, failures)
+        if not docs_path.exists():
+            continue
+        docs = docs_path.read_text(encoding="utf-8")
+        require(
+            "release tag's commit" in docs and "historical tags" in docs,
+            failures,
+            f"{relative_path}: missing historical release-tag workflow safety warning",
+        )
 
 
 def validate(root: Path, npm_versions: dict[str, str] | None = None) -> list[str]:
