@@ -125,6 +125,17 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         self.assertEqual(payload["message"], "unknown argument: --bad-arg")
         self.assert_toolchain_versions_shape(payload)
 
+    def test_public_verifier_runs_backend_contract_gate(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"Backend contract report checks"', script)
+        self.assertRegex(
+            script,
+            r'begin_step \d+ "Backend contract report checks"\n'
+            r'run_shell_step "python3 scripts/check_backend_contract_reports\.py"\n'
+            r"mark_step_complete",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
