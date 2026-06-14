@@ -76,6 +76,7 @@ STEP_LABELS=(
   "Shell static analysis"
   "Workflow YAML validation"
   "Confidentiality leak scan"
+  "JavaScript release artifact smoke"
   "Generated artifact hygiene"
 )
 steps_total="${#STEP_LABELS[@]}"
@@ -576,7 +577,11 @@ begin_step 56 "Confidentiality leak scan"
 run_shell_step "python3 scripts/check_confidentiality_scan.py"
 mark_step_complete
 
-begin_step 57 "Generated artifact hygiene"
+begin_step 57 "JavaScript release artifact smoke"
+run_shell_step "bash scripts/real_user_js_release_artifact_smoke.sh"
+mark_step_complete
+
+begin_step 58 "Generated artifact hygiene"
 cleanup_build_artifacts
 run_shell_step "PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_generated_artifacts.py"
 mark_step_complete

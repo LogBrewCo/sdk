@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -135,6 +136,29 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'run_shell_step "python3 scripts/check_backend_contract_reports\.py"\n'
             r"mark_step_complete",
         )
+
+    def test_public_verifier_runs_release_artifact_smoke_before_hygiene(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"JavaScript release artifact smoke"', script)
+        self.assertRegex(
+            script,
+            r'begin_step \d+ "JavaScript release artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_js_release_artifact_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_step \d+ "Generated artifact hygiene"',
+        )
+
+    def test_declared_step_labels_match_executable_steps(self) -> None:
+        script = SCRIPT.read_text()
+        labels_block = re.search(r"STEP_LABELS=\(\n(?P<labels>.*?)\n\)", script, re.DOTALL)
+        self.assertIsNotNone(labels_block)
+        assert labels_block is not None
+
+        declared_labels = re.findall(r'^\s+"([^"]+)"$', labels_block.group("labels"), re.MULTILINE)
+        executable_labels = re.findall(r'^begin_step \d+ "([^"]+)"$', script, re.MULTILINE)
+
+        self.assertEqual(declared_labels, executable_labels)
 
 
 if __name__ == "__main__":
