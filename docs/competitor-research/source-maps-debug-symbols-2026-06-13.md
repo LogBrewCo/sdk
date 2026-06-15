@@ -9,8 +9,11 @@ This note records why LogBrew is currently behind Sentry and Datadog for post-de
 - Sentry JavaScript public repo at `getsentry/sentry-javascript@4e12c7a9013daa6b14e6b7e6106304e3eba42724`
 - Sentry source paths read: `dev-packages/test-utils/src/sourcemap-upload-utils.ts`, `packages/sveltekit/src/vite/sourceMaps.ts`
 - Datadog JavaScript source maps docs: https://docs.datadoghq.com/real_user_monitoring/guide/upload-javascript-source-maps/
+- Datadog Source Maps build plugin docs: https://docs.datadoghq.com/real_user_monitoring/application_monitoring/browser/build_plugins/source_maps/
 - Datadog CI public repo at `DataDog/datadog-ci@74ed439f292a09a44d38de1f4f5ac092e9528b75`
 - Datadog source paths read: `packages/base/src/commands/sourcemaps/README.md`, `packages/base/src/commands/sourcemaps/upload.ts`, `packages/base/src/commands/sourcemaps/interfaces.ts`, `packages/base/src/commands/sourcemaps/validation.ts`, `packages/base/src/helpers/git/format-git-sourcemaps-data.ts`, `packages/base/src/commands/react-native/injectDebugId.ts`
+
+2026-06-15 drift check: Sentry's current docs still recommend Debug IDs for matching event stack frames to minified source and source maps, and Datadog now documents a browser build plugin that discovers `.js`/`.map` pairs and uploads them with Git metadata during builds. LogBrew should still keep runtime SDKs dependency-light, but the future public tooling path should include an optional build-plugin layer after backend upload/lookup exists.
 
 ## What Competitors Do Better Today
 
@@ -57,5 +60,5 @@ LogBrew should not copy heavyweight auto-instrumentation or upload raw source by
 - Keep expanding the JS dry-run path before real upload: validate minified files, source maps, matching Debug IDs, sensitive `sourcesContent`, Git metadata, and normalized minified URLs. A local real-user smoke now proves this against temporary build output, but fake intake/upload proof still depends on the backend contract.
 - Keep Debug ID preparation dry-run-first and explicit; mutation of build output should require a `--write`-style opt-in and should never touch runtime source packages.
 - Add runtime docs/API fields for optional `debugId` or `artifactId` only after ingestion and issue lookup can consume them.
-- Add Vite/Next/React Native proof apps that create minified errors, upload artifacts to a local intake, and verify unminified output.
+- After backend intake exists, add Vite/Next/React Native proof apps that create minified errors, upload artifacts to a local intake, and verify unminified output; then add an optional build-plugin layer.
 - Add native follow-up contracts for Swift/Kotlin/Unity/C/C++/Objective-C symbol formats instead of claiming crash symbolication from normal error capture.
