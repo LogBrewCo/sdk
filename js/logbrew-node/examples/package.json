@@ -1,6 +1,7 @@
 {
   "type": "module",
   "scripts": {
+    "first-useful-telemetry": "node index.mjs first-useful-telemetry",
     "help": "node index.mjs --help",
     "list": "node index.mjs --list",
     "readme-example": "node index.mjs readme-example",

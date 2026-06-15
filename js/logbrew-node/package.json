@@ -49,6 +49,6 @@
     "@logbrew/sdk": "^0.1.0"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check examples/index.mjs && node --check examples/first-useful-telemetry.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
   }
 }

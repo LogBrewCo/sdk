@@ -40,6 +40,7 @@ grep -q '^package/index.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/examples/first-useful-telemetry.mjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/examples/index.mjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/examples/package.json$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/node-tarball.txt"
@@ -499,9 +500,46 @@ node -e 'const node = require("@logbrew/node"); if (typeof node.withLogBrewHttpH
 node -e 'const node = require("@logbrew/node"); if (typeof node.createNodeFetchTransport !== "function") process.exit(1)'
 
 node node_modules/@logbrew/node/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
+grep -q 'node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/node/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"
 node node_modules/@logbrew/node/examples/index.mjs --list > "$tmp_dir/launcher-list.txt"
+grep -q 'first-useful-telemetry -> node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry' "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/node/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
+node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry > "$tmp_dir/example-first-useful.stdout.json" 2> "$tmp_dir/example-first-useful.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-first-useful.stdout.json" >/dev/null
+python3 - "$tmp_dir/example-first-useful.stdout.json" "$tmp_dir/example-first-useful.stderr.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+summary = json.loads(Path(sys.argv[2]).read_text())
+events = payload.get("events", [])
+ids = {event.get("id") for event in events}
+required_ids = {
+    "evt_release_checkout_api",
+    "evt_environment_checkout_api",
+    "evt_log_checkout_received",
+    "evt_action_checkout_started",
+    "evt_network_payment_authorized",
+    "evt_metric_checkout_duration",
+    "evt_span_checkout_request",
+}
+missing = sorted(required_ids - ids)
+if missing:
+    raise SystemExit(f"missing first useful telemetry ids: {missing}")
+request_span = next(event for event in events if event["id"] == "evt_span_checkout_request")
+if request_span["type"] != "span":
+    raise SystemExit(f"expected request span, got {request_span}")
+metadata = request_span["attributes"]["metadata"]
+if metadata["path"] != "/checkout/123" or "coupon" in json.dumps(metadata):
+    raise SystemExit(f"request span should omit query text: {metadata}")
+network = next(event for event in events if event["id"] == "evt_network_payment_authorized")
+if network["attributes"]["metadata"]["routeTemplate"] != "/payments/:paymentId":
+    raise SystemExit(f"missing network route template: {network}")
+if summary.get("events") != 7 or summary.get("traceId") != request_span["attributes"]["traceId"]:
+    raise SystemExit(f"unexpected first useful summary: {summary}")
+PY
 node node_modules/@logbrew/node/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
@@ -513,9 +551,14 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q 'GET /explode failed' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/node/examples run list > "$tmp_dir/npm-helper-list.txt"
+grep -q 'first-useful-telemetry -> node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry' "$tmp_dir/npm-helper-list.txt"
 grep -q 'readme-example -> node node_modules/@logbrew/node/examples/index.mjs readme-example' "$tmp_dir/npm-helper-list.txt"
 npm --prefix node_modules/@logbrew/node/examples run help > "$tmp_dir/npm-helper-help.txt"
+grep -q 'npm --prefix node_modules/@logbrew/node/examples run first-useful-telemetry' "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/node/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
+npm --prefix node_modules/@logbrew/node/examples run --silent first-useful-telemetry > "$tmp_dir/npm-helper-first-useful.stdout.json" 2> "$tmp_dir/npm-helper-first-useful.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-first-useful.stdout.json" >/dev/null
+grep -q '"events":7' "$tmp_dir/npm-helper-first-useful.stderr.json"
 npm --prefix node_modules/@logbrew/node/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null

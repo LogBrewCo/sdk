@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const commands = {
+  "first-useful-telemetry": "first-useful-telemetry.mjs",
   "readme-example": "readme-example.mjs",
   "real-user-smoke": "real-user-smoke.mjs"
 };
@@ -15,11 +16,14 @@ if (command === "--help" || command === "-h") {
   console.log("Usage: node node_modules/@logbrew/node/examples/index.mjs [command]");
   console.log("");
   console.log("Commands:");
+  console.log("  first-useful-telemetry  Run the first useful Node.js telemetry example");
   console.log("  readme-example    Run the README-sized Node.js example");
   console.log("  real-user-smoke   Run the full Node.js real-user smoke example");
   console.log("");
+  console.log("npm --prefix node_modules/@logbrew/node/examples run first-useful-telemetry");
   console.log("npm --prefix node_modules/@logbrew/node/examples run readme-example");
   console.log("npm --prefix node_modules/@logbrew/node/examples run real-user-smoke");
+  console.log("node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry");
   console.log("node node_modules/@logbrew/node/examples/index.mjs readme-example");
   console.log("node node_modules/@logbrew/node/examples/index.mjs real-user-smoke");
   process.exit(0);
