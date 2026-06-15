@@ -380,6 +380,9 @@ jobs:
       - name: Run Rust real-user smoke test
         run: bash scripts/real_user_rust_smoke.sh
 
+      - name: Run Rust Axum real-user smoke test
+        run: bash scripts/real_user_rust_axum_smoke.sh
+
       - name: Dry-run publish
         shell: bash
         run: |

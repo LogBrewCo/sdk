@@ -214,6 +214,79 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 `HttpRequestTelemetry` strips query strings and hash fragments from route templates, normalizes HTTP methods, adds primitive metadata such as `routeTemplate`, `method`, `statusCode`, and `statusCodeClass`, treats valid incoming W3C `traceparent` values as parent context, and falls back to the explicit app trace ID when propagation is missing or malformed. It does not create backend setup state, inspect account sessions, capture arbitrary headers, or read request/response bodies.
 
+## Axum Middleware Example
+
+For Axum apps, use `route_layer` plus `middleware::from_fn_with_state` so LogBrew receives Axum's matched route template instead of the raw request URI. The packaged `examples/axum_request_middleware.rs` file is a runnable mini-app; the core pattern is:
+
+```rust
+use axum::{
+    body::Body,
+    extract::{MatchedPath, State},
+    http::Request,
+    middleware::Next,
+    response::Response,
+};
+use logbrew::{HttpRequestTelemetry, LogBrewClient, Metadata, MetadataValue};
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+
+#[derive(Clone)]
+struct AppState {
+    client: Arc<Mutex<LogBrewClient>>,
+}
+
+async fn logbrew_middleware(
+    State(state): State<AppState>,
+    matched_path: Option<MatchedPath>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let started = Instant::now();
+    let method = request.method().as_str().to_string();
+    let incoming_traceparent = request
+        .headers()
+        .get("traceparent")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let route_template = matched_path
+        .map(|path| path.as_str().to_string())
+        .unwrap_or_else(|| request.uri().path().to_string());
+
+    let response = next.run(request).await;
+    let mut metadata = Metadata::new();
+    metadata.insert("framework".to_string(), MetadataValue::String("axum".to_string()));
+
+    let mut telemetry = HttpRequestTelemetry::new(
+        route_template,
+        method,
+        "11111111111111111111111111111111",
+        "b7ad6b7169203331",
+    )
+    .with_status_code(response.status().as_u16())
+    .with_duration_ms(started.elapsed().as_secs_f64() * 1000.0)
+    .with_metadata(metadata);
+    if let Some(traceparent) = incoming_traceparent {
+        telemetry = telemetry.with_incoming_traceparent(traceparent);
+    }
+
+    let events = telemetry.build().expect("request telemetry should build");
+    let mut client = state.client.lock().expect("LogBrew client lock should be available");
+    client
+        .span("evt_http_request", "2026-06-02T10:00:00Z", events.span)
+        .expect("request span should queue");
+    if let Some(metric) = events.metric {
+        client
+            .metric("evt_http_request_duration", "2026-06-02T10:00:00Z", metric)
+            .expect("request metric should queue");
+    }
+    response
+}
+```
+
+Keep the LogBrew client in your own state management, generate unique event/span IDs per request, and flush on your normal lifecycle boundary. The middleware should only read the W3C `traceparent` propagation header and framework-owned route/status metadata; do not capture arbitrary headers, raw request URIs, payloads, account session values, or user-specific identifiers.
+
 ## W3C Trace Context
 
 Use `Traceparent` when your Rust app already has an incoming or outgoing W3C `traceparent` value:

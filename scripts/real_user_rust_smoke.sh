@@ -102,6 +102,7 @@ grep -q '^logbrew-0.1.0/examples/readme_example.rs$' "$tmp_dir/crate-contents.tx
 grep -q '^logbrew-0.1.0/examples/real_user_smoke.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/first_useful_telemetry.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/http_server_request.rs$' "$tmp_dir/crate-contents.txt"
+grep -q '^logbrew-0.1.0/examples/axum_request_middleware.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/Makefile$' "$tmp_dir/crate-contents.txt"
 crate_readme="$tmp_dir/crate-readme.md"
 tar -xOf "$crate_path" logbrew-0.1.0/README.md > "$crate_readme"
@@ -119,6 +120,7 @@ grep -q 'ProductTimeline' "$crate_readme"
 grep -q 'Product And Network Timelines' "$crate_readme"
 grep -q 'First Useful Service Telemetry' "$crate_readme"
 grep -q 'HTTP Server Request Telemetry' "$crate_readme"
+grep -q 'Axum Middleware Example' "$crate_readme"
 grep -q 'Traceparent' "$crate_readme"
 grep -q 'HttpRequestTelemetry' "$crate_readme"
 grep -q 'W3C Trace Context' "$crate_readme"
@@ -131,7 +133,7 @@ crate_manifest="$tmp_dir/crate-Cargo.toml"
 tar -xOf "$crate_path" logbrew-0.1.0/Cargo.toml > "$crate_manifest"
 crate_examples_makefile="$tmp_dir/crate-examples-Makefile"
 tar -xOf "$crate_path" logbrew-0.1.0/examples/Makefile > "$crate_examples_makefile"
-grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request$' "$crate_examples_makefile"
+grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware$' "$crate_examples_makefile"
 grep -q '^help:$' "$crate_examples_makefile"
 grep -q '^run: run-real-user-smoke$' "$crate_examples_makefile"
 grep -q '^run-readme-example:$' "$crate_examples_makefile"
@@ -142,11 +144,14 @@ grep -q '^run-first-useful-telemetry:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --example first_useful_telemetry --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q '^run-http-server-request:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --example http_server_request --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
+grep -q '^run-axum-request-middleware:$' "$crate_examples_makefile"
+grep -q '^	@cargo run --quiet --example axum_request_middleware --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q 'run-readme-example -> make run-readme-example' "$crate_examples_makefile"
 grep -q 'run (real-user-smoke) -> make run' "$crate_examples_makefile"
 grep -q 'run-real-user-smoke -> make run-real-user-smoke' "$crate_examples_makefile"
 grep -q 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$crate_examples_makefile"
 grep -q 'run-http-server-request -> make run-http-server-request' "$crate_examples_makefile"
+grep -q 'run-axum-request-middleware -> make run-axum-request-middleware' "$crate_examples_makefile"
 python3 - "$crate_manifest" <<'PY'
 from pathlib import Path
 import tomllib
@@ -194,6 +199,7 @@ test -f "$crate_dir/examples/readme_example.rs"
 test -f "$crate_dir/examples/real_user_smoke.rs"
 test -f "$crate_dir/examples/first_useful_telemetry.rs"
 test -f "$crate_dir/examples/http_server_request.rs"
+test -f "$crate_dir/examples/axum_request_middleware.rs"
 test -f "$crate_dir/examples/Makefile"
 
 cargo run --quiet --manifest-path "$crate_dir/Cargo.toml" --example readme_example > "$tmp_dir/packaged-readme-example.stdout.json" 2> "$tmp_dir/packaged-readme-example.stderr.json"
@@ -225,7 +231,8 @@ grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' "$tmp_dir/packaged-ex
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run-http-server-request -> make run-http-server-request' <(sed -n '5p' "$tmp_dir/packaged-example-make-help.txt")
-test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "5"
+grep -qx 'run-axum-request-middleware -> make run-axum-request-middleware' <(sed -n '6p' "$tmp_dir/packaged-example-make-help.txt")
+test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "6"
 (cd "$crate_dir/examples" && make run-readme-example) > "$tmp_dir/packaged-readme-example-make.stdout.json" 2> "$tmp_dir/packaged-readme-example-make.stderr.json"
 grep -q '"type": "release"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "environment"' "$tmp_dir/packaged-readme-example-make.stdout.json"
@@ -268,6 +275,10 @@ cargo run --quiet --manifest-path Cargo.toml --example http_server_request > "$t
 python3 "$repo_root/scripts/check_rust_http_server_payload.py" "$tmp_dir/packaged-http-server.stdout.json" "$tmp_dir/packaged-http-server.stderr.json" >/dev/null
 (cd "$crate_dir/examples" && make run-http-server-request) > "$tmp_dir/packaged-http-server-make.stdout.json" 2> "$tmp_dir/packaged-http-server-make.stderr.json"
 python3 "$repo_root/scripts/check_rust_http_server_payload.py" "$tmp_dir/packaged-http-server-make.stdout.json" "$tmp_dir/packaged-http-server-make.stderr.json" >/dev/null
+cargo run --quiet --manifest-path Cargo.toml --example axum_request_middleware > "$tmp_dir/packaged-axum.stdout.json" 2> "$tmp_dir/packaged-axum.stderr.json"
+python3 "$repo_root/scripts/check_rust_axum_payload.py" "$tmp_dir/packaged-axum.stdout.json" "$tmp_dir/packaged-axum.stderr.json" >/dev/null
+(cd "$crate_dir/examples" && make run-axum-request-middleware) > "$tmp_dir/packaged-axum-make.stdout.json" 2> "$tmp_dir/packaged-axum-make.stderr.json"
+python3 "$repo_root/scripts/check_rust_axum_payload.py" "$tmp_dir/packaged-axum-make.stdout.json" "$tmp_dir/packaged-axum-make.stderr.json" >/dev/null
 
 cd "$tmp_dir"
 cargo new --quiet lifecycle-app

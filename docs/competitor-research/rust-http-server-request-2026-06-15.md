@@ -16,21 +16,23 @@ Follow-up to the Rust first-useful pass. Tested the next practical service gap f
 - The helper builds a request `SpanEvent`, optional `http.server.duration` histogram metric, effective trace/span IDs, parent span ID when a valid incoming W3C `traceparent` is continued, and an outgoing `traceparent` value for downstream app-owned clients.
 - Route templates are sanitized to remove query strings and hash fragments, HTTP methods are normalized, status code class is captured, `5xx` maps to span `error`, and malformed incoming propagation falls back non-fatally to the explicit app trace ID.
 - Packaged example and installed-app smoke proof validate span/metric output, outgoing propagation, route-template privacy, and absence of payload/header/query leakage.
+- Follow-up Axum proof adds a packaged `examples/axum_request_middleware.rs` mini-app plus generated `axum-app` install smoke. It uses Axum's matched route template through app-owned middleware, reads only W3C `traceparent`, returns an outgoing `traceparent`, and keeps Axum/Tokio/Tower out of LogBrew's default dependency path.
 
 ## Where LogBrew Is Better Today
 
 - No new runtime dependencies and no default Tower/Axum dependency tax.
 - No global middleware side effects by default; apps choose where to call the helper and keep response ownership.
 - Safer route semantics than URI-based transaction naming: public examples use stable route templates and explicitly reject query/hash leakage.
+- A runnable Axum mini-app now shows the exact middleware glue from an installed package without forcing every Rust user to accept Axum/Tokio/Tower dependencies.
 - Lower-friction first useful path for teams that only need hosted logs/actions/network milestones/metrics/spans before adopting full OpenTelemetry or Sentry-style automatic instrumentation.
 
 ## Where LogBrew Is Still Worse
 
-- No drop-in Tower `Layer` or Axum middleware yet, so users still need a few lines of app-owned middleware glue.
+- No drop-in Tower `Layer` or Axum middleware crate yet, so teams that expect one-line middleware still need to copy the app-owned glue.
 - No Rust `tracing` subscriber/layer bridge yet, so existing `tracing` spans and logs are not automatically converted.
 - No Actix/Rocket examples yet.
 - Source-map/native symbolication and backend-owned setup/usage/quota contracts remain broader product gaps.
 
 ## Next Focus
 
-Add one installed Axum or Tower mini-app smoke example that shows the exact app-owned middleware glue using `HttpRequestTelemetry`, then evaluate a minimal `tracing` bridge. Keep both optional and dependency-light; do not patch global clients, capture arbitrary headers, capture request/response bodies, or infer route names from raw URLs.
+Evaluate a minimal Rust `tracing` bridge or optional Tower `Layer` only if it stays dependency-light and does not hide route-template ownership. Keep integrations optional; do not patch global clients, capture arbitrary headers, capture request/response bodies, or infer route names from raw URLs.

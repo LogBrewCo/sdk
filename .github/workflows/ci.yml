@@ -123,6 +123,10 @@ jobs:
         if: ${{ hashFiles('Cargo.toml') != '' }}
         run: bash scripts/real_user_rust_smoke.sh
 
+      - name: Run Rust Axum real-user smoke test
+        if: ${{ hashFiles('Cargo.toml') != '' }}
+        run: bash scripts/real_user_rust_axum_smoke.sh
+
       - name: Run JavaScript SDK tests
         if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
         run: python3 scripts/check_js_sources.py && bash scripts/check_js_lint.sh && bash scripts/check_js_package.sh && cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test
