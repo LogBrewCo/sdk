@@ -71,6 +71,7 @@ class LogBrewExamplesEntrypointTests(unittest.TestCase):
             stdout.getvalue().splitlines(),
             [
                 "agent-timeline -> python -m logbrew_sdk.examples agent-timeline",
+                "first-useful-telemetry -> python -m logbrew_sdk.examples first-useful-telemetry",
                 "readme-example -> python -m logbrew_sdk.examples readme-example",
                 "real-user-smoke -> python -m logbrew_sdk.examples real-user-smoke",
                 "default (real-user-smoke) -> python -m logbrew_sdk.examples",
@@ -91,6 +92,13 @@ class LogBrewExamplesEntrypointTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         runner.assert_called_once_with()
 
+    def test_named_first_useful_telemetry_runs_requested_example(self) -> None:
+        with patch("logbrew_sdk.examples.first_useful_telemetry.main", return_value=0) as runner:
+            exit_code = examples_main.main(["first-useful-telemetry"])
+
+        self.assertEqual(exit_code, 0)
+        runner.assert_called_once_with()
+
     def test_help_outputs_packaged_examples_usage(self) -> None:
         stdout = io.StringIO()
         with self.assertRaises(SystemExit) as ctx, redirect_stdout(stdout):
@@ -100,10 +108,14 @@ class LogBrewExamplesEntrypointTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("Run the packaged LogBrew SDK examples", output)
         self.assertIn("--list", output)
-        self.assertIn("{agent-timeline,readme-example,real-user-smoke}", output)
+        self.assertIn("{agent-timeline,first-useful-telemetry,readme-example,real-user-smoke}", output)
         self.assertIn("Packaged examples:", output)
         self.assertIn(
             "agent-timeline -> python -m logbrew_sdk.examples agent-timeline",
+            output,
+        )
+        self.assertIn(
+            "first-useful-telemetry -> python -m logbrew_sdk.examples first-useful-telemetry",
             output,
         )
         self.assertIn(
@@ -148,6 +160,7 @@ class LogBrewExamplesEntrypointTests(unittest.TestCase):
             result.stdout.splitlines(),
             [
                 "agent-timeline -> python -m logbrew_sdk.examples agent-timeline",
+                "first-useful-telemetry -> python -m logbrew_sdk.examples first-useful-telemetry",
                 "readme-example -> python -m logbrew_sdk.examples readme-example",
                 "real-user-smoke -> python -m logbrew_sdk.examples real-user-smoke",
                 "default (real-user-smoke) -> python -m logbrew_sdk.examples",
@@ -215,6 +228,34 @@ class LogBrewExamplesEntrypointTests(unittest.TestCase):
                 "attempts": 1,
                 "events": 2,
                 "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            },
+        )
+
+    def test_repo_checkout_examples_module_named_first_useful_telemetry_runs(self) -> None:
+        result = run_repo_module("first-useful-telemetry")
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            [event["type"] for event in payload["events"]],
+            ["release", "environment", "log", "action", "action", "metric", "span"],
+        )
+        self.assertEqual(payload["events"][3]["attributes"]["metadata"]["routeTemplate"], "/checkout/:cart_id")
+        self.assertEqual(payload["events"][4]["attributes"]["metadata"]["routeTemplate"], "/payments/:payment_id")
+        self.assertEqual(payload["events"][6]["attributes"]["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736")
+        self.assertEqual(payload["events"][6]["attributes"]["parentSpanId"], "00f067aa0ba902b7")
+        output_text = result.stdout
+        self.assertNotIn("coupon=private", output_text)
+        self.assertNotIn("card=private", output_text)
+        self.assertNotIn("authorization", output_text)
+        self.assertEqual(
+            json.loads(result.stderr),
+            {
+                "ok": True,
+                "status": 202,
+                "attempts": 1,
+                "events": 7,
+                "requestSpan": "evt_span_checkout_request",
+                "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
             },
         )
 

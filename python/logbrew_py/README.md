@@ -87,6 +87,111 @@ print(
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush()` or `shutdown()` to send queued events through a transport, and use `preview_json()` when you want a stable local JSON preview before sending anything.
 
+## First Useful Telemetry
+
+For a new Python service, capture a small set of signals that explain what changed, where the service ran, what the user or job attempted, which outbound dependency mattered, how long it took, and how the request links to a distributed trace:
+
+```python
+import logging
+
+from logbrew_sdk import (
+    LogBrewClient,
+    LogBrewLoggingHandler,
+    RecordingTransport,
+    create_network_milestone_attributes,
+    create_product_action_attributes,
+    span_attributes_from_traceparent,
+)
+
+traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+route_template = "/checkout/:cart_id"
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.4.0",
+)
+client.release(
+    "evt_release_checkout_api",
+    "2026-06-15T08:00:00Z",
+    {"version": "1.4.0", "commit": "abc123def456"},
+)
+client.environment(
+    "evt_environment_checkout_api",
+    "2026-06-15T08:00:01Z",
+    {"name": "production", "region": "us-east-1"},
+)
+
+logger = logging.getLogger("checkout-api")
+logger.addHandler(LogBrewLoggingHandler(client, metadata={"service": "checkout-api"}))
+logger.setLevel(logging.INFO)
+logger.info("checkout request accepted", extra={"routeTemplate": route_template, "traceId": trace_id})
+
+client.action(
+    "evt_action_checkout_started",
+    "2026-06-15T08:00:03Z",
+    create_product_action_attributes(
+        {
+            "name": "checkout started",
+            "status": "running",
+            "sessionId": "sess_checkout_123",
+            "traceId": trace_id,
+            "routeTemplate": route_template,
+            "funnel": "checkout",
+            "step": "payment",
+        }
+    ),
+)
+client.action(
+    "evt_network_payment_authorized",
+    "2026-06-15T08:00:04Z",
+    create_network_milestone_attributes(
+        {
+            "routeTemplate": "/payments/:payment_id",
+            "method": "POST",
+            "statusCode": 202,
+            "durationMs": 43,
+            "sessionId": "sess_checkout_123",
+            "traceId": trace_id,
+        }
+    ),
+)
+client.metric(
+    "evt_metric_checkout_duration",
+    "2026-06-15T08:00:05Z",
+    {
+        "name": "checkout.duration",
+        "kind": "histogram",
+        "value": 128,
+        "unit": "ms",
+        "temporality": "delta",
+        "metadata": {"routeTemplate": route_template, "traceId": trace_id},
+    },
+)
+client.span(
+    "evt_span_checkout_request",
+    "2026-06-15T08:00:06Z",
+    span_attributes_from_traceparent(
+        traceparent,
+        name="POST /checkout/:cart_id",
+        span_id="b7ad6b7169203331",
+        status="ok",
+        duration_ms=17,
+        metadata={"routeTemplate": route_template, "service": "checkout-api"},
+    ),
+)
+client.shutdown(RecordingTransport.always_accept())
+```
+
+The packaged example prints a local JSON preview of this flow:
+
+```bash
+python -m logbrew_sdk.examples first-useful-telemetry
+```
+
+This path is intentionally app-owned. It uses Python's standard logging module, explicit W3C `traceparent` continuation, and explicit product, network, and metric helpers. It does not patch global HTTP clients, does not collect request or response bodies, does not capture arbitrary headers, and timeline helpers strip query strings and hashes from route templates.
+
 ## Metrics
 
 Use `metric()` for explicit, application-owned measurements. LogBrew validates the metric name, kind, value, unit, temporality, and optional metadata before queueing the event:

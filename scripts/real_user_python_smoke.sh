@@ -143,16 +143,56 @@ run_agent_timeline_example() {
     grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/$output_prefix.stderr.json"
 }
 
+run_first_useful_telemetry_example() {
+    local make_target="$1"
+    local output_prefix="$2"
+
+    run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.json" 2> "$tmp_dir/$output_prefix.stderr.json"
+    grep -q '"type": "release"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"type": "environment"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"type": "log"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"type": "action"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"type": "metric"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"type": "span"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"id": "evt_release_checkout_api"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"id": "evt_environment_checkout_api"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"id": "evt_action_checkout_started"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"id": "evt_network_payment_authorized"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"id": "evt_metric_checkout_duration"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"id": "evt_span_checkout_request"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"routeTemplate": "/checkout/:cart_id"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"parentSpanId": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
+    if grep -q 'coupon=private' "$tmp_dir/$output_prefix.stdout.json"; then
+        echo "first useful telemetry leaked query text" >&2
+        exit 1
+    fi
+    if grep -q 'card=private' "$tmp_dir/$output_prefix.stdout.json"; then
+        echo "first useful telemetry leaked payload text" >&2
+        exit 1
+    fi
+    if grep -q '"authorization"' "$tmp_dir/$output_prefix.stdout.json"; then
+        echo "first useful telemetry leaked header metadata" >&2
+        exit 1
+    fi
+    python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/$output_prefix.stdout.json" >/dev/null
+    grep -q '"events": 7' "$tmp_dir/$output_prefix.stderr.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stderr.json"
+    grep -q '"requestSpan": "evt_span_checkout_request"' "$tmp_dir/$output_prefix.stderr.json"
+}
+
 check_packaged_examples_listing() {
     local make_target="$1"
     local output_prefix="$2"
 
     run_make "$make_target" > "$tmp_dir/$output_prefix.stdout.txt"
     grep -qx 'agent-timeline -> python -m logbrew_sdk.examples agent-timeline' <(sed -n '1p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'readme-example -> python -m logbrew_sdk.examples readme-example' <(sed -n '2p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'real-user-smoke -> python -m logbrew_sdk.examples real-user-smoke' <(sed -n '3p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'default (real-user-smoke) -> python -m logbrew_sdk.examples' <(sed -n '4p' "$tmp_dir/$output_prefix.stdout.txt")
-    test "$(wc -l < "$tmp_dir/$output_prefix.stdout.txt" | tr -d ' ')" = "4"
+    grep -qx 'first-useful-telemetry -> python -m logbrew_sdk.examples first-useful-telemetry' <(sed -n '2p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'readme-example -> python -m logbrew_sdk.examples readme-example' <(sed -n '3p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'real-user-smoke -> python -m logbrew_sdk.examples real-user-smoke' <(sed -n '4p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'default (real-user-smoke) -> python -m logbrew_sdk.examples' <(sed -n '5p' "$tmp_dir/$output_prefix.stdout.txt")
+    test "$(wc -l < "$tmp_dir/$output_prefix.stdout.txt" | tr -d ' ')" = "5"
 }
 
 check_packaged_examples_help() {
@@ -166,10 +206,12 @@ check_packaged_examples_help() {
     grep -q 'package\.' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q -- '--list' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q 'agent-timeline' "$tmp_dir/$output_prefix.stdout.txt"
+    grep -q 'first-useful-telemetry' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q 'readme-example' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q 'real-user-smoke' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q '^Packaged examples:$' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q '^  agent-timeline -> python -m logbrew_sdk.examples agent-timeline$' "$tmp_dir/$output_prefix.stdout.txt"
+    grep -q '^  first-useful-telemetry -> python -m logbrew_sdk.examples first-useful-telemetry$' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q '^  readme-example -> python -m logbrew_sdk.examples readme-example$' "$tmp_dir/$output_prefix.stdout.txt"
     grep -q '^  real-user-smoke -> python -m logbrew_sdk.examples real-user-smoke$' "$tmp_dir/$output_prefix.stdout.txt"
     grep -Fqx '  default (real-user-smoke) -> python -m logbrew_sdk.examples' <(grep '^  default ' "$tmp_dir/$output_prefix.stdout.txt")
@@ -186,11 +228,12 @@ check_makefile_help() {
     grep -qx 'smoke-packaged-smoke -> make smoke-packaged-smoke' <(sed -n '5p' "$tmp_dir/$output_prefix.stdout.txt")
     grep -qx 'smoke-packaged-examples-readme -> make smoke-packaged-examples-readme' <(sed -n '6p' "$tmp_dir/$output_prefix.stdout.txt")
     grep -qx 'smoke-packaged-examples-agent-timeline -> make smoke-packaged-examples-agent-timeline' <(sed -n '7p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'smoke-packaged-examples-list -> make smoke-packaged-examples-list' <(sed -n '8p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'smoke-packaged-examples-help -> make smoke-packaged-examples-help' <(sed -n '9p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'smoke-packaged-examples (default packaged entrypoint) -> make smoke-packaged-examples' <(sed -n '10p' "$tmp_dir/$output_prefix.stdout.txt")
-    grep -qx 'smoke-run (real-user-smoke) -> make smoke-run' <(sed -n '11p' "$tmp_dir/$output_prefix.stdout.txt")
-    test "$(wc -l < "$tmp_dir/$output_prefix.stdout.txt" | tr -d ' ')" = "11"
+    grep -qx 'smoke-packaged-examples-first-useful-telemetry -> make smoke-packaged-examples-first-useful-telemetry' <(sed -n '8p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'smoke-packaged-examples-list -> make smoke-packaged-examples-list' <(sed -n '9p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'smoke-packaged-examples-help -> make smoke-packaged-examples-help' <(sed -n '10p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'smoke-packaged-examples (default packaged entrypoint) -> make smoke-packaged-examples' <(sed -n '11p' "$tmp_dir/$output_prefix.stdout.txt")
+    grep -qx 'smoke-run (real-user-smoke) -> make smoke-run' <(sed -n '12p' "$tmp_dir/$output_prefix.stdout.txt")
+    test "$(wc -l < "$tmp_dir/$output_prefix.stdout.txt" | tr -d ' ')" = "12"
 }
 
 run_smoke_script() {
@@ -271,6 +314,7 @@ run_reinstall_from_freeze() {
     run_packaged_real_user_module "smoke-packaged-smoke" "$output_prefix-freeze-packaged-smoke"
     run_packaged_example_module "smoke-packaged-examples-readme" "$output_prefix-freeze-packaged-examples-readme"
     run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "$output_prefix-freeze-packaged-examples-agent-timeline"
+    run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "$output_prefix-freeze-packaged-examples-first-useful-telemetry"
     check_packaged_examples_listing "smoke-packaged-examples-list" "$output_prefix-freeze-packaged-examples-list"
     check_packaged_examples_help "smoke-packaged-examples-help" "$output_prefix-freeze-packaged-examples-help"
     run_packaged_examples_entrypoint "smoke-packaged-examples" "$output_prefix-freeze-packaged-examples"
@@ -316,6 +360,7 @@ run_reinstall_from_direct_requirement() {
     run_packaged_real_user_module "smoke-packaged-smoke" "$output_prefix-direct-packaged-smoke"
     run_packaged_example_module "smoke-packaged-examples-readme" "$output_prefix-direct-packaged-examples-readme"
     run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "$output_prefix-direct-packaged-examples-agent-timeline"
+    run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "$output_prefix-direct-packaged-examples-first-useful-telemetry"
     check_packaged_examples_listing "smoke-packaged-examples-list" "$output_prefix-direct-packaged-examples-list"
     check_packaged_examples_help "smoke-packaged-examples-help" "$output_prefix-direct-packaged-examples-help"
     run_packaged_examples_entrypoint "smoke-packaged-examples" "$output_prefix-direct-packaged-examples"
@@ -371,6 +416,7 @@ with zipfile.ZipFile(wheel_path) as archive:
         "logbrew_sdk/examples/__init__.py",
         "logbrew_sdk/examples/__main__.py",
         "logbrew_sdk/examples/agent_timeline.py",
+        "logbrew_sdk/examples/first_useful_telemetry.py",
         "logbrew_sdk/examples/readme_example.py",
         "logbrew_sdk/examples/real_user_smoke.py",
         "logbrew_sdk/py.typed",
@@ -394,6 +440,7 @@ for needle in (
     "create_product_action_attributes",
     "create_network_milestone_attributes",
     "span_attributes_from_traceparent",
+    "first-useful-telemetry",
 ):
     if needle not in metadata:
         raise SystemExit(f"missing wheel metadata guidance: {needle}")
@@ -424,6 +471,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
         f"{sdist_root}/src/logbrew_sdk/examples/__init__.py",
         f"{sdist_root}/src/logbrew_sdk/examples/__main__.py",
         f"{sdist_root}/src/logbrew_sdk/examples/agent_timeline.py",
+        f"{sdist_root}/src/logbrew_sdk/examples/first_useful_telemetry.py",
         f"{sdist_root}/src/logbrew_sdk/examples/readme_example.py",
         f"{sdist_root}/src/logbrew_sdk/examples/real_user_smoke.py",
     }
@@ -453,6 +501,7 @@ for needle in (
     "create_product_action_attributes",
     "create_network_milestone_attributes",
     "span_attributes_from_traceparent",
+    "first-useful-telemetry",
 ):
     if needle not in readme:
         raise SystemExit(f"missing sdist README guidance: {needle}")
@@ -1380,7 +1429,7 @@ print(f'{{"ok": true, "status": {response.status_code}, "attempts": {response.at
 EOF
 
 cat > "$tmp_dir/Makefile" <<'EOF'
-.PHONY: help smoke-types smoke-test smoke-readme smoke-packaged-example smoke-packaged-smoke smoke-packaged-examples-readme smoke-packaged-examples-agent-timeline smoke-packaged-examples-list smoke-packaged-examples-help smoke-packaged-examples smoke-run
+.PHONY: help smoke-types smoke-test smoke-readme smoke-packaged-example smoke-packaged-smoke smoke-packaged-examples-readme smoke-packaged-examples-agent-timeline smoke-packaged-examples-first-useful-telemetry smoke-packaged-examples-list smoke-packaged-examples-help smoke-packaged-examples smoke-run
 
 help:
 	@printf '%s\n' \
@@ -1391,6 +1440,7 @@ help:
 		'smoke-packaged-smoke -> make smoke-packaged-smoke' \
 		'smoke-packaged-examples-readme -> make smoke-packaged-examples-readme' \
 		'smoke-packaged-examples-agent-timeline -> make smoke-packaged-examples-agent-timeline' \
+		'smoke-packaged-examples-first-useful-telemetry -> make smoke-packaged-examples-first-useful-telemetry' \
 		'smoke-packaged-examples-list -> make smoke-packaged-examples-list' \
 		'smoke-packaged-examples-help -> make smoke-packaged-examples-help' \
 		'smoke-packaged-examples (default packaged entrypoint) -> make smoke-packaged-examples' \
@@ -1417,6 +1467,9 @@ smoke-packaged-examples-readme:
 smoke-packaged-examples-agent-timeline:
 	@python -m logbrew_sdk.examples agent-timeline
 
+smoke-packaged-examples-first-useful-telemetry:
+	@python -m logbrew_sdk.examples first-useful-telemetry
+
 smoke-packaged-examples-list:
 	@python -m logbrew_sdk.examples --list
 
@@ -1430,7 +1483,7 @@ smoke-run:
 	@python smoke.py
 EOF
 
-grep -q '^\.PHONY: help smoke-types smoke-test smoke-readme smoke-packaged-example smoke-packaged-smoke smoke-packaged-examples-readme smoke-packaged-examples-agent-timeline smoke-packaged-examples-list smoke-packaged-examples-help smoke-packaged-examples smoke-run$' "$tmp_dir/Makefile"
+grep -q '^\.PHONY: help smoke-types smoke-test smoke-readme smoke-packaged-example smoke-packaged-smoke smoke-packaged-examples-readme smoke-packaged-examples-agent-timeline smoke-packaged-examples-first-useful-telemetry smoke-packaged-examples-list smoke-packaged-examples-help smoke-packaged-examples smoke-run$' "$tmp_dir/Makefile"
 grep -q '^help:$' "$tmp_dir/Makefile"
 grep -q '^smoke-types:$' "$tmp_dir/Makefile"
 grep -q '^smoke-test:$' "$tmp_dir/Makefile"
@@ -1439,6 +1492,7 @@ grep -q '^smoke-packaged-example:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-smoke:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-examples-readme:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-examples-agent-timeline:$' "$tmp_dir/Makefile"
+grep -q '^smoke-packaged-examples-first-useful-telemetry:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-examples-list:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-examples-help:$' "$tmp_dir/Makefile"
 grep -q '^smoke-packaged-examples:$' "$tmp_dir/Makefile"
@@ -1452,6 +1506,7 @@ run_packaged_example_module "smoke-packaged-example" "wheel-packaged-example"
 run_packaged_real_user_module "smoke-packaged-smoke" "wheel-packaged-smoke"
 run_packaged_example_module "smoke-packaged-examples-readme" "wheel-packaged-examples-readme"
 run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "wheel-packaged-examples-agent-timeline"
+run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "wheel-packaged-examples-first-useful-telemetry"
 check_packaged_examples_listing "smoke-packaged-examples-list" "wheel-packaged-examples-list"
 check_packaged_examples_help "smoke-packaged-examples-help" "wheel-packaged-examples-help"
 run_packaged_examples_entrypoint "smoke-packaged-examples" "wheel-packaged-examples"
@@ -1479,6 +1534,7 @@ run_packaged_example_module "smoke-packaged-example" "wheel-reinstall-packaged-e
 run_packaged_real_user_module "smoke-packaged-smoke" "wheel-reinstall-packaged-smoke"
 run_packaged_example_module "smoke-packaged-examples-readme" "wheel-reinstall-packaged-examples-readme"
 run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "wheel-reinstall-packaged-examples-agent-timeline"
+run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "wheel-reinstall-packaged-examples-first-useful-telemetry"
 check_packaged_examples_listing "smoke-packaged-examples-list" "wheel-reinstall-packaged-examples-list"
 check_packaged_examples_help "smoke-packaged-examples-help" "wheel-reinstall-packaged-examples-help"
 run_packaged_examples_entrypoint "smoke-packaged-examples" "wheel-reinstall-packaged-examples"
@@ -1516,6 +1572,7 @@ run_packaged_example_module "smoke-packaged-example" "sdist-packaged-example"
 run_packaged_real_user_module "smoke-packaged-smoke" "sdist-packaged-smoke"
 run_packaged_example_module "smoke-packaged-examples-readme" "sdist-packaged-examples-readme"
 run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "sdist-packaged-examples-agent-timeline"
+run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "sdist-packaged-examples-first-useful-telemetry"
 check_packaged_examples_listing "smoke-packaged-examples-list" "sdist-packaged-examples-list"
 check_packaged_examples_help "smoke-packaged-examples-help" "sdist-packaged-examples-help"
 run_packaged_examples_entrypoint "smoke-packaged-examples" "sdist-packaged-examples"
@@ -1543,6 +1600,7 @@ run_packaged_example_module "smoke-packaged-example" "sdist-reinstall-packaged-e
 run_packaged_real_user_module "smoke-packaged-smoke" "sdist-reinstall-packaged-smoke"
 run_packaged_example_module "smoke-packaged-examples-readme" "sdist-reinstall-packaged-examples-readme"
 run_agent_timeline_example "smoke-packaged-examples-agent-timeline" "sdist-reinstall-packaged-examples-agent-timeline"
+run_first_useful_telemetry_example "smoke-packaged-examples-first-useful-telemetry" "sdist-reinstall-packaged-examples-first-useful-telemetry"
 check_packaged_examples_listing "smoke-packaged-examples-list" "sdist-reinstall-packaged-examples-list"
 check_packaged_examples_help "smoke-packaged-examples-help" "sdist-reinstall-packaged-examples-help"
 run_packaged_examples_entrypoint "smoke-packaged-examples" "sdist-reinstall-packaged-examples"

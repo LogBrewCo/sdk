@@ -5,12 +5,13 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
-from . import agent_timeline, readme_example, real_user_smoke
+from . import agent_timeline, first_useful_telemetry, readme_example, real_user_smoke
 
 
 def _example_runners() -> dict[str, Callable[[], int]]:
     return {
         "agent-timeline": agent_timeline.main,
+        "first-useful-telemetry": first_useful_telemetry.main,
         "readme-example": readme_example.main,
         "real-user-smoke": real_user_smoke.main,
     }
