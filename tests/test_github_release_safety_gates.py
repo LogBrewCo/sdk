@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMAND = "python3 scripts/check_github_release_safety.py"
+WORKFLOW_COMMAND = f"{COMMAND} --allow-public-branch-summary"
 
 
 class GitHubReleaseSafetyGateTests(unittest.TestCase):
@@ -20,7 +21,7 @@ class GitHubReleaseSafetyGateTests(unittest.TestCase):
             with self.subTest(workflow=workflow.name):
                 self.assertIn("Check GitHub release safety", text)
                 self.assertIn(auth_env, text)
-                self.assertIn(f"run: {COMMAND}", text)
+                self.assertIn(f"run: {WORKFLOW_COMMAND}", text)
 
     def test_public_verifier_runs_release_safety_before_docs_checks(self) -> None:
         script = (ROOT / "scripts" / "check_public_sdks.sh").read_text(encoding="utf-8")

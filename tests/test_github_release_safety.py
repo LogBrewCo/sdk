@@ -45,6 +45,22 @@ def environment(**overrides: object) -> dict[str, object]:
     return payload
 
 
+def branch_summary(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "name": "main",
+        "protected": True,
+        "protection": {
+            "enabled": True,
+            "required_status_checks": {
+                "contexts": ["Contract checks"],
+                "checks": [{"context": "Contract checks"}],
+            },
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
 class GitHubReleaseSafetyTests(unittest.TestCase):
     def test_accepts_current_release_safety_shape(self) -> None:
         failures = check_github_release_safety.release_safety_failures(
@@ -101,6 +117,23 @@ class GitHubReleaseSafetyTests(unittest.TestCase):
         self.assertIn("release: custom branch policies should stay disabled", failures)
         self.assertIn("release: branch policy protection rule is missing", failures)
 
+    def test_accepts_public_branch_summary_shape_for_ci_auth(self) -> None:
+        failures = check_github_release_safety.public_summary_release_safety_failures(
+            branch_summary(),
+            environment(),
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_public_branch_summary_requires_protected_branch_and_context(self) -> None:
+        failures = check_github_release_safety.public_summary_release_safety_failures(
+            branch_summary(protected=False, protection={"enabled": True, "required_status_checks": {}}),
+            environment(),
+        )
+
+        self.assertIn("main: branch must be protected", failures)
+        self.assertIn("main: required status check 'Contract checks' is missing", failures)
+
     def test_main_supports_fixture_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -112,6 +145,25 @@ class GitHubReleaseSafetyTests(unittest.TestCase):
             result = check_github_release_safety.main(
                 [
                     "--branch-protection-json",
+                    str(branch_path),
+                    "--environment-json",
+                    str(environment_path),
+                ]
+            )
+
+        self.assertEqual(result, 0)
+
+    def test_main_supports_public_branch_summary_fixture_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            branch_path = root / "branch.json"
+            environment_path = root / "environment.json"
+            branch_path.write_text(json.dumps(branch_summary()), encoding="utf-8")
+            environment_path.write_text(json.dumps(environment()), encoding="utf-8")
+
+            result = check_github_release_safety.main(
+                [
+                    "--branch-summary-json",
                     str(branch_path),
                     "--environment-json",
                     str(environment_path),

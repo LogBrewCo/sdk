@@ -158,7 +158,7 @@ jobs:
       - name: Check GitHub release safety
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/check_github_release_safety.py
+        run: python3 scripts/check_github_release_safety.py --allow-public-branch-summary
 
       - name: Check Markdown links
         run: python3 scripts/check_markdown_links.py

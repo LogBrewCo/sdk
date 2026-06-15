@@ -102,6 +102,32 @@ def validate_branch_protection(
     return failures
 
 
+def validate_public_branch_summary(
+    branch_summary: Any,
+    *,
+    branch: str,
+    required_context: str,
+) -> list[str]:
+    failures: list[str] = []
+    if not isinstance(branch_summary, dict):
+        return [f"{branch}: branch summary response is not an object"]
+
+    if branch_summary.get("protected") is not True:
+        failures.append(f"{branch}: branch must be protected")
+
+    protection = branch_summary.get("protection")
+    if not isinstance(protection, dict) or protection.get("enabled") is not True:
+        failures.append(f"{branch}: public branch protection summary is missing")
+        return failures
+
+    required_status_checks = protection.get("required_status_checks")
+    if not isinstance(required_status_checks, dict):
+        failures.append(f"{branch}: required status checks are not visible in public summary")
+    elif required_context not in required_status_contexts(protection):
+        failures.append(f"{branch}: required status check {required_context!r} is missing")
+    return failures
+
+
 def validate_environment(environment: Any, *, environment_name: str) -> list[str]:
     failures: list[str] = []
     if not isinstance(environment, dict):
@@ -145,6 +171,24 @@ def release_safety_failures(
     ]
 
 
+def public_summary_release_safety_failures(
+    branch_summary: Any,
+    environment: Any,
+    *,
+    branch: str = DEFAULT_BRANCH,
+    environment_name: str = DEFAULT_ENVIRONMENT,
+    required_context: str = DEFAULT_REQUIRED_CONTEXT,
+) -> list[str]:
+    return [
+        *validate_public_branch_summary(
+            branch_summary,
+            branch=branch,
+            required_context=required_context,
+        ),
+        *validate_environment(environment, environment_name=environment_name),
+    ]
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Check the GitHub branch and environment protections required before package publishing."
@@ -157,15 +201,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_REQUIRED_CONTEXT,
         help="Required branch status-check context.",
     )
-    parser.add_argument(
+    branch_fixture_group = parser.add_mutually_exclusive_group()
+    branch_fixture_group.add_argument(
         "--branch-protection-json",
         type=Path,
         help="Fixture JSON for branch protection; skips the GitHub API branch call.",
+    )
+    branch_fixture_group.add_argument(
+        "--branch-summary-json",
+        type=Path,
+        help="Fixture JSON for the public branch summary; skips the GitHub API branch call.",
     )
     parser.add_argument(
         "--environment-json",
         type=Path,
         help="Fixture JSON for the environment; skips the GitHub API environment call.",
+    )
+    parser.add_argument(
+        "--allow-public-branch-summary",
+        action="store_true",
+        help=(
+            "Fall back to the public branch summary when full branch protection is inaccessible. "
+            "This checks protected branch status and required status checks, but not strict mode, "
+            "force-push protection, or branch-deletion protection."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -173,23 +232,42 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        branch_protection = (
-            read_json(args.branch_protection_json)
-            if args.branch_protection_json
-            else gh_api(f"repos/{args.repo}/branches/{args.branch}/protection")
-        )
+        used_public_summary = False
+        if args.branch_summary_json:
+            branch_payload = read_json(args.branch_summary_json)
+            used_public_summary = True
+        elif args.branch_protection_json:
+            branch_payload = read_json(args.branch_protection_json)
+        elif args.allow_public_branch_summary:
+            try:
+                branch_payload = gh_api(f"repos/{args.repo}/branches/{args.branch}/protection")
+            except RuntimeError:
+                branch_payload = gh_api(f"repos/{args.repo}/branches/{args.branch}")
+                used_public_summary = True
+        else:
+            branch_payload = gh_api(f"repos/{args.repo}/branches/{args.branch}/protection")
+
         environment = (
             read_json(args.environment_json)
             if args.environment_json
             else gh_api(f"repos/{args.repo}/environments/{args.environment}")
         )
-        failures = release_safety_failures(
-            branch_protection,
-            environment,
-            branch=args.branch,
-            environment_name=args.environment,
-            required_context=args.required_context,
-        )
+        if used_public_summary:
+            failures = public_summary_release_safety_failures(
+                branch_payload,
+                environment,
+                branch=args.branch,
+                environment_name=args.environment,
+                required_context=args.required_context,
+            )
+        else:
+            failures = release_safety_failures(
+                branch_payload,
+                environment,
+                branch=args.branch,
+                environment_name=args.environment,
+                required_context=args.required_context,
+            )
     except Exception as exc:
         print(f"GitHub release safety check failed: {exc}", file=sys.stderr)
         return 1
@@ -200,11 +278,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"- {failure}", file=sys.stderr)
         return 1
 
-    print(
-        "GitHub release safety ok: "
-        f"{args.branch} requires {args.required_context!r}, force pushes/deletion are disabled, "
-        f"and {args.environment!r} deploys only from protected branches."
-    )
+    if used_public_summary:
+        print(
+            "GitHub release safety ok: "
+            f"public summary shows {args.branch} is protected and requires {args.required_context!r}; "
+            f"{args.environment!r} deploys only from protected branches. "
+            "Run without --allow-public-branch-summary for full strict/force-push/deletion verification."
+        )
+    else:
+        print(
+            "GitHub release safety ok: "
+            f"{args.branch} requires {args.required_context!r}, force pushes/deletion are disabled, "
+            f"and {args.environment!r} deploys only from protected branches."
+        )
     return 0
 
 
