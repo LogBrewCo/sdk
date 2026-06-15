@@ -92,6 +92,9 @@ with zipfile.ZipFile(zip_path) as archive:
     agent_timeline_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/agent_timeline/main.go"
     if agent_timeline_path not in names:
         raise SystemExit("missing examples/agent_timeline/main.go in proxy module zip")
+    first_useful_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/first_useful_telemetry/main.go"
+    if first_useful_path not in names:
+        raise SystemExit("missing examples/first_useful_telemetry/main.go in proxy module zip")
     examples_makefile_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/Makefile"
     if examples_makefile_path not in names:
         raise SystemExit("missing examples/Makefile in proxy module zip")
@@ -115,7 +118,9 @@ for needle in (
     "NewHTTPTransport",
     "MetricAttributes",
     "client.Metric",
+    "First Useful Telemetry",
     "examples/agent_timeline",
+    "examples/first_useful_telemetry",
     "copyable snippets",
     "your own Go service",
 ):
@@ -143,16 +148,19 @@ module_dir="$module_src_root/github.com/LogBrewCo/sdk/go/logbrew@v0.1.0"
 test -f "$module_dir/go.mod"
 test -f "$module_dir/examples/Makefile"
 test -f "$module_dir/examples/agent_timeline/main.go"
+test -f "$module_dir/examples/first_useful_telemetry/main.go"
 test -f "$module_dir/examples/readme_example/main.go"
 test -f "$module_dir/examples/real_user_smoke/main.go"
 test -f "$module_dir/examples/real_user_smoke/Makefile"
-grep -q '^\.PHONY: help run run-agent-timeline run-readme-example run-real-user-smoke$' "$module_dir/examples/Makefile"
+grep -q '^\.PHONY: help run run-agent-timeline run-first-useful-telemetry run-readme-example run-real-user-smoke$' "$module_dir/examples/Makefile"
 grep -q '^help:$' "$module_dir/examples/Makefile"
 grep -q '^run: run-real-user-smoke$' "$module_dir/examples/Makefile"
 grep -q '^run-agent-timeline:$' "$module_dir/examples/Makefile"
+grep -q '^run-first-useful-telemetry:$' "$module_dir/examples/Makefile"
 grep -q '^run-readme-example:$' "$module_dir/examples/Makefile"
 grep -q '^run-real-user-smoke:$' "$module_dir/examples/Makefile"
 grep -q '^	@go run \./agent_timeline$' "$module_dir/examples/Makefile"
+grep -q '^	@go run \./first_useful_telemetry$' "$module_dir/examples/Makefile"
 grep -q '^	@go run \./readme_example$' "$module_dir/examples/Makefile"
 grep -q '^	@go run \./real_user_smoke$' "$module_dir/examples/Makefile"
 grep -q '^\.PHONY: help run run-real-user-smoke$' "$module_dir/examples/real_user_smoke/Makefile"
@@ -173,10 +181,11 @@ grep -q '"events":' "$tmp_dir/packaged-readme-example.stderr.json"
 grep -q '"ok":' "$tmp_dir/packaged-readme-example.stderr.json"
 (cd "$module_dir/examples" && make) > "$tmp_dir/packaged-examples-make-help.txt"
 grep -qx 'run-agent-timeline -> make run-agent-timeline' <(sed -n '1p' "$tmp_dir/packaged-examples-make-help.txt")
-grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '2p' "$tmp_dir/packaged-examples-make-help.txt")
-grep -qx 'run (real-user-smoke) -> make run' <(sed -n '3p' "$tmp_dir/packaged-examples-make-help.txt")
-grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '4p' "$tmp_dir/packaged-examples-make-help.txt")
-test "$(wc -l < "$tmp_dir/packaged-examples-make-help.txt" | tr -d ' ')" = "4"
+grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '2p' "$tmp_dir/packaged-examples-make-help.txt")
+grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '3p' "$tmp_dir/packaged-examples-make-help.txt")
+grep -qx 'run (real-user-smoke) -> make run' <(sed -n '4p' "$tmp_dir/packaged-examples-make-help.txt")
+grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '5p' "$tmp_dir/packaged-examples-make-help.txt")
+test "$(wc -l < "$tmp_dir/packaged-examples-make-help.txt" | tr -d ' ')" = "5"
 (cd "$module_dir/examples" && make run-agent-timeline) > "$tmp_dir/packaged-agent-timeline.stdout.txt" 2> "$tmp_dir/packaged-agent-timeline.stderr.txt"
 grep -q '"source": "product.action"' "$tmp_dir/packaged-agent-timeline.stdout.txt"
 grep -q '"source": "network.milestone"' "$tmp_dir/packaged-agent-timeline.stdout.txt"
@@ -187,6 +196,15 @@ if grep -Eq 'email=user@example\.com|debug=true|payload|headers' "$tmp_dir/packa
 	echo "packaged agent timeline leaked unsafe route or metadata values" >&2
 	exit 1
 fi
+(cd "$module_dir/examples" && make run-first-useful-telemetry) > "$tmp_dir/packaged-first-useful.stdout.json" 2> "$tmp_dir/packaged-first-useful.stderr.json"
+grep -q '"type": "release"' "$tmp_dir/packaged-first-useful.stdout.json"
+grep -q '"type": "environment"' "$tmp_dir/packaged-first-useful.stdout.json"
+grep -q '"type": "log"' "$tmp_dir/packaged-first-useful.stdout.json"
+grep -q '"type": "action"' "$tmp_dir/packaged-first-useful.stdout.json"
+grep -q '"type": "metric"' "$tmp_dir/packaged-first-useful.stdout.json"
+grep -q '"type": "span"' "$tmp_dir/packaged-first-useful.stdout.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_go_first_useful_payload.py" "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json" >/dev/null
 (cd "$module_dir/examples" && make run-readme-example) > "$tmp_dir/packaged-readme-example-make.stdout.json" 2> "$tmp_dir/packaged-readme-example-make.stderr.json"
 grep -q '"type": "release"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "environment"' "$tmp_dir/packaged-readme-example-make.stdout.json"

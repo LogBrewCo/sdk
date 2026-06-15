@@ -90,6 +90,16 @@ func must(err error) {
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `Flush` or `Shutdown` to send queued events through a transport, and use `PreviewJSON` when you want a stable local JSON preview before sending anything.
 
+## First Useful Telemetry
+
+For a production Go service, the first useful LogBrew payload is usually a release marker, environment marker, one service log, one product action, one network milestone, one request duration metric, and one W3C-linked request span. That gives developers and AI assistants enough context to answer "what changed?", "where did this happen?", "what did the user do?", "which API call mattered?", and "which trace links the signals?" without installing a large instrumentation stack.
+
+```bash
+go run ./examples/first_useful_telemetry
+```
+
+The example uses a fake API key, emits a local `PreviewJSON` payload, and then flushes to `AlwaysAcceptTransport`. It keeps the SDK dependency-free, app-owned, and explicit: no global `net/http` patching, no request or response payload capture, no arbitrary header capture, and no query or hash text in route metadata. Use `NewHTTPTransport` only when you are ready to send to the hosted LogBrew intake.
+
 ## Metrics
 
 Use `Metric` for explicit, application-owned measurements. LogBrew validates the metric name, kind, value, unit, temporality, and optional metadata before queueing the event:
@@ -185,7 +195,7 @@ if err != nil {
 must(client.Action("evt_payment_api", "2026-06-02T10:00:01Z", network))
 ```
 
-Route templates are stripped to path-only values before queueing, nested metadata is dropped, HTTP methods are normalized, and 4xx/5xx status codes default network milestone status to `failure`. The `examples/agent_timeline` package contains a copyable preview that shows product and network milestones correlated by `sessionId` and W3C `traceId`.
+Route templates are stripped to path-only values before queueing, nested metadata is dropped, HTTP methods are normalized, and 4xx/5xx status codes default network milestone status to `failure`. The `examples/agent_timeline` package contains a focused preview of product and network milestones correlated by `sessionId` and W3C `traceId`; `examples/first_useful_telemetry` shows the same timeline signals alongside release, environment, log, metric, and span events.
 
 ## HTTP Delivery
 
@@ -209,4 +219,4 @@ fmt.Println(response.StatusCode)
 
 `HTTPTransport` uses Go's standard `net/http` client, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint/header/client/timeout settings, drains and closes response bodies, and maps client delivery failures into retryable `NetworkError(...)` values so `Client.Flush` can preserve queued events and retry. Inject a custom `*http.Client` when a service already owns proxy, TLS, or timeout settings.
 
-The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, sending through `HTTPTransport`, and using W3C trace propagation in your own Go service.
+The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, sending through `HTTPTransport`, producing a first-useful telemetry payload, and using W3C trace propagation in your own Go service.
