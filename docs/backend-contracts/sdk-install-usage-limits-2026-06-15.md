@@ -63,7 +63,11 @@ Setup proof recommendation:
 Usage and limit behavior:
 
 - Backend should enforce usage limits on ingest and return stable redacted error envelopes.
-- Suggested redacted fields include `code`, `message`, `status`, `retryable`, optional `retry_after_ms`, optional `limit_kind`, and optional `reset_at`.
+- Backend coordination reports configurable account usage/limit enforcement exists in backend code but is not production-confirmed yet, so SDKs should not claim the behavior is live until backend confirms availability.
+- Native ingest may return HTTP `429` with redacted JSON fields `code: "usage_limit_exceeded"`, `limit: "events" | "bytes"`, `reset_at`, `error`, and actionable `next` when an incoming telemetry envelope would exceed configured account limits.
+- Usage checks happen after auth and before acceptance side effects, so SDKs should treat HTTP `429` as a backend-owned account limit state, not an SDK retry-loop condition.
+- `GET /api/account/usage` is the backend-owned source for usage and limit state; SDKs should not derive quota locally.
+- Suggested redacted fields also include `status`, `retryable`, optional `retry_after_ms`, and optional `limit_kind` if backend keeps those fields in the stable envelope.
 - Error envelopes must never echo raw keys, authorization headers, request bodies, non-public project internals, account/provider details, or user telemetry payloads.
 
 ## SDK Gap Observed
@@ -84,7 +88,7 @@ SDK constraints:
 - SDKs can reliably add runtime/platform in each package without querying backend.
 - SDKs can send release/environment on first telemetry when the app provides them, but should not invent defaults or claim setup completeness from missing release/environment.
 - SDK telemetry examples should keep release and environment explicit, and SDK-facing error docs should keep canonical severity vocabulary to `info`, `warning`, `error`, and `critical`.
-- SDKs should treat over-limit responses as delivery failures with a stable public code and redacted message. Retryability should follow backend fields; without an explicit retry hint, usage-limit errors should not be aggressively retried.
+- SDKs should treat over-limit responses as delivery failures with a stable public code and redacted message. Retryability should follow backend fields; without an explicit retry hint, `usage_limit_exceeded` responses should not be aggressively retried.
 - SDKs should preserve queued events on non-2xx responses unless the backend contract later defines a safe drop policy for non-retryable over-limit errors.
 
 ## Suggested SDK Work After Backend Contract
@@ -99,6 +103,6 @@ SDK constraints:
 
 - Backend tests for project creation, ingest key creation, setup status transitions, usage accounting, and quota/limit envelopes.
 - Backend smoke proof that first accepted telemetry moves setup status from `setup_started` or `sdk_seen` to `first_telemetry_seen` or `active`.
-- SDK fake-intake tests for redacted over-limit envelopes across at least JS, Python, Go, Java, .NET, PHP, Ruby, and Rust.
+- SDK fake-intake tests for HTTP `429` redacted `usage_limit_exceeded` envelopes across at least JS, Python, Go, Java, .NET, PHP, Ruby, and Rust.
 - SDK real-user setup proof after backend endpoints exist: create project, create write-only ingest key, send optional check-in, send first telemetry, read setup status from product/API surface, and assert no key or non-public payload appears in logs or errors.
 - Confidentiality scans on public docs so account/provider/session/backend internals do not leak into SDK-facing material.
