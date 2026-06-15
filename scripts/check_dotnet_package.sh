@@ -63,6 +63,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "logbrew-logo-transparent-128.png",
         "examples/ReadmeExample.cs",
         "examples/RealUserSmoke.cs",
+        "examples/FirstUsefulTelemetry.cs",
         "examples/Makefile",
     }
     missing = sorted(required - names)
@@ -82,6 +83,8 @@ for needle in (
     "This SDK does not automatically collect CLR, runtime, or framework metrics yet.",
     "ProductTimeline",
     "without visual replay, HTTP client patching, request/response payload capture, or header capture",
+    "Traceparent",
+    "first useful .NET service telemetry",
     "HttpTransport",
     "System.Net.Http",
     "AddLogBrew(client",
@@ -128,9 +131,14 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdo
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
 
+run_example FirstUsefulTelemetry.cs FirstUsefulTelemetry "$tmp_dir/first-useful.stdout.json" "$tmp_dir/first-useful.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/first-useful.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_first_useful_payload.py" "$tmp_dir/first-useful.stdout.json" "$tmp_dir/first-useful.stderr.json" >/dev/null
+
 make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
+grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/examples-help.txt"
 
 echo "dotnet package checks passed"

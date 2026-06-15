@@ -522,6 +522,7 @@ def validate_maven_pom(
 def validate_dotnet(root: Path, failures: list[str]) -> None:
     project_path = require_path(root, "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj", failures)
     require_path(root, "dotnet/logbrew-dotnet/README.md", failures)
+    require_path(root, "dotnet/logbrew-dotnet/examples/FirstUsefulTelemetry.cs", failures)
     require_path(root, "assets/brand/logbrew-logo-transparent-128.png", failures)
     if not project_path.exists():
         return
@@ -546,6 +547,12 @@ def validate_dotnet(root: Path, failures: list[str]) -> None:
     for field, value in expected.items():
         require_equal(failures, location, field, child_text(properties, field), value)
     require_contains(failures, location, "Description", child_text(properties, "Description"), "LogBrew")
+    project_text = project_path.read_text(encoding="utf-8")
+    require(
+        "examples/FirstUsefulTelemetry.cs" in project_text,
+        failures,
+        f"{location}: package must include examples/FirstUsefulTelemetry.cs",
+    )
 
 
 def validate_unity(root: Path, failures: list[str]) -> None:

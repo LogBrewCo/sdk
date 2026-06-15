@@ -93,6 +93,73 @@ client.Action(
 
 `ProductTimeline` strips query strings and fragments from route templates, keeps metadata primitive-only, and leaves all product action and network milestone capture under app control.
 
+## First Useful Service Telemetry
+
+For first useful .NET service telemetry, combine release, environment, logs, product actions, network milestones, metrics, and a W3C-linked span in one small app-owned flow:
+
+```csharp
+using System.Collections.Generic;
+using LogBrew;
+
+const string incomingTraceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+const string childSpanId = "b7ad6b7169203331";
+var context = Traceparent.Parse(incomingTraceparent);
+var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "1.0.0");
+
+client.Log(
+    "evt_log_checkout_started",
+    "2026-06-02T10:00:02Z",
+    LogAttributes.Create("checkout request started", "info")
+        .WithLogger("checkout.http")
+        .WithMetadata(new Dictionary<string, object?>
+        {
+            ["routeTemplate"] = "/checkout/:cart_id",
+            ["sessionId"] = "sess_checkout_123",
+            ["traceId"] = context.TraceId
+        }));
+
+client.Action(
+    "evt_action_payment_api",
+    "2026-06-02T10:00:04Z",
+    ProductTimeline.NetworkMilestone("https://payments.example/payments/:payment_id?card=sample")
+        .WithMethod("POST")
+        .WithStatusCode(202)
+        .WithDurationMs(183.4)
+        .WithSessionId("sess_checkout_123")
+        .WithTraceId(context.TraceId)
+        .ToActionAttributes());
+
+client.Metric(
+    "evt_metric_http_server_duration",
+    "2026-06-02T10:00:05Z",
+    MetricAttributes.Create("http.server.duration", "histogram", 183.4, "ms", "delta")
+        .WithMetadata(new Dictionary<string, object?>
+        {
+            ["method"] = "POST",
+            ["routeTemplate"] = "/checkout/:cart_id",
+            ["statusCode"] = 202,
+            ["traceId"] = context.TraceId
+        }));
+
+client.Span(
+    "evt_span_checkout_request",
+    "2026-06-02T10:00:06Z",
+    Traceparent.SpanAttributesFromTraceparent(
+        incomingTraceparent,
+        TraceparentSpanInput.Create("POST /checkout/:cart_id", childSpanId, "ok")
+            .WithDurationMs(183.4)
+            .WithMetadata(new Dictionary<string, object?>
+            {
+                ["routeTemplate"] = "/checkout/:cart_id",
+                ["sampled"] = context.Sampled,
+                ["sessionId"] = "sess_checkout_123"
+            })));
+
+var outgoingHeaders = Traceparent.CreateHeaders(context.TraceId, childSpanId, context.TraceFlags);
+```
+
+`Traceparent` validates W3C shape, rejects forbidden or all-zero IDs, normalizes IDs, exposes the sampled flag, creates outbound `traceparent` headers, and builds child span attributes with primitive metadata only. The packaged `examples/FirstUsefulTelemetry.cs` file shows the complete release, environment, log, product action, network milestone, metric, and span flow.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:

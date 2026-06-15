@@ -78,6 +78,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "README.md",
         "examples/ReadmeExample.cs",
         "examples/RealUserSmoke.cs",
+        "examples/FirstUsefulTelemetry.cs",
         "examples/Makefile",
     ):
         if required not in names:
@@ -94,6 +95,8 @@ for needle in (
     "This SDK does not automatically collect CLR, runtime, or framework metrics yet.",
     "ProductTimeline",
     "without visual replay, HTTP client patching, request/response payload capture, or header capture",
+    "Traceparent",
+    "first useful .NET service telemetry",
     "HttpTransport",
     "System.Net.Http",
     "AddLogBrew(client",
@@ -126,6 +129,10 @@ run_packaged_example RealUserSmoke.cs PackagedSmoke "$tmp_dir/packaged-smoke.std
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/packaged-smoke.stderr.json"
+
+run_packaged_example FirstUsefulTelemetry.cs PackagedFirstUseful "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_first_useful_payload.py" "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json" >/dev/null
 
 lifecycle_dir="$tmp_dir/lifecycle-app"
 dotnet new console --framework net10.0 --name LifecycleApp --output "$lifecycle_dir" >/dev/null

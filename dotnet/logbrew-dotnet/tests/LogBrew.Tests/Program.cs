@@ -102,6 +102,49 @@ ExpectSdkError("validation_error", "span durationMs must be non-negative", () =>
     SampleClient().Span("evt_span_001", "2026-06-02T10:00:04Z", SpanAttributes.Create("GET /health", "trace_001", "span_001", "ok").WithDurationMs(-1)));
 tests++;
 
+var incomingTraceparent = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
+var traceContext = Traceparent.Parse(incomingTraceparent);
+AssertTrue(traceContext.Version == "00", "expected traceparent version");
+AssertTrue(traceContext.TraceId == "4bf92f3577b34da6a3ce929d0e0e4736", "expected normalized trace id");
+AssertTrue(traceContext.ParentSpanId == "00f067aa0ba902b7", "expected normalized parent span id");
+AssertTrue(traceContext.TraceFlags == "01", "expected normalized trace flags");
+AssertTrue(traceContext.Sampled, "expected sampled traceparent");
+var createdTraceparent = Traceparent.Create(traceContext.TraceId, "B7AD6B7169203331", traceContext.TraceFlags);
+AssertTrue(createdTraceparent == "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01", "expected created traceparent");
+var traceHeaders = Traceparent.CreateHeaders(traceContext.TraceId, "b7ad6b7169203331");
+AssertTrue(traceHeaders["traceparent"] == createdTraceparent, "expected traceparent header");
+var traceparentClient = SampleClient();
+traceparentClient.Span(
+    "evt_traceparent_span",
+    "2026-06-02T10:00:04Z",
+    Traceparent.SpanAttributesFromTraceparent(
+        incomingTraceparent,
+        TraceparentSpanInput.Create("POST /checkout/:cart_id", "b7ad6b7169203331", "ok")
+            .WithDurationMs(183.4)
+            .WithMetadata(new Dictionary<string, object?>
+            {
+                ["routeTemplate"] = "/checkout/:cart_id",
+                ["sampled"] = traceContext.Sampled
+            })));
+var traceparentPreview = traceparentClient.PreviewJson();
+AssertTrue(traceparentPreview.Contains("\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\"", StringComparison.Ordinal), "expected traceparent trace id");
+AssertTrue(traceparentPreview.Contains("\"spanId\": \"b7ad6b7169203331\"", StringComparison.Ordinal), "expected traceparent child span id");
+AssertTrue(traceparentPreview.Contains("\"parentSpanId\": \"00f067aa0ba902b7\"", StringComparison.Ordinal), "expected traceparent parent span id");
+AssertTrue(traceparentPreview.Contains("\"durationMs\": 183.4", StringComparison.Ordinal), "expected traceparent duration");
+AssertTrue(traceparentPreview.Contains("\"sampled\": true", StringComparison.Ordinal), "expected traceparent sampled metadata");
+ExpectSdkError("validation_error", "traceparent version ff is forbidden", () =>
+    Traceparent.Parse("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"));
+ExpectSdkError("validation_error", "traceparent traceId must not be all zeros", () =>
+    Traceparent.Parse("00-00000000000000000000000000000000-00f067aa0ba902b7-01"));
+ExpectSdkError("validation_error", "traceparent parent span id must not be all zeros", () =>
+    Traceparent.Parse("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01"));
+ExpectSdkError("validation_error", "spanId must be 16 hex characters", () =>
+    Traceparent.Create(traceContext.TraceId, "bad"));
+ExpectSdkError("validation_error", "metadata value for nested must be a string, number, boolean, or null", () =>
+    TraceparentSpanInput.Create("POST /checkout/:cart_id", "b7ad6b7169203331", "ok")
+        .WithMetadata(new Dictionary<string, object?> { ["nested"] = new object() }));
+tests++;
+
 var metricClient = SampleClient();
 metricClient.Metric(
     "evt_metric_001",
