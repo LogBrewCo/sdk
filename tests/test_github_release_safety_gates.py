@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -28,9 +29,15 @@ class GitHubReleaseSafetyGateTests(unittest.TestCase):
 
         self.assertIn('"GitHub release safety checks"', script)
         self.assertIn(f'run_shell_step "{COMMAND}"', script)
+        release_step = re.search(
+            r'begin_step \d+ "GitHub release safety checks"', script
+        )
+        docs_step = re.search(r'begin_step \d+ "Markdown link checks"', script)
+        self.assertIsNotNone(release_step)
+        self.assertIsNotNone(docs_step)
         self.assertLess(
-            script.index('begin_step 53 "GitHub release safety checks"'),
-            script.index('begin_step 54 "Markdown link checks"'),
+            release_step.start(),
+            docs_step.start(),
         )
 
     def test_readiness_checklist_mentions_release_safety(self) -> None:
