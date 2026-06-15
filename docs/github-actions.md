@@ -43,7 +43,7 @@ Important: GitHub evaluates `release` workflows from the release tag's commit, n
 
 ## What to do next
 
-1. Enable branch protection for `main` and require the `CI / Contract checks` job.
+1. Keep branch protection for `main` requiring the `Contract checks` GitHub Actions check; force pushes and branch deletion should stay disabled.
 2. Add protected GitHub environments for each registry publish target before running `publish-packages.yml` with `dry_run=false`.
 3. Keep `.github/publishing/trusted-publishers.md` aligned with registry-side trusted publisher records.
 4. Run publish workflow dry-runs before every external publish.
