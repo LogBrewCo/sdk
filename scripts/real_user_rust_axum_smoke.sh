@@ -27,6 +27,8 @@ if not isinstance(dependency, dict):
     raise SystemExit(f"expected table dependency for logbrew, found: {dependency!r}")
 if dependency.get("version") not in (None, "0.1.0"):
     raise SystemExit(f"unexpected logbrew version requirement: {dependency.get('version')!r}")
+if "tower" not in dependency.get("features", []):
+    raise SystemExit(f"expected logbrew tower feature, found: {dependency.get('features')!r}")
 dependency_path = str(dependency.get("path", ""))
 if not dependency_path.endswith(path_suffix):
     raise SystemExit(f"unexpected logbrew path: {dependency_path!r}")
@@ -48,7 +50,7 @@ test -f "$crate_dir/examples/axum_request_middleware.rs"
 cd "$tmp_dir"
 cargo new --quiet axum-app
 cd axum-app
-cargo add logbrew --path "$crate_dir" >/dev/null
+cargo add logbrew --path "$crate_dir" --features tower >/dev/null
 cargo add axum@0.8 >/dev/null
 cargo add tokio@1 --features macros,rt-multi-thread >/dev/null
 cargo add tower@0.5 --features util >/dev/null
@@ -77,6 +79,8 @@ if logbrew.get("req") not in ("^0.1.0", "*"):
     raise SystemExit(f"unexpected logbrew requirement: {logbrew.get('req')}")
 if not str(logbrew.get("path", "")).endswith("/extracted-crate/logbrew-0.1.0"):
     raise SystemExit(f"unexpected logbrew path: {logbrew.get('path')}")
+if "tower" not in logbrew.get("features", []):
+    raise SystemExit(f"missing logbrew tower feature: {logbrew.get('features')}")
 PY
 cargo tree --locked --depth 1 --charset ascii > axum-cargo-tree.txt
 grep -q '^axum-app v0.1.0 (' axum-cargo-tree.txt

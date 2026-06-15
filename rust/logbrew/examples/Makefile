@@ -24,4 +24,4 @@ run-http-server-request:
 	@cargo run --quiet --example http_server_request --manifest-path ../Cargo.toml
 
 run-axum-request-middleware:
-	@cargo run --quiet --example axum_request_middleware --manifest-path ../Cargo.toml
+	@cargo run --quiet --features tower --example axum_request_middleware --manifest-path ../Cargo.toml

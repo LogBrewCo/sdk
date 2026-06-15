@@ -16,23 +16,28 @@ Follow-up to the Rust first-useful pass. Tested the next practical service gap f
 - The helper builds a request `SpanEvent`, optional `http.server.duration` histogram metric, effective trace/span IDs, parent span ID when a valid incoming W3C `traceparent` is continued, and an outgoing `traceparent` value for downstream app-owned clients.
 - Route templates are sanitized to remove query strings and hash fragments, HTTP methods are normalized, status code class is captured, `5xx` maps to span `error`, and malformed incoming propagation falls back non-fatally to the explicit app trace ID.
 - Packaged example and installed-app smoke proof validate span/metric output, outgoing propagation, route-template privacy, and absence of payload/header/query leakage.
-- Follow-up Axum proof adds a packaged `examples/axum_request_middleware.rs` mini-app plus generated `axum-app` install smoke. It uses Axum's matched route template through app-owned middleware, reads only W3C `traceparent`, returns an outgoing `traceparent`, and keeps Axum/Tokio/Tower out of LogBrew's default dependency path.
+- Follow-up Axum proof adds a packaged `examples/axum_request_middleware.rs` mini-app plus generated `axum-app` install smoke. It now uses the optional `tower` feature and `TowerRequestTelemetryLayer` with Axum's matched route template, reads only W3C `traceparent`, returns an outgoing `traceparent`, and keeps Axum/Tokio/Tower out of LogBrew's default dependency path.
 
 ## Where LogBrew Is Better Today
 
 - No new runtime dependencies and no default Tower/Axum dependency tax.
 - No global middleware side effects by default; apps choose where to call the helper and keep response ownership.
 - Safer route semantics than URI-based transaction naming: public examples use stable route templates and explicitly reject query/hash leakage.
-- A runnable Axum mini-app now shows the exact middleware glue from an installed package without forcing every Rust user to accept Axum/Tokio/Tower dependencies.
+- A runnable Axum mini-app now shows one-line Tower `route_layer` integration from an installed package without forcing every Rust user to accept Axum/Tokio/Tower dependencies.
 - Lower-friction first useful path for teams that only need hosted logs/actions/network milestones/metrics/spans before adopting full OpenTelemetry or Sentry-style automatic instrumentation.
 
 ## Where LogBrew Is Still Worse
 
-- No drop-in Tower `Layer` or Axum middleware crate yet, so teams that expect one-line middleware still need to copy the app-owned glue.
+- The Tower layer is feature-gated in the core crate, not a separate Axum integration crate with framework-specific defaults.
 - No Rust `tracing` subscriber/layer bridge yet, so existing `tracing` spans and logs are not automatically converted.
 - No Actix/Rocket examples yet.
 - Source-map/native symbolication and backend-owned setup/usage/quota contracts remain broader product gaps.
 
 ## Next Focus
 
-Evaluate a minimal Rust `tracing` bridge or optional Tower `Layer` only if it stays dependency-light and does not hide route-template ownership. Keep integrations optional; do not patch global clients, capture arbitrary headers, capture request/response bodies, or infer route names from raw URLs.
+Evaluate a minimal Rust `tracing` bridge next only if it stays dependency-light and does not hide route-template ownership. Keep integrations optional; do not patch global clients, capture arbitrary headers, capture request/response bodies, or infer route names from raw URLs.
+
+## Updated Proof
+
+- `bash scripts/real_user_rust_axum_smoke.sh` packages the crate, installs it into a generated `axum-app` with `logbrew --features tower`, adds `axum@0.8`, `tokio@1`, and `tower@0.5`, copies the packaged Axum example, runs it, and validates span/metric payload shape plus privacy constraints.
+- Current package proof after the Tower layer: `cargo publish --dry-run --allow-dirty` packaged 21 files, 162.9 KiB uncompressed, 33.4 KiB compressed.

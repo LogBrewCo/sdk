@@ -145,7 +145,7 @@ grep -q '^	@cargo run --quiet --example first_useful_telemetry --manifest-path \
 grep -q '^run-http-server-request:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --example http_server_request --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q '^run-axum-request-middleware:$' "$crate_examples_makefile"
-grep -q '^	@cargo run --quiet --example axum_request_middleware --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
+grep -q '^	@cargo run --quiet --features tower --example axum_request_middleware --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q 'run-readme-example -> make run-readme-example' "$crate_examples_makefile"
 grep -q 'run (real-user-smoke) -> make run' "$crate_examples_makefile"
 grep -q 'run-real-user-smoke -> make run-real-user-smoke' "$crate_examples_makefile"
@@ -275,11 +275,6 @@ cargo run --quiet --manifest-path Cargo.toml --example http_server_request > "$t
 python3 "$repo_root/scripts/check_rust_http_server_payload.py" "$tmp_dir/packaged-http-server.stdout.json" "$tmp_dir/packaged-http-server.stderr.json" >/dev/null
 (cd "$crate_dir/examples" && make run-http-server-request) > "$tmp_dir/packaged-http-server-make.stdout.json" 2> "$tmp_dir/packaged-http-server-make.stderr.json"
 python3 "$repo_root/scripts/check_rust_http_server_payload.py" "$tmp_dir/packaged-http-server-make.stdout.json" "$tmp_dir/packaged-http-server-make.stderr.json" >/dev/null
-cargo run --quiet --manifest-path Cargo.toml --example axum_request_middleware > "$tmp_dir/packaged-axum.stdout.json" 2> "$tmp_dir/packaged-axum.stderr.json"
-python3 "$repo_root/scripts/check_rust_axum_payload.py" "$tmp_dir/packaged-axum.stdout.json" "$tmp_dir/packaged-axum.stderr.json" >/dev/null
-(cd "$crate_dir/examples" && make run-axum-request-middleware) > "$tmp_dir/packaged-axum-make.stdout.json" 2> "$tmp_dir/packaged-axum-make.stderr.json"
-python3 "$repo_root/scripts/check_rust_axum_payload.py" "$tmp_dir/packaged-axum-make.stdout.json" "$tmp_dir/packaged-axum-make.stderr.json" >/dev/null
-
 cd "$tmp_dir"
 cargo new --quiet lifecycle-app
 cd lifecycle-app

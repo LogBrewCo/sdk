@@ -11,11 +11,17 @@ mod http_fields;
 mod http_server;
 mod metric;
 mod product_timeline;
+#[cfg(feature = "tower")]
+mod tower_layer;
 mod traceparent;
 pub use http_server::{HttpRequestTelemetry, HttpRequestTelemetryEvents};
 pub use metric::MetricEvent;
 pub use product_timeline::{NetworkMilestoneTimeline, ProductActionTimeline, ProductTimeline};
 pub use serde_json::Value as MetadataValue;
+#[cfg(feature = "tower")]
+pub use tower_layer::{
+    SharedLogBrewClient, TowerRequestIds, TowerRequestTelemetryLayer, TowerRequestTelemetryService,
+};
 pub use traceparent::{Traceparent, TraceparentContext, TraceparentSpanInput};
 
 pub(crate) const ACTION_STATUSES: &[&str] = &["queued", "running", "success", "failure"];

@@ -13,7 +13,7 @@ cargo add logbrew
 cargo add logbrew --features http
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, W3C helpers such as `Traceparent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, W3C helpers such as `Traceparent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -216,76 +216,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Axum Middleware Example
 
-For Axum apps, use `route_layer` plus `middleware::from_fn_with_state` so LogBrew receives Axum's matched route template instead of the raw request URI. The packaged `examples/axum_request_middleware.rs` file is a runnable mini-app; the core pattern is:
+For Axum apps, enable the optional Tower integration and use `route_layer` so LogBrew receives Axum's matched route template instead of the raw request URI. Axum, Tokio, and Tower stay out of default `cargo add logbrew`; only apps that opt in to the `tower` feature pay for the integration.
+
+```bash
+cargo add logbrew --features tower
+```
+
+The packaged `examples/axum_request_middleware.rs` file is a runnable mini-app; the core pattern is:
 
 ```rust
 use axum::{
     body::Body,
-    extract::{MatchedPath, State},
+    extract::MatchedPath,
     http::Request,
-    middleware::Next,
-    response::Response,
 };
-use logbrew::{HttpRequestTelemetry, LogBrewClient, Metadata, MetadataValue};
-use std::{
-    sync::{Arc, Mutex},
-    time::Instant,
+use logbrew::{
+    LogBrewClient, Metadata, MetadataValue, TowerRequestIds, TowerRequestTelemetryLayer,
 };
+use std::sync::{Arc, Mutex};
 
-#[derive(Clone)]
-struct AppState {
+fn logbrew_layer(
     client: Arc<Mutex<LogBrewClient>>,
-}
-
-async fn logbrew_middleware(
-    State(state): State<AppState>,
-    matched_path: Option<MatchedPath>,
-    request: Request<Body>,
-    next: Next,
-) -> Response {
-    let started = Instant::now();
-    let method = request.method().as_str().to_string();
-    let incoming_traceparent = request
-        .headers()
-        .get("traceparent")
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let route_template = matched_path
-        .map(|path| path.as_str().to_string())
-        .unwrap_or_else(|| request.uri().path().to_string());
-
-    let response = next.run(request).await;
+) -> TowerRequestTelemetryLayer<
+    impl Fn(&Request<Body>) -> String + Clone,
+    impl Fn() -> TowerRequestIds + Clone,
+    impl Fn() -> String + Clone,
+> {
     let mut metadata = Metadata::new();
     metadata.insert("framework".to_string(), MetadataValue::String("axum".to_string()));
 
-    let mut telemetry = HttpRequestTelemetry::new(
-        route_template,
-        method,
-        "11111111111111111111111111111111",
-        "b7ad6b7169203331",
+    TowerRequestTelemetryLayer::new(
+        client,
+        |request: &Request<Body>| {
+            request
+                .extensions()
+                .get::<MatchedPath>()
+                .map(|path| path.as_str().to_string())
+                .unwrap_or_else(|| request.uri().path().to_string())
+        },
+        || TowerRequestIds::new("11111111111111111111111111111111", "b7ad6b7169203331"),
+        || "2026-06-02T10:00:00Z".to_string(),
     )
-    .with_status_code(response.status().as_u16())
-    .with_duration_ms(started.elapsed().as_secs_f64() * 1000.0)
-    .with_metadata(metadata);
-    if let Some(traceparent) = incoming_traceparent {
-        telemetry = telemetry.with_incoming_traceparent(traceparent);
-    }
-
-    let events = telemetry.build().expect("request telemetry should build");
-    let mut client = state.client.lock().expect("LogBrew client lock should be available");
-    client
-        .span("evt_http_request", "2026-06-02T10:00:00Z", events.span)
-        .expect("request span should queue");
-    if let Some(metric) = events.metric {
-        client
-            .metric("evt_http_request_duration", "2026-06-02T10:00:00Z", metric)
-            .expect("request metric should queue");
-    }
-    response
+    .with_metadata(metadata)
 }
 ```
 
-Keep the LogBrew client in your own state management, generate unique event/span IDs per request, and flush on your normal lifecycle boundary. The middleware should only read the W3C `traceparent` propagation header and framework-owned route/status metadata; do not capture arbitrary headers, raw request URIs, payloads, account session values, or user-specific identifiers.
+Attach the layer with `Router::route(...).route_layer(logbrew_layer(client.clone()))`, keep the LogBrew client in your own state management, generate unique trace/span IDs per request, and flush on your normal lifecycle boundary. The layer reads only the W3C `traceparent` propagation header and framework-owned route/status metadata; do not capture arbitrary headers, raw request URIs, payloads, account session values, or user-specific identifiers.
 
 ## W3C Trace Context
 
