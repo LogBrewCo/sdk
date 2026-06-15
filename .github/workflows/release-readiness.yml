@@ -161,6 +161,9 @@ jobs:
       - name: Run shell static analysis
         run: bash scripts/check_shell_static.sh
 
+      - name: Run JavaScript release artifact smoke
+        run: bash scripts/real_user_js_release_artifact_smoke.sh
+
       - name: Leak scan
         run: python3 scripts/check_confidentiality_scan.py
 
