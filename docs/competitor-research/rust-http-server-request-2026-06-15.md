@@ -29,13 +29,13 @@ Follow-up to the Rust first-useful pass. Tested the next practical service gap f
 ## Where LogBrew Is Still Worse
 
 - The Tower layer is feature-gated in the core crate, not a separate Axum integration crate with framework-specific defaults.
-- Rust now has an optional event-to-log `tracing` bridge; it still does not convert `tracing` spans into LogBrew span events.
+- Rust now has an optional `tracing` event/span bridge, but span conversion remains basic compared with Sentry and OpenTelemetry because it does not consume an existing OTel context or model rich span events/exceptions.
 - No Actix/Rocket examples yet.
 - Source-map/native symbolication and backend-owned setup/usage/quota contracts remain broader product gaps.
 
 ## Next Focus
 
-Next, evaluate whether `tracing` span conversion can stay privacy-bounded and dependency-light. Keep integrations optional; do not patch global clients, capture arbitrary headers, capture request/response bodies, or infer route names from raw URLs.
+Next, add Actix/Rocket examples or richer externally supplied trace context only if they stay privacy-bounded and dependency-light. Keep integrations optional; do not patch global clients, capture arbitrary headers, capture request/response bodies, or infer route names from raw URLs.
 
 ## Updated Proof
 

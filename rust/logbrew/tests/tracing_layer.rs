@@ -82,3 +82,77 @@ fn tracing_layer_normalizes_warning_and_debug_levels() {
     assert_eq!(events[1]["attributes"]["level"], "warning");
     assert!(events[0]["attributes"]["metadata"].get("message").is_none());
 }
+
+#[test]
+fn tracing_layer_can_queue_privacy_bounded_spans() {
+    let client = Arc::new(Mutex::new(sample_client()));
+    let layer =
+        LogBrewTracingLayer::new(Arc::clone(&client), || "2026-06-02T10:00:00Z".to_string())
+            .with_span_events()
+            .with_allowed_fields(["routeTemplate", "statusCode", "cartTier", "unsafeDebug"]);
+    let subscriber = tracing_subscriber::registry().with(layer);
+
+    tracing::subscriber::with_default(subscriber, || {
+        let root = tracing::info_span!(
+            target: "checkout",
+            "checkout.request",
+            routeTemplate = "/checkout/{cart_id}?coupon=sample#review",
+            cartTier = "gold",
+            unsafeDebug = ?vec!["debug-value"],
+            authorization = "Bearer sample",
+        );
+        let _root_guard = root.enter();
+        tracing::info!(
+            target: "checkout",
+            statusCode = 202_u64,
+            "checkout tracing event accepted"
+        );
+        let child = tracing::debug_span!(target: "checkout", "checkout.validate");
+        let _child_guard = child.enter();
+        tracing::error!(target: "checkout", "cart validation failed");
+    });
+
+    let client = client.lock().unwrap();
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let events = payload["events"].as_array().unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| &event["type"])
+            .collect::<Vec<_>>(),
+        vec!["log", "log", "span", "span"]
+    );
+
+    let info_log_metadata = &events[0]["attributes"]["metadata"];
+    assert_eq!(
+        info_log_metadata["traceId"],
+        "00000000000000000000000000000001"
+    );
+    assert_eq!(info_log_metadata["spanId"], "0000000000000001");
+
+    let child_span = &events[2]["attributes"];
+    assert_eq!(child_span["name"], "checkout.validate");
+    assert_eq!(child_span["traceId"], "00000000000000000000000000000001");
+    assert_eq!(child_span["spanId"], "0000000000000002");
+    assert_eq!(child_span["parentSpanId"], "0000000000000001");
+    assert_eq!(child_span["status"], "error");
+    assert!(child_span["durationMs"].as_f64().unwrap() >= 0.0);
+
+    let root_span = &events[3]["attributes"];
+    assert_eq!(root_span["name"], "checkout.request");
+    assert_eq!(root_span["traceId"], "00000000000000000000000000000001");
+    assert_eq!(root_span["spanId"], "0000000000000001");
+    assert_eq!(root_span["status"], "ok");
+    assert_eq!(
+        root_span["metadata"]["routeTemplate"],
+        "/checkout/{cart_id}"
+    );
+    assert_eq!(root_span["metadata"]["cartTier"], "gold");
+    assert!(root_span["metadata"].get("unsafeDebug").is_none());
+    assert!(root_span["metadata"].get("authorization").is_none());
+
+    let text = payload.to_string().to_ascii_lowercase();
+    assert!(!text.contains("coupon=sample"));
+    assert!(!text.contains("bearer sample"));
+    assert!(!text.contains("debug-value"));
+}

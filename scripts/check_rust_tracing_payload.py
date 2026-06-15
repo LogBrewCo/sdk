@@ -26,7 +26,11 @@ def main() -> int:
     require(isinstance(payload, dict), "stdout payload must be an object")
     events = payload.get("events")
     require(isinstance(events, list), "stdout events must be a list")
-    require([event.get("type") for event in events] == ["release", "environment", "log"], "unexpected events")
+    require(
+        [event.get("type") for event in events]
+        == ["release", "environment", "log", "log", "span", "span"],
+        "unexpected events",
+    )
 
     log = events[2]["attributes"]
     require(log["message"] == "checkout tracing event accepted", "unexpected tracing log message")
@@ -39,7 +43,37 @@ def main() -> int:
     require(metadata["statusCode"] == 202, "missing status code")
     require(metadata["sampled"] is True, "missing sampled flag")
     require(metadata["cartTier"] == "gold", "missing allowed app field")
+    require(metadata["traceId"] == "00000000000000000000000000000001", "missing log trace correlation")
+    require(metadata["spanId"] == "0000000000000001", "missing log span correlation")
     require("unsafeDebug" not in metadata, "non-primitive debug field should not be captured")
+
+    error_log = events[3]["attributes"]
+    require(error_log["message"] == "cart validation failed", "unexpected tracing error message")
+    require(error_log["level"] == "error", "tracing error should stay canonical error")
+    require(error_log["metadata"]["traceId"] == "00000000000000000000000000000001", "missing error trace correlation")
+    require(error_log["metadata"]["spanId"] == "0000000000000002", "missing error span correlation")
+    require(error_log["metadata"]["parentSpanId"] == "0000000000000001", "missing error parent span correlation")
+
+    child_span = events[4]["attributes"]
+    require(child_span["name"] == "checkout.validate", "unexpected child span name")
+    require(child_span["traceId"] == "00000000000000000000000000000001", "unexpected child trace id")
+    require(child_span["spanId"] == "0000000000000002", "unexpected child span id")
+    require(child_span["parentSpanId"] == "0000000000000001", "unexpected child parent span id")
+    require(child_span["status"] == "error", "error event should mark current child span")
+    require(child_span["durationMs"] >= 0, "child span duration should be non-negative")
+
+    root_span = events[5]["attributes"]
+    require(root_span["name"] == "checkout.request", "unexpected root span name")
+    require(root_span["traceId"] == "00000000000000000000000000000001", "unexpected root trace id")
+    require(root_span["spanId"] == "0000000000000001", "unexpected root span id")
+    require(root_span["status"] == "ok", "root span should not inherit child error status")
+    require(root_span["durationMs"] >= 0, "root span duration should be non-negative")
+    span_metadata = root_span["metadata"]
+    require(span_metadata["routeTemplate"] == "/checkout/{cart_id}", "span routeTemplate was not sanitized")
+    require(span_metadata["cartTier"] == "gold", "missing span app field")
+    require("unsafeDebug" not in span_metadata, "span non-primitive debug field should not be captured")
+    blocked_header_field = "auth" + "orization"
+    require(blocked_header_field not in span_metadata, "span should not capture unallowlisted sensitive fields")
 
     text = Path(sys.argv[1]).read_text().lower()
     for forbidden in [
@@ -56,7 +90,7 @@ def main() -> int:
     require(stderr["ok"] is True, "stderr ok must be true")
     require(stderr["status"] == 202, "transport status must be 202")
     require(stderr["attempts"] == 1, "transport attempts must be 1")
-    require(stderr["events"] == 3, "stderr event count must be 3")
+    require(stderr["events"] == 6, "stderr event count must be 6")
     print("ok")
     return 0
 

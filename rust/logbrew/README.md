@@ -15,7 +15,7 @@ cargo add logbrew --features tower
 cargo add logbrew --features tracing
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, W3C helpers such as `Traceparent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, W3C helpers such as `Traceparent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -267,7 +267,7 @@ Attach the layer with `Router::route(...).route_layer(logbrew_layer(client.clone
 
 ## Tracing Bridge
 
-For Rust services that already use the `tracing` ecosystem, enable the optional bridge to convert app log events into LogBrew log events without replacing your subscriber stack or capturing arbitrary structured fields by default.
+For Rust services that already use the `tracing` ecosystem, enable the optional bridge to convert app log events into LogBrew log events without replacing your subscriber stack or capturing arbitrary structured fields by default. Closed `tracing` spans are only converted when your app explicitly calls `with_span_events()`.
 
 ```bash
 cargo add logbrew --features tracing
@@ -288,11 +288,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let layer = LogBrewTracingLayer::new(client.clone(), || {
         "2026-06-02T10:00:02Z".to_string()
     })
+    .with_span_events()
     .with_allowed_fields(["routeTemplate", "statusCode", "sampled"])
     .with_logger("checkout");
 
     let subscriber = tracing_subscriber::registry().with(layer);
     tracing::subscriber::with_default(subscriber, || {
+        let span = tracing::info_span!(
+            target: "checkout",
+            "checkout.request",
+            routeTemplate = "/checkout/{cart_id}?coupon=sample#review",
+        );
+        let _guard = span.enter();
         tracing::info!(
             target: "checkout",
             routeTemplate = "/checkout/{cart_id}?coupon=sample#review",
@@ -307,7 +314,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`LogBrewTracingLayer` maps `trace`/`debug` to `info`, `warn` to `warning`, and `error` to `error`. It records `tracingTarget` and `tracingLevel`, but only copies additional primitive fields that your app allowlists with `with_allowed_fields(...)`; route-template field values are sanitized to remove query strings and hash fragments. Do not allowlist payloads, headers, account session values, raw URLs, or user-specific identifiers.
+`LogBrewTracingLayer` maps `trace`/`debug` to `info`, `warn` to `warning`, and `error` to `error`. It records `tracingTarget` and `tracingLevel`, but only copies additional primitive fields that your app allowlists with `with_allowed_fields(...)`; route-template field values are sanitized to remove query strings and hash fragments. With `with_span_events()`, the layer generates W3C-shaped trace/span IDs, adds trace correlation to logs emitted inside a span, records parent/child span links, and marks the current span as `error` when an error-level event is emitted inside it. Do not allowlist payloads, headers, account session values, raw URLs, or user-specific identifiers.
 
 ## W3C Trace Context
 

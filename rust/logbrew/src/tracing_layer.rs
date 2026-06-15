@@ -1,5 +1,5 @@
 use crate::{
-    LogBrewClient, LogEvent, Metadata, MetadataValue, SharedLogBrewClient,
+    LogBrewClient, LogEvent, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent,
     http_fields::sanitize_route_template,
 };
 use std::fmt;
@@ -7,11 +7,13 @@ use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
 };
+use std::time::Instant;
 use tracing_core::{
     Event as TracingEvent, Level, Subscriber,
     field::{Field, Visit},
+    span::{Attributes, Id, Record},
 };
-use tracing_subscriber::{Layer, layer::Context};
+use tracing_subscriber::{Layer, layer::Context, registry::LookupSpan};
 
 /// Optional `tracing` layer that converts app log events into LogBrew log events.
 #[derive(Clone)]
@@ -20,8 +22,11 @@ pub struct LogBrewTracingLayer<T> {
     timestamp: T,
     allowed_fields: Vec<String>,
     event_id_prefix: String,
+    span_id_prefix: String,
     next_id: Arc<AtomicU64>,
+    next_span_id: Arc<AtomicU64>,
     logger_name: Option<String>,
+    capture_spans: bool,
 }
 
 impl<T> LogBrewTracingLayer<T> {
@@ -32,12 +37,15 @@ impl<T> LogBrewTracingLayer<T> {
             timestamp,
             allowed_fields: Vec::new(),
             event_id_prefix: "evt_tracing_log".to_string(),
+            span_id_prefix: "evt_tracing_span".to_string(),
             next_id: Arc::new(AtomicU64::new(1)),
+            next_span_id: Arc::new(AtomicU64::new(1)),
             logger_name: None,
+            capture_spans: false,
         }
     }
 
-    /// Allowlist primitive event fields copied into LogBrew metadata.
+    /// Allowlist primitive event and span fields copied into LogBrew metadata.
     pub fn with_allowed_fields<I, F>(mut self, fields: I) -> Self
     where
         I: IntoIterator<Item = F>,
@@ -53,19 +61,88 @@ impl<T> LogBrewTracingLayer<T> {
         self
     }
 
+    /// Override the span event ID prefix used before the layer's monotonic counter.
+    pub fn with_span_id_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.span_id_prefix = prefix.into();
+        self
+    }
+
     /// Override the logger name attached to converted LogBrew log events.
     pub fn with_logger(mut self, logger: impl Into<String>) -> Self {
         self.logger_name = Some(logger.into());
+        self
+    }
+
+    /// Opt in to converting closed `tracing` spans into LogBrew span events.
+    pub fn with_span_events(mut self) -> Self {
+        self.capture_spans = true;
         self
     }
 }
 
 impl<S, T> Layer<S> for LogBrewTracingLayer<T>
 where
-    S: Subscriber,
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
     T: Fn() -> String + Clone + Send + Sync + 'static,
 {
-    fn on_event(&self, event: &TracingEvent<'_>, _ctx: Context<'_, S>) {
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
+        if !self.capture_spans {
+            return;
+        }
+
+        let metadata = attrs.metadata();
+        let mut visitor = TracingLogVisitor::new(&self.allowed_fields);
+        attrs.record(&mut visitor);
+        let mut span_metadata = visitor.metadata;
+        span_metadata.insert(
+            "tracingTarget".to_string(),
+            MetadataValue::String(metadata.target().to_string()),
+        );
+        span_metadata.insert(
+            "tracingLevel".to_string(),
+            MetadataValue::String(metadata.level().as_str().to_string()),
+        );
+
+        let parent = parent_span_reference(attrs, &ctx);
+        let sequence = self.next_span_id.fetch_add(1, Ordering::Relaxed);
+        let state = TracingSpanState {
+            event_id: format!("{}_{}", self.span_id_prefix.trim(), sequence),
+            trace_id: parent
+                .as_ref()
+                .map(|state| state.trace_id.clone())
+                .unwrap_or_else(|| trace_id_for(sequence)),
+            span_id: span_id_for(sequence),
+            parent_span_id: parent.map(|state| state.span_id),
+            name: metadata.name().trim().to_string(),
+            timestamp: (self.timestamp)(),
+            started_at: Instant::now(),
+            metadata: span_metadata,
+            error: false,
+        };
+
+        if let Some(span) = ctx.span(id) {
+            span.extensions_mut().insert(state);
+        }
+    }
+
+    fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
+        if !self.capture_spans {
+            return;
+        }
+
+        let Some(span) = ctx.span(id) else {
+            return;
+        };
+        let mut extensions = span.extensions_mut();
+        let Some(state) = extensions.get_mut::<TracingSpanState>() else {
+            return;
+        };
+        let mut visitor = TracingLogVisitor::new(&self.allowed_fields);
+        values.record(&mut visitor);
+        state.metadata.extend(visitor.metadata);
+    }
+
+    fn on_event(&self, event: &TracingEvent<'_>, ctx: Context<'_, S>) {
         let metadata = event.metadata();
         let mut visitor = TracingLogVisitor::new(&self.allowed_fields);
         event.record(&mut visitor);
@@ -74,6 +151,16 @@ where
             .message
             .unwrap_or_else(|| "tracing event".to_string());
         let mut log_metadata = visitor.metadata;
+        if let Some(state) = current_event_span_correlation(event, &ctx) {
+            log_metadata.insert("traceId".to_string(), MetadataValue::String(state.trace_id));
+            log_metadata.insert("spanId".to_string(), MetadataValue::String(state.span_id));
+            if let Some(parent_span_id) = state.parent_span_id {
+                log_metadata.insert(
+                    "parentSpanId".to_string(),
+                    MetadataValue::String(parent_span_id),
+                );
+            }
+        }
         log_metadata.insert(
             "tracingTarget".to_string(),
             MetadataValue::String(metadata.target().to_string()),
@@ -100,6 +187,39 @@ where
         if let Ok(mut client) = self.client.lock() {
             let _ = queue_log(&mut client, event_id, (self.timestamp)(), log);
         }
+
+        if self.capture_spans && *metadata.level() == Level::ERROR {
+            mark_current_span_error(event, &ctx);
+        }
+    }
+
+    fn on_close(&self, id: Id, ctx: Context<'_, S>) {
+        if !self.capture_spans {
+            return;
+        }
+
+        let Some(span) = ctx.span(&id) else {
+            return;
+        };
+        let Some(state) = span.extensions_mut().remove::<TracingSpanState>() else {
+            return;
+        };
+
+        let mut event = SpanEvent::new(
+            state.name,
+            state.trace_id,
+            state.span_id,
+            if state.error { "error" } else { "ok" },
+        )
+        .with_duration_ms(state.started_at.elapsed().as_secs_f64() * 1000.0)
+        .with_metadata(state.metadata);
+        if let Some(parent_span_id) = state.parent_span_id {
+            event = event.with_parent_span_id(parent_span_id);
+        }
+
+        if let Ok(mut client) = self.client.lock() {
+            let _ = queue_span(&mut client, state.event_id, state.timestamp, event);
+        }
     }
 }
 
@@ -112,6 +232,15 @@ fn queue_log(
     client.log(event_id, timestamp, log)
 }
 
+fn queue_span(
+    client: &mut LogBrewClient,
+    event_id: String,
+    timestamp: String,
+    span: SpanEvent,
+) -> Result<(), crate::SdkError> {
+    client.span(event_id, timestamp, span)
+}
+
 fn severity_for(level: &Level) -> &'static str {
     if *level == Level::ERROR {
         "error"
@@ -119,6 +248,90 @@ fn severity_for(level: &Level) -> &'static str {
         "warning"
     } else {
         "info"
+    }
+}
+
+fn trace_id_for(sequence: u64) -> String {
+    format!("{:032x}", sequence as u128)
+}
+
+fn span_id_for(sequence: u64) -> String {
+    format!("{sequence:016x}")
+}
+
+#[derive(Debug)]
+struct TracingSpanState {
+    event_id: String,
+    trace_id: String,
+    span_id: String,
+    parent_span_id: Option<String>,
+    name: String,
+    timestamp: String,
+    started_at: Instant,
+    metadata: Metadata,
+    error: bool,
+}
+
+#[derive(Clone, Debug)]
+struct SpanReference {
+    trace_id: String,
+    span_id: String,
+    parent_span_id: Option<String>,
+}
+
+impl From<&TracingSpanState> for SpanReference {
+    fn from(state: &TracingSpanState) -> Self {
+        Self {
+            trace_id: state.trace_id.clone(),
+            span_id: state.span_id.clone(),
+            parent_span_id: state.parent_span_id.clone(),
+        }
+    }
+}
+
+fn parent_span_reference<S>(attrs: &Attributes<'_>, ctx: &Context<'_, S>) -> Option<SpanReference>
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
+    let span = attrs
+        .parent()
+        .and_then(|parent_id| ctx.span(parent_id))
+        .or_else(|| {
+            attrs
+                .is_contextual()
+                .then(|| ctx.current_span().id().and_then(|id| ctx.span(id)))
+                .flatten()
+        })?;
+    span.extensions().get::<TracingSpanState>().map(Into::into)
+}
+
+fn current_event_span_correlation<S>(
+    event: &TracingEvent<'_>,
+    ctx: &Context<'_, S>,
+) -> Option<SpanReference>
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
+    let scope = ctx.event_scope(event)?;
+    let current = scope.from_root().last()?;
+    current
+        .extensions()
+        .get::<TracingSpanState>()
+        .map(Into::into)
+}
+
+fn mark_current_span_error<S>(event: &TracingEvent<'_>, ctx: &Context<'_, S>)
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
+    let Some(scope) = ctx.event_scope(event) else {
+        return;
+    };
+    let Some(current) = scope.from_root().last() else {
+        return;
+    };
+    if let Some(state) = current.extensions_mut().get_mut::<TracingSpanState>() {
+        state.error = true;
     }
 }
 
