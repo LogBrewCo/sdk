@@ -2,7 +2,7 @@
 
 ## Status
 
-This is an SDK-originated backend contract request from backend, website, and mobile convergence work. Backend handoff is pending because no backend automation/thread target is exposed in this session. The public SDK repo should not implement or document account lifecycle, provider OAuth, project creation semantics, subscription state, setup status computation, usage accounting, or quota enforcement independently.
+This is an SDK-originated backend contract request from backend, website, and mobile convergence work. Backend handoff is pending because no backend automation/thread target is exposed in this session. Backend coordination reports that the project setup and ingest-key contract is implemented but not confirmed production-available yet, so public SDK docs and examples must not claim this setup flow is live until backend confirms availability. The public SDK repo should not implement or document account lifecycle, provider OAuth, project creation semantics, subscription state, setup status computation, usage accounting, or quota enforcement independently.
 
 ## Priority
 
@@ -48,9 +48,12 @@ Suggested event fields on telemetry/check-in intake:
 Ingest key behavior:
 
 - SDKs should accept an opaque project-scoped write-only ingestion key, currently represented in public SDK options as `api_key`.
+- When backend availability is confirmed, project setup should return a one-time project-scoped write-only ingest-key DTO with public fields such as `id`, `label`, `kind`, `created_at`, `expires_at`, and a separate raw key value for one-time setup.
+- Raw ingest keys should be displayed/used only once for SDK, CLI, browser, or server setup, should use a distinct `lbw_ingest_` prefix, and should authorize telemetry ingestion only for the matching `project_id`.
 - SDKs should continue sending the key as `authorization: Bearer <value>` unless backend publishes a replacement header contract.
 - The key must not be a user session value, account bearer value, provider value, or key with read/admin scope.
 - SDK docs should call the key submit-only or write-only and should avoid describing backend account/provider/session lifecycle.
+- Invalid, expired, or wrong-project ingest keys should return a redacted `ingest_key_invalid` error with an actionable next step and no echoed key text.
 
 Setup proof recommendation:
 
@@ -80,6 +83,7 @@ SDK constraints:
 - Required init fields can stay small: project ingestion key, SDK name, SDK version, and optional endpoint/transport overrides.
 - SDKs can reliably add runtime/platform in each package without querying backend.
 - SDKs can send release/environment on first telemetry when the app provides them, but should not invent defaults or claim setup completeness from missing release/environment.
+- SDK telemetry examples should keep release and environment explicit, and SDK-facing error docs should keep canonical severity vocabulary to `info`, `warning`, `error`, and `critical`.
 - SDKs should treat over-limit responses as delivery failures with a stable public code and redacted message. Retryability should follow backend fields; without an explicit retry hint, usage-limit errors should not be aggressively retried.
 - SDKs should preserve queued events on non-2xx responses unless the backend contract later defines a safe drop policy for non-retryable over-limit errors.
 
