@@ -67,6 +67,7 @@ Usage and limit behavior:
 - Native ingest may return HTTP `429` with redacted JSON fields `code: "usage_limit_exceeded"`, `limit: "events" | "bytes"`, `reset_at`, `error`, and actionable `next` when an incoming telemetry envelope would exceed configured account limits.
 - Usage checks happen after auth and before acceptance side effects, so SDKs should treat HTTP `429` as a backend-owned account limit state, not an SDK retry-loop condition.
 - `GET /api/account/usage` is the backend-owned source for usage and limit state; SDKs should not derive quota locally.
+- Backend coordination also reports live account usage updates exist in backend code but are not production-confirmed yet. Successful native ingest can publish backend-owned usage feed events named `usage_updated`, `usage_limit_warning`, and `usage_limit_blocked`; their payload should match `GET /api/account/usage`, and SDKs should consume them only through backend-owned product surfaces or future stable public contracts.
 - Suggested redacted fields also include `status`, `retryable`, optional `retry_after_ms`, and optional `limit_kind` if backend keeps those fields in the stable envelope.
 - Error envelopes must never echo raw keys, authorization headers, request bodies, non-public project internals, account/provider details, or user telemetry payloads.
 
@@ -103,6 +104,7 @@ SDK constraints:
 
 - Backend tests for project creation, ingest key creation, setup status transitions, usage accounting, and quota/limit envelopes.
 - Backend smoke proof that first accepted telemetry moves setup status from `setup_started` or `sdk_seen` to `first_telemetry_seen` or `active`.
+- Backend proof that live usage feed events use the same redacted account-usage payload as `GET /api/account/usage`.
 - SDK fake-intake tests for HTTP `429` redacted `usage_limit_exceeded` envelopes across at least JS, Python, Go, Java, .NET, PHP, Ruby, and Rust.
 - SDK real-user setup proof after backend endpoints exist: create project, create write-only ingest key, send optional check-in, send first telemetry, read setup status from product/API surface, and assert no key or non-public payload appears in logs or errors.
 - Confidentiality scans on public docs so account/provider/session/backend internals do not leak into SDK-facing material.
