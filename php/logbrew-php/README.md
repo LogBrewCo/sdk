@@ -129,6 +129,68 @@ $client->action('evt_network_payment', '2026-06-02T10:00:06Z', ProductTimeline::
 
 `ProductTimeline` strips query strings and fragments from route templates, keeps metadata primitive-only, infers failed network milestones from 4xx/5xx status codes, and leaves all capture under app control.
 
+## First Useful Service Telemetry
+
+For first useful PHP service telemetry, combine release, environment, log, action, metric, and span events in one request path. `Traceparent` accepts W3C `traceparent` headers, normalizes IDs, rejects forbidden all-zero identifiers, exposes the sampled flag, and creates outbound propagation headers without patching HTTP clients.
+
+```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use LogBrew\LogBrewClient;
+use LogBrew\ProductTimeline;
+use LogBrew\Traceparent;
+use LogBrew\TraceparentSpanInput;
+
+$incomingTraceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+$traceContext = Traceparent::parse($incomingTraceparent);
+$childSpanId = 'b7ad6b7169203331';
+$outgoingHeaders = Traceparent::createHeaders($traceContext->traceId, $childSpanId, $traceContext->traceFlags);
+
+$client = LogBrewClient::create('LOGBREW_API_KEY', 'checkout-service', '1.2.3');
+$client->release('evt_release_checkout', '2026-06-02T10:00:00Z', ['version' => '1.2.3']);
+$client->environment('evt_environment_checkout', '2026-06-02T10:00:01Z', ['name' => 'production']);
+$client->log('evt_log_checkout_started', '2026-06-02T10:00:02Z', [
+    'message' => 'checkout request started',
+    'level' => 'info',
+    'metadata' => [
+        'traceId' => $traceContext->traceId,
+        'sessionId' => 'sess_checkout_123',
+        'routeTemplate' => '/checkout/:cart_id',
+    ],
+]);
+$client->action('evt_action_payment_api', '2026-06-02T10:00:04Z', ProductTimeline::networkMilestone(
+    routeTemplate: 'https://api.example.com/payments/:payment_id?card=sample',
+    method: 'POST',
+    statusCode: 202,
+    durationMs: 183.4,
+    sessionId: 'sess_checkout_123',
+    traceId: $traceContext->traceId
+));
+$client->metric('evt_metric_http_server_duration', '2026-06-02T10:00:05Z', [
+    'name' => 'http.server.duration',
+    'kind' => 'histogram',
+    'value' => 183.4,
+    'unit' => 'ms',
+    'temporality' => 'delta',
+    'metadata' => [
+        'method' => 'POST',
+        'routeTemplate' => '/checkout/:cart_id',
+        'statusCode' => 202,
+        'traceId' => $traceContext->traceId,
+    ],
+]);
+$client->span('evt_span_checkout_request', '2026-06-02T10:00:06Z', Traceparent::spanAttributesFromTraceparent(
+    $traceContext,
+    TraceparentSpanInput::create('POST /checkout/:cart_id', $childSpanId)
+        ->withDurationMs(183.4)
+        ->withMetadata(['sampled' => $traceContext->sampled, 'sessionId' => 'sess_checkout_123'])
+));
+```
+
+Attach `$outgoingHeaders['traceparent']` to the next service call when your application owns that request. Keep route metadata as stable patterns such as `/checkout/:cart_id`; avoid raw URLs, request bodies, response bodies, and arbitrary headers.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:

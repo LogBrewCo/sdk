@@ -12,6 +12,8 @@ use LogBrew\LogBrewPsrLogger;
 use LogBrew\ProductTimeline;
 use LogBrew\RecordingTransport;
 use LogBrew\SdkError;
+use LogBrew\Traceparent;
+use LogBrew\TraceparentSpanInput;
 use LogBrew\TransportError;
 use Monolog\LogRecord;
 use Monolog\Logger as MonologLogger;
@@ -355,6 +357,74 @@ foreach (['"level": "critical"', '"level": "info"', '"level": "warning"'] as $ne
 expectThrows(
     fn () => sampleClient()->span('evt_span_001', '2026-06-02T10:00:04Z', ['name' => 'GET /health', 'traceId' => 'trace_001', 'spanId' => 'span_001', 'status' => 'ok', 'durationMs' => -1]),
     'span durationMs must be non-negative'
+);
+
+$incomingTraceparent = '00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01';
+$traceContext = Traceparent::parse($incomingTraceparent);
+assertTrue($traceContext->version === '00', 'expected traceparent version');
+assertTrue($traceContext->traceId === '4bf92f3577b34da6a3ce929d0e0e4736', 'expected normalized trace id');
+assertTrue($traceContext->parentSpanId === '00f067aa0ba902b7', 'expected normalized parent span id');
+assertTrue($traceContext->traceFlags === '01', 'expected normalized trace flags');
+assertTrue($traceContext->sampled === true, 'expected sampled trace flag');
+assertTrue(
+    Traceparent::create('4BF92F3577B34DA6A3CE929D0E0E4736', 'B7AD6B7169203331') === '00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01',
+    'expected normalized outgoing traceparent'
+);
+$outgoingHeaders = Traceparent::createHeaders($traceContext->traceId, 'b7ad6b7169203331');
+assertTrue($outgoingHeaders === ['traceparent' => '00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01'], 'expected outgoing traceparent headers');
+$traceMetadata = ['sampled' => $traceContext->sampled, 'routeTemplate' => '/checkout/:cart_id'];
+$spanInput = TraceparentSpanInput::create('POST /checkout/:cart_id', 'B7AD6B7169203331')
+    ->withDurationMs(42.5)
+    ->withMetadata($traceMetadata);
+$traceMetadata['routeTemplate'] = '/mutated';
+$spanAttributes = Traceparent::spanAttributesFromTraceparent($traceContext, $spanInput);
+assertTrue($spanAttributes['traceId'] === '4bf92f3577b34da6a3ce929d0e0e4736', 'expected traceparent span trace id');
+assertTrue($spanAttributes['spanId'] === 'b7ad6b7169203331', 'expected traceparent span child span id');
+assertTrue(($spanAttributes['parentSpanId'] ?? null) === '00f067aa0ba902b7', 'expected traceparent span parent id');
+assertTrue(($spanAttributes['metadata']['sampled'] ?? null) === true, 'expected traceparent span sampled metadata');
+assertTrue(($spanAttributes['metadata']['routeTemplate'] ?? null) === '/checkout/:cart_id', 'expected traceparent span metadata copy');
+$client = sampleClient();
+$client->span('evt_span_traceparent', '2026-06-02T10:00:04Z', $spanAttributes);
+$tracePreview = $client->previewJson();
+foreach ([
+    '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"',
+    '"spanId": "b7ad6b7169203331"',
+    '"parentSpanId": "00f067aa0ba902b7"',
+    '"sampled": true',
+] as $needle) {
+    assertTrue(str_contains($tracePreview, $needle), "missing traceparent span payload: {$needle}");
+}
+expectThrows(
+    fn () => Traceparent::parse('ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'),
+    'traceparent version must be two hex characters and not ff'
+);
+expectThrows(
+    fn () => Traceparent::parse('00-00000000000000000000000000000000-00f067aa0ba902b7-01'),
+    'traceparent trace id must be 32 non-zero hex characters'
+);
+expectThrows(
+    fn () => Traceparent::parse('00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01'),
+    'traceparent parent span id must be 16 non-zero hex characters'
+);
+expectThrows(
+    fn () => Traceparent::create('4bf92f3577b34da6a3ce929d0e0e4736', '0000000000000000'),
+    'traceparent span id must be 16 non-zero hex characters'
+);
+expectThrows(
+    fn () => Traceparent::create('4bf92f3577b34da6a3ce929d0e0e4736', 'b7ad6b7169203331', 'zz'),
+    'traceparent flags must be two hex characters'
+);
+expectThrows(
+    fn () => TraceparentSpanInput::create('POST /checkout/:cart_id', 'b7ad6b7169203331', 'done'),
+    'span status must be one of'
+);
+expectThrows(
+    fn () => TraceparentSpanInput::create('POST /checkout/:cart_id', 'b7ad6b7169203331')->withDurationMs(NAN),
+    'span durationMs must be a finite number'
+);
+expectThrows(
+    fn () => TraceparentSpanInput::create('POST /checkout/:cart_id', 'b7ad6b7169203331')->withMetadata(['bad' => []]),
+    'metadata value for bad must be a string, number, boolean, or null'
 );
 
 $client = sampleClient();
@@ -763,6 +833,7 @@ assertTrue($helpLines === [
     'run-readme-example -> make run-readme-example',
     'run (real-user-smoke) -> make run',
     'run-real-user-smoke -> make run-real-user-smoke',
+    'run-first-useful-telemetry -> make run-first-useful-telemetry',
 ], 'unexpected PHP examples make output');
 assertTrue($makeHelp['stderr'] === '', 'expected empty stderr from PHP examples make help');
 
@@ -795,5 +866,20 @@ assertTrue(str_contains($makeRealUser['stdout'], '"type":"span"') || str_contain
 assertTrue(str_contains($makeRealUser['stdout'], '"type":"action"') || str_contains($makeRealUser['stdout'], '"type": "action"'), 'expected action event in PHP make run-real-user-smoke output');
 assertTrue(str_contains($makeRealUser['stderr'], '"ok":true') || str_contains($makeRealUser['stderr'], '"ok": true'), 'expected success status in PHP make run-real-user-smoke stderr');
 assertTrue(str_contains($makeRealUser['stderr'], '"events":6') || str_contains($makeRealUser['stderr'], '"events": 6'), 'expected event count in PHP make run-real-user-smoke stderr');
+
+$firstUseful = runCommand($packageRoot, [PHP_BINARY, 'examples/first_useful_telemetry.php']);
+foreach (['"type":"release"', '"type":"environment"', '"type":"log"', '"type":"action"', '"type":"metric"', '"type":"span"'] as $needle) {
+    $prettyNeedle = str_replace('":"', '": "', $needle);
+    assertTrue(str_contains($firstUseful['stdout'], $needle) || str_contains($firstUseful['stdout'], $prettyNeedle), "expected first-useful output to contain {$needle}");
+}
+assertTrue(str_contains($firstUseful['stdout'], '"traceId":"4bf92f3577b34da6a3ce929d0e0e4736"') || str_contains($firstUseful['stdout'], '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"'), 'expected first-useful trace correlation');
+assertTrue(!str_contains($firstUseful['stdout'], 'coupon=sample'), 'expected first-useful product query text to be omitted');
+assertTrue(!str_contains($firstUseful['stdout'], 'card=sample'), 'expected first-useful network query text to be omitted');
+assertTrue(str_contains($firstUseful['stderr'], '"events":7') || str_contains($firstUseful['stderr'], '"events": 7'), 'expected first-useful event count');
+assertTrue(str_contains($firstUseful['stderr'], '"outgoingTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"') || str_contains($firstUseful['stderr'], '"outgoingTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"'), 'expected first-useful outgoing traceparent');
+
+$makeFirstUseful = runCommand($examplesDir, ['make', 'run-first-useful-telemetry']);
+assertTrue(str_contains($makeFirstUseful['stdout'], '"type":"metric"') || str_contains($makeFirstUseful['stdout'], '"type": "metric"'), 'expected metric event in PHP make run-first-useful-telemetry output');
+assertTrue(str_contains($makeFirstUseful['stderr'], '"events":7') || str_contains($makeFirstUseful['stderr'], '"events": 7'), 'expected first-useful make event count');
 
 fwrite(STDOUT, "php sdk checks passed\n");

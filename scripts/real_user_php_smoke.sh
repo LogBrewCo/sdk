@@ -30,9 +30,13 @@ $composerJson = null;
 $readme = null;
 $readmeExample = null;
 $example = null;
+$firstUsefulExample = null;
 $exampleMakefile = null;
 $httpTransport = null;
 $productTimeline = null;
+$traceparent = null;
+$traceparentContext = null;
+$traceparentSpanInput = null;
 $psrLogger = null;
 $monologHandler = null;
 for ($i = 0; $i < $zip->numFiles; $i++) {
@@ -52,6 +56,9 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
     if ($name === "examples/real_user_smoke.php" || str_ends_with($name, "/examples/real_user_smoke.php")) {
         $example = $zip->getFromIndex($i);
     }
+    if ($name === "examples/first_useful_telemetry.php" || str_ends_with($name, "/examples/first_useful_telemetry.php")) {
+        $firstUsefulExample = $zip->getFromIndex($i);
+    }
     if ($name === "examples/Makefile" || str_ends_with($name, "/examples/Makefile")) {
         $exampleMakefile = $zip->getFromIndex($i);
     }
@@ -60,6 +67,15 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
     }
     if ($name === "src/ProductTimeline.php" || str_ends_with($name, "/src/ProductTimeline.php")) {
         $productTimeline = $zip->getFromIndex($i);
+    }
+    if ($name === "src/Traceparent.php" || str_ends_with($name, "/src/Traceparent.php")) {
+        $traceparent = $zip->getFromIndex($i);
+    }
+    if ($name === "src/TraceparentContext.php" || str_ends_with($name, "/src/TraceparentContext.php")) {
+        $traceparentContext = $zip->getFromIndex($i);
+    }
+    if ($name === "src/TraceparentSpanInput.php" || str_ends_with($name, "/src/TraceparentSpanInput.php")) {
+        $traceparentSpanInput = $zip->getFromIndex($i);
     }
     if ($name === "src/LogBrewPsrLogger.php" || str_ends_with($name, "/src/LogBrewPsrLogger.php")) {
         $psrLogger = $zip->getFromIndex($i);
@@ -85,6 +101,10 @@ if (!is_string($example)) {
     fwrite(STDERR, "missing examples/real_user_smoke.php in composer archive\n");
     exit(1);
 }
+if (!is_string($firstUsefulExample)) {
+    fwrite(STDERR, "missing examples/first_useful_telemetry.php in composer archive\n");
+    exit(1);
+}
 if (!is_string($exampleMakefile)) {
     fwrite(STDERR, "missing examples/Makefile in composer archive\n");
     exit(1);
@@ -95,6 +115,18 @@ if (!is_string($httpTransport)) {
 }
 if (!is_string($productTimeline)) {
     fwrite(STDERR, "missing src/ProductTimeline.php in composer archive\n");
+    exit(1);
+}
+if (!is_string($traceparent)) {
+    fwrite(STDERR, "missing src/Traceparent.php in composer archive\n");
+    exit(1);
+}
+if (!is_string($traceparentContext)) {
+    fwrite(STDERR, "missing src/TraceparentContext.php in composer archive\n");
+    exit(1);
+}
+if (!is_string($traceparentSpanInput)) {
+    fwrite(STDERR, "missing src/TraceparentSpanInput.php in composer archive\n");
     exit(1);
 }
 if (!is_string($psrLogger)) {
@@ -134,6 +166,8 @@ foreach ([
     "This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet." => "missing composer archive metric auto-capture guidance\n",
     "ProductTimeline" => "missing composer archive timeline guidance\n",
     "without visual replay, HTTP client patching, request/response payload capture, or header capture" => "missing composer archive timeline privacy guidance\n",
+    "Traceparent" => "missing composer archive traceparent guidance\n",
+    "first useful PHP service telemetry" => "missing composer archive first useful telemetry guidance\n",
     "HttpTransport" => "missing composer archive HTTP transport guidance\n",
     "HTTP Delivery" => "missing composer archive HTTP delivery heading\n",
     "HttpTransport::DEFAULT_ENDPOINT" => "missing composer archive HTTP endpoint guidance\n",
@@ -161,16 +195,23 @@ if (!str_contains($example, "../vendor/autoload.php") || !str_contains($example,
     fwrite(STDERR, "missing composer archive dual-context autoload support in shipped example\n");
     exit(1);
 }
-if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-real-user-smoke")
+if (!str_contains($firstUsefulExample, "../vendor/autoload.php") || !str_contains($firstUsefulExample, "../../../autoload.php")) {
+    fwrite(STDERR, "missing composer archive dual-context autoload support in first-useful example\n");
+    exit(1);
+}
+if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry")
     || !str_contains($exampleMakefile, "help:")
     || !str_contains($exampleMakefile, "run: run-real-user-smoke")
     || !str_contains($exampleMakefile, "run-readme-example:")
     || !str_contains($exampleMakefile, "@php readme_example.php")
     || !str_contains($exampleMakefile, "run-real-user-smoke:")
     || !str_contains($exampleMakefile, "@php real_user_smoke.php")
+    || !str_contains($exampleMakefile, "run-first-useful-telemetry:")
+    || !str_contains($exampleMakefile, "@php first_useful_telemetry.php")
     || !str_contains($exampleMakefile, "run-readme-example -> make run-readme-example")
     || !str_contains($exampleMakefile, "run (real-user-smoke) -> make run")
-    || !str_contains($exampleMakefile, "run-real-user-smoke -> make run-real-user-smoke")) {
+    || !str_contains($exampleMakefile, "run-real-user-smoke -> make run-real-user-smoke")
+    || !str_contains($exampleMakefile, "run-first-useful-telemetry -> make run-first-useful-telemetry")) {
     fwrite(STDERR, "missing composer archive example Makefile helper\n");
     exit(1);
 }
@@ -336,10 +377,14 @@ test -f vendor/logbrew/sdk/README.md
 test -f vendor/logbrew/sdk/composer.json
 test -f vendor/logbrew/sdk/src/HttpTransport.php
 test -f vendor/logbrew/sdk/src/ProductTimeline.php
+test -f vendor/logbrew/sdk/src/Traceparent.php
+test -f vendor/logbrew/sdk/src/TraceparentContext.php
+test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/logbrew/sdk/examples/readme_example.php
 test -f vendor/logbrew/sdk/examples/real_user_smoke.php
+test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
 test -f vendor/logbrew/sdk/examples/Makefile
 test -f vendor/composer/installed.json
 test -f vendor/composer/autoload_psr4.php
@@ -347,7 +392,8 @@ test -f vendor/composer/autoload_psr4.php
 grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' vendor-example-make-help.txt)
 grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' vendor-example-make-help.txt)
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' vendor-example-make-help.txt)
-test "$(wc -l < vendor-example-make-help.txt | tr -d ' ')" = "3"
+grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' vendor-example-make-help.txt)
+test "$(wc -l < vendor-example-make-help.txt | tr -d ' ')" = "4"
 php -r '
 $readme = file_get_contents($argv[1]);
 if ($readme === false) {
@@ -362,6 +408,8 @@ foreach ([
     "This SDK does not automatically collect PHP runtime, FPM, framework, or database metrics yet." => "missing installed README metric auto-capture guidance\n",
     "ProductTimeline" => "missing installed README timeline guidance\n",
     "without visual replay, HTTP client patching, request/response payload capture, or header capture" => "missing installed README timeline privacy guidance\n",
+    "Traceparent" => "missing installed README traceparent guidance\n",
+    "first useful PHP service telemetry" => "missing installed README first useful telemetry guidance\n",
     "HttpTransport" => "missing installed README HTTP transport guidance\n",
     "HTTP Delivery" => "missing installed README HTTP delivery heading\n",
     "HttpTransport::DEFAULT_ENDPOINT" => "missing installed README HTTP endpoint guidance\n",
@@ -454,6 +502,17 @@ python3 "$repo_root/scripts/validate_fixtures.py" vendor-example-make.stdout.jso
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example-make.stdout.json >/dev/null
 grep -q '"events":6' vendor-example-make.stderr.json
 grep -q '"ok":true' vendor-example-make.stderr.json
+php vendor/logbrew/sdk/examples/first_useful_telemetry.php > vendor-first-useful.stdout.json 2> vendor-first-useful.stderr.json
+grep -q '"type": "metric"' vendor-first-useful.stdout.json
+grep -q '"type": "span"' vendor-first-useful.stdout.json
+grep -q '"events":7' vendor-first-useful.stderr.json
+grep -q '"outgoingTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' vendor-first-useful.stderr.json
+python3 "$repo_root/scripts/validate_fixtures.py" vendor-first-useful.stdout.json >/dev/null
+python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-useful.stdout.json vendor-first-useful.stderr.json >/dev/null
+(cd vendor/logbrew/sdk/examples && make run-first-useful-telemetry) > vendor-first-useful-make.stdout.json 2> vendor-first-useful-make.stderr.json
+grep -q '"type": "metric"' vendor-first-useful-make.stdout.json
+grep -q '"events":7' vendor-first-useful-make.stderr.json
+python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-useful-make.stdout.json vendor-first-useful-make.stderr.json >/dev/null
 php -r '
 $data = json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR);
 $packages = $data["packages"] ?? $data;
@@ -588,8 +647,12 @@ test -f vendor/logbrew/sdk/README.md
 test -f vendor/logbrew/sdk/composer.json
 test -f vendor/logbrew/sdk/src/HttpTransport.php
 test -f vendor/logbrew/sdk/src/ProductTimeline.php
+test -f vendor/logbrew/sdk/src/Traceparent.php
+test -f vendor/logbrew/sdk/src/TraceparentContext.php
+test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
+test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
 test -f vendor/composer/installed.json
 test -f vendor/composer/autoload_psr4.php
 php -r '
@@ -1294,6 +1357,7 @@ $data["scripts"]["smoke-psr-logger"] = "php psr-logger.php";
 $data["scripts"]["smoke-monolog-handler"] = "php monolog-handler.php";
 $data["scripts"]["smoke-http-transport"] = "php http-transport.php";
 $data["scripts"]["smoke-vendor-example"] = "php vendor/logbrew/sdk/examples/real_user_smoke.php";
+$data["scripts"]["smoke-first-useful"] = "php vendor/logbrew/sdk/examples/first_useful_telemetry.php";
 $data["scripts"]["smoke-types"] = "@php vendor/bin/phpstan analyse phpstan-consumer.php --level=max --memory-limit=512M --no-progress";
 file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
 ' composer.json
@@ -1315,6 +1379,10 @@ grep -q '"httpTransport":true' http-transport.stderr.json
 grep -q '"httpAttempts":2' http-transport.stderr.json
 grep -q '"httpRequests":2' http-transport.stderr.json
 composer run --no-interaction --quiet smoke-vendor-example >/dev/null
+composer run --no-interaction smoke-first-useful > first-useful-composer.stdout.json 2> first-useful-composer.stderr.json
+grep -q '"type": "metric"' first-useful-composer.stdout.json
+grep -q '"events":7' first-useful-composer.stderr.json
+python3 "$repo_root/scripts/check_php_first_useful_payload.py" first-useful-composer.stdout.json first-useful-composer.stderr.json >/dev/null
 php readme-example.php > readme-example.stdout.json 2> readme-example.stderr.json
 grep -q '"type": "release"' readme-example.stdout.json
 grep -q '"type": "environment"' readme-example.stdout.json
@@ -1334,8 +1402,12 @@ test -f vendor/logbrew/sdk/README.md
 test -f vendor/logbrew/sdk/composer.json
 test -f vendor/logbrew/sdk/src/HttpTransport.php
 test -f vendor/logbrew/sdk/src/ProductTimeline.php
+test -f vendor/logbrew/sdk/src/Traceparent.php
+test -f vendor/logbrew/sdk/src/TraceparentContext.php
+test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
+test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
 test -f vendor/composer/installed.json
 test -f vendor/composer/autoload_psr4.php
 php -r '
@@ -1579,7 +1651,8 @@ grep -q '"ok":true' vendor-example-reinstall.stderr.json
 grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' vendor-example-make-reinstall-help.txt)
 grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' vendor-example-make-reinstall-help.txt)
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' vendor-example-make-reinstall-help.txt)
-test "$(wc -l < vendor-example-make-reinstall-help.txt | tr -d ' ')" = "3"
+grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' vendor-example-make-reinstall-help.txt)
+test "$(wc -l < vendor-example-make-reinstall-help.txt | tr -d ' ')" = "4"
 (cd vendor/logbrew/sdk/examples && make run-readme-example) > vendor-readme-example-make-reinstall.stdout.json 2> vendor-readme-example-make-reinstall.stderr.json
 grep -q '"type": "release"' vendor-readme-example-make-reinstall.stdout.json
 grep -q '"type": "environment"' vendor-readme-example-make-reinstall.stdout.json
@@ -1607,6 +1680,16 @@ python3 "$repo_root/scripts/validate_fixtures.py" vendor-example-make-reinstall.
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example-make-reinstall.stdout.json >/dev/null
 grep -q '"events":6' vendor-example-make-reinstall.stderr.json
 grep -q '"ok":true' vendor-example-make-reinstall.stderr.json
+php vendor/logbrew/sdk/examples/first_useful_telemetry.php > vendor-first-useful-reinstall.stdout.json 2> vendor-first-useful-reinstall.stderr.json
+grep -q '"type": "metric"' vendor-first-useful-reinstall.stdout.json
+grep -q '"type": "span"' vendor-first-useful-reinstall.stdout.json
+grep -q '"events":7' vendor-first-useful-reinstall.stderr.json
+python3 "$repo_root/scripts/validate_fixtures.py" vendor-first-useful-reinstall.stdout.json >/dev/null
+python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-useful-reinstall.stdout.json vendor-first-useful-reinstall.stderr.json >/dev/null
+(cd vendor/logbrew/sdk/examples && make run-first-useful-telemetry) > vendor-first-useful-make-reinstall.stdout.json 2> vendor-first-useful-make-reinstall.stderr.json
+grep -q '"type": "metric"' vendor-first-useful-make-reinstall.stdout.json
+grep -q '"events":7' vendor-first-useful-make-reinstall.stderr.json
+python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-useful-make-reinstall.stdout.json vendor-first-useful-make-reinstall.stderr.json >/dev/null
 composer run --no-interaction --quiet smoke-run >/dev/null
 cat > reflection-docs.php <<'EOF'
 <?php
@@ -1702,6 +1785,51 @@ if (!str_contains($networkMilestone, 'Create an action attribute payload for an 
 }
 if (!str_contains($networkMilestone, '@return ActionAttributes')) {
     fwrite(STDERR, "missing ProductTimeline::networkMilestone return docblock\n");
+    exit(1);
+}
+
+$traceparent = new ReflectionClass(\LogBrew\Traceparent::class);
+$traceparentDoc = $traceparent->getDocComment() ?: '';
+if (!str_contains($traceparentDoc, 'Dependency-free W3C traceparent helpers for explicit app-owned propagation.')) {
+    fwrite(STDERR, "missing Traceparent class doc summary\n");
+    exit(1);
+}
+if (!str_contains($traceparentDoc, '@phpstan-import-type SpanAttributes from LogBrewClient')) {
+    fwrite(STDERR, "missing Traceparent span attributes import\n");
+    exit(1);
+}
+$traceparentParse = $traceparent->getMethod('parse')->getDocComment() ?: '';
+if (!str_contains($traceparentParse, 'Parse and validate one W3C traceparent header.')) {
+    fwrite(STDERR, "missing Traceparent::parse doc summary\n");
+    exit(1);
+}
+$traceparentHeaders = $traceparent->getMethod('createHeaders')->getDocComment() ?: '';
+if (!str_contains($traceparentHeaders, '@return array{traceparent:string}')) {
+    fwrite(STDERR, "missing Traceparent::createHeaders return docblock\n");
+    exit(1);
+}
+$traceparentSpan = $traceparent->getMethod('spanAttributesFromTraceparent')->getDocComment() ?: '';
+if (!str_contains($traceparentSpan, '@return SpanAttributes')) {
+    fwrite(STDERR, "missing Traceparent::spanAttributesFromTraceparent return docblock\n");
+    exit(1);
+}
+
+$traceparentContext = new ReflectionClass(\LogBrew\TraceparentContext::class);
+$traceparentContextDoc = $traceparentContext->getDocComment() ?: '';
+if (!str_contains($traceparentContextDoc, 'Parsed W3C traceparent context with normalized lowercase identifiers.')) {
+    fwrite(STDERR, "missing TraceparentContext class doc summary\n");
+    exit(1);
+}
+
+$traceparentSpanInput = new ReflectionClass(\LogBrew\TraceparentSpanInput::class);
+$traceparentSpanInputDoc = $traceparentSpanInput->getDocComment() ?: '';
+if (!str_contains($traceparentSpanInputDoc, 'App-owned child span fields derived from an incoming traceparent.')) {
+    fwrite(STDERR, "missing TraceparentSpanInput class doc summary\n");
+    exit(1);
+}
+$traceparentSpanInputCreate = $traceparentSpanInput->getMethod('create')->getDocComment() ?: '';
+if (!str_contains($traceparentSpanInputCreate, 'Create a child span input that can be converted into LogBrew span attributes.')) {
+    fwrite(STDERR, "missing TraceparentSpanInput::create doc summary\n");
     exit(1);
 }
 
