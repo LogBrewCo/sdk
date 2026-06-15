@@ -43,6 +43,9 @@ grep -q '^co/logbrew/sdk/MetricAttributes.class$' "$tmp_dir/binary-jar-contents.
 grep -q '^co/logbrew/sdk/ProductTimeline.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline\$ProductAction.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline\$NetworkMilestone.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/Traceparent.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/Traceparent\$Context.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/Traceparent\$SpanInput.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewJulHandler.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewLogbackAppender.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/Transport.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -57,8 +60,10 @@ grep -q '^src/main/java/co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/source-jar
 grep -q '^src/main/java/co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/MetricAttributes.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/ProductTimeline.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/Traceparent.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewJulHandler.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewLogbackAppender.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^examples/FirstUsefulTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^examples/ReadmeExample.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^examples/RealUserSmoke.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^examples/Makefile$' "$tmp_dir/source-jar-contents.txt"
@@ -70,6 +75,8 @@ grep -q 'LogBrewClient.create' "$package_dir/README.md"
 grep -q 'HttpTransport' "$package_dir/README.md"
 grep -q 'MetricAttributes' "$package_dir/README.md"
 grep -q 'ProductTimeline' "$package_dir/README.md"
+grep -q 'Traceparent' "$package_dir/README.md"
+grep -q 'first useful LogBrew payload' "$package_dir/README.md"
 grep -q 'without visual replay, HTTP client patching, request/response payload capture, or header capture' "$package_dir/README.md"
 grep -q 'This SDK does not automatically collect JVM, runtime, or framework metrics yet.' "$package_dir/README.md"
 grep -q 'java.net.http' "$package_dir/README.md"
@@ -85,6 +92,7 @@ mkdir -p "$extract_dir"
 test -f "$extract_dir/examples/Makefile"
 make -C "$extract_dir/examples" > "$tmp_dir/extracted-examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/extracted-examples-help.txt"
+grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/extracted-examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/extracted-examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/extracted-examples-help.txt"
 (cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_logback_classpath" run-readme-example) > "$tmp_dir/extracted-readme.stdout.json" 2> "$tmp_dir/extracted-readme.stderr.json"
@@ -95,6 +103,9 @@ grep -q '"ok":true' "$tmp_dir/extracted-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-smoke-alias.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/extracted-smoke-alias.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/extracted-smoke-alias.stderr.json"
+(cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_logback_classpath" run-first-useful-telemetry) > "$tmp_dir/extracted-first-useful.stdout.json" 2> "$tmp_dir/extracted-first-useful.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-first-useful.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/extracted-first-useful.stdout.json" "$tmp_dir/extracted-first-useful.stderr.json" >/dev/null
 
 javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_logback_classpath" -d "$tmp_dir/example-classes" @"$example_sources"
 java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" ReadmeExample > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
@@ -105,6 +116,9 @@ java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/packaged-smoke.stderr.json"
+java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" FirstUsefulTelemetry > "$tmp_dir/packaged-first-useful.stdout.json" 2> "$tmp_dir/packaged-first-useful.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json" >/dev/null
 
 lifecycle_app="$tmp_dir/lifecycle-app"
 mkdir -p "$lifecycle_app/lib" "$lifecycle_app/src" "$lifecycle_app/classes"

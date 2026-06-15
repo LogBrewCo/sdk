@@ -60,6 +60,19 @@ public final class App {
 }
 ```
 
+## First Useful Telemetry
+
+For a production Java service, the first useful LogBrew payload is usually a release marker, environment marker, one service log, one product action, one network milestone, one request duration metric, and one W3C-linked request span. That gives developers and AI assistants enough context to answer "what changed?", "where did this happen?", "what did the user do?", "which API call mattered?", and "which trace links the signals?" without installing a Java agent or global HTTP instrumentation.
+
+From this package source:
+
+```bash
+cd java/logbrew-java
+make -C examples run-first-useful-telemetry
+```
+
+The example uses a fake key and `RecordingTransport` so you can inspect the JSON locally before enabling `HttpTransport` in your app. It strips query strings and fragments from route templates, keeps metadata primitive-only, links logs/actions/metrics/spans with the same trace and session IDs, and does not capture request/response payloads, arbitrary headers, or full URLs.
+
 ## Metrics
 
 Use `metric` for explicit, application-owned measurements:
@@ -112,6 +125,37 @@ client.action(
         .toActionAttributes()
 );
 ```
+
+## W3C Trace Context
+
+Use `Traceparent` when a Java service needs to continue trace context from OpenTelemetry-compatible callers or pass a W3C `traceparent` value downstream without adding a tracing dependency:
+
+```java
+import co.logbrew.sdk.Traceparent;
+import java.util.Map;
+
+String incoming = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
+Traceparent.Context context = Traceparent.parse(incoming);
+
+client.span(
+    "evt_span_checkout",
+    "2026-06-02T10:00:04Z",
+    Traceparent.spanAttributesFromTraceparent(
+        incoming,
+        Traceparent.SpanInput.create("POST /checkout/:cart_id", "b7ad6b7169203331", "ok")
+            .durationMs(183.4)
+            .metadata(Map.of("routeTemplate", "/checkout/:cart_id"))
+    )
+);
+
+Map<String, String> headers = Traceparent.createHeaders(
+    context.traceId(),
+    "b7ad6b7169203331",
+    context.traceFlags()
+);
+```
+
+`Traceparent.parse(...)` validates the W3C shape, rejects forbidden version `ff`, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `Traceparent.spanAttributesFromTraceparent(...)` creates child span attributes with the incoming trace ID and parent span ID while preserving only primitive metadata. `Traceparent.createHeaders(...)` returns an explicit outbound carrier with only `traceparent`.
 
 ## HTTP Delivery
 
@@ -232,12 +276,13 @@ appender.stop();
 
 From `java/logbrew-java`:
 
-The `examples` directory contains copyable snippets for creating a client, sending through `HttpTransport`, attaching `java.util.logging`, and configuring the optional Logback appender in your own Java service.
+The `examples` directory contains copyable snippets for creating a client, producing a first useful telemetry payload, sending through `HttpTransport`, attaching `java.util.logging`, and configuring the optional Logback appender in your own Java service.
 
 ## Behavior
 
 - `previewJson()` returns the queued batch as pretty JSON.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
+- `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
 - `isClosed()` returns whether `shutdown(transport)` has closed the client.

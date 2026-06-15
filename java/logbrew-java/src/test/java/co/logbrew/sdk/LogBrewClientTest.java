@@ -53,6 +53,8 @@ public final class LogBrewClientTest {
         testMetricRejectsInvalidTemporalityForKind();
         testProductTimelineActionAttributesSanitizePrimitiveMetadata();
         testNetworkTimelineAttributesSanitizeAndValidate();
+        testTraceparentHelpersContinueW3cContext();
+        testTraceparentHelpersRejectInvalidContext();
         testMetadataIsDefensivelyCopied();
         testUnauthenticatedResponseSurfacesCleanError();
         testNetworkFailureRetriesBeforeSucceeding();
@@ -299,6 +301,92 @@ public final class LogBrewClientTest {
         SdkException missingRoute = expectSdkException(() ->
             ProductTimeline.networkMilestone("   ").toActionAttributes());
         assertContains(missingRoute.getMessage(), "network milestone routeTemplate must be non-empty");
+        testsRun++;
+    }
+
+    private void testTraceparentHelpersContinueW3cContext() {
+        String traceparent = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
+        Traceparent.Context context = Traceparent.parse(traceparent);
+
+        assertEquals("00", context.version(), "traceparent version");
+        assertEquals("4bf92f3577b34da6a3ce929d0e0e4736", context.traceId(), "traceparent trace id");
+        assertEquals("00f067aa0ba902b7", context.parentSpanId(), "traceparent parent span id");
+        assertEquals("01", context.traceFlags(), "traceparent flags");
+        assertTrue(context.sampled(), "traceparent sampled flag");
+
+        String childSpanId = "b7ad6b7169203331";
+        assertEquals(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01",
+            Traceparent.create(context.traceId(), childSpanId, context.traceFlags()),
+            "created traceparent"
+        );
+        assertEquals(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01",
+            Traceparent.createHeaders(context.traceId(), childSpanId).get("traceparent"),
+            "created traceparent headers"
+        );
+
+        LogBrewClient client = sampleClient();
+        client.span(
+            "evt_traceparent_span",
+            "2026-06-02T10:00:04Z",
+            Traceparent.spanAttributesFromTraceparent(
+                traceparent,
+                Traceparent.SpanInput.create("POST /checkout/:cart_id", childSpanId, "ok")
+                    .durationMs(8.5)
+                    .metadata(Map.of("routeTemplate", "/checkout/:cart_id", "sampled", Boolean.TRUE))
+            )
+        );
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\"");
+        assertContains(payload, "\"parentSpanId\": \"00f067aa0ba902b7\"");
+        assertContains(payload, "\"spanId\": \"b7ad6b7169203331\"");
+        assertContains(payload, "\"durationMs\": 8.5");
+        assertContains(payload, "\"sampled\": true");
+        testsRun++;
+    }
+
+    private void testTraceparentHelpersRejectInvalidContext() {
+        assertContains(
+            expectSdkException(() -> Traceparent.parse(
+                "00-00000000000000000000000000000000-00f067aa0ba902b7-01"
+            )).getMessage(),
+            "traceparent traceId must not be all zeros"
+        );
+        assertContains(
+            expectSdkException(() -> Traceparent.parse(
+                "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+            )).getMessage(),
+            "traceparent version ff is forbidden"
+        );
+        assertContains(
+            expectSdkException(() -> Traceparent.create(
+                "4bf92f3577b34da6a3ce929d0e0e4736",
+                "0000000000000000"
+            )).getMessage(),
+            "spanId must not be all zeros"
+        );
+        assertContains(
+            expectSdkException(() -> Traceparent.spanAttributesFromTraceparent(
+                "not-a-traceparent",
+                Traceparent.SpanInput.create("GET /health", "b7ad6b7169203331", "ok")
+            )).getMessage(),
+            "traceparent must match W3C"
+        );
+        LogBrewClient client = sampleClient();
+        assertContains(
+            expectSdkException(() -> client.span(
+                "evt_invalid_traceparent_span",
+                "2026-06-02T10:00:04Z",
+                Traceparent.spanAttributesFromTraceparent(
+                    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                    Traceparent.SpanInput.create("GET /health", "b7ad6b7169203331", "ok")
+                        .durationMs(-1.0)
+                )
+            )).getMessage(),
+            "span durationMs must be non-negative"
+        );
         testsRun++;
     }
 
