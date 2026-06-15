@@ -149,6 +149,17 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_step \d+ "Generated artifact hygiene"',
         )
 
+    def test_public_verifier_runs_github_release_safety_gate(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"GitHub release safety checks"', script)
+        self.assertRegex(
+            script,
+            r'begin_step \d+ "GitHub release safety checks"\n'
+            r'run_shell_step "python3 scripts/check_github_release_safety\.py"\n'
+            r"mark_step_complete",
+        )
+
     def test_declared_step_labels_match_executable_steps(self) -> None:
         script = SCRIPT.read_text()
         labels_block = re.search(r"STEP_LABELS=\(\n(?P<labels>.*?)\n\)", script, re.DOTALL)

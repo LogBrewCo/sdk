@@ -72,6 +72,7 @@ STEP_LABELS=(
   "Objective-C real-user smoke"
   "Backend contract report checks"
   "Release metadata checks"
+  "GitHub release safety checks"
   "Markdown link checks"
   "Shell static analysis"
   "Workflow YAML validation"
@@ -561,27 +562,31 @@ begin_step 52 "Release metadata checks"
 run_shell_step "python3 scripts/check_release_metadata.py"
 mark_step_complete
 
-begin_step 53 "Markdown link checks"
+begin_step 53 "GitHub release safety checks"
+run_shell_step "python3 scripts/check_github_release_safety.py"
+mark_step_complete
+
+begin_step 54 "Markdown link checks"
 run_shell_step "python3 scripts/check_markdown_links.py"
 mark_step_complete
 
-begin_step 54 "Shell static analysis"
+begin_step 55 "Shell static analysis"
 run_shell_step "bash scripts/check_shell_static.sh"
 mark_step_complete
 
-begin_step 55 "Workflow YAML validation"
+begin_step 56 "Workflow YAML validation"
 run_shell_step "ruby -e 'require \"yaml\"; YAML.load_file(\".github/workflows/ci.yml\"); YAML.load_file(\".github/workflows/release-readiness.yml\"); puts \"yaml ok\"'"
 mark_step_complete
 
-begin_step 56 "Confidentiality leak scan"
+begin_step 57 "Confidentiality leak scan"
 run_shell_step "python3 scripts/check_confidentiality_scan.py"
 mark_step_complete
 
-begin_step 57 "JavaScript release artifact smoke"
+begin_step 58 "JavaScript release artifact smoke"
 run_shell_step "bash scripts/real_user_js_release_artifact_smoke.sh"
 mark_step_complete
 
-begin_step 58 "Generated artifact hygiene"
+begin_step 59 "Generated artifact hygiene"
 cleanup_build_artifacts
 run_shell_step "PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_generated_artifacts.py"
 mark_step_complete

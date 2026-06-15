@@ -155,6 +155,11 @@ jobs:
       - name: Check release metadata
         run: python3 scripts/check_release_metadata.py
 
+      - name: Check GitHub release safety
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/check_github_release_safety.py
+
       - name: Check Markdown links
         run: python3 scripts/check_markdown_links.py
 
