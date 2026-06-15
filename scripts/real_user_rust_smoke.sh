@@ -95,8 +95,10 @@ tar -tf "$crate_path" > "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/README.md$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/Cargo.toml$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/src/product_timeline.rs$' "$tmp_dir/crate-contents.txt"
+grep -q '^logbrew-0.1.0/src/traceparent.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/readme_example.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/real_user_smoke.rs$' "$tmp_dir/crate-contents.txt"
+grep -q '^logbrew-0.1.0/examples/first_useful_telemetry.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/Makefile$' "$tmp_dir/crate-contents.txt"
 crate_readme="$tmp_dir/crate-readme.md"
 tar -xOf "$crate_path" logbrew-0.1.0/README.md > "$crate_readme"
@@ -106,11 +108,17 @@ grep -q 'LOGBREW_API_KEY' "$crate_readme"
 grep -q 'preview_json' "$crate_readme"
 grep -q 'HttpTransport' "$crate_readme"
 grep -q 'DEFAULT_HTTP_ENDPOINT' "$crate_readme"
+grep -q 'MetadataValue' "$crate_readme"
 grep -q 'MetricEvent' "$crate_readme"
 grep -q 'client.metric' "$crate_readme"
 grep -q 'low-cardinality' "$crate_readme"
 grep -q 'ProductTimeline' "$crate_readme"
 grep -q 'Product And Network Timelines' "$crate_readme"
+grep -q 'First Useful Service Telemetry' "$crate_readme"
+grep -q 'Traceparent' "$crate_readme"
+grep -q 'W3C Trace Context' "$crate_readme"
+grep -q 'http.server.duration' "$crate_readme"
+grep -q 'account-specific values' "$crate_readme"
 grep -q 'do not patch HTTP clients' "$crate_readme"
 grep -q 'copyable snippets' "$crate_readme"
 grep -q 'optional HTTP transport' "$crate_readme"
@@ -118,16 +126,19 @@ crate_manifest="$tmp_dir/crate-Cargo.toml"
 tar -xOf "$crate_path" logbrew-0.1.0/Cargo.toml > "$crate_manifest"
 crate_examples_makefile="$tmp_dir/crate-examples-Makefile"
 tar -xOf "$crate_path" logbrew-0.1.0/examples/Makefile > "$crate_examples_makefile"
-grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke$' "$crate_examples_makefile"
+grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry$' "$crate_examples_makefile"
 grep -q '^help:$' "$crate_examples_makefile"
 grep -q '^run: run-real-user-smoke$' "$crate_examples_makefile"
 grep -q '^run-readme-example:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --example readme_example --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q '^run-real-user-smoke:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --example real_user_smoke --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
+grep -q '^run-first-useful-telemetry:$' "$crate_examples_makefile"
+grep -q '^	@cargo run --quiet --example first_useful_telemetry --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q 'run-readme-example -> make run-readme-example' "$crate_examples_makefile"
 grep -q 'run (real-user-smoke) -> make run' "$crate_examples_makefile"
 grep -q 'run-real-user-smoke -> make run-real-user-smoke' "$crate_examples_makefile"
+grep -q 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$crate_examples_makefile"
 python3 - "$crate_manifest" <<'PY'
 from pathlib import Path
 import tomllib
@@ -168,8 +179,10 @@ tar -xf "$crate_path" -C "$crate_src_root"
 crate_dir="$crate_src_root/logbrew-0.1.0"
 test -f "$crate_dir/Cargo.toml"
 test -f "$crate_dir/src/product_timeline.rs"
+test -f "$crate_dir/src/traceparent.rs"
 test -f "$crate_dir/examples/readme_example.rs"
 test -f "$crate_dir/examples/real_user_smoke.rs"
+test -f "$crate_dir/examples/first_useful_telemetry.rs"
 test -f "$crate_dir/examples/Makefile"
 
 cargo run --quiet --manifest-path "$crate_dir/Cargo.toml" --example readme_example > "$tmp_dir/packaged-readme-example.stdout.json" 2> "$tmp_dir/packaged-readme-example.stderr.json"
@@ -199,7 +212,8 @@ grep -q '"ok":true' "$tmp_dir/packaged-example.stderr.json"
 grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' "$tmp_dir/packaged-example-make-help.txt")
-test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "3"
+grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' "$tmp_dir/packaged-example-make-help.txt")
+test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "4"
 (cd "$crate_dir/examples" && make run-readme-example) > "$tmp_dir/packaged-readme-example-make.stdout.json" 2> "$tmp_dir/packaged-readme-example-make.stderr.json"
 grep -q '"type": "release"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "environment"' "$tmp_dir/packaged-readme-example-make.stdout.json"
@@ -233,6 +247,11 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-example-mak
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-example-make-run.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-example-make-run.stderr.json"
 grep -q '"ok":true' "$tmp_dir/packaged-example-make-run.stderr.json"
+cd "$crate_dir"
+cargo run --quiet --manifest-path Cargo.toml --example first_useful_telemetry > "$tmp_dir/packaged-first-useful.stdout.json" 2> "$tmp_dir/packaged-first-useful.stderr.json"
+python3 "$repo_root/scripts/check_rust_first_useful_payload.py" "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json" >/dev/null
+(cd "$crate_dir/examples" && make run-first-useful-telemetry) > "$tmp_dir/packaged-first-useful-make.stdout.json" 2> "$tmp_dir/packaged-first-useful-make.stderr.json"
+python3 "$repo_root/scripts/check_rust_first_useful_payload.py" "$tmp_dir/packaged-first-useful-make.stdout.json" "$tmp_dir/packaged-first-useful-make.stderr.json" >/dev/null
 
 cd "$tmp_dir"
 cargo new --quiet lifecycle-app
@@ -330,6 +349,7 @@ smoke-doc = "doc --quiet --locked --no-deps --package logbrew"
 smoke-run = "run --quiet --locked --bin smoke-app"
 smoke-readme = "run --quiet --locked --bin readme_example"
 smoke-timeline = "run --quiet --locked --bin timeline"
+smoke-first-useful = "run --quiet --locked --bin first_useful_telemetry"
 EOF
 grep -q '^smoke-check = "check --quiet --locked"$' .cargo/config.toml
 grep -q '^smoke-build = "build --quiet --locked"$' .cargo/config.toml
@@ -338,6 +358,7 @@ grep -q '^smoke-doc = "doc --quiet --locked --no-deps --package logbrew"$' .carg
 grep -q '^smoke-run = "run --quiet --locked --bin smoke-app"$' .cargo/config.toml
 grep -q '^smoke-readme = "run --quiet --locked --bin readme_example"$' .cargo/config.toml
 grep -q '^smoke-timeline = "run --quiet --locked --bin timeline"$' .cargo/config.toml
+grep -q '^smoke-first-useful = "run --quiet --locked --bin first_useful_telemetry"$' .cargo/config.toml
 
 cat > src/main.rs <<'EOF'
 use logbrew::{
@@ -526,6 +547,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 EOF
 
+cp "$crate_dir/examples/first_useful_telemetry.rs" src/bin/first_useful_telemetry.rs
+
 mkdir -p tests
 cat > tests/installed_user.rs <<'EOF'
 use logbrew::{LogBrewClient, MetricEvent, ReleaseEvent};
@@ -704,6 +727,20 @@ test -f target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Public metric-event builder for explicit low-cardinality metric measurements\.' target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Create a metric event with name, kind, value, unit, and temporality fields\.' target/doc/logbrew/struct.MetricEvent.html
 grep -q 'Attach primitive, low-cardinality metadata to the metric payload\.' target/doc/logbrew/struct.MetricEvent.html
+grep -q 'type.Metadata.html' target/doc/logbrew/index.html
+grep -q 'MetadataValue' target/doc/logbrew/index.html
+test -f target/doc/logbrew/struct.Traceparent.html
+grep -q 'Dependency-free helpers for explicit W3C traceparent interoperability\.' target/doc/logbrew/struct.Traceparent.html
+grep -q 'Parse, validate, and normalize one W3C traceparent value\.' target/doc/logbrew/struct.Traceparent.html
+grep -q 'Create a one-header outbound carrier containing only <code>traceparent</code>\.' target/doc/logbrew/struct.Traceparent.html
+grep -q 'Build a LogBrew span event that continues an incoming W3C traceparent\.' target/doc/logbrew/struct.Traceparent.html
+grep -q 'Build a LogBrew span event from previously parsed W3C trace context\.' target/doc/logbrew/struct.Traceparent.html
+test -f target/doc/logbrew/struct.TraceparentContext.html
+grep -q 'Parsed W3C traceparent context with normalized lowercase identifiers\.' target/doc/logbrew/struct.TraceparentContext.html
+grep -q 'Whether the W3C sampled bit is set\.' target/doc/logbrew/struct.TraceparentContext.html
+test -f target/doc/logbrew/struct.TraceparentSpanInput.html
+grep -q 'Inputs for deriving a LogBrew span event from incoming W3C trace context\.' target/doc/logbrew/struct.TraceparentSpanInput.html
+grep -q 'Attach primitive, app-owned metadata to the derived span\.' target/doc/logbrew/struct.TraceparentSpanInput.html
 test -f target/doc/logbrew/struct.ProductTimeline.html
 grep -q 'App-owned timeline builders for product actions and network milestones\.' target/doc/logbrew/struct.ProductTimeline.html
 grep -q 'Start a product action timeline builder for an app-known product step\.' target/doc/logbrew/struct.ProductTimeline.html
@@ -757,6 +794,9 @@ grep -q '"ok":true' readme-example.stderr.json
 cargo smoke-timeline > timeline.stdout.json
 grep -q '"ok":true' timeline.stdout.json
 grep -q '"timelineEvents":2' timeline.stdout.json
+
+cargo smoke-first-useful > first-useful.stdout.json 2> first-useful.stderr.json
+python3 "$repo_root/scripts/check_rust_first_useful_payload.py" first-useful.stdout.json first-useful.stderr.json >/dev/null
 
 cat > src/bin/unauth.rs <<'EOF'
 use logbrew::{LogBrewClient, RecordingTransport, ReleaseEvent, SdkError};

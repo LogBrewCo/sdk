@@ -9,10 +9,16 @@ use std::time::Duration;
 
 mod metric;
 mod product_timeline;
+mod traceparent;
 pub use metric::MetricEvent;
 pub use product_timeline::{NetworkMilestoneTimeline, ProductActionTimeline, ProductTimeline};
+pub use serde_json::Value as MetadataValue;
+pub use traceparent::{Traceparent, TraceparentContext, TraceparentSpanInput};
 
 pub(crate) const ACTION_STATUSES: &[&str] = &["queued", "running", "success", "failure"];
+
+/// Public metadata map type accepted by LogBrew event builders.
+pub type Metadata = Map<String, Value>;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 /// Public SDK identity emitted with every LogBrew event batch.

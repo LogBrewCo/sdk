@@ -1,6 +1,7 @@
 use logbrew::{
     ActionEvent, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent, MetricEvent,
-    ProductTimeline, RecordingTransport, ReleaseEvent, SdkError, SpanEvent, TransportError,
+    ProductTimeline, RecordingTransport, ReleaseEvent, SdkError, SpanEvent, Traceparent,
+    TraceparentSpanInput, TransportError,
 };
 #[cfg(feature = "http")]
 use logbrew::{HttpTransport, HttpTransportConfig, Transport};
@@ -582,6 +583,95 @@ fn product_timeline_validates_inputs_before_queueing() {
             .unwrap_err()
             .message,
         "metadata value for nested must be primitive"
+    );
+}
+
+#[test]
+fn traceparent_helpers_parse_create_and_build_child_span() {
+    let incoming = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
+    let context = Traceparent::parse(incoming).unwrap();
+    assert_eq!(context.version, "00");
+    assert_eq!(context.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736");
+    assert_eq!(context.parent_span_id, "00f067aa0ba902b7");
+    assert_eq!(context.trace_flags, "01");
+    assert!(context.sampled);
+
+    let child_span_id = "b7ad6b7169203331";
+    assert_eq!(
+        Traceparent::create(&context.trace_id, child_span_id, &context.trace_flags).unwrap(),
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
+    );
+    let headers =
+        Traceparent::create_headers(&context.trace_id, child_span_id, &context.trace_flags)
+            .unwrap();
+    assert_eq!(
+        headers.get("traceparent").map(String::as_str),
+        Some("00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01")
+    );
+
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("sampled".to_string(), Value::Bool(context.sampled));
+    metadata.insert(
+        "routeTemplate".to_string(),
+        Value::String("/checkout/:cart_id".to_string()),
+    );
+    let span = Traceparent::span_attributes_from_context(
+        &context,
+        TraceparentSpanInput::new("POST /checkout/:cart_id", child_span_id, "ok")
+            .with_duration_ms(183.4)
+            .with_metadata(metadata),
+    )
+    .unwrap();
+    let mut client = sample_client();
+    client
+        .span("evt_traceparent_span", "2026-06-02T10:00:06Z", span)
+        .unwrap();
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let attributes = &payload["events"][0]["attributes"];
+    assert_eq!(attributes["traceId"], context.trace_id);
+    assert_eq!(attributes["spanId"], child_span_id);
+    assert_eq!(attributes["parentSpanId"], context.parent_span_id);
+    assert_eq!(attributes["durationMs"], 183.4);
+    assert_eq!(attributes["metadata"]["sampled"], true);
+}
+
+#[test]
+fn traceparent_helpers_reject_invalid_context() {
+    for invalid in [
+        "",
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7",
+        "ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-zz",
+    ] {
+        assert!(
+            Traceparent::parse(invalid).is_err(),
+            "expected invalid traceparent to fail: {invalid}"
+        );
+    }
+
+    assert!(
+        Traceparent::create("00000000000000000000000000000000", "b7ad6b7169203331", "01",).is_err()
+    );
+    assert!(
+        Traceparent::create("4bf92f3577b34da6a3ce929d0e0e4736", "0000000000000000", "01",).is_err()
+    );
+
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("nested".to_string(), Value::Object(serde_json::Map::new()));
+    let context =
+        Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").unwrap();
+    let error = Traceparent::span_attributes_from_context(
+        &context,
+        TraceparentSpanInput::new("POST /checkout/:cart_id", "b7ad6b7169203331", "ok")
+            .with_metadata(metadata),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "validation_error");
+    assert_eq!(
+        error.message,
+        "traceparent span metadata values must be primitive"
     );
 }
 

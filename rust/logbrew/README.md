@@ -13,7 +13,7 @@ cargo add logbrew
 cargo add logbrew --features http
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, timeline builders such as `ProductTimeline`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, W3C helpers such as `Traceparent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -78,6 +78,129 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush` or `shutdown` to send queued events through a transport, and use `preview_json` when you want a stable local JSON preview before sending anything.
+
+## First Useful Service Telemetry
+
+For a Rust service, start with release, environment, a canonical-severity log, a product action, a network milestone, a request-duration metric, and one W3C-linked request span:
+
+```rust
+use logbrew::{
+    EnvironmentEvent, LogBrewClient, LogEvent, Metadata, MetadataValue, MetricEvent,
+    ProductTimeline, ReleaseEvent, Traceparent, TraceparentSpanInput,
+};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    let trace = Traceparent::parse(incoming)?;
+    let child_span_id = "b7ad6b7169203331";
+    let route_template = "/checkout/:cart_id";
+    let session_id = "sess_checkout_123";
+
+    let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+        .api_key("LOGBREW_API_KEY")
+        .build()?;
+
+    client.release(
+        "evt_release_checkout",
+        "2026-06-02T10:00:00Z",
+        ReleaseEvent::new("1.2.3"),
+    )?;
+    client.environment(
+        "evt_environment_checkout",
+        "2026-06-02T10:00:01Z",
+        EnvironmentEvent::new("production"),
+    )?;
+
+    let mut log_metadata = Metadata::new();
+    log_metadata.insert("traceId".to_string(), MetadataValue::String(trace.trace_id.clone()));
+    log_metadata.insert("sessionId".to_string(), MetadataValue::String(session_id.to_string()));
+    log_metadata.insert("routeTemplate".to_string(), MetadataValue::String(route_template.to_string()));
+    client.log(
+        "evt_log_checkout_started",
+        "2026-06-02T10:00:02Z",
+        LogEvent::new("checkout request started", "info")
+            .with_logger("checkout")
+            .with_metadata(log_metadata),
+    )?;
+
+    client.action(
+        "evt_action_checkout_submit",
+        "2026-06-02T10:00:03Z",
+        ProductTimeline::product_action("checkout.submit")
+            .with_route_template(route_template)
+            .with_session_id(session_id)
+            .with_trace_id(&trace.trace_id)
+            .with_screen("Checkout")
+            .build()?,
+    )?;
+    client.action(
+        "evt_action_payment_api",
+        "2026-06-02T10:00:04Z",
+        ProductTimeline::network_milestone("/payments/:payment_id")
+            .with_method("POST")
+            .with_status_code(202)
+            .with_duration_ms(183.4)
+            .with_session_id(session_id)
+            .with_trace_id(&trace.trace_id)
+            .build()?,
+    )?;
+
+    let mut metric_metadata = Metadata::new();
+    metric_metadata.insert("method".to_string(), MetadataValue::String("POST".to_string()));
+    metric_metadata.insert("routeTemplate".to_string(), MetadataValue::String(route_template.to_string()));
+    metric_metadata.insert("statusCode".to_string(), MetadataValue::from(202));
+    metric_metadata.insert("traceId".to_string(), MetadataValue::String(trace.trace_id.clone()));
+    client.metric(
+        "evt_metric_http_server_duration",
+        "2026-06-02T10:00:05Z",
+        MetricEvent::new("http.server.duration", "histogram", 183.4, "ms", "delta")
+            .with_metadata(metric_metadata),
+    )?;
+
+    client.span(
+        "evt_span_checkout_request",
+        "2026-06-02T10:00:06Z",
+        Traceparent::span_attributes_from_context(
+            &trace,
+            TraceparentSpanInput::new("POST /checkout/:cart_id", child_span_id, "ok")
+                .with_duration_ms(183.4),
+        )?,
+    )?;
+
+    println!("{}", client.preview_json()?);
+    Ok(())
+}
+```
+
+This stays app-owned and privacy-safe: use route templates such as `/checkout/:cart_id`, primitive metadata, release, environment, and canonical severities (`info`, `warning`, `error`, `critical`). Do not put account-specific values, request or response payloads, arbitrary headers, query strings, hashes, full URLs, or sensitive user data into telemetry.
+
+## W3C Trace Context
+
+Use `Traceparent` when your Rust app already has an incoming or outgoing W3C `traceparent` value:
+
+```rust
+use logbrew::{Traceparent, TraceparentSpanInput};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    let trace = Traceparent::parse(incoming)?;
+    let headers = Traceparent::create_headers(
+        &trace.trace_id,
+        "b7ad6b7169203331",
+        &trace.trace_flags,
+    )?;
+    let span = Traceparent::span_attributes_from_context(
+        &trace,
+        TraceparentSpanInput::new("POST /checkout/:cart_id", "b7ad6b7169203331", "ok"),
+    )?;
+
+    assert_eq!(headers.get("traceparent").map(String::as_str), Some("00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"));
+    drop(span);
+    Ok(())
+}
+```
+
+`Traceparent` validates W3C shape, rejects forbidden or all-zero IDs, normalizes identifiers, exposes the sampled flag, creates one-header outbound carriers, and derives LogBrew child span events. It does not install OpenTelemetry, patch HTTP clients, or capture request payloads or headers.
 
 ## Metrics
 
