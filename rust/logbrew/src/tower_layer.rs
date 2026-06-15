@@ -1,16 +1,13 @@
-use crate::{HttpRequestTelemetry, LogBrewClient, Metadata, SdkError, require_non_empty};
+use crate::{HttpRequestTelemetry, Metadata, SdkError, SharedLogBrewClient, require_non_empty};
 use http_types::{HeaderValue, Request, Response};
 use std::{
     future::Future,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::Arc,
     task::{Context, Poll},
     time::Instant,
 };
 use tower::{Layer, Service};
-
-/// Shared client handle used by the optional Tower request telemetry layer.
-pub type SharedLogBrewClient = Arc<Mutex<LogBrewClient>>;
 
 /// App-provided trace and span identifiers for one Tower request.
 #[derive(Clone, Debug, PartialEq, Eq)]

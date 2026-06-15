@@ -103,6 +103,7 @@ grep -q '^logbrew-0.1.0/examples/real_user_smoke.rs$' "$tmp_dir/crate-contents.t
 grep -q '^logbrew-0.1.0/examples/first_useful_telemetry.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/http_server_request.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/axum_request_middleware.rs$' "$tmp_dir/crate-contents.txt"
+grep -q '^logbrew-0.1.0/examples/tracing_bridge.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/Makefile$' "$tmp_dir/crate-contents.txt"
 crate_readme="$tmp_dir/crate-readme.md"
 tar -xOf "$crate_path" logbrew-0.1.0/README.md > "$crate_readme"
@@ -121,8 +122,10 @@ grep -q 'Product And Network Timelines' "$crate_readme"
 grep -q 'First Useful Service Telemetry' "$crate_readme"
 grep -q 'HTTP Server Request Telemetry' "$crate_readme"
 grep -q 'Axum Middleware Example' "$crate_readme"
+grep -q 'Tracing Bridge' "$crate_readme"
 grep -q 'Traceparent' "$crate_readme"
 grep -q 'HttpRequestTelemetry' "$crate_readme"
+grep -q 'LogBrewTracingLayer' "$crate_readme"
 grep -q 'W3C Trace Context' "$crate_readme"
 grep -q 'http.server.duration' "$crate_readme"
 grep -q 'account-specific values' "$crate_readme"
@@ -133,7 +136,7 @@ crate_manifest="$tmp_dir/crate-Cargo.toml"
 tar -xOf "$crate_path" logbrew-0.1.0/Cargo.toml > "$crate_manifest"
 crate_examples_makefile="$tmp_dir/crate-examples-Makefile"
 tar -xOf "$crate_path" logbrew-0.1.0/examples/Makefile > "$crate_examples_makefile"
-grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware$' "$crate_examples_makefile"
+grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware run-tracing-bridge$' "$crate_examples_makefile"
 grep -q '^help:$' "$crate_examples_makefile"
 grep -q '^run: run-real-user-smoke$' "$crate_examples_makefile"
 grep -q '^run-readme-example:$' "$crate_examples_makefile"
@@ -146,12 +149,15 @@ grep -q '^run-http-server-request:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --example http_server_request --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q '^run-axum-request-middleware:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --features tower --example axum_request_middleware --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
+grep -q '^run-tracing-bridge:$' "$crate_examples_makefile"
+grep -q '^	@cargo run --quiet --features tracing --example tracing_bridge --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q 'run-readme-example -> make run-readme-example' "$crate_examples_makefile"
 grep -q 'run (real-user-smoke) -> make run' "$crate_examples_makefile"
 grep -q 'run-real-user-smoke -> make run-real-user-smoke' "$crate_examples_makefile"
 grep -q 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$crate_examples_makefile"
 grep -q 'run-http-server-request -> make run-http-server-request' "$crate_examples_makefile"
 grep -q 'run-axum-request-middleware -> make run-axum-request-middleware' "$crate_examples_makefile"
+grep -q 'run-tracing-bridge -> make run-tracing-bridge' "$crate_examples_makefile"
 python3 - "$crate_manifest" <<'PY'
 from pathlib import Path
 import tomllib
@@ -177,14 +183,26 @@ if features.get("default") != []:
     raise SystemExit(f"unexpected packaged default features: {features.get('default')!r}")
 if features.get("http") != ["dep:ureq"]:
     raise SystemExit(f"unexpected packaged http feature: {features.get('http')!r}")
+if features.get("tower") != ["dep:http_types", "dep:tower"]:
+    raise SystemExit(f"unexpected packaged tower feature: {features.get('tower')!r}")
+if features.get("tracing") != ["dep:tracing-core", "dep:tracing-subscriber"]:
+    raise SystemExit(f"unexpected packaged tracing feature: {features.get('tracing')!r}")
 dependencies = manifest.get("dependencies", {})
-ureq = dependencies.get("ureq")
-if not isinstance(ureq, dict):
-    raise SystemExit(f"expected packaged optional ureq dependency, found: {ureq!r}")
-if ureq.get("version") != "3.3":
-    raise SystemExit(f"unexpected packaged ureq version requirement: {ureq.get('version')!r}")
-if ureq.get("optional") is not True:
-    raise SystemExit("expected packaged ureq dependency to stay optional")
+expected_optional = {
+    "http_types": "1",
+    "tower": "0.5",
+    "tracing-core": "0.1",
+    "tracing-subscriber": "0.3",
+    "ureq": "3.3",
+}
+for name, version in expected_optional.items():
+    dependency = dependencies.get(name)
+    if not isinstance(dependency, dict):
+        raise SystemExit(f"expected packaged optional {name} dependency, found: {dependency!r}")
+    if dependency.get("version") != version:
+        raise SystemExit(f"unexpected packaged {name} version requirement: {dependency.get('version')!r}")
+    if dependency.get("optional") is not True:
+        raise SystemExit(f"expected packaged {name} dependency to stay optional")
 PY
 crate_src_root="$tmp_dir/extracted-crate"
 mkdir -p "$crate_src_root"
@@ -200,6 +218,7 @@ test -f "$crate_dir/examples/real_user_smoke.rs"
 test -f "$crate_dir/examples/first_useful_telemetry.rs"
 test -f "$crate_dir/examples/http_server_request.rs"
 test -f "$crate_dir/examples/axum_request_middleware.rs"
+test -f "$crate_dir/examples/tracing_bridge.rs"
 test -f "$crate_dir/examples/Makefile"
 
 cargo run --quiet --manifest-path "$crate_dir/Cargo.toml" --example readme_example > "$tmp_dir/packaged-readme-example.stdout.json" 2> "$tmp_dir/packaged-readme-example.stderr.json"
@@ -232,7 +251,8 @@ grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' "$tmp_d
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run-http-server-request -> make run-http-server-request' <(sed -n '5p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run-axum-request-middleware -> make run-axum-request-middleware' <(sed -n '6p' "$tmp_dir/packaged-example-make-help.txt")
-test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "6"
+grep -qx 'run-tracing-bridge -> make run-tracing-bridge' <(sed -n '7p' "$tmp_dir/packaged-example-make-help.txt")
+test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "7"
 (cd "$crate_dir/examples" && make run-readme-example) > "$tmp_dir/packaged-readme-example-make.stdout.json" 2> "$tmp_dir/packaged-readme-example-make.stderr.json"
 grep -q '"type": "release"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "environment"' "$tmp_dir/packaged-readme-example-make.stdout.json"

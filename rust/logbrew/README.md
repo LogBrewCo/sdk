@@ -11,9 +11,11 @@ Public Rust SDK for creating LogBrew event batches, validating them locally, and
 ```bash
 cargo add logbrew
 cargo add logbrew --features http
+cargo add logbrew --features tower
+cargo add logbrew --features tracing
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, W3C helpers such as `Traceparent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, W3C helpers such as `Traceparent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -262,6 +264,50 @@ fn logbrew_layer(
 ```
 
 Attach the layer with `Router::route(...).route_layer(logbrew_layer(client.clone()))`, keep the LogBrew client in your own state management, generate unique trace/span IDs per request, and flush on your normal lifecycle boundary. The layer reads only the W3C `traceparent` propagation header and framework-owned route/status metadata; do not capture arbitrary headers, raw request URIs, payloads, account session values, or user-specific identifiers.
+
+## Tracing Bridge
+
+For Rust services that already use the `tracing` ecosystem, enable the optional bridge to convert app log events into LogBrew log events without replacing your subscriber stack or capturing arbitrary structured fields by default.
+
+```bash
+cargo add logbrew --features tracing
+cargo add tracing tracing-subscriber
+```
+
+```rust
+use logbrew::{LogBrewClient, LogBrewTracingLayer};
+use std::sync::{Arc, Mutex};
+use tracing_subscriber::prelude::*;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Arc::new(Mutex::new(
+        LogBrewClient::builder("checkout-service", "1.2.3")
+            .api_key("LOGBREW_API_KEY")
+            .build()?,
+    ));
+    let layer = LogBrewTracingLayer::new(client.clone(), || {
+        "2026-06-02T10:00:02Z".to_string()
+    })
+    .with_allowed_fields(["routeTemplate", "statusCode", "sampled"])
+    .with_logger("checkout");
+
+    let subscriber = tracing_subscriber::registry().with(layer);
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::info!(
+            target: "checkout",
+            routeTemplate = "/checkout/{cart_id}?coupon=sample#review",
+            statusCode = 202_u64,
+            sampled = true,
+            "checkout tracing event accepted"
+        );
+    });
+
+    println!("{}", client.lock().unwrap().preview_json()?);
+    Ok(())
+}
+```
+
+`LogBrewTracingLayer` maps `trace`/`debug` to `info`, `warn` to `warning`, and `error` to `error`. It records `tracingTarget` and `tracingLevel`, but only copies additional primitive fields that your app allowlists with `with_allowed_fields(...)`; route-template field values are sanitized to remove query strings and hash fragments. Do not allowlist payloads, headers, account session values, raw URLs, or user-specific identifiers.
 
 ## W3C Trace Context
 
