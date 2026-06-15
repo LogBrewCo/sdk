@@ -1,3 +1,7 @@
+use crate::http_fields::{
+    insert_optional, normalize_method, optional_label, optional_route_template, required_label,
+    sanitize_route_template, telemetry_metadata, validate_duration_ms, validate_status_code,
+};
 use crate::{ACTION_STATUSES, ActionEvent, SdkError, require_allowed_value, require_non_empty};
 use serde_json::{Map, Value};
 
@@ -100,7 +104,7 @@ impl ProductActionTimeline {
         require_non_empty("product action name", &self.name)?;
         require_allowed_value("action status", &self.status, ACTION_STATUSES)?;
 
-        let mut metadata = timeline_metadata("product_timeline", self.metadata)?;
+        let mut metadata = telemetry_metadata("product_timeline", self.metadata)?;
         insert_optional(
             &mut metadata,
             "routeTemplate",
@@ -214,9 +218,9 @@ impl NetworkMilestoneTimeline {
     pub fn build(self) -> Result<ActionEvent, SdkError> {
         let route =
             sanitize_route_template("network milestone route_template", self.route_template)?;
-        let method = normalize_method(&self.method)?;
-        validate_status_code(self.status_code)?;
-        validate_duration_ms(self.duration_ms)?;
+        let method = normalize_method("network milestone method", &self.method)?;
+        validate_status_code("network milestone status_code", self.status_code)?;
+        validate_duration_ms("network milestone duration_ms", self.duration_ms)?;
         let status = self.status.unwrap_or_else(|| {
             if self.status_code.is_some_and(|code| code >= 400) {
                 "failure".to_string()
@@ -230,7 +234,7 @@ impl NetworkMilestoneTimeline {
             Some(name) => required_label("network milestone name", name)?,
             None => format!("network.{} {route}", method.to_ascii_lowercase()),
         };
-        let mut metadata = timeline_metadata("network_timeline", self.metadata)?;
+        let mut metadata = telemetry_metadata("network_timeline", self.metadata)?;
         metadata.insert("routeTemplate".to_string(), Value::String(route));
         metadata.insert("method".to_string(), Value::String(method));
         if let Some(status_code) = self.status_code {
@@ -251,140 +255,5 @@ impl NetworkMilestoneTimeline {
         );
 
         Ok(ActionEvent::new(name, status).with_metadata(metadata))
-    }
-}
-
-fn timeline_metadata(
-    source: &'static str,
-    metadata: Option<Map<String, Value>>,
-) -> Result<Map<String, Value>, SdkError> {
-    let mut copied = Map::new();
-    copied.insert("source".to_string(), Value::String(source.to_string()));
-    let Some(metadata) = metadata else {
-        return Ok(copied);
-    };
-
-    for (key, value) in metadata {
-        require_non_empty("metadata key", &key)?;
-        require_primitive_metadata_value(&key, &value)?;
-        if key != "source" {
-            copied.insert(key, value);
-        }
-    }
-    Ok(copied)
-}
-
-fn optional_route_template(
-    label: &str,
-    route_template: Option<String>,
-) -> Result<Option<String>, SdkError> {
-    route_template
-        .map(|route_template| sanitize_route_template(label, route_template))
-        .transpose()
-}
-
-fn sanitize_route_template(label: &str, route_template: String) -> Result<String, SdkError> {
-    require_non_empty(label, &route_template)?;
-    let trimmed = route_template.trim();
-    let lowercase = trimmed.to_ascii_lowercase();
-    let route = if lowercase.starts_with("https://") {
-        path_from_http_url(&trimmed[8..])?
-    } else if lowercase.starts_with("http://") {
-        path_from_http_url(&trimmed[7..])?
-    } else {
-        trimmed
-    };
-    let route = match first_present_index(route.find('?'), route.find('#')) {
-        Some(cutoff) => route[..cutoff].trim_end(),
-        None => route.trim_end(),
-    };
-    Ok(if route.is_empty() { "/" } else { route }.to_string())
-}
-
-fn path_from_http_url(rest: &str) -> Result<&str, SdkError> {
-    let host_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    if host_end == 0 {
-        return Err(SdkError::new(
-            "validation_error",
-            "route_template URL host must be non-empty",
-        ));
-    }
-    Ok(rest.get(host_end..).unwrap_or("/"))
-}
-
-fn normalize_method(method: &str) -> Result<String, SdkError> {
-    let method = method.trim().to_ascii_uppercase();
-    if method.is_empty()
-        || !method.bytes().all(|byte| {
-            byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
-        })
-    {
-        return Err(SdkError::new(
-            "validation_error",
-            "network milestone method must be a valid HTTP method",
-        ));
-    }
-    Ok(method)
-}
-
-fn validate_status_code(status_code: Option<u16>) -> Result<(), SdkError> {
-    if status_code.is_some_and(|status_code| !(100..=599).contains(&status_code)) {
-        return Err(SdkError::new(
-            "validation_error",
-            "network milestone status_code must be between 100 and 599",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_duration_ms(duration_ms: Option<f64>) -> Result<(), SdkError> {
-    if let Some(duration_ms) = duration_ms {
-        if !duration_ms.is_finite() {
-            return Err(SdkError::new(
-                "validation_error",
-                "network milestone duration_ms must be finite",
-            ));
-        }
-        if duration_ms < 0.0 {
-            return Err(SdkError::new(
-                "validation_error",
-                "network milestone duration_ms must be non-negative",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn optional_label(label: &str, value: Option<String>) -> Result<Option<String>, SdkError> {
-    value.map(|value| required_label(label, value)).transpose()
-}
-
-fn required_label(label: &str, value: String) -> Result<String, SdkError> {
-    require_non_empty(label, &value)?;
-    Ok(value.trim().to_string())
-}
-
-fn require_primitive_metadata_value(key: &str, value: &Value) -> Result<(), SdkError> {
-    match value {
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => Ok(()),
-        Value::Array(_) | Value::Object(_) => Err(SdkError::new(
-            "validation_error",
-            format!("metadata value for {key} must be primitive"),
-        )),
-    }
-}
-
-fn insert_optional(map: &mut Map<String, Value>, key: &str, value: Option<String>) {
-    if let Some(value) = value {
-        map.insert(key.to_string(), Value::String(value));
-    }
-}
-
-fn first_present_index(first: Option<usize>, second: Option<usize>) -> Option<usize> {
-    match (first, second) {
-        (Some(first), Some(second)) => Some(first.min(second)),
-        (Some(first), None) => Some(first),
-        (None, Some(second)) => Some(second),
-        (None, None) => None,
     }
 }

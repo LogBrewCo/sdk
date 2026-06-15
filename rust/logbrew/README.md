@@ -13,7 +13,7 @@ cargo add logbrew
 cargo add logbrew --features http
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, W3C helpers such as `Traceparent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, W3C helpers such as `Traceparent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -173,6 +173,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 This stays app-owned and privacy-safe: use route templates such as `/checkout/:cart_id`, primitive metadata, release, environment, and canonical severities (`info`, `warning`, `error`, `critical`). Do not put account-specific values, request or response payloads, arbitrary headers, query strings, hashes, full URLs, or sensitive user data into telemetry.
+
+## HTTP Server Request Telemetry
+
+For Axum, Tower, Actix, Rocket, or a custom Rust server, keep request capture in your app-owned middleware and pass stable route metadata into `HttpRequestTelemetry`. The helper builds a request span plus an optional `http.server.duration` metric without installing framework middleware, patching HTTP clients, or capturing payloads/headers.
+
+```rust
+use logbrew::{HttpRequestTelemetry, LogBrewClient, Metadata, MetadataValue};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    let mut metadata = Metadata::new();
+    metadata.insert("framework".to_string(), MetadataValue::String("axum".to_string()));
+
+    let request = HttpRequestTelemetry::new(
+        "https://api.example.invalid/checkout/:cart_id?coupon=sample#review",
+        "post",
+        "11111111111111111111111111111111",
+        "b7ad6b7169203331",
+    )
+    .with_incoming_traceparent(incoming)
+    .with_status_code(202)
+    .with_duration_ms(183.4)
+    .with_metadata(metadata)
+    .build()?;
+
+    let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+        .api_key("LOGBREW_API_KEY")
+        .build()?;
+    client.span("evt_http_server_span", "2026-06-02T10:00:00Z", request.span)?;
+    if let Some(metric) = request.metric {
+        client.metric("evt_http_server_duration", "2026-06-02T10:00:00Z", metric)?;
+    }
+
+    println!("{}", client.preview_json()?);
+    eprintln!("outgoing traceparent: {}", request.outgoing_traceparent);
+    Ok(())
+}
+```
+
+`HttpRequestTelemetry` strips query strings and hash fragments from route templates, normalizes HTTP methods, adds primitive metadata such as `routeTemplate`, `method`, `statusCode`, and `statusCodeClass`, treats valid incoming W3C `traceparent` values as parent context, and falls back to the explicit app trace ID when propagation is missing or malformed. It does not create backend setup state, inspect account sessions, capture arbitrary headers, or read request/response bodies.
 
 ## W3C Trace Context
 

@@ -1,7 +1,7 @@
 use logbrew::{
-    ActionEvent, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent, MetricEvent,
-    ProductTimeline, RecordingTransport, ReleaseEvent, SdkError, SpanEvent, Traceparent,
-    TraceparentSpanInput, TransportError,
+    ActionEvent, EnvironmentEvent, HttpRequestTelemetry, IssueEvent, LogBrewClient, LogEvent,
+    MetricEvent, ProductTimeline, RecordingTransport, ReleaseEvent, SdkError, SpanEvent,
+    Traceparent, TraceparentSpanInput, TransportError,
 };
 #[cfg(feature = "http")]
 use logbrew::{HttpTransport, HttpTransportConfig, Transport};
@@ -480,7 +480,7 @@ fn product_timeline_builds_network_milestone_event() {
             "evt_network_timeline",
             "2026-06-02T10:00:08Z",
             ProductTimeline::network_milestone(
-                "https://api.example.test/v1/checkout?cart=123#debug",
+                "https://api.example.invalid/v1/checkout?cart=123#debug",
             )
             .with_method("post")
             .with_status_code(503)
@@ -672,6 +672,121 @@ fn traceparent_helpers_reject_invalid_context() {
     assert_eq!(
         error.message,
         "traceparent span metadata values must be primitive"
+    );
+}
+
+#[test]
+fn http_request_telemetry_builds_span_and_metric_from_valid_traceparent() {
+    let incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("framework".to_string(), Value::String("axum".to_string()));
+    metadata.insert("source".to_string(), Value::String("caller".to_string()));
+
+    let events = HttpRequestTelemetry::new(
+        "https://api.example.invalid/checkout/:cart_id?cart=sample#debug",
+        "post",
+        "11111111111111111111111111111111",
+        "b7ad6b7169203331",
+    )
+    .with_incoming_traceparent(incoming)
+    .with_status_code(503)
+    .with_duration_ms(183.4)
+    .with_metadata(metadata)
+    .build()
+    .unwrap();
+
+    assert_eq!(events.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736");
+    assert_eq!(events.span_id, "b7ad6b7169203331");
+    assert_eq!(events.parent_span_id.as_deref(), Some("00f067aa0ba902b7"));
+    assert_eq!(
+        events.outgoing_traceparent,
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
+    );
+
+    let mut client = sample_client();
+    client
+        .span("evt_http_span", "2026-06-02T10:00:06Z", events.span)
+        .unwrap();
+    client
+        .metric(
+            "evt_http_metric",
+            "2026-06-02T10:00:06Z",
+            events.metric.unwrap(),
+        )
+        .unwrap();
+
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let span = &payload["events"][0]["attributes"];
+    assert_eq!(span["name"], "POST /checkout/:cart_id");
+    assert_eq!(span["status"], "error");
+    assert_eq!(span["durationMs"], 183.4);
+    assert_eq!(span["metadata"]["source"], "rust_http_server");
+    assert_eq!(span["metadata"]["framework"], "axum");
+    assert_eq!(span["metadata"]["routeTemplate"], "/checkout/:cart_id");
+    assert_eq!(span["metadata"]["method"], "POST");
+    assert_eq!(span["metadata"]["statusCode"], 503);
+    assert_eq!(span["metadata"]["statusCodeClass"], "5xx");
+    assert!(client.preview_json().unwrap().find("cart=sample").is_none());
+    assert!(client.preview_json().unwrap().find("#debug").is_none());
+
+    let metric = &payload["events"][1]["attributes"];
+    assert_eq!(metric["name"], "http.server.duration");
+    assert_eq!(metric["kind"], "histogram");
+    assert_eq!(metric["value"], 183.4);
+    assert_eq!(metric["unit"], "ms");
+    assert_eq!(metric["metadata"]["routeTemplate"], "/checkout/:cart_id");
+}
+
+#[test]
+fn http_request_telemetry_falls_back_when_traceparent_is_missing_or_malformed() {
+    let events = HttpRequestTelemetry::new(
+        "/orders/:order_id?debug=sample",
+        "GET",
+        "11111111111111111111111111111111",
+        "2222222222222222",
+    )
+    .with_incoming_traceparent("not-a-traceparent")
+    .with_status_code(404)
+    .with_trace_flags("00")
+    .build()
+    .unwrap();
+
+    assert_eq!(events.trace_id, "11111111111111111111111111111111");
+    assert_eq!(events.parent_span_id, None);
+    assert_eq!(
+        events.outgoing_traceparent,
+        "00-11111111111111111111111111111111-2222222222222222-00"
+    );
+    assert!(events.metric.is_none());
+
+    let mut client = sample_client();
+    client
+        .span("evt_http_span", "2026-06-02T10:00:06Z", events.span)
+        .unwrap();
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let attributes = &payload["events"][0]["attributes"];
+    assert_eq!(attributes["status"], "ok");
+    assert_eq!(attributes["metadata"]["routeTemplate"], "/orders/:order_id");
+    assert_eq!(attributes["metadata"]["statusCodeClass"], "4xx");
+    assert!(
+        client
+            .preview_json()
+            .unwrap()
+            .find("debug=sample")
+            .is_none()
+    );
+
+    let error = HttpRequestTelemetry::new(
+        "/orders/:order_id",
+        "bad method",
+        "11111111111111111111111111111111",
+        "2222222222222222",
+    )
+    .build()
+    .unwrap_err();
+    assert_eq!(
+        error.message,
+        "http request method must be a valid HTTP method"
     );
 }
 

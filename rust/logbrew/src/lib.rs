@@ -7,9 +7,12 @@ use std::fmt;
 #[cfg(feature = "http")]
 use std::time::Duration;
 
+mod http_fields;
+mod http_server;
 mod metric;
 mod product_timeline;
 mod traceparent;
+pub use http_server::{HttpRequestTelemetry, HttpRequestTelemetryEvents};
 pub use metric::MetricEvent;
 pub use product_timeline::{NetworkMilestoneTimeline, ProductActionTimeline, ProductTimeline};
 pub use serde_json::Value as MetadataValue;

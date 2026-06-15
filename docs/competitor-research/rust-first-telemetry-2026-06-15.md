@@ -48,4 +48,4 @@ Measured with Cargo 1.94.1 and Rust 1.94.1 using a fresh Cargo home per package.
 
 ## Next Focus
 
-Add a thin app-owned Rust request helper for Tower/Axum first: continue valid W3C `traceparent` as a child span, omit query strings by default, preserve app response ownership, optionally emit `http.server.duration`, and avoid global HTTP patching or payload/header capture. After that, evaluate a `tracing` bridge that reports capture failures without interrupting application logging.
+The thin app-owned Rust request helper now exists as `HttpRequestTelemetry`; see `docs/competitor-research/rust-http-server-request-2026-06-15.md`. Next, add one installed Axum or Tower mini-app smoke example that shows the exact middleware glue, then evaluate a `tracing` bridge that reports capture failures without interrupting application logging.
