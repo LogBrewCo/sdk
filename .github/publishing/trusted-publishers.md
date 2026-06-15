@@ -9,6 +9,11 @@ Use these exact values when creating registry-side trusted publisher records for
 - Workflow filename: `publish-packages.yml`
 - GitHub environment: `release`
 
+The shared `release` environment is restricted to protected branches only. Keep that policy in
+place before any `dry_run=false` publish because the package workflow uses the environment for
+registry access and OIDC identity, while checking out the requested release tag or commit via the
+workflow `ref` input.
+
 `publish-release.yml` is the repo-wide release dispatcher. Publishing a GitHub Release with a
 `vMAJOR.MINOR.PATCH` tag dispatches `publish-packages.yml` for that release tag with the configured
 OIDC-capable registries enabled. Scoped GitHub Releases whose tags contain `/`, such as

@@ -33,7 +33,7 @@ Important: GitHub evaluates `release` workflows from the release tag's commit, n
 - Run contract tests before ecosystem-specific dry-runs
 - Detect manifests and skip irrelevant jobs instead of failing empty repos
 - Prefer trusted publishing or OIDC over long-lived registry tokens
-- Add protected environments before any real publish job is enabled
+- Keep the shared `release` environment restricted to protected branches so registry publishing can run only from protected workflow refs
 - Pin explicit hosted toolchain setup for every supported ecosystem instead of relying on whatever `ubuntu-latest` happens to preinstall
 - If a real-user smoke script exercises `pnpm` or `yarn`, enable Corepack before the smoke step even when the repo itself does not check in that package manager's lockfile
 - Keep local and CI release-readiness checks aligned: if local smoke tests install packaged artifacts, CI should continue to exercise those same artifact-oriented paths
@@ -44,7 +44,7 @@ Important: GitHub evaluates `release` workflows from the release tag's commit, n
 ## What to do next
 
 1. Keep branch protection for `main` requiring the `Contract checks` GitHub Actions check; force pushes and branch deletion should stay disabled.
-2. Add protected GitHub environments for each registry publish target before running `publish-packages.yml` with `dry_run=false`.
+2. Keep the shared `release` environment deployment policy on protected branches only. `publish-release.yml` dispatches `publish-packages.yml` from the default branch, then `publish-packages.yml` checks out the requested release tag or commit through its `ref` input.
 3. Keep `.github/publishing/trusted-publishers.md` aligned with registry-side trusted publisher records.
 4. Run publish workflow dry-runs before every external publish.
 5. Run `target=verify` after registry publishes or when marketplace state is unclear.
