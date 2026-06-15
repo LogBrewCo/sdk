@@ -216,6 +216,66 @@ expect_error("validation_error", "metadata key must be non-empty") do
 end
 tests += 1
 
+trace_context = LogBrew::Traceparent.parse("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
+assert(trace_context.trace_id == "4bf92f3577b34da6a3ce929d0e0e4736", "expected normalized trace id")
+assert(trace_context.parent_span_id == "00f067aa0ba902b7", "expected normalized parent span id")
+assert(trace_context.trace_flags == "01", "expected normalized trace flags")
+assert(trace_context.sampled == true, "expected sampled flag")
+outgoing_headers = LogBrew::Traceparent.create_headers(
+  trace_id: trace_context.trace_id,
+  span_id: "b7ad6b7169203331",
+  trace_flags: trace_context.trace_flags
+)
+assert(
+  outgoing_headers.fetch("traceparent") == "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01",
+  "expected outgoing traceparent"
+)
+span_attributes = LogBrew::Traceparent.span_attributes_from_traceparent(
+  trace_context,
+  LogBrew::TraceparentSpanInput.new(
+    name: "POST /checkout/:cart_id",
+    span_id: "b7ad6b7169203331",
+    duration_ms: 183.4,
+    metadata: { routeTemplate: "/checkout/:cart_id", sampled: true }
+  )
+)
+assert(span_attributes.fetch("traceId") == trace_context.trace_id, "expected traceparent span trace id")
+assert(span_attributes.fetch("parentSpanId") == trace_context.parent_span_id, "expected traceparent parent span id")
+assert(span_attributes.fetch("spanId") == "b7ad6b7169203331", "expected traceparent child span id")
+assert(span_attributes.fetch("status") == "ok", "expected traceparent span status")
+assert(span_attributes.fetch("durationMs") == 183.4, "expected traceparent span duration")
+assert(span_attributes.fetch("metadata").fetch("routeTemplate") == "/checkout/:cart_id", "expected traceparent metadata")
+tests += 1
+
+expect_error("validation_error", "traceparent must have four fields") do
+  LogBrew::Traceparent.parse("bad")
+end
+expect_error("validation_error", "traceparent version must be two hex characters and not ff") do
+  LogBrew::Traceparent.parse("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+end
+expect_error("validation_error", "traceparent trace id must be 32 non-zero hex characters") do
+  LogBrew::Traceparent.parse("00-00000000000000000000000000000000-00f067aa0ba902b7-01")
+end
+expect_error("validation_error", "traceparent parent span id must be 16 non-zero hex characters") do
+  LogBrew::Traceparent.parse("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01")
+end
+expect_error("validation_error", "traceparent flags must be two hex characters") do
+  LogBrew::Traceparent.parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-0z")
+end
+expect_error("validation_error", "span spanId must be 16 non-zero hex characters") do
+  LogBrew::Traceparent.span_attributes_from_traceparent(
+    trace_context,
+    LogBrew::TraceparentSpanInput.new(name: "POST /checkout", span_id: "0000000000000000")
+  )
+end
+expect_error("validation_error", "metadata value for nested must be a string, number, boolean, or null") do
+  LogBrew::Traceparent.span_attributes_from_traceparent(
+    trace_context,
+    LogBrew::TraceparentSpanInput.new(name: "POST /checkout", span_id: "b7ad6b7169203331", metadata: { nested: [] })
+  )
+end
+tests += 1
+
 client = sample_client
 enqueue_all(client)
 transport = LogBrew::RecordingTransport.always_accept

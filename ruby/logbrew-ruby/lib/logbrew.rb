@@ -996,3 +996,4 @@ module LogBrew
 end
 
 require_relative "logbrew/product_timeline"
+require_relative "logbrew/traceparent"

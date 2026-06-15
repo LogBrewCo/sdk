@@ -43,6 +43,86 @@ response = client.shutdown(LogBrew::RecordingTransport.always_accept)
 warn response.status_code
 ```
 
+## First Useful Service Telemetry
+
+For a service request, combine release, environment, log, product action, network milestone, metric, and span events around one shared W3C trace:
+
+```ruby
+incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+trace = LogBrew::Traceparent.parse(incoming)
+child_span_id = "b7ad6b7169203331"
+route_template = "/checkout/:cart_id"
+session_id = "sess_checkout_123"
+
+client.log(
+  "evt_log_checkout_started",
+  "2026-06-02T10:00:02Z",
+  message: "checkout request started",
+  level: "info",
+  logger: "checkout",
+  metadata: { traceId: trace.trace_id, sessionId: session_id, routeTemplate: route_template }
+)
+client.action(
+  "evt_action_checkout_submit",
+  "2026-06-02T10:00:03Z",
+  LogBrew::ProductTimeline.product_action(
+    name: "checkout.submit",
+    route_template: "/checkout/:cart_id",
+    session_id: session_id,
+    trace_id: trace.trace_id,
+    screen: "Checkout",
+    funnel: "checkout",
+    step: "submit"
+  )
+)
+client.metric(
+  "evt_metric_http_server_duration",
+  "2026-06-02T10:00:05Z",
+  name: "http.server.duration",
+  kind: "histogram",
+  value: 183.4,
+  unit: "ms",
+  temporality: "delta",
+  metadata: { method: "POST", routeTemplate: route_template, statusCode: 202, traceId: trace.trace_id }
+)
+client.span(
+  "evt_span_checkout_request",
+  "2026-06-02T10:00:06Z",
+  LogBrew::Traceparent.span_attributes_from_traceparent(
+    trace,
+    LogBrew::TraceparentSpanInput.new(
+      name: "POST /checkout/:cart_id",
+      span_id: child_span_id,
+      duration_ms: 183.4,
+      metadata: { sampled: trace.sampled, routeTemplate: route_template, sessionId: session_id }
+    )
+  )
+)
+
+outgoing_headers = LogBrew::Traceparent.create_headers(
+  trace_id: trace.trace_id,
+  span_id: child_span_id,
+  trace_flags: trace.trace_flags
+)
+```
+
+The packaged `examples/first_useful_telemetry.rb` file shows the full flow, including release, environment, and network milestone events. Route templates stay query-free, metadata is primitive-only, and the SDK does not capture request bodies or arbitrary transport metadata.
+
+## W3C Trace Context
+
+Use `LogBrew::Traceparent` when your app already has an incoming or outgoing W3C `traceparent` value:
+
+```ruby
+trace = LogBrew::Traceparent.parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+headers = LogBrew::Traceparent.create_headers(
+  trace_id: trace.trace_id,
+  span_id: "b7ad6b7169203331",
+  trace_flags: trace.trace_flags
+)
+```
+
+The helper accepts W3C-shaped values, rejects forbidden or all-zero IDs, normalizes uppercase hex to lowercase, exposes the sampled flag, and creates LogBrew child span attributes with a new caller-provided span ID. It does not patch Ruby HTTP clients.
+
 ## Metrics
 
 Use `metric` for explicit, application-owned measurements. LogBrew validates the metric name, kind, value, unit, temporality, and optional metadata before queueing the event:

@@ -25,13 +25,18 @@ unpacked_dir="$tmp_dir/unpacked/logbrew-sdk-0.1.0"
 test -f "$unpacked_dir/logbrew-sdk.gemspec" || true
 test -f "$unpacked_dir/lib/logbrew.rb"
 test -f "$unpacked_dir/lib/logbrew/product_timeline.rb"
+test -f "$unpacked_dir/lib/logbrew/traceparent.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
 test -f "$unpacked_dir/examples/real_user_smoke.rb"
+test -f "$unpacked_dir/examples/first_useful_telemetry.rb"
 test -f "$unpacked_dir/examples/Makefile"
 grep -q 'gem install logbrew-sdk' "$unpacked_dir/README.md"
 grep -q 'LOGBREW_API_KEY' "$unpacked_dir/README.md"
 grep -q 'preview_json' "$unpacked_dir/README.md"
+grep -q 'First Useful Service Telemetry' "$unpacked_dir/README.md"
+grep -q 'LogBrew::Traceparent' "$unpacked_dir/README.md"
+grep -q 'W3C Trace Context' "$unpacked_dir/README.md"
 grep -q 'client.metric' "$unpacked_dir/README.md"
 grep -q 'Metric' "$unpacked_dir/README.md"
 grep -q 'LogBrew::ProductTimeline' "$unpacked_dir/README.md"
@@ -51,10 +56,13 @@ make -C "$unpacked_dir/examples" > "$tmp_dir/unpacked-examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/unpacked-examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/unpacked-examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/unpacked-examples-help.txt"
+grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/unpacked-examples-help.txt"
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-readme-example) > "$tmp_dir/unpacked-readme.stdout.json" 2> "$tmp_dir/unpacked-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/unpacked-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/unpacked-readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/unpacked-readme.stderr.json"
+(cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-first-useful-telemetry) > "$tmp_dir/unpacked-first-useful.stdout.json" 2> "$tmp_dir/unpacked-first-useful.stderr.json"
+python3 "$repo_root/scripts/check_ruby_first_useful_payload.py" "$tmp_dir/unpacked-first-useful.stdout.json" "$tmp_dir/unpacked-first-useful.stderr.json" >/dev/null
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run) > "$tmp_dir/unpacked-smoke.stdout.json" 2> "$tmp_dir/unpacked-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/unpacked-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/unpacked-smoke.stdout.json" >/dev/null
@@ -75,12 +83,19 @@ GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBr
 grep -qx 'true' "$tmp_dir/installed-rails-subscriber.out"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::ProductTimeline.respond_to?(:product_action)); puts(LogBrew::ProductTimeline.respond_to?(:network_milestone))' > "$tmp_dir/installed-product-timeline.out"
 grep -qx 'true' "$tmp_dir/installed-product-timeline.out"
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::Traceparent.respond_to?(:parse)); puts(LogBrew::Traceparent.respond_to?(:create_headers))' > "$tmp_dir/installed-traceparent.out"
+grep -qx 'true' "$tmp_dir/installed-traceparent.out"
 gem_dir="$(GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "rubygems"; puts Gem::Specification.find_by_name("logbrew-sdk").gem_dir')"
 test -f "$gem_dir/README.md"
 test -f "$gem_dir/lib/logbrew/product_timeline.rb"
+test -f "$gem_dir/lib/logbrew/traceparent.rb"
 test -f "$gem_dir/examples/readme_example.rb"
 test -f "$gem_dir/examples/real_user_smoke.rb"
+test -f "$gem_dir/examples/first_useful_telemetry.rb"
 test -f "$gem_dir/examples/Makefile"
+grep -q 'First Useful Service Telemetry' "$gem_dir/README.md"
+grep -q 'LogBrew::Traceparent' "$gem_dir/README.md"
+grep -q 'W3C Trace Context' "$gem_dir/README.md"
 grep -q 'LogBrew::RackMiddleware' "$gem_dir/README.md"
 grep -q 'client.metric' "$gem_dir/README.md"
 grep -q 'Metric' "$gem_dir/README.md"
@@ -96,6 +111,8 @@ GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/readme_example
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/installed-readme.stderr.json"
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/first_useful_telemetry.rb" > "$tmp_dir/installed-first-useful.stdout.json" 2> "$tmp_dir/installed-first-useful.stderr.json"
+python3 "$repo_root/scripts/check_ruby_first_useful_payload.py" "$tmp_dir/installed-first-useful.stdout.json" "$tmp_dir/installed-first-useful.stderr.json" >/dev/null
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/real_user_smoke.rb" > "$tmp_dir/installed-smoke.stdout.json" 2> "$tmp_dir/installed-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
@@ -104,6 +121,7 @@ grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/installed-examples-help.txt"
+grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/installed-examples-help.txt"
 
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" gem uninstall logbrew-sdk --all --executables --ignore-dependencies --force >/dev/null
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" gem list --local logbrew-sdk > "$tmp_dir/removed-gem-list.txt"
@@ -297,6 +315,33 @@ raise "expected network primitive metadata" unless network_metadata.fetch("cache
 expect("validation_error") { LogBrew::ProductTimeline.product_action(name: "checkout.submit", metadata: { nested: [] }) }
 expect("validation_error") { LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", method: "bad method") }
 expect("validation_error") { LogBrew::ProductTimeline.network_milestone(route_template: "/checkout", duration_ms: -1) }
+
+trace_context = LogBrew::Traceparent.parse("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
+raise "expected normalized trace id" unless trace_context.trace_id == "4bf92f3577b34da6a3ce929d0e0e4736"
+raise "expected normalized parent span id" unless trace_context.parent_span_id == "00f067aa0ba902b7"
+raise "expected sampled trace context" unless trace_context.sampled == true
+trace_headers = LogBrew::Traceparent.create_headers(
+  trace_id: trace_context.trace_id,
+  span_id: "b7ad6b7169203331",
+  trace_flags: trace_context.trace_flags
+)
+raise "expected outgoing traceparent" unless trace_headers.fetch("traceparent") == "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
+trace_span = LogBrew::Traceparent.span_attributes_from_traceparent(
+  trace_context,
+  LogBrew::TraceparentSpanInput.new(
+    name: "POST /checkout/:cart_id",
+    span_id: "b7ad6b7169203331",
+    duration_ms: 183.4,
+    metadata: { routeTemplate: "/checkout/:cart_id", sampled: true }
+  )
+)
+raise "expected trace span trace id" unless trace_span.fetch("traceId") == trace_context.trace_id
+raise "expected trace span parent id" unless trace_span.fetch("parentSpanId") == trace_context.parent_span_id
+raise "expected trace span metadata" unless trace_span.fetch("metadata").fetch("routeTemplate") == "/checkout/:cart_id"
+expect("validation_error") { LogBrew::Traceparent.parse("bad") }
+expect("validation_error") do
+  LogBrew::Traceparent.parse("00-00000000000000000000000000000000-00f067aa0ba902b7-01")
+end
 
 unauthenticated = client
 enqueue_all(unauthenticated)
