@@ -22,9 +22,17 @@ export type NodeFetchTransportConfig = {
   headers?: Record<string, string>;
 };
 
+export type LogBrewTraceContext = {
+  traceId: string;
+  spanId: string;
+  parentSpanId: string;
+  sampled: boolean;
+};
+
 export type LogBrewNodeContext = {
   client: LogBrewClient;
   logbrew: LogBrewClient;
+  trace?: LogBrewTraceContext;
   transport: Transport;
   previewJson(): string;
   flush(): Promise<TransportResponse>;
@@ -35,6 +43,7 @@ export type LogBrewNodeRuntimeContext = {
   req: IncomingMessage;
   res: ServerResponse;
   client: LogBrewClient;
+  trace?: LogBrewTraceContext;
 };
 
 export type LogBrewClientFactory = (
@@ -84,7 +93,7 @@ export type LogBrewNodeOptions = CreateLogBrewNodeClientConfig & {
   requestEvent?: (
     req: IncomingMessage,
     res: ServerResponse,
-    context: { client: LogBrewClient; durationMs: number }
+    context: { client: LogBrewClient; durationMs: number; trace?: LogBrewTraceContext }
   ) => LogBrewHttpRequestEvent;
   errorEvent?: (
     error: unknown,
@@ -119,8 +128,11 @@ export declare function withLogBrewHttpHandler(
 
 export declare function createLogBrewNodeContext(
   client: LogBrewClient,
-  transport: Transport
+  transport: Transport,
+  trace?: LogBrewTraceContext
 ): LogBrewNodeContext;
+
+export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
 
 export declare function createHttpRequestEvent(
   req: IncomingMessage,
@@ -130,6 +142,7 @@ export declare function createHttpRequestEvent(
     durationMs?: number;
     idFactory?: (req: IncomingMessage, res: ServerResponse) => string;
     spanIdFactory?: (req: IncomingMessage, res: ServerResponse) => string;
+    trace?: LogBrewTraceContext;
   }
 ): LogBrewHttpRequestEvent;
 
@@ -139,6 +152,7 @@ export declare function createHttpErrorEvent(
   options?: {
     now?: () => string;
     idFactory?: (error: unknown, req: IncomingMessage) => string;
+    trace?: LogBrewTraceContext;
   }
 ): LogBrewHttpErrorEvent;
 
@@ -163,6 +177,7 @@ declare const defaultExport: {
   createHttpRequestEvent: typeof createHttpRequestEvent;
   createLogBrewNodeClient: typeof createLogBrewNodeClient;
   createLogBrewNodeContext: typeof createLogBrewNodeContext;
+  getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   withLogBrewHttpHandler: typeof withLogBrewHttpHandler;
 };
 

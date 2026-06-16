@@ -42,7 +42,7 @@ server.listen(3000);
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request and error metadata records the path without query text by default.
 
-When an incoming request has a valid W3C `traceparent` header, the default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your server. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
+When an incoming request has a valid W3C `traceparent` header, the wrapper attaches `logbrew.trace` and the default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous work started by the wrapped handler. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your server. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
 
 ```js
 const server = createServer(withLogBrewHttpHandler((req, res) => {
@@ -50,6 +50,32 @@ const server = createServer(withLogBrewHttpHandler((req, res) => {
 }, {
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   spanIdFactory: () => "b7ad6b7169203331",
+  transport
+}));
+```
+
+`logbrew.trace` contains only normalized W3C IDs and the sampled flag. It does not include request bodies, response bodies, headers, query strings, or the raw `traceparent` value. Use it to correlate your own logs, errors, product actions, and downstream milestones with the current request span:
+
+```js
+import { getActiveLogBrewTrace } from "@logbrew/node";
+
+const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
+  const trace = logbrew.trace ?? getActiveLogBrewTrace();
+
+  logbrew.client.log("evt_checkout_received", new Date().toISOString(), {
+    message: "checkout request accepted",
+    level: "info",
+    logger: "checkout-api",
+    metadata: {
+      routeTemplate: "/checkout/:cartId",
+      traceId: trace?.traceId,
+      spanId: trace?.spanId
+    }
+  });
+
+  res.end("ok");
+}, {
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
   transport
 }));
 ```
@@ -69,8 +95,7 @@ For a Node.js API, start with the signals that make incidents and product flows 
 import { createServer } from "node:http";
 import {
   createNetworkMilestoneAttributes,
-  createProductActionAttributes,
-  parseTraceparent
+  createProductActionAttributes
 } from "@logbrew/sdk";
 import {
   createLogBrewNodeClient,
@@ -97,13 +122,13 @@ await client.flush(transport);
 
 const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
   const routeTemplate = "/checkout/:cartId";
-  const traceId = traceIdFromRequest(req);
+  const trace = logbrew.trace;
 
   logbrew.client.action("evt_checkout_started", new Date().toISOString(), createProductActionAttributes({
     name: "checkout started",
     status: "running",
     sessionId: "sess_checkout_123",
-    traceId,
+    traceId: trace?.traceId,
     routeTemplate,
     funnel: "checkout",
     step: "payment"
@@ -115,7 +140,7 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
     statusCode: 202,
     durationMs: 43,
     sessionId: "sess_checkout_123",
-    traceId
+    traceId: trace?.traceId
   }));
   logbrew.client.metric("evt_checkout_duration", new Date().toISOString(), {
     name: "checkout.duration",
@@ -123,7 +148,11 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
     value: 128,
     unit: "ms",
     temporality: "delta",
-    metadata: { routeTemplate, traceId }
+    metadata: {
+      routeTemplate,
+      traceId: trace?.traceId,
+      spanId: trace?.spanId
+    }
   });
 
   res.statusCode = 202;
@@ -135,16 +164,6 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
 }));
 
 server.listen(3000);
-
-function traceIdFromRequest(req) {
-  const value = req.headers.traceparent;
-  if (typeof value !== "string") return undefined;
-  try {
-    return parseTraceparent(value).traceId;
-  } catch {
-    return undefined;
-  }
-}
 ```
 
 The wrapper keeps app response ownership, records URL path without query text, and does not collect request bodies, response bodies, arbitrary headers, or outgoing calls. Use the explicit action and network milestone helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.

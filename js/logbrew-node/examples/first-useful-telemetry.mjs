@@ -4,11 +4,11 @@ import {
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
   createTraceparentHeaders,
-  parseTraceparent,
   RecordingTransport
 } from "@logbrew/sdk";
 import {
   createLogBrewNodeClient,
+  getActiveLogBrewTrace,
   withLogBrewHttpHandler
 } from "@logbrew/node";
 
@@ -40,7 +40,11 @@ await startupClient.flush(transport);
 
 let monotonicMs = 0;
 const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
-  const requestTraceId = traceIdFromRequest(req);
+  const requestTrace = logbrew.trace;
+  const activeTrace = getActiveLogBrewTrace();
+  if (activeTrace?.traceId !== requestTrace?.traceId || activeTrace?.spanId !== requestTrace?.spanId) {
+    throw new Error(`active trace context mismatch: ${JSON.stringify({ activeTrace, requestTrace })}`);
+  }
   logbrew.client.log("evt_log_checkout_received", "2026-06-15T08:00:02Z", {
     message: "checkout request accepted",
     level: "info",
@@ -48,7 +52,8 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
     metadata: {
       method: "POST",
       routeTemplate,
-      traceId: requestTraceId
+      spanId: requestTrace?.spanId,
+      traceId: requestTrace?.traceId
     }
   });
   logbrew.client.action(
@@ -58,7 +63,7 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
       name: "checkout started",
       status: "running",
       sessionId: "sess_checkout_123",
-      traceId: requestTraceId,
+      traceId: requestTrace?.traceId,
       routeTemplate,
       funnel: "checkout",
       step: "payment"
@@ -74,7 +79,7 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
       statusCode: 202,
       durationMs: 43,
       sessionId: "sess_checkout_123",
-      traceId: requestTraceId
+      traceId: requestTrace?.traceId
     })
   );
   logbrew.client.metric("evt_metric_checkout_duration", "2026-06-15T08:00:05Z", {
@@ -85,7 +90,8 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
     temporality: "delta",
     metadata: {
       routeTemplate,
-      traceId: requestTraceId
+      spanId: requestTrace?.spanId,
+      traceId: requestTrace?.traceId
     }
   });
   res.statusCode = 202;
@@ -136,6 +142,10 @@ if (requestSpan.attributes.traceId !== traceId || requestSpan.attributes.parentS
 if (requestSpan.attributes.metadata.path !== "/checkout/123") {
   throw new Error(`request path should omit query text: ${JSON.stringify(requestSpan)}`);
 }
+const logEvent = payload.events.find((event) => event.id === "evt_log_checkout_received");
+if (logEvent?.attributes.metadata.traceId !== traceId || logEvent?.attributes.metadata.spanId !== requestSpan.attributes.spanId) {
+  throw new Error(`missing log trace correlation: ${JSON.stringify(logEvent)}`);
+}
 const networkEvent = payload.events.find((event) => event.id === "evt_network_payment_authorized");
 if (networkEvent?.attributes.metadata.routeTemplate !== "/payments/:paymentId") {
   throw new Error(`missing network milestone route template: ${JSON.stringify(networkEvent)}`);
@@ -149,18 +159,6 @@ console.error(JSON.stringify({
   networkMilestone: networkEvent.attributes.name,
   traceId: requestSpan.attributes.traceId
 }));
-
-function traceIdFromRequest(req) {
-  const value = req.headers.traceparent;
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  try {
-    return parseTraceparent(value).traceId;
-  } catch {
-    return undefined;
-  }
-}
 
 async function waitFor(predicate) {
   for (let attempt = 0; attempt < 20; attempt += 1) {

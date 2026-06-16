@@ -104,9 +104,11 @@ import {
   createHttpRequestEvent,
   createLogBrewNodeClient,
   createLogBrewNodeContext,
+  getActiveLogBrewTrace,
   withLogBrewHttpHandler
 } from "@logbrew/node";
 
+const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
 const client = createLogBrewNodeClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
@@ -170,7 +172,14 @@ const captureClient = createLogBrewNodeClient({
   sdkName: "node-request-capture-smoke",
   sdkVersion: "0.1.0"
 });
-const captureServer = createServer(withLogBrewHttpHandler((req, res) => {
+let activeTraceFromAsync;
+const captureServer = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
+  Promise.resolve().then(() => {
+    activeTraceFromAsync = getActiveLogBrewTrace();
+  });
+  if (logbrew.trace?.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+    throw new Error(`missing request trace context: ${JSON.stringify(logbrew.trace)}`);
+  }
   res.statusCode = req.url?.startsWith("/captured") ? 204 : 404;
   res.end();
 }, {
@@ -185,13 +194,13 @@ await once(captureServer, "listening");
 const capturePort = captureServer.address().port;
 const captureResponse = await fetch(`http://127.0.0.1:${capturePort}/captured?token=secret`, {
   headers: {
-    traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    traceparent
   }
 });
 if (captureResponse.status !== 204) {
   throw new Error(`unexpected capture status: ${captureResponse.status}`);
 }
-await waitFor(() => captureTransport.sentBodies.length === 1);
+await waitFor(() => captureTransport.sentBodies.length === 1 && activeTraceFromAsync);
 await closeServer(captureServer);
 
 const errorTransport = RecordingTransport.alwaysAccept();
@@ -204,18 +213,26 @@ const errorServer = createServer(withLogBrewHttpHandler(() => {
   throw new Error("node handler exploded");
 }, {
   client: errorClient,
-  errorEvent(error, { req }) {
+  errorEvent(error, { req, trace }) {
+    if (trace?.spanId !== "b7ad6b7169203332") {
+      throw new Error(`missing error callback trace: ${JSON.stringify(trace)}`);
+    }
     return createHttpErrorEvent(error, req, {
       idFactory: () => "evt_node_error_001",
       now: () => "2026-06-02T10:00:08Z"
     });
   },
+  spanIdFactory: () => "b7ad6b7169203332",
   transport: errorTransport
 }));
 errorServer.listen(0);
 await once(errorServer, "listening");
 const errorPort = errorServer.address().port;
-const errorResponse = await fetch(`http://127.0.0.1:${errorPort}/explode?token=secret`);
+const errorResponse = await fetch(`http://127.0.0.1:${errorPort}/explode?token=secret`, {
+  headers: {
+    traceparent
+  }
+});
 if (errorResponse.status !== 500) {
   throw new Error(`unexpected error status: ${errorResponse.status}`);
 }
@@ -329,11 +346,23 @@ if (capturePayload.events[0].attributes.spanId !== "b7ad6b7169203331") {
 if (capturePayload.events[0].attributes.metadata.framework !== "node:http") {
   throw new Error(`missing node span metadata: ${captureTransport.lastBody()}`);
 }
+if (capturePayload.events[0].attributes.metadata.sampled !== true) {
+  throw new Error(`missing sampled request metadata: ${captureTransport.lastBody()}`);
+}
+if (activeTraceFromAsync?.spanId !== "b7ad6b7169203331") {
+  throw new Error(`async trace context was not preserved: ${JSON.stringify(activeTraceFromAsync)}`);
+}
 if (errorPayload.events[0].id !== "evt_node_error_001") {
   throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
 }
 if (errorPayload.events[0].attributes.metadata.path !== "/explode") {
   throw new Error(`error capture should omit query text: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[0].attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+  throw new Error(`error capture should include trace id: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[0].attributes.metadata.spanId !== "b7ad6b7169203332") {
+  throw new Error(`error capture should include request span id: ${errorTransport.lastBody()}`);
 }
 if (manualErrorPayload.events[0].id !== "evt_node_error_manual") {
   throw new Error(`unexpected manual error payload: ${manualErrorTransport.lastBody()}`);
@@ -434,7 +463,9 @@ import {
   createNodeFetchTransport,
   createHttpRequestEvent,
   createLogBrewNodeClient,
+  getActiveLogBrewTrace,
   type LogBrewNodeContext,
+  type LogBrewTraceContext,
   withLogBrewHttpHandler
 } from "@logbrew/node";
 
@@ -456,6 +487,9 @@ const handler = withLogBrewHttpHandler((
   if (!req.logbrew) {
     throw new Error("missing request context");
   }
+  const activeTrace: LogBrewTraceContext | undefined = getActiveLogBrewTrace();
+  activeTrace?.traceId.toUpperCase();
+  context.trace?.spanId.toUpperCase();
   const event = createHttpRequestEvent(req, res, {
     now: () => "2026-06-02T10:00:06Z",
     spanIdFactory: () => "b7ad6b7169203331"
