@@ -29,10 +29,8 @@ class GitHubReleaseSafetyGateTests(unittest.TestCase):
 
         self.assertIn('"GitHub release safety checks"', script)
         self.assertIn(f'run_shell_step "{COMMAND}"', script)
-        release_step = re.search(
-            r'begin_step \d+ "GitHub release safety checks"', script
-        )
-        docs_step = re.search(r'begin_step \d+ "Markdown link checks"', script)
+        release_step = re.search(r'begin_next_step "GitHub release safety checks"', script)
+        docs_step = re.search(r'begin_next_step "Markdown link checks"', script)
         self.assertIsNotNone(release_step)
         self.assertIsNotNone(docs_step)
         self.assertLess(

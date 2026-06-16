@@ -132,7 +132,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         self.assertIn('"Backend contract report checks"', script)
         self.assertRegex(
             script,
-            r'begin_step \d+ "Backend contract report checks"\n'
+            r'begin_next_step "Backend contract report checks"\n'
             r'run_shell_step "python3 scripts/check_backend_contract_reports\.py"\n'
             r"mark_step_complete",
         )
@@ -143,10 +143,10 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         self.assertIn('"JavaScript release artifact smoke"', script)
         self.assertRegex(
             script,
-            r'begin_step \d+ "JavaScript release artifact smoke"\n'
+            r'begin_next_step "JavaScript release artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_js_release_artifact_smoke\.sh"\n'
             r"mark_step_complete\n\n"
-            r'begin_step \d+ "Generated artifact hygiene"',
+            r'begin_next_step "Generated artifact hygiene"',
         )
 
     def test_public_verifier_runs_github_release_safety_gate(self) -> None:
@@ -155,10 +155,17 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         self.assertIn('"GitHub release safety checks"', script)
         self.assertRegex(
             script,
-            r'begin_step \d+ "GitHub release safety checks"\n'
+            r'begin_next_step "GitHub release safety checks"\n'
             r'run_shell_step "python3 scripts/check_github_release_safety\.py"\n'
             r"mark_step_complete",
         )
+
+    def test_public_verifier_validates_step_label_order_at_runtime(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('expected_label="${STEP_LABELS[$((current_step_number - 1))]:-}"', script)
+        self.assertIn('if [[ "$expected_label" != "$current_step_label" ]]; then', script)
+        self.assertIn("step label mismatch for step $current_step_number", script)
 
     def test_declared_step_labels_match_executable_steps(self) -> None:
         script = SCRIPT.read_text()
@@ -167,7 +174,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         assert labels_block is not None
 
         declared_labels = re.findall(r'^\s+"([^"]+)"$', labels_block.group("labels"), re.MULTILINE)
-        executable_labels = re.findall(r'^begin_step \d+ "([^"]+)"$', script, re.MULTILINE)
+        executable_labels = re.findall(r'^begin_next_step "([^"]+)"$', script, re.MULTILINE)
 
         self.assertEqual(declared_labels, executable_labels)
 
