@@ -32,7 +32,9 @@ LogBrew React Native already shipped a thin provider/hook layer, screen/app-stat
 - Re-read Sentry React Native `packages/core/src/js/tracing/reactnavigation.ts`: `reactNavigationIntegration(...)`, `registerNavigationContainer(...)`, `updateLatestNavigationSpanWithCurrentRoute(...)`, and route transaction handling show why navigation spans need route-name continuity, previous-route context, and native span sync for deep mobile debugging.
 - Re-read Sentry React Native `packages/core/src/js/tracing/span.ts`: `startIdleNavigationSpan(...)` and idle-span lifecycle handling show the value of route spans without making user handlers responsible for every transition.
 - Re-read Datadog React Native `packages/core/src/rum/instrumentation/resourceTracking/requestProxy/XHRProxy/DatadogRumResource/ResourceReporter.ts`: `ResourceReporter.reportResource(...)`, `formatResourceStartContext(...)`, and `formatResourceStopContext(...)` show how resource spans attach method, URL-like resource names, status, size, timing, and tracing IDs.
+- Re-read Datadog React Native `packages/core/src/rum/instrumentation/resourceTracking/requestProxy/XHRProxy/XHRProxy.ts`: `reportXhr(...)` and proxied `onreadystatechange` show the stronger-but-heavier pattern of automatic XHR interception, timing capture, status capture, response-size calculation, and optional GraphQL payload/error extraction.
 - Re-read Datadog React Native `packages/core/src/rum/instrumentation/resourceTracking/requestProxy/interfaces/RumResource.ts`: `RUMResource` confirms resource timing and tracing fields are first-class in stronger mobile SDKs.
+- Re-read Sentry React Native `packages/core/src/js/options.ts`: `propagateTraceparent`, `tracePropagationTargets`, and `enableCaptureFailedRequests` show why outgoing `traceparent` must stay opt-in/target-scoped and why automatic failed-request capture crosses into heavier platform-specific instrumentation.
 - Re-read OpenTelemetry JS `packages/opentelemetry-core/src/trace/W3CTraceContextPropagator.ts` and `packages/opentelemetry-sdk-trace-web/test/StackContextManager.test.ts`: propagation remains strict and stack scopes return to the previous context after nested work.
 
 ## LogBrew Implementation
@@ -48,12 +50,14 @@ LogBrew React Native already shipped a thin provider/hook layer, screen/app-stat
 - The React Navigation listener accepts app-owned container refs, captures optional initial route spans plus route-change spans, strips query/hash text from route paths, carries previous route name, and keeps route keys opt-in to avoid high-cardinality defaults.
 - Resource span helpers capture method, route template, duration, status code, response size, screen, and session ID while mapping 4xx/5xx status codes to `error` without deriving payload/header details.
 - Added packaged `examples/navigation-resource-spans.mjs` to prove one W3C trace links initial navigation, route-change navigation, successful resource, and failed resource spans with primitive-only metadata.
+- Added the explicit `@logbrew/react-native/resource-fetch` subpath with `createReactNativeResourceFetch(...)`, an app-owned fetch wrapper that reuses `createTraceparentFetch(...)`, records a resource span for success or thrown fetch errors, strips query/hash text from route templates, preserves target-scoped `traceparent` propagation, and avoids global `fetch`/XHR patching.
+- Added packaged `examples/resource-fetch-spans.mjs` to prove one W3C trace links a successful resource fetch span, a failed resource fetch span, sanitized route templates, provider trace propagation for matched API targets, and no `traceparent` on unmatched targets.
 
 ## Tradeoffs
 
-- LogBrew intentionally did not copy Sentry native scope sync, navigation auto-instrumentation, Datadog XHR/fetch patching, Babel interaction rewriting, multi-format propagation, baggage, tracestate, replay, payload capture, or native bridge state.
+- LogBrew intentionally did not copy Sentry native scope sync, navigation auto-instrumentation, Datadog XHR/fetch patching, GraphQL payload extraction, Babel interaction rewriting, multi-format propagation, baggage, tracestate, replay, payload capture, or native bridge state.
 - The React Native package remains a thin peer-dependency layer over `@logbrew/sdk`, React, and React Native. Async work after `await` should keep the returned trace object and pass it explicitly or use provider `trace`; this avoids stale global context leaks between unrelated mobile interactions.
-- Navigation/resource spans stay explicit and app-owned. LogBrew does not globally patch React Navigation, `fetch`, or XHR; target-scoped propagation and helper calls keep privacy defaults obvious and reversible.
+- Navigation/resource spans stay explicit and app-owned. LogBrew does not globally patch React Navigation, `fetch`, or XHR; target-scoped propagation and helper calls keep privacy defaults obvious and reversible. The resource-fetch subpath is intentionally separate so teams opt into fetch wrapping only where they want spans.
 
 ## Evidence
 
@@ -61,9 +65,10 @@ LogBrew React Native already shipped a thin provider/hook layer, screen/app-stat
 - `cd js/logbrew-react-native && npm test`
 - `bash scripts/real_user_react_native_smoke.sh`
 - Packaged `examples/navigation-resource-spans.mjs` ran through `real_user_react_native_smoke.sh` after installing the generated tarball.
+- Packaged `examples/resource-fetch-spans.mjs` runs through `real_user_react_native_smoke.sh` after installing the generated tarball.
 - `bash scripts/check_js_lint.sh`
 - `bash scripts/check_js_package.sh`
 
 ## Remaining Gaps
 
-- React Native still lacks automatic navigation/lifecycle spans, native bridge scope sync, automatic `fetch`/XHR resource child spans, OTel context ingestion, baggage/tracestate, rich span events/exceptions, and source-map/native symbolication parity with Sentry/Datadog.
+- React Native still lacks automatic navigation/lifecycle spans, native bridge scope sync, automatic `fetch`/XHR resource child spans, OTel context ingestion, baggage/tracestate, rich span events/exceptions, and source-map/native symbolication parity with Sentry/Datadog. The explicit resource-fetch helper intentionally reduces the fetch resource gap without claiming automatic resource instrumentation.

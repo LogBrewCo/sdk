@@ -19,6 +19,17 @@
         "default": "./index.cjs"
       },
       "default": "./index.js"
+    },
+    "./resource-fetch": {
+      "import": {
+        "types": "./resource-fetch.d.ts",
+        "default": "./resource-fetch.js"
+      },
+      "require": {
+        "types": "./resource-fetch.d.cts",
+        "default": "./resource-fetch.cjs"
+      },
+      "default": "./resource-fetch.js"
     }
   },
   "files": [
@@ -27,6 +38,10 @@
     "index.native.js",
     "index.d.ts",
     "index.d.cts",
+    "resource-fetch.cjs",
+    "resource-fetch.js",
+    "resource-fetch.d.ts",
+    "resource-fetch.d.cts",
     "README.md",
     "examples"
   ],
@@ -54,6 +69,6 @@
     "react-native": ">=0.72"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check examples/index.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/trace-correlation.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check examples/index.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs"
   }
 }

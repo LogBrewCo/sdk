@@ -41,11 +41,16 @@ grep -q '^package/index.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.native.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/resource-fetch.js$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/resource-fetch.cjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/resource-fetch.d.ts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/resource-fetch.d.cts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/index.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/navigation-resource-spans.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/package.json$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/examples/resource-fetch-spans.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/trace-correlation.mjs$' "$tmp_dir/native-tarball.txt"
 tar -xOf "$native_tgz" package/README.md > "$tmp_dir/native-readme.md"
 grep -q 'npm install @logbrew/sdk @logbrew/react-native react react-native' "$tmp_dir/native-readme.md"
@@ -63,6 +68,8 @@ grep -q 'withLogBrewTrace' "$tmp_dir/native-readme.md"
 grep -q 'getActiveLogBrewTrace' "$tmp_dir/native-readme.md"
 grep -q 'createReactNavigationSpanListener' "$tmp_dir/native-readme.md"
 grep -q 'captureReactNativeResourceSpan' "$tmp_dir/native-readme.md"
+grep -q 'createReactNativeResourceFetch' "$tmp_dir/native-readme.md"
+grep -q '@logbrew/react-native/resource-fetch' "$tmp_dir/native-readme.md"
 
 app_dir="$tmp_dir/react-native-smoke-app"
 mkdir -p "$app_dir"
@@ -109,7 +116,10 @@ for name in ("@logbrew/react-native", "@logbrew/sdk", "react", "react-native"):
         raise SystemExit(f"missing npm dependency entry: {name}")
 PY
 node --check node_modules/@logbrew/react-native/index.native.js
+node --check node_modules/@logbrew/react-native/resource-fetch.js
+node --check node_modules/@logbrew/react-native/resource-fetch.cjs
 node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.captureReactNativeNavigationSpan !== "function" || typeof native.captureReactNativeResourceSpan !== "function" || typeof native.createReactNavigationSpanListener !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.createReactNativeNavigationSpanEvent !== "function" || typeof native.createReactNativeResourceSpanEvent !== "function" || typeof native.default !== "object") process.exit(1)'
+node -e 'const nativeResourceFetch = require("@logbrew/react-native/resource-fetch"); if (typeof nativeResourceFetch.createReactNativeResourceFetch !== "function") process.exit(1)'
 
 cat > smoke.mjs <<'EOF'
 import React from "react";
@@ -139,6 +149,7 @@ import {
   withLogBrewTrace,
   useLogBrewNativeActions
 } from "@logbrew/react-native";
+import { createReactNativeResourceFetch } from "@logbrew/react-native/resource-fetch";
 
 const platform = {
   OS: "ios",
@@ -352,6 +363,78 @@ if (activeTraceFetchRequests[0].init.headers.traceparent !== providerTraceHeader
 }
 if (getActiveLogBrewTrace() !== undefined) {
   throw new Error("active trace should be cleared after scoped fetch");
+}
+
+const resourceFetchClient = createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-native-resource-fetch-smoke",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+const resourceFetchRequests = [];
+const resourceFetchTimes = [1000, 1167, 2000, 2031];
+const resourceFetchTimestamps = ["2026-06-02T10:00:12Z", "2026-06-02T10:00:13Z"];
+const resourceFetch = createReactNativeResourceFetch(resourceFetchClient, {
+  fetchImpl: async (input, init = {}) => {
+    resourceFetchRequests.push({ input, init });
+    if (String(input).includes("/api/fail")) {
+      throw new TypeError("network request failed");
+    }
+    return { status: 202 };
+  },
+  metadata: { flow: "checkout", nested: { dropped: true } },
+  now: () => resourceFetchTimestamps.shift(),
+  nowMs: () => resourceFetchTimes.shift(),
+  platform,
+  appState,
+  screen: "Checkout",
+  sessionId: "session_mobile_001",
+  trace: providerTrace,
+  tracePropagationTargets: ["https://api.example.test/"]
+});
+await resourceFetch("https://api.example.test/api/checkout?email=dev@example.test", {
+  method: "POST",
+  headers: { accept: "application/json" }
+});
+try {
+  await resourceFetch("https://cdn.example.test/api/fail?debug=hidden", {
+    method: "GET"
+  });
+} catch (error) {
+  if (!(error instanceof TypeError)) {
+    throw error;
+  }
+}
+const resourceFetchEvents = JSON.parse(resourceFetchClient.previewJson()).events;
+if (resourceFetchEvents.length !== 2) {
+  throw new Error(`expected two resource fetch spans, got ${resourceFetchEvents.length}`);
+}
+if (resourceFetchRequests[0].init.headers.traceparent !== providerTraceHeaders.traceparent) {
+  throw new Error(`resource fetch should propagate provider trace: ${resourceFetchRequests[0].init.headers.traceparent}`);
+}
+if (resourceFetchRequests[1].init.headers?.traceparent !== undefined) {
+  throw new Error("non-target resource fetch should not receive traceparent");
+}
+const resourceFetchSuccess = resourceFetchEvents[0].attributes;
+const resourceFetchFailure = resourceFetchEvents[1].attributes;
+if (
+  resourceFetchSuccess.name !== "POST /api/checkout" ||
+  resourceFetchSuccess.status !== "ok" ||
+  resourceFetchSuccess.durationMs !== 167 ||
+  resourceFetchSuccess.metadata.routeTemplate !== "/api/checkout" ||
+  resourceFetchSuccess.metadata.traceId !== providerTrace.traceId ||
+  resourceFetchSuccess.metadata.nested !== undefined
+) {
+  throw new Error(`unexpected resource fetch success span: ${JSON.stringify(resourceFetchSuccess)}`);
+}
+if (
+  resourceFetchFailure.name !== "GET /api/fail" ||
+  resourceFetchFailure.status !== "error" ||
+  resourceFetchFailure.durationMs !== 31 ||
+  resourceFetchFailure.metadata.fetchErrorName !== "TypeError" ||
+  resourceFetchFailure.metadata.traceId !== providerTrace.traceId
+) {
+  throw new Error(`unexpected resource fetch failure span: ${JSON.stringify(resourceFetchFailure)}`);
 }
 
 const timelineClient = createLogBrewReactNativeClient({
@@ -579,6 +662,7 @@ import {
   type ReactNativeTraceContext,
   type TracePropagationTarget
 } from "@logbrew/react-native";
+import { createReactNativeResourceFetch } from "@logbrew/react-native/resource-fetch";
 
 const platform: ReactNativePlatformLike = {
   OS: "android",
@@ -627,6 +711,12 @@ const tracedFetch = createTraceparentFetch({
 });
 void tracedFetch("/mobile-api/ping");
 void createTraceparentFetch({ fetchImpl: async () => ({ status: 204 }), trace, tracePropagationTargets: traceTargets })("/mobile-api/trace");
+const resourceFetch = createReactNativeResourceFetch(client, {
+  fetchImpl: async () => ({ status: 202 }),
+  trace,
+  tracePropagationTargets: traceTargets
+});
+void resourceFetch("/mobile-api/resource", { method: "POST" });
 
 captureScreenView(client, "Checkout", { platform, appState, trace });
 captureAppStateChange(client, state, { platform, appState, trace });
@@ -776,10 +866,12 @@ npx tsc --project tsconfig.json
 node node_modules/@logbrew/react-native/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"
+grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation' "$tmp_dir/launcher-help.txt"
 node node_modules/@logbrew/react-native/examples/index.mjs --list > "$tmp_dir/launcher-list.txt"
 grep -q 'navigation-resource-spans -> node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/react-native/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
+grep -q 'resource-fetch-spans -> node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans' "$tmp_dir/launcher-list.txt"
 grep -q 'trace-correlation -> node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/react-native/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
@@ -814,13 +906,21 @@ for event in events:
 PY
 grep -q '"events":5' "$tmp_dir/example-trace.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$tmp_dir/example-trace.stderr.json"
+node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans > "$tmp_dir/example-resource-fetch.stdout.json" 2> "$tmp_dir/example-resource-fetch.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-resource-fetch.stdout.json" >/dev/null
+grep -q '"events":2' "$tmp_dir/example-resource-fetch.stderr.json"
+grep -q '"successSpan":"POST /api/checkout"' "$tmp_dir/example-resource-fetch.stderr.json"
+grep -q '"failureSpan":"GET /api/fail"' "$tmp_dir/example-resource-fetch.stderr.json"
+grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-c2ad6b7169204442-01"' "$tmp_dir/example-resource-fetch.stderr.json"
 grep -q '"listenerRemoved":true' "$tmp_dir/example-default.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/react-native/examples run list > "$tmp_dir/npm-helper-list.txt"
 grep -q 'navigation-resource-spans -> node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/npm-helper-list.txt"
 grep -q 'readme-example -> node node_modules/@logbrew/react-native/examples/index.mjs readme-example' "$tmp_dir/npm-helper-list.txt"
+grep -q 'resource-fetch-spans -> node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans' "$tmp_dir/npm-helper-list.txt"
 npm --prefix node_modules/@logbrew/react-native/examples run help > "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
+grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run resource-fetch-spans' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/react-native/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"

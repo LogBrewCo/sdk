@@ -6,7 +6,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, and explicit W3C trace propagation for mobile fetch calls.
+This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, and opt-in resource fetch spans.
 
 ## Install
 
@@ -257,6 +257,27 @@ captureReactNativeResourceSpan(client, {
 
 `createReactNavigationSpanListener()` listens for React Navigation `state` changes and uses `__unsafe_action__` dispatch timing when the container exposes it. Route names and query-stripped route paths are captured; route keys are omitted unless `includeRouteKey: true` is set because they can be high-cardinality. `captureReactNativeResourceSpan()` records app-owned resource spans without patching global `fetch`/XHR, reading request bodies, copying headers, or storing full URLs with query text.
 
+For app-owned fetch calls where you want the resource span and outbound `traceparent` in one place, use the explicit resource-fetch subpath:
+
+```js
+import { createReactNativeResourceFetch } from "@logbrew/react-native/resource-fetch";
+
+const resourceFetch = createReactNativeResourceFetch(client, {
+  trace,
+  platform: Platform,
+  appState: AppState,
+  screen: "Checkout",
+  tracePropagationTargets: ["https://api.example.com/"]
+});
+
+await resourceFetch("https://api.example.com/checkout?email=hidden", {
+  method: "POST",
+  headers: { accept: "application/json" }
+});
+```
+
+`createReactNativeResourceFetch()` wraps the fetch function your app supplies, or the runtime `fetch` when available. It records status, method, duration, sanitized route template, screen, session, primitive metadata, and trace correlation. It does not patch global `fetch` or XHR, inspect request or response bodies, capture arbitrary headers, or attach `traceparent` outside `tracePropagationTargets`. Pass `trace` explicitly after `await` boundaries or build the wrapper from provider/hook state so async resource spans stay correlated.
+
 ## Example Source
 
 The package includes example source for screen views, app-state metadata, handled JavaScript errors, provider/hooks, active trace correlation, and target-scoped trace propagation. After installing, inspect the shipped examples with:
@@ -264,5 +285,6 @@ The package includes example source for screen views, app-state metadata, handle
 ```bash
 node node_modules/@logbrew/react-native/examples/index.mjs --list
 node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans
+node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans
 node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation
 ```
