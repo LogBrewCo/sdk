@@ -60,17 +60,29 @@ cat > "$app_dir/main.py" <<'PY'
 from __future__ import annotations
 
 import json
+import logging
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from django.test import Client
 from django.urls import path
-from logbrew_django import configure_logbrew
-from logbrew_sdk import LogBrewClient, RecordingTransport
+from logbrew_django import configure_logbrew, get_active_logbrew_trace
+from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport
 
 
 def health(_request: HttpRequest) -> HttpResponse:
-    return HttpResponse('{"ok":true}', content_type="application/json")
+    trace = get_active_logbrew_trace()
+    logging.getLogger("django.checkout").info("health request", extra={"route_template": "/health/"})
+    return HttpResponse(
+        json.dumps(
+            {
+                "ok": True,
+                "traceId": trace.trace_id if trace else None,
+                "spanId": trace.span_id if trace else None,
+            }
+        ),
+        content_type="application/json",
+    )
 
 
 def boom(_request: HttpRequest) -> HttpResponse:
@@ -100,6 +112,11 @@ client = LogBrewClient.create(
     sdk_version="0.1.0",
 )
 transport = RecordingTransport.always_accept()
+logger = logging.getLogger("django.checkout")
+logger.handlers = []
+logger.propagate = False
+logger.setLevel(logging.INFO)
+logger.addHandler(LogBrewLoggingHandler(client, metadata={"service": "checkout"}))
 configure_logbrew(client=client, transport=transport, span_id_factory=lambda: "b7ad6b7169203331")
 
 http = Client(raise_request_exception=False)
@@ -112,7 +129,8 @@ boom_response = http.get("/boom/")
 events: list[dict[str, object]] = []
 for body in transport.sent_bodies:
     events.extend(json.loads(body)["events"])
-first_span = events[0]["attributes"]
+first_log = events[0]["attributes"]
+first_span = events[1]["attributes"]
 
 print(
     json.dumps(
@@ -125,6 +143,10 @@ print(
             "eventTypes": [event["type"] for event in events],
             "spanNames": [event["attributes"]["name"] for event in events if event["type"] == "span"],
             "issueTitles": [event["attributes"]["title"] for event in events if event["type"] == "issue"],
+            "handlerTraceId": health_response.json()["traceId"],
+            "handlerSpanId": health_response.json()["spanId"],
+            "logTraceId": first_log["metadata"]["traceId"],
+            "logSpanId": first_log["metadata"]["spanId"],
             "traceId": first_span["traceId"],
             "parentSpanId": first_span["parentSpanId"],
             "spanId": first_span["spanId"],
@@ -151,7 +173,7 @@ if payload["sentBodies"] != 2:
     raise SystemExit(f"expected two flushed bodies, got {payload['sentBodies']}")
 if payload["pending"] != 0:
     raise SystemExit(f"expected empty queue, got {payload['pending']}")
-if payload["eventTypes"] != ["span", "issue", "span"]:
+if payload["eventTypes"] != ["log", "span", "issue", "span"]:
     raise SystemExit(f"unexpected event types: {payload['eventTypes']}")
 if payload["spanNames"] != ["GET /health/", "GET /boom/"]:
     raise SystemExit(f"unexpected span names: {payload['spanNames']}")
@@ -159,6 +181,10 @@ if payload["issueTitles"] != ["GET /boom/ failed"]:
     raise SystemExit(f"unexpected issue titles: {payload['issueTitles']}")
 if payload["traceId"] != "4bf92f3577b34da6a3ce929d0e0e4736":
     raise SystemExit(f"unexpected trace id: {payload['traceId']}")
+if payload["handlerTraceId"] != payload["traceId"] or payload["logTraceId"] != payload["traceId"]:
+    raise SystemExit(f"trace correlation failed: {payload}")
+if payload["handlerSpanId"] != payload["spanId"] or payload["logSpanId"] != payload["spanId"]:
+    raise SystemExit(f"span correlation failed: {payload}")
 if payload["parentSpanId"] != "00f067aa0ba902b7":
     raise SystemExit(f"unexpected parent span id: {payload['parentSpanId']}")
 if payload["spanId"] != "b7ad6b7169203331":
@@ -172,7 +198,7 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/body.json" >/dev/nul
 cat > "$app_dir/typecheck.py" <<'PY'
 from __future__ import annotations
 
-from logbrew_django import configure_logbrew
+from logbrew_django import configure_logbrew, get_active_logbrew_trace
 from logbrew_sdk import LogBrewClient, RecordingTransport
 
 client: LogBrewClient = LogBrewClient.create(
@@ -181,6 +207,8 @@ client: LogBrewClient = LogBrewClient.create(
     sdk_version="0.1.0",
 )
 transport: RecordingTransport = RecordingTransport.always_accept()
+active_trace = get_active_logbrew_trace()
+trace_id: str | None = active_trace.trace_id if active_trace else None
 configure_logbrew(
     client=client,
     transport=transport,

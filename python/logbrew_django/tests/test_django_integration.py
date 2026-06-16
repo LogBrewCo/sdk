@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 import unittest
 
 import django
@@ -8,8 +10,8 @@ import django.conf
 from django.http import HttpRequest, HttpResponse
 from django.test import Client
 from django.urls import path
-from logbrew_django import configure_logbrew
-from logbrew_sdk import LogBrewClient, RecordingTransport, SdkError
+from logbrew_django import configure_logbrew, get_active_logbrew_trace
+from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport, SdkError
 
 
 def health(_request: HttpRequest) -> HttpResponse:
@@ -20,6 +22,20 @@ def order_detail(_request: HttpRequest, order_id: int) -> HttpResponse:
     return HttpResponse(f'{{"orderId":{order_id}}}', content_type="application/json")
 
 
+def traced_order(_request: HttpRequest, order_id: int) -> HttpResponse:
+    trace = get_active_logbrew_trace()
+    logging.getLogger("django.checkout").info("loading order", extra={"order_id": order_id})
+    return HttpResponse(
+        json.dumps(
+            {
+                "traceId": trace.trace_id if trace else None,
+                "spanId": trace.span_id if trace else None,
+            }
+        ),
+        content_type="application/json",
+    )
+
+
 def boom(_request: HttpRequest) -> HttpResponse:
     raise RuntimeError("broken handler")
 
@@ -27,6 +43,7 @@ def boom(_request: HttpRequest) -> HttpResponse:
 urlpatterns = [
     path("health/", health, name="health"),
     path("orders/<int:order_id>/", order_detail, name="order-detail"),
+    path("traced-orders/<int:order_id>/", traced_order, name="traced-order"),
     path("boom/", boom, name="boom"),
 ]
 
@@ -133,7 +150,7 @@ class DjangoIntegrationTests(unittest.TestCase):
         self.assertEqual(attributes["spanId"], "b7ad6b7169203331")
         self.assertEqual(attributes["metadata"]["path"], "/health/")
 
-    def test_malformed_traceparent_keeps_synthetic_span_without_span_id_factory(self) -> None:
+    def test_malformed_traceparent_uses_safe_local_trace_without_raw_header(self) -> None:
         sdk_client = make_client()
         transport = RecordingTransport.always_accept()
         span_id_calls = 0
@@ -154,9 +171,49 @@ class DjangoIntegrationTests(unittest.TestCase):
         payload = json.loads(transport.sent_bodies[0])
         attributes = payload["events"][0]["attributes"]
         self.assertNotIn("parentSpanId", attributes)
-        self.assertTrue(attributes["traceId"].startswith("trace_evt_django_span_"))
+        self.assertRegex(attributes["traceId"], re.compile(r"^[0-9a-f]{32}$"))
+        self.assertEqual(attributes["spanId"], "b7ad6b7169203331")
         self.assertEqual(attributes["metadata"]["path"], "/health/")
-        self.assertEqual(span_id_calls, 0)
+        self.assertNotIn("traceparent", json.dumps(attributes))
+        self.assertEqual(span_id_calls, 1)
+
+    def test_view_logs_share_active_request_trace(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        handler = LogBrewLoggingHandler(sdk_client, metadata={"service": "checkout"})
+        logger = logging.getLogger("django.checkout")
+        logger.handlers = []
+        logger.propagate = False
+        logger.setLevel(logging.INFO)
+        logger.addHandler(handler)
+        configure_logbrew(
+            client=sdk_client,
+            transport=transport,
+            span_id_factory=lambda: "b7ad6b7169203331",
+        )
+
+        try:
+            response = Client().get(
+                "/traced-orders/42/?debug=true",
+                HTTP_TRACEPARENT="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            )
+        finally:
+            logger.removeHandler(handler)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"traceId": "4bf92f3577b34da6a3ce929d0e0e4736", "spanId": "b7ad6b7169203331"},
+        )
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["log", "span"])
+        log = payload["events"][0]["attributes"]
+        span = payload["events"][1]["attributes"]
+        self.assertEqual(log["metadata"]["traceId"], span["traceId"])
+        self.assertEqual(log["metadata"]["spanId"], span["spanId"])
+        self.assertEqual(log["metadata"]["parentSpanId"], span["parentSpanId"])
+        self.assertIs(log["metadata"]["sampled"], True)
+        self.assertNotIn("debug", json.dumps(payload))
 
     def test_exception_captures_issue_and_error_span(self) -> None:
         sdk_client = make_client()
@@ -177,6 +234,8 @@ class DjangoIntegrationTests(unittest.TestCase):
         self.assertEqual(issue["metadata"]["exception_type"], "RuntimeError")
         self.assertEqual(span["status"], "error")
         self.assertEqual(span["metadata"]["status_code"], 500)
+        self.assertEqual(issue["metadata"]["traceId"], span["traceId"])
+        self.assertEqual(issue["metadata"]["spanId"], span["spanId"])
 
     def test_flush_errors_do_not_break_application_by_default(self) -> None:
         sdk_client = make_client()

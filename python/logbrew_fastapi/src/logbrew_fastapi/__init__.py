@@ -12,13 +12,18 @@ from typing import Any
 from fastapi import FastAPI, Request, Response
 from logbrew_sdk import (
     LogBrewClient,
+    LogBrewTraceContext,
     MetricAttributes,
     RecordingTransport,
     SdkError,
     SpanAttributes,
     TransportError,
+    create_logbrew_trace_context,
+    get_active_logbrew_trace,
     parse_traceparent,
-    span_attributes_from_traceparent,
+    span_attributes_from_trace_context,
+    trace_metadata,
+    use_logbrew_trace,
 )
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp
@@ -161,33 +166,22 @@ def capture_request_span(
     event_id: str | None = None,
     timestamp: str | None = None,
     span_id_factory: Callable[[], str] | None = None,
+    trace: LogBrewTraceContext | None = None,
 ) -> str:
     """Capture a FastAPI request as a LogBrew span event and return its event id."""
 
     span_event_id = event_id or f"evt_fastapi_span_{uuid.uuid4().hex}"
-    span_seed = span_event_id.replace("-", "_")
-    traceparent = request.headers.get("traceparent")
-    attributes: SpanAttributes = {
-        "name": request_name(request),
-        "traceId": f"trace_{span_seed}",
-        "spanId": f"span_{span_seed}",
-        "status": "ok" if status_code < 500 else "error",
-        "durationMs": duration_ms,
-        "metadata": request_metadata(request, status_code=status_code, duration_ms=duration_ms),
-    }
-    if traceparent:
-        try:
-            parse_traceparent(traceparent)
-            attributes = span_attributes_from_traceparent(
-                traceparent,
-                name=request_name(request),
-                span_id=(span_id_factory or default_span_id_factory)(),
-                status="ok" if status_code < 500 else "error",
-                duration_ms=duration_ms,
-                metadata=request_metadata(request, status_code=status_code, duration_ms=duration_ms),
-            )
-        except SdkError:
-            pass
+    trace_context = trace or request_logbrew_trace(request) or create_request_trace_context(
+        request,
+        span_id_factory=span_id_factory,
+    )
+    attributes: SpanAttributes = span_attributes_from_trace_context(
+        trace_context,
+        name=request_name(request),
+        status="ok" if status_code < 500 else "error",
+        duration_ms=duration_ms,
+        metadata=request_metadata(request, status_code=status_code, duration_ms=duration_ms),
+    )
     client.span(
         span_event_id,
         timestamp or utc_timestamp(),
@@ -203,10 +197,12 @@ def capture_exception(
     *,
     event_id: str | None = None,
     timestamp: str | None = None,
+    trace: LogBrewTraceContext | None = None,
 ) -> str:
     """Capture an exception raised while handling a FastAPI request and return its event id."""
 
     issue_event_id = event_id or f"evt_fastapi_issue_{uuid.uuid4().hex}"
+    trace_context = trace or request_logbrew_trace(request) or get_active_logbrew_trace()
     client.issue(
         issue_event_id,
         timestamp or utc_timestamp(),
@@ -217,6 +213,7 @@ def capture_exception(
             "metadata": {
                 **request_metadata(request, status_code=500),
                 "exception_type": exc.__class__.__name__,
+                **trace_metadata(trace_context),
             },
         },
     )
@@ -257,19 +254,23 @@ class LogBrewFastAPIMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         start = time.perf_counter()
+        trace_context = create_request_trace_context(request, span_id_factory=self.config.span_id_factory)
+        request.state.logbrew_trace = trace_context
         try:
-            response = await call_next(request)
+            with use_logbrew_trace(trace_context):
+                response = await call_next(request)
         except Exception as exc:
             duration_ms = (time.perf_counter() - start) * 1000
             should_capture_exception = self.config.capture_exceptions
             if should_capture_exception:
-                capture_exception(self.config.client, request, exc)
+                capture_exception(self.config.client, request, exc, trace=trace_context)
                 capture_request_span(
                     self.config.client,
                     request,
                     status_code=500,
                     duration_ms=duration_ms,
                     span_id_factory=self.config.span_id_factory,
+                    trace=trace_context,
                 )
             if self.config.capture_request_metrics:
                 capture_request_metric(
@@ -292,6 +293,7 @@ class LogBrewFastAPIMiddleware(BaseHTTPMiddleware):
                 status_code=response.status_code,
                 duration_ms=duration_ms,
                 span_id_factory=self.config.span_id_factory,
+                trace=trace_context,
             )
         if self.config.capture_request_metrics:
             capture_request_metric(
@@ -353,6 +355,30 @@ def default_span_id_factory() -> str:
     return "0000000000000001" if span_id == "0000000000000000" else span_id
 
 
+def create_request_trace_context(
+    request: Request,
+    *,
+    span_id_factory: Callable[[], str] | None = None,
+) -> LogBrewTraceContext:
+    """Return a privacy-safe request-local trace context for FastAPI telemetry."""
+
+    traceparent = request.headers.get("traceparent")
+    if traceparent:
+        try:
+            parse_traceparent(traceparent)
+            return create_logbrew_trace_context(traceparent, span_id_factory=span_id_factory)
+        except SdkError:
+            pass
+    return create_logbrew_trace_context(span_id_factory=span_id_factory)
+
+
+def request_logbrew_trace(request: Request) -> LogBrewTraceContext | None:
+    """Return the trace context attached to a FastAPI request, when present."""
+
+    trace = getattr(request.state, "logbrew_trace", None)
+    return trace if isinstance(trace, LogBrewTraceContext) else None
+
+
 __all__ = [
     "LogBrewFastAPIConfig",
     "LogBrewFastAPIMiddleware",
@@ -361,6 +387,9 @@ __all__ = [
     "capture_request_metric",
     "capture_request_span",
     "create_request_metric_attributes",
+    "create_request_trace_context",
+    "get_active_logbrew_trace",
+    "request_logbrew_trace",
     "request_metadata",
     "request_name",
     "request_route_template",

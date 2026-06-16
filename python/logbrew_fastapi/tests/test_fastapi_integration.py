@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 import unittest
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from logbrew_fastapi import add_logbrew_middleware
-from logbrew_sdk import LogBrewClient, RecordingTransport, SdkError
+from logbrew_fastapi import add_logbrew_middleware, get_active_logbrew_trace
+from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport, SdkError
 
 
 def make_client() -> LogBrewClient:
@@ -111,7 +113,7 @@ class FastAPIIntegrationTests(unittest.TestCase):
         self.assertEqual(attributes["spanId"], "b7ad6b7169203331")
         self.assertEqual(attributes["metadata"]["path"], "/trace")
 
-    def test_malformed_traceparent_keeps_synthetic_span_without_span_id_factory(self) -> None:
+    def test_malformed_traceparent_uses_safe_local_trace_without_raw_header(self) -> None:
         sdk_client = make_client()
         transport = RecordingTransport.always_accept()
         span_id_calls = 0
@@ -135,9 +137,57 @@ class FastAPIIntegrationTests(unittest.TestCase):
         payload = json.loads(transport.sent_bodies[0])
         attributes = payload["events"][0]["attributes"]
         self.assertNotIn("parentSpanId", attributes)
-        self.assertTrue(attributes["traceId"].startswith("trace_evt_fastapi_span_"))
+        self.assertRegex(attributes["traceId"], re.compile(r"^[0-9a-f]{32}$"))
+        self.assertEqual(attributes["spanId"], "b7ad6b7169203331")
         self.assertEqual(attributes["metadata"]["path"], "/bad")
-        self.assertEqual(span_id_calls, 0)
+        self.assertNotIn("traceparent", json.dumps(attributes))
+        self.assertEqual(span_id_calls, 1)
+
+    def test_handler_logs_share_active_request_trace(self) -> None:
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        handler = LogBrewLoggingHandler(sdk_client, metadata={"service": "checkout"})
+        logger = logging.getLogger("fastapi.checkout")
+        logger.handlers = []
+        logger.propagate = False
+        logger.setLevel(logging.INFO)
+        logger.addHandler(handler)
+        app = FastAPI()
+        add_logbrew_middleware(
+            app,
+            client=sdk_client,
+            transport=transport,
+            span_id_factory=lambda: "b7ad6b7169203331",
+        )
+
+        @app.get("/orders/{order_id}")
+        async def order_detail(order_id: int) -> dict[str, object]:
+            trace = get_active_logbrew_trace()
+            logger.info("loading order", extra={"order_id": order_id})
+            return {"traceId": trace.trace_id if trace else None, "spanId": trace.span_id if trace else None}
+
+        try:
+            with TestClient(app) as http:
+                response = http.get(
+                    "/orders/42?debug=true",
+                    headers={
+                        "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                    },
+                )
+        finally:
+            logger.removeHandler(handler)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"traceId": "4bf92f3577b34da6a3ce929d0e0e4736", "spanId": "b7ad6b7169203331"})
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["log", "span"])
+        log = payload["events"][0]["attributes"]
+        span = payload["events"][1]["attributes"]
+        self.assertEqual(log["metadata"]["traceId"], span["traceId"])
+        self.assertEqual(log["metadata"]["spanId"], span["spanId"])
+        self.assertEqual(log["metadata"]["parentSpanId"], span["parentSpanId"])
+        self.assertIs(log["metadata"]["sampled"], True)
+        self.assertNotIn("debug", json.dumps(payload))
 
     def test_exception_captures_issue_and_error_span(self) -> None:
         sdk_client = make_client()
@@ -164,6 +214,8 @@ class FastAPIIntegrationTests(unittest.TestCase):
         self.assertEqual(issue["metadata"]["exception_type"], "RuntimeError")
         self.assertEqual(span["status"], "error")
         self.assertEqual(span["metadata"]["status_code"], 500)
+        self.assertEqual(issue["metadata"]["traceId"], span["traceId"])
+        self.assertEqual(issue["metadata"]["spanId"], span["spanId"])
 
     def test_flush_errors_do_not_break_application_by_default(self) -> None:
         sdk_client = make_client()

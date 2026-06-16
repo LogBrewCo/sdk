@@ -12,6 +12,14 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, Protocol, TypeAlias, TypedDict
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from uuid import uuid4
+
+from logbrew_sdk._trace_context import (
+    LogBrewTraceContext,
+    get_active_logbrew_trace,
+    trace_metadata,
+    use_logbrew_trace,
+)
 
 MetadataValue: TypeAlias = str | int | float | bool | None
 Metadata: TypeAlias = dict[str, MetadataValue]
@@ -471,6 +479,9 @@ def metadata_from_log_record(
         "threadName": record.threadName,
     }
     metadata.update(extra_metadata_from_log_record(record))
+    active_trace = get_active_logbrew_trace()
+    if active_trace is not None:
+        metadata.update(active_trace.metadata())
     if record.exc_info is not None:
         exception = record.exc_info[1]
         if exception is not None:
@@ -569,6 +580,35 @@ def create_traceparent_headers(*, trace_id: str, span_id: str, trace_flags: str 
     }
 
 
+def create_logbrew_trace_context(
+    traceparent: str | None = None,
+    *,
+    span_id: str | None = None,
+    span_id_factory: Callable[[], str] | None = None,
+) -> LogBrewTraceContext:
+    """Create request-local trace context from W3C traceparent or a new local trace."""
+
+    child_span_id = span_id
+    if child_span_id is None:
+        child_span_id = (span_id_factory or default_span_id_factory)()
+    require_span_id("span_id", child_span_id)
+
+    if traceparent:
+        context = parse_traceparent(traceparent)
+        return LogBrewTraceContext(
+            trace_id=context.trace_id,
+            span_id=child_span_id.lower(),
+            parent_span_id=context.parent_span_id,
+            sampled=context.sampled,
+        )
+
+    return LogBrewTraceContext(
+        trace_id=default_trace_id(),
+        span_id=child_span_id.lower(),
+        sampled=False,
+    )
+
+
 def span_attributes_from_traceparent(
     traceparent: str,
     *,
@@ -599,6 +639,53 @@ def span_attributes_from_traceparent(
         **({"durationMs": duration_ms} if duration_ms is not None else {}),
         **({"metadata": safe_metadata} if safe_metadata is not None else {}),
     }
+
+
+def span_attributes_from_trace_context(
+    trace: LogBrewTraceContext,
+    *,
+    name: str,
+    status: str,
+    duration_ms: float | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> SpanAttributes:
+    """Build LogBrew span attributes from an existing request-local trace context."""
+
+    require_non_empty("span name", name)
+    require_allowed_value("span status", status, SPAN_STATUSES)
+    if duration_ms is not None and (
+        isinstance(duration_ms, bool) or not isinstance(duration_ms, (int, float)) or duration_ms < 0
+    ):
+        raise SdkError("validation_error", "span durationMs must be non-negative")
+
+    safe_metadata = compact_metadata(metadata)
+    return {
+        "name": name,
+        "traceId": trace.trace_id,
+        "spanId": trace.span_id,
+        **({"parentSpanId": trace.parent_span_id} if trace.parent_span_id is not None else {}),
+        "status": status,
+        **({"durationMs": duration_ms} if duration_ms is not None else {}),
+        **({"metadata": safe_metadata} if safe_metadata is not None else {}),
+    }
+
+
+def default_trace_id() -> str:
+    """Return a fresh non-zero W3C-compatible trace id."""
+
+    trace_id = uuid4_hex(16)
+    return "00000000000000000000000000000001" if trace_id == ZERO_TRACE_ID else trace_id
+
+
+def default_span_id_factory() -> str:
+    """Return a fresh non-zero W3C-compatible span id."""
+
+    span_id = uuid4_hex(8)
+    return "0000000000000001" if span_id == ZERO_SPAN_ID else span_id
+
+
+def uuid4_hex(byte_count: int) -> str:
+    return uuid4().hex[: byte_count * 2]
 
 
 def slugify(value: str) -> str:
@@ -825,6 +912,7 @@ __all__ = [
     "LogAttributes",
     "LogBrewClient",
     "LogBrewLoggingHandler",
+    "LogBrewTraceContext",
     "Metadata",
     "MetadataValue",
     "MetricAttributes",
@@ -836,11 +924,16 @@ __all__ = [
     "Transport",
     "TransportError",
     "TransportResponse",
+    "create_logbrew_trace_context",
     "create_network_milestone_attributes",
     "create_product_action_attributes",
     "create_traceparent",
     "create_traceparent_headers",
+    "get_active_logbrew_trace",
     "log_attributes_from_record",
     "parse_traceparent",
+    "span_attributes_from_trace_context",
     "span_attributes_from_traceparent",
+    "trace_metadata",
+    "use_logbrew_trace",
 ]

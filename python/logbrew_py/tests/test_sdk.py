@@ -11,15 +11,20 @@ from logbrew_sdk import (
     HttpTransport,
     LogBrewClient,
     LogBrewLoggingHandler,
+    LogBrewTraceContext,
     RecordingTransport,
     SdkError,
     TransportError,
+    create_logbrew_trace_context,
     create_network_milestone_attributes,
     create_product_action_attributes,
     create_traceparent,
     create_traceparent_headers,
+    get_active_logbrew_trace,
     parse_traceparent,
     span_attributes_from_traceparent,
+    trace_metadata,
+    use_logbrew_trace,
 )
 
 
@@ -365,6 +370,41 @@ class LogBrewSdkTests(unittest.TestCase):
                 "metadata": {"service": "checkout"},
             },
         )
+
+    def test_active_trace_context_correlates_standard_logs(self) -> None:
+        trace = create_logbrew_trace_context(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            span_id="b7ad6b7169203331",
+        )
+        self.assertIsInstance(trace, LogBrewTraceContext)
+        self.assertIsNone(get_active_logbrew_trace())
+
+        client = sample_client()
+        handler = LogBrewLoggingHandler(client, metadata={"service": "checkout"})
+        logger = logging.getLogger("checkout.trace")
+        logger.handlers = []
+        logger.propagate = False
+        logger.setLevel(logging.INFO)
+        logger.addHandler(handler)
+
+        try:
+            with use_logbrew_trace(trace):
+                self.assertEqual(get_active_logbrew_trace(), trace)
+                logger.info("checkout step", extra={"cart_id": "cart_123"})
+        finally:
+            logger.removeHandler(handler)
+
+        self.assertIsNone(get_active_logbrew_trace())
+        payload = json.loads(client.preview_json())
+        metadata = payload["events"][0]["attributes"]["metadata"]
+        self.assertEqual(metadata["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736")
+        self.assertEqual(metadata["spanId"], "b7ad6b7169203331")
+        self.assertEqual(metadata["parentSpanId"], "00f067aa0ba902b7")
+        self.assertIs(metadata["sampled"], True)
+        self.assertEqual(metadata["cart_id"], "cart_123")
+
+    def test_trace_metadata_returns_empty_without_active_trace(self) -> None:
+        self.assertEqual(trace_metadata(), {})
 
     def test_traceparent_helpers_reject_malformed_w3c_trace_context(self) -> None:
         with self.assertRaisesRegex(SdkError, "traceparent traceId must not be all zeros"):

@@ -17,9 +17,11 @@ The package is typed, ships `py.typed`, depends on the core `logbrew-sdk`, and k
 ## Example
 
 ```python
+import logging
+
 from fastapi import FastAPI
-from logbrew_fastapi import add_logbrew_middleware
-from logbrew_sdk import LogBrewClient, RecordingTransport
+from logbrew_fastapi import add_logbrew_middleware, get_active_logbrew_trace
+from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
@@ -27,6 +29,8 @@ client = LogBrewClient.create(
     sdk_version="0.1.0",
 )
 transport = RecordingTransport.always_accept()
+logger = logging.getLogger("checkout-api")
+logger.addHandler(LogBrewLoggingHandler(client, metadata={"service": "checkout-api"}))
 app = FastAPI()
 add_logbrew_middleware(
     app,
@@ -38,12 +42,14 @@ add_logbrew_middleware(
 
 @app.get("/health")
 def health() -> dict[str, bool]:
+    trace = get_active_logbrew_trace()
+    logger.info("health request", extra={"traceId": trace.trace_id if trace else None})
     return {"ok": True}
 ```
 
 `add_logbrew_middleware()` records successful requests as span events, records unhandled handler exceptions as issue plus error-span events, and flushes through the provided transport after each response. If no transport is provided, events stay queued on the core client so the app can flush them itself.
 
-When an incoming request has a valid W3C `traceparent` header, request capture continues that trace by using the incoming `traceId` and parent span id while creating a fresh child span id. Missing or malformed `traceparent` headers keep the existing synthetic request span behavior so bad client headers do not break the app. Automatic metadata uses the request path without query text.
+When an incoming request has a valid W3C `traceparent` header, request capture continues that trace by using the incoming `traceId` and parent span id while creating a fresh child span id. The same request-local trace is available from `get_active_logbrew_trace()` while your handler runs, and `LogBrewLoggingHandler` automatically adds `traceId`, `spanId`, `parentSpanId`, and `sampled` metadata to standard-library logs emitted inside that context. Missing or malformed `traceparent` headers start a fresh W3C-shaped local trace so bad client headers do not break the app. Automatic metadata uses the request path without query text, and the trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
 
 Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests:
 

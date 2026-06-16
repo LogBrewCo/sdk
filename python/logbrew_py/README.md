@@ -226,14 +226,21 @@ Supported metric kinds are `counter`, `gauge`, and `histogram`. Counters and his
 Use the W3C helpers when a Python service needs to interoperate with distributed tracing headers:
 
 ```python
-from logbrew_sdk import create_traceparent_headers, parse_traceparent, span_attributes_from_traceparent
+from logbrew_sdk import (
+    create_logbrew_trace_context,
+    create_traceparent_headers,
+    parse_traceparent,
+    span_attributes_from_trace_context,
+    trace_metadata,
+    use_logbrew_trace,
+)
 
 traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 context = parse_traceparent(traceparent)
-attributes = span_attributes_from_traceparent(
-    traceparent,
+trace = create_logbrew_trace_context(traceparent, span_id="b7ad6b7169203331")
+attributes = span_attributes_from_trace_context(
+    trace,
     name="GET /health",
-    span_id="b7ad6b7169203331",
     status="ok",
     duration_ms=12.5,
     metadata={"service": "checkout"},
@@ -243,9 +250,11 @@ headers = create_traceparent_headers(
     span_id=attributes["spanId"],
     trace_flags="01",
 )
+with use_logbrew_trace(trace):
+    metadata = trace_metadata()
 ```
 
-`parse_traceparent()` validates W3C shape, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `span_attributes_from_traceparent()` returns LogBrew span attributes with `traceId` from the incoming trace and `parentSpanId` from the incoming parent span. `create_traceparent_headers()` returns an explicit outbound carrier with only `traceparent` for app-owned HTTP clients. FastAPI and Django integrations use these helpers automatically for valid inbound `traceparent` headers and start a fresh synthetic span when the header is missing or malformed. The helpers do not patch HTTP clients or capture request payloads.
+`parse_traceparent()` validates W3C shape, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `create_logbrew_trace_context()` creates the request-local `LogBrewTraceContext` used to correlate request spans, app-owned logs, issues, actions, metrics, and outgoing milestones with one safe set of IDs. `use_logbrew_trace()` makes that context available through `trace_metadata()` and `get_active_logbrew_trace()` during framework handler work, including async work that keeps Python `contextvars`. `create_traceparent_headers()` returns an explicit outbound carrier with only `traceparent` for app-owned HTTP clients. FastAPI and Django integrations use these helpers automatically for valid inbound `traceparent` headers and start a fresh W3C-shaped local trace when the header is missing or malformed. The helpers do not patch HTTP clients or capture request payloads, headers, cookies, query strings, or the raw `traceparent` value.
 
 ## Agent-Readable Timelines
 

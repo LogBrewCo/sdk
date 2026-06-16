@@ -14,13 +14,18 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse
 from logbrew_sdk import (
     LogBrewClient,
+    LogBrewTraceContext,
     MetricAttributes,
     RecordingTransport,
     SdkError,
     SpanAttributes,
     TransportError,
+    create_logbrew_trace_context,
+    get_active_logbrew_trace,
     parse_traceparent,
-    span_attributes_from_traceparent,
+    span_attributes_from_trace_context,
+    trace_metadata,
+    use_logbrew_trace,
 )
 
 
@@ -235,33 +240,22 @@ def capture_request_span(
     event_id: str | None = None,
     timestamp: str | None = None,
     span_id_factory: Callable[[], str] | None = None,
+    trace: LogBrewTraceContext | None = None,
 ) -> str:
     """Capture a Django request as a LogBrew span event and return its event id."""
 
     span_event_id = event_id or f"evt_django_span_{uuid.uuid4().hex}"
-    span_seed = span_event_id.replace("-", "_")
-    traceparent = traceparent_from_request(request)
-    attributes: SpanAttributes = {
-        "name": request_name(request),
-        "traceId": f"trace_{span_seed}",
-        "spanId": f"span_{span_seed}",
-        "status": "ok" if status_code < 500 else "error",
-        "durationMs": duration_ms,
-        "metadata": request_metadata(request, status_code=status_code, duration_ms=duration_ms),
-    }
-    if traceparent:
-        try:
-            parse_traceparent(traceparent)
-            attributes = span_attributes_from_traceparent(
-                traceparent,
-                name=request_name(request),
-                span_id=(span_id_factory or default_span_id_factory)(),
-                status="ok" if status_code < 500 else "error",
-                duration_ms=duration_ms,
-                metadata=request_metadata(request, status_code=status_code, duration_ms=duration_ms),
-            )
-        except SdkError:
-            pass
+    trace_context = trace or request_logbrew_trace(request) or create_request_trace_context(
+        request,
+        span_id_factory=span_id_factory,
+    )
+    attributes: SpanAttributes = span_attributes_from_trace_context(
+        trace_context,
+        name=request_name(request),
+        status="ok" if status_code < 500 else "error",
+        duration_ms=duration_ms,
+        metadata=request_metadata(request, status_code=status_code, duration_ms=duration_ms),
+    )
     client.span(
         span_event_id,
         timestamp or utc_timestamp(),
@@ -277,10 +271,12 @@ def capture_exception(
     *,
     event_id: str | None = None,
     timestamp: str | None = None,
+    trace: LogBrewTraceContext | None = None,
 ) -> str:
     """Capture an exception raised while handling a Django request and return its event id."""
 
     issue_event_id = event_id or f"evt_django_issue_{uuid.uuid4().hex}"
+    trace_context = trace or request_logbrew_trace(request) or get_active_logbrew_trace()
     client.issue(
         issue_event_id,
         timestamp or utc_timestamp(),
@@ -291,6 +287,7 @@ def capture_exception(
             "metadata": {
                 **request_metadata(request, status_code=500),
                 "exception_type": exc.__class__.__name__,
+                **trace_metadata(trace_context),
             },
         },
     )
@@ -306,21 +303,25 @@ class LogBrewDjangoMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         config = get_logbrew_config()
         start = time.perf_counter()
+        trace_context = create_request_trace_context(request, span_id_factory=config.span_id_factory)
+        request.META["logbrew.trace"] = trace_context
         try:
-            response = self.get_response(request)
+            with use_logbrew_trace(trace_context):
+                response = self.get_response(request)
         except Exception as exc:
             duration_ms = (time.perf_counter() - start) * 1000
             should_capture_exception = (
                 config.capture_exceptions and request.META.get("logbrew.exception_captured") is not True
             )
             if should_capture_exception:
-                capture_exception(config.client, request, exc)
+                capture_exception(config.client, request, exc, trace=trace_context)
                 capture_request_span(
                     config.client,
                     request,
                     status_code=500,
                     duration_ms=duration_ms,
                     span_id_factory=config.span_id_factory,
+                    trace=trace_context,
                 )
             if config.capture_request_metrics:
                 capture_request_metric(
@@ -343,6 +344,7 @@ class LogBrewDjangoMiddleware:
                 status_code=response.status_code,
                 duration_ms=duration_ms,
                 span_id_factory=config.span_id_factory,
+                trace=trace_context,
             )
         if config.capture_request_metrics:
             capture_request_metric(
@@ -362,7 +364,7 @@ class LogBrewDjangoMiddleware:
         config = get_logbrew_config()
         if not config.capture_exceptions:
             return None
-        capture_exception(config.client, request, exception)
+        capture_exception(config.client, request, exception, trace=request_logbrew_trace(request))
         request.META["logbrew.exception_captured"] = True
         return None
 
@@ -387,6 +389,30 @@ def traceparent_from_request(request: HttpRequest) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def create_request_trace_context(
+    request: HttpRequest,
+    *,
+    span_id_factory: Callable[[], str] | None = None,
+) -> LogBrewTraceContext:
+    """Return a privacy-safe request-local trace context for Django telemetry."""
+
+    traceparent = traceparent_from_request(request)
+    if traceparent:
+        try:
+            parse_traceparent(traceparent)
+            return create_logbrew_trace_context(traceparent, span_id_factory=span_id_factory)
+        except SdkError:
+            pass
+    return create_logbrew_trace_context(span_id_factory=span_id_factory)
+
+
+def request_logbrew_trace(request: HttpRequest) -> LogBrewTraceContext | None:
+    """Return the trace context attached to a Django request, when present."""
+
+    trace = request.META.get("logbrew.trace")
+    return trace if isinstance(trace, LogBrewTraceContext) else None
+
+
 def default_span_id_factory() -> str:
     """Return a fresh W3C-compatible child span id."""
 
@@ -402,7 +428,10 @@ __all__ = [
     "capture_request_span",
     "configure_logbrew",
     "create_request_metric_attributes",
+    "create_request_trace_context",
+    "get_active_logbrew_trace",
     "get_logbrew_config",
+    "request_logbrew_trace",
     "request_metadata",
     "request_name",
     "request_route_template",

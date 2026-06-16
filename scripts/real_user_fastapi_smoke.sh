@@ -60,11 +60,12 @@ cat > "$app_dir/main.py" <<'PY'
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from logbrew_fastapi import add_logbrew_middleware
-from logbrew_sdk import LogBrewClient, RecordingTransport
+from logbrew_fastapi import add_logbrew_middleware, get_active_logbrew_trace
+from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
@@ -72,13 +73,24 @@ client = LogBrewClient.create(
     sdk_version="0.1.0",
 )
 transport = RecordingTransport.always_accept()
+logger = logging.getLogger("fastapi.checkout")
+logger.handlers = []
+logger.propagate = False
+logger.setLevel(logging.INFO)
+logger.addHandler(LogBrewLoggingHandler(client, metadata={"service": "checkout"}))
 app = FastAPI()
 add_logbrew_middleware(app, client=client, transport=transport, span_id_factory=lambda: "b7ad6b7169203331")
 
 
 @app.get("/health")
-def health() -> dict[str, bool]:
-    return {"ok": True}
+def health() -> dict[str, object]:
+    trace = get_active_logbrew_trace()
+    logger.info("health request", extra={"route_template": "/health"})
+    return {
+        "ok": True,
+        "traceId": trace.trace_id if trace else None,
+        "spanId": trace.span_id if trace else None,
+    }
 
 
 @app.get("/boom")
@@ -96,7 +108,8 @@ with TestClient(app, raise_server_exceptions=False) as http:
 events: list[dict[str, object]] = []
 for body in transport.sent_bodies:
     events.extend(json.loads(body)["events"])
-first_span = events[0]["attributes"]
+first_log = events[0]["attributes"]
+first_span = events[1]["attributes"]
 
 print(
     json.dumps(
@@ -109,6 +122,10 @@ print(
             "eventTypes": [event["type"] for event in events],
             "spanNames": [event["attributes"]["name"] for event in events if event["type"] == "span"],
             "issueTitles": [event["attributes"]["title"] for event in events if event["type"] == "issue"],
+            "handlerTraceId": health_response.json()["traceId"],
+            "handlerSpanId": health_response.json()["spanId"],
+            "logTraceId": first_log["metadata"]["traceId"],
+            "logSpanId": first_log["metadata"]["spanId"],
             "traceId": first_span["traceId"],
             "parentSpanId": first_span["parentSpanId"],
             "spanId": first_span["spanId"],
@@ -135,7 +152,7 @@ if payload["sentBodies"] != 2:
     raise SystemExit(f"expected two flushed bodies, got {payload['sentBodies']}")
 if payload["pending"] != 0:
     raise SystemExit(f"expected empty queue, got {payload['pending']}")
-if payload["eventTypes"] != ["span", "issue", "span"]:
+if payload["eventTypes"] != ["log", "span", "issue", "span"]:
     raise SystemExit(f"unexpected event types: {payload['eventTypes']}")
 if payload["spanNames"] != ["GET /health", "GET /boom"]:
     raise SystemExit(f"unexpected span names: {payload['spanNames']}")
@@ -143,6 +160,10 @@ if payload["issueTitles"] != ["GET /boom failed"]:
     raise SystemExit(f"unexpected issue titles: {payload['issueTitles']}")
 if payload["traceId"] != "4bf92f3577b34da6a3ce929d0e0e4736":
     raise SystemExit(f"unexpected trace id: {payload['traceId']}")
+if payload["handlerTraceId"] != payload["traceId"] or payload["logTraceId"] != payload["traceId"]:
+    raise SystemExit(f"trace correlation failed: {payload}")
+if payload["handlerSpanId"] != payload["spanId"] or payload["logSpanId"] != payload["spanId"]:
+    raise SystemExit(f"span correlation failed: {payload}")
 if payload["parentSpanId"] != "00f067aa0ba902b7":
     raise SystemExit(f"unexpected parent span id: {payload['parentSpanId']}")
 if payload["spanId"] != "b7ad6b7169203331":
@@ -157,7 +178,7 @@ cat > "$app_dir/typecheck.py" <<'PY'
 from __future__ import annotations
 
 from fastapi import FastAPI
-from logbrew_fastapi import add_logbrew_middleware
+from logbrew_fastapi import add_logbrew_middleware, get_active_logbrew_trace
 from logbrew_sdk import LogBrewClient, RecordingTransport
 
 client: LogBrewClient = LogBrewClient.create(
@@ -167,6 +188,8 @@ client: LogBrewClient = LogBrewClient.create(
 )
 transport: RecordingTransport = RecordingTransport.always_accept()
 app: FastAPI = FastAPI()
+active_trace = get_active_logbrew_trace()
+trace_id: str | None = active_trace.trace_id if active_trace else None
 add_logbrew_middleware(
     app,
     client=client,
