@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -266,6 +267,7 @@ type eventBatch struct {
 // Client buffers validated LogBrew events until they are previewed, flushed,
 // or shut down through a transport.
 type Client struct {
+	mu         sync.Mutex
 	apiKey     string
 	sdk        sdkInfo
 	maxRetries int
@@ -304,11 +306,19 @@ func NewClient(config Config) (*Client, error) {
 // PendingEvents returns the number of validated events currently buffered in
 // memory.
 func (c *Client) PendingEvents() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return len(c.events)
 }
 
 // PreviewJSON returns the queued event batch as stable, pretty-printed JSON.
 func (c *Client) PreviewJSON() (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.previewJSONLocked()
+}
+
+func (c *Client) previewJSONLocked() (string, error) {
 	payload, err := json.MarshalIndent(eventBatch{SDK: c.sdk, Events: c.events}, "", "  ")
 	if err != nil {
 		return "", &SdkError{Code: "serialization_error", Message: err.Error()}
@@ -319,19 +329,23 @@ func (c *Client) PreviewJSON() (string, error) {
 // Flush sends queued events through a transport while preserving retry
 // semantics.
 func (c *Client) Flush(transport Transport) (*TransportResponse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.closed {
 		return nil, &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
 	}
-	return c.flushInternal(transport)
+	return c.flushInternalLocked(transport)
 }
 
 // Shutdown flushes queued events, then marks the client closed so later writes
 // fail.
 func (c *Client) Shutdown(transport Transport) (*TransportResponse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.closed {
 		return nil, &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
 	}
-	response, err := c.flushInternal(transport)
+	response, err := c.flushInternalLocked(transport)
 	if err != nil {
 		return nil, err
 	}
@@ -491,6 +505,8 @@ func (c *Client) Metric(id, timestamp string, attributes MetricAttributes) error
 }
 
 func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[string]any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.closed {
 		return &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
 	}
@@ -506,11 +522,11 @@ func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[strin
 	return nil
 }
 
-func (c *Client) flushInternal(transport Transport) (*TransportResponse, error) {
+func (c *Client) flushInternalLocked(transport Transport) (*TransportResponse, error) {
 	if len(c.events) == 0 {
 		return &TransportResponse{StatusCode: 204, Attempts: 0}, nil
 	}
-	body, err := c.PreviewJSON()
+	body, err := c.previewJSONLocked()
 	if err != nil {
 		return nil, err
 	}

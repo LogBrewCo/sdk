@@ -154,6 +154,57 @@ fmt.Println(outgoing)
 
 `ParseTraceparent` validates W3C shape, rejects forbidden version `ff`, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `SpanAttributesFromTraceparent` returns LogBrew span attributes with `TraceID` from the incoming trace and `ParentSpanID` from the incoming parent span, while copying only primitive metadata values. `CreateTraceparent` emits a normalized outgoing `traceparent` from explicit IDs and defaults empty flags to sampled `01`.
 
+For request-local correlation, use `NewTraceContext` and attach it with `ContextWithLogBrewTrace`. `LogBrewTraceFromContext` returns the active request trace, and `LogAttributesWithTrace` / `IssueAttributesWithTrace` merge primitive trace metadata into app-owned logs and issues:
+
+```go
+trace, err := logbrew.NewTraceContext(logbrew.TraceContextInput{
+  Traceparent: r.Header.Get("traceparent"),
+})
+if err != nil {
+  // Treat malformed incoming propagation as non-fatal in request handlers.
+  trace, err = logbrew.NewTraceContext(logbrew.TraceContextInput{})
+}
+if err != nil {
+  panic(err)
+}
+r = r.WithContext(logbrew.ContextWithLogBrewTrace(r.Context(), trace))
+
+must(client.Log("evt_handler_log", "2026-06-02T10:00:03Z", logbrew.LogAttributesWithTrace(r.Context(), logbrew.LogAttributes{
+  Message: "checkout handler reached",
+  Level:   "info",
+  Logger:  "checkout-service",
+})))
+```
+
+`NewHTTPHandler` wraps an app-owned `net/http` handler, reads only W3C `traceparent`, creates one request span, optionally emits `http.server.duration`, and passes the active `TraceContext` to downstream code through `context.Context`. `NewSlogHandler` wraps an app-owned `slog.Handler`, queues a LogBrew log, and adds `traceId` / `spanId` fields to the wrapped app log when the context contains a LogBrew trace:
+
+```go
+slogHandler, err := logbrew.NewSlogHandler(logbrew.SlogHandlerConfig{
+  Client:  client,
+  Wrapped: slog.NewJSONHandler(os.Stdout, nil),
+  Logger:  "checkout-service",
+})
+if err != nil {
+  panic(err)
+}
+logger := slog.New(slogHandler)
+
+handler, err := logbrew.NewHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+  logger.InfoContext(r.Context(), "checkout handler reached", slog.String("cartTier", "standard"))
+  w.WriteHeader(http.StatusNoContent)
+}), logbrew.HTTPHandlerConfig{
+  Client:               client,
+  RouteTemplate:        "/checkout/:cart_id",
+  CaptureRequestMetric: true,
+})
+if err != nil {
+  panic(err)
+}
+http.Handle("/checkout/", handler)
+```
+
+The HTTP and slog helpers are dependency-free and explicit. They do not patch global HTTP clients, do not capture request or response bodies, do not capture arbitrary headers, and strip query/hash text from route metadata. Run `go run ./examples/http_trace_correlation` for a copyable local example where release, environment, slog, issue, request span, and request-duration metric events share the same W3C trace.
+
 ## Agent-Readable Timelines
 
 Use `CreateProductActionAttributes` and `CreateNetworkMilestoneAttributes` when your Go service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.
@@ -195,7 +246,7 @@ if err != nil {
 must(client.Action("evt_payment_api", "2026-06-02T10:00:01Z", network))
 ```
 
-Route templates are stripped to path-only values before queueing, nested metadata is dropped, HTTP methods are normalized, and 4xx/5xx status codes default network milestone status to `failure`. The `examples/agent_timeline` package contains a focused preview of product and network milestones correlated by `sessionId` and W3C `traceId`; `examples/first_useful_telemetry` shows the same timeline signals alongside release, environment, log, metric, and span events.
+Route templates are stripped to path-only values before queueing, nested metadata is dropped, HTTP methods are normalized, and 4xx/5xx status codes default network milestone status to `failure`. The `examples/agent_timeline` package contains a focused preview of product and network milestones correlated by `sessionId` and W3C `traceId`; `examples/first_useful_telemetry` shows the same timeline signals alongside release, environment, log, metric, and span events; `examples/http_trace_correlation` shows request-local trace, slog, issue, request span, and duration metric correlation in a local `net/http` app.
 
 ## HTTP Delivery
 
@@ -219,4 +270,4 @@ fmt.Println(response.StatusCode)
 
 `HTTPTransport` uses Go's standard `net/http` client, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint/header/client/timeout settings, drains and closes response bodies, and maps client delivery failures into retryable `NetworkError(...)` values so `Client.Flush` can preserve queued events and retry. Inject a custom `*http.Client` when a service already owns proxy, TLS, or timeout settings.
 
-The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, sending through `HTTPTransport`, producing a first-useful telemetry payload, and using W3C trace propagation in your own Go service.
+The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, sending through `HTTPTransport`, producing a first-useful telemetry payload, correlating `net/http` + `slog` signals, and using W3C trace propagation in your own Go service.

@@ -757,6 +757,7 @@ func TestRepoCheckoutExamplesMakeListsCommands(t *testing.T) {
 	expected := []string{
 		"run-agent-timeline -> make run-agent-timeline",
 		"run-first-useful-telemetry -> make run-first-useful-telemetry",
+		"run-http-trace-correlation -> make run-http-trace-correlation",
 		"run-readme-example -> make run-readme-example",
 		"run (real-user-smoke) -> make run",
 		"run-real-user-smoke -> make run-real-user-smoke",
@@ -828,6 +829,48 @@ func TestRepoCheckoutExamplesMakeRunFirstUsefulTelemetryExecutesExample(t *testi
 		!strings.Contains(stderr, `"events":7`) ||
 		!strings.Contains(stderr, `"ok":true`) ||
 		!strings.Contains(stderr, `"outgoingTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"`) ||
+		!strings.Contains(stderr, `"status":202`) {
+		t.Fatalf("unexpected stderr: %s", stderr)
+	}
+}
+
+func TestRepoCheckoutExamplesMakeRunHTTPTraceCorrelationExecutesExample(t *testing.T) {
+	stdout, stderr := runRepoCommand(t, "./examples", "make", "run-http-trace-correlation")
+	for _, needle := range []string{
+		`"type": "release"`,
+		`"type": "environment"`,
+		`"type": "log"`,
+		`"type": "issue"`,
+		`"type": "span"`,
+		`"type": "metric"`,
+		`"name": "http.server.duration"`,
+		`"routeTemplate": "/checkout/:cart_id"`,
+		`"parentSpanId": "00f067aa0ba902b7"`,
+		`"spanId": "b7ad6b7169203331"`,
+		`"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"`,
+		`"source": "slog"`,
+	} {
+		if !strings.Contains(stdout, needle) {
+			t.Fatalf("HTTP trace example missing %q in stdout: %s", needle, stdout)
+		}
+	}
+	for _, unsafe := range []string{
+		"coupon=sale",
+		"card",
+		"payload",
+		"#confirm",
+		"?",
+	} {
+		if strings.Contains(stdout, unsafe) {
+			t.Fatalf("HTTP trace example leaked unsafe value %q: %s", unsafe, stdout)
+		}
+	}
+	if !strings.Contains(stderr, `"appLogHasTrace":true`) ||
+		!strings.Contains(stderr, `"attempts":1`) ||
+		!strings.Contains(stderr, `"events":6`) ||
+		!strings.Contains(stderr, `"ok":true`) ||
+		!strings.Contains(stderr, `"outgoingTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"`) ||
+		!strings.Contains(stderr, `"requestStatus":502`) ||
 		!strings.Contains(stderr, `"status":202`) {
 		t.Fatalf("unexpected stderr: %s", stderr)
 	}
