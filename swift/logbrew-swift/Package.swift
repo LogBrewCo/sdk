@@ -14,11 +14,13 @@ let package = Package(
         .library(name: "LogBrew", targets: ["LogBrew"]),
         .executable(name: "ReadmeExample", targets: ["ReadmeExample"]),
         .executable(name: "RealUserSmoke", targets: ["RealUserSmoke"]),
+        .executable(name: "TraceCorrelationExample", targets: ["TraceCorrelationExample"]),
     ],
     targets: [
         .target(name: "LogBrew"),
         .executableTarget(name: "ReadmeExample", dependencies: ["LogBrew"]),
         .executableTarget(name: "RealUserSmoke", dependencies: ["LogBrew"]),
+        .executableTarget(name: "TraceCorrelationExample", dependencies: ["LogBrew"]),
         .testTarget(name: "LogBrewTests", dependencies: ["LogBrew"]),
     ],
 )

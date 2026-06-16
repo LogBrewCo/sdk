@@ -138,6 +138,45 @@ try client.captureNetworkMilestone(
 
 Network helpers normalize the method, strip query strings and fragments from route templates, default HTTP `4xx` and `5xx` milestones to `failure`, and store primitive metadata such as `sessionId`, `screen`, `traceId`, `funnel`, and `step`. They do not patch `URLSession`, record visual replay, collect headers, or capture request or response bodies. Keep user-entered text, raw URLs, query strings, headers, and payloads out of timeline metadata.
 
+## Trace Correlation
+
+Use `LogBrewTrace` when app-owned Swift work should keep logs, errors, product actions, metrics, and spans on the same W3C trace. Valid incoming `traceparent` values continue the upstream trace with a fresh local span id; missing or malformed propagation starts a local root trace without throwing into your app:
+
+```swift
+let trace = LogBrewTrace.continueOrCreateContext(
+    fromTraceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+)
+
+try LogBrewTrace.withContext(trace) {
+    logger.warning("checkout retry scheduled", metadata: ["screen": "Checkout"])
+    try client.issue(
+        "evt_issue_001",
+        timestamp: "2026-06-02T10:00:02Z",
+        attributes: IssueAttributes(title: "Checkout timeout", level: .error)
+    )
+    try client.captureNetworkMilestone(
+        "evt_network_milestone_001",
+        timestamp: "2026-06-02T10:00:08Z",
+        method: "POST",
+        routeTemplate: "/api/checkout",
+        statusCode: 503,
+        durationMs: 184.5
+    )
+    try client.span(
+        "evt_span_001",
+        timestamp: "2026-06-02T10:00:09Z",
+        attributes: try LogBrewTrace.spanAttributes(name: "POST /api/checkout", status: .error, durationMs: 184.5)
+    )
+
+    let headers = LogBrewTrace.outgoingHeaders()
+    // Pass headers["traceparent"] to the app-owned URLRequest you create.
+}
+```
+
+`LogBrewTrace.current` is task-local, so async work started inside `withContext(...)` can read the active context without global state. `LogBrewClient` automatically adds active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewLogger` receives the same correlation through the client. `LogBrewTrace.spanAttributes(...)` reuses the active span id for a span event, and `LogBrewTrace.outgoingHeaders()` creates only a normalized `traceparent` header for app-owned requests.
+
+The Swift SDK does not patch `URLSession`, collect arbitrary headers, capture request or response bodies, serialize the raw `traceparent` value into event metadata, or start automatic database/network child spans. Keep route templates low-cardinality and query-free, and add richer framework instrumentation only in a dedicated integration package.
+
 ## HTTP Delivery
 
 Use `HTTPTransport` when the app is ready to send queued batches to LogBrew. It posts JSON to the production intake by default, passes the SDK key through the `authorization` header, and supports custom endpoints, headers, and timeouts for local collectors or proxies:

@@ -33,6 +33,7 @@ grep -q '/.swiftlint.yml$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/EventEncoding.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/LogBrewClient.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/LogBrewLogger.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/LogBrewTrace.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/Metadata.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/ProductTimeline.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/PublicTypes.swift$' "$tmp_dir/archive-contents.txt"
@@ -40,13 +41,16 @@ grep -q '/Sources/LogBrew/Transport.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/Validation.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/ReadmeExample/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/RealUserSmoke/main.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/TraceCorrelationExample/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/LogBrewTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/ProductTimelineTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/TraceContextTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/examples/Makefile$' "$tmp_dir/archive-contents.txt"
 unzip -p "$archive_path" '*/README.md' > "$tmp_dir/archive-readme.md"
 grep -q 'captureProductAction' "$tmp_dir/archive-readme.md"
 grep -q 'captureNetworkMilestone' "$tmp_dir/archive-readme.md"
 grep -q 'ProductTimelineContext' "$tmp_dir/archive-readme.md"
+grep -q 'LogBrewTrace' "$tmp_dir/archive-readme.md"
 
 echo "swift real-user smoke: packaged README example" >&2
 swift run --package-path "$package_dir" --scratch-path "$tmp_dir/readme-run-build" ReadmeExample > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
@@ -67,12 +71,22 @@ grep -q '"metricEvents":1' "$tmp_dir/smoke.stderr.json"
 grep -q '"timelineEvents":2' "$tmp_dir/smoke.stderr.json"
 grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/smoke.stderr.json"
 
+echo "swift real-user smoke: packaged trace-correlation example" >&2
+swift run --package-path "$package_dir" --scratch-path "$tmp_dir/trace-run-build" TraceCorrelationExample > "$tmp_dir/trace.stdout.json" 2> "$tmp_dir/trace.stderr.json"
+python3 "$repo_root/scripts/check_swift_trace_correlation_payload.py" "$tmp_dir/trace.stdout.json" >/dev/null
+grep -q '"ok":true' "$tmp_dir/trace.stderr.json"
+grep -q '"events":8' "$tmp_dir/trace.stderr.json"
+grep -q '"traceId":"4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/trace.stderr.json"
+grep -q '"parentSpanId":"00f067aa0ba902b7"' "$tmp_dir/trace.stderr.json"
+grep -q '"traceSampled":true' "$tmp_dir/trace.stderr.json"
+
 echo "swift real-user smoke: example Makefile commands" >&2
 (cd "$package_dir/examples" && make) > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' "$tmp_dir/examples-help.txt")
 grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' "$tmp_dir/examples-help.txt")
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' "$tmp_dir/examples-help.txt")
-test "$(wc -l < "$tmp_dir/examples-help.txt" | tr -d ' ')" = "3"
+grep -qx 'run-trace-correlation -> make run-trace-correlation' <(sed -n '4p' "$tmp_dir/examples-help.txt")
+test "$(wc -l < "$tmp_dir/examples-help.txt" | tr -d ' ')" = "4"
 
 (cd "$package_dir/examples" && make -n SWIFT_SCRATCH="$tmp_dir/make-readme-build" run-readme-example) > "$tmp_dir/make-readme-plan.txt"
 grep -q 'swift run --package-path .. --scratch-path' "$tmp_dir/make-readme-plan.txt"
@@ -81,6 +95,10 @@ grep -q 'ReadmeExample' "$tmp_dir/make-readme-plan.txt"
 (cd "$package_dir/examples" && make -n SWIFT_SCRATCH="$tmp_dir/make-smoke-build" run-real-user-smoke) > "$tmp_dir/make-smoke-plan.txt"
 grep -q 'swift run --package-path .. --scratch-path' "$tmp_dir/make-smoke-plan.txt"
 grep -q 'RealUserSmoke' "$tmp_dir/make-smoke-plan.txt"
+
+(cd "$package_dir/examples" && make -n SWIFT_SCRATCH="$tmp_dir/make-trace-build" run-trace-correlation) > "$tmp_dir/make-trace-plan.txt"
+grep -q 'swift run --package-path .. --scratch-path' "$tmp_dir/make-trace-plan.txt"
+grep -q 'TraceCorrelationExample' "$tmp_dir/make-trace-plan.txt"
 
 (cd "$package_dir/examples" && make -n SWIFT_SCRATCH="$tmp_dir/make-alias-build" run) > "$tmp_dir/make-alias-plan.txt"
 grep -q 'swift run --package-path .. --scratch-path' "$tmp_dir/make-alias-plan.txt"
@@ -326,6 +344,59 @@ do {
     rejectedBadStatusCode = error.code == "validation_error" && error.message.contains("statusCode")
 }
 precondition(rejectedBadStatusCode)
+
+let traceClient = try LogBrewClient.create(
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "swift-consumer-trace",
+    sdkVersion: "0.1.0"
+)
+let trace = LogBrewTrace.continueOrCreateContext(
+    fromTraceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+)
+try LogBrewTrace.withContext(trace) {
+    try traceClient.log(
+        "evt_trace_log_001",
+        timestamp: "2026-06-02T10:00:09Z",
+        attributes: LogAttributes(message: "checkout traced", level: .info, logger: "checkout")
+    )
+    try traceClient.issue(
+        "evt_trace_issue_001",
+        timestamp: "2026-06-02T10:00:10Z",
+        attributes: IssueAttributes(title: "Checkout timeout", level: .error)
+    )
+    try traceClient.captureNetworkMilestone(
+        "evt_trace_network_001",
+        timestamp: "2026-06-02T10:00:11Z",
+        method: "POST",
+        routeTemplate: "https://mobile.example.test/api/checkout?cart_id=123#pay",
+        statusCode: 503,
+        durationMs: 184.5
+    )
+    try traceClient.metric(
+        "evt_trace_metric_001",
+        timestamp: "2026-06-02T10:00:12Z",
+        attributes: MetricAttributes(
+            name: "checkout.duration",
+            kind: .histogram,
+            value: 184.5,
+            unit: "ms",
+            temporality: .delta
+        )
+    )
+    try traceClient.span(
+        "evt_trace_span_001",
+        timestamp: "2026-06-02T10:00:13Z",
+        attributes: try LogBrewTrace.spanAttributes(name: "POST /api/checkout", status: .error, durationMs: 184.5)
+    )
+}
+let tracePreview = try traceClient.previewJSON()
+precondition(tracePreview.contains(#""traceId" : "4bf92f3577b34da6a3ce929d0e0e4736""#))
+precondition(tracePreview.contains(#""parentSpanId" : "00f067aa0ba902b7""#))
+precondition(tracePreview.contains(#""traceFlags" : "01""#))
+precondition(tracePreview.contains(#""traceSampled" : true"#))
+precondition(!tracePreview.contains("cart_id"))
+precondition(!tracePreview.contains("#pay"))
+precondition(!tracePreview.contains("traceparent"))
 
 let httpEndpointValue = ProcessInfo.processInfo.environment["LOGBREW_SWIFT_HTTP_ENDPOINT"] ?? ""
 let httpEndpoint = URL(string: httpEndpointValue)!

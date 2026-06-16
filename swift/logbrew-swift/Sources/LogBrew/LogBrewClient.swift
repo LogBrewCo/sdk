@@ -4,6 +4,7 @@ public final class LogBrewClient {
     private let apiKey: String
     private let sdk: SDKInfo
     private let maxRetries: Int
+    private let lock = NSLock()
     private var events: [Event] = []
     private var closed = false
 
@@ -33,13 +34,19 @@ public final class LogBrewClient {
     }
 
     public func pendingEvents() -> Int {
-        events.count
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return events.count
     }
 
     public func previewJSON() throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(EventBatch(sdk: sdk, events: events))
+        lock.lock()
+        let batch = EventBatch(sdk: sdk, events: events)
+        lock.unlock()
+
+        let data = try encodeBatch(batch)
         guard let json = String(data: data, encoding: .utf8) else {
             throw SdkError(code: "encoding_error", message: "event batch was not valid UTF-8")
         }
@@ -55,11 +62,11 @@ public final class LogBrewClient {
     }
 
     public func issue(_ id: String, timestamp: String, attributes: IssueAttributes) throws {
-        try pushEvent(.issue(validateIssue(attributes)), id: id, timestamp: timestamp)
+        try pushEvent(.issue(validateIssue(attributes.withActiveTrace())), id: id, timestamp: timestamp)
     }
 
     public func log(_ id: String, timestamp: String, attributes: LogAttributes) throws {
-        try pushEvent(.log(validateLog(attributes)), id: id, timestamp: timestamp)
+        try pushEvent(.log(validateLog(attributes.withActiveTrace())), id: id, timestamp: timestamp)
     }
 
     public func span(_ id: String, timestamp: String, attributes: SpanAttributes) throws {
@@ -67,30 +74,42 @@ public final class LogBrewClient {
     }
 
     public func action(_ id: String, timestamp: String, attributes: ActionAttributes) throws {
-        try pushEvent(.action(validateAction(attributes)), id: id, timestamp: timestamp)
+        try pushEvent(.action(validateAction(attributes.withActiveTrace())), id: id, timestamp: timestamp)
     }
 
     public func metric(_ id: String, timestamp: String, attributes: MetricAttributes) throws {
-        try pushEvent(.metric(validateMetric(attributes)), id: id, timestamp: timestamp)
+        try pushEvent(.metric(validateMetric(attributes.withActiveTrace())), id: id, timestamp: timestamp)
     }
 
     public func flush(transport: any Transport) throws -> TransportResponse {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
         if closed {
             throw SdkError(code: "shutdown_error", message: "client is already shut down")
         }
-        return try flushInternal(transport: transport)
+        return try flushInternalLocked(transport: transport)
     }
 
     public func shutdown(transport: any Transport) throws -> TransportResponse {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
         if closed {
             throw SdkError(code: "shutdown_error", message: "client is already shut down")
         }
-        let response = try flushInternal(transport: transport)
+        let response = try flushInternalLocked(transport: transport)
         closed = true
         return response
     }
 
     private func pushEvent(_ attributes: EventAttributes, id: String, timestamp: String) throws {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
         if closed {
             throw SdkError(code: "shutdown_error", message: "client is already shut down")
         }
@@ -99,12 +118,12 @@ public final class LogBrewClient {
         events.append(Event(type: attributes.eventType, timestamp: timestamp, id: id, attributes: attributes))
     }
 
-    private func flushInternal(transport: any Transport) throws -> TransportResponse {
+    private func flushInternalLocked(transport: any Transport) throws -> TransportResponse {
         if events.isEmpty {
             return TransportResponse(statusCode: 204, attempts: 0)
         }
 
-        let body = try Data(previewJSON().utf8)
+        let body = try encodeBatch(EventBatch(sdk: sdk, events: events))
         let maxAttempts = maxRetries + 1
         var attempts = 0
 
@@ -137,5 +156,52 @@ public final class LogBrewClient {
         }
 
         throw SdkError(code: "transport_error", message: "exhausted retries")
+    }
+
+    private func encodeBatch(_ batch: EventBatch) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(batch)
+    }
+}
+
+private extension IssueAttributes {
+    func withActiveTrace() -> IssueAttributes {
+        IssueAttributes(
+            title: title,
+            level: level,
+            message: message,
+            metadata: LogBrewTrace.metadataWithCurrentTrace(metadata),
+        )
+    }
+}
+
+private extension LogAttributes {
+    func withActiveTrace() -> LogAttributes {
+        LogAttributes(
+            message: message,
+            level: level,
+            logger: logger,
+            metadata: LogBrewTrace.metadataWithCurrentTrace(metadata),
+        )
+    }
+}
+
+private extension ActionAttributes {
+    func withActiveTrace() -> ActionAttributes {
+        ActionAttributes(name: name, status: status, metadata: LogBrewTrace.metadataWithCurrentTrace(metadata))
+    }
+}
+
+private extension MetricAttributes {
+    func withActiveTrace() -> MetricAttributes {
+        MetricAttributes(
+            name: name,
+            kind: kind,
+            value: value,
+            unit: unit,
+            temporality: temporality,
+            metadata: LogBrewTrace.metadataWithCurrentTrace(metadata),
+        )
     }
 }

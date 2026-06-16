@@ -104,7 +104,7 @@ private func productTimelineMetadata(
     try copyMetadata(context.metadata, into: &output)
     try copyMetadata(metadata, into: &output)
     output["source"] = .string(source)
-    return output
+    return LogBrewTrace.mergeTraceMetadata(output) ?? output
 }
 
 private func copyOptionalString(_ key: String, _ value: String?, into output: inout Metadata) throws {
