@@ -1,0 +1,141 @@
+#import "LogBrew.h"
+
+#import "LogBrewNetworkValidation.h"
+
+@interface LBWURLSessionSpan ()
+
+@property(nonatomic, copy) NSURLRequest *request;
+@property(nonatomic, strong) LBWTraceContext *traceContext;
+@property(nonatomic, copy) NSString *method;
+@property(nonatomic, copy) NSString *routeTemplate;
+
+- (instancetype)initWithRequest:(NSURLRequest *)request
+                   traceContext:(LBWTraceContext *)traceContext
+                          method:(NSString *)method
+                   routeTemplate:(NSString *)routeTemplate NS_DESIGNATED_INITIALIZER;
+
+@end
+
+static NSError *LBWURLSessionError(NSString *message) {
+  return [NSError errorWithDomain:LBWErrorDomain
+                             code:LBWErrorKindValidation
+                         userInfo:@{
+                           LBWErrorStableCodeKey: @"validation_error",
+                           LBWErrorRetryableKey: @NO,
+                           NSLocalizedDescriptionKey: message
+                         }];
+}
+
+static void LBWURLSessionSetError(NSError *_Nullable *_Nullable error, NSError *value) {
+  if (error != NULL) {
+    *error = value;
+  }
+}
+
+static NSString *LBWURLSessionSpanStatus(NSNumber *_Nullable statusCode, NSString *_Nullable errorType) {
+  if (!LBWNetworkStringIsBlank(errorType)) {
+    return @"error";
+  }
+  return statusCode != nil && [statusCode integerValue] >= 400 ? @"error" : @"ok";
+}
+
+@implementation LBWURLSessionSpan
+
+- (instancetype)initWithRequest:(NSURLRequest *)request
+                   traceContext:(LBWTraceContext *)traceContext
+                          method:(NSString *)method
+                   routeTemplate:(NSString *)routeTemplate {
+  self = [super init];
+  if (self != nil) {
+    _request = [request copy];
+    _traceContext = traceContext;
+    _method = [method copy];
+    _routeTemplate = [routeTemplate copy];
+  }
+  return self;
+}
+
+@end
+
+@implementation LBWTrace (URLSession)
+
++ (LBWURLSessionSpan *)startURLSessionSpanForRequest:(NSURLRequest *)request error:(NSError **)error {
+  return [self startURLSessionSpanForRequest:request routeTemplate:nil context:nil error:error];
+}
+
++ (LBWURLSessionSpan *)startURLSessionSpanForRequest:(NSURLRequest *)request
+                                      routeTemplate:(NSString *)routeTemplate
+                                            context:(LBWTraceContext *)context
+                                              error:(NSError **)error {
+  if (request.URL == nil) {
+    LBWURLSessionSetError(error, LBWURLSessionError(@"URLSession request URL is required"));
+    return nil;
+  }
+  NSString *method = LBWNetworkNormalizedMethod(request.HTTPMethod, @"URLSession method", @"GET", error);
+  NSString *route = LBWNetworkNormalizedRouteTemplate(
+      routeTemplate != nil ? routeTemplate : [request.URL absoluteString],
+      @"URLSession routeTemplate",
+      error);
+  if (method == nil || route == nil) {
+    return nil;
+  }
+
+  LBWTraceContext *sourceContext = context != nil ? context : [LBWTrace currentContext];
+  LBWTraceContext *spanContext = sourceContext != nil ? [sourceContext childContext] : [LBWTraceContext rootContext];
+  NSMutableURLRequest *tracedRequest = [request mutableCopy];
+  [tracedRequest setValue:spanContext.traceparent forHTTPHeaderField:@"traceparent"];
+
+  return [[LBWURLSessionSpan alloc] initWithRequest:tracedRequest
+                                      traceContext:spanContext
+                                             method:method
+                                      routeTemplate:route];
+}
+
+@end
+
+@implementation LBWClient (URLSession)
+
+- (BOOL)captureURLSessionSpanWithID:(NSString *)eventID
+                           timestamp:(NSString *)timestamp
+                                span:(LBWURLSessionSpan *)span
+                          statusCode:(NSNumber *)statusCode
+                          durationMs:(NSNumber *)durationMs
+                           errorType:(NSString *)errorType
+                            metadata:(NSDictionary<NSString *, id> *)metadata
+                               error:(NSError **)error {
+  if (span == nil) {
+    LBWURLSessionSetError(error, LBWURLSessionError(@"URLSession span is required"));
+    return NO;
+  }
+  NSNumber *checkedStatusCode = LBWNetworkValidatedStatusCode(statusCode, @"URLSession statusCode", error);
+  NSNumber *checkedDurationMs = LBWNetworkValidatedDurationMs(durationMs, @"URLSession durationMs", error);
+  if ((statusCode != nil && checkedStatusCode == nil) || (durationMs != nil && checkedDurationMs == nil)) {
+    return NO;
+  }
+
+  NSMutableDictionary<NSString *, id> *spanMetadata =
+      metadata != nil ? [metadata mutableCopy] : [NSMutableDictionary dictionary];
+  spanMetadata[@"source"] = @"objc.urlsession";
+  spanMetadata[@"method"] = span.method;
+  spanMetadata[@"routeTemplate"] = span.routeTemplate;
+  if (checkedStatusCode != nil) {
+    spanMetadata[@"statusCode"] = checkedStatusCode;
+  }
+  if (!LBWNetworkStringIsBlank(errorType)) {
+    spanMetadata[@"errorType"] = errorType;
+  }
+
+  NSString *name = [NSString stringWithFormat:@"%@ %@", span.method, span.routeTemplate];
+  NSDictionary<NSString *, id> *attributes =
+      [span.traceContext spanAttributesWithName:name
+                                         status:LBWURLSessionSpanStatus(checkedStatusCode, errorType)
+                                     durationMs:checkedDurationMs
+                                       metadata:spanMetadata
+                                          error:error];
+  if (attributes == nil) {
+    return NO;
+  }
+  return [self spanWithID:eventID timestamp:timestamp attributes:attributes error:error];
+}
+
+@end

@@ -100,6 +100,33 @@ def main() -> None:
     if span.get("status") != "error":
         fail("span status was not preserved")
 
+    url_span = event_by_id(payload, "evt_trace_urlsession_001").get("attributes", {})
+    url_span_id = url_span.get("spanId")
+    if url_span.get("traceId") != TRACE_ID:
+        fail("URLSession span did not continue incoming trace")
+    if not re.fullmatch(r"[0-9a-f]{16}", url_span_id or ""):
+        fail(f"URLSession span id was invalid: {url_span_id}")
+    if url_span_id == local_span_id:
+        fail("URLSession child span reused active span id")
+    if url_span.get("parentSpanId") != local_span_id:
+        fail("URLSession span did not link to active local span")
+    if url_span.get("name") != "POST /api/checkout" or url_span.get("status") != "error":
+        fail("URLSession span name/status was not preserved")
+    url_metadata = url_span.get("metadata", {})
+    if url_metadata.get("source") != "objc.urlsession":
+        fail("URLSession span source metadata missing")
+    if url_metadata.get("traceId") != TRACE_ID or url_metadata.get("spanId") != url_span_id:
+        fail("URLSession metadata did not use child trace context")
+    if url_metadata.get("parentSpanId") != local_span_id:
+        fail("URLSession metadata did not link to active local span")
+    if url_metadata.get("routeTemplate") != "/api/checkout" or url_metadata.get("method") != "POST":
+        fail("URLSession metadata did not preserve sanitized method/route")
+    if url_metadata.get("statusCode") != 503 or url_metadata.get("component") != "pay-api":
+        fail("URLSession metadata did not preserve status/app metadata")
+    for forbidden in ("cart=123", "#pay", "app-owned-header-value", "traceparent"):
+        if forbidden in raw_payload:
+            fail(f"URLSession span leaked forbidden text: {forbidden}")
+
     print("objc trace correlation payload passed")
 
 

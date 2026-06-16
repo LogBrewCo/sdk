@@ -84,6 +84,20 @@ int main(void) {
                      timestamp:@"2026-06-02T10:00:07Z"
                     attributes:spanAttributes
                          error:&error], error);
+    NSMutableURLRequest *request =
+        [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.example.com/api/checkout?cart=123#pay"]];
+    request.HTTPMethod = @"post";
+    [request setValue:@"app-owned-header-value" forHTTPHeaderField:@"x-app-context"];
+    LBWURLSessionSpan *urlSessionSpan = [LBWTrace startURLSessionSpanForRequest:request error:&error];
+    LBWMust(urlSessionSpan != nil, error);
+    LBWMust([client captureURLSessionSpanWithID:@"evt_trace_urlsession_001"
+                                      timestamp:@"2026-06-02T10:00:08Z"
+                                           span:urlSessionSpan
+                                     statusCode:@503
+                                     durationMs:@184.5
+                                      errorType:nil
+                                       metadata:@{@"component": @"pay-api"}
+                                          error:&error], error);
 
     NSDictionary<NSString *, NSString *> *headers = [LBWTrace outgoingHeaders];
     fprintf(stderr, "{\"traceparent\":\"%s\"}\n", [headers[@"traceparent"] UTF8String]);

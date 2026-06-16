@@ -169,13 +169,28 @@ NSDictionary *spanAttributes =
         attributes:spanAttributes
              error:&error];
 
+NSMutableURLRequest *request =
+    [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.example.com/api/checkout?cart=123#pay"]];
+request.HTTPMethod = @"POST";
+LBWURLSessionSpan *urlSessionSpan = [LBWTrace startURLSessionSpanForRequest:request error:&error];
+
+// Use urlSessionSpan.request with your own NSURLSession call, then capture the completion.
+[client captureURLSessionSpanWithID:@"evt_trace_urlsession_001"
+                           timestamp:@"2026-06-02T10:00:08Z"
+                                span:urlSessionSpan
+                          statusCode:@503
+                          durationMs:@184.5
+                           errorType:nil
+                            metadata:@{@"component": @"pay-api"}
+                               error:&error];
+
 NSDictionary *headers = [LBWTrace outgoingHeaders];
 [scope close];
 ```
 
-`continueOrCreateContextFromTraceparent:` accepts valid W3C `traceparent` values, creates a fresh local span ID, and falls back to a local root trace for malformed propagation. While a scope is active on the current thread, issue, log, action, and metric metadata receive `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled`; active trace fields override caller-supplied trace metadata so telemetry stays internally consistent. `outgoingHeaders` returns only a normalized `traceparent` header for app-owned HTTP clients.
+`continueOrCreateContextFromTraceparent:` accepts valid W3C `traceparent` values, creates a fresh local span ID, and falls back to a local root trace for malformed propagation. While a scope is active on the current thread, issue, log, action, and metric metadata receive `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled`; active trace fields override caller-supplied trace metadata so telemetry stays internally consistent. `outgoingHeaders` returns only a normalized `traceparent` header for app-owned HTTP clients. `startURLSessionSpanForRequest:error:` copies your request, adds only `traceparent`, strips query strings and fragments from the span route, and returns a child span context for `captureURLSessionSpanWithID:...` when your request completes.
 
-The trace helpers do not patch `NSURLSession`, do not collect headers or payloads, do not serialize the raw incoming `traceparent`, and do not capture query strings or fragments. Use only the project-scoped client key shown by LogBrew setup examples when sending telemetry.
+The trace helpers do not patch `NSURLSession`, do not collect headers or payloads, do not serialize the raw incoming `traceparent`, and do not capture query strings or fragments. They also do not add baggage or tracestate. Use only the project-scoped client key shown by LogBrew setup examples when sending telemetry.
 
 ## Error Shape
 

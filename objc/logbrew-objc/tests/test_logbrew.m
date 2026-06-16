@@ -397,6 +397,29 @@ static void LBWExerciseTraceHelpers(void) {
                      timestamp:@"2026-06-02T10:00:07Z"
                     attributes:spanAttributes
                          error:&error], @"trace span failed");
+  NSMutableURLRequest *request =
+      [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.example.com/api/checkout?cart=123#pay"]];
+  request.HTTPMethod = @"post";
+  [request setValue:@"app-owned-header-value" forHTTPHeaderField:@"x-app-context"];
+  LBWURLSessionSpan *urlSessionSpan = [LBWTrace startURLSessionSpanForRequest:request error:&error];
+  LBWAssert(urlSessionSpan != nil, @"URLSession span start failed");
+  LBWAssert([urlSessionSpan.method isEqualToString:@"POST"], @"URLSession method normalization failed");
+  LBWAssert([urlSessionSpan.routeTemplate isEqualToString:@"/api/checkout"], @"URLSession route failed");
+  LBWAssert([urlSessionSpan.traceContext.traceID isEqualToString:context.traceID], @"URLSession trace id failed");
+  LBWAssert([urlSessionSpan.traceContext.parentSpanID isEqualToString:context.spanID],
+            @"URLSession parent span failed");
+  LBWAssert([urlSessionSpan.request valueForHTTPHeaderField:@"traceparent"] != nil,
+            @"URLSession traceparent missing");
+  LBWAssert([[urlSessionSpan.request valueForHTTPHeaderField:@"x-app-context"] isEqualToString:@"app-owned-header-value"],
+            @"URLSession app header not preserved on copied request");
+  LBWAssert([client captureURLSessionSpanWithID:@"evt_trace_urlsession_001"
+                                      timestamp:@"2026-06-02T10:00:08Z"
+                                           span:urlSessionSpan
+                                     statusCode:@503
+                                     durationMs:@184.5
+                                      errorType:nil
+                                       metadata:@{@"component": @"pay-api"}
+                                          error:&error], @"URLSession span capture failed");
 
   NSString *preview = [client previewJSONWithError:&error];
   LBWAssert(preview != nil, @"trace preview failed");
@@ -413,6 +436,22 @@ static void LBWExerciseTraceHelpers(void) {
   NSDictionary<NSString *, id> *span = LBWEventWithID(payload, @"evt_trace_span_001");
   LBWAssert([span[@"attributes"][@"traceId"] isEqualToString:context.traceID], @"span trace id failed");
   LBWAssert([span[@"attributes"][@"spanId"] isEqualToString:context.spanID], @"span id failed");
+  NSDictionary<NSString *, id> *urlSpan = LBWEventWithID(payload, @"evt_trace_urlsession_001")[@"attributes"];
+  LBWAssert([urlSpan[@"traceId"] isEqualToString:context.traceID], @"URLSession event trace id failed");
+  LBWAssert([urlSpan[@"parentSpanId"] isEqualToString:context.spanID], @"URLSession event parent failed");
+  LBWAssert(![urlSpan[@"spanId"] isEqualToString:context.spanID], @"URLSession child span reused parent");
+  LBWAssert([urlSpan[@"status"] isEqualToString:@"error"], @"URLSession span status failed");
+  NSDictionary<NSString *, id> *urlMetadata = urlSpan[@"metadata"];
+  LBWAssert([urlMetadata[@"source"] isEqualToString:@"objc.urlsession"], @"URLSession source failed");
+  LBWAssert([urlMetadata[@"routeTemplate"] isEqualToString:@"/api/checkout"], @"URLSession metadata route failed");
+  LBWAssert([urlMetadata[@"method"] isEqualToString:@"POST"], @"URLSession metadata method failed");
+  LBWAssert([urlMetadata[@"statusCode"] isEqual:@503], @"URLSession statusCode failed");
+  LBWAssert([urlMetadata[@"component"] isEqualToString:@"pay-api"], @"URLSession app metadata failed");
+  LBWAssert([preview rangeOfString:@"cart=123"].location == NSNotFound, @"URLSession leaked query");
+  LBWAssert([preview rangeOfString:@"#pay"].location == NSNotFound, @"URLSession leaked fragment");
+  LBWAssert([preview rangeOfString:@"app-owned-header-value"].location == NSNotFound,
+            @"URLSession leaked app header");
+  LBWAssert([preview rangeOfString:@"traceparent"].location == NSNotFound, @"URLSession leaked traceparent");
   [scope close];
   LBWAssert([LBWTrace currentContext] == nil, @"trace scope close failed");
 }

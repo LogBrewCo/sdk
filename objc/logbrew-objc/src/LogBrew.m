@@ -1,5 +1,7 @@
 #import "LogBrew.h"
 
+#import "LogBrewNetworkValidation.h"
+
 #import <math.h>
 
 NSString *const LogBrewObjectiveCVersion = @"0.1.0";
@@ -255,75 +257,6 @@ static BOOL LBWCopyMetadata(
   }
   [target addEntriesFromDictionary:clean];
   return YES;
-}
-
-static NSString *LBWTrimmedString(NSString *value) {
-  return [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-}
-
-static NSString *_Nullable LBWNormalizedNetworkMethod(NSString *method, NSError *_Nullable *_Nullable error) {
-  if (!LBWRequireNonEmpty(@"network method", method, error)) {
-    return nil;
-  }
-  return [LBWTrimmedString(method) uppercaseString];
-}
-
-static NSString *LBWStripQueryAndFragment(NSString *value) {
-  NSString *withoutQuery = [value componentsSeparatedByString:@"?"][0];
-  return [withoutQuery componentsSeparatedByString:@"#"][0];
-}
-
-static NSString *_Nullable LBWNormalizedRouteTemplate(NSString *routeTemplate, NSError *_Nullable *_Nullable error) {
-  if (!LBWRequireNonEmpty(@"network routeTemplate", routeTemplate, error)) {
-    return nil;
-  }
-  NSString *trimmed = LBWTrimmedString(routeTemplate);
-  NSURLComponents *components = [NSURLComponents componentsWithString:trimmed];
-  NSString *scheme = [[components scheme] lowercaseString];
-  if ([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"]) {
-    NSString *path = [[components path] length] == 0U ? @"/" : [components path];
-    return LBWStripQueryAndFragment(path);
-  }
-  if ([trimmed rangeOfString:@"://"].location != NSNotFound) {
-    LBWSetError(error, LBWMakeError(
-        LBWErrorKindValidation,
-        @"validation_error",
-        @"network routeTemplate must be a route template or HTTP(S) URL",
-        NO));
-    return nil;
-  }
-  NSString *sanitized = LBWStripQueryAndFragment(trimmed);
-  if (!LBWRequireNonEmpty(@"network routeTemplate", sanitized, error)) {
-    return nil;
-  }
-  return sanitized;
-}
-
-static NSNumber *_Nullable LBWValidatedStatusCode(NSNumber *_Nullable statusCode, NSError *_Nullable *_Nullable error) {
-  if (statusCode == nil) {
-    return nil;
-  }
-  double doubleValue = [statusCode doubleValue];
-  NSInteger integerValue = [statusCode integerValue];
-  if (!isfinite(doubleValue) || doubleValue != (double)integerValue || integerValue < 100 || integerValue > 599) {
-    LBWSetError(error, LBWMakeError(
-        LBWErrorKindValidation, @"validation_error", @"network statusCode must be an integer between 100 and 599", NO));
-    return nil;
-  }
-  return @(integerValue);
-}
-
-static NSNumber *_Nullable LBWValidatedDurationMs(NSNumber *_Nullable durationMs, NSError *_Nullable *_Nullable error) {
-  if (durationMs == nil) {
-    return nil;
-  }
-  double value = [durationMs doubleValue];
-  if (!isfinite(value) || value < 0.0) {
-    LBWSetError(error, LBWMakeError(
-        LBWErrorKindValidation, @"validation_error", @"network durationMs must be finite and non-negative", NO));
-    return nil;
-  }
-  return durationMs;
 }
 
 static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
@@ -753,10 +686,10 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
                                context:(NSDictionary<NSString *, id> *)context
                               metadata:(NSDictionary<NSString *, id> *)metadata
                                  error:(NSError **)error {
-  NSString *normalizedMethod = LBWNormalizedNetworkMethod(method, error);
-  NSString *normalizedRoute = LBWNormalizedRouteTemplate(routeTemplate, error);
-  NSNumber *checkedStatusCode = LBWValidatedStatusCode(statusCode, error);
-  NSNumber *checkedDurationMs = LBWValidatedDurationMs(durationMs, error);
+  NSString *normalizedMethod = LBWNetworkNormalizedMethod(method, @"network method", nil, error);
+  NSString *normalizedRoute = LBWNetworkNormalizedRouteTemplate(routeTemplate, @"network routeTemplate", error);
+  NSNumber *checkedStatusCode = LBWNetworkValidatedStatusCode(statusCode, @"network statusCode", error);
+  NSNumber *checkedDurationMs = LBWNetworkValidatedDurationMs(durationMs, @"network durationMs", error);
   if (normalizedMethod == nil || normalizedRoute == nil ||
       (statusCode != nil && checkedStatusCode == nil) ||
       (durationMs != nil && checkedDurationMs == nil)) {

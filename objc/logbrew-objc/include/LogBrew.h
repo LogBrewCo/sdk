@@ -112,6 +112,17 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 
 @end
 
+@interface LBWURLSessionSpan : NSObject
+
+@property(nonatomic, copy, readonly) NSURLRequest *request;
+@property(nonatomic, strong, readonly) LBWTraceContext *traceContext;
+@property(nonatomic, copy, readonly) NSString *method;
+@property(nonatomic, copy, readonly) NSString *routeTemplate;
+
+- (instancetype)init NS_UNAVAILABLE;
+
+@end
+
 @interface LBWTrace : NSObject
 
 + (nullable LBWTraceContext *)currentContext;
@@ -119,6 +130,17 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 + (nullable NSDictionary<NSString *, id> *)metadataByMergingActiveContextIntoMetadata:
     (nullable NSDictionary<NSString *, id> *)metadata;
 + (NSDictionary<NSString *, NSString *> *)outgoingHeaders;
+
+@end
+
+@interface LBWTrace (URLSession)
+
++ (nullable LBWURLSessionSpan *)startURLSessionSpanForRequest:(NSURLRequest *)request
+                                                        error:(NSError *_Nullable *_Nullable)error;
++ (nullable LBWURLSessionSpan *)startURLSessionSpanForRequest:(NSURLRequest *)request
+                                                routeTemplate:(nullable NSString *)routeTemplate
+                                                      context:(nullable LBWTraceContext *)context
+                                                        error:(NSError *_Nullable *_Nullable)error;
 
 @end
 
@@ -187,8 +209,21 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
                             durationMs:(nullable NSNumber *)durationMs
                                 status:(nullable NSString *)status
                                context:(nullable NSDictionary<NSString *, id> *)context
-                              metadata:(nullable NSDictionary<NSString *, id> *)metadata
+                               metadata:(nullable NSDictionary<NSString *, id> *)metadata
                                  error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
+@interface LBWClient (URLSession)
+
+- (BOOL)captureURLSessionSpanWithID:(NSString *)eventID
+                           timestamp:(NSString *)timestamp
+                                span:(LBWURLSessionSpan *)span
+                          statusCode:(nullable NSNumber *)statusCode
+                          durationMs:(nullable NSNumber *)durationMs
+                           errorType:(nullable NSString *)errorType
+                            metadata:(nullable NSDictionary<NSString *, id> *)metadata
+                               error:(NSError *_Nullable *_Nullable)error;
 
 @end
 
