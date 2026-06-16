@@ -153,7 +153,7 @@ grep -q '"httpAttempts":1' "$tmp_dir/installed-smoke.stderr.json"
 
 test -f "$installed_package_dir/Runtime/LogBrewTrace.cs"
 test -f "$installed_package_dir/examples/trace_correlation/TraceCorrelation.cs"
-make -C "$installed_package_dir/examples" run-trace-correlation > "$tmp_dir/installed-trace-correlation.stdout.json" 2> "$tmp_dir/installed-trace-correlation.stderr.json"
+make --no-print-directory -C "$installed_package_dir/examples" run-trace-correlation > "$tmp_dir/installed-trace-correlation.stdout.json" 2> "$tmp_dir/installed-trace-correlation.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-trace-correlation.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_trace_correlation_payload.py" "$tmp_dir/installed-trace-correlation.stdout.json" "$tmp_dir/installed-trace-correlation.stderr.json"
 
@@ -392,7 +392,7 @@ if "evt_unity_http_transport" not in requests[1]["body"]:
     raise SystemExit("missing HTTP transport event in final request body")
 PY
 
-make -C "$installed_package_dir/examples" > "$tmp_dir/installed-examples-help.txt"
+make --no-print-directory -C "$installed_package_dir/examples" > "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/installed-examples-help.txt"

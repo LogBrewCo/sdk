@@ -162,11 +162,11 @@ grep -q '"retryAttempts":2' "$tmp_dir/real-user-sample.stderr.json"
 grep -q '"unityHelperEvents":3' "$tmp_dir/real-user-sample.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/real-user-sample.stderr.json"
 
-make -C "$package_dir/examples" run-trace-correlation > "$tmp_dir/trace-correlation.stdout.json" 2> "$tmp_dir/trace-correlation.stderr.json"
+make --no-print-directory -C "$package_dir/examples" run-trace-correlation > "$tmp_dir/trace-correlation.stdout.json" 2> "$tmp_dir/trace-correlation.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/trace-correlation.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_trace_correlation_payload.py" "$tmp_dir/trace-correlation.stdout.json" "$tmp_dir/trace-correlation.stderr.json"
 
-make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
+make --no-print-directory -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
