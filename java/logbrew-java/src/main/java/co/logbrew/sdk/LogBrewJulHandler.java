@@ -176,7 +176,7 @@ public final class LogBrewJulHandler extends Handler {
                 values.put("javaStackTrace", stackTraceText(thrown));
             }
         }
-        return Collections.unmodifiableMap(values);
+        return LogBrewTrace.metadataWithCurrentTrace(values);
     }
 
     @Override

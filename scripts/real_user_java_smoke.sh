@@ -46,6 +46,10 @@ grep -q '^co/logbrew/sdk/ProductTimeline\$NetworkMilestone.class$' "$tmp_dir/bin
 grep -q '^co/logbrew/sdk/Traceparent.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/Traceparent\$Context.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/Traceparent\$SpanInput.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewTrace\$Scope.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewJulHandler.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewLogbackAppender.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/Transport.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -61,9 +65,13 @@ grep -q '^src/main/java/co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/source-jar
 grep -q '^src/main/java/co/logbrew/sdk/MetricAttributes.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/ProductTimeline.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/Traceparent.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/LogBrewTraceContext.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/LogBrewTrace.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewJulHandler.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewLogbackAppender.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^examples/FirstUsefulTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^examples/HttpTraceCorrelation.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^examples/ReadmeExample.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^examples/RealUserSmoke.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^examples/Makefile$' "$tmp_dir/source-jar-contents.txt"
@@ -93,6 +101,7 @@ test -f "$extract_dir/examples/Makefile"
 make -C "$extract_dir/examples" > "$tmp_dir/extracted-examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/extracted-examples-help.txt"
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/extracted-examples-help.txt"
+grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/extracted-examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/extracted-examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/extracted-examples-help.txt"
 (cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_logback_classpath" run-readme-example) > "$tmp_dir/extracted-readme.stdout.json" 2> "$tmp_dir/extracted-readme.stderr.json"
@@ -106,6 +115,9 @@ grep -q '"retryAttempts":2' "$tmp_dir/extracted-smoke-alias.stderr.json"
 (cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_logback_classpath" run-first-useful-telemetry) > "$tmp_dir/extracted-first-useful.stdout.json" 2> "$tmp_dir/extracted-first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/extracted-first-useful.stdout.json" "$tmp_dir/extracted-first-useful.stderr.json" >/dev/null
+(cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_logback_classpath" run-http-trace-correlation) > "$tmp_dir/extracted-http-trace.stdout.json" 2> "$tmp_dir/extracted-http-trace.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-http-trace.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_java_http_trace_payload.py" "$tmp_dir/extracted-http-trace.stdout.json" "$tmp_dir/extracted-http-trace.stderr.json" >/dev/null
 
 javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_logback_classpath" -d "$tmp_dir/example-classes" @"$example_sources"
 java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" ReadmeExample > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
@@ -119,6 +131,9 @@ grep -q '"retryAttempts":2' "$tmp_dir/packaged-smoke.stderr.json"
 java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" FirstUsefulTelemetry > "$tmp_dir/packaged-first-useful.stdout.json" 2> "$tmp_dir/packaged-first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json" >/dev/null
+java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" HttpTraceCorrelation > "$tmp_dir/packaged-http-trace.stdout.json" 2> "$tmp_dir/packaged-http-trace.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-http-trace.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_java_http_trace_payload.py" "$tmp_dir/packaged-http-trace.stdout.json" "$tmp_dir/packaged-http-trace.stderr.json" >/dev/null
 
 lifecycle_app="$tmp_dir/lifecycle-app"
 mkdir -p "$lifecycle_app/lib" "$lifecycle_app/src" "$lifecycle_app/classes"

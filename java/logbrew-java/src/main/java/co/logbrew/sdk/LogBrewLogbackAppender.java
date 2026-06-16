@@ -185,7 +185,7 @@ public final class LogBrewLogbackAppender extends AppenderBase<ILoggingEvent> {
         copyKeyValuePairs(values, event.getKeyValuePairs());
         copyCallerData(values, event);
         copyThrowable(values, event.getThrowableProxy(), includeThrowableStackTrace);
-        return Collections.unmodifiableMap(values);
+        return LogBrewTrace.metadataWithCurrentTrace(values);
     }
 
     @Override

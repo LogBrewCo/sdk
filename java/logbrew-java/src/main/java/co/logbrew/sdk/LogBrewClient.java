@@ -56,77 +56,77 @@ public final class LogBrewClient {
     /**
      * Returns the queued event count currently buffered in memory.
      */
-    public int pendingEvents() {
+    public synchronized int pendingEvents() {
         return events.size();
     }
 
     /**
      * Returns whether {@link #shutdown(Transport)} has closed this client.
      */
-    public boolean isClosed() {
+    public synchronized boolean isClosed() {
         return closed;
     }
 
     /**
      * Returns the queued event batch as stable, pretty-printed JSON.
      */
-    public String previewJson() {
+    public synchronized String previewJson() {
         return Json.write(batchMap());
     }
 
     /**
      * Adds a release event to the queue.
      */
-    public void release(String id, String timestamp, ReleaseAttributes attributes) {
+    public synchronized void release(String id, String timestamp, ReleaseAttributes attributes) {
         pushEvent("release", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds an environment event to the queue.
      */
-    public void environment(String id, String timestamp, EnvironmentAttributes attributes) {
+    public synchronized void environment(String id, String timestamp, EnvironmentAttributes attributes) {
         pushEvent("environment", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds an issue event to the queue.
      */
-    public void issue(String id, String timestamp, IssueAttributes attributes) {
+    public synchronized void issue(String id, String timestamp, IssueAttributes attributes) {
         pushEvent("issue", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds a log event to the queue.
      */
-    public void log(String id, String timestamp, LogAttributes attributes) {
+    public synchronized void log(String id, String timestamp, LogAttributes attributes) {
         pushEvent("log", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds a span event to the queue.
      */
-    public void span(String id, String timestamp, SpanAttributes attributes) {
+    public synchronized void span(String id, String timestamp, SpanAttributes attributes) {
         pushEvent("span", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds an action event to the queue.
      */
-    public void action(String id, String timestamp, ActionAttributes attributes) {
+    public synchronized void action(String id, String timestamp, ActionAttributes attributes) {
         pushEvent("action", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds an explicit, application-owned metric event to the queue.
      */
-    public void metric(String id, String timestamp, MetricAttributes attributes) {
+    public synchronized void metric(String id, String timestamp, MetricAttributes attributes) {
         pushEvent("metric", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Flushes queued events through a transport while preserving retry semantics.
      */
-    public TransportResponse flush(Transport transport) {
+    public synchronized TransportResponse flush(Transport transport) {
         if (closed) {
             throw new SdkException("shutdown_error", "client is already shut down");
         }
@@ -136,7 +136,7 @@ public final class LogBrewClient {
     /**
      * Flushes queued events, then marks the client closed so later writes fail.
      */
-    public TransportResponse shutdown(Transport transport) {
+    public synchronized TransportResponse shutdown(Transport transport) {
         if (closed) {
             throw new SdkException("shutdown_error", "client is already shut down");
         }

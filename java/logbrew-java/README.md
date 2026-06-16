@@ -6,7 +6,7 @@
 
 Public Java SDK for building, validating, previewing, and flushing LogBrew event batches.
 
-The core client, `HttpTransport`, and `java.util.logging` handler use only the JDK at runtime. The optional Logback appender integrates with app-owned SLF4J/Logback setups when those libraries are already present.
+The core client, `HttpTransport`, request trace helpers, and `java.util.logging` handler use only the JDK at runtime. The optional Logback appender integrates with app-owned SLF4J/Logback setups when those libraries are already present.
 
 ## Install
 
@@ -156,6 +156,52 @@ Map<String, String> headers = Traceparent.createHeaders(
 ```
 
 `Traceparent.parse(...)` validates the W3C shape, rejects forbidden version `ff`, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `Traceparent.spanAttributesFromTraceparent(...)` creates child span attributes with the incoming trace ID and parent span ID while preserving only primitive metadata. `Traceparent.createHeaders(...)` returns an explicit outbound carrier with only `traceparent`.
+
+## Request Trace Correlation
+
+Use `LogBrewTraceContext`, `LogBrewTrace`, and `LogBrewHttpRequestTelemetry` when a Java service needs request-local trace continuity across spans, logs, issues, and explicit metrics. This is opt-in and app-owned: the SDK does not install a Java agent, patch servlet containers, patch HTTP clients, capture request/response payloads, capture headers, or change root logger configuration.
+
+```java
+import co.logbrew.sdk.IssueAttributes;
+import co.logbrew.sdk.LogBrewHttpRequestTelemetry;
+import co.logbrew.sdk.LogBrewTrace;
+import co.logbrew.sdk.LogBrewTraceContext;
+import java.util.Map;
+
+String incoming = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
+LogBrewTraceContext trace = LogBrewTraceContext.fromTraceparent(incoming, "b7ad6b7169203331");
+LogBrewHttpRequestTelemetry request = LogBrewHttpRequestTelemetry.start(
+    client,
+    "POST",
+    "/checkout/{cart_id}",
+    trace,
+    Map.of("service", "checkout-api")
+);
+
+LogBrewTrace.Scope scope = request.activate();
+try {
+    logger.warning("checkout handler saw a slow payment response");
+    client.issue(
+        "evt_issue_checkout_request",
+        "2026-06-02T10:00:03Z",
+        IssueAttributes.create("Checkout returned a server error", "error")
+            .metadata(LogBrewTrace.metadataWithCurrentTrace(Map.of("stage", "handler")))
+    );
+} finally {
+    scope.close();
+}
+
+request.finishSpanAndMetric(
+    "evt_span_checkout_request",
+    "evt_metric_checkout_request_duration",
+    "2026-06-02T10:00:04Z",
+    502,
+    183.4
+);
+Map<String, String> outgoingHeaders = request.outgoingHeaders();
+```
+
+`LogBrewTrace.activate(...)` reinstates the previous active trace when closed. Use `LogBrewTrace.wrapCurrent(...)` when handing work to another thread or executor; plain Java threads do not inherit request trace state automatically. The request helper falls back to a local root trace when incoming propagation is missing or malformed, while `Traceparent.parse(...)` stays strict for explicit validation paths. `LogBrewJulHandler` and `LogBrewLogbackAppender` attach active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata automatically, while preserving app-owned logger handlers and primitive metadata.
 
 ## HTTP Delivery
 
