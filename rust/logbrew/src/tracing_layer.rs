@@ -1,6 +1,6 @@
 use crate::{
-    LogBrewClient, LogEvent, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent,
-    http_fields::sanitize_route_template,
+    LogBrewClient, LogEvent, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent, Traceparent,
+    TraceparentContext, http_fields::sanitize_route_template,
 };
 use std::fmt;
 use std::sync::{
@@ -93,6 +93,7 @@ where
         let metadata = attrs.metadata();
         let mut visitor = TracingLogVisitor::new(&self.allowed_fields);
         attrs.record(&mut visitor);
+        let incoming_trace = incoming_trace_context(&visitor);
         let mut span_metadata = visitor.metadata;
         span_metadata.insert(
             "tracingTarget".to_string(),
@@ -105,18 +106,32 @@ where
 
         let parent = parent_span_reference(attrs, &ctx);
         let sequence = self.next_span_id.fetch_add(1, Ordering::Relaxed);
+        let sampled = parent
+            .as_ref()
+            .and_then(|state| state.sampled)
+            .or_else(|| incoming_trace.as_ref().map(|trace| trace.sampled));
+        if let Some(sampled) = sampled {
+            span_metadata
+                .entry("sampled".to_string())
+                .or_insert(MetadataValue::Bool(sampled));
+        }
         let state = TracingSpanState {
             event_id: format!("{}_{}", self.span_id_prefix.trim(), sequence),
             trace_id: parent
                 .as_ref()
                 .map(|state| state.trace_id.clone())
+                .or_else(|| incoming_trace.as_ref().map(|trace| trace.trace_id.clone()))
                 .unwrap_or_else(|| trace_id_for(sequence)),
             span_id: span_id_for(sequence),
-            parent_span_id: parent.map(|state| state.span_id),
+            parent_span_id: parent
+                .as_ref()
+                .map(|state| state.span_id.clone())
+                .or_else(|| incoming_trace.map(|trace| trace.parent_span_id)),
             name: metadata.name().trim().to_string(),
             timestamp: (self.timestamp)(),
             started_at: Instant::now(),
             metadata: span_metadata,
+            sampled,
             error: false,
         };
 
@@ -159,6 +174,11 @@ where
                     "parentSpanId".to_string(),
                     MetadataValue::String(parent_span_id),
                 );
+            }
+            if let Some(sampled) = state.sampled {
+                log_metadata
+                    .entry("sampled".to_string())
+                    .or_insert(MetadataValue::Bool(sampled));
             }
         }
         log_metadata.insert(
@@ -269,6 +289,7 @@ struct TracingSpanState {
     timestamp: String,
     started_at: Instant,
     metadata: Metadata,
+    sampled: Option<bool>,
     error: bool,
 }
 
@@ -277,6 +298,7 @@ struct SpanReference {
     trace_id: String,
     span_id: String,
     parent_span_id: Option<String>,
+    sampled: Option<bool>,
 }
 
 impl From<&TracingSpanState> for SpanReference {
@@ -285,6 +307,7 @@ impl From<&TracingSpanState> for SpanReference {
             trace_id: state.trace_id.clone(),
             span_id: state.span_id.clone(),
             parent_span_id: state.parent_span_id.clone(),
+            sampled: state.sampled,
         }
     }
 }
@@ -339,6 +362,7 @@ struct TracingLogVisitor<'a> {
     allowed_fields: &'a [String],
     message: Option<String>,
     metadata: Metadata,
+    traceparent: Option<String>,
 }
 
 impl<'a> TracingLogVisitor<'a> {
@@ -347,6 +371,7 @@ impl<'a> TracingLogVisitor<'a> {
             allowed_fields,
             message: None,
             metadata: Metadata::new(),
+            traceparent: None,
         }
     }
 
@@ -357,6 +382,10 @@ impl<'a> TracingLogVisitor<'a> {
     }
 
     fn record_string(&mut self, field: &Field, value: String) {
+        if is_traceparent_field(field.name()) {
+            self.traceparent = Some(value);
+            return;
+        }
         if field.name() == "message" {
             self.message = Some(value);
             return;
@@ -406,12 +435,27 @@ impl Visit for TracingLogVisitor<'_> {
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        if is_traceparent_field(field.name()) {
+            self.traceparent = Some(format!("{value:?}").trim_matches('"').to_string());
+            return;
+        }
         if field.name() == "message" {
             self.record_string(field, format!("{value:?}"));
         }
     }
 }
 
+fn incoming_trace_context(visitor: &TracingLogVisitor<'_>) -> Option<TraceparentContext> {
+    visitor
+        .traceparent
+        .as_deref()
+        .and_then(|traceparent| Traceparent::parse(traceparent).ok())
+}
+
 fn is_route_field(name: &str) -> bool {
     matches!(name, "routeTemplate" | "route_template")
+}
+
+fn is_traceparent_field(name: &str) -> bool {
+    matches!(name, "traceparent" | "trace_parent")
 }

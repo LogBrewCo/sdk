@@ -373,9 +373,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let subscriber = tracing_subscriber::registry().with(layer);
     tracing::subscriber::with_default(subscriber, || {
+        let incoming_traceparent =
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
         let span = tracing::info_span!(
             target: "checkout",
             "checkout.request",
+            traceparent = incoming_traceparent,
             routeTemplate = "/checkout/{cart_id}?coupon=sample#review",
         );
         let _guard = span.enter();
@@ -393,7 +396,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`LogBrewTracingLayer` maps `trace`/`debug` to `info`, `warn` to `warning`, and `error` to `error`. It records `tracingTarget` and `tracingLevel`, but only copies additional primitive fields that your app allowlists with `with_allowed_fields(...)`; route-template field values are sanitized to remove query strings and hash fragments. With `with_span_events()`, the layer generates W3C-shaped trace/span IDs, adds trace correlation to logs emitted inside a span, records parent/child span links, and marks the current span as `error` when an error-level event is emitted inside it. Do not allowlist payloads, headers, account session values, raw URLs, or user-specific identifiers.
+`LogBrewTracingLayer` maps `trace`/`debug` to `info`, `warn` to `warning`, and `error` to `error`. It records `tracingTarget` and `tracingLevel`, but only copies additional primitive fields that your app allowlists with `with_allowed_fields(...)`; route-template field values are sanitized to remove query strings and hash fragments. With `with_span_events()`, the layer continues a valid `traceparent` or `trace_parent` field on a root span, generates W3C-shaped child span IDs, adds trace correlation to logs emitted inside a span, records parent/child span links, copies the sampled flag, and marks the current span as `error` when an error-level event is emitted inside it. Malformed trace context is ignored non-fatally and the raw propagation field is not emitted as metadata. Do not allowlist payloads, headers, account session values, raw URLs, or user-specific identifiers.
 
 ## W3C Trace Context
 

@@ -47,9 +47,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subscriber = tracing_subscriber::registry().with(layer);
 
     tracing::subscriber::with_default(subscriber, || {
+        let incoming_traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
         let checkout_span = tracing::info_span!(
             target: "checkout",
             "checkout.request",
+            traceparent = incoming_traceparent,
             routeTemplate = "/checkout/{cart_id}?coupon=sample#review",
             cartTier = "gold",
             unsafeDebug = ?vec!["debug-value"],

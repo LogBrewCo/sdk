@@ -7,6 +7,12 @@ import json
 import sys
 from pathlib import Path
 
+UPSTREAM_TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736"
+UPSTREAM_PARENT_SPAN_ID = "00f067aa0ba902b7"
+INCOMING_TRACEPARENT = (
+    f"00-{UPSTREAM_TRACE_ID}-{UPSTREAM_PARENT_SPAN_ID}-01"
+)
+
 
 def load_json(path: str) -> object:
     return json.loads(Path(path).read_text())
@@ -43,34 +49,46 @@ def main() -> int:
     require(metadata["statusCode"] == 202, "missing status code")
     require(metadata["sampled"] is True, "missing sampled flag")
     require(metadata["cartTier"] == "gold", "missing allowed app field")
-    require(metadata["traceId"] == "00000000000000000000000000000001", "missing log trace correlation")
+    require(metadata["traceId"] == UPSTREAM_TRACE_ID, "missing log trace correlation")
     require(metadata["spanId"] == "0000000000000001", "missing log span correlation")
+    require(
+        metadata["parentSpanId"] == UPSTREAM_PARENT_SPAN_ID,
+        "missing upstream parent span correlation",
+    )
     require("unsafeDebug" not in metadata, "non-primitive debug field should not be captured")
 
     error_log = events[3]["attributes"]
     require(error_log["message"] == "cart validation failed", "unexpected tracing error message")
     require(error_log["level"] == "error", "tracing error should stay canonical error")
-    require(error_log["metadata"]["traceId"] == "00000000000000000000000000000001", "missing error trace correlation")
+    require(error_log["metadata"]["traceId"] == UPSTREAM_TRACE_ID, "missing error trace correlation")
     require(error_log["metadata"]["spanId"] == "0000000000000002", "missing error span correlation")
     require(error_log["metadata"]["parentSpanId"] == "0000000000000001", "missing error parent span correlation")
+    require(error_log["metadata"]["sampled"] is True, "missing inherited sampled flag")
 
     child_span = events[4]["attributes"]
     require(child_span["name"] == "checkout.validate", "unexpected child span name")
-    require(child_span["traceId"] == "00000000000000000000000000000001", "unexpected child trace id")
+    require(child_span["traceId"] == UPSTREAM_TRACE_ID, "unexpected child trace id")
     require(child_span["spanId"] == "0000000000000002", "unexpected child span id")
     require(child_span["parentSpanId"] == "0000000000000001", "unexpected child parent span id")
     require(child_span["status"] == "error", "error event should mark current child span")
     require(child_span["durationMs"] >= 0, "child span duration should be non-negative")
+    require(child_span["metadata"]["sampled"] is True, "missing child sampled metadata")
 
     root_span = events[5]["attributes"]
     require(root_span["name"] == "checkout.request", "unexpected root span name")
-    require(root_span["traceId"] == "00000000000000000000000000000001", "unexpected root trace id")
+    require(root_span["traceId"] == UPSTREAM_TRACE_ID, "unexpected root trace id")
     require(root_span["spanId"] == "0000000000000001", "unexpected root span id")
+    require(
+        root_span["parentSpanId"] == UPSTREAM_PARENT_SPAN_ID,
+        "unexpected root upstream parent span id",
+    )
     require(root_span["status"] == "ok", "root span should not inherit child error status")
     require(root_span["durationMs"] >= 0, "root span duration should be non-negative")
     span_metadata = root_span["metadata"]
     require(span_metadata["routeTemplate"] == "/checkout/{cart_id}", "span routeTemplate was not sanitized")
     require(span_metadata["cartTier"] == "gold", "missing span app field")
+    require(span_metadata["sampled"] is True, "missing root sampled metadata")
+    require("traceparent" not in span_metadata, "raw traceparent should not be captured")
     require("unsafeDebug" not in span_metadata, "span non-primitive debug field should not be captured")
     blocked_header_field = "auth" + "orization"
     require(blocked_header_field not in span_metadata, "span should not capture unallowlisted sensitive fields")
@@ -84,6 +102,8 @@ def main() -> int:
         "requestbody",
         "card=sample",
         "debug-value",
+        INCOMING_TRACEPARENT,
+        "traceparent",
     ]:
         require(forbidden not in text, f"unsafe text leaked: {forbidden}")
 
