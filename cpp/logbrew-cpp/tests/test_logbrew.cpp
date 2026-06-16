@@ -132,6 +132,102 @@ void metric_helper_validates_and_serializes() {
   EXPECT_TRUE(json.find("\"sampled\":true") != std::string::npos);
 }
 
+void trace_context_helpers_validate_and_correlate() {
+  static const std::string incoming = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
+  logbrew::TraceContext context = logbrew::trace_context_from_traceparent(incoming);
+  EXPECT_TRUE(context.trace_id == "4bf92f3577b34da6a3ce929d0e0e4736");
+  EXPECT_TRUE(context.parent_span_id.has_value() && *context.parent_span_id == "00f067aa0ba902b7");
+  EXPECT_TRUE(context.span_id.size() == logbrew::span_id_length);
+  EXPECT_TRUE(context.span_id != *context.parent_span_id);
+  EXPECT_TRUE(context.sampled);
+  EXPECT_TRUE(context.trace_flags == "01");
+  const auto headers = logbrew::traceparent_headers(&context);
+  EXPECT_TRUE(headers.at("traceparent").find("00-4bf92f3577b34da6a3ce929d0e0e4736-") == 0U);
+  EXPECT_TRUE(headers.at("traceparent").substr(52U) == "-01");
+
+  try {
+    static_cast<void>(logbrew::trace_context_from_traceparent("bad"));
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
+  try {
+    static_cast<void>(logbrew::trace_context_from_traceparent(
+        "00-00000000000000000000000000000000-00f067aa0ba902b7-01"));
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
+  const logbrew::TraceContext fallback = logbrew::continue_or_create_trace_context("bad");
+  EXPECT_TRUE(fallback.trace_id.size() == logbrew::trace_id_length);
+  EXPECT_TRUE(!fallback.parent_span_id.has_value());
+
+  auto client = new_client();
+  logbrew::ProductTimelineContext timeline_context;
+  timeline_context.session_id = "session_123";
+  timeline_context.screen = "Checkout";
+  timeline_context.trace_id = "spoofed_trace";
+  timeline_context.funnel = "checkout";
+  timeline_context.step = "submit";
+
+  {
+    logbrew::TraceScope scope(context);
+    EXPECT_TRUE(logbrew::current_trace_context() != nullptr);
+    EXPECT_TRUE(logbrew::current_trace_context()->trace_id == context.trace_id);
+    {
+      logbrew::TraceScope nested_scope(logbrew::create_trace_context());
+      EXPECT_TRUE(logbrew::current_trace_context()->trace_id == nested_scope.context().trace_id);
+    }
+    EXPECT_TRUE(logbrew::current_trace_context() != nullptr);
+    EXPECT_TRUE(logbrew::current_trace_context()->trace_id == context.trace_id);
+
+    const auto trace_metadata = logbrew::trace_metadata();
+    const auto span = logbrew::trace_span_attributes("POST /checkout/{cart_id}", "error", 37.5);
+    timeline_context = logbrew::trace_product_timeline_context(timeline_context);
+    client.issue("evt_trace_issue", "2026-06-02T10:00:02Z",
+                 logbrew::IssueAttributes{"Checkout failed", "error", "request failed"});
+    client.log("evt_trace_log", "2026-06-02T10:00:03Z",
+               logbrew::LogAttributes{"checkout failed", "warn", "checkout"});
+    client.action("evt_trace_action", "2026-06-02T10:00:04Z",
+                  logbrew::ActionAttributes{"checkout.submit", "failure", {{"traceId", "spoofed_trace"}}});
+    client.span("evt_trace_span", "2026-06-02T10:00:05Z", span);
+    client.metric("evt_trace_metric", "2026-06-02T10:00:06Z",
+                  logbrew::MetricAttributes{"http.server.duration", "histogram", 37.5, "ms", "delta", trace_metadata});
+    client.capture_product_action(
+        "evt_trace_product_action",
+        "2026-06-02T10:00:07Z",
+        logbrew::ProductActionAttributes{"checkout.submit", "failure", timeline_context, {}});
+    client.capture_network_milestone(
+        "evt_trace_network",
+        "2026-06-02T10:00:08Z",
+        logbrew::NetworkMilestoneAttributes{
+            "post",
+            "https://native.example.test/api/checkout?card=redacted#pay",
+            503,
+            37.5,
+            std::nullopt,
+            timeline_context,
+            {}});
+  }
+  EXPECT_TRUE(logbrew::current_trace_context() == nullptr);
+
+  const std::string json = client.preview_json();
+  EXPECT_TRUE(json.find("\"traceId\":\"4bf92f3577b34da6a3ce929d0e0e4736\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"parentSpanId\":\"00f067aa0ba902b7\"") != std::string::npos);
+  EXPECT_TRUE(json.find(context.span_id) != std::string::npos);
+  EXPECT_TRUE(json.find("\"sampled\":true") != std::string::npos);
+  EXPECT_TRUE(json.find("\"traceFlags\":\"01\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"type\":\"issue\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"type\":\"log\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"type\":\"span\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"type\":\"metric\"") != std::string::npos);
+  EXPECT_TRUE(json.find("\"name\":\"POST /api/checkout\"") != std::string::npos);
+  EXPECT_TRUE(json.find("spoofed_trace") == std::string::npos);
+  EXPECT_TRUE(json.find("traceparent") == std::string::npos);
+  EXPECT_TRUE(json.find("card=redacted") == std::string::npos);
+  EXPECT_TRUE(json.find("#pay") == std::string::npos);
+}
+
 void flush_success_clears_queue() {
   auto client = new_client();
   queue_fixture_events(client);
@@ -336,6 +432,7 @@ int main() {
   preview_json_contains_all_supported_event_types();
   product_timeline_helpers_capture_safe_metadata();
   metric_helper_validates_and_serializes();
+  trace_context_helpers_validate_and_correlate();
   flush_success_clears_queue();
   empty_flush_is_no_op();
   validation_failures_are_stable();

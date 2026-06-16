@@ -106,6 +106,31 @@ client.capture_network_milestone("evt_network_checkout_confirm", "2026-06-02T10:
 
 Timeline helpers are app-owned and explicit. They do not patch HTTP clients, auto-capture clicks, collect request or response bodies, capture headers, or include URL query strings and hashes. Keep metadata primitive and low-cardinality, such as `sessionId`, `screen`, `traceId`, `funnel`, `step`, status codes, durations, and stable route templates.
 
+## W3C Trace Correlation
+
+Use `TraceContext` and `TraceScope` when one native request or operation should connect logs, issues, product actions, metrics, spans, and downstream calls into the same trace:
+
+```cpp
+auto trace = logbrew::continue_or_create_trace_context(incomingTraceparent);
+logbrew::TraceScope scope(trace);
+
+client.log(
+    "evt_log_checkout_failed",
+    "2026-06-02T10:00:03Z",
+    logbrew::LogAttributes{"checkout failed", "warning", "checkout"});
+
+client.span(
+    "evt_span_checkout",
+    "2026-06-02T10:00:04Z",
+    logbrew::trace_span_attributes("POST /checkout/{cart_id}", "error", 37.5));
+
+auto headers = logbrew::traceparent_headers();
+```
+
+`trace_context_from_traceparent(...)` strictly validates the W3C `version-traceId-parentSpanId-traceFlags` shape, rejects forbidden and all-zero IDs, normalizes IDs to lowercase, preserves sampled state, and creates a fresh local span ID. `continue_or_create_trace_context(...)` falls back to a local root trace when the incoming value is missing or malformed, so bad propagation does not break application work.
+
+When a `TraceScope` is active, `LogBrewClient` automatically adds primitive `traceId`, `spanId`, `parentSpanId`, `sampled`, and `traceFlags` metadata to issue, log, action, and metric events. `trace_span_attributes(...)` reuses the same active span ID for an explicit span event, `trace_product_timeline_context(...)` adds the active trace ID to product timelines, and `traceparent_headers()` returns only a normalized `traceparent` header for app-owned outbound requests. These helpers do not patch HTTP clients, capture request/response payloads, serialize raw incoming propagation headers, or include URL query strings and hashes.
+
 ## Example Source
 
-The `examples/readme_example.cpp` source shows a complete six-event payload and recording transport setup that you can copy into your own native application.
+The `examples/readme_example.cpp` source shows a complete six-event payload and recording transport setup that you can copy into your own native application. `examples/trace_correlation.cpp` shows one W3C trace connecting a C++ issue, log, action, span, metric, product action, network milestone, and outgoing `traceparent`.

@@ -22,7 +22,9 @@ on_error() {
     "$tmp_dir/readme-example.stdout.json" \
     "$tmp_dir/readme-example.stderr.json" \
     "$tmp_dir/real-user-smoke.stdout.json" \
-    "$tmp_dir/real-user-smoke.stderr.json"; do
+    "$tmp_dir/real-user-smoke.stderr.json" \
+    "$tmp_dir/trace-correlation.stdout.json" \
+    "$tmp_dir/trace-correlation.stderr.json"; do
     if [[ -f "$diagnostic" ]]; then
       echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
       sed -n '1,80p' "$diagnostic" >&2
@@ -68,10 +70,15 @@ tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/logbrew.hpp"
 test -f "$sdk_dir/src/logbrew.cpp"
 test -f "$sdk_dir/src/logbrew_http_transport.cpp"
+test -f "$sdk_dir/examples/trace_correlation.cpp"
 grep -q 'capture_product_action' "$sdk_dir/include/logbrew.hpp"
 grep -q 'capture_network_milestone' "$sdk_dir/include/logbrew.hpp"
 grep -q 'MetricAttributes' "$sdk_dir/include/logbrew.hpp"
 grep -q 'metric(' "$sdk_dir/include/logbrew.hpp"
+grep -q 'TraceContext' "$sdk_dir/include/logbrew.hpp"
+grep -q 'TraceScope' "$sdk_dir/include/logbrew.hpp"
+grep -q 'trace_context_from_traceparent' "$sdk_dir/include/logbrew.hpp"
+grep -q 'traceparent_headers' "$sdk_dir/include/logbrew.hpp"
 grep -q 'HttpTransport' "$sdk_dir/include/logbrew.hpp"
 
 cat > "$app_dir/main.cpp" <<'EOF'
@@ -401,11 +408,17 @@ run_examples_make > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
+grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 run_examples_make run-readme-example > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 run_examples_make run-real-user-smoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+run_examples_make run-trace-correlation > "$tmp_dir/trace-correlation.stdout.json" 2> "$tmp_dir/trace-correlation.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/trace-correlation.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_cpp_trace_correlation_payload.py" \
+  "$tmp_dir/trace-correlation.stdout.json" \
+  "$tmp_dir/trace-correlation.stderr.json"
 
 echo "c++ real-user smoke passed with $($cxx_command --version | head -n 1)"

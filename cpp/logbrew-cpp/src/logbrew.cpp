@@ -5,15 +5,86 @@
 #include <cmath>
 #include <functional>
 #include <iomanip>
+#include <random>
 #include <sstream>
 
 namespace logbrew {
 namespace {
 
+thread_local const TraceContext *active_trace_context = nullptr;
+
 [[nodiscard]] bool is_blank(const std::string &value) {
   return std::all_of(value.begin(), value.end(), [](unsigned char character) {
     return std::isspace(character) != 0;
   });
+}
+
+[[nodiscard]] bool is_hex_character(char value) {
+  return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f') || (value >= 'A' && value <= 'F');
+}
+
+[[nodiscard]] int hex_value(char value) {
+  if (value >= '0' && value <= '9') {
+    return value - '0';
+  }
+  return static_cast<int>(std::tolower(static_cast<unsigned char>(value)) - 'a') + 10;
+}
+
+[[nodiscard]] std::string lower_hex(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+    return static_cast<char>(std::tolower(character));
+  });
+  return value;
+}
+
+[[nodiscard]] bool valid_non_zero_hex(const std::string &value, std::size_t length) {
+  bool any_non_zero = false;
+  if (value.size() != length) {
+    return false;
+  }
+  for (const char character : value) {
+    if (!is_hex_character(character)) {
+      return false;
+    }
+    if (character != '0') {
+      any_non_zero = true;
+    }
+  }
+  return any_non_zero;
+}
+
+void require_valid_trace_context(const TraceContext &context) {
+  if (!valid_non_zero_hex(context.trace_id, trace_id_length)) {
+    throw SdkException("validation_error", "trace context trace_id is invalid");
+  }
+  if (!valid_non_zero_hex(context.span_id, span_id_length)) {
+    throw SdkException("validation_error", "trace context span_id is invalid");
+  }
+  if (context.parent_span_id.has_value() && !valid_non_zero_hex(*context.parent_span_id, span_id_length)) {
+    throw SdkException("validation_error", "trace context parent_span_id is invalid");
+  }
+  if (context.trace_flags.size() != trace_flags_length ||
+      !std::all_of(context.trace_flags.begin(), context.trace_flags.end(), is_hex_character)) {
+    throw SdkException("validation_error", "trace context trace_flags are invalid");
+  }
+}
+
+[[nodiscard]] std::string generated_hex(std::size_t length) {
+  static constexpr char hex[] = "0123456789abcdef";
+  static thread_local std::mt19937_64 generator{std::random_device{}()};
+  std::uniform_int_distribution<int> distribution(0, 15);
+  std::string value;
+  bool any_non_zero = false;
+  value.reserve(length);
+  for (std::size_t index = 0; index < length; index++) {
+    const int nibble = distribution(generator);
+    value.push_back(hex[nibble]);
+    any_non_zero = any_non_zero || nibble != 0;
+  }
+  if (!any_non_zero && !value.empty()) {
+    value.back() = '1';
+  }
+  return value;
 }
 
 [[nodiscard]] std::string trim_copy(const std::string &value) {
@@ -250,6 +321,14 @@ void append_metadata_object(std::ostringstream &output, bool &needs_comma, const
   needs_comma = true;
 }
 
+[[nodiscard]] Metadata merge_active_trace_metadata(Metadata metadata) {
+  Metadata trace = trace_metadata();
+  for (const auto &entry : trace) {
+    metadata[entry.first] = entry.second;
+  }
+  return metadata;
+}
+
 [[nodiscard]] Metadata timeline_metadata(
     const std::string &source,
     const ProductTimelineContext &context,
@@ -341,6 +420,145 @@ double MetadataValue::number_value() const noexcept {
 
 const std::string &MetadataValue::string_value() const noexcept {
   return string_value_;
+}
+
+TraceContext create_trace_context(std::string trace_flags) {
+  trace_flags = lower_hex(trim_copy(trace_flags));
+  if (trace_flags.size() != trace_flags_length ||
+      !std::all_of(trace_flags.begin(), trace_flags.end(), is_hex_character)) {
+    throw SdkException("validation_error", "trace flags must be two hex characters");
+  }
+  return TraceContext{
+      generated_hex(trace_id_length),
+      generated_hex(span_id_length),
+      std::nullopt,
+      trace_flags,
+      (hex_value(trace_flags.back()) & 0x01) == 0x01,
+  };
+}
+
+TraceContext trace_context_from_traceparent(const std::string &traceparent) {
+  const std::string value = trim_copy(traceparent);
+  if (value.size() != traceparent_length || value[2] != '-' || value[35] != '-' || value[52] != '-') {
+    throw SdkException("validation_error", "traceparent must use W3C version-traceid-spanid-flags shape");
+  }
+  const std::string version = lower_hex(value.substr(0, 2));
+  const std::string trace_id = lower_hex(value.substr(3, trace_id_length));
+  const std::string parent_span_id = lower_hex(value.substr(36, span_id_length));
+  const std::string trace_flags = lower_hex(value.substr(53, trace_flags_length));
+  if (version == "ff" || !std::all_of(version.begin(), version.end(), is_hex_character)) {
+    throw SdkException("validation_error", "traceparent version is invalid");
+  }
+  if (!valid_non_zero_hex(trace_id, trace_id_length)) {
+    throw SdkException("validation_error", "traceparent trace id is invalid");
+  }
+  if (!valid_non_zero_hex(parent_span_id, span_id_length)) {
+    throw SdkException("validation_error", "traceparent span id is invalid");
+  }
+  if (!std::all_of(trace_flags.begin(), trace_flags.end(), is_hex_character)) {
+    throw SdkException("validation_error", "traceparent trace flags are invalid");
+  }
+  return TraceContext{
+      trace_id,
+      generated_hex(span_id_length),
+      parent_span_id,
+      trace_flags,
+      (hex_value(trace_flags.back()) & 0x01) == 0x01,
+  };
+}
+
+TraceContext continue_or_create_trace_context(const std::string &traceparent) {
+  if (!is_blank(traceparent)) {
+    try {
+      return trace_context_from_traceparent(traceparent);
+    } catch (const SdkException &) {
+      return create_trace_context();
+    }
+  }
+  return create_trace_context();
+}
+
+const TraceContext *current_trace_context() noexcept {
+  return active_trace_context;
+}
+
+TraceScope::TraceScope(TraceContext context)
+    : context_(std::move(context)), previous_(active_trace_context) {
+  require_valid_trace_context(context_);
+  active_trace_context = &context_;
+}
+
+TraceScope::~TraceScope() {
+  active_trace_context = previous_;
+}
+
+const TraceContext &TraceScope::context() const noexcept {
+  return context_;
+}
+
+Metadata trace_metadata(const TraceContext *context) {
+  if (context == nullptr) {
+    context = active_trace_context;
+  }
+  if (context == nullptr || is_blank(context->trace_id) || is_blank(context->span_id)) {
+    return {};
+  }
+  require_valid_trace_context(*context);
+  Metadata metadata{
+      {"traceId", context->trace_id},
+      {"spanId", context->span_id},
+      {"sampled", context->sampled},
+      {"traceFlags", context->trace_flags},
+  };
+  if (context->parent_span_id.has_value()) {
+    metadata["parentSpanId"] = *context->parent_span_id;
+  }
+  return metadata;
+}
+
+ProductTimelineContext trace_product_timeline_context(ProductTimelineContext context, const TraceContext *trace) {
+  if (trace == nullptr) {
+    trace = active_trace_context;
+  }
+  if (trace != nullptr && !is_blank(trace->trace_id)) {
+    require_valid_trace_context(*trace);
+    context.trace_id = trace->trace_id;
+  }
+  return context;
+}
+
+SpanAttributes trace_span_attributes(
+    std::string name,
+    std::string status,
+    std::optional<double> duration_ms,
+    const TraceContext *context) {
+  if (context == nullptr) {
+    context = active_trace_context;
+  }
+  if (context == nullptr || is_blank(context->trace_id) || is_blank(context->span_id)) {
+    throw SdkException("validation_error", "trace context is required");
+  }
+  require_valid_trace_context(*context);
+  return SpanAttributes{
+      std::move(name),
+      context->trace_id,
+      context->span_id,
+      context->parent_span_id,
+      std::move(status),
+      duration_ms,
+  };
+}
+
+std::map<std::string, std::string> traceparent_headers(const TraceContext *context) {
+  if (context == nullptr) {
+    context = active_trace_context;
+  }
+  if (context == nullptr || is_blank(context->trace_id) || is_blank(context->span_id) ||
+      is_blank(context->trace_flags)) {
+    throw SdkException("validation_error", "trace context is required");
+  }
+  require_valid_trace_context(*context);
+  return {{"traceparent", "00-" + context->trace_id + "-" + context->span_id + "-" + context->trace_flags}};
 }
 
 RecordingTransport::Step RecordingTransport::Step::status_code_step(int status_code) {
@@ -450,6 +668,7 @@ void LogBrewClient::issue(std::string id, std::string timestamp, IssueAttributes
                append_field(output, needs_comma, "title", attributes.title);
                append_field(output, needs_comma, "level", level);
                append_optional_field(output, needs_comma, "message", attributes.message, false);
+               append_metadata_object(output, needs_comma, trace_metadata());
              }));
 }
 
@@ -460,6 +679,7 @@ void LogBrewClient::log(std::string id, std::string timestamp, LogAttributes att
                append_field(output, needs_comma, "message", attributes.message);
                append_field(output, needs_comma, "level", level);
                append_optional_field(output, needs_comma, "logger", attributes.logger, false);
+               append_metadata_object(output, needs_comma, trace_metadata());
              }));
 }
 
@@ -505,7 +725,7 @@ void LogBrewClient::metric(std::string id, std::string timestamp, MetricAttribut
                append_number_field(output, needs_comma, "value", attributes.value);
                append_field(output, needs_comma, "unit", attributes.unit);
                append_field(output, needs_comma, "temporality", attributes.temporality);
-               append_metadata_object(output, needs_comma, attributes.metadata);
+               append_metadata_object(output, needs_comma, merge_active_trace_metadata(std::move(attributes.metadata)));
              }));
 }
 
@@ -515,7 +735,7 @@ void LogBrewClient::action(std::string id, std::string timestamp, ActionAttribut
   push_event("action", std::move(id), std::move(timestamp), object_json([&](std::ostringstream &output, bool &needs_comma) {
                append_field(output, needs_comma, "name", attributes.name);
                append_field(output, needs_comma, "status", attributes.status);
-               append_metadata_object(output, needs_comma, attributes.metadata);
+               append_metadata_object(output, needs_comma, merge_active_trace_metadata(std::move(attributes.metadata)));
              }));
 }
 

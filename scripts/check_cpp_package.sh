@@ -62,10 +62,16 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/smoke.stderr.json"
 
+"$cxx_command" "${cxxflags[@]}" "$package_dir/src/logbrew.cpp" "$package_dir/examples/trace_correlation.cpp" -o "$tmp_dir/build/trace_correlation"
+"$tmp_dir/build/trace_correlation" > "$tmp_dir/trace.stdout.json" 2> "$tmp_dir/trace.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/trace.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_cpp_trace_correlation_payload.py" "$tmp_dir/trace.stdout.json" "$tmp_dir/trace.stderr.json"
+
 run_examples_make > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
+grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 
 archive="$tmp_dir/logbrew-cpp-0.1.0.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
@@ -77,6 +83,7 @@ grep -qx 'src/logbrew.cpp' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_http_transport.cpp' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/readme_example.cpp' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/real_user_smoke.cpp' "$tmp_dir/archive-contents.txt"
+grep -qx 'examples/trace_correlation.cpp' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'tests/test_logbrew.cpp' "$tmp_dir/archive-contents.txt"
 
@@ -104,6 +111,10 @@ for needle in (
     "Sending To LogBrew",
     "capture_product_action",
     "capture_network_milestone",
+    "W3C Trace Correlation",
+    "TraceScope",
+    "trace_context_from_traceparent",
+    "traceparent_headers",
     "HttpTransport",
     "do not patch HTTP clients",
     "copy into your own native application",
@@ -119,6 +130,10 @@ for needle in (
     "ProductTimelineContext",
     "capture_product_action",
     "capture_network_milestone",
+    "TraceContext",
+    "TraceScope",
+    "trace_context_from_traceparent",
+    "traceparent_headers",
     "HttpTransport",
     "http_transport_default_endpoint",
     "RecordingTransport",

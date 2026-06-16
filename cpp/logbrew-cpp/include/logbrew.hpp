@@ -13,6 +13,10 @@ namespace logbrew {
 
 inline constexpr const char *version = "0.1.0";
 inline constexpr const char *http_transport_default_endpoint = "https://api.logbrew.com/v1/events";
+inline constexpr std::size_t trace_id_length = 32U;
+inline constexpr std::size_t span_id_length = 16U;
+inline constexpr std::size_t trace_flags_length = 2U;
+inline constexpr std::size_t traceparent_length = 55U;
 
 class SdkException final : public std::runtime_error {
 public:
@@ -142,6 +146,29 @@ private:
 
 using Metadata = std::map<std::string, MetadataValue>;
 
+struct TraceContext {
+  std::string trace_id;
+  std::string span_id;
+  std::optional<std::string> parent_span_id;
+  std::string trace_flags = "01";
+  bool sampled = true;
+};
+
+class TraceScope final {
+public:
+  explicit TraceScope(TraceContext context);
+  ~TraceScope();
+
+  TraceScope(const TraceScope &) = delete;
+  TraceScope &operator=(const TraceScope &) = delete;
+
+  [[nodiscard]] const TraceContext &context() const noexcept;
+
+private:
+  TraceContext context_;
+  const TraceContext *previous_ = nullptr;
+};
+
 struct MetricAttributes {
   std::string name;
   std::string kind;
@@ -182,6 +209,21 @@ struct NetworkMilestoneAttributes {
   ProductTimelineContext context = {};
   Metadata metadata = {};
 };
+
+[[nodiscard]] TraceContext create_trace_context(std::string trace_flags = "01");
+[[nodiscard]] TraceContext trace_context_from_traceparent(const std::string &traceparent);
+[[nodiscard]] TraceContext continue_or_create_trace_context(const std::string &traceparent);
+[[nodiscard]] const TraceContext *current_trace_context() noexcept;
+[[nodiscard]] Metadata trace_metadata(const TraceContext *context = nullptr);
+[[nodiscard]] ProductTimelineContext trace_product_timeline_context(
+    ProductTimelineContext context,
+    const TraceContext *trace = nullptr);
+[[nodiscard]] SpanAttributes trace_span_attributes(
+    std::string name,
+    std::string status,
+    std::optional<double> duration_ms = std::nullopt,
+    const TraceContext *context = nullptr);
+[[nodiscard]] std::map<std::string, std::string> traceparent_headers(const TraceContext *context = nullptr);
 
 class RecordingTransport final : public Transport {
 public:
