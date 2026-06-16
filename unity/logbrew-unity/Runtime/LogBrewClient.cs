@@ -83,7 +83,7 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(attributes));
             }
 
-            PushEvent("issue", id, timestamp, attributes.ToJsonObject());
+            PushEvent("issue", id, timestamp, LogBrewTrace.AddActiveTraceMetadata(attributes.ToJsonObject()));
         }
 
         public void Log(string id, string timestamp, LogAttributes attributes)
@@ -93,7 +93,7 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(attributes));
             }
 
-            PushEvent("log", id, timestamp, attributes.ToJsonObject());
+            PushEvent("log", id, timestamp, LogBrewTrace.AddActiveTraceMetadata(attributes.ToJsonObject()));
         }
 
         public void Span(string id, string timestamp, SpanAttributes attributes)
@@ -113,7 +113,7 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(attributes));
             }
 
-            PushEvent("action", id, timestamp, attributes.ToJsonObject());
+            PushEvent("action", id, timestamp, LogBrewTrace.AddActiveTraceMetadata(attributes.ToJsonObject()));
         }
 
         public TransportResponse Flush(ITransport transport)

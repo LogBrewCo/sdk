@@ -25,7 +25,8 @@ namespace LogBrew.Unity.Tests
             Run("non_retryable_status_preserves_queue", NonRetryableStatusPreservesQueue);
             Run("shutdown_flushes_and_prevents_future_events", ShutdownFlushesAndPreventsFutureEvents);
             Run("unity_helpers_add_context_metadata", UnityHelpersAddContextMetadata);
-            Console.WriteLine("unity package tests ok (15 tests)");
+            Run("trace_context_helpers_validate_and_correlate", TraceContextHelpersValidateAndCorrelate);
+            Console.WriteLine("unity package tests ok (16 tests)");
         }
 
         private static void Run(string name, Action test)
@@ -267,11 +268,104 @@ namespace LogBrew.Unity.Tests
             AssertContains(body, "\"source\": \"unity\"");
         }
 
+        private static void TraceContextHelpersValidateAndCorrelate()
+        {
+            const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+            const string parentSpanId = "00f067aa0ba902b7";
+            const string incoming = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
+
+            AssertFalse(LogBrewTraceContext.TryFromTraceparent("00-00000000000000000000000000000000-00f067aa0ba902b7-01", out _), "zero trace id should fail");
+            AssertFalse(LogBrewTraceContext.TryFromTraceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01", out _), "zero parent span should fail");
+            AssertFalse(LogBrewTraceContext.TryFromTraceparent("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", out _), "unsupported version should fail");
+            AssertFalse(LogBrewTraceContext.TryFromTraceparent("not-a-traceparent", out _), "malformed traceparent should fail");
+
+            var context = LogBrewTraceContext.FromTraceparent(incoming);
+            AssertEqual(traceId, context.TraceId);
+            AssertEqual(parentSpanId, context.ParentSpanId ?? string.Empty);
+            AssertEqual("01", context.TraceFlags);
+            AssertTrue(context.Sampled, "sampled flag should be true");
+            AssertNotEqual(parentSpanId, context.SpanId);
+            AssertContains(LogBrewTrace.OutgoingHeaders(context)["traceparent"], traceId);
+
+            var fallback = LogBrewTraceContext.ContinueOrCreate("not-a-traceparent");
+            AssertEqual(string.Empty, fallback.ParentSpanId ?? string.Empty);
+            AssertTrue(fallback.Traceparent.StartsWith("00-", StringComparison.Ordinal), "fallback should create W3C traceparent");
+
+            var client = NewClient();
+            using (LogBrewTrace.Activate(context))
+            {
+                var child = LogBrewTraceContext.CreateChild(context);
+                using (LogBrewTrace.Activate(child))
+                {
+                    AssertEqual(child.SpanId, LogBrewTrace.Current?.SpanId ?? string.Empty);
+                }
+
+                AssertEqual(context.SpanId, LogBrewTrace.Current?.SpanId ?? string.Empty);
+                client.Issue(
+                    "evt_unity_trace_issue_001",
+                    "2026-06-02T10:00:10Z",
+                    IssueAttributes.Create("Unity checkout timeout", "error").WithMessage("request timed out").WithMetadata(new Dictionary<string, object?>
+                    {
+                        ["traceId"] = "spoofed_trace",
+                        ["spanId"] = "spoofed_span",
+                        ["parentSpanId"] = "spoofed_parent",
+                        ["traceFlags"] = "ff",
+                        ["traceSampled"] = false,
+                        ["sceneName"] = "Checkout"
+                    }));
+                client.Log(
+                    "evt_unity_trace_log_001",
+                    "2026-06-02T10:00:11Z",
+                    LogAttributes.Create("checkout button tapped", "info").WithLogger("unity-ui"));
+                client.Action(
+                    "evt_unity_trace_action_001",
+                    "2026-06-02T10:00:12Z",
+                    ActionAttributes.Create("checkout_submit", "running"));
+                client.Span(
+                    "evt_unity_trace_span_001",
+                    "2026-06-02T10:00:13Z",
+                    LogBrewTrace.SpanAttributes(
+                        "POST /checkout/{cart_id}",
+                        "error",
+                        37.5,
+                        new Dictionary<string, object?> { ["route"] = "POST /checkout/{cart_id}" }));
+                LogBrewUnity.CaptureSceneLoaded(client, "evt_unity_trace_scene_001", "2026-06-02T10:00:14Z", "Checkout", 2);
+                LogBrewUnity.CaptureLogMessage(client, "evt_unity_trace_helper_log_001", "2026-06-02T10:00:15Z", "Unity warning", "Warning");
+                LogBrewUnity.CaptureException(client, "evt_unity_trace_exception_001", "2026-06-02T10:00:16Z", "NullReferenceException", "stack trace");
+            }
+
+            AssertEqual(string.Empty, LogBrewTrace.Current?.SpanId ?? string.Empty);
+            var body = client.PreviewJson();
+            AssertContains(body, "\"traceId\": \"" + traceId + "\"");
+            AssertContains(body, "\"spanId\": \"" + context.SpanId + "\"");
+            AssertContains(body, "\"parentSpanId\": \"" + parentSpanId + "\"");
+            AssertContains(body, "\"traceFlags\": \"01\"");
+            AssertContains(body, "\"traceSampled\": true");
+            AssertContains(body, "\"type\": \"span\"");
+            AssertContains(body, "\"name\": \"POST /checkout/{cart_id}\"");
+            AssertContains(body, "\"durationMs\": 37.5");
+            AssertContains(body, "\"name\": \"scene_loaded\"");
+            AssertContains(body, "\"unityLogType\": \"Warning\"");
+            AssertDoesNotContain(body, "spoofed_trace");
+            AssertDoesNotContain(body, "spoofed_span");
+            AssertDoesNotContain(body, "spoofed_parent");
+            AssertDoesNotContain(body, "4BF92F");
+            AssertDoesNotContain(body, "traceparent");
+        }
+
         private static void AssertContains(string haystack, string needle)
         {
             if (!haystack.Contains(needle, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("missing " + needle);
+            }
+        }
+
+        private static void AssertDoesNotContain(string haystack, string needle)
+        {
+            if (haystack.Contains(needle, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("unexpected " + needle);
             }
         }
 
@@ -288,6 +382,30 @@ namespace LogBrew.Unity.Tests
             if (!string.Equals(expected, actual, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("expected " + expected + " but got " + actual);
+            }
+        }
+
+        private static void AssertNotEqual(string notExpected, string actual)
+        {
+            if (string.Equals(notExpected, actual, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("did not expect " + notExpected);
+            }
+        }
+
+        private static void AssertTrue(bool value, string message)
+        {
+            if (!value)
+            {
+                throw new InvalidOperationException(message);
+            }
+        }
+
+        private static void AssertFalse(bool value, string message)
+        {
+            if (value)
+            {
+                throw new InvalidOperationException(message);
             }
         }
     }
