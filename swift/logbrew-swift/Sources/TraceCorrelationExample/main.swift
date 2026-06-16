@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
 import LogBrew
 
 let client = try LogBrewClient.create(
@@ -77,6 +80,22 @@ try LogBrewTrace.withContext(trace) {
             metadata: ["routeTemplate": "/api/checkout"],
         ),
     )
+    var request = URLRequest(url: URL(string: "https://api.example.com/api/checkout?cart_id=123#pay")!)
+    request.httpMethod = "post"
+    request.setValue("app-owned-header-value", forHTTPHeaderField: "x-app-context")
+    let urlSessionSpan = try LogBrewTrace.startURLSessionSpan(for: request)
+    let propagatedTraceparent = urlSessionSpan.request.value(forHTTPHeaderField: "traceparent")
+    precondition(propagatedTraceparent == urlSessionSpan.traceContext.traceparent)
+    precondition(urlSessionSpan.request.value(forHTTPHeaderField: "x-app-context") == "app-owned-header-value")
+    precondition(urlSessionSpan.traceContext.parentSpanId == trace.spanId)
+    try client.captureURLSessionSpan(
+        "evt_urlsession_span_001",
+        timestamp: "2026-06-02T10:00:08Z",
+        span: urlSessionSpan,
+        statusCode: 503,
+        durationMs: 184.5,
+        metadata: ["component": "pay-api"],
+    )
 
     let headers = LogBrewTrace.outgoingHeaders()
     precondition(headers["traceparent"] == trace.traceparent)
@@ -87,12 +106,13 @@ try LogBrewTrace.withContext(trace) {
 let preview = try client.previewJSON()
 precondition(!preview.contains("cart_id"))
 precondition(!preview.contains("#pay"))
+precondition(!preview.contains("app-owned-header-value"))
 precondition(!preview.contains("traceparent\""))
 print(preview)
 
 let summaryFields = [
     #""ok":true"#,
-    #""events":8"#,
+    #""events":9"#,
     #""traceId":"\#(trace.traceId)""#,
     #""spanId":"\#(trace.spanId)""#,
     #""parentSpanId":"\#(trace.parentSpanId ?? "")""#,

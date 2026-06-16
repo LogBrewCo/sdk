@@ -12,6 +12,7 @@ LogBrew Swift had product timeline helpers and explicit span attributes, but it 
 - OpenTelemetry files/functions read: `Sources/Bridges/OTelSwiftLog/LogHandler.swift` active span-to-log record correlation, `Sources/Importers/OpenTracingShim/Propagation.swift` text-map extraction/injection, `Sources/Instrumentation/URLSession/URLSessionLogger.swift` URLSession span creation and propagation injection.
 - Datadog iOS `DataDog/dd-sdk-ios@6462c0b81f5221072008443925d8bbf18aa5750b`
 - Datadog files/functions read: `DatadogLogs/Sources/RemoteLogger.swift` active span IDs on log events, `DatadogInternal/Sources/NetworkInstrumentation/TraceContext.swift`, `DatadogInternal/Sources/NetworkInstrumentation/Datadog/HTTPHeadersWriter.swift`, and `DatadogRUM/Sources/Instrumentation/Resources/URLSessionRUMResourcesHandler.swift` active-span reuse for resource traces and propagation.
+- URLSession helper follow-up reread the same current source commits, focusing on OpenTelemetry `URLSessionLogger.processAndLogRequest(...)` / `instrumentedRequest(...)`, Datadog `DistributedTracing.modify(...)` / `URLSessionRUMResourcesHandler.interceptionDidStart(...)`, and Sentry `SentryTracePropagation.addBaggageHeader(...)` / `addHeaderFieldsToRequest(...)` plus public `urlSession`, `urlSessionDelegate`, and `tracePropagationTargets` options.
 
 ## Competitor Pattern
 
@@ -29,11 +30,13 @@ LogBrew Swift had product timeline helpers and explicit span attributes, but it 
 - `captureProductAction(...)` and `captureNetworkMilestone(...)` now merge active trace metadata while keeping existing route/query privacy behavior.
 - `LogBrewTrace.spanAttributes(...)` creates span attributes from the active context, including `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata.
 - `LogBrewTrace.outgoingHeaders()` returns only a normalized W3C `traceparent` header for app-owned `URLRequest` usage.
+- `LogBrewTrace.startURLSessionSpan(...)` now creates an explicit child span context, returns a copied `URLRequest` with only `traceparent` injected, and keeps the request span ID aligned with `LogBrewClient.captureURLSessionSpan(...)`.
+- `captureURLSessionSpan(...)` records sanitized method, route template, status code, duration, primitive metadata, and error type without serializing the raw URL, request/response headers, request/response bodies, or raw propagation header.
 - `LogBrewClient` event queue access is now lock-protected for logger and async trace usage.
 
 ## Privacy and Weight Tradeoff
 
-LogBrew intentionally did not copy Sentry scope internals, OpenTelemetry URLSession patching, or Datadog RUM/network auto-instrumentation. The Swift SDK still does not patch `URLSession`, capture request/response bodies, collect arbitrary headers, store raw propagation headers, emit visual replay, or create automatic DB/network child spans. Those should remain explicit or belong in dedicated framework packages.
+LogBrew intentionally did not copy Sentry scope internals, OpenTelemetry URLSession patching, or Datadog RUM/network auto-instrumentation. The Swift SDK still does not patch `URLSession`, capture request/response bodies, collect arbitrary headers, store raw propagation headers, emit visual replay, or create automatic DB/network child spans. URLSession spans are app-owned and explicit: the helper only prepares the request the app passes to URLSession and records a matching span when the app reports completion. Richer automatic instrumentation should remain in dedicated framework packages.
 
 ## Evidence
 
@@ -45,5 +48,5 @@ LogBrew intentionally did not copy Sentry scope internals, OpenTelemetry URLSess
 
 ## Remaining Gaps
 
-- Swift still lacks dedicated SwiftUI/UIKit/AppKit lifecycle spans, URLSession child-span instrumentation, baggage/tracestate, existing OpenTelemetry context ingestion, and rich span events/exceptions.
+- Swift still lacks dedicated SwiftUI/UIKit/AppKit lifecycle spans, automatic URLSession instrumentation, baggage/tracestate, existing OpenTelemetry context ingestion, and rich span events/exceptions.
 - Objective-C, C, C++, Kotlin Android, Unity, and React Native still need the newer active trace/error-correlation pattern or richer mobile-native equivalents.

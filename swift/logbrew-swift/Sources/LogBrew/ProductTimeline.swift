@@ -115,7 +115,7 @@ private func copyOptionalString(_ key: String, _ value: String?, into output: in
     output[key] = .string(value)
 }
 
-private func copyMetadata(_ metadata: Metadata?, into output: inout Metadata) throws {
+func copyMetadata(_ metadata: Metadata?, into output: inout Metadata) throws {
     guard let metadata else {
         return
     }
@@ -128,12 +128,12 @@ private func copyMetadata(_ metadata: Metadata?, into output: inout Metadata) th
     }
 }
 
-private func normalizedNetworkMethod(_ method: String) throws -> String {
+func normalizedNetworkMethod(_ method: String) throws -> String {
     try requireNonEmpty("network method", method)
     return method.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
 }
 
-private func normalizedRouteTemplate(_ routeTemplate: String) throws -> String {
+func normalizedRouteTemplate(_ routeTemplate: String) throws -> String {
     try requireNonEmpty("network routeTemplate", routeTemplate)
     let trimmed = routeTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
     if let components = URLComponents(string: trimmed), components.scheme == "http" || components.scheme == "https" {
@@ -157,7 +157,7 @@ private func stripQueryAndHash(_ value: String) -> String {
     return String(withoutHash)
 }
 
-private func validatedStatusCode(_ statusCode: Int?) throws -> Int? {
+func validatedStatusCode(_ statusCode: Int?) throws -> Int? {
     guard let statusCode else {
         return nil
     }
@@ -167,7 +167,7 @@ private func validatedStatusCode(_ statusCode: Int?) throws -> Int? {
     return statusCode
 }
 
-private func validatedDurationMs(_ durationMs: Double?) throws -> Double? {
+func validatedDurationMs(_ durationMs: Double?) throws -> Double? {
     guard let durationMs else {
         return nil
     }
@@ -177,7 +177,7 @@ private func validatedDurationMs(_ durationMs: Double?) throws -> Double? {
     return durationMs
 }
 
-private func statusFromStatusCode(_ statusCode: Int?) -> ActionStatus {
+func statusFromStatusCode(_ statusCode: Int?) -> ActionStatus {
     guard let statusCode else {
         return .success
     }

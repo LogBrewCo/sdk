@@ -19,8 +19,8 @@ def main() -> int:
     payload_text = Path(sys.argv[1]).read_text(encoding="utf-8")
     payload = json.loads(payload_text)
     events = payload.get("events")
-    if not isinstance(events, list) or len(events) != 8:
-        raise SystemExit(f"expected 8 events, got {len(events) if isinstance(events, list) else 'non-list'}")
+    if not isinstance(events, list) or len(events) != 9:
+        raise SystemExit(f"expected 9 events, got {len(events) if isinstance(events, list) else 'non-list'}")
 
     by_id = {event.get("id"): event for event in events if isinstance(event, dict)}
     required_ids = [
@@ -32,6 +32,7 @@ def main() -> int:
         "evt_network_milestone_001",
         "evt_metric_001",
         "evt_span_001",
+        "evt_urlsession_span_001",
     ]
     missing = [event_id for event_id in required_ids if event_id not in by_id]
     if missing:
@@ -65,8 +66,40 @@ def main() -> int:
 
     if "cart_id" in payload_text or "#pay" in payload_text:
         raise SystemExit("payload leaked URL query or fragment")
+    if "app-owned-header-value" in payload_text:
+        raise SystemExit("payload leaked app-owned request header")
     if '"traceparent"' in payload_text:
         raise SystemExit("payload leaked raw propagation header")
+
+    urlsession_span = require_dict(by_id["evt_urlsession_span_001"].get("attributes"), "URLSession span attributes")
+    urlsession_span_id = urlsession_span.get("spanId")
+    if urlsession_span.get("traceId") != TRACE_ID:
+        raise SystemExit("URLSession span did not continue the active trace id")
+    if urlsession_span.get("parentSpanId") != span_id:
+        raise SystemExit("URLSession span did not use the active span as parent")
+    if not isinstance(urlsession_span_id, str) or len(urlsession_span_id) != 16 or urlsession_span_id == span_id:
+        raise SystemExit(f"URLSession span used invalid child span id: {urlsession_span_id!r}")
+    if urlsession_span.get("name") != "POST /api/checkout":
+        raise SystemExit("URLSession span used unexpected name")
+    if urlsession_span.get("status") != "error":
+        raise SystemExit("URLSession span did not map 5xx status to error")
+    urlsession_metadata = require_dict(urlsession_span.get("metadata"), "URLSession span metadata")
+    if urlsession_metadata.get("source") != "swift.urlsession":
+        raise SystemExit("URLSession span missing source metadata")
+    if urlsession_metadata.get("routeTemplate") != "/api/checkout":
+        raise SystemExit("URLSession span route template was not sanitized")
+    if urlsession_metadata.get("method") != "POST":
+        raise SystemExit("URLSession span method was not normalized")
+    if urlsession_metadata.get("statusCode") != 503:
+        raise SystemExit("URLSession span status code was not preserved")
+    if urlsession_metadata.get("component") != "pay-api":
+        raise SystemExit("URLSession span custom primitive metadata was not preserved")
+    assert_trace_metadata(
+        "evt_urlsession_span_001",
+        urlsession_metadata,
+        urlsession_span_id,
+        parent_span_id=span_id,
+    )
 
     print("swift trace correlation payload checks passed")
     return 0
@@ -78,12 +111,17 @@ def require_dict(value: object, label: str) -> dict[str, object]:
     return value
 
 
-def assert_trace_metadata(event_id: str, metadata: dict[str, object], span_id: str) -> None:
+def assert_trace_metadata(
+    event_id: str,
+    metadata: dict[str, object],
+    span_id: str,
+    parent_span_id: str = PARENT_SPAN_ID,
+) -> None:
     if metadata.get("traceId") != TRACE_ID:
         raise SystemExit(f"{event_id} missing trace id metadata")
     if metadata.get("spanId") != span_id:
         raise SystemExit(f"{event_id} missing local span id metadata")
-    if metadata.get("parentSpanId") != PARENT_SPAN_ID:
+    if metadata.get("parentSpanId") != parent_span_id:
         raise SystemExit(f"{event_id} missing parent span id metadata")
     if metadata.get("traceFlags") != "01":
         raise SystemExit(f"{event_id} missing trace flags metadata")

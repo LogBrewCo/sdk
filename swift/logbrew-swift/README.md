@@ -168,14 +168,24 @@ try LogBrewTrace.withContext(trace) {
         attributes: try LogBrewTrace.spanAttributes(name: "POST /api/checkout", status: .error, durationMs: 184.5)
     )
 
-    let headers = LogBrewTrace.outgoingHeaders()
-    // Pass headers["traceparent"] to the app-owned URLRequest you create.
+    var request = URLRequest(url: URL(string: "https://api.example.com/api/checkout")!)
+    request.httpMethod = "POST"
+    let requestSpan = try LogBrewTrace.startURLSessionSpan(for: request)
+    // Send requestSpan.request with your app-owned URLSession.
+    try client.captureURLSessionSpan(
+        "evt_urlsession_span_001",
+        timestamp: "2026-06-02T10:00:10Z",
+        span: requestSpan,
+        statusCode: 503,
+        durationMs: 184.5,
+        metadata: ["component": "checkout-api"]
+    )
 }
 ```
 
-`LogBrewTrace.current` is task-local, so async work started inside `withContext(...)` can read the active context without global state. `LogBrewClient` automatically adds active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewLogger` receives the same correlation through the client. `LogBrewTrace.spanAttributes(...)` reuses the active span id for a span event, and `LogBrewTrace.outgoingHeaders()` creates only a normalized `traceparent` header for app-owned requests.
+`LogBrewTrace.current` is task-local, so async work started inside `withContext(...)` can read the active context without global state. `LogBrewClient` automatically adds active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewLogger` receives the same correlation through the client. `LogBrewTrace.spanAttributes(...)` reuses the active span id for a span event, `LogBrewTrace.outgoingHeaders()` creates only a normalized `traceparent` header for app-owned requests, and `LogBrewTrace.startURLSessionSpan(...)` creates a child span context plus a copied `URLRequest` with only `traceparent` injected. Call `captureURLSessionSpan(...)` after your URLSession completion to record sanitized method, route template, status, duration, and primitive metadata.
 
-The Swift SDK does not patch `URLSession`, collect arbitrary headers, capture request or response bodies, serialize the raw `traceparent` value into event metadata, or start automatic database/network child spans. Keep route templates low-cardinality and query-free, and add richer framework instrumentation only in a dedicated integration package.
+The Swift SDK does not patch `URLSession`, collect arbitrary headers, capture request or response bodies, serialize the raw `traceparent` value into event metadata, or start automatic database/network child spans. URLSession spans are explicit and app-owned; keep route templates low-cardinality and query-free, and add richer framework instrumentation only in a dedicated integration package.
 
 ## HTTP Delivery
 
