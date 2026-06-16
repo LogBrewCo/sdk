@@ -26,12 +26,7 @@ function createLogBrewReactNativeClient({
   return LogBrewClient.create({ apiKey: authKey, sdkName, sdkVersion, maxRetries });
 }
 
-function createReactNativeTraceparent({
-  randomValues = defaultRandomValues,
-  spanId,
-  traceFlags = "01",
-  traceId
-} = {}) {
+function createReactNativeTraceparent({ randomValues = defaultRandomValues, spanId, traceFlags = "01", traceId } = {}) {
   return createTraceparent({
     spanId: spanId ?? randomHex(8, randomValues),
     traceFlags,
@@ -40,12 +35,7 @@ function createReactNativeTraceparent({
 }
 
 function createReactNativeTraceContext({
-  parentSpanId,
-  randomValues = defaultRandomValues,
-  spanId,
-  traceFlags = "01",
-  traceId,
-  traceparent
+  parentSpanId, randomValues = defaultRandomValues, spanId, traceFlags = "01", traceId, traceparent
 } = {}) {
   if (traceparent !== undefined && traceparent !== null && String(traceparent).trim() !== "") {
     try {
@@ -183,16 +173,7 @@ function createTraceparentFetch({
     }
 
     const requestInit = init ?? {};
-    const nextTraceparent = traceparentForRequest({
-      init,
-      input,
-      randomValues,
-      trace,
-      traceFlags,
-      traceparent,
-      traceparentFactory,
-      url
-    });
+    const nextTraceparent = traceparentForRequest({ init, input, randomValues, trace, traceFlags, traceparent, traceparentFactory, url });
     const nextInit = {
       ...requestInit,
       headers: headersWithTraceparent(requestHeaders(input, requestInit), nextTraceparent)
@@ -371,6 +352,157 @@ function captureReactNativeNetwork(client, input = {}) {
   return event;
 }
 
+function createReactNativeNavigationSpanEvent({
+  actionType, durationMs, id, idFactory = defaultNavigationSpanEventId, includeRouteKey = false, metadata = {},
+  name, now = () => new Date().toISOString(), platform, appState, previousRouteKey, previousRouteName,
+  routeKey, routeName, routePath, screen, status = "ok", timestamp, trace
+} = {}) {
+  const safeRoutePath = stripQueryAndHash(routePath);
+  const spanName = name ?? `navigation:${routeName ?? safeRoutePath ?? screen ?? "route"}`;
+  const context = resolveTraceContext(trace) ?? getActiveLogBrewTrace() ?? createReactNativeTraceContext();
+  return {
+    id: id ?? idFactory({ routeName, routePath: safeRoutePath, screen }),
+    timestamp: timestamp ?? now(),
+    attributes: createReactNativeSpanAttributes({
+      name: spanName,
+      status,
+      durationMs,
+      trace: context,
+      metadata: {
+        ...getReactNativeContext({ platform, appState }),
+        source: "react-native.navigation",
+        actionType,
+        previousRouteName,
+        routeName,
+        routePath: safeRoutePath,
+        screen: screen ?? routeName,
+        ...(includeRouteKey ? { previousRouteKey, routeKey } : {}),
+        ...metadata
+      }
+    })
+  };
+}
+
+function captureReactNativeNavigationSpan(client, input = {}) {
+  requireClient(client);
+  const event = createReactNativeNavigationSpanEvent(input);
+  client.span(event.id, event.timestamp, event.attributes);
+  return event;
+}
+
+function createReactNativeResourceSpanEvent({
+  durationMs, id, idFactory = defaultResourceSpanEventId, kind = "fetch", metadata = {}, method, name,
+  now = () => new Date().toISOString(), platform, appState, responseSizeBytes, routeTemplate, screen,
+  sessionId, status, statusCode, timestamp, trace
+} = {}) {
+  const safeRouteTemplate = stripQueryAndHash(routeTemplate);
+  const safeMethod = method === undefined ? undefined : String(method).toUpperCase();
+  const defaultName = [safeMethod, safeRouteTemplate].filter(Boolean).join(" ");
+  const spanName = name ?? (defaultName || "mobile.resource");
+  const context = resolveTraceContext(trace) ?? getActiveLogBrewTrace() ?? createReactNativeTraceContext();
+  return {
+    id: id ?? idFactory({ method: safeMethod, routeTemplate: safeRouteTemplate, screen }),
+    timestamp: timestamp ?? now(),
+    attributes: createReactNativeSpanAttributes({
+      name: spanName,
+      status: status ?? spanStatusFromStatusCode(statusCode),
+      durationMs,
+      trace: context,
+      metadata: {
+        ...getReactNativeContext({ platform, appState }),
+        source: "react-native.resource",
+        durationMs,
+        method: safeMethod,
+        resourceKind: kind,
+        responseSizeBytes,
+        routeTemplate: safeRouteTemplate,
+        screen,
+        sessionId,
+        statusCode,
+        ...metadata
+      }
+    })
+  };
+}
+
+function captureReactNativeResourceSpan(client, input = {}) {
+  requireClient(client);
+  const event = createReactNativeResourceSpanEvent(input);
+  client.span(event.id, event.timestamp, event.attributes);
+  return event;
+}
+
+function createReactNavigationSpanListener(client, navigationContainer, {
+  captureInitialRoute = false, includeRouteKey = false, metadata = {}, now = () => new Date().toISOString(),
+  nowMs = () => Date.now(), onError, platform, appState, trace
+} = {}) {
+  requireClient(client);
+  const container = resolveNavigationContainer(navigationContainer);
+  if (!container || typeof container.addListener !== "function" || typeof container.getCurrentRoute !== "function") {
+    throw new SdkError("configuration_error", "createReactNavigationSpanListener requires a React Navigation container ref with addListener and getCurrentRoute");
+  }
+
+  let previousRoute = captureInitialRoute ? {} : routeSnapshot(container.getCurrentRoute());
+  let pendingNavigation;
+  const removers = [];
+  const captureCurrentRoute = () => {
+    try {
+      const route = routeSnapshot(container.getCurrentRoute());
+      if (!route.name && !route.path) {
+        return;
+      }
+      const startedAtMs = pendingNavigation?.startedAtMs;
+      const durationMs = startedAtMs === undefined ? undefined : Math.max(0, nowMs() - startedAtMs);
+      captureReactNativeNavigationSpan(client, {
+        actionType: pendingNavigation?.actionType,
+        durationMs,
+        includeRouteKey,
+        metadata,
+        now,
+        platform,
+        appState,
+        previousRouteKey: previousRoute.key,
+        previousRouteName: previousRoute.name,
+        routeKey: route.key,
+        routeName: route.name,
+        routePath: route.path,
+        timestamp: pendingNavigation?.timestamp,
+        trace
+      });
+      previousRoute = route;
+      pendingNavigation = undefined;
+    } catch (error) {
+      if (typeof onError === "function") {
+        onError(error);
+      } else {
+        throw error;
+      }
+    }
+  };
+
+  const actionSubscription = safeNavigationListener(container, "__unsafe_action__", (event) => {
+    pendingNavigation = {
+      actionType: navigationActionType(event),
+      startedAtMs: nowMs(),
+      timestamp: now()
+    };
+  });
+  if (actionSubscription) {
+    removers.push(actionSubscription);
+  }
+  removers.push(addNavigationListener(container, "state", captureCurrentRoute));
+
+  if (captureInitialRoute) {
+    captureCurrentRoute();
+  }
+
+  return () => {
+    for (const remove of removers.splice(0).reverse()) {
+      remove();
+    }
+  };
+}
+
 function createReactNativeErrorEvent(error, {
   id,
   idFactory = defaultErrorEventId,
@@ -457,6 +589,7 @@ function useLogBrewNative() {
 
 function useLogBrewNativeActions() {
   const { client, platform, appState, trace } = useLogBrewNative();
+  const scoped = (options = {}) => ({ platform, appState, trace, ...options });
   return {
     release: client.release.bind(client),
     environment: client.environment.bind(client),
@@ -469,36 +602,13 @@ function useLogBrewNativeActions() {
     previewJson: client.previewJson.bind(client),
     pendingEvents: client.pendingEvents.bind(client),
     trace,
-    captureScreenView: (screenName, options = {}) => captureScreenView(client, screenName, {
-      platform,
-      appState,
-      trace,
-      ...options
-    }),
-    captureAppStateChange: (state, options = {}) => captureAppStateChange(client, state, {
-      platform,
-      appState,
-      trace,
-      ...options
-    }),
-    captureReactNativeAction: (input = {}) => captureReactNativeAction(client, {
-      platform,
-      appState,
-      trace,
-      ...input
-    }),
-    captureReactNativeNetwork: (input = {}) => captureReactNativeNetwork(client, {
-      platform,
-      appState,
-      trace,
-      ...input
-    }),
-    captureReactNativeError: (error, options = {}) => captureReactNativeError(client, error, {
-      platform,
-      appState,
-      trace,
-      ...options
-    })
+    captureScreenView: (screenName, options = {}) => captureScreenView(client, screenName, scoped(options)),
+    captureAppStateChange: (state, options = {}) => captureAppStateChange(client, state, scoped(options)),
+    captureReactNativeAction: (input = {}) => captureReactNativeAction(client, scoped(input)),
+    captureReactNativeNetwork: (input = {}) => captureReactNativeNetwork(client, scoped(input)),
+    captureReactNativeNavigationSpan: (input = {}) => captureReactNativeNavigationSpan(client, scoped(input)),
+    captureReactNativeResourceSpan: (input = {}) => captureReactNativeResourceSpan(client, scoped(input)),
+    captureReactNativeError: (error, options = {}) => captureReactNativeError(client, error, scoped(options))
   };
 }
 
@@ -595,6 +705,14 @@ function defaultActionEventId({ name, screen }) {
 
 function defaultNetworkEventId({ method, routeTemplate, screen }) {
   return `evt_native_network_${slugify([screen, method, routeTemplate].filter(Boolean).join("_") || "request")}`;
+}
+
+function defaultNavigationSpanEventId({ routeName, routePath, screen }) {
+  return `evt_native_navigation_${slugify([screen, routeName, routePath].filter(Boolean).join("_") || "route")}`;
+}
+
+function defaultResourceSpanEventId({ method, routeTemplate, screen }) {
+  return `evt_native_resource_${slugify([screen, method, routeTemplate].filter(Boolean).join("_") || "request")}`;
 }
 
 function defaultFetch() {
@@ -783,6 +901,13 @@ function statusFromStatusCode(statusCode) {
   return "success";
 }
 
+function spanStatusFromStatusCode(statusCode) {
+  if (typeof statusCode === "number" && Number.isFinite(statusCode) && statusCode >= 400) {
+    return "error";
+  }
+  return "ok";
+}
+
 function stripQueryAndHash(value) {
   if (value === undefined || value === null) {
     return undefined;
@@ -790,15 +915,47 @@ function stripQueryAndHash(value) {
   return String(value).split(/[?#]/u, 1)[0];
 }
 
+function resolveNavigationContainer(navigationContainer) {
+  if (navigationContainer && typeof navigationContainer === "object" && "current" in navigationContainer) {
+    return navigationContainer.current;
+  }
+  return navigationContainer;
+}
+
+function addNavigationListener(container, eventName, listener) {
+  const subscription = container.addListener(eventName, listener);
+  if (typeof subscription === "function") {
+    return subscription;
+  }
+  if (subscription && typeof subscription.remove === "function") {
+    return () => subscription.remove();
+  }
+  return () => {};
+}
+
+function safeNavigationListener(container, eventName, listener) {
+  try {
+    return addNavigationListener(container, eventName, listener);
+  } catch {
+    return undefined;
+  }
+}
+
+function routeSnapshot(route) {
+  return {
+    key: normalizeMetadataValue(route?.key),
+    name: typeof route?.name === "string" && route.name.trim() !== "" ? route.name : undefined,
+    path: stripQueryAndHash(route?.path)
+  };
+}
+
+function navigationActionType(event) {
+  const action = event?.data?.action ?? event?.action ?? event;
+  return typeof action?.type === "string" && action.type.trim() !== "" ? action.type : undefined;
+}
+
 function traceparentForRequest({
-  init,
-  input,
-  randomValues,
-  trace,
-  traceFlags,
-  traceparent,
-  traceparentFactory,
-  url
+  init, input, randomValues, trace, traceFlags, traceparent, traceparentFactory, url
 }) {
   const context = resolveTraceContext(trace) ?? getActiveLogBrewTrace();
   const nextTraceparent = typeof traceparentFactory === "function"
@@ -809,56 +966,14 @@ function traceparentForRequest({
 }
 
 const defaultExport = {
-  LogBrewNativeProvider,
-  captureAppStateChange,
-  captureReactNativeAction,
-  captureReactNativeError,
-  captureReactNativeNetwork,
-  captureScreenView,
-  bindLogBrewTrace,
-  createAppStateListener,
-  createLogBrewReactNativeClient,
-  createReactNativeSpanAttributes,
-  createReactNativeTraceContext,
-  createReactNativeTraceHeaders,
-  createReactNativeActionEvent,
-  createReactNativeErrorEvent,
-  createReactNativeNetworkEvent,
-  createReactNativeTraceparent,
-  createTraceparentFetch,
-  getActiveLogBrewTrace,
-  getReactNativeContext,
-  getReactNativeTraceMetadata,
-  shouldPropagateTraceparent,
-  useLogBrewNative,
-  useLogBrewNativeActions,
-  withLogBrewTrace
+  LogBrewNativeProvider, captureAppStateChange, captureReactNativeAction, captureReactNativeError,
+  captureReactNativeNetwork, captureReactNativeNavigationSpan, captureReactNativeResourceSpan, captureScreenView,
+  bindLogBrewTrace, createAppStateListener, createLogBrewReactNativeClient, createReactNavigationSpanListener,
+  createReactNativeSpanAttributes, createReactNativeTraceContext, createReactNativeTraceHeaders, createReactNativeActionEvent,
+  createReactNativeErrorEvent, createReactNativeNetworkEvent, createReactNativeNavigationSpanEvent,
+  createReactNativeResourceSpanEvent, createReactNativeTraceparent, createTraceparentFetch, getActiveLogBrewTrace,
+  getReactNativeContext, getReactNativeTraceMetadata, shouldPropagateTraceparent, useLogBrewNative,
+  useLogBrewNativeActions, withLogBrewTrace
 };
 
-module.exports = {
-  LogBrewNativeProvider,
-  captureAppStateChange,
-  captureReactNativeAction,
-  captureReactNativeError,
-  captureReactNativeNetwork,
-  captureScreenView,
-  bindLogBrewTrace,
-  createAppStateListener,
-  createLogBrewReactNativeClient,
-  createReactNativeSpanAttributes,
-  createReactNativeTraceContext,
-  createReactNativeTraceHeaders,
-  createReactNativeActionEvent,
-  createReactNativeErrorEvent,
-  createReactNativeNetworkEvent,
-  createReactNativeTraceparent,
-  createTraceparentFetch,
-  default: defaultExport,
-  getActiveLogBrewTrace,
-  getReactNativeContext,
-  getReactNativeTraceMetadata,
-  shouldPropagateTraceparent,
-  useLogBrewNative,
-  useLogBrewNativeActions,
-  withLogBrewTrace
-};
+module.exports = { ...defaultExport, default: defaultExport };

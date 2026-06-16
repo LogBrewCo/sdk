@@ -42,6 +42,7 @@ grep -q '^package/index.native.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/index.mjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/examples/navigation-resource-spans.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/package.json$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/native-tarball.txt"
@@ -60,6 +61,8 @@ grep -q 'captureReactNativeAction' "$tmp_dir/native-readme.md"
 grep -q 'captureReactNativeNetwork' "$tmp_dir/native-readme.md"
 grep -q 'withLogBrewTrace' "$tmp_dir/native-readme.md"
 grep -q 'getActiveLogBrewTrace' "$tmp_dir/native-readme.md"
+grep -q 'createReactNavigationSpanListener' "$tmp_dir/native-readme.md"
+grep -q 'captureReactNativeResourceSpan' "$tmp_dir/native-readme.md"
 
 app_dir="$tmp_dir/react-native-smoke-app"
 mkdir -p "$app_dir"
@@ -106,7 +109,7 @@ for name in ("@logbrew/react-native", "@logbrew/sdk", "react", "react-native"):
         raise SystemExit(f"missing npm dependency entry: {name}")
 PY
 node --check node_modules/@logbrew/react-native/index.native.js
-node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.default !== "object") process.exit(1)'
+node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.captureReactNativeNavigationSpan !== "function" || typeof native.captureReactNativeResourceSpan !== "function" || typeof native.createReactNavigationSpanListener !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.createReactNativeNavigationSpanEvent !== "function" || typeof native.createReactNativeResourceSpanEvent !== "function" || typeof native.default !== "object") process.exit(1)'
 
 cat > smoke.mjs <<'EOF'
 import React from "react";
@@ -533,6 +536,13 @@ grep -q '"timelineEvents":6' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/native-smoke.stderr.json"
 
+node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans > "$tmp_dir/navigation-resource-spans.stdout.json" 2> "$tmp_dir/navigation-resource-spans.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/navigation-resource-spans.stdout.json" >/dev/null
+grep -q '"ok":true' "$tmp_dir/navigation-resource-spans.stderr.json"
+grep -q '"events":4' "$tmp_dir/navigation-resource-spans.stderr.json"
+grep -q '"navigationSpan":"navigation:CheckoutComplete"' "$tmp_dir/navigation-resource-spans.stderr.json"
+grep -q '"resourceSpan":"POST /api/checkout"' "$tmp_dir/navigation-resource-spans.stderr.json"
+
 cat > consumer.ts <<'EOF'
 import React from "react";
 import type { AppStateStatus } from "react-native";
@@ -544,12 +554,17 @@ import {
   captureScreenView,
   createAppStateListener,
   createLogBrewReactNativeClient,
+  captureReactNativeNavigationSpan,
+  captureReactNativeResourceSpan,
   captureReactNativeAction,
   captureReactNativeError,
   captureReactNativeNetwork,
+  createReactNavigationSpanListener,
   createReactNativeActionEvent,
   createReactNativeErrorEvent,
   createReactNativeNetworkEvent,
+  createReactNativeNavigationSpanEvent,
+  createReactNativeResourceSpanEvent,
   createReactNativeSpanAttributes,
   createReactNativeTraceContext,
   createReactNativeTraceHeaders,
@@ -639,6 +654,58 @@ captureReactNativeNetwork(client, {
   routeTemplate: "/api/checkout",
   statusCode: 202
 });
+const navigationSpan = createReactNativeNavigationSpanEvent({
+  routeName: "Checkout",
+  previousRouteName: "Cart",
+  actionType: "NAVIGATE",
+  durationMs: 64,
+  trace
+});
+captureReactNativeNavigationSpan(client, {
+  routeName: "CheckoutComplete",
+  routePath: "/checkout/complete?hidden=value",
+  actionType: "NAVIGATE",
+  durationMs: 72,
+  trace,
+  metadata: navigationSpan.attributes.metadata
+});
+const resourceSpan = createReactNativeResourceSpanEvent({
+  method: "GET",
+  routeTemplate: "/api/cart?itemId=123#items",
+  statusCode: 200,
+  durationMs: 42,
+  trace
+});
+captureReactNativeResourceSpan(client, {
+  name: resourceSpan.attributes.name,
+  method: "POST",
+  routeTemplate: "/api/checkout?email=hidden",
+  statusCode: 202,
+  durationMs: 128,
+  trace
+});
+let currentRoute = { key: "Checkout-1", name: "Checkout", path: "/checkout?email=hidden" };
+const navigationListeners = new Map<string, (event?: unknown) => void>();
+const navigationContainer = {
+  addListener(eventName: string, listener: (event?: unknown) => void) {
+    navigationListeners.set(eventName, listener);
+    return { remove() { navigationListeners.delete(eventName); } };
+  },
+  getCurrentRoute() {
+    return currentRoute;
+  }
+};
+const stopNavigation = createReactNavigationSpanListener(client, navigationContainer, {
+  trace,
+  platform,
+  appState,
+  nowMs: () => 100,
+  now: () => "2026-06-02T10:00:18Z"
+});
+navigationListeners.get("__unsafe_action__")?.({ data: { action: { type: "NAVIGATE" } } });
+currentRoute = { key: "Done-1", name: "Done", path: "/done?email=hidden" };
+navigationListeners.get("state")?.();
+stopNavigation();
 const errorEvent = createReactNativeErrorEvent(new Error("typed native error"), {
   platform,
   appState,
@@ -669,6 +736,16 @@ function Component(): React.ReactElement {
     durationMs: 42,
     screen: "Checkout"
   });
+  actions.captureReactNativeNavigationSpan({
+    routeName: "Checkout",
+    durationMs: 10
+  });
+  actions.captureReactNativeResourceSpan({
+    method: "GET",
+    routeTemplate: "/api/cart",
+    statusCode: 200,
+    durationMs: 42
+  });
   void actions.flush(RecordingTransport.alwaysAccept());
   return React.createElement("span", { pending: actions.pendingEvents(), issue: errorEvent.attributes.title }, "typed");
 }
@@ -697,9 +774,11 @@ EOF
 npx tsc --project tsconfig.json
 
 node node_modules/@logbrew/react-native/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
+grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation' "$tmp_dir/launcher-help.txt"
 node node_modules/@logbrew/react-native/examples/index.mjs --list > "$tmp_dir/launcher-list.txt"
+grep -q 'navigation-resource-spans -> node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/react-native/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 grep -q 'trace-correlation -> node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/react-native/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
@@ -738,6 +817,7 @@ grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169
 grep -q '"listenerRemoved":true' "$tmp_dir/example-default.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/react-native/examples run list > "$tmp_dir/npm-helper-list.txt"
+grep -q 'navigation-resource-spans -> node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/npm-helper-list.txt"
 grep -q 'readme-example -> node node_modules/@logbrew/react-native/examples/index.mjs readme-example' "$tmp_dir/npm-helper-list.txt"
 npm --prefix node_modules/@logbrew/react-native/examples run help > "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"

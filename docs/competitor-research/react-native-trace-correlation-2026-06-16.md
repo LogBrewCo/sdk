@@ -27,6 +27,14 @@ LogBrew React Native already shipped a thin provider/hook layer, screen/app-stat
 - Datadog is stronger because resource and action instrumentation carries correlation context and tracing headers through mobile network/RUM flows.
 - OpenTelemetry is stronger because W3C propagation is a dedicated context operation and malformed trace headers do not break user code.
 
+## Follow-Up Source Review
+
+- Re-read Sentry React Native `packages/core/src/js/tracing/reactnavigation.ts`: `reactNavigationIntegration(...)`, `registerNavigationContainer(...)`, `updateLatestNavigationSpanWithCurrentRoute(...)`, and route transaction handling show why navigation spans need route-name continuity, previous-route context, and native span sync for deep mobile debugging.
+- Re-read Sentry React Native `packages/core/src/js/tracing/span.ts`: `startIdleNavigationSpan(...)` and idle-span lifecycle handling show the value of route spans without making user handlers responsible for every transition.
+- Re-read Datadog React Native `packages/core/src/rum/instrumentation/resourceTracking/requestProxy/XHRProxy/DatadogRumResource/ResourceReporter.ts`: `ResourceReporter.reportResource(...)`, `formatResourceStartContext(...)`, and `formatResourceStopContext(...)` show how resource spans attach method, URL-like resource names, status, size, timing, and tracing IDs.
+- Re-read Datadog React Native `packages/core/src/rum/instrumentation/resourceTracking/requestProxy/interfaces/RumResource.ts`: `RUMResource` confirms resource timing and tracing fields are first-class in stronger mobile SDKs.
+- Re-read OpenTelemetry JS `packages/opentelemetry-core/src/trace/W3CTraceContextPropagator.ts` and `packages/opentelemetry-sdk-trace-web/test/StackContextManager.test.ts`: propagation remains strict and stack scopes return to the previous context after nested work.
+
 ## LogBrew Implementation
 
 - Added dependency-free `createReactNativeTraceContext(...)` to continue valid W3C `traceparent` values with a fresh local span ID and fall back to local roots for missing or malformed incoming propagation.
@@ -36,20 +44,26 @@ LogBrew React Native already shipped a thin provider/hook layer, screen/app-stat
 - `LogBrewNativeProvider` accepts `trace`, and `useLogBrewNativeActions()` passes that trace into hook helper captures. Hook `issue`, `log`, and `action` wrappers add trace metadata while preserving app-owned client setup.
 - `createTraceparentFetch()` now reuses supplied or active trace context when no explicit `traceparentFactory` is provided, while still honoring target-scoped propagation and preserving existing headers.
 - Added packaged `examples/trace-correlation.mjs` to prove one W3C trace links screen, action, network, error, span, and outgoing `traceparent`.
+- Added explicit `captureReactNativeNavigationSpan(...)`, `createReactNativeNavigationSpanEvent(...)`, `captureReactNativeResourceSpan(...)`, `createReactNativeResourceSpanEvent(...)`, and `createReactNavigationSpanListener(...)`.
+- The React Navigation listener accepts app-owned container refs, captures optional initial route spans plus route-change spans, strips query/hash text from route paths, carries previous route name, and keeps route keys opt-in to avoid high-cardinality defaults.
+- Resource span helpers capture method, route template, duration, status code, response size, screen, and session ID while mapping 4xx/5xx status codes to `error` without deriving payload/header details.
+- Added packaged `examples/navigation-resource-spans.mjs` to prove one W3C trace links initial navigation, route-change navigation, successful resource, and failed resource spans with primitive-only metadata.
 
 ## Tradeoffs
 
 - LogBrew intentionally did not copy Sentry native scope sync, navigation auto-instrumentation, Datadog XHR/fetch patching, Babel interaction rewriting, multi-format propagation, baggage, tracestate, replay, payload capture, or native bridge state.
 - The React Native package remains a thin peer-dependency layer over `@logbrew/sdk`, React, and React Native. Async work after `await` should keep the returned trace object and pass it explicitly or use provider `trace`; this avoids stale global context leaks between unrelated mobile interactions.
+- Navigation/resource spans stay explicit and app-owned. LogBrew does not globally patch React Navigation, `fetch`, or XHR; target-scoped propagation and helper calls keep privacy defaults obvious and reversible.
 
 ## Evidence
 
 - `python3 scripts/check_js_sources.py js/logbrew-react-native`
 - `cd js/logbrew-react-native && npm test`
 - `bash scripts/real_user_react_native_smoke.sh`
+- Packaged `examples/navigation-resource-spans.mjs` ran through `real_user_react_native_smoke.sh` after installing the generated tarball.
 - `bash scripts/check_js_lint.sh`
 - `bash scripts/check_js_package.sh`
 
 ## Remaining Gaps
 
-- React Native still lacks automatic navigation/lifecycle spans, React Navigation route middleware, native bridge scope sync, `fetch`/XHR resource child spans, OTel context ingestion, baggage/tracestate, rich span events/exceptions, and source-map/native symbolication parity with Sentry/Datadog.
+- React Native still lacks automatic navigation/lifecycle spans, native bridge scope sync, automatic `fetch`/XHR resource child spans, OTel context ingestion, baggage/tracestate, rich span events/exceptions, and source-map/native symbolication parity with Sentry/Datadog.

@@ -89,6 +89,21 @@ export type TraceparentFetchConfig<TResponse = unknown> = {
   tracePropagationTargets?: TracePropagationTarget[];
 };
 
+export type ReactNavigationRouteLike = {
+  key?: string | number | null;
+  name?: string | null;
+  path?: string | null;
+};
+
+export type ReactNavigationContainerLike = {
+  current?: ReactNavigationContainerLike | null;
+  addListener(
+    eventName: string,
+    listener: (event?: unknown) => void
+  ): { remove(): void } | (() => void) | void;
+  getCurrentRoute(): ReactNavigationRouteLike | undefined | null;
+};
+
 export type ReactNativeContextOptions = {
   platform?: ReactNativePlatformLike;
   appState?: ReactNativeAppStateLike;
@@ -152,6 +167,67 @@ export type ReactNativeNetworkIdFactoryContext = {
   screen?: string;
 };
 
+export type ReactNativeSpanEvent = {
+  id: string;
+  timestamp: string;
+  attributes: SpanAttributes;
+};
+
+export type ReactNativeNavigationSpanInput = ReactNativeContextOptions & {
+  actionType?: string;
+  durationMs?: number;
+  id?: string;
+  idFactory?: (context: ReactNativeNavigationSpanIdFactoryContext) => string;
+  includeRouteKey?: boolean;
+  name?: string;
+  now?: () => string;
+  previousRouteKey?: string | number | null;
+  previousRouteName?: string;
+  routeKey?: string | number | null;
+  routeName?: string;
+  routePath?: string;
+  screen?: string;
+  status?: SpanAttributes["status"];
+  timestamp?: string;
+};
+
+export type ReactNativeNavigationSpanIdFactoryContext = {
+  routeName?: string;
+  routePath?: string;
+  screen?: string;
+};
+
+export type ReactNativeResourceSpanInput = ReactNativeContextOptions & {
+  durationMs?: number;
+  id?: string;
+  idFactory?: (context: ReactNativeResourceSpanIdFactoryContext) => string;
+  kind?: string;
+  method?: string;
+  name?: string;
+  now?: () => string;
+  responseSizeBytes?: number;
+  routeTemplate?: string;
+  screen?: string;
+  sessionId?: string;
+  status?: SpanAttributes["status"];
+  statusCode?: number;
+  timestamp?: string;
+};
+
+export type ReactNativeResourceSpanIdFactoryContext = {
+  method?: string;
+  routeTemplate?: string;
+  screen?: string;
+};
+
+export type ReactNavigationSpanListenerOptions = ReactNativeContextOptions & {
+  captureInitialRoute?: boolean;
+  includeRouteKey?: boolean;
+  now?: () => string;
+  nowMs?: () => number;
+  onError?: (error: unknown) => void;
+};
+
 export type ReactNativeErrorEvent = {
   id: string;
   timestamp: string;
@@ -205,6 +281,8 @@ export type LogBrewNativeActions = {
   captureAppStateChange(state: string, options?: CaptureAppStateChangeOptions): void;
   captureReactNativeAction(input?: ReactNativeActionInput): ReactNativeActionEvent;
   captureReactNativeNetwork(input?: ReactNativeNetworkInput): ReactNativeActionEvent;
+  captureReactNativeNavigationSpan(input?: ReactNativeNavigationSpanInput): ReactNativeSpanEvent;
+  captureReactNativeResourceSpan(input?: ReactNativeResourceSpanInput): ReactNativeSpanEvent;
   captureReactNativeError(error: unknown, options?: CaptureReactNativeErrorOptions): ReactNativeErrorEvent;
 };
 
@@ -263,6 +341,25 @@ export declare function captureReactNativeNetwork(
   client: LogBrewClient,
   input?: ReactNativeNetworkInput
 ): ReactNativeActionEvent;
+export declare function createReactNativeNavigationSpanEvent(
+  input?: ReactNativeNavigationSpanInput
+): ReactNativeSpanEvent;
+export declare function captureReactNativeNavigationSpan(
+  client: LogBrewClient,
+  input?: ReactNativeNavigationSpanInput
+): ReactNativeSpanEvent;
+export declare function createReactNativeResourceSpanEvent(
+  input?: ReactNativeResourceSpanInput
+): ReactNativeSpanEvent;
+export declare function captureReactNativeResourceSpan(
+  client: LogBrewClient,
+  input?: ReactNativeResourceSpanInput
+): ReactNativeSpanEvent;
+export declare function createReactNavigationSpanListener(
+  client: LogBrewClient,
+  navigationContainer: ReactNavigationContainerLike,
+  options?: ReactNavigationSpanListenerOptions
+): () => void;
 export declare function createReactNativeErrorEvent(
   error: unknown,
   options?: CaptureReactNativeErrorOptions
@@ -320,15 +417,20 @@ declare const defaultExport: {
   captureReactNativeAction: typeof captureReactNativeAction;
   captureReactNativeError: typeof captureReactNativeError;
   captureReactNativeNetwork: typeof captureReactNativeNetwork;
+  captureReactNativeNavigationSpan: typeof captureReactNativeNavigationSpan;
+  captureReactNativeResourceSpan: typeof captureReactNativeResourceSpan;
   captureScreenView: typeof captureScreenView;
   createAppStateListener: typeof createAppStateListener;
   createLogBrewReactNativeClient: typeof createLogBrewReactNativeClient;
+  createReactNavigationSpanListener: typeof createReactNavigationSpanListener;
   createReactNativeSpanAttributes: typeof createReactNativeSpanAttributes;
   createReactNativeTraceContext: typeof createReactNativeTraceContext;
   createReactNativeTraceHeaders: typeof createReactNativeTraceHeaders;
   createReactNativeActionEvent: typeof createReactNativeActionEvent;
   createReactNativeErrorEvent: typeof createReactNativeErrorEvent;
   createReactNativeNetworkEvent: typeof createReactNativeNetworkEvent;
+  createReactNativeNavigationSpanEvent: typeof createReactNativeNavigationSpanEvent;
+  createReactNativeResourceSpanEvent: typeof createReactNativeResourceSpanEvent;
   createReactNativeTraceparent: typeof createReactNativeTraceparent;
   createTraceparentFetch: typeof createTraceparentFetch;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;

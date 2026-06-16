@@ -223,11 +223,46 @@ await tracedFetch("https://api.example.com/checkout", {
 
 When `traceparentFactory` is omitted, `createTraceparentFetch()` reuses the supplied or active trace context. `tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. String URL targets apply only to the same origin plus a path prefix, so `https://api.example.com/v1` covers `/v1/orders` on that origin but not `https://wrong.example.com` or `/v10`. Keep targets narrow so mobile requests do not send tracing headers to unrelated origins. If the API is cross-origin or behind a gateway, allow the `traceparent` request header there too.
 
+## Navigation And Resource Spans
+
+Use explicit span helpers when you want route changes and API resources to appear in the same trace as mobile actions and errors. The React Navigation listener accepts a navigation container ref shape without adding a React Navigation dependency:
+
+```js
+import {
+  captureReactNativeResourceSpan,
+  createReactNavigationSpanListener,
+  createReactNativeTraceContext
+} from "@logbrew/react-native";
+
+const trace = createReactNativeTraceContext({
+  traceparent: incomingTraceparent
+});
+
+const stopNavigationTracing = createReactNavigationSpanListener(client, navigationRef, {
+  trace,
+  platform: Platform,
+  appState: AppState,
+  metadata: { flow: "checkout" }
+});
+
+captureReactNativeResourceSpan(client, {
+  trace,
+  method: "POST",
+  routeTemplate: "/api/checkout",
+  statusCode: 202,
+  durationMs: 171,
+  screen: "Checkout"
+});
+```
+
+`createReactNavigationSpanListener()` listens for React Navigation `state` changes and uses `__unsafe_action__` dispatch timing when the container exposes it. Route names and query-stripped route paths are captured; route keys are omitted unless `includeRouteKey: true` is set because they can be high-cardinality. `captureReactNativeResourceSpan()` records app-owned resource spans without patching global `fetch`/XHR, reading request bodies, copying headers, or storing full URLs with query text.
+
 ## Example Source
 
 The package includes example source for screen views, app-state metadata, handled JavaScript errors, provider/hooks, active trace correlation, and target-scoped trace propagation. After installing, inspect the shipped examples with:
 
 ```bash
 node node_modules/@logbrew/react-native/examples/index.mjs --list
+node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans
 node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation
 ```
