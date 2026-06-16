@@ -74,6 +74,54 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 
 @end
 
+@interface LBWTraceContext : NSObject
+
+@property(nonatomic, copy, readonly) NSString *traceID;
+@property(nonatomic, copy, readonly) NSString *spanID;
+@property(nonatomic, copy, readonly, nullable) NSString *parentSpanID;
+@property(nonatomic, copy, readonly) NSString *traceFlags;
+@property(nonatomic, readonly) BOOL sampled;
+@property(nonatomic, copy, readonly) NSString *traceparent;
+
++ (instancetype)rootContext;
++ (nullable instancetype)rootContextWithTraceFlags:(NSString *)traceFlags
+                                             error:(NSError *_Nullable *_Nullable)error;
++ (nullable instancetype)contextWithTraceID:(NSString *)traceID
+                                     spanID:(NSString *)spanID
+                               parentSpanID:(nullable NSString *)parentSpanID
+                                 traceFlags:(NSString *)traceFlags
+                                      error:(NSError *_Nullable *_Nullable)error;
++ (nullable instancetype)contextFromTraceparent:(NSString *)traceparent
+                                          error:(NSError *_Nullable *_Nullable)error;
++ (instancetype)continueOrCreateContextFromTraceparent:(nullable NSString *)traceparent;
+
+- (instancetype)childContext;
+- (NSDictionary<NSString *, id> *)metadata;
+- (NSDictionary<NSString *, NSString *> *)outgoingHeaders;
+- (nullable NSDictionary<NSString *, id> *)spanAttributesWithName:(NSString *)name
+                                                           status:(NSString *)status
+                                                       durationMs:(nullable NSNumber *)durationMs
+                                                         metadata:(nullable NSDictionary<NSString *, id> *)metadata
+                                                            error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
+@interface LBWTraceScope : NSObject
+
+- (void)close;
+
+@end
+
+@interface LBWTrace : NSObject
+
++ (nullable LBWTraceContext *)currentContext;
++ (LBWTraceScope *)activateContext:(LBWTraceContext *)context;
++ (nullable NSDictionary<NSString *, id> *)metadataByMergingActiveContextIntoMetadata:
+    (nullable NSDictionary<NSString *, id> *)metadata;
++ (NSDictionary<NSString *, NSString *> *)outgoingHeaders;
+
+@end
+
 @interface LBWClient : NSObject
 
 @property(nonatomic, readonly) NSUInteger pendingEvents;

@@ -83,6 +83,16 @@ static NSDictionary<NSString *, id> *LBWJSON(NSString *body) {
   return payload;
 }
 
+static NSDictionary<NSString *, id> *LBWEventWithID(NSDictionary<NSString *, id> *payload, NSString *eventID) {
+  for (NSDictionary<NSString *, id> *event in payload[@"events"]) {
+    if ([event[@"id"] isEqualToString:eventID]) {
+      return event;
+    }
+  }
+  LBWTestFail([NSString stringWithFormat:@"missing event %@", eventID]);
+  return @{};
+}
+
 static void LBWExerciseFailurePaths(void) {
   NSError *error = nil;
   LBWClient *emptyClient = LBWNewClient();
@@ -311,6 +321,102 @@ static void LBWExerciseMetricHelper(void) {
   LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"nested metric metadata failed");
 }
 
+static void LBWExerciseTraceHelpers(void) {
+  NSError *error = nil;
+  NSString *incoming = @"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+  LBWTraceContext *parsed = [LBWTraceContext contextFromTraceparent:incoming error:&error];
+  LBWAssert(parsed != nil, @"traceparent parse failed");
+  LBWAssert([parsed.traceID isEqualToString:@"4bf92f3577b34da6a3ce929d0e0e4736"], @"parsed trace id failed");
+  LBWAssert([parsed.spanID isEqualToString:@"00f067aa0ba902b7"], @"parsed parent span failed");
+  LBWAssert(parsed.sampled, @"parsed sampled flag failed");
+
+  LBWTraceContext *context = [LBWTraceContext continueOrCreateContextFromTraceparent:incoming];
+  LBWAssert([context.traceID isEqualToString:parsed.traceID], @"continued trace id failed");
+  LBWAssert([context.parentSpanID isEqualToString:parsed.spanID], @"continued parent span failed");
+  LBWAssert(![context.spanID isEqualToString:parsed.spanID], @"continued span reused parent");
+  NSDictionary<NSString *, NSString *> *headers = [context outgoingHeaders];
+  LBWAssert([headers[@"traceparent"] hasPrefix:@"00-4bf92f3577b34da6a3ce929d0e0e4736-"], @"outgoing trace failed");
+  NSDictionary<NSString *, id> *unscopedSpanAttributes = [context spanAttributesWithName:@"manual child work"
+                                                                                  status:@"ok"
+                                                                              durationMs:nil
+                                                                                metadata:@{@"routeTemplate": @"/manual"}
+                                                                                   error:&error];
+  LBWAssert([unscopedSpanAttributes[@"metadata"][@"traceId"] isEqualToString:context.traceID],
+            @"unscoped span metadata failed");
+
+  LBWTraceContext *fallback = [LBWTraceContext continueOrCreateContextFromTraceparent:@"malformed"];
+  LBWAssert([fallback.traceID length] == 32U && fallback.parentSpanID == nil, @"malformed fallback failed");
+  LBWAssert([LBWTraceContext contextFromTraceparent:@"00-00000000000000000000000000000000-00f067aa0ba902b7-01"
+                                             error:&error] == nil &&
+                [LBWStableCode(error) isEqualToString:@"validation_error"],
+            @"strict all-zero trace id failed");
+
+  LBWClient *client = LBWNewClient();
+  LBWTraceScope *scope = [LBWTrace activateContext:context];
+  LBWAssert([LBWTrace currentContext] == context, @"active context failed");
+  LBWAssert([client issueWithID:@"evt_trace_issue_001"
+                      timestamp:@"2026-06-02T10:00:02Z"
+                     attributes:@{
+                       @"title": @"Checkout timeout",
+                       @"level": @"error",
+                       @"metadata": @{@"traceId": @"caller_supplied_trace", @"component": @"checkout"}
+                     }
+                          error:&error], @"trace issue failed");
+  LBWAssert([client logWithID:@"evt_trace_log_001"
+                    timestamp:@"2026-06-02T10:00:03Z"
+                   attributes:@{
+                     @"message": @"checkout retry scheduled",
+                     @"level": @"warning",
+                     @"logger": @"checkout"
+                   }
+                        error:&error], @"trace log failed");
+  LBWAssert([client captureProductActionWithID:@"evt_trace_action_001"
+                                     timestamp:@"2026-06-02T10:00:04Z"
+                                          name:@"checkout.pay_tapped"
+                                        status:nil
+                                       context:@{@"sessionId": @"session_123"}
+                                      metadata:@{@"component": @"pay-button"}
+                                         error:&error], @"trace action failed");
+  LBWAssert([client metricWithID:@"evt_trace_metric_001"
+                       timestamp:@"2026-06-02T10:00:06Z"
+                      attributes:@{
+                        @"name": @"http.server.duration",
+                        @"kind": @"histogram",
+                        @"value": @184.5,
+                        @"unit": @"ms",
+                        @"temporality": @"delta"
+                      }
+                           error:&error], @"trace metric failed");
+  NSDictionary<NSString *, id> *spanAttributes = [context spanAttributesWithName:@"POST /api/checkout"
+                                                                          status:@"error"
+                                                                      durationMs:@184.5
+                                                                        metadata:nil
+                                                                           error:&error];
+  LBWAssert(spanAttributes != nil, @"trace span attributes failed");
+  LBWAssert([client spanWithID:@"evt_trace_span_001"
+                     timestamp:@"2026-06-02T10:00:07Z"
+                    attributes:spanAttributes
+                         error:&error], @"trace span failed");
+
+  NSString *preview = [client previewJSONWithError:&error];
+  LBWAssert(preview != nil, @"trace preview failed");
+  NSDictionary<NSString *, id> *payload = LBWJSON(preview);
+  NSDictionary<NSString *, id> *issue = LBWEventWithID(payload, @"evt_trace_issue_001");
+  NSDictionary<NSString *, id> *issueMetadata = issue[@"attributes"][@"metadata"];
+  LBWAssert([issueMetadata[@"traceId"] isEqualToString:context.traceID], @"trace metadata id failed");
+  LBWAssert([issueMetadata[@"spanId"] isEqualToString:context.spanID], @"trace metadata span failed");
+  LBWAssert([issueMetadata[@"parentSpanId"] isEqualToString:parsed.spanID], @"trace metadata parent failed");
+  LBWAssert([issueMetadata[@"component"] isEqualToString:@"checkout"], @"trace metadata app field failed");
+  LBWAssert(![issueMetadata[@"traceId"] isEqualToString:@"caller_supplied_trace"], @"active trace did not win");
+  NSDictionary<NSString *, id> *log = LBWEventWithID(payload, @"evt_trace_log_001");
+  LBWAssert([log[@"attributes"][@"metadata"][@"spanId"] isEqualToString:context.spanID], @"log trace failed");
+  NSDictionary<NSString *, id> *span = LBWEventWithID(payload, @"evt_trace_span_001");
+  LBWAssert([span[@"attributes"][@"traceId"] isEqualToString:context.traceID], @"span trace id failed");
+  LBWAssert([span[@"attributes"][@"spanId"] isEqualToString:context.spanID], @"span id failed");
+  [scope close];
+  LBWAssert([LBWTrace currentContext] == nil, @"trace scope close failed");
+}
+
 static void LBWExerciseHTTPTransportValidation(void) {
   NSError *error = nil;
   LBWHTTPTransport *transport = [[LBWHTTPTransport alloc] initWithEndpoint:@"ftp://example.com/v1/events"
@@ -359,6 +465,7 @@ int main(void) {
     LBWExerciseFailurePaths();
     LBWExerciseMetricHelper();
     LBWExerciseTimelineHelpers();
+    LBWExerciseTraceHelpers();
     LBWExerciseHTTPTransportValidation();
   }
   return 0;

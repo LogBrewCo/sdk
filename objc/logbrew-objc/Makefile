@@ -2,6 +2,7 @@ OBJC ?= clang
 OBJCFLAGS ?= -fobjc-arc -Wall -Wextra -Wpedantic -Werror -Iinclude
 LDFLAGS ?= -framework Foundation
 BUILD_DIR ?= build
+CORE_SOURCES := src/LogBrew.m src/LogBrewTrace.m
 
 .PHONY: all test examples clean
 
@@ -10,8 +11,8 @@ all: test examples
 $(BUILD_DIR):
 	@mkdir -p "$(BUILD_DIR)"
 
-$(BUILD_DIR)/test_logbrew: src/LogBrew.m src/LBWHTTPTransport.m tests/test_logbrew.m include/LogBrew.h | $(BUILD_DIR)
-	@$(OBJC) $(OBJCFLAGS) src/LogBrew.m src/LBWHTTPTransport.m tests/test_logbrew.m $(LDFLAGS) -o "$@"
+$(BUILD_DIR)/test_logbrew: $(CORE_SOURCES) src/LBWHTTPTransport.m tests/test_logbrew.m include/LogBrew.h | $(BUILD_DIR)
+	@$(OBJC) $(OBJCFLAGS) $(CORE_SOURCES) src/LBWHTTPTransport.m tests/test_logbrew.m $(LDFLAGS) -o "$@"
 
 test: $(BUILD_DIR)/test_logbrew
 	@$(BUILD_DIR)/test_logbrew

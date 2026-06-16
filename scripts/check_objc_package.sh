@@ -29,28 +29,34 @@ objcflags=(-fobjc-arc -Wall -Wextra -Wpedantic -Werror -I"$package_dir/include")
 ldflags=(-framework Foundation)
 
 mkdir -p "$tmp_dir/build"
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LBWHTTPTransport.m" "$package_dir/tests/test_logbrew.m" \
+"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LBWHTTPTransport.m" "$package_dir/tests/test_logbrew.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/test_logbrew"
 "$tmp_dir/build/test_logbrew"
 
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/examples/readme_example.m" \
+"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/examples/readme_example.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/readme_example"
 "$tmp_dir/build/readme_example" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/examples/real_user_smoke.m" \
+"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/examples/real_user_smoke.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/real_user_smoke"
 "$tmp_dir/build/real_user_smoke" > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/smoke.stderr.json"
 
+"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/examples/trace_correlation.m" \
+  "${ldflags[@]}" -o "$tmp_dir/build/trace_correlation"
+"$tmp_dir/build/trace_correlation" > "$tmp_dir/trace.stdout.json" 2> "$tmp_dir/trace.stderr.json"
+python3 "$repo_root/scripts/check_objc_trace_correlation_payload.py" "$tmp_dir/trace.stdout.json" "$tmp_dir/trace.stderr.json" >/dev/null
+
 run_examples_make > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
+grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 
 archive="$tmp_dir/logbrew-objc-0.1.0.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
@@ -59,9 +65,11 @@ grep -qx 'README.md' "$tmp_dir/archive-contents.txt"
 grep -qx 'Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'include/LogBrew.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LogBrew.m' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/LogBrewTrace.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LBWHTTPTransport.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/readme_example.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/real_user_smoke.m' "$tmp_dir/archive-contents.txt"
+grep -qx 'examples/trace_correlation.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'tests/test_logbrew.m' "$tmp_dir/archive-contents.txt"
 
@@ -89,15 +97,18 @@ for needle in (
     "LBWHTTPTransport",
     "LBWRecordingTransport",
     "LBWErrorStableCodeKey",
+    "LBWTraceContext",
+    "LBWTraceScope",
+    "LBWTrace",
     "metricWithID",
     "captureProductActionWithID",
     "captureNetworkMilestoneWithID",
 ):
     if needle not in header:
         raise SystemExit(f"missing public header symbol: {needle}")
-for needle in ("Metrics", "metricWithID", "low-cardinality"):
+for needle in ("Metrics", "metricWithID", "low-cardinality", "Tracing", "LBWTraceContext"):
     if needle not in readme:
-        raise SystemExit(f"missing README metric guidance: {needle}")
+        raise SystemExit(f"missing README guidance: {needle}")
 PY
 
 echo "objc package checks passed with $($objc_command --version | head -n 1)"

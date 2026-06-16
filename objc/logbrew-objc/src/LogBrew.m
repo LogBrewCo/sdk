@@ -566,6 +566,14 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
   if (message != nil) {
     clean[@"message"] = message;
   }
+  NSDictionary<NSString *, id> *metadata = LBWMetadataAttribute(attributes, @"metadata", @"issue metadata", error);
+  if (metadata == nil && attributes[@"metadata"] != nil) {
+    return NO;
+  }
+  NSDictionary<NSString *, id> *traceMetadata = [LBWTrace metadataByMergingActiveContextIntoMetadata:metadata];
+  if (traceMetadata != nil) {
+    clean[@"metadata"] = traceMetadata;
+  }
   return [self pushEventWithType:@"issue" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
 
@@ -588,6 +596,14 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
   }
   if (logger != nil) {
     clean[@"logger"] = logger;
+  }
+  NSDictionary<NSString *, id> *metadata = LBWMetadataAttribute(attributes, @"metadata", @"log metadata", error);
+  if (metadata == nil && attributes[@"metadata"] != nil) {
+    return NO;
+  }
+  NSDictionary<NSString *, id> *traceMetadata = [LBWTrace metadataByMergingActiveContextIntoMetadata:metadata];
+  if (traceMetadata != nil) {
+    clean[@"metadata"] = traceMetadata;
   }
   return [self pushEventWithType:@"log" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
@@ -623,6 +639,13 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
   if (durationMs != nil) {
     clean[@"durationMs"] = durationMs;
   }
+  NSDictionary<NSString *, id> *metadata = LBWMetadataAttribute(attributes, @"metadata", @"span metadata", error);
+  if (metadata == nil && attributes[@"metadata"] != nil) {
+    return NO;
+  }
+  if (metadata != nil) {
+    clean[@"metadata"] = metadata;
+  }
   return [self pushEventWithType:@"span" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
 
@@ -643,8 +666,9 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
   if (metadata == nil && attributes[@"metadata"] != nil) {
     return NO;
   }
-  if (metadata != nil) {
-    clean[@"metadata"] = metadata;
+  NSDictionary<NSString *, id> *traceMetadata = [LBWTrace metadataByMergingActiveContextIntoMetadata:metadata];
+  if (traceMetadata != nil) {
+    clean[@"metadata"] = traceMetadata;
   }
   return [self pushEventWithType:@"action" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }
@@ -689,8 +713,9 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
   if (metadata == nil && attributes[@"metadata"] != nil) {
     return NO;
   }
-  if (metadata != nil) {
-    clean[@"metadata"] = metadata;
+  NSDictionary<NSString *, id> *traceMetadata = [LBWTrace metadataByMergingActiveContextIntoMetadata:metadata];
+  if (traceMetadata != nil) {
+    clean[@"metadata"] = traceMetadata;
   }
   return [self pushEventWithType:@"metric" eventID:eventID timestamp:timestamp attributes:clean error:error];
 }

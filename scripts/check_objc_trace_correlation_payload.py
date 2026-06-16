@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Validate the Objective-C installed trace-correlation example payload."""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736"
+PARENT_SPAN_ID = "00f067aa0ba902b7"
+RAW_TRACEPARENT = f"00-{TRACE_ID}-{PARENT_SPAN_ID}-01"
+
+
+def fail(message: str) -> None:
+    raise SystemExit(message)
+
+
+def load_json(path: str) -> dict:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def event_by_id(payload: dict, event_id: str) -> dict:
+    for event in payload.get("events", []):
+        if event.get("id") == event_id:
+            return event
+    fail(f"missing event {event_id}")
+
+
+def metadata_for(payload: dict, event_id: str) -> dict:
+    metadata = event_by_id(payload, event_id).get("attributes", {}).get("metadata")
+    if not isinstance(metadata, dict):
+        fail(f"missing metadata for {event_id}")
+    return metadata
+
+
+def assert_trace_metadata(metadata: dict, local_span_id: str) -> None:
+    if metadata.get("traceId") != TRACE_ID:
+        fail(f"unexpected traceId metadata: {metadata.get('traceId')}")
+    if metadata.get("spanId") != local_span_id:
+        fail(f"unexpected spanId metadata: {metadata.get('spanId')}")
+    if metadata.get("parentSpanId") != PARENT_SPAN_ID:
+        fail(f"unexpected parentSpanId metadata: {metadata.get('parentSpanId')}")
+    if metadata.get("traceFlags") != "01":
+        fail(f"unexpected traceFlags metadata: {metadata.get('traceFlags')}")
+    if metadata.get("traceSampled") is not True:
+        fail(f"unexpected traceSampled metadata: {metadata.get('traceSampled')}")
+
+
+def main() -> None:
+    if len(sys.argv) != 3:
+        fail("usage: check_objc_trace_correlation_payload.py PAYLOAD_JSON STDERR_JSON")
+
+    payload_path, stderr_path = sys.argv[1:]
+    payload = load_json(payload_path)
+    stderr_payload = load_json(stderr_path)
+    raw_payload = Path(payload_path).read_text(encoding="utf-8")
+
+    outgoing = stderr_payload.get("traceparent")
+    match = re.fullmatch(rf"00-{TRACE_ID}-([0-9a-f]{{16}})-01", outgoing or "")
+    if match is None:
+        fail(f"unexpected outgoing traceparent: {outgoing}")
+    local_span_id = match.group(1)
+    if local_span_id == PARENT_SPAN_ID:
+        fail("outgoing traceparent reused the incoming parent span id")
+
+    for event_id in (
+        "evt_trace_issue_001",
+        "evt_trace_log_001",
+        "evt_trace_action_001",
+        "evt_trace_network_001",
+        "evt_trace_metric_001",
+    ):
+        assert_trace_metadata(metadata_for(payload, event_id), local_span_id)
+
+    issue_metadata = metadata_for(payload, "evt_trace_issue_001")
+    if issue_metadata.get("traceId") == "caller_supplied_trace":
+        fail("caller-supplied traceId overrode active trace metadata")
+    if issue_metadata.get("component") != "checkout":
+        fail("issue metadata did not preserve primitive app metadata")
+
+    network_metadata = metadata_for(payload, "evt_trace_network_001")
+    if network_metadata.get("routeTemplate") != "/api/checkout":
+        fail(f"network routeTemplate leaked raw URL data: {network_metadata.get('routeTemplate')}")
+    if network_metadata.get("method") != "POST" or network_metadata.get("statusCode") != 503:
+        fail("network metadata did not preserve method/status")
+    if "card=redacted" in raw_payload or "#pay" in raw_payload:
+        fail("network milestone leaked query or fragment text")
+    if RAW_TRACEPARENT in raw_payload:
+        fail("raw incoming traceparent leaked into telemetry payload")
+
+    span = event_by_id(payload, "evt_trace_span_001").get("attributes", {})
+    if span.get("traceId") != TRACE_ID:
+        fail("span traceId did not continue incoming trace")
+    if span.get("spanId") != local_span_id:
+        fail("span did not reuse the active local span id")
+    if span.get("parentSpanId") != PARENT_SPAN_ID:
+        fail("span did not link to incoming parent span")
+    if span.get("status") != "error":
+        fail("span status was not preserved")
+
+    print("objc trace correlation payload passed")
+
+
+if __name__ == "__main__":
+    main()

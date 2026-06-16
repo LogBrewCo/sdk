@@ -21,7 +21,9 @@ on_error() {
     "$tmp_dir/readme-example.stdout.json" \
     "$tmp_dir/readme-example.stderr.json" \
     "$tmp_dir/real-user-smoke.stdout.json" \
-    "$tmp_dir/real-user-smoke.stderr.json"; do
+    "$tmp_dir/real-user-smoke.stderr.json" \
+    "$tmp_dir/trace-correlation.stdout.json" \
+    "$tmp_dir/trace-correlation.stderr.json"; do
     if [[ -f "$diagnostic" ]]; then
       echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
       sed -n '1,80p' "$diagnostic" >&2
@@ -52,8 +54,10 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
+test -f "$sdk_dir/src/LogBrewTrace.m"
 test -f "$sdk_dir/src/LBWHTTPTransport.m"
 grep -q 'LBWHTTPTransport' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWTraceContext' "$sdk_dir/include/LogBrew.h"
 grep -q 'metricWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
@@ -67,8 +71,10 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
+test -f "$sdk_dir/src/LogBrewTrace.m"
 test -f "$sdk_dir/src/LBWHTTPTransport.m"
 grep -q 'LBWHTTPTransport' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWTraceContext' "$sdk_dir/include/LogBrew.h"
 grep -q 'metricWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
@@ -330,6 +336,7 @@ EOF
 "$objc_command" -fobjc-arc -Wall -Wextra -Wpedantic -Werror \
   -I"$sdk_dir/include" \
   "$sdk_dir/src/LogBrew.m" \
+  "$sdk_dir/src/LogBrewTrace.m" \
   "$app_dir/main.m" \
   -framework Foundation \
   -o "$app_dir/native_objc_app"
@@ -462,6 +469,7 @@ fi
 "$objc_command" -fobjc-arc -Wall -Wextra -Wpedantic -Werror \
   -I"$sdk_dir/include" \
   "$sdk_dir/src/LogBrew.m" \
+  "$sdk_dir/src/LogBrewTrace.m" \
   "$sdk_dir/src/LBWHTTPTransport.m" \
   "$app_dir/http_app.m" \
   -framework Foundation \
@@ -495,11 +503,16 @@ make -C "$sdk_dir/examples" OBJC="$objc_command" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
+grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 make -C "$sdk_dir/examples" OBJC="$objc_command" run-readme-example > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 make -C "$sdk_dir/examples" OBJC="$objc_command" run-real-user-smoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+make -C "$sdk_dir/examples" OBJC="$objc_command" run-trace-correlation > "$tmp_dir/trace-correlation.stdout.json" 2> "$tmp_dir/trace-correlation.stderr.json"
+python3 "$repo_root/scripts/check_objc_trace_correlation_payload.py" \
+  "$tmp_dir/trace-correlation.stdout.json" \
+  "$tmp_dir/trace-correlation.stderr.json" >/dev/null
 
 echo "objc real-user smoke passed with $($objc_command --version | head -n 1)"

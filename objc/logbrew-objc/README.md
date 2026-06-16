@@ -8,11 +8,12 @@ Public Objective-C SDK for Apple and mixed Swift/Objective-C apps. It ships as a
 
 ## Install From Source
 
-Copy `include/LogBrew.h` and `src/LogBrew.m` into your app target, or vendor the source package and compile it with Foundation:
+Copy `include/LogBrew.h` and the Objective-C files in `src/` into your app target, or vendor the source package and compile it with Foundation:
 
 ```bash
 clang -fobjc-arc -Iobjc/logbrew-objc/include \
   objc/logbrew-objc/src/LogBrew.m \
+  objc/logbrew-objc/src/LogBrewTrace.m \
   your_app.m \
   -framework Foundation \
   -o your_app
@@ -79,6 +80,7 @@ Use `LBWHTTPTransport` when your application is ready to send events to the host
 ```bash
 clang -fobjc-arc -Iobjc/logbrew-objc/include \
   objc/logbrew-objc/src/LogBrew.m \
+  objc/logbrew-objc/src/LogBrewTrace.m \
   objc/logbrew-objc/src/LBWHTTPTransport.m \
   your_app.m \
   -framework Foundation \
@@ -137,6 +139,43 @@ Use `captureNetworkMilestoneWithID:...` for app-owned API milestones that should
 ```
 
 Network helpers normalize the method, strip query strings and fragments from route templates, default HTTP `4xx` and `5xx` milestones to `failure`, and store primitive metadata such as `sessionId`, `screen`, `traceId`, `funnel`, and `step`. They do not patch `NSURLSession`, record visual replay, collect headers, or capture request or response bodies. Keep user-entered text, raw URLs, query strings, headers, and payloads out of timeline metadata.
+
+## Tracing
+
+Use `LBWTraceContext` and `LBWTrace` when your app receives or creates W3C trace context and wants issues, logs, product actions, network milestones, metrics, and spans to line up in LogBrew:
+
+```objective-c
+LBWTraceContext *trace =
+    [LBWTraceContext continueOrCreateContextFromTraceparent:incomingTraceparent];
+LBWTraceScope *scope = [LBWTrace activateContext:trace];
+
+[client logWithID:@"evt_trace_log_001"
+        timestamp:@"2026-06-02T10:00:03Z"
+       attributes:@{
+         @"message": @"checkout retry scheduled",
+         @"level": @"warning",
+         @"logger": @"checkout"
+       }
+            error:&error];
+
+NSDictionary *spanAttributes =
+    [trace spanAttributesWithName:@"POST /api/checkout"
+                           status:@"error"
+                       durationMs:@184.5
+                         metadata:@{@"routeTemplate": @"/api/checkout"}
+                            error:&error];
+[client spanWithID:@"evt_trace_span_001"
+         timestamp:@"2026-06-02T10:00:07Z"
+        attributes:spanAttributes
+             error:&error];
+
+NSDictionary *headers = [LBWTrace outgoingHeaders];
+[scope close];
+```
+
+`continueOrCreateContextFromTraceparent:` accepts valid W3C `traceparent` values, creates a fresh local span ID, and falls back to a local root trace for malformed propagation. While a scope is active on the current thread, issue, log, action, and metric metadata receive `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled`; active trace fields override caller-supplied trace metadata so telemetry stays internally consistent. `outgoingHeaders` returns only a normalized `traceparent` header for app-owned HTTP clients.
+
+The trace helpers do not patch `NSURLSession`, do not collect headers or payloads, do not serialize the raw incoming `traceparent`, and do not capture query strings or fragments. Use only the project-scoped client key shown by LogBrew setup examples when sending telemetry.
 
 ## Error Shape
 
