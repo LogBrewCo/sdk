@@ -6,9 +6,14 @@ import {
   captureScreenView,
   createAppStateListener,
   createLogBrewReactNativeClient,
+  createReactNativeSpanAttributes,
+  createReactNativeTraceContext,
+  createReactNativeTraceHeaders,
   createReactNativeTraceparent,
   createTraceparentFetch,
-  shouldPropagateTraceparent
+  getActiveLogBrewTrace,
+  shouldPropagateTraceparent,
+  withLogBrewTrace
 } from "@logbrew/react-native";
 
 const fakePlatform = {
@@ -36,19 +41,27 @@ const client = createLogBrewReactNativeClient({
   sdkVersion: "0.1.0",
   maxRetries: 1
 });
+const trace = createReactNativeTraceContext({
+  traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  spanId: "b7ad6b7169203331"
+});
+const activeTraceparent = createReactNativeTraceHeaders(trace).traceparent;
 
 addCoreEvents(client);
-captureScreenView(client, "Checkout", {
-  id: "evt_action_001",
-  timestamp: "2026-06-02T10:00:05Z",
-  platform: fakePlatform,
-  appState: fakeAppState,
-  metadata: { flow: "checkout" }
+withLogBrewTrace(trace, () => {
+  captureScreenView(client, "Checkout", {
+    id: "evt_action_001",
+    timestamp: "2026-06-02T10:00:05Z",
+    platform: fakePlatform,
+    appState: fakeAppState,
+    metadata: { flow: "checkout" }
+  });
 });
 const stopListening = createAppStateListener(client, fakeAppState, {
   id: "evt_action_app_state_background",
   timestamp: "2026-06-02T10:00:06Z",
-  platform: fakePlatform
+  platform: fakePlatform,
+  trace
 });
 appStateListener("background");
 stopListening();
@@ -59,6 +72,7 @@ captureReactNativeError(client, handledError, {
   platform: fakePlatform,
   appState: fakeAppState,
   screen: "Checkout",
+  trace,
   metadata: { flow: "checkout", handled: true }
 });
 
@@ -86,6 +100,19 @@ await tracedFetch("https://cdn.example.test/app.js", {
   headers: { accept: "text/javascript" }
 });
 await tracedFetch("/mobile-api/cart");
+const activeTraceRequests = [];
+let activeTraceFetchPromise;
+withLogBrewTrace(trace, () => {
+  const activeTraceFetch = createTraceparentFetch({
+    fetchImpl: async (input, init = {}) => {
+      activeTraceRequests.push({ input, init });
+      return { status: 204 };
+    },
+    tracePropagationTargets: ["https://api.example.test/"]
+  });
+  activeTraceFetchPromise = activeTraceFetch("https://api.example.test/mobile");
+});
+await activeTraceFetchPromise;
 const propagatedTraceparent = propagatedRequests[0].init.headers.traceparent;
 if (propagatedTraceparent !== "00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01") {
   throw new Error(`unexpected propagated traceparent: ${propagatedTraceparent}`);
@@ -98,6 +125,12 @@ if (propagatedRequests[1].init.headers?.traceparent !== undefined) {
 }
 if (propagatedRequests[2].init.headers.traceparent !== propagatedTraceparent) {
   throw new Error("relative matched requests should receive traceparent");
+}
+if (activeTraceRequests[0].init.headers.traceparent !== activeTraceparent) {
+  throw new Error(`expected active trace fetch to reuse current trace: ${activeTraceRequests[0].init.headers.traceparent}`);
+}
+if (getActiveLogBrewTrace() !== undefined) {
+  throw new Error("active trace should be cleared after scoped fetch");
 }
 
 const timelineClient = createLogBrewReactNativeClient({
@@ -132,11 +165,17 @@ captureReactNativeNetwork(timelineClient, {
   durationMs: 241,
   screen: "Checkout",
   sessionId: "session_mobile_001",
-  traceId: "trace_mobile_001"
+  trace
 });
+timelineClient.span("evt_native_span_checkout", "2026-06-02T10:00:10Z", createReactNativeSpanAttributes({
+  name: "mobile.checkout",
+  status: "ok",
+  durationMs: 245,
+  trace
+}));
 const timelineEvents = JSON.parse(timelineClient.previewJson()).events;
-if (timelineEvents.length !== 2) {
-  throw new Error(`expected two timeline events, got ${timelineEvents.length}`);
+if (timelineEvents.length !== 3) {
+  throw new Error(`expected three timeline events, got ${timelineEvents.length}`);
 }
 const timelineAction = timelineEvents[0].attributes;
 if (timelineAction.metadata.source !== "react-native.action" || timelineAction.metadata.nested !== undefined) {
@@ -148,6 +187,9 @@ if (timelineNetwork.name !== "POST /api/checkout" || timelineNetwork.status !== 
 }
 if (timelineNetwork.metadata.routeTemplate !== "/api/checkout" || timelineNetwork.metadata.method !== "POST") {
   throw new Error(`expected sanitized network metadata: ${JSON.stringify(timelineNetwork.metadata)}`);
+}
+if (timelineNetwork.metadata.traceId !== trace.traceId || timelineEvents[2].attributes.traceId !== trace.traceId) {
+  throw new Error("expected network and span timeline events to share the trace");
 }
 
 const preview = client.previewJson();
@@ -162,7 +204,8 @@ console.error(JSON.stringify({
   listenerRemoved: appStateListener === null,
   timelineEvents: timelineEvents.length,
   networkAction: timelineNetwork.name,
-  propagatedTraceparent
+  propagatedTraceparent,
+  activeTraceparent
 }));
 
 function addCoreEvents(client) {

@@ -6,7 +6,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, and explicit W3C trace propagation for mobile fetch calls.
+This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, and explicit W3C trace propagation for mobile fetch calls.
 
 ## Install
 
@@ -51,32 +51,38 @@ Use explicit action and network helpers for important mobile funnel steps your a
 ```js
 import {
   captureReactNativeAction,
-  captureReactNativeNetwork
+  captureReactNativeNetwork,
+  createReactNativeTraceContext,
+  withLogBrewTrace
 } from "@logbrew/react-native";
 
-captureReactNativeAction(client, {
-  name: "checkout.submit",
-  screen: "Checkout",
-  sessionId: "session_123",
-  traceId: "trace_123",
-  metadata: {
-    funnel: "checkout",
-    step: "submit"
-  }
+const trace = createReactNativeTraceContext({
+  traceparent: incomingTraceparent
 });
 
-captureReactNativeNetwork(client, {
-  method: "POST",
-  routeTemplate: "/api/checkout",
-  statusCode: 202,
-  durationMs: 128,
-  screen: "Checkout",
-  sessionId: "session_123",
-  traceId: "trace_123"
+withLogBrewTrace(trace, () => {
+  captureReactNativeAction(client, {
+    name: "checkout.submit",
+    screen: "Checkout",
+    sessionId: "session_123",
+    metadata: {
+      funnel: "checkout",
+      step: "submit"
+    }
+  });
+
+  captureReactNativeNetwork(client, {
+    method: "POST",
+    routeTemplate: "/api/checkout",
+    statusCode: 202,
+    durationMs: 128,
+    screen: "Checkout",
+    sessionId: "session_123"
+  });
 });
 ```
 
-`routeTemplate` is stripped of query strings and hashes before capture. Keep metadata low-cardinality and primitive-only, such as screen names, route templates, funnel names, step names, status codes, durations, session IDs, or trace IDs. Do not send request bodies, response bodies, authorization headers, user-entered form values, or full URLs with private query text. LogBrew does not patch global `fetch` or record visual replay from this package.
+`routeTemplate` is stripped of query strings and hashes before capture. Keep metadata low-cardinality and primitive-only, such as screen names, route templates, funnel names, step names, status codes, durations, session IDs, or trace IDs. Active trace metadata overwrites caller-supplied trace keys so accidental spoofed IDs do not break correlation. Do not send request bodies, response bodies, authorization headers, user-entered form values, or full URLs with private query text. LogBrew does not patch global `fetch` or record visual replay from this package.
 
 ## Error Capture
 
@@ -105,6 +111,7 @@ Set `includeStack: true` only when your app has decided stack text is safe to se
 ```js
 import { AppState, Platform } from "react-native";
 import {
+  createReactNativeTraceContext,
   LogBrewNativeProvider,
   useLogBrewNativeActions
 } from "@logbrew/react-native";
@@ -132,8 +139,11 @@ function CheckoutScreen() {
 }
 
 export function App({ client }) {
+  const trace = createReactNativeTraceContext({
+    traceparent: incomingTraceparent
+  });
   return (
-    <LogBrewNativeProvider client={client} platform={Platform} appState={AppState}>
+    <LogBrewNativeProvider client={client} platform={Platform} appState={AppState} trace={trace}>
       <CheckoutScreen />
     </LogBrewNativeProvider>
   );
@@ -144,15 +154,60 @@ The package ships a `react-native` entry that imports `AppState` and `Platform` 
 
 ## Trace Propagation
 
+Use an active trace when one product operation should connect screen views, logs, handled errors, actions, network milestones, explicit spans, and outbound request headers. `createReactNativeTraceContext()` continues a valid W3C `traceparent` with a fresh local span ID and falls back to a local root when the incoming value is missing or malformed:
+
+```js
+import {
+  createReactNativeSpanAttributes,
+  createReactNativeTraceContext,
+  createReactNativeTraceHeaders,
+  getReactNativeTraceMetadata,
+  getActiveLogBrewTrace,
+  withLogBrewTrace
+} from "@logbrew/react-native";
+
+const trace = createReactNativeTraceContext({
+  traceparent: incomingTraceparent
+});
+
+withLogBrewTrace(trace, activeTrace => {
+  client.log("evt_log_checkout", new Date().toISOString(), {
+    message: "checkout started",
+    level: "info",
+    metadata: {
+      screen: "Checkout",
+      ...getReactNativeTraceMetadata(activeTrace)
+    }
+  });
+  client.span("evt_span_checkout", new Date().toISOString(), createReactNativeSpanAttributes({
+    name: "mobile.checkout",
+    status: "ok",
+    durationMs: 132,
+    trace: activeTrace
+  }));
+  console.log(getActiveLogBrewTrace()?.traceId);
+});
+
+const headers = createReactNativeTraceHeaders(trace);
+```
+
+For async handlers, keep the returned `trace` object and pass it explicitly after `await` boundaries, or use provider `trace` so hook helpers receive it directly. This avoids pretending React Native has a universal async context manager while still making event-handler correlation simple and predictable.
+
 Use `createTraceparentFetch()` when a React Native app should connect mobile fetch work to backend traces. Propagation is target-scoped by default: no `traceparent` header is attached unless the request URL matches `tracePropagationTargets`.
 
 ```js
 import {
+  createReactNativeTraceContext,
   createReactNativeTraceparent,
   createTraceparentFetch
 } from "@logbrew/react-native";
 
+const trace = createReactNativeTraceContext({
+  traceparent: incomingTraceparent
+});
+
 const tracedFetch = createTraceparentFetch({
+  trace,
   traceparentFactory: () => createReactNativeTraceparent(),
   tracePropagationTargets: [
     "https://api.example.com/",
@@ -166,8 +221,13 @@ await tracedFetch("https://api.example.com/checkout", {
 });
 ```
 
-`tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. String URL targets apply only to the same origin plus a path prefix, so `https://api.example.com/v1` covers `/v1/orders` on that origin but not `https://wrong.example.com` or `/v10`. Keep targets narrow so mobile requests do not send tracing headers to unrelated origins. If the API is cross-origin or behind a gateway, allow the `traceparent` request header there too.
+When `traceparentFactory` is omitted, `createTraceparentFetch()` reuses the supplied or active trace context. `tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. String URL targets apply only to the same origin plus a path prefix, so `https://api.example.com/v1` covers `/v1/orders` on that origin but not `https://wrong.example.com` or `/v10`. Keep targets narrow so mobile requests do not send tracing headers to unrelated origins. If the API is cross-origin or behind a gateway, allow the `traceparent` request header there too.
 
 ## Example Source
 
-The package includes example source for screen views, app-state metadata, handled JavaScript errors, provider/hooks, and target-scoped trace propagation. Use the snippets above as the starting point for wiring LogBrew into your React Native application.
+The package includes example source for screen views, app-state metadata, handled JavaScript errors, provider/hooks, active trace correlation, and target-scoped trace propagation. After installing, inspect the shipped examples with:
+
+```bash
+node node_modules/@logbrew/react-native/examples/index.mjs --list
+node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation
+```

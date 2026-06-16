@@ -2,7 +2,8 @@
 
 const commands = new Map([
   ["readme-example", new URL("./readme-example.mjs", import.meta.url)],
-  ["real-user-smoke", new URL("./real-user-smoke.mjs", import.meta.url)]
+  ["real-user-smoke", new URL("./real-user-smoke.mjs", import.meta.url)],
+  ["trace-correlation", new URL("./trace-correlation.mjs", import.meta.url)]
 ]);
 
 const command = process.argv[2] ?? "real-user-smoke";
@@ -24,13 +25,16 @@ function printHelp() {
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs --list");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs readme-example");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs real-user-smoke");
+  console.log("node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run list");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run readme-example");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run real-user-smoke");
+  console.log("npm --prefix node_modules/@logbrew/react-native/examples run trace-correlation");
 }
 
 function printList() {
   console.log("readme-example -> node node_modules/@logbrew/react-native/examples/index.mjs readme-example");
   console.log("real-user-smoke -> node node_modules/@logbrew/react-native/examples/index.mjs real-user-smoke");
+  console.log("trace-correlation -> node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation");
 }

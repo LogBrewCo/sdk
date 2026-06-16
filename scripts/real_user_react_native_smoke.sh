@@ -45,6 +45,7 @@ grep -q '^package/examples/index.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/package.json$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/examples/trace-correlation.mjs$' "$tmp_dir/native-tarball.txt"
 tar -xOf "$native_tgz" package/README.md > "$tmp_dir/native-readme.md"
 grep -q 'npm install @logbrew/sdk @logbrew/react-native react react-native' "$tmp_dir/native-readme.md"
 grep -q 'pnpm add @logbrew/sdk @logbrew/react-native react react-native' "$tmp_dir/native-readme.md"
@@ -57,6 +58,8 @@ grep -q 'tracePropagationTargets' "$tmp_dir/native-readme.md"
 grep -q 'captureReactNativeError' "$tmp_dir/native-readme.md"
 grep -q 'captureReactNativeAction' "$tmp_dir/native-readme.md"
 grep -q 'captureReactNativeNetwork' "$tmp_dir/native-readme.md"
+grep -q 'withLogBrewTrace' "$tmp_dir/native-readme.md"
+grep -q 'getActiveLogBrewTrace' "$tmp_dir/native-readme.md"
 
 app_dir="$tmp_dir/react-native-smoke-app"
 mkdir -p "$app_dir"
@@ -103,7 +106,7 @@ for name in ("@logbrew/react-native", "@logbrew/sdk", "react", "react-native"):
         raise SystemExit(f"missing npm dependency entry: {name}")
 PY
 node --check node_modules/@logbrew/react-native/index.native.js
-node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.default !== "object") process.exit(1)'
+node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.default !== "object") process.exit(1)'
 
 cat > smoke.mjs <<'EOF'
 import React from "react";
@@ -111,6 +114,7 @@ import TestRenderer, { act } from "react-test-renderer";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   LogBrewNativeProvider,
+  bindLogBrewTrace,
   captureAppStateChange,
   captureReactNativeAction,
   captureReactNativeError,
@@ -120,10 +124,16 @@ import {
   createLogBrewReactNativeClient,
   createReactNativeActionEvent,
   createReactNativeNetworkEvent,
+  createReactNativeSpanAttributes,
+  createReactNativeTraceContext,
+  createReactNativeTraceHeaders,
   createReactNativeTraceparent,
   createTraceparentFetch,
+  getActiveLogBrewTrace,
   getReactNativeContext,
+  getReactNativeTraceMetadata,
   shouldPropagateTraceparent,
+  withLogBrewTrace,
   useLogBrewNativeActions
 } from "@logbrew/react-native";
 
@@ -157,6 +167,22 @@ const client = createLogBrewReactNativeClient({
   sdkVersion: "0.1.0",
   maxRetries: 1
 });
+const providerTrace = createReactNativeTraceContext({
+  traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  spanId: "b7ad6b7169203331"
+});
+const providerTraceHeaders = createReactNativeTraceHeaders(providerTrace);
+if (providerTraceHeaders.traceparent !== "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01") {
+  throw new Error(`unexpected provider traceparent: ${providerTraceHeaders.traceparent}`);
+}
+const traceMetadata = getReactNativeTraceMetadata(providerTrace);
+if (traceMetadata.traceSampled !== true || traceMetadata.parentSpanId !== "00f067aa0ba902b7") {
+  throw new Error(`unexpected trace metadata: ${JSON.stringify(traceMetadata)}`);
+}
+const boundHandler = bindLogBrewTrace(providerTrace, () => getActiveLogBrewTrace()?.traceId);
+if (boundHandler() !== providerTrace.traceId || getActiveLogBrewTrace() !== undefined) {
+  throw new Error("bound trace callback should expose and then clear active trace");
+}
 
 function CaptureComponent() {
   const actions = useLogBrewNativeActions();
@@ -198,7 +224,7 @@ await act(async () => {
   TestRenderer.create(
     React.createElement(
       LogBrewNativeProvider,
-      { client, platform, appState },
+      { client, platform, appState, trace: providerTrace },
       React.createElement(CaptureComponent)
     )
   );
@@ -207,21 +233,24 @@ await act(async () => {
 const stopListening = createAppStateListener(client, appState, {
   id: "evt_action_background",
   timestamp: "2026-06-02T10:00:06Z",
-  platform
+  platform,
+  trace: providerTrace
 });
 appStateListener("background");
 stopListening();
-captureAppStateChange(client, "active", {
-  id: "evt_action_foreground",
-  timestamp: "2026-06-02T10:00:07Z",
-  platform,
-  appState
-});
-captureScreenView(client, "Checkout Complete", {
-  id: "evt_action_checkout_complete",
-  timestamp: "2026-06-02T10:00:08Z",
-  platform,
-  appState
+withLogBrewTrace(providerTrace, () => {
+  captureAppStateChange(client, "active", {
+    id: "evt_action_foreground",
+    timestamp: "2026-06-02T10:00:07Z",
+    platform,
+    appState
+  });
+  captureScreenView(client, "Checkout Complete", {
+    id: "evt_action_checkout_complete",
+    timestamp: "2026-06-02T10:00:08Z",
+    platform,
+    appState
+  });
 });
 const handledError = new Error("Checkout failed on device");
 handledError.stack = "Error: Checkout failed on device\n    at checkout (app://Checkout.js:12:4)";
@@ -231,6 +260,7 @@ captureReactNativeError(client, handledError, {
   platform,
   appState,
   screen: "Checkout",
+  trace: providerTrace,
   metadata: { flow: "checkout", handled: true }
 });
 captureReactNativeError(client, "non-error rejection", {
@@ -239,6 +269,7 @@ captureReactNativeError(client, "non-error rejection", {
   level: "warning",
   platform,
   appState,
+  trace: providerTrace,
   metadata: { handled: true }
 });
 captureReactNativeError(client, handledError, {
@@ -247,7 +278,8 @@ captureReactNativeError(client, handledError, {
   includeStack: true,
   platform,
   appState,
-  screen: "Checkout"
+  screen: "Checkout",
+  trace: providerTrace
 });
 
 const tracedFetchRequests = [];
@@ -283,6 +315,19 @@ await tracedFetch("https://cdn.example.test/app.js", {
   headers: { accept: "text/javascript" }
 });
 await tracedFetch("/mobile-api/cart");
+const activeTraceFetchRequests = [];
+let activeTraceFetchPromise;
+withLogBrewTrace(providerTrace, () => {
+  const activeTraceFetch = createTraceparentFetch({
+    fetchImpl: async (input, init = {}) => {
+      activeTraceFetchRequests.push({ input, init });
+      return { status: 204 };
+    },
+    tracePropagationTargets: ["https://api.example.test/"]
+  });
+  activeTraceFetchPromise = activeTraceFetch("https://api.example.test/checkout");
+});
+await activeTraceFetchPromise;
 if (tracedFetchRequests.length !== 3) {
   throw new Error(`expected three traced fetch calls, got ${tracedFetchRequests.length}`);
 }
@@ -298,6 +343,12 @@ if (tracedFetchRequests[1].init.headers?.traceparent !== undefined) {
 }
 if (tracedFetchRequests[2].init.headers.traceparent !== propagatedTraceparent) {
   throw new Error("relative target should receive traceparent");
+}
+if (activeTraceFetchRequests[0].init.headers.traceparent !== providerTraceHeaders.traceparent) {
+  throw new Error(`active trace fetch should reuse provider trace: ${activeTraceFetchRequests[0].init.headers.traceparent}`);
+}
+if (getActiveLogBrewTrace() !== undefined) {
+  throw new Error("active trace should be cleared after scoped fetch");
 }
 
 const timelineClient = createLogBrewReactNativeClient({
@@ -340,7 +391,7 @@ await act(async () => {
   TestRenderer.create(
     React.createElement(
       LogBrewNativeProvider,
-      { client: timelineClient, platform, appState },
+      { client: timelineClient, platform, appState, trace: providerTrace },
       React.createElement(TimelineComponent)
     )
   );
@@ -394,6 +445,9 @@ const timelineAction = timelineEvents[0].attributes;
 if (timelineAction.metadata.source !== "react-native.action" || timelineAction.metadata.platform !== "ios") {
   throw new Error(`unexpected action metadata: ${JSON.stringify(timelineAction.metadata)}`);
 }
+if (timelineAction.metadata.traceId !== providerTrace.traceId || timelineAction.metadata.spanId !== providerTrace.spanId) {
+  throw new Error(`timeline action should include provider trace: ${JSON.stringify(timelineAction.metadata)}`);
+}
 if (timelineAction.metadata.nested !== undefined) {
   throw new Error("nested action metadata should be dropped");
 }
@@ -444,6 +498,15 @@ if len(events) != 12:
     raise SystemExit(f"expected 12 events, got {len(events)}")
 if [event["type"] for event in events[:6]] != ["release", "environment", "issue", "log", "span", "action"]:
     raise SystemExit("first six event types did not match the public batch flow")
+trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+span_id = "b7ad6b7169203331"
+parent_span_id = "00f067aa0ba902b7"
+for index in (2, 3, 5, 6, 7, 8, 9, 10, 11):
+    metadata = events[index]["attributes"].get("metadata", {})
+    if metadata.get("traceId") != trace_id or metadata.get("spanId") != span_id:
+        raise SystemExit(f"event {index} is missing trace correlation: {metadata}")
+    if metadata.get("parentSpanId") != parent_span_id:
+        raise SystemExit(f"event {index} is missing parent span correlation: {metadata}")
 screen = events[5]["attributes"]
 if screen["name"] != "screen:Checkout" or screen["metadata"]["platform"] != "ios":
     raise SystemExit(f"unexpected screen event: {screen}")
@@ -476,6 +539,7 @@ import type { AppStateStatus } from "react-native";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   LogBrewNativeProvider,
+  bindLogBrewTrace,
   captureAppStateChange,
   captureScreenView,
   createAppStateListener,
@@ -486,11 +550,18 @@ import {
   createReactNativeActionEvent,
   createReactNativeErrorEvent,
   createReactNativeNetworkEvent,
+  createReactNativeSpanAttributes,
+  createReactNativeTraceContext,
+  createReactNativeTraceHeaders,
   createReactNativeTraceparent,
   createTraceparentFetch,
+  getActiveLogBrewTrace,
+  getReactNativeTraceMetadata,
   useLogBrewNativeActions,
+  withLogBrewTrace,
   type ReactNativeAppStateLike,
   type ReactNativePlatformLike,
+  type ReactNativeTraceContext,
   type TracePropagationTarget
 } from "@logbrew/react-native";
 
@@ -513,9 +584,26 @@ const client = createLogBrewReactNativeClient({
   sdkName: "typed-native-smoke",
   sdkVersion: "0.1.0"
 });
+const trace: ReactNativeTraceContext = createReactNativeTraceContext({
+  traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  spanId: "b7ad6b7169203331"
+});
+const traceHeaders: { traceparent: string } = createReactNativeTraceHeaders(trace);
+const metadata = getReactNativeTraceMetadata(trace);
+const activeTraceId = withLogBrewTrace(trace, activeTrace => getActiveLogBrewTrace()?.traceId ?? activeTrace.traceId);
+const bound = bindLogBrewTrace(trace, (value: string) => `${getActiveLogBrewTrace()?.spanId}:${value}`);
+bound("typed");
+client.span("evt_span_trace", "2026-06-02T10:00:00Z", createReactNativeSpanAttributes({
+  name: "typed.mobile",
+  status: "ok",
+  durationMs: 1,
+  trace,
+  metadata
+}));
 const traceTargets: TracePropagationTarget[] = ["https://api.example.test/", /^\/mobile-api\//u];
 const tracedFetch = createTraceparentFetch({
   fetchImpl: async () => ({ status: 204 }),
+  trace,
   traceparentFactory: () => createReactNativeTraceparent({
     traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
     spanId: "b7ad6b7169203331"
@@ -523,9 +611,10 @@ const tracedFetch = createTraceparentFetch({
   tracePropagationTargets: traceTargets
 });
 void tracedFetch("/mobile-api/ping");
+void createTraceparentFetch({ fetchImpl: async () => ({ status: 204 }), trace, tracePropagationTargets: traceTargets })("/mobile-api/trace");
 
-captureScreenView(client, "Checkout", { platform, appState });
-captureAppStateChange(client, state, { platform, appState });
+captureScreenView(client, "Checkout", { platform, appState, trace });
+captureAppStateChange(client, state, { platform, appState, trace });
 const actionEvent = createReactNativeActionEvent({
   name: "checkout.submit",
   screen: "Checkout",
@@ -555,15 +644,17 @@ const errorEvent = createReactNativeErrorEvent(new Error("typed native error"), 
   appState,
   screen: "Checkout"
 });
-captureReactNativeError(client, new Error("typed handled error"), { platform, appState });
-const remove = createAppStateListener(client, appState, { platform });
+captureReactNativeError(client, new Error("typed handled error"), { platform, appState, trace });
+const remove = createAppStateListener(client, appState, { platform, trace });
 remove();
 
 function Component(): React.ReactElement {
   const actions = useLogBrewNativeActions();
+  const currentTrace: ReactNativeTraceContext | undefined = actions.trace;
   actions.log("evt_log_001", "2026-06-02T10:00:03Z", {
     message: "worker started",
-    level: "info"
+    level: "info",
+    metadata: { activeTraceId, outgoing: traceHeaders.traceparent, hookTrace: currentTrace?.traceId ?? null }
   });
   actions.captureReactNativeError(new Error("hook handled error"));
   actions.captureReactNativeAction({
@@ -584,7 +675,7 @@ function Component(): React.ReactElement {
 
 export const app = React.createElement(
   LogBrewNativeProvider,
-  { client, platform, appState },
+  { client, platform, appState, trace },
   React.createElement(Component)
 );
 EOF
@@ -607,8 +698,10 @@ npx tsc --project tsconfig.json
 
 node node_modules/@logbrew/react-native/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"
+grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation' "$tmp_dir/launcher-help.txt"
 node node_modules/@logbrew/react-native/examples/index.mjs --list > "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/react-native/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
+grep -q 'trace-correlation -> node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/react-native/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/example-readme.stderr.json"
@@ -616,8 +709,32 @@ node node_modules/@logbrew/react-native/examples/index.mjs > "$tmp_dir/example-d
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q '"events":8' "$tmp_dir/example-default.stderr.json"
-grep -q '"timelineEvents":2' "$tmp_dir/example-default.stderr.json"
+grep -q '"timelineEvents":3' "$tmp_dir/example-default.stderr.json"
 grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/example-default.stderr.json"
+node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation > "$tmp_dir/example-trace.stdout.json" 2> "$tmp_dir/example-trace.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-trace.stdout.json" >/dev/null
+python3 - "$tmp_dir/example-trace.stdout.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+events = payload["events"]
+if len(events) != 5:
+    raise SystemExit(f"expected five trace-correlation events, got {len(events)}")
+for event in events:
+    if event["type"] == "span":
+        if event["attributes"]["traceId"] != "4bf92f3577b34da6a3ce929d0e0e4736":
+            raise SystemExit(f"span trace missing: {event}")
+        continue
+    metadata = event["attributes"].get("metadata", {})
+    if metadata.get("traceId") != "4bf92f3577b34da6a3ce929d0e0e4736":
+        raise SystemExit(f"event trace missing: {event}")
+    if "errorStack" in metadata:
+        raise SystemExit("trace example should not include stack text")
+PY
+grep -q '"events":5' "$tmp_dir/example-trace.stderr.json"
+grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$tmp_dir/example-trace.stderr.json"
 grep -q '"listenerRemoved":true' "$tmp_dir/example-default.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/react-native/examples run list > "$tmp_dir/npm-helper-list.txt"
@@ -627,7 +744,7 @@ grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run real-user-
 npm --prefix node_modules/@logbrew/react-native/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"
-grep -q '"timelineEvents":2' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"timelineEvents":3' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/npm-helper-smoke.stderr.json"
 

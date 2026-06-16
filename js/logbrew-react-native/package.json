@@ -54,6 +54,6 @@
     "react-native": ">=0.72"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/trace-correlation.mjs"
   }
 }

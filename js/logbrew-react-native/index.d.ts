@@ -46,6 +46,30 @@ export type ReactNativeTraceparentConfig = {
   randomValues?: (length: number) => ArrayLike<number>;
 };
 
+export type ReactNativeTraceContext = {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  traceFlags: string;
+  sampled: boolean;
+};
+
+export type ReactNativeTraceInput = ReactNativeTraceContext | string;
+
+export type ReactNativeTraceContextConfig = ReactNativeTraceparentConfig & {
+  parentSpanId?: string;
+  traceparent?: string;
+};
+
+export type ReactNativeSpanAttributesInput = {
+  durationMs?: number;
+  metadata?: Metadata;
+  name?: string;
+  spanId?: string;
+  status?: SpanAttributes["status"];
+  trace?: ReactNativeTraceInput;
+};
+
 export type TraceparentFetchLike<TResponse = unknown> = (
   input: any,
   init?: any
@@ -54,6 +78,7 @@ export type TraceparentFetchLike<TResponse = unknown> = (
 export type TraceparentFetchConfig<TResponse = unknown> = {
   fetchImpl?: TraceparentFetchLike<TResponse>;
   randomValues?: (length: number) => ArrayLike<number>;
+  trace?: ReactNativeTraceInput;
   traceFlags?: string;
   traceparent?: string;
   traceparentFactory?: (context: {
@@ -68,6 +93,7 @@ export type ReactNativeContextOptions = {
   platform?: ReactNativePlatformLike;
   appState?: ReactNativeAppStateLike;
   metadata?: Metadata;
+  trace?: ReactNativeTraceInput;
 };
 
 export type CaptureScreenViewOptions = ReactNativeContextOptions & {
@@ -152,6 +178,7 @@ export type LogBrewNativeProviderProps = {
   client: LogBrewClient;
   platform?: ReactNativePlatformLike;
   appState?: ReactNativeAppStateLike;
+  trace?: ReactNativeTraceInput;
   children?: React.ReactNode;
 };
 
@@ -159,6 +186,7 @@ export type LogBrewNativeContextValue = {
   client: LogBrewClient;
   platform?: ReactNativePlatformLike;
   appState?: ReactNativeAppStateLike;
+  trace?: ReactNativeTraceContext;
 };
 
 export type LogBrewNativeActions = {
@@ -172,6 +200,7 @@ export type LogBrewNativeActions = {
   shutdown(transport: Transport): Promise<TransportResponse>;
   previewJson(): string;
   pendingEvents(): number;
+  trace?: ReactNativeTraceContext;
   captureScreenView(screenName: string, options?: CaptureScreenViewOptions): void;
   captureAppStateChange(state: string, options?: CaptureAppStateChangeOptions): void;
   captureReactNativeAction(input?: ReactNativeActionInput): ReactNativeActionEvent;
@@ -183,6 +212,25 @@ export declare function createLogBrewReactNativeClient(
   config: CreateLogBrewReactNativeClientConfig
 ): LogBrewClient;
 export declare function createReactNativeTraceparent(config?: ReactNativeTraceparentConfig): string;
+export declare function createReactNativeTraceContext(
+  config?: ReactNativeTraceContextConfig
+): ReactNativeTraceContext;
+export declare function getActiveLogBrewTrace(): ReactNativeTraceContext | undefined;
+export declare function withLogBrewTrace<T>(
+  trace: ReactNativeTraceInput | undefined,
+  callback: (trace: ReactNativeTraceContext) => T
+): T;
+export declare function bindLogBrewTrace<TArgs extends unknown[], TResult>(
+  trace: ReactNativeTraceInput | undefined,
+  callback: (...args: TArgs) => TResult
+): (...args: TArgs) => TResult;
+export declare function getReactNativeTraceMetadata(trace?: ReactNativeTraceInput): Metadata;
+export declare function createReactNativeSpanAttributes(
+  input?: ReactNativeSpanAttributesInput
+): SpanAttributes;
+export declare function createReactNativeTraceHeaders(
+  trace?: ReactNativeTraceInput
+): { traceparent: string };
 export declare function createTraceparentFetch<TResponse = unknown>(
   config?: TraceparentFetchConfig<TResponse>
 ): TraceparentFetchLike<TResponse>;
@@ -267,6 +315,7 @@ export declare function createDefaultAppStateListener(
 
 declare const defaultExport: {
   LogBrewNativeProvider: typeof LogBrewNativeProvider;
+  bindLogBrewTrace: typeof bindLogBrewTrace;
   captureAppStateChange: typeof captureAppStateChange;
   captureReactNativeAction: typeof captureReactNativeAction;
   captureReactNativeError: typeof captureReactNativeError;
@@ -274,15 +323,21 @@ declare const defaultExport: {
   captureScreenView: typeof captureScreenView;
   createAppStateListener: typeof createAppStateListener;
   createLogBrewReactNativeClient: typeof createLogBrewReactNativeClient;
+  createReactNativeSpanAttributes: typeof createReactNativeSpanAttributes;
+  createReactNativeTraceContext: typeof createReactNativeTraceContext;
+  createReactNativeTraceHeaders: typeof createReactNativeTraceHeaders;
   createReactNativeActionEvent: typeof createReactNativeActionEvent;
   createReactNativeErrorEvent: typeof createReactNativeErrorEvent;
   createReactNativeNetworkEvent: typeof createReactNativeNetworkEvent;
   createReactNativeTraceparent: typeof createReactNativeTraceparent;
   createTraceparentFetch: typeof createTraceparentFetch;
+  getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   getReactNativeContext: typeof getReactNativeContext;
+  getReactNativeTraceMetadata: typeof getReactNativeTraceMetadata;
   shouldPropagateTraceparent: typeof shouldPropagateTraceparent;
   useLogBrewNative: typeof useLogBrewNative;
   useLogBrewNativeActions: typeof useLogBrewNativeActions;
+  withLogBrewTrace: typeof withLogBrewTrace;
 };
 
 export default defaultExport;

@@ -9,6 +9,8 @@ const {
 const DEFAULT_SDK_NAME = "logbrew-react-native";
 const DEFAULT_SDK_VERSION = "0.1.0";
 const LogBrewNativeContext = React.createContext(null);
+const activeTraceScopes = [];
+let nextTraceScopeId = 0;
 
 function createLogBrewReactNativeClient({
   apiKey,
@@ -37,9 +39,128 @@ function createReactNativeTraceparent({
   });
 }
 
+function createReactNativeTraceContext({
+  parentSpanId,
+  randomValues = defaultRandomValues,
+  spanId,
+  traceFlags = "01",
+  traceId,
+  traceparent
+} = {}) {
+  if (traceparent !== undefined && traceparent !== null && String(traceparent).trim() !== "") {
+    try {
+      const parsed = parseTraceparent(traceparent);
+      const localSpanId = spanId ?? randomHex(8, randomValues);
+      createTraceparent({ traceId: parsed.traceId, spanId: localSpanId, traceFlags: parsed.traceFlags });
+      return freezeTraceContext({
+        parentSpanId: parsed.parentSpanId,
+        sampled: parsed.sampled,
+        spanId: localSpanId,
+        traceFlags: parsed.traceFlags,
+        traceId: parsed.traceId
+      });
+    } catch {
+      // Bad upstream propagation should not break mobile app flows.
+    }
+  }
+
+  const localTraceId = traceId ?? randomHex(16, randomValues);
+  const localSpanId = spanId ?? randomHex(8, randomValues);
+  createTraceparent({ traceId: localTraceId, spanId: localSpanId, traceFlags });
+  if (parentSpanId !== undefined) {
+    createTraceparent({ traceId: localTraceId, spanId: parentSpanId, traceFlags });
+  }
+  return freezeTraceContext({
+    parentSpanId,
+    sampled: sampledFromTraceFlags(traceFlags),
+    spanId: localSpanId,
+    traceFlags,
+    traceId: localTraceId
+  });
+}
+
+function getActiveLogBrewTrace() {
+  return activeTraceScopes.length === 0 ? undefined : activeTraceScopes[activeTraceScopes.length - 1].trace;
+}
+
+function withLogBrewTrace(trace, callback) {
+  if (typeof callback !== "function") {
+    throw new SdkError("configuration_error", "withLogBrewTrace requires a callback");
+  }
+  const context = resolveTraceContext(trace) ?? createReactNativeTraceContext();
+  const scope = {
+    id: ++nextTraceScopeId,
+    trace: context
+  };
+  activeTraceScopes.push(scope);
+  try {
+    return callback(context);
+  } finally {
+    removeActiveTraceScope(scope.id);
+  }
+}
+
+function bindLogBrewTrace(trace, callback) {
+  if (typeof callback !== "function") {
+    throw new SdkError("configuration_error", "bindLogBrewTrace requires a callback");
+  }
+  const context = resolveTraceContext(trace) ?? createReactNativeTraceContext();
+  return function logBrewTracedCallback(...args) {
+    return withLogBrewTrace(context, () => callback(...args));
+  };
+}
+
+function getReactNativeTraceMetadata(trace = getActiveLogBrewTrace()) {
+  const context = resolveTraceContext(trace);
+  if (!context) {
+    return {};
+  }
+  return compactMetadata({
+    parentSpanId: context.parentSpanId,
+    spanId: context.spanId,
+    traceFlags: context.traceFlags,
+    traceId: context.traceId,
+    traceSampled: context.sampled
+  });
+}
+
+function createReactNativeSpanAttributes({
+  durationMs,
+  metadata = {},
+  name,
+  spanId,
+  status = "ok",
+  trace = getActiveLogBrewTrace()
+} = {}) {
+  const context = resolveTraceContext(trace) ?? createReactNativeTraceContext();
+  return {
+    name,
+    traceId: context.traceId,
+    spanId: spanId ?? context.spanId,
+    status,
+    durationMs,
+    metadata: compactMetadata({
+      ...metadata,
+      ...getReactNativeTraceMetadata(context)
+    })
+  };
+}
+
+function createReactNativeTraceHeaders(trace = getActiveLogBrewTrace()) {
+  const context = resolveTraceContext(trace) ?? createReactNativeTraceContext();
+  return {
+    traceparent: createTraceparent({
+      traceFlags: context.traceFlags,
+      traceId: context.traceId,
+      spanId: context.spanId
+    })
+  };
+}
+
 function createTraceparentFetch({
   fetchImpl = defaultFetch(),
   randomValues = defaultRandomValues,
+  trace,
   traceFlags = "01",
   traceparent,
   traceparentFactory,
@@ -66,6 +187,7 @@ function createTraceparentFetch({
       init,
       input,
       randomValues,
+      trace,
       traceFlags,
       traceparent,
       traceparentFactory,
@@ -117,6 +239,7 @@ function captureScreenView(client, screenName, {
   status = "success",
   platform,
   appState,
+  trace,
   metadata = {}
 } = {}) {
   requireClient(client);
@@ -127,7 +250,8 @@ function captureScreenView(client, screenName, {
     metadata: {
       ...getReactNativeContext({ platform, appState }),
       screen: screenName,
-      ...metadata
+      ...metadata,
+      ...getReactNativeTraceMetadata(trace ?? getActiveLogBrewTrace())
     }
   });
 }
@@ -137,6 +261,7 @@ function captureAppStateChange(client, state, {
   timestamp = new Date().toISOString(),
   platform,
   appState,
+  trace,
   metadata = {}
 } = {}) {
   requireClient(client);
@@ -147,7 +272,8 @@ function captureAppStateChange(client, state, {
     metadata: {
       ...getReactNativeContext({ platform, appState }),
       appState: state,
-      ...metadata
+      ...metadata,
+      ...getReactNativeTraceMetadata(trace ?? getActiveLogBrewTrace())
     }
   });
 }
@@ -164,6 +290,7 @@ function createReactNativeActionEvent({
   sessionId,
   status = "success",
   timestamp,
+  trace,
   traceId
 } = {}) {
   return {
@@ -178,7 +305,8 @@ function createReactNativeActionEvent({
         screen,
         sessionId,
         traceId,
-        ...metadata
+        ...metadata,
+        ...getReactNativeTraceMetadata(trace ?? getActiveLogBrewTrace())
       })
     }
   };
@@ -207,6 +335,7 @@ function createReactNativeNetworkEvent({
   status,
   statusCode,
   timestamp,
+  trace,
   traceId
 } = {}) {
   const safeRouteTemplate = stripQueryAndHash(routeTemplate);
@@ -228,7 +357,8 @@ function createReactNativeNetworkEvent({
         sessionId,
         statusCode,
         traceId,
-        ...metadata
+        ...metadata,
+        ...getReactNativeTraceMetadata(trace ?? getActiveLogBrewTrace())
       })
     }
   };
@@ -251,7 +381,8 @@ function createReactNativeErrorEvent(error, {
   platform,
   appState,
   screen,
-  timestamp
+  timestamp,
+  trace
 } = {}) {
   const details = errorDetails(error, includeStack);
   const eventMetadata = compactMetadata({
@@ -261,7 +392,8 @@ function createReactNativeErrorEvent(error, {
     source: "react-native.error",
     screen,
     ...(includeStack ? { errorStack: details.stack } : {}),
-    ...metadata
+    ...metadata,
+    ...getReactNativeTraceMetadata(trace ?? getActiveLogBrewTrace())
   });
   return {
     id: id ?? idFactory({ error, message: details.message, screen }),
@@ -304,13 +436,14 @@ function createAppStateListener(client, appState, options = {}) {
   return () => {};
 }
 
-function LogBrewNativeProvider({ client, platform, appState, children }) {
+function LogBrewNativeProvider({ client, platform, appState, trace, children }) {
   requireClient(client);
   const value = React.useMemo(() => ({
     client,
     platform,
-    appState
-  }), [appState, client, platform]);
+    appState,
+    trace: resolveTraceContext(trace)
+  }), [appState, client, platform, trace]);
   return React.createElement(LogBrewNativeContext.Provider, { value }, children);
 }
 
@@ -323,41 +456,47 @@ function useLogBrewNative() {
 }
 
 function useLogBrewNativeActions() {
-  const { client, platform, appState } = useLogBrewNative();
+  const { client, platform, appState, trace } = useLogBrewNative();
   return {
     release: client.release.bind(client),
     environment: client.environment.bind(client),
-    issue: client.issue.bind(client),
-    log: client.log.bind(client),
+    issue: (id, timestamp, attributes) => client.issue(id, timestamp, attributesWithTrace(attributes, trace)),
+    log: (id, timestamp, attributes) => client.log(id, timestamp, attributesWithTrace(attributes, trace)),
     span: client.span.bind(client),
-    action: client.action.bind(client),
+    action: (id, timestamp, attributes) => client.action(id, timestamp, attributesWithTrace(attributes, trace)),
     flush: client.flush.bind(client),
     shutdown: client.shutdown.bind(client),
     previewJson: client.previewJson.bind(client),
     pendingEvents: client.pendingEvents.bind(client),
+    trace,
     captureScreenView: (screenName, options = {}) => captureScreenView(client, screenName, {
       platform,
       appState,
+      trace,
       ...options
     }),
     captureAppStateChange: (state, options = {}) => captureAppStateChange(client, state, {
       platform,
       appState,
+      trace,
       ...options
     }),
     captureReactNativeAction: (input = {}) => captureReactNativeAction(client, {
       platform,
       appState,
+      trace,
       ...input
     }),
     captureReactNativeNetwork: (input = {}) => captureReactNativeNetwork(client, {
       platform,
       appState,
+      trace,
       ...input
     }),
     captureReactNativeError: (error, options = {}) => captureReactNativeError(client, error, {
       platform,
       appState,
+      trace,
       ...options
     })
   };
@@ -396,6 +535,20 @@ function compactMetadata(metadata) {
     }
   }
   return compacted;
+}
+
+function attributesWithTrace(attributes, trace) {
+  const context = resolveTraceContext(trace) ?? getActiveLogBrewTrace();
+  if (!context) {
+    return attributes;
+  }
+  return {
+    ...attributes,
+    metadata: compactMetadata({
+      ...(attributes?.metadata ?? {}),
+      ...getReactNativeTraceMetadata(context)
+    })
+  };
 }
 
 function errorDetails(error, includeStack) {
@@ -502,6 +655,61 @@ function randomHex(length, randomValues) {
   return bytes.map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
+function resolveTraceContext(trace) {
+  if (trace === undefined || trace === null) {
+    return undefined;
+  }
+  if (typeof trace === "string") {
+    return createReactNativeTraceContext({ traceparent: trace });
+  }
+  if (typeof trace === "object") {
+    const {
+      parentSpanId,
+      sampled,
+      spanId,
+      traceFlags = "01",
+      traceId
+    } = trace;
+    if (typeof traceId !== "string" || typeof spanId !== "string") {
+      throw new SdkError("validation_error", "trace context requires traceId and spanId");
+    }
+    createTraceparent({ traceId, spanId, traceFlags });
+    if (parentSpanId !== undefined) {
+      createTraceparent({ traceId, spanId: parentSpanId, traceFlags });
+    }
+    return freezeTraceContext({
+      parentSpanId,
+      sampled: sampled ?? sampledFromTraceFlags(traceFlags),
+      spanId,
+      traceFlags,
+      traceId
+    });
+  }
+  throw new SdkError("validation_error", "trace must be a trace context or traceparent string");
+}
+
+function freezeTraceContext({ parentSpanId, sampled, spanId, traceFlags, traceId }) {
+  const normalized = {
+    traceId: String(traceId).toLowerCase(),
+    spanId: String(spanId).toLowerCase(),
+    parentSpanId: parentSpanId === undefined ? undefined : String(parentSpanId).toLowerCase(),
+    traceFlags: String(traceFlags).toLowerCase(),
+    sampled: Boolean(sampled)
+  };
+  return Object.freeze(normalized);
+}
+
+function sampledFromTraceFlags(traceFlags) {
+  return (Number.parseInt(traceFlags, 16) & 1) === 1;
+}
+
+function removeActiveTraceScope(scopeId) {
+  const index = activeTraceScopes.findIndex((scope) => scope.id === scopeId);
+  if (index >= 0) {
+    activeTraceScopes.splice(index, 1);
+  }
+}
+
 function shouldPropagateToStringTarget(url, target) {
   const targetText = target.trim();
   if (targetText === "") {
@@ -586,14 +794,16 @@ function traceparentForRequest({
   init,
   input,
   randomValues,
+  trace,
   traceFlags,
   traceparent,
   traceparentFactory,
   url
 }) {
+  const context = resolveTraceContext(trace) ?? getActiveLogBrewTrace();
   const nextTraceparent = typeof traceparentFactory === "function"
     ? traceparentFactory({ init, input, url })
-    : traceparent ?? createReactNativeTraceparent({ randomValues, traceFlags });
+    : traceparent ?? (context ? createReactNativeTraceHeaders(context).traceparent : createReactNativeTraceparent({ randomValues, traceFlags }));
   parseTraceparent(nextTraceparent);
   return nextTraceparent;
 }
@@ -605,17 +815,24 @@ const defaultExport = {
   captureReactNativeError,
   captureReactNativeNetwork,
   captureScreenView,
+  bindLogBrewTrace,
   createAppStateListener,
   createLogBrewReactNativeClient,
+  createReactNativeSpanAttributes,
+  createReactNativeTraceContext,
+  createReactNativeTraceHeaders,
   createReactNativeActionEvent,
   createReactNativeErrorEvent,
   createReactNativeNetworkEvent,
   createReactNativeTraceparent,
   createTraceparentFetch,
+  getActiveLogBrewTrace,
   getReactNativeContext,
+  getReactNativeTraceMetadata,
   shouldPropagateTraceparent,
   useLogBrewNative,
-  useLogBrewNativeActions
+  useLogBrewNativeActions,
+  withLogBrewTrace
 };
 
 module.exports = {
@@ -625,16 +842,23 @@ module.exports = {
   captureReactNativeError,
   captureReactNativeNetwork,
   captureScreenView,
+  bindLogBrewTrace,
   createAppStateListener,
   createLogBrewReactNativeClient,
+  createReactNativeSpanAttributes,
+  createReactNativeTraceContext,
+  createReactNativeTraceHeaders,
   createReactNativeActionEvent,
   createReactNativeErrorEvent,
   createReactNativeNetworkEvent,
   createReactNativeTraceparent,
   createTraceparentFetch,
   default: defaultExport,
+  getActiveLogBrewTrace,
   getReactNativeContext,
+  getReactNativeTraceMetadata,
   shouldPropagateTraceparent,
   useLogBrewNative,
-  useLogBrewNativeActions
+  useLogBrewNativeActions,
+  withLogBrewTrace
 };
