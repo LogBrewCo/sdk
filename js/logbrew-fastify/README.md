@@ -41,13 +41,38 @@ app.get("/health", async (request) => {
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request and error metadata records the path without query text by default.
 
-When an incoming request has a valid W3C `traceparent` header, the default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
+When an incoming request has a valid W3C `traceparent` header, the plugin attaches `request.logbrew.trace` and the default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous work started by Fastify after the plugin's `onRequest` hook. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
 
 ```js
 await app.register(logbrewFastifyPlugin, {
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   spanIdFactory: () => "b7ad6b7169203331",
   transport: RecordingTransport.alwaysAccept()
+});
+```
+
+`request.logbrew.trace` contains only normalized W3C IDs and the sampled flag. It does not include request bodies, response bodies, headers, query strings, or the raw `traceparent` value. Use it to correlate app-owned logs, errors, product actions, and downstream milestones with the current request span:
+
+```js
+import { getActiveLogBrewTrace } from "@logbrew/fastify";
+
+app.get("/checkout/:cartId", async (request) => {
+  const trace = request.logbrew.trace ?? getActiveLogBrewTrace();
+
+  await Promise.resolve();
+
+  const metadata = trace
+    ? { routeTemplate: "/checkout/:cartId", traceId: trace.traceId, spanId: trace.spanId }
+    : { routeTemplate: "/checkout/:cartId" };
+
+  request.logbrew.client.log("evt_checkout_received", new Date().toISOString(), {
+    message: "checkout request accepted",
+    level: "info",
+    logger: "fastify",
+    metadata
+  });
+
+  return { ok: true };
 });
 ```
 
@@ -80,7 +105,7 @@ app.setErrorHandler((error, _request, reply) => {
 });
 ```
 
-The plugin uses Fastify's `onRequest`, `onResponse`, and `onError` hooks. `onResponse` runs after the response has been sent, which makes it a good place to flush request telemetry without changing the response body; `onError` captures thrown route errors before your normal error response handler finishes the request.
+The plugin uses Fastify's `onRequest`, `preHandler`, `onResponse`, and `onError` hooks. `onResponse` runs after the response has been sent, which makes it a good place to flush request telemetry without changing the response body; `onError` captures thrown route errors before your normal error response handler finishes the request. When the failing request passed through `logbrewFastifyPlugin` with a valid `traceparent`, the default error event includes trace correlation metadata without echoing the raw propagation header.
 
 ## Example Source
 

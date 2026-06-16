@@ -22,9 +22,17 @@ export type CreateLogBrewFastifyClientConfig = {
   maxRetries?: number;
 };
 
+export type LogBrewTraceContext = {
+  traceId: string;
+  spanId: string;
+  parentSpanId: string;
+  sampled: boolean;
+};
+
 export type LogBrewFastifyContext = {
   client: LogBrewClient;
   logbrew: LogBrewClient;
+  trace?: LogBrewTraceContext;
   transport: Transport;
   previewJson(): string;
   flush(): Promise<TransportResponse>;
@@ -35,6 +43,7 @@ export type LogBrewFastifyRuntimeContext = {
   request: FastifyRequest;
   reply: FastifyReply;
   client: LogBrewClient;
+  trace?: LogBrewTraceContext;
 };
 
 export type LogBrewClientFactory = (context: Omit<LogBrewFastifyRuntimeContext, "client">) => LogBrewClient;
@@ -82,12 +91,12 @@ export type LogBrewFastifyOptions = CreateLogBrewFastifyClientConfig & {
   requestEvent?: (
     request: FastifyRequest,
     reply: FastifyReply,
-    context: { client: LogBrewClient; durationMs: number }
+    context: { client: LogBrewClient; durationMs: number; trace?: LogBrewTraceContext }
   ) => LogBrewRequestEvent;
   requestMetricEvent?: (
     request: FastifyRequest,
     reply: FastifyReply,
-    context: { client: LogBrewClient; durationMs: number }
+    context: { client: LogBrewClient; durationMs: number; trace?: LogBrewTraceContext }
   ) => LogBrewRequestMetricEvent;
   errorEvent?: (error: unknown, context: LogBrewFastifyRuntimeContext) => LogBrewErrorEvent;
   onFlush?: (response: TransportResponse, context: LogBrewFastifyRuntimeContext) => void | Promise<void>;
@@ -97,6 +106,7 @@ export type LogBrewFastifyOptions = CreateLogBrewFastifyClientConfig & {
 export declare function createLogBrewFastifyClient(config?: CreateLogBrewFastifyClientConfig): LogBrewClient;
 export declare const logbrewFastifyPlugin: FastifyPluginAsync<LogBrewFastifyOptions>;
 export declare const logbrewPlugin: typeof logbrewFastifyPlugin;
+export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
 export declare function createRequestEvent(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -105,6 +115,7 @@ export declare function createRequestEvent(
     durationMs?: number;
     idFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
     spanIdFactory?: (request: FastifyRequest, reply: FastifyReply) => string;
+    trace?: LogBrewTraceContext;
   }
 ): LogBrewRequestEvent;
 export declare function createRequestMetricEvent(
@@ -123,6 +134,7 @@ export declare function createErrorEvent(
   options?: {
     now?: () => string;
     idFactory?: (error: unknown, request: FastifyRequest) => string;
+    trace?: LogBrewTraceContext;
   }
 ): LogBrewErrorEvent;
 
@@ -137,6 +149,7 @@ declare const defaultExport: {
   createLogBrewFastifyClient: typeof createLogBrewFastifyClient;
   createRequestMetricEvent: typeof createRequestMetricEvent;
   createRequestEvent: typeof createRequestEvent;
+  getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   logbrewFastifyPlugin: typeof logbrewFastifyPlugin;
   logbrewPlugin: typeof logbrewPlugin;
 };

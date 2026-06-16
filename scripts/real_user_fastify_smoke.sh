@@ -106,14 +106,17 @@ import {
   createLogBrewFastifyClient,
   createRequestMetricEvent,
   createRequestEvent,
+  getActiveLogBrewTrace,
   logbrewFastifyPlugin
 } from "@logbrew/fastify";
 
+const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
 const autoTransport = RecordingTransport.alwaysAccept();
 const errorTransport = RecordingTransport.alwaysAccept();
 const metricOnlyTransport = RecordingTransport.alwaysAccept();
 const app = Fastify();
+let activeTraceFromAuto;
 
 const explicitClient = createLogBrewFastifyClient({
   apiKey: "LOGBREW_API_KEY",
@@ -168,12 +171,12 @@ await app.register(async (scope) => {
     serverApiKey: "LOGBREW_SERVER_API_KEY",
     now: () => "2026-06-02T10:00:06Z",
     nowMs: () => 100,
+    spanIdFactory: () => "b7ad6b7169203331",
     requestEvent(request, reply, { durationMs }) {
       return createRequestEvent(request, reply, {
         durationMs,
         idFactory: () => "evt_fastify_request_001",
-        now: () => "2026-06-02T10:00:06Z",
-        spanIdFactory: () => "b7ad6b7169203331"
+        now: () => "2026-06-02T10:00:06Z"
       });
     },
     sdkName: "fastify-auto-smoke",
@@ -181,13 +184,22 @@ await app.register(async (scope) => {
     transport: autoTransport
   });
 
-  scope.get("/auto", async () => ({ ok: true }));
+  scope.get("/auto", async (request) => {
+    await Promise.resolve().then(() => {
+      activeTraceFromAuto = getActiveLogBrewTrace();
+    });
+    if (request.logbrew.trace?.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+      throw new Error(`missing Fastify request trace context: ${JSON.stringify(request.logbrew.trace)}`);
+    }
+    return { ok: true };
+  });
 });
 
 await app.register(async (scope) => {
   await scope.register(logbrewFastifyPlugin, {
     serverApiKey: "LOGBREW_SERVER_API_KEY",
     captureRequests: false,
+    spanIdFactory: () => "b7ad6b7169203332",
     errorEvent(error, { request }) {
       return createErrorEvent(error, request, {
         idFactory: () => "evt_fastify_error_001",
@@ -213,15 +225,19 @@ const okResponse = await fetch(`${address}/logbrew`);
 const okText = await okResponse.text();
 const autoResponse = await fetch(`${address}/auto?token=secret`, {
   headers: {
-    traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    traceparent
   }
 });
 await autoResponse.json();
-await waitFor(() => autoTransport.sentBodies.length === 1);
+await waitFor(() => autoTransport.sentBodies.length === 1 && activeTraceFromAuto);
 const metricResponse = await fetch(`${address}/metrics-only/42?token=secret#hidden`);
 await metricResponse.json();
 await waitFor(() => metricOnlyTransport.sentBodies.length === 1);
-const failResponse = await fetch(`${address}/fail?token=secret`);
+const failResponse = await fetch(`${address}/fail?token=secret`, {
+  headers: {
+    traceparent
+  }
+});
 await failResponse.json();
 await waitFor(() => errorTransport.sentBodies.length === 1);
 await app.close();
@@ -242,8 +258,14 @@ if (autoPayload.events[0].attributes.spanId !== "b7ad6b7169203331") {
 if (autoPayload.events[0].attributes.metadata.framework !== "fastify") {
   throw new Error(`missing fastify span metadata: ${autoTransport.lastBody()}`);
 }
+if (autoPayload.events[0].attributes.metadata.sampled !== true) {
+  throw new Error(`missing sampled fastify span metadata: ${autoTransport.lastBody()}`);
+}
 if (autoPayload.events[0].attributes.metadata.path !== "/auto") {
   throw new Error(`request capture should omit query text: ${autoTransport.lastBody()}`);
+}
+if (activeTraceFromAuto?.spanId !== "b7ad6b7169203331") {
+  throw new Error(`async trace context was not preserved: ${JSON.stringify(activeTraceFromAuto)}`);
 }
 const metricPayload = JSON.parse(metricOnlyTransport.lastBody());
 const metricEvent = metricPayload.events[0];
@@ -275,6 +297,12 @@ if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "ev
 if (errorPayload.events[0].attributes.metadata.path !== "/fail") {
   throw new Error(`error capture should omit query text: ${errorTransport.lastBody()}`);
 }
+if (errorPayload.events[0].attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+  throw new Error(`error capture should include trace id: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[0].attributes.metadata.spanId !== "b7ad6b7169203332") {
+  throw new Error(`error capture should include request span id: ${errorTransport.lastBody()}`);
+}
 const errorPreview = createErrorEvent(new Error("manual failure"), { method: "POST", url: "/manual?token=secret" }, {
   idFactory: () => "evt_fastify_error_preview",
   now: () => "2026-06-02T10:00:08Z"
@@ -305,6 +333,7 @@ console.error(JSON.stringify({
   autoCaptured: autoPayload.events[0].attributes.name,
   autoTraceId: autoPayload.events[0].attributes.traceId,
   errorCaptured: errorPayload.events[0].attributes.title,
+  errorTraceId: errorPayload.events[0].attributes.metadata.traceId,
   errorStatus: failResponse.status,
   events: 6,
   metricCaptured: metricEvent.attributes.name,
@@ -375,6 +404,8 @@ import {
   createLogBrewFastifyClient,
   createRequestMetricEvent,
   createRequestEvent,
+  getActiveLogBrewTrace,
+  type LogBrewTraceContext,
   logbrewFastifyPlugin
 } from "@logbrew/fastify";
 
@@ -391,17 +422,19 @@ app.register(logbrewFastifyPlugin, {
   metricIdFactory(request, reply) {
     return `evt_metric_${request.method}_${reply.statusCode}`;
   },
-  requestMetricEvent(request, reply, { durationMs }) {
+  spanIdFactory: () => "b7ad6b7169203331",
+  requestMetricEvent(request, reply, { durationMs, trace }) {
+    trace?.spanId.toUpperCase();
     return createRequestMetricEvent(request, reply, {
       durationMs,
       now: () => "2026-06-02T10:00:09Z"
     });
   },
-  requestEvent(request, reply, { durationMs }) {
+  requestEvent(request, reply, { durationMs, trace }) {
+    trace?.spanId.toUpperCase();
     const event = createRequestEvent(request, reply, {
       durationMs,
-      now: () => "2026-06-02T10:00:06Z",
-      spanIdFactory: () => "b7ad6b7169203331"
+      now: () => "2026-06-02T10:00:06Z"
     });
     if (event.type === "span") {
       event.attributes.parentSpanId?.toUpperCase();
@@ -412,6 +445,9 @@ app.register(logbrewFastifyPlugin, {
 });
 
 app.get("/typed", async (request: FastifyRequest, _reply: FastifyReply) => {
+  const activeTrace: LogBrewTraceContext | undefined = getActiveLogBrewTrace();
+  activeTrace?.traceId.toUpperCase();
+  request.logbrew?.trace?.spanId.toUpperCase();
   request.logbrew?.client.log("evt_log_001", "2026-06-02T10:00:03Z", {
     message: "typed worker",
     level: "info"
