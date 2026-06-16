@@ -63,6 +63,8 @@ test -f "$sdk_dir/src/logbrew_internal.h"
 test -f "$sdk_dir/src/logbrew_metric.c"
 test -f "$sdk_dir/src/logbrew_recording_transport.c"
 test -f "$sdk_dir/src/logbrew_timeline.c"
+test -f "$sdk_dir/src/logbrew_trace.c"
+test -f "$sdk_dir/examples/trace_correlation.c"
 
 rm -rf "$sdk_dir"
 if [[ -d "$sdk_dir" ]]; then
@@ -78,10 +80,15 @@ test -f "$sdk_dir/src/logbrew_internal.h"
 test -f "$sdk_dir/src/logbrew_metric.c"
 test -f "$sdk_dir/src/logbrew_recording_transport.c"
 test -f "$sdk_dir/src/logbrew_timeline.c"
+test -f "$sdk_dir/src/logbrew_trace.c"
+test -f "$sdk_dir/examples/trace_correlation.c"
 grep -q 'logbrew_client_product_action' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_client_network_milestone' "$sdk_dir/include/logbrew.h"
 grep -q 'LogBrewMetricAttributes' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_client_metric' "$sdk_dir/include/logbrew.h"
+grep -q 'LogBrewTraceContext' "$sdk_dir/include/logbrew.h"
+grep -q 'logbrew_trace_context_from_traceparent' "$sdk_dir/include/logbrew.h"
+grep -q 'logbrew_trace_scope_enter' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_http_transport_init' "$sdk_dir/include/logbrew.h"
 
 cat > "$app_dir/main.c" <<'EOF'
@@ -282,7 +289,7 @@ static void exercise_metric_helper(void) {
       strstr(preview, "\"value\":42") == NULL ||
       strstr(preview, "\"unit\":\"{items}\"") == NULL ||
       strstr(preview, "\"temporality\":\"instant\"") == NULL ||
-      strstr(preview, "\"queue\":\"checkout\"") == NULL ||
+      strstr(preview, "\"metadata\":{\"queue\":\"checkout\"") == NULL ||
       strstr(preview, "\"sampled\":true") == NULL) {
     fprintf(stderr, "metric helper preview failed\n");
     exit(1);
@@ -337,9 +344,10 @@ EOF
   "$sdk_dir/src/logbrew_metric.c" \
   "$sdk_dir/src/logbrew_recording_transport.c" \
   "$sdk_dir/src/logbrew_timeline.c" \
+  "$sdk_dir/src/logbrew_trace.c" \
   "$app_dir/main.c" \
   -o "$app_dir/native_app"
-"$app_dir/native_app" > "$tmp_dir/native-app.stdout.json" 2> "$tmp_dir/native-app.stderr.json"
+  "$app_dir/native_app" > "$tmp_dir/native-app.stdout.json" 2> "$tmp_dir/native-app.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/native-app.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/native-app.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/native-app.stderr.json"
@@ -473,6 +481,7 @@ PY
     "$sdk_dir/src/logbrew_metric.c" \
     "$sdk_dir/src/logbrew_recording_transport.c" \
     "$sdk_dir/src/logbrew_timeline.c" \
+    "$sdk_dir/src/logbrew_trace.c" \
     "$sdk_dir/src/logbrew_http_transport.c" \
     "$app_dir/http_app.c" \
     ${curl_libs[@]+"${curl_libs[@]}"} \
@@ -507,11 +516,15 @@ run_examples_make > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
+grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 run_examples_make run-readme-example > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 run_examples_make run-real-user-smoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
+run_examples_make run-trace-correlation > "$tmp_dir/trace-correlation.stdout.json" 2> "$tmp_dir/trace-correlation.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/trace-correlation.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_c_trace_correlation_payload.py" "$tmp_dir/trace-correlation.stdout.json" "$tmp_dir/trace-correlation.stderr.json" >/dev/null
 
 echo "c real-user smoke passed with $($cc_command --version | head -n 1)"

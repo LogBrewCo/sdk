@@ -231,7 +231,7 @@ static void metric_helper_validates_and_serializes(void) {
   EXPECT_TRUE(strstr(json, "\"value\":42") != NULL);
   EXPECT_TRUE(strstr(json, "\"unit\":\"{items}\"") != NULL);
   EXPECT_TRUE(strstr(json, "\"temporality\":\"instant\"") != NULL);
-  EXPECT_TRUE(strstr(json, "\"queue\":\"checkout\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"metadata\":{\"queue\":\"checkout\"") != NULL);
   EXPECT_TRUE(strstr(json, "\"sampled\":true") != NULL);
   logbrew_free_string(json);
   logbrew_client_free(client);
@@ -259,6 +259,92 @@ static void metric_helper_validates_and_serializes(void) {
   metric.metadata.count = 1U;
   EXPECT_TRUE(logbrew_client_metric(client, "evt_bad_metadata", "2026-06-02T10:00:06Z",
       metric, &error) == LOGBREW_VALIDATION_ERROR);
+  logbrew_client_free(client);
+}
+
+static void trace_context_helpers_validate_and_correlate(void) {
+  static const char *incoming = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
+  LogBrewClient *client = new_client();
+  LogBrewError error;
+  LogBrewTraceContext context;
+  LogBrewTraceContext fallback;
+  LogBrewTraceContext nested;
+  LogBrewTraceScope scope;
+  LogBrewTraceScope nested_scope;
+  LogBrewSpanAttributes span;
+  LogBrewMetadataEntry trace_entries[LOGBREW_TRACE_METADATA_ENTRY_COUNT];
+  LogBrewProductTimelineContext timeline_context = {
+    "session_123",
+    NULL,
+    "/checkout?sku=123#pay",
+    "Checkout",
+    "checkout",
+    "submit"
+  };
+  LogBrewMetadata trace_metadata;
+  char traceparent[LOGBREW_TRACEPARENT_LENGTH + 1U];
+  char *json = NULL;
+
+  logbrew_error_clear(&error);
+  EXPECT_TRUE(logbrew_trace_context_from_traceparent(incoming, &context, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strcmp(context.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736") == 0);
+  EXPECT_TRUE(strcmp(context.parent_span_id, "00f067aa0ba902b7") == 0);
+  EXPECT_TRUE(strlen(context.span_id) == LOGBREW_SPAN_ID_LENGTH);
+  EXPECT_TRUE(strcmp(context.span_id, context.parent_span_id) != 0);
+  EXPECT_TRUE(context.sampled);
+  EXPECT_TRUE(strcmp(context.trace_flags, "01") == 0);
+  EXPECT_TRUE(logbrew_trace_create_headers(&context, traceparent, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strstr(traceparent, "00-4bf92f3577b34da6a3ce929d0e0e4736-") == traceparent);
+  EXPECT_TRUE(strcmp(traceparent + 52, "-01") == 0);
+
+  EXPECT_TRUE(logbrew_trace_context_from_traceparent("bad", &fallback, &error) == LOGBREW_VALIDATION_ERROR);
+  EXPECT_TRUE(logbrew_trace_context_from_traceparent(
+      "00-00000000000000000000000000000000-00f067aa0ba902b7-01", &fallback, &error) == LOGBREW_VALIDATION_ERROR);
+  EXPECT_TRUE(logbrew_trace_continue_or_create_context("bad", &fallback, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strlen(fallback.trace_id) == LOGBREW_TRACE_ID_LENGTH);
+  EXPECT_TRUE(strlen(fallback.parent_span_id) == 0U);
+
+  EXPECT_TRUE(logbrew_trace_scope_enter(&scope, &context, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_trace_current_context() != NULL);
+  EXPECT_TRUE(strcmp(logbrew_trace_current_context()->trace_id, context.trace_id) == 0);
+  EXPECT_TRUE(logbrew_trace_root_context(&nested, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_trace_scope_enter(&nested_scope, &nested, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strcmp(logbrew_trace_current_context()->trace_id, nested.trace_id) == 0);
+  logbrew_trace_scope_exit(&nested_scope);
+  EXPECT_TRUE(logbrew_trace_current_context() != NULL);
+  EXPECT_TRUE(strcmp(logbrew_trace_current_context()->trace_id, context.trace_id) == 0);
+
+  trace_metadata = logbrew_trace_metadata(&context, trace_entries);
+  timeline_context = logbrew_trace_product_timeline_context(&context, timeline_context);
+  EXPECT_TRUE(logbrew_trace_span_attributes(&context, "POST /checkout", "error", 37.5, true, &span, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_issue(client, "evt_trace_issue", "2026-06-02T10:00:02Z",
+      (LogBrewIssueAttributes){"Checkout failed", "error", "request failed"}, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_log(client, "evt_trace_log", "2026-06-02T10:00:03Z",
+      (LogBrewLogAttributes){"checkout failed", "warn", "checkout"}, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_action(client, "evt_trace_action", "2026-06-02T10:00:04Z",
+      (LogBrewActionAttributes){"checkout.submit", "failure"}, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_span(client, "evt_trace_span", "2026-06-02T10:00:05Z", span, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_metric(client, "evt_trace_metric", "2026-06-02T10:00:06Z",
+      (LogBrewMetricAttributes){"http.server.duration", "histogram", 37.5, "ms", "delta", trace_metadata}, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_product_action(client, "evt_trace_product_action", "2026-06-02T10:00:07Z",
+      (LogBrewProductActionAttributes){"checkout.submit", "failure", timeline_context, {NULL, 0U}}, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_preview_json(client, &json, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strstr(json, "\"traceId\":\"4bf92f3577b34da6a3ce929d0e0e4736\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"parentSpanId\":\"00f067aa0ba902b7\"") != NULL);
+  EXPECT_TRUE(strstr(json, context.span_id) != NULL);
+  EXPECT_TRUE(strstr(json, "\"sampled\":true") != NULL);
+  EXPECT_TRUE(strstr(json, "\"traceFlags\":\"01\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"metadata\":{\"traceId\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"type\":\"issue\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"type\":\"log\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"type\":\"span\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"type\":\"metric\"") != NULL);
+  EXPECT_TRUE(strstr(json, "traceparent") == NULL);
+  EXPECT_TRUE(strstr(json, "sku=") == NULL);
+  EXPECT_TRUE(strstr(json, "#pay") == NULL);
+  logbrew_free_string(json);
+  logbrew_trace_scope_exit(&scope);
+  EXPECT_TRUE(logbrew_trace_current_context() == NULL);
   logbrew_client_free(client);
 }
 
@@ -368,6 +454,7 @@ int main(void) {
   preview_json_contains_all_supported_event_types();
   product_timeline_helpers_capture_safe_metadata();
   metric_helper_validates_and_serializes();
+  trace_context_helpers_validate_and_correlate();
   flush_success_clears_queue();
   empty_flush_is_no_op();
   validation_failures_are_stable();

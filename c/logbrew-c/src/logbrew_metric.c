@@ -269,25 +269,34 @@ static LogBrewStatus append_metadata(
     bool *needs_comma,
     LogBrewError *error) {
   size_t index;
+  bool metadata_needs_comma = false;
+  LogBrewStatus status;
+  if (metadata.count == 0U) {
+    return LOGBREW_OK;
+  }
   if (metadata.count > 0U && metadata.entries == NULL) {
     set_metric_error(error, "validation_error", "metadata entries are required when count is non-zero");
     return LOGBREW_VALIDATION_ERROR;
   }
+  status = metric_append(buffer, *needs_comma ? ",\"metadata\":{" : "\"metadata\":{", error);
+  if (status != LOGBREW_OK) {
+    return status;
+  }
   for (index = 0U; index < metadata.count; index++) {
     LogBrewMetadataEntry entry = metadata.entries[index];
-    LogBrewStatus status = require_text("metadata key", entry.key, error);
+    status = require_text("metadata key", entry.key, error);
     if (status != LOGBREW_OK) {
       return status;
     }
     if (entry.kind == LOGBREW_METADATA_STRING) {
       status = require_text("metadata string value", entry.string_value, error);
       if (status == LOGBREW_OK) {
-        status = append_named_string(buffer, entry.key, entry.string_value, needs_comma, error);
+        status = append_named_string(buffer, entry.key, entry.string_value, &metadata_needs_comma, error);
       }
     } else if (entry.kind == LOGBREW_METADATA_NUMBER) {
-      status = append_named_number(buffer, entry.key, entry.number_value, needs_comma, error);
+      status = append_named_number(buffer, entry.key, entry.number_value, &metadata_needs_comma, error);
     } else if (entry.kind == LOGBREW_METADATA_BOOL) {
-      status = append_named_bool(buffer, entry.key, entry.bool_value, needs_comma, error);
+      status = append_named_bool(buffer, entry.key, entry.bool_value, &metadata_needs_comma, error);
     } else {
       set_metric_error(error, "validation_error", "metadata kind is unsupported");
       return LOGBREW_VALIDATION_ERROR;
@@ -296,7 +305,11 @@ static LogBrewStatus append_metadata(
       return status;
     }
   }
-  return LOGBREW_OK;
+  status = metric_append_char(buffer, '}', error);
+  if (status == LOGBREW_OK) {
+    *needs_comma = true;
+  }
+  return status;
 }
 
 LogBrewStatus logbrew_client_metric(

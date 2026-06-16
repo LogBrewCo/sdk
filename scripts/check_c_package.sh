@@ -25,7 +25,7 @@ run_examples_make() {
 }
 
 cflags=(-std=c99 -Wall -Wextra -Wpedantic -Werror -I"$package_dir/include")
-sdk_sources=("$package_dir/src/logbrew.c" "$package_dir/src/logbrew_metric.c" "$package_dir/src/logbrew_recording_transport.c" "$package_dir/src/logbrew_timeline.c")
+sdk_sources=("$package_dir/src/logbrew.c" "$package_dir/src/logbrew_metric.c" "$package_dir/src/logbrew_recording_transport.c" "$package_dir/src/logbrew_timeline.c" "$package_dir/src/logbrew_trace.c")
 
 mkdir -p "$tmp_dir/build"
 "$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/tests/test_logbrew.c" -o "$tmp_dir/build/test_logbrew"
@@ -60,10 +60,16 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/smoke.stderr.json"
 
+"$cc_command" "${cflags[@]}" "${sdk_sources[@]}" "$package_dir/examples/trace_correlation.c" -o "$tmp_dir/build/trace_correlation"
+"$tmp_dir/build/trace_correlation" > "$tmp_dir/trace.stdout.json" 2> "$tmp_dir/trace.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/trace.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_c_trace_correlation_payload.py" "$tmp_dir/trace.stdout.json" "$tmp_dir/trace.stderr.json" >/dev/null
+
 run_examples_make > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
+grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 
 archive="$tmp_dir/logbrew-c-0.1.0.tar.gz"
 (cd "$package_dir" && tar -czf "$archive" README.md Makefile include src examples tests)
@@ -77,8 +83,10 @@ grep -qx 'src/logbrew_internal.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_metric.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_recording_transport.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/logbrew_timeline.c' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/logbrew_trace.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/readme_example.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/real_user_smoke.c' "$tmp_dir/archive-contents.txt"
+grep -qx 'examples/trace_correlation.c' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'tests/test_logbrew.c' "$tmp_dir/archive-contents.txt"
 
@@ -94,10 +102,10 @@ import tarfile
 with tarfile.open(sys.argv[1], "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
     header = archive.extractfile("include/logbrew.h").read().decode()
-for needle in ("LOGBREW_API_KEY", "copy into your own native application", "logbrew_client_flush", "LogBrewMetricAttributes", "logbrew_client_metric", "logbrew_client_product_action", "logbrew_client_network_milestone", "logbrew_http_transport_init"):
+for needle in ("LOGBREW_API_KEY", "copy into your own native application", "logbrew_client_flush", "LogBrewMetricAttributes", "logbrew_client_metric", "logbrew_client_product_action", "logbrew_client_network_milestone", "logbrew_trace_context_from_traceparent", "logbrew_trace_scope_enter", "logbrew_http_transport_init"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
-for needle in ("LOGBREW_C_VERSION", "LogBrewClient", "LogBrewRecordingTransport", "LogBrewMetricAttributes", "logbrew_client_metric", "LogBrewProductTimelineContext", "logbrew_client_product_action", "logbrew_client_network_milestone", "LogBrewHttpTransport", "logbrew_http_transport_init"):
+for needle in ("LOGBREW_C_VERSION", "LogBrewClient", "LogBrewRecordingTransport", "LogBrewMetricAttributes", "logbrew_client_metric", "LogBrewProductTimelineContext", "logbrew_client_product_action", "logbrew_client_network_milestone", "LogBrewTraceContext", "logbrew_trace_current_context", "LogBrewHttpTransport", "logbrew_http_transport_init"):
     if needle not in header:
         raise SystemExit(f"missing public header symbol: {needle}")
 PY

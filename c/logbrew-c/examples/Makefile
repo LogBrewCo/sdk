@@ -1,14 +1,15 @@
 CC ?= cc
 CFLAGS ?= -std=c99 -Wall -Wextra -Wpedantic -Werror -I../include
-SDK_SRC ?= ../src/logbrew.c ../src/logbrew_metric.c ../src/logbrew_recording_transport.c ../src/logbrew_timeline.c
+SDK_SRC ?= ../src/logbrew.c ../src/logbrew_metric.c ../src/logbrew_recording_transport.c ../src/logbrew_timeline.c ../src/logbrew_trace.c
 BUILD_DIR ?= build
 
-.PHONY: help run run-readme-example run-real-user-smoke clean
+.PHONY: help run run-readme-example run-real-user-smoke run-trace-correlation clean
 
 help:
 	@printf '%s\n' 'run-readme-example -> make run-readme-example'
 	@printf '%s\n' 'run (real-user-smoke) -> make run'
 	@printf '%s\n' 'run-real-user-smoke -> make run-real-user-smoke'
+	@printf '%s\n' 'run-trace-correlation -> make run-trace-correlation'
 
 run: run-real-user-smoke
 
@@ -21,6 +22,11 @@ run-real-user-smoke:
 	@mkdir -p "$(BUILD_DIR)"
 	@$(CC) $(CFLAGS) real_user_smoke.c $(SDK_SRC) -o "$(BUILD_DIR)/real_user_smoke"
 	@"$(BUILD_DIR)/real_user_smoke"
+
+run-trace-correlation:
+	@mkdir -p "$(BUILD_DIR)"
+	@$(CC) $(CFLAGS) trace_correlation.c $(SDK_SRC) -o "$(BUILD_DIR)/trace_correlation"
+	@"$(BUILD_DIR)/trace_correlation"
 
 clean:
 	rm -rf "$(BUILD_DIR)"

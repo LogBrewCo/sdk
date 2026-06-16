@@ -103,6 +103,12 @@ typedef struct {
   const char *status;
 } LogBrewActionAttributes;
 
+#define LOGBREW_TRACE_ID_LENGTH 32U
+#define LOGBREW_SPAN_ID_LENGTH 16U
+#define LOGBREW_TRACE_FLAGS_LENGTH 2U
+#define LOGBREW_TRACEPARENT_LENGTH 55U
+#define LOGBREW_TRACE_METADATA_ENTRY_COUNT 5U
+
 typedef enum {
   LOGBREW_METADATA_STRING,
   LOGBREW_METADATA_NUMBER,
@@ -121,6 +127,20 @@ typedef struct {
   const LogBrewMetadataEntry *entries;
   size_t count;
 } LogBrewMetadata;
+
+typedef struct {
+  char trace_id[LOGBREW_TRACE_ID_LENGTH + 1U];
+  char span_id[LOGBREW_SPAN_ID_LENGTH + 1U];
+  char parent_span_id[LOGBREW_SPAN_ID_LENGTH + 1U];
+  char trace_flags[LOGBREW_TRACE_FLAGS_LENGTH + 1U];
+  bool sampled;
+} LogBrewTraceContext;
+
+typedef struct {
+  LogBrewTraceContext context;
+  const LogBrewTraceContext *previous;
+  bool active;
+} LogBrewTraceScope;
 
 typedef struct {
   const char *name;
@@ -284,6 +304,49 @@ LogBrewStatus logbrew_client_network_milestone(
     const char *id,
     const char *timestamp,
     LogBrewNetworkMilestoneAttributes attributes,
+    LogBrewError *error);
+
+LogBrewStatus logbrew_trace_root_context(LogBrewTraceContext *out_context, LogBrewError *error);
+
+LogBrewStatus logbrew_trace_context_from_traceparent(
+    const char *traceparent,
+    LogBrewTraceContext *out_context,
+    LogBrewError *error);
+
+LogBrewStatus logbrew_trace_continue_or_create_context(
+    const char *traceparent,
+    LogBrewTraceContext *out_context,
+    LogBrewError *error);
+
+LogBrewStatus logbrew_trace_create_headers(
+    const LogBrewTraceContext *context,
+    char out_traceparent[LOGBREW_TRACEPARENT_LENGTH + 1U],
+    LogBrewError *error);
+
+const LogBrewTraceContext *logbrew_trace_current_context(void);
+
+LogBrewStatus logbrew_trace_scope_enter(
+    LogBrewTraceScope *scope,
+    const LogBrewTraceContext *context,
+    LogBrewError *error);
+
+void logbrew_trace_scope_exit(LogBrewTraceScope *scope);
+
+LogBrewMetadata logbrew_trace_metadata(
+    const LogBrewTraceContext *context,
+    LogBrewMetadataEntry entries[LOGBREW_TRACE_METADATA_ENTRY_COUNT]);
+
+LogBrewProductTimelineContext logbrew_trace_product_timeline_context(
+    const LogBrewTraceContext *context,
+    LogBrewProductTimelineContext base_context);
+
+LogBrewStatus logbrew_trace_span_attributes(
+    const LogBrewTraceContext *context,
+    const char *name,
+    const char *status,
+    double duration_ms,
+    bool has_duration_ms,
+    LogBrewSpanAttributes *out_attributes,
     LogBrewError *error);
 
 void logbrew_recording_transport_init(

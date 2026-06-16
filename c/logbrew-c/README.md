@@ -10,7 +10,7 @@ The SDK ships as source plus header. Add `include/logbrew.h` and the core files 
 
 ```bash
 cc -std=c99 -Wall -Wextra -Wpedantic -Iinclude \
-  src/logbrew.c src/logbrew_metric.c src/logbrew_recording_transport.c src/logbrew_timeline.c \
+  src/logbrew.c src/logbrew_metric.c src/logbrew_recording_transport.c src/logbrew_timeline.c src/logbrew_trace.c \
   your_app.c -o your_app
 ```
 
@@ -76,6 +76,50 @@ logbrew_client_metric(
 Metric `kind` must be `counter`, `gauge`, or `histogram`. Gauges use `instant` temporality; counters and histograms use `delta` or `cumulative` temporality and must be non-negative. Values must be finite, units must be non-empty, and metadata should stay low-cardinality: service, queue, route template, or feature flag names are appropriate; user IDs, raw URLs, per-session identifiers, request IDs, headers, and payload fields are not.
 
 This SDK does not automatically collect native runtime, process, or framework metrics yet. Add only the measurements your app owns and wants LogBrew to correlate with logs, errors, traces, and product timelines.
+
+## W3C Trace Correlation
+
+Use the trace helpers when a native C service or app receives a W3C `traceparent` value and wants logs, errors, actions, metrics, spans, and outgoing calls to line up on one trace. The helper validates the incoming context, rejects all-zero IDs, normalizes IDs to lowercase, and creates a fresh local span ID for this process.
+
+```c
+LogBrewTraceContext trace;
+LogBrewTraceScope scope;
+LogBrewSpanAttributes span;
+LogBrewMetadataEntry trace_entries[LOGBREW_TRACE_METADATA_ENTRY_COUNT];
+LogBrewMetadata trace_metadata;
+char traceparent[LOGBREW_TRACEPARENT_LENGTH + 1U];
+
+logbrew_trace_context_from_traceparent(
+    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    &trace,
+    &error);
+logbrew_trace_scope_enter(&scope, &trace, &error);
+
+logbrew_client_log(
+    client,
+    "evt_log_checkout",
+    "2026-06-02T10:00:03Z",
+    (LogBrewLogAttributes){"checkout failed", "warning", "checkout"},
+    &error);
+
+logbrew_trace_span_attributes(&trace, "POST /checkout/{cart_id}", "error", 37.5, true, &span, &error);
+logbrew_client_span(client, "evt_span_checkout", "2026-06-02T10:00:04Z", span, &error);
+
+trace_metadata = logbrew_trace_metadata(&trace, trace_entries);
+logbrew_client_metric(
+    client,
+    "evt_metric_request_duration",
+    "2026-06-02T10:00:05Z",
+    (LogBrewMetricAttributes){"http.server.duration", "histogram", 37.5, "ms", "delta", trace_metadata},
+    &error);
+
+logbrew_trace_create_headers(&trace, traceparent, &error);
+logbrew_trace_scope_exit(&scope);
+```
+
+While a `LogBrewTraceScope` is active, `logbrew_client_issue()`, `logbrew_client_log()`, and `logbrew_client_action()` automatically include trace metadata. For metrics and product timeline helpers, use `logbrew_trace_metadata()` or `logbrew_trace_product_timeline_context()` so the correlation stays explicit at the call site.
+
+`logbrew_trace_continue_or_create_context()` is useful for request boundaries: valid incoming W3C context is continued; missing or malformed context falls back to a fresh local root without failing the request. The SDK never serializes the raw incoming `traceparent` into telemetry, does not patch HTTP clients, and does not capture headers, request bodies, response bodies, raw URLs, query strings, or fragments.
 
 ## Product Timelines
 
@@ -156,7 +200,7 @@ Compile the optional transport with libcurl:
 
 ```bash
 cc -std=c99 -Wall -Wextra -Wpedantic -Iinclude \
-  src/logbrew.c src/logbrew_metric.c src/logbrew_recording_transport.c src/logbrew_timeline.c \
+  src/logbrew.c src/logbrew_metric.c src/logbrew_recording_transport.c src/logbrew_timeline.c src/logbrew_trace.c \
   src/logbrew_http_transport.c \
   your_app.c -o your_app $(curl-config --libs)
 ```

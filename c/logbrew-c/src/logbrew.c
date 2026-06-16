@@ -384,6 +384,19 @@ static LogBrewStatus append_named_number(
   return status;
 }
 
+static LogBrewStatus append_active_trace_metadata(LogBrewBuffer *buffer, bool *needs_comma, LogBrewError *error) {
+  char *metadata_json = NULL;
+  LogBrewStatus status = logbrew_trace_active_metadata_json(&metadata_json, error);
+  if (status != LOGBREW_OK || metadata_json == NULL) {
+    return status;
+  }
+  status = buffer_append(buffer, *needs_comma ? ",\"metadata\":" : "\"metadata\":", error);
+  if (status == LOGBREW_OK) status = buffer_append(buffer, metadata_json, error);
+  free(metadata_json);
+  if (status == LOGBREW_OK) *needs_comma = true;
+  return status;
+}
+
 static LogBrewStatus build_event_json(
     const char *event_type,
     const char *id,
@@ -814,6 +827,9 @@ LogBrewStatus logbrew_client_issue(
     status = append_optional_string(&buffer, "message", attributes.message, false, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
+    status = append_active_trace_metadata(&buffer, &needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
     status = finish_attributes(&buffer, &attributes_json, error);
   }
   if (status != LOGBREW_OK) {
@@ -848,6 +864,9 @@ LogBrewStatus logbrew_client_log(
   }
   if (status == LOGBREW_OK) {
     status = append_optional_string(&buffer, "logger", attributes.logger, false, &needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_active_trace_metadata(&buffer, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = finish_attributes(&buffer, &attributes_json, error);
@@ -936,6 +955,9 @@ LogBrewStatus logbrew_client_action(
   }
   if (status == LOGBREW_OK) {
     status = append_named_string(&buffer, "status", attributes.status, &needs_comma, error);
+  }
+  if (status == LOGBREW_OK) {
+    status = append_active_trace_metadata(&buffer, &needs_comma, error);
   }
   if (status == LOGBREW_OK) {
     status = finish_attributes(&buffer, &attributes_json, error);

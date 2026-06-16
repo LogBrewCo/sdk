@@ -18,4 +18,6 @@ LogBrewStatus logbrew_client_push_action_json(
     char *attributes_json,
     LogBrewError *error);
 
+LogBrewStatus logbrew_trace_active_metadata_json(char **out_json, LogBrewError *error);
+
 #endif
