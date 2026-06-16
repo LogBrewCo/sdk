@@ -265,6 +265,85 @@ fn logbrew_layer(
 
 Attach the layer with `Router::route(...).route_layer(logbrew_layer(client.clone()))`, keep the LogBrew client in your own state management, generate unique trace/span IDs per request, and flush on your normal lifecycle boundary. The layer reads only the W3C `traceparent` propagation header and framework-owned route/status metadata; do not capture arbitrary headers, raw request URIs, payloads, account session values, or user-specific identifiers.
 
+## Actix Middleware Example
+
+For Actix Web apps, keep telemetry in app-owned middleware and call `HttpRequestTelemetry` with Actix's matched route pattern after the handler returns. Actix stays out of the LogBrew dependency graph; your app owns the `actix-web` dependency and the middleware placement.
+
+```bash
+cargo add logbrew
+cargo add actix-web
+```
+
+The packaged `examples/actix_request_middleware.rs` file is a runnable mini-app; the core pattern is:
+
+```rust
+use actix_web::{
+    Error,
+    dev::{ServiceRequest, ServiceResponse},
+    middleware::Next,
+    web,
+};
+use logbrew::{HttpRequestTelemetry, LogBrewClient, Metadata, MetadataValue};
+use std::{sync::{Arc, Mutex}, time::Instant};
+
+#[derive(Clone)]
+struct AppState {
+    client: Arc<Mutex<LogBrewClient>>,
+}
+
+async fn logbrew_request_telemetry(
+    request: ServiceRequest,
+    next: Next<impl actix_web::body::MessageBody + 'static>,
+) -> Result<ServiceResponse<impl actix_web::body::MessageBody>, Error> {
+    let started = Instant::now();
+    let method = request.method().as_str().to_string();
+    let incoming = request
+        .headers()
+        .get("traceparent")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let app_state = request
+        .app_data::<web::Data<AppState>>()
+        .map(|data| data.get_ref().clone());
+    let response = next.call(request).await?;
+
+    let route_template = response
+        .request()
+        .match_pattern()
+        .unwrap_or_else(|| "/unknown".to_string());
+    let mut metadata = Metadata::new();
+    metadata.insert("framework".to_string(), MetadataValue::String("actix-web".to_string()));
+    let mut telemetry = HttpRequestTelemetry::new(
+        route_template,
+        method,
+        "11111111111111111111111111111111",
+        "b7ad6b7169203331",
+    )
+    .with_status_code(response.status().as_u16())
+    .with_duration_ms(started.elapsed().as_secs_f64() * 1000.0)
+    .with_metadata(metadata);
+    if let Some(traceparent) = incoming {
+        telemetry = telemetry.with_incoming_traceparent(traceparent);
+    }
+    let Ok(events) = telemetry.build() else {
+        return Ok(response);
+    };
+    if let Some(app_state) = app_state {
+        if let Ok(mut client) = app_state.client.lock() {
+            let span_event_id = format!("evt_actix_request_span_{}", events.span_id);
+            let metric_event_id = format!("evt_actix_request_duration_{}", events.span_id);
+            let _ = client.span(span_event_id, "2026-06-02T10:00:00Z", events.span);
+            if let Some(metric) = events.metric {
+                let _ = client.metric(metric_event_id, "2026-06-02T10:00:00Z", metric);
+            }
+        }
+    }
+    Ok(response)
+}
+```
+
+The packaged example also adds the outgoing `traceparent` to the response. Flush the app-owned `LogBrewClient` on your normal lifecycle boundary, keep route values templated, and do not capture arbitrary headers, raw request URIs, payloads, account session values, or user-specific identifiers.
+
 ## Tracing Bridge
 
 For Rust services that already use the `tracing` ecosystem, enable the optional bridge to convert app log events into LogBrew log events without replacing your subscriber stack or capturing arbitrary structured fields by default. Closed `tracing` spans are only converted when your app explicitly calls `with_span_events()`.

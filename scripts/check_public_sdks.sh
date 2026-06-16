@@ -39,6 +39,7 @@ STEP_LABELS=(
   "Swift package checks"
   "Rust real-user smoke"
   "Rust Axum real-user smoke"
+  "Rust Actix real-user smoke"
   "Rust tracing real-user smoke"
   "JavaScript real-user smoke"
   "Browser real-user smoke"
@@ -350,253 +351,263 @@ mark_step_complete() {
   steps_completed=$((steps_completed + 1))
 }
 
-begin_step() {
-  current_step_number="$1"
-  current_step_label="$2"
-  log_line "[$1/$steps_total] $2"
+begin_next_step() {
+  local expected_label
+  current_step_number=$((current_step_number + 1))
+  current_step_label="$1"
+  expected_label="${STEP_LABELS[$((current_step_number - 1))]:-}"
+  if [[ "$expected_label" != "$current_step_label" ]]; then
+    log_line "step label mismatch for step $current_step_number: expected '$expected_label', got '$current_step_label'"
+    exit 1
+  fi
+  log_line "[$current_step_number/$steps_total] $current_step_label"
 }
 
-begin_step 1 "Root contract tests"
+begin_next_step "Root contract tests"
 run_shell_step "python3 -m unittest discover -s tests -p 'test_*.py'"
 mark_step_complete
 
-begin_step 2 "Rust tests"
+begin_next_step "Rust tests"
 run_shell_step "cd rust/logbrew && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo clippy --all-targets --features http -- -D warnings && cargo test && cargo test --features http && bash tests/run.sh"
 mark_step_complete
 
-begin_step 3 "Rust package dry-run"
+begin_next_step "Rust package dry-run"
 run_shell_step "cd rust/logbrew && cargo publish --dry-run --allow-dirty"
 mark_step_complete
 
-begin_step 4 "JavaScript tests"
+begin_next_step "JavaScript tests"
 run_shell_step "python3 scripts/check_js_sources.py && bash scripts/check_js_lint.sh && cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test"
 mark_step_complete
 
-begin_step 5 "JavaScript package dry-run"
+begin_next_step "JavaScript package dry-run"
 run_shell_step "bash scripts/check_js_package.sh && cd js/logbrew-js && npm pack --dry-run >/dev/null && cd ../logbrew-browser && npm pack --dry-run >/dev/null && cd ../logbrew-node && npm pack --dry-run >/dev/null && cd ../logbrew-express && npm pack --dry-run >/dev/null && cd ../logbrew-fastify && npm pack --dry-run >/dev/null && cd ../logbrew-nestjs && npm pack --dry-run >/dev/null && cd ../logbrew-angular && npm pack --dry-run >/dev/null && cd ../logbrew-vue && npm pack --dry-run >/dev/null && cd ../logbrew-svelte && npm pack --dry-run >/dev/null && cd ../logbrew-react && npm pack --dry-run >/dev/null && cd ../logbrew-react-native && npm pack --dry-run >/dev/null && cd ../logbrew-next && npm pack --dry-run >/dev/null"
 mark_step_complete
 
-begin_step 6 "Python tests"
+begin_next_step "Python tests"
 run_shell_step "python3 scripts/check_python_sources.py && bash scripts/check_python_static.sh && PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'"
 mark_step_complete
 
-begin_step 7 "FastAPI package checks"
+begin_next_step "FastAPI package checks"
 run_shell_step "bash scripts/check_fastapi_package.sh"
 mark_step_complete
 
-begin_step 8 "Django package checks"
+begin_next_step "Django package checks"
 run_shell_step "bash scripts/check_django_package.sh"
 mark_step_complete
 
-begin_step 9 "Go tests"
+begin_next_step "Go tests"
 run_shell_step "cd go/logbrew && test -z \"\$(gofmt -l .)\" && go vet ./... && go test ./... && cd ../.. && bash scripts/check_go_static.sh"
 mark_step_complete
 
-begin_step 10 "C package checks"
+begin_next_step "C package checks"
 run_shell_step "bash scripts/check_c_package.sh"
 mark_step_complete
 
-begin_step 11 "C++ package checks"
+begin_next_step "C++ package checks"
 run_shell_step "bash scripts/check_cpp_package.sh"
 mark_step_complete
 
-begin_step 12 "Java package checks"
+begin_next_step "Java package checks"
 run_shell_step "bash scripts/check_java_static.sh && bash scripts/check_java_package.sh"
 mark_step_complete
 
-begin_step 13 ".NET package checks"
+begin_next_step ".NET package checks"
 run_shell_step "bash scripts/check_dotnet_package.sh"
 mark_step_complete
 
-begin_step 14 "Unity package checks"
+begin_next_step "Unity package checks"
 run_shell_step "bash scripts/check_unity_package.sh"
 mark_step_complete
 
-begin_step 15 "Kotlin package checks"
+begin_next_step "Kotlin package checks"
 run_shell_step "bash scripts/check_kotlin_style.sh && bash scripts/check_kotlin_package.sh"
 mark_step_complete
 
-begin_step 16 "Ruby package checks"
+begin_next_step "Ruby package checks"
 run_shell_step "bash scripts/check_ruby_package.sh"
 mark_step_complete
 
-begin_step 17 "Swift package checks"
+begin_next_step "Swift package checks"
 run_shell_step "bash scripts/check_swift_style.sh && bash scripts/check_swift_package.sh"
 mark_step_complete
 
-begin_step 18 "Rust real-user smoke"
+begin_next_step "Rust real-user smoke"
 run_shell_step "bash scripts/real_user_rust_smoke.sh"
 mark_step_complete
 
-begin_step 19 "Rust Axum real-user smoke"
+begin_next_step "Rust Axum real-user smoke"
 run_shell_step "bash scripts/real_user_rust_axum_smoke.sh"
 mark_step_complete
 
-begin_step 20 "Rust tracing real-user smoke"
+begin_next_step "Rust Actix real-user smoke"
+run_shell_step "bash scripts/real_user_rust_actix_smoke.sh"
+mark_step_complete
+
+begin_next_step "Rust tracing real-user smoke"
 run_shell_step "bash scripts/real_user_rust_tracing_smoke.sh"
 mark_step_complete
 
-begin_step 21 "JavaScript real-user smoke"
+begin_next_step "JavaScript real-user smoke"
 run_shell_step "bash scripts/real_user_js_smoke.sh"
 mark_step_complete
 
-begin_step 22 "Browser real-user smoke"
+begin_next_step "Browser real-user smoke"
 run_shell_step "bash scripts/real_user_browser_smoke.sh"
 mark_step_complete
 
-begin_step 23 "Node.js real-user smoke"
+begin_next_step "Node.js real-user smoke"
 run_shell_step "bash scripts/real_user_node_smoke.sh"
 mark_step_complete
 
-begin_step 24 "Express real-user smoke"
+begin_next_step "Express real-user smoke"
 run_shell_step "bash scripts/real_user_express_smoke.sh"
 mark_step_complete
 
-begin_step 25 "Fastify real-user smoke"
+begin_next_step "Fastify real-user smoke"
 run_shell_step "bash scripts/real_user_fastify_smoke.sh"
 mark_step_complete
 
-begin_step 26 "NestJS real-user smoke"
+begin_next_step "NestJS real-user smoke"
 run_shell_step "bash scripts/real_user_nestjs_smoke.sh"
 mark_step_complete
 
-begin_step 27 "Angular real-user smoke"
+begin_next_step "Angular real-user smoke"
 run_shell_step "bash scripts/real_user_angular_smoke.sh"
 mark_step_complete
 
-begin_step 28 "Vue real-user smoke"
+begin_next_step "Vue real-user smoke"
 run_shell_step "bash scripts/real_user_vue_smoke.sh"
 mark_step_complete
 
-begin_step 29 "Svelte real-user smoke"
+begin_next_step "Svelte real-user smoke"
 run_shell_step "bash scripts/real_user_svelte_smoke.sh"
 mark_step_complete
 
-begin_step 30 "React real-user smoke"
+begin_next_step "React real-user smoke"
 run_shell_step "bash scripts/real_user_react_smoke.sh"
 mark_step_complete
 
-begin_step 31 "React Native real-user smoke"
+begin_next_step "React Native real-user smoke"
 run_shell_step "bash scripts/real_user_react_native_smoke.sh"
 mark_step_complete
 
-begin_step 32 "Next.js real-user smoke"
+begin_next_step "Next.js real-user smoke"
 run_shell_step "bash scripts/real_user_next_smoke.sh"
 mark_step_complete
 
-begin_step 33 "Python real-user smoke"
+begin_next_step "Python real-user smoke"
 run_shell_step "bash scripts/real_user_python_smoke.sh"
 mark_step_complete
 
-begin_step 34 "FastAPI real-user smoke"
+begin_next_step "FastAPI real-user smoke"
 run_shell_step "bash scripts/real_user_fastapi_smoke.sh"
 mark_step_complete
 
-begin_step 35 "Django real-user smoke"
+begin_next_step "Django real-user smoke"
 run_shell_step "bash scripts/real_user_django_smoke.sh"
 mark_step_complete
 
-begin_step 36 "Go real-user smoke"
+begin_next_step "Go real-user smoke"
 run_shell_step "bash scripts/real_user_go_smoke.sh"
 mark_step_complete
 
-begin_step 37 "C real-user smoke"
+begin_next_step "C real-user smoke"
 run_shell_step "bash scripts/real_user_c_smoke.sh"
 mark_step_complete
 
-begin_step 38 "C++ real-user smoke"
+begin_next_step "C++ real-user smoke"
 run_shell_step "bash scripts/real_user_cpp_smoke.sh"
 mark_step_complete
 
-begin_step 39 "Java real-user smoke"
+begin_next_step "Java real-user smoke"
 run_shell_step "bash scripts/real_user_java_smoke.sh"
 mark_step_complete
 
-begin_step 40 "Spring Boot real-user smoke"
+begin_next_step "Spring Boot real-user smoke"
 run_shell_step "bash scripts/real_user_spring_boot_smoke.sh"
 mark_step_complete
 
-begin_step 41 ".NET real-user smoke"
+begin_next_step ".NET real-user smoke"
 run_shell_step "bash scripts/real_user_dotnet_smoke.sh"
 mark_step_complete
 
-begin_step 42 "Unity real-user smoke"
+begin_next_step "Unity real-user smoke"
 run_shell_step "bash scripts/real_user_unity_smoke.sh"
 mark_step_complete
 
-begin_step 43 "Kotlin real-user smoke"
+begin_next_step "Kotlin real-user smoke"
 run_shell_step "bash scripts/real_user_kotlin_smoke.sh"
 mark_step_complete
 
-begin_step 44 "Ruby real-user smoke"
+begin_next_step "Ruby real-user smoke"
 run_shell_step "bash scripts/real_user_ruby_smoke.sh"
 mark_step_complete
 
-begin_step 45 "Swift real-user smoke"
+begin_next_step "Swift real-user smoke"
 run_shell_step "bash scripts/real_user_swift_smoke.sh"
 mark_step_complete
 
-begin_step 46 "PHP package metadata"
+begin_next_step "PHP package metadata"
 run_shell_step "cd php/logbrew-php && composer validate --no-check-publish --strict"
 mark_step_complete
 
-begin_step 47 "PHP package install"
+begin_next_step "PHP package install"
 run_shell_step "cd php/logbrew-php && composer update --no-interaction"
 mark_step_complete
 
-begin_step 48 "PHP package tests"
+begin_next_step "PHP package tests"
 run_shell_step "python3 scripts/check_php_sources.py && bash scripts/check_php_static.sh && cd php/logbrew-php && php tests/run.php"
 mark_step_complete
 
-begin_step 49 "PHP real-user smoke"
+begin_next_step "PHP real-user smoke"
 run_shell_step "bash scripts/real_user_php_smoke.sh"
 mark_step_complete
 
-begin_step 50 "Python package build checks"
+begin_next_step "Python package build checks"
 run_shell_step "cd python/logbrew_py && python3 -m build && python3 -m twine check 'dist/*' && cd ../logbrew_fastapi && python3 -m build && python3 -m twine check 'dist/*' && cd ../logbrew_django && python3 -m build && python3 -m twine check 'dist/*'"
 mark_step_complete
 
-begin_step 51 "Objective-C package checks"
+begin_next_step "Objective-C package checks"
 run_shell_step "bash scripts/check_objc_package.sh"
 mark_step_complete
 
-begin_step 52 "Objective-C real-user smoke"
+begin_next_step "Objective-C real-user smoke"
 run_shell_step "bash scripts/real_user_objc_smoke.sh"
 mark_step_complete
 
-begin_step 53 "Backend contract report checks"
+begin_next_step "Backend contract report checks"
 run_shell_step "python3 scripts/check_backend_contract_reports.py"
 mark_step_complete
 
-begin_step 54 "Release metadata checks"
+begin_next_step "Release metadata checks"
 run_shell_step "python3 scripts/check_release_metadata.py"
 mark_step_complete
 
-begin_step 55 "GitHub release safety checks"
+begin_next_step "GitHub release safety checks"
 run_shell_step "python3 scripts/check_github_release_safety.py"
 mark_step_complete
 
-begin_step 56 "Markdown link checks"
+begin_next_step "Markdown link checks"
 run_shell_step "python3 scripts/check_markdown_links.py"
 mark_step_complete
 
-begin_step 57 "Shell static analysis"
+begin_next_step "Shell static analysis"
 run_shell_step "bash scripts/check_shell_static.sh"
 mark_step_complete
 
-begin_step 58 "Workflow YAML validation"
+begin_next_step "Workflow YAML validation"
 run_shell_step "ruby -e 'require \"yaml\"; YAML.load_file(\".github/workflows/ci.yml\"); YAML.load_file(\".github/workflows/release-readiness.yml\"); puts \"yaml ok\"'"
 mark_step_complete
 
-begin_step 59 "Confidentiality leak scan"
+begin_next_step "Confidentiality leak scan"
 run_shell_step "python3 scripts/check_confidentiality_scan.py"
 mark_step_complete
 
-begin_step 60 "JavaScript release artifact smoke"
+begin_next_step "JavaScript release artifact smoke"
 run_shell_step "bash scripts/real_user_js_release_artifact_smoke.sh"
 mark_step_complete
 
-begin_step 61 "Generated artifact hygiene"
+begin_next_step "Generated artifact hygiene"
 cleanup_build_artifacts
 run_shell_step "PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_generated_artifacts.py"
 mark_step_complete

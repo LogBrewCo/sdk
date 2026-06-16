@@ -127,6 +127,10 @@ jobs:
         if: ${{ hashFiles('Cargo.toml') != '' }}
         run: bash scripts/real_user_rust_axum_smoke.sh
 
+      - name: Run Rust Actix real-user smoke test
+        if: ${{ hashFiles('Cargo.toml') != '' }}
+        run: bash scripts/real_user_rust_actix_smoke.sh
+
       - name: Run Rust tracing real-user smoke test
         if: ${{ hashFiles('Cargo.toml') != '' }}
         run: bash scripts/real_user_rust_tracing_smoke.sh

@@ -25,6 +25,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["r
 ureq = { version = "3.3", optional = true }
 
 [dev-dependencies]
+actix-web = "4"
 axum = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
