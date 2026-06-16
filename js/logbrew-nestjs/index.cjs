@@ -1,16 +1,17 @@
 "use strict";
 
-const { catchError, tap, throwError } = require("rxjs");
+const { AsyncLocalStorage } = require("node:async_hooks");
+const { catchError, Observable, tap, throwError } = require("rxjs");
 const {
   LogBrewClient,
   RecordingTransport,
   SdkError,
-  parseTraceparent,
-  spanAttributesFromTraceparent
+  parseTraceparent
 } = require("@logbrew/sdk");
 
 const DEFAULT_SDK_NAME = "logbrew-nestjs";
 const DEFAULT_SDK_VERSION = "0.1.1";
+const activeTraceContext = new AsyncLocalStorage();
 
 function createLogBrewNestClient({
   serverApiKey,
@@ -40,59 +41,68 @@ class LogBrewInterceptor {
     const response = http.getResponse();
     const client = resolveClient(this.options, executionContext, request, response);
     const transport = resolveTransport(this.options, executionContext, request, response, client);
+    const trace = createRequestTraceContext(request, response, this.options);
     const startedAt = nowMs(this.options);
 
-    request.logbrew = createRequestContext(client, transport);
+    request.logbrew = createRequestContext(client, transport, trace);
 
-    return next.handle().pipe(
-      tap({
-        complete: () => {
-          if (this.options.captureRequests !== false || this.options.captureRequestMetrics === true) {
-            void captureRequestFinish(this.options, {
-              client,
-              executionContext,
-              request,
-              response,
-              startedAt,
-              transport
-            });
+    return new Observable((subscriber) => activeTraceContext.run(trace, () =>
+      next.handle().pipe(
+        tap({
+          complete: () => {
+            if (this.options.captureRequests !== false || this.options.captureRequestMetrics === true) {
+              void captureRequestFinish(this.options, {
+                client,
+                executionContext,
+                request,
+                response,
+                startedAt,
+                trace,
+                transport
+              });
+            }
           }
-        }
-      }),
-      catchError((error) => {
-        void captureRequestError(this.options, {
-          client,
-          error,
-          executionContext,
-          request,
-          response,
-          transport
-        });
-        return throwError(() => error);
-      })
-    );
+        }),
+        catchError((error) => {
+          void captureRequestError(this.options, {
+            client,
+            error,
+            executionContext,
+            request,
+            response,
+            trace,
+            transport
+          });
+          return throwError(() => error);
+        })
+      ).subscribe(subscriber)
+    ));
   }
+}
+
+function getActiveLogBrewTrace() {
+  return activeTraceContext.getStore();
 }
 
 function createRequestEvent(request, response, {
   now = () => new Date().toISOString(),
   durationMs = 0,
   idFactory = defaultRequestEventId,
-  spanIdFactory = defaultSpanIdFactory
+  spanIdFactory = defaultSpanIdFactory,
+  trace
 } = {}) {
   const method = request.method ?? "GET";
   const path = getRequestPath(request);
   const statusCode = Number(response.statusCode ?? 0);
   const id = idFactory(request, response);
-  const traceparent = getTraceparentHeader(request);
-  const spanEvent = traceparent
-    ? createTraceparentRequestSpan(traceparent, {
+  const requestTrace = trace ?? getRequestTraceContext(request) ?? createRequestTraceContext(request, response, { spanIdFactory });
+  const spanEvent = requestTrace
+    ? createTraceparentRequestSpan(requestTrace, {
       durationMs,
       id,
       method,
       now,
       path,
-      spanIdFactory: () => spanIdFactory(request, response),
       statusCode
     })
     : undefined;
@@ -119,11 +129,13 @@ function createRequestEvent(request, response, {
 
 function createErrorEvent(error, request, {
   now = () => new Date().toISOString(),
-  idFactory = defaultErrorEventId
+  idFactory = defaultErrorEventId,
+  trace
 } = {}) {
   const method = request.method ?? "GET";
   const path = getRequestPath(request);
   const message = error instanceof Error ? error.message : String(error);
+  const requestTrace = trace ?? getRequestTraceContext(request);
   return {
     id: idFactory(error, request),
     timestamp: now(),
@@ -133,7 +145,8 @@ function createErrorEvent(error, request, {
       message,
       metadata: {
         method,
-        path
+        path,
+        ...traceMetadata(requestTrace)
       }
     }
   };
@@ -168,10 +181,11 @@ function createRequestMetricEvent(request, response, {
   };
 }
 
-function createRequestContext(client, transport) {
+function createRequestContext(client, transport, trace) {
   return {
     client,
     logbrew: client,
+    trace,
     transport,
     previewJson: () => client.previewJson(),
     flush: () => client.flush(transport),
@@ -185,19 +199,20 @@ async function captureRequestFinish(options, {
   request,
   response,
   startedAt,
+  trace,
   transport
 }) {
   try {
     const durationMs = Math.max(0, Math.round(nowMs(options) - startedAt));
     if (options.captureRequests !== false) {
       const event = typeof options.requestEvent === "function"
-        ? options.requestEvent(request, response, { client, durationMs, executionContext })
-        : createRequestEvent(request, response, { ...options, durationMs });
+        ? options.requestEvent(request, response, { client, durationMs, executionContext, trace })
+        : createRequestEvent(request, response, { ...options, durationMs, trace });
       captureRequestEvent(client, event);
     }
     if (options.captureRequestMetrics === true) {
       const metricEvent = typeof options.requestMetricEvent === "function"
-        ? options.requestMetricEvent(request, response, { client, durationMs, executionContext })
+        ? options.requestMetricEvent(request, response, { client, durationMs, executionContext, trace })
         : createRequestMetricEvent(request, response, {
           ...options,
           durationMs,
@@ -206,9 +221,9 @@ async function captureRequestFinish(options, {
       captureRequestMetricEvent(client, metricEvent);
     }
     const transportResponse = await client.shutdown(transport);
-    await notifyFlush(options, transportResponse, { client, executionContext, request, response });
+    await notifyFlush(options, transportResponse, { client, executionContext, request, response, trace });
   } catch (error) {
-    await notifyFailure(options, error, { client, executionContext, request, response });
+    await notifyFailure(options, error, { client, executionContext, request, response, trace });
   }
 }
 
@@ -218,18 +233,20 @@ async function captureRequestError(options, {
   executionContext,
   request,
   response,
+  trace,
   transport
 }) {
+  const requestTrace = trace ?? getRequestTraceContext(request) ?? getActiveLogBrewTrace();
   const event = typeof options.errorEvent === "function"
-    ? options.errorEvent(error, { client, executionContext, request, response })
-    : createErrorEvent(error, request, options);
+    ? options.errorEvent(error, { client, executionContext, request, response, trace: requestTrace })
+    : createErrorEvent(error, request, { ...options, trace: requestTrace });
 
   try {
     client.issue(event.id, event.timestamp, event.attributes);
     const transportResponse = await client.shutdown(transport);
-    await notifyFlush(options, transportResponse, { client, executionContext, request, response });
+    await notifyFlush(options, transportResponse, { client, executionContext, request, response, trace: requestTrace });
   } catch (captureError) {
-    await notifyFailure(options, captureError, { client, executionContext, request, response });
+    await notifyFailure(options, captureError, { client, executionContext, request, response, trace: requestTrace });
   }
 }
 
@@ -312,42 +329,90 @@ function getTraceparentHeader(request) {
   return typeof value === "string" ? value : undefined;
 }
 
-function createTraceparentRequestSpan(traceparent, {
-  durationMs,
-  id,
-  method,
-  now,
-  path,
-  spanIdFactory,
-  statusCode
-}) {
+function createRequestTraceContext(request, response, {
+  spanIdFactory = defaultSpanIdFactory
+} = {}) {
+  const traceparent = getTraceparentHeader(request);
   if (!traceparent) {
     return undefined;
   }
 
   try {
-    parseTraceparent(traceparent);
-    const spanId = spanIdFactory();
+    const context = parseTraceparent(traceparent);
+    const spanId = normalizeSpanId(spanIdFactory(request, response));
+    if (!spanId) {
+      return undefined;
+    }
     return {
-      id,
-      timestamp: now(),
-      type: "span",
-      attributes: spanAttributesFromTraceparent(traceparent, {
-        durationMs,
-        metadata: {
-          framework: "nestjs",
-          method,
-          path,
-          statusCode
-        },
-        name: `${method} ${path}`,
-        spanId,
-        status: statusCode >= 500 ? "error" : "ok"
-      })
+      traceId: context.traceId,
+      spanId,
+      parentSpanId: context.parentSpanId,
+      sampled: context.sampled
     };
   } catch {
     return undefined;
   }
+}
+
+function getRequestTraceContext(request) {
+  return request.logbrew?.trace;
+}
+
+function normalizeSpanId(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const spanId = value.toLowerCase();
+  if (!/^[0-9a-f]{16}$/u.test(spanId) || spanId === "0000000000000000") {
+    return undefined;
+  }
+  return spanId;
+}
+
+function traceMetadata(trace) {
+  if (!trace) {
+    return {};
+  }
+  return {
+    parentSpanId: trace.parentSpanId,
+    sampled: trace.sampled,
+    spanId: trace.spanId,
+    traceId: trace.traceId
+  };
+}
+
+function createTraceparentRequestSpan(traceContext, {
+  durationMs,
+  id,
+  method,
+  now,
+  path,
+  statusCode
+}) {
+  if (!traceContext) {
+    return undefined;
+  }
+
+  return {
+    id,
+    timestamp: now(),
+    type: "span",
+    attributes: {
+      name: `${method} ${path}`,
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      parentSpanId: traceContext.parentSpanId,
+      status: statusCode >= 500 ? "error" : "ok",
+      durationMs,
+      metadata: {
+        framework: "nestjs",
+        method,
+        path,
+        sampled: traceContext.sampled,
+        statusCode
+      }
+    }
+  };
 }
 
 function captureRequestEvent(client, event) {
@@ -406,11 +471,13 @@ function randomHex(byteLength) {
 
 module.exports = {
   createErrorEvent,
+  getActiveLogBrewTrace,
   createLogBrewNestClient,
   createRequestMetricEvent,
   createRequestEvent,
   default: {
     createErrorEvent,
+    getActiveLogBrewTrace,
     createLogBrewNestClient,
     createRequestMetricEvent,
     createRequestEvent,

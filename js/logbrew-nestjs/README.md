@@ -58,7 +58,37 @@ The interceptor uses Nest's HTTP `ExecutionContext`, adds `request.logbrew` befo
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK.
 
-When an incoming HTTP request has a valid W3C `traceparent` header, default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break the controller. Automatic request metadata uses the path without query text by default. Use `captureRequests: false` when a controller should only flush manual events, and use `spanIdFactory` when your runtime needs app-provided child span IDs.
+When an incoming HTTP request has a valid W3C `traceparent` header, the interceptor attaches `request.logbrew.trace` and default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous controller work started after the interceptor runs. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break the controller. Automatic request metadata uses the path without query text by default. Use `captureRequests: false` when a controller should only flush manual events, and use `spanIdFactory` when your runtime needs app-provided child span IDs.
+
+```ts
+import { Controller, Get, Req } from "@nestjs/common";
+import { getActiveLogBrewTrace } from "@logbrew/nestjs";
+import type { Request } from "express";
+
+@Controller()
+export class CheckoutController {
+  @Get("/checkout/:cartId")
+  async checkout(@Req() request: Request) {
+    await Promise.resolve();
+    const trace = request.logbrew?.trace ?? getActiveLogBrewTrace();
+    const metadata = trace ? {
+      traceId: trace.traceId,
+      spanId: trace.spanId,
+      parentSpanId: trace.parentSpanId,
+      sampled: trace.sampled
+    } : undefined;
+    request.logbrew?.client.log("evt_checkout_started", "2026-06-02T10:00:03Z", {
+      message: "checkout started",
+      level: "info",
+      logger: "nestjs",
+      ...(metadata ? { metadata } : {})
+    });
+    return { ok: true };
+  }
+}
+```
+
+The trace context contains only normalized W3C IDs plus sampled state. The interceptor does not serialize the raw `traceparent` header and does not capture request bodies, headers, query strings, or arbitrary controller values.
 
 ## Request Duration Metrics
 

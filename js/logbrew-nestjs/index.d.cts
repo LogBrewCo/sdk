@@ -22,10 +22,18 @@ export type CreateLogBrewNestClientConfig = {
 export type LogBrewNestContext = {
   client: LogBrewClient;
   logbrew: LogBrewClient;
+  trace?: LogBrewTraceContext;
   transport: Transport;
   previewJson(): string;
   flush(): Promise<TransportResponse>;
   shutdown(): Promise<TransportResponse>;
+};
+
+export type LogBrewTraceContext = {
+  traceId: string;
+  spanId: string;
+  parentSpanId: string;
+  sampled: boolean;
 };
 
 export type LogBrewNestRuntimeContext = {
@@ -33,6 +41,7 @@ export type LogBrewNestRuntimeContext = {
   request: Request;
   response: Response;
   client: LogBrewClient;
+  trace?: LogBrewTraceContext;
 };
 
 export type LogBrewClientFactory = (context: Omit<LogBrewNestRuntimeContext, "client">) => LogBrewClient;
@@ -80,12 +89,12 @@ export type LogBrewNestOptions = CreateLogBrewNestClientConfig & {
   requestEvent?: (
     request: Request,
     response: Response,
-    context: { client: LogBrewClient; durationMs: number; executionContext: ExecutionContext }
+    context: { client: LogBrewClient; durationMs: number; executionContext: ExecutionContext; trace?: LogBrewTraceContext }
   ) => LogBrewRequestEvent;
   requestMetricEvent?: (
     request: Request,
     response: Response,
-    context: { client: LogBrewClient; durationMs: number; executionContext: ExecutionContext }
+    context: { client: LogBrewClient; durationMs: number; executionContext: ExecutionContext; trace?: LogBrewTraceContext }
   ) => LogBrewRequestMetricEvent;
   errorEvent?: (error: unknown, context: LogBrewNestRuntimeContext) => LogBrewErrorEvent;
   onFlush?: (response: TransportResponse, context: LogBrewNestRuntimeContext) => void | Promise<void>;
@@ -97,6 +106,7 @@ export declare class LogBrewInterceptor implements NestInterceptor {
   constructor(options?: LogBrewNestOptions);
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown>;
 }
+export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
 export declare function createRequestEvent(
   request: Request,
   response: Response,
@@ -105,6 +115,7 @@ export declare function createRequestEvent(
     durationMs?: number;
     idFactory?: (request: Request, response: Response) => string;
     spanIdFactory?: (request: Request, response: Response) => string;
+    trace?: LogBrewTraceContext;
   }
 ): LogBrewRequestEvent;
 export declare function createErrorEvent(
@@ -113,6 +124,7 @@ export declare function createErrorEvent(
   options?: {
     now?: () => string;
     idFactory?: (error: unknown, request: Request) => string;
+    trace?: LogBrewTraceContext;
   }
 ): LogBrewErrorEvent;
 export declare function createRequestMetricEvent(
@@ -136,6 +148,7 @@ declare global {
 
 declare const defaultExport: {
   createErrorEvent: typeof createErrorEvent;
+  getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   createLogBrewNestClient: typeof createLogBrewNestClient;
   createRequestMetricEvent: typeof createRequestMetricEvent;
   createRequestEvent: typeof createRequestEvent;

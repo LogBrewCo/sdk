@@ -52,6 +52,8 @@ grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/nestjs-readme.md"
 grep -q 'serverApiKey' "$tmp_dir/nestjs-readme.md"
 grep -q 'LogBrewInterceptor' "$tmp_dir/nestjs-readme.md"
 grep -q 'request.logbrew' "$tmp_dir/nestjs-readme.md"
+grep -q 'request.logbrew.trace' "$tmp_dir/nestjs-readme.md"
+grep -q 'getActiveLogBrewTrace' "$tmp_dir/nestjs-readme.md"
 grep -q 'catchError' "$tmp_dir/nestjs-readme.md"
 grep -q 'traceparent' "$tmp_dir/nestjs-readme.md"
 grep -q 'spanIdFactory' "$tmp_dir/nestjs-readme.md"
@@ -126,13 +128,15 @@ import "reflect-metadata";
 import { Controller, Get, Module, Req } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { Request, Response } from "express";
-import { RecordingTransport } from "@logbrew/sdk";
+import { RecordingTransport, type LogAttributes } from "@logbrew/sdk";
 import {
   createErrorEvent,
   createLogBrewNestClient,
   createRequestMetricEvent,
   createRequestEvent,
-  LogBrewInterceptor
+  getActiveLogBrewTrace,
+  LogBrewInterceptor,
+  type LogBrewTraceContext
 } from "@logbrew/nestjs";
 
 const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
@@ -140,6 +144,9 @@ const autoTransport = RecordingTransport.alwaysAccept();
 const errorTransport = RecordingTransport.alwaysAccept();
 const traceTransport = RecordingTransport.alwaysAccept();
 const metricTransport = RecordingTransport.alwaysAccept();
+const autoTraceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+const autoSpanId = "b7ad6b7169203331";
+const errorSpanId = "b7ad6b7169203332";
 
 const explicitClient = createLogBrewNestClient({
   apiKey: "LOGBREW_API_KEY",
@@ -181,10 +188,33 @@ const okResponse = await fetch(`${await manualApp.getUrl()}/logbrew`);
 const okText = await okResponse.text();
 await manualApp.close();
 
+let requestTraceFromAuto: LogBrewTraceContext | undefined;
+let activeTraceFromAuto: LogBrewTraceContext | undefined;
+
 @Controller()
 class AutoController {
   @Get("/auto")
-  auto(): { ok: true } {
+  async auto(@Req() request: Request): Promise<{ ok: true }> {
+    requestTraceFromAuto = request.logbrew?.trace;
+    await Promise.resolve();
+    activeTraceFromAuto = getActiveLogBrewTrace();
+    const trace = requestTraceFromAuto ?? activeTraceFromAuto;
+    const attributes: LogAttributes = {
+      message: "auto route reached",
+      level: "info" as const,
+      logger: "nestjs"
+    };
+    if (trace) {
+      attributes.metadata = {
+        traceId: trace.traceId,
+        spanId: trace.spanId,
+        parentSpanId: trace.parentSpanId,
+        sampled: trace.sampled
+      };
+    }
+    request.logbrew?.client.log("evt_nestjs_correlated_log", "2026-06-02T10:00:05Z", {
+      ...attributes
+    });
     return { ok: true };
   }
 
@@ -200,23 +230,28 @@ class AutoModule {}
 const autoApp = await NestFactory.create(AutoModule, { logger: false });
 autoApp.useGlobalInterceptors(new LogBrewInterceptor({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
-  errorEvent(error, { request }) {
+  errorEvent(error, { request, trace }) {
     return createErrorEvent(error, request, {
       idFactory: () => "evt_nestjs_error_001",
-      now: () => "2026-06-02T10:00:07Z"
+      now: () => "2026-06-02T10:00:07Z",
+      trace
     });
   },
   now: () => "2026-06-02T10:00:06Z",
   nowMs: () => 100,
-  requestEvent(request, response, { durationMs }) {
+  requestEvent(request, response, { durationMs, trace }) {
     return createRequestEvent(request, response, {
       durationMs,
       idFactory: () => "evt_nestjs_request_001",
-      now: () => "2026-06-02T10:00:06Z"
+      now: () => "2026-06-02T10:00:06Z",
+      trace
     });
   },
   sdkName: "nestjs-auto-smoke",
   sdkVersion: "0.1.1",
+  spanIdFactory(request) {
+    return request.url?.startsWith("/fail") ? errorSpanId : autoSpanId;
+  },
   transport({ request }) {
     return request.url?.startsWith("/fail") ? errorTransport : autoTransport;
   }
@@ -224,20 +259,39 @@ autoApp.useGlobalInterceptors(new LogBrewInterceptor({
 
 await autoApp.listen(0, "127.0.0.1");
 const autoUrl = await autoApp.getUrl();
-const autoResponse = await fetch(`${autoUrl}/auto?token=secret`);
+const autoResponse = await fetch(`${autoUrl}/auto?token=secret`, {
+  headers: {
+    traceparent: autoTraceparent
+  }
+});
 await autoResponse.json();
 await waitFor(() => autoTransport.sentBodies.length === 1);
-const failResponse = await fetch(`${autoUrl}/fail?token=secret`);
+const failResponse = await fetch(`${autoUrl}/fail?token=secret`, {
+  headers: {
+    traceparent: autoTraceparent
+  }
+});
 await failResponse.json();
 await waitFor(() => errorTransport.sentBodies.length === 1);
 await autoApp.close();
 
 const autoPayload = JSON.parse(autoTransport.lastBody() ?? "");
-if (autoPayload.events[0].type !== "log" || autoPayload.events[0].id !== "evt_nestjs_request_001") {
+const autoRequestEvent = autoPayload.events.find((event: { id?: string }) => event.id === "evt_nestjs_request_001");
+const correlatedLogEvent = autoPayload.events.find((event: { id?: string }) => event.id === "evt_nestjs_correlated_log");
+if (!autoRequestEvent || autoRequestEvent.type !== "span") {
   throw new Error(`unexpected auto request payload: ${autoTransport.lastBody()}`);
 }
-if (autoPayload.events[0].attributes.metadata.path !== "/auto") {
+if (autoRequestEvent.attributes.metadata.path !== "/auto") {
   throw new Error(`request capture should omit query text: ${autoTransport.lastBody()}`);
+}
+if (autoRequestEvent.attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736" || autoRequestEvent.attributes.spanId !== autoSpanId) {
+  throw new Error(`request span should reuse request-local trace: ${autoTransport.lastBody()}`);
+}
+if (requestTraceFromAuto?.spanId !== autoSpanId || activeTraceFromAuto?.spanId !== autoSpanId) {
+  throw new Error(`controller should see active request trace: ${JSON.stringify({ requestTraceFromAuto, activeTraceFromAuto })}`);
+}
+if (!correlatedLogEvent || correlatedLogEvent.attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+  throw new Error(`app log should carry request trace metadata: ${autoTransport.lastBody()}`);
 }
 const errorPayload = JSON.parse(errorTransport.lastBody() ?? "");
 if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "evt_nestjs_error_001") {
@@ -245,6 +299,9 @@ if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "ev
 }
 if (errorPayload.events[0].attributes.metadata.path !== "/fail") {
   throw new Error(`error capture should omit query text: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[0].attributes.metadata.spanId !== errorSpanId) {
+  throw new Error(`error capture should carry request trace metadata: ${errorTransport.lastBody()}`);
 }
 const errorPreview = createErrorEvent(new Error("manual failure"), { method: "POST", originalUrl: "/manual" } as Request, {
   idFactory: () => "evt_nestjs_error_preview",
@@ -422,10 +479,11 @@ console.log(okText);
 console.error(JSON.stringify({
   ok: true,
   attempts: requestTransport.sentBodies.length,
-  autoCaptured: autoPayload.events[0].attributes.message,
+  autoCaptured: autoRequestEvent.attributes.name,
+  activeTrace: activeTraceFromAuto?.spanId,
   errorCaptured: errorPayload.events[0].attributes.title,
   errorStatus: failResponse.status,
-  events: 6,
+  events: 7,
   metricCaptured: metricEvent.attributes.name,
   metricRoute: metricEvent.attributes.metadata.routeTemplate,
   traceCaptured: traceEvent.attributes.name,
@@ -484,14 +542,16 @@ import "reflect-metadata";
 import { Controller, Get, Module, Req } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { Request } from "express";
-import { RecordingTransport } from "@logbrew/sdk";
+import { RecordingTransport, type LogAttributes } from "@logbrew/sdk";
 import {
   createLogBrewNestClient,
   createRequestMetricEvent,
   createRequestEvent,
+  getActiveLogBrewTrace,
   LogBrewInterceptor,
   type LogBrewRequestMetricEvent,
-  type LogBrewRequestEvent
+  type LogBrewRequestEvent,
+  type LogBrewTraceContext
 } from "@logbrew/nestjs";
 
 const client = createLogBrewNestClient({
@@ -504,10 +564,15 @@ const client = createLogBrewNestClient({
 class TypedController {
   @Get("/typed")
   typed(@Req() request: Request): { pending: number } {
-    request.logbrew?.client.log("evt_log_001", "2026-06-02T10:00:03Z", {
+    const trace: LogBrewTraceContext | undefined = request.logbrew?.trace ?? getActiveLogBrewTrace();
+    const attributes: LogAttributes = {
       message: "typed worker",
-      level: "info"
-    });
+      level: "info" as const
+    };
+    if (trace) {
+      attributes.metadata = { traceId: trace.traceId, spanId: trace.spanId };
+    }
+    request.logbrew?.client.log("evt_log_001", "2026-06-02T10:00:03Z", attributes);
     return { pending: request.logbrew?.client.pendingEvents() ?? 0 };
   }
 }
@@ -520,11 +585,12 @@ async function createApp(): Promise<unknown> {
   app.useGlobalInterceptors(new LogBrewInterceptor({
     client,
     captureRequestMetrics: true,
-    requestEvent(request, response, { durationMs }) {
+    requestEvent(request, response, { durationMs, trace }) {
       const event: LogBrewRequestEvent = createRequestEvent(request, response, {
         durationMs,
         now: () => "2026-06-02T10:00:06Z",
-        spanIdFactory: () => "b7ad6b7169203331"
+        spanIdFactory: () => "b7ad6b7169203331",
+        trace
       });
       if (event.type === "span") {
         event.attributes.parentSpanId?.toUpperCase();
@@ -574,7 +640,8 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"ok":true' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q '"errorStatus":500' "$tmp_dir/nestjs-smoke.stderr.json"
-grep -q 'GET /auto 200' "$tmp_dir/nestjs-smoke.stderr.json"
+grep -q 'GET /auto' "$tmp_dir/nestjs-smoke.stderr.json"
+grep -q '"activeTrace":"b7ad6b7169203331"' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q 'GET /fail failed' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q 'http.server.duration' "$tmp_dir/nestjs-smoke.stderr.json"
 grep -q '/metrics/:id' "$tmp_dir/nestjs-smoke.stderr.json"
