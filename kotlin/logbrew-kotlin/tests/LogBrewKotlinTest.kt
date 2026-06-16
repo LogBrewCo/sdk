@@ -9,6 +9,8 @@ import co.logbrew.sdk.IssueAttributes
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewTrace
+import co.logbrew.sdk.LogBrewTraceContext
 import co.logbrew.sdk.MetricAttributes
 import co.logbrew.sdk.RecordingTransport
 import co.logbrew.sdk.ReleaseAttributes
@@ -41,7 +43,8 @@ fun main() {
     run("android_timeline_helpers_sanitize_product_and_network_metadata", ::androidTimelineHelpersSanitizeProductAndNetworkMetadata)
     run("android_log_priority_helper_captures_throwable_safely", ::androidLogPriorityHelperCapturesThrowableSafely)
     run("android_throwable_helper_keeps_stack_trace_opt_in", ::androidThrowableHelperKeepsStackTraceOptIn)
-    println("kotlin package tests ok (20 tests)")
+    run("trace_context_helpers_validate_and_correlate", ::traceContextHelpersValidateAndCorrelate)
+    println("kotlin package tests ok (21 tests)")
 }
 
 private fun run(
@@ -471,4 +474,108 @@ private fun androidThrowableHelperKeepsStackTraceOptIn() {
         includeStackTrace = true,
     )
     check("\"throwableStackTrace\"" in stackClient.previewJson())
+}
+
+private fun traceContextHelpersValidateAndCorrelate() {
+    val incoming = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01"
+    val context = LogBrewTrace.fromTraceparent(incoming) ?: error("expected valid traceparent")
+    check(context.traceId == "4bf92f3577b34da6a3ce929d0e0e4736")
+    check(context.parentSpanId == "00f067aa0ba902b7")
+    check(context.spanId != "00f067aa0ba902b7")
+    check(context.traceFlags == "01")
+    check(context.sampled)
+    check(LogBrewTrace.fromTraceparent("00-${"0".repeat(32)}-00f067aa0ba902b7-01") == null)
+    check(LogBrewTrace.fromTraceparent("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01") == null)
+    check(LogBrewTrace.fromTraceparent("not-a-traceparent") == null)
+    val fallback = LogBrewTrace.continueOrCreate("not-a-traceparent")
+    check(fallback.traceId != context.traceId)
+    check(fallback.parentSpanId == null)
+
+    val client = newClient()
+    check(LogBrewTrace.currentTraceContext() == null)
+    LogBrewTrace.use(context).use {
+        check(LogBrewTrace.currentTraceContext() == context)
+        val nested = LogBrewTrace.createTraceContext(sampled = false)
+        val nestedScope = LogBrewTrace.use(nested)
+        check(LogBrewTrace.currentTraceContext() == nested)
+        nestedScope.close()
+        check(LogBrewTrace.currentTraceContext() == context)
+
+        client.issue(
+            "evt_kotlin_trace_issue_001",
+            "2026-06-02T10:00:20Z",
+            IssueAttributes
+                .create("Checkout timeout", "error")
+                .withMetadata(mapOf("traceId" to "spoofed_trace", "routeTemplate" to "/checkout/{cart_id}")),
+        )
+        client.log(
+            "evt_kotlin_trace_log_001",
+            "2026-06-02T10:00:21Z",
+            LogAttributes
+                .create("checkout handler failed", "error")
+                .withLogger("CheckoutActivity")
+                .withMetadata(mapOf("traceSampled" to false)),
+        )
+        client.action(
+            "evt_kotlin_trace_action_001",
+            "2026-06-02T10:00:22Z",
+            ActionAttributes.create("checkout.submit", "failure").withMetadata(mapOf("spanId" to "spoofed_span")),
+        )
+        client.span(
+            "evt_kotlin_trace_span_001",
+            "2026-06-02T10:00:23Z",
+            LogBrewTrace.spanAttributes("POST /checkout/{cart_id}", "error", 37.5, mapOf("routeTemplate" to "/checkout/{cart_id}")),
+        )
+        client.metric(
+            "evt_kotlin_trace_metric_001",
+            "2026-06-02T10:00:24Z",
+            MetricAttributes
+                .create("http.server.duration", "histogram", 37.5, "ms", "delta")
+                .withMetadata(mapOf("routeTemplate" to "/checkout/{cart_id}")),
+        )
+        LogBrewAndroid.captureProductAction(
+            client,
+            "evt_kotlin_trace_product_action_001",
+            "2026-06-02T10:00:25Z",
+            "checkout.confirm",
+            metadata = mapOf("traceId" to "spoofed_trace", "screen" to "Checkout"),
+        )
+        LogBrewAndroid.captureNetworkMilestone(
+            client,
+            "evt_kotlin_trace_network_001",
+            "2026-06-02T10:00:26Z",
+            "post",
+            "https://mobile.example.test/api/checkout?card=redacted#pay",
+            statusCode = 503,
+            durationMs = 37.5,
+            metadata = mapOf("parentSpanId" to "spoofed_parent"),
+        )
+        val headers = LogBrewTrace.outgoingHeaders()
+        check(headers["traceparent"] == "00-${context.traceId}-${context.spanId}-01")
+    }
+    check(LogBrewTrace.currentTraceContext() == null)
+
+    val body = client.previewJson()
+    check("\"traceId\": \"${context.traceId}\"" in body)
+    check("\"spanId\": \"${context.spanId}\"" in body)
+    check("\"parentSpanId\": \"${context.parentSpanId}\"" in body)
+    check("\"traceFlags\": \"01\"" in body)
+    check("\"traceSampled\": true" in body)
+    check("\"name\": \"POST /api/checkout\"" in body)
+    check("\"durationMs\": 37.5" in body)
+    check("spoofed_trace" !in body)
+    check("spoofed_span" !in body)
+    check("spoofed_parent" !in body)
+    check("traceparent" !in body)
+    check("card=redacted" !in body)
+    check("#pay" !in body)
+
+    expect("validation_error") {
+        LogBrewTrace.use(
+            LogBrewTraceContext(
+                traceId = "0".repeat(32),
+                spanId = "00f067aa0ba902b7",
+            ),
+        )
+    }
 }

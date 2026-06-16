@@ -70,6 +70,7 @@ jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0-sources.jar" -C "$package_dir
 jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewAndroid.kt$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewTrace.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/PublicTypes.kt$' "$tmp_dir/sources-jar-contents.txt"
 
 mkdir -p "$tmp_dir/javadoc-stage"
@@ -83,11 +84,15 @@ cp "$package_dir/README.md" "$tmp_dir/jar-stage/README.md"
 mkdir -p "$tmp_dir/jar-stage/examples"
 cp -R "$package_dir/examples/readme_example" "$tmp_dir/jar-stage/examples/readme_example"
 cp -R "$package_dir/examples/real_user_smoke" "$tmp_dir/jar-stage/examples/real_user_smoke"
+cp -R "$package_dir/examples/trace_correlation" "$tmp_dir/jar-stage/examples/trace_correlation"
 cp "$package_dir/examples/Makefile" "$tmp_dir/jar-stage/examples/Makefile"
 jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" -C "$tmp_dir/classes" . -C "$tmp_dir/jar-stage" .
 jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewAndroid.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewTraceScope.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequester.class$' "$tmp_dir/jar-contents.txt"
@@ -98,6 +103,7 @@ grep -q '^META-INF/maven/co.logbrew/logbrew-kotlin/pom.xml$' "$tmp_dir/jar-conte
 grep -q '^README.md$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/readme_example/ReadmeExample.kt$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/real_user_smoke/RealUserSmoke.kt$' "$tmp_dir/jar-contents.txt"
+grep -q '^examples/trace_correlation/TraceCorrelation.kt$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/Makefile$' "$tmp_dir/jar-contents.txt"
 
 python3 - "$tmp_dir/logbrew-kotlin-0.1.0.jar" <<'PY'
@@ -119,6 +125,8 @@ for needle in (
     "LogBrewAndroid.captureAndroidLog",
     "LogBrewAndroid.captureThrowable",
     "AndroidLogPriority.WARN",
+    "LogBrewTrace",
+    "traceparent",
 ):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
@@ -172,5 +180,16 @@ make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
+grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
+
+run_example \
+  trace-correlation \
+  TraceCorrelationKt \
+  "$tmp_dir/trace-correlation.stdout.json" \
+  "$tmp_dir/trace-correlation.stderr.json" \
+  "$package_dir/examples/trace_correlation/TraceCorrelation.kt"
+python3 "$repo_root/scripts/check_kotlin_trace_correlation_payload.py" \
+  "$tmp_dir/trace-correlation.stdout.json" \
+  "$tmp_dir/trace-correlation.stderr.json"
 
 echo "kotlin package checks passed"

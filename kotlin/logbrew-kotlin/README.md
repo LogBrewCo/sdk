@@ -21,8 +21,11 @@ co.logbrew:logbrew-kotlin:0.1.0
 ```kotlin
 import co.logbrew.sdk.AndroidLogPriority
 import co.logbrew.sdk.HttpTransport
+import co.logbrew.sdk.IssueAttributes
+import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.MetricAttributes
 import co.logbrew.sdk.RecordingTransport
 import co.logbrew.sdk.ReleaseAttributes
@@ -84,6 +87,44 @@ LogBrewAndroid.captureNetworkMilestone(
 println(client.previewJson())
 val response = client.flush(RecordingTransport.alwaysAccept())
 ```
+
+## W3C Trace Correlation
+
+Use `LogBrewTrace` when an Android or JVM operation should connect logs, issues, product actions, metrics, spans, and outbound requests under one W3C trace. The helper reads only an explicit `traceparent` string you pass in, creates a fresh local span ID when continuing a trace, and falls back to a local root trace when propagation is missing or malformed:
+
+```kotlin
+val trace = LogBrewTrace.continueOrCreate(incomingTraceparent)
+
+LogBrewTrace.use(trace).use {
+    client.log(
+        id = "evt_log_001",
+        timestamp = "2026-06-02T10:00:03Z",
+        attributes = LogAttributes
+            .create("checkout handler failed", "error")
+            .withLogger("CheckoutActivity"),
+    )
+
+    client.issue(
+        id = "evt_issue_001",
+        timestamp = "2026-06-02T10:00:04Z",
+        attributes = IssueAttributes.create("Checkout timeout", "error"),
+    )
+
+    client.span(
+        id = "evt_span_001",
+        timestamp = "2026-06-02T10:00:05Z",
+        attributes = LogBrewTrace.spanAttributes(
+            name = "POST /checkout/{cart_id}",
+            status = "error",
+            durationMs = 37.5,
+        ),
+    )
+
+    val headers = LogBrewTrace.outgoingHeaders()
+}
+```
+
+While a `LogBrewTraceScope` is active, `LogBrewClient` automatically adds authoritative `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewAndroid.captureProductAction(...)`, `captureNetworkMilestone(...)`, `captureAndroidLog(...)`, and `captureThrowable(...)` receive the same correlation through the client. Trace metadata overwrites spoofed trace keys in app metadata, and the helper never captures raw propagation values, request bodies, response bodies, arbitrary headers, query strings, fragments, or visual replay. Use `LogBrewTrace.outgoingHeaders()` for app-owned HTTP clients when you want to forward only the normalized `traceparent` header.
 
 ## HTTP Delivery
 
@@ -161,6 +202,7 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 ## Behavior
 
 - `previewJson()` returns the queued batch as pretty JSON.
+- `LogBrewTrace` validates W3C `traceparent`, creates request/task-local-style scopes through `AutoCloseable`, adds active trace metadata to app-owned events, and creates outgoing `traceparent` headers without patching HTTP clients.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.

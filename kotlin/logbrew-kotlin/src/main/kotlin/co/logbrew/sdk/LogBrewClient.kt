@@ -44,7 +44,7 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: IssueAttributes,
     ) {
-        pushEvent("issue", id, timestamp, attributes.toJsonObject())
+        pushEvent("issue", id, timestamp, attributes.withActiveTraceMetadata().toJsonObject())
     }
 
     fun log(
@@ -52,7 +52,7 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: LogAttributes,
     ) {
-        pushEvent("log", id, timestamp, attributes.toJsonObject())
+        pushEvent("log", id, timestamp, attributes.withActiveTraceMetadata().toJsonObject())
     }
 
     fun span(
@@ -68,7 +68,7 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: MetricAttributes,
     ) {
-        pushEvent("metric", id, timestamp, attributes.toJsonObject())
+        pushEvent("metric", id, timestamp, attributes.withActiveTraceMetadata().toJsonObject())
     }
 
     fun action(
@@ -76,7 +76,7 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: ActionAttributes,
     ) {
-        pushEvent("action", id, timestamp, attributes.toJsonObject())
+        pushEvent("action", id, timestamp, attributes.withActiveTraceMetadata().toJsonObject())
     }
 
     fun flush(transport: Transport): TransportResponse {
@@ -165,6 +165,14 @@ class LogBrewClient private constructor(
         }
     }
 }
+
+private fun IssueAttributes.withActiveTraceMetadata(): IssueAttributes = copy(metadata = LogBrewTrace.mergeTraceMetadata(metadata))
+
+private fun LogAttributes.withActiveTraceMetadata(): LogAttributes = copy(metadata = LogBrewTrace.mergeTraceMetadata(metadata))
+
+private fun MetricAttributes.withActiveTraceMetadata(): MetricAttributes = copy(metadata = LogBrewTrace.mergeTraceMetadata(metadata))
+
+private fun ActionAttributes.withActiveTraceMetadata(): ActionAttributes = copy(metadata = LogBrewTrace.mergeTraceMetadata(metadata))
 
 private data class Event(
     val type: String,

@@ -60,9 +60,12 @@ cp "$package_dir/README.md" "$tmp_dir/jar-stage/README.md"
 mkdir -p "$tmp_dir/jar-stage/examples"
 cp -R "$package_dir/examples/readme_example" "$tmp_dir/jar-stage/examples/readme_example"
 cp -R "$package_dir/examples/real_user_smoke" "$tmp_dir/jar-stage/examples/real_user_smoke"
+cp -R "$package_dir/examples/trace_correlation" "$tmp_dir/jar-stage/examples/trace_correlation"
 cp "$package_dir/examples/Makefile" "$tmp_dir/jar-stage/examples/Makefile"
 jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" -C "$tmp_dir/classes" . -C "$tmp_dir/jar-stage" .
 jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequester.class$' "$tmp_dir/jar-contents.txt"
@@ -133,10 +136,12 @@ mkdir -p "$extract_dir"
 test -f "$extract_dir/README.md"
 test -f "$extract_dir/examples/readme_example/ReadmeExample.kt"
 test -f "$extract_dir/examples/real_user_smoke/RealUserSmoke.kt"
+test -f "$extract_dir/examples/trace_correlation/TraceCorrelation.kt"
 test -f "$extract_dir/examples/Makefile"
 grep -q 'HttpTransport' "$extract_dir/README.md"
 grep -q 'captureProductAction' "$extract_dir/README.md"
 grep -q 'captureNetworkMilestone' "$extract_dir/README.md"
+grep -q 'LogBrewTrace' "$extract_dir/README.md"
 
 run_app() {
   local name="$1"
@@ -178,6 +183,16 @@ grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"androidHelperEvents":3' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"androidTimelineEvents":2' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"androidNetworkAction":"POST /api/checkout"' "$tmp_dir/installed-smoke.stderr.json"
+
+run_app \
+  installed-trace-correlation \
+  TraceCorrelationKt \
+  "$tmp_dir/installed-trace-correlation.stdout.json" \
+  "$tmp_dir/installed-trace-correlation.stderr.json" \
+  "$extract_dir/examples/trace_correlation/TraceCorrelation.kt"
+python3 "$repo_root/scripts/check_kotlin_trace_correlation_payload.py" \
+  "$tmp_dir/installed-trace-correlation.stdout.json" \
+  "$tmp_dir/installed-trace-correlation.stderr.json"
 
 smoke_app="$tmp_dir/smoke-app"
 mkdir -p "$smoke_app"
