@@ -54,6 +54,7 @@ grep -q 'includeSearchParams' "$tmp_dir/next-readme.md"
 grep -q 'withLogBrewRouteHandler' "$tmp_dir/next-readme.md"
 grep -q 'proxy.js' "$tmp_dir/next-readme.md"
 grep -q 'traceparent' "$tmp_dir/next-readme.md"
+grep -q 'getActiveLogBrewTrace' "$tmp_dir/next-readme.md"
 grep -q 'captureRequests: false' "$tmp_dir/next-readme.md"
 grep -q 'spanIdFactory' "$tmp_dir/next-readme.md"
 grep -q 'onCaptureError' "$tmp_dir/next-readme.md"
@@ -208,6 +209,7 @@ import {
   createLogBrewNextClient,
   createRequestMetricEvent,
   createRouteRequestEvent,
+  getActiveLogBrewTrace,
   withLogBrewRouteHandler
 } from "@logbrew/next";
 
@@ -218,8 +220,27 @@ const client = createLogBrewNextClient({
   sdkName: "next-capture-smoke",
   sdkVersion: "0.1.0"
 });
+let activeTraceFromAsync;
 const POST = withLogBrewRouteHandler(
-  async () => new Response(null, { status: 204 }),
+  async (_request, _context, { client, trace }) => {
+    await Promise.resolve();
+    activeTraceFromAsync = getActiveLogBrewTrace();
+    if (!trace || !activeTraceFromAsync || trace.spanId !== activeTraceFromAsync.spanId) {
+      throw new Error("active trace was not preserved through async route work");
+    }
+    client.log("evt_next_app_log_001", "2026-06-02T10:00:06Z", {
+      message: "checkout route handled",
+      level: "info",
+      logger: "next-route",
+      metadata: {
+        traceId: trace.traceId,
+        spanId: trace.spanId,
+        parentSpanId: trace.parentSpanId,
+        sampled: trace.sampled
+      }
+    });
+    return new Response(null, { status: 204 });
+  },
   {
     client,
     now: () => "2026-06-02T10:00:07Z",
@@ -241,11 +262,15 @@ if (response.status !== 204) {
 }
 
 const payload = JSON.parse(transport.lastBody());
-if (payload.events.length !== 1) {
-  throw new Error(`expected one request capture event: ${transport.lastBody()}`);
+if (payload.events.length !== 2) {
+  throw new Error(`expected app log and request capture event: ${transport.lastBody()}`);
 }
-const event = payload.events[0];
-if (event.id !== "evt_next_request_auto" || event.type !== "span") {
+const appLog = payload.events.find((candidate) => candidate.id === "evt_next_app_log_001");
+const event = payload.events.find((candidate) => candidate.id === "evt_next_request_auto");
+if (!appLog || appLog.type !== "log") {
+  throw new Error(`missing correlated app log: ${transport.lastBody()}`);
+}
+if (!event || event.type !== "span") {
   throw new Error(`unexpected request event identity: ${transport.lastBody()}`);
 }
 if (event.attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
@@ -256,6 +281,15 @@ if (event.attributes.parentSpanId !== "00f067aa0ba902b7") {
 }
 if (event.attributes.spanId !== "b7ad6b7169203331") {
   throw new Error(`unexpected child span id: ${transport.lastBody()}`);
+}
+if (activeTraceFromAsync.spanId !== "b7ad6b7169203331") {
+  throw new Error(`unexpected active trace span id: ${JSON.stringify(activeTraceFromAsync)}`);
+}
+if (appLog.attributes.metadata.traceId !== event.attributes.traceId) {
+  throw new Error(`app log trace id should match request span: ${transport.lastBody()}`);
+}
+if (appLog.attributes.metadata.spanId !== event.attributes.spanId) {
+  throw new Error(`app log span id should match request span: ${transport.lastBody()}`);
 }
 if (event.attributes.name !== "POST /api/logbrew") {
   throw new Error(`unexpected span name: ${transport.lastBody()}`);
@@ -268,6 +302,9 @@ if (event.attributes.metadata.framework !== "nextjs") {
 }
 if ("search" in event.attributes.metadata) {
   throw new Error(`request capture should omit query text: ${transport.lastBody()}`);
+}
+if (transport.lastBody().includes("traceparent") || transport.lastBody().includes("debug=true")) {
+  throw new Error(`capture payload leaked raw propagation or query text: ${transport.lastBody()}`);
 }
 
 const metricTransport = RecordingTransport.alwaysAccept();
@@ -407,10 +444,12 @@ import {
   createRequestMetricEvent,
   createRouteRequestEvent,
   createLogBrewNextClient,
+  getActiveLogBrewTrace,
   withLogBrewRouteHandler,
   type LogBrewRouteHelpers,
   type LogBrewRouteMetricEvent,
-  type LogBrewRouteRequestEvent
+  type LogBrewRouteRequestEvent,
+  type LogBrewTraceContext
 } from "@logbrew/next";
 
 const transport = RecordingTransport.alwaysAccept();
@@ -426,6 +465,7 @@ const typedClient = createLogBrewNextClient({
 export const POST = withLogBrewRouteHandler(
   async (request: Request, _context: { params?: Promise<Record<string, string>> }, helpers: LogBrewRouteHelpers) => {
     const body = await request.json() as { ok: boolean };
+    const activeTrace: LogBrewTraceContext | undefined = helpers.trace ?? getActiveLogBrewTrace();
     const requestEvent: LogBrewRouteRequestEvent = createRouteRequestEvent(
       request,
       new Response(null, { status: 202 }),
@@ -441,7 +481,10 @@ export const POST = withLogBrewRouteHandler(
     }
     helpers.client.log("evt_log_001", "2026-06-02T10:00:03Z", {
       message: body.ok ? "worker started" : "worker skipped",
-      level: "info"
+      level: "info",
+      ...(activeTrace
+        ? { metadata: { traceId: activeTrace.traceId, spanId: activeTrace.spanId } }
+        : {})
     });
     return Response.json({ pending: helpers.logbrew.pendingEvents() });
   },
@@ -496,18 +539,23 @@ import { createRouteErrorEvent, withLogBrewRouteHandler } from "@logbrew/next";
 const transport = RecordingTransport.alwaysAccept();
 const GET = withLogBrewRouteHandler(
   async () => {
+    await Promise.resolve();
     throw new Error("route exploded");
   },
   {
     serverApiKey: "LOGBREW_SERVER_API_KEY",
     transport,
     now: () => "2026-06-02T10:00:06Z",
-    idFactory: () => "evt_next_error_001"
+    idFactory: () => "evt_next_error_001",
+    spanIdFactory: () => "c0ffeec0ffeec0ff"
   }
 );
 
 try {
-  await GET(new Request("https://example.com/api/failure?token=secret", { method: "GET" }), {});
+  await GET(new Request("https://example.com/api/failure?token=secret", {
+    method: "GET",
+    headers: { traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-1111111111111111-01" }
+  }), {});
   throw new Error("expected route failure");
 } catch (error) {
   if (error.message !== "route exploded") {
@@ -521,6 +569,15 @@ if (payload.events[0].type !== "issue" || payload.events[0].id !== "evt_next_err
 }
 if ("search" in payload.events[0].attributes.metadata) {
   throw new Error(`query string should be omitted by default: ${transport.lastBody()}`);
+}
+if (payload.events[0].attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+  throw new Error(`error event should include trace id: ${transport.lastBody()}`);
+}
+if (payload.events[0].attributes.metadata.spanId !== "c0ffeec0ffeec0ff") {
+  throw new Error(`error event should include route span id: ${transport.lastBody()}`);
+}
+if (transport.lastBody().includes("traceparent") || transport.lastBody().includes("failure?")) {
+  throw new Error(`error payload leaked raw propagation or query text: ${transport.lastBody()}`);
 }
 const optedIn = createRouteErrorEvent(
   new Error("route exploded"),
@@ -546,7 +603,7 @@ grep -q 'GET /api/failure failed' "$tmp_dir/error-check.json"
 grep -q '"defaultSearchCaptured":false' "$tmp_dir/error-check.json"
 grep -q '"optInSearch":"?token=secret"' "$tmp_dir/error-check.json"
 
-node -e 'const next = require("@logbrew/next"); if (typeof next.withLogBrewRouteHandler !== "function" || typeof next.createRouteRequestEvent !== "function" || typeof next.createRequestMetricEvent !== "function") process.exit(1)'
+node -e 'const next = require("@logbrew/next"); if (typeof next.withLogBrewRouteHandler !== "function" || typeof next.createRouteRequestEvent !== "function" || typeof next.createRequestMetricEvent !== "function" || typeof next.getActiveLogBrewTrace !== "function") process.exit(1)'
 
 node node_modules/@logbrew/next/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/next/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"

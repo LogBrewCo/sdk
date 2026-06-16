@@ -20,16 +20,21 @@ pnpm add @logbrew/sdk @logbrew/next next react react-dom
 ```js
 // app/api/logbrew/route.js
 import { RecordingTransport } from "@logbrew/sdk";
-import { withLogBrewRouteHandler } from "@logbrew/next";
+import { getActiveLogBrewTrace, withLogBrewRouteHandler } from "@logbrew/next";
 
 export const runtime = "nodejs";
 
 export const POST = withLogBrewRouteHandler(
-  async (_request, _context, { client }) => {
+  async (_request, _context, { client, trace }) => {
+    const activeTrace = trace ?? getActiveLogBrewTrace();
+
     client.log("evt_log_001", "2026-06-02T10:00:03Z", {
       message: "worker started",
       level: "info",
-      logger: "job-runner"
+      logger: "job-runner",
+      ...(activeTrace
+        ? { metadata: { traceId: activeTrace.traceId, spanId: activeTrace.spanId } }
+        : {})
     });
 
     return Response.json(JSON.parse(client.previewJson()));
@@ -44,7 +49,9 @@ export const POST = withLogBrewRouteHandler(
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with lower-level SDK examples, but Next.js Route Handlers should use server-side keys only. Use the Browser, React, Vue, Svelte, Angular, or React Native packages for frontend `clientKey` setup.
 
-By default, successful Route Handler responses are captured after your handler returns. When the incoming `Request` has a valid W3C `traceparent` header, request capture records a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to a request `log` event so bad client headers do not break your route. Use `captureRequests: false` when a route should only flush manual events, use `spanIdFactory` when your runtime needs app-provided child span IDs, and use `onCaptureError` to observe telemetry delivery failures without letting observability own the route response.
+By default, successful Route Handler responses are captured after your handler returns. When the incoming `Request` has a valid W3C `traceparent` header, the wrapper exposes a normalized trace object through `helpers.trace` and `getActiveLogBrewTrace()`, then records the request as a LogBrew `span` that continues the incoming trace. Use that same `traceId` and `spanId` in app-owned logs, product actions, or custom event callbacks when you want route-level debugging correlation. Requests without `traceparent`, or with a malformed header, fall back to a request `log` event so bad client headers do not break your route. Use `captureRequests: false` when a route should only flush manual events, use `spanIdFactory` when your runtime needs app-provided child span IDs, and use `onCaptureError` to observe telemetry delivery failures without letting observability own the route response.
+
+The public trace helper only includes normalized W3C IDs plus sampled state: `traceId`, `spanId`, `parentSpanId`, and `sampled`. It does not expose the raw `traceparent` header, request headers, request bodies, cookies, or query strings.
 
 Automatic route error events record the method and pathname, but omit query strings by default. Pass `includeSearchParams: true` only when query capture is intentional and safe for the route.
 

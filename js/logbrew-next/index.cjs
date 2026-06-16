@@ -1,13 +1,14 @@
+const { AsyncLocalStorage } = require("node:async_hooks");
 const {
   LogBrewClient,
   RecordingTransport,
   SdkError,
-  parseTraceparent,
-  spanAttributesFromTraceparent
+  parseTraceparent
 } = require("@logbrew/sdk");
 
 const DEFAULT_SDK_NAME = "logbrew-next";
 const DEFAULT_SDK_VERSION = "0.1.0";
+const activeTraceContext = new AsyncLocalStorage();
 
 function createLogBrewNextClient({
   apiKey,
@@ -34,40 +35,47 @@ function withLogBrewRouteHandler(handler, options = {}) {
   return async function logBrewRouteHandler(request, context = {}) {
     const client = resolveClient(options, request, context);
     const transport = resolveTransport(options, request, context, client);
-    const helpers = createRouteHelpers(client, transport);
+    const trace = createRouteTraceContext(request, undefined, options);
+    const helpers = createRouteHelpers(client, transport, trace);
     const startedAt = nowMs(options);
 
-    try {
-      const response = await handler(request, context, helpers);
-      ensureResponse(response);
-      await captureRouteSuccess(options, { request, response, context, client, transport, startedAt });
-      return response;
-    } catch (error) {
-      await recordRouteError(options, error, { request, context, client, transport });
-      throw error;
-    }
+    return activeTraceContext.run(trace, async () => {
+      try {
+        const response = await handler(request, context, helpers);
+        ensureResponse(response);
+        await captureRouteSuccess(options, { request, response, context, client, transport, startedAt, trace });
+        return response;
+      } catch (error) {
+        await recordRouteError(options, error, { request, context, client, transport, trace });
+        throw error;
+      }
+    });
   };
+}
+
+function getActiveLogBrewTrace() {
+  return activeTraceContext.getStore();
 }
 
 function createRouteRequestEvent(request, response, {
   now = () => new Date().toISOString(),
   durationMs = 0,
   idFactory = defaultRouteRequestId,
-  spanIdFactory = defaultSpanIdFactory
+  spanIdFactory = defaultSpanIdFactory,
+  trace
 } = {}) {
   const url = safeUrl(request);
   const method = request?.method ?? "GET";
   const statusCode = Number(response?.status ?? 0);
   const id = idFactory(request, response);
-  const traceparent = getTraceparentHeader(request);
-  const spanEvent = traceparent
-    ? createTraceparentRouteSpan(traceparent, {
+  const routeTrace = trace ?? getActiveLogBrewTrace() ?? createRouteTraceContext(request, response, { spanIdFactory });
+  const spanEvent = routeTrace
+    ? createTraceparentRouteSpan(routeTrace, {
       durationMs,
       id,
       method,
       now,
       pathname: url.pathname,
-      spanIdFactory: () => spanIdFactory(request, response),
       statusCode
     })
     : undefined;
@@ -96,11 +104,13 @@ function createRouteRequestEvent(request, response, {
 function createRouteErrorEvent(error, request, {
   includeSearchParams = false,
   now = () => new Date().toISOString(),
-  idFactory = defaultRouteErrorId
+  idFactory = defaultRouteErrorId,
+  trace
 } = {}) {
   const url = safeUrl(request);
   const method = request?.method ?? "GET";
   const message = error instanceof Error ? error.message : String(error);
+  const routeTrace = trace ?? getActiveLogBrewTrace();
   return {
     id: idFactory(request),
     timestamp: now(),
@@ -111,7 +121,8 @@ function createRouteErrorEvent(error, request, {
       metadata: {
         method,
         pathname: url.pathname,
-        ...(includeSearchParams ? { search: url.search || null } : {})
+        ...(includeSearchParams ? { search: url.search || null } : {}),
+        ...traceMetadata(routeTrace)
       }
     }
   };
@@ -164,10 +175,11 @@ function resolveTransport(options, request, context, client) {
   return options.transport ?? RecordingTransport.alwaysAccept();
 }
 
-function createRouteHelpers(client, transport) {
+function createRouteHelpers(client, transport, trace) {
   return {
     client,
     logbrew: client,
+    trace,
     previewJson: () => client.previewJson(),
     flush: () => client.flush(transport),
     shutdown: () => client.shutdown(transport)
@@ -192,39 +204,40 @@ async function notifyFailure(options, error, context) {
   }
 }
 
-async function captureRouteSuccess(options, { request, response, context, client, transport, startedAt }) {
+async function captureRouteSuccess(options, { request, response, context, client, transport, startedAt, trace }) {
   try {
     const durationMs = (options.captureRequests !== false || options.captureRequestMetrics === true)
       ? routeDurationMs(options, startedAt)
       : 0;
     if (options.captureRequests !== false) {
-      recordRouteRequest(options, { request, response, context, client, durationMs });
+      recordRouteRequest(options, { request, response, context, client, durationMs, trace });
     }
     if (options.captureRequestMetrics === true) {
-      recordRouteMetric(options, { request, response, context, client, durationMs });
+      recordRouteMetric(options, { request, response, context, client, durationMs, trace });
     }
     const flushResponse = await client.shutdown(transport);
-    await notifyFlush(options, flushResponse, { request, context, client });
+    await notifyFlush(options, flushResponse, { request, context, client, trace });
   } catch (error) {
-    await notifyFailure(options, error, { request, context, client });
+    await notifyFailure(options, error, { request, context, client, trace });
   }
 }
 
-function recordRouteRequest(options, { request, response, context, client, durationMs }) {
+function recordRouteRequest(options, { request, response, context, client, durationMs, trace }) {
   const event = typeof options.requestEvent === "function"
-    ? options.requestEvent(request, response, { client, context, durationMs, request, response })
+    ? options.requestEvent(request, response, { client, context, durationMs, request, response, trace })
     : createRouteRequestEvent(request, response, {
       ...options,
       durationMs,
-      idFactory: options.requestIdFactory
+      idFactory: options.requestIdFactory,
+      trace
     });
   captureRouteRequestEvent(client, event);
 }
 
-function recordRouteMetric(options, { request, response, context, client, durationMs }) {
+function recordRouteMetric(options, { request, response, context, client, durationMs, trace }) {
   const routeTemplate = resolveRouteTemplate(options, request, context);
   const event = typeof options.requestMetricEvent === "function"
-    ? options.requestMetricEvent(request, response, { client, context, durationMs, request, response })
+    ? options.requestMetricEvent(request, response, { client, context, durationMs, request, response, trace })
     : createRequestMetricEvent(request, response, {
       ...options,
       durationMs,
@@ -234,19 +247,20 @@ function recordRouteMetric(options, { request, response, context, client, durati
   captureRouteMetricEvent(client, event);
 }
 
-async function recordRouteError(options, error, { request, context, client, transport }) {
+async function recordRouteError(options, error, { request, context, client, transport, trace }) {
   if (options.captureErrors === false) {
     return;
   }
+  const routeTrace = trace ?? getActiveLogBrewTrace();
   const event = typeof options.errorEvent === "function"
-    ? options.errorEvent(error, { request, context, client })
-    : createRouteErrorEvent(error, request, options);
+    ? options.errorEvent(error, { request, context, client, trace: routeTrace })
+    : createRouteErrorEvent(error, request, { ...options, trace: routeTrace });
   try {
     client.issue(event.id, event.timestamp, event.attributes);
     const flushResponse = await client.shutdown(transport);
-    await notifyFlush(options, flushResponse, { request, context, client });
+    await notifyFlush(options, flushResponse, { request, context, client, trace: routeTrace });
   } catch (captureError) {
-    await notifyFailure(options, captureError, { request, context, client });
+    await notifyFailure(options, captureError, { request, context, client, trace: routeTrace });
   }
 }
 
@@ -334,42 +348,86 @@ function statusCodeClass(statusCode) {
   return `${Math.floor(statusCode / 100)}xx`;
 }
 
-function createTraceparentRouteSpan(traceparent, {
-  durationMs,
-  id,
-  method,
-  now,
-  pathname,
-  spanIdFactory,
-  statusCode
-}) {
+function createRouteTraceContext(request, response, {
+  spanIdFactory = defaultSpanIdFactory
+} = {}) {
+  const traceparent = getTraceparentHeader(request);
   if (!traceparent) {
     return undefined;
   }
 
   try {
-    parseTraceparent(traceparent);
-    const spanId = spanIdFactory();
+    const context = parseTraceparent(traceparent);
+    const spanId = normalizeSpanId(spanIdFactory(request, response));
+    if (!spanId) {
+      return undefined;
+    }
     return {
-      id,
-      timestamp: now(),
-      type: "span",
-      attributes: spanAttributesFromTraceparent(traceparent, {
-        durationMs,
-        metadata: {
-          framework: "nextjs",
-          method,
-          pathname,
-          statusCode
-        },
-        name: `${method} ${pathname}`,
-        spanId,
-        status: statusCode >= 500 ? "error" : "ok"
-      })
+      traceId: context.traceId,
+      spanId,
+      parentSpanId: context.parentSpanId,
+      sampled: context.sampled
     };
   } catch {
     return undefined;
   }
+}
+
+function normalizeSpanId(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const spanId = value.toLowerCase();
+  if (!/^[0-9a-f]{16}$/u.test(spanId) || spanId === "0000000000000000") {
+    return undefined;
+  }
+  return spanId;
+}
+
+function traceMetadata(trace) {
+  if (!trace) {
+    return {};
+  }
+  return {
+    parentSpanId: trace.parentSpanId,
+    sampled: trace.sampled,
+    spanId: trace.spanId,
+    traceId: trace.traceId
+  };
+}
+
+function createTraceparentRouteSpan(traceContext, {
+  durationMs,
+  id,
+  method,
+  now,
+  pathname,
+  statusCode
+}) {
+  if (!traceContext) {
+    return undefined;
+  }
+
+  return {
+    id,
+    timestamp: now(),
+    type: "span",
+    attributes: {
+      name: `${method} ${pathname}`,
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      parentSpanId: traceContext.parentSpanId,
+      status: statusCode >= 500 ? "error" : "ok",
+      durationMs,
+      metadata: {
+        framework: "nextjs",
+        method,
+        pathname,
+        sampled: traceContext.sampled,
+        statusCode
+      }
+    }
+  };
 }
 
 function routeDurationMs(options, startedAt) {
@@ -409,5 +467,6 @@ module.exports = {
   createRequestMetricEvent,
   createRouteErrorEvent,
   createRouteRequestEvent,
+  getActiveLogBrewTrace,
   withLogBrewRouteHandler
 };

@@ -18,9 +18,17 @@ export type CreateLogBrewNextClientConfig = {
 
 export type LogBrewRouteContext = Record<string, unknown>;
 
+export type LogBrewTraceContext = {
+  traceId: string;
+  spanId: string;
+  parentSpanId: string;
+  sampled: boolean;
+};
+
 export type LogBrewRouteHelpers = {
   client: LogBrewClient;
   logbrew: LogBrewClient;
+  trace?: LogBrewTraceContext;
   previewJson(): string;
   flush(): Promise<TransportResponse>;
   shutdown(): Promise<TransportResponse>;
@@ -36,6 +44,7 @@ export type LogBrewRouteRuntimeContext<TContext = LogBrewRouteContext> = {
   request: Request;
   context: TContext;
   client: LogBrewClient;
+  trace?: LogBrewTraceContext;
 };
 
 export type LogBrewRouteRequestRuntimeContext<TContext = LogBrewRouteContext> =
@@ -95,7 +104,7 @@ export type LogBrewRouteOptions<TContext = LogBrewRouteContext> = CreateLogBrewN
   idFactory?: (request: Request) => string;
   requestIdFactory?: (request: Request, response: Response) => string;
   metricIdFactory?: (request: Request, response: Response) => string;
-  spanIdFactory?: (request: Request, response: Response) => string;
+  spanIdFactory?: (request: Request, response?: Response) => string;
   requestEvent?: (
     request: Request,
     response: Response,
@@ -129,6 +138,8 @@ export declare function withLogBrewRouteHandler<TContext = LogBrewRouteContext>(
   options?: LogBrewRouteOptions<TContext>
 ): (request: Request, context?: TContext) => Promise<Response>;
 
+export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
+
 export declare function createRouteRequestEvent(
   request: Request,
   response: Response,
@@ -136,7 +147,8 @@ export declare function createRouteRequestEvent(
     now?: () => string;
     durationMs?: number;
     idFactory?: (request: Request, response: Response) => string;
-    spanIdFactory?: (request: Request, response: Response) => string;
+    spanIdFactory?: (request: Request, response?: Response) => string;
+    trace?: LogBrewTraceContext;
   }
 ): LogBrewRouteRequestEvent;
 
@@ -159,6 +171,7 @@ export declare function createRouteErrorEvent(
     includeSearchParams?: boolean;
     now?: () => string;
     idFactory?: (request: Request) => string;
+    trace?: LogBrewTraceContext;
   }
 ): LogBrewRouteErrorEvent;
 
@@ -167,6 +180,7 @@ declare const defaultExport: {
   createRequestMetricEvent: typeof createRequestMetricEvent;
   createRouteErrorEvent: typeof createRouteErrorEvent;
   createRouteRequestEvent: typeof createRouteRequestEvent;
+  getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   withLogBrewRouteHandler: typeof withLogBrewRouteHandler;
 };
 
