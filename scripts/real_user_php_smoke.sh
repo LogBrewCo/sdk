@@ -31,12 +31,17 @@ $readme = null;
 $readmeExample = null;
 $example = null;
 $firstUsefulExample = null;
+$httpTraceExample = null;
 $exampleMakefile = null;
 $httpTransport = null;
 $productTimeline = null;
 $traceparent = null;
 $traceparentContext = null;
 $traceparentSpanInput = null;
+$traceContext = null;
+$traceScope = null;
+$trace = null;
+$httpRequestTelemetry = null;
 $psrLogger = null;
 $monologHandler = null;
 for ($i = 0; $i < $zip->numFiles; $i++) {
@@ -59,6 +64,9 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
     if ($name === "examples/first_useful_telemetry.php" || str_ends_with($name, "/examples/first_useful_telemetry.php")) {
         $firstUsefulExample = $zip->getFromIndex($i);
     }
+    if ($name === "examples/http_trace_correlation.php" || str_ends_with($name, "/examples/http_trace_correlation.php")) {
+        $httpTraceExample = $zip->getFromIndex($i);
+    }
     if ($name === "examples/Makefile" || str_ends_with($name, "/examples/Makefile")) {
         $exampleMakefile = $zip->getFromIndex($i);
     }
@@ -76,6 +84,18 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
     }
     if ($name === "src/TraceparentSpanInput.php" || str_ends_with($name, "/src/TraceparentSpanInput.php")) {
         $traceparentSpanInput = $zip->getFromIndex($i);
+    }
+    if ($name === "src/LogBrewTraceContext.php" || str_ends_with($name, "/src/LogBrewTraceContext.php")) {
+        $traceContext = $zip->getFromIndex($i);
+    }
+    if ($name === "src/LogBrewTraceScope.php" || str_ends_with($name, "/src/LogBrewTraceScope.php")) {
+        $traceScope = $zip->getFromIndex($i);
+    }
+    if ($name === "src/LogBrewTrace.php" || str_ends_with($name, "/src/LogBrewTrace.php")) {
+        $trace = $zip->getFromIndex($i);
+    }
+    if ($name === "src/LogBrewHttpRequestTelemetry.php" || str_ends_with($name, "/src/LogBrewHttpRequestTelemetry.php")) {
+        $httpRequestTelemetry = $zip->getFromIndex($i);
     }
     if ($name === "src/LogBrewPsrLogger.php" || str_ends_with($name, "/src/LogBrewPsrLogger.php")) {
         $psrLogger = $zip->getFromIndex($i);
@@ -105,6 +125,10 @@ if (!is_string($firstUsefulExample)) {
     fwrite(STDERR, "missing examples/first_useful_telemetry.php in composer archive\n");
     exit(1);
 }
+if (!is_string($httpTraceExample)) {
+    fwrite(STDERR, "missing examples/http_trace_correlation.php in composer archive\n");
+    exit(1);
+}
 if (!is_string($exampleMakefile)) {
     fwrite(STDERR, "missing examples/Makefile in composer archive\n");
     exit(1);
@@ -127,6 +151,22 @@ if (!is_string($traceparentContext)) {
 }
 if (!is_string($traceparentSpanInput)) {
     fwrite(STDERR, "missing src/TraceparentSpanInput.php in composer archive\n");
+    exit(1);
+}
+if (!is_string($traceContext)) {
+    fwrite(STDERR, "missing src/LogBrewTraceContext.php in composer archive\n");
+    exit(1);
+}
+if (!is_string($traceScope)) {
+    fwrite(STDERR, "missing src/LogBrewTraceScope.php in composer archive\n");
+    exit(1);
+}
+if (!is_string($trace)) {
+    fwrite(STDERR, "missing src/LogBrewTrace.php in composer archive\n");
+    exit(1);
+}
+if (!is_string($httpRequestTelemetry)) {
+    fwrite(STDERR, "missing src/LogBrewHttpRequestTelemetry.php in composer archive\n");
     exit(1);
 }
 if (!is_string($psrLogger)) {
@@ -167,6 +207,10 @@ foreach ([
     "ProductTimeline" => "missing composer archive timeline guidance\n",
     "without visual replay, HTTP client patching, request/response payload capture, or header capture" => "missing composer archive timeline privacy guidance\n",
     "Traceparent" => "missing composer archive traceparent guidance\n",
+    "LogBrewHttpRequestTelemetry" => "missing composer archive HTTP request trace guidance\n",
+    "LogBrewTrace::current()" => "missing composer archive active trace guidance\n",
+    "metadataWithCurrentTrace" => "missing composer archive trace metadata guidance\n",
+    "run-http-trace-correlation" => "missing composer archive HTTP trace example guidance\n",
     "first useful PHP service telemetry" => "missing composer archive first useful telemetry guidance\n",
     "HttpTransport" => "missing composer archive HTTP transport guidance\n",
     "HTTP Delivery" => "missing composer archive HTTP delivery heading\n",
@@ -199,7 +243,11 @@ if (!str_contains($firstUsefulExample, "../vendor/autoload.php") || !str_contain
     fwrite(STDERR, "missing composer archive dual-context autoload support in first-useful example\n");
     exit(1);
 }
-if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry")
+if (!str_contains($httpTraceExample, "../vendor/autoload.php") || !str_contains($httpTraceExample, "../../../autoload.php")) {
+    fwrite(STDERR, "missing composer archive dual-context autoload support in HTTP trace example\n");
+    exit(1);
+}
+if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation")
     || !str_contains($exampleMakefile, "help:")
     || !str_contains($exampleMakefile, "run: run-real-user-smoke")
     || !str_contains($exampleMakefile, "run-readme-example:")
@@ -208,10 +256,13 @@ if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-rea
     || !str_contains($exampleMakefile, "@php real_user_smoke.php")
     || !str_contains($exampleMakefile, "run-first-useful-telemetry:")
     || !str_contains($exampleMakefile, "@php first_useful_telemetry.php")
+    || !str_contains($exampleMakefile, "run-http-trace-correlation:")
+    || !str_contains($exampleMakefile, "@php http_trace_correlation.php")
     || !str_contains($exampleMakefile, "run-readme-example -> make run-readme-example")
     || !str_contains($exampleMakefile, "run (real-user-smoke) -> make run")
     || !str_contains($exampleMakefile, "run-real-user-smoke -> make run-real-user-smoke")
-    || !str_contains($exampleMakefile, "run-first-useful-telemetry -> make run-first-useful-telemetry")) {
+    || !str_contains($exampleMakefile, "run-first-useful-telemetry -> make run-first-useful-telemetry")
+    || !str_contains($exampleMakefile, "run-http-trace-correlation -> make run-http-trace-correlation")) {
     fwrite(STDERR, "missing composer archive example Makefile helper\n");
     exit(1);
 }
@@ -380,11 +431,16 @@ test -f vendor/logbrew/sdk/src/ProductTimeline.php
 test -f vendor/logbrew/sdk/src/Traceparent.php
 test -f vendor/logbrew/sdk/src/TraceparentContext.php
 test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
+test -f vendor/logbrew/sdk/src/LogBrewTraceContext.php
+test -f vendor/logbrew/sdk/src/LogBrewTraceScope.php
+test -f vendor/logbrew/sdk/src/LogBrewTrace.php
+test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/logbrew/sdk/examples/readme_example.php
 test -f vendor/logbrew/sdk/examples/real_user_smoke.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
+test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
 test -f vendor/logbrew/sdk/examples/Makefile
 test -f vendor/composer/installed.json
 test -f vendor/composer/autoload_psr4.php
@@ -393,7 +449,8 @@ grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' vendor-ex
 grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' vendor-example-make-help.txt)
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' vendor-example-make-help.txt)
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' vendor-example-make-help.txt)
-test "$(wc -l < vendor-example-make-help.txt | tr -d ' ')" = "4"
+grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' <(sed -n '5p' vendor-example-make-help.txt)
+test "$(wc -l < vendor-example-make-help.txt | tr -d ' ')" = "5"
 php -r '
 $readme = file_get_contents($argv[1]);
 if ($readme === false) {
@@ -409,6 +466,10 @@ foreach ([
     "ProductTimeline" => "missing installed README timeline guidance\n",
     "without visual replay, HTTP client patching, request/response payload capture, or header capture" => "missing installed README timeline privacy guidance\n",
     "Traceparent" => "missing installed README traceparent guidance\n",
+    "LogBrewHttpRequestTelemetry" => "missing installed README HTTP request trace guidance\n",
+    "LogBrewTrace::current()" => "missing installed README active trace guidance\n",
+    "metadataWithCurrentTrace" => "missing installed README trace metadata guidance\n",
+    "run-http-trace-correlation" => "missing installed README HTTP trace example guidance\n",
     "first useful PHP service telemetry" => "missing installed README first useful telemetry guidance\n",
     "HttpTransport" => "missing installed README HTTP transport guidance\n",
     "HTTP Delivery" => "missing installed README HTTP delivery heading\n",
@@ -513,6 +574,15 @@ python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-usef
 grep -q '"type": "metric"' vendor-first-useful-make.stdout.json
 grep -q '"events":7' vendor-first-useful-make.stderr.json
 python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-useful-make.stdout.json vendor-first-useful-make.stderr.json >/dev/null
+php vendor/logbrew/sdk/examples/http_trace_correlation.php > vendor-http-trace.stdout.json 2> vendor-http-trace.stderr.json
+grep -q '"type": "metric"' vendor-http-trace.stdout.json
+grep -q '"type": "span"' vendor-http-trace.stdout.json
+grep -q '"events":7' vendor-http-trace.stderr.json
+python3 "$repo_root/scripts/check_php_http_trace_payload.py" vendor-http-trace.stdout.json vendor-http-trace.stderr.json >/dev/null
+(cd vendor/logbrew/sdk/examples && make run-http-trace-correlation) > vendor-http-trace-make.stdout.json 2> vendor-http-trace-make.stderr.json
+grep -q '"type": "metric"' vendor-http-trace-make.stdout.json
+grep -q '"events":7' vendor-http-trace-make.stderr.json
+python3 "$repo_root/scripts/check_php_http_trace_payload.py" vendor-http-trace-make.stdout.json vendor-http-trace-make.stderr.json >/dev/null
 php -r '
 $data = json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR);
 $packages = $data["packages"] ?? $data;
@@ -650,9 +720,14 @@ test -f vendor/logbrew/sdk/src/ProductTimeline.php
 test -f vendor/logbrew/sdk/src/Traceparent.php
 test -f vendor/logbrew/sdk/src/TraceparentContext.php
 test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
+test -f vendor/logbrew/sdk/src/LogBrewTraceContext.php
+test -f vendor/logbrew/sdk/src/LogBrewTraceScope.php
+test -f vendor/logbrew/sdk/src/LogBrewTrace.php
+test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
+test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
 test -f vendor/composer/installed.json
 test -f vendor/composer/autoload_psr4.php
 php -r '
@@ -1358,6 +1433,7 @@ $data["scripts"]["smoke-monolog-handler"] = "php monolog-handler.php";
 $data["scripts"]["smoke-http-transport"] = "php http-transport.php";
 $data["scripts"]["smoke-vendor-example"] = "php vendor/logbrew/sdk/examples/real_user_smoke.php";
 $data["scripts"]["smoke-first-useful"] = "php vendor/logbrew/sdk/examples/first_useful_telemetry.php";
+$data["scripts"]["smoke-http-trace"] = "php vendor/logbrew/sdk/examples/http_trace_correlation.php";
 $data["scripts"]["smoke-types"] = "@php vendor/bin/phpstan analyse phpstan-consumer.php --level=max --memory-limit=512M --no-progress";
 file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
 ' composer.json
@@ -1383,6 +1459,10 @@ composer run --no-interaction smoke-first-useful > first-useful-composer.stdout.
 grep -q '"type": "metric"' first-useful-composer.stdout.json
 grep -q '"events":7' first-useful-composer.stderr.json
 python3 "$repo_root/scripts/check_php_first_useful_payload.py" first-useful-composer.stdout.json first-useful-composer.stderr.json >/dev/null
+composer run --no-interaction smoke-http-trace > http-trace-composer.stdout.json 2> http-trace-composer.stderr.json
+grep -q '"type": "metric"' http-trace-composer.stdout.json
+grep -q '"events":7' http-trace-composer.stderr.json
+python3 "$repo_root/scripts/check_php_http_trace_payload.py" http-trace-composer.stdout.json http-trace-composer.stderr.json >/dev/null
 php readme-example.php > readme-example.stdout.json 2> readme-example.stderr.json
 grep -q '"type": "release"' readme-example.stdout.json
 grep -q '"type": "environment"' readme-example.stdout.json
@@ -1405,9 +1485,14 @@ test -f vendor/logbrew/sdk/src/ProductTimeline.php
 test -f vendor/logbrew/sdk/src/Traceparent.php
 test -f vendor/logbrew/sdk/src/TraceparentContext.php
 test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
+test -f vendor/logbrew/sdk/src/LogBrewTraceContext.php
+test -f vendor/logbrew/sdk/src/LogBrewTraceScope.php
+test -f vendor/logbrew/sdk/src/LogBrewTrace.php
+test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
+test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
 test -f vendor/composer/installed.json
 test -f vendor/composer/autoload_psr4.php
 php -r '
@@ -1652,7 +1737,8 @@ grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' vendor-ex
 grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' vendor-example-make-reinstall-help.txt)
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' vendor-example-make-reinstall-help.txt)
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' vendor-example-make-reinstall-help.txt)
-test "$(wc -l < vendor-example-make-reinstall-help.txt | tr -d ' ')" = "4"
+grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' <(sed -n '5p' vendor-example-make-reinstall-help.txt)
+test "$(wc -l < vendor-example-make-reinstall-help.txt | tr -d ' ')" = "5"
 (cd vendor/logbrew/sdk/examples && make run-readme-example) > vendor-readme-example-make-reinstall.stdout.json 2> vendor-readme-example-make-reinstall.stderr.json
 grep -q '"type": "release"' vendor-readme-example-make-reinstall.stdout.json
 grep -q '"type": "environment"' vendor-readme-example-make-reinstall.stdout.json
@@ -1690,6 +1776,15 @@ python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-usef
 grep -q '"type": "metric"' vendor-first-useful-make-reinstall.stdout.json
 grep -q '"events":7' vendor-first-useful-make-reinstall.stderr.json
 python3 "$repo_root/scripts/check_php_first_useful_payload.py" vendor-first-useful-make-reinstall.stdout.json vendor-first-useful-make-reinstall.stderr.json >/dev/null
+php vendor/logbrew/sdk/examples/http_trace_correlation.php > vendor-http-trace-reinstall.stdout.json 2> vendor-http-trace-reinstall.stderr.json
+grep -q '"type": "metric"' vendor-http-trace-reinstall.stdout.json
+grep -q '"type": "span"' vendor-http-trace-reinstall.stdout.json
+grep -q '"events":7' vendor-http-trace-reinstall.stderr.json
+python3 "$repo_root/scripts/check_php_http_trace_payload.py" vendor-http-trace-reinstall.stdout.json vendor-http-trace-reinstall.stderr.json >/dev/null
+(cd vendor/logbrew/sdk/examples && make run-http-trace-correlation) > vendor-http-trace-make-reinstall.stdout.json 2> vendor-http-trace-make-reinstall.stderr.json
+grep -q '"type": "metric"' vendor-http-trace-make-reinstall.stdout.json
+grep -q '"events":7' vendor-http-trace-make-reinstall.stderr.json
+python3 "$repo_root/scripts/check_php_http_trace_payload.py" vendor-http-trace-make-reinstall.stdout.json vendor-http-trace-make-reinstall.stderr.json >/dev/null
 composer run --no-interaction --quiet smoke-run >/dev/null
 cat > reflection-docs.php <<'EOF'
 <?php

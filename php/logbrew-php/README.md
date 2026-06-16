@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Public PHP SDK for creating LogBrew event batches, validating them locally, and flushing them through dependency-free HTTP delivery, with opt-in PSR-3 and Monolog/Laravel logger support.
+Public PHP SDK for creating LogBrew event batches, validating them locally, and flushing them through dependency-free HTTP delivery, with opt-in request trace correlation plus PSR-3 and Monolog/Laravel logger support.
 
 ## Install
 
@@ -191,6 +191,61 @@ $client->span('evt_span_checkout_request', '2026-06-02T10:00:06Z', Traceparent::
 
 Attach `$outgoingHeaders['traceparent']` to the next service call when your application owns that request. Keep route metadata as stable patterns such as `/checkout/:cart_id`; avoid raw URLs, request bodies, response bodies, and arbitrary headers.
 
+## HTTP Request Trace Correlation
+
+Use `LogBrewHttpRequestTelemetry` when a PHP service owns request handling and wants one W3C trace to link request logs, handler errors, request spans, request-duration metrics, and outgoing propagation. The helper keeps capture explicit: it does not patch global HTTP clients, read payloads, collect arbitrary headers, or serialize the raw `traceparent` value.
+
+```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use LogBrew\LogBrewClient;
+use LogBrew\LogBrewHttpRequestTelemetry;
+use LogBrew\LogBrewPsrLogger;
+use LogBrew\LogBrewTrace;
+use Psr\Log\LogLevel;
+
+$client = LogBrewClient::create('LOGBREW_API_KEY', 'checkout-php-service', '1.4.2');
+$request = LogBrewHttpRequestTelemetry::start(
+    $client,
+    'POST',
+    'https://shop.example/checkout/:cart_id?coupon=sample#review',
+    $_SERVER['HTTP_TRACEPARENT'] ?? null
+);
+$logger = new LogBrewPsrLogger($client, loggerName: 'checkout');
+
+$scope = $request->activate();
+try {
+    $logger->log(LogLevel::WARNING, 'checkout slow for {cartId}', ['cartId' => 'cart_123']);
+    $client->issue('evt_issue_checkout_trace', '2026-06-02T10:00:04Z', [
+        'title' => 'Checkout handler failed',
+        'level' => 'error',
+        'message' => 'payment provider failed',
+        'metadata' => LogBrewTrace::metadataWithCurrentTrace([
+            'routeTemplate' => $request->routeTemplate,
+            'exceptionType' => RuntimeException::class,
+            'exceptionMessage' => 'payment provider failed',
+        ]),
+    ]);
+} finally {
+    $scope->close();
+}
+
+$request->finishSpanAndMetric(
+    'evt_span_checkout_trace',
+    'evt_metric_checkout_trace',
+    '2026-06-02T10:00:06Z',
+    503
+);
+
+$outgoingHeaders = $request->outgoingHeaders();
+```
+
+`LogBrewHttpRequestTelemetry::start(...)` continues valid incoming W3C `traceparent` values and falls back to a local root trace when propagation is missing or malformed, so bad upstream headers do not interrupt request handling. `LogBrewTrace::current()` returns the active request trace, and `LogBrewTrace::metadataWithCurrentTrace(...)` merges primitive metadata with `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled`. Active trace metadata is automatically added to `LogBrewPsrLogger` and `LogBrewMonologHandler` records, and app metadata cannot spoof those correlation fields.
+
+For a copyable service example, run `php vendor/logbrew/sdk/examples/http_trace_correlation.php` or `make run-http-trace-correlation` from `vendor/logbrew/sdk/examples`.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:
@@ -258,7 +313,7 @@ try {
 $client->flush($transport);
 ```
 
-`LogBrewPsrLogger` interpolates PSR-3 placeholders, maps `debug`/`info`/`notice` to LogBrew `info`, `warning` to `warning`, `error` to `error`, and `critical`/`alert`/`emergency` to `critical`, captures primitive context values under `context.*`, and records exception type/message when the `exception` context value is a `Throwable`. Exception trace text is omitted unless `includeExceptionTrace` is enabled. Logs are queued by default; pass both `transport` and `flushOnLog: true` only when each logger call should flush immediately.
+`LogBrewPsrLogger` interpolates PSR-3 placeholders, maps `debug`/`info`/`notice` to LogBrew `info`, `warning` to `warning`, `error` to `error`, and `critical`/`alert`/`emergency` to `critical`, captures primitive context values under `context.*`, and records exception type/message when the `exception` context value is a `Throwable`. When `LogBrewTrace::current()` is active, the logger automatically adds trace correlation metadata to each record. Exception trace text is omitted unless `includeExceptionTrace` is enabled. Logs are queued by default; pass both `transport` and `flushOnLog: true` only when each logger call should flush immediately.
 
 ## Monolog And Laravel
 
@@ -289,6 +344,6 @@ Use `LogBrewMonologHandler` when a PHP app already logs through Monolog. Laravel
 
 Then include `logbrew` in the Laravel logging stack or write to it directly with `Log::channel('logbrew')->warning(...)`.
 
-`LogBrewMonologHandler` captures the Monolog channel, level, message template, primitive context fields, primitive `extra` fields, and exception type/message. Exception trace text is omitted unless `includeExceptionTrace` is enabled. The handler preserves normal app logging by default: capture failures are reported through `onError` when provided, and only rethrown when `raiseErrors` is enabled.
+`LogBrewMonologHandler` captures the Monolog channel, level, message template, primitive context fields, primitive `extra` fields, active LogBrew trace metadata, and exception type/message. Exception trace text is omitted unless `includeExceptionTrace` is enabled. The handler preserves normal app logging by default: capture failures are reported through `onError` when provided, and only rethrown when `raiseErrors` is enabled.
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush()` or `shutdown()` to send queued events through a transport, and use `previewJson()` when you want a stable local JSON preview before sending anything.

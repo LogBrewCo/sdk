@@ -97,7 +97,7 @@ final class LogBrewMonologHandler extends AbstractProcessingHandler
      */
     private function metadata(LogRecord $record, array $context): array
     {
-        $metadata = $this->copyMetadata($this->metadata);
+        $metadata = LogBrewClient::copyPrimitiveMetadata($this->metadata);
         $metadata['monologLevel'] = strtolower($record->level->getName());
         $metadata['monologChannel'] = $record->channel;
         $metadata['messageTemplate'] = $record->message;
@@ -108,18 +108,18 @@ final class LogBrewMonologHandler extends AbstractProcessingHandler
                 continue;
             }
 
-            if ($this->isMetadataValue($value)) {
+            if (LogBrewClient::isMetadataValue($value)) {
                 $metadata['context.' . $key] = $value;
             }
         }
 
         foreach ($this->stringKeyed($record->extra) as $key => $value) {
-            if ($this->isMetadataValue($value)) {
+            if (LogBrewClient::isMetadataValue($value)) {
                 $metadata['extra.' . $key] = $value;
             }
         }
 
-        return $metadata;
+        return LogBrewTrace::metadataWithCurrentTrace($metadata);
     }
 
     /** @return 'info'|'warning'|'error'|'critical' */
@@ -132,22 +132,6 @@ final class LogBrewMonologHandler extends AbstractProcessingHandler
             LogLevel::ERROR => 'error',
             default => 'critical',
         };
-    }
-
-    /**
-     * @param MetadataInput $metadata
-     * @return Metadata
-     */
-    private function copyMetadata(array $metadata): array
-    {
-        $copied = [];
-        foreach ($metadata as $key => $value) {
-            if ($this->isMetadataValue($value)) {
-                $copied[$key] = $value;
-            }
-        }
-
-        return $copied;
     }
 
     /**
@@ -201,13 +185,4 @@ final class LogBrewMonologHandler extends AbstractProcessingHandler
         return $copied;
     }
 
-    /** @phpstan-assert-if-true MetadataValue $value */
-    private function isMetadataValue(mixed $value): bool
-    {
-        if ($value === null || is_string($value) || is_int($value) || is_bool($value)) {
-            return true;
-        }
-
-        return is_float($value) && is_finite($value);
-    }
 }

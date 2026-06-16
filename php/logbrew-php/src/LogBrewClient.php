@@ -402,6 +402,36 @@ final class LogBrewClient
         }
     }
 
+    /**
+     * Copy primitive metadata while omitting arrays, objects, resources, and non-finite floats.
+     *
+     * @param array<string, mixed> $metadata
+     * @return Metadata
+     */
+    public static function copyPrimitiveMetadata(array $metadata): array
+    {
+        $copied = [];
+        foreach ($metadata as $key => $value) {
+            $stringKey = (string) $key;
+            if (trim($stringKey) === '' || !self::isMetadataValue($value)) {
+                continue;
+            }
+            $copied[$stringKey] = $value;
+        }
+
+        return $copied;
+    }
+
+    /** @phpstan-assert-if-true MetadataValue $value */
+    public static function isMetadataValue(mixed $value): bool
+    {
+        if ($value === null || is_string($value) || is_int($value) || is_bool($value)) {
+            return true;
+        }
+
+        return is_float($value) && is_finite($value);
+    }
+
     /** @param list<string> $allowedValues */
     private static function requireAllowedValue(string $label, string $value, array $allowedValues): void
     {

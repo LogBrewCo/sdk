@@ -111,7 +111,7 @@ final class LogBrewPsrLogger extends AbstractLogger
      */
     private function metadata(string $level, string|Stringable $message, array $context): array
     {
-        $metadata = $this->copyMetadata($this->metadata);
+        $metadata = LogBrewClient::copyPrimitiveMetadata($this->metadata);
         $metadata['psrLevel'] = $level;
         $metadata['messageTemplate'] = (string) $message;
 
@@ -121,28 +121,12 @@ final class LogBrewPsrLogger extends AbstractLogger
                 continue;
             }
 
-            if ($this->isMetadataValue($value)) {
+            if (LogBrewClient::isMetadataValue($value)) {
                 $metadata['context.' . $key] = $value;
             }
         }
 
-        return $metadata;
-    }
-
-    /**
-     * @param MetadataInput $metadata
-     * @return Metadata
-     */
-    private function copyMetadata(array $metadata): array
-    {
-        $copied = [];
-        foreach ($metadata as $key => $value) {
-            if ($this->isMetadataValue($value)) {
-                $copied[$key] = $value;
-            }
-        }
-
-        return $copied;
+        return LogBrewTrace::metadataWithCurrentTrace($metadata);
     }
 
     /**
@@ -180,13 +164,4 @@ final class LogBrewPsrLogger extends AbstractLogger
         return strtr($message, $replace);
     }
 
-    /** @phpstan-assert-if-true MetadataValue $value */
-    private function isMetadataValue(mixed $value): bool
-    {
-        if ($value === null || is_string($value) || is_int($value) || is_bool($value)) {
-            return true;
-        }
-
-        return is_float($value) && is_finite($value);
-    }
 }

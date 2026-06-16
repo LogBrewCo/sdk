@@ -834,6 +834,7 @@ assertTrue($helpLines === [
     'run (real-user-smoke) -> make run',
     'run-real-user-smoke -> make run-real-user-smoke',
     'run-first-useful-telemetry -> make run-first-useful-telemetry',
+    'run-http-trace-correlation -> make run-http-trace-correlation',
 ], 'unexpected PHP examples make output');
 assertTrue($makeHelp['stderr'] === '', 'expected empty stderr from PHP examples make help');
 
@@ -881,5 +882,7 @@ assertTrue(str_contains($firstUseful['stderr'], '"outgoingTraceparent":"00-4bf92
 $makeFirstUseful = runCommand($examplesDir, ['make', 'run-first-useful-telemetry']);
 assertTrue(str_contains($makeFirstUseful['stdout'], '"type":"metric"') || str_contains($makeFirstUseful['stdout'], '"type": "metric"'), 'expected metric event in PHP make run-first-useful-telemetry output');
 assertTrue(str_contains($makeFirstUseful['stderr'], '"events":7') || str_contains($makeFirstUseful['stderr'], '"events": 7'), 'expected first-useful make event count');
+
+require __DIR__ . '/trace_correlation.php';
 
 fwrite(STDOUT, "php sdk checks passed\n");
