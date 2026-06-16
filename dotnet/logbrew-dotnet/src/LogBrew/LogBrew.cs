@@ -636,6 +636,7 @@ namespace LogBrew
         private readonly OrderedJsonObject sdk;
         private readonly int maxRetries;
         private readonly List<Event> events;
+        private readonly object gate = new object();
         private bool closed;
 
         private LogBrewClient(string apiKey, string sdkName, string sdkVersion, int maxRetries)
@@ -664,14 +665,18 @@ namespace LogBrew
 
         public int PendingEvents()
         {
-            return events.Count;
+            lock (gate)
+            {
+                return events.Count;
+            }
         }
 
         public string PreviewJson()
         {
-            return JsonWriter.Write(new OrderedJsonObject()
-                .Add("sdk", sdk)
-                .Add("events", events.Select(item => item.ToJsonObject()).ToList()));
+            lock (gate)
+            {
+                return PreviewJsonLocked();
+            }
         }
 
         public void Release(string id, string timestamp, ReleaseAttributes attributes)
@@ -711,36 +716,52 @@ namespace LogBrew
 
         public TransportResponse Flush(ITransport transport)
         {
-            if (closed)
+            lock (gate)
             {
-                throw new SdkException("shutdown_error", "client is already shut down");
-            }
+                if (closed)
+                {
+                    throw new SdkException("shutdown_error", "client is already shut down");
+                }
 
-            return FlushInternal(transport);
+                return FlushInternal(transport);
+            }
         }
 
         public TransportResponse Shutdown(ITransport transport)
         {
-            if (closed)
+            lock (gate)
             {
-                throw new SdkException("shutdown_error", "client is already shut down");
-            }
+                if (closed)
+                {
+                    throw new SdkException("shutdown_error", "client is already shut down");
+                }
 
-            var response = FlushInternal(transport);
-            closed = true;
-            return response;
+                var response = FlushInternal(transport);
+                closed = true;
+                return response;
+            }
         }
 
         private void PushEvent(string type, string id, string timestamp, OrderedJsonObject attributes)
         {
-            if (closed)
+            lock (gate)
             {
-                throw new SdkException("shutdown_error", "client is already shut down");
-            }
+                if (closed)
+                {
+                    throw new SdkException("shutdown_error", "client is already shut down");
+                }
 
-            Validation.RequireNonEmpty("event id", id);
-            Validation.RequireTimestamp(timestamp);
-            events.Add(new Event(type, timestamp, id, attributes));
+                Validation.RequireNonEmpty("event id", id);
+                Validation.RequireTimestamp(timestamp);
+                events.Add(new Event(type, timestamp, id, attributes));
+            }
+        }
+
+        private string PreviewJsonLocked()
+        {
+            return JsonWriter.Write(new OrderedJsonObject()
+                .Add("sdk", sdk)
+                .Add("events", events.Select(item => item.ToJsonObject()).ToList()));
         }
 
         private TransportResponse FlushInternal(ITransport transport)
@@ -750,7 +771,7 @@ namespace LogBrew
                 return new TransportResponse(204, 0);
             }
 
-            var body = PreviewJson();
+            var body = PreviewJsonLocked();
             var maxAttempts = maxRetries + 1;
             for (var attempt = 1; attempt <= maxAttempts; attempt++)
             {
@@ -925,6 +946,25 @@ namespace LogBrew
             return copied;
         }
 
+        internal static Dictionary<string, object?> CopyPrimitiveMetadata(IDictionary<string, object?>? metadata)
+        {
+            var copied = new Dictionary<string, object?>(StringComparer.Ordinal);
+            if (metadata == null)
+            {
+                return copied;
+            }
+
+            foreach (var item in metadata)
+            {
+                if (!string.IsNullOrWhiteSpace(item.Key) && IsMetadataValue(item.Value))
+                {
+                    copied[item.Key] = item.Value;
+                }
+            }
+
+            return copied;
+        }
+
         private static SdkException TimestampError(string timestamp)
         {
             return new SdkException("validation_error", "timestamp must include a timezone offset: " + timestamp);
@@ -947,7 +987,7 @@ namespace LogBrew
             return timePortion.Contains("+") || timePortion.LastIndexOf("-", StringComparison.Ordinal) > 0;
         }
 
-        private static bool IsMetadataValue(object? value)
+        internal static bool IsMetadataValue(object? value)
         {
             if (value == null || value is string || value is bool)
             {

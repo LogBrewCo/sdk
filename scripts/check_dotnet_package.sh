@@ -64,6 +64,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "examples/ReadmeExample.cs",
         "examples/RealUserSmoke.cs",
         "examples/FirstUsefulTelemetry.cs",
+        "examples/HttpTraceCorrelation.cs",
         "examples/Makefile",
     }
     missing = sorted(required - names)
@@ -84,6 +85,10 @@ for needle in (
     "ProductTimeline",
     "without visual replay, HTTP client patching, request/response payload capture, or header capture",
     "Traceparent",
+    "LogBrewHttpRequestTelemetry",
+    "LogBrewTrace.Current",
+    "MetadataWithCurrentTrace",
+    "HttpTraceCorrelation.cs",
     "first useful .NET service telemetry",
     "HttpTransport",
     "System.Net.Http",
@@ -135,10 +140,15 @@ run_example FirstUsefulTelemetry.cs FirstUsefulTelemetry "$tmp_dir/first-useful.
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_first_useful_payload.py" "$tmp_dir/first-useful.stdout.json" "$tmp_dir/first-useful.stderr.json" >/dev/null
 
+run_example HttpTraceCorrelation.cs HttpTraceCorrelation "$tmp_dir/http-trace.stdout.json" "$tmp_dir/http-trace.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/http-trace.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_http_trace_payload.py" "$tmp_dir/http-trace.stdout.json" "$tmp_dir/http-trace.stderr.json" >/dev/null
+
 make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/examples-help.txt"
+grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/examples-help.txt"
 
 echo "dotnet package checks passed"

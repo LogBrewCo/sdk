@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Public .NET SDK for building, validating, previewing, and flushing LogBrew event batches, with `System.Net.Http` delivery and opt-in `Microsoft.Extensions.Logging` provider support.
+Public .NET SDK for building, validating, previewing, and flushing LogBrew event batches, with `System.Net.Http` delivery, W3C trace correlation, and opt-in `Microsoft.Extensions.Logging` provider support.
 
 The library targets `netstandard2.0`, uses `System.Net.Http` for built-in HTTP delivery, and depends on `Microsoft.Extensions.Logging` for the standard .NET logging provider surface.
 
@@ -159,6 +159,58 @@ var outgoingHeaders = Traceparent.CreateHeaders(context.TraceId, childSpanId, co
 ```
 
 `Traceparent` validates W3C shape, rejects forbidden or all-zero IDs, normalizes IDs, exposes the sampled flag, creates outbound `traceparent` headers, and builds child span attributes with primitive metadata only. The packaged `examples/FirstUsefulTelemetry.cs` file shows the complete release, environment, log, product action, network milestone, metric, and span flow.
+
+## Request Trace Correlation
+
+Use `LogBrewHttpRequestTelemetry` when your service owns request handling and wants one W3C request span to connect request logs, handler errors, metrics, and outgoing propagation. The helper keeps capture explicit: it does not patch global HTTP clients, read payloads, or collect request headers.
+
+```csharp
+using System.Collections.Generic;
+using LogBrew;
+using Microsoft.Extensions.Logging;
+
+const string incomingTraceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "1.0.0");
+var request = LogBrewHttpRequestTelemetry.Start(
+    client,
+    "POST",
+    "https://shop.example/checkout/:cart_id?coupon=sample#review",
+    incomingTraceparent);
+
+using ILoggerFactory factory = LoggerFactory.Create(builder =>
+{
+    builder.AddLogBrew(client, new LogBrewLoggerOptions { EventIdPrefix = "checkout_trace" });
+});
+
+using (request.Activate())
+{
+    LogBrewTraceContext? activeTrace = LogBrewTrace.Current;
+    ILogger logger = factory.CreateLogger("CheckoutTrace");
+    logger.LogWarning("checkout slow for {CartId}", "cart_123");
+
+    client.Issue(
+        "evt_issue_checkout_trace",
+        "2026-06-02T10:00:04Z",
+        IssueAttributes.Create("Checkout handler failed", "error")
+            .WithMessage("payment provider failed")
+            .WithMetadata(LogBrewTrace.MetadataWithCurrentTrace(new Dictionary<string, object?>
+            {
+                ["routeTemplate"] = request.RouteTemplate,
+                ["exceptionType"] = "System.InvalidOperationException",
+                ["exceptionMessage"] = "payment provider failed"
+            })));
+}
+
+request.FinishSpanAndMetric(
+    "evt_span_checkout_trace",
+    "evt_metric_checkout_trace",
+    "2026-06-02T10:00:06Z",
+    503);
+
+IReadOnlyDictionary<string, string> outgoingHeaders = request.OutgoingHeaders;
+```
+
+`LogBrewTraceContext` generates W3C-shaped non-zero trace/span IDs, continues valid incoming `traceparent` values, preserves sampled flags, and omits malformed propagation values non-fatally for request helpers. `LogBrewTrace.Activate()` uses .NET `AsyncLocal` so standard async work keeps the active trace context. The `ILogger` provider automatically adds `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata when a trace is active. `MetadataWithCurrentTrace()` is useful for app-owned errors or product events that should join the same request. The packaged `examples/HttpTraceCorrelation.cs` file shows copyable request trace, async logger, handler error, span, metric, and outgoing propagation usage.
 
 ## HTTP Delivery
 

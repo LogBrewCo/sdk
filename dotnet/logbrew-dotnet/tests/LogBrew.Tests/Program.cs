@@ -482,6 +482,8 @@ AssertTrue(flushOnLogClient.PendingEvents() == 0, "expected flush-on-log to clea
 AssertTrue(flushOnLogTransport.SentBodies.Count == 1, "expected flush-on-log transport body");
 tests++;
 
+tests += TraceCorrelationTests.Run();
+
 Console.WriteLine("dotnet package tests ok (" + tests.ToString(CultureInfo.InvariantCulture) + " tests)");
 
 internal sealed class LocalHttpIntake : IDisposable

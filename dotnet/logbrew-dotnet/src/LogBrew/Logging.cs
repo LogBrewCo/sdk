@@ -274,6 +274,7 @@ namespace LogBrew
             AddStructuredValues(metadata, state, prefix: null);
             AddException(metadata, exception, options.IncludeExceptionStackTrace);
             scopeProvider?.ForEachScope((scope, values) => AddStructuredValues(values, scope, "scope."), metadata);
+            LogBrewTrace.AddActiveTraceMetadata(metadata);
             return metadata;
         }
 
@@ -284,13 +285,7 @@ namespace LogBrew
                 return null;
             }
 
-            var copied = new Dictionary<string, object?>(StringComparer.Ordinal);
-            foreach (var item in metadata)
-            {
-                AddPrimitive(copied, item.Key, item.Value);
-            }
-
-            return copied;
+            return Validation.CopyPrimitiveMetadata(metadata);
         }
 
         private static void AddStructuredValues<TState>(IDictionary<string, object?> metadata, TState state, string? prefix)
@@ -337,42 +332,12 @@ namespace LogBrew
 
         private static void AddPrimitive(IDictionary<string, object?> metadata, string key, object? value)
         {
-            if (string.IsNullOrWhiteSpace(key) || !IsPrimitive(value))
+            if (string.IsNullOrWhiteSpace(key) || !Validation.IsMetadataValue(value))
             {
                 return;
             }
 
             metadata[key] = value;
-        }
-
-        private static bool IsPrimitive(object? value)
-        {
-            if (value == null || value is string || value is bool)
-            {
-                return true;
-            }
-
-            if (value is byte || value is short || value is int || value is long || value is float || value is double || value is decimal)
-            {
-                return !IsInvalidNumber(value);
-            }
-
-            return false;
-        }
-
-        private static bool IsInvalidNumber(object value)
-        {
-            if (value is double doubleValue)
-            {
-                return double.IsNaN(doubleValue) || double.IsInfinity(doubleValue);
-            }
-
-            if (value is float floatValue)
-            {
-                return float.IsNaN(floatValue) || float.IsInfinity(floatValue);
-            }
-
-            return false;
         }
     }
 }

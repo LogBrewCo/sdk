@@ -79,6 +79,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "examples/ReadmeExample.cs",
         "examples/RealUserSmoke.cs",
         "examples/FirstUsefulTelemetry.cs",
+        "examples/HttpTraceCorrelation.cs",
         "examples/Makefile",
     ):
         if required not in names:
@@ -96,6 +97,10 @@ for needle in (
     "ProductTimeline",
     "without visual replay, HTTP client patching, request/response payload capture, or header capture",
     "Traceparent",
+    "LogBrewHttpRequestTelemetry",
+    "LogBrewTrace.Current",
+    "MetadataWithCurrentTrace",
+    "HttpTraceCorrelation.cs",
     "first useful .NET service telemetry",
     "HttpTransport",
     "System.Net.Http",
@@ -133,6 +138,10 @@ grep -q '"retryAttempts":2' "$tmp_dir/packaged-smoke.stderr.json"
 run_packaged_example FirstUsefulTelemetry.cs PackagedFirstUseful "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_first_useful_payload.py" "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json" >/dev/null
+
+run_packaged_example HttpTraceCorrelation.cs PackagedHttpTrace "$tmp_dir/packaged-http-trace.stdout.json" "$tmp_dir/packaged-http-trace.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-http-trace.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_http_trace_payload.py" "$tmp_dir/packaged-http-trace.stdout.json" "$tmp_dir/packaged-http-trace.stderr.json" >/dev/null
 
 lifecycle_dir="$tmp_dir/lifecycle-app"
 dotnet new console --framework net10.0 --name LifecycleApp --output "$lifecycle_dir" >/dev/null
