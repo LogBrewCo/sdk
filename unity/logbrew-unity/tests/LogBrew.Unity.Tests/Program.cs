@@ -26,7 +26,8 @@ namespace LogBrew.Unity.Tests
             Run("shutdown_flushes_and_prevents_future_events", ShutdownFlushesAndPreventsFutureEvents);
             Run("unity_helpers_add_context_metadata", UnityHelpersAddContextMetadata);
             Run("trace_context_helpers_validate_and_correlate", TraceContextHelpersValidateAndCorrelate);
-            Console.WriteLine("unity package tests ok (16 tests)");
+            Run("unity_lifecycle_span_uses_active_trace", UnityLifecycleSpanUsesActiveTrace);
+            Console.WriteLine("unity package tests ok (17 tests)");
         }
 
         private static void Run(string name, Action test)
@@ -350,6 +351,51 @@ namespace LogBrew.Unity.Tests
             AssertDoesNotContain(body, "spoofed_span");
             AssertDoesNotContain(body, "spoofed_parent");
             AssertDoesNotContain(body, "4BF92F");
+            AssertDoesNotContain(body, "traceparent");
+        }
+
+        private static void UnityLifecycleSpanUsesActiveTrace()
+        {
+            const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+            const string parentSpanId = "00f067aa0ba902b7";
+            var client = NewClient();
+            var trace = LogBrewTraceContext.FromTraceparent("00-" + traceId + "-" + parentSpanId + "-01");
+            using (LogBrewTrace.Activate(trace))
+            {
+                LogBrewUnity.CaptureLifecycleSpan(
+                    client,
+                    "evt_unity_lifecycle_001",
+                    "2026-06-02T10:00:17Z",
+                    "active",
+                    "paused",
+                    1532.25,
+                    UnityContext.Create()
+                        .WithPlatform("ios")
+                        .WithSceneName("Checkout")
+                        .WithSessionId("session_123")
+                        .WithMetadata("traceId", "spoofed_trace"));
+            }
+
+            Expect("validation_error", () => LogBrewUnity.CaptureLifecycleSpan(
+                client,
+                "evt_bad_lifecycle",
+                "2026-06-02T10:00:18Z",
+                "active",
+                "paused",
+                -1));
+
+            var body = client.PreviewJson();
+            AssertContains(body, "\"type\": \"span\"");
+            AssertContains(body, "\"name\": \"unity.lifecycle:active->paused\"");
+            AssertContains(body, "\"traceId\": \"" + traceId + "\"");
+            AssertContains(body, "\"spanId\": \"" + trace.SpanId + "\"");
+            AssertContains(body, "\"parentSpanId\": \"" + parentSpanId + "\"");
+            AssertContains(body, "\"durationMs\": 1532.25");
+            AssertContains(body, "\"previousState\": \"active\"");
+            AssertContains(body, "\"currentState\": \"paused\"");
+            AssertContains(body, "\"durationSource\": \"previous_state\"");
+            AssertContains(body, "\"sceneName\": \"Checkout\"");
+            AssertDoesNotContain(body, "spoofed_trace");
             AssertDoesNotContain(body, "traceparent");
         }
 

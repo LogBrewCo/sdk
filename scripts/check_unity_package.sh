@@ -87,6 +87,7 @@ grep -qx 'Samples~/ReadmeExample/ReadmeExample.cs' "$tmp_dir/package-contents.tx
 grep -qx 'Samples~/RealUserSmoke/RealUserSmoke.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'examples/Makefile' "$tmp_dir/package-contents.txt"
 grep -qx 'examples/trace_correlation/TraceCorrelation.cs' "$tmp_dir/package-contents.txt"
+grep -qx 'examples/lifecycle_spans/LifecycleSpans.cs' "$tmp_dir/package-contents.txt"
 
 python3 - "$package_tgz" <<'PY'
 import json
@@ -166,10 +167,16 @@ make --no-print-directory -C "$package_dir/examples" run-trace-correlation > "$t
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/trace-correlation.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_trace_correlation_payload.py" "$tmp_dir/trace-correlation.stdout.json" "$tmp_dir/trace-correlation.stderr.json"
 
+make --no-print-directory -C "$package_dir/examples" run-lifecycle-spans > "$tmp_dir/lifecycle-spans.stdout.json" 2> "$tmp_dir/lifecycle-spans.stderr.json"
+test ! -s "$tmp_dir/lifecycle-spans.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/lifecycle-spans.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_unity_lifecycle_payload.py" "$tmp_dir/lifecycle-spans.stdout.json"
+
 make --no-print-directory -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
+grep -qx 'run-lifecycle-spans -> make run-lifecycle-spans' "$tmp_dir/examples-help.txt"
 
 echo "unity package checks passed"

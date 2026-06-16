@@ -153,9 +153,14 @@ grep -q '"httpAttempts":1' "$tmp_dir/installed-smoke.stderr.json"
 
 test -f "$installed_package_dir/Runtime/LogBrewTrace.cs"
 test -f "$installed_package_dir/examples/trace_correlation/TraceCorrelation.cs"
+test -f "$installed_package_dir/examples/lifecycle_spans/LifecycleSpans.cs"
 make --no-print-directory -C "$installed_package_dir/examples" run-trace-correlation > "$tmp_dir/installed-trace-correlation.stdout.json" 2> "$tmp_dir/installed-trace-correlation.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-trace-correlation.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_trace_correlation_payload.py" "$tmp_dir/installed-trace-correlation.stdout.json" "$tmp_dir/installed-trace-correlation.stderr.json"
+make --no-print-directory -C "$installed_package_dir/examples" run-lifecycle-spans > "$tmp_dir/installed-lifecycle-spans.stdout.json" 2> "$tmp_dir/installed-lifecycle-spans.stderr.json"
+test ! -s "$tmp_dir/installed-lifecycle-spans.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-lifecycle-spans.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_unity_lifecycle_payload.py" "$tmp_dir/installed-lifecycle-spans.stdout.json"
 
 smoke_dir="$tmp_dir/smoke-app"
 mkdir -p "$smoke_dir"
@@ -397,5 +402,6 @@ grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/installed-exa
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/installed-examples-help.txt"
+grep -qx 'run-lifecycle-spans -> make run-lifecycle-spans' "$tmp_dir/installed-examples-help.txt"
 
 echo "unity real-user smoke passed"

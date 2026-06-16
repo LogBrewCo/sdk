@@ -98,6 +98,36 @@ namespace LogBrew.Unity
                     .WithMetadata(MetadataFromContext(context)));
         }
 
+        public static void CaptureLifecycleSpan(
+            LogBrewClient client,
+            string id,
+            string timestamp,
+            string previousState,
+            string currentState,
+            double durationMs,
+            UnityContext? context = null)
+        {
+            if (client == null)
+            {
+                throw new ArgumentNullException(nameof(client));
+            }
+
+            Validation.RequireNonEmpty("unity previousState", previousState);
+            Validation.RequireNonEmpty("unity currentState", currentState);
+            var metadata = MetadataFromContext(context);
+            metadata["previousState"] = previousState;
+            metadata["currentState"] = currentState;
+            metadata["durationSource"] = "previous_state";
+            client.Span(
+                id,
+                timestamp,
+                LogBrewTrace.SpanAttributes(
+                    "unity.lifecycle:" + previousState + "->" + currentState,
+                    "ok",
+                    durationMs,
+                    metadata));
+        }
+
         private static Dictionary<string, object?> MetadataFromContext(UnityContext? context)
         {
             return context == null

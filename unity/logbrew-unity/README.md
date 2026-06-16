@@ -79,6 +79,15 @@ using (LogBrewTrace.Activate(trace))
         "2026-06-02T10:00:22Z",
         LogBrewTrace.SpanAttributes("POST /checkout/{cart_id}", "error", 37.5));
 
+    LogBrewUnity.CaptureLifecycleSpan(
+        client,
+        "evt_lifecycle_001",
+        "2026-06-02T10:00:23Z",
+        previousState: "active",
+        currentState: "paused",
+        durationMs: 1532.25,
+        context: UnityContext.Create().WithSceneName("Checkout").WithSessionId("session_001"));
+
     IReadOnlyDictionary<string, string> headers = LogBrewTrace.OutgoingHeaders();
     string traceparent = headers["traceparent"];
 }
@@ -88,7 +97,7 @@ Issue, log, action, and Unity helper events inherit active trace metadata while 
 
 ## Sample Source
 
-The package includes sample source for creating a client, sending through `HttpTransport`, recording scene transitions, mapping Unity logs, capturing exceptions, and correlating Unity telemetry with W3C `traceparent` in your own game or realtime app.
+The package includes sample source for creating a client, sending through `HttpTransport`, recording scene transitions, mapping Unity logs, capturing exceptions, creating lifecycle spans, and correlating Unity telemetry with W3C `traceparent` in your own game or realtime app.
 
 ## Behavior
 
@@ -99,5 +108,6 @@ The package includes sample source for creating a client, sending through `HttpT
 - `LogBrewUnity.CaptureSceneLoaded()` records Unity scene transitions as action events.
 - `LogBrewUnity.CaptureLogMessage()` maps Unity log types to LogBrew log levels.
 - `LogBrewUnity.CaptureException()` records Unity exception details as issue events.
+- `LogBrewUnity.CaptureLifecycleSpan()` records app-owned lifecycle transitions such as `active -> paused` as spans with previous-state duration.
 - `UnityContext` adds scene, object, platform, session, and frame metadata while keeping the core event builders independent from `UnityEngine`.
-- `LogBrewTrace` adds active trace metadata to issue, log, action, and Unity helper events without global HTTP patching or payload/header capture.
+- `LogBrewTrace` adds active trace metadata to issue, log, action, span, and Unity helper events without global HTTP patching or payload/header capture.
