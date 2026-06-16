@@ -1,10 +1,12 @@
 import express from "express";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
+  getActiveLogBrewTrace,
   logbrewErrorHandler,
   logbrewMiddleware
 } from "@logbrew/express";
 
+const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
 const errorTransport = RecordingTransport.alwaysAccept();
 const app = express();
@@ -24,7 +26,18 @@ app.get("/logbrew", (req, res) => {
   void req.logbrew.shutdown();
 });
 
+app.use("/fail", logbrewMiddleware({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  transport: errorTransport,
+  captureRequests: false,
+  spanIdFactory: () => "b7ad6b7169203331"
+}));
+
+let activeTraceFromAsync;
 app.get("/fail", async () => {
+  await Promise.resolve().then(() => {
+    activeTraceFromAsync = getActiveLogBrewTrace();
+  });
   throw new Error("route exploded");
 });
 
@@ -44,7 +57,9 @@ const server = app.listen(0);
 const port = server.address().port;
 const okResponse = await fetch(`http://127.0.0.1:${port}/logbrew`);
 const okText = await okResponse.text();
-const failResponse = await fetch(`http://127.0.0.1:${port}/fail?token=secret`);
+const failResponse = await fetch(`http://127.0.0.1:${port}/fail?token=secret`, {
+  headers: { traceparent }
+});
 await failResponse.json();
 await waitFor(() => errorTransport.sentBodies.length === 1);
 await new Promise((resolve) => {
@@ -58,6 +73,15 @@ if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "ev
 if (errorPayload.events[0].attributes.metadata.path !== "/fail") {
   throw new Error(`error capture should omit query text: ${errorTransport.lastBody()}`);
 }
+if (errorPayload.events[0].attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+  throw new Error(`error capture should include trace id: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[0].attributes.metadata.spanId !== "b7ad6b7169203331") {
+  throw new Error(`error capture should include request span id: ${errorTransport.lastBody()}`);
+}
+if (activeTraceFromAsync?.spanId !== "b7ad6b7169203331") {
+  throw new Error(`async trace context was not preserved: ${JSON.stringify(activeTraceFromAsync)}`);
+}
 
 console.log(okText);
 console.error(JSON.stringify({
@@ -66,6 +90,7 @@ console.error(JSON.stringify({
   attempts: requestTransport.sentBodies.length,
   errorStatus: failResponse.status,
   errorCaptured: errorPayload.events[0].attributes.title,
+  errorTraceId: errorPayload.events[0].attributes.metadata.traceId,
   events: 6
 }));
 

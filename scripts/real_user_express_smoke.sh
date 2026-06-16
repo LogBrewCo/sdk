@@ -107,10 +107,12 @@ import {
   createLogBrewExpressClient,
   createRequestEvent,
   createRequestMetricEvent,
+  getActiveLogBrewTrace,
   logbrewErrorHandler,
   logbrewMiddleware
 } from "@logbrew/express";
 
+const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
 const autoTransport = RecordingTransport.alwaysAccept();
 const metricOnlyTransport = RecordingTransport.alwaysAccept();
@@ -150,17 +152,24 @@ app.use("/auto", logbrewMiddleware({
   now: () => "2026-06-02T10:00:06Z",
   nowMs: () => 100,
   metricIdFactory: () => "evt_express_metric_001",
+  spanIdFactory: () => "b7ad6b7169203331",
   requestEvent(req, res, { durationMs }) {
     return createRequestEvent(req, res, {
       now: () => "2026-06-02T10:00:06Z",
       durationMs,
-      idFactory: () => "evt_express_request_001",
-      spanIdFactory: () => "b7ad6b7169203331"
+      idFactory: () => "evt_express_request_001"
     });
   }
 }));
 
-app.get("/auto", (_req, res) => {
+let activeTraceFromAuto;
+app.get("/auto", async (req, res) => {
+  await Promise.resolve().then(() => {
+    activeTraceFromAuto = getActiveLogBrewTrace();
+  });
+  if (req.logbrew.trace?.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+    throw new Error(`missing Express request trace context: ${JSON.stringify(req.logbrew.trace)}`);
+  }
   res.json({ ok: true });
 });
 
@@ -179,6 +188,15 @@ app.use("/metrics-only", logbrewMiddleware({
 app.get("/metrics-only/:id", (_req, res) => {
   res.json({ ok: true });
 });
+
+app.use("/fail", logbrewMiddleware({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "express-error-trace-smoke",
+  sdkVersion: "0.1.0",
+  transport: errorTransport,
+  captureRequests: false,
+  spanIdFactory: () => "b7ad6b7169203332"
+}));
 
 app.get("/fail", async () => {
   throw new Error("route exploded");
@@ -203,15 +221,19 @@ const okResponse = await fetch(`http://127.0.0.1:${port}/logbrew`);
 const okText = await okResponse.text();
 const autoResponse = await fetch(`http://127.0.0.1:${port}/auto?token=secret`, {
   headers: {
-    traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    traceparent
   }
 });
 await autoResponse.json();
-await waitFor(() => autoTransport.sentBodies.length === 1);
+await waitFor(() => autoTransport.sentBodies.length === 1 && activeTraceFromAuto);
 const metricOnlyResponse = await fetch(`http://127.0.0.1:${port}/metrics-only/123?token=secret`);
 await metricOnlyResponse.json();
 await waitFor(() => metricOnlyTransport.sentBodies.length === 1);
-const failResponse = await fetch(`http://127.0.0.1:${port}/fail?token=secret`);
+const failResponse = await fetch(`http://127.0.0.1:${port}/fail?token=secret`, {
+  headers: {
+    traceparent
+  }
+});
 await failResponse.json();
 await waitFor(() => errorTransport.sentBodies.length === 1);
 await new Promise((resolve) => {
@@ -234,8 +256,14 @@ if (autoPayload.events[0].attributes.spanId !== "b7ad6b7169203331") {
 if (autoPayload.events[0].attributes.metadata.framework !== "express") {
   throw new Error(`missing express span metadata: ${autoTransport.lastBody()}`);
 }
+if (autoPayload.events[0].attributes.metadata.sampled !== true) {
+  throw new Error(`missing sampled express span metadata: ${autoTransport.lastBody()}`);
+}
 if (autoPayload.events[0].attributes.metadata.path !== "/auto") {
   throw new Error(`request capture should omit query text: ${autoTransport.lastBody()}`);
+}
+if (activeTraceFromAuto?.spanId !== "b7ad6b7169203331") {
+  throw new Error(`async trace context was not preserved: ${JSON.stringify(activeTraceFromAuto)}`);
 }
 if (autoPayload.events[1].type !== "metric" || autoPayload.events[1].id !== "evt_express_metric_001") {
   throw new Error(`unexpected request metric payload: ${autoTransport.lastBody()}`);
@@ -265,6 +293,12 @@ if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "ev
 }
 if (errorPayload.events[0].attributes.metadata.path !== "/fail") {
   throw new Error(`error capture should omit query text: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[0].attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+  throw new Error(`error capture should include trace id: ${errorTransport.lastBody()}`);
+}
+if (errorPayload.events[0].attributes.metadata.spanId !== "b7ad6b7169203332") {
+  throw new Error(`error capture should include request span id: ${errorTransport.lastBody()}`);
 }
 const errorPreview = createErrorEvent(new Error("manual failure"), { method: "POST", originalUrl: "/manual" }, {
   now: () => "2026-06-02T10:00:08Z",
@@ -363,6 +397,8 @@ import {
   createLogBrewExpressClient,
   createRequestEvent,
   createRequestMetricEvent,
+  getActiveLogBrewTrace,
+  type LogBrewTraceContext,
   logbrewErrorHandler,
   logbrewMiddleware
 } from "@logbrew/express";
@@ -379,11 +415,12 @@ app.use(logbrewMiddleware({
   transport: RecordingTransport.alwaysAccept(),
   captureRequestMetrics: true,
   metricIdFactory: () => "evt_typed_metric_001",
-  requestEvent(req, res, { durationMs }) {
+  spanIdFactory: () => "b7ad6b7169203331",
+  requestEvent(req, res, { durationMs, trace }) {
+    trace?.spanId.toUpperCase();
     const event = createRequestEvent(req, res, {
       durationMs,
-      now: () => "2026-06-02T10:00:06Z",
-      spanIdFactory: () => "b7ad6b7169203331"
+      now: () => "2026-06-02T10:00:06Z"
     });
     if (event.type === "span") {
       event.attributes.parentSpanId?.toUpperCase();
@@ -401,6 +438,9 @@ app.use(logbrewMiddleware({
 }));
 
 app.get("/typed", (req: Request, res: Response) => {
+  const activeTrace: LogBrewTraceContext | undefined = getActiveLogBrewTrace();
+  activeTrace?.traceId.toUpperCase();
+  req.logbrew?.trace?.spanId.toUpperCase();
   req.logbrew?.client.log("evt_log_001", "2026-06-02T10:00:03Z", {
     message: "typed worker",
     level: "info"

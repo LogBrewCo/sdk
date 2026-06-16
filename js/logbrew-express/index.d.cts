@@ -17,9 +17,17 @@ export type CreateLogBrewExpressClientConfig = {
   maxRetries?: number;
 };
 
+export type LogBrewTraceContext = {
+  traceId: string;
+  spanId: string;
+  parentSpanId: string;
+  sampled: boolean;
+};
+
 export type LogBrewExpressContext = {
   client: LogBrewClient;
   logbrew: LogBrewClient;
+  trace?: LogBrewTraceContext;
   transport: Transport;
   previewJson(): string;
   flush(): Promise<TransportResponse>;
@@ -30,6 +38,7 @@ export type LogBrewExpressRuntimeContext = {
   req: Request;
   res: Response;
   client: LogBrewClient;
+  trace?: LogBrewTraceContext;
 };
 
 export type LogBrewClientFactory = (context: Omit<LogBrewExpressRuntimeContext, "client">) => LogBrewClient;
@@ -77,12 +86,12 @@ export type LogBrewExpressOptions = CreateLogBrewExpressClientConfig & {
   requestEvent?: (
     req: Request,
     res: Response,
-    context: { client: LogBrewClient; durationMs: number }
+    context: { client: LogBrewClient; durationMs: number; trace?: LogBrewTraceContext }
   ) => LogBrewRequestEvent;
   requestMetricEvent?: (
     req: Request,
     res: Response,
-    context: { client: LogBrewClient; durationMs: number }
+    context: { client: LogBrewClient; durationMs: number; trace?: LogBrewTraceContext }
   ) => LogBrewRequestMetricEvent;
   errorEvent?: (error: unknown, context: LogBrewExpressRuntimeContext) => LogBrewErrorEvent;
   onFlush?: (response: TransportResponse, context: LogBrewExpressRuntimeContext) => void | Promise<void>;
@@ -92,6 +101,7 @@ export type LogBrewExpressOptions = CreateLogBrewExpressClientConfig & {
 export declare function createLogBrewExpressClient(config?: CreateLogBrewExpressClientConfig): LogBrewClient;
 export declare function logbrewMiddleware(options?: LogBrewExpressOptions): RequestHandler;
 export declare function logbrewErrorHandler(options?: LogBrewExpressOptions): ErrorRequestHandler;
+export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
 export declare function createRequestEvent(
   req: Request,
   res: Response,
@@ -100,6 +110,7 @@ export declare function createRequestEvent(
     durationMs?: number;
     idFactory?: (req: Request, res: Response) => string;
     spanIdFactory?: (req: Request, res: Response) => string;
+    trace?: LogBrewTraceContext;
   }
 ): LogBrewRequestEvent;
 export declare function createErrorEvent(
@@ -108,6 +119,7 @@ export declare function createErrorEvent(
   options?: {
     now?: () => string;
     idFactory?: (error: unknown, req: Request) => string;
+    trace?: LogBrewTraceContext;
   }
 ): LogBrewErrorEvent;
 export declare function createRequestMetricEvent(
@@ -134,6 +146,7 @@ declare const defaultExport: {
   createLogBrewExpressClient: typeof createLogBrewExpressClient;
   createRequestMetricEvent: typeof createRequestMetricEvent;
   createRequestEvent: typeof createRequestEvent;
+  getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   logbrewErrorHandler: typeof logbrewErrorHandler;
   logbrewMiddleware: typeof logbrewMiddleware;
 };

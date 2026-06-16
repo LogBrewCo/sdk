@@ -2,12 +2,13 @@ const {
   LogBrewClient,
   RecordingTransport,
   parseTraceparent,
-  SdkError,
-  spanAttributesFromTraceparent
+  SdkError
 } = require("@logbrew/sdk");
+const { AsyncLocalStorage } = require("node:async_hooks");
 
 const DEFAULT_SDK_NAME = "logbrew-express";
 const DEFAULT_SDK_VERSION = "0.1.0";
+const activeTraceContext = new AsyncLocalStorage();
 
 function createLogBrewExpressClient({
   serverApiKey,
@@ -31,8 +32,9 @@ function logbrewMiddleware(options = {}) {
     const client = resolveClient(options, req, res);
     const transport = resolveTransport(options, req, res, client);
     const startedAt = nowMs(options);
+    const trace = createRequestTraceContext(req, res, options);
 
-    req.logbrew = createRequestContext(client, transport);
+    req.logbrew = createRequestContext(client, transport, trace);
 
     if (options.captureRequests !== false || options.captureRequestMetrics === true) {
       res.once("finish", () => {
@@ -40,7 +42,7 @@ function logbrewMiddleware(options = {}) {
       });
     }
 
-    next();
+    activeTraceContext.run(trace, next);
   };
 }
 
@@ -49,42 +51,47 @@ function logbrewErrorHandler(options = {}) {
     const existing = req.logbrew;
     const client = existing?.client ?? resolveClient(options, req, res);
     const transport = existing?.transport ?? resolveTransport(options, req, res, client);
+    const trace = existing?.trace ?? getActiveLogBrewTrace();
     const event = typeof options.errorEvent === "function"
-      ? options.errorEvent(error, { req, res, client })
-      : createErrorEvent(error, req, options);
+      ? options.errorEvent(error, { req, res, client, trace })
+      : createErrorEvent(error, req, { ...options, trace });
 
     try {
       client.issue(event.id, event.timestamp, event.attributes);
       void client.shutdown(transport)
-        .then((response) => notifyFlush(options, response, { req, res, client }))
-        .catch((flushError) => notifyFailure(options, flushError, { req, res, client }));
+        .then((response) => notifyFlush(options, response, { req, res, client, trace }))
+        .catch((flushError) => notifyFailure(options, flushError, { req, res, client, trace }));
     } catch (captureError) {
-      void notifyFailure(options, captureError, { req, res, client });
+      void notifyFailure(options, captureError, { req, res, client, trace });
     }
 
     next(error);
   };
 }
 
+function getActiveLogBrewTrace() {
+  return activeTraceContext.getStore();
+}
+
 function createRequestEvent(req, res, {
   now = () => new Date().toISOString(),
   durationMs = 0,
   idFactory = defaultRequestEventId,
-  spanIdFactory = defaultSpanIdFactory
+  spanIdFactory = defaultSpanIdFactory,
+  trace = undefined
 } = {}) {
   const method = req.method ?? "GET";
   const path = getRequestPath(req);
   const statusCode = Number(res.statusCode ?? 0);
   const id = idFactory(req, res);
-  const traceparent = getTraceparentHeader(req);
-  const spanEvent = traceparent
-    ? createTraceparentRequestSpan(traceparent, {
+  const traceContext = trace ?? getRequestTraceContext(req) ?? createRequestTraceContext(req, res, { spanIdFactory });
+  const spanEvent = traceContext
+    ? createTraceparentRequestSpan(traceContext, {
       durationMs,
       id,
       method,
       now,
       path,
-      spanIdFactory: () => spanIdFactory(req, res),
       statusCode
     })
     : undefined;
@@ -111,11 +118,13 @@ function createRequestEvent(req, res, {
 
 function createErrorEvent(error, req, {
   now = () => new Date().toISOString(),
-  idFactory = defaultErrorEventId
+  idFactory = defaultErrorEventId,
+  trace = undefined
 } = {}) {
   const method = req.method ?? "GET";
   const path = getRequestPath(req);
   const message = error instanceof Error ? error.message : String(error);
+  const traceContext = trace ?? getRequestTraceContext(req) ?? getActiveLogBrewTrace();
   return {
     id: idFactory(error, req),
     timestamp: now(),
@@ -125,7 +134,8 @@ function createErrorEvent(error, req, {
       message,
       metadata: {
         method,
-        path
+        path,
+        ...traceMetadata(traceContext)
       }
     }
   };
@@ -160,10 +170,11 @@ function createRequestMetricEvent(req, res, {
   };
 }
 
-function createRequestContext(client, transport) {
+function createRequestContext(client, transport, trace) {
   return {
     client,
     logbrew: client,
+    ...(trace ? { trace } : {}),
     transport,
     previewJson: () => client.previewJson(),
     flush: () => client.flush(transport),
@@ -172,17 +183,18 @@ function createRequestContext(client, transport) {
 }
 
 async function captureRequestFinish(options, { req, res, client, transport, startedAt }) {
+  const trace = getRequestTraceContext(req);
   try {
     const durationMs = Math.max(0, Math.round(nowMs(options) - startedAt));
     if (options.captureRequests !== false) {
       const event = typeof options.requestEvent === "function"
-        ? options.requestEvent(req, res, { client, durationMs })
-        : createRequestEvent(req, res, { ...options, durationMs });
+        ? options.requestEvent(req, res, { client, durationMs, trace })
+        : createRequestEvent(req, res, { ...options, durationMs, trace });
       captureRequestEvent(client, event);
     }
     if (options.captureRequestMetrics === true) {
       const metricEvent = typeof options.requestMetricEvent === "function"
-        ? options.requestMetricEvent(req, res, { client, durationMs })
+        ? options.requestMetricEvent(req, res, { client, durationMs, trace })
         : createRequestMetricEvent(req, res, {
           ...options,
           durationMs,
@@ -191,9 +203,9 @@ async function captureRequestFinish(options, { req, res, client, transport, star
       captureRequestMetricEvent(client, metricEvent);
     }
     const response = await client.shutdown(transport);
-    await notifyFlush(options, response, { req, res, client });
+    await notifyFlush(options, response, { req, res, client, trace });
   } catch (error) {
-    await notifyFailure(options, error, { req, res, client });
+    await notifyFailure(options, error, { req, res, client, trace });
   }
 }
 
@@ -276,42 +288,38 @@ function getTraceparentHeader(req) {
   return typeof value === "string" ? value : undefined;
 }
 
-function createTraceparentRequestSpan(traceparent, {
+function createTraceparentRequestSpan(traceContext, {
   durationMs,
   id,
   method,
   now,
   path,
-  spanIdFactory,
   statusCode
 }) {
-  if (!traceparent) {
+  if (!traceContext) {
     return undefined;
   }
 
-  try {
-    parseTraceparent(traceparent);
-    const spanId = spanIdFactory();
-    return {
-      id,
-      timestamp: now(),
-      type: "span",
-      attributes: spanAttributesFromTraceparent(traceparent, {
-        durationMs,
-        metadata: {
-          framework: "express",
-          method,
-          path,
-          statusCode
-        },
-        name: `${method} ${path}`,
-        spanId,
-        status: statusCode >= 500 ? "error" : "ok"
-      })
-    };
-  } catch {
-    return undefined;
-  }
+  return {
+    id,
+    timestamp: now(),
+    type: "span",
+    attributes: {
+      name: `${method} ${path}`,
+      traceId: traceContext.traceId,
+      spanId: traceContext.spanId,
+      parentSpanId: traceContext.parentSpanId,
+      status: statusCode >= 500 ? "error" : "ok",
+      durationMs,
+      metadata: {
+        framework: "express",
+        method,
+        path,
+        sampled: traceContext.sampled,
+        statusCode
+      }
+    }
+  };
 }
 
 function captureRequestEvent(client, event) {
@@ -347,6 +355,58 @@ function randomHex(byteLength) {
   return hex === "0000000000000000" ? "0000000000000001" : hex;
 }
 
+function createRequestTraceContext(req, res, {
+  spanIdFactory = defaultSpanIdFactory
+} = {}) {
+  const traceparent = getTraceparentHeader(req);
+  if (!traceparent) {
+    return undefined;
+  }
+
+  try {
+    const context = parseTraceparent(traceparent);
+    const spanId = normalizeSpanId(spanIdFactory(req, res));
+    if (!spanId) {
+      return undefined;
+    }
+    return {
+      traceId: context.traceId,
+      spanId,
+      parentSpanId: context.parentSpanId,
+      sampled: context.sampled
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function getRequestTraceContext(req) {
+  return req.logbrew?.trace;
+}
+
+function normalizeSpanId(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const spanId = value.toLowerCase();
+  if (!/^[0-9a-f]{16}$/u.test(spanId) || spanId === "0000000000000000") {
+    return undefined;
+  }
+  return spanId;
+}
+
+function traceMetadata(trace) {
+  if (!trace) {
+    return {};
+  }
+  return {
+    parentSpanId: trace.parentSpanId,
+    sampled: trace.sampled,
+    spanId: trace.spanId,
+    traceId: trace.traceId
+  };
+}
+
 function readEnvApiKey() {
   return globalThis.process?.env?.LOGBREW_API_KEY;
 }
@@ -374,6 +434,7 @@ module.exports = {
   createLogBrewExpressClient,
   createRequestMetricEvent,
   createRequestEvent,
+  getActiveLogBrewTrace,
   logbrewErrorHandler,
   logbrewMiddleware
 };

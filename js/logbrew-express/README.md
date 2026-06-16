@@ -41,7 +41,7 @@ app.get("/health", (req, res) => {
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request and error metadata records the path without query text by default.
 
-When an incoming request has a valid W3C `traceparent` header, the default request capture records the request as a LogBrew `span` that continues the incoming trace. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
+When an incoming request has a valid W3C `traceparent` header, the middleware attaches `req.logbrew.trace` and the default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous work started by the Express middleware. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your app. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
 
 ```js
 app.use(logbrewMiddleware({
@@ -49,6 +49,31 @@ app.use(logbrewMiddleware({
   spanIdFactory: () => "b7ad6b7169203331",
   transport: RecordingTransport.alwaysAccept()
 }));
+```
+
+`req.logbrew.trace` contains only normalized W3C IDs and the sampled flag. It does not include request bodies, response bodies, headers, query strings, or the raw `traceparent` value. Use it to correlate app-owned logs, errors, product actions, and downstream milestones with the current request span:
+
+```js
+import { getActiveLogBrewTrace } from "@logbrew/express";
+
+app.get("/checkout/:cartId", async (req, res) => {
+  const trace = req.logbrew.trace ?? getActiveLogBrewTrace();
+
+  await Promise.resolve();
+
+  const metadata = trace
+    ? { routeTemplate: "/checkout/:cartId", traceId: trace.traceId, spanId: trace.spanId }
+    : { routeTemplate: "/checkout/:cartId" };
+
+  req.logbrew.client.log("evt_checkout_received", new Date().toISOString(), {
+    message: "checkout request accepted",
+    level: "info",
+    logger: "express",
+    metadata
+  });
+
+  res.json({ ok: true });
+});
 ```
 
 ## Request Metrics
@@ -79,7 +104,7 @@ app.use((err, _req, res, _next) => {
 });
 ```
 
-Express error-handling middleware uses four arguments: `(err, req, res, next)`. In Express 5, route handlers and middleware that return rejected promises are forwarded to error handlers automatically, so `logbrewErrorHandler()` is designed to capture and then pass the error onward to your existing response handler.
+Express error-handling middleware uses four arguments: `(err, req, res, next)`. In Express 5, route handlers and middleware that return rejected promises are forwarded to error handlers automatically, so `logbrewErrorHandler()` is designed to capture and then pass the error onward to your existing response handler. When the failing request passed through `logbrewMiddleware()` with a valid `traceparent`, the default error event includes trace correlation metadata without echoing the raw propagation header.
 
 ## Example Source
 
