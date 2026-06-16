@@ -123,6 +123,33 @@ headers = LogBrew::Traceparent.create_headers(
 
 The helper accepts W3C-shaped values, rejects forbidden or all-zero IDs, normalizes uppercase hex to lowercase, exposes the sampled flag, and creates LogBrew child span attributes with a new caller-provided span ID. It does not patch Ruby HTTP clients.
 
+## HTTP Request Trace Correlation
+
+Use `LogBrew::RackMiddleware` and `LogBrew::Trace.current` when request logs, handled errors, product actions, metrics, and the request span should share one W3C trace:
+
+```ruby
+app = lambda do |_env|
+  trace = LogBrew::Trace.current
+  logger.info("checkout started")
+  client.metric(
+    "evt_checkout_duration",
+    "2026-06-02T10:00:05Z",
+    name: "http.server.duration",
+    kind: "histogram",
+    value: 183.4,
+    unit: "ms",
+    temporality: "delta",
+    metadata: { routeTemplate: "/checkout/:cart_id", statusCode: 202 }
+  )
+  outgoing_headers = LogBrew::Trace.create_headers(trace)
+  [202, {}, ["ok"]]
+end
+
+rack = LogBrew::RackMiddleware.new(app, client: client)
+```
+
+The middleware reads only W3C `traceparent`, creates a request-local span ID, exposes `LogBrew::Trace.current` while your app runs, and uses that same span ID on the emitted request span. `LogBrew::Logger`, direct `client.log`, `client.issue`, `client.action`, `client.metric`, and `LogBrew::RailsErrorSubscriber` add active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata when a request trace is active. Malformed propagation falls back to a local root trace without raising into the app. Raw propagation values, request bodies, arbitrary headers, cookies, and query strings are not captured.
+
 ## Metrics
 
 Use `metric` for explicit, application-owned measurements. LogBrew validates the metric name, kind, value, unit, temporality, and optional metadata before queueing the event:

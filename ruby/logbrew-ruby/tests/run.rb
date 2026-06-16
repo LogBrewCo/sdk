@@ -524,8 +524,10 @@ response = rack.call(
   "QUERY_STRING" => "cart=123",
   "rack.url_scheme" => "https",
   "HTTP_X_REQUEST_ID" => "req_123",
-  "logbrew.trace_id" => "trace_rack",
-  "logbrew.span_id" => "span_rack"
+  "logbrew.trace_id" => "4bf92f3577b34da6a3ce929d0e0e4736",
+  "logbrew.span_id" => "b7ad6b7169203331",
+  "logbrew.parent_span_id" => "00f067aa0ba902b7",
+  "logbrew.trace_flags" => "01"
 )
 assert(response[0] == 200, "expected Rack response to pass through")
 rack_events = JSON.parse(client.preview_json).fetch("events")
@@ -535,8 +537,9 @@ assert(rack_span.fetch("id") == "rack_test_span_1", "expected Rack span id")
 assert(rack_span.fetch("timestamp") == "2026-06-02T10:00:08Z", "expected Rack timestamp")
 span_attributes = rack_span.fetch("attributes")
 assert(span_attributes.fetch("name") == "POST /checkout", "expected Rack span name")
-assert(span_attributes.fetch("traceId") == "trace_rack", "expected Rack trace id")
-assert(span_attributes.fetch("spanId") == "span_rack", "expected Rack span id")
+assert(span_attributes.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736", "expected Rack trace id")
+assert(span_attributes.fetch("spanId") == "b7ad6b7169203331", "expected Rack span id")
+assert(span_attributes.fetch("parentSpanId") == "00f067aa0ba902b7", "expected Rack parent span id")
 assert(span_attributes.fetch("status") == "ok", "expected Rack span status")
 assert(span_attributes.fetch("durationMs") >= 0, "expected Rack duration")
 span_metadata = span_attributes.fetch("metadata")
@@ -546,6 +549,9 @@ assert(span_metadata.fetch("source") == "rack", "expected Rack source")
 assert(span_metadata.fetch("http.method") == "POST", "expected Rack method metadata")
 assert(span_metadata.fetch("http.path") == "/checkout", "expected Rack path metadata")
 assert(span_metadata.fetch("http.status_code") == 200, "expected Rack status metadata")
+assert(span_metadata.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736", "expected Rack trace metadata")
+assert(span_metadata.fetch("spanId") == "b7ad6b7169203331", "expected Rack span metadata")
+assert(span_metadata.fetch("parentSpanId") == "00f067aa0ba902b7", "expected Rack parent metadata")
 assert(span_metadata.fetch("rack.url_scheme") == "https", "expected Rack scheme metadata")
 assert(span_metadata.fetch("HTTP_X_REQUEST_ID") == "req_123", "expected Rack request id metadata")
 assert(!span_metadata.fetch("http.path").include?("?"), "expected Rack middleware to omit query text")
@@ -560,7 +566,12 @@ rack = LogBrew::RackMiddleware.new(
   timestamp_provider: -> { Time.utc(2026, 6, 2, 10, 0, 9) }
 )
 begin
-  rack.call("REQUEST_METHOD" => "GET", "PATH_INFO" => "/boom", "logbrew.trace_id" => "trace_error", "logbrew.span_id" => "span_error")
+  rack.call(
+    "REQUEST_METHOD" => "GET",
+    "PATH_INFO" => "/boom",
+    "logbrew.trace_id" => "11111111111111111111111111111111",
+    "logbrew.span_id" => "2222222222222222"
+  )
   raise "expected Rack app exception"
 rescue RuntimeError => error
   assert(error.message == "checkout failed", "expected original Rack exception")
@@ -678,3 +689,4 @@ assert(errors[0].message.include?("client is already shut down"), "expected Rail
 tests += 1
 
 puts "ruby package tests ok (#{tests} tests)"
+load File.expand_path("trace_correlation.rb", __dir__)

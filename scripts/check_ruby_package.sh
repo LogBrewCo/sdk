@@ -35,9 +35,11 @@ grep -q '^summary: Public LogBrew Ruby SDK$' "$tmp_dir/spec.yaml"
 gem unpack "$tmp_dir/logbrew-sdk-0.1.0.gem" --target "$tmp_dir/unpacked" >/dev/null
 unpacked_dir="$tmp_dir/unpacked/logbrew-sdk-0.1.0"
 test -f "$unpacked_dir/lib/logbrew.rb"
+test -f "$unpacked_dir/lib/logbrew/trace.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
 test -f "$unpacked_dir/examples/real_user_smoke.rb"
+test -f "$unpacked_dir/examples/http_trace_correlation.rb"
 test -f "$unpacked_dir/examples/Makefile"
 grep -q 'gem install logbrew-sdk' "$unpacked_dir/README.md"
 grep -q 'LOGBREW_API_KEY' "$unpacked_dir/README.md"
@@ -47,6 +49,8 @@ grep -q 'Metric' "$unpacked_dir/README.md"
 grep -q 'LogBrew::HttpTransport' "$unpacked_dir/README.md"
 grep -q 'Net::HTTP' "$unpacked_dir/README.md"
 grep -q 'LogBrew::Logger' "$unpacked_dir/README.md"
+grep -q 'LogBrew::Trace.current' "$unpacked_dir/README.md"
+grep -q 'HTTP Request Trace Correlation' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RackMiddleware' "$unpacked_dir/README.md"
 grep -q 'Rack And Rails Middleware' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$unpacked_dir/README.md"
@@ -65,9 +69,14 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdo
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
 
+ruby -I "$package_dir/lib" "$package_dir/examples/http_trace_correlation.rb" > "$tmp_dir/http-trace.stdout.json" 2> "$tmp_dir/http-trace.stderr.json"
+python3 "$repo_root/scripts/check_ruby_http_trace_payload.py" "$tmp_dir/http-trace.stdout.json" "$tmp_dir/http-trace.stderr.json" >/dev/null
+
 make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
+grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/examples-help.txt"
+grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/examples-help.txt"
 
 echo "ruby package checks passed"

@@ -26,10 +26,12 @@ test -f "$unpacked_dir/logbrew-sdk.gemspec" || true
 test -f "$unpacked_dir/lib/logbrew.rb"
 test -f "$unpacked_dir/lib/logbrew/product_timeline.rb"
 test -f "$unpacked_dir/lib/logbrew/traceparent.rb"
+test -f "$unpacked_dir/lib/logbrew/trace.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
 test -f "$unpacked_dir/examples/real_user_smoke.rb"
 test -f "$unpacked_dir/examples/first_useful_telemetry.rb"
+test -f "$unpacked_dir/examples/http_trace_correlation.rb"
 test -f "$unpacked_dir/examples/Makefile"
 grep -q 'gem install logbrew-sdk' "$unpacked_dir/README.md"
 grep -q 'LOGBREW_API_KEY' "$unpacked_dir/README.md"
@@ -45,6 +47,8 @@ grep -q 'do not patch `Net::HTTP`' "$unpacked_dir/README.md"
 grep -q 'LogBrew::HttpTransport' "$unpacked_dir/README.md"
 grep -q 'Net::HTTP' "$unpacked_dir/README.md"
 grep -q 'LogBrew::Logger' "$unpacked_dir/README.md"
+grep -q 'LogBrew::Trace.current' "$unpacked_dir/README.md"
+grep -q 'HTTP Request Trace Correlation' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RackMiddleware' "$unpacked_dir/README.md"
 grep -q 'Rack And Rails Middleware' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$unpacked_dir/README.md"
@@ -57,12 +61,15 @@ grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/unpacked-exam
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/unpacked-examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/unpacked-examples-help.txt"
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/unpacked-examples-help.txt"
+grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/unpacked-examples-help.txt"
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-readme-example) > "$tmp_dir/unpacked-readme.stdout.json" 2> "$tmp_dir/unpacked-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/unpacked-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/unpacked-readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/unpacked-readme.stderr.json"
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-first-useful-telemetry) > "$tmp_dir/unpacked-first-useful.stdout.json" 2> "$tmp_dir/unpacked-first-useful.stderr.json"
 python3 "$repo_root/scripts/check_ruby_first_useful_payload.py" "$tmp_dir/unpacked-first-useful.stdout.json" "$tmp_dir/unpacked-first-useful.stderr.json" >/dev/null
+(cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run-http-trace-correlation) > "$tmp_dir/unpacked-http-trace.stdout.json" 2> "$tmp_dir/unpacked-http-trace.stderr.json"
+python3 "$repo_root/scripts/check_ruby_http_trace_payload.py" "$tmp_dir/unpacked-http-trace.stdout.json" "$tmp_dir/unpacked-http-trace.stderr.json" >/dev/null
 (cd "$unpacked_dir/examples" && RUBYLIB="$unpacked_dir/lib" make run) > "$tmp_dir/unpacked-smoke.stdout.json" 2> "$tmp_dir/unpacked-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/unpacked-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/unpacked-smoke.stdout.json" >/dev/null
@@ -85,18 +92,24 @@ GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBr
 grep -qx 'true' "$tmp_dir/installed-product-timeline.out"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::Traceparent.respond_to?(:parse)); puts(LogBrew::Traceparent.respond_to?(:create_headers))' > "$tmp_dir/installed-traceparent.out"
 grep -qx 'true' "$tmp_dir/installed-traceparent.out"
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::Trace.respond_to?(:current)); puts(LogBrew::Trace.respond_to?(:with_context)); puts(LogBrew::Trace.respond_to?(:create_headers))' > "$tmp_dir/installed-trace.out"
+grep -qx 'true' "$tmp_dir/installed-trace.out"
 gem_dir="$(GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "rubygems"; puts Gem::Specification.find_by_name("logbrew-sdk").gem_dir')"
 test -f "$gem_dir/README.md"
 test -f "$gem_dir/lib/logbrew/product_timeline.rb"
 test -f "$gem_dir/lib/logbrew/traceparent.rb"
+test -f "$gem_dir/lib/logbrew/trace.rb"
 test -f "$gem_dir/examples/readme_example.rb"
 test -f "$gem_dir/examples/real_user_smoke.rb"
 test -f "$gem_dir/examples/first_useful_telemetry.rb"
+test -f "$gem_dir/examples/http_trace_correlation.rb"
 test -f "$gem_dir/examples/Makefile"
 grep -q 'First Useful Service Telemetry' "$gem_dir/README.md"
 grep -q 'LogBrew::Traceparent' "$gem_dir/README.md"
 grep -q 'W3C Trace Context' "$gem_dir/README.md"
 grep -q 'LogBrew::RackMiddleware' "$gem_dir/README.md"
+grep -q 'LogBrew::Trace.current' "$gem_dir/README.md"
+grep -q 'HTTP Request Trace Correlation' "$gem_dir/README.md"
 grep -q 'client.metric' "$gem_dir/README.md"
 grep -q 'Metric' "$gem_dir/README.md"
 grep -q 'LogBrew::ProductTimeline' "$gem_dir/README.md"
@@ -113,6 +126,8 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"events":6' "$tmp_dir/installed-readme.stderr.json"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/first_useful_telemetry.rb" > "$tmp_dir/installed-first-useful.stdout.json" 2> "$tmp_dir/installed-first-useful.stderr.json"
 python3 "$repo_root/scripts/check_ruby_first_useful_payload.py" "$tmp_dir/installed-first-useful.stdout.json" "$tmp_dir/installed-first-useful.stderr.json" >/dev/null
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/http_trace_correlation.rb" > "$tmp_dir/installed-http-trace.stdout.json" 2> "$tmp_dir/installed-http-trace.stderr.json"
+python3 "$repo_root/scripts/check_ruby_http_trace_payload.py" "$tmp_dir/installed-http-trace.stdout.json" "$tmp_dir/installed-http-trace.stderr.json" >/dev/null
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/real_user_smoke.rb" > "$tmp_dir/installed-smoke.stdout.json" 2> "$tmp_dir/installed-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
@@ -122,6 +137,7 @@ grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/installed-exa
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/installed-examples-help.txt"
+grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/installed-examples-help.txt"
 
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" gem uninstall logbrew-sdk --all --executables --ignore-dependencies --force >/dev/null
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" gem list --local logbrew-sdk > "$tmp_dir/removed-gem-list.txt"
@@ -470,8 +486,10 @@ rack_response = rack.call(
   "QUERY_STRING" => "cart=123",
   "rack.url_scheme" => "https",
   "HTTP_X_REQUEST_ID" => "req_123",
-  "logbrew.trace_id" => "trace_rack",
-  "logbrew.span_id" => "span_rack"
+  "logbrew.trace_id" => "4bf92f3577b34da6a3ce929d0e0e4736",
+  "logbrew.span_id" => "b7ad6b7169203331",
+  "logbrew.parent_span_id" => "00f067aa0ba902b7",
+  "logbrew.trace_flags" => "01"
 )
 raise "expected Rack response passthrough" unless rack_response[0] == 201
 rack_payload = JSON.parse(rack_client.preview_json)
@@ -482,8 +500,9 @@ raise "expected Rack span id" unless rack_span.fetch("id") == "installed_rack_sp
 raise "expected Rack timestamp" unless rack_span.fetch("timestamp") == "2026-06-02T10:00:09Z"
 rack_attributes = rack_span.fetch("attributes")
 raise "expected Rack span name" unless rack_attributes.fetch("name") == "POST /checkout"
-raise "expected Rack trace id" unless rack_attributes.fetch("traceId") == "trace_rack"
-raise "expected Rack span id attribute" unless rack_attributes.fetch("spanId") == "span_rack"
+raise "expected Rack trace id" unless rack_attributes.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736"
+raise "expected Rack span id attribute" unless rack_attributes.fetch("spanId") == "b7ad6b7169203331"
+raise "expected Rack parent span" unless rack_attributes.fetch("parentSpanId") == "00f067aa0ba902b7"
 raise "expected Rack status" unless rack_attributes.fetch("status") == "ok"
 raise "expected Rack duration" unless rack_attributes.fetch("durationMs") >= 0
 rack_metadata = rack_attributes.fetch("metadata")
@@ -494,6 +513,9 @@ raise "expected Rack method" unless rack_metadata.fetch("http.method") == "POST"
 raise "expected Rack path" unless rack_metadata.fetch("http.path") == "/checkout"
 raise "expected Rack path without query" if rack_metadata.fetch("http.path").include?("?")
 raise "expected Rack status code" unless rack_metadata.fetch("http.status_code") == 201
+raise "expected Rack trace metadata" unless rack_metadata.fetch("traceId") == "4bf92f3577b34da6a3ce929d0e0e4736"
+raise "expected Rack span metadata" unless rack_metadata.fetch("spanId") == "b7ad6b7169203331"
+raise "expected Rack parent metadata" unless rack_metadata.fetch("parentSpanId") == "00f067aa0ba902b7"
 raise "expected Rack scheme" unless rack_metadata.fetch("rack.url_scheme") == "https"
 raise "expected Rack request id" unless rack_metadata.fetch("HTTP_X_REQUEST_ID") == "req_123"
 
@@ -505,7 +527,12 @@ rack_error = LogBrew::RackMiddleware.new(
   timestamp_provider: -> { Time.utc(2026, 6, 2, 10, 0, 10) }
 )
 begin
-  rack_error.call("REQUEST_METHOD" => "GET", "PATH_INFO" => "/boom", "logbrew.trace_id" => "trace_error", "logbrew.span_id" => "span_error")
+  rack_error.call(
+    "REQUEST_METHOD" => "GET",
+    "PATH_INFO" => "/boom",
+    "logbrew.trace_id" => "11111111111111111111111111111111",
+    "logbrew.span_id" => "2222222222222222"
+  )
   raise "expected Rack app exception"
 rescue RuntimeError => error
   raise "expected original Rack error" unless error.message == "checkout failed"

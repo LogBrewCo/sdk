@@ -330,7 +330,6 @@ module LogBrew
       value.is_a?(Float) && value.finite?
     end
   end
-
   # Rack-compatible middleware for Rails, Sinatra, and other Rack-based Ruby apps.
   #
   # The middleware captures completed requests as span events and unhandled app
@@ -997,3 +996,4 @@ end
 
 require_relative "logbrew/product_timeline"
 require_relative "logbrew/traceparent"
+require_relative "logbrew/trace"
