@@ -41,11 +41,16 @@ grep -q '^package/index.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.native.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/lifecycle.js$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/lifecycle.cjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/lifecycle.d.ts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/lifecycle.d.cts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/resource-fetch.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/resource-fetch.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/resource-fetch.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/resource-fetch.d.cts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/index.mjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/examples/lifecycle-spans.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/navigation-resource-spans.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/package.json$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/native-tarball.txt"
@@ -67,9 +72,11 @@ grep -q 'captureReactNativeNetwork' "$tmp_dir/native-readme.md"
 grep -q 'withLogBrewTrace' "$tmp_dir/native-readme.md"
 grep -q 'getActiveLogBrewTrace' "$tmp_dir/native-readme.md"
 grep -q 'createReactNavigationSpanListener' "$tmp_dir/native-readme.md"
+grep -q 'createAppStateLifecycleSpanListener' "$tmp_dir/native-readme.md"
 grep -q 'captureReactNativeResourceSpan' "$tmp_dir/native-readme.md"
 grep -q 'createReactNativeResourceFetch' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/resource-fetch' "$tmp_dir/native-readme.md"
+grep -q '@logbrew/react-native/lifecycle' "$tmp_dir/native-readme.md"
 
 app_dir="$tmp_dir/react-native-smoke-app"
 mkdir -p "$app_dir"
@@ -97,6 +104,7 @@ grep -q '"react":' package.json
 grep -q '"@logbrew/react-native"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
 grep -q '"react-native": "./index.native.js"' node_modules/@logbrew/react-native/package.json
+grep -q '"./lifecycle"' node_modules/@logbrew/react-native/package.json
 npm ls @logbrew/sdk @logbrew/react-native react react-native react-test-renderer >/dev/null
 npm explain @logbrew/react-native > "$tmp_dir/npm-explain-native.txt"
 grep -q '@logbrew/react-native@0.1.0' "$tmp_dir/npm-explain-native.txt"
@@ -116,9 +124,12 @@ for name in ("@logbrew/react-native", "@logbrew/sdk", "react", "react-native"):
         raise SystemExit(f"missing npm dependency entry: {name}")
 PY
 node --check node_modules/@logbrew/react-native/index.native.js
+node --check node_modules/@logbrew/react-native/lifecycle.js
+node --check node_modules/@logbrew/react-native/lifecycle.cjs
 node --check node_modules/@logbrew/react-native/resource-fetch.js
 node --check node_modules/@logbrew/react-native/resource-fetch.cjs
 node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.captureReactNativeNavigationSpan !== "function" || typeof native.captureReactNativeResourceSpan !== "function" || typeof native.createReactNavigationSpanListener !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.createReactNativeNavigationSpanEvent !== "function" || typeof native.createReactNativeResourceSpanEvent !== "function" || typeof native.default !== "object") process.exit(1)'
+node -e 'const lifecycle = require("@logbrew/react-native/lifecycle"); if (typeof lifecycle.createAppStateLifecycleSpanListener !== "function" || typeof lifecycle.captureReactNativeLifecycleSpan !== "function" || typeof lifecycle.createReactNativeLifecycleSpanEvent !== "function") process.exit(1)'
 node -e 'const nativeResourceFetch = require("@logbrew/react-native/resource-fetch"); if (typeof nativeResourceFetch.createReactNativeResourceFetch !== "function") process.exit(1)'
 
 cat > smoke.mjs <<'EOF'
@@ -149,6 +160,9 @@ import {
   withLogBrewTrace,
   useLogBrewNativeActions
 } from "@logbrew/react-native";
+import {
+  createAppStateLifecycleSpanListener
+} from "@logbrew/react-native/lifecycle";
 import { createReactNativeResourceFetch } from "@logbrew/react-native/resource-fetch";
 
 const platform = {
@@ -266,6 +280,65 @@ withLogBrewTrace(providerTrace, () => {
     appState
   });
 });
+
+const lifecycleClient = createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-native-lifecycle-smoke",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+const lifecycleTimes = [1000, 1125, 1600];
+const lifecycleTimestamps = [
+  "2026-06-02T10:00:09Z",
+  "2026-06-02T10:00:10Z",
+  "2026-06-02T10:00:11Z"
+];
+const stopLifecycleListening = createAppStateLifecycleSpanListener(lifecycleClient, appState, {
+  captureInitialState: true,
+  metadata: { flow: "checkout", nested: { dropped: true } },
+  now: () => lifecycleTimestamps.shift(),
+  nowMs: () => lifecycleTimes.shift(),
+  platform,
+  screen: "Checkout",
+  sessionId: "session_mobile_001",
+  trace: providerTrace
+});
+appState.currentState = "inactive";
+appStateListener("inactive");
+appState.currentState = "background";
+appStateListener("background");
+stopLifecycleListening();
+appState.currentState = "active";
+const lifecycleEvents = JSON.parse(lifecycleClient.previewJson()).events;
+if (lifecycleEvents.length !== 3) {
+  throw new Error(`expected three lifecycle spans, got ${lifecycleEvents.length}`);
+}
+const lifecycleInitial = lifecycleEvents[0].attributes;
+const lifecycleInactive = lifecycleEvents[1].attributes;
+const lifecycleBackground = lifecycleEvents[2].attributes;
+if (
+  lifecycleInitial.name !== "app_state:active" ||
+  lifecycleInitial.metadata.toAppState !== "active" ||
+  lifecycleInitial.metadata.traceId !== providerTrace.traceId
+) {
+  throw new Error(`unexpected initial lifecycle span: ${JSON.stringify(lifecycleInitial)}`);
+}
+if (
+  lifecycleInactive.name !== "app_state:active->inactive" ||
+  lifecycleInactive.durationMs !== 125 ||
+  lifecycleInactive.metadata.fromAppState !== "active" ||
+  lifecycleInactive.metadata.toAppState !== "inactive" ||
+  lifecycleInactive.metadata.nested !== undefined
+) {
+  throw new Error(`unexpected inactive lifecycle span: ${JSON.stringify(lifecycleInactive)}`);
+}
+if (
+  lifecycleBackground.name !== "app_state:inactive->background" ||
+  lifecycleBackground.durationMs !== 475 ||
+  lifecycleBackground.metadata.appState !== "background"
+) {
+  throw new Error(`unexpected background lifecycle span: ${JSON.stringify(lifecycleBackground)}`);
+}
 const handledError = new Error("Checkout failed on device");
 handledError.stack = "Error: Checkout failed on device\n    at checkout (app://Checkout.js:12:4)";
 captureReactNativeError(client, handledError, {
@@ -560,6 +633,8 @@ console.error(JSON.stringify({
   status: response.statusCode,
   attempts: response.attempts,
   events: 12,
+  lifecycleEvents: lifecycleEvents.length,
+  lifecycleSpan: lifecycleBackground.name,
   timelineEvents: timelineEvents.length,
   networkAction: timelineNetwork.name,
   listenerRemoved: appStateListener === null,
@@ -615,6 +690,8 @@ PY
 grep -q '"ok":true' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"listenerRemoved":true' "$tmp_dir/native-smoke.stderr.json"
+grep -q '"lifecycleEvents":3' "$tmp_dir/native-smoke.stderr.json"
+grep -q '"lifecycleSpan":"app_state:inactive->background"' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"timelineEvents":6' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/native-smoke.stderr.json"
@@ -662,6 +739,11 @@ import {
   type ReactNativeTraceContext,
   type TracePropagationTarget
 } from "@logbrew/react-native";
+import {
+  captureReactNativeLifecycleSpan,
+  createAppStateLifecycleSpanListener,
+  createReactNativeLifecycleSpanEvent
+} from "@logbrew/react-native/lifecycle";
 import { createReactNativeResourceFetch } from "@logbrew/react-native/resource-fetch";
 
 const platform: ReactNativePlatformLike = {
@@ -774,6 +856,30 @@ captureReactNativeResourceSpan(client, {
   durationMs: 128,
   trace
 });
+const lifecycleSpan = createReactNativeLifecycleSpanEvent({
+  fromState: "active",
+  toState: "background",
+  durationMs: 640,
+  screen: "Checkout",
+  sessionId: "session_123",
+  trace
+});
+captureReactNativeLifecycleSpan(client, {
+  fromState: "background",
+  toState: "active",
+  durationMs: 320,
+  screen: "Checkout",
+  trace,
+  metadata: lifecycleSpan.attributes.metadata
+});
+const stopLifecycle = createAppStateLifecycleSpanListener(client, appState, {
+  captureInitialState: true,
+  trace,
+  platform,
+  screen: "Checkout",
+  sessionId: "session_123"
+});
+stopLifecycle();
 let currentRoute = { key: "Checkout-1", name: "Checkout", path: "/checkout?email=hidden" };
 const navigationListeners = new Map<string, (event?: unknown) => void>();
 const navigationContainer = {
@@ -864,11 +970,13 @@ EOF
 npx tsc --project tsconfig.json
 
 node node_modules/@logbrew/react-native/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
+grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation' "$tmp_dir/launcher-help.txt"
 node node_modules/@logbrew/react-native/examples/index.mjs --list > "$tmp_dir/launcher-list.txt"
+grep -q 'lifecycle-spans -> node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans' "$tmp_dir/launcher-list.txt"
 grep -q 'navigation-resource-spans -> node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/react-native/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 grep -q 'resource-fetch-spans -> node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans' "$tmp_dir/launcher-list.txt"
@@ -882,6 +990,12 @@ grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q '"events":8' "$tmp_dir/example-default.stderr.json"
 grep -q '"timelineEvents":3' "$tmp_dir/example-default.stderr.json"
 grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/example-default.stderr.json"
+node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans > "$tmp_dir/example-lifecycle.stdout.json" 2> "$tmp_dir/example-lifecycle.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-lifecycle.stdout.json" >/dev/null
+grep -q '"events":4' "$tmp_dir/example-lifecycle.stderr.json"
+grep -q '"inactiveSpan":"app_state:active->inactive"' "$tmp_dir/example-lifecycle.stderr.json"
+grep -q '"backgroundSpan":"app_state:inactive->background"' "$tmp_dir/example-lifecycle.stderr.json"
+grep -q '"listenerRemoved":true' "$tmp_dir/example-lifecycle.stderr.json"
 node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation > "$tmp_dir/example-trace.stdout.json" 2> "$tmp_dir/example-trace.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-trace.stdout.json" >/dev/null
 python3 - "$tmp_dir/example-trace.stdout.json" <<'PY'
@@ -915,10 +1029,12 @@ grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-c2ad6b7169
 grep -q '"listenerRemoved":true' "$tmp_dir/example-default.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/react-native/examples run list > "$tmp_dir/npm-helper-list.txt"
+grep -q 'lifecycle-spans -> node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans' "$tmp_dir/npm-helper-list.txt"
 grep -q 'navigation-resource-spans -> node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/npm-helper-list.txt"
 grep -q 'readme-example -> node node_modules/@logbrew/react-native/examples/index.mjs readme-example' "$tmp_dir/npm-helper-list.txt"
 grep -q 'resource-fetch-spans -> node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans' "$tmp_dir/npm-helper-list.txt"
 npm --prefix node_modules/@logbrew/react-native/examples run help > "$tmp_dir/npm-helper-help.txt"
+grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run lifecycle-spans' "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run resource-fetch-spans' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/react-native/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"

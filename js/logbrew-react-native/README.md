@@ -6,7 +6,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, and opt-in resource fetch spans.
+This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, and opt-in resource fetch spans.
 
 ## Install
 
@@ -223,20 +223,36 @@ await tracedFetch("https://api.example.com/checkout", {
 
 When `traceparentFactory` is omitted, `createTraceparentFetch()` reuses the supplied or active trace context. `tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. String URL targets apply only to the same origin plus a path prefix, so `https://api.example.com/v1` covers `/v1/orders` on that origin but not `https://wrong.example.com` or `/v10`. Keep targets narrow so mobile requests do not send tracing headers to unrelated origins. If the API is cross-origin or behind a gateway, allow the `traceparent` request header there too.
 
-## Navigation And Resource Spans
+## Lifecycle, Navigation, And Resource Spans
 
-Use explicit span helpers when you want route changes and API resources to appear in the same trace as mobile actions and errors. The React Navigation listener accepts a navigation container ref shape without adding a React Navigation dependency:
+Use explicit span helpers when you want app foreground/background transitions, route changes, and API resources to appear in the same trace as mobile actions and errors. The AppState lifecycle listener records app-owned lifecycle spans without replacing the simpler action-only `createAppStateListener()`:
+
+```js
+import { createReactNativeTraceContext } from "@logbrew/react-native";
+import { createAppStateLifecycleSpanListener } from "@logbrew/react-native/lifecycle";
+
+const trace = createReactNativeTraceContext({
+  traceparent: incomingTraceparent
+});
+
+const stopLifecycleTracing = createAppStateLifecycleSpanListener(client, AppState, {
+  trace,
+  platform: Platform,
+  screen: "Checkout",
+  sessionId: "session_123",
+  captureInitialState: true
+});
+```
+
+`createAppStateLifecycleSpanListener()` captures the current AppState as primitive metadata, records transition names such as `app_state:active->background`, and measures duration from the previous observed state when possible. It does not patch React Native internals, derive session health, or inspect native bridge state.
+
+The React Navigation listener accepts a navigation container ref shape without adding a React Navigation dependency:
 
 ```js
 import {
   captureReactNativeResourceSpan,
   createReactNavigationSpanListener,
-  createReactNativeTraceContext
 } from "@logbrew/react-native";
-
-const trace = createReactNativeTraceContext({
-  traceparent: incomingTraceparent
-});
 
 const stopNavigationTracing = createReactNavigationSpanListener(client, navigationRef, {
   trace,
@@ -284,6 +300,7 @@ The package includes example source for screen views, app-state metadata, handle
 
 ```bash
 node node_modules/@logbrew/react-native/examples/index.mjs --list
+node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans
 node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans
 node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans
 node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const commands = new Map([
+  ["lifecycle-spans", new URL("./lifecycle-spans.mjs", import.meta.url)],
   ["navigation-resource-spans", new URL("./navigation-resource-spans.mjs", import.meta.url)],
   ["readme-example", new URL("./readme-example.mjs", import.meta.url)],
   ["real-user-smoke", new URL("./real-user-smoke.mjs", import.meta.url)],
@@ -24,6 +25,7 @@ if (command === "--help" || command === "-h") {
 
 function printHelp() {
   console.log("LogBrew React Native examples");
+  console.log("node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs --list");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs readme-example");
@@ -32,6 +34,7 @@ function printHelp() {
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run list");
+  console.log("npm --prefix node_modules/@logbrew/react-native/examples run lifecycle-spans");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run navigation-resource-spans");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run readme-example");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run real-user-smoke");
@@ -40,6 +43,7 @@ function printHelp() {
 }
 
 function printList() {
+  console.log("lifecycle-spans -> node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans");
   console.log("navigation-resource-spans -> node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans");
   console.log("readme-example -> node node_modules/@logbrew/react-native/examples/index.mjs readme-example");
   console.log("real-user-smoke -> node node_modules/@logbrew/react-native/examples/index.mjs real-user-smoke");

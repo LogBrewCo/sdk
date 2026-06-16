@@ -3,6 +3,7 @@
   "type": "module",
   "scripts": {
     "help": "node ./index.mjs --help",
+    "lifecycle-spans": "node ./index.mjs lifecycle-spans",
     "list": "node ./index.mjs --list",
     "navigation-resource-spans": "node ./index.mjs navigation-resource-spans",
     "readme-example": "node ./index.mjs readme-example",

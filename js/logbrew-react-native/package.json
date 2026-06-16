@@ -20,6 +20,17 @@
       },
       "default": "./index.js"
     },
+    "./lifecycle": {
+      "import": {
+        "types": "./lifecycle.d.ts",
+        "default": "./lifecycle.js"
+      },
+      "require": {
+        "types": "./lifecycle.d.cts",
+        "default": "./lifecycle.cjs"
+      },
+      "default": "./lifecycle.js"
+    },
     "./resource-fetch": {
       "import": {
         "types": "./resource-fetch.d.ts",
@@ -38,6 +49,10 @@
     "index.native.js",
     "index.d.ts",
     "index.d.cts",
+    "lifecycle.cjs",
+    "lifecycle.js",
+    "lifecycle.d.ts",
+    "lifecycle.d.cts",
     "resource-fetch.cjs",
     "resource-fetch.js",
     "resource-fetch.d.ts",
@@ -69,6 +84,6 @@
     "react-native": ">=0.72"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check examples/index.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check lifecycle.js && node --check lifecycle.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check examples/index.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs"
   }
 }

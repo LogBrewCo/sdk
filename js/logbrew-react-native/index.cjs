@@ -559,13 +559,7 @@ function createAppStateListener(client, appState, options = {}) {
     });
   });
 
-  if (typeof subscription === "function") {
-    return subscription;
-  }
-  if (subscription && typeof subscription.remove === "function") {
-    return () => subscription.remove();
-  }
-  return () => {};
+  return subscriptionRemover(subscription);
 }
 
 function LogBrewNativeProvider({ client, platform, appState, trace, children }) {
@@ -924,6 +918,10 @@ function resolveNavigationContainer(navigationContainer) {
 
 function addNavigationListener(container, eventName, listener) {
   const subscription = container.addListener(eventName, listener);
+  return subscriptionRemover(subscription);
+}
+
+function subscriptionRemover(subscription) {
   if (typeof subscription === "function") {
     return subscription;
   }
