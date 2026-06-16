@@ -58,6 +58,7 @@ test -f "$sdk_dir/src/LogBrewTrace.m"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.h"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.m"
 test -f "$sdk_dir/src/LogBrewURLSession.m"
+test -f "$sdk_dir/src/LogBrewLifecycle.m"
 test -f "$sdk_dir/src/LBWHTTPTransport.m"
 grep -q 'LBWHTTPTransport' "$sdk_dir/include/LogBrew.h"
 grep -q 'LBWTraceContext' "$sdk_dir/include/LogBrew.h"
@@ -66,6 +67,7 @@ grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'startURLSessionSpanForRequest' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureURLSessionSpanWithID' "$sdk_dir/include/LogBrew.h"
+grep -q 'captureLifecycleSpanWithID' "$sdk_dir/include/LogBrew.h"
 
 rm -rf "$sdk_dir"
 if [[ -d "$sdk_dir" ]]; then
@@ -80,6 +82,7 @@ test -f "$sdk_dir/src/LogBrewTrace.m"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.h"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.m"
 test -f "$sdk_dir/src/LogBrewURLSession.m"
+test -f "$sdk_dir/src/LogBrewLifecycle.m"
 test -f "$sdk_dir/src/LBWHTTPTransport.m"
 grep -q 'LBWHTTPTransport' "$sdk_dir/include/LogBrew.h"
 grep -q 'LBWTraceContext' "$sdk_dir/include/LogBrew.h"
@@ -88,6 +91,7 @@ grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'startURLSessionSpanForRequest' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureURLSessionSpanWithID' "$sdk_dir/include/LogBrew.h"
+grep -q 'captureLifecycleSpanWithID' "$sdk_dir/include/LogBrew.h"
 
 cat > "$app_dir/main.m" <<'EOF'
 #import "LogBrew.h"
@@ -349,6 +353,7 @@ EOF
   "$sdk_dir/src/LogBrewTrace.m" \
   "$sdk_dir/src/LogBrewNetworkValidation.m" \
   "$sdk_dir/src/LogBrewURLSession.m" \
+  "$sdk_dir/src/LogBrewLifecycle.m" \
   "$app_dir/main.m" \
   -framework Foundation \
   -o "$app_dir/native_objc_app"
@@ -484,6 +489,7 @@ fi
   "$sdk_dir/src/LogBrewTrace.m" \
   "$sdk_dir/src/LogBrewNetworkValidation.m" \
   "$sdk_dir/src/LogBrewURLSession.m" \
+  "$sdk_dir/src/LogBrewLifecycle.m" \
   "$sdk_dir/src/LBWHTTPTransport.m" \
   "$app_dir/http_app.m" \
   -framework Foundation \

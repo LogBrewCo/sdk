@@ -127,6 +127,36 @@ def main() -> None:
         if forbidden in raw_payload:
             fail(f"URLSession span leaked forbidden text: {forbidden}")
 
+    lifecycle_span = event_by_id(payload, "evt_trace_lifecycle_001").get("attributes", {})
+    lifecycle_span_id = lifecycle_span.get("spanId")
+    if lifecycle_span.get("traceId") != TRACE_ID:
+        fail("lifecycle span did not continue incoming trace")
+    if not re.fullmatch(r"[0-9a-f]{16}", lifecycle_span_id or ""):
+        fail(f"lifecycle span id was invalid: {lifecycle_span_id}")
+    if lifecycle_span_id == local_span_id:
+        fail("lifecycle child span reused active span id")
+    if lifecycle_span.get("parentSpanId") != local_span_id:
+        fail("lifecycle span did not link to active local span")
+    if lifecycle_span.get("name") != "objc.lifecycle:active->background" or lifecycle_span.get("status") != "ok":
+        fail("lifecycle span name/status was not preserved")
+    if lifecycle_span.get("durationMs") != 1532.25:
+        fail("lifecycle duration was not preserved")
+    lifecycle_metadata = lifecycle_span.get("metadata", {})
+    if lifecycle_metadata.get("source") != "objc.lifecycle":
+        fail("lifecycle span source metadata missing")
+    if lifecycle_metadata.get("traceId") != TRACE_ID or lifecycle_metadata.get("spanId") != lifecycle_span_id:
+        fail("lifecycle metadata did not use child trace context")
+    if lifecycle_metadata.get("parentSpanId") != local_span_id:
+        fail("lifecycle metadata did not link to active local span")
+    if lifecycle_metadata.get("previousState") != "active" or lifecycle_metadata.get("currentState") != "background":
+        fail("lifecycle states were not preserved")
+    if lifecycle_metadata.get("durationSource") != "previous_state":
+        fail("lifecycle duration source was not preserved")
+    if lifecycle_metadata.get("screen") != "Checkout" or lifecycle_metadata.get("component") != "app-delegate":
+        fail("lifecycle app metadata was not preserved")
+    if lifecycle_metadata.get("traceId") == "spoofed_trace":
+        fail("caller-supplied lifecycle traceId overrode child trace metadata")
+
     print("objc trace correlation payload passed")
 
 

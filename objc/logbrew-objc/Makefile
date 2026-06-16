@@ -2,7 +2,7 @@ OBJC ?= clang
 OBJCFLAGS ?= -fobjc-arc -Wall -Wextra -Wpedantic -Werror -Iinclude
 LDFLAGS ?= -framework Foundation
 BUILD_DIR ?= build
-CORE_SOURCES := src/LogBrew.m src/LogBrewTrace.m src/LogBrewNetworkValidation.m src/LogBrewURLSession.m
+CORE_SOURCES := src/LogBrew.m src/LogBrewTrace.m src/LogBrewNetworkValidation.m src/LogBrewURLSession.m src/LogBrewLifecycle.m
 
 .PHONY: all test examples clean
 

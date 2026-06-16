@@ -29,25 +29,25 @@ objcflags=(-fobjc-arc -Wall -Wextra -Wpedantic -Werror -I"$package_dir/include")
 ldflags=(-framework Foundation)
 
 mkdir -p "$tmp_dir/build"
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/src/LBWHTTPTransport.m" "$package_dir/tests/test_logbrew.m" \
+"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/src/LogBrewLifecycle.m" "$package_dir/src/LBWHTTPTransport.m" "$package_dir/tests/test_logbrew.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/test_logbrew"
 "$tmp_dir/build/test_logbrew"
 
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/examples/readme_example.m" \
+"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/src/LogBrewLifecycle.m" "$package_dir/examples/readme_example.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/readme_example"
 "$tmp_dir/build/readme_example" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/examples/real_user_smoke.m" \
+"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/src/LogBrewLifecycle.m" "$package_dir/examples/real_user_smoke.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/real_user_smoke"
 "$tmp_dir/build/real_user_smoke" > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/smoke.stderr.json"
 
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/examples/trace_correlation.m" \
+"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/src/LogBrewLifecycle.m" "$package_dir/examples/trace_correlation.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/trace_correlation"
 "$tmp_dir/build/trace_correlation" > "$tmp_dir/trace.stdout.json" 2> "$tmp_dir/trace.stderr.json"
 python3 "$repo_root/scripts/check_objc_trace_correlation_payload.py" "$tmp_dir/trace.stdout.json" "$tmp_dir/trace.stderr.json" >/dev/null
@@ -69,6 +69,7 @@ grep -qx 'src/LogBrewTrace.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LogBrewNetworkValidation.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LogBrewNetworkValidation.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LogBrewURLSession.m' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/LogBrewLifecycle.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LBWHTTPTransport.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/readme_example.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/real_user_smoke.m' "$tmp_dir/archive-contents.txt"
@@ -106,6 +107,7 @@ for needle in (
     "LBWURLSessionSpan",
     "startURLSessionSpanForRequest",
     "captureURLSessionSpanWithID",
+    "captureLifecycleSpanWithID",
     "metricWithID",
     "captureProductActionWithID",
     "captureNetworkMilestoneWithID",

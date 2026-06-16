@@ -227,6 +227,19 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 
 @end
 
+@interface LBWClient (Lifecycle)
+
+- (BOOL)captureLifecycleSpanWithID:(NSString *)eventID
+                          timestamp:(NSString *)timestamp
+                      previousState:(NSString *)previousState
+                       currentState:(NSString *)currentState
+                         durationMs:(nullable NSNumber *)durationMs
+                            context:(nullable NSDictionary<NSString *, id> *)context
+                           metadata:(nullable NSDictionary<NSString *, id> *)metadata
+                              error:(NSError *_Nullable *_Nullable)error;
+
+@end
+
 NS_ASSUME_NONNULL_END
 
 #endif

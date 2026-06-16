@@ -98,6 +98,14 @@ int main(void) {
                                       errorType:nil
                                        metadata:@{@"component": @"pay-api"}
                                           error:&error], error);
+    LBWMust([client captureLifecycleSpanWithID:@"evt_trace_lifecycle_001"
+                                     timestamp:@"2026-06-02T10:00:09Z"
+                                 previousState:@"active"
+                                  currentState:@"background"
+                                    durationMs:@1532.25
+                                       context:@{@"screen": @"Checkout", @"traceId": @"spoofed_trace"}
+                                      metadata:@{@"component": @"app-delegate"}
+                                         error:&error], error);
 
     NSDictionary<NSString *, NSString *> *headers = [LBWTrace outgoingHeaders];
     fprintf(stderr, "{\"traceparent\":\"%s\"}\n", [headers[@"traceparent"] UTF8String]);

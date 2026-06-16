@@ -420,6 +420,14 @@ static void LBWExerciseTraceHelpers(void) {
                                       errorType:nil
                                        metadata:@{@"component": @"pay-api"}
                                           error:&error], @"URLSession span capture failed");
+  LBWAssert([client captureLifecycleSpanWithID:@"evt_trace_lifecycle_001"
+                                     timestamp:@"2026-06-02T10:00:09Z"
+                                 previousState:@" active "
+                                  currentState:@"background"
+                                    durationMs:@1532.25
+                                       context:@{@"screen": @"Checkout", @"traceId": @"spoofed_trace"}
+                                      metadata:@{@"component": @"app-delegate"}
+                                         error:&error], @"lifecycle span capture failed");
 
   NSString *preview = [client previewJSONWithError:&error];
   LBWAssert(preview != nil, @"trace preview failed");
@@ -447,11 +455,46 @@ static void LBWExerciseTraceHelpers(void) {
   LBWAssert([urlMetadata[@"method"] isEqualToString:@"POST"], @"URLSession metadata method failed");
   LBWAssert([urlMetadata[@"statusCode"] isEqual:@503], @"URLSession statusCode failed");
   LBWAssert([urlMetadata[@"component"] isEqualToString:@"pay-api"], @"URLSession app metadata failed");
+  NSDictionary<NSString *, id> *lifecycleSpan = LBWEventWithID(payload, @"evt_trace_lifecycle_001")[@"attributes"];
+  LBWAssert([lifecycleSpan[@"traceId"] isEqualToString:context.traceID], @"lifecycle trace id failed");
+  LBWAssert([lifecycleSpan[@"parentSpanId"] isEqualToString:context.spanID], @"lifecycle parent failed");
+  LBWAssert(![lifecycleSpan[@"spanId"] isEqualToString:context.spanID], @"lifecycle child span reused parent");
+  LBWAssert([lifecycleSpan[@"name"] isEqualToString:@"objc.lifecycle:active->background"], @"lifecycle name failed");
+  LBWAssert([lifecycleSpan[@"status"] isEqualToString:@"ok"], @"lifecycle status failed");
+  LBWAssert([lifecycleSpan[@"durationMs"] doubleValue] == 1532.25, @"lifecycle duration failed");
+  NSDictionary<NSString *, id> *lifecycleMetadata = lifecycleSpan[@"metadata"];
+  LBWAssert([lifecycleMetadata[@"source"] isEqualToString:@"objc.lifecycle"], @"lifecycle source failed");
+  LBWAssert([lifecycleMetadata[@"previousState"] isEqualToString:@"active"], @"lifecycle previous state failed");
+  LBWAssert([lifecycleMetadata[@"currentState"] isEqualToString:@"background"], @"lifecycle current state failed");
+  LBWAssert([lifecycleMetadata[@"durationSource"] isEqualToString:@"previous_state"], @"lifecycle duration source failed");
+  LBWAssert([lifecycleMetadata[@"screen"] isEqualToString:@"Checkout"], @"lifecycle context failed");
+  LBWAssert([lifecycleMetadata[@"component"] isEqualToString:@"app-delegate"], @"lifecycle app metadata failed");
+  LBWAssert([lifecycleMetadata[@"traceId"] isEqualToString:context.traceID], @"lifecycle trace metadata failed");
+  LBWAssert(![lifecycleMetadata[@"traceId"] isEqualToString:@"spoofed_trace"], @"lifecycle spoofed trace won");
   LBWAssert([preview rangeOfString:@"cart=123"].location == NSNotFound, @"URLSession leaked query");
   LBWAssert([preview rangeOfString:@"#pay"].location == NSNotFound, @"URLSession leaked fragment");
   LBWAssert([preview rangeOfString:@"app-owned-header-value"].location == NSNotFound,
             @"URLSession leaked app header");
   LBWAssert([preview rangeOfString:@"traceparent"].location == NSNotFound, @"URLSession leaked traceparent");
+
+  BOOL ok = [client captureLifecycleSpanWithID:@"evt_bad_lifecycle"
+                                     timestamp:@"2026-06-02T10:00:09Z"
+                                 previousState:@""
+                                  currentState:@"background"
+                                    durationMs:nil
+                                       context:nil
+                                      metadata:nil
+                                         error:&error];
+  LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"bad lifecycle state failed");
+  ok = [client captureLifecycleSpanWithID:@"evt_bad_lifecycle_duration"
+                                timestamp:@"2026-06-02T10:00:09Z"
+                            previousState:@"active"
+                             currentState:@"background"
+                               durationMs:@-1
+                                  context:nil
+                                 metadata:nil
+                                    error:&error];
+  LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"bad lifecycle duration failed");
   [scope close];
   LBWAssert([LBWTrace currentContext] == nil, @"trace scope close failed");
 }

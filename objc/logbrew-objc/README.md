@@ -12,8 +12,7 @@ Copy `include/LogBrew.h` and the Objective-C files in `src/` into your app targe
 
 ```bash
 clang -fobjc-arc -Iobjc/logbrew-objc/include \
-  objc/logbrew-objc/src/LogBrew.m \
-  objc/logbrew-objc/src/LogBrewTrace.m \
+  objc/logbrew-objc/src/*.m \
   your_app.m \
   -framework Foundation \
   -o your_app
@@ -79,9 +78,7 @@ Use `LBWHTTPTransport` when your application is ready to send events to the host
 
 ```bash
 clang -fobjc-arc -Iobjc/logbrew-objc/include \
-  objc/logbrew-objc/src/LogBrew.m \
-  objc/logbrew-objc/src/LogBrewTrace.m \
-  objc/logbrew-objc/src/LBWHTTPTransport.m \
+  objc/logbrew-objc/src/*.m \
   your_app.m \
   -framework Foundation \
   -o your_app
@@ -184,13 +181,24 @@ LBWURLSessionSpan *urlSessionSpan = [LBWTrace startURLSessionSpanForRequest:requ
                             metadata:@{@"component": @"pay-api"}
                                error:&error];
 
+[client captureLifecycleSpanWithID:@"evt_trace_lifecycle_001"
+                          timestamp:@"2026-06-02T10:00:09Z"
+                      previousState:@"active"
+                       currentState:@"background"
+                         durationMs:@1532.25
+                            context:@{@"screen": @"Checkout"}
+                           metadata:@{@"component": @"app-delegate"}
+                              error:&error];
+
 NSDictionary *headers = [LBWTrace outgoingHeaders];
 [scope close];
 ```
 
 `continueOrCreateContextFromTraceparent:` accepts valid W3C `traceparent` values, creates a fresh local span ID, and falls back to a local root trace for malformed propagation. While a scope is active on the current thread, issue, log, action, and metric metadata receive `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled`; active trace fields override caller-supplied trace metadata so telemetry stays internally consistent. `outgoingHeaders` returns only a normalized `traceparent` header for app-owned HTTP clients. `startURLSessionSpanForRequest:error:` copies your request, adds only `traceparent`, strips query strings and fragments from the span route, and returns a child span context for `captureURLSessionSpanWithID:...` when your request completes.
 
-The trace helpers do not patch `NSURLSession`, do not collect headers or payloads, do not serialize the raw incoming `traceparent`, and do not capture query strings or fragments. They also do not add baggage or tracestate. Use only the project-scoped client key shown by LogBrew setup examples when sending telemetry.
+Use `captureLifecycleSpanWithID:...` from app-owned AppDelegate, SceneDelegate, UIKit, or AppKit lifecycle hooks when a foreground/background or view lifecycle transition is already known to your app. It creates a child span under the active trace, stores primitive lifecycle metadata such as `previousState`, `currentState`, `screen`, and `durationSource`, and leaves session-health decisions to your application and backend-owned setup state.
+
+The trace helpers do not patch `NSURLSession`, do not observe application lifecycle notifications, do not swizzle UIKit/AppKit methods, do not collect headers or payloads, do not serialize the raw incoming `traceparent`, and do not capture query strings or fragments. They also do not add baggage or tracestate. Use only the project-scoped client key shown by LogBrew setup examples when sending telemetry.
 
 ## Error Shape
 
