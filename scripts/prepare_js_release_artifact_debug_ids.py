@@ -20,6 +20,7 @@ from create_js_release_artifact_manifest import (
     byte_size,
     find_debug_id,
     find_source_mapping_url,
+    iter_minified_source_files,
     read_source_map,
     relative,
     require_non_empty,
@@ -162,9 +163,9 @@ def create_debug_id_plan(*, build_dir: Path, write: bool = False) -> dict[str, A
     if not build_dir.is_dir():
         raise ValueError(f"build directory does not exist: {build_dir}")
 
-    js_files = sorted(path for path in build_dir.rglob("*.js") if not path.name.endswith(".map"))
-    artifacts = [build_artifact_plan(path, build_dir) for path in js_files]
-    errors = [] if artifacts else ["no JavaScript files found in build directory"]
+    source_files = iter_minified_source_files(build_dir)
+    artifacts = [build_artifact_plan(path, build_dir) for path in source_files]
+    errors = [] if artifacts else ["no JavaScript release artifact files found in build directory"]
     warnings: list[str] = []
     for artifact in artifacts:
         rel_path = artifact["path"]

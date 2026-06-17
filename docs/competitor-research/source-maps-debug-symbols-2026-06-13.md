@@ -15,6 +15,8 @@ This note records why LogBrew is currently behind Sentry and Datadog for post-de
 
 2026-06-15 drift check: Sentry's current docs still recommend Debug IDs for matching event stack frames to minified source and source maps, and Datadog now documents a browser build plugin that discovers `.js`/`.map` pairs and uploads them with Git metadata during builds. LogBrew should still keep runtime SDKs dependency-light, but the future public tooling path should include an optional build-plugin layer after backend upload/lookup exists.
 
+2026-06-17 React Native bundle follow-up: re-read Datadog CI `DataDog/datadog-ci@74ed439f292a09a44d38de1f4f5ac092e9528b75` paths `packages/base/src/commands/react-native/injectDebugId.ts`, `upload.ts`, `interfaces.ts`, `utils.ts`, `validation.ts`, and React Native fixtures such as `basic-android/index.android.bundle(.map)` and `basic-ios/main.jsbundle(.map)`. Also re-read Sentry React Native `getsentry/sentry-react-native@580fb5c7bf39cc1a8caf7a30af9078c887eb40b9` paths `packages/core/sentry.gradle.kts`, `packages/core/scripts/sentry-xcode.sh`, `packages/core/scripts/copy-debugid.js`, `packages/core/scripts/has-sourcemap-debugid.js`, and `packages/expo-upload-sourcemaps/cli.js`. Pattern: competitors do not assume React Native bundles end in `.js`; Android commonly uses `index.android.bundle`, iOS uses `main.jsbundle`, and the paired source map is often the bundle path plus `.map`. LogBrew's dry-run scripts now scan `.js`, `.mjs`, `.bundle`, and `.jsbundle`, use sibling `.map` fallback for bundle outputs, and still avoid upload or runtime symbolication claims until backend support exists.
+
 ## What Competitors Do Better Today
 
 Sentry and Datadog both treat source maps and native symbols as release artifacts, not as normal runtime telemetry. The user uploads build output and metadata before or during deploy, then runtime errors carry enough release and artifact identity for the backend to unminify or symbolicate stack frames later.
@@ -57,8 +59,8 @@ LogBrew should not copy heavyweight auto-instrumentation or upload raw source by
 ## Concrete LogBrew Work
 
 - Define the backend contract before adding SDK claims: upload, list, delete, validation error, and symbolication lookup shapes.
-- Keep expanding the JS dry-run path before real upload: validate minified files, source maps, matching Debug IDs, sensitive `sourcesContent`, Git metadata, and normalized minified URLs. A local real-user smoke now proves this against temporary build output, but fake intake/upload proof still depends on the backend contract.
+- Keep expanding the JS dry-run path before real upload: validate minified files, React Native `.bundle`/`.jsbundle` outputs, source maps, matching Debug IDs, sensitive `sourcesContent`, Git metadata, and normalized minified URLs. A local real-user smoke now proves web `.js` and React Native-style bundle build output, but fake intake/upload proof still depends on the backend contract.
 - Keep Debug ID preparation dry-run-first and explicit; mutation of build output should require a `--write`-style opt-in and should never touch runtime source packages.
 - Add runtime docs/API fields for optional `debugId` or `artifactId` only after ingestion and issue lookup can consume them.
-- After backend intake exists, add Vite/Next/React Native proof apps that create minified errors, upload artifacts to a local intake, and verify unminified output; then add an optional build-plugin layer.
+- After backend intake exists, add Vite/Next/React Native proof apps that create minified errors, upload artifacts to a local intake, and verify unminified output; then add optional build-plugin or framework-owned upload layers.
 - Add native follow-up contracts for Swift/Kotlin/Unity/C/C++/Objective-C symbol formats instead of claiming crash symbolication from normal error capture.

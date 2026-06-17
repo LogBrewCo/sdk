@@ -89,6 +89,46 @@ class JavaScriptReleaseArtifactManifestTests(unittest.TestCase):
         self.assertEqual(manifest["validation"]["status"], "blocked")
         self.assertIn("app.js: source map file is missing: app.js.map", manifest["validation"]["errors"])
 
+    def test_react_native_bundle_manifest_uses_sibling_source_map(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = Path(tmp) / "dist"
+            build_dir.mkdir()
+            (build_dir / "index.android.bundle").write_text(
+                'function bootstrap(){return "ok";}\n//# debugId=rn-debug-id\n',
+                encoding="utf-8",
+            )
+            (build_dir / "index.android.bundle.map").write_text(
+                json.dumps(
+                    {
+                        "version": 3,
+                        "sources": ["index.js"],
+                        "names": [],
+                        "mappings": "AAAA",
+                        "debug_id": "rn-debug-id",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            manifest = create_js_release_artifact_manifest.create_manifest(
+                build_dir=build_dir,
+                release="1.2.3",
+                environment="production",
+                service="checkout-mobile",
+                minified_path_prefix="app:///",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "ready")
+        artifact = manifest["artifacts"][0]
+        self.assertEqual(artifact["debugId"], "rn-debug-id")
+        self.assertEqual(artifact["minifiedSource"]["path"], "index.android.bundle")
+        self.assertEqual(artifact["minifiedSource"]["minifiedUrl"], "app:///index.android.bundle")
+        self.assertEqual(artifact["sourceMap"]["path"], "index.android.bundle.map")
+        self.assertIn(
+            "index.android.bundle: sourceMappingURL comment missing; checked sibling .map fallback",
+            manifest["validation"]["warnings"],
+        )
+
     def test_sources_content_is_blocked_by_default_and_allowed_explicitly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             build_dir = Path(tmp) / "dist"

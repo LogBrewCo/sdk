@@ -17,6 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 SOURCE_MAPPING_RE = re.compile(r"(?://#|/\*#)\s*sourceMappingURL=([^\s*]+)", re.IGNORECASE)
 DEBUG_ID_RE = re.compile(r"(?://#|/\*#)\s*debugId=([A-Za-z0-9._:-]+)", re.IGNORECASE)
 SOURCE_MAP_DEBUG_ID_KEYS = ("debug_id", "debugId", "debugID", "x_debug_id")
+MINIFIED_SOURCE_SUFFIXES = (".js", ".mjs", ".bundle", ".jsbundle")
 SCRIPT_VERSION = "0.1.0"
 
 
@@ -40,13 +41,17 @@ def byte_size(path: Path) -> int:
 
 
 def normalize_url_or_path(value: str) -> str:
-    parsed = urlsplit(value.strip())
-    if parsed.scheme and parsed.netloc:
+    normalized_value = value.strip()
+    parsed = urlsplit(normalized_value)
+    if parsed.scheme and (parsed.netloc or normalized_value.startswith(f"{parsed.scheme}://")):
         normalized_path = posixpath.normpath(parsed.path or "/")
         if normalized_path == ".":
             normalized_path = "/"
-        return urlunsplit((parsed.scheme, parsed.netloc, normalized_path.rstrip("/"), "", ""))
-    path = value.split("?", 1)[0].split("#", 1)[0].strip()
+        normalized_path = normalized_path.rstrip("/")
+        if not parsed.netloc:
+            return f"{parsed.scheme}://{normalized_path or '/'}"
+        return urlunsplit((parsed.scheme, parsed.netloc, normalized_path, "", ""))
+    path = normalized_value.split("?", 1)[0].split("#", 1)[0].strip()
     return path.rstrip("/")
 
 
@@ -54,10 +59,12 @@ def join_url_or_path(prefix: str, relative_path: str) -> str:
     normalized_prefix = normalize_url_or_path(prefix)
     normalized_relative = relative_path.strip("/").replace("\\", "/")
     parsed = urlsplit(normalized_prefix)
-    if parsed.scheme and parsed.netloc:
+    if parsed.scheme and (parsed.netloc or normalized_prefix.startswith(f"{parsed.scheme}://")):
         joined_path = posixpath.join(parsed.path.rstrip("/"), normalized_relative)
         if not joined_path.startswith("/"):
             joined_path = f"/{joined_path}"
+        if not parsed.netloc:
+            return f"{parsed.scheme}://{joined_path}"
         return urlunsplit((parsed.scheme, parsed.netloc, joined_path, "", ""))
     if normalized_prefix == "":
         return normalized_relative
@@ -136,6 +143,14 @@ def source_map_debug_id(payload: dict[str, Any]) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def is_minified_source_file(path: Path) -> bool:
+    return not path.name.endswith(".map") and any(path.name.endswith(suffix) for suffix in MINIFIED_SOURCE_SUFFIXES)
+
+
+def iter_minified_source_files(build_dir: Path) -> list[Path]:
+    return sorted(path for path in build_dir.rglob("*") if path.is_file() and is_minified_source_file(path))
 
 
 def validate_source_map_payload(payload: dict[str, Any], allow_sources_content: bool) -> tuple[list[str], list[str]]:
@@ -254,12 +269,12 @@ def create_manifest(
     if not build_dir.is_dir():
         raise ValueError(f"build directory does not exist: {build_dir}")
 
-    js_files = sorted(path for path in build_dir.rglob("*.js") if not path.name.endswith(".map"))
+    source_files = iter_minified_source_files(build_dir)
     artifacts = [
         build_artifact_entry(path, build_dir, minified_path_prefix, allow_sources_content)
-        for path in js_files
+        for path in source_files
     ]
-    errors = [] if artifacts else ["no JavaScript files found in build directory"]
+    errors = [] if artifacts else ["no JavaScript release artifact files found in build directory"]
     warnings: list[str] = []
     for artifact in artifacts:
         rel_path = artifact["minifiedSource"]["path"]

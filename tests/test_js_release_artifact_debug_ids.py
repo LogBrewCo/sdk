@@ -30,6 +30,11 @@ class JavaScriptReleaseArtifactDebugIdTests(unittest.TestCase):
         (build_dir / "app.js").write_text(js_source, encoding="utf-8")
         (build_dir / "app.js.map").write_text(json.dumps(source_map), encoding="utf-8")
 
+    def write_bundle(self, build_dir: Path, bundle_name: str, source: str, source_map: dict[str, object]) -> None:
+        build_dir.mkdir(parents=True)
+        (build_dir / bundle_name).write_text(source, encoding="utf-8")
+        (build_dir / f"{bundle_name}.map").write_text(json.dumps(source_map), encoding="utf-8")
+
     def test_dry_run_plans_matching_debug_ids_without_writing_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             build_dir = Path(tmp) / "dist"
@@ -89,6 +94,32 @@ class JavaScriptReleaseArtifactDebugIdTests(unittest.TestCase):
             self.assertEqual(js_lines[0], 'console.log("ok");')
             self.assertEqual(js_lines[1], f"//# debugId={debug_id}")
             self.assertEqual(js_lines[2], "//# sourceMappingURL=app.js.map")
+
+    def test_react_native_bundle_without_source_mapping_url_uses_sibling_map(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = Path(tmp) / "dist"
+            self.write_bundle(
+                build_dir,
+                "main.jsbundle",
+                'function bootstrap(){return "ok";}\n',
+                {"version": 3, "sources": ["index.js"], "names": [], "mappings": "AAAA"},
+            )
+
+            written = prepare_js_release_artifact_debug_ids.create_debug_id_plan(build_dir=build_dir, write=True)
+
+            self.assertTrue(written["writeApplied"])
+            artifact = written["artifacts"][0]
+            debug_id = artifact["debugId"]
+            self.assertEqual(artifact["path"], "main.jsbundle")
+            self.assertEqual(artifact["sourceMapPath"], "main.jsbundle.map")
+            self.assertEqual(artifact["validation"]["status"], "ready")
+            self.assertIn(
+                "sourceMappingURL comment missing; checked sibling .map fallback",
+                artifact["validation"]["warnings"],
+            )
+            self.assertIn(f"//# debugId={debug_id}", (build_dir / "main.jsbundle").read_text(encoding="utf-8"))
+            source_map = json.loads((build_dir / "main.jsbundle.map").read_text(encoding="utf-8"))
+            self.assertEqual(source_map["debug_id"], debug_id)
 
     def test_existing_source_map_debug_id_is_added_to_minified_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
