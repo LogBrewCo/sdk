@@ -137,12 +137,27 @@ fn tracing_layer_can_queue_privacy_bounded_spans() {
     assert_eq!(child_span["parentSpanId"], "0000000000000001");
     assert_eq!(child_span["status"], "error");
     assert!(child_span["durationMs"].as_f64().unwrap() >= 0.0);
+    assert_eq!(child_span["metadata"]["tracingSpanEventCount"], 1);
+    assert_eq!(child_span["metadata"]["tracingSpanErrorEventCount"], 1);
+    assert_eq!(child_span["metadata"]["tracingLastErrorLevel"], "ERROR");
+    assert_eq!(child_span["metadata"]["tracingLastErrorTarget"], "checkout");
+    assert!(
+        !child_span["metadata"]
+            .to_string()
+            .contains("cart validation failed")
+    );
 
     let root_span = &events[3]["attributes"];
     assert_eq!(root_span["name"], "checkout.request");
     assert_eq!(root_span["traceId"], "00000000000000000000000000000001");
     assert_eq!(root_span["spanId"], "0000000000000001");
     assert_eq!(root_span["status"], "ok");
+    assert_eq!(root_span["metadata"]["tracingSpanEventCount"], 1);
+    assert!(
+        root_span["metadata"]
+            .get("tracingSpanErrorEventCount")
+            .is_none()
+    );
     assert_eq!(
         root_span["metadata"]["routeTemplate"],
         "/checkout/{cart_id}"
@@ -219,6 +234,12 @@ fn tracing_layer_continues_incoming_traceparent_on_root_span() {
     assert_eq!(child_span["spanId"], "0000000000000002");
     assert_eq!(child_span["parentSpanId"], "0000000000000001");
     assert_eq!(child_span["metadata"]["sampled"], true);
+    assert_eq!(child_span["metadata"]["tracingSpanEventCount"], 1);
+    assert!(
+        child_span["metadata"]
+            .get("tracingSpanErrorEventCount")
+            .is_none()
+    );
 
     let root_span = &events[3]["attributes"];
     assert_eq!(root_span["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
@@ -229,6 +250,7 @@ fn tracing_layer_continues_incoming_traceparent_on_root_span() {
         "/checkout/{cart_id}"
     );
     assert_eq!(root_span["metadata"]["sampled"], true);
+    assert_eq!(root_span["metadata"]["tracingSpanEventCount"], 1);
     assert!(root_span["metadata"].get("traceparent").is_none());
 
     let text = payload.to_string();

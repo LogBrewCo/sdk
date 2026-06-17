@@ -73,6 +73,14 @@ def main() -> int:
     require(child_span["status"] == "error", "error event should mark current child span")
     require(child_span["durationMs"] >= 0, "child span duration should be non-negative")
     require(child_span["metadata"]["sampled"] is True, "missing child sampled metadata")
+    require(child_span["metadata"]["tracingSpanEventCount"] == 1, "missing child span event count")
+    require(child_span["metadata"]["tracingSpanErrorEventCount"] == 1, "missing child span error count")
+    require(child_span["metadata"]["tracingLastErrorLevel"] == "ERROR", "missing child last error level")
+    require(child_span["metadata"]["tracingLastErrorTarget"] == "checkout", "missing child last error target")
+    require(
+        "cart validation failed" not in json.dumps(child_span["metadata"]),
+        "span metadata should not duplicate error messages",
+    )
 
     root_span = events[5]["attributes"]
     require(root_span["name"] == "checkout.request", "unexpected root span name")
@@ -88,6 +96,8 @@ def main() -> int:
     require(span_metadata["routeTemplate"] == "/checkout/{cart_id}", "span routeTemplate was not sanitized")
     require(span_metadata["cartTier"] == "gold", "missing span app field")
     require(span_metadata["sampled"] is True, "missing root sampled metadata")
+    require(span_metadata["tracingSpanEventCount"] == 1, "missing root span event count")
+    require("tracingSpanErrorEventCount" not in span_metadata, "root span should not inherit child errors")
     require("traceparent" not in span_metadata, "raw traceparent should not be captured")
     require("unsafeDebug" not in span_metadata, "span non-primitive debug field should not be captured")
     blocked_header_field = "auth" + "orization"

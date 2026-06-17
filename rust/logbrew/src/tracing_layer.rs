@@ -133,6 +133,9 @@ where
             metadata: span_metadata,
             sampled,
             error: false,
+            event_count: 0,
+            error_event_count: 0,
+            last_error_event: None,
         };
 
         if let Some(span) = ctx.span(id) {
@@ -208,8 +211,8 @@ where
             let _ = queue_log(&mut client, event_id, (self.timestamp)(), log);
         }
 
-        if self.capture_spans && *metadata.level() == Level::ERROR {
-            mark_current_span_error(event, &ctx);
+        if self.capture_spans {
+            record_current_span_event(event, &ctx);
         }
     }
 
@@ -225,6 +228,7 @@ where
             return;
         };
 
+        let span_metadata = span_metadata_with_event_summary(&state);
         let mut event = SpanEvent::new(
             state.name,
             state.trace_id,
@@ -232,7 +236,7 @@ where
             if state.error { "error" } else { "ok" },
         )
         .with_duration_ms(state.started_at.elapsed().as_secs_f64() * 1000.0)
-        .with_metadata(state.metadata);
+        .with_metadata(span_metadata);
         if let Some(parent_span_id) = state.parent_span_id {
             event = event.with_parent_span_id(parent_span_id);
         }
@@ -291,6 +295,15 @@ struct TracingSpanState {
     metadata: Metadata,
     sampled: Option<bool>,
     error: bool,
+    event_count: u64,
+    error_event_count: u64,
+    last_error_event: Option<TracingSpanErrorEvent>,
+}
+
+#[derive(Clone, Debug)]
+struct TracingSpanErrorEvent {
+    level: String,
+    target: String,
 }
 
 #[derive(Clone, Debug)]
@@ -343,7 +356,7 @@ where
         .map(Into::into)
 }
 
-fn mark_current_span_error<S>(event: &TracingEvent<'_>, ctx: &Context<'_, S>)
+fn record_current_span_event<S>(event: &TracingEvent<'_>, ctx: &Context<'_, S>)
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
 {
@@ -354,8 +367,43 @@ where
         return;
     };
     if let Some(state) = current.extensions_mut().get_mut::<TracingSpanState>() {
-        state.error = true;
+        state.event_count = state.event_count.saturating_add(1);
+        if *event.metadata().level() == Level::ERROR {
+            state.error = true;
+            state.error_event_count = state.error_event_count.saturating_add(1);
+            state.last_error_event = Some(TracingSpanErrorEvent {
+                level: event.metadata().level().as_str().to_string(),
+                target: event.metadata().target().to_string(),
+            });
+        }
     }
+}
+
+fn span_metadata_with_event_summary(state: &TracingSpanState) -> Metadata {
+    let mut metadata = state.metadata.clone();
+    if state.event_count > 0 {
+        metadata.insert(
+            "tracingSpanEventCount".to_string(),
+            MetadataValue::from(state.event_count),
+        );
+    }
+    if state.error_event_count > 0 {
+        metadata.insert(
+            "tracingSpanErrorEventCount".to_string(),
+            MetadataValue::from(state.error_event_count),
+        );
+    }
+    if let Some(event) = &state.last_error_event {
+        metadata.insert(
+            "tracingLastErrorLevel".to_string(),
+            MetadataValue::String(event.level.clone()),
+        );
+        metadata.insert(
+            "tracingLastErrorTarget".to_string(),
+            MetadataValue::String(event.target.clone()),
+        );
+    }
+    metadata
 }
 
 struct TracingLogVisitor<'a> {

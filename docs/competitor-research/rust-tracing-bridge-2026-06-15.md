@@ -82,3 +82,22 @@ Follow-up to the Rust HTTP server request pass. Tested the next Rust service gap
 ### Remaining Rust Gaps
 
 - Still behind Sentry/OpenTelemetry for automatic `tracing-opentelemetry` extraction/processor interop, rich span events/exceptions, span links, tracestate/baggage, and automatic framework/outbound/DB/cache/queue spans.
+
+## 2026-06-17 Span Event Summary Follow-Up
+
+### Source Reading
+
+- Sentry Rust `getsentry/sentry-rust@e33b7ff20eb5bf948eacf89d7eecdcc59b31d4f3`: re-read `sentry-tracing/src/layer/mod.rs` (`default_event_filter`, `on_event`, `record_fields`) and `sentry-tracing/src/converters.rs` (`extract_event_data`, `FieldVisitor::record_error`, `event_from_event`). Pattern: Sentry can turn tracing events into breadcrumbs, logs, and exception events, and can include broad event/span fields when configured.
+- Tokio `tracing-opentelemetry@1d5422f1f37932fd65e434da618b305d4c94ee9c`: re-read `src/layer.rs` (`SpanEventVisitor`, `with_error_events_to_exceptions`, `on_event`) and `src/span_ext.rs` (`add_event`, `add_event_with_timestamp`, `set_status`). Pattern: the OTel layer materializes in-span events, maps error fields to exception semantic-convention attributes, and updates span status.
+- Datadog Rust `DataDog/dd-trace-rs@0d1d982f0464318f5c1a21c2db1c84b58ff2c95c`: re-read `datadog-opentelemetry/src/mappings/sdk_span.rs` (`SdkSpan`, `events`, `dropped_event_count`, `links`). Pattern: Datadog consumes OTel span data with explicit span events and links, but through the heavier OTel exporter path.
+
+### LogBrew Update
+
+- Added privacy-bounded tracing span event summaries when apps opt into `LogBrewTracingLayer::with_span_events()`.
+- Closed LogBrew span metadata now includes `tracingSpanEventCount` for in-span events and, when an error-level event occurs on that span, `tracingSpanErrorEventCount`, `tracingLastErrorLevel`, and `tracingLastErrorTarget`.
+- The bridge still records the event itself as a LogBrew log event, marks only the current span as `error`, and intentionally does not copy error messages, exception stacks, payloads, arbitrary headers, full URLs, baggage, tracestate, or non-allowlisted event fields into span metadata.
+
+### Tradeoffs
+
+- This narrows the Sentry/OpenTelemetry diagnostics gap by making closed spans explain whether important events occurred inside them.
+- LogBrew remains lighter but less expressive than full Sentry/OTel/Datadog span event ingestion: no exception object model, no event arrays, no links, no stack capture, and no automatic processor/exporter interop.
