@@ -1,4 +1,4 @@
-.PHONY: help run run-readme-example run-real-user-smoke run-trace-correlation run-lifecycle-spans
+.PHONY: help run run-readme-example run-real-user-smoke run-trace-correlation run-lifecycle-spans run-lifecycle-tracker
 
 PACKAGE_DIR := $(abspath ..)
 
@@ -8,6 +8,7 @@ help:
 	@printf '%s\n' 'run-real-user-smoke -> make run-real-user-smoke'
 	@printf '%s\n' 'run-trace-correlation -> make run-trace-correlation'
 	@printf '%s\n' 'run-lifecycle-spans -> make run-lifecycle-spans'
+	@printf '%s\n' 'run-lifecycle-tracker -> make run-lifecycle-tracker'
 
 run: run-real-user-smoke
 
@@ -22,3 +23,6 @@ run-trace-correlation:
 
 run-lifecycle-spans:
 	@tmp_dir="$$(realpath "$$(mktemp -d)")" && trap 'rm -rf "$$tmp_dir"' EXIT && mkdir -p "$$tmp_dir/app" && printf '%s\n' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors><EnableDefaultCompileItems>false</EnableDefaultCompileItems><StartupObject>LifecycleSpans</StartupObject></PropertyGroup><ItemGroup><Compile Include="$(PACKAGE_DIR)/Runtime/*.cs" /><Compile Include="$(PACKAGE_DIR)/examples/lifecycle_spans/LifecycleSpans.cs" /></ItemGroup></Project>' > "$$tmp_dir/app/LifecycleSpans.csproj" && dotnet run --project "$$tmp_dir/app/LifecycleSpans.csproj" --configuration Release
+
+run-lifecycle-tracker:
+	@tmp_dir="$$(realpath "$$(mktemp -d)")" && trap 'rm -rf "$$tmp_dir"' EXIT && mkdir -p "$$tmp_dir/app" && printf '%s\n' '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors><EnableDefaultCompileItems>false</EnableDefaultCompileItems><StartupObject>LifecycleTracker</StartupObject></PropertyGroup><ItemGroup><Compile Include="$(PACKAGE_DIR)/Runtime/*.cs" /><Compile Include="$(PACKAGE_DIR)/examples/lifecycle_tracker/LifecycleTracker.cs" /></ItemGroup></Project>' > "$$tmp_dir/app/LifecycleTracker.csproj" && dotnet run --project "$$tmp_dir/app/LifecycleTracker.csproj" --configuration Release

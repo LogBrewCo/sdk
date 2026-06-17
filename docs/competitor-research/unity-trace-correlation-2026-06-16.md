@@ -62,3 +62,24 @@ LogBrew Unity already had source-only UPM packaging, explicit spans, Unity scene
 - `scripts/check_unity_lifecycle_payload.py`: validates lifecycle span names, active trace IDs, previous/current state metadata, previous-state duration, Unity context metadata, and no raw propagation or spoofed trace leakage.
 - `bash scripts/check_unity_package.sh`: validates package metadata, package contents, README guidance, canonical examples, source trace-correlation payload, source lifecycle payload, and examples help.
 - `bash scripts/real_user_unity_smoke.sh`: installs from a local UPM tarball into a temporary Unity-style project, proves dependency remove/re-add, validates installed canonical examples, installed trace-correlation and lifecycle payloads, and local HTTP 5xx-to-2xx retry delivery.
+
+## 2026-06-17 Lifecycle Tracker Follow-Up
+
+### Source Reading
+
+- Re-checked upstream HEADs before implementation; Sentry Unity, Datadog Unity, and OpenTelemetry .NET still match the commits recorded above.
+- Re-read Sentry Unity `SentryMonoBehaviour.UpdatePauseStatus(...)`, `OnApplicationPause(...)`, and `OnApplicationFocus(...)`: Sentry deduplicates startup/duplicate pause or focus callbacks behind a hidden singleton `MonoBehaviour` and emits resume/pause events from global lifecycle hooks.
+- Re-read Datadog Unity `DdUnityLogHandler.Attach(...)`, `Detach(...)`, `LogException(...)`, and `LogFormat(...)`: Datadog demonstrates a useful explicit attach/detach reliability pattern, but it still replaces global Unity logging while forwarding to the original handler.
+- Re-read OpenTelemetry .NET `RuntimeContext.RegisterSlot(...)`, `SetValue(...)`, `GetValue(...)`, and `AsyncLocalRuntimeContextSlot<T>`: OTel keeps ambient context in registered slots; LogBrew Unity still avoids ambient/global lifecycle state and keeps app-owned callback wiring.
+
+### LogBrew Update
+
+- Added source-only `UnityLifecycleTracker`, a small state tracker that apps instantiate in their own `MonoBehaviour` and call from `OnApplicationPause(...)` or `OnApplicationFocus(...)`.
+- The tracker deduplicates repeated pause/focus notifications, computes previous-state duration from an app-supplied realtime clock, merges default and per-transition primitive Unity metadata, and calls the existing lifecycle span path so active trace metadata and spoof-key overwrite stay canonical.
+- Packaged `examples/lifecycle_tracker/LifecycleTracker.cs` proves the tracker emits the same privacy-bounded lifecycle span payload as the explicit helper from both source and installed UPM tarballs.
+
+### Tradeoffs
+
+- This closes part of the "automatic lifecycle" gap with a lighter, explicit setup: apps get automatic transition spans after wiring their own callbacks.
+- LogBrew still deliberately avoids Sentry-style hidden GameObject creation, global lifecycle subscriptions, local session-health inference, Unity API patching, payload/header/query capture, baggage, and tracestate.
+- Remaining Unity gaps: `UnityWebRequest` convenience instrumentation, coroutine convenience instrumentation beyond explicit wrapping, OpenTelemetry context ingestion, rich span events/exceptions, URL/request phase timings, and native crash/symbolication integration.

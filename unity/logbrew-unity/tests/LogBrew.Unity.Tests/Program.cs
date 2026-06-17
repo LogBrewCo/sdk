@@ -28,9 +28,10 @@ namespace LogBrew.Unity.Tests
             Run("unity_helpers_add_context_metadata", UnityHelpersAddContextMetadata);
             Run("trace_context_helpers_validate_and_correlate", TraceContextHelpersValidateAndCorrelate);
             Run("unity_lifecycle_span_uses_active_trace", UnityLifecycleSpanUsesActiveTrace);
+            Run("unity_lifecycle_tracker_records_deduplicated_transitions", UnityLifecycleTrackerRecordsDeduplicatedTransitions);
             Run("unity_request_span_uses_child_trace", UnityRequestSpanUsesChildTrace);
             Run("unity_coroutine_wrapper_reactivates_trace_per_step", UnityCoroutineWrapperReactivatesTracePerStep);
-            Console.WriteLine("unity package tests ok (19 tests)");
+            Console.WriteLine("unity package tests ok (20 tests)");
         }
 
         private static void Run(string name, Action test)
@@ -468,6 +469,83 @@ namespace LogBrew.Unity.Tests
             AssertDoesNotContain(body, "#frag");
             AssertDoesNotContain(body, "spoofed_trace");
             AssertDoesNotContain(body, "spoofed_traceparent");
+            AssertDoesNotContain(body, "traceparent");
+        }
+
+        private static void UnityLifecycleTrackerRecordsDeduplicatedTransitions()
+        {
+            const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+            const string parentSpanId = "00f067aa0ba902b7";
+            var client = NewClient();
+            var ids = new Queue<string>();
+            ids.Enqueue("evt_unity_lifecycle_tracker_active_paused_001");
+            ids.Enqueue("evt_unity_lifecycle_tracker_paused_active_001");
+            var timestamps = new Queue<string>();
+            timestamps.Enqueue("2026-06-02T10:00:30Z");
+            timestamps.Enqueue("2026-06-02T10:00:31Z");
+            var now = 1000.0;
+            var tracker = new UnityLifecycleTracker(
+                client,
+                () => ids.Dequeue(),
+                () => timestamps.Dequeue(),
+                () => now,
+                context: UnityContext.Create().WithPlatform("ios").WithSceneName("Checkout"));
+            var trace = LogBrewTraceContext.FromTraceparent("00-" + traceId + "-" + parentSpanId + "-01");
+
+            using (LogBrewTrace.Activate(trace))
+            {
+                now = 2532.25;
+                AssertTrue(tracker.CapturePause(true), "pause transition should be captured");
+                AssertFalse(tracker.CaptureFocus(false), "duplicate pause/focus transition should not be captured");
+                now = 2954.75;
+                AssertTrue(
+                    tracker.CapturePause(false, UnityContext.Create().WithFrame(128).WithMetadata("traceId", "spoofed_trace")),
+                    "resume transition should be captured");
+            }
+
+            ExpectArgumentNull("client", () =>
+            {
+                var unused = new UnityLifecycleTracker(null!, () => "evt", () => "2026-06-02T10:00:30Z", () => 0);
+                AssertEqual("active", unused.CurrentState);
+            });
+            ExpectArgumentNull("idFactory", () =>
+            {
+                var unused = new UnityLifecycleTracker(client, null!, () => "2026-06-02T10:00:30Z", () => 0);
+                AssertEqual("active", unused.CurrentState);
+            });
+            ExpectArgumentNull("timestampFactory", () =>
+            {
+                var unused = new UnityLifecycleTracker(client, () => "evt", null!, () => 0);
+                AssertEqual("active", unused.CurrentState);
+            });
+            ExpectArgumentNull("realtimeMilliseconds", () =>
+            {
+                var unused = new UnityLifecycleTracker(client, () => "evt", () => "2026-06-02T10:00:30Z", null!);
+                AssertEqual("active", unused.CurrentState);
+            });
+            Expect("validation_error", () =>
+            {
+                var unused = new UnityLifecycleTracker(client, () => "evt", () => "2026-06-02T10:00:30Z", () => double.NaN);
+                AssertEqual("active", unused.CurrentState);
+            });
+            Expect("validation_error", () => tracker.CaptureState(" "));
+
+            AssertEqual("active", tracker.CurrentState);
+            AssertEqual(2, client.PendingEvents());
+            var body = client.PreviewJson();
+            AssertContains(body, "\"evt_unity_lifecycle_tracker_active_paused_001\"");
+            AssertContains(body, "\"evt_unity_lifecycle_tracker_paused_active_001\"");
+            AssertContains(body, "\"name\": \"unity.lifecycle:active->paused\"");
+            AssertContains(body, "\"name\": \"unity.lifecycle:paused->active\"");
+            AssertContains(body, "\"durationMs\": 1532.25");
+            AssertContains(body, "\"durationMs\": 422.5");
+            AssertContains(body, "\"traceId\": \"" + traceId + "\"");
+            AssertContains(body, "\"spanId\": \"" + trace.SpanId + "\"");
+            AssertContains(body, "\"parentSpanId\": \"" + parentSpanId + "\"");
+            AssertContains(body, "\"platform\": \"ios\"");
+            AssertContains(body, "\"sceneName\": \"Checkout\"");
+            AssertContains(body, "\"frame\": 128");
+            AssertDoesNotContain(body, "spoofed_trace");
             AssertDoesNotContain(body, "traceparent");
         }
 
