@@ -15,7 +15,7 @@ cargo add logbrew --features tower
 cargo add logbrew --features tracing
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, W3C helpers such as `Traceparent`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -403,7 +403,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 Use `Traceparent` when your Rust app already has an incoming or outgoing W3C `traceparent` value:
 
 ```rust
-use logbrew::{Traceparent, TraceparentSpanInput};
+use logbrew::{OpenTelemetrySpanContext, Traceparent, TraceparentSpanInput};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let incoming = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
@@ -420,11 +420,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     assert_eq!(headers.get("traceparent").map(String::as_str), Some("00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"));
     drop(span);
+
+    // If your app already uses OpenTelemetry, copy the active SpanContext IDs into
+    // this dependency-free input instead of adding a LogBrew OTel exporter.
+    let otel_context = OpenTelemetrySpanContext::new(
+        &trace.trace_id,
+        &trace.parent_span_id,
+        &trace.trace_flags,
+    )?;
+    let otel_child = Traceparent::span_attributes_from_opentelemetry_context(
+        &otel_context,
+        TraceparentSpanInput::new("POST /checkout/:cart_id", "f7ad6b7169203332", "ok"),
+    )?;
+    drop(otel_child);
     Ok(())
 }
 ```
 
-`Traceparent` validates W3C shape, rejects forbidden or all-zero IDs, normalizes identifiers, exposes the sampled flag, creates one-header outbound carriers, and derives LogBrew child span events. It does not install OpenTelemetry, patch HTTP clients, or capture request payloads or headers.
+`Traceparent` validates W3C shape, rejects forbidden or all-zero IDs, normalizes identifiers, exposes the sampled flag, creates one-header outbound carriers, and derives LogBrew child span events. `OpenTelemetrySpanContext` accepts the trace ID, span ID, and trace flags from an app-owned OpenTelemetry span context, then creates LogBrew child spans with the OTel span as parent. It does not install OpenTelemetry, patch HTTP clients, read tracestate/baggage, or capture request payloads or headers.
 
 ## Metrics
 

@@ -1,7 +1,7 @@
 use logbrew::{
     ActionEvent, EnvironmentEvent, HttpRequestTelemetry, IssueEvent, LogBrewClient, LogEvent,
-    MetricEvent, ProductTimeline, RecordingTransport, ReleaseEvent, SdkError, SpanEvent,
-    Traceparent, TraceparentSpanInput, TransportError,
+    MetricEvent, OpenTelemetrySpanContext, ProductTimeline, RecordingTransport, ReleaseEvent,
+    SdkError, SpanEvent, Traceparent, TraceparentSpanInput, TransportError,
 };
 #[cfg(feature = "http")]
 use logbrew::{HttpTransport, HttpTransportConfig, Transport};
@@ -636,6 +636,57 @@ fn traceparent_helpers_parse_create_and_build_child_span() {
 }
 
 #[test]
+fn traceparent_helpers_ingest_opentelemetry_span_context() {
+    let context =
+        OpenTelemetrySpanContext::new("4BF92F3577B34DA6A3CE929D0E0E4736", "00F067AA0BA902B7", "01")
+            .unwrap();
+    assert_eq!(context.trace_id(), "4bf92f3577b34da6a3ce929d0e0e4736");
+    assert_eq!(context.span_id(), "00f067aa0ba902b7");
+    assert_eq!(context.trace_flags(), "01");
+    assert!(context.sampled());
+
+    let child_span_id = "b7ad6b7169203331";
+    let headers =
+        Traceparent::create_headers_from_opentelemetry_context(&context, child_span_id).unwrap();
+    assert_eq!(
+        headers.get("traceparent").map(String::as_str),
+        Some("00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01")
+    );
+
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "routeTemplate".to_string(),
+        Value::String("/checkout/:cart_id".to_string()),
+    );
+    let span = Traceparent::span_attributes_from_opentelemetry_context(
+        &context,
+        TraceparentSpanInput::new("POST /checkout/:cart_id", child_span_id, "ok")
+            .with_duration_ms(183.4)
+            .with_metadata(metadata),
+    )
+    .unwrap();
+    let mut client = sample_client();
+    client
+        .span("evt_otel_span", "2026-06-02T10:00:06Z", span)
+        .unwrap();
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let attributes = &payload["events"][0]["attributes"];
+    assert_eq!(attributes["traceId"], context.trace_id());
+    assert_eq!(attributes["spanId"], child_span_id);
+    assert_eq!(attributes["parentSpanId"], context.span_id());
+    assert_eq!(attributes["durationMs"], 183.4);
+
+    let unsampled = OpenTelemetrySpanContext::from_sampled(
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "00f067aa0ba902b7",
+        false,
+    )
+    .unwrap();
+    assert_eq!(unsampled.trace_flags(), "00");
+    assert!(!unsampled.sampled());
+}
+
+#[test]
 fn traceparent_helpers_reject_invalid_context() {
     for invalid in [
         "",
@@ -656,6 +707,22 @@ fn traceparent_helpers_reject_invalid_context() {
     );
     assert!(
         Traceparent::create("4bf92f3577b34da6a3ce929d0e0e4736", "0000000000000000", "01",).is_err()
+    );
+    assert!(
+        OpenTelemetrySpanContext::new(
+            "00000000000000000000000000000000",
+            "00f067aa0ba902b7",
+            "01",
+        )
+        .is_err()
+    );
+    assert!(
+        OpenTelemetrySpanContext::new(
+            "4bf92f3577b34da6a3ce929d0e0e4736",
+            "0000000000000000",
+            "01",
+        )
+        .is_err()
     );
 
     let mut metadata = serde_json::Map::new();

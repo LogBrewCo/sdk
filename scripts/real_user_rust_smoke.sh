@@ -129,6 +129,7 @@ grep -q 'Traceparent' "$crate_readme"
 grep -q 'HttpRequestTelemetry' "$crate_readme"
 grep -q 'LogBrewTracingLayer' "$crate_readme"
 grep -q 'W3C Trace Context' "$crate_readme"
+grep -q 'OpenTelemetrySpanContext' "$crate_readme"
 grep -q 'http.server.duration' "$crate_readme"
 grep -q 'account-specific values' "$crate_readme"
 grep -q 'do not patch HTTP clients' "$crate_readme"
@@ -785,14 +786,22 @@ test -f target/doc/logbrew/struct.Traceparent.html
 grep -q 'Dependency-free helpers for explicit W3C traceparent interoperability\.' target/doc/logbrew/struct.Traceparent.html
 grep -q 'Parse, validate, and normalize one W3C traceparent value\.' target/doc/logbrew/struct.Traceparent.html
 grep -q 'Create a one-header outbound carrier containing only <code>traceparent</code>\.' target/doc/logbrew/struct.Traceparent.html
+grep -q 'Create a one-header outbound carrier from an OpenTelemetry-compatible parent context\.' target/doc/logbrew/struct.Traceparent.html
 grep -q 'Build a LogBrew span event that continues an incoming W3C traceparent\.' target/doc/logbrew/struct.Traceparent.html
 grep -q 'Build a LogBrew span event from previously parsed W3C trace context\.' target/doc/logbrew/struct.Traceparent.html
+grep -q 'Build a LogBrew child span from an OpenTelemetry-compatible current span context\.' target/doc/logbrew/struct.Traceparent.html
+grep -q 'Convert OpenTelemetry-compatible IDs into the existing W3C trace context shape\.' target/doc/logbrew/struct.Traceparent.html
 test -f target/doc/logbrew/struct.TraceparentContext.html
 grep -q 'Parsed W3C traceparent context with normalized lowercase identifiers\.' target/doc/logbrew/struct.TraceparentContext.html
 grep -q 'Whether the W3C sampled bit is set\.' target/doc/logbrew/struct.TraceparentContext.html
 test -f target/doc/logbrew/struct.TraceparentSpanInput.html
 grep -q 'Inputs for deriving a LogBrew span event from incoming W3C trace context\.' target/doc/logbrew/struct.TraceparentSpanInput.html
 grep -q 'Attach primitive, app-owned metadata to the derived span\.' target/doc/logbrew/struct.TraceparentSpanInput.html
+test -f target/doc/logbrew/struct.OpenTelemetrySpanContext.html
+grep -q 'Dependency-free copy of OpenTelemetry SpanContext fields needed for child span correlation\.' target/doc/logbrew/struct.OpenTelemetrySpanContext.html
+grep -q 'Create a validated OpenTelemetry-compatible span context from W3C IDs and trace flags\.' target/doc/logbrew/struct.OpenTelemetrySpanContext.html
+grep -q 'Create a context when the app has a sampled boolean but not a trace-flags string\.' target/doc/logbrew/struct.OpenTelemetrySpanContext.html
+grep -q 'Whether the sampled bit is set\.' target/doc/logbrew/struct.OpenTelemetrySpanContext.html
 test -f target/doc/logbrew/struct.HttpRequestTelemetry.html
 grep -q 'App-owned HTTP server telemetry built from framework request metadata\.' target/doc/logbrew/struct.HttpRequestTelemetry.html
 grep -q 'Create request telemetry from app-owned route, method, trace, and child span IDs\.' target/doc/logbrew/struct.HttpRequestTelemetry.html

@@ -1,16 +1,21 @@
 use logbrew::{
     EnvironmentEvent, LogBrewClient, LogEvent, Metadata, MetadataValue, MetricEvent,
-    ProductTimeline, RecordingTransport, ReleaseEvent, Traceparent, TraceparentSpanInput,
+    OpenTelemetrySpanContext, ProductTimeline, RecordingTransport, ReleaseEvent, Traceparent,
+    TraceparentSpanInput,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let incoming_traceparent = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
     let trace_context = Traceparent::parse(incoming_traceparent)?;
     let child_span_id = "b7ad6b7169203331";
-    let outgoing_headers = Traceparent::create_headers(
+    let otel_parent_context = OpenTelemetrySpanContext::new(
         &trace_context.trace_id,
-        child_span_id,
+        &trace_context.parent_span_id,
         &trace_context.trace_flags,
+    )?;
+    let outgoing_headers = Traceparent::create_headers_from_opentelemetry_context(
+        &otel_parent_context,
+        child_span_id,
     )?;
     let session_id = "sess_checkout_123";
     let route_template = "/checkout/:cart_id";
@@ -139,8 +144,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.span(
         "evt_span_checkout_request",
         "2026-06-02T10:00:06Z",
-        Traceparent::span_attributes_from_context(
-            &trace_context,
+        Traceparent::span_attributes_from_opentelemetry_context(
+            &otel_parent_context,
             TraceparentSpanInput::new("POST /checkout/:cart_id", child_span_id, "ok")
                 .with_duration_ms(183.4)
                 .with_metadata(span_metadata),

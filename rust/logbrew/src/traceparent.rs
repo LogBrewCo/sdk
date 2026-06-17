@@ -59,6 +59,66 @@ impl TraceparentSpanInput {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Dependency-free copy of OpenTelemetry SpanContext fields needed for child span correlation.
+pub struct OpenTelemetrySpanContext {
+    trace_id: String,
+    span_id: String,
+    trace_flags: String,
+    sampled: bool,
+}
+
+impl OpenTelemetrySpanContext {
+    /// Create a validated OpenTelemetry-compatible span context from W3C IDs and trace flags.
+    pub fn new(
+        trace_id: impl AsRef<str>,
+        span_id: impl AsRef<str>,
+        trace_flags: impl AsRef<str>,
+    ) -> Result<Self, SdkError> {
+        let normalized_trace_id = trace_id.as_ref().trim().to_ascii_lowercase();
+        let normalized_span_id = span_id.as_ref().trim().to_ascii_lowercase();
+        let normalized_flags = trace_flags.as_ref().trim().to_ascii_lowercase();
+        require_trace_id(&normalized_trace_id)?;
+        require_span_id("OpenTelemetry span id", &normalized_span_id)?;
+        require_trace_flags(&normalized_flags)?;
+        Ok(Self {
+            trace_id: normalized_trace_id,
+            span_id: normalized_span_id,
+            sampled: trace_flags_sampled(&normalized_flags),
+            trace_flags: normalized_flags,
+        })
+    }
+
+    /// Create a context when the app has a sampled boolean but not a trace-flags string.
+    pub fn from_sampled(
+        trace_id: impl AsRef<str>,
+        span_id: impl AsRef<str>,
+        sampled: bool,
+    ) -> Result<Self, SdkError> {
+        Self::new(trace_id, span_id, if sampled { "01" } else { "00" })
+    }
+
+    /// Normalized 32-character trace identifier.
+    pub fn trace_id(&self) -> &str {
+        &self.trace_id
+    }
+
+    /// Normalized current or parent span identifier.
+    pub fn span_id(&self) -> &str {
+        &self.span_id
+    }
+
+    /// Normalized two-character trace flags value.
+    pub fn trace_flags(&self) -> &str {
+        &self.trace_flags
+    }
+
+    /// Whether the sampled bit is set.
+    pub fn sampled(&self) -> bool {
+        self.sampled
+    }
+}
+
 #[derive(Clone, Debug)]
 /// Dependency-free helpers for explicit W3C traceparent interoperability.
 pub struct Traceparent;
@@ -91,9 +151,7 @@ impl Traceparent {
         require_span_id("traceparent parent span id", &parent_span_id)?;
         require_trace_flags(&trace_flags)?;
 
-        let sampled = u8::from_str_radix(&trace_flags, 16)
-            .map(|flags| flags & 1 == 1)
-            .unwrap_or(false);
+        let sampled = trace_flags_sampled(&trace_flags);
         Ok(TraceparentContext {
             version,
             trace_id,
@@ -134,6 +192,14 @@ impl Traceparent {
         Ok(headers)
     }
 
+    /// Create a one-header outbound carrier from an OpenTelemetry-compatible parent context.
+    pub fn create_headers_from_opentelemetry_context(
+        context: &OpenTelemetrySpanContext,
+        child_span_id: impl AsRef<str>,
+    ) -> Result<BTreeMap<String, String>, SdkError> {
+        Self::create_headers(context.trace_id(), child_span_id, context.trace_flags())
+    }
+
     /// Build a LogBrew span event that continues an incoming W3C traceparent.
     pub fn span_attributes_from_traceparent(
         traceparent: impl AsRef<str>,
@@ -163,6 +229,28 @@ impl Traceparent {
             span = span.with_metadata(metadata);
         }
         Ok(span)
+    }
+
+    /// Build a LogBrew child span from an OpenTelemetry-compatible current span context.
+    pub fn span_attributes_from_opentelemetry_context(
+        context: &OpenTelemetrySpanContext,
+        input: TraceparentSpanInput,
+    ) -> Result<SpanEvent, SdkError> {
+        let trace_context = Self::context_from_opentelemetry_context(context);
+        Self::span_attributes_from_context(&trace_context, input)
+    }
+
+    /// Convert OpenTelemetry-compatible IDs into the existing W3C trace context shape.
+    pub fn context_from_opentelemetry_context(
+        context: &OpenTelemetrySpanContext,
+    ) -> TraceparentContext {
+        TraceparentContext {
+            version: "00".to_string(),
+            trace_id: context.trace_id.clone(),
+            parent_span_id: context.span_id.clone(),
+            trace_flags: context.trace_flags.clone(),
+            sampled: context.sampled,
+        }
     }
 }
 
@@ -214,6 +302,12 @@ fn require_trace_flags(trace_flags: &str) -> Result<(), SdkError> {
 
 fn is_lower_hex(value: &str) -> bool {
     value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn trace_flags_sampled(trace_flags: &str) -> bool {
+    u8::from_str_radix(trace_flags, 16)
+        .map(|flags| flags & 1 == 1)
+        .unwrap_or(false)
 }
 
 fn require_primitive_metadata(metadata: &Map<String, Value>) -> Result<(), SdkError> {

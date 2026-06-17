@@ -25,7 +25,9 @@ pub use serde_json::Value as MetadataValue;
 pub type SharedLogBrewClient = std::sync::Arc<std::sync::Mutex<LogBrewClient>>;
 #[cfg(feature = "tower")]
 pub use tower_layer::{TowerRequestIds, TowerRequestTelemetryLayer, TowerRequestTelemetryService};
-pub use traceparent::{Traceparent, TraceparentContext, TraceparentSpanInput};
+pub use traceparent::{
+    OpenTelemetrySpanContext, Traceparent, TraceparentContext, TraceparentSpanInput,
+};
 #[cfg(feature = "tracing")]
 pub use tracing_layer::LogBrewTracingLayer;
 
