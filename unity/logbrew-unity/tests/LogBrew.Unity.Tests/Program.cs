@@ -32,7 +32,8 @@ namespace LogBrew.Unity.Tests
             Run("unity_request_span_uses_child_trace", UnityRequestSpanUsesChildTrace);
             Run("unity_request_tracker_applies_headers_and_captures_duration", UnityRequestTrackerAppliesHeadersAndCapturesDuration);
             Run("unity_coroutine_wrapper_reactivates_trace_per_step", UnityCoroutineWrapperReactivatesTracePerStep);
-            Console.WriteLine("unity package tests ok (21 tests)");
+            Run("unity_coroutine_tracker_records_completion_and_failure_spans", UnityCoroutineTrackerRecordsCompletionAndFailureSpans);
+            Console.WriteLine("unity package tests ok (22 tests)");
         }
 
         private static void Run(string name, Action test)
@@ -682,6 +683,124 @@ namespace LogBrew.Unity.Tests
             AssertDoesNotContain(body, "traceparent");
         }
 
+        private static void UnityCoroutineTrackerRecordsCompletionAndFailureSpans()
+        {
+            const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+            const string parentSpanId = "00f067aa0ba902b7";
+            var client = NewClient();
+            var trace = LogBrewTraceContext.FromTraceparent("00-" + traceId + "-" + parentSpanId + "-01");
+            var clockMs = 1000.0;
+            var eventIds = new Queue<string>();
+            eventIds.Enqueue("evt_unity_coroutine_tracker_complete_001");
+            var timestamps = new Queue<string>();
+            timestamps.Enqueue("2026-06-02T10:00:22Z");
+            var tracker = new UnityCoroutineTracker(
+                client,
+                idFactory: () => eventIds.Dequeue(),
+                timestampFactory: () => timestamps.Dequeue(),
+                realtimeMilliseconds: () => clockMs,
+                context: UnityContext.Create().WithPlatform("ios").WithSceneName("Checkout"));
+
+            UnityTrackedCoroutine coroutine;
+            using (LogBrewTrace.Activate(trace))
+            {
+                coroutine = tracker.Trace(
+                    "checkout.upload",
+                    TraceAwareCoroutine(client),
+                    context: UnityContext.Create()
+                        .WithFrame(128)
+                        .WithMetadata("traceparent", "spoofed_traceparent"));
+            }
+
+            using (coroutine)
+            {
+                AssertTrue(coroutine.MoveNext(), "tracked coroutine should yield once");
+                clockMs = 1250.75;
+                AssertFalse(coroutine.MoveNext(), "tracked coroutine should complete after resume");
+            }
+
+            var body = client.PreviewJson();
+            AssertContains(body, "\"evt_unity_coroutine_tracker_complete_001\"");
+            AssertContains(body, "\"name\": \"unity.coroutine:checkout.upload\"");
+            AssertContains(body, "\"durationMs\": 250.75");
+            AssertContains(body, "\"status\": \"ok\"");
+            AssertContains(body, "\"source\": \"unity.coroutine\"");
+            AssertContains(body, "\"coroutineName\": \"checkout.upload\"");
+            AssertContains(body, "\"outcome\": \"completed\"");
+            AssertContains(body, "\"traceId\": \"" + traceId + "\"");
+            AssertContains(body, "\"parentSpanId\": \"" + trace.SpanId + "\"");
+            AssertContains(body, "\"platform\": \"ios\"");
+            AssertContains(body, "\"sceneName\": \"Checkout\"");
+            AssertContains(body, "\"frame\": 128");
+            AssertDoesNotContain(body, "spoofed_traceparent");
+            AssertDoesNotContain(body, "traceparent");
+
+            var failureClient = NewClient();
+            clockMs = 2000.0;
+            eventIds = new Queue<string>();
+            eventIds.Enqueue("evt_unity_coroutine_tracker_failure_001");
+            timestamps = new Queue<string>();
+            timestamps.Enqueue("2026-06-02T10:00:23Z");
+            tracker = new UnityCoroutineTracker(
+                failureClient,
+                idFactory: () => eventIds.Dequeue(),
+                timestampFactory: () => timestamps.Dequeue(),
+                realtimeMilliseconds: () => clockMs);
+            using (LogBrewTrace.Activate(trace))
+            using (var failingCoroutine = tracker.Trace("checkout.fail", FailingCoroutine()))
+            {
+                AssertTrue(failingCoroutine.MoveNext(), "failing coroutine should yield before throwing");
+                clockMs = 2033.5;
+                try
+                {
+                    failingCoroutine.MoveNext();
+                    throw new InvalidOperationException("expected coroutine failure");
+                }
+                catch (FormatException)
+                {
+                }
+            }
+
+            var failureBody = failureClient.PreviewJson();
+            AssertContains(failureBody, "\"evt_unity_coroutine_tracker_failure_001\"");
+            AssertContains(failureBody, "\"name\": \"unity.coroutine:checkout.fail\"");
+            AssertContains(failureBody, "\"durationMs\": 33.5");
+            AssertContains(failureBody, "\"status\": \"error\"");
+            AssertContains(failureBody, "\"outcome\": \"exception\"");
+            AssertContains(failureBody, "\"errorType\": \"FormatException\"");
+            AssertDoesNotContain(failureBody, "boom");
+            AssertDoesNotContain(failureBody, "traceparent");
+
+            ExpectArgumentNull("client", () =>
+            {
+                var unused = new UnityCoroutineTracker(null!, () => "evt", () => "2026-06-02T10:00:22Z", () => 0);
+                AssertEqual(0, unused.GetHashCode());
+            });
+            ExpectArgumentNull("idFactory", () =>
+            {
+                var unused = new UnityCoroutineTracker(client, null!, () => "2026-06-02T10:00:22Z", () => 0);
+                AssertEqual(0, unused.GetHashCode());
+            });
+            ExpectArgumentNull("timestampFactory", () =>
+            {
+                var unused = new UnityCoroutineTracker(client, () => "evt", null!, () => 0);
+                AssertEqual(0, unused.GetHashCode());
+            });
+            ExpectArgumentNull("realtimeMilliseconds", () =>
+            {
+                var unused = new UnityCoroutineTracker(client, () => "evt", () => "2026-06-02T10:00:22Z", null!);
+                AssertEqual(0, unused.GetHashCode());
+            });
+            Expect("validation_error", () =>
+            {
+                var unused = new UnityCoroutineTracker(client, () => "evt", () => "2026-06-02T10:00:22Z", () => double.NaN);
+                AssertEqual(0, unused.GetHashCode());
+            });
+            ExpectArgumentNull("name", () => tracker.Trace(null!, EmptyCoroutine()));
+            ExpectArgumentNull("routine", () => tracker.Trace("checkout.empty", null!));
+            Expect("validation_error", () => tracker.Trace(" ", EmptyCoroutine()));
+        }
+
         private static IEnumerator TraceAwareCoroutine(LogBrewClient client)
         {
             var firstStepSpanId = LogBrewTrace.Current?.SpanId ?? string.Empty;
@@ -701,6 +820,17 @@ namespace LogBrew.Unity.Tests
                     ["traceId"] = "spoofed_trace",
                     ["spanId"] = "spoofed_span"
                 }));
+        }
+
+        private static IEnumerator FailingCoroutine()
+        {
+            yield return "before_failure";
+            throw new FormatException("boom");
+        }
+
+        private static IEnumerator EmptyCoroutine()
+        {
+            yield break;
         }
 
         private static void AssertContains(string haystack, string needle)

@@ -105,3 +105,25 @@ LogBrew Unity already had source-only UPM packaging, explicit spans, Unity scene
 - This reduces the UnityWebRequest convenience gap without pulling `UnityEngine.Networking` into the core runtime or owning request disposal/completion callbacks.
 - LogBrew still deliberately avoids Datadog-style wrapper ownership, hidden global request instrumentation, payload/header copying, full URL/query/hash capture, baggage, and tracestate.
 - Remaining Unity gaps: coroutine convenience instrumentation beyond explicit wrapping, OpenTelemetry context ingestion, rich span events/exceptions, URL/request phase timings, and native crash/symbolication integration.
+
+## 2026-06-17 Coroutine Tracker Follow-Up
+
+### Source Reading
+
+- Re-checked upstream HEADs before implementation: Sentry Unity and Datadog Unity still match the commits recorded above; OpenTelemetry .NET advanced to `184b1cfd4a48f1fe6240a1b76f39c37efb38f465`.
+- Re-read Sentry Unity `SentryMonoBehaviour.QueueCoroutine(...)`, `Update()`, `StartCoroutine(...)`, `UpdatePauseStatus(...)`, `OnApplicationPause(...)`, `OnApplicationFocus(...)`, `StartAwakeSpan(...)`, and `FinishAwakeSpan()`: Sentry's convenience comes from a hidden singleton `MonoBehaviour`, a main-thread coroutine queue, and auto lifecycle/performance hooks.
+- Re-read Datadog Unity `DdUnityLogHandler.Attach(...)`, `Detach(...)`, `LogException(...)`, and `LogFormat(...)`: the useful reliability pattern is defensive attach/detach plus `finally` forwarding, but it still owns a global Unity logging hook that LogBrew does not want in core.
+- Re-read OpenTelemetry .NET `RuntimeContext.RegisterSlot(...)`, `SetValue(...)`, `GetValue(...)`, and `AsyncLocalRuntimeContextSlot<T>.Get()/Set(...)` at `184b1cfd4a48f1fe6240a1b76f39c37efb38f465`: OTel still uses ambient runtime context slots, which are not a clean fit for Unity's frame-driven `IEnumerator` coroutines.
+
+### LogBrew Update
+
+- Added source-only `UnityCoroutineTracker`, a small tracker that apps instantiate near app-owned coroutine starts and call with a name plus owned `IEnumerator`.
+- `UnityCoroutineTracker.Trace(...)` creates a child trace context under the supplied or active trace, returns an `IEnumerator` for the app's own `StartCoroutine(...)`, reactivates that child context around each `MoveNext()`/`Reset()`, and emits one `unity.coroutine:<name>` span on completion.
+- Exceptions record status `error`, outcome `exception`, and exception type only; messages, stacks, coroutine yielded values, payloads, headers, query strings, baggage, and tracestate are not copied into metadata.
+- Packaged `examples/coroutine_tracker/CoroutineTracker.cs` plus `scripts/check_unity_coroutine_tracker_payload.py` prove source and installed UPM tarballs correlate coroutine log/action events under the child span, record completion duration from an app-supplied realtime clock, preserve primitive Unity metadata, and overwrite spoofed trace keys.
+
+### Tradeoffs
+
+- This reduces the coroutine convenience gap without creating hidden `MonoBehaviour` objects, scheduling coroutines globally, assuming ambient async context, patching Unity APIs, or owning cancellation/disposal semantics.
+- LogBrew still deliberately avoids Sentry-style automatic coroutine/lifecycle instrumentation, Datadog-style global Unity hooks, OpenTelemetry baggage/tracestate, rich span event arrays, URL/request phase timings, and native crash/symbolication integration.
+- Remaining Unity gaps: OpenTelemetry context ingestion, richer span events/exceptions beyond bounded summary fields, URL/request phase timings, hidden/global instrumentation for teams that explicitly want it, and native crash/symbolication parity.
