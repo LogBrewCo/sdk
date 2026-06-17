@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using LogBrew.Unity;
 
@@ -12,6 +13,7 @@ public static class TraceCorrelation
         var trace = LogBrewTraceContext.ContinueOrCreate("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01");
         string outgoingTraceparent;
         string requestTraceparent;
+        UnityTraceCoroutine tracedCoroutine;
 
         using (LogBrewTrace.Activate(trace))
         {
@@ -80,9 +82,31 @@ public static class TraceCorrelation
                 "UnityWebRequestError",
                 UnityContext.Create().WithSceneName("Checkout").WithMetadata("traceparent", "spoofed_traceparent"));
             outgoingTraceparent = LogBrewTrace.OutgoingHeaders()["traceparent"];
+            tracedCoroutine = LogBrewUnity.TraceCoroutine(CorrelatedCoroutine(client));
+        }
+
+        using (tracedCoroutine)
+        {
+            tracedCoroutine.MoveNext();
+            tracedCoroutine.MoveNext();
         }
 
         Console.WriteLine(client.PreviewJson());
         Console.Error.WriteLine("{\"traceparent\":\"" + outgoingTraceparent + "\",\"requestTraceparent\":\"" + requestTraceparent + "\"}");
+    }
+
+    private static IEnumerator CorrelatedCoroutine(LogBrewClient client)
+    {
+        yield return "frame_1";
+        client.Action(
+            "evt_unity_trace_coroutine_001",
+            "2026-06-02T10:00:28Z",
+            ActionAttributes.Create("unity.coroutine.resume", "success").WithMetadata(new Dictionary<string, object?>
+            {
+                ["source"] = "unity.coroutine",
+                ["phase"] = "resume",
+                ["sceneName"] = "Checkout",
+                ["traceparent"] = "spoofed_traceparent"
+            }));
     }
 }

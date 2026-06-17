@@ -105,14 +105,18 @@ using (LogBrewTrace.Activate(trace))
 
     IReadOnlyDictionary<string, string> headers = LogBrewTrace.OutgoingHeaders();
     string traceparent = headers["traceparent"];
+
+    var tracedCoroutine = LogBrewUnity.TraceCoroutine(UploadCheckoutCoroutine());
+    // StartCoroutine(tracedCoroutine) in a MonoBehaviour you own.
 }
 ```
 
 Issue, log, action, and Unity helper events inherit active trace metadata while the scope is active. Spans stay explicit through `LogBrewTrace.SpanAttributes(...)`. Request spans are app-owned: `StartRequestSpan(...)` returns only `traceparent`, and `CaptureRequestSpan(...)` records route-only metadata without query strings, payloads, or copied request headers.
+For app-owned coroutines, wrap the routine with `LogBrewUnity.TraceCoroutine(...)` while the trace is active, then pass the returned `IEnumerator` to your own `StartCoroutine(...)`. The wrapper reactivates the captured trace only while Unity advances each coroutine step; it does not create hidden `MonoBehaviour` objects or subscribe to lifecycle events.
 
 ## Sample Source
 
-The package includes sample source for creating a client, sending through `HttpTransport`, recording scene transitions, mapping Unity logs, capturing exceptions, creating lifecycle and request spans, and correlating Unity telemetry with W3C `traceparent` in your own game or realtime app.
+The package includes sample source for creating a client, sending through `HttpTransport`, recording scene transitions, mapping Unity logs, capturing exceptions, creating lifecycle and request spans, preserving coroutine trace context, and correlating Unity telemetry with W3C `traceparent` in your own game or realtime app.
 
 ## Behavior
 
@@ -126,5 +130,6 @@ The package includes sample source for creating a client, sending through `HttpT
 - `LogBrewUnity.CaptureLifecycleSpan()` records app-owned lifecycle transitions such as `active -> paused` as spans with previous-state duration.
 - `LogBrewUnity.StartRequestSpan()` returns a child trace context plus `traceparent` header for app-owned request clients such as `UnityWebRequest`.
 - `LogBrewUnity.CaptureRequestSpan()` records app-owned request completions as child spans with method, route template, status code, optional error type, and Unity context metadata.
+- `LogBrewUnity.TraceCoroutine()` captures an explicit or active trace and reactivates it while each app-owned coroutine step executes.
 - `UnityContext` adds scene, object, platform, session, and frame metadata while keeping the core event builders independent from `UnityEngine`.
 - `LogBrewTrace` adds active trace metadata to issue, log, action, span, and Unity helper events without global HTTP patching or payload/header capture.

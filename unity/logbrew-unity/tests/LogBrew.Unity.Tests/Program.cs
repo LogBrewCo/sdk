@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using LogBrew.Unity;
 
@@ -28,7 +29,8 @@ namespace LogBrew.Unity.Tests
             Run("trace_context_helpers_validate_and_correlate", TraceContextHelpersValidateAndCorrelate);
             Run("unity_lifecycle_span_uses_active_trace", UnityLifecycleSpanUsesActiveTrace);
             Run("unity_request_span_uses_child_trace", UnityRequestSpanUsesChildTrace);
-            Console.WriteLine("unity package tests ok (18 tests)");
+            Run("unity_coroutine_wrapper_reactivates_trace_per_step", UnityCoroutineWrapperReactivatesTracePerStep);
+            Console.WriteLine("unity package tests ok (19 tests)");
         }
 
         private static void Run(string name, Action test)
@@ -467,6 +469,62 @@ namespace LogBrew.Unity.Tests
             AssertDoesNotContain(body, "spoofed_trace");
             AssertDoesNotContain(body, "spoofed_traceparent");
             AssertDoesNotContain(body, "traceparent");
+        }
+
+        private static void UnityCoroutineWrapperReactivatesTracePerStep()
+        {
+            const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+            const string parentSpanId = "00f067aa0ba902b7";
+            var client = NewClient();
+            var trace = LogBrewTraceContext.FromTraceparent("00-" + traceId + "-" + parentSpanId + "-01");
+            UnityTraceCoroutine coroutine;
+            using (LogBrewTrace.Activate(trace))
+            {
+                coroutine = LogBrewUnity.TraceCoroutine(TraceAwareCoroutine(client));
+            }
+
+            using (coroutine)
+            {
+                AssertEqual(string.Empty, LogBrewTrace.Current?.SpanId ?? string.Empty);
+                AssertTrue(coroutine.MoveNext(), "coroutine should yield once");
+                AssertEqual("frame_1", coroutine.Current?.ToString() ?? string.Empty);
+                AssertEqual(string.Empty, LogBrewTrace.Current?.SpanId ?? string.Empty);
+                AssertFalse(coroutine.MoveNext(), "coroutine should complete after the resume step");
+                AssertEqual(string.Empty, LogBrewTrace.Current?.SpanId ?? string.Empty);
+            }
+
+            ExpectArgumentNull("routine", () => LogBrewUnity.TraceCoroutine(null!));
+            var body = client.PreviewJson();
+            AssertContains(body, "\"evt_unity_coroutine_log_001\"");
+            AssertContains(body, "\"evt_unity_coroutine_action_001\"");
+            AssertContains(body, "\"traceId\": \"" + traceId + "\"");
+            AssertContains(body, "\"spanId\": \"" + trace.SpanId + "\"");
+            AssertContains(body, "\"parentSpanId\": \"" + parentSpanId + "\"");
+            AssertContains(body, "\"phase\": \"resume\"");
+            AssertDoesNotContain(body, "spoofed_trace");
+            AssertDoesNotContain(body, "spoofed_span");
+            AssertDoesNotContain(body, "traceparent");
+        }
+
+        private static IEnumerator TraceAwareCoroutine(LogBrewClient client)
+        {
+            var firstStepSpanId = LogBrewTrace.Current?.SpanId ?? string.Empty;
+            AssertNotEqual(string.Empty, firstStepSpanId);
+            client.Log(
+                "evt_unity_coroutine_log_001",
+                "2026-06-02T10:00:20Z",
+                LogAttributes.Create("coroutine started", "info").WithLogger("unity-coroutine"));
+            yield return "frame_1";
+            AssertEqual(firstStepSpanId, LogBrewTrace.Current?.SpanId ?? string.Empty);
+            client.Action(
+                "evt_unity_coroutine_action_001",
+                "2026-06-02T10:00:21Z",
+                ActionAttributes.Create("unity.coroutine.resume", "success").WithMetadata(new Dictionary<string, object?>
+                {
+                    ["phase"] = "resume",
+                    ["traceId"] = "spoofed_trace",
+                    ["spanId"] = "spoofed_span"
+                }));
         }
 
         private static void AssertContains(string haystack, string needle)

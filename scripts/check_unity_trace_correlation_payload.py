@@ -94,8 +94,9 @@ def main() -> None:
     helper_log = event_by_id(events, "evt_unity_trace_helper_log_001")
     exception = event_by_id(events, "evt_unity_trace_exception_001")
     request = event_by_id(events, "evt_unity_trace_request_001")
+    coroutine = event_by_id(events, "evt_unity_trace_coroutine_001")
 
-    for event in (issue, log, action, scene, helper_log, exception):
+    for event in (issue, log, action, scene, helper_log, exception, coroutine):
         attributes = event.get("attributes")
         if not isinstance(attributes, dict):
             raise SystemExit("event attributes must be objects")
@@ -124,6 +125,19 @@ def main() -> None:
     exception_attributes = exception.get("attributes")
     if not isinstance(exception_attributes, dict) or exception_attributes.get("level") != "error":
         raise SystemExit("missing Unity exception issue")
+    coroutine_attributes = coroutine.get("attributes")
+    if not isinstance(coroutine_attributes, dict) or coroutine_attributes.get("name") != "unity.coroutine.resume":
+        raise SystemExit("missing Unity coroutine action")
+    coroutine_metadata = coroutine_attributes.get("metadata")
+    if not isinstance(coroutine_metadata, dict):
+        raise SystemExit("missing coroutine metadata")
+    for key, value in {
+        "source": "unity.coroutine",
+        "phase": "resume",
+        "sceneName": "Checkout",
+    }.items():
+        if coroutine_metadata.get(key) != value:
+            raise SystemExit(f"unexpected coroutine metadata {key}: {coroutine_metadata.get(key)!r}")
 
     request_attributes = request.get("attributes")
     if not isinstance(request_attributes, dict):

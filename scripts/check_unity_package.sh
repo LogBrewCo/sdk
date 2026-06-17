@@ -81,6 +81,7 @@ grep -qx 'Runtime/LogBrew.Unity.asmdef' "$tmp_dir/package-contents.txt"
 grep -qx 'Runtime/PublicTypes.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'Runtime/LogBrewClient.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'Runtime/LogBrewTrace.cs' "$tmp_dir/package-contents.txt"
+grep -qx 'Runtime/UnityCoroutineTrace.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'Runtime/UnityRequestTrace.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'Runtime/JsonSupport.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'Runtime/UnityHelpers.cs' "$tmp_dir/package-contents.txt"
@@ -102,7 +103,7 @@ with tarfile.open(package_tgz, "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
 if manifest["name"] != "co.logbrew.unity":
     raise SystemExit("wrong package name")
-for needle in ("LOGBREW_API_KEY", "LogBrewUnity.CreateClient", "HttpTransport", "LogBrewTrace", "StartRequestSpan", "CaptureRequestSpan", "traceparent", "https://api.logbrew.com/v1/events", "sample source"):
+for needle in ("LOGBREW_API_KEY", "LogBrewUnity.CreateClient", "HttpTransport", "LogBrewTrace", "TraceCoroutine", "StartRequestSpan", "CaptureRequestSpan", "traceparent", "https://api.logbrew.com/v1/events", "sample source"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
 PY

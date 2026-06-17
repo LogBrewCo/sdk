@@ -152,6 +152,7 @@ grep -q '"unityHelperEvents":3' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/installed-smoke.stderr.json"
 
 test -f "$installed_package_dir/Runtime/LogBrewTrace.cs"
+test -f "$installed_package_dir/Runtime/UnityCoroutineTrace.cs"
 test -f "$installed_package_dir/Runtime/UnityRequestTrace.cs"
 test -f "$installed_package_dir/examples/trace_correlation/TraceCorrelation.cs"
 test -f "$installed_package_dir/examples/lifecycle_spans/LifecycleSpans.cs"
