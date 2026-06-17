@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.native_elf_fixture import DEFAULT_DEBUG_PAYLOAD, write_android_elf_symbol
+
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "scripts" / "create_native_release_artifact_manifest.py"
@@ -38,18 +40,43 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         )
         return mapping
 
+    def create_android_native_symbols(
+        self,
+        root: Path,
+        *,
+        build_id: bytes = bytes.fromhex("32cc7f54d61dc2d4022a4dc58fdec1f4"),
+        include_build_id: bool = True,
+        include_debug_info: bool = True,
+        include_symtab: bool = True,
+        include_dynsym: bool = False,
+        include_code: bool = True,
+    ) -> Path:
+        symbols_dir = root / "android" / "symbols"
+        write_android_elf_symbol(
+            symbols_dir / "lib" / "arm64-v8a" / "libcheckout.so",
+            build_id=build_id,
+            include_build_id=include_build_id,
+            include_debug_info=include_debug_info,
+            include_symtab=include_symtab,
+            include_dynsym=include_dynsym,
+            include_code=include_code,
+        )
+        return symbols_dir
+
     def test_ready_manifest_keeps_paths_relative_and_omits_symbol_contents(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             artifact_root = Path(tmp) / "artifacts"
             artifact_root.mkdir()
             dsym = self.create_dsym(artifact_root)
             mapping = self.create_mapping(artifact_root)
+            native_symbols = self.create_android_native_symbols(artifact_root)
 
             manifest = create_native_release_artifact_manifest.create_manifest(
                 artifact_root=artifact_root,
                 artifacts=[
                     ("ios_dsym", dsym),
                     ("android_proguard_mapping", mapping),
+                    ("android_native_symbols", native_symbols),
                 ],
                 release="2026.06.17",
                 environment="production",
@@ -63,10 +90,15 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertEqual(manifest["git"]["commitSha"], "abc123def456")
         self.assertEqual(
             [artifact["artifactType"] for artifact in manifest["artifacts"]],
-            ["ios_dsym", "android_proguard_mapping"],
+            ["ios_dsym", "android_proguard_mapping", "android_native_symbols"],
+        )
+        self.assertEqual(
+            manifest["supportedArtifactTypes"],
+            ["ios_dsym", "android_proguard_mapping", "android_native_symbols"],
         )
         dsym_artifact = manifest["artifacts"][0]
         mapping_artifact = manifest["artifacts"][1]
+        native_artifact = manifest["artifacts"][2]
         self.assertEqual(dsym_artifact["path"], "ios/Checkout.app.dSYM")
         self.assertEqual(dsym_artifact["fileCount"], 2)
         self.assertEqual(
@@ -77,10 +109,23 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertEqual(mapping_artifact["path"], "android/mapping.txt")
         self.assertEqual(mapping_artifact["proguard"]["classMappingCount"], 1)
         self.assertTrue(mapping_artifact["artifactId"].startswith("lbw_android_proguard_mapping_"))
+        native_symbols_details = native_artifact["androidNativeSymbols"]
+        self.assertEqual(native_artifact["path"], "android/symbols")
+        self.assertEqual(native_symbols_details["symbolFileCount"], 1)
+        self.assertEqual(native_symbols_details["architectures"], ["arm64-v8a"])
+        native_file = native_symbols_details["files"][0]
+        self.assertEqual(native_file["path"], "android/symbols/lib/arm64-v8a/libcheckout.so")
+        self.assertEqual(native_file["elfClass"], 64)
+        self.assertEqual(native_file["elfType"], "DYN")
+        self.assertEqual(native_file["arch"], "arm64-v8a")
+        self.assertEqual(native_file["symbolSource"], "debug_info")
+        self.assertEqual(native_file["gnuBuildId"], "32cc7f54d61dc2d4022a4dc58fdec1f4")
+        self.assertTrue(native_artifact["artifactId"].startswith("lbw_android_native_symbols_"))
         serialized = json.dumps(manifest)
         self.assertNotIn(tmp, serialized)
         self.assertNotIn("com.example.Checkout", serialized)
         self.assertNotIn("fake dwarf object", serialized)
+        self.assertNotIn(DEFAULT_DEBUG_PAYLOAD.decode("ascii", errors="ignore"), serialized)
 
     def test_missing_dsym_dwarf_directory_blocks_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -120,6 +165,75 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertEqual(manifest["validation"]["status"], "blocked")
         self.assertIn(
             "android/mapping.txt: ProGuard/R8 mapping file has no class mapping entries",
+            manifest["validation"]["errors"],
+        )
+
+    def test_android_native_symbol_without_build_id_or_code_hash_blocks_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            artifact_root.mkdir()
+            native_symbols = self.create_android_native_symbols(
+                artifact_root,
+                include_build_id=False,
+                include_code=False,
+            )
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("android_native_symbols", native_symbols)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "android/symbols: android/symbols/lib/arm64-v8a/libcheckout.so: ELF file has no build ID or code hash",
+            manifest["validation"]["errors"],
+        )
+
+    def test_android_native_symbol_without_symbol_sections_blocks_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            artifact_root.mkdir()
+            native_symbols = self.create_android_native_symbols(
+                artifact_root,
+                include_debug_info=False,
+                include_symtab=False,
+            )
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("android_native_symbols", native_symbols)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "android/symbols: android/symbols/lib/arm64-v8a/libcheckout.so: ELF file has no debug info or symbol tables",
+            manifest["validation"]["errors"],
+        )
+
+    def test_android_native_symbol_non_elf_blocks_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            symbols_dir = artifact_root / "android" / "symbols"
+            symbols_dir.mkdir(parents=True)
+            (symbols_dir / "libbad.so").write_bytes(b"not an elf file")
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("android_native_symbols", symbols_dir)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "android/symbols: android/symbols/libbad.so: not an ELF file",
             manifest["validation"]["errors"],
         )
 

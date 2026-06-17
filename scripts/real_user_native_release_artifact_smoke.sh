@@ -15,14 +15,24 @@ artifact_root="$tmp_dir/artifacts"
 dsym_dir="$artifact_root/ios/Checkout.app.dSYM"
 dwarf_dir="$dsym_dir/Contents/Resources/DWARF"
 mapping_file="$artifact_root/android/mapping.txt"
+native_symbols_dir="$artifact_root/android/symbols"
+native_so="$native_symbols_dir/lib/arm64-v8a/libcheckout.so"
 
-mkdir -p "$dwarf_dir" "$(dirname "$mapping_file")"
+mkdir -p "$dwarf_dir" "$(dirname "$mapping_file")" "$(dirname "$native_so")"
 printf '%s\n' '<plist version="1.0" />' > "$dsym_dir/Contents/Info.plist"
 printf '%s\n' 'fake dwarf object bytes' > "$dwarf_dir/Checkout"
 printf '%s\n' \
   'com.example.Checkout -> a:' \
   '    void placeOrder() -> a' \
   > "$mapping_file"
+PYTHONPATH="$repo_root/tests" python3 - "$native_so" <<'PY'
+import sys
+from pathlib import Path
+
+from native_elf_fixture import write_android_elf_symbol
+
+write_android_elf_symbol(Path(sys.argv[1]))
+PY
 
 ready_manifest="$tmp_dir/native-manifest-ready.json"
 python3 "$repo_root/scripts/create_native_release_artifact_manifest.py" \
@@ -32,6 +42,7 @@ python3 "$repo_root/scripts/create_native_release_artifact_manifest.py" \
   --service "checkout-mobile" \
   --artifact "ios_dsym=$dsym_dir" \
   --artifact "android_proguard_mapping=$mapping_file" \
+  --artifact "android_native_symbols=$native_symbols_dir" \
   > "$ready_manifest"
 
 python3 - "$ready_manifest" "$tmp_dir" <<'PY'
@@ -48,14 +59,22 @@ assert manifest["artifactType"] == "native_debug_symbol_manifest"
 assert [artifact["artifactType"] for artifact in manifest["artifacts"]] == [
     "ios_dsym",
     "android_proguard_mapping",
+    "android_native_symbols",
 ]
 assert manifest["artifacts"][0]["path"] == "ios/Checkout.app.dSYM"
 assert manifest["artifacts"][0]["dsym"]["hasInfoPlist"] is True
 assert manifest["artifacts"][1]["path"] == "android/mapping.txt"
 assert manifest["artifacts"][1]["proguard"]["classMappingCount"] == 1
+native_details = manifest["artifacts"][2]["androidNativeSymbols"]
+native_file = native_details["files"][0]
+assert native_details["symbolFileCount"] == 1
+assert native_file["path"] == "android/symbols/lib/arm64-v8a/libcheckout.so"
+assert native_file["gnuBuildId"] == "32cc7f54d61dc2d4022a4dc58fdec1f4"
+assert native_file["symbolSource"] == "debug_info"
 assert tmp_dir not in serialized
 assert "com.example.Checkout" not in serialized
 assert "fake dwarf object bytes" not in serialized
+assert "raw-symbol-section" not in serialized
 PY
 
 blocked_mapping="$artifact_root/android/empty-mapping.txt"
