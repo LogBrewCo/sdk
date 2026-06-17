@@ -82,6 +82,7 @@ STEP_LABELS=(
   "Workflow YAML validation"
   "Confidentiality leak scan"
   "JavaScript release artifact smoke"
+  "Native release artifact smoke"
   "Generated artifact hygiene"
 )
 steps_total="${#STEP_LABELS[@]}"
@@ -610,6 +611,10 @@ mark_step_complete
 
 begin_next_step "JavaScript release artifact smoke"
 run_shell_step "bash scripts/real_user_js_release_artifact_smoke.sh"
+mark_step_complete
+
+begin_next_step "Native release artifact smoke"
+run_shell_step "bash scripts/real_user_native_release_artifact_smoke.sh"
 mark_step_complete
 
 begin_next_step "Generated artifact hygiene"
