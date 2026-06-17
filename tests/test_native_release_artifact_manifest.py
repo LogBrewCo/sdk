@@ -409,6 +409,70 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
             "symbol_table",
         )
 
+    def test_breakpad_duplicate_module_id_keeps_richer_symbols(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            symbols_dir = artifact_root / "native" / "breakpad"
+            write_breakpad_symbol(
+                symbols_dir / "00-public.sym",
+                include_file_records=False,
+                module_name="/Users/dev/checkout/checkout.pdb",
+            )
+            write_breakpad_symbol(
+                symbols_dir / "99-rich.sym",
+                include_file_records=True,
+                module_name="/Users/dev/checkout/checkout.pdb",
+            )
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("breakpad_symbols", symbols_dir)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        serialized = json.dumps(manifest)
+        artifact = manifest["artifacts"][0]
+        self.assertEqual(manifest["validation"]["status"], "ready")
+        self.assertEqual(artifact["breakpadSymbols"]["symbolFileCount"], 1)
+        self.assertEqual(artifact["breakpadSymbols"]["files"][0]["path"], "native/breakpad/99-rich.sym")
+        self.assertEqual(artifact["breakpadSymbols"]["files"][0]["symbolSource"], "debug_info")
+        self.assertTrue(
+            any("duplicate Breakpad symbol identity" in warning for warning in artifact["validation"]["warnings"])
+        )
+        self.assertNotIn("/Users/dev/checkout", serialized)
+        self.assertNotIn(DEFAULT_BREAKPAD_SOURCE_PATH, serialized)
+        self.assertNotIn(DEFAULT_BREAKPAD_SYMBOL_NAME, serialized)
+
+    def test_dotnet_pdb_duplicate_debug_id_skips_same_quality_pe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            symbols_dir = artifact_root / "windows" / "symbols"
+            write_pe_with_codeview(symbols_dir / "00-checkout-copy.dll")
+            write_pe_with_codeview(symbols_dir / "99-checkout.dll")
+            write_pdb(symbols_dir / "checkout.pdb")
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("dotnet_pdb", symbols_dir)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        serialized = json.dumps(manifest)
+        artifact = manifest["artifacts"][0]
+        self.assertEqual(manifest["validation"]["status"], "ready")
+        self.assertEqual(artifact["dotnetPdb"]["symbolFileCount"], 1)
+        self.assertEqual(artifact["dotnetPdb"]["files"][0]["path"], "windows/symbols/00-checkout-copy.dll")
+        self.assertEqual(artifact["dotnetPdb"]["files"][0]["pdbPath"], "windows/symbols/checkout.pdb")
+        self.assertTrue(
+            any("duplicate PDB symbol identity" in warning for warning in artifact["validation"]["warnings"])
+        )
+        self.assertNotIn(DEFAULT_PDB_PATH, serialized)
+        self.assertNotIn(DEFAULT_PDB_PAYLOAD.decode("ascii"), serialized)
+
     def test_unity_symbols_without_build_id_blocks_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             artifact_root = Path(tmp) / "artifacts"

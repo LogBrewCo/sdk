@@ -21,8 +21,10 @@ unity_symbols_dir="$artifact_root/unity/symbols"
 unity_so="$unity_symbols_dir/arm64-v8a/libil2cpp.sym.so"
 breakpad_symbols_dir="$artifact_root/native/breakpad"
 breakpad_symbol="$breakpad_symbols_dir/checkout.sym"
+breakpad_public_symbol="$breakpad_symbols_dir/checkout-public.sym"
 dotnet_symbols_dir="$artifact_root/windows/symbols"
 dotnet_pe="$dotnet_symbols_dir/checkout.dll"
+dotnet_duplicate_pe="$dotnet_symbols_dir/checkout-copy.dll"
 dotnet_pdb="$dotnet_symbols_dir/checkout.pdb"
 
 mkdir -p "$dwarf_dir" "$(dirname "$mapping_file")" "$(dirname "$native_so")" "$(dirname "$unity_so")" "$breakpad_symbols_dir" "$dotnet_symbols_dir"
@@ -38,7 +40,15 @@ printf '%s\n' \
   '  "methods": ["Checkout.PlaceOrder"]' \
   '}' \
   > "$unity_symbols_dir/LineNumberMappings.json"
-PYTHONPATH="$repo_root/tests" python3 - "$dwarf_dir/Checkout" "$native_so" "$unity_so" "$breakpad_symbol" "$dotnet_pe" "$dotnet_pdb" <<'PY'
+PYTHONPATH="$repo_root/tests" python3 - \
+  "$dwarf_dir/Checkout" \
+  "$native_so" \
+  "$unity_so" \
+  "$breakpad_symbol" \
+  "$breakpad_public_symbol" \
+  "$dotnet_pe" \
+  "$dotnet_duplicate_pe" \
+  "$dotnet_pdb" <<'PY'
 import sys
 from pathlib import Path
 
@@ -51,8 +61,10 @@ write_macho_dwarf(Path(sys.argv[1]))
 write_android_elf_symbol(Path(sys.argv[2]))
 write_android_elf_symbol(Path(sys.argv[3]))
 write_breakpad_symbol(Path(sys.argv[4]))
-write_pe_with_codeview(Path(sys.argv[5]))
-write_pdb(Path(sys.argv[6]))
+write_breakpad_symbol(Path(sys.argv[5]), include_file_records=False)
+write_pe_with_codeview(Path(sys.argv[6]))
+write_pe_with_codeview(Path(sys.argv[7]))
+write_pdb(Path(sys.argv[8]))
 PY
 
 ready_manifest="$tmp_dir/native-manifest-ready.json"
@@ -118,21 +130,25 @@ assert unity_native_file["symbolSource"] == "debug_info"
 assert unity_mapping_file["path"] == "unity/symbols/LineNumberMappings.json"
 assert unity_mapping_file["symbolFormat"] == "il2cpp_mapping"
 breakpad_details = manifest["artifacts"][4]["breakpadSymbols"]
+breakpad_warnings = manifest["artifacts"][4]["validation"]["warnings"]
 breakpad_file = breakpad_details["files"][0]
 assert breakpad_details["symbolFileCount"] == 1
 assert breakpad_file["path"] == "native/breakpad/checkout.sym"
 assert breakpad_file["guid"] == "00112233-4455-6677-8899-AABBCCDDEEFF"
 assert breakpad_file["age"] == 42
 assert breakpad_file["symbolSource"] == "debug_info"
+assert any("duplicate Breakpad symbol identity" in warning for warning in breakpad_warnings)
 dotnet_details = manifest["artifacts"][5]["dotnetPdb"]
+dotnet_warnings = manifest["artifacts"][5]["validation"]["warnings"]
 dotnet_file = dotnet_details["files"][0]
 assert dotnet_details["symbolFileCount"] == 1
-assert dotnet_file["path"] == "windows/symbols/checkout.dll"
+assert dotnet_file["path"] == "windows/symbols/checkout-copy.dll"
 assert dotnet_file["pdbPath"] == "windows/symbols/checkout.pdb"
 assert dotnet_file["pdbGuid"] == "00112233-4455-6677-8899-AABBCCDDEEFF"
 assert dotnet_file["pdbAge"] == 42
 assert dotnet_file["pdbFileName"] == "checkout.pdb"
 assert dotnet_file["symbolSource"] == "debug_info"
+assert any("duplicate PDB symbol identity" in warning for warning in dotnet_warnings)
 assert tmp_dir not in serialized
 assert "com.example.Checkout" not in serialized
 assert "macho-debug-payload" not in serialized

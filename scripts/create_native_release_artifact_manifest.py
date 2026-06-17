@@ -26,6 +26,7 @@ from native_release_artifact_io import align_offset, read_bytes, sha256_file  # 
 from native_release_artifact_pe import (  # noqa: E402
     associated_pdb_candidates,
     breakpad_symbol_candidates,
+    dedupe_pe_symbol_files,
     pe_symbol_candidates,
     read_breakpad_metadata,
     read_pe_codeview_metadata,
@@ -624,6 +625,7 @@ def build_breakpad_symbols_artifact(path: Path, root: Path, limits: dict[str, in
             if str(metadata["arch"]).startswith("unknown("):
                 warnings.append(f"{rel_path}: Breakpad MODULE CPU is not mapped: {metadata['cpu']}")
             symbol_files.append({"path": rel_path, "byteSize": candidate.stat().st_size, **metadata})
+        symbol_files = dedupe_pe_symbol_files(symbol_files, warnings, label="Breakpad symbol")
 
     details = {
         "breakpadSymbols": {
@@ -707,6 +709,7 @@ def build_dotnet_pdb_artifact(path: Path, root: Path, limits: dict[str, int]) ->
                     "symbolSource": metadata["symbolSource"],
                 }
             )
+        symbol_files = dedupe_pe_symbol_files(symbol_files, warnings, label="PDB symbol")
 
     details = {
         "dotnetPdb": {

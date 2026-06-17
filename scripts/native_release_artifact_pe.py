@@ -47,6 +47,11 @@ PE_MACHINE_ARCHES = {
     0xAA64: "arm64",
 }
 PE_CANDIDATE_SUFFIXES = {".dll", ".exe"}
+SYMBOL_SOURCE_PRIORITY = {
+    "debug_info": 3,
+    "symbol_table": 2,
+    "dynamic_symbol_table": 1,
+}
 
 
 def breakpad_symbol_candidates(path: Path) -> list[Path]:
@@ -262,3 +267,46 @@ def associated_pdb_candidates(pe_path: Path, pdb_file_name: str) -> list[Path]:
             seen.add(key)
             unique.append(candidate)
     return unique
+
+
+def symbol_source_priority(symbol_source: str | None) -> int:
+    return SYMBOL_SOURCE_PRIORITY.get(symbol_source or "", 0)
+
+
+def pe_symbol_identity(symbol_file: dict[str, Any]) -> str:
+    if "pdbDebugId" in symbol_file:
+        return str(symbol_file["pdbDebugId"])
+    if "guid" in symbol_file and "age" in symbol_file:
+        return f"{symbol_file['guid']}_{symbol_file['age']}"
+    return str(symbol_file["path"])
+
+
+def dedupe_pe_symbol_files(
+    symbol_files: list[dict[str, Any]],
+    warnings: list[str],
+    *,
+    label: str,
+) -> list[dict[str, Any]]:
+    by_identity: dict[str, dict[str, Any]] = {}
+    for symbol_file in symbol_files:
+        identity = pe_symbol_identity(symbol_file)
+        existing = by_identity.get(identity)
+        if not existing:
+            by_identity[identity] = symbol_file
+            continue
+
+        new_priority = symbol_source_priority(str(symbol_file.get("symbolSource", "")))
+        existing_priority = symbol_source_priority(str(existing.get("symbolSource", "")))
+        if new_priority > existing_priority:
+            warnings.append(
+                f"{symbol_file['path']}: duplicate {label} identity {identity}; "
+                f"keeping this file because it has richer symbols"
+            )
+            by_identity[identity] = symbol_file
+            continue
+
+        warnings.append(
+            f"{symbol_file['path']}: duplicate {label} identity {identity}; "
+            f"skipping this file because {existing['path']} is at least as complete"
+        )
+    return sorted(by_identity.values(), key=lambda symbol_file: str(symbol_file["path"]))
