@@ -1,6 +1,7 @@
 #ifndef LOGBREW_CPP_HPP
 #define LOGBREW_CPP_HPP
 
+#include <array>
 #include <cstddef>
 #include <map>
 #include <optional>
@@ -228,6 +229,73 @@ struct NetworkMilestoneAttributes {
     std::string trace_id,
     std::string span_id,
     bool sampled);
+template <typename OpenTelemetrySpanContextLike>
+[[nodiscard]] std::optional<OpenTelemetrySpanContext>
+try_open_telemetry_span_context_from_span_context(const OpenTelemetrySpanContextLike &context) {
+  if (!context.IsValid()) {
+    return std::nullopt;
+  }
+  std::array<char, trace_id_length> trace_id{};
+  std::array<char, span_id_length> span_id{};
+  std::array<char, trace_flags_length> trace_flags{};
+  context.trace_id().ToLowerBase16(trace_id);
+  context.span_id().ToLowerBase16(span_id);
+  context.trace_flags().ToLowerBase16(trace_flags);
+  try {
+    return open_telemetry_span_context(
+        std::string(trace_id.data(), trace_id.size()),
+        std::string(span_id.data(), span_id.size()),
+        std::string(trace_flags.data(), trace_flags.size()));
+  } catch (const SdkException &) {
+    return std::nullopt;
+  }
+}
+
+template <typename OpenTelemetrySpanContextLike>
+[[nodiscard]] OpenTelemetrySpanContext
+open_telemetry_span_context_from_span_context(const OpenTelemetrySpanContextLike &context) {
+  auto copied = try_open_telemetry_span_context_from_span_context(context);
+  if (!copied.has_value()) {
+    throw SdkException("validation_error", "OpenTelemetry span context is invalid");
+  }
+  return *copied;
+}
+
+template <typename OpenTelemetrySpanLike>
+[[nodiscard]] std::optional<OpenTelemetrySpanContext>
+try_open_telemetry_span_context_from_span(const OpenTelemetrySpanLike &span) {
+  return try_open_telemetry_span_context_from_span_context(span.GetContext());
+}
+
+template <typename OpenTelemetrySpanLike>
+[[nodiscard]] OpenTelemetrySpanContext
+open_telemetry_span_context_from_span(const OpenTelemetrySpanLike &span) {
+  auto copied = try_open_telemetry_span_context_from_span(span);
+  if (!copied.has_value()) {
+    throw SdkException("validation_error", "OpenTelemetry span is invalid");
+  }
+  return *copied;
+}
+
+template <typename OpenTelemetrySpanPointerLike>
+[[nodiscard]] std::optional<OpenTelemetrySpanContext>
+try_open_telemetry_span_context_from_span_pointer(const OpenTelemetrySpanPointerLike &span) {
+  if (!span) {
+    return std::nullopt;
+  }
+  return try_open_telemetry_span_context_from_span(*span);
+}
+
+template <typename OpenTelemetrySpanPointerLike>
+[[nodiscard]] OpenTelemetrySpanContext
+open_telemetry_span_context_from_span_pointer(const OpenTelemetrySpanPointerLike &span) {
+  auto copied = try_open_telemetry_span_context_from_span_pointer(span);
+  if (!copied.has_value()) {
+    throw SdkException("validation_error", "OpenTelemetry span pointer is invalid");
+  }
+  return *copied;
+}
+
 [[nodiscard]] TraceContext trace_context_from_opentelemetry_span_context(
     const OpenTelemetrySpanContext &context);
 [[nodiscard]] const TraceContext *current_trace_context() noexcept;

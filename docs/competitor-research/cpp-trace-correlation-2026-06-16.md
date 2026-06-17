@@ -74,3 +74,35 @@ LogBrew C++ already had explicit span attributes, metric helpers, product timeli
 ### Remaining Gap
 
 LogBrew C++ still does not ingest a live OpenTelemetry `Context`, install OpenTelemetry, add exporters/processors, preserve tracestate/baggage, emit links/events/exceptions, or automatically instrument HTTP/lifecycle/DB/cache/queue work. Those remain deliberate follow-up areas after this minimal bridge.
+
+## 2026-06-17 Live OpenTelemetry Span Follow-Up
+
+### Additional Source Read
+
+- OpenTelemetry C++, [`open-telemetry/opentelemetry-cpp`](https://github.com/open-telemetry/opentelemetry-cpp/tree/d6035a817b363db74f02a401cfbe396831b60109) at commit `d6035a817b363db74f02a401cfbe396831b60109`.
+- Read `api/include/opentelemetry/trace/span_context.h`: `SpanContext::IsValid`, `trace_id`, `span_id`, `trace_flags`, and `IsSampled`.
+- Read `api/include/opentelemetry/trace/span.h`: `Span::GetContext`.
+- Read `api/include/opentelemetry/trace/context.h`: `GetSpan(context)` for explicit `Context` extraction.
+- Read `api/include/opentelemetry/trace/tracer.h`: `Tracer::GetCurrentSpan`.
+- Read `api/include/opentelemetry/trace/trace_id.h`, `span_id.h`, and `trace_flags.h`: `ToLowerBase16` and validity helpers.
+- Sentry Native, [`getsentry/sentry-native`](https://github.com/getsentry/sentry-native/tree/fd19f353875b7043613b7c08f565aebbf8490e16) at commit `fd19f353875b7043613b7c08f565aebbf8490e16`.
+- Read `src/sentry_core.c`: `sentry_set_trace`, `sentry_set_trace_n`, and `sentry_regenerate_trace`.
+- Read `src/sentry_tracing.c`: `sentry__span_iter_headers`, outgoing `sentry-trace`, baggage construction, optional W3C `traceparent`, `sentry_span_iter_headers`, and `sentry_transaction_iter_headers`.
+- Read `include/sentry.h`: public trace propagation declarations and `sentry_options_set_propagate_traceparent`.
+- Datadog C++, [`DataDog/dd-trace-cpp`](https://github.com/DataDog/dd-trace-cpp/tree/0a1dc56b418262cee758c33fa6f488e9e44ab6ed) at commit `0a1dc56b418262cee758c33fa6f488e9e44ab6ed`.
+- Read `src/datadog/tracer.cpp`: `Tracer::extract_span` merge/error behavior.
+- Read `src/datadog/trace_segment.cpp`: `TraceSegment::inject` W3C `traceparent` and `tracestate` injection.
+- Read `src/datadog/w3c_propagation.cpp`: `extract_traceparent` validation and sampling extraction.
+
+### LogBrew Follow-Up
+
+- Added header-only template adapters that compile only when an app passes OTel-like objects: `try_open_telemetry_span_context_from_span_context(...)`, `open_telemetry_span_context_from_span_context(...)`, `try_open_telemetry_span_context_from_span(...)`, `open_telemetry_span_context_from_span(...)`, `try_open_telemetry_span_context_from_span_pointer(...)`, and `open_telemetry_span_context_from_span_pointer(...)`.
+- Apps that already include OpenTelemetry C++ can call `try_open_telemetry_span_context_from_span_pointer(opentelemetry::trace::Tracer::GetCurrentSpan())` or pass `opentelemetry::trace::GetSpan(context)` for an explicit OTel `Context`; default LogBrew source builds still include no OTel headers or libraries.
+- The `try_` helpers return `std::nullopt` for invalid or absent spans, while the throwing helpers keep the existing C++ `SdkException("validation_error", ...)` behavior.
+- The adapters copy only valid trace ID, span ID, and trace flags through OTel's stable `ToLowerBase16` surface, then reuse LogBrew's existing validation and fresh-child-span creation.
+
+### Tradeoffs
+
+- This keeps LogBrew lighter than Sentry Native and Datadog C++ because it does not manage global trace scope, install exporters/processors, emit baggage/tracestate, own HTTP injection styles, or capture span attributes/events/links.
+- The live active-span path is now more useful for C++ apps that already run OpenTelemetry, while preserving source-only builds for native apps that do not.
+- Remaining C++ gaps are explicit OTel `Context` convenience overloads that name OTel types, full OTel span processor/exporter interop, baggage/tracestate, rich events/exceptions/links, automatic outbound/DB/cache/queue spans, URL/request phase timings, lifecycle spans, and native symbolication parity.

@@ -1,9 +1,11 @@
 #include "logbrew.hpp"
 
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -21,6 +23,84 @@ int tests_run = 0;
 logbrew::LogBrewClient new_client() {
   return logbrew::LogBrewClient(logbrew::Config{"LOGBREW_API_KEY", "logbrew-cpp", logbrew::version, 2});
 }
+
+template <std::size_t Size>
+class FakeOpenTelemetryHex final {
+public:
+  explicit FakeOpenTelemetryHex(std::string value) : value_(std::move(value)) {}
+
+  void ToLowerBase16(std::array<char, Size> &buffer) const noexcept {
+    for (std::size_t index = 0; index < Size; index++) {
+      buffer[index] = index < value_.size() ? value_[index] : '0';
+    }
+  }
+
+private:
+  std::string value_;
+};
+
+class FakeOpenTelemetrySpanContext final {
+public:
+  FakeOpenTelemetrySpanContext(
+      bool valid,
+      std::string trace_id,
+      std::string span_id,
+      std::string trace_flags)
+      : valid_(valid),
+        trace_id_(std::move(trace_id)),
+        span_id_(std::move(span_id)),
+        trace_flags_(std::move(trace_flags)) {}
+
+  [[nodiscard]] bool IsValid() const noexcept {
+    return valid_;
+  }
+
+  [[nodiscard]] const FakeOpenTelemetryHex<logbrew::trace_id_length> &trace_id() const noexcept {
+    return trace_id_;
+  }
+
+  [[nodiscard]] const FakeOpenTelemetryHex<logbrew::span_id_length> &span_id() const noexcept {
+    return span_id_;
+  }
+
+  [[nodiscard]] const FakeOpenTelemetryHex<logbrew::trace_flags_length> &trace_flags() const noexcept {
+    return trace_flags_;
+  }
+
+private:
+  bool valid_;
+  FakeOpenTelemetryHex<logbrew::trace_id_length> trace_id_;
+  FakeOpenTelemetryHex<logbrew::span_id_length> span_id_;
+  FakeOpenTelemetryHex<logbrew::trace_flags_length> trace_flags_;
+};
+
+class FakeOpenTelemetrySpan final {
+public:
+  explicit FakeOpenTelemetrySpan(FakeOpenTelemetrySpanContext context) : context_(std::move(context)) {}
+
+  [[nodiscard]] FakeOpenTelemetrySpanContext GetContext() const noexcept {
+    return context_;
+  }
+
+private:
+  FakeOpenTelemetrySpanContext context_;
+};
+
+class FakeOpenTelemetrySpanPointer final {
+public:
+  explicit FakeOpenTelemetrySpanPointer(const FakeOpenTelemetrySpan *span) : span_(span) {}
+
+  explicit operator bool() const noexcept {
+    return span_ != nullptr;
+  }
+
+  [[nodiscard]] const FakeOpenTelemetrySpan &operator*() const noexcept {
+    return *span_;
+  }
+
+private:
+  const FakeOpenTelemetrySpan *span_;
+};
 
 void queue_fixture_events(logbrew::LogBrewClient &client) {
   client.release(
@@ -177,6 +257,41 @@ void trace_context_helpers_validate_and_correlate() {
   EXPECT_TRUE(otel_context.span_id != *context.parent_span_id);
   EXPECT_TRUE(otel_context.sampled);
   EXPECT_TRUE(otel_context.trace_flags == "01");
+  const FakeOpenTelemetrySpanContext fake_otel_context(
+      true,
+      "4BF92F3577B34DA6A3CE929D0E0E4736",
+      "00F067AA0BA902B7",
+      "03");
+  const auto copied_otel_parent =
+      logbrew::open_telemetry_span_context_from_span_context(fake_otel_context);
+  EXPECT_TRUE(copied_otel_parent.trace_id == context.trace_id);
+  EXPECT_TRUE(copied_otel_parent.span_id == *context.parent_span_id);
+  EXPECT_TRUE(copied_otel_parent.trace_flags == "03");
+  EXPECT_TRUE(copied_otel_parent.sampled);
+  const FakeOpenTelemetrySpan fake_otel_span(fake_otel_context);
+  const auto copied_from_span =
+      logbrew::try_open_telemetry_span_context_from_span(fake_otel_span);
+  EXPECT_TRUE(copied_from_span.has_value());
+  EXPECT_TRUE(copied_from_span->trace_flags == "03");
+  const auto copied_from_pointer =
+      logbrew::try_open_telemetry_span_context_from_span_pointer(FakeOpenTelemetrySpanPointer(&fake_otel_span));
+  EXPECT_TRUE(copied_from_pointer.has_value());
+  EXPECT_TRUE(copied_from_pointer->trace_id == context.trace_id);
+  EXPECT_TRUE(!logbrew::try_open_telemetry_span_context_from_span_pointer(
+      FakeOpenTelemetrySpanPointer(nullptr)).has_value());
+  const FakeOpenTelemetrySpanContext invalid_fake_otel_context(
+      false,
+      "4bf92f3577b34da6a3ce929d0e0e4736",
+      "00f067aa0ba902b7",
+      "01");
+  EXPECT_TRUE(!logbrew::try_open_telemetry_span_context_from_span_context(
+      invalid_fake_otel_context).has_value());
+  try {
+    static_cast<void>(logbrew::open_telemetry_span_context_from_span_context(invalid_fake_otel_context));
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
   const logbrew::OpenTelemetrySpanContext unsampled_otel_parent =
       logbrew::open_telemetry_span_context_from_sampled(context.trace_id, *context.parent_span_id, false);
   const logbrew::TraceContext unsampled_otel_context =

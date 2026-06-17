@@ -146,7 +146,22 @@ auto logbrew_trace = logbrew::trace_context_from_opentelemetry_span_context(otel
 logbrew::TraceScope scope(logbrew_trace);
 ```
 
-`OpenTelemetrySpanContext` is dependency-free and accepts the stable string values your app reads from its own OTel objects. It creates a fresh LogBrew child span under the OTel parent and can also feed `trace_span_attributes_from_opentelemetry_span_context(...)` for a single explicit span event. It does not install OpenTelemetry, read tracestate or baggage, patch HTTP clients, capture payloads, copy arbitrary headers, or serialize raw propagation metadata.
+If your app already includes OpenTelemetry C++ headers, you can also copy a live OTel context without adding OpenTelemetry to LogBrew itself:
+
+```cpp
+auto maybe_parent = logbrew::try_open_telemetry_span_context_from_span_pointer(
+    opentelemetry::trace::Tracer::GetCurrentSpan());
+
+if (maybe_parent.has_value()) {
+  logbrew::TraceScope scope(logbrew::trace_context_from_opentelemetry_span_context(*maybe_parent));
+  client.log("evt_log_checkout_failed", "2026-06-02T10:00:03Z",
+             logbrew::LogAttributes{"checkout failed", "warning", "checkout"});
+}
+```
+
+For explicit OTel objects, use `try_open_telemetry_span_context_from_span_context(...)`, `try_open_telemetry_span_context_from_span(...)`, or `try_open_telemetry_span_context_from_span_pointer(...)`. The throwing variants use the same names without `try_` and raise `SdkException("validation_error", ...)` for invalid or absent OTel spans.
+
+`OpenTelemetrySpanContext` is dependency-free and accepts the stable string values your app reads from its own OTel objects, or the validated IDs copied by the template adapters above. It creates a fresh LogBrew child span under the OTel parent and can also feed `trace_span_attributes_from_opentelemetry_span_context(...)` for a single explicit span event. It does not install OpenTelemetry, read tracestate or baggage, patch HTTP clients, capture payloads, copy arbitrary headers, or serialize raw propagation metadata.
 
 When a `TraceScope` is active, `LogBrewClient` automatically adds primitive `traceId`, `spanId`, `parentSpanId`, `sampled`, and `traceFlags` metadata to issue, log, action, and metric events. `trace_span_attributes(...)` reuses the same active span ID for an explicit span event, `trace_product_timeline_context(...)` adds the active trace ID to product timelines, and `traceparent_headers()` returns only a normalized `traceparent` header for app-owned outbound requests. These helpers do not patch HTTP clients, capture request/response payloads, serialize raw incoming propagation headers, or include URL query strings and hashes.
 

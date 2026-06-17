@@ -80,6 +80,7 @@ grep -q 'TraceScope' "$sdk_dir/include/logbrew.hpp"
 grep -q 'trace_context_from_traceparent' "$sdk_dir/include/logbrew.hpp"
 grep -q 'OpenTelemetrySpanContext' "$sdk_dir/include/logbrew.hpp"
 grep -q 'open_telemetry_span_context' "$sdk_dir/include/logbrew.hpp"
+grep -q 'try_open_telemetry_span_context_from_span_pointer' "$sdk_dir/include/logbrew.hpp"
 grep -q 'trace_context_from_opentelemetry_span_context' "$sdk_dir/include/logbrew.hpp"
 grep -q 'trace_span_attributes_from_opentelemetry_span_context' "$sdk_dir/include/logbrew.hpp"
 grep -q 'traceparent_headers' "$sdk_dir/include/logbrew.hpp"
@@ -89,15 +90,89 @@ grep -q 'open_telemetry_span_context' "$sdk_dir/examples/trace_correlation.cpp"
 cat > "$app_dir/main.cpp" <<'EOF'
 #include "logbrew.hpp"
 
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <utility>
 
 namespace {
 
 logbrew::LogBrewClient new_client() {
   return logbrew::LogBrewClient(logbrew::Config{"LOGBREW_API_KEY", "native-cpp-app", logbrew::version, 2});
 }
+
+template <std::size_t Size>
+class FakeOpenTelemetryHex final {
+public:
+  explicit FakeOpenTelemetryHex(std::string value) : value_(std::move(value)) {}
+
+  void ToLowerBase16(std::array<char, Size> &buffer) const noexcept {
+    for (std::size_t index = 0; index < Size; index++) {
+      buffer[index] = index < value_.size() ? value_[index] : '0';
+    }
+  }
+
+private:
+  std::string value_;
+};
+
+class FakeOpenTelemetrySpanContext final {
+public:
+  FakeOpenTelemetrySpanContext(bool valid, std::string trace_id, std::string span_id, std::string trace_flags)
+      : valid_(valid), trace_id_(std::move(trace_id)), span_id_(std::move(span_id)),
+        trace_flags_(std::move(trace_flags)) {}
+
+  [[nodiscard]] bool IsValid() const noexcept {
+    return valid_;
+  }
+
+  [[nodiscard]] const FakeOpenTelemetryHex<logbrew::trace_id_length> &trace_id() const noexcept {
+    return trace_id_;
+  }
+
+  [[nodiscard]] const FakeOpenTelemetryHex<logbrew::span_id_length> &span_id() const noexcept {
+    return span_id_;
+  }
+
+  [[nodiscard]] const FakeOpenTelemetryHex<logbrew::trace_flags_length> &trace_flags() const noexcept {
+    return trace_flags_;
+  }
+
+private:
+  bool valid_;
+  FakeOpenTelemetryHex<logbrew::trace_id_length> trace_id_;
+  FakeOpenTelemetryHex<logbrew::span_id_length> span_id_;
+  FakeOpenTelemetryHex<logbrew::trace_flags_length> trace_flags_;
+};
+
+class FakeOpenTelemetrySpan final {
+public:
+  explicit FakeOpenTelemetrySpan(FakeOpenTelemetrySpanContext context) : context_(std::move(context)) {}
+
+  [[nodiscard]] FakeOpenTelemetrySpanContext GetContext() const noexcept {
+    return context_;
+  }
+
+private:
+  FakeOpenTelemetrySpanContext context_;
+};
+
+class FakeOpenTelemetrySpanPointer final {
+public:
+  explicit FakeOpenTelemetrySpanPointer(const FakeOpenTelemetrySpan *span) : span_(span) {}
+
+  explicit operator bool() const noexcept {
+    return span_ != nullptr;
+  }
+
+  [[nodiscard]] const FakeOpenTelemetrySpan &operator*() const noexcept {
+    return *span_;
+  }
+
+private:
+  const FakeOpenTelemetrySpan *span_;
+};
 
 void queue_events(logbrew::LogBrewClient &client) {
   client.release("evt_release_001", "2026-06-02T10:00:00Z", logbrew::ReleaseAttributes{"1.2.3", "abc123def456", "Public release marker"});
@@ -165,6 +240,26 @@ void exercise_metric_helper() {
   require_condition(preview.find("\"name\":\"queue.depth\"") != std::string::npos, "metric name missing");
   require_condition(preview.find("\"temporality\":\"instant\"") != std::string::npos, "metric temporality missing");
   require_condition(preview.find("\"queue\":\"checkout\"") != std::string::npos, "metric metadata missing");
+}
+
+void exercise_open_telemetry_bridge() {
+  const FakeOpenTelemetrySpanContext otel_context(
+      true,
+      "4BF92F3577B34DA6A3CE929D0E0E4736",
+      "00F067AA0BA902B7",
+      "01");
+  const auto copied = logbrew::open_telemetry_span_context_from_span_context(otel_context);
+  require_condition(copied.trace_id == "4bf92f3577b34da6a3ce929d0e0e4736", "OpenTelemetry trace id copy failed");
+  require_condition(copied.span_id == "00f067aa0ba902b7", "OpenTelemetry span id copy failed");
+
+  const FakeOpenTelemetrySpan otel_span(otel_context);
+  const auto maybe_copied =
+      logbrew::try_open_telemetry_span_context_from_span_pointer(FakeOpenTelemetrySpanPointer(&otel_span));
+  require_condition(maybe_copied.has_value(), "OpenTelemetry span pointer copy failed");
+  require_condition(maybe_copied->sampled, "OpenTelemetry sampled flag copy failed");
+  require_condition(!logbrew::try_open_telemetry_span_context_from_span_pointer(
+                        FakeOpenTelemetrySpanPointer(nullptr)).has_value(),
+                    "OpenTelemetry null span pointer should be empty");
 }
 
 void exercise_failure_paths() {
@@ -243,6 +338,7 @@ int main() {
               << ",\"sentBodies\":" << transport.sent_bodies().size() << "}\n";
     exercise_timeline_helpers();
     exercise_metric_helper();
+    exercise_open_telemetry_bridge();
     exercise_failure_paths();
     return 0;
   } catch (const logbrew::SdkException &error) {
