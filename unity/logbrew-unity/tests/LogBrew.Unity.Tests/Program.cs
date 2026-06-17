@@ -30,8 +30,9 @@ namespace LogBrew.Unity.Tests
             Run("unity_lifecycle_span_uses_active_trace", UnityLifecycleSpanUsesActiveTrace);
             Run("unity_lifecycle_tracker_records_deduplicated_transitions", UnityLifecycleTrackerRecordsDeduplicatedTransitions);
             Run("unity_request_span_uses_child_trace", UnityRequestSpanUsesChildTrace);
+            Run("unity_request_tracker_applies_headers_and_captures_duration", UnityRequestTrackerAppliesHeadersAndCapturesDuration);
             Run("unity_coroutine_wrapper_reactivates_trace_per_step", UnityCoroutineWrapperReactivatesTracePerStep);
-            Console.WriteLine("unity package tests ok (20 tests)");
+            Console.WriteLine("unity package tests ok (21 tests)");
         }
 
         private static void Run(string name, Action test)
@@ -467,6 +468,103 @@ namespace LogBrew.Unity.Tests
             AssertDoesNotContain(body, "api.example.test");
             AssertDoesNotContain(body, "cache=1");
             AssertDoesNotContain(body, "#frag");
+            AssertDoesNotContain(body, "spoofed_trace");
+            AssertDoesNotContain(body, "spoofed_traceparent");
+            AssertDoesNotContain(body, "traceparent");
+        }
+
+        private static void UnityRequestTrackerAppliesHeadersAndCapturesDuration()
+        {
+            const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+            const string parentSpanId = "00f067aa0ba902b7";
+            var client = NewClient();
+            var ids = new Queue<string>();
+            ids.Enqueue("evt_unity_request_tracker_001");
+            var timestamps = new Queue<string>();
+            timestamps.Enqueue("2026-06-02T10:00:40Z");
+            var now = 1000.0;
+            var headers = new Dictionary<string, string>();
+            var setHeaderCalls = 0;
+            var tracker = new UnityRequestTracker(
+                client,
+                () => ids.Dequeue(),
+                () => timestamps.Dequeue(),
+                () => now,
+                UnityContext.Create().WithPlatform("ios").WithSceneName("Checkout"));
+            var trace = LogBrewTraceContext.FromTraceparent("00-" + traceId + "-" + parentSpanId + "-01");
+
+            using (LogBrewTrace.Activate(trace))
+            {
+                var request = tracker.Start(
+                    "put",
+                    "https://api.example.test/api/checkout?cache=1#poll",
+                    (name, value) =>
+                    {
+                        setHeaderCalls++;
+                        headers[name] = value;
+                    });
+                AssertEqual(1, setHeaderCalls);
+                AssertEqual(1, headers.Count);
+                AssertEqual(request.Headers["traceparent"], headers["traceparent"]);
+                AssertEqual(traceId, request.RequestSpan.TraceContext.TraceId);
+                AssertEqual(trace.SpanId, request.RequestSpan.TraceContext.ParentSpanId ?? string.Empty);
+                now = 1184.5;
+                tracker.Capture(
+                    request,
+                    503,
+                    "UnityWebRequestError",
+                    UnityContext.Create()
+                        .WithFrame(128)
+                        .WithMetadata("traceparent", "spoofed_traceparent")
+                        .WithMetadata("traceId", "spoofed_trace"));
+            }
+
+            ExpectArgumentNull("client", () =>
+            {
+                var unused = new UnityRequestTracker(null!, () => "evt", () => "2026-06-02T10:00:40Z", () => 0);
+                AssertNotEqual(string.Empty, unused.ToString() ?? string.Empty);
+            });
+            ExpectArgumentNull("idFactory", () =>
+            {
+                var unused = new UnityRequestTracker(client, null!, () => "2026-06-02T10:00:40Z", () => 0);
+                AssertNotEqual(string.Empty, unused.ToString() ?? string.Empty);
+            });
+            ExpectArgumentNull("timestampFactory", () =>
+            {
+                var unused = new UnityRequestTracker(client, () => "evt", null!, () => 0);
+                AssertNotEqual(string.Empty, unused.ToString() ?? string.Empty);
+            });
+            ExpectArgumentNull("realtimeMilliseconds", () =>
+            {
+                var unused = new UnityRequestTracker(client, () => "evt", () => "2026-06-02T10:00:40Z", null!);
+                AssertNotEqual(string.Empty, unused.ToString() ?? string.Empty);
+            });
+            Expect("validation_error", () =>
+            {
+                var unused = new UnityRequestTracker(client, () => "evt", () => "2026-06-02T10:00:40Z", () => double.NaN);
+                AssertNotEqual(string.Empty, unused.ToString() ?? string.Empty);
+            });
+            ExpectArgumentNull("request", () => tracker.Capture(null!));
+
+            AssertEqual(1, client.PendingEvents());
+            var body = client.PreviewJson();
+            AssertContains(body, "\"evt_unity_request_tracker_001\"");
+            AssertContains(body, "\"name\": \"PUT /api/checkout\"");
+            AssertContains(body, "\"traceId\": \"" + traceId + "\"");
+            AssertContains(body, "\"parentSpanId\": \"" + trace.SpanId + "\"");
+            AssertContains(body, "\"status\": \"error\"");
+            AssertContains(body, "\"durationMs\": 184.5");
+            AssertContains(body, "\"source\": \"unity.request\"");
+            AssertContains(body, "\"method\": \"PUT\"");
+            AssertContains(body, "\"routeTemplate\": \"/api/checkout\"");
+            AssertContains(body, "\"statusCode\": 503");
+            AssertContains(body, "\"errorType\": \"UnityWebRequestError\"");
+            AssertContains(body, "\"platform\": \"ios\"");
+            AssertContains(body, "\"sceneName\": \"Checkout\"");
+            AssertContains(body, "\"frame\": 128");
+            AssertDoesNotContain(body, "api.example.test");
+            AssertDoesNotContain(body, "cache=1");
+            AssertDoesNotContain(body, "#poll");
             AssertDoesNotContain(body, "spoofed_trace");
             AssertDoesNotContain(body, "spoofed_traceparent");
             AssertDoesNotContain(body, "traceparent");

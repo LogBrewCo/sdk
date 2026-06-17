@@ -83,3 +83,25 @@ LogBrew Unity already had source-only UPM packaging, explicit spans, Unity scene
 - This closes part of the "automatic lifecycle" gap with a lighter, explicit setup: apps get automatic transition spans after wiring their own callbacks.
 - LogBrew still deliberately avoids Sentry-style hidden GameObject creation, global lifecycle subscriptions, local session-health inference, Unity API patching, payload/header/query capture, baggage, and tracestate.
 - Remaining Unity gaps: `UnityWebRequest` convenience instrumentation, coroutine convenience instrumentation beyond explicit wrapping, OpenTelemetry context ingestion, rich span events/exceptions, URL/request phase timings, and native crash/symbolication integration.
+
+## 2026-06-17 Request Tracker Follow-Up
+
+### Source Reading
+
+- Re-checked upstream HEADs before implementation; Sentry Unity, Datadog Unity, and OpenTelemetry .NET still match the commits recorded above.
+- Re-read Sentry Unity `UnityWebRequestTransport.SendEnvelopeAsync(...)`, `CreateWebRequest(...)`, and `GetResponse(...)`: Sentry uses UnityWebRequest for its own transport, forwards HTTP headers into the request, maps connection errors separately from HTTP responses, and avoids treating transport response headers as user telemetry.
+- Re-read Datadog Unity `DatadogTrackedWebRequest.SendWebRequest(...)`: Datadog injects tracing headers before send, starts a resource, registers an operation completion callback, records status/download bytes on protocol success, and records connection/data-processing errors separately.
+- Re-read Datadog Unity `ResourceTrackingHelperTest.GeneratesCorrectTraceContextHeaders(...)` and `CustomResourceTrackingTest.ResourceTrackingHelperPermitsManualContextInjection()`: Datadog proves both wrapper-based and manual header injection paths, with W3C `traceparent` validation.
+- Re-read OpenTelemetry .NET `TraceContextPropagator.Inject(...)`: OTel writes one normalized W3C `traceparent` through a caller-provided setter and skips invalid/null carriers rather than copying arbitrary request state.
+
+### LogBrew Update
+
+- Added source-only `UnityRequestTracker`, a small tracker that apps instantiate near app-owned `UnityWebRequest` code and start with a method, route template, optional trace context, and optional `Action<string,string>` header setter such as `request.SetRequestHeader`.
+- `UnityRequestTracker.Start(...)` creates the existing sanitized child request span and applies exactly the returned propagation headers; `Capture(...)` computes duration from an app-supplied realtime clock, merges default plus per-request primitive Unity metadata, and emits through the canonical request span path.
+- Packaged `examples/request_tracker/RequestTracker.cs` plus `scripts/check_unity_request_tracker_payload.py` prove source and installed UPM tarballs write one `traceparent`, record status/duration/error metadata, strip host/query/hash values, and overwrite spoofed trace keys.
+
+### Tradeoffs
+
+- This reduces the UnityWebRequest convenience gap without pulling `UnityEngine.Networking` into the core runtime or owning request disposal/completion callbacks.
+- LogBrew still deliberately avoids Datadog-style wrapper ownership, hidden global request instrumentation, payload/header copying, full URL/query/hash capture, baggage, and tracestate.
+- Remaining Unity gaps: coroutine convenience instrumentation beyond explicit wrapping, OpenTelemetry context ingestion, rich span events/exceptions, URL/request phase timings, and native crash/symbolication integration.

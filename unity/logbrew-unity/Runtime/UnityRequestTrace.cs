@@ -26,6 +26,113 @@ namespace LogBrew.Unity
         }
     }
 
+    public sealed class UnityTrackedRequest
+    {
+        internal UnityTrackedRequest(UnityRequestSpan requestSpan, double startedAtMs)
+        {
+            RequestSpan = requestSpan;
+            StartedAtMs = startedAtMs;
+        }
+
+        public UnityRequestSpan RequestSpan { get; }
+
+        public double StartedAtMs { get; }
+
+        public IReadOnlyDictionary<string, string> Headers
+        {
+            get { return RequestSpan.Headers; }
+        }
+    }
+
+    public sealed class UnityRequestTracker
+    {
+        private readonly LogBrewClient client;
+        private readonly Func<string> idFactory;
+        private readonly Func<string> timestampFactory;
+        private readonly Func<double> realtimeMilliseconds;
+        private readonly UnityContext? context;
+
+        public UnityRequestTracker(
+            LogBrewClient client,
+            Func<string> idFactory,
+            Func<string> timestampFactory,
+            Func<double> realtimeMilliseconds,
+            UnityContext? context = null)
+        {
+            this.client = client ?? throw new ArgumentNullException(nameof(client));
+            this.idFactory = idFactory ?? throw new ArgumentNullException(nameof(idFactory));
+            this.timestampFactory = timestampFactory ?? throw new ArgumentNullException(nameof(timestampFactory));
+            this.realtimeMilliseconds = realtimeMilliseconds ?? throw new ArgumentNullException(nameof(realtimeMilliseconds));
+            this.context = context;
+            ValidateRequestClock(this.realtimeMilliseconds());
+        }
+
+        public UnityTrackedRequest Start(
+            string method,
+            string routeTemplate,
+            Action<string, string>? setRequestHeader = null,
+            LogBrewTraceContext? traceContext = null)
+        {
+            var requestSpan = LogBrewUnity.StartRequestSpan(method, routeTemplate, traceContext);
+            if (setRequestHeader != null)
+            {
+                foreach (var header in requestSpan.Headers)
+                {
+                    setRequestHeader(header.Key, header.Value);
+                }
+            }
+
+            return new UnityTrackedRequest(requestSpan, ValidateRequestClock(realtimeMilliseconds()));
+        }
+
+        public void Capture(
+            UnityTrackedRequest request,
+            int? statusCode = null,
+            string? errorType = null,
+            UnityContext? context = null)
+        {
+            if (request == null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
+
+            var elapsedMs = Math.Max(0, ValidateRequestClock(realtimeMilliseconds()) - request.StartedAtMs);
+            LogBrewUnity.CaptureRequestSpanWithMetadata(
+                client,
+                idFactory(),
+                timestampFactory(),
+                request.RequestSpan,
+                statusCode,
+                elapsedMs,
+                errorType,
+                MetadataFor(context));
+        }
+
+        private Dictionary<string, object?> MetadataFor(UnityContext? currentContext)
+        {
+            var metadata = LogBrewUnity.MetadataFromContext(context);
+            if (currentContext != null)
+            {
+                foreach (var item in currentContext.ToMetadata())
+                {
+                    metadata[item.Key] = item.Value;
+                }
+            }
+
+            return metadata;
+        }
+
+        private static double ValidateRequestClock(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value))
+            {
+                throw new SdkException("validation_error", "unity request realtimeMilliseconds must be finite");
+            }
+
+            return value;
+        }
+    }
+
     public static partial class LogBrewUnity
     {
         public static UnityRequestSpan StartRequestSpan(
@@ -72,9 +179,29 @@ namespace LogBrew.Unity
                 throw new ArgumentNullException(nameof(requestSpan));
             }
 
+            CaptureRequestSpanWithMetadata(
+                client,
+                id,
+                timestamp,
+                requestSpan,
+                statusCode,
+                durationMs,
+                errorType,
+                MetadataFromContext(context));
+        }
+
+        internal static void CaptureRequestSpanWithMetadata(
+            LogBrewClient client,
+            string id,
+            string timestamp,
+            UnityRequestSpan requestSpan,
+            int? statusCode,
+            double? durationMs,
+            string? errorType,
+            IDictionary<string, object?> metadata)
+        {
             ValidateStatusCode(statusCode);
             ValidateRequestDuration(durationMs);
-            var metadata = MetadataFromContext(context);
             metadata["source"] = "unity.request";
             metadata["method"] = requestSpan.Method;
             metadata["routeTemplate"] = requestSpan.RouteTemplate;

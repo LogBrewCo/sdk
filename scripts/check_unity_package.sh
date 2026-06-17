@@ -92,6 +92,7 @@ grep -qx 'examples/Makefile' "$tmp_dir/package-contents.txt"
 grep -qx 'examples/trace_correlation/TraceCorrelation.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'examples/lifecycle_spans/LifecycleSpans.cs' "$tmp_dir/package-contents.txt"
 grep -qx 'examples/lifecycle_tracker/LifecycleTracker.cs' "$tmp_dir/package-contents.txt"
+grep -qx 'examples/request_tracker/RequestTracker.cs' "$tmp_dir/package-contents.txt"
 
 python3 - "$package_tgz" <<'PY'
 import json
@@ -105,7 +106,7 @@ with tarfile.open(package_tgz, "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
 if manifest["name"] != "co.logbrew.unity":
     raise SystemExit("wrong package name")
-for needle in ("LOGBREW_API_KEY", "LogBrewUnity.CreateClient", "HttpTransport", "LogBrewTrace", "UnityLifecycleTracker", "TraceCoroutine", "StartRequestSpan", "CaptureRequestSpan", "traceparent", "https://api.logbrew.com/v1/events", "sample source"):
+for needle in ("LOGBREW_API_KEY", "LogBrewUnity.CreateClient", "HttpTransport", "LogBrewTrace", "UnityLifecycleTracker", "UnityRequestTracker", "TraceCoroutine", "StartRequestSpan", "CaptureRequestSpan", "traceparent", "https://api.logbrew.com/v1/events", "sample source"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
 PY
@@ -181,6 +182,10 @@ test ! -s "$tmp_dir/lifecycle-tracker.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/lifecycle-tracker.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_unity_lifecycle_payload.py" "$tmp_dir/lifecycle-tracker.stdout.json"
 
+make --no-print-directory -C "$package_dir/examples" run-request-tracker > "$tmp_dir/request-tracker.stdout.json" 2> "$tmp_dir/request-tracker.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/request-tracker.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_unity_request_tracker_payload.py" "$tmp_dir/request-tracker.stdout.json" "$tmp_dir/request-tracker.stderr.json"
+
 make --no-print-directory -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
@@ -188,5 +193,6 @@ grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-he
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
 grep -qx 'run-lifecycle-spans -> make run-lifecycle-spans' "$tmp_dir/examples-help.txt"
 grep -qx 'run-lifecycle-tracker -> make run-lifecycle-tracker' "$tmp_dir/examples-help.txt"
+grep -qx 'run-request-tracker -> make run-request-tracker' "$tmp_dir/examples-help.txt"
 
 echo "unity package checks passed"
