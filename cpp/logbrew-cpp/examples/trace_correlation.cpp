@@ -16,9 +16,12 @@ void require_condition(bool condition, const char *message) {
 } // namespace
 
 int main() {
-  static const std::string incoming = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
   logbrew::LogBrewClient client(logbrew::Config{"LOGBREW_API_KEY", "logbrew-cpp-trace", logbrew::version, 2});
-  logbrew::TraceScope scope(logbrew::trace_context_from_traceparent(incoming));
+  const logbrew::OpenTelemetrySpanContext otel_parent = logbrew::open_telemetry_span_context(
+      "4BF92F3577B34DA6A3CE929D0E0E4736",
+      "00F067AA0BA902B7",
+      "01");
+  logbrew::TraceScope scope(logbrew::trace_context_from_opentelemetry_span_context(otel_parent));
   const auto trace_metadata = logbrew::trace_metadata();
   auto timeline_context = logbrew::trace_product_timeline_context(logbrew::ProductTimelineContext{
       "session_123",

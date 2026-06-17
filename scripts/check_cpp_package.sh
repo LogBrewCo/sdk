@@ -101,6 +101,7 @@ archive_path = Path(sys.argv[1])
 with tarfile.open(archive_path, "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
     header = archive.extractfile("include/logbrew.hpp").read().decode()
+    trace_example = archive.extractfile("examples/trace_correlation.cpp").read().decode()
 for needle in (
     "LOGBREW_API_KEY",
     "Metrics",
@@ -114,6 +115,10 @@ for needle in (
     "W3C Trace Correlation",
     "TraceScope",
     "trace_context_from_traceparent",
+    "OpenTelemetrySpanContext",
+    "open_telemetry_span_context",
+    "trace_context_from_opentelemetry_span_context",
+    "trace_span_attributes_from_opentelemetry_span_context",
     "traceparent_headers",
     "HttpTransport",
     "do not patch HTTP clients",
@@ -133,6 +138,10 @@ for needle in (
     "TraceContext",
     "TraceScope",
     "trace_context_from_traceparent",
+    "OpenTelemetrySpanContext",
+    "open_telemetry_span_context",
+    "trace_context_from_opentelemetry_span_context",
+    "trace_span_attributes_from_opentelemetry_span_context",
     "traceparent_headers",
     "HttpTransport",
     "http_transport_default_endpoint",
@@ -141,6 +150,13 @@ for needle in (
 ):
     if needle not in header:
         raise SystemExit(f"missing public header symbol: {needle}")
+for needle in (
+    "OpenTelemetrySpanContext",
+    "open_telemetry_span_context",
+    "trace_context_from_opentelemetry_span_context",
+):
+    if needle not in trace_example:
+        raise SystemExit(f"missing trace example OTel guidance: {needle}")
 PY
 
 echo "c++ package checks passed with $($cxx_command --version | head -n 1)"

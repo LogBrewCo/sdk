@@ -146,6 +146,13 @@ private:
 
 using Metadata = std::map<std::string, MetadataValue>;
 
+struct OpenTelemetrySpanContext {
+  std::string trace_id;
+  std::string span_id;
+  std::string trace_flags = "01";
+  bool sampled = true;
+};
+
 struct TraceContext {
   std::string trace_id;
   std::string span_id;
@@ -213,6 +220,16 @@ struct NetworkMilestoneAttributes {
 [[nodiscard]] TraceContext create_trace_context(std::string trace_flags = "01");
 [[nodiscard]] TraceContext trace_context_from_traceparent(const std::string &traceparent);
 [[nodiscard]] TraceContext continue_or_create_trace_context(const std::string &traceparent);
+[[nodiscard]] OpenTelemetrySpanContext open_telemetry_span_context(
+    std::string trace_id,
+    std::string span_id,
+    std::string trace_flags = "01");
+[[nodiscard]] OpenTelemetrySpanContext open_telemetry_span_context_from_sampled(
+    std::string trace_id,
+    std::string span_id,
+    bool sampled);
+[[nodiscard]] TraceContext trace_context_from_opentelemetry_span_context(
+    const OpenTelemetrySpanContext &context);
 [[nodiscard]] const TraceContext *current_trace_context() noexcept;
 [[nodiscard]] Metadata trace_metadata(const TraceContext *context = nullptr);
 [[nodiscard]] ProductTimelineContext trace_product_timeline_context(
@@ -223,6 +240,11 @@ struct NetworkMilestoneAttributes {
     std::string status,
     std::optional<double> duration_ms = std::nullopt,
     const TraceContext *context = nullptr);
+[[nodiscard]] SpanAttributes trace_span_attributes_from_opentelemetry_span_context(
+    std::string name,
+    std::string status,
+    const OpenTelemetrySpanContext &context,
+    std::optional<double> duration_ms = std::nullopt);
 [[nodiscard]] std::map<std::string, std::string> traceparent_headers(const TraceContext *context = nullptr);
 
 class RecordingTransport final : public Transport {

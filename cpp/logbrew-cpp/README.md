@@ -129,8 +129,27 @@ auto headers = logbrew::traceparent_headers();
 
 `trace_context_from_traceparent(...)` strictly validates the W3C `version-traceId-parentSpanId-traceFlags` shape, rejects forbidden and all-zero IDs, normalizes IDs to lowercase, preserves sampled state, and creates a fresh local span ID. `continue_or_create_trace_context(...)` falls back to a local root trace when the incoming value is missing or malformed, so bad propagation does not break application work.
 
+If your application already owns an OpenTelemetry C++ span context, copy only its W3C trace ID, span ID, and trace flags into LogBrew:
+
+```cpp
+std::string otelTraceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+std::string otelSpanId = "00f067aa0ba902b7";
+std::string otelTraceFlags = "01";
+
+auto otel_parent = logbrew::open_telemetry_span_context(
+    otelTraceId,    // 32 lowercase or uppercase hex chars from your OTel SpanContext
+    otelSpanId,     // 16 lowercase or uppercase hex chars from your OTel SpanContext
+    otelTraceFlags  // W3C trace flags, such as "01" or "00"
+);
+
+auto logbrew_trace = logbrew::trace_context_from_opentelemetry_span_context(otel_parent);
+logbrew::TraceScope scope(logbrew_trace);
+```
+
+`OpenTelemetrySpanContext` is dependency-free and accepts the stable string values your app reads from its own OTel objects. It creates a fresh LogBrew child span under the OTel parent and can also feed `trace_span_attributes_from_opentelemetry_span_context(...)` for a single explicit span event. It does not install OpenTelemetry, read tracestate or baggage, patch HTTP clients, capture payloads, copy arbitrary headers, or serialize raw propagation metadata.
+
 When a `TraceScope` is active, `LogBrewClient` automatically adds primitive `traceId`, `spanId`, `parentSpanId`, `sampled`, and `traceFlags` metadata to issue, log, action, and metric events. `trace_span_attributes(...)` reuses the same active span ID for an explicit span event, `trace_product_timeline_context(...)` adds the active trace ID to product timelines, and `traceparent_headers()` returns only a normalized `traceparent` header for app-owned outbound requests. These helpers do not patch HTTP clients, capture request/response payloads, serialize raw incoming propagation headers, or include URL query strings and hashes.
 
 ## Example Source
 
-The `examples/readme_example.cpp` source shows a complete six-event payload and recording transport setup that you can copy into your own native application. `examples/trace_correlation.cpp` shows one W3C trace connecting a C++ issue, log, action, span, metric, product action, network milestone, and outgoing `traceparent`.
+The `examples/readme_example.cpp` source shows a complete six-event payload and recording transport setup that you can copy into your own native application. `examples/trace_correlation.cpp` shows one copied OpenTelemetry parent span connecting a C++ issue, log, action, span, metric, product action, network milestone, and outgoing W3C `traceparent`.

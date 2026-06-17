@@ -44,3 +44,33 @@ LogBrew C++ already had explicit span attributes, metric helpers, product timeli
 - `bash scripts/check_cpp_package.sh`: compiles C++17 core/tests/examples, validates canonical payloads, validates packaged trace correlation payload, and checks package metadata.
 - `bash scripts/real_user_cpp_smoke.sh`: installs from the source archive into a temporary native app, proves remove/reinstall, validates optional HTTP retry delivery, and runs installed `run-trace-correlation`.
 - `scripts/check_cpp_trace_correlation_payload.py`: validates trace/span IDs, active issue/log/action metadata, metric metadata, timeline trace IDs, outgoing `traceparent`, route query/fragment stripping, and no raw incoming propagation leakage.
+
+## 2026-06-17 OpenTelemetry SpanContext Follow-Up
+
+### Additional Source Read
+
+- OpenTelemetry C++, [`open-telemetry/opentelemetry-cpp`](https://github.com/open-telemetry/opentelemetry-cpp/tree/de26178fe5275a632a749792b4a72b625422d2ff) at commit `de26178fe5275a632a749792b4a72b625422d2ff`.
+- Read `api/include/opentelemetry/trace/span_context.h`: `SpanContext::IsValid`, `trace_id`, `span_id`, `trace_flags`, `IsSampled`, and `IsRemote`.
+- Read `api/include/opentelemetry/trace/trace_id.h`: `TraceId::ToLowerBase16`, `IsValid`, and `CopyBytesTo`.
+- Read `api/include/opentelemetry/trace/span_id.h`: `SpanId::ToLowerBase16`, `IsValid`, and `CopyBytesTo`.
+- Read `api/include/opentelemetry/trace/trace_flags.h`: `TraceFlags::IsSampled`, `ToLowerBase16`, and `flags`.
+- Read `api/include/opentelemetry/trace/propagation/http_trace_context.h`: `HttpTraceContext::Inject`, `Extract`, `InjectImpl`, and `ExtractContextFromTraceHeaders`.
+- Sentry Native, [`getsentry/sentry-native`](https://github.com/getsentry/sentry-native/tree/10a29ab2e594944d1dfabb4fd261e7f314dbd8d7) at commit `10a29ab2e594944d1dfabb4fd261e7f314dbd8d7`.
+- Read `src/sentry_tracing.c`: outgoing `sentry-trace`, baggage construction, and optional W3C `traceparent` emission.
+- Read `src/sentry_core.c`: `sentry_set_trace` and `sentry_set_trace_n`.
+- Read `include/sentry.h`: `sentry_options_set_propagate_traceparent`.
+- Datadog C++, [`DataDog/dd-trace-cpp`](https://github.com/DataDog/dd-trace-cpp/tree/0a1dc56b418262cee758c33fa6f488e9e44ab6ed) at commit `0a1dc56b418262cee758c33fa6f488e9e44ab6ed`.
+- Read `src/datadog/tracer.cpp`: `Tracer::extract_span`.
+- Read `src/datadog/trace_segment.cpp`: `TraceSegment::inject` W3C branch.
+- Read `test/test_span.cpp`: `injecting W3C traceparent header`.
+
+### LogBrew Follow-Up
+
+- Added dependency-free `OpenTelemetrySpanContext`, `open_telemetry_span_context(...)`, `open_telemetry_span_context_from_sampled(...)`, `trace_context_from_opentelemetry_span_context(...)`, and `trace_span_attributes_from_opentelemetry_span_context(...)`.
+- Apps can copy only stable OTel W3C trace ID, span ID, and trace flags from an app-owned OpenTelemetry C++ `SpanContext` into a fresh LogBrew child context/span.
+- The helper normalizes uppercase IDs, rejects malformed/all-zero IDs and invalid flags, derives sampled state from trace flags, creates a fresh LogBrew local span ID, and keeps the OTel span ID as the parent.
+- Packaged `examples/trace_correlation.cpp` now proves the OTel parent copy path while preserving the same privacy-bounded payload contract: no tracestate, baggage, raw propagation metadata, global HTTP patching, payloads, headers, full URLs, query strings, or fragments.
+
+### Remaining Gap
+
+LogBrew C++ still does not ingest a live OpenTelemetry `Context`, install OpenTelemetry, add exporters/processors, preserve tracestate/baggage, emit links/events/exceptions, or automatically instrument HTTP/lifecycle/DB/cache/queue work. Those remain deliberate follow-up areas after this minimal bridge.

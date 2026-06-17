@@ -37,6 +37,8 @@ thread_local const TraceContext *active_trace_context = nullptr;
   return value;
 }
 
+[[nodiscard]] std::string trim_copy(const std::string &value);
+
 [[nodiscard]] bool valid_non_zero_hex(const std::string &value, std::size_t length) {
   bool any_non_zero = false;
   if (value.size() != length) {
@@ -51,6 +53,25 @@ thread_local const TraceContext *active_trace_context = nullptr;
     }
   }
   return any_non_zero;
+}
+
+[[nodiscard]] std::string require_valid_hex_id(
+    const std::string &label,
+    std::string value,
+    std::size_t length) {
+  value = lower_hex(trim_copy(value));
+  if (!valid_non_zero_hex(value, length)) {
+    throw SdkException("validation_error", label + " is invalid");
+  }
+  return value;
+}
+
+[[nodiscard]] std::string require_valid_trace_flags(const std::string &label, std::string value) {
+  value = lower_hex(trim_copy(value));
+  if (value.size() != trace_flags_length || !std::all_of(value.begin(), value.end(), is_hex_character)) {
+    throw SdkException("validation_error", label + " are invalid");
+  }
+  return value;
 }
 
 void require_valid_trace_context(const TraceContext &context) {
@@ -478,6 +499,40 @@ TraceContext continue_or_create_trace_context(const std::string &traceparent) {
   return create_trace_context();
 }
 
+OpenTelemetrySpanContext open_telemetry_span_context(
+    std::string trace_id,
+    std::string span_id,
+    std::string trace_flags) {
+  trace_id = require_valid_hex_id("OpenTelemetry trace id", std::move(trace_id), trace_id_length);
+  span_id = require_valid_hex_id("OpenTelemetry span id", std::move(span_id), span_id_length);
+  trace_flags = require_valid_trace_flags("OpenTelemetry trace flags", std::move(trace_flags));
+  return OpenTelemetrySpanContext{
+      std::move(trace_id),
+      std::move(span_id),
+      trace_flags,
+      (hex_value(trace_flags.back()) & 0x01) == 0x01,
+  };
+}
+
+OpenTelemetrySpanContext open_telemetry_span_context_from_sampled(
+    std::string trace_id,
+    std::string span_id,
+    bool sampled) {
+  return open_telemetry_span_context(std::move(trace_id), std::move(span_id), sampled ? "01" : "00");
+}
+
+TraceContext trace_context_from_opentelemetry_span_context(const OpenTelemetrySpanContext &context) {
+  const OpenTelemetrySpanContext normalized =
+      open_telemetry_span_context(context.trace_id, context.span_id, context.trace_flags);
+  return TraceContext{
+      normalized.trace_id,
+      generated_hex(span_id_length),
+      normalized.span_id,
+      normalized.trace_flags,
+      normalized.sampled,
+  };
+}
+
 const TraceContext *current_trace_context() noexcept {
   return active_trace_context;
 }
@@ -547,6 +602,15 @@ SpanAttributes trace_span_attributes(
       std::move(status),
       duration_ms,
   };
+}
+
+SpanAttributes trace_span_attributes_from_opentelemetry_span_context(
+    std::string name,
+    std::string status,
+    const OpenTelemetrySpanContext &context,
+    std::optional<double> duration_ms) {
+  const TraceContext trace = trace_context_from_opentelemetry_span_context(context);
+  return trace_span_attributes(std::move(name), std::move(status), duration_ms, &trace);
 }
 
 std::map<std::string, std::string> traceparent_headers(const TraceContext *context) {

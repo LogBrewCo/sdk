@@ -78,8 +78,13 @@ grep -q 'metric(' "$sdk_dir/include/logbrew.hpp"
 grep -q 'TraceContext' "$sdk_dir/include/logbrew.hpp"
 grep -q 'TraceScope' "$sdk_dir/include/logbrew.hpp"
 grep -q 'trace_context_from_traceparent' "$sdk_dir/include/logbrew.hpp"
+grep -q 'OpenTelemetrySpanContext' "$sdk_dir/include/logbrew.hpp"
+grep -q 'open_telemetry_span_context' "$sdk_dir/include/logbrew.hpp"
+grep -q 'trace_context_from_opentelemetry_span_context' "$sdk_dir/include/logbrew.hpp"
+grep -q 'trace_span_attributes_from_opentelemetry_span_context' "$sdk_dir/include/logbrew.hpp"
 grep -q 'traceparent_headers' "$sdk_dir/include/logbrew.hpp"
 grep -q 'HttpTransport' "$sdk_dir/include/logbrew.hpp"
+grep -q 'open_telemetry_span_context' "$sdk_dir/examples/trace_correlation.cpp"
 
 cat > "$app_dir/main.cpp" <<'EOF'
 #include "logbrew.hpp"

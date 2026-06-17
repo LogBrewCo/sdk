@@ -162,6 +162,62 @@ void trace_context_helpers_validate_and_correlate() {
   EXPECT_TRUE(fallback.trace_id.size() == logbrew::trace_id_length);
   EXPECT_TRUE(!fallback.parent_span_id.has_value());
 
+  const logbrew::OpenTelemetrySpanContext otel_parent = logbrew::open_telemetry_span_context(
+      "4BF92F3577B34DA6A3CE929D0E0E4736",
+      "00F067AA0BA902B7",
+      "01");
+  EXPECT_TRUE(otel_parent.trace_id == context.trace_id);
+  EXPECT_TRUE(otel_parent.span_id == *context.parent_span_id);
+  EXPECT_TRUE(otel_parent.trace_flags == "01");
+  EXPECT_TRUE(otel_parent.sampled);
+  const logbrew::TraceContext otel_context = logbrew::trace_context_from_opentelemetry_span_context(otel_parent);
+  EXPECT_TRUE(otel_context.trace_id == context.trace_id);
+  EXPECT_TRUE(otel_context.parent_span_id.has_value() && *otel_context.parent_span_id == *context.parent_span_id);
+  EXPECT_TRUE(otel_context.span_id.size() == logbrew::span_id_length);
+  EXPECT_TRUE(otel_context.span_id != *context.parent_span_id);
+  EXPECT_TRUE(otel_context.sampled);
+  EXPECT_TRUE(otel_context.trace_flags == "01");
+  const logbrew::OpenTelemetrySpanContext unsampled_otel_parent =
+      logbrew::open_telemetry_span_context_from_sampled(context.trace_id, *context.parent_span_id, false);
+  const logbrew::TraceContext unsampled_otel_context =
+      logbrew::trace_context_from_opentelemetry_span_context(unsampled_otel_parent);
+  EXPECT_TRUE(!unsampled_otel_context.sampled);
+  EXPECT_TRUE(unsampled_otel_context.trace_flags == "00");
+  const auto otel_span = logbrew::trace_span_attributes_from_opentelemetry_span_context(
+      "GET /otel-parent",
+      "ok",
+      otel_parent,
+      12.0);
+  EXPECT_TRUE(otel_span.trace_id == context.trace_id);
+  EXPECT_TRUE(otel_span.parent_span_id.has_value() && *otel_span.parent_span_id == *context.parent_span_id);
+  EXPECT_TRUE(otel_span.span_id.size() == logbrew::span_id_length);
+  EXPECT_TRUE(otel_span.span_id != *context.parent_span_id);
+  EXPECT_TRUE(otel_span.duration_ms.has_value() && *otel_span.duration_ms == 12.0);
+  try {
+    static_cast<void>(logbrew::open_telemetry_span_context(
+        "00000000000000000000000000000000",
+        "00f067aa0ba902b7",
+        "01"));
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
+  try {
+    static_cast<void>(logbrew::open_telemetry_span_context(
+        context.trace_id,
+        "0000000000000000",
+        "01"));
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
+  try {
+    static_cast<void>(logbrew::open_telemetry_span_context(context.trace_id, *context.parent_span_id, "zz"));
+    EXPECT_TRUE(false);
+  } catch (const logbrew::SdkException &error) {
+    EXPECT_TRUE(error.code() == "validation_error");
+  }
+
   auto client = new_client();
   logbrew::ProductTimelineContext timeline_context;
   timeline_context.session_id = "session_123";
