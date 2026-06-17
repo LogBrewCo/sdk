@@ -60,3 +60,25 @@ Follow-up to the Rust HTTP server request pass. Tested the next Rust service gap
 
 - Better than before for teams with an existing OpenTelemetry context who just need LogBrew trace/log/span correlation and one-header downstream propagation.
 - Still behind Sentry and full OpenTelemetry for automatic span processing, rich span events/exceptions, links, tracestate/baggage, and collector/exporter workflows.
+
+## 2026-06-17 Rocket Request Follow-Up
+
+### Source Reading
+
+- Rocket `rwf2/Rocket@v0.5.1`: read `core/lib/src/fairing/ad_hoc.rs` (`AdHoc::on_request`, `AdHoc::on_response`), `core/lib/src/request/request.rs` (`Request::headers`, `Request::route`, `Request::local_cache`), and `core/lib/src/route/route.rs` (`Route::uri`). Pattern: fairings are app-owned lifecycle hooks; route templates are available after routing, so request telemetry should build in `on_response` rather than `on_request`.
+- Sentry Rust `getsentry/sentry-rust@0.48.2`: read `sentry-actix/src/lib.rs` request transaction middleware and `sentry-tower/src/lib.rs` tower layer. Pattern: Sentry can start transactions from incoming headers, configure scope processors, map status, and finish transactions in framework middleware, but the official repo does not ship a Rocket integration and the request path is heavier than LogBrew needs for first-useful telemetry.
+
+### LogBrew Update
+
+- Added packaged `examples/rocket_request_fairing.rs` plus `scripts/real_user_rust_rocket_smoke.sh`. The smoke packages `logbrew`, installs it into a generated Rocket app, runs the packaged example, and validates a request span plus `http.server.duration` metric.
+- The Rocket example records start time in `AdHoc::on_request`, builds telemetry in `AdHoc::on_response` with `Request::route().uri`, continues a valid incoming W3C `traceparent`, emits one outgoing `traceparent`, and keeps the LogBrew client in app-managed state.
+- Privacy boundary matches the other Rust server examples: no framework dependency in default `logbrew`, no global HTTP patching, no payload/header capture beyond the single W3C propagation header, and no raw URI/query/hash capture.
+
+### Proof
+
+- `cargo run --quiet --example rocket_request_fairing` plus `scripts/check_rust_rocket_payload.py` validates the local example output.
+- `bash scripts/real_user_rust_rocket_smoke.sh` validates the installed crate path with Rocket `0.5.1`; current package proof reported 26 files, 265.3 KiB uncompressed, 55.0 KiB compressed.
+
+### Remaining Rust Gaps
+
+- Still behind Sentry/OpenTelemetry for automatic `tracing-opentelemetry` extraction/processor interop, rich span events/exceptions, span links, tracestate/baggage, and automatic framework/outbound/DB/cache/queue spans.

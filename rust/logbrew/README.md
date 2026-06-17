@@ -344,6 +344,93 @@ async fn logbrew_request_telemetry(
 
 The packaged example also adds the outgoing `traceparent` to the response. Flush the app-owned `LogBrewClient` on your normal lifecycle boundary, keep route values templated, and do not capture arbitrary headers, raw request URIs, payloads, account session values, or user-specific identifiers.
 
+## Rocket Fairing Example
+
+For Rocket apps, keep request telemetry in app-owned fairings. Record timing in `AdHoc::on_request`, then build the LogBrew request span in `AdHoc::on_response` after Rocket has matched the route; this lets you use `Request::route()` for `/checkout/<cart_id>` instead of emitting raw request paths.
+
+```bash
+cargo add logbrew
+cargo add rocket
+```
+
+The packaged `examples/rocket_request_fairing.rs` file is a runnable mini-app; the core pattern is:
+
+```rust
+use logbrew::{HttpRequestTelemetry, LogBrewClient, Metadata, MetadataValue};
+use rocket::{Data, Request, Response, fairing::AdHoc, http::Header};
+use std::{sync::{Arc, Mutex}, time::Instant};
+
+#[derive(Clone)]
+struct AppState {
+    client: Arc<Mutex<LogBrewClient>>,
+}
+
+fn logbrew_request_timer() -> AdHoc {
+    AdHoc::on_request(
+        "LogBrew request timer",
+        |request: &mut Request<'_>, _data: &Data<'_>| {
+            Box::pin(async move {
+                let _ = request.local_cache(Instant::now);
+            })
+        },
+    )
+}
+
+fn logbrew_request_telemetry() -> AdHoc {
+    AdHoc::on_response(
+        "LogBrew request telemetry",
+        |request: &Request<'_>, response: &mut Response<'_>| {
+            Box::pin(async move {
+                let started = *request.local_cache(Instant::now);
+                let Some(state) = request.rocket().state::<AppState>() else { return; };
+                let route_template = request
+                    .route()
+                    .map(|route| route.uri.to_string())
+                    .unwrap_or_else(|| "/unknown".to_string());
+                let mut metadata = Metadata::new();
+                metadata.insert(
+                    "framework".to_string(),
+                    MetadataValue::String("rocket".to_string()),
+                );
+                let mut telemetry = HttpRequestTelemetry::new(
+                    route_template,
+                    request.method().to_string(),
+                    "11111111111111111111111111111111",
+                    "b7ad6b7169203331",
+                )
+                .with_status_code(response.status().code)
+                .with_duration_ms(started.elapsed().as_secs_f64() * 1000.0)
+                .with_metadata(metadata);
+                if let Some(traceparent) = request.headers().get_one("traceparent") {
+                    telemetry = telemetry.with_incoming_traceparent(traceparent);
+                }
+                let Ok(events) = telemetry.build() else { return; };
+                response.set_header(Header::new(
+                    "traceparent",
+                    events.outgoing_traceparent.clone(),
+                ));
+                if let Ok(mut client) = state.client.lock() {
+                    let _ = client.span(
+                        "evt_rocket_request_span",
+                        "2026-06-02T10:00:00Z",
+                        events.span,
+                    );
+                    if let Some(metric) = events.metric {
+                        let _ = client.metric(
+                            "evt_rocket_request_duration",
+                            "2026-06-02T10:00:00Z",
+                            metric,
+                        );
+                    }
+                }
+            })
+        },
+    )
+}
+```
+
+Attach the fairings with `rocket::build().manage(app_state).attach(logbrew_request_timer()).attach(logbrew_request_telemetry())`. Keep the LogBrew client in your own managed state, generate unique trace/span IDs per request, and flush on your normal lifecycle boundary. The fairing reads only the W3C `traceparent` propagation header plus Rocket-owned route/status metadata; do not capture arbitrary headers, raw request URIs, payloads, account session values, or user-specific identifiers.
+
 ## Tracing Bridge
 
 For Rust services that already use the `tracing` ecosystem, enable the optional bridge to convert app log events into LogBrew log events without replacing your subscriber stack or capturing arbitrary structured fields by default. Closed `tracing` spans are only converted when your app explicitly calls `with_span_events()`.

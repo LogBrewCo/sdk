@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the Rust Axum request middleware preview payload."""
+"""Validate the Rust Rocket request fairing preview payload."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from check_rust_framework_request_payload import validate_payload
 
 def main() -> int:
     if len(sys.argv) != 3:
-        raise SystemExit("usage: check_rust_axum_payload.py STDOUT_JSON STDERR_JSON")
+        raise SystemExit("usage: check_rust_rocket_payload.py STDOUT_JSON STDERR_JSON")
 
     validate_payload(
-        sys.argv[1], sys.argv[2], framework="axum", route_template="/checkout/{cart_id}"
+        sys.argv[1], sys.argv[2], framework="rocket", route_template="/checkout/<cart_id>"
     )
     print("ok")
     return 0

@@ -1,4 +1,4 @@
-.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware run-actix-request-middleware run-tracing-bridge
+.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware run-actix-request-middleware run-rocket-request-fairing run-tracing-bridge
 
 help:
 	@printf '%s\n' \
@@ -9,6 +9,7 @@ help:
 		'run-http-server-request -> make run-http-server-request' \
 		'run-axum-request-middleware -> make run-axum-request-middleware' \
 		'run-actix-request-middleware -> make run-actix-request-middleware' \
+		'run-rocket-request-fairing -> make run-rocket-request-fairing' \
 		'run-tracing-bridge -> make run-tracing-bridge'
 
 run: run-real-user-smoke
@@ -30,6 +31,9 @@ run-axum-request-middleware:
 
 run-actix-request-middleware:
 	@cargo run --quiet --example actix_request_middleware --manifest-path ../Cargo.toml
+
+run-rocket-request-fairing:
+	@cargo run --quiet --example rocket_request_fairing --manifest-path ../Cargo.toml
 
 run-tracing-bridge:
 	@cargo run --quiet --features tracing --example tracing_bridge --manifest-path ../Cargo.toml

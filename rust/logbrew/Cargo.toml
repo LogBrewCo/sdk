@@ -27,6 +27,7 @@ ureq = { version = "3.3", optional = true }
 [dev-dependencies]
 actix-web = "4"
 axum = "0.8"
+rocket = "0.5"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"

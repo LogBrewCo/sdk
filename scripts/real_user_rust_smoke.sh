@@ -104,6 +104,7 @@ grep -q '^logbrew-0.1.0/examples/first_useful_telemetry.rs$' "$tmp_dir/crate-con
 grep -q '^logbrew-0.1.0/examples/http_server_request.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/axum_request_middleware.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/actix_request_middleware.rs$' "$tmp_dir/crate-contents.txt"
+grep -q '^logbrew-0.1.0/examples/rocket_request_fairing.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/tracing_bridge.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/Makefile$' "$tmp_dir/crate-contents.txt"
 crate_readme="$tmp_dir/crate-readme.md"
@@ -124,6 +125,7 @@ grep -q 'First Useful Service Telemetry' "$crate_readme"
 grep -q 'HTTP Server Request Telemetry' "$crate_readme"
 grep -q 'Axum Middleware Example' "$crate_readme"
 grep -q 'Actix Middleware Example' "$crate_readme"
+grep -q 'Rocket Fairing Example' "$crate_readme"
 grep -q 'Tracing Bridge' "$crate_readme"
 grep -q 'Traceparent' "$crate_readme"
 grep -q 'HttpRequestTelemetry' "$crate_readme"
@@ -139,7 +141,7 @@ crate_manifest="$tmp_dir/crate-Cargo.toml"
 tar -xOf "$crate_path" logbrew-0.1.0/Cargo.toml > "$crate_manifest"
 crate_examples_makefile="$tmp_dir/crate-examples-Makefile"
 tar -xOf "$crate_path" logbrew-0.1.0/examples/Makefile > "$crate_examples_makefile"
-grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware run-actix-request-middleware run-tracing-bridge$' "$crate_examples_makefile"
+grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware run-actix-request-middleware run-rocket-request-fairing run-tracing-bridge$' "$crate_examples_makefile"
 grep -q '^help:$' "$crate_examples_makefile"
 grep -q '^run: run-real-user-smoke$' "$crate_examples_makefile"
 grep -q '^run-readme-example:$' "$crate_examples_makefile"
@@ -154,6 +156,8 @@ grep -q '^run-axum-request-middleware:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --features tower --example axum_request_middleware --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q '^run-actix-request-middleware:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --example actix_request_middleware --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
+grep -q '^run-rocket-request-fairing:$' "$crate_examples_makefile"
+grep -q '^	@cargo run --quiet --example rocket_request_fairing --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q '^run-tracing-bridge:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --features tracing --example tracing_bridge --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q 'run-readme-example -> make run-readme-example' "$crate_examples_makefile"
@@ -163,6 +167,7 @@ grep -q 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$crate_
 grep -q 'run-http-server-request -> make run-http-server-request' "$crate_examples_makefile"
 grep -q 'run-axum-request-middleware -> make run-axum-request-middleware' "$crate_examples_makefile"
 grep -q 'run-actix-request-middleware -> make run-actix-request-middleware' "$crate_examples_makefile"
+grep -q 'run-rocket-request-fairing -> make run-rocket-request-fairing' "$crate_examples_makefile"
 grep -q 'run-tracing-bridge -> make run-tracing-bridge' "$crate_examples_makefile"
 python3 - "$crate_manifest" <<'PY'
 from pathlib import Path
@@ -225,6 +230,7 @@ test -f "$crate_dir/examples/first_useful_telemetry.rs"
 test -f "$crate_dir/examples/http_server_request.rs"
 test -f "$crate_dir/examples/axum_request_middleware.rs"
 test -f "$crate_dir/examples/actix_request_middleware.rs"
+test -f "$crate_dir/examples/rocket_request_fairing.rs"
 test -f "$crate_dir/examples/tracing_bridge.rs"
 test -f "$crate_dir/examples/Makefile"
 
@@ -259,8 +265,9 @@ grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -
 grep -qx 'run-http-server-request -> make run-http-server-request' <(sed -n '5p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run-axum-request-middleware -> make run-axum-request-middleware' <(sed -n '6p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run-actix-request-middleware -> make run-actix-request-middleware' <(sed -n '7p' "$tmp_dir/packaged-example-make-help.txt")
-grep -qx 'run-tracing-bridge -> make run-tracing-bridge' <(sed -n '8p' "$tmp_dir/packaged-example-make-help.txt")
-test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "8"
+grep -qx 'run-rocket-request-fairing -> make run-rocket-request-fairing' <(sed -n '8p' "$tmp_dir/packaged-example-make-help.txt")
+grep -qx 'run-tracing-bridge -> make run-tracing-bridge' <(sed -n '9p' "$tmp_dir/packaged-example-make-help.txt")
+test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "9"
 (cd "$crate_dir/examples" && make run-readme-example) > "$tmp_dir/packaged-readme-example-make.stdout.json" 2> "$tmp_dir/packaged-readme-example-make.stderr.json"
 grep -q '"type": "release"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "environment"' "$tmp_dir/packaged-readme-example-make.stdout.json"

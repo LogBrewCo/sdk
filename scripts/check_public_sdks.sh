@@ -40,6 +40,7 @@ STEP_LABELS=(
   "Rust real-user smoke"
   "Rust Axum real-user smoke"
   "Rust Actix real-user smoke"
+  "Rust Rocket real-user smoke"
   "Rust tracing real-user smoke"
   "JavaScript real-user smoke"
   "Browser real-user smoke"
@@ -441,6 +442,10 @@ mark_step_complete
 
 begin_next_step "Rust Actix real-user smoke"
 run_shell_step "bash scripts/real_user_rust_actix_smoke.sh"
+mark_step_complete
+
+begin_next_step "Rust Rocket real-user smoke"
+run_shell_step "bash scripts/real_user_rust_rocket_smoke.sh"
 mark_step_complete
 
 begin_next_step "Rust tracing real-user smoke"
