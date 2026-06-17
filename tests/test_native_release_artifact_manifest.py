@@ -9,6 +9,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.native_breakpad_fixture import (
+    DEFAULT_BREAKPAD_MODULE_ID,
+    DEFAULT_BREAKPAD_SOURCE_PATH,
+    DEFAULT_BREAKPAD_SYMBOL_NAME,
+    write_breakpad_symbol,
+)
 from tests.native_elf_fixture import DEFAULT_DEBUG_PAYLOAD, write_android_elf_symbol
 from tests.native_macho_fixture import (
     DEFAULT_MACHO_DEBUG_PAYLOAD,
@@ -70,6 +76,25 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         )
         return symbols_dir
 
+    def create_breakpad_symbols(
+        self,
+        root: Path,
+        *,
+        module_id: str = DEFAULT_BREAKPAD_MODULE_ID,
+        include_file_records: bool = True,
+        cpu: str = "x86",
+        module_name: str = "checkout.pdb",
+    ) -> Path:
+        symbols_dir = root / "native" / "breakpad"
+        write_breakpad_symbol(
+            symbols_dir / "checkout.sym",
+            module_id=module_id,
+            include_file_records=include_file_records,
+            cpu=cpu,
+            module_name=module_name,
+        )
+        return symbols_dir
+
     def test_ready_manifest_keeps_paths_relative_and_omits_symbol_contents(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             artifact_root = Path(tmp) / "artifacts"
@@ -77,6 +102,7 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
             dsym = self.create_dsym(artifact_root)
             mapping = self.create_mapping(artifact_root)
             native_symbols = self.create_android_native_symbols(artifact_root)
+            breakpad_symbols = self.create_breakpad_symbols(artifact_root)
 
             manifest = create_native_release_artifact_manifest.create_manifest(
                 artifact_root=artifact_root,
@@ -84,6 +110,7 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
                     ("ios_dsym", dsym),
                     ("android_proguard_mapping", mapping),
                     ("android_native_symbols", native_symbols),
+                    ("breakpad_symbols", breakpad_symbols),
                 ],
                 release="2026.06.17",
                 environment="production",
@@ -97,15 +124,16 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertEqual(manifest["git"]["commitSha"], "abc123def456")
         self.assertEqual(
             [artifact["artifactType"] for artifact in manifest["artifacts"]],
-            ["ios_dsym", "android_proguard_mapping", "android_native_symbols"],
+            ["ios_dsym", "android_proguard_mapping", "android_native_symbols", "breakpad_symbols"],
         )
         self.assertEqual(
             manifest["supportedArtifactTypes"],
-            ["ios_dsym", "android_proguard_mapping", "android_native_symbols"],
+            ["ios_dsym", "android_proguard_mapping", "android_native_symbols", "breakpad_symbols"],
         )
         dsym_artifact = manifest["artifacts"][0]
         mapping_artifact = manifest["artifacts"][1]
         native_artifact = manifest["artifacts"][2]
+        breakpad_artifact = manifest["artifacts"][3]
         self.assertEqual(dsym_artifact["path"], "ios/Checkout.app.dSYM")
         self.assertEqual(dsym_artifact["fileCount"], 2)
         self.assertEqual(
@@ -134,12 +162,116 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertEqual(native_file["symbolSource"], "debug_info")
         self.assertEqual(native_file["gnuBuildId"], "32cc7f54d61dc2d4022a4dc58fdec1f4")
         self.assertTrue(native_artifact["artifactId"].startswith("lbw_android_native_symbols_"))
+        breakpad_details = breakpad_artifact["breakpadSymbols"]
+        breakpad_file = breakpad_details["files"][0]
+        self.assertEqual(breakpad_artifact["path"], "native/breakpad")
+        self.assertEqual(breakpad_details["symbolFileCount"], 1)
+        self.assertEqual(breakpad_details["architectures"], ["x86"])
+        self.assertEqual(breakpad_file["path"], "native/breakpad/checkout.sym")
+        self.assertEqual(breakpad_file["moduleOs"], "windows")
+        self.assertEqual(breakpad_file["arch"], "x86")
+        self.assertEqual(breakpad_file["moduleId"], "00112233445566778899AABBCCDDEEFF2A")
+        self.assertEqual(breakpad_file["guid"], "00112233-4455-6677-8899-AABBCCDDEEFF")
+        self.assertEqual(breakpad_file["age"], 42)
+        self.assertEqual(breakpad_file["moduleName"], "checkout.pdb")
+        self.assertEqual(breakpad_file["symbolSource"], "debug_info")
+        self.assertTrue(breakpad_artifact["artifactId"].startswith("lbw_breakpad_symbols_"))
         serialized = json.dumps(manifest)
         self.assertNotIn(tmp, serialized)
         self.assertNotIn("com.example.Checkout", serialized)
         self.assertNotIn(DEFAULT_MACHO_DEBUG_PAYLOAD.decode("ascii", errors="ignore"), serialized)
         self.assertNotIn(DEFAULT_MACHO_UUID.hex(), serialized)
         self.assertNotIn(DEFAULT_DEBUG_PAYLOAD.decode("ascii", errors="ignore"), serialized)
+        self.assertNotIn(DEFAULT_BREAKPAD_SOURCE_PATH, serialized)
+        self.assertNotIn(DEFAULT_BREAKPAD_SYMBOL_NAME, serialized)
+
+    def test_breakpad_public_only_symbol_uses_symbol_table_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            artifact_root.mkdir()
+            breakpad_symbols = self.create_breakpad_symbols(artifact_root, include_file_records=False)
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("breakpad_symbols", breakpad_symbols)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "ready")
+        self.assertEqual(
+            manifest["artifacts"][0]["breakpadSymbols"]["files"][0]["symbolSource"],
+            "symbol_table",
+        )
+
+    def test_breakpad_module_name_drops_local_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            artifact_root.mkdir()
+            breakpad_symbols = self.create_breakpad_symbols(
+                artifact_root,
+                module_name="/workspace/mobile/checkout.pdb",
+            )
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("breakpad_symbols", breakpad_symbols)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        serialized = json.dumps(manifest)
+        self.assertEqual(manifest["validation"]["status"], "ready")
+        self.assertEqual(
+            manifest["artifacts"][0]["breakpadSymbols"]["files"][0]["moduleName"],
+            "checkout.pdb",
+        )
+        self.assertNotIn("/workspace/mobile", serialized)
+
+    def test_breakpad_without_module_header_blocks_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            symbols_dir = artifact_root / "native" / "breakpad"
+            symbols_dir.mkdir(parents=True)
+            (symbols_dir / "bad.sym").write_text("FILE 0 src/app/checkout.cpp\n", encoding="ascii")
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("breakpad_symbols", symbols_dir)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "native/breakpad: native/breakpad/bad.sym: "
+            "first non-empty line must be a Breakpad MODULE header",
+            manifest["validation"]["errors"],
+        )
+
+    def test_breakpad_malformed_identifier_blocks_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            artifact_root.mkdir()
+            breakpad_symbols = self.create_breakpad_symbols(artifact_root, module_id="001122")
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("breakpad_symbols", breakpad_symbols)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "native/breakpad: native/breakpad/checkout.sym: "
+            "Breakpad MODULE identifier must contain GUID and age",
+            manifest["validation"]["errors"],
+        )
 
     def test_dsym_without_macho_uuid_warns_without_blocking_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -15,8 +15,25 @@ from typing import Any
 
 
 SCRIPT_VERSION = "0.1.0"
-SUPPORTED_ARTIFACT_TYPES = ("ios_dsym", "android_proguard_mapping", "android_native_symbols")
+SUPPORTED_ARTIFACT_TYPES = (
+    "ios_dsym",
+    "android_proguard_mapping",
+    "android_native_symbols",
+    "breakpad_symbols",
+)
 PROGUARD_CLASS_MAPPING_RE = re.compile(r"^\s*[^#\s].+?\s+->\s+[^:]+:\s*$")
+BREAKPAD_IDENTIFIER_RE = re.compile(r"^[0-9A-F]+$")
+BREAKPAD_CPU_ARCHES = {
+    "x86": "x86",
+    "x86_64": "x86_64",
+    "amd64": "x86_64",
+    "x64": "x86_64",
+    "arm64": "arm64",
+    "aarch64": "arm64",
+    "arm": "armv7",
+    "armv7": "armv7",
+    "arm32": "armv7",
+}
 ELF_CLASS_32 = 1
 ELF_CLASS_64 = 2
 ELF_DATA_LITTLE_ENDIAN = 1
@@ -721,6 +738,120 @@ def build_android_native_symbols_artifact(path: Path, root: Path) -> dict[str, A
     )
 
 
+def breakpad_symbol_candidates(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path] if path.suffix.lower() == ".sym" else []
+    return sorted(candidate for candidate in path.rglob("*.sym") if candidate.is_file())
+
+
+def breakpad_guid(guid_hex: str) -> str:
+    return f"{guid_hex[:8]}-{guid_hex[8:12]}-{guid_hex[12:16]}-{guid_hex[16:20]}-{guid_hex[20:]}"
+
+
+def breakpad_module_basename(module_name: str) -> str:
+    return module_name.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or "unknown"
+
+
+def parse_breakpad_header(line: str) -> tuple[str, str, str, str]:
+    if not line.startswith("MODULE "):
+        raise ValueError("first non-empty line must be a Breakpad MODULE header")
+    parts = line.split()
+    if len(parts) < 5:
+        raise ValueError("Breakpad MODULE header is malformed")
+    module_os, cpu, identifier = parts[1], parts[2], parts[3].upper()
+    if len(identifier) <= 32:
+        raise ValueError("Breakpad MODULE identifier must contain GUID and age")
+    if not BREAKPAD_IDENTIFIER_RE.fullmatch(identifier):
+        raise ValueError("Breakpad MODULE identifier must be hexadecimal")
+    int(identifier[32:], 16)
+    return module_os, cpu, identifier, breakpad_module_basename(" ".join(parts[4:]))
+
+
+def read_breakpad_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
+    header: tuple[str, str, str, str] | None = None
+    has_file_records = False
+    try:
+        with path.open("rb") as handle:
+            for raw_line in handle:
+                line = raw_line.rstrip(b"\r\n")
+                if any(byte > 127 for byte in line):
+                    return {}, "Breakpad .sym files must be ASCII encoded"
+                text = line.decode("ascii").strip()
+                if not header:
+                    if not text:
+                        continue
+                    header = parse_breakpad_header(text)
+                    continue
+                if text.startswith("FILE "):
+                    has_file_records = True
+                    break
+                if text.startswith(("FUNC ", "PUBLIC ")):
+                    break
+        if not header:
+            return {}, "Breakpad symbol file is missing MODULE header"
+        module_os, cpu, identifier, module_name = header
+        guid_hex = identifier[:32]
+        age_hex = identifier[32:]
+        return {
+            "moduleOs": module_os,
+            "cpu": cpu,
+            "arch": BREAKPAD_CPU_ARCHES.get(cpu.lower(), f"unknown({cpu})"),
+            "moduleId": identifier,
+            "guid": breakpad_guid(guid_hex),
+            "age": int(age_hex, 16),
+            "moduleName": module_name,
+            "symbolSource": "debug_info" if has_file_records else "symbol_table",
+        }, None
+    except (OSError, ValueError) as exc:
+        return {}, str(exc)
+
+
+def build_breakpad_symbols_artifact(path: Path, root: Path) -> dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    symbol_files: list[dict[str, Any]] = []
+
+    if not path.exists():
+        errors.append("Breakpad symbols artifact is missing")
+    elif not path.is_file() and not path.is_dir():
+        errors.append("Breakpad symbols artifact must be a .sym file or directory")
+    else:
+        symlink_errors = validate_no_symlinks(path, root)
+        errors.extend(symlink_errors)
+        candidates = [] if symlink_errors else breakpad_symbol_candidates(path)
+        if not candidates and not symlink_errors:
+            errors.append("Breakpad symbols artifact contains no .sym files")
+        for candidate in candidates:
+            rel_path = relative(candidate, root)
+            if candidate.stat().st_size == 0:
+                errors.append(f"{rel_path}: Breakpad symbol file is empty")
+                continue
+            metadata, metadata_error = read_breakpad_metadata(candidate)
+            if metadata_error:
+                errors.append(f"{rel_path}: {metadata_error}")
+                continue
+            if str(metadata["arch"]).startswith("unknown("):
+                warnings.append(f"{rel_path}: Breakpad MODULE CPU is not mapped: {metadata['cpu']}")
+            symbol_files.append({"path": rel_path, "byteSize": candidate.stat().st_size, **metadata})
+
+    details = {
+        "breakpadSymbols": {
+            "symbolFileCount": len(symbol_files),
+            "architectures": sorted({str(symbol_file["arch"]) for symbol_file in symbol_files}),
+            "files": symbol_files,
+        }
+    }
+
+    return base_artifact_entry(
+        artifact_type="breakpad_symbols",
+        path=path,
+        root=root,
+        errors=errors,
+        warnings=warnings,
+        details=details,
+    )
+
+
 def build_artifact_entry(artifact_type: str, path: Path, root: Path) -> dict[str, Any]:
     if artifact_type == "ios_dsym":
         return build_ios_dsym_artifact(path, root)
@@ -728,6 +859,8 @@ def build_artifact_entry(artifact_type: str, path: Path, root: Path) -> dict[str
         return build_android_proguard_mapping_artifact(path, root)
     if artifact_type == "android_native_symbols":
         return build_android_native_symbols_artifact(path, root)
+    if artifact_type == "breakpad_symbols":
+        return build_breakpad_symbols_artifact(path, root)
     raise ValueError(f"unsupported artifact type: {artifact_type}")
 
 
@@ -816,7 +949,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         required=True,
         help=(
             "Release artifact in TYPE=PATH form. Supported types: "
-            "ios_dsym, android_proguard_mapping, android_native_symbols."
+            f"{', '.join(SUPPORTED_ARTIFACT_TYPES)}."
         ),
     )
     parser.add_argument("--repository-url", help="Optional app-owned source repository URL.")
