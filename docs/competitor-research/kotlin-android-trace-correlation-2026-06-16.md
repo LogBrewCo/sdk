@@ -48,6 +48,43 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 - Kotlin Android now has a better first-useful explicit trace/log/error/product/network correlation path for apps that want small install footprint and app-owned instrumentation.
 - Remaining gaps versus mature competitors: no Android lifecycle spans, OkHttp/HttpURLConnection child-span instrumentation, OpenTelemetry context ingestion, baggage/tracestate, coroutine context propagation, DB/cache/queue spans, rich span events/exceptions, or native crash/symbolication integration.
 
+## 2026-06-17 Outbound Request Child-Span Follow-Up
+
+### Source Re-Read
+
+- Sentry Java/Android HEAD still resolves to `getsentry/sentry-java@6dff1c9970ad612ac431980c08abb138218465e0`.
+- Re-read `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpInterceptor.kt`: `intercept(...)`, `TracingUtils.traceIfAllowed(...)` header injection, response/error span completion, and optional network body/detail capture.
+- OpenTelemetry Java instrumentation HEAD now resolves to `open-telemetry/opentelemetry-java-instrumentation@2f94c787cb511ddd80c6e337cd89999798a2da2b`.
+- Re-read `instrumentation/okhttp/okhttp-3.0/library/src/main/java/io/opentelemetry/instrumentation/okhttp/v3_0/internal/TracingInterceptor.java`: `intercept(...)`, `instrumenter.start(...)`, scoped `chain.proceed(...)`, error completion, and immutable request rebuilding.
+- Re-read `instrumentation/okhttp/okhttp-3.0/library/src/main/java/io/opentelemetry/instrumentation/okhttp/v3_0/internal/RequestHeaderSetter.java`: `set(...)` injecting propagation headers into `Request.Builder`.
+- Datadog Android HEAD still resolves to `DataDog/dd-sdk-android@e07c4cc6a23b51d4a45602787cea3f3f1db7b8b0`.
+- Re-read `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/trace/TracingInterceptor.kt`: `interceptAndTrace(...)`, `buildSpan(...)`, `updateRequest(...)`, `handleResponse(...)`, and `handleThrowable(...)`.
+- Re-read `features/dd-sdk-android-trace/src/main/kotlin/com/datadog/android/trace/TraceContextInjection.kt`: sampled-only versus all-request injection.
+
+### Pattern And Tradeoffs
+
+- Mature competitors solve outbound request correlation with interceptors that start child spans, inject propagation into immutable request builders, scope the child context during request execution, and finish spans from response/error paths.
+- Sentry and Datadog also include optional body/header/network detail capture and richer automatic client behavior. That improves debugging depth but adds dependency, privacy, and configuration surface area.
+- LogBrew should stay lighter for the core Kotlin artifact: explicit app-owned request spans that hand back one normalized `traceparent` header, require explicit response/error completion, and avoid OkHttp/HttpURLConnection patching, arbitrary header capture, payload capture, baggage, and tracestate.
+
+### LogBrew Follow-Up Implementation
+
+- Added `AndroidRequestSpan` plus `LogBrewAndroid.startRequestSpan(...)` and `LogBrewAndroid.captureRequestSpan(...)`.
+- `startRequestSpan(...)` creates a fresh child context under the supplied or active `LogBrewTraceContext`, sanitizes method and route template, preserves primitive Android context and app metadata, and returns `headers` containing exactly one normalized `traceparent` value for app-owned request clients.
+- `captureRequestSpan(...)` records an explicit `span` event with sanitized method/route/status/duration/error metadata, child span ID, active parent span ID, and spoofed trace-key overwrite.
+- The helper intentionally avoids OkHttp interceptors, `HttpURLConnection` patching, Android lifecycle observers, coroutine context capture, payload/header/full-URL/query/hash capture, baggage, tracestate, and automatic retry or usage/quota interpretation.
+
+### Updated Verification
+
+- `LogBrewKotlinTest.kt` now proves request child context creation, one-header propagation, sanitized completion span metadata, status/duration validation, and no raw query/fragment/traceparent/spoofed trace leakage.
+- Packaged `examples/trace_correlation/TraceCorrelation.kt` now emits a request child span and request-scoped outgoing `traceparent`.
+- `scripts/check_kotlin_trace_correlation_payload.py` now verifies active traceparent and request traceparent separately, parent/child span linkage, sanitized request metadata, and no forbidden raw values.
+- Package and installed-smoke scripts now require `AndroidRequestSpan`, README `startRequestSpan`/`captureRequestSpan` guidance, and installed trace-correlation proof.
+
+### Remaining Gaps After Follow-Up
+
+- Kotlin Android still lacks automatic lifecycle instrumentation, automatic OkHttp/HttpURLConnection interceptors, coroutine context propagation beyond explicit thread-local scopes, OpenTelemetry context ingestion, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
+
 ## Verification
 
 - `bash scripts/check_kotlin_style.sh`: ktlint `1.8.0` passed.

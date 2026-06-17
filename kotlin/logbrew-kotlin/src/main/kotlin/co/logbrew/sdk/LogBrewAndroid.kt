@@ -12,6 +12,17 @@ object AndroidLogPriority {
     const val ASSERT: Int = 7
 }
 
+class AndroidRequestSpan internal constructor(
+    val method: String,
+    val routeTemplate: String,
+    val traceContext: LogBrewTraceContext,
+    val headers: Map<String, String>,
+    internal val metadata: Map<String, Any?>,
+) {
+    val traceparent: String
+        get() = headers.getValue("traceparent")
+}
+
 object LogBrewAndroid {
     private const val SDK_VERSION: String = "0.1.0"
 
@@ -95,6 +106,66 @@ object LogBrewAndroid {
             id,
             timestamp,
             ActionAttributes.create("$safeMethod $safeRouteTemplate", actionStatus).withMetadata(timelineMetadata),
+        )
+    }
+
+    fun startRequestSpan(
+        method: String,
+        routeTemplate: String,
+        context: AndroidContext = AndroidContext.create(),
+        traceContext: LogBrewTraceContext? = null,
+        metadata: Map<String, Any?> = emptyMap(),
+    ): AndroidRequestSpan {
+        val safeMethod = normalizedMethod(method)
+        val safeRouteTemplate = routeTemplatePath(routeTemplate)
+        val parentContext = traceContext ?: LogBrewTrace.currentTraceContext()
+        val requestContext = LogBrewTrace.childContext(parentContext)
+        val safeMetadata =
+            context.toMetadata() +
+                compactMetadata(metadata) +
+                mapOf(
+                    "source" to "android.request",
+                    "method" to safeMethod,
+                    "routeTemplate" to safeRouteTemplate,
+                )
+        return AndroidRequestSpan(
+            method = safeMethod,
+            routeTemplate = safeRouteTemplate,
+            traceContext = requestContext,
+            headers = LogBrewTrace.outgoingHeaders(requestContext),
+            metadata = safeMetadata,
+        )
+    }
+
+    fun captureRequestSpan(
+        client: LogBrewClient,
+        id: String,
+        timestamp: String,
+        requestSpan: AndroidRequestSpan,
+        statusCode: Int? = null,
+        durationMs: Double? = null,
+        error: Throwable? = null,
+        status: String? = null,
+        metadata: Map<String, Any?> = emptyMap(),
+    ) {
+        val safeStatusCode = checkedStatusCode(statusCode)
+        val safeDurationMs = checkedDurationMs(durationMs)
+        val spanStatus = status ?: if (error != null || (safeStatusCode != null && safeStatusCode >= 400)) "error" else "ok"
+        val spanMetadata =
+            requestSpan.metadata +
+                compactMetadata(metadata) +
+                optionalMetadata("statusCode", safeStatusCode) +
+                (error?.let { requestErrorMetadata(it) } ?: emptyMap())
+        client.span(
+            id,
+            timestamp,
+            LogBrewTrace.spanAttributes(
+                name = "${requestSpan.method} ${requestSpan.routeTemplate}",
+                status = spanStatus,
+                durationMs = safeDurationMs,
+                metadata = spanMetadata,
+                context = requestSpan.traceContext,
+            ),
         )
     }
 
@@ -267,6 +338,11 @@ object LogBrewAndroid {
         key: String,
         value: Any?,
     ): Map<String, Any?> = if (value == null) emptyMap() else mapOf(key to value)
+
+    private fun requestErrorMetadata(error: Throwable): Map<String, Any?> =
+        mapOf(
+            "errorType" to throwableTitle(error),
+        ) + optionalMetadata("errorMessage", error.message?.takeIf { it.isNotBlank() })
 
     private fun throwableTitle(throwable: Throwable): String =
         throwable::class.java.simpleName.takeIf { it.isNotBlank() } ?: throwable::class.java.name

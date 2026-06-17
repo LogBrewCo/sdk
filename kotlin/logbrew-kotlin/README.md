@@ -126,6 +126,33 @@ LogBrewTrace.use(trace).use {
 
 While a `LogBrewTraceScope` is active, `LogBrewClient` automatically adds authoritative `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewAndroid.captureProductAction(...)`, `captureNetworkMilestone(...)`, `captureAndroidLog(...)`, and `captureThrowable(...)` receive the same correlation through the client. Trace metadata overwrites spoofed trace keys in app metadata, and the helper never captures raw propagation values, request bodies, response bodies, arbitrary headers, query strings, fragments, or visual replay. Use `LogBrewTrace.outgoingHeaders()` for app-owned HTTP clients when you want to forward only the normalized `traceparent` header.
 
+For app-owned Android or JVM request clients such as OkHttp or `HttpURLConnection`, use `LogBrewAndroid.startRequestSpan(...)` to create a child span and get exactly one `traceparent` header to attach to your request. Finish the span explicitly when the response or exception is available:
+
+```kotlin
+LogBrewTrace.use(trace).use {
+    val requestSpan =
+        LogBrewAndroid.startRequestSpan(
+            method = "POST",
+            routeTemplate = "/api/checkout",
+            metadata = mapOf("funnel" to "checkout"),
+        )
+
+    val headers = requestSpan.headers // attach only traceparent to your request builder
+
+    LogBrewAndroid.captureRequestSpan(
+        client = client,
+        id = "evt_request_001",
+        timestamp = "2026-06-02T10:00:06Z",
+        requestSpan = requestSpan,
+        statusCode = 503,
+        durationMs = 42.5,
+        error = IllegalStateException("retry budget reached"),
+    )
+}
+```
+
+The request helper sanitizes methods and route templates, strips query strings and fragments, records status, duration, and exception type/message, and overwrites spoofed trace metadata. It does not install an OkHttp interceptor, patch `HttpURLConnection`, capture payloads, copy arbitrary headers, or send baggage/tracestate.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when a JVM or Android app is ready to send queued batches to LogBrew. It posts JSON to the production intake by default, passes the SDK key through the `authorization` header, and supports custom endpoints, headers, and timeouts for local collectors or proxies:
@@ -203,6 +230,7 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 
 - `previewJson()` returns the queued batch as pretty JSON.
 - `LogBrewTrace` validates W3C `traceparent`, creates request/task-local-style scopes through `AutoCloseable`, adds active trace metadata to app-owned events, and creates outgoing `traceparent` headers without patching HTTP clients.
+- `LogBrewAndroid.startRequestSpan()` and `captureRequestSpan()` create explicit outbound request child spans for app-owned OkHttp, `HttpURLConnection`, or other request clients with one normalized `traceparent` header and sanitized completion metadata.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.

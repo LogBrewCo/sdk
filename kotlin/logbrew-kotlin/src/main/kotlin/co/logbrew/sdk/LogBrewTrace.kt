@@ -84,6 +84,20 @@ object LogBrewTrace {
 
     fun currentTraceContext(): LogBrewTraceContext? = scopes.get().lastOrNull()?.context
 
+    internal fun childContext(parentContext: LogBrewTraceContext?): LogBrewTraceContext {
+        if (parentContext == null) {
+            return createTraceContext()
+        }
+        validateContext(parentContext)
+        return LogBrewTraceContext(
+            traceId = parentContext.traceId,
+            spanId = randomSpanId(),
+            parentSpanId = parentContext.spanId,
+            traceFlags = parentContext.traceFlags,
+            sampled = parentContext.sampled,
+        )
+    }
+
     fun use(context: LogBrewTraceContext): LogBrewTraceScope {
         validateContext(context)
         val scopeId = nextScopeId.getAndIncrement()

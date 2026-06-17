@@ -93,6 +93,7 @@ grep -q '^co/logbrew/sdk/LogBrewAndroid.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTraceScope.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AndroidRequestSpan.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequester.class$' "$tmp_dir/jar-contents.txt"
@@ -127,6 +128,9 @@ for needle in (
     "AndroidLogPriority.WARN",
     "LogBrewTrace",
     "traceparent",
+    "LogBrewAndroid.startRequestSpan",
+    "LogBrewAndroid.captureRequestSpan",
+    "HttpURLConnection",
 ):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")

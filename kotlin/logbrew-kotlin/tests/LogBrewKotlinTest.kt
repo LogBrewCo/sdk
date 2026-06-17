@@ -41,10 +41,11 @@ fun main() {
     run("shutdown_flushes_and_prevents_future_events", ::shutdownFlushesAndPreventsFutureEvents)
     run("android_helpers_add_context_metadata", ::androidHelpersAddContextMetadata)
     run("android_timeline_helpers_sanitize_product_and_network_metadata", ::androidTimelineHelpersSanitizeProductAndNetworkMetadata)
+    run("android_request_span_helper_correlates_outbound_requests", ::androidRequestSpanHelperCorrelatesOutboundRequests)
     run("android_log_priority_helper_captures_throwable_safely", ::androidLogPriorityHelperCapturesThrowableSafely)
     run("android_throwable_helper_keeps_stack_trace_opt_in", ::androidThrowableHelperKeepsStackTraceOptIn)
     run("trace_context_helpers_validate_and_correlate", ::traceContextHelpersValidateAndCorrelate)
-    println("kotlin package tests ok (21 tests)")
+    println("kotlin package tests ok (22 tests)")
 }
 
 private fun run(
@@ -448,6 +449,89 @@ private fun androidLogPriorityHelperCapturesThrowableSafely() {
     check("\"throwableName\": \"IllegalArgumentException\"" in body)
     check("\"throwableMessage\": \"bad cart\"" in body)
     check("\"throwableStackTrace\"" !in body)
+}
+
+private fun androidRequestSpanHelperCorrelatesOutboundRequests() {
+    val parent =
+        LogBrewTrace.continueOrCreate(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+        )
+    val client = newClient()
+    val context =
+        AndroidContext
+            .create()
+            .withActivityName("CheckoutActivity")
+            .withScreenName("Checkout")
+            .withSessionId("session_android_001")
+
+    LogBrewTrace.use(parent).use {
+        val requestSpan =
+            LogBrewAndroid.startRequestSpan(
+                method = "post",
+                routeTemplate = "https://mobile.example.test/api/checkout?card=redacted#pay",
+                context = context,
+                metadata = mapOf("traceId" to "spoofed_trace", "funnel" to "checkout"),
+            )
+        check(requestSpan.method == "POST")
+        check(requestSpan.routeTemplate == "/api/checkout")
+        check(requestSpan.headers.keys == setOf("traceparent"))
+        check(requestSpan.traceContext.traceId == parent.traceId)
+        check(requestSpan.traceContext.parentSpanId == parent.spanId)
+        check(requestSpan.traceContext.spanId != parent.spanId)
+        check(requestSpan.traceparent == "00-${parent.traceId}-${requestSpan.traceContext.spanId}-01")
+
+        LogBrewAndroid.captureRequestSpan(
+            client = client,
+            id = "evt_android_request_span_001",
+            timestamp = "2026-06-02T10:00:12Z",
+            requestSpan = requestSpan,
+            statusCode = 503,
+            durationMs = 42.5,
+            error = IllegalStateException("retry budget reached"),
+            metadata = mapOf("parentSpanId" to "spoofed_parent", "phase" to "payment"),
+        )
+    }
+
+    val body = client.previewJson()
+    check("\"type\": \"span\"" in body)
+    check("\"name\": \"POST /api/checkout\"" in body)
+    check("\"traceId\": \"${parent.traceId}\"" in body)
+    check("\"parentSpanId\": \"${parent.spanId}\"" in body)
+    check("\"status\": \"error\"" in body)
+    check("\"durationMs\": 42.5" in body)
+    check("\"source\": \"android.request\"" in body)
+    check("\"method\": \"POST\"" in body)
+    check("\"routeTemplate\": \"/api/checkout\"" in body)
+    check("\"statusCode\": 503" in body)
+    check("\"errorType\": \"IllegalStateException\"" in body)
+    check("\"errorMessage\": \"retry budget reached\"" in body)
+    check("\"sessionId\": \"session_android_001\"" in body)
+    check("card=redacted" !in body)
+    check("#pay" !in body)
+    check("traceparent" !in body)
+    check("spoofed_trace" !in body)
+    check("spoofed_parent" !in body)
+
+    expect("validation_error") {
+        val requestSpan = LogBrewAndroid.startRequestSpan("GET", "/api/cart")
+        LogBrewAndroid.captureRequestSpan(
+            client = newClient(),
+            id = "evt_android_request_bad_duration",
+            timestamp = "2026-06-02T10:00:12Z",
+            requestSpan = requestSpan,
+            durationMs = -1.0,
+        )
+    }
+    expect("validation_error") {
+        val requestSpan = LogBrewAndroid.startRequestSpan("GET", "/api/cart")
+        LogBrewAndroid.captureRequestSpan(
+            client = newClient(),
+            id = "evt_android_request_bad_status",
+            timestamp = "2026-06-02T10:00:12Z",
+            requestSpan = requestSpan,
+            statusCode = 99,
+        )
+    }
 }
 
 private fun androidThrowableHelperKeepsStackTraceOptIn() {

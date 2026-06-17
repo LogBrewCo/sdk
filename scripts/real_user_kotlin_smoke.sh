@@ -66,6 +66,7 @@ jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" -C "$tmp_dir/classes" . 
 jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AndroidRequestSpan.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequester.class$' "$tmp_dir/jar-contents.txt"
@@ -141,6 +142,8 @@ test -f "$extract_dir/examples/Makefile"
 grep -q 'HttpTransport' "$extract_dir/README.md"
 grep -q 'captureProductAction' "$extract_dir/README.md"
 grep -q 'captureNetworkMilestone' "$extract_dir/README.md"
+grep -q 'startRequestSpan' "$extract_dir/README.md"
+grep -q 'captureRequestSpan' "$extract_dir/README.md"
 grep -q 'LogBrewTrace' "$extract_dir/README.md"
 
 run_app() {

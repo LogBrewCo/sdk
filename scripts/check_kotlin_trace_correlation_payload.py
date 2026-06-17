@@ -54,15 +54,24 @@ def main() -> None:
         if forbidden in serialized:
             raise SystemExit(f"forbidden value leaked into payload: {forbidden}")
 
-    outgoing = stderr_payload.get("traceparent") if isinstance(stderr_payload, dict) else None
-    if not isinstance(outgoing, str):
-        raise SystemExit("missing outgoing traceparent")
-    parts = outgoing.split("-")
+    active_outgoing = stderr_payload.get("activeTraceparent") if isinstance(stderr_payload, dict) else None
+    request_outgoing = stderr_payload.get("requestTraceparent") if isinstance(stderr_payload, dict) else None
+    if not isinstance(active_outgoing, str):
+        raise SystemExit("missing active outgoing traceparent")
+    if not isinstance(request_outgoing, str):
+        raise SystemExit("missing request outgoing traceparent")
+    parts = active_outgoing.split("-")
     if len(parts) != 4 or parts[0] != "00" or parts[1] != TRACE_ID or parts[3] != "01":
-        raise SystemExit(f"unexpected outgoing traceparent: {outgoing}")
+        raise SystemExit(f"unexpected active outgoing traceparent: {active_outgoing}")
     span_id = parts[2]
     if not HEX16.match(span_id) or span_id == PARENT_SPAN_ID or span_id == "0" * 16:
         raise SystemExit(f"unexpected local span id: {span_id}")
+    request_parts = request_outgoing.split("-")
+    if len(request_parts) != 4 or request_parts[0] != "00" or request_parts[1] != TRACE_ID or request_parts[3] != "01":
+        raise SystemExit(f"unexpected request outgoing traceparent: {request_outgoing}")
+    request_span_id = request_parts[2]
+    if not HEX16.match(request_span_id) or request_span_id in {PARENT_SPAN_ID, span_id, "0" * 16}:
+        raise SystemExit(f"unexpected request span id: {request_span_id}")
 
     issue = event_by_id(events, "evt_kotlin_trace_issue_001")
     log = event_by_id(events, "evt_kotlin_trace_log_001")
@@ -71,6 +80,7 @@ def main() -> None:
     metric = event_by_id(events, "evt_kotlin_trace_metric_001")
     product_action = event_by_id(events, "evt_kotlin_trace_product_action_001")
     network = event_by_id(events, "evt_kotlin_trace_network_001")
+    request = event_by_id(events, "evt_kotlin_trace_request_001")
 
     for event in (issue, log, action, metric, product_action, network):
         attributes = event.get("attributes")
@@ -97,6 +107,39 @@ def main() -> None:
         raise SystemExit("network attributes must be an object")
     if network_attributes.get("name") != "POST /api/checkout":
         raise SystemExit("network route was not sanitized")
+
+    request_attributes = request.get("attributes")
+    if not isinstance(request_attributes, dict):
+        raise SystemExit("request span attributes must be an object")
+    for key, value in {
+        "name": "POST /api/checkout",
+        "traceId": TRACE_ID,
+        "spanId": request_span_id,
+        "parentSpanId": span_id,
+        "status": "error",
+        "durationMs": 38.5,
+    }.items():
+        if request_attributes.get(key) != value:
+            raise SystemExit(f"unexpected request span {key}: {request_attributes.get(key)!r}")
+    request_metadata = request_attributes.get("metadata")
+    if not isinstance(request_metadata, dict):
+        raise SystemExit("request span metadata must be an object")
+    for key, value in {
+        "source": "android.request",
+        "method": "POST",
+        "routeTemplate": "/api/checkout",
+        "statusCode": 503,
+        "errorType": "IllegalStateException",
+        "errorMessage": "retry budget reached",
+        "phase": "payment",
+        "traceId": TRACE_ID,
+        "spanId": request_span_id,
+        "parentSpanId": span_id,
+        "traceFlags": "01",
+        "traceSampled": True,
+    }.items():
+        if request_metadata.get(key) != value:
+            raise SystemExit(f"unexpected request metadata {key}: {request_metadata.get(key)!r}")
 
 
 if __name__ == "__main__":

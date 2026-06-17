@@ -73,8 +73,24 @@ fun main() {
             durationMs = 37.5,
             metadata = mapOf("funnel" to "checkout", "parentSpanId" to "spoofed_parent"),
         )
-        val outgoing = LogBrewTrace.outgoingHeaders().getValue("traceparent")
-        System.err.println("""{"traceparent":"$outgoing"}""")
+        val requestSpan =
+            LogBrewAndroid.startRequestSpan(
+                method = "post",
+                routeTemplate = "https://mobile.example.test/api/checkout?card=redacted#pay",
+                metadata = mapOf("funnel" to "checkout", "traceId" to "spoofed_trace"),
+            )
+        LogBrewAndroid.captureRequestSpan(
+            client = client,
+            id = "evt_kotlin_trace_request_001",
+            timestamp = "2026-06-02T10:00:27Z",
+            requestSpan = requestSpan,
+            statusCode = 503,
+            durationMs = 38.5,
+            error = IllegalStateException("retry budget reached"),
+            metadata = mapOf("phase" to "payment", "parentSpanId" to "spoofed_parent"),
+        )
+        val activeTraceparent = LogBrewTrace.outgoingHeaders().getValue("traceparent")
+        System.err.println("""{"activeTraceparent":"$activeTraceparent","requestTraceparent":"${requestSpan.traceparent}"}""")
     }
 
     println(client.previewJson())
