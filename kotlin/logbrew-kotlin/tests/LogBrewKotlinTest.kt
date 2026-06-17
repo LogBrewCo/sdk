@@ -9,6 +9,7 @@ import co.logbrew.sdk.IssueAttributes
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewOpenTelemetrySpanContext
 import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.LogBrewTraceContext
 import co.logbrew.sdk.MetricAttributes
@@ -45,7 +46,8 @@ fun main() {
     run("android_log_priority_helper_captures_throwable_safely", ::androidLogPriorityHelperCapturesThrowableSafely)
     run("android_throwable_helper_keeps_stack_trace_opt_in", ::androidThrowableHelperKeepsStackTraceOptIn)
     run("trace_context_helpers_validate_and_correlate", ::traceContextHelpersValidateAndCorrelate)
-    println("kotlin package tests ok (22 tests)")
+    run("opentelemetry_span_context_helpers_validate_and_correlate", ::openTelemetrySpanContextHelpersValidateAndCorrelate)
+    println("kotlin package tests ok (23 tests)")
 }
 
 private fun run(
@@ -662,4 +664,45 @@ private fun traceContextHelpersValidateAndCorrelate() {
             ),
         )
     }
+}
+
+private fun openTelemetrySpanContextHelpersValidateAndCorrelate() {
+    val context =
+        LogBrewTrace.fromTraceparent("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
+            ?: error("expected valid traceparent")
+    val parentSpanId = context.parentSpanId ?: error("expected parent span")
+    val otelParent =
+        LogBrewOpenTelemetrySpanContext.create(
+            traceId = "4BF92F3577B34DA6A3CE929D0E0E4736",
+            spanId = "00F067AA0BA902B7",
+            traceFlags = "01",
+        ) ?: error("expected valid OpenTelemetry span context")
+    val otelTrace = LogBrewTrace.fromOpenTelemetrySpanContext(otelParent)
+    check(otelTrace.traceId == context.traceId)
+    check(otelTrace.parentSpanId == context.parentSpanId)
+    check(otelTrace.spanId != otelParent.spanId)
+    check(otelTrace.traceFlags == "01")
+    check(otelTrace.sampled)
+    check(LogBrewOpenTelemetrySpanContext.create("0".repeat(32), "00f067aa0ba902b7", "01") == null)
+    check(LogBrewOpenTelemetrySpanContext.create(context.traceId, "0".repeat(16), "01") == null)
+    check(LogBrewOpenTelemetrySpanContext.create(context.traceId, parentSpanId, "zz") == null)
+    val unsampledOtelParent =
+        LogBrewOpenTelemetrySpanContext.create(context.traceId, parentSpanId, sampled = false)
+            ?: error("expected valid unsampled OpenTelemetry span context")
+    val unsampledOtelTrace = LogBrewTrace.fromOpenTelemetrySpanContext(unsampledOtelParent)
+    check(unsampledOtelTrace.traceFlags == "00")
+    check(!unsampledOtelTrace.sampled)
+    val otelSpanAttributes =
+        LogBrewTrace.spanAttributesFromOpenTelemetrySpanContext(
+            name = "OTel parent span",
+            status = "ok",
+            durationMs = 12.5,
+            metadata = mapOf("spanId" to "spoofed_span", "bridge" to "opentelemetry"),
+            context = otelParent,
+        )
+    check(otelSpanAttributes.traceId == context.traceId)
+    check(otelSpanAttributes.parentSpanId == context.parentSpanId)
+    check(otelSpanAttributes.spanId != context.parentSpanId)
+    check(otelSpanAttributes.metadata["spanId"] == otelSpanAttributes.spanId)
+    check(otelSpanAttributes.metadata["bridge"] == "opentelemetry")
 }

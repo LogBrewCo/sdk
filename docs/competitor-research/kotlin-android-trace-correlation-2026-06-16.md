@@ -85,6 +85,40 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 
 - Kotlin Android still lacks automatic lifecycle instrumentation, automatic OkHttp/HttpURLConnection interceptors, coroutine context propagation beyond explicit thread-local scopes, OpenTelemetry context ingestion, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
 
+## 2026-06-17 OpenTelemetry SpanContext Follow-Up
+
+### Source Re-Read
+
+- OpenTelemetry Java HEAD now resolves to `open-telemetry/opentelemetry-java@a00536a2c7b3a3f7a0952dbea12e9249da18611d`.
+- Read `api/all/src/main/java/io/opentelemetry/api/trace/SpanContext.java`: `getTraceId()`, `getSpanId()`, `getTraceFlags()`, `isSampled()`, `isValid()`, and `isRemote()`.
+- Read `api/all/src/main/java/io/opentelemetry/api/trace/TraceFlags.java`: `asHex()`, `isSampled()`, and sampled/default flag helpers.
+- Read `api/all/src/main/java/io/opentelemetry/api/trace/Span.java`: `current()`, `fromContext(...)`, `wrap(...)`, and `getSpanContext()`.
+- Read `api/all/src/main/java/io/opentelemetry/api/trace/propagation/W3CTraceContextPropagator.java`: `inject(...)`, `extract(...)`, and `extractContextFromTraceParent(...)`.
+- Sentry Java/Android HEAD still resolves to `getsentry/sentry-java@6dff1c9970ad612ac431980c08abb138218465e0`.
+- Re-read `sentry/src/main/java/io/sentry/PropagationContext.java`: `fromHeaders(...)`, `fromExistingTrace(...)`, and `toSpanContext()`.
+- Re-read `sentry/src/main/java/io/sentry/SentryTraceHeader.java`: trace ID/span ID/sampled parsing and serialization.
+- Datadog Android HEAD still resolves to `DataDog/dd-sdk-android@e07c4cc6a23b51d4a45602787cea3f3f1db7b8b0`.
+- Re-read `features/dd-sdk-android-trace/src/main/kotlin/com/datadog/android/trace/internal/net/TraceContext.kt`: small trace/span/sampling carrier.
+- Re-read `features/dd-sdk-android-trace/src/main/kotlin/com/datadog/android/trace/TraceContextInjection.kt`: all-request versus sampled-only injection policy.
+
+### Pattern And Tradeoffs
+
+- OpenTelemetry treats `SpanContext` as immutable propagation state with lowercase trace ID, span ID, trace flags, trace state, and validity/remote checks. It injects only valid contexts and can wrap a `SpanContext` in a non-recording span for downstream propagation.
+- Sentry and Datadog both keep lightweight trace carriers separate from broader exporter/instrumentation machinery, then create or bind local spans/scopes from those carriers.
+- LogBrew should not depend on OpenTelemetry, import trace state/baggage, or install processors. The useful subset is copying validated trace ID, parent span ID, and trace flags from an app-owned OTel span context into a fresh LogBrew child span.
+
+### LogBrew Follow-Up Implementation
+
+- Added dependency-free `LogBrewOpenTelemetrySpanContext` with validated `create(...)` factories for copied OTel `traceId`, `spanId`, and `traceFlags` or sampled boolean.
+- Added `LogBrewTrace.fromOpenTelemetrySpanContext(...)` so apps can create a fresh LogBrew child context under an owned OTel span without adding OpenTelemetry dependencies to LogBrew.
+- Added `LogBrewTrace.spanAttributesFromOpenTelemetrySpanContext(...)` for one-off child span attributes when apps want to report a LogBrew span parented to an OTel span.
+- Packaged `examples/trace_correlation/TraceCorrelation.kt` now starts from a copied OTel-compatible parent and still proves trace-log-error-action-metric-network-request correlation under one W3C trace.
+- The helper intentionally ignores tracestate, baggage, links, raw propagation metadata, payloads, arbitrary headers, global HTTP patching, processors, and exporters.
+
+### Remaining Gaps After OTel Follow-Up
+
+- Kotlin Android still lacks automatic lifecycle instrumentation, automatic OkHttp/HttpURLConnection interceptors, coroutine context propagation beyond explicit thread-local scopes, richer OpenTelemetry `Context`/`Span` extraction, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
+
 ## Verification
 
 - `bash scripts/check_kotlin_style.sh`: ktlint `1.8.0` passed.

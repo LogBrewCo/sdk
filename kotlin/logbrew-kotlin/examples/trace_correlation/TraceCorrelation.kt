@@ -3,6 +3,7 @@ import co.logbrew.sdk.IssueAttributes
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewOpenTelemetrySpanContext
 import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.MetricAttributes
 
@@ -13,10 +14,13 @@ fun main() {
             sdkName = "logbrew-kotlin-trace",
             sdkVersion = "0.1.0",
         )
-    val trace =
-        LogBrewTrace.continueOrCreate(
-            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
-        )
+    val otelParent =
+        LogBrewOpenTelemetrySpanContext.create(
+            traceId = "4BF92F3577B34DA6A3CE929D0E0E4736",
+            spanId = "00F067AA0BA902B7",
+            traceFlags = "01",
+        ) ?: error("expected valid OpenTelemetry span context")
+    val trace = LogBrewTrace.fromOpenTelemetrySpanContext(otelParent)
 
     LogBrewTrace.use(trace).use {
         client.issue(

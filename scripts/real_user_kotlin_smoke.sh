@@ -145,6 +145,8 @@ grep -q 'captureNetworkMilestone' "$extract_dir/README.md"
 grep -q 'startRequestSpan' "$extract_dir/README.md"
 grep -q 'captureRequestSpan' "$extract_dir/README.md"
 grep -q 'LogBrewTrace' "$extract_dir/README.md"
+grep -q 'LogBrewOpenTelemetrySpanContext' "$extract_dir/README.md"
+grep -q 'fromOpenTelemetrySpanContext' "$extract_dir/README.md"
 
 run_app() {
   local name="$1"

@@ -93,6 +93,7 @@ grep -q '^co/logbrew/sdk/LogBrewAndroid.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTraceScope.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySpanContext.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidRequestSpan.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt"
@@ -127,6 +128,8 @@ for needle in (
     "LogBrewAndroid.captureThrowable",
     "AndroidLogPriority.WARN",
     "LogBrewTrace",
+    "LogBrewOpenTelemetrySpanContext",
+    "fromOpenTelemetrySpanContext",
     "traceparent",
     "LogBrewAndroid.startRequestSpan",
     "LogBrewAndroid.captureRequestSpan",

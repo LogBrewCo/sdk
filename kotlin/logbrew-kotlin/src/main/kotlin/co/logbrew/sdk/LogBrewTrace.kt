@@ -4,6 +4,11 @@ import java.security.SecureRandom
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 
+private const val TRACE_ID_LENGTH = 32
+private const val SPAN_ID_LENGTH = 16
+private const val TRACE_FLAGS_LENGTH = 2
+private const val TRACEPARENT_LENGTH = 55
+
 data class LogBrewTraceContext(
     val traceId: String,
     val spanId: String,
@@ -14,6 +19,40 @@ data class LogBrewTraceContext(
     fun traceparent(): String {
         LogBrewTrace.validateContext(this)
         return "00-$traceId-$spanId-$traceFlags"
+    }
+}
+
+class LogBrewOpenTelemetrySpanContext private constructor(
+    val traceId: String,
+    val spanId: String,
+    val traceFlags: String,
+) {
+    val sampled: Boolean
+        get() = traceFlags.toInt(radix = 16).and(1) == 1
+
+    companion object {
+        fun create(
+            traceId: String,
+            spanId: String,
+            traceFlags: String = "01",
+        ): LogBrewOpenTelemetrySpanContext? {
+            val normalizedTraceId = traceId.trim().lowercase(Locale.ROOT)
+            val normalizedSpanId = spanId.trim().lowercase(Locale.ROOT)
+            val normalizedTraceFlags = traceFlags.trim().lowercase(Locale.ROOT)
+            if (!isValidHexId(normalizedTraceId, TRACE_ID_LENGTH) ||
+                !isValidHexId(normalizedSpanId, SPAN_ID_LENGTH) ||
+                !isValidTraceFlags(normalizedTraceFlags)
+            ) {
+                return null
+            }
+            return LogBrewOpenTelemetrySpanContext(normalizedTraceId, normalizedSpanId, normalizedTraceFlags)
+        }
+
+        fun create(
+            traceId: String,
+            spanId: String,
+            sampled: Boolean,
+        ): LogBrewOpenTelemetrySpanContext? = create(traceId, spanId, if (sampled) "01" else "00")
     }
 }
 
@@ -31,11 +70,6 @@ class LogBrewTraceScope internal constructor(
 }
 
 object LogBrewTrace {
-    private const val TRACE_ID_LENGTH = 32
-    private const val SPAN_ID_LENGTH = 16
-    private const val TRACE_FLAGS_LENGTH = 2
-    private const val TRACEPARENT_LENGTH = 55
-
     private val hex = "0123456789abcdef".toCharArray()
     private val random = SecureRandom()
     private val nextScopeId = AtomicLong(1)
@@ -81,6 +115,15 @@ object LogBrewTrace {
     }
 
     fun continueOrCreate(traceparent: String?): LogBrewTraceContext = traceparent?.let { fromTraceparent(it) } ?: createTraceContext()
+
+    fun fromOpenTelemetrySpanContext(context: LogBrewOpenTelemetrySpanContext): LogBrewTraceContext =
+        LogBrewTraceContext(
+            traceId = context.traceId,
+            spanId = randomSpanId(),
+            parentSpanId = context.spanId,
+            traceFlags = context.traceFlags,
+            sampled = context.sampled,
+        )
 
     fun currentTraceContext(): LogBrewTraceContext? = scopes.get().lastOrNull()?.context
 
@@ -147,6 +190,21 @@ object LogBrewTrace {
         return attributes
     }
 
+    fun spanAttributesFromOpenTelemetrySpanContext(
+        name: String,
+        status: String = "ok",
+        durationMs: Double? = null,
+        metadata: Map<String, Any?> = emptyMap(),
+        context: LogBrewOpenTelemetrySpanContext,
+    ): SpanAttributes =
+        spanAttributes(
+            name = name,
+            status = status,
+            durationMs = durationMs,
+            metadata = metadata,
+            context = fromOpenTelemetrySpanContext(context),
+        )
+
     fun outgoingHeaders(context: LogBrewTraceContext = currentTraceContext() ?: createTraceContext()): Map<String, String> {
         validateContext(context)
         return mapOf("traceparent" to context.traceparent())
@@ -174,7 +232,7 @@ object LogBrewTrace {
         requireHexId("trace traceId", context.traceId, TRACE_ID_LENGTH)
         requireHexId("trace spanId", context.spanId, SPAN_ID_LENGTH)
         context.parentSpanId?.let { requireHexId("trace parentSpanId", it, SPAN_ID_LENGTH) }
-        if (context.traceFlags.length != TRACE_FLAGS_LENGTH || !isLowerHex(context.traceFlags)) {
+        if (!isValidTraceFlags(context.traceFlags)) {
             throw SdkException("validation_error", "trace traceFlags must be two lowercase hex characters")
         }
         if (context.sampled != (context.traceFlags.toInt(radix = 16).and(1) == 1)) {
@@ -190,16 +248,6 @@ object LogBrewTrace {
         }
         if (stack.isEmpty()) {
             scopes.remove()
-        }
-    }
-
-    private fun requireHexId(
-        label: String,
-        value: String,
-        length: Int,
-    ) {
-        if (value.length != length || !isLowerHex(value) || isAllZeros(value)) {
-            throw SdkException("validation_error", "$label must be $length lowercase hex characters and non-zero")
         }
     }
 
@@ -226,12 +274,29 @@ object LogBrewTrace {
             }
         }
 
-    private fun isLowerHex(value: String): Boolean = value.all { it in '0'..'9' || it in 'a'..'f' }
-
-    private fun isAllZeros(value: String): Boolean = value.all { it == '0' }
-
     private data class TraceFrame(
         val id: Long,
         val context: LogBrewTraceContext,
     )
 }
+
+private fun requireHexId(
+    label: String,
+    value: String,
+    length: Int,
+) {
+    if (!isValidHexId(value, length)) {
+        throw SdkException("validation_error", "$label must be $length lowercase hex characters and non-zero")
+    }
+}
+
+private fun isValidHexId(
+    value: String,
+    length: Int,
+): Boolean = value.length == length && isLowerHex(value) && !isAllZeros(value)
+
+private fun isValidTraceFlags(value: String): Boolean = value.length == TRACE_FLAGS_LENGTH && isLowerHex(value)
+
+private fun isLowerHex(value: String): Boolean = value.all { it in '0'..'9' || it in 'a'..'f' }
+
+private fun isAllZeros(value: String): Boolean = value.all { it == '0' }

@@ -124,6 +124,20 @@ LogBrewTrace.use(trace).use {
 }
 ```
 
+If your app already owns an OpenTelemetry `SpanContext`, copy only the stable W3C fields into LogBrew without adding an SDK dependency or exporter bridge:
+
+```kotlin
+val copiedOtelParent =
+    LogBrewOpenTelemetrySpanContext.create(
+        traceId = otelSpanContext.traceId,
+        spanId = otelSpanContext.spanId,
+        traceFlags = otelSpanContext.traceFlags.asHex(),
+    )
+
+val trace = copiedOtelParent?.let(LogBrewTrace::fromOpenTelemetrySpanContext)
+    ?: LogBrewTrace.createTraceContext()
+```
+
 While a `LogBrewTraceScope` is active, `LogBrewClient` automatically adds authoritative `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewAndroid.captureProductAction(...)`, `captureNetworkMilestone(...)`, `captureAndroidLog(...)`, and `captureThrowable(...)` receive the same correlation through the client. Trace metadata overwrites spoofed trace keys in app metadata, and the helper never captures raw propagation values, request bodies, response bodies, arbitrary headers, query strings, fragments, or visual replay. Use `LogBrewTrace.outgoingHeaders()` for app-owned HTTP clients when you want to forward only the normalized `traceparent` header.
 
 For app-owned Android or JVM request clients such as OkHttp or `HttpURLConnection`, use `LogBrewAndroid.startRequestSpan(...)` to create a child span and get exactly one `traceparent` header to attach to your request. Finish the span explicitly when the response or exception is available:
