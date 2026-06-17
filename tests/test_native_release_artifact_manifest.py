@@ -84,6 +84,20 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         )
         return symbols_dir
 
+    def create_unity_symbols(self, root: Path) -> Path:
+        symbols_dir = root / "unity" / "symbols"
+        (symbols_dir / "build_id").parent.mkdir(parents=True)
+        (symbols_dir / "build_id").write_text("checkout-unity-2026.06.17\n", encoding="utf-8")
+        (symbols_dir / "LineNumberMappings.json").write_text(
+            "{\n"
+            "  \"files\": [\"/Users/dev/checkout/Assets/Scripts/Checkout.cs\"],\n"
+            "  \"methods\": [\"Checkout.PlaceOrder\"]\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        write_android_elf_symbol(symbols_dir / "arm64-v8a" / "libil2cpp.sym.so")
+        return symbols_dir
+
     def create_breakpad_symbols(
         self,
         root: Path,
@@ -124,6 +138,7 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
             dsym = self.create_dsym(artifact_root)
             mapping = self.create_mapping(artifact_root)
             native_symbols = self.create_android_native_symbols(artifact_root)
+            unity_symbols = self.create_unity_symbols(artifact_root)
             breakpad_symbols = self.create_breakpad_symbols(artifact_root)
             dotnet_pdb = self.create_dotnet_pdb_symbols(artifact_root)
 
@@ -133,6 +148,7 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
                     ("ios_dsym", dsym),
                     ("android_proguard_mapping", mapping),
                     ("android_native_symbols", native_symbols),
+                    ("unity_symbols", unity_symbols),
                     ("breakpad_symbols", breakpad_symbols),
                     ("dotnet_pdb", dotnet_pdb),
                 ],
@@ -155,6 +171,7 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
                 "ios_dsym",
                 "android_proguard_mapping",
                 "android_native_symbols",
+                "unity_symbols",
                 "breakpad_symbols",
                 "dotnet_pdb",
             ],
@@ -165,6 +182,7 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
                 "ios_dsym",
                 "android_proguard_mapping",
                 "android_native_symbols",
+                "unity_symbols",
                 "breakpad_symbols",
                 "dotnet_pdb",
             ],
@@ -172,8 +190,9 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         dsym_artifact = manifest["artifacts"][0]
         mapping_artifact = manifest["artifacts"][1]
         native_artifact = manifest["artifacts"][2]
-        breakpad_artifact = manifest["artifacts"][3]
-        dotnet_artifact = manifest["artifacts"][4]
+        unity_artifact = manifest["artifacts"][3]
+        breakpad_artifact = manifest["artifacts"][4]
+        dotnet_artifact = manifest["artifacts"][5]
         self.assertEqual(dsym_artifact["path"], "ios/Checkout.app.dSYM")
         self.assertEqual(dsym_artifact["fileCount"], 2)
         self.assertEqual(
@@ -202,6 +221,21 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertEqual(native_file["symbolSource"], "debug_info")
         self.assertEqual(native_file["gnuBuildId"], "32cc7f54d61dc2d4022a4dc58fdec1f4")
         self.assertTrue(native_artifact["artifactId"].startswith("lbw_android_native_symbols_"))
+        unity_details = unity_artifact["unitySymbols"]
+        self.assertEqual(unity_artifact["path"], "unity/symbols")
+        self.assertEqual(unity_details["buildId"], "checkout-unity-2026.06.17")
+        self.assertEqual(unity_details["symbolFileCount"], 2)
+        self.assertEqual(unity_details["nativeSymbolFileCount"], 1)
+        self.assertEqual(unity_details["il2cppMappingFileCount"], 1)
+        self.assertEqual(unity_details["architectures"], ["arm64-v8a"])
+        unity_native_file = unity_details["files"][0]
+        unity_mapping_file = unity_details["files"][1]
+        self.assertEqual(unity_native_file["path"], "unity/symbols/arm64-v8a/libil2cpp.sym.so")
+        self.assertEqual(unity_native_file["symbolFormat"], "elf")
+        self.assertEqual(unity_native_file["symbolSource"], "debug_info")
+        self.assertEqual(unity_mapping_file["path"], "unity/symbols/LineNumberMappings.json")
+        self.assertEqual(unity_mapping_file["symbolFormat"], "il2cpp_mapping")
+        self.assertTrue(unity_artifact["artifactId"].startswith("lbw_unity_symbols_"))
         breakpad_details = breakpad_artifact["breakpadSymbols"]
         breakpad_file = breakpad_details["files"][0]
         self.assertEqual(breakpad_artifact["path"], "native/breakpad")
@@ -241,6 +275,8 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertNotIn(DEFAULT_BREAKPAD_SYMBOL_NAME, serialized)
         self.assertNotIn(DEFAULT_PDB_PATH, serialized)
         self.assertNotIn(DEFAULT_PDB_PAYLOAD.decode("ascii"), serialized)
+        self.assertNotIn("/Users/dev/checkout", serialized)
+        self.assertNotIn("Checkout.PlaceOrder", serialized)
 
     def test_android_native_symbol_file_count_limit_blocks_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -372,6 +408,74 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
             manifest["artifacts"][0]["breakpadSymbols"]["files"][0]["symbolSource"],
             "symbol_table",
         )
+
+    def test_unity_symbols_without_build_id_blocks_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            unity_symbols = self.create_unity_symbols(artifact_root)
+            (unity_symbols / "build_id").unlink()
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("unity_symbols", unity_symbols)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "unity/symbols: Unity symbols artifact is missing build_id",
+            manifest["validation"]["errors"],
+        )
+        self.assertEqual(manifest["artifacts"][0]["unitySymbols"]["buildId"], "")
+
+    def test_unity_symbols_without_il2cpp_mapping_warns_without_blocking_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            unity_symbols = self.create_unity_symbols(artifact_root)
+            (unity_symbols / "LineNumberMappings.json").unlink()
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("unity_symbols", unity_symbols)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "ready")
+        self.assertEqual(manifest["artifacts"][0]["unitySymbols"]["symbolFileCount"], 1)
+        self.assertIn(
+            "unity/symbols: LineNumberMappings.json is missing; managed Unity stack deobfuscation will be incomplete",
+            manifest["validation"]["warnings"],
+        )
+
+    def test_unity_symbols_malformed_il2cpp_mapping_blocks_manifest_without_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            unity_symbols = self.create_unity_symbols(artifact_root)
+            (unity_symbols / "LineNumberMappings.json").write_text(
+                "/Users/dev/checkout/Assets/Scripts/Checkout.cs\n",
+                encoding="utf-8",
+            )
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("unity_symbols", unity_symbols)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        serialized = json.dumps(manifest)
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "unity/symbols: unity/symbols/LineNumberMappings.json: "
+            "IL2CPP mapping file must be JSON object or array data",
+            manifest["validation"]["errors"],
+        )
+        self.assertNotIn("/Users/dev/checkout", serialized)
 
     def test_breakpad_module_name_drops_local_directories(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

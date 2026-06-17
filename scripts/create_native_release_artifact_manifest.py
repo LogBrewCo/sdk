@@ -18,12 +18,9 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from native_release_artifact_elf import (  # noqa: E402
-    ELF_TYPE_DYN,
-    ELF_TYPE_EXEC,
     android_native_symbol_candidates,
     dedupe_android_symbol_files,
-    elf_symbol_source,
-    read_elf_metadata,
+    validated_elf_symbol_file,
 )
 from native_release_artifact_io import align_offset, read_bytes, sha256_file  # noqa: E402
 from native_release_artifact_pe import (  # noqa: E402
@@ -32,6 +29,13 @@ from native_release_artifact_pe import (  # noqa: E402
     pe_symbol_candidates,
     read_breakpad_metadata,
     read_pe_codeview_metadata,
+)
+from native_release_artifact_unity import (  # noqa: E402
+    UNITY_BUILD_ID_FILE_NAME,
+    UNITY_IL2CPP_MAPPING_FILE_NAME,
+    il2cpp_mapping_entry,
+    read_unity_build_id,
+    unity_native_symbol_candidates,
 )
 
 SCRIPT_VERSION = "0.1.0"
@@ -475,55 +479,11 @@ def build_android_native_symbols_artifact(path: Path, root: Path, limits: dict[s
             errors.append("Android native symbols artifact contains no .so files")
         for candidate in candidates:
             rel_path = relative(candidate, root)
-            if candidate.stat().st_size == 0:
-                errors.append(f"{rel_path}: ELF file is empty")
-                continue
-
-            metadata, metadata_error = read_elf_metadata(candidate)
-            if metadata_error:
-                errors.append(f"{rel_path}: {metadata_error}")
-                continue
-            if not metadata.get("isElf"):
-                errors.append(f"{rel_path}: not an ELF file")
-                continue
-            if metadata["elfTypeCode"] not in {ELF_TYPE_EXEC, ELF_TYPE_DYN}:
-                errors.append(f"{rel_path}: unsupported ELF type {metadata['elfType']}")
-                continue
-            if str(metadata["arch"]).startswith("unknown("):
-                errors.append(f"{rel_path}: unsupported ELF architecture {metadata['arch']}")
-                continue
-
-            symbol_source = elf_symbol_source(metadata)
-            has_identifier = bool(metadata["gnuBuildId"] or metadata["goBuildId"] or metadata["fileSha256"])
-            if not has_identifier:
-                errors.append(f"{rel_path}: ELF file has no build ID or code hash")
-                continue
-            if symbol_source == "none":
-                errors.append(f"{rel_path}: ELF file has no debug info or symbol tables")
-                continue
-            if symbol_source == "dynamic_symbol_table":
-                warnings.append(
-                    f"{rel_path}: only dynamic symbols found; full symbolication usually needs unstripped symbols"
-                )
-            if not metadata["gnuBuildId"] and not metadata["goBuildId"]:
-                warnings.append(f"{rel_path}: no ELF build ID found; dry run falls back to file hash")
-
-            symbol_file = {
-                "path": rel_path,
-                "byteSize": candidate.stat().st_size,
-                "elfClass": metadata["elfClass"],
-                "elfType": metadata["elfType"],
-                "arch": metadata["arch"],
-                "symbolSource": symbol_source,
-                "hasCode": metadata["hasCode"],
-            }
-            if metadata["gnuBuildId"]:
-                symbol_file["gnuBuildId"] = metadata["gnuBuildId"]
-            if metadata["goBuildId"]:
-                symbol_file["goBuildId"] = metadata["goBuildId"]
-            if metadata["fileSha256"]:
-                symbol_file["fileSha256"] = metadata["fileSha256"]
-            symbol_files.append(symbol_file)
+            symbol_file, candidate_errors, candidate_warnings = validated_elf_symbol_file(candidate, rel_path)
+            errors.extend(candidate_errors)
+            warnings.extend(candidate_warnings)
+            if symbol_file:
+                symbol_files.append(symbol_file)
         symbol_files = dedupe_android_symbol_files(symbol_files, warnings)
 
     details = {
@@ -536,6 +496,95 @@ def build_android_native_symbols_artifact(path: Path, root: Path, limits: dict[s
 
     return base_artifact_entry(
         artifact_type="android_native_symbols",
+        path=path,
+        root=root,
+        errors=errors,
+        warnings=warnings,
+        details=details,
+    )
+
+
+def build_unity_symbols_artifact(path: Path, root: Path, limits: dict[str, int]) -> dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    build_id = ""
+    native_symbol_files: list[dict[str, Any]] = []
+    il2cpp_mapping_file: dict[str, Any] | None = None
+
+    if not path.exists():
+        errors.append("Unity symbols artifact is missing")
+    elif not path.is_dir():
+        errors.append("Unity symbols artifact must be a directory")
+    else:
+        symlink_errors = validate_no_symlinks(path, root)
+        errors.extend(symlink_errors)
+        if not symlink_errors:
+            validate_artifact_byte_limit("Unity symbols", path, errors, limits)
+
+        build_id_path = path / UNITY_BUILD_ID_FILE_NAME
+        mapping_path = path / UNITY_IL2CPP_MAPPING_FILE_NAME
+        native_candidates = [] if symlink_errors else unity_native_symbol_candidates(path)
+        upload_candidates = list(native_candidates)
+        if not symlink_errors and mapping_path.is_file():
+            upload_candidates.append(mapping_path)
+
+        if not symlink_errors:
+            if not build_id_path.is_file():
+                errors.append(f"Unity symbols artifact is missing {UNITY_BUILD_ID_FILE_NAME}")
+            elif build_id_path.stat().st_size > limits["maxSymbolFileBytes"]:
+                errors.append(
+                    f"{relative(build_id_path, root)}: build_id file is {build_id_path.stat().st_size} bytes; "
+                    f"maximum is {limits['maxSymbolFileBytes']} bytes"
+                )
+            else:
+                build_id, build_id_error = read_unity_build_id(build_id_path)
+                if build_id_error:
+                    errors.append(f"{relative(build_id_path, root)}: {build_id_error}")
+
+        found_upload_candidates = bool(upload_candidates)
+        accepted_candidates = enforce_symbol_file_limits("Unity symbols artifact", upload_candidates, root, errors, limits)
+        accepted_paths = set(accepted_candidates)
+        if not found_upload_candidates and not symlink_errors:
+            errors.append(f"Unity symbols artifact contains no .so files or {UNITY_IL2CPP_MAPPING_FILE_NAME}")
+
+        for candidate in native_candidates:
+            if candidate not in accepted_paths:
+                continue
+            rel_path = relative(candidate, root)
+            symbol_file, candidate_errors, candidate_warnings = validated_elf_symbol_file(candidate, rel_path)
+            errors.extend(candidate_errors)
+            warnings.extend(candidate_warnings)
+            if symbol_file:
+                native_symbol_files.append({"symbolFormat": "elf", **symbol_file})
+        native_symbol_files = dedupe_android_symbol_files(native_symbol_files, warnings, label="Unity native symbol")
+
+        if mapping_path.is_file() and mapping_path in accepted_paths:
+            mapping_entry, mapping_error = il2cpp_mapping_entry(mapping_path, relative(mapping_path, root))
+            if mapping_error:
+                errors.append(f"{relative(mapping_path, root)}: {mapping_error}")
+            else:
+                il2cpp_mapping_file = mapping_entry
+        elif not symlink_errors:
+            warnings.append(
+                f"{UNITY_IL2CPP_MAPPING_FILE_NAME} is missing; managed Unity stack deobfuscation will be incomplete"
+            )
+
+    files = [*native_symbol_files]
+    if il2cpp_mapping_file:
+        files.append(il2cpp_mapping_file)
+    details = {
+        "unitySymbols": {
+            "buildId": build_id,
+            "symbolFileCount": len(files),
+            "nativeSymbolFileCount": len(native_symbol_files),
+            "il2cppMappingFileCount": 1 if il2cpp_mapping_file else 0,
+            "architectures": sorted({str(symbol_file["arch"]) for symbol_file in native_symbol_files}),
+            "files": files,
+        }
+    }
+
+    return base_artifact_entry(
+        artifact_type="unity_symbols",
         path=path,
         root=root,
         errors=errors,
@@ -681,6 +730,7 @@ ARTIFACT_BUILDERS = {
     "ios_dsym": build_ios_dsym_artifact,
     "android_proguard_mapping": build_android_proguard_mapping_artifact,
     "android_native_symbols": build_android_native_symbols_artifact,
+    "unity_symbols": build_unity_symbols_artifact,
     "breakpad_symbols": build_breakpad_symbols_artifact,
     "dotnet_pdb": build_dotnet_pdb_artifact,
 }

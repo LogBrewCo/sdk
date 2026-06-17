@@ -17,19 +17,28 @@ dwarf_dir="$dsym_dir/Contents/Resources/DWARF"
 mapping_file="$artifact_root/android/mapping.txt"
 native_symbols_dir="$artifact_root/android/symbols"
 native_so="$native_symbols_dir/lib/arm64-v8a/libcheckout.so"
+unity_symbols_dir="$artifact_root/unity/symbols"
+unity_so="$unity_symbols_dir/arm64-v8a/libil2cpp.sym.so"
 breakpad_symbols_dir="$artifact_root/native/breakpad"
 breakpad_symbol="$breakpad_symbols_dir/checkout.sym"
 dotnet_symbols_dir="$artifact_root/windows/symbols"
 dotnet_pe="$dotnet_symbols_dir/checkout.dll"
 dotnet_pdb="$dotnet_symbols_dir/checkout.pdb"
 
-mkdir -p "$dwarf_dir" "$(dirname "$mapping_file")" "$(dirname "$native_so")" "$breakpad_symbols_dir" "$dotnet_symbols_dir"
+mkdir -p "$dwarf_dir" "$(dirname "$mapping_file")" "$(dirname "$native_so")" "$(dirname "$unity_so")" "$breakpad_symbols_dir" "$dotnet_symbols_dir"
 printf '%s\n' '<plist version="1.0" />' > "$dsym_dir/Contents/Info.plist"
 printf '%s\n' \
   'com.example.Checkout -> a:' \
   '    void placeOrder() -> a' \
   > "$mapping_file"
-PYTHONPATH="$repo_root/tests" python3 - "$dwarf_dir/Checkout" "$native_so" "$breakpad_symbol" "$dotnet_pe" "$dotnet_pdb" <<'PY'
+printf '%s\n' 'checkout-unity-2026.06.17' > "$unity_symbols_dir/build_id"
+printf '%s\n' \
+  '{' \
+  '  "files": ["/Users/dev/checkout/Assets/Scripts/Checkout.cs"],' \
+  '  "methods": ["Checkout.PlaceOrder"]' \
+  '}' \
+  > "$unity_symbols_dir/LineNumberMappings.json"
+PYTHONPATH="$repo_root/tests" python3 - "$dwarf_dir/Checkout" "$native_so" "$unity_so" "$breakpad_symbol" "$dotnet_pe" "$dotnet_pdb" <<'PY'
 import sys
 from pathlib import Path
 
@@ -40,9 +49,10 @@ from native_pe_fixture import write_pdb, write_pe_with_codeview
 
 write_macho_dwarf(Path(sys.argv[1]))
 write_android_elf_symbol(Path(sys.argv[2]))
-write_breakpad_symbol(Path(sys.argv[3]))
-write_pe_with_codeview(Path(sys.argv[4]))
-write_pdb(Path(sys.argv[5]))
+write_android_elf_symbol(Path(sys.argv[3]))
+write_breakpad_symbol(Path(sys.argv[4]))
+write_pe_with_codeview(Path(sys.argv[5]))
+write_pdb(Path(sys.argv[6]))
 PY
 
 ready_manifest="$tmp_dir/native-manifest-ready.json"
@@ -54,6 +64,7 @@ python3 "$repo_root/scripts/create_native_release_artifact_manifest.py" \
   --artifact "ios_dsym=$dsym_dir" \
   --artifact "android_proguard_mapping=$mapping_file" \
   --artifact "android_native_symbols=$native_symbols_dir" \
+  --artifact "unity_symbols=$unity_symbols_dir" \
   --artifact "breakpad_symbols=$breakpad_symbols_dir" \
   --artifact "dotnet_pdb=$dotnet_symbols_dir" \
   > "$ready_manifest"
@@ -78,6 +89,7 @@ assert [artifact["artifactType"] for artifact in manifest["artifacts"]] == [
     "ios_dsym",
     "android_proguard_mapping",
     "android_native_symbols",
+    "unity_symbols",
     "breakpad_symbols",
     "dotnet_pdb",
 ]
@@ -95,14 +107,24 @@ assert native_details["symbolFileCount"] == 1
 assert native_file["path"] == "android/symbols/lib/arm64-v8a/libcheckout.so"
 assert native_file["gnuBuildId"] == "32cc7f54d61dc2d4022a4dc58fdec1f4"
 assert native_file["symbolSource"] == "debug_info"
-breakpad_details = manifest["artifacts"][3]["breakpadSymbols"]
+unity_details = manifest["artifacts"][3]["unitySymbols"]
+unity_native_file = unity_details["files"][0]
+unity_mapping_file = unity_details["files"][1]
+assert unity_details["buildId"] == "checkout-unity-2026.06.17"
+assert unity_details["symbolFileCount"] == 2
+assert unity_native_file["path"] == "unity/symbols/arm64-v8a/libil2cpp.sym.so"
+assert unity_native_file["symbolFormat"] == "elf"
+assert unity_native_file["symbolSource"] == "debug_info"
+assert unity_mapping_file["path"] == "unity/symbols/LineNumberMappings.json"
+assert unity_mapping_file["symbolFormat"] == "il2cpp_mapping"
+breakpad_details = manifest["artifacts"][4]["breakpadSymbols"]
 breakpad_file = breakpad_details["files"][0]
 assert breakpad_details["symbolFileCount"] == 1
 assert breakpad_file["path"] == "native/breakpad/checkout.sym"
 assert breakpad_file["guid"] == "00112233-4455-6677-8899-AABBCCDDEEFF"
 assert breakpad_file["age"] == 42
 assert breakpad_file["symbolSource"] == "debug_info"
-dotnet_details = manifest["artifacts"][4]["dotnetPdb"]
+dotnet_details = manifest["artifacts"][5]["dotnetPdb"]
 dotnet_file = dotnet_details["files"][0]
 assert dotnet_details["symbolFileCount"] == 1
 assert dotnet_file["path"] == "windows/symbols/checkout.dll"
@@ -119,6 +141,8 @@ assert "src/app/checkout.cpp" not in serialized
 assert "checkout_handler" not in serialized
 assert "C:\\Users\\dev\\checkout.pdb" not in serialized
 assert "portable-pdb-symbol-bytes" not in serialized
+assert "/Users/dev/checkout" not in serialized
+assert "Checkout.PlaceOrder" not in serialized
 PY
 
 blocked_mapping="$artifact_root/android/empty-mapping.txt"

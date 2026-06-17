@@ -251,6 +251,51 @@ def elf_symbol_source(metadata: dict[str, Any]) -> str:
     return "none"
 
 
+def validated_elf_symbol_file(path: Path, rel_path: str) -> tuple[dict[str, Any] | None, list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    if path.stat().st_size == 0:
+        return None, [f"{rel_path}: ELF file is empty"], []
+
+    metadata, metadata_error = read_elf_metadata(path)
+    if metadata_error:
+        return None, [f"{rel_path}: {metadata_error}"], []
+    if not metadata.get("isElf"):
+        return None, [f"{rel_path}: not an ELF file"], []
+    if metadata["elfTypeCode"] not in {ELF_TYPE_EXEC, ELF_TYPE_DYN}:
+        return None, [f"{rel_path}: unsupported ELF type {metadata['elfType']}"], []
+    if str(metadata["arch"]).startswith("unknown("):
+        return None, [f"{rel_path}: unsupported ELF architecture {metadata['arch']}"], []
+
+    symbol_source = elf_symbol_source(metadata)
+    has_identifier = bool(metadata["gnuBuildId"] or metadata["goBuildId"] or metadata["fileSha256"])
+    if not has_identifier:
+        return None, [f"{rel_path}: ELF file has no build ID or code hash"], []
+    if symbol_source == "none":
+        return None, [f"{rel_path}: ELF file has no debug info or symbol tables"], []
+    if symbol_source == "dynamic_symbol_table":
+        warnings.append(f"{rel_path}: only dynamic symbols found; full symbolication usually needs unstripped symbols")
+    if not metadata["gnuBuildId"] and not metadata["goBuildId"]:
+        warnings.append(f"{rel_path}: no ELF build ID found; dry run falls back to file hash")
+
+    symbol_file = {
+        "path": rel_path,
+        "byteSize": path.stat().st_size,
+        "elfClass": metadata["elfClass"],
+        "elfType": metadata["elfType"],
+        "arch": metadata["arch"],
+        "symbolSource": symbol_source,
+        "hasCode": metadata["hasCode"],
+    }
+    if metadata["gnuBuildId"]:
+        symbol_file["gnuBuildId"] = metadata["gnuBuildId"]
+    if metadata["goBuildId"]:
+        symbol_file["goBuildId"] = metadata["goBuildId"]
+    if metadata["fileSha256"]:
+        symbol_file["fileSha256"] = metadata["fileSha256"]
+    return symbol_file, errors, warnings
+
+
 def symbol_source_priority(symbol_source: str) -> int:
     return {
         "debug_info": 3,
@@ -267,6 +312,8 @@ def android_symbol_identity(symbol_file: dict[str, Any]) -> str:
 def dedupe_android_symbol_files(
     symbol_files: list[dict[str, Any]],
     warnings: list[str],
+    *,
+    label: str = "Android native symbol",
 ) -> list[dict[str, Any]]:
     by_identity: dict[str, dict[str, Any]] = {}
     for symbol_file in symbol_files:
@@ -280,13 +327,13 @@ def dedupe_android_symbol_files(
         existing_priority = symbol_source_priority(str(existing["symbolSource"]))
         if new_priority > existing_priority:
             warnings.append(
-                f"{symbol_file['path']}: duplicate Android native symbol identity {identity}; "
+                f"{symbol_file['path']}: duplicate {label} identity {identity}; "
                 f"keeping this file because it has richer symbols"
             )
             by_identity[identity] = symbol_file
         else:
             warnings.append(
-                f"{symbol_file['path']}: duplicate Android native symbol identity {identity}; "
+                f"{symbol_file['path']}: duplicate {label} identity {identity}; "
                 f"skipping this file"
             )
     return sorted(by_identity.values(), key=lambda symbol_file: str(symbol_file["path"]))
