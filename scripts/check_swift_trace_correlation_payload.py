@@ -19,8 +19,8 @@ def main() -> int:
     payload_text = Path(sys.argv[1]).read_text(encoding="utf-8")
     payload = json.loads(payload_text)
     events = payload.get("events")
-    if not isinstance(events, list) or len(events) != 9:
-        raise SystemExit(f"expected 9 events, got {len(events) if isinstance(events, list) else 'non-list'}")
+    if not isinstance(events, list) or len(events) != 10:
+        raise SystemExit(f"expected 10 events, got {len(events) if isinstance(events, list) else 'non-list'}")
 
     by_id = {event.get("id"): event for event in events if isinstance(event, dict)}
     required_ids = [
@@ -33,6 +33,7 @@ def main() -> int:
         "evt_metric_001",
         "evt_span_001",
         "evt_urlsession_span_001",
+        "evt_lifecycle_span_001",
     ]
     missing = [event_id for event_id in required_ids if event_id not in by_id]
     if missing:
@@ -100,6 +101,42 @@ def main() -> int:
         urlsession_span_id,
         parent_span_id=span_id,
     )
+
+    lifecycle_span = require_dict(by_id["evt_lifecycle_span_001"].get("attributes"), "lifecycle span attributes")
+    lifecycle_span_id = lifecycle_span.get("spanId")
+    if lifecycle_span.get("traceId") != TRACE_ID:
+        raise SystemExit("lifecycle span did not continue the active trace id")
+    if lifecycle_span.get("parentSpanId") != span_id:
+        raise SystemExit("lifecycle span did not use the active span as parent")
+    if not isinstance(lifecycle_span_id, str) or len(lifecycle_span_id) != 16 or lifecycle_span_id == span_id:
+        raise SystemExit(f"lifecycle span used invalid child span id: {lifecycle_span_id!r}")
+    if lifecycle_span.get("name") != "swift.lifecycle:active->background":
+        raise SystemExit("lifecycle span used unexpected name")
+    if lifecycle_span.get("status") != "ok":
+        raise SystemExit("lifecycle span did not use ok status")
+    if lifecycle_span.get("durationMs") != 1532.25:
+        raise SystemExit("lifecycle span duration was not preserved")
+    lifecycle_metadata = require_dict(lifecycle_span.get("metadata"), "lifecycle span metadata")
+    if lifecycle_metadata.get("source") != "swift.lifecycle":
+        raise SystemExit("lifecycle span missing source metadata")
+    if lifecycle_metadata.get("previousState") != "active":
+        raise SystemExit("lifecycle span previous state was not normalized")
+    if lifecycle_metadata.get("currentState") != "background":
+        raise SystemExit("lifecycle span current state was not preserved")
+    if lifecycle_metadata.get("durationSource") != "previous_state":
+        raise SystemExit("lifecycle span missing duration source metadata")
+    if lifecycle_metadata.get("screen") != "Checkout":
+        raise SystemExit("lifecycle span context metadata was not preserved")
+    if lifecycle_metadata.get("component") != "scene-delegate":
+        raise SystemExit("lifecycle span custom primitive metadata was not preserved")
+    assert_trace_metadata(
+        "evt_lifecycle_span_001",
+        lifecycle_metadata,
+        lifecycle_span_id,
+        parent_span_id=span_id,
+    )
+    if "spoofed_trace" in payload_text:
+        raise SystemExit("lifecycle span allowed spoofed trace metadata")
 
     print("swift trace correlation payload checks passed")
     return 0

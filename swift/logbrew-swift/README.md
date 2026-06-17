@@ -180,12 +180,23 @@ try LogBrewTrace.withContext(trace) {
         durationMs: 184.5,
         metadata: ["component": "checkout-api"]
     )
+    try client.captureLifecycleSpan(
+        "evt_lifecycle_span_001",
+        timestamp: "2026-06-02T10:00:11Z",
+        previousState: "active",
+        currentState: "background",
+        durationMs: 1532.25,
+        context: ["screen": "Checkout"],
+        metadata: ["component": "scene-delegate"]
+    )
 }
 ```
 
 `LogBrewTrace.current` is task-local, so async work started inside `withContext(...)` can read the active context without global state. `LogBrewClient` automatically adds active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewLogger` receives the same correlation through the client. `LogBrewTrace.spanAttributes(...)` reuses the active span id for a span event, `LogBrewTrace.outgoingHeaders()` creates only a normalized `traceparent` header for app-owned requests, and `LogBrewTrace.startURLSessionSpan(...)` creates a child span context plus a copied `URLRequest` with only `traceparent` injected. Call `captureURLSessionSpan(...)` after your URLSession completion to record sanitized method, route template, status, duration, and primitive metadata.
 
-The Swift SDK does not patch `URLSession`, collect arbitrary headers, capture request or response bodies, serialize the raw `traceparent` value into event metadata, or start automatic database/network child spans. URLSession spans are explicit and app-owned; keep route templates low-cardinality and query-free, and add richer framework instrumentation only in a dedicated integration package.
+Call `captureLifecycleSpan(...)` from your own SwiftUI, UIKit, AppKit, or SceneDelegate lifecycle hooks when you want app state transitions such as `active -> background` to appear as child spans on the active trace. The helper records normalized previous/current state, optional previous-state duration, and primitive metadata only; it overwrites spoofed trace metadata with the active child span context.
+
+The Swift SDK does not patch `URLSession`, install notification observers, swizzle SwiftUI/UIKit/AppKit lifecycle APIs, collect arbitrary headers, capture request or response bodies, serialize the raw `traceparent` value into event metadata, derive local session health, or start automatic database/network child spans. URLSession and lifecycle spans are explicit and app-owned; keep route templates low-cardinality and query-free, and add richer framework instrumentation only in a dedicated integration package.
 
 ## HTTP Delivery
 

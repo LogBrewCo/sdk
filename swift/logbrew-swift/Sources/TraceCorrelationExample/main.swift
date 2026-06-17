@@ -96,6 +96,15 @@ try LogBrewTrace.withContext(trace) {
         durationMs: 184.5,
         metadata: ["component": "pay-api"],
     )
+    try client.captureLifecycleSpan(
+        "evt_lifecycle_span_001",
+        timestamp: "2026-06-02T10:00:09Z",
+        previousState: "active",
+        currentState: "background",
+        durationMs: 1532.25,
+        context: ["screen": "Checkout", "traceId": "spoofed_trace"],
+        metadata: ["component": "scene-delegate"],
+    )
 
     let headers = LogBrewTrace.outgoingHeaders()
     precondition(headers["traceparent"] == trace.traceparent)
@@ -112,7 +121,7 @@ print(preview)
 
 let summaryFields = [
     #""ok":true"#,
-    #""events":9"#,
+    #""events":10"#,
     #""traceId":"\#(trace.traceId)""#,
     #""spanId":"\#(trace.spanId)""#,
     #""parentSpanId":"\#(trace.parentSpanId ?? "")""#,

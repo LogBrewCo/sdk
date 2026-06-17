@@ -13,12 +13,14 @@ LogBrew Swift had product timeline helpers and explicit span attributes, but it 
 - Datadog iOS `DataDog/dd-sdk-ios@6462c0b81f5221072008443925d8bbf18aa5750b`
 - Datadog files/functions read: `DatadogLogs/Sources/RemoteLogger.swift` active span IDs on log events, `DatadogInternal/Sources/NetworkInstrumentation/TraceContext.swift`, `DatadogInternal/Sources/NetworkInstrumentation/Datadog/HTTPHeadersWriter.swift`, and `DatadogRUM/Sources/Instrumentation/Resources/URLSessionRUMResourcesHandler.swift` active-span reuse for resource traces and propagation.
 - URLSession helper follow-up reread the same current source commits, focusing on OpenTelemetry `URLSessionLogger.processAndLogRequest(...)` / `instrumentedRequest(...)`, Datadog `DistributedTracing.modify(...)` / `URLSessionRUMResourcesHandler.interceptionDidStart(...)`, and Sentry `SentryTracePropagation.addBaggageHeader(...)` / `addHeaderFieldsToRequest(...)` plus public `urlSession`, `urlSessionDelegate`, and `tracePropagationTargets` options.
+- Lifecycle follow-up reread Sentry `Sources/Sentry/SentryDefaultAppStateManager.m` `start` / `stop` / `didBecomeActive` / `willResignActive` / `willTerminate`, Sentry `Sources/Swift/Integrations/Session/SessionTracker.swift` `start` / `stop` / `didBecomeActive` / `startSession` / `willResignActive` / `willTerminate`, Datadog `DatadogRUM/Sources/Instrumentation/AppState/AppStateManager.swift` `start` / `updateAppState` / `storeCurrentAppState` / `readAppState`, Datadog `DatadogRUM/Sources/Instrumentation/Views/UIKit/UIViewControllerSwizzler.swift` `swizzle` / `unswizzle` / `viewDidAppear` / `viewDidDisappear`, and OpenTelemetry `Sources/Instrumentation/Sessions/SessionManager.swift` `getSession` / `locked_startSession` / `locked_refreshSession`.
 
 ## Competitor Pattern
 
 - Sentry gives Apple apps a scope/hub model: captures read the current scope, and scopes hold the active span/transaction plus propagation context. This is ergonomic but heavier and framework-oriented.
 - OpenTelemetry keeps trace context in a provider and bridges active span context into logs; URLSession instrumentation can auto-create spans and inject propagation headers. This is standards-aligned but carries a larger instrumentation surface.
 - Datadog correlates logs with active span IDs and reuses active span trace IDs as parents for network/RUM resources when available. It also supports multiple propagation formats and baggage, but the RUM/network path is broad and intentionally invasive.
+- Sentry and Datadog also observe app lifecycle/session/view-controller transitions automatically through notification observers and swizzling-style hooks. That gives richer out-of-the-box mobile debugging, but it also owns more application runtime behavior than LogBrew's core package should.
 
 ## LogBrew Implementation
 
@@ -32,21 +34,22 @@ LogBrew Swift had product timeline helpers and explicit span attributes, but it 
 - `LogBrewTrace.outgoingHeaders()` returns only a normalized W3C `traceparent` header for app-owned `URLRequest` usage.
 - `LogBrewTrace.startURLSessionSpan(...)` now creates an explicit child span context, returns a copied `URLRequest` with only `traceparent` injected, and keeps the request span ID aligned with `LogBrewClient.captureURLSessionSpan(...)`.
 - `captureURLSessionSpan(...)` records sanitized method, route template, status code, duration, primitive metadata, and error type without serializing the raw URL, request/response headers, request/response bodies, or raw propagation header.
+- `LogBrewClient.captureLifecycleSpan(...)` now records app-owned lifecycle transitions as child spans under the active trace. It validates previous/current state and duration, stores primitive previous/current/duration metadata, and overwrites spoofed trace keys with the child span context.
 - `LogBrewClient` event queue access is now lock-protected for logger and async trace usage.
 
 ## Privacy and Weight Tradeoff
 
-LogBrew intentionally did not copy Sentry scope internals, OpenTelemetry URLSession patching, or Datadog RUM/network auto-instrumentation. The Swift SDK still does not patch `URLSession`, capture request/response bodies, collect arbitrary headers, store raw propagation headers, emit visual replay, or create automatic DB/network child spans. URLSession spans are app-owned and explicit: the helper only prepares the request the app passes to URLSession and records a matching span when the app reports completion. Richer automatic instrumentation should remain in dedicated framework packages.
+LogBrew intentionally did not copy Sentry scope internals, OpenTelemetry URLSession patching, Sentry/Datadog lifecycle observers, UIKit/AppKit swizzling, or Datadog RUM/network auto-instrumentation. The Swift SDK still does not patch `URLSession`, install notification observers, derive local session health, capture request/response bodies, collect arbitrary headers, store raw propagation headers, emit visual replay, or create automatic DB/network child spans. URLSession and lifecycle spans are app-owned and explicit: the helpers only prepare a request or record a state transition when the app calls them. Richer automatic instrumentation should remain in dedicated framework packages.
 
 ## Evidence
 
 - `swift test --package-path swift/logbrew-swift --scratch-path /tmp/logbrew-swift-trace-test`
-- `swift run --package-path swift/logbrew-swift --scratch-path <tmp>/build TraceCorrelationExample` plus `python3 scripts/check_swift_trace_correlation_payload.py <payload>`
+- `swift run --package-path swift/logbrew-swift --scratch-path <tmp>/build TraceCorrelationExample` plus `python3 scripts/check_swift_trace_correlation_payload.py <payload>` validates 10 events including URLSession and lifecycle child spans.
 - `bash scripts/check_swift_style.sh`
 - `bash scripts/check_swift_package.sh`
 - `bash scripts/real_user_swift_smoke.sh`
 
 ## Remaining Gaps
 
-- Swift still lacks dedicated SwiftUI/UIKit/AppKit lifecycle spans, automatic URLSession instrumentation, baggage/tracestate, existing OpenTelemetry context ingestion, and rich span events/exceptions.
-- Objective-C, C, C++, Kotlin Android, Unity, and React Native still need the newer active trace/error-correlation pattern or richer mobile-native equivalents.
+- Swift still lacks automatic URLSession instrumentation, automatic SwiftUI/UIKit/AppKit lifecycle instrumentation, baggage/tracestate, existing OpenTelemetry context ingestion, rich span events/exceptions, URLSession phase timing, and native symbolication parity.
+- Dedicated framework packages should own automatic lifecycle/navigation/resource instrumentation instead of growing the core package.
