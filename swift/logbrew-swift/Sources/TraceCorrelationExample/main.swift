@@ -17,9 +17,14 @@ let logger = try LogBrewLogger(
     timestampProvider: { "2026-06-02T10:00:03Z" },
 )
 
-let trace = LogBrewTrace.continueOrCreateContext(
-    fromTraceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+let openTelemetryParent = try LogBrewTrace.openTelemetrySpanContext(
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "00f067aa0ba902b7",
+    traceFlags: "01",
 )
+let trace = LogBrewTrace.context(fromOpenTelemetrySpanContext: openTelemetryParent)
+precondition(trace.traceId == openTelemetryParent.traceId)
+precondition(trace.parentSpanId == openTelemetryParent.spanId)
 
 try client.release(
     "evt_release_001",

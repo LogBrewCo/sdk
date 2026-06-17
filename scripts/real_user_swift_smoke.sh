@@ -46,6 +46,7 @@ grep -q '/Sources/RealUserSmoke/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/TraceCorrelationExample/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/LogBrewTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/LifecycleTraceTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/OpenTelemetryTraceContextTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/ProductTimelineTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/TraceContextTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/examples/Makefile$' "$tmp_dir/archive-contents.txt"
@@ -54,8 +55,14 @@ grep -q 'captureProductAction' "$tmp_dir/archive-readme.md"
 grep -q 'captureNetworkMilestone' "$tmp_dir/archive-readme.md"
 grep -q 'ProductTimelineContext' "$tmp_dir/archive-readme.md"
 grep -q 'LogBrewTrace' "$tmp_dir/archive-readme.md"
+grep -q 'OpenTelemetry' "$tmp_dir/archive-readme.md"
 grep -q 'captureLifecycleSpan' "$tmp_dir/archive-readme.md"
 grep -q 'startURLSessionSpan' "$tmp_dir/archive-readme.md"
+unzip -p "$archive_path" '*/Sources/LogBrew/LogBrewTrace.swift' > "$tmp_dir/archive-trace.swift"
+grep -q 'LogBrewOpenTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
+grep -q 'openTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
+grep -q 'context(fromOpenTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
+grep -q 'spanAttributesFromOpenTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
 
 echo "swift real-user smoke: packaged README example" >&2
 swift run --package-path "$package_dir" --scratch-path "$tmp_dir/readme-run-build" ReadmeExample > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
@@ -355,9 +362,14 @@ let traceClient = try LogBrewClient.create(
     sdkName: "swift-consumer-trace",
     sdkVersion: "0.1.0"
 )
-let trace = LogBrewTrace.continueOrCreateContext(
-    fromTraceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+let otelParent = try LogBrewTrace.openTelemetrySpanContext(
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "00f067aa0ba902b7",
+    traceFlags: "01"
 )
+let trace = LogBrewTrace.context(fromOpenTelemetrySpanContext: otelParent)
+precondition(trace.traceId == otelParent.traceId)
+precondition(trace.parentSpanId == otelParent.spanId)
 try LogBrewTrace.withContext(trace) {
     try traceClient.log(
         "evt_trace_log_001",
@@ -402,6 +414,18 @@ precondition(tracePreview.contains(#""traceSampled" : true"#))
 precondition(!tracePreview.contains("cart_id"))
 precondition(!tracePreview.contains("#pay"))
 precondition(!tracePreview.contains("traceparent"))
+
+let otelSpanAttributes = LogBrewTrace.spanAttributesFromOpenTelemetrySpanContext(
+    otelParent,
+    name: "POST /api/checkout",
+    status: .error,
+    durationMs: 184.5,
+    metadata: ["traceId": "spoofed", "component": "otel-bridge"]
+)
+precondition(otelSpanAttributes.traceId == otelParent.traceId)
+precondition(otelSpanAttributes.parentSpanId == otelParent.spanId)
+precondition(otelSpanAttributes.metadata?["traceId"] == .string(otelParent.traceId))
+precondition(otelSpanAttributes.metadata?["component"] == .string("otel-bridge"))
 
 let httpEndpointValue = ProcessInfo.processInfo.environment["LOGBREW_SWIFT_HTTP_ENDPOINT"] ?? ""
 let httpEndpoint = URL(string: httpEndpointValue)!

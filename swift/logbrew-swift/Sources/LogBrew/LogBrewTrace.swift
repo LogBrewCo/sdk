@@ -57,6 +57,19 @@ public struct LogBrewTraceContext: Equatable, Sendable {
         )
     }
 
+    fileprivate static func child(
+        traceId: String,
+        parentSpanId: String,
+        traceFlags: String,
+    ) -> LogBrewTraceContext {
+        LogBrewTraceContext(
+            validatedTraceId: traceId,
+            spanId: randomSpanId(),
+            parentSpanId: parentSpanId,
+            traceFlags: traceFlags,
+        )
+    }
+
     private init(validatedTraceId: String, spanId: String, parentSpanId: String?, traceFlags: String) {
         traceId = validatedTraceId
         self.spanId = spanId
@@ -107,6 +120,36 @@ public struct LogBrewTraceContext: Equatable, Sendable {
     }
 }
 
+public struct LogBrewOpenTelemetrySpanContext: Equatable, Sendable {
+    public let traceId: String
+    public let spanId: String
+    public let traceFlags: String
+    public let sampled: Bool
+
+    public init(
+        traceId: String,
+        spanId: String,
+        traceFlags: String = "01",
+    ) throws {
+        let normalizedTraceId = try LogBrewTraceContext.normalizedTraceId(traceId)
+        let normalizedSpanId = try LogBrewTraceContext.normalizedSpanId("OpenTelemetry spanId", spanId)
+        let normalizedTraceFlags = try LogBrewTraceContext.normalizedTraceFlags(traceFlags)
+
+        self.traceId = normalizedTraceId
+        self.spanId = normalizedSpanId
+        self.traceFlags = normalizedTraceFlags
+        sampled = (Int(normalizedTraceFlags, radix: 16) ?? 0) & 1 == 1
+    }
+
+    public init(
+        traceId: String,
+        spanId: String,
+        sampled: Bool,
+    ) throws {
+        try self.init(traceId: traceId, spanId: spanId, traceFlags: sampled ? "01" : "00")
+    }
+}
+
 public enum LogBrewTrace {
     @TaskLocal private static var activeContext: LogBrewTraceContext?
 
@@ -118,8 +161,34 @@ public enum LogBrewTrace {
         try LogBrewTraceContext.createRoot(traceFlags: traceFlags)
     }
 
+    public static func openTelemetrySpanContext(
+        traceId: String,
+        spanId: String,
+        traceFlags: String = "01",
+    ) throws -> LogBrewOpenTelemetrySpanContext {
+        try LogBrewOpenTelemetrySpanContext(traceId: traceId, spanId: spanId, traceFlags: traceFlags)
+    }
+
+    public static func openTelemetrySpanContext(
+        traceId: String,
+        spanId: String,
+        sampled: Bool,
+    ) throws -> LogBrewOpenTelemetrySpanContext {
+        try LogBrewOpenTelemetrySpanContext(traceId: traceId, spanId: spanId, sampled: sampled)
+    }
+
     public static func childContext(of parent: LogBrewTraceContext) -> LogBrewTraceContext {
         LogBrewTraceContext.child(of: parent)
+    }
+
+    public static func context(
+        fromOpenTelemetrySpanContext spanContext: LogBrewOpenTelemetrySpanContext,
+    ) -> LogBrewTraceContext {
+        LogBrewTraceContext.child(
+            traceId: spanContext.traceId,
+            parentSpanId: spanContext.spanId,
+            traceFlags: spanContext.traceFlags,
+        )
     }
 
     public static func continueOrCreateContext(fromTraceparent traceparent: String?) -> LogBrewTraceContext {
@@ -214,6 +283,25 @@ public enum LogBrewTrace {
             throw SdkError(code: "validation_error", message: "trace context is required for span attributes")
         }
 
+        return SpanAttributes(
+            name: name,
+            traceId: context.traceId,
+            spanId: context.spanId,
+            parentSpanId: context.parentSpanId,
+            status: status,
+            durationMs: durationMs,
+            metadata: mergeTraceMetadata(metadata, context: context),
+        )
+    }
+
+    public static func spanAttributesFromOpenTelemetrySpanContext(
+        _ spanContext: LogBrewOpenTelemetrySpanContext,
+        name: String,
+        status: SpanStatus,
+        durationMs: Double? = nil,
+        metadata: Metadata? = nil,
+    ) -> SpanAttributes {
+        let context = context(fromOpenTelemetrySpanContext: spanContext)
         return SpanAttributes(
             name: name,
             traceId: context.traceId,
