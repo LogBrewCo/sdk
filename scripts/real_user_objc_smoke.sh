@@ -69,6 +69,9 @@ grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'startURLSessionSpanForRequest' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureURLSessionSpanWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureLifecycleSpanWithID' "$sdk_dir/include/LogBrew.h"
+grep -q 'openTelemetrySpanContextFromSpanObject' "$sdk_dir/include/LogBrew.h"
+grep -q 'contextFromOpenTelemetrySpanObject' "$sdk_dir/include/LogBrew.h"
+grep -q 'spanAttributesFromOpenTelemetrySpanObject' "$sdk_dir/include/LogBrew.h"
 grep -q 'spanAttributesFromOpenTelemetrySpanContext' "$sdk_dir/include/LogBrew.h"
 
 rm -rf "$sdk_dir"
@@ -95,10 +98,42 @@ grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'startURLSessionSpanForRequest' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureURLSessionSpanWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureLifecycleSpanWithID' "$sdk_dir/include/LogBrew.h"
+grep -q 'openTelemetrySpanContextFromSpanObject' "$sdk_dir/include/LogBrew.h"
+grep -q 'contextFromOpenTelemetrySpanObject' "$sdk_dir/include/LogBrew.h"
+grep -q 'spanAttributesFromOpenTelemetrySpanObject' "$sdk_dir/include/LogBrew.h"
 grep -q 'spanAttributesFromOpenTelemetrySpanContext' "$sdk_dir/include/LogBrew.h"
 
 cat > "$app_dir/main.m" <<'EOF'
 #import "LogBrew.h"
+
+@interface ConsumerOpenTelemetrySpanContext : NSObject
+
+@property(nonatomic, copy) NSString *traceId;
+@property(nonatomic, copy) NSString *spanId;
+@property(nonatomic) BOOL sampled;
+
+@end
+
+@implementation ConsumerOpenTelemetrySpanContext
+
+- (BOOL)isValid {
+  return YES;
+}
+
+- (BOOL)isSampled {
+  return self.sampled;
+}
+
+@end
+
+@interface ConsumerOpenTelemetrySpan : NSObject
+
+@property(nonatomic, strong) ConsumerOpenTelemetrySpanContext *context;
+
+@end
+
+@implementation ConsumerOpenTelemetrySpan
+@end
 
 static void LBWDie(NSString *message) {
   fprintf(stderr, "%s\n", [message UTF8String]);
@@ -323,6 +358,44 @@ static void LBWExerciseMetricHelper(void) {
   LBWRequireCode(error, @"validation_error", @"metric validation failure used wrong code");
 }
 
+static void LBWExerciseOpenTelemetryObjectBridge(void) {
+  NSError *error = nil;
+  ConsumerOpenTelemetrySpanContext *spanContext = [[ConsumerOpenTelemetrySpanContext alloc] init];
+  spanContext.traceId = @"4BF92F3577B34DA6A3CE929D0E0E4736";
+  spanContext.spanId = @"00F067AA0BA902B7";
+  spanContext.sampled = YES;
+  ConsumerOpenTelemetrySpan *span = [[ConsumerOpenTelemetrySpan alloc] init];
+  span.context = spanContext;
+
+  LBWOpenTelemetrySpanContext *copied =
+      [LBWTrace openTelemetrySpanContextFromSpanObject:span error:&error];
+  if (copied == nil) {
+    LBWDie([error localizedDescription]);
+  }
+  if (![copied.traceID isEqualToString:@"4bf92f3577b34da6a3ce929d0e0e4736"] ||
+      ![copied.spanID isEqualToString:@"00f067aa0ba902b7"] ||
+      ![copied.traceFlags isEqualToString:@"01"]) {
+    LBWDie(@"OpenTelemetry-compatible span object copy failed");
+  }
+
+  LBWTraceContext *child = [LBWTrace contextFromOpenTelemetrySpanObject:span error:&error];
+  if (child == nil || ![child.parentSpanID isEqualToString:copied.spanID]) {
+    LBWDie(@"OpenTelemetry-compatible child context failed");
+  }
+  NSDictionary *attributes = [LBWTrace spanAttributesFromOpenTelemetrySpanObject:span
+                                                                           name:@"consumer otel work"
+                                                                         status:@"ok"
+                                                                     durationMs:@4
+                                                                       metadata:@{@"component": @"installed-consumer"}
+                                                                          error:&error];
+  if (attributes == nil || ![attributes[@"traceId"] isEqualToString:copied.traceID]) {
+    LBWDie(@"OpenTelemetry-compatible span attributes failed");
+  }
+  if ([LBWTrace openTelemetrySpanContextFromSpanObject:nil error:&error] != nil || error != nil) {
+    LBWDie(@"nil OpenTelemetry-compatible span should be absent without error");
+  }
+}
+
 int main(void) {
   @autoreleasepool {
     NSError *error = nil;
@@ -346,6 +419,7 @@ int main(void) {
     LBWExerciseFailurePaths();
     LBWExerciseMetricHelper();
     LBWExerciseTimelineHelpers();
+    LBWExerciseOpenTelemetryObjectBridge();
   }
   return 0;
 }

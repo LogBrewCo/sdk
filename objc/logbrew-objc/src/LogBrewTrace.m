@@ -1,5 +1,7 @@
 #import "LogBrew.h"
 
+#import <objc/message.h>
+
 static NSString *const LBWZeroTraceID = @"00000000000000000000000000000000";
 static NSString *const LBWZeroSpanID = @"0000000000000000";
 static NSString *const LBWTraceScopeStackKey = @"co.logbrew.sdk.traceScopeStack";
@@ -142,6 +144,114 @@ static NSDictionary<NSString *, id> *_Nullable LBWTraceMetadataByMergingContext(
       metadata != nil ? [metadata mutableCopy] : [NSMutableDictionary dictionary];
   [merged addEntriesFromDictionary:[context metadata]];
   return [merged count] > 0U ? [merged copy] : nil;
+}
+
+static id _Nullable LBWTraceObjectValue(id _Nullable object, SEL selector) {
+  if (object == nil || ![object respondsToSelector:selector]) {
+    return nil;
+  }
+  id (*send)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
+  return send(object, selector);
+}
+
+static BOOL LBWTraceObjectBoolValue(id _Nullable object, SEL selector, BOOL *value) {
+  if (object == nil || ![object respondsToSelector:selector]) {
+    return NO;
+  }
+  BOOL (*send)(id, SEL) = (BOOL (*)(id, SEL))objc_msgSend;
+  *value = send(object, selector);
+  return YES;
+}
+
+static NSString *_Nullable LBWTraceStringValueFromObject(id _Nullable value, NSArray<NSString *> *stringSelectors) {
+  if (value == nil || value == (id)[NSNull null]) {
+    return nil;
+  }
+  if ([value isKindOfClass:[NSString class]]) {
+    return value;
+  }
+  for (NSString *selectorName in stringSelectors) {
+    id selected = LBWTraceObjectValue(value, NSSelectorFromString(selectorName));
+    if ([selected isKindOfClass:[NSString class]]) {
+      return selected;
+    }
+  }
+  return nil;
+}
+
+static NSString *_Nullable LBWTraceFirstStringValue(id _Nullable object, NSArray<NSString *> *selectors) {
+  for (NSString *selectorName in selectors) {
+    id selected = LBWTraceObjectValue(object, NSSelectorFromString(selectorName));
+    NSString *value = LBWTraceStringValueFromObject(selected, @[
+      @"hexString",
+      @"sentryIdString",
+      @"sentrySpanIdString",
+      @"stringValue"
+    ]);
+    if (value != nil) {
+      return value;
+    }
+  }
+  return nil;
+}
+
+static NSString *_Nullable LBWTraceFlagsValueFromObject(id _Nullable object) {
+  for (NSString *selectorName in @[@"traceFlags", @"traceFlag"]) {
+    id selected = LBWTraceObjectValue(object, NSSelectorFromString(selectorName));
+    if ([selected isKindOfClass:[NSNumber class]]) {
+      return [NSString stringWithFormat:@"%02x", [selected unsignedIntValue] & 0xffU];
+    }
+    NSString *value = LBWTraceStringValueFromObject(selected, @[@"hexString", @"stringValue"]);
+    if (value != nil) {
+      return value;
+    }
+  }
+  BOOL sampled = NO;
+  if (LBWTraceObjectBoolValue(object, @selector(isSampled), &sampled) ||
+      LBWTraceObjectBoolValue(object, @selector(sampled), &sampled)) {
+    return sampled ? @"01" : @"00";
+  }
+  return nil;
+}
+
+static BOOL LBWTraceObjectIsExplicitlyInvalid(id _Nullable object) {
+  BOOL valid = YES;
+  return LBWTraceObjectBoolValue(object, @selector(isValid), &valid) && !valid;
+}
+
+static LBWOpenTelemetrySpanContext *_Nullable LBWTraceOpenTelemetrySpanContextFromObject(
+    id _Nullable object,
+    NSError *_Nullable *_Nullable error) {
+  if (object == nil || LBWTraceObjectIsExplicitlyInvalid(object)) {
+    return nil;
+  }
+  NSString *traceID = LBWTraceFirstStringValue(object, @[@"traceID", @"traceId"]);
+  NSString *spanID = LBWTraceFirstStringValue(object, @[@"spanID", @"spanId"]);
+  NSString *traceFlags = LBWTraceFlagsValueFromObject(object);
+  if (traceID == nil || spanID == nil || traceFlags == nil) {
+    LBWTraceSetError(error, LBWTraceError(@"OpenTelemetry span context object must expose trace ID, span ID, and trace flags"));
+    return nil;
+  }
+  return [LBWOpenTelemetrySpanContext contextWithTraceID:traceID
+                                                  spanID:spanID
+                                              traceFlags:traceFlags
+                                                   error:error];
+}
+
+static LBWOpenTelemetrySpanContext *_Nullable LBWTraceOpenTelemetrySpanContextFromSpanObject(
+    id _Nullable span,
+    NSError *_Nullable *_Nullable error) {
+  if (span == nil) {
+    return nil;
+  }
+  id context = LBWTraceObjectValue(span, @selector(context));
+  if (context == nil) {
+    context = LBWTraceObjectValue(span, @selector(spanContext));
+  }
+  if (context != nil) {
+    return LBWTraceOpenTelemetrySpanContextFromObject(context, error);
+  }
+  return LBWTraceOpenTelemetrySpanContextFromObject(span, error);
 }
 
 @implementation LBWTraceContext
@@ -407,11 +517,24 @@ static NSDictionary<NSString *, id> *_Nullable LBWTraceMetadataByMergingContext(
   return [LBWOpenTelemetrySpanContext contextWithTraceID:traceID spanID:spanID sampled:sampled error:error];
 }
 
++ (LBWOpenTelemetrySpanContext *)openTelemetrySpanContextFromSpanContextObject:(id)spanContext error:(NSError **)error {
+  return LBWTraceOpenTelemetrySpanContextFromObject(spanContext, error);
+}
+
++ (LBWOpenTelemetrySpanContext *)openTelemetrySpanContextFromSpanObject:(id)span error:(NSError **)error {
+  return LBWTraceOpenTelemetrySpanContextFromSpanObject(span, error);
+}
+
 + (LBWTraceContext *)contextFromOpenTelemetrySpanContext:(LBWOpenTelemetrySpanContext *)context {
   return [[LBWTraceContext alloc] initWithValidatedTraceID:context.traceID
                                                     spanID:LBWTraceRandomHex(16U, LBWZeroSpanID)
                                               parentSpanID:context.spanID
                                                 traceFlags:context.traceFlags];
+}
+
++ (LBWTraceContext *)contextFromOpenTelemetrySpanObject:(id)span error:(NSError **)error {
+  LBWOpenTelemetrySpanContext *context = [self openTelemetrySpanContextFromSpanObject:span error:error];
+  return context != nil ? [self contextFromOpenTelemetrySpanContext:context] : nil;
 }
 
 + (NSDictionary<NSString *, id> *)spanAttributesFromOpenTelemetrySpanContext:(LBWOpenTelemetrySpanContext *)context
@@ -426,6 +549,24 @@ static NSDictionary<NSString *, id> *_Nullable LBWTraceMetadataByMergingContext(
                                    durationMs:durationMs
                                      metadata:metadata
                                         error:error];
+}
+
++ (NSDictionary<NSString *, id> *)spanAttributesFromOpenTelemetrySpanObject:(id)span
+                                                                       name:(NSString *)name
+                                                                     status:(NSString *)status
+                                                                 durationMs:(NSNumber *)durationMs
+                                                                   metadata:(NSDictionary<NSString *, id> *)metadata
+                                                                      error:(NSError **)error {
+  LBWOpenTelemetrySpanContext *context = [self openTelemetrySpanContextFromSpanObject:span error:error];
+  if (context == nil) {
+    return nil;
+  }
+  return [self spanAttributesFromOpenTelemetrySpanContext:context
+                                                     name:name
+                                                   status:status
+                                               durationMs:durationMs
+                                                 metadata:metadata
+                                                    error:error];
 }
 
 @end

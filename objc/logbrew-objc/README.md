@@ -213,11 +213,27 @@ NSDictionary *spanAttributes =
                                                    error:&error];
 ```
 
+If your app already has an Objective-C-compatible live span object, pass either the span context object or a span object that exposes `context`, `traceId`, `spanId`, and either `traceFlags` or `isSampled`. This is useful for mixed apps that wrap OpenTelemetry Swift state in an app-owned `NSObject` adapter:
+
+```objective-c
+LBWOpenTelemetrySpanContext *otelParent =
+    [LBWTrace openTelemetrySpanContextFromSpanObject:appOwnedOpenTelemetrySpan error:&error];
+
+LBWTraceContext *trace = [LBWTrace contextFromOpenTelemetrySpanObject:appOwnedOpenTelemetrySpan error:&error];
+NSDictionary *spanAttributes =
+    [LBWTrace spanAttributesFromOpenTelemetrySpanObject:appOwnedOpenTelemetrySpan
+                                                  name:@"POST /api/checkout"
+                                                status:@"ok"
+                                            durationMs:@42
+                                              metadata:@{@"routeTemplate": @"/api/checkout"}
+                                                 error:&error];
+```
+
 `continueOrCreateContextFromTraceparent:` accepts valid W3C `traceparent` values, creates a fresh local span ID, and falls back to a local root trace for malformed propagation. While a scope is active on the current thread, issue, log, action, and metric metadata receive `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled`; active trace fields override caller-supplied trace metadata so telemetry stays internally consistent. `outgoingHeaders` returns only a normalized `traceparent` header for app-owned HTTP clients. `startURLSessionSpanForRequest:error:` copies your request, adds only `traceparent`, strips query strings and fragments from the span route, and returns a child span context for `captureURLSessionSpanWithID:...` when your request completes.
 
 Use `captureLifecycleSpanWithID:...` from app-owned AppDelegate, SceneDelegate, UIKit, or AppKit lifecycle hooks when a foreground/background or view lifecycle transition is already known to your app. It creates a child span under the active trace, stores primitive lifecycle metadata such as `previousState`, `currentState`, `screen`, and `durationSource`, and leaves session-health decisions to your application and backend-owned setup state.
 
-The OpenTelemetry helpers are copy helpers only: they do not install OpenTelemetry exporters, processors, or global context hooks, and they do not ingest baggage or tracestate. The trace helpers do not patch `NSURLSession`, do not observe application lifecycle notifications, do not swizzle UIKit/AppKit methods, do not collect headers or payloads, do not serialize the raw incoming `traceparent`, and do not capture query strings or fragments. Use only the project-scoped client key shown by LogBrew setup examples when sending telemetry.
+The OpenTelemetry helpers are copy helpers only: they do not install OpenTelemetry exporters, processors, or global context hooks, and they do not ingest baggage or tracestate. Swift-only OpenTelemetry values may need an app-owned `NSObject` adapter before Objective-C can inspect them. The trace helpers do not patch `NSURLSession`, do not observe application lifecycle notifications, do not swizzle UIKit/AppKit methods, do not collect headers or payloads, do not serialize the raw incoming `traceparent`, and do not capture query strings or fragments. Use only the project-scoped client key shown by LogBrew setup examples when sending telemetry.
 
 ## Error Shape
 

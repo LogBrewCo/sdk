@@ -152,13 +152,19 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 + (NSDictionary<NSString *, NSString *> *)outgoingHeaders;
 + (nullable LBWOpenTelemetrySpanContext *)openTelemetrySpanContextWithTraceID:(NSString *)traceID
                                                                        spanID:(NSString *)spanID
-                                                                   traceFlags:(NSString *)traceFlags
+                                                                  traceFlags:(NSString *)traceFlags
                                                                         error:(NSError *_Nullable *_Nullable)error;
 + (nullable LBWOpenTelemetrySpanContext *)openTelemetrySpanContextWithTraceID:(NSString *)traceID
                                                                        spanID:(NSString *)spanID
                                                                       sampled:(BOOL)sampled
                                                                         error:(NSError *_Nullable *_Nullable)error;
++ (nullable LBWOpenTelemetrySpanContext *)openTelemetrySpanContextFromSpanContextObject:(nullable id)spanContext
+                                                                                 error:(NSError *_Nullable *_Nullable)error;
++ (nullable LBWOpenTelemetrySpanContext *)openTelemetrySpanContextFromSpanObject:(nullable id)span
+                                                                          error:(NSError *_Nullable *_Nullable)error;
 + (LBWTraceContext *)contextFromOpenTelemetrySpanContext:(LBWOpenTelemetrySpanContext *)context;
++ (nullable LBWTraceContext *)contextFromOpenTelemetrySpanObject:(nullable id)span
+                                                          error:(NSError *_Nullable *_Nullable)error;
 + (nullable NSDictionary<NSString *, id> *)
     spanAttributesFromOpenTelemetrySpanContext:(LBWOpenTelemetrySpanContext *)context
                                           name:(NSString *)name
@@ -166,6 +172,12 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
                                     durationMs:(nullable NSNumber *)durationMs
                                       metadata:(nullable NSDictionary<NSString *, id> *)metadata
                                          error:(NSError *_Nullable *_Nullable)error;
++ (nullable NSDictionary<NSString *, id> *)spanAttributesFromOpenTelemetrySpanObject:(nullable id)span
+                                                                                name:(NSString *)name
+                                                                              status:(NSString *)status
+                                                                          durationMs:(nullable NSNumber *)durationMs
+                                                                            metadata:(nullable NSDictionary<NSString *, id> *)metadata
+                                                                               error:(NSError *_Nullable *_Nullable)error;
 
 @end
 

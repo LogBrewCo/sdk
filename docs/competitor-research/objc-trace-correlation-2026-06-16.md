@@ -78,6 +78,24 @@ Implemented a dependency-free Objective-C copy bridge:
 
 The bridge intentionally avoids OpenTelemetry dependencies, exporters, processors, global context hooks, live `Context`/`Span` extraction, tracestate/baggage ingestion, raw propagation metadata, automatic `NSURLSession` instrumentation, and payload/header/full-URL/query/fragment capture.
 
+## 2026-06-17 Live OpenTelemetry-Compatible Object Follow-Up
+
+Public source re-read for this follow-up:
+
+- OpenTelemetry Swift `open-telemetry/opentelemetry-swift@291fe3fff413ae9277ac36aec9fd9b51c1caa7e0`: read `Package.swift` for its `opentelemetry-swift-core` dependency boundary, `Sources/Bridges/OTelSwiftLog/LogHandler.swift` `log(event:)`, and `Sources/Instrumentation/URLSession/URLSessionLogger.swift` `tracePropagationHTTPHeaders(...)`. Pattern: Swift integrations read `OpenTelemetry.instance.contextProvider.activeSpan?.context`, attach the context to logs, and inject W3C plus baggage through propagators.
+- OpenTelemetry Swift Core `open-telemetry/opentelemetry-swift-core@4f85f2a5c8138a72384be3edd1dcfc2cc97b297f`: read `Sources/OpenTelemetryApi/Trace/SpanContext.swift` (`traceId`, `spanId`, `traceFlags`, `isValid`, `isSampled`), `Span.swift` (`Span.context`), `TraceId.swift`/`SpanId.swift` (`hexString`, validity), `TraceFlags.swift` (`hexString`, `byte`, `sampled`), and `Context/OpenTelemetryContextProvider.swift` (`activeSpan`). Pattern: a valid span context is still the stable propagation unit, but Swift value types are not a dependency-free Objective-C surface by default.
+- Sentry Cocoa `getsentry/sentry-cocoa@5804f3336b7be802acced20d716d7c092d0d8a6b`: read `Sources/Sentry/Public/SentrySpanProtocol.h`, `SentrySpanContext.h`, `SentryTraceHeader.h`, and `SentryTraceHeader.m`. Pattern: Objective-C spans expose trace/span IDs and sampling through ObjC properties, and Sentry propagates richer Sentry-specific headers in addition to W3C-compatible work elsewhere.
+- Datadog iOS `DataDog/dd-sdk-ios@f5464fe3c6ebec40a80bce262d64a8381c800261`: read `DatadogTrace/Sources/OpenTelemetry/OTelSpan.swift`, `OTelTraceId+Datadog.swift`, `OTelSpanId+Datadog.swift`, `DatadogCore/Tests/Datadog/Tracing/OTelSpanTests.swift`, and `DatadogInternal/Sources/NetworkInstrumentation/W3C/W3CHTTPHeadersWriter.swift`. Pattern: Datadog owns a full OTel bridge and richer header writer, including tracestate/baggage; LogBrew should copy only the W3C ID/flag subset for the lightweight Objective-C SDK.
+
+Implemented a dependency-free Objective-C live-object bridge:
+
+- `LBWTrace openTelemetrySpanContextFromSpanContextObject:error:` reads Objective-C-compatible `traceId`/`traceID`, `spanId`/`spanID`, and `traceFlags`/`traceFlag` selectors; ID objects may expose `hexString`, `sentryIdString`, or `sentrySpanIdString`.
+- `LBWTrace openTelemetrySpanContextFromSpanObject:error:` first reads `context` or `spanContext`, then falls back to direct span ID selectors. This covers app-owned wrappers around live OTel spans and Objective-C-style span objects without importing OpenTelemetry headers.
+- `contextFromOpenTelemetrySpanObject:error:` and `spanAttributesFromOpenTelemetrySpanObject:...` create LogBrew child contexts/spans from that copied parent while preserving existing trace metadata overwrite rules.
+- Nil live spans and explicitly invalid contexts return `nil` without error so apps can treat absent active OTel state as non-fatal. Malformed non-empty IDs/flags still return redacted `validation_error`.
+
+The bridge intentionally does not read Swift-only OTel structs directly, install `opentelemetry-swift-core`, inspect `OpenTelemetry.instance`, serialize raw propagation metadata, ingest baggage/tracestate, copy attributes/events/links, patch `NSURLSession`, or capture payloads/headers/full URLs. Mixed Swift/Objective-C apps can expose an app-owned `NSObject` adapter when they want Objective-C code to copy the active OTel parent into LogBrew.
+
 ## Remaining Gaps
 
-- Objective-C still lacks automatic UIKit/AppKit lifecycle instrumentation, automatic `NSURLSession` instrumentation, live OpenTelemetry `Context`/`Span` extraction, baggage/tracestate, rich span events/exceptions, URLSession metrics phase breakdown, and native symbolication parity.
+- Objective-C still lacks direct Swift-only OTel `Context`/`Span` extraction without an app-owned adapter, automatic UIKit/AppKit lifecycle instrumentation, automatic `NSURLSession` instrumentation, baggage/tracestate, rich span events/exceptions, URLSession metrics phase breakdown, and native symbolication parity.

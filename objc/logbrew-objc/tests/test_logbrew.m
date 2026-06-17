@@ -16,6 +16,92 @@ static NSString *LBWStableCode(NSError *error) {
   return code != nil ? code : @"";
 }
 
+@interface LBWFakeOpenTelemetryID : NSObject
+
+@property(nonatomic, copy) NSString *hexString;
+
+- (instancetype)initWithHexString:(NSString *)hexString;
+
+@end
+
+@implementation LBWFakeOpenTelemetryID
+
+- (instancetype)initWithHexString:(NSString *)hexString {
+  self = [super init];
+  if (self != nil) {
+    _hexString = [hexString copy];
+  }
+  return self;
+}
+
+@end
+
+@interface LBWFakeOpenTelemetrySpanContextObject : NSObject
+
+@property(nonatomic, strong) LBWFakeOpenTelemetryID *traceId;
+@property(nonatomic, strong) LBWFakeOpenTelemetryID *spanId;
+@property(nonatomic, copy, nullable) NSString *traceFlags;
+@property(nonatomic) BOOL valid;
+@property(nonatomic) BOOL sampled;
+
+- (instancetype)initWithTraceID:(NSString *)traceID
+                         spanID:(NSString *)spanID
+                     traceFlags:(nullable NSString *)traceFlags
+                          valid:(BOOL)valid
+                        sampled:(BOOL)sampled;
+- (BOOL)isValid;
+- (BOOL)isSampled;
+
+@end
+
+@implementation LBWFakeOpenTelemetrySpanContextObject
+
+- (instancetype)initWithTraceID:(NSString *)traceID
+                         spanID:(NSString *)spanID
+                     traceFlags:(NSString *)traceFlags
+                          valid:(BOOL)valid
+                        sampled:(BOOL)sampled {
+  self = [super init];
+  if (self != nil) {
+    _traceId = [[LBWFakeOpenTelemetryID alloc] initWithHexString:traceID];
+    _spanId = [[LBWFakeOpenTelemetryID alloc] initWithHexString:spanID];
+    _traceFlags = [traceFlags copy];
+    _valid = valid;
+    _sampled = sampled;
+  }
+  return self;
+}
+
+- (BOOL)isValid {
+  return self.valid;
+}
+
+- (BOOL)isSampled {
+  return self.sampled;
+}
+
+@end
+
+@interface LBWFakeOpenTelemetrySpanObject : NSObject
+
+@property(nonatomic, strong) LBWFakeOpenTelemetrySpanContextObject *context;
+
+- (instancetype)initWithContext:(LBWFakeOpenTelemetrySpanContextObject *)context;
+
+@end
+
+@implementation LBWFakeOpenTelemetrySpanObject
+
+- (instancetype)initWithContext:(LBWFakeOpenTelemetrySpanContextObject *)context {
+  self = [super init];
+  if (self != nil) {
+    _context = context;
+  }
+  return self;
+}
+
+@end
+
 static LBWClient *LBWNewClient(void) {
   NSError *error = nil;
   LBWConfig *config = [LBWConfig configWithAPIKey:@"LOGBREW_API_KEY"];
@@ -380,6 +466,69 @@ static void LBWExerciseTraceHelpers(void) {
             @"OpenTelemetry metadata trace override failed");
   LBWAssert([otelSpanAttributes[@"metadata"][@"component"] isEqualToString:@"otel-bridge"],
             @"OpenTelemetry metadata primitive failed");
+  LBWFakeOpenTelemetrySpanContextObject *liveContextObject =
+      [[LBWFakeOpenTelemetrySpanContextObject alloc] initWithTraceID:@"4BF92F3577B34DA6A3CE929D0E0E4736"
+                                                              spanID:@"00F067AA0BA902B7"
+                                                          traceFlags:@"01"
+                                                               valid:YES
+                                                             sampled:YES];
+  LBWOpenTelemetrySpanContext *liveContext =
+      [LBWTrace openTelemetrySpanContextFromSpanContextObject:liveContextObject error:&error];
+  LBWAssert(liveContext != nil, @"OpenTelemetry live context object failed");
+  LBWAssert([liveContext.traceID isEqualToString:otelContext.traceID], @"OpenTelemetry live trace id failed");
+  LBWAssert([liveContext.spanID isEqualToString:otelContext.spanID], @"OpenTelemetry live span id failed");
+  LBWFakeOpenTelemetrySpanObject *liveSpanObject =
+      [[LBWFakeOpenTelemetrySpanObject alloc] initWithContext:liveContextObject];
+  LBWOpenTelemetrySpanContext *liveSpanContext =
+      [LBWTrace openTelemetrySpanContextFromSpanObject:liveSpanObject error:&error];
+  LBWAssert(liveSpanContext != nil, @"OpenTelemetry live span object failed");
+  LBWAssert([liveSpanContext.traceID isEqualToString:otelContext.traceID], @"OpenTelemetry span object trace failed");
+  LBWTraceContext *liveChild = [LBWTrace contextFromOpenTelemetrySpanObject:liveSpanObject error:&error];
+  LBWAssert([liveChild.traceID isEqualToString:otelContext.traceID], @"OpenTelemetry live child trace failed");
+  LBWAssert([liveChild.parentSpanID isEqualToString:otelContext.spanID], @"OpenTelemetry live child parent failed");
+  NSDictionary<NSString *, id> *liveSpanAttributes =
+      [LBWTrace spanAttributesFromOpenTelemetrySpanObject:liveSpanObject
+                                                     name:@"otel live child work"
+                                                   status:@"ok"
+                                               durationMs:@7
+                                                 metadata:@{@"component": @"otel-live-bridge", @"traceId": @"spoofed"}
+                                                    error:&error];
+  LBWAssert([liveSpanAttributes[@"traceId"] isEqualToString:otelContext.traceID],
+            @"OpenTelemetry live span attributes trace failed");
+  LBWAssert([liveSpanAttributes[@"metadata"][@"traceId"] isEqualToString:otelContext.traceID],
+            @"OpenTelemetry live span attributes metadata trace failed");
+  LBWFakeOpenTelemetrySpanContextObject *sampledOnlyContext =
+      [[LBWFakeOpenTelemetrySpanContextObject alloc] initWithTraceID:@"4bf92f3577b34da6a3ce929d0e0e4736"
+                                                              spanID:@"00f067aa0ba902b7"
+                                                          traceFlags:nil
+                                                               valid:YES
+                                                             sampled:NO];
+  LBWOpenTelemetrySpanContext *sampledOnly =
+      [LBWTrace openTelemetrySpanContextFromSpanContextObject:sampledOnlyContext error:&error];
+  LBWAssert([sampledOnly.traceFlags isEqualToString:@"00"] && !sampledOnly.sampled,
+            @"OpenTelemetry sampled fallback failed");
+  error = nil;
+  LBWAssert([LBWTrace openTelemetrySpanContextFromSpanObject:nil error:&error] == nil && error == nil,
+            @"OpenTelemetry nil live span failed");
+  LBWFakeOpenTelemetrySpanContextObject *invalidLiveContext =
+      [[LBWFakeOpenTelemetrySpanContextObject alloc] initWithTraceID:@"00000000000000000000000000000000"
+                                                              spanID:@"00f067aa0ba902b7"
+                                                          traceFlags:@"01"
+                                                               valid:YES
+                                                             sampled:YES];
+  LBWAssert([LBWTrace openTelemetrySpanContextFromSpanContextObject:invalidLiveContext error:&error] == nil &&
+                [LBWStableCode(error) isEqualToString:@"validation_error"],
+            @"OpenTelemetry live invalid context failed");
+  error = nil;
+  LBWFakeOpenTelemetrySpanContextObject *explicitlyInvalidLiveContext =
+      [[LBWFakeOpenTelemetrySpanContextObject alloc] initWithTraceID:@"4bf92f3577b34da6a3ce929d0e0e4736"
+                                                              spanID:@"00f067aa0ba902b7"
+                                                          traceFlags:@"01"
+                                                               valid:NO
+                                                             sampled:YES];
+  LBWAssert([LBWTrace openTelemetrySpanContextFromSpanContextObject:explicitlyInvalidLiveContext error:&error] == nil &&
+                error == nil,
+            @"OpenTelemetry explicitly invalid context failed");
   LBWAssert([LBWTrace openTelemetrySpanContextWithTraceID:@"00000000000000000000000000000000"
                                                    spanID:@"00f067aa0ba902b7"
                                                traceFlags:@"01"
