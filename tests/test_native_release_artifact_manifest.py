@@ -10,6 +10,13 @@ import unittest
 from pathlib import Path
 
 from tests.native_elf_fixture import DEFAULT_DEBUG_PAYLOAD, write_android_elf_symbol
+from tests.native_macho_fixture import (
+    DEFAULT_MACHO_DEBUG_PAYLOAD,
+    DEFAULT_MACHO_UUID,
+    DEFAULT_MACHO_X86_UUID,
+    write_fat_macho_dwarf,
+    write_macho_dwarf,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,7 +33,7 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         dsym = root / "ios" / "Checkout.app.dSYM"
         dwarf_dir = dsym / "Contents" / "Resources" / "DWARF"
         dwarf_dir.mkdir(parents=True)
-        (dwarf_dir / "Checkout").write_bytes(b"fake dwarf object")
+        write_macho_dwarf(dwarf_dir / "Checkout")
         (dsym / "Contents" / "Info.plist").write_text("<plist version=\"1.0\" />\n", encoding="utf-8")
         return dsym
 
@@ -105,6 +112,12 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
             dsym_artifact["dsym"]["dwarfFiles"][0]["path"],
             "ios/Checkout.app.dSYM/Contents/Resources/DWARF/Checkout",
         )
+        self.assertEqual(dsym_artifact["dsym"]["uuidCount"], 1)
+        self.assertEqual(dsym_artifact["dsym"]["dwarfFiles"][0]["uuidCount"], 1)
+        self.assertEqual(
+            dsym_artifact["dsym"]["dwarfFiles"][0]["uuids"],
+            [{"uuid": "C8469F85-B060-3085-B69D-E46C645560EA", "arch": "arm64"}],
+        )
         self.assertTrue(dsym_artifact["artifactId"].startswith("lbw_ios_dsym_"))
         self.assertEqual(mapping_artifact["path"], "android/mapping.txt")
         self.assertEqual(mapping_artifact["proguard"]["classMappingCount"], 1)
@@ -124,8 +137,67 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         serialized = json.dumps(manifest)
         self.assertNotIn(tmp, serialized)
         self.assertNotIn("com.example.Checkout", serialized)
-        self.assertNotIn("fake dwarf object", serialized)
+        self.assertNotIn(DEFAULT_MACHO_DEBUG_PAYLOAD.decode("ascii", errors="ignore"), serialized)
+        self.assertNotIn(DEFAULT_MACHO_UUID.hex(), serialized)
         self.assertNotIn(DEFAULT_DEBUG_PAYLOAD.decode("ascii", errors="ignore"), serialized)
+
+    def test_dsym_without_macho_uuid_warns_without_blocking_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            dsym = artifact_root / "ios" / "Checkout.app.dSYM"
+            dwarf_dir = dsym / "Contents" / "Resources" / "DWARF"
+            write_macho_dwarf(dwarf_dir / "Checkout", include_uuid=False)
+            (dsym / "Contents" / "Info.plist").write_text("<plist version=\"1.0\" />\n", encoding="utf-8")
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("ios_dsym", dsym)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "ready")
+        self.assertEqual(manifest["artifacts"][0]["dsym"]["uuidCount"], 0)
+        self.assertIn(
+            "ios/Checkout.app.dSYM: dSYM UUIDs were not found; "
+            "symbolication upload will need valid Mach-O DWARF objects",
+            manifest["validation"]["warnings"],
+        )
+        self.assertTrue(
+            any("Mach-O UUID was not found" in warning for warning in manifest["validation"]["warnings"])
+        )
+
+    def test_dsym_fat_macho_extracts_per_arch_uuids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            dsym = artifact_root / "ios" / "Checkout.app.dSYM"
+            dwarf_dir = dsym / "Contents" / "Resources" / "DWARF"
+            write_fat_macho_dwarf(dwarf_dir / "Checkout")
+            (dsym / "Contents" / "Info.plist").write_text("<plist version=\"1.0\" />\n", encoding="utf-8")
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("ios_dsym", dsym)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "ready")
+        dwarf_file = manifest["artifacts"][0]["dsym"]["dwarfFiles"][0]
+        self.assertEqual(manifest["artifacts"][0]["dsym"]["uuidCount"], 2)
+        self.assertEqual(dwarf_file["uuidCount"], 2)
+        self.assertEqual(
+            dwarf_file["uuids"],
+            [
+                {"uuid": "C8469F85-B060-3085-B69D-E46C645560EA", "arch": "arm64"},
+                {"uuid": "7A7B4FB7-CD1C-3F8D-B821-DD02295CBEEF", "arch": "x86_64"},
+            ],
+        )
+        serialized = json.dumps(manifest)
+        self.assertNotIn(DEFAULT_MACHO_UUID.hex(), serialized)
+        self.assertNotIn(DEFAULT_MACHO_X86_UUID.hex(), serialized)
 
     def test_missing_dsym_dwarf_directory_blocks_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

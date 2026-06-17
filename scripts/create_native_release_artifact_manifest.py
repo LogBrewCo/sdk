@@ -46,6 +46,21 @@ ELF_HEADER_SIZE_32 = 52
 ELF_HEADER_SIZE_64 = 64
 ELF_SECTION_HEADER_SIZE_32 = 40
 ELF_SECTION_HEADER_SIZE_64 = 64
+MACHO_MAGIC_32_LE = b"\xce\xfa\xed\xfe"
+MACHO_MAGIC_32_BE = b"\xfe\xed\xfa\xce"
+MACHO_MAGIC_64_LE = b"\xcf\xfa\xed\xfe"
+MACHO_MAGIC_64_BE = b"\xfe\xed\xfa\xcf"
+FAT_MAGIC_32_BE = b"\xca\xfe\xba\xbe"
+FAT_MAGIC_32_LE = b"\xbe\xba\xfe\xca"
+FAT_MAGIC_64_BE = b"\xca\xfe\xba\xbf"
+FAT_MAGIC_64_LE = b"\xbf\xba\xfe\xca"
+LC_UUID = 0x1B
+MACHO_CPU_ARCHES = {
+    7: "i386",
+    12: "armv7",
+    0x01000007: "x86_64",
+    0x0100000C: "arm64",
+}
 
 
 def require_non_empty(label: str, value: str) -> str:
@@ -113,6 +128,11 @@ def artifact_id(artifact_type: str, digest: str) -> str:
     return f"lbw_{artifact_type}_{digest[:32]}"
 
 
+def format_uuid(uuid_bytes: bytes) -> str:
+    value = uuid_bytes.hex().upper()
+    return f"{value[:8]}-{value[8:12]}-{value[12:16]}-{value[16:20]}-{value[20:]}"
+
+
 def base_artifact_entry(
     *,
     artifact_type: str,
@@ -152,12 +172,12 @@ def align_offset(value: int, alignment: int) -> int:
 
 def read_bytes(path: Path, offset: int, size: int) -> bytes:
     if offset < 0 or size < 0:
-        raise ValueError("ELF offset and size must be non-negative")
+        raise ValueError("file offset and size must be non-negative")
     with path.open("rb") as handle:
         handle.seek(offset)
         payload = handle.read(size)
     if len(payload) != size:
-        raise ValueError("ELF section data is truncated")
+        raise ValueError("file data is truncated")
     return payload
 
 
@@ -384,6 +404,116 @@ def android_native_symbol_candidates(path: Path) -> list[Path]:
     return sorted(candidate for candidate in path.rglob("*.so") if candidate.is_file())
 
 
+def parse_macho_slice(path: Path, offset: int, size: int) -> tuple[dict[str, str] | None, str | None]:
+    if offset < 0 or size < 4 or offset + size > path.stat().st_size:
+        return None, "Mach-O slice is truncated"
+    magic = read_bytes(path, offset, 4)
+    if magic == MACHO_MAGIC_64_LE:
+        endian_prefix = "<"
+        is_64_bit = True
+    elif magic == MACHO_MAGIC_64_BE:
+        endian_prefix = ">"
+        is_64_bit = True
+    elif magic == MACHO_MAGIC_32_LE:
+        endian_prefix = "<"
+        is_64_bit = False
+    elif magic == MACHO_MAGIC_32_BE:
+        endian_prefix = ">"
+        is_64_bit = False
+    else:
+        return None, "not a Mach-O object"
+
+    header_size = 32 if is_64_bit else 28
+    if size < header_size:
+        return None, "Mach-O header is truncated"
+    header = read_bytes(path, offset, header_size)
+    cputype, _cpusubtype, _filetype, command_count, command_size, _flags = struct.unpack_from(
+        endian_prefix + "IIIIII", header, 4
+    )
+    command_offset = offset + header_size
+    command_end = command_offset + command_size
+    if command_end > offset + size or command_end > path.stat().st_size:
+        return None, "Mach-O load commands are truncated"
+
+    for _ in range(command_count):
+        if command_offset + 8 > command_end:
+            return None, "Mach-O load command is truncated"
+        command_header = read_bytes(path, command_offset, 8)
+        command, command_byte_size = struct.unpack_from(endian_prefix + "II", command_header)
+        if command_byte_size < 8 or command_offset + command_byte_size > command_end:
+            return None, "Mach-O load command size is invalid"
+        if command == LC_UUID:
+            if command_byte_size < 24:
+                return None, "Mach-O UUID load command is truncated"
+            uuid_bytes = read_bytes(path, command_offset + 8, 16)
+            return {
+                "uuid": format_uuid(uuid_bytes),
+                "arch": MACHO_CPU_ARCHES.get(cputype, f"unknown({cputype})"),
+            }, None
+        command_offset += command_byte_size
+
+    return None, "Mach-O UUID load command is missing"
+
+
+def parse_fat_macho(path: Path, magic: bytes) -> tuple[list[dict[str, str]], str | None]:
+    if magic == FAT_MAGIC_32_BE:
+        endian_prefix = ">"
+        is_64_bit = False
+    elif magic == FAT_MAGIC_32_LE:
+        endian_prefix = "<"
+        is_64_bit = False
+    elif magic == FAT_MAGIC_64_BE:
+        endian_prefix = ">"
+        is_64_bit = True
+    elif magic == FAT_MAGIC_64_LE:
+        endian_prefix = "<"
+        is_64_bit = True
+    else:
+        return [], "not a fat Mach-O object"
+
+    arch_count = struct.unpack_from(endian_prefix + "I", read_bytes(path, 4, 4))[0]
+    entry_size = 32 if is_64_bit else 20
+    table_offset = 8
+    if table_offset + arch_count * entry_size > path.stat().st_size:
+        return [], "fat Mach-O architecture table is truncated"
+
+    entries: list[tuple[int, int]] = []
+    table = read_bytes(path, table_offset, arch_count * entry_size)
+    for index in range(arch_count):
+        entry_offset = index * entry_size
+        if is_64_bit:
+            _cputype, _cpusubtype, slice_offset, slice_size, _align, _reserved = struct.unpack_from(
+                endian_prefix + "IIQQII", table, entry_offset
+            )
+        else:
+            _cputype, _cpusubtype, slice_offset, slice_size, _align = struct.unpack_from(
+                endian_prefix + "IIIII", table, entry_offset
+            )
+        entries.append((int(slice_offset), int(slice_size)))
+
+    uuids: list[dict[str, str]] = []
+    errors: list[str] = []
+    for slice_offset, slice_size in entries:
+        uuid_entry, error = parse_macho_slice(path, slice_offset, slice_size)
+        if uuid_entry:
+            uuids.append(uuid_entry)
+        elif error:
+            errors.append(error)
+    if uuids:
+        return uuids, None
+    return [], "; ".join(errors) if errors else "fat Mach-O object has no UUIDs"
+
+
+def macho_uuids(path: Path) -> tuple[list[dict[str, str]], str | None]:
+    if path.stat().st_size < 4:
+        return [], "Mach-O object is truncated"
+    magic = read_bytes(path, 0, 4)
+    if magic in {FAT_MAGIC_32_BE, FAT_MAGIC_32_LE, FAT_MAGIC_64_BE, FAT_MAGIC_64_LE}:
+        return parse_fat_macho(path, magic)
+    uuid_entry, error = parse_macho_slice(path, 0, path.stat().st_size)
+    return ([uuid_entry] if uuid_entry else []), error
+
+
 def validate_no_symlinks(path: Path, root: Path) -> list[str]:
     if not path.exists():
         return []
@@ -399,6 +529,8 @@ def build_ios_dsym_artifact(path: Path, root: Path) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
     details: dict[str, Any] = {}
+    dwarf_file_entries: list[dict[str, Any]] = []
+    uuid_count = 0
 
     if not path.exists():
         errors.append("dSYM bundle is missing")
@@ -421,22 +553,32 @@ def build_ios_dsym_artifact(path: Path, root: Path) -> dict[str, Any]:
                 if not dwarf_files:
                     errors.append("dSYM DWARF directory has no object files")
                 for dwarf_file in dwarf_files:
+                    rel_path = relative(dwarf_file, root)
                     if dwarf_file.stat().st_size == 0:
-                        errors.append(f"{relative(dwarf_file, root)}: DWARF object file is empty")
+                        errors.append(f"{rel_path}: DWARF object file is empty")
+                        continue
+                    uuid_entries, uuid_error = macho_uuids(dwarf_file)
+                    dwarf_file_entry: dict[str, Any] = {
+                        "path": rel_path,
+                        "byteSize": dwarf_file.stat().st_size,
+                    }
+                    if uuid_entries:
+                        dwarf_file_entry["uuids"] = uuid_entries
+                        dwarf_file_entry["uuidCount"] = len(uuid_entries)
+                        uuid_count += len(uuid_entries)
+                    else:
+                        warnings.append(f"{rel_path}: Mach-O UUID was not found ({uuid_error})")
+                    dwarf_file_entries.append(dwarf_file_entry)
         info_plist = path / "Contents" / "Info.plist"
         has_info_plist = False if symlink_errors else info_plist.is_file()
         if not has_info_plist:
             warnings.append("dSYM Info.plist is missing; platform tooling may reject this bundle")
-        warnings.append("UUID extraction is not performed; this dry run validates dSYM structure only")
+        if dwarf_files and uuid_count == 0:
+            warnings.append("dSYM UUIDs were not found; symbolication upload will need valid Mach-O DWARF objects")
         details["dsym"] = {
             "bundleName": path.name,
-            "dwarfFiles": [
-                {
-                    "path": relative(dwarf_file, root),
-                    "byteSize": dwarf_file.stat().st_size,
-                }
-                for dwarf_file in dwarf_files
-            ],
+            "uuidCount": uuid_count,
+            "dwarfFiles": dwarf_file_entries,
             "hasInfoPlist": has_info_plist,
         }
 
