@@ -6,7 +6,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, opt-in resource fetch spans, and app-owned native bridge scope sync.
+This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, opt-in resource fetch spans, app-owned native bridge scope sync, and reversible instrumentation setup.
 
 ## Install
 
@@ -321,12 +321,47 @@ await withLogBrewNativeBridgeScope(nativeCheckoutModule, {
 
 `withLogBrewNativeBridgeScope()` syncs the scope before the callback and clears it afterward, including async callbacks. The payload contains only trace IDs, sampled flags, and primitive metadata. It does not install a native module, inspect native bridge arguments, sync user/session identity, capture payloads or headers, derive session health, or patch React Native internals.
 
+## Reversible Instrumentation Setup
+
+Use the instrumentation subpath when you want one setup call to install the app-owned pieces above and receive a resource fetch wrapper:
+
+```js
+import { createReactNativeTraceContext } from "@logbrew/react-native";
+import { createLogBrewReactNativeInstrumentation } from "@logbrew/react-native/instrumentation";
+
+const trace = createReactNativeTraceContext({
+  traceparent: incomingTraceparent
+});
+
+const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+  trace,
+  platform: Platform,
+  appState: AppState,
+  navigationContainer: navigationRef,
+  nativeBridge: nativeCheckoutModule,
+  screen: "Checkout",
+  sessionId: "session_123",
+  tracePropagationTargets: ["https://api.example.com/"],
+  captureInitialLifecycleState: true,
+  captureInitialNavigationRoute: true
+});
+
+await instrumentation.resourceFetch("https://api.example.com/checkout", {
+  method: "POST"
+});
+
+instrumentation.remove();
+```
+
+`createLogBrewReactNativeInstrumentation()` composes existing AppState lifecycle spans, React Navigation spans, target-scoped resource fetch spans, and native bridge scope sync into a removable handle. It does not patch global `fetch`, XHR, React Navigation, AppState, or native modules; it only subscribes to the objects your app passes in and returns `remove()`/`stop()` so setup is reversible. Keep `tracePropagationTargets` narrow and continue to avoid request bodies, response bodies, arbitrary headers, full URLs with query text, and high-cardinality route keys unless your app explicitly opts in.
+
 ## Example Source
 
-The package includes example source for screen views, app-state metadata, handled JavaScript errors, provider/hooks, active trace correlation, target-scoped trace propagation, lifecycle/resource spans, and native bridge scope sync. After installing, inspect the shipped examples with:
+The package includes example source for screen views, app-state metadata, handled JavaScript errors, provider/hooks, active trace correlation, target-scoped trace propagation, lifecycle/resource spans, native bridge scope sync, and reversible instrumentation setup. After installing, inspect the shipped examples with:
 
 ```bash
 node node_modules/@logbrew/react-native/examples/index.mjs --list
+node node_modules/@logbrew/react-native/examples/index.mjs instrumentation-kit
 node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans
 node node_modules/@logbrew/react-native/examples/index.mjs native-bridge-scope
 node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans

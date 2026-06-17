@@ -31,6 +31,17 @@
       },
       "default": "./lifecycle.js"
     },
+    "./instrumentation": {
+      "import": {
+        "types": "./instrumentation.d.ts",
+        "default": "./instrumentation.js"
+      },
+      "require": {
+        "types": "./instrumentation.d.cts",
+        "default": "./instrumentation.cjs"
+      },
+      "default": "./instrumentation.js"
+    },
     "./native-bridge": {
       "import": {
         "types": "./native-bridge.d.ts",
@@ -60,6 +71,10 @@
     "index.native.js",
     "index.d.ts",
     "index.d.cts",
+    "instrumentation.cjs",
+    "instrumentation.js",
+    "instrumentation.d.ts",
+    "instrumentation.d.cts",
     "lifecycle.cjs",
     "lifecycle.js",
     "lifecycle.d.ts",
@@ -99,6 +114,6 @@
     "react-native": ">=0.72"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check lifecycle.js && node --check lifecycle.cjs && node --check native-bridge.js && node --check native-bridge.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check examples/index.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/native-bridge-scope.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check instrumentation.js && node --check instrumentation.cjs && node --check lifecycle.js && node --check lifecycle.cjs && node --check native-bridge.js && node --check native-bridge.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check examples/index.mjs && node --check examples/instrumentation-kit.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/native-bridge-scope.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs"
   }
 }

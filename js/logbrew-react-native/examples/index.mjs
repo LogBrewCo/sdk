@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const commands = new Map([
+  ["instrumentation-kit", new URL("./instrumentation-kit.mjs", import.meta.url)],
   ["lifecycle-spans", new URL("./lifecycle-spans.mjs", import.meta.url)],
   ["native-bridge-scope", new URL("./native-bridge-scope.mjs", import.meta.url)],
   ["navigation-resource-spans", new URL("./navigation-resource-spans.mjs", import.meta.url)],
@@ -26,6 +27,7 @@ if (command === "--help" || command === "-h") {
 
 function printHelp() {
   console.log("LogBrew React Native examples");
+  console.log("node node_modules/@logbrew/react-native/examples/index.mjs instrumentation-kit");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs native-bridge-scope");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs --list");
@@ -36,6 +38,7 @@ function printHelp() {
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run list");
+  console.log("npm --prefix node_modules/@logbrew/react-native/examples run instrumentation-kit");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run lifecycle-spans");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run native-bridge-scope");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run navigation-resource-spans");
@@ -46,6 +49,7 @@ function printHelp() {
 }
 
 function printList() {
+  console.log("instrumentation-kit -> node node_modules/@logbrew/react-native/examples/index.mjs instrumentation-kit");
   console.log("lifecycle-spans -> node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans");
   console.log("native-bridge-scope -> node node_modules/@logbrew/react-native/examples/index.mjs native-bridge-scope");
   console.log("navigation-resource-spans -> node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans");
