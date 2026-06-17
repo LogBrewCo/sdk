@@ -23,6 +23,14 @@ from tests.native_macho_fixture import (
     write_fat_macho_dwarf,
     write_macho_dwarf,
 )
+from tests.native_pe_fixture import (
+    DEFAULT_PDB_AGE,
+    DEFAULT_PDB_GUID,
+    DEFAULT_PDB_PATH,
+    DEFAULT_PDB_PAYLOAD,
+    write_pdb,
+    write_pe_with_codeview,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +103,20 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         )
         return symbols_dir
 
+    def create_dotnet_pdb_symbols(
+        self,
+        root: Path,
+        *,
+        include_pdb: bool = True,
+        include_codeview: bool = True,
+    ) -> Path:
+        symbols_dir = root / "windows" / "symbols"
+        pe_path = symbols_dir / "checkout.dll"
+        write_pe_with_codeview(pe_path, include_codeview=include_codeview)
+        if include_pdb:
+            write_pdb(symbols_dir / "checkout.pdb")
+        return symbols_dir
+
     def test_ready_manifest_keeps_paths_relative_and_omits_symbol_contents(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             artifact_root = Path(tmp) / "artifacts"
@@ -103,6 +125,7 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
             mapping = self.create_mapping(artifact_root)
             native_symbols = self.create_android_native_symbols(artifact_root)
             breakpad_symbols = self.create_breakpad_symbols(artifact_root)
+            dotnet_pdb = self.create_dotnet_pdb_symbols(artifact_root)
 
             manifest = create_native_release_artifact_manifest.create_manifest(
                 artifact_root=artifact_root,
@@ -111,6 +134,7 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
                     ("android_proguard_mapping", mapping),
                     ("android_native_symbols", native_symbols),
                     ("breakpad_symbols", breakpad_symbols),
+                    ("dotnet_pdb", dotnet_pdb),
                 ],
                 release="2026.06.17",
                 environment="production",
@@ -124,16 +148,29 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertEqual(manifest["git"]["commitSha"], "abc123def456")
         self.assertEqual(
             [artifact["artifactType"] for artifact in manifest["artifacts"]],
-            ["ios_dsym", "android_proguard_mapping", "android_native_symbols", "breakpad_symbols"],
+            [
+                "ios_dsym",
+                "android_proguard_mapping",
+                "android_native_symbols",
+                "breakpad_symbols",
+                "dotnet_pdb",
+            ],
         )
         self.assertEqual(
             manifest["supportedArtifactTypes"],
-            ["ios_dsym", "android_proguard_mapping", "android_native_symbols", "breakpad_symbols"],
+            [
+                "ios_dsym",
+                "android_proguard_mapping",
+                "android_native_symbols",
+                "breakpad_symbols",
+                "dotnet_pdb",
+            ],
         )
         dsym_artifact = manifest["artifacts"][0]
         mapping_artifact = manifest["artifacts"][1]
         native_artifact = manifest["artifacts"][2]
         breakpad_artifact = manifest["artifacts"][3]
+        dotnet_artifact = manifest["artifacts"][4]
         self.assertEqual(dsym_artifact["path"], "ios/Checkout.app.dSYM")
         self.assertEqual(dsym_artifact["fileCount"], 2)
         self.assertEqual(
@@ -176,6 +213,21 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertEqual(breakpad_file["moduleName"], "checkout.pdb")
         self.assertEqual(breakpad_file["symbolSource"], "debug_info")
         self.assertTrue(breakpad_artifact["artifactId"].startswith("lbw_breakpad_symbols_"))
+        dotnet_details = dotnet_artifact["dotnetPdb"]
+        dotnet_file = dotnet_details["files"][0]
+        self.assertEqual(dotnet_artifact["path"], "windows/symbols")
+        self.assertEqual(dotnet_details["symbolFileCount"], 1)
+        self.assertEqual(dotnet_details["architectures"], ["x64"])
+        self.assertEqual(dotnet_file["path"], "windows/symbols/checkout.dll")
+        self.assertEqual(dotnet_file["peClass"], 64)
+        self.assertEqual(dotnet_file["arch"], "x64")
+        self.assertEqual(dotnet_file["pdbGuid"], DEFAULT_PDB_GUID)
+        self.assertEqual(dotnet_file["pdbAge"], DEFAULT_PDB_AGE)
+        self.assertEqual(dotnet_file["pdbDebugId"], f"{DEFAULT_PDB_GUID}_{DEFAULT_PDB_AGE}")
+        self.assertEqual(dotnet_file["pdbFileName"], "checkout.pdb")
+        self.assertEqual(dotnet_file["pdbPath"], "windows/symbols/checkout.pdb")
+        self.assertEqual(dotnet_file["symbolSource"], "debug_info")
+        self.assertTrue(dotnet_artifact["artifactId"].startswith("lbw_dotnet_pdb_"))
         serialized = json.dumps(manifest)
         self.assertNotIn(tmp, serialized)
         self.assertNotIn("com.example.Checkout", serialized)
@@ -184,6 +236,8 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertNotIn(DEFAULT_DEBUG_PAYLOAD.decode("ascii", errors="ignore"), serialized)
         self.assertNotIn(DEFAULT_BREAKPAD_SOURCE_PATH, serialized)
         self.assertNotIn(DEFAULT_BREAKPAD_SYMBOL_NAME, serialized)
+        self.assertNotIn(DEFAULT_PDB_PATH, serialized)
+        self.assertNotIn(DEFAULT_PDB_PAYLOAD.decode("ascii"), serialized)
 
     def test_breakpad_public_only_symbol_uses_symbol_table_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -270,6 +324,46 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertIn(
             "native/breakpad: native/breakpad/checkout.sym: "
             "Breakpad MODULE identifier must contain GUID and age",
+            manifest["validation"]["errors"],
+        )
+
+    def test_dotnet_pdb_missing_sibling_pdb_blocks_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            artifact_root.mkdir()
+            dotnet_pdb = self.create_dotnet_pdb_symbols(artifact_root, include_pdb=False)
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("dotnet_pdb", dotnet_pdb)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "windows/symbols: windows/symbols/checkout.dll: associated PDB file was not found",
+            manifest["validation"]["errors"],
+        )
+
+    def test_dotnet_pdb_without_codeview_blocks_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            artifact_root.mkdir()
+            dotnet_pdb = self.create_dotnet_pdb_symbols(artifact_root, include_codeview=False)
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("dotnet_pdb", dotnet_pdb)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "windows/symbols: windows/symbols/checkout.dll: PE file has no CodeView PDB debug information",
             manifest["validation"]["errors"],
         )
 
@@ -416,7 +510,8 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
 
         self.assertEqual(manifest["validation"]["status"], "blocked")
         self.assertIn(
-            "android/symbols: android/symbols/lib/arm64-v8a/libcheckout.so: ELF file has no debug info or symbol tables",
+            "android/symbols: android/symbols/lib/arm64-v8a/libcheckout.so: "
+            "ELF file has no debug info or symbol tables",
             manifest["validation"]["errors"],
         )
 
