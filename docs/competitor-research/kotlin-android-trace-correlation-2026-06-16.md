@@ -119,6 +119,41 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 
 - Kotlin Android still lacks automatic lifecycle instrumentation, automatic OkHttp/HttpURLConnection interceptors, coroutine context propagation beyond explicit thread-local scopes, richer OpenTelemetry `Context`/`Span` extraction, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
 
+## 2026-06-17 Live OpenTelemetry Span/Context Follow-Up
+
+### Source Re-Read
+
+- OpenTelemetry Java HEAD still resolves to `open-telemetry/opentelemetry-java@a00536a2c7b3a3f7a0952dbea12e9249da18611d`.
+- Re-read `api/all/src/main/java/io/opentelemetry/api/trace/Span.java`: `current()`, `fromContext(...)`, `wrap(...)`, and `getSpanContext()`.
+- Re-read `api/all/src/main/java/io/opentelemetry/api/trace/SpanContext.java`: `getTraceId()`, `getSpanId()`, `getTraceFlags()`, `isSampled()`, and `isValid()`.
+- Re-read `context/src/main/java/io/opentelemetry/context/Context.java`: `current()`, `root()`, and scoped current-context behavior.
+- Sentry Java/Android HEAD now resolves to `getsentry/sentry-java@ba010111864967003758a5e4d750dfe04f995c18`.
+- Re-read `sentry/src/main/java/io/sentry/PropagationContext.java`: `fromHeaders(...)`, `fromExistingTrace(...)`, `toSpanContext()`, and sampled trace handoff.
+- Re-read `sentry/src/main/java/io/sentry/SpanContext.java`: trace/span ID storage plus sampling decision accessors.
+- Datadog Android HEAD still resolves to `DataDog/dd-sdk-android@e07c4cc6a23b51d4a45602787cea3f3f1db7b8b0`.
+- Re-read `features/dd-sdk-android-trace/src/main/kotlin/com/datadog/android/trace/internal/net/TraceContext.kt`: compact trace ID/span ID/sampling carrier.
+
+### Pattern And Tradeoffs
+
+- OpenTelemetry users often already have a live `Span.current()` or a scoped `Context`; forcing them to manually copy IDs is avoidable friction.
+- Sentry and Datadog keep trace carriers separate from richer SDK/exporter state, which supports a LogBrew bridge that copies only the propagation fields.
+- LogBrew should still avoid adding an OpenTelemetry dependency to the default Kotlin artifact, avoid exporter/processor ownership, and avoid reading tracestate, baggage, span attributes, links, events, payloads, or headers.
+
+### LogBrew Follow-Up Implementation
+
+- Added dependency-free `LogBrewOpenTelemetry` reflection bridge with `spanContextFromCurrentSpan()`, `traceContextFromCurrentSpan()`, `spanContextFromSpan(...)`, `traceContextFromSpan(...)`, `spanContextFromContext(...)`, and `traceContextFromContext(...)`.
+- Apps that already install `io.opentelemetry:opentelemetry-api` can pass a live OTel `Span`, OTel `Context`, or rely on the current OTel span; LogBrew copies only valid trace ID/span ID/trace flags into `LogBrewOpenTelemetrySpanContext` and creates a fresh LogBrew child context when requested.
+- The helpers return `null` when OpenTelemetry is absent, no valid span is active, or the object is not an OTel span/context. They intentionally do not install OTel exporters/processors, read attributes, copy baggage/tracestate, mutate global HTTP clients, or serialize raw propagation metadata.
+
+### Updated Verification
+
+- `LogBrewKotlinTest.kt` now validates dependency-free helper null behavior when OpenTelemetry classes are absent and unknown objects are passed, while the existing SpanContext-copy tests keep invalid/all-zero rejection covered.
+- `scripts/real_user_kotlin_smoke.sh` now builds and runs an installed Gradle Java consumer that adds `io.opentelemetry:opentelemetry-api:1.63.0` and `io.opentelemetry:opentelemetry-context:1.63.0`, wraps a real OTel `SpanContext`, scopes it with `makeCurrent()`, and proves `LogBrewOpenTelemetry` copies live `Span.current()`, explicit `Span`, and `Context.current()` into fresh LogBrew child context.
+
+### Remaining Gaps After Live OTel Follow-Up
+
+- Kotlin Android still lacks automatic lifecycle instrumentation, automatic OkHttp/HttpURLConnection interceptors, coroutine context propagation beyond explicit thread-local scopes, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
+
 ## Verification
 
 - `bash scripts/check_kotlin_style.sh`: ktlint `1.8.0` passed.

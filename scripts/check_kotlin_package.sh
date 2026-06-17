@@ -70,6 +70,7 @@ jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0-sources.jar" -C "$package_dir
 jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewAndroid.kt$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/PublicTypes.kt$' "$tmp_dir/sources-jar-contents.txt"
 
@@ -93,6 +94,7 @@ grep -q '^co/logbrew/sdk/LogBrewAndroid.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTraceScope.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySpanContext.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidRequestSpan.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
@@ -128,7 +130,11 @@ for needle in (
     "LogBrewAndroid.captureThrowable",
     "AndroidLogPriority.WARN",
     "LogBrewTrace",
+    "LogBrewOpenTelemetry",
     "LogBrewOpenTelemetrySpanContext",
+    "spanContextFromCurrentSpan",
+    "spanContextFromSpan",
+    "spanContextFromContext",
     "fromOpenTelemetrySpanContext",
     "traceparent",
     "LogBrewAndroid.startRequestSpan",

@@ -138,6 +138,19 @@ val trace = copiedOtelParent?.let(LogBrewTrace::fromOpenTelemetrySpanContext)
     ?: LogBrewTrace.createTraceContext()
 ```
 
+If your app already has `io.opentelemetry:opentelemetry-api` on its classpath, `LogBrewOpenTelemetry` can copy a live current span, an explicit `Span`, or a `Context` without making OpenTelemetry a LogBrew dependency:
+
+```kotlin
+val trace = LogBrewOpenTelemetry.traceContextFromCurrentSpan()
+    ?: LogBrewTrace.createTraceContext()
+
+val currentParent = LogBrewOpenTelemetry.spanContextFromCurrentSpan()
+val spanParent = LogBrewOpenTelemetry.spanContextFromSpan(otelSpan)
+val contextParent = LogBrewOpenTelemetry.spanContextFromContext(otelContext)
+```
+
+Those helpers return `null` when OpenTelemetry is absent, no valid span is active, or the object is not an OpenTelemetry span/context. They copy only trace ID, span ID, and trace flags, then create a fresh LogBrew child span. LogBrew does not read OTel attributes, tracestate, baggage, links, events, exporters, processors, payloads, or headers.
+
 While a `LogBrewTraceScope` is active, `LogBrewClient` automatically adds authoritative `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewAndroid.captureProductAction(...)`, `captureNetworkMilestone(...)`, `captureAndroidLog(...)`, and `captureThrowable(...)` receive the same correlation through the client. Trace metadata overwrites spoofed trace keys in app metadata, and the helper never captures raw propagation values, request bodies, response bodies, arbitrary headers, query strings, fragments, or visual replay. Use `LogBrewTrace.outgoingHeaders()` for app-owned HTTP clients when you want to forward only the normalized `traceparent` header.
 
 For app-owned Android or JVM request clients such as OkHttp or `HttpURLConnection`, use `LogBrewAndroid.startRequestSpan(...)` to create a child span and get exactly one `traceparent` header to attach to your request. Finish the span explicitly when the response or exception is available:
@@ -244,6 +257,7 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 
 - `previewJson()` returns the queued batch as pretty JSON.
 - `LogBrewTrace` validates W3C `traceparent`, creates request/task-local-style scopes through `AutoCloseable`, adds active trace metadata to app-owned events, and creates outgoing `traceparent` headers without patching HTTP clients.
+- `LogBrewOpenTelemetry` optionally copies trace ID, span ID, and trace flags from app-owned OpenTelemetry `Span`/`Context` objects when OpenTelemetry is already installed by the app; it returns `null` instead of installing exporters, processors, baggage, or tracestate support.
 - `LogBrewAndroid.startRequestSpan()` and `captureRequestSpan()` create explicit outbound request child spans for app-owned OkHttp, `HttpURLConnection`, or other request clients with one normalized `traceparent` header and sanitized completion metadata.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.

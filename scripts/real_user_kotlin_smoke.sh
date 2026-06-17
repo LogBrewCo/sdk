@@ -66,6 +66,8 @@ jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" -C "$tmp_dir/classes" . 
 jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySpanContext.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidRequestSpan.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt"
@@ -131,6 +133,96 @@ PY
 (cd "$gradle_app" && gradle --no-daemon -q dependencies --configuration runtimeClasspath > "$tmp_dir/gradle-deps-readded.txt")
 grep -q 'co.logbrew:logbrew-kotlin:0.1.0' "$tmp_dir/gradle-deps-readded.txt"
 
+otel_app="$tmp_dir/otel-gradle-app"
+kotlin_stdlib_version="$(kotlinc -version 2>&1 | sed -E 's/.*kotlinc-jvm ([^ ]+).*/\1/')"
+mkdir -p "$otel_app/src/main/java/app"
+cat > "$otel_app/settings.gradle" <<'EOF'
+rootProject.name = "kotlin-otel-app"
+EOF
+cat > "$otel_app/build.gradle" <<EOF
+plugins {
+    id 'java'
+    id 'application'
+}
+
+application {
+    mainClass = 'app.OtelApp'
+}
+
+repositories {
+    maven {
+        url = uri('$tmp_dir/maven')
+    }
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'co.logbrew:logbrew-kotlin:0.1.0'
+    implementation 'io.opentelemetry:opentelemetry-api:1.63.0'
+    implementation 'io.opentelemetry:opentelemetry-context:1.63.0'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:$kotlin_stdlib_version'
+}
+EOF
+cat > "$otel_app/src/main/java/app/OtelApp.java" <<'JAVA'
+package app;
+
+import co.logbrew.sdk.LogBrewOpenTelemetry;
+import co.logbrew.sdk.LogBrewOpenTelemetrySpanContext;
+import co.logbrew.sdk.LogBrewTraceContext;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanContext;
+import io.opentelemetry.api.trace.TraceFlags;
+import io.opentelemetry.api.trace.TraceState;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
+
+public final class OtelApp {
+    public static void main(String[] args) {
+        SpanContext parent =
+            SpanContext.createFromRemoteParent(
+                "4bf92f3577b34da6a3ce929d0e0e4736",
+                "00f067aa0ba902b7",
+                TraceFlags.getSampled(),
+                TraceState.getDefault());
+        Span span = Span.wrap(parent);
+
+        LogBrewOpenTelemetrySpanContext copied = LogBrewOpenTelemetry.spanContextFromSpan(span);
+        require(copied != null, "expected copied span context");
+        require("4bf92f3577b34da6a3ce929d0e0e4736".equals(copied.getTraceId()), "trace id mismatch");
+        require("00f067aa0ba902b7".equals(copied.getSpanId()), "span id mismatch");
+        require("01".equals(copied.getTraceFlags()), "trace flags mismatch");
+
+        LogBrewTraceContext child = LogBrewOpenTelemetry.traceContextFromSpan(span);
+        require(child != null, "expected child trace context");
+        require(copied.getTraceId().equals(child.getTraceId()), "child trace id mismatch");
+        require(copied.getSpanId().equals(child.getParentSpanId()), "child parent span id mismatch");
+        require(!copied.getSpanId().equals(child.getSpanId()), "child span id should be fresh");
+
+        require(LogBrewOpenTelemetry.spanContextFromSpan(new Object()) == null, "unknown object must not copy");
+        require(LogBrewOpenTelemetry.spanContextFromContext(new Object()) == null, "unknown context must not copy");
+
+        try (Scope ignored = span.makeCurrent()) {
+            require(Context.current() != null, "expected active OpenTelemetry context");
+            require(LogBrewOpenTelemetry.spanContextFromCurrentSpan() != null, "expected current span context");
+            require(LogBrewOpenTelemetry.traceContextFromCurrentSpan() != null, "expected current trace context");
+            require(LogBrewOpenTelemetry.spanContextFromContext(Context.current()) != null, "expected context span copy");
+            require(LogBrewOpenTelemetry.traceContextFromContext(Context.current()) != null, "expected context trace copy");
+        }
+
+        System.out.println("otel bridge ok");
+    }
+
+    private static void require(boolean condition, String message) {
+        if (!condition) {
+            throw new IllegalStateException(message);
+        }
+    }
+}
+JAVA
+(cd "$otel_app" && gradle --no-daemon -q compileJava)
+(cd "$otel_app" && gradle --no-daemon -q run > "$tmp_dir/otel-app.out")
+grep -qx 'otel bridge ok' "$tmp_dir/otel-app.out"
+
 extract_dir="$tmp_dir/extracted-jar"
 mkdir -p "$extract_dir"
 (cd "$extract_dir" && jar --extract --file "$tmp_dir/logbrew-kotlin-0.1.0.jar")
@@ -145,7 +237,11 @@ grep -q 'captureNetworkMilestone' "$extract_dir/README.md"
 grep -q 'startRequestSpan' "$extract_dir/README.md"
 grep -q 'captureRequestSpan' "$extract_dir/README.md"
 grep -q 'LogBrewTrace' "$extract_dir/README.md"
+grep -q 'LogBrewOpenTelemetry' "$extract_dir/README.md"
 grep -q 'LogBrewOpenTelemetrySpanContext' "$extract_dir/README.md"
+grep -q 'spanContextFromCurrentSpan' "$extract_dir/README.md"
+grep -q 'spanContextFromSpan' "$extract_dir/README.md"
+grep -q 'spanContextFromContext' "$extract_dir/README.md"
 grep -q 'fromOpenTelemetrySpanContext' "$extract_dir/README.md"
 
 run_app() {

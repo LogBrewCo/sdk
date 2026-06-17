@@ -9,6 +9,7 @@ import co.logbrew.sdk.IssueAttributes
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewOpenTelemetry
 import co.logbrew.sdk.LogBrewOpenTelemetrySpanContext
 import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.LogBrewTraceContext
@@ -47,7 +48,8 @@ fun main() {
     run("android_throwable_helper_keeps_stack_trace_opt_in", ::androidThrowableHelperKeepsStackTraceOptIn)
     run("trace_context_helpers_validate_and_correlate", ::traceContextHelpersValidateAndCorrelate)
     run("opentelemetry_span_context_helpers_validate_and_correlate", ::openTelemetrySpanContextHelpersValidateAndCorrelate)
-    println("kotlin package tests ok (23 tests)")
+    run("opentelemetry_reflection_bridge_returns_null_without_otel_types", ::openTelemetryReflectionBridgeReturnsNullWithoutOtelTypes)
+    println("kotlin package tests ok (24 tests)")
 }
 
 private fun run(
@@ -705,4 +707,15 @@ private fun openTelemetrySpanContextHelpersValidateAndCorrelate() {
     check(otelSpanAttributes.spanId != context.parentSpanId)
     check(otelSpanAttributes.metadata["spanId"] == otelSpanAttributes.spanId)
     check(otelSpanAttributes.metadata["bridge"] == "opentelemetry")
+}
+
+private fun openTelemetryReflectionBridgeReturnsNullWithoutOtelTypes() {
+    check(LogBrewOpenTelemetry.spanContextFromSpan(null) == null)
+    check(LogBrewOpenTelemetry.traceContextFromSpan(null) == null)
+    check(LogBrewOpenTelemetry.spanContextFromSpan(Any()) == null)
+    check(LogBrewOpenTelemetry.traceContextFromSpan(Any()) == null)
+    check(LogBrewOpenTelemetry.spanContextFromContext(Any()) == null)
+    check(LogBrewOpenTelemetry.traceContextFromContext(Any()) == null)
+    check(LogBrewOpenTelemetry.spanContextFromCurrentSpan() == null)
+    check(LogBrewOpenTelemetry.traceContextFromCurrentSpan() == null)
 }
