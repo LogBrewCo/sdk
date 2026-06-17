@@ -8,6 +8,8 @@ import struct
 from pathlib import Path
 from typing import Any
 
+from native_release_artifact_io import c_string, read_bytes
+
 
 BREAKPAD_IDENTIFIER_RE = re.compile(r"^[0-9A-F]+$")
 BREAKPAD_CPU_ARCHES = {
@@ -125,17 +127,6 @@ def pe_symbol_candidates(path: Path) -> list[Path]:
     )
 
 
-def read_at(path: Path, offset: int, size: int) -> bytes:
-    if offset < 0 or size < 0:
-        raise ValueError("file offset and size must be non-negative")
-    with path.open("rb") as handle:
-        handle.seek(offset)
-        payload = handle.read(size)
-    if len(payload) != size:
-        raise ValueError("PE data is truncated")
-    return payload
-
-
 def format_codeview_guid(payload: bytes) -> str:
     if len(payload) != 16:
         raise ValueError("CodeView GUID is truncated")
@@ -147,15 +138,6 @@ def format_codeview_guid(payload: bytes) -> str:
         f"{data1:08X}-{data2:04X}-{data3:04X}-"
         f"{data4[:2].hex().upper()}-{data4[2:].hex().upper()}"
     )
-
-
-def c_string(payload: bytes, offset: int) -> str:
-    if offset >= len(payload):
-        return ""
-    end = payload.find(b"\0", offset)
-    if end == -1:
-        end = len(payload)
-    return payload[offset:end].decode("utf-8", errors="replace")
 
 
 def rva_to_file_offset(rva: int, sections: list[dict[str, int]], file_size: int) -> int | None:
@@ -170,7 +152,7 @@ def rva_to_file_offset(rva: int, sections: list[dict[str, int]], file_size: int)
 
 def read_pe_sections(path: Path, offset: int, count: int) -> list[dict[str, int]]:
     sections: list[dict[str, int]] = []
-    table = read_at(path, offset, count * PE_SECTION_HEADER_SIZE)
+    table = read_bytes(path, offset, count * PE_SECTION_HEADER_SIZE)
     for index in range(count):
         section_offset = index * PE_SECTION_HEADER_SIZE
         virtual_size = struct.unpack_from("<I", table, section_offset + 8)[0]
@@ -193,24 +175,24 @@ def read_pe_codeview_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
         file_size = path.stat().st_size
         if file_size < PE_DOS_HEADER_SIZE:
             return {"isPe": False}, "PE DOS header is truncated"
-        dos_header = read_at(path, 0, PE_DOS_HEADER_SIZE)
+        dos_header = read_bytes(path, 0, PE_DOS_HEADER_SIZE)
         if dos_header[:2] != PE_DOS_SIGNATURE:
             return {"isPe": False}, "not a PE file"
         pe_offset = struct.unpack_from("<I", dos_header, PE_LFANEW_OFFSET)[0]
         if pe_offset + 4 + PE_FILE_HEADER_SIZE > file_size:
             return {"isPe": True}, "PE header is truncated"
-        if read_at(path, pe_offset, 4) != PE_SIGNATURE:
+        if read_bytes(path, pe_offset, 4) != PE_SIGNATURE:
             return {"isPe": False}, "invalid PE signature"
 
         file_header_offset = pe_offset + 4
-        file_header = read_at(path, file_header_offset, PE_FILE_HEADER_SIZE)
+        file_header = read_bytes(path, file_header_offset, PE_FILE_HEADER_SIZE)
         machine = struct.unpack_from("<H", file_header, 0)[0]
         section_count = struct.unpack_from("<H", file_header, 2)[0]
         optional_header_size = struct.unpack_from("<H", file_header, 16)[0]
         optional_header_offset = file_header_offset + PE_FILE_HEADER_SIZE
         if optional_header_size < PE_DATA_DIRECTORY64_OFFSET + PE_DATA_DIRECTORY_SIZE:
             return {"isPe": True}, "PE optional header is truncated"
-        optional_header = read_at(path, optional_header_offset, optional_header_size)
+        optional_header = read_bytes(path, optional_header_offset, optional_header_size)
         magic = struct.unpack_from("<H", optional_header, 0)[0]
         if magic == PE_OPTIONAL_HEADER32_MAGIC:
             directory_offset = PE_DATA_DIRECTORY32_OFFSET
@@ -236,7 +218,7 @@ def read_pe_codeview_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
         debug_offset = rva_to_file_offset(debug_rva, sections, file_size)
         if debug_offset is None or debug_offset + debug_size > file_size:
             return {"isPe": True}, "PE debug directory points outside the file"
-        debug_payload = read_at(path, debug_offset, debug_size)
+        debug_payload = read_bytes(path, debug_offset, debug_size)
         for entry_offset in range(0, debug_size - PE_DEBUG_DIRECTORY_SIZE + 1, PE_DEBUG_DIRECTORY_SIZE):
             debug_type = struct.unpack_from("<I", debug_payload, entry_offset + 12)[0]
             if debug_type != PE_DEBUG_TYPE_CODEVIEW:
@@ -247,12 +229,12 @@ def read_pe_codeview_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
             codeview_offset = codeview_raw or rva_to_file_offset(codeview_rva, sections, file_size)
             if codeview_offset is None or codeview_offset + codeview_size > file_size:
                 return {"isPe": True}, "PE CodeView record points outside the file"
-            codeview = read_at(path, codeview_offset, codeview_size)
+            codeview = read_bytes(path, codeview_offset, codeview_size)
             if len(codeview) < PE_CODEVIEW_PDB70_SIZE or codeview[:4] != PE_CODEVIEW_PDB70_SIGNATURE:
                 return {"isPe": True}, "PE CodeView record is not PDB70/RSDS"
             pdb_guid = format_codeview_guid(codeview[4:20])
             pdb_age = struct.unpack_from("<I", codeview, 20)[0]
-            pdb_filename = basename_only(c_string(codeview, 24))
+            pdb_filename = basename_only(c_string(codeview, 24, encoding="utf-8"))
             if not pdb_filename:
                 return {"isPe": True}, "PE CodeView PDB filename is empty"
             return {

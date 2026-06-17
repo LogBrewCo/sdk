@@ -17,6 +17,15 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+from native_release_artifact_elf import (  # noqa: E402
+    ELF_TYPE_DYN,
+    ELF_TYPE_EXEC,
+    android_native_symbol_candidates,
+    dedupe_android_symbol_files,
+    elf_symbol_source,
+    read_elf_metadata,
+)
+from native_release_artifact_io import align_offset, read_bytes, sha256_file  # noqa: E402
 from native_release_artifact_pe import (  # noqa: E402
     associated_pdb_candidates,
     breakpad_symbol_candidates,
@@ -27,35 +36,9 @@ from native_release_artifact_pe import (  # noqa: E402
 
 SCRIPT_VERSION = "0.1.0"
 PROGUARD_CLASS_MAPPING_RE = re.compile(r"^\s*[^#\s].+?\s+->\s+[^:]+:\s*$")
-ELF_CLASS_32 = 1
-ELF_CLASS_64 = 2
-ELF_DATA_LITTLE_ENDIAN = 1
-ELF_DATA_BIG_ENDIAN = 2
-ELF_VERSION_CURRENT = 1
-ELF_TYPE_EXEC = 2
-ELF_TYPE_DYN = 3
-ELF_MACHINE_ARCHES = {
-    3: "x86",
-    40: "armeabi-v7a",
-    62: "x86_64",
-    183: "arm64-v8a",
-}
-ELF_TYPES = {
-    ELF_TYPE_EXEC: "EXEC",
-    ELF_TYPE_DYN: "DYN",
-}
-SHT_PROGBITS = 1
-SHT_SYMTAB = 2
-SHT_STRTAB = 3
-SHT_NOTE = 7
-SHT_NOBITS = 8
-SHT_DYNSYM = 11
-NT_GNU_BUILD_ID = 3
-NT_GO_BUILD_ID = 4
-ELF_HEADER_SIZE_32 = 52
-ELF_HEADER_SIZE_64 = 64
-ELF_SECTION_HEADER_SIZE_32 = 40
-ELF_SECTION_HEADER_SIZE_64 = 64
+DEFAULT_MAX_SYMBOL_FILES = 500
+DEFAULT_MAX_SYMBOL_FILE_BYTES = 2 * 1024 * 1024 * 1024
+DEFAULT_MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024
 MACHO_MAGIC_32_LE = b"\xce\xfa\xed\xfe"
 MACHO_MAGIC_32_BE = b"\xfe\xed\xfa\xce"
 MACHO_MAGIC_64_LE = b"\xcf\xfa\xed\xfe"
@@ -78,14 +61,6 @@ def require_non_empty(label: str, value: str) -> str:
     if not normalized:
         raise ValueError(f"{label} is required")
     return normalized
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def iter_regular_files(path: Path) -> list[Path]:
@@ -121,6 +96,65 @@ def relative(path: Path, root: Path) -> str:
 
 def artifact_status(errors: list[str]) -> str:
     return "blocked" if errors else "ready"
+
+
+def positive_limit(label: str, value: int | None, default: int) -> int:
+    if value is None:
+        return default
+    if value <= 0:
+        raise ValueError(f"{label} must be a positive integer")
+    return value
+
+
+def release_artifact_limits(
+    *,
+    max_symbol_files: int | None = None,
+    max_symbol_file_bytes: int | None = None,
+    max_artifact_bytes: int | None = None,
+) -> dict[str, int]:
+    return {
+        "maxSymbolFiles": positive_limit("max_symbol_files", max_symbol_files, DEFAULT_MAX_SYMBOL_FILES),
+        "maxSymbolFileBytes": positive_limit(
+            "max_symbol_file_bytes",
+            max_symbol_file_bytes,
+            DEFAULT_MAX_SYMBOL_FILE_BYTES,
+        ),
+        "maxArtifactBytes": positive_limit("max_artifact_bytes", max_artifact_bytes, DEFAULT_MAX_ARTIFACT_BYTES),
+    }
+
+
+def validate_artifact_byte_limit(label: str, path: Path, errors: list[str], limits: dict[str, int]) -> None:
+    if not path.exists():
+        return
+    size = byte_size(path)
+    max_size = limits["maxArtifactBytes"]
+    if size > max_size:
+        errors.append(f"{label} artifact is {size} bytes; maximum is {max_size} bytes")
+
+
+def enforce_symbol_file_limits(
+    label: str,
+    candidates: list[Path],
+    root: Path,
+    errors: list[str],
+    limits: dict[str, int],
+) -> list[Path]:
+    max_count = limits["maxSymbolFiles"]
+    if len(candidates) > max_count:
+        errors.append(f"{label} contains {len(candidates)} symbol files; maximum is {max_count}")
+        return []
+
+    max_file_size = limits["maxSymbolFileBytes"]
+    accepted: list[Path] = []
+    for candidate in candidates:
+        size = candidate.stat().st_size
+        if size > max_file_size:
+            errors.append(
+                f"{relative(candidate, root)}: symbol file is {size} bytes; maximum is {max_file_size} bytes"
+            )
+            continue
+        accepted.append(candidate)
+    return accepted
 
 
 def safe_resolve(candidate: Path, root: Path) -> Path:
@@ -173,248 +207,6 @@ def base_artifact_entry(
             }
         )
     return entry
-
-
-def align_offset(value: int, alignment: int) -> int:
-    alignment = max(alignment, 1)
-    return value + ((alignment - (value % alignment)) % alignment)
-
-
-def read_bytes(path: Path, offset: int, size: int) -> bytes:
-    if offset < 0 or size < 0:
-        raise ValueError("file offset and size must be non-negative")
-    with path.open("rb") as handle:
-        handle.seek(offset)
-        payload = handle.read(size)
-    if len(payload) != size:
-        raise ValueError("file data is truncated")
-    return payload
-
-
-def c_string(payload: bytes, offset: int) -> str:
-    if offset >= len(payload):
-        return ""
-    end = payload.find(b"\0", offset)
-    if end == -1:
-        end = len(payload)
-    return payload[offset:end].decode("ascii", errors="replace")
-
-
-def parse_elf_header(path: Path) -> tuple[dict[str, Any] | None, str | None]:
-    header_start = read_bytes(path, 0, min(ELF_HEADER_SIZE_64, path.stat().st_size))
-    if len(header_start) < 16 or header_start[:4] != b"\x7fELF":
-        return None, "not an ELF file"
-
-    elf_class = header_start[4]
-    data_encoding = header_start[5]
-    ident_version = header_start[6]
-    if elf_class not in (ELF_CLASS_32, ELF_CLASS_64):
-        return None, f"unsupported ELF class: {elf_class}"
-    if data_encoding not in (ELF_DATA_LITTLE_ENDIAN, ELF_DATA_BIG_ENDIAN):
-        return None, f"unsupported ELF endianness: {data_encoding}"
-    if ident_version != ELF_VERSION_CURRENT:
-        return None, f"unsupported ELF version: {ident_version}"
-
-    is_64_bit = elf_class == ELF_CLASS_64
-    header_size = ELF_HEADER_SIZE_64 if is_64_bit else ELF_HEADER_SIZE_32
-    section_header_size = ELF_SECTION_HEADER_SIZE_64 if is_64_bit else ELF_SECTION_HEADER_SIZE_32
-    if path.stat().st_size < header_size:
-        return None, "ELF header is truncated"
-
-    endian_prefix = "<" if data_encoding == ELF_DATA_LITTLE_ENDIAN else ">"
-    header_format = "HHIQQQIHHHHHH" if is_64_bit else "HHIIIIIHHHHHH"
-    unpacked = struct.unpack_from(endian_prefix + header_format, read_bytes(path, 0, header_size), 16)
-    (
-        elf_type_code,
-        machine_code,
-        file_version,
-        _entry,
-        _program_header_offset,
-        section_header_offset,
-        _flags,
-        elf_header_size,
-        _program_header_entry_size,
-        _program_header_count,
-        section_header_entry_size,
-        section_header_count,
-        section_name_index,
-    ) = unpacked
-
-    if file_version != ELF_VERSION_CURRENT:
-        return None, f"unsupported ELF file version: {file_version}"
-    if elf_header_size != header_size:
-        return None, f"unexpected ELF header size: {elf_header_size}"
-    if section_header_count and section_header_entry_size != section_header_size:
-        return None, f"unexpected ELF section header size: {section_header_entry_size}"
-    if section_header_count == 0 or section_name_index == 0xFFFF:
-        return None, "ELF extended section tables are not supported by this dry run"
-
-    return {
-        "elfClass": 64 if is_64_bit else 32,
-        "littleEndian": data_encoding == ELF_DATA_LITTLE_ENDIAN,
-        "endianPrefix": endian_prefix,
-        "elfTypeCode": elf_type_code,
-        "elfType": ELF_TYPES.get(elf_type_code, f"unknown({elf_type_code})"),
-        "machineCode": machine_code,
-        "arch": ELF_MACHINE_ARCHES.get(machine_code, f"unknown({machine_code})"),
-        "sectionHeaderOffset": int(section_header_offset),
-        "sectionHeaderEntrySize": section_header_entry_size,
-        "sectionHeaderCount": section_header_count,
-        "sectionNameIndex": section_name_index,
-    }, None
-
-
-def parse_elf_section_headers(path: Path, header: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
-    count = int(header["sectionHeaderCount"])
-    entry_size = int(header["sectionHeaderEntrySize"])
-    offset = int(header["sectionHeaderOffset"])
-    table_size = count * entry_size
-    if offset <= 0:
-        return [], "ELF section header table is missing"
-    if offset + table_size > path.stat().st_size:
-        return [], "ELF section header table is truncated"
-
-    section_format = "IIQQQQIIQQ" if header["elfClass"] == 64 else "IIIIIIIIII"
-    sections: list[dict[str, Any]] = []
-    file_size = path.stat().st_size
-    table = read_bytes(path, offset, table_size)
-    for index in range(count):
-        values = struct.unpack_from(header["endianPrefix"] + section_format, table, index * entry_size)
-        (
-            name_offset,
-            section_type,
-            _flags,
-            _address,
-            section_offset,
-            section_size,
-            _link,
-            _info,
-            alignment,
-            _entry_size,
-        ) = values
-        if section_type != SHT_NOBITS and int(section_offset) + int(section_size) > file_size:
-            return [], "ELF section data is truncated"
-        sections.append(
-            {
-                "nameOffset": int(name_offset),
-                "type": int(section_type),
-                "offset": int(section_offset),
-                "size": int(section_size),
-                "alignment": int(alignment),
-                "name": "",
-            }
-        )
-
-    section_name_index = int(header["sectionNameIndex"])
-    if section_name_index >= len(sections):
-        return [], "ELF section name table index is invalid"
-    name_section = sections[section_name_index]
-    if name_section["type"] != SHT_STRTAB:
-        return [], "ELF section name table is missing"
-    names = read_bytes(path, name_section["offset"], name_section["size"])
-    for section in sections:
-        section["name"] = c_string(names, section["nameOffset"])
-    return sections, None
-
-
-def parse_elf_note_payload(payload: bytes, little_endian: bool, alignment: int) -> list[dict[str, Any]]:
-    endian_prefix = "<" if little_endian else ">"
-    notes: list[dict[str, Any]] = []
-    offset = 0
-    while offset + 12 <= len(payload):
-        name_size, desc_size, note_type = struct.unpack_from(endian_prefix + "III", payload, offset)
-        name_offset = offset + 12
-        desc_offset = align_offset(name_offset + name_size, alignment)
-        desc_end = desc_offset + desc_size
-        if desc_end > len(payload):
-            break
-        name = payload[name_offset : name_offset + name_size].rstrip(b"\0").decode("ascii", errors="replace")
-        notes.append({"type": note_type, "name": name, "desc": payload[desc_offset:desc_end]})
-        offset = align_offset(desc_end, alignment)
-    return notes
-
-
-def elf_build_ids(path: Path, sections: list[dict[str, Any]], little_endian: bool) -> tuple[str, str]:
-    gnu_build_id = ""
-    go_build_id = ""
-    for section in sections:
-        if section["type"] != SHT_NOTE:
-            continue
-        if section["name"] not in {".note.gnu.build-id", ".note.go.buildid"}:
-            continue
-        payload = read_bytes(path, section["offset"], section["size"])
-        for note in parse_elf_note_payload(payload, little_endian, section["alignment"]):
-            if section["name"] == ".note.gnu.build-id" and (
-                note["type"] == NT_GNU_BUILD_ID or note["name"] == "GNU"
-            ):
-                gnu_build_id = note["desc"].hex()
-            if section["name"] == ".note.go.buildid" and (
-                note["type"] == NT_GO_BUILD_ID or note["name"] == "Go"
-            ):
-                go_build_id = note["desc"].decode("ascii", errors="replace")
-    return gnu_build_id, go_build_id
-
-
-def has_non_empty_section(sections: list[dict[str, Any]], name: str) -> bool:
-    return any(
-        section["name"] == name and section["type"] != SHT_NOBITS and section["size"] > 0
-        for section in sections
-    )
-
-
-def read_elf_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
-    try:
-        header, header_error = parse_elf_header(path)
-        if header_error:
-            return {"isElf": header is not None}, header_error
-        assert header is not None
-        sections, section_error = parse_elf_section_headers(path, header)
-        if section_error:
-            return {"isElf": True, **header}, section_error
-        gnu_build_id, go_build_id = elf_build_ids(path, sections, header["littleEndian"])
-        has_debug_info = has_non_empty_section(sections, ".debug_info") or has_non_empty_section(
-            sections, ".zdebug_info"
-        )
-        has_symbol_table = has_non_empty_section(sections, ".symtab")
-        has_dynamic_symbol_table = has_non_empty_section(sections, ".dynsym")
-        has_code = any(
-            section["name"] == ".text" and section["type"] == SHT_PROGBITS
-            for section in sections
-        )
-        return {
-            "isElf": True,
-            "elfClass": header["elfClass"],
-            "elfType": header["elfType"],
-            "elfTypeCode": header["elfTypeCode"],
-            "arch": header["arch"],
-            "gnuBuildId": gnu_build_id,
-            "goBuildId": go_build_id,
-            "fileSha256": sha256_file(path) if has_code else "",
-            "hasDebugInfo": has_debug_info,
-            "hasSymbolTable": has_symbol_table,
-            "hasDynamicSymbolTable": has_dynamic_symbol_table,
-            "hasCode": has_code,
-        }, None
-    except OSError as exc:
-        return {"isElf": False}, str(exc)
-    except (struct.error, ValueError) as exc:
-        return {"isElf": True}, str(exc)
-
-
-def elf_symbol_source(metadata: dict[str, Any]) -> str:
-    if metadata.get("hasDebugInfo"):
-        return "debug_info"
-    if metadata.get("hasSymbolTable"):
-        return "symbol_table"
-    if metadata.get("hasDynamicSymbolTable"):
-        return "dynamic_symbol_table"
-    return "none"
-
-
-def android_native_symbol_candidates(path: Path) -> list[Path]:
-    if path.is_file():
-        return [path]
-    return sorted(candidate for candidate in path.rglob("*.so") if candidate.is_file())
 
 
 def parse_macho_slice(path: Path, offset: int, size: int) -> tuple[dict[str, str] | None, str | None]:
@@ -538,7 +330,7 @@ def validate_no_symlinks(path: Path, root: Path) -> list[str]:
     ]
 
 
-def build_ios_dsym_artifact(path: Path, root: Path) -> dict[str, Any]:
+def build_ios_dsym_artifact(path: Path, root: Path, limits: dict[str, int]) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
     details: dict[str, Any] = {}
@@ -554,6 +346,8 @@ def build_ios_dsym_artifact(path: Path, root: Path) -> dict[str, Any]:
     else:
         symlink_errors = validate_no_symlinks(path, root)
         errors.extend(symlink_errors)
+        if not symlink_errors:
+            validate_artifact_byte_limit("dSYM", path, errors, limits)
         if symlink_errors:
             dwarf_files: list[Path] = []
         else:
@@ -563,7 +357,9 @@ def build_ios_dsym_artifact(path: Path, root: Path) -> dict[str, Any]:
                 dwarf_files = []
             else:
                 dwarf_files = sorted(candidate for candidate in dwarf_dir.iterdir() if candidate.is_file())
-                if not dwarf_files:
+                found_dwarf_files = bool(dwarf_files)
+                dwarf_files = enforce_symbol_file_limits("dSYM DWARF directory", dwarf_files, root, errors, limits)
+                if not found_dwarf_files:
                     errors.append("dSYM DWARF directory has no object files")
                 for dwarf_file in dwarf_files:
                     rel_path = relative(dwarf_file, root)
@@ -605,7 +401,7 @@ def build_ios_dsym_artifact(path: Path, root: Path) -> dict[str, Any]:
     )
 
 
-def build_android_proguard_mapping_artifact(path: Path, root: Path) -> dict[str, Any]:
+def build_android_proguard_mapping_artifact(path: Path, root: Path, limits: dict[str, int]) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
     details: dict[str, Any] = {}
@@ -617,12 +413,21 @@ def build_android_proguard_mapping_artifact(path: Path, root: Path) -> dict[str,
     else:
         symlink_errors = validate_no_symlinks(path, root)
         errors.extend(symlink_errors)
+        if not symlink_errors:
+            validate_artifact_byte_limit("ProGuard/R8 mapping", path, errors, limits)
         if symlink_errors:
             lines: list[str] = []
             class_mapping_count = 0
         else:
             size = path.stat().st_size
-            if size == 0:
+            if size > limits["maxSymbolFileBytes"]:
+                errors.append(
+                    f"{relative(path, root)}: symbol file is {size} bytes; "
+                    f"maximum is {limits['maxSymbolFileBytes']} bytes"
+                )
+                lines = []
+                class_mapping_count = 0
+            elif size == 0:
                 errors.append("ProGuard/R8 mapping file is empty")
                 lines = []
                 class_mapping_count = 0
@@ -649,7 +454,7 @@ def build_android_proguard_mapping_artifact(path: Path, root: Path) -> dict[str,
     )
 
 
-def build_android_native_symbols_artifact(path: Path, root: Path) -> dict[str, Any]:
+def build_android_native_symbols_artifact(path: Path, root: Path, limits: dict[str, int]) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
     symbol_files: list[dict[str, Any]] = []
@@ -661,8 +466,12 @@ def build_android_native_symbols_artifact(path: Path, root: Path) -> dict[str, A
     else:
         symlink_errors = validate_no_symlinks(path, root)
         errors.extend(symlink_errors)
+        if not symlink_errors:
+            validate_artifact_byte_limit("Android native symbols", path, errors, limits)
         candidates = [] if symlink_errors else android_native_symbol_candidates(path)
-        if not candidates and not symlink_errors:
+        found_candidates = bool(candidates)
+        candidates = enforce_symbol_file_limits("Android native symbols artifact", candidates, root, errors, limits)
+        if not found_candidates and not symlink_errors:
             errors.append("Android native symbols artifact contains no .so files")
         for candidate in candidates:
             rel_path = relative(candidate, root)
@@ -715,6 +524,7 @@ def build_android_native_symbols_artifact(path: Path, root: Path) -> dict[str, A
             if metadata["fileSha256"]:
                 symbol_file["fileSha256"] = metadata["fileSha256"]
             symbol_files.append(symbol_file)
+        symbol_files = dedupe_android_symbol_files(symbol_files, warnings)
 
     details = {
         "androidNativeSymbols": {
@@ -734,7 +544,7 @@ def build_android_native_symbols_artifact(path: Path, root: Path) -> dict[str, A
     )
 
 
-def build_breakpad_symbols_artifact(path: Path, root: Path) -> dict[str, Any]:
+def build_breakpad_symbols_artifact(path: Path, root: Path, limits: dict[str, int]) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
     symbol_files: list[dict[str, Any]] = []
@@ -746,8 +556,12 @@ def build_breakpad_symbols_artifact(path: Path, root: Path) -> dict[str, Any]:
     else:
         symlink_errors = validate_no_symlinks(path, root)
         errors.extend(symlink_errors)
+        if not symlink_errors:
+            validate_artifact_byte_limit("Breakpad symbols", path, errors, limits)
         candidates = [] if symlink_errors else breakpad_symbol_candidates(path)
-        if not candidates and not symlink_errors:
+        found_candidates = bool(candidates)
+        candidates = enforce_symbol_file_limits("Breakpad symbols artifact", candidates, root, errors, limits)
+        if not found_candidates and not symlink_errors:
             errors.append("Breakpad symbols artifact contains no .sym files")
         for candidate in candidates:
             rel_path = relative(candidate, root)
@@ -780,7 +594,7 @@ def build_breakpad_symbols_artifact(path: Path, root: Path) -> dict[str, Any]:
     )
 
 
-def build_dotnet_pdb_artifact(path: Path, root: Path) -> dict[str, Any]:
+def build_dotnet_pdb_artifact(path: Path, root: Path, limits: dict[str, int]) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
     symbol_files: list[dict[str, Any]] = []
@@ -792,8 +606,12 @@ def build_dotnet_pdb_artifact(path: Path, root: Path) -> dict[str, Any]:
     else:
         symlink_errors = validate_no_symlinks(path, root)
         errors.extend(symlink_errors)
+        if not symlink_errors:
+            validate_artifact_byte_limit("PDB symbols", path, errors, limits)
         candidates = [] if symlink_errors else pe_symbol_candidates(path)
-        if not candidates and not symlink_errors:
+        found_candidates = bool(candidates)
+        candidates = enforce_symbol_file_limits("PDB symbols artifact", candidates, root, errors, limits)
+        if not found_candidates and not symlink_errors:
             errors.append("PDB symbols artifact contains no .dll or .exe PE files")
         for candidate in candidates:
             rel_path = relative(candidate, root)
@@ -817,6 +635,12 @@ def build_dotnet_pdb_artifact(path: Path, root: Path) -> dict[str, Any]:
                 continue
             if pdb_path.stat().st_size == 0:
                 errors.append(f"{relative(pdb_path, root)}: PDB file is empty")
+                continue
+            if pdb_path.stat().st_size > limits["maxSymbolFileBytes"]:
+                errors.append(
+                    f"{relative(pdb_path, root)}: symbol file is {pdb_path.stat().st_size} bytes; "
+                    f"maximum is {limits['maxSymbolFileBytes']} bytes"
+                )
                 continue
 
             symbol_files.append(
@@ -863,11 +687,11 @@ ARTIFACT_BUILDERS = {
 SUPPORTED_ARTIFACT_TYPES = tuple(ARTIFACT_BUILDERS)
 
 
-def build_artifact_entry(artifact_type: str, path: Path, root: Path) -> dict[str, Any]:
+def build_artifact_entry(artifact_type: str, path: Path, root: Path, limits: dict[str, int]) -> dict[str, Any]:
     builder = ARTIFACT_BUILDERS.get(artifact_type)
     if builder is None:
         raise ValueError(f"unsupported artifact type: {artifact_type}")
-    return builder(path, root)
+    return builder(path, root, limits)
 
 
 def create_manifest(
@@ -879,10 +703,18 @@ def create_manifest(
     service: str,
     repository_url: str | None = None,
     commit_sha: str | None = None,
+    max_symbol_files: int | None = None,
+    max_symbol_file_bytes: int | None = None,
+    max_artifact_bytes: int | None = None,
 ) -> dict[str, Any]:
     release = require_non_empty("release", release)
     environment = require_non_empty("environment", environment)
     service = require_non_empty("service", service)
+    limits = release_artifact_limits(
+        max_symbol_files=max_symbol_files,
+        max_symbol_file_bytes=max_symbol_file_bytes,
+        max_artifact_bytes=max_artifact_bytes,
+    )
     artifact_root = Path(os.path.abspath(artifact_root))
     if not artifact_root.is_dir():
         raise ValueError(f"artifact root does not exist: {artifact_root}")
@@ -892,7 +724,7 @@ def create_manifest(
         errors = ["at least one release artifact is required"]
     else:
         artifact_entries = [
-            build_artifact_entry(artifact_type, safe_resolve(path, artifact_root), artifact_root)
+            build_artifact_entry(artifact_type, safe_resolve(path, artifact_root), artifact_root, limits)
             for artifact_type, path in artifacts
         ]
         errors = []
@@ -920,6 +752,7 @@ def create_manifest(
             "name": "logbrew-native-release-artifact-manifest",
             "version": SCRIPT_VERSION,
         },
+        "limits": limits,
         **({"git": git} if git else {}),
         "artifacts": artifact_entries,
         "validation": {
@@ -941,6 +774,16 @@ def parse_artifact_spec(value: str) -> tuple[str, Path]:
     return artifact_type, Path(require_non_empty("artifact path", artifact_path))
 
 
+def parse_positive_int(value: str) -> int:
+    try:
+        parsed = int(value, 10)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Create a LogBrew dry-run manifest for native/mobile debug-symbol artifacts."
@@ -960,6 +803,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--repository-url", help="Optional app-owned source repository URL.")
     parser.add_argument("--commit-sha", help="Optional app-owned commit SHA for source links.")
+    parser.add_argument(
+        "--max-symbol-files",
+        type=parse_positive_int,
+        default=DEFAULT_MAX_SYMBOL_FILES,
+        help=f"Maximum candidate symbol files per artifact before the dry run blocks. Default: {DEFAULT_MAX_SYMBOL_FILES}.",
+    )
+    parser.add_argument(
+        "--max-symbol-file-bytes",
+        type=parse_positive_int,
+        default=DEFAULT_MAX_SYMBOL_FILE_BYTES,
+        help=(
+            "Maximum bytes for any individual symbol/debug file before the dry run blocks. "
+            f"Default: {DEFAULT_MAX_SYMBOL_FILE_BYTES}."
+        ),
+    )
+    parser.add_argument(
+        "--max-artifact-bytes",
+        type=parse_positive_int,
+        default=DEFAULT_MAX_ARTIFACT_BYTES,
+        help=(
+            "Maximum total bytes for a single release artifact before the dry run blocks. "
+            f"Default: {DEFAULT_MAX_ARTIFACT_BYTES}."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -975,6 +842,9 @@ def main(argv: list[str] | None = None) -> int:
             service=args.service,
             repository_url=args.repository_url,
             commit_sha=args.commit_sha,
+            max_symbol_files=args.max_symbol_files,
+            max_symbol_file_bytes=args.max_symbol_file_bytes,
+            max_artifact_bytes=args.max_artifact_bytes,
         )
     except ValueError as exc:
         print(f"manifest validation failed: {exc}", file=sys.stderr)

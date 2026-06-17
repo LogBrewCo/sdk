@@ -146,6 +146,9 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertEqual(manifest["validation"]["status"], "ready")
         self.assertEqual(manifest["artifactType"], "native_debug_symbol_manifest")
         self.assertEqual(manifest["git"]["commitSha"], "abc123def456")
+        self.assertEqual(manifest["limits"]["maxSymbolFiles"], 500)
+        self.assertEqual(manifest["limits"]["maxSymbolFileBytes"], 2147483648)
+        self.assertEqual(manifest["limits"]["maxArtifactBytes"], 2147483648)
         self.assertEqual(
             [artifact["artifactType"] for artifact in manifest["artifacts"]],
             [
@@ -238,6 +241,117 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertNotIn(DEFAULT_BREAKPAD_SYMBOL_NAME, serialized)
         self.assertNotIn(DEFAULT_PDB_PATH, serialized)
         self.assertNotIn(DEFAULT_PDB_PAYLOAD.decode("ascii"), serialized)
+
+    def test_android_native_symbol_file_count_limit_blocks_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            symbols_dir = artifact_root / "android" / "symbols"
+            write_android_elf_symbol(symbols_dir / "lib" / "arm64-v8a" / "libcheckout.so")
+            write_android_elf_symbol(
+                symbols_dir / "lib" / "x86_64" / "libcheckout.so",
+                build_id=bytes.fromhex("42cc7f54d61dc2d4022a4dc58fdec1f4"),
+            )
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("android_native_symbols", symbols_dir)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+                max_symbol_files=1,
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "android/symbols: Android native symbols artifact contains 2 symbol files; maximum is 1",
+            manifest["validation"]["errors"],
+        )
+        self.assertEqual(manifest["artifacts"][0]["androidNativeSymbols"]["symbolFileCount"], 0)
+
+    def test_android_native_symbol_file_size_limit_blocks_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            symbols_dir = self.create_android_native_symbols(artifact_root)
+            symbol_file = symbols_dir / "lib" / "arm64-v8a" / "libcheckout.so"
+            symbol_size = symbol_file.stat().st_size
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("android_native_symbols", symbols_dir)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+                max_symbol_file_bytes=symbol_size - 1,
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            f"android/symbols: android/symbols/lib/arm64-v8a/libcheckout.so: "
+            f"symbol file is {symbol_size} bytes; maximum is {symbol_size - 1} bytes",
+            manifest["validation"]["errors"],
+        )
+        self.assertEqual(manifest["artifacts"][0]["androidNativeSymbols"]["symbolFileCount"], 0)
+
+    def test_android_native_artifact_size_limit_blocks_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            symbols_dir = self.create_android_native_symbols(artifact_root)
+            symbols_size = create_native_release_artifact_manifest.byte_size(symbols_dir)
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("android_native_symbols", symbols_dir)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+                max_artifact_bytes=1,
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "android/symbols: Android native symbols artifact is "
+            f"{symbols_size} bytes; maximum is 1 bytes",
+            manifest["validation"]["errors"],
+        )
+
+    def test_android_native_duplicate_build_id_keeps_richer_symbols(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            symbols_dir = artifact_root / "android" / "symbols"
+            build_id = bytes.fromhex("32cc7f54d61dc2d4022a4dc58fdec1f4")
+            write_android_elf_symbol(
+                symbols_dir / "lib" / "arm64-v8a" / "libcheckout-stripped.so",
+                build_id=build_id,
+                include_debug_info=False,
+                include_symtab=False,
+                include_dynsym=True,
+            )
+            write_android_elf_symbol(
+                symbols_dir / "lib" / "arm64-v8a" / "libcheckout.so",
+                build_id=build_id,
+                include_debug_info=True,
+                include_symtab=True,
+                include_dynsym=False,
+            )
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("android_native_symbols", symbols_dir)],
+                release="2026.06.17",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        self.assertEqual(manifest["validation"]["status"], "ready")
+        artifact = manifest["artifacts"][0]
+        self.assertEqual(artifact["androidNativeSymbols"]["symbolFileCount"], 1)
+        self.assertEqual(
+            artifact["androidNativeSymbols"]["files"][0]["path"],
+            "android/symbols/lib/arm64-v8a/libcheckout.so",
+        )
+        self.assertTrue(
+            any("duplicate Android native symbol identity" in warning for warning in artifact["validation"]["warnings"])
+        )
 
     def test_breakpad_public_only_symbol_uses_symbol_table_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

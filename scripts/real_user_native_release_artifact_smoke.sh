@@ -69,6 +69,11 @@ serialized = json.dumps(manifest)
 
 assert manifest["validation"]["status"] == "ready"
 assert manifest["artifactType"] == "native_debug_symbol_manifest"
+assert manifest["limits"] == {
+    "maxSymbolFiles": 500,
+    "maxSymbolFileBytes": 2147483648,
+    "maxArtifactBytes": 2147483648,
+}
 assert [artifact["artifactType"] for artifact in manifest["artifacts"]] == [
     "ios_dsym",
     "android_proguard_mapping",
