@@ -21,9 +21,13 @@ int main(void) {
       LBWDie([NSString stringWithFormat:@"client init failed: %@", error]);
     }
 
-    LBWTraceContext *trace =
-        [LBWTraceContext continueOrCreateContextFromTraceparent:
-                             @"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"];
+    LBWOpenTelemetrySpanContext *openTelemetryParent =
+        [LBWTrace openTelemetrySpanContextWithTraceID:@"4bf92f3577b34da6a3ce929d0e0e4736"
+                                               spanID:@"00f067aa0ba902b7"
+                                           traceFlags:@"01"
+                                                error:&error];
+    LBWMust(openTelemetryParent != nil, error);
+    LBWTraceContext *trace = [LBWTrace contextFromOpenTelemetrySpanContext:openTelemetryParent];
     LBWTraceScope *scope = [LBWTrace activateContext:trace];
 
     LBWMust([client issueWithID:@"evt_trace_issue_001"

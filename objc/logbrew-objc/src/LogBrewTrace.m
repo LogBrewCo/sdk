@@ -20,6 +20,19 @@ static NSString *const LBWTraceScopeStackKey = @"co.logbrew.sdk.traceScopeStack"
 
 @end
 
+@interface LBWOpenTelemetrySpanContext ()
+
+@property(nonatomic, copy) NSString *traceID;
+@property(nonatomic, copy) NSString *spanID;
+@property(nonatomic, copy) NSString *traceFlags;
+@property(nonatomic) BOOL sampled;
+
+- (instancetype)initWithValidatedTraceID:(NSString *)traceID
+                                  spanID:(NSString *)spanID
+                              traceFlags:(NSString *)traceFlags NS_DESIGNATED_INITIALIZER;
+
+@end
+
 @interface LBWTraceScope ()
 
 @property(nonatomic, strong) LBWTraceContext *context;
@@ -288,6 +301,47 @@ static NSDictionary<NSString *, id> *_Nullable LBWTraceMetadataByMergingContext(
 
 @end
 
+@implementation LBWOpenTelemetrySpanContext
+
+- (instancetype)initWithValidatedTraceID:(NSString *)traceID
+                                  spanID:(NSString *)spanID
+                              traceFlags:(NSString *)traceFlags {
+  self = [super init];
+  if (self != nil) {
+    _traceID = [traceID copy];
+    _spanID = [spanID copy];
+    _traceFlags = [traceFlags copy];
+    unsigned int flags = 0U;
+    [[NSScanner scannerWithString:_traceFlags] scanHexInt:&flags];
+    _sampled = (flags & 1U) == 1U;
+  }
+  return self;
+}
+
++ (instancetype)contextWithTraceID:(NSString *)traceID
+                            spanID:(NSString *)spanID
+                        traceFlags:(NSString *)traceFlags
+                             error:(NSError **)error {
+  NSString *normalizedTraceID = LBWTraceNormalizeHex(@"OpenTelemetry traceID", traceID, 32U, LBWZeroTraceID, error);
+  NSString *normalizedSpanID = LBWTraceNormalizeHex(@"OpenTelemetry spanID", spanID, 16U, LBWZeroSpanID, error);
+  NSString *normalizedFlags = LBWTraceNormalizeFlags(traceFlags, error);
+  if (normalizedTraceID == nil || normalizedSpanID == nil || normalizedFlags == nil) {
+    return nil;
+  }
+  return [[LBWOpenTelemetrySpanContext alloc] initWithValidatedTraceID:normalizedTraceID
+                                                                spanID:normalizedSpanID
+                                                            traceFlags:normalizedFlags];
+}
+
++ (instancetype)contextWithTraceID:(NSString *)traceID
+                            spanID:(NSString *)spanID
+                           sampled:(BOOL)sampled
+                             error:(NSError **)error {
+  return [self contextWithTraceID:traceID spanID:spanID traceFlags:(sampled ? @"01" : @"00") error:error];
+}
+
+@end
+
 @implementation LBWTraceScope
 
 - (instancetype)initWithContext:(LBWTraceContext *)context {
@@ -334,6 +388,44 @@ static NSDictionary<NSString *, id> *_Nullable LBWTraceMetadataByMergingContext(
 + (NSDictionary<NSString *, NSString *> *)outgoingHeaders {
   LBWTraceContext *context = [LBWTrace currentContext];
   return context != nil ? [context outgoingHeaders] : @{};
+}
+
++ (LBWOpenTelemetrySpanContext *)openTelemetrySpanContextWithTraceID:(NSString *)traceID
+                                                              spanID:(NSString *)spanID
+                                                          traceFlags:(NSString *)traceFlags
+                                                               error:(NSError **)error {
+  return [LBWOpenTelemetrySpanContext contextWithTraceID:traceID
+                                                  spanID:spanID
+                                              traceFlags:traceFlags
+                                                   error:error];
+}
+
++ (LBWOpenTelemetrySpanContext *)openTelemetrySpanContextWithTraceID:(NSString *)traceID
+                                                              spanID:(NSString *)spanID
+                                                             sampled:(BOOL)sampled
+                                                               error:(NSError **)error {
+  return [LBWOpenTelemetrySpanContext contextWithTraceID:traceID spanID:spanID sampled:sampled error:error];
+}
+
++ (LBWTraceContext *)contextFromOpenTelemetrySpanContext:(LBWOpenTelemetrySpanContext *)context {
+  return [[LBWTraceContext alloc] initWithValidatedTraceID:context.traceID
+                                                    spanID:LBWTraceRandomHex(16U, LBWZeroSpanID)
+                                              parentSpanID:context.spanID
+                                                traceFlags:context.traceFlags];
+}
+
++ (NSDictionary<NSString *, id> *)spanAttributesFromOpenTelemetrySpanContext:(LBWOpenTelemetrySpanContext *)context
+                                                                        name:(NSString *)name
+                                                                      status:(NSString *)status
+                                                                  durationMs:(NSNumber *)durationMs
+                                                                    metadata:(NSDictionary<NSString *, id> *)metadata
+                                                                       error:(NSError **)error {
+  LBWTraceContext *traceContext = [self contextFromOpenTelemetrySpanContext:context];
+  return [traceContext spanAttributesWithName:name
+                                       status:status
+                                   durationMs:durationMs
+                                     metadata:metadata
+                                        error:error];
 }
 
 @end

@@ -351,6 +351,54 @@ static void LBWExerciseTraceHelpers(void) {
                 [LBWStableCode(error) isEqualToString:@"validation_error"],
             @"strict all-zero trace id failed");
 
+  LBWOpenTelemetrySpanContext *otelContext =
+      [LBWTrace openTelemetrySpanContextWithTraceID:@"4BF92F3577B34DA6A3CE929D0E0E4736"
+                                             spanID:@"00F067AA0BA902B7"
+                                            sampled:YES
+                                              error:&error];
+  LBWAssert(otelContext != nil, @"OpenTelemetry context creation failed");
+  LBWAssert([otelContext.traceID isEqualToString:parsed.traceID], @"OpenTelemetry trace id normalization failed");
+  LBWAssert([otelContext.spanID isEqualToString:parsed.spanID], @"OpenTelemetry span id normalization failed");
+  LBWAssert([otelContext.traceFlags isEqualToString:@"01"] && otelContext.sampled, @"OpenTelemetry flags failed");
+  LBWTraceContext *otelChild = [LBWTrace contextFromOpenTelemetrySpanContext:otelContext];
+  LBWAssert([otelChild.traceID isEqualToString:otelContext.traceID], @"OpenTelemetry child trace id failed");
+  LBWAssert([otelChild.parentSpanID isEqualToString:otelContext.spanID], @"OpenTelemetry child parent failed");
+  LBWAssert(![otelChild.spanID isEqualToString:otelContext.spanID], @"OpenTelemetry child reused parent span");
+  NSDictionary<NSString *, id> *otelSpanAttributes =
+      [LBWTrace spanAttributesFromOpenTelemetrySpanContext:otelContext
+                                                      name:@"otel child work"
+                                                    status:@"ok"
+                                                durationMs:@9.5
+                                                  metadata:@{@"component": @"otel-bridge", @"traceId": @"spoofed"}
+                                                     error:&error];
+  LBWAssert(otelSpanAttributes != nil, @"OpenTelemetry span attributes failed");
+  LBWAssert([otelSpanAttributes[@"traceId"] isEqualToString:otelContext.traceID],
+            @"OpenTelemetry span trace id failed");
+  LBWAssert([otelSpanAttributes[@"parentSpanId"] isEqualToString:otelContext.spanID],
+            @"OpenTelemetry span parent failed");
+  LBWAssert([otelSpanAttributes[@"metadata"][@"traceId"] isEqualToString:otelContext.traceID],
+            @"OpenTelemetry metadata trace override failed");
+  LBWAssert([otelSpanAttributes[@"metadata"][@"component"] isEqualToString:@"otel-bridge"],
+            @"OpenTelemetry metadata primitive failed");
+  LBWAssert([LBWTrace openTelemetrySpanContextWithTraceID:@"00000000000000000000000000000000"
+                                                   spanID:@"00f067aa0ba902b7"
+                                               traceFlags:@"01"
+                                                    error:&error] == nil &&
+                [LBWStableCode(error) isEqualToString:@"validation_error"],
+            @"OpenTelemetry all-zero trace id failed");
+  LBWAssert([LBWTrace openTelemetrySpanContextWithTraceID:parsed.traceID
+                                                   spanID:@"0000000000000000"
+                                               traceFlags:@"01"
+                                                    error:&error] == nil &&
+                [LBWStableCode(error) isEqualToString:@"validation_error"],
+            @"OpenTelemetry all-zero span id failed");
+  LBWAssert([LBWTrace openTelemetrySpanContextWithTraceID:parsed.traceID
+                                                   spanID:parsed.spanID
+                                               traceFlags:@"0g"
+                                                    error:&error] == nil &&
+                [LBWStableCode(error) isEqualToString:@"validation_error"],
+            @"OpenTelemetry bad flags failed");
+
   LBWClient *client = LBWNewClient();
   LBWTraceScope *scope = [LBWTrace activateContext:context];
   LBWAssert([LBWTrace currentContext] == context, @"active context failed");

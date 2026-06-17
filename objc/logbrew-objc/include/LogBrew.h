@@ -106,6 +106,26 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 
 @end
 
+@interface LBWOpenTelemetrySpanContext : NSObject
+
+@property(nonatomic, copy, readonly) NSString *traceID;
+@property(nonatomic, copy, readonly) NSString *spanID;
+@property(nonatomic, copy, readonly) NSString *traceFlags;
+@property(nonatomic, readonly) BOOL sampled;
+
++ (nullable instancetype)contextWithTraceID:(NSString *)traceID
+                                     spanID:(NSString *)spanID
+                                 traceFlags:(NSString *)traceFlags
+                                      error:(NSError *_Nullable *_Nullable)error;
++ (nullable instancetype)contextWithTraceID:(NSString *)traceID
+                                     spanID:(NSString *)spanID
+                                    sampled:(BOOL)sampled
+                                      error:(NSError *_Nullable *_Nullable)error;
+
+- (instancetype)init NS_UNAVAILABLE;
+
+@end
+
 @interface LBWTraceScope : NSObject
 
 - (void)close;
@@ -130,6 +150,22 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 + (nullable NSDictionary<NSString *, id> *)metadataByMergingActiveContextIntoMetadata:
     (nullable NSDictionary<NSString *, id> *)metadata;
 + (NSDictionary<NSString *, NSString *> *)outgoingHeaders;
++ (nullable LBWOpenTelemetrySpanContext *)openTelemetrySpanContextWithTraceID:(NSString *)traceID
+                                                                       spanID:(NSString *)spanID
+                                                                   traceFlags:(NSString *)traceFlags
+                                                                        error:(NSError *_Nullable *_Nullable)error;
++ (nullable LBWOpenTelemetrySpanContext *)openTelemetrySpanContextWithTraceID:(NSString *)traceID
+                                                                       spanID:(NSString *)spanID
+                                                                      sampled:(BOOL)sampled
+                                                                        error:(NSError *_Nullable *_Nullable)error;
++ (LBWTraceContext *)contextFromOpenTelemetrySpanContext:(LBWOpenTelemetrySpanContext *)context;
++ (nullable NSDictionary<NSString *, id> *)
+    spanAttributesFromOpenTelemetrySpanContext:(LBWOpenTelemetrySpanContext *)context
+                                          name:(NSString *)name
+                                        status:(NSString *)status
+                                    durationMs:(nullable NSNumber *)durationMs
+                                      metadata:(nullable NSDictionary<NSString *, id> *)metadata
+                                         error:(NSError *_Nullable *_Nullable)error;
 
 @end
 

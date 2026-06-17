@@ -61,6 +61,23 @@ Goal: close the Objective-C/mobile-native trace correlation gap without copying 
 - `bash scripts/check_objc_package.sh`
 - `bash scripts/real_user_objc_smoke.sh`
 
+## 2026-06-17 OpenTelemetry SpanContext Follow-Up
+
+Public source re-read for this follow-up:
+
+- OpenTelemetry Swift Core `open-telemetry/opentelemetry-swift-core@4f85f2a5c8138a72384be3edd1dcfc2cc97b297f`: read `Sources/OpenTelemetryApi/Trace/SpanContext.swift` (`SpanContext`, `create`, `createFromRemoteParent`, `isValid`, `isSampled`) and `Sources/OpenTelemetryApi/Trace/Propagation/W3CTraceContextPropagator.swift` (W3C extraction/injection flow). Pattern: the propagation unit carries trace ID, span ID, trace flags, remote state, and tracestate; validity rejects invalid IDs and sampled state comes from trace flags.
+- Sentry Cocoa `getsentry/sentry-cocoa@4da7fcb73836342b63f1aca7449766c2c15f2822`: re-read `Sources/Sentry/SentryTracePropagation.m` and `Sources/Sentry/SentryScope.m`. Pattern: Sentry keeps propagation/scope context close to events and outbound propagation, but its richer scope model carries more SDK-owned state than LogBrew should copy into the lightweight Objective-C surface.
+- Datadog iOS `DataDog/dd-sdk-ios@6462c0b81f5221072008443925d8bbf18aa5750b`: re-read `DatadogInternal/Sources/NetworkInstrumentation/Datadog/HTTPHeadersWriter.swift` and `DatadogInternal/Sources/NetworkInstrumentation/TraceContext.swift`. Pattern: Datadog separates a trace context from header writing and supports broader propagation styles; LogBrew should preserve only the W3C-compatible trace/span/flags subset for now.
+
+Implemented a dependency-free Objective-C copy bridge:
+
+- `LBWOpenTelemetrySpanContext` validates and normalizes only trace ID, span ID, and trace flags, with a sampled convenience constructor.
+- `LBWTrace contextFromOpenTelemetrySpanContext:` creates a fresh LogBrew child context that uses the OpenTelemetry span ID as parent.
+- `LBWTrace spanAttributesFromOpenTelemetrySpanContext:...` emits LogBrew span attributes linked to the OTel parent while overwriting spoofed trace metadata.
+- Packaged `trace_correlation.m` now starts from an OTel-compatible parent and still proves one trace links Objective-C issue, log, action, network milestone, metric, manual span, URLSession span, lifecycle span, and outgoing W3C propagation.
+
+The bridge intentionally avoids OpenTelemetry dependencies, exporters, processors, global context hooks, live `Context`/`Span` extraction, tracestate/baggage ingestion, raw propagation metadata, automatic `NSURLSession` instrumentation, and payload/header/full-URL/query/fragment capture.
+
 ## Remaining Gaps
 
-- Objective-C still lacks automatic UIKit/AppKit lifecycle instrumentation, automatic `NSURLSession` instrumentation, OpenTelemetry context ingestion, baggage/tracestate, rich span events/exceptions, URLSession metrics phase breakdown, and native symbolication parity.
+- Objective-C still lacks automatic UIKit/AppKit lifecycle instrumentation, automatic `NSURLSession` instrumentation, live OpenTelemetry `Context`/`Span` extraction, baggage/tracestate, rich span events/exceptions, URLSession metrics phase breakdown, and native symbolication parity.
