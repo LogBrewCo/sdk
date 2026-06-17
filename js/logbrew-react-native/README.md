@@ -6,7 +6,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, and opt-in resource fetch spans.
+This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, opt-in resource fetch spans, and app-owned native bridge scope sync.
 
 ## Install
 
@@ -294,13 +294,41 @@ await resourceFetch("https://api.example.com/checkout?email=hidden", {
 
 `createReactNativeResourceFetch()` wraps the fetch function your app supplies, or the runtime `fetch` when available. It records status, method, duration, sanitized route template, screen, session, primitive metadata, and trace correlation. It does not patch global `fetch` or XHR, inspect request or response bodies, capture arbitrary headers, or attach `traceparent` outside `tracePropagationTargets`. Pass `trace` explicitly after `await` boundaries or build the wrapper from provider/hook state so async resource spans stay correlated.
 
+## Native Bridge Scope Sync
+
+Use the native bridge subpath when JavaScript needs to pass the active LogBrew trace into a native module call your app owns. The helper builds a primitive-only scope payload and sends it through a callback or adapter method such as `setLogBrewScope()`:
+
+```js
+import { createReactNativeTraceContext } from "@logbrew/react-native";
+import { withLogBrewNativeBridgeScope } from "@logbrew/react-native/native-bridge";
+
+const trace = createReactNativeTraceContext({
+  traceparent: incomingTraceparent
+});
+
+await withLogBrewNativeBridgeScope(nativeCheckoutModule, {
+  trace,
+  logger: "NativeCheckout",
+  screen: "Checkout",
+  sessionId: "session_123",
+  metadata: {
+    routeTemplate: "/native/checkout"
+  }
+}, async () => {
+  await nativeCheckoutModule.submitOrder();
+});
+```
+
+`withLogBrewNativeBridgeScope()` syncs the scope before the callback and clears it afterward, including async callbacks. The payload contains only trace IDs, sampled flags, and primitive metadata. It does not install a native module, inspect native bridge arguments, sync user/session identity, capture payloads or headers, derive session health, or patch React Native internals.
+
 ## Example Source
 
-The package includes example source for screen views, app-state metadata, handled JavaScript errors, provider/hooks, active trace correlation, and target-scoped trace propagation. After installing, inspect the shipped examples with:
+The package includes example source for screen views, app-state metadata, handled JavaScript errors, provider/hooks, active trace correlation, target-scoped trace propagation, lifecycle/resource spans, and native bridge scope sync. After installing, inspect the shipped examples with:
 
 ```bash
 node node_modules/@logbrew/react-native/examples/index.mjs --list
 node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans
+node node_modules/@logbrew/react-native/examples/index.mjs native-bridge-scope
 node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans
 node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans
 node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation

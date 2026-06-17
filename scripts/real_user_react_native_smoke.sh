@@ -45,12 +45,17 @@ grep -q '^package/lifecycle.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/lifecycle.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/lifecycle.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/lifecycle.d.cts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/native-bridge.js$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/native-bridge.cjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/native-bridge.d.ts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/native-bridge.d.cts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/resource-fetch.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/resource-fetch.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/resource-fetch.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/resource-fetch.d.cts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/index.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/lifecycle-spans.mjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/examples/native-bridge-scope.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/navigation-resource-spans.mjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/package.json$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/native-tarball.txt"
@@ -75,6 +80,8 @@ grep -q 'createReactNavigationSpanListener' "$tmp_dir/native-readme.md"
 grep -q 'createAppStateLifecycleSpanListener' "$tmp_dir/native-readme.md"
 grep -q 'captureReactNativeResourceSpan' "$tmp_dir/native-readme.md"
 grep -q 'createReactNativeResourceFetch' "$tmp_dir/native-readme.md"
+grep -q 'withLogBrewNativeBridgeScope' "$tmp_dir/native-readme.md"
+grep -q '@logbrew/react-native/native-bridge' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/resource-fetch' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/lifecycle' "$tmp_dir/native-readme.md"
 
@@ -105,6 +112,7 @@ grep -q '"@logbrew/react-native"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
 grep -q '"react-native": "./index.native.js"' node_modules/@logbrew/react-native/package.json
 grep -q '"./lifecycle"' node_modules/@logbrew/react-native/package.json
+grep -q '"./native-bridge"' node_modules/@logbrew/react-native/package.json
 npm ls @logbrew/sdk @logbrew/react-native react react-native react-test-renderer >/dev/null
 npm explain @logbrew/react-native > "$tmp_dir/npm-explain-native.txt"
 grep -q '@logbrew/react-native@0.1.0' "$tmp_dir/npm-explain-native.txt"
@@ -126,10 +134,13 @@ PY
 node --check node_modules/@logbrew/react-native/index.native.js
 node --check node_modules/@logbrew/react-native/lifecycle.js
 node --check node_modules/@logbrew/react-native/lifecycle.cjs
+node --check node_modules/@logbrew/react-native/native-bridge.js
+node --check node_modules/@logbrew/react-native/native-bridge.cjs
 node --check node_modules/@logbrew/react-native/resource-fetch.js
 node --check node_modules/@logbrew/react-native/resource-fetch.cjs
 node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.captureReactNativeNavigationSpan !== "function" || typeof native.captureReactNativeResourceSpan !== "function" || typeof native.createReactNavigationSpanListener !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.createReactNativeNavigationSpanEvent !== "function" || typeof native.createReactNativeResourceSpanEvent !== "function" || typeof native.default !== "object") process.exit(1)'
 node -e 'const lifecycle = require("@logbrew/react-native/lifecycle"); if (typeof lifecycle.createAppStateLifecycleSpanListener !== "function" || typeof lifecycle.captureReactNativeLifecycleSpan !== "function" || typeof lifecycle.createReactNativeLifecycleSpanEvent !== "function") process.exit(1)'
+node -e 'const bridge = require("@logbrew/react-native/native-bridge"); if (typeof bridge.createLogBrewNativeBridgeScope !== "function" || typeof bridge.syncLogBrewNativeBridgeScope !== "function" || typeof bridge.clearLogBrewNativeBridgeScope !== "function" || typeof bridge.withLogBrewNativeBridgeScope !== "function" || typeof bridge.default !== "object") process.exit(1)'
 node -e 'const nativeResourceFetch = require("@logbrew/react-native/resource-fetch"); if (typeof nativeResourceFetch.createReactNativeResourceFetch !== "function") process.exit(1)'
 
 cat > smoke.mjs <<'EOF'
@@ -744,6 +755,13 @@ import {
   createAppStateLifecycleSpanListener,
   createReactNativeLifecycleSpanEvent
 } from "@logbrew/react-native/lifecycle";
+import {
+  createLogBrewNativeBridgeScope,
+  syncLogBrewNativeBridgeScope,
+  withLogBrewNativeBridgeScope,
+  type LogBrewNativeBridgeLike,
+  type LogBrewNativeBridgeScope
+} from "@logbrew/react-native/native-bridge";
 import { createReactNativeResourceFetch } from "@logbrew/react-native/resource-fetch";
 
 const platform: ReactNativePlatformLike = {
@@ -774,12 +792,30 @@ const metadata = getReactNativeTraceMetadata(trace);
 const activeTraceId = withLogBrewTrace(trace, activeTrace => getActiveLogBrewTrace()?.traceId ?? activeTrace.traceId);
 const bound = bindLogBrewTrace(trace, (value: string) => `${getActiveLogBrewTrace()?.spanId}:${value}`);
 bound("typed");
+const bridgeCalls: Array<LogBrewNativeBridgeScope | undefined> = [];
+const bridge: LogBrewNativeBridgeLike = scope => {
+  bridgeCalls.push(scope);
+};
+const bridgeScope = createLogBrewNativeBridgeScope({
+  logger: "NativeCheckout",
+  metadata: { routeTemplate: "/native/checkout" },
+  screen: "Checkout",
+  sessionId: "session_123",
+  trace
+});
+syncLogBrewNativeBridgeScope(bridge, { logger: "NativeCheckout", trace });
+const bridgeResult = withLogBrewNativeBridgeScope(bridge, {
+  logger: "NativeCheckout",
+  metadata: bridgeScope.metadata,
+  screen: "Checkout",
+  trace
+}, scope => scope.trace?.traceId ?? "missing");
 client.span("evt_span_trace", "2026-06-02T10:00:00Z", createReactNativeSpanAttributes({
   name: "typed.mobile",
   status: "ok",
   durationMs: 1,
   trace,
-  metadata
+  metadata: { ...metadata, bridgeResult }
 }));
 const traceTargets: TracePropagationTarget[] = ["https://api.example.test/", /^\/mobile-api\//u];
 const tracedFetch = createTraceparentFetch({
@@ -971,12 +1007,14 @@ npx tsc --project tsconfig.json
 
 node node_modules/@logbrew/react-native/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans' "$tmp_dir/launcher-help.txt"
+grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs native-bridge-scope' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans' "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation' "$tmp_dir/launcher-help.txt"
 node node_modules/@logbrew/react-native/examples/index.mjs --list > "$tmp_dir/launcher-list.txt"
 grep -q 'lifecycle-spans -> node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans' "$tmp_dir/launcher-list.txt"
+grep -q 'native-bridge-scope -> node node_modules/@logbrew/react-native/examples/index.mjs native-bridge-scope' "$tmp_dir/launcher-list.txt"
 grep -q 'navigation-resource-spans -> node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/react-native/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 grep -q 'resource-fetch-spans -> node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans' "$tmp_dir/launcher-list.txt"
@@ -996,6 +1034,8 @@ grep -q '"events":4' "$tmp_dir/example-lifecycle.stderr.json"
 grep -q '"inactiveSpan":"app_state:active->inactive"' "$tmp_dir/example-lifecycle.stderr.json"
 grep -q '"backgroundSpan":"app_state:inactive->background"' "$tmp_dir/example-lifecycle.stderr.json"
 grep -q '"listenerRemoved":true' "$tmp_dir/example-lifecycle.stderr.json"
+node node_modules/@logbrew/react-native/examples/index.mjs native-bridge-scope > "$tmp_dir/example-native-bridge.stdout.json" 2> "$tmp_dir/example-native-bridge.stderr.json"
+python3 "$repo_root/scripts/check_react_native_native_bridge_payload.py" "$tmp_dir/example-native-bridge.stdout.json" "$tmp_dir/example-native-bridge.stderr.json"
 node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation > "$tmp_dir/example-trace.stdout.json" 2> "$tmp_dir/example-trace.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-trace.stdout.json" >/dev/null
 python3 - "$tmp_dir/example-trace.stdout.json" <<'PY'
@@ -1030,13 +1070,17 @@ grep -q '"listenerRemoved":true' "$tmp_dir/example-default.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/react-native/examples run list > "$tmp_dir/npm-helper-list.txt"
 grep -q 'lifecycle-spans -> node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans' "$tmp_dir/npm-helper-list.txt"
+grep -q 'native-bridge-scope -> node node_modules/@logbrew/react-native/examples/index.mjs native-bridge-scope' "$tmp_dir/npm-helper-list.txt"
 grep -q 'navigation-resource-spans -> node node_modules/@logbrew/react-native/examples/index.mjs navigation-resource-spans' "$tmp_dir/npm-helper-list.txt"
 grep -q 'readme-example -> node node_modules/@logbrew/react-native/examples/index.mjs readme-example' "$tmp_dir/npm-helper-list.txt"
 grep -q 'resource-fetch-spans -> node node_modules/@logbrew/react-native/examples/index.mjs resource-fetch-spans' "$tmp_dir/npm-helper-list.txt"
 npm --prefix node_modules/@logbrew/react-native/examples run help > "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run lifecycle-spans' "$tmp_dir/npm-helper-help.txt"
+grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run native-bridge-scope' "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/react-native/examples run resource-fetch-spans' "$tmp_dir/npm-helper-help.txt"
+npm --prefix node_modules/@logbrew/react-native/examples run --silent native-bridge-scope > "$tmp_dir/npm-helper-native-bridge.stdout.json" 2> "$tmp_dir/npm-helper-native-bridge.stderr.json"
+python3 "$repo_root/scripts/check_react_native_native_bridge_payload.py" "$tmp_dir/npm-helper-native-bridge.stdout.json" "$tmp_dir/npm-helper-native-bridge.stderr.json"
 npm --prefix node_modules/@logbrew/react-native/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"attempts":2' "$tmp_dir/npm-helper-smoke.stderr.json"

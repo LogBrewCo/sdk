@@ -31,6 +31,17 @@
       },
       "default": "./lifecycle.js"
     },
+    "./native-bridge": {
+      "import": {
+        "types": "./native-bridge.d.ts",
+        "default": "./native-bridge.js"
+      },
+      "require": {
+        "types": "./native-bridge.d.cts",
+        "default": "./native-bridge.cjs"
+      },
+      "default": "./native-bridge.js"
+    },
     "./resource-fetch": {
       "import": {
         "types": "./resource-fetch.d.ts",
@@ -53,6 +64,10 @@
     "lifecycle.js",
     "lifecycle.d.ts",
     "lifecycle.d.cts",
+    "native-bridge.cjs",
+    "native-bridge.js",
+    "native-bridge.d.ts",
+    "native-bridge.d.cts",
     "resource-fetch.cjs",
     "resource-fetch.js",
     "resource-fetch.d.ts",
@@ -84,6 +99,6 @@
     "react-native": ">=0.72"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check lifecycle.js && node --check lifecycle.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check examples/index.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check lifecycle.js && node --check lifecycle.cjs && node --check native-bridge.js && node --check native-bridge.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check examples/index.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/native-bridge-scope.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs"
   }
 }

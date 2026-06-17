@@ -5,6 +5,7 @@
     "help": "node ./index.mjs --help",
     "lifecycle-spans": "node ./index.mjs lifecycle-spans",
     "list": "node ./index.mjs --list",
+    "native-bridge-scope": "node ./index.mjs native-bridge-scope",
     "navigation-resource-spans": "node ./index.mjs navigation-resource-spans",
     "readme-example": "node ./index.mjs readme-example",
     "real-user-smoke": "node ./index.mjs real-user-smoke",

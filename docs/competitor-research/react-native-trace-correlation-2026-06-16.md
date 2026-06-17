@@ -63,12 +63,22 @@ LogBrew React Native already shipped a thin provider/hook layer, screen/app-stat
 - The lifecycle listener records AppState transitions such as `app_state:active->background`, measures duration from the previous observed AppState when possible, carries active/provider trace metadata, preserves primitive-only metadata, and avoids global React Native patching, native bridge scope sync, session-health derivation, or hidden foreground/background policy.
 - Added packaged `examples/lifecycle-spans.mjs` to show one W3C trace links initial, inactive, background, and foreground lifecycle spans with listener removal and primitive-only metadata.
 
+## Native Bridge Scope Sync Follow-Up - 2026-06-17
+
+- Re-used the earlier source reading of Sentry React Native `packages/core/src/js/scopeSync.ts`, `packages/core/src/js/wrapper.ts`, and `packages/core/src/js/tracing/reactnavigation.ts` at `getsentry/sentry-react-native@580fb5c7bf39cc1a8caf7a30af9078c887eb40b9`: Sentry is stronger because JavaScript scope/span changes can be mirrored into native SDK state and navigation can call native active-span sync for timing/log correlation.
+- Re-used Datadog React Native `packages/core/src/rum/instrumentation/resourceTracking/requestProxy/XHRProxy/DatadogRumResource/ResourceReporter.ts` and `packages/core/src/rum/instrumentation/resourceTracking/distributedTracing/headers.ts` at `DataDog/dd-sdk-reactnative@92462dccefd689815d87dabbad0d41572cd06cca`: Datadog is stronger because native/RUM resource reporting carries trace identifiers through automatic instrumentation, but pays complexity and privacy costs from broader interception.
+- Added the explicit `@logbrew/react-native/native-bridge` subpath with `createLogBrewNativeBridgeScope(...)`, `syncLogBrewNativeBridgeScope(...)`, `clearLogBrewNativeBridgeScope(...)`, and `withLogBrewNativeBridgeScope(...)`.
+- The helper accepts an app-owned bridge callback or object with `setLogBrewScope(...)`/`syncLogBrewScope(...)`, syncs only trace IDs, span IDs, flags, sampled state, and primitive logger/screen/session metadata, then clears the scope after sync or after an async callback settles.
+- Added packaged `examples/native-bridge-scope.mjs` to prove native bridge sync, async clear behavior, primitive metadata dropping, and one correlated LogBrew log event from the installed tarball.
+- LogBrew intentionally still avoids native module installation, automatic Sentry-style global scope sync, native SDK state ownership, bridge argument inspection, user/session identity sync, payload/header capture, automatic navigation/resource/lifecycle instrumentation, baggage, and tracestate.
+
 ## Tradeoffs
 
 - LogBrew intentionally did not copy Sentry native scope sync, navigation auto-instrumentation, Datadog XHR/fetch patching, GraphQL payload extraction, Babel interaction rewriting, multi-format propagation, baggage, tracestate, replay, payload capture, or native bridge state.
 - The React Native package remains a thin peer-dependency layer over `@logbrew/sdk`, React, and React Native. Async work after `await` should keep the returned trace object and pass it explicitly or use provider `trace`; this avoids stale global context leaks between unrelated mobile interactions.
 - Navigation/resource spans stay explicit and app-owned. LogBrew does not globally patch React Navigation, `fetch`, or XHR; target-scoped propagation and helper calls keep privacy defaults obvious and reversible. The resource-fetch subpath is intentionally separate so teams opt into fetch wrapping only where they want spans.
 - Lifecycle spans stay explicit, app-owned, and separated behind their own subpath. LogBrew records AppState transitions that an app chooses to listen for, but it does not cancel spans, auto-restart views, infer session health, or synchronize JS scope into native SDKs like heavier mobile SDKs.
+- Native bridge scope sync is explicit and app-owned. This narrows the Sentry native-scope gap for teams with their own native modules while avoiding a new native SDK contract or background bridge synchronization.
 
 ## Evidence
 
@@ -78,9 +88,11 @@ LogBrew React Native already shipped a thin provider/hook layer, screen/app-stat
 - Packaged `examples/navigation-resource-spans.mjs` ran through `real_user_react_native_smoke.sh` after installing the generated tarball.
 - Packaged `examples/resource-fetch-spans.mjs` runs through `real_user_react_native_smoke.sh` after installing the generated tarball.
 - Packaged `examples/lifecycle-spans.mjs` runs through `real_user_react_native_smoke.sh` after installing the generated tarball.
+- Packaged `examples/native-bridge-scope.mjs` runs through `real_user_react_native_smoke.sh` after installing the generated tarball and through the installed examples npm helper.
+- `npm pack --json` package proof after the native bridge subpath: 28 files, 176,350 bytes unpacked, 31,288 bytes compressed.
 - `bash scripts/check_js_lint.sh`
 - `bash scripts/check_js_package.sh`
 
 ## Remaining Gaps
 
-- React Native still lacks automatic navigation/lifecycle instrumentation, native bridge scope sync, automatic `fetch`/XHR resource child spans, OTel context ingestion, baggage/tracestate, rich span events/exceptions, and source-map/native symbolication parity with Sentry/Datadog. The explicit lifecycle and resource-fetch helpers intentionally reduce these gaps without claiming automatic instrumentation.
+- React Native still lacks automatic navigation/lifecycle instrumentation, automatic native bridge scope sync, automatic `fetch`/XHR resource child spans, OTel context ingestion, baggage/tracestate, rich span events/exceptions, and source-map/native symbolication parity with Sentry/Datadog. The explicit lifecycle, resource-fetch, and native-bridge helpers intentionally reduce these gaps without claiming automatic instrumentation.
