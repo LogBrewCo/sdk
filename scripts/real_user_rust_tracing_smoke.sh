@@ -12,12 +12,13 @@ assert_logbrew_path_dependency() {
 	local manifest_path="$1"
 	local package_name="$2"
 	local path_suffix="$3"
-	python3 - "$manifest_path" "$package_name" "$path_suffix" <<'PY'
+	shift 3
+	python3 - "$manifest_path" "$package_name" "$path_suffix" "$@" <<'PY'
 import sys
 import tomllib
 from pathlib import Path
 
-manifest_path, package_name, path_suffix = sys.argv[1:]
+manifest_path, package_name, path_suffix, *expected_features = sys.argv[1:]
 manifest = tomllib.loads(Path(manifest_path).read_text())
 package = manifest.get("package", {})
 if package.get("name") != package_name:
@@ -27,8 +28,10 @@ if not isinstance(dependency, dict):
     raise SystemExit(f"expected table dependency for logbrew, found: {dependency!r}")
 if dependency.get("version") not in (None, "0.1.0"):
     raise SystemExit(f"unexpected logbrew version requirement: {dependency.get('version')!r}")
-if "tracing" not in dependency.get("features", []):
-    raise SystemExit(f"expected logbrew tracing feature, found: {dependency.get('features')!r}")
+features = dependency.get("features", [])
+for feature in expected_features:
+    if feature not in features:
+        raise SystemExit(f"expected logbrew {feature} feature, found: {features!r}")
 dependency_path = str(dependency.get("path", ""))
 if not dependency_path.endswith(path_suffix):
     raise SystemExit(f"unexpected logbrew path: {dependency_path!r}")
@@ -41,6 +44,7 @@ test -f "$crate_path"
 tar -tf "$crate_path" > "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/src/tracing_layer.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/tracing_bridge.rs$' "$tmp_dir/crate-contents.txt"
+grep -q '^logbrew-0.1.0/examples/tracing_opentelemetry_bridge.rs$' "$tmp_dir/crate-contents.txt"
 
 crate_src_root="$tmp_dir/extracted-crate"
 mkdir -p "$crate_src_root"
@@ -54,7 +58,7 @@ cd tracing-app
 cargo add logbrew --path "$crate_dir" --features tracing >/dev/null
 cargo add tracing@0.1 >/dev/null
 cargo add tracing-subscriber@0.3 --no-default-features --features registry,std >/dev/null
-assert_logbrew_path_dependency Cargo.toml tracing-app "/extracted-crate/logbrew-0.1.0"
+assert_logbrew_path_dependency Cargo.toml tracing-app "/extracted-crate/logbrew-0.1.0" tracing
 cp "$crate_dir/examples/tracing_bridge.rs" src/main.rs
 
 grep -q '^name = "logbrew"$' Cargo.lock
@@ -88,3 +92,44 @@ grep -q 'tracing v0\.1\.' tracing-cargo-tree.txt
 grep -q 'tracing-subscriber v0\.3\.' tracing-cargo-tree.txt
 cargo run --quiet --locked > tracing.stdout.json 2> tracing.stderr.json
 python3 "$repo_root/scripts/check_rust_tracing_payload.py" tracing.stdout.json tracing.stderr.json >/dev/null
+
+cd "$tmp_dir"
+cargo new --quiet tracing-otel-app
+cd tracing-otel-app
+cargo add logbrew --path "$crate_dir" --features tracing-opentelemetry >/dev/null
+cargo add opentelemetry@0.32 --no-default-features --features trace >/dev/null
+cargo add tracing@0.1 >/dev/null
+cargo add tracing-opentelemetry@0.33 --no-default-features >/dev/null
+cargo add tracing-subscriber@0.3 --no-default-features --features registry,std >/dev/null
+assert_logbrew_path_dependency Cargo.toml tracing-otel-app "/extracted-crate/logbrew-0.1.0" tracing-opentelemetry
+cp "$crate_dir/examples/tracing_opentelemetry_bridge.rs" src/main.rs
+
+grep -q '^name = "logbrew"$' Cargo.lock
+grep -q '^name = "opentelemetry"$' Cargo.lock
+grep -q '^name = "tracing-opentelemetry"$' Cargo.lock
+cargo metadata --locked --format-version 1 > tracing-otel-cargo-metadata.json
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+payload = json.loads(Path("tracing-otel-cargo-metadata.json").read_text())
+root = next((pkg for pkg in payload.get("packages", []) if pkg.get("name") == "tracing-otel-app"), None)
+if root is None:
+    raise SystemExit("expected resolved tracing-otel-app package")
+direct = {dep.get("name"): dep for dep in root.get("dependencies", [])}
+for name in ["logbrew", "opentelemetry", "tracing", "tracing-opentelemetry", "tracing-subscriber"]:
+    if name not in direct:
+        raise SystemExit(f"missing tracing-otel-app direct dependency: {name}")
+logbrew = direct["logbrew"]
+if "tracing-opentelemetry" not in logbrew.get("features", []):
+    raise SystemExit(f"missing logbrew tracing-opentelemetry feature: {logbrew.get('features')}")
+if not str(logbrew.get("path", "")).endswith("/extracted-crate/logbrew-0.1.0"):
+    raise SystemExit(f"unexpected logbrew path: {logbrew.get('path')}")
+PY
+cargo tree --locked --depth 1 --charset ascii > tracing-otel-cargo-tree.txt
+grep -q '^tracing-otel-app v0.1.0 (' tracing-otel-cargo-tree.txt
+grep -q 'logbrew v0\.1\.0 .*extracted-crate/logbrew-0\.1\.0' tracing-otel-cargo-tree.txt
+grep -q 'opentelemetry v0\.32\.' tracing-otel-cargo-tree.txt
+grep -q 'tracing-opentelemetry v0\.33\.' tracing-otel-cargo-tree.txt
+cargo run --quiet --locked > tracing-otel.stdout.json 2> tracing-otel.stderr.json
+python3 "$repo_root/scripts/check_rust_tracing_opentelemetry_payload.py" tracing-otel.stdout.json tracing-otel.stderr.json >/dev/null

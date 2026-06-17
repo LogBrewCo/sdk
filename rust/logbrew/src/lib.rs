@@ -30,6 +30,11 @@ pub use traceparent::{
 };
 #[cfg(feature = "tracing")]
 pub use tracing_layer::LogBrewTracingLayer;
+#[cfg(feature = "tracing-opentelemetry")]
+pub use tracing_layer::{
+    opentelemetry_span_context_from_current_tracing_span,
+    opentelemetry_span_context_from_tracing_span,
+};
 
 pub(crate) const ACTION_STATUSES: &[&str] = &["queued", "running", "success", "failure"];
 

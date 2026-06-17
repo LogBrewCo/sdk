@@ -14,13 +14,22 @@ default = []
 http = ["dep:ureq"]
 tower = ["dep:http_types", "dep:tower"]
 tracing = ["dep:tracing-core", "dep:tracing-subscriber"]
+tracing-opentelemetry = [
+    "tracing",
+    "dep:opentelemetry",
+    "dep:tracing",
+    "dep:tracing-opentelemetry",
+]
 
 [dependencies]
 http_types = { package = "http", version = "1", optional = true }
+opentelemetry = { version = "0.32", default-features = false, features = ["trace"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tower = { version = "0.5", optional = true }
+tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 tracing-core = { version = "0.1", optional = true }
+tracing-opentelemetry = { version = "0.33", default-features = false, optional = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"], optional = true }
 ureq = { version = "3.3", optional = true }
 
@@ -40,3 +49,7 @@ required-features = ["tower"]
 [[example]]
 name = "tracing_bridge"
 required-features = ["tracing"]
+
+[[example]]
+name = "tracing_opentelemetry_bridge"
+required-features = ["tracing-opentelemetry"]

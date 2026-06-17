@@ -1,3 +1,5 @@
+#[cfg(feature = "tracing-opentelemetry")]
+use crate::OpenTelemetrySpanContext;
 use crate::{
     LogBrewClient, LogEvent, Metadata, MetadataValue, SharedLogBrewClient, SpanEvent, Traceparent,
     TraceparentContext, http_fields::sanitize_route_template,
@@ -78,6 +80,43 @@ impl<T> LogBrewTracingLayer<T> {
         self.capture_spans = true;
         self
     }
+}
+
+/// Copy the current `tracing` span's OpenTelemetry context into LogBrew's dependency-free shape.
+///
+/// This helper is available with the `tracing-opentelemetry` feature. It returns `None` when no
+/// valid OpenTelemetry span context is attached, for example when the app has not installed a
+/// `tracing_opentelemetry` layer or the current span is disabled.
+#[cfg(feature = "tracing-opentelemetry")]
+pub fn opentelemetry_span_context_from_current_tracing_span() -> Option<OpenTelemetrySpanContext> {
+    let span = tracing::Span::current();
+    opentelemetry_span_context_from_tracing_span(&span)
+}
+
+/// Copy one `tracing` span's OpenTelemetry trace ID, span ID, and trace flags.
+///
+/// The helper intentionally ignores tracestate, baggage, span attributes, events, links, and
+/// exporter/provider state; apps can pass the returned context to `Traceparent` helpers to create
+/// LogBrew child spans or one-header downstream propagation.
+#[cfg(feature = "tracing-opentelemetry")]
+pub fn opentelemetry_span_context_from_tracing_span(
+    span: &tracing::Span,
+) -> Option<OpenTelemetrySpanContext> {
+    use opentelemetry::trace::TraceContextExt as _;
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    let context = span.context();
+    let span_context = context.span().span_context().clone();
+    if !span_context.is_valid() {
+        return None;
+    }
+
+    OpenTelemetrySpanContext::new(
+        span_context.trace_id().to_string(),
+        span_context.span_id().to_string(),
+        format!("{:02x}", span_context.trace_flags().to_u8()),
+    )
+    .ok()
 }
 
 impl<S, T> Layer<S> for LogBrewTracingLayer<T>

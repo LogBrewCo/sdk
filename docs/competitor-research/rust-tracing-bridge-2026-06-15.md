@@ -101,3 +101,23 @@ Follow-up to the Rust HTTP server request pass. Tested the next Rust service gap
 
 - This narrows the Sentry/OpenTelemetry diagnostics gap by making closed spans explain whether important events occurred inside them.
 - LogBrew remains lighter but less expressive than full Sentry/OTel/Datadog span event ingestion: no exception object model, no event arrays, no links, no stack capture, and no automatic processor/exporter interop.
+
+## 2026-06-17 `tracing-opentelemetry` Active Context Copy Follow-Up
+
+### Source Reading
+
+- Re-read Tokio `tracing-opentelemetry@1d5422f1f37932fd65e434da618b305d4c94ee9c` `src/span_ext.rs` (`OpenTelemetrySpanExt::set_parent`, `context`) and `src/layer.rs` (`WithContext`, `parent_context`, `on_new_span`, `on_event`, `on_close`). Pattern: the OTel layer stores private span extension state; the public API is `tracing::Span::context()`, while processor/exporter paths retain full span events, links, and lifecycle data.
+- Re-read OpenTelemetry Rust `open-telemetry/opentelemetry-rust@88821497a893ff6dd4dd916621a2224394ebb0a4` `opentelemetry/src/trace/context.rs` (`TraceContextExt`, `SpanRef::span_context`), `opentelemetry/src/trace/span_context.rs` (`SpanContext::is_valid`, `is_sampled`), and `opentelemetry/src/trace_context.rs` (`TraceFlags::to_u8`, `TraceId`, `SpanId`). Pattern: valid OTel contexts expose exactly the W3C IDs and flags LogBrew needs without reading tracestate or baggage.
+- Re-read Sentry Rust `sentry-opentelemetry/src/processor.rs` (`SentrySpanProcessor::new`, `on_start`, `on_end`). Pattern: Sentry's higher ceiling comes from a real OTel span processor that owns conversion at start/end and correlates Sentry events against active OTel spans.
+- Re-read Datadog Rust `datadog-opentelemetry/src/mappings/sdk_span.rs` (`SdkSpan`). Pattern: Datadog consumes complete OTel span data, including attributes, events, and links, through a heavier exporter-mapping path.
+
+### LogBrew Update
+
+- Added optional `tracing-opentelemetry` feature. It keeps default `logbrew` and `logbrew --features tracing` installs unchanged, while apps that already depend on OpenTelemetry can opt into `opentelemetry_span_context_from_current_tracing_span()` or `opentelemetry_span_context_from_tracing_span(...)`.
+- The helper calls the public `tracing_opentelemetry::OpenTelemetrySpanExt::context()` API, rejects invalid/no-layer contexts by returning `None`, and copies only trace ID, span ID, trace flags, and sampled state into LogBrew's existing `OpenTelemetrySpanContext`.
+- Added packaged `examples/tracing_opentelemetry_bridge.rs` plus installed smoke coverage. The example uses an app-owned OTel parent and no-op tracer, creates one LogBrew child span with `Traceparent::span_attributes_from_opentelemetry_context(...)`, and proves the outgoing trace header can be created without emitting raw `traceparent`.
+
+### Tradeoffs
+
+- This is a smaller, safer interop step than Sentry or full OpenTelemetry processors: useful for apps that already have an active OTel `tracing` span and want LogBrew child spans or downstream headers.
+- LogBrew still does not automatically consume full OTel span processor data, span links, event arrays, exceptions, tracestate, baggage, or exporter lifecycle. That remains a real gap for teams wanting full OTel replacement behavior.

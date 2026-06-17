@@ -257,3 +257,86 @@ fn tracing_layer_continues_incoming_traceparent_on_root_span() {
     assert!(!text.contains(incoming_traceparent));
     assert!(!text.contains("coupon=sample"));
 }
+
+#[cfg(feature = "tracing-opentelemetry")]
+#[test]
+fn tracing_opentelemetry_helper_returns_none_without_otel_layer() {
+    let subscriber = tracing_subscriber::registry();
+
+    tracing::subscriber::with_default(subscriber, || {
+        let span = tracing::info_span!("checkout.without_otel");
+        let _guard = span.enter();
+
+        assert!(
+            logbrew::opentelemetry_span_context_from_current_tracing_span().is_none(),
+            "helper should not synthesize context when no OTel layer is installed"
+        );
+        assert!(
+            logbrew::opentelemetry_span_context_from_tracing_span(&span).is_none(),
+            "helper should ignore spans without valid OTel context"
+        );
+    });
+}
+
+#[cfg(feature = "tracing-opentelemetry")]
+#[test]
+fn tracing_opentelemetry_helper_copies_active_span_context() {
+    use logbrew::{Traceparent, TraceparentSpanInput};
+    use opentelemetry::{
+        Context,
+        trace::{
+            SpanContext, SpanId, TraceContextExt as _, TraceFlags, TraceId, TraceState,
+            TracerProvider as _, noop::NoopTracerProvider,
+        },
+    };
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    let provider = NoopTracerProvider::new();
+    let tracer = provider.tracer("logbrew-test");
+    let subscriber =
+        tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
+
+    tracing::subscriber::with_default(subscriber, || {
+        let remote_context = SpanContext::new(
+            TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").unwrap(),
+            SpanId::from_hex("00f067aa0ba902b7").unwrap(),
+            TraceFlags::SAMPLED,
+            true,
+            TraceState::NONE,
+        );
+        let root = tracing::info_span!("checkout.otel");
+        root.set_parent(Context::new().with_remote_span_context(remote_context))
+            .expect("root span should accept an OTel parent before it starts");
+        let _guard = root.enter();
+
+        let copied = logbrew::opentelemetry_span_context_from_current_tracing_span()
+            .expect("expected active OTel context");
+        assert_eq!(copied.trace_id(), "4bf92f3577b34da6a3ce929d0e0e4736");
+        assert_eq!(copied.span_id(), "00f067aa0ba902b7");
+        assert_eq!(copied.trace_flags(), "01");
+        assert!(copied.sampled());
+
+        let headers =
+            Traceparent::create_headers_from_opentelemetry_context(&copied, "1111111111111111")
+                .unwrap();
+        assert_eq!(
+            headers.get("traceparent").map(String::as_str),
+            Some("00-4bf92f3577b34da6a3ce929d0e0e4736-1111111111111111-01")
+        );
+
+        let child = Traceparent::span_attributes_from_opentelemetry_context(
+            &copied,
+            TraceparentSpanInput::new("checkout.otel.child", "1111111111111111", "ok"),
+        )
+        .unwrap();
+        let mut client = sample_client();
+        client
+            .span("evt_otel_child", "2026-06-02T10:00:00Z", child)
+            .unwrap();
+        let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+        let span = &payload["events"][0]["attributes"];
+        assert_eq!(span["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
+        assert_eq!(span["parentSpanId"], "00f067aa0ba902b7");
+        assert_eq!(span["spanId"], "1111111111111111");
+    });
+}
