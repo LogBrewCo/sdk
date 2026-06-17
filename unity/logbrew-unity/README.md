@@ -88,16 +88,31 @@ using (LogBrewTrace.Activate(trace))
         durationMs: 1532.25,
         context: UnityContext.Create().WithSceneName("Checkout").WithSessionId("session_001"));
 
+    UnityRequestSpan requestSpan = LogBrewUnity.StartRequestSpan(
+        method: "GET",
+        routeTemplate: "/api/checkout/status");
+    IReadOnlyDictionary<string, string> requestHeaders = requestSpan.Headers;
+    // Apply requestHeaders["traceparent"] to your app-owned UnityWebRequest.
+    LogBrewUnity.CaptureRequestSpan(
+        client,
+        "evt_request_001",
+        "2026-06-02T10:00:24Z",
+        requestSpan,
+        statusCode: 503,
+        durationMs: 184.5,
+        errorType: "UnityWebRequestError",
+        context: UnityContext.Create().WithSceneName("Checkout"));
+
     IReadOnlyDictionary<string, string> headers = LogBrewTrace.OutgoingHeaders();
     string traceparent = headers["traceparent"];
 }
 ```
 
-Issue, log, action, and Unity helper events inherit active trace metadata while the scope is active. Spans stay explicit through `LogBrewTrace.SpanAttributes(...)`, which keeps trace IDs consistent without adding global HTTP instrumentation.
+Issue, log, action, and Unity helper events inherit active trace metadata while the scope is active. Spans stay explicit through `LogBrewTrace.SpanAttributes(...)`. Request spans are app-owned: `StartRequestSpan(...)` returns only `traceparent`, and `CaptureRequestSpan(...)` records route-only metadata without query strings, payloads, or copied request headers.
 
 ## Sample Source
 
-The package includes sample source for creating a client, sending through `HttpTransport`, recording scene transitions, mapping Unity logs, capturing exceptions, creating lifecycle spans, and correlating Unity telemetry with W3C `traceparent` in your own game or realtime app.
+The package includes sample source for creating a client, sending through `HttpTransport`, recording scene transitions, mapping Unity logs, capturing exceptions, creating lifecycle and request spans, and correlating Unity telemetry with W3C `traceparent` in your own game or realtime app.
 
 ## Behavior
 
@@ -109,5 +124,7 @@ The package includes sample source for creating a client, sending through `HttpT
 - `LogBrewUnity.CaptureLogMessage()` maps Unity log types to LogBrew log levels.
 - `LogBrewUnity.CaptureException()` records Unity exception details as issue events.
 - `LogBrewUnity.CaptureLifecycleSpan()` records app-owned lifecycle transitions such as `active -> paused` as spans with previous-state duration.
+- `LogBrewUnity.StartRequestSpan()` returns a child trace context plus `traceparent` header for app-owned request clients such as `UnityWebRequest`.
+- `LogBrewUnity.CaptureRequestSpan()` records app-owned request completions as child spans with method, route template, status code, optional error type, and Unity context metadata.
 - `UnityContext` adds scene, object, platform, session, and frame metadata while keeping the core event builders independent from `UnityEngine`.
 - `LogBrewTrace` adds active trace metadata to issue, log, action, span, and Unity helper events without global HTTP patching or payload/header capture.

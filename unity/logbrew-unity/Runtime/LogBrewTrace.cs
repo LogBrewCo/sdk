@@ -302,7 +302,8 @@ namespace LogBrew.Unity
             "spanId",
             "parentSpanId",
             "traceFlags",
-            "traceSampled"
+            "traceSampled",
+            "traceparent"
         };
 
         [ThreadStatic]

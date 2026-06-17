@@ -1,0 +1,184 @@
+#nullable enable
+
+using System;
+using System.Collections.Generic;
+
+namespace LogBrew.Unity
+{
+    public sealed class UnityRequestSpan
+    {
+        internal UnityRequestSpan(LogBrewTraceContext traceContext, string method, string routeTemplate)
+        {
+            TraceContext = traceContext;
+            Method = method;
+            RouteTemplate = routeTemplate;
+        }
+
+        public LogBrewTraceContext TraceContext { get; }
+
+        public string Method { get; }
+
+        public string RouteTemplate { get; }
+
+        public IReadOnlyDictionary<string, string> Headers
+        {
+            get { return TraceContext.Headers; }
+        }
+    }
+
+    public static partial class LogBrewUnity
+    {
+        public static UnityRequestSpan StartRequestSpan(
+            string method,
+            string routeTemplate,
+            LogBrewTraceContext? context = null)
+        {
+            if (method == null)
+            {
+                throw new ArgumentNullException(nameof(method));
+            }
+
+            if (routeTemplate == null)
+            {
+                throw new ArgumentNullException(nameof(routeTemplate));
+            }
+
+            var normalizedMethod = NormalizeRequestMethod(method);
+            var normalizedRouteTemplate = NormalizeRouteTemplate(routeTemplate);
+            var parentContext = context ?? LogBrewTrace.Current;
+            var requestContext = parentContext == null
+                ? LogBrewTraceContext.CreateRoot()
+                : LogBrewTraceContext.CreateChild(parentContext);
+            return new UnityRequestSpan(requestContext, normalizedMethod, normalizedRouteTemplate);
+        }
+
+        public static void CaptureRequestSpan(
+            LogBrewClient client,
+            string id,
+            string timestamp,
+            UnityRequestSpan requestSpan,
+            int? statusCode = null,
+            double? durationMs = null,
+            string? errorType = null,
+            UnityContext? context = null)
+        {
+            if (client == null)
+            {
+                throw new ArgumentNullException(nameof(client));
+            }
+
+            if (requestSpan == null)
+            {
+                throw new ArgumentNullException(nameof(requestSpan));
+            }
+
+            ValidateStatusCode(statusCode);
+            ValidateRequestDuration(durationMs);
+            var metadata = MetadataFromContext(context);
+            metadata["source"] = "unity.request";
+            metadata["method"] = requestSpan.Method;
+            metadata["routeTemplate"] = requestSpan.RouteTemplate;
+            if (statusCode.HasValue)
+            {
+                metadata["statusCode"] = statusCode.Value;
+            }
+
+            var normalizedErrorType = NormalizeOptionalErrorType(errorType);
+            if (normalizedErrorType != null)
+            {
+                metadata["errorType"] = normalizedErrorType;
+            }
+
+            client.Span(
+                id,
+                timestamp,
+                LogBrewTrace.SpanAttributes(
+                    requestSpan.Method + " " + requestSpan.RouteTemplate,
+                    RequestStatus(statusCode, normalizedErrorType),
+                    durationMs,
+                    metadata,
+                    requestSpan.TraceContext));
+        }
+
+        private static string NormalizeRequestMethod(string method)
+        {
+            Validation.RequireNonEmpty("unity request method", method);
+            return method.Trim().ToUpperInvariant();
+        }
+
+        private static string NormalizeRouteTemplate(string routeTemplate)
+        {
+            Validation.RequireNonEmpty("unity request routeTemplate", routeTemplate);
+            var trimmed = routeTemplate.Trim();
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+                && (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+            {
+                return RequireNormalizedRoute(StripQueryAndFragment(uri.AbsolutePath));
+            }
+
+            if (trimmed.Contains("://", StringComparison.Ordinal))
+            {
+                throw new SdkException("validation_error", "unity request routeTemplate must be a route template or HTTP(S) URL");
+            }
+
+            return RequireNormalizedRoute(StripQueryAndFragment(trimmed));
+        }
+
+        private static string StripQueryAndFragment(string value)
+        {
+            var end = value.Length;
+            var queryIndex = value.IndexOf('?', StringComparison.Ordinal);
+            if (queryIndex >= 0 && queryIndex < end)
+            {
+                end = queryIndex;
+            }
+
+            var fragmentIndex = value.IndexOf('#', StringComparison.Ordinal);
+            if (fragmentIndex >= 0 && fragmentIndex < end)
+            {
+                end = fragmentIndex;
+            }
+
+            return value.Substring(0, end).Trim();
+        }
+
+        private static string RequireNormalizedRoute(string value)
+        {
+            Validation.RequireNonEmpty("unity request routeTemplate", value);
+            return value.StartsWith('/') ? value : "/" + value;
+        }
+
+        private static void ValidateStatusCode(int? statusCode)
+        {
+            if (statusCode.HasValue && (statusCode.Value < 100 || statusCode.Value > 599))
+            {
+                throw new SdkException("validation_error", "unity request statusCode must be between 100 and 599");
+            }
+        }
+
+        private static void ValidateRequestDuration(double? durationMs)
+        {
+            if (durationMs.HasValue && (durationMs.Value < 0 || double.IsNaN(durationMs.Value) || double.IsInfinity(durationMs.Value)))
+            {
+                throw new SdkException("validation_error", "unity request durationMs must be non-negative");
+            }
+        }
+
+        private static string? NormalizeOptionalErrorType(string? errorType)
+        {
+            if (errorType == null)
+            {
+                return null;
+            }
+
+            Validation.RequireNonEmpty("unity request errorType", errorType);
+            return errorType.Trim();
+        }
+
+        private static string RequestStatus(int? statusCode, string? errorType)
+        {
+            return errorType != null || (statusCode.HasValue && statusCode.Value >= 400) ? "error" : "ok";
+        }
+    }
+}

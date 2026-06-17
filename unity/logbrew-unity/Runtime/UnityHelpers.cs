@@ -5,7 +5,7 @@ using System.Collections.Generic;
 
 namespace LogBrew.Unity
 {
-    public static class LogBrewUnity
+    public static partial class LogBrewUnity
     {
         public const string SdkVersion = "0.1.0";
 
@@ -128,7 +128,7 @@ namespace LogBrew.Unity
                     metadata));
         }
 
-        private static Dictionary<string, object?> MetadataFromContext(UnityContext? context)
+        internal static Dictionary<string, object?> MetadataFromContext(UnityContext? context)
         {
             return context == null
                 ? new Dictionary<string, object?>()

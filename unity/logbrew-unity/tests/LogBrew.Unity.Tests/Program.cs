@@ -27,7 +27,8 @@ namespace LogBrew.Unity.Tests
             Run("unity_helpers_add_context_metadata", UnityHelpersAddContextMetadata);
             Run("trace_context_helpers_validate_and_correlate", TraceContextHelpersValidateAndCorrelate);
             Run("unity_lifecycle_span_uses_active_trace", UnityLifecycleSpanUsesActiveTrace);
-            Console.WriteLine("unity package tests ok (17 tests)");
+            Run("unity_request_span_uses_child_trace", UnityRequestSpanUsesChildTrace);
+            Console.WriteLine("unity package tests ok (18 tests)");
         }
 
         private static void Run(string name, Action test)
@@ -396,6 +397,75 @@ namespace LogBrew.Unity.Tests
             AssertContains(body, "\"durationSource\": \"previous_state\"");
             AssertContains(body, "\"sceneName\": \"Checkout\"");
             AssertDoesNotContain(body, "spoofed_trace");
+            AssertDoesNotContain(body, "traceparent");
+        }
+
+        private static void UnityRequestSpanUsesChildTrace()
+        {
+            const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+            const string parentSpanId = "00f067aa0ba902b7";
+            var client = NewClient();
+            var trace = LogBrewTraceContext.FromTraceparent("00-" + traceId + "-" + parentSpanId + "-01");
+            UnityRequestSpan requestSpan;
+            using (LogBrewTrace.Activate(trace))
+            {
+                requestSpan = LogBrewUnity.StartRequestSpan(
+                    "post",
+                    "https://api.example.test/api/checkout?cache=1#frag");
+                AssertEqual(traceId, requestSpan.TraceContext.TraceId);
+                AssertEqual(trace.SpanId, requestSpan.TraceContext.ParentSpanId ?? string.Empty);
+                AssertNotEqual(trace.SpanId, requestSpan.TraceContext.SpanId);
+                AssertEqual(1, requestSpan.Headers.Count);
+                AssertEqual(requestSpan.TraceContext.Traceparent, requestSpan.Headers["traceparent"]);
+
+                LogBrewUnity.CaptureRequestSpan(
+                    client,
+                    "evt_unity_request_001",
+                    "2026-06-02T10:00:18Z",
+                    requestSpan,
+                    503,
+                    184.5,
+                    "UnityWebRequestError",
+                    UnityContext.Create()
+                        .WithSceneName("Checkout")
+                        .WithMetadata("traceId", "spoofed_trace")
+                        .WithMetadata("traceparent", "spoofed_traceparent"));
+            }
+
+            Expect("validation_error", () => LogBrewUnity.StartRequestSpan("GET", "ftp://example.test/path"));
+            Expect("validation_error", () => LogBrewUnity.CaptureRequestSpan(
+                client,
+                "evt_bad_status",
+                "2026-06-02T10:00:19Z",
+                requestSpan,
+                99));
+            Expect("validation_error", () => LogBrewUnity.CaptureRequestSpan(
+                client,
+                "evt_bad_duration",
+                "2026-06-02T10:00:19Z",
+                requestSpan,
+                200,
+                -1));
+
+            var body = client.PreviewJson();
+            AssertContains(body, "\"type\": \"span\"");
+            AssertContains(body, "\"name\": \"POST /api/checkout\"");
+            AssertContains(body, "\"traceId\": \"" + traceId + "\"");
+            AssertContains(body, "\"spanId\": \"" + requestSpan.TraceContext.SpanId + "\"");
+            AssertContains(body, "\"parentSpanId\": \"" + trace.SpanId + "\"");
+            AssertContains(body, "\"status\": \"error\"");
+            AssertContains(body, "\"durationMs\": 184.5");
+            AssertContains(body, "\"source\": \"unity.request\"");
+            AssertContains(body, "\"method\": \"POST\"");
+            AssertContains(body, "\"routeTemplate\": \"/api/checkout\"");
+            AssertContains(body, "\"statusCode\": 503");
+            AssertContains(body, "\"errorType\": \"UnityWebRequestError\"");
+            AssertContains(body, "\"sceneName\": \"Checkout\"");
+            AssertDoesNotContain(body, "api.example.test");
+            AssertDoesNotContain(body, "cache=1");
+            AssertDoesNotContain(body, "#frag");
+            AssertDoesNotContain(body, "spoofed_trace");
+            AssertDoesNotContain(body, "spoofed_traceparent");
             AssertDoesNotContain(body, "traceparent");
         }
 

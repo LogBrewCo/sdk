@@ -11,6 +11,7 @@ public static class TraceCorrelation
         var client = LogBrewUnity.CreateClient("LOGBREW_API_KEY", "logbrew-unity-trace");
         var trace = LogBrewTraceContext.ContinueOrCreate("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01");
         string outgoingTraceparent;
+        string requestTraceparent;
 
         using (LogBrewTrace.Activate(trace))
         {
@@ -65,10 +66,23 @@ public static class TraceCorrelation
                 "NullReferenceException",
                 "stack trace",
                 UnityContext.Create().WithGameObjectName("CheckoutButton"));
+            var requestSpan = LogBrewUnity.StartRequestSpan(
+                "get",
+                "https://api.example.test/api/checkout/status?cache=1#poll");
+            requestTraceparent = requestSpan.Headers["traceparent"];
+            LogBrewUnity.CaptureRequestSpan(
+                client,
+                "evt_unity_trace_request_001",
+                "2026-06-02T10:00:27Z",
+                requestSpan,
+                503,
+                184.5,
+                "UnityWebRequestError",
+                UnityContext.Create().WithSceneName("Checkout").WithMetadata("traceparent", "spoofed_traceparent"));
             outgoingTraceparent = LogBrewTrace.OutgoingHeaders()["traceparent"];
         }
 
         Console.WriteLine(client.PreviewJson());
-        Console.Error.WriteLine("{\"traceparent\":\"" + outgoingTraceparent + "\"}");
+        Console.Error.WriteLine("{\"traceparent\":\"" + outgoingTraceparent + "\",\"requestTraceparent\":\"" + requestTraceparent + "\"}");
     }
 }
