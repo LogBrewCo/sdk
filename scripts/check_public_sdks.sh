@@ -82,6 +82,7 @@ STEP_LABELS=(
   "Workflow YAML validation"
   "Confidentiality leak scan"
   "JavaScript release artifact smoke"
+  "JavaScript release artifact installed CLI smoke"
   "Vite release artifact smoke"
   "Next.js release artifact smoke"
   "React Native release artifact smoke"
@@ -616,6 +617,10 @@ mark_step_complete
 
 begin_next_step "JavaScript release artifact smoke"
 run_shell_step "bash scripts/real_user_js_release_artifact_smoke.sh"
+mark_step_complete
+
+begin_next_step "JavaScript release artifact installed CLI smoke"
+run_shell_step "bash scripts/real_user_js_release_artifact_cli_smoke.sh"
 mark_step_complete
 
 begin_next_step "Vite release artifact smoke"

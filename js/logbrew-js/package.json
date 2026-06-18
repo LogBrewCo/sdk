@@ -5,6 +5,9 @@
   "type": "module",
   "main": "./index.cjs",
   "types": "./index.d.ts",
+  "bin": {
+    "logbrew-release-artifacts": "./release-artifacts.js"
+  },
   "exports": {
     ".": {
       "import": {
@@ -23,6 +26,7 @@
     "index.js",
     "index.d.ts",
     "index.d.cts",
+    "release-artifacts.js",
     "README.md",
     "examples"
   ],

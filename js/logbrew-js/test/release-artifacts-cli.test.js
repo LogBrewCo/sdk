@@ -1,0 +1,164 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const CLI_PATH = new URL("../release-artifacts.js", import.meta.url);
+
+function makeBuild() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-release-artifacts-"));
+  const appRoot = path.join(root, "app");
+  const dist = path.join(appRoot, "dist", "assets");
+  const sourceDir = path.join(appRoot, "src");
+  fs.mkdirSync(dist, { recursive: true });
+  fs.mkdirSync(sourceDir, { recursive: true });
+  const sourcePath = path.join(sourceDir, "main.js");
+  fs.writeFileSync(sourcePath, "export function checkout() { return 'source-fixture-marker'; }\n", "utf8");
+  fs.writeFileSync(
+    path.join(dist, "app.js"),
+    "function checkout(){throw new Error('source-fixture-marker')}checkout();\n//# sourceMappingURL=app.js.map\n",
+    "utf8"
+  );
+  fs.writeFileSync(
+    path.join(dist, "app.js.map"),
+    `${JSON.stringify({
+      version: 3,
+      file: "app.js",
+      sources: [sourcePath],
+      sourcesContent: ["export function checkout() { return 'source-fixture-marker'; }\n"],
+      names: ["checkout"],
+      mappings: "AAAA"
+    })}\n`,
+    "utf8"
+  );
+  return { root, appRoot, buildDir: path.join(appRoot, "dist") };
+}
+
+function runCli(args, options = {}) {
+  return spawnSync(process.execPath, [CLI_PATH.pathname, ...args], {
+    encoding: "utf8",
+    ...options
+  });
+}
+
+function jsonFromStdout(result) {
+  return JSON.parse(result.stdout);
+}
+
+test("prepare-js injects Debug IDs and strips source content from a local build", () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const result = runCli([
+      "prepare-js",
+      "--build-dir",
+      buildDir,
+      "--strip-sources-content",
+      "--strip-source-prefix",
+      appRoot,
+      "--write"
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const plan = jsonFromStdout(result);
+    assert.equal(plan.validation.status, "ready");
+    assert.equal(plan.writeApplied, true);
+    assert.equal(plan.stripSourcesContent, true);
+    assert.equal(plan.stripSourcePrefixCount, 1);
+    assert.deepEqual(plan.artifacts[0].changes.sort(), [
+      "minifiedSource.debugId",
+      "sourceMap.debug_id",
+      "sourceMap.sources",
+      "sourceMap.sourcesContent"
+    ].sort());
+    assert.doesNotMatch(result.stdout, /source-fixture-marker/);
+    assert.doesNotMatch(result.stdout, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+    const minified = fs.readFileSync(path.join(buildDir, "assets", "app.js"), "utf8");
+    const sourceMap = JSON.parse(fs.readFileSync(path.join(buildDir, "assets", "app.js.map"), "utf8"));
+    const debugId = minified.match(/debugId=([A-Za-z0-9-]+)/u)?.[1];
+    assert.match(debugId, /^[0-9a-f-]{36}$/u);
+    assert.equal(sourceMap.debug_id, debugId);
+    assert.deepEqual(sourceMap.sources, ["src/main.js"]);
+    assert.equal(sourceMap.sourcesContent, undefined);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("manifest-js emits a ready privacy-bounded source-map manifest", () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const prep = runCli([
+      "prepare-js",
+      "--build-dir",
+      buildDir,
+      "--strip-sources-content",
+      "--strip-source-prefix",
+      appRoot,
+      "--write"
+    ]);
+    assert.equal(prep.status, 0, prep.stderr);
+
+    const result = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets?flag=debug#fragment",
+      "--repository-url",
+      "https://github.com/example/checkout-web",
+      "--commit-sha",
+      "abc123"
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const manifest = jsonFromStdout(result);
+    const artifact = manifest.artifacts[0];
+    assert.equal(manifest.validation.status, "ready");
+    assert.equal(manifest.minifiedPathPrefix, "https://cdn.example/assets");
+    assert.equal(artifact.minifiedSource.minifiedUrl, "https://cdn.example/assets/assets/app.js");
+    assert.equal(artifact.sourceMap.hasSourcesContent, false);
+    assert.equal(artifact.sourceMap.sourceCount, 1);
+    assert.equal(artifact.debugId, artifact.minifiedSource.debugId);
+    assert.equal(artifact.debugId, artifact.sourceMap.debugId);
+    assert.match(artifact.minifiedSource.artifactSha256, /^[0-9a-f]{64}$/u);
+    assert.match(artifact.sourceMap.artifactSha256, /^[0-9a-f]{64}$/u);
+    assert.doesNotMatch(result.stdout, /source-fixture-marker|flag=debug|#fragment/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("manifest-js blocks embedded sourcesContent until the build is stripped", () => {
+  const { root, buildDir } = makeBuild();
+  try {
+    const result = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets"
+    ]);
+
+    assert.equal(result.status, 1);
+    const manifest = jsonFromStdout(result);
+    assert.equal(manifest.validation.status, "blocked");
+    assert.match(manifest.validation.errors.join("\n"), /source map contains sourcesContent/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

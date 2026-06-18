@@ -25,6 +25,25 @@ node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline
 npm --prefix node_modules/@logbrew/sdk/examples run agent-timeline
 ```
 
+The package also ships the dependency-free `logbrew-release-artifacts` command for local JavaScript source-map preparation. Use it in CI after your frontend build to inject matching Debug IDs, strip embedded source text by default, and create a privacy-bounded manifest that can be inspected before any backend upload contract exists:
+
+```bash
+npx logbrew-release-artifacts prepare-js \
+  --build-dir dist \
+  --strip-sources-content \
+  --strip-source-prefix "$PWD" \
+  --write
+
+npx logbrew-release-artifacts manifest-js \
+  --build-dir dist \
+  --release web@1.2.3 \
+  --environment production \
+  --service checkout-web \
+  --minified-path-prefix https://cdn.example/assets
+```
+
+The command validates local files only. It does not upload source maps, open support tickets, use account/session API values, or claim backend symbolication support.
+
 ## Example
 
 ```js

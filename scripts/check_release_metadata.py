@@ -246,6 +246,15 @@ def validate_js_package(
     files = set(manifest.get("files", []))
     for expected_file in ("README.md", "examples", "index.js", "index.cjs", "index.d.ts", "index.d.cts"):
         require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
+    if expected_name == "@logbrew/sdk":
+        require("release-artifacts.js" in files, failures, f"{location}: files must include 'release-artifacts.js'")
+        require_equal(
+            failures,
+            location,
+            "bin.logbrew-release-artifacts",
+            manifest.get("bin", {}).get("logbrew-release-artifacts"),
+            "./release-artifacts.js",
+        )
     if expected_name == "@logbrew/react-native":
         require("index.native.js" in files, failures, f"{location}: files must include 'index.native.js'")
 

@@ -141,6 +141,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         script = SCRIPT.read_text()
 
         self.assertIn('"JavaScript release artifact smoke"', script)
+        self.assertIn('"JavaScript release artifact installed CLI smoke"', script)
         self.assertIn('"Vite release artifact smoke"', script)
         self.assertIn('"Next.js release artifact smoke"', script)
         self.assertIn('"React Native release artifact smoke"', script)
@@ -151,6 +152,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             script,
             r'begin_next_step "JavaScript release artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_js_release_artifact_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "JavaScript release artifact installed CLI smoke"\n'
+            r'run_shell_step "bash scripts/real_user_js_release_artifact_cli_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Vite release artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_vite_release_artifact_smoke\.sh"\n'
