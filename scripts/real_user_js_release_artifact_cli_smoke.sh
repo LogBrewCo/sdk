@@ -22,6 +22,7 @@ package_path="$tmp_dir/$package_tgz"
 
 tar -tf "$package_path" > "$tmp_dir/package-contents.txt"
 grep -q '^package/release-artifacts.js$' "$tmp_dir/package-contents.txt"
+grep -q '^package/release-artifacts-symbolication.js$' "$tmp_dir/package-contents.txt"
 tar -xOf "$package_path" package/package.json > "$tmp_dir/packed-package.json"
 
 node - "$sdk_package_version" "$tmp_dir/packed-package.json" <<'EOF'
@@ -38,6 +39,9 @@ if (packageJson.bin?.["logbrew-release-artifacts"] !== "./release-artifacts.js")
 if (!packageJson.files?.includes("release-artifacts.js")) {
   throw new Error("release-artifacts.js missing from package files list");
 }
+if (!packageJson.files?.includes("release-artifacts-symbolication.js")) {
+  throw new Error("release-artifacts-symbolication.js missing from package files list");
+}
 EOF
 
 cd "$tmp_dir"
@@ -49,6 +53,7 @@ node_modules/.bin/logbrew-release-artifacts --help > "$tmp_dir/cli-help.txt"
 grep -q '^Usage:$' "$tmp_dir/cli-help.txt"
 grep -q 'prepare-js --build-dir <dir>' "$tmp_dir/cli-help.txt"
 grep -q 'manifest-js --build-dir <dir>' "$tmp_dir/cli-help.txt"
+grep -q 'symbolicate-js --build-dir <dir>' "$tmp_dir/cli-help.txt"
 
 app_root="$tmp_dir/checkout-app"
 build_dir="$app_root/dist"
@@ -93,6 +98,13 @@ node_modules/.bin/logbrew-release-artifacts \
   --commit-sha abc123 \
   > "$tmp_dir/manifest.json"
 
+node_modules/.bin/logbrew-release-artifacts \
+  symbolicate-js \
+  --build-dir "$build_dir" \
+  --manifest "$tmp_dir/manifest.json" \
+  --stack-frame "at checkout (https://cdn.example/assets/assets/app.js:1:1)" \
+  > "$tmp_dir/symbolicated-frame.json"
+
 node - "$tmp_dir" "$build_dir" <<'EOF'
 const fs = require("node:fs");
 const path = require("node:path");
@@ -101,9 +113,10 @@ const tmpDir = process.argv[2];
 const buildDir = process.argv[3];
 const prepareReport = JSON.parse(fs.readFileSync(path.join(tmpDir, "prepare-report.json"), "utf8"));
 const manifest = JSON.parse(fs.readFileSync(path.join(tmpDir, "manifest.json"), "utf8"));
+const symbolicatedFrame = JSON.parse(fs.readFileSync(path.join(tmpDir, "symbolicated-frame.json"), "utf8"));
 const minified = fs.readFileSync(path.join(buildDir, "assets", "app.js"), "utf8");
 const sourceMap = JSON.parse(fs.readFileSync(path.join(buildDir, "assets", "app.js.map"), "utf8"));
-const serialized = `${JSON.stringify(prepareReport)}\n${JSON.stringify(manifest)}`;
+const serialized = `${JSON.stringify(prepareReport)}\n${JSON.stringify(manifest)}\n${JSON.stringify(symbolicatedFrame)}`;
 
 if (prepareReport.validation.status !== "ready") {
   throw new Error(`prepare-js was not ready: ${JSON.stringify(prepareReport.validation)}`);
@@ -130,6 +143,15 @@ if (!debugId || debugId !== sourceMap.debug_id) {
 }
 if (artifact.debugId !== debugId || artifact.sourceMap.debugId !== debugId) {
   throw new Error("manifest debug IDs do not match prepared artifacts");
+}
+if (symbolicatedFrame.status !== "resolved") {
+  throw new Error(`symbolicate-js failed: ${JSON.stringify(symbolicatedFrame)}`);
+}
+if (symbolicatedFrame.generated.path !== "assets/app.js" || symbolicatedFrame.original.source !== "src/main.js") {
+  throw new Error(`unexpected symbolicated frame: ${JSON.stringify(symbolicatedFrame)}`);
+}
+if (symbolicatedFrame.original.line !== 1 || symbolicatedFrame.original.column !== 1) {
+  throw new Error(`unexpected original position: ${JSON.stringify(symbolicatedFrame.original)}`);
 }
 if (sourceMap.sourcesContent !== undefined || artifact.sourceMap.hasSourcesContent !== false) {
   throw new Error("sourcesContent was not stripped");

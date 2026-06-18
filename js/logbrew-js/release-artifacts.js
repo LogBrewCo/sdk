@@ -4,6 +4,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import { verifyJavaScriptSymbolication } from "./release-artifacts-symbolication.js";
+
 const DEBUG_ID_NAMESPACE = "16f4a837-7e0b-4d7c-97d9-8a7af1fd2768";
 const DEBUG_ID_RE = /(?:\/\/#|\/\*#)\s*debugId=([A-Za-z0-9._:-]+)/giu;
 const MINIFIED_SOURCE_SUFFIXES = [".js", ".mjs", ".bundle", ".jsbundle"];
@@ -39,6 +41,7 @@ function usage() {
     "Usage:",
     "  logbrew-release-artifacts prepare-js --build-dir <dir> [--write] [--strip-sources-content] [--strip-source-prefix <path>...]",
     "  logbrew-release-artifacts manifest-js --build-dir <dir> --release <id> --environment <env> --service <name> --minified-path-prefix <url-or-path> [--repository-url <url>] [--commit-sha <sha>] [--allow-sources-content]",
+    "  logbrew-release-artifacts symbolicate-js --build-dir <dir> --manifest <file> --stack-frame <frame>",
     "",
     "This installed-package helper prepares and validates local JavaScript source-map artifacts.",
     "It does not upload files or claim backend symbolication support."
@@ -99,9 +102,10 @@ function relativeTo(root, filePath) {
 function safeResolve(candidate, root) {
   const resolvedRoot = fs.realpathSync(root);
   const resolved = path.resolve(candidate);
-  const relative = path.relative(resolvedRoot, resolved);
+  const comparable = fs.existsSync(resolved) ? fs.realpathSync(resolved) : resolved;
+  const relative = path.relative(resolvedRoot, comparable);
   if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
-    return resolved;
+    return comparable;
   }
   return null;
 }
@@ -143,6 +147,19 @@ function readSourceMap(filePath) {
     return [null, ["source map must be a JSON object"]];
   }
   return [payload, []];
+}
+
+function readJsonObject(filePath, label) {
+  let payload;
+  try {
+    payload = JSON.parse(readText(filePath));
+  } catch (error) {
+    throw new Error(`${label} is not valid JSON: ${error.message}`, { cause: error });
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error(`${label} must be a JSON object`);
+  }
+  return payload;
 }
 
 function findLastMatch(source, regex) {
@@ -688,6 +705,35 @@ function runManifestJs(args) {
   return manifest.validation.status === "blocked" ? 1 : 0;
 }
 
+function runSymbolicateJs(args) {
+  const options = parseOptions(args, {
+    "build-dir": "string",
+    manifest: "string",
+    "stack-frame": "string"
+  });
+  try {
+    const buildDir = requireBuildDir(requireOption(options, "build-dir"));
+    const manifestPath = path.resolve(requireOption(options, "manifest"));
+    if (!fs.existsSync(manifestPath)) {
+      throw new Error(`manifest file does not exist: ${options.manifest}`);
+    }
+    const report = verifyJavaScriptSymbolication({
+      buildDir,
+      manifest: readJsonObject(manifestPath, "manifest"),
+      stackFrame: requireOption(options, "stack-frame")
+    });
+    printJson(report);
+    return 0;
+  } catch (error) {
+    printJson({
+      status: "validation_failed",
+      verifier: { name: "logbrew-js-release-artifact-symbolication-verifier", version: SCRIPT_VERSION },
+      validation: { errors: [error.message] }
+    });
+    return 1;
+  }
+}
+
 function main(argv) {
   const [command, ...args] = argv;
   if (!command || command === "--help" || command === "-h") {
@@ -700,6 +746,9 @@ function main(argv) {
     }
     if (command === "manifest-js") {
       return runManifestJs(args);
+    }
+    if (command === "symbolicate-js") {
+      return runSymbolicateJs(args);
     }
     throw new Error(`unknown command: ${command}`);
   } catch (error) {

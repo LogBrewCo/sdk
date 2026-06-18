@@ -39,10 +39,16 @@ npx logbrew-release-artifacts manifest-js \
   --release web@1.2.3 \
   --environment production \
   --service checkout-web \
-  --minified-path-prefix https://cdn.example/assets
+  --minified-path-prefix https://cdn.example/assets \
+  > logbrew-release-artifacts.json
+
+npx logbrew-release-artifacts symbolicate-js \
+  --build-dir dist \
+  --manifest logbrew-release-artifacts.json \
+  --stack-frame "at checkout (https://cdn.example/assets/app.js:1:1)"
 ```
 
-The command validates local files only. It does not upload source maps, open support tickets, use account/session API values, or claim backend symbolication support.
+The command validates local files only. The `symbolicate-js` check resolves one generated stack frame through the prepared manifest so you can catch bad path prefixes, embedded source content, and local source-path leaks before deploy. It does not upload source maps, open support tickets, use account/session API values, or claim backend symbolication support.
 
 ## Example
 

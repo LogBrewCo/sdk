@@ -247,7 +247,8 @@ def validate_js_package(
     for expected_file in ("README.md", "examples", "index.js", "index.cjs", "index.d.ts", "index.d.cts"):
         require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
     if expected_name == "@logbrew/sdk":
-        require("release-artifacts.js" in files, failures, f"{location}: files must include 'release-artifacts.js'")
+        for expected_file in ("release-artifacts.js", "release-artifacts-symbolication.js"):
+            require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
         require_equal(
             failures,
             location,

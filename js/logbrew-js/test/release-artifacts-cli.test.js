@@ -137,6 +137,114 @@ test("manifest-js emits a ready privacy-bounded source-map manifest", () => {
   }
 });
 
+test("symbolicate-js resolves a sanitized minified frame through a ready manifest", () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const prep = runCli([
+      "prepare-js",
+      "--build-dir",
+      buildDir,
+      "--strip-sources-content",
+      "--strip-source-prefix",
+      appRoot,
+      "--write"
+    ]);
+    assert.equal(prep.status, 0, prep.stderr);
+
+    const manifestResult = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets"
+    ]);
+    assert.equal(manifestResult.status, 0, manifestResult.stderr);
+    const manifestPath = path.join(root, "manifest.json");
+    fs.writeFileSync(manifestPath, manifestResult.stdout, "utf8");
+
+    const result = runCli([
+      "symbolicate-js",
+      "--build-dir",
+      buildDir,
+      "--manifest",
+      manifestPath,
+      "--stack-frame",
+      "at checkout (https://cdn.example/assets/assets/app.js:1:1)"
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const report = jsonFromStdout(result);
+    assert.equal(report.status, "resolved");
+    assert.equal(report.generated.path, "assets/app.js");
+    assert.equal(report.generated.line, 1);
+    assert.equal(report.generated.column, 1);
+    assert.equal(report.generated.function, "checkout");
+    assert.equal(report.original.source, "src/main.js");
+    assert.equal(report.original.line, 1);
+    assert.equal(report.original.column, 1);
+    assert.equal(report.sourceMap.hasSourcesContent, false);
+    assert.doesNotMatch(result.stdout, /source-fixture-marker/);
+    assert.doesNotMatch(result.stdout, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("symbolicate-js blocks source maps that still expose local source paths", () => {
+  const { root, buildDir } = makeBuild();
+  try {
+    const prep = runCli([
+      "prepare-js",
+      "--build-dir",
+      buildDir,
+      "--strip-sources-content",
+      "--write"
+    ]);
+    assert.equal(prep.status, 0, prep.stderr);
+
+    const manifestResult = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets"
+    ]);
+    assert.equal(manifestResult.status, 0, manifestResult.stderr);
+    const manifestPath = path.join(root, "manifest.json");
+    fs.writeFileSync(manifestPath, manifestResult.stdout, "utf8");
+
+    const result = runCli([
+      "symbolicate-js",
+      "--build-dir",
+      buildDir,
+      "--manifest",
+      manifestPath,
+      "--stack-frame",
+      "https://cdn.example/assets/assets/app.js:1:1"
+    ]);
+
+    assert.equal(result.status, 1);
+    const report = jsonFromStdout(result);
+    assert.equal(report.status, "validation_failed");
+    assert.match(report.validation.errors.join("\n"), /source map source path must be stripped/);
+    assert.doesNotMatch(result.stdout, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("manifest-js blocks embedded sourcesContent until the build is stripped", () => {
   const { root, buildDir } = makeBuild();
   try {
