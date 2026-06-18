@@ -143,6 +143,72 @@ class JavaScriptReleaseArtifactDebugIdTests(unittest.TestCase):
             self.assertEqual(plan["artifacts"][0]["changes"], ["minifiedSource.debugId"])
             self.assertIn("debugId=map-debug-id", (build_dir / "app.js").read_text(encoding="utf-8"))
 
+    def test_dry_run_plans_sources_content_stripping_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = Path(tmp) / "dist"
+            stripped_build_dir = Path(tmp) / "dist-stripped"
+            js_source = 'console.log("ok");\n//# sourceMappingURL=app.js.map\n'
+            self.write_build(
+                build_dir,
+                js_source,
+                {
+                    "version": 3,
+                    "sources": ["src/app.ts"],
+                    "sourcesContent": ["console.log('source stays local')"],
+                    "names": [],
+                    "mappings": "AAAA",
+                },
+            )
+            self.write_build(
+                stripped_build_dir,
+                js_source,
+                {"version": 3, "sources": ["src/app.ts"], "names": [], "mappings": "AAAA"},
+            )
+
+            plan = prepare_js_release_artifact_debug_ids.create_debug_id_plan(
+                build_dir=build_dir,
+                strip_sources_content=True,
+            )
+            stripped_plan = prepare_js_release_artifact_debug_ids.create_debug_id_plan(build_dir=stripped_build_dir)
+            source_map = json.loads((build_dir / "app.js.map").read_text(encoding="utf-8"))
+
+            self.assertEqual(plan["validation"]["status"], "ready")
+            self.assertFalse(plan["writeApplied"])
+            self.assertTrue(plan["stripSourcesContent"])
+            self.assertEqual(plan["artifacts"][0]["debugId"], stripped_plan["artifacts"][0]["debugId"])
+            self.assertEqual(
+                plan["artifacts"][0]["changes"],
+                ["minifiedSource.debugId", "sourceMap.debug_id", "sourceMap.sourcesContent"],
+            )
+            self.assertIn("sourcesContent", source_map)
+
+    def test_write_can_strip_sources_content_while_adding_debug_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = Path(tmp) / "dist"
+            self.write_build(
+                build_dir,
+                'console.log("ok");\n//# sourceMappingURL=app.js.map\n',
+                {
+                    "version": 3,
+                    "sources": ["src/app.ts"],
+                    "sourcesContent": ["console.log('source stays local')"],
+                    "names": [],
+                    "mappings": "AAAA",
+                },
+            )
+
+            plan = prepare_js_release_artifact_debug_ids.create_debug_id_plan(
+                build_dir=build_dir,
+                write=True,
+                strip_sources_content=True,
+            )
+            source_map = json.loads((build_dir / "app.js.map").read_text(encoding="utf-8"))
+
+            self.assertTrue(plan["writeApplied"])
+            self.assertTrue(plan["stripSourcesContent"])
+            self.assertEqual(source_map["debug_id"], plan["artifacts"][0]["debugId"])
+            self.assertNotIn("sourcesContent", source_map)
+
     def test_mismatched_debug_ids_block_without_partial_writes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             build_dir = Path(tmp) / "dist"

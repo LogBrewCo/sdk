@@ -70,15 +70,31 @@ def source_with_debug_id(source: str, debug_id: str) -> str:
     return f"{source}{separator}{debug_line}"
 
 
-def source_map_with_debug_id(payload: dict[str, Any], debug_id: str) -> dict[str, Any]:
-    if source_map_debug_id(payload):
+def source_map_with_debug_id(
+    payload: dict[str, Any],
+    debug_id: str,
+    *,
+    strip_sources_content: bool = False,
+) -> dict[str, Any]:
+    if source_map_debug_id(payload) and (not strip_sources_content or "sourcesContent" not in payload):
         return payload
     updated = dict(payload)
-    updated["debug_id"] = debug_id
+    if not source_map_debug_id(updated):
+        updated["debug_id"] = debug_id
+    if strip_sources_content:
+        updated.pop("sourcesContent", None)
     return updated
 
 
-def build_artifact_plan(js_path: Path, build_dir: Path) -> dict[str, Any]:
+def source_map_payload_for_debug_id(payload: dict[str, Any], *, strip_sources_content: bool = False) -> dict[str, Any]:
+    if not strip_sources_content or "sourcesContent" not in payload:
+        return payload
+    updated = dict(payload)
+    updated.pop("sourcesContent", None)
+    return updated
+
+
+def build_artifact_plan(js_path: Path, build_dir: Path, *, strip_sources_content: bool = False) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
     changes: list[str] = []
@@ -117,13 +133,19 @@ def build_artifact_plan(js_path: Path, build_dir: Path) -> dict[str, Any]:
     debug_id = js_debug_id or map_debug_id
     if not errors and source_map_payload is not None:
         if debug_id is None:
-            debug_id = generate_debug_id(rel_js, js_source, source_map_payload)
+            debug_id = generate_debug_id(
+                rel_js,
+                js_source,
+                source_map_payload_for_debug_id(source_map_payload, strip_sources_content=strip_sources_content),
+            )
             changes.extend(["minifiedSource.debugId", "sourceMap.debug_id"])
         else:
             if js_debug_id is None:
                 changes.append("minifiedSource.debugId")
             if map_debug_id is None:
                 changes.append("sourceMap.debug_id")
+        if strip_sources_content and "sourcesContent" in source_map_payload:
+            changes.append("sourceMap.sourcesContent")
 
     return {
         "path": rel_js,
@@ -138,7 +160,7 @@ def build_artifact_plan(js_path: Path, build_dir: Path) -> dict[str, Any]:
     }
 
 
-def apply_artifact_plan(artifact: dict[str, Any], build_dir: Path) -> None:
+def apply_artifact_plan(artifact: dict[str, Any], build_dir: Path, *, strip_sources_content: bool = False) -> None:
     debug_id = artifact["debugId"]
     js_path = build_dir / artifact["path"]
     js_source = js_path.read_text(encoding="utf-8", errors="replace")
@@ -150,7 +172,7 @@ def apply_artifact_plan(artifact: dict[str, Any], build_dir: Path) -> None:
     payload, errors = read_source_map(source_map_path)
     if errors or payload is None:
         raise ValueError(f"{artifact['path']}: source map became unreadable before write")
-    updated_payload = source_map_with_debug_id(payload, debug_id)
+    updated_payload = source_map_with_debug_id(payload, debug_id, strip_sources_content=strip_sources_content)
     if updated_payload != payload:
         source_map_path.write_text(
             f"{json.dumps(updated_payload, indent=2, sort_keys=True)}\n",
@@ -158,13 +180,15 @@ def apply_artifact_plan(artifact: dict[str, Any], build_dir: Path) -> None:
         )
 
 
-def create_debug_id_plan(*, build_dir: Path, write: bool = False) -> dict[str, Any]:
+def create_debug_id_plan(*, build_dir: Path, write: bool = False, strip_sources_content: bool = False) -> dict[str, Any]:
     build_dir = build_dir.resolve()
     if not build_dir.is_dir():
         raise ValueError(f"build directory does not exist: {build_dir}")
 
     source_files = iter_minified_source_files(build_dir)
-    artifacts = [build_artifact_plan(path, build_dir) for path in source_files]
+    artifacts = [
+        build_artifact_plan(path, build_dir, strip_sources_content=strip_sources_content) for path in source_files
+    ]
     errors = [] if artifacts else ["no JavaScript release artifact files found in build directory"]
     warnings: list[str] = []
     for artifact in artifacts:
@@ -175,7 +199,7 @@ def create_debug_id_plan(*, build_dir: Path, write: bool = False) -> dict[str, A
     status = "blocked" if errors else "ready"
     if write and status == "ready":
         for artifact in artifacts:
-            apply_artifact_plan(artifact, build_dir)
+            apply_artifact_plan(artifact, build_dir, strip_sources_content=strip_sources_content)
 
     return {
         "manifestVersion": 1,
@@ -183,6 +207,7 @@ def create_debug_id_plan(*, build_dir: Path, write: bool = False) -> dict[str, A
             "name": "logbrew-js-release-artifact-debug-id-prep",
             "version": SCRIPT_VERSION,
         },
+        "stripSourcesContent": strip_sources_content,
         "writeApplied": bool(write and status == "ready"),
         "artifacts": artifacts,
         "validation": {
@@ -203,6 +228,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Mutate build artifacts after validation. Defaults to dry-run JSON output only.",
     )
+    parser.add_argument(
+        "--strip-sources-content",
+        action="store_true",
+        help=(
+            "Remove source map sourcesContent during --write so manifests stay source-content-free by default. "
+            "Dry runs report the planned sourceMap.sourcesContent change without mutating files."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -210,7 +243,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         require_non_empty("build directory", str(args.build_dir))
-        plan = create_debug_id_plan(build_dir=args.build_dir, write=args.write)
+        plan = create_debug_id_plan(
+            build_dir=args.build_dir,
+            write=args.write,
+            strip_sources_content=args.strip_sources_content,
+        )
     except ValueError as exc:
         print(f"debug-id preparation failed: {exc}", file=sys.stderr)
         return 2

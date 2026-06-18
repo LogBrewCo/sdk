@@ -115,6 +115,9 @@ jobs:
       - name: Run JavaScript release artifact smoke
         run: bash scripts/real_user_js_release_artifact_smoke.sh
 
+      - name: Run Vite release artifact smoke
+        run: bash scripts/real_user_vite_release_artifact_smoke.sh
+
       - name: Run native release artifact smoke
         run: bash scripts/real_user_native_release_artifact_smoke.sh
 
