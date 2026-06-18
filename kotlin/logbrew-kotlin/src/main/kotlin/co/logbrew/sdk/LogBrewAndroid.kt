@@ -1,5 +1,6 @@
 package co.logbrew.sdk
 
+import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URISyntaxException
 
@@ -183,6 +184,51 @@ object LogBrewAndroid {
         )
     }
 
+    fun <T> withHttpURLConnectionSpan(
+        client: LogBrewClient,
+        id: String,
+        timestamp: String,
+        connection: HttpURLConnection,
+        routeTemplate: String = connection.url.toString(),
+        context: AndroidContext = AndroidContext.create(),
+        traceContext: LogBrewTraceContext? = null,
+        metadata: Map<String, Any?> = emptyMap(),
+        block: (HttpURLConnection) -> T,
+    ): T {
+        val requestSpan =
+            startRequestSpan(
+                method = connection.requestMethod,
+                routeTemplate = routeTemplate,
+                context = context,
+                traceContext = traceContext,
+                metadata = metadata,
+            )
+        requestSpan.applyHeadersTo(connection::setRequestProperty)
+
+        val startedAtMs = monotonicTimeMs()
+        var statusCode: Int? = null
+        var error: Throwable? = null
+
+        try {
+            val result = requestSpan.withTrace { block(connection) }
+            statusCode = responseCodeOrNull(connection)
+            return result
+        } catch (thrown: Throwable) {
+            error = thrown
+            throw thrown
+        } finally {
+            captureRequestSpan(
+                client = client,
+                id = id,
+                timestamp = timestamp,
+                requestSpan = requestSpan,
+                statusCode = statusCode,
+                durationMs = (monotonicTimeMs() - startedAtMs).coerceAtLeast(0.0),
+                error = error,
+            )
+        }
+    }
+
     fun captureLogcat(
         client: LogBrewClient,
         id: String,
@@ -357,6 +403,15 @@ object LogBrewAndroid {
         mapOf(
             "errorType" to throwableTitle(error),
         ) + optionalMetadata("errorMessage", error.message?.takeIf { it.isNotBlank() })
+
+    private fun responseCodeOrNull(connection: HttpURLConnection): Int? =
+        try {
+            connection.responseCode
+        } catch (_: Exception) {
+            null
+        }
+
+    private fun monotonicTimeMs(): Double = System.nanoTime().toDouble() / 1_000_000.0
 
     private fun throwableTitle(throwable: Throwable): String =
         throwable::class.java.simpleName.takeIf { it.isNotBlank() } ?: throwable::class.java.name

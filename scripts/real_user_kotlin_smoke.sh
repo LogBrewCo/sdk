@@ -321,6 +321,97 @@ kotlinc "$coroutines_app/CoroutinesApp.kt" \
 java -cp "$tmp_dir/coroutines-app.jar:$coroutines_classpath" CoroutinesAppKt > "$tmp_dir/coroutines-app.out"
 grep -qx 'coroutine bridge ok' "$tmp_dir/coroutines-app.out"
 
+cat > "$tmp_dir/HttpUrlConnectionApp.kt" <<'KT'
+import co.logbrew.sdk.AndroidContext
+import co.logbrew.sdk.LogAttributes
+import co.logbrew.sdk.LogBrewAndroid
+import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewTrace
+import java.net.HttpURLConnection
+import java.net.URL
+
+private class FakeConnection(
+    url: URL,
+    private val code: Int,
+) : HttpURLConnection(url) {
+    var capturedTraceparent: String? = null
+
+    override fun disconnect() = Unit
+
+    override fun usingProxy(): Boolean = false
+
+    override fun connect() {
+        connected = true
+    }
+
+    override fun setRequestProperty(
+        key: String,
+        value: String,
+    ) {
+        super.setRequestProperty(key, value)
+        if (key == "traceparent") {
+            capturedTraceparent = value
+        }
+    }
+
+    override fun getResponseCode(): Int = code
+}
+
+fun main() {
+    val client = LogBrewClient.create("LOGBREW_API_KEY", "kotlin-http-url-connection-app", "0.1.0")
+    val trace = LogBrewTrace.continueOrCreate("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
+    val connection = FakeConnection(URL("https://mobile.example.test/api/orders?cart=123#pay"), 201)
+
+    LogBrewTrace.use(trace).use {
+        val result = LogBrewAndroid.withHttpURLConnectionSpan(
+            client = client,
+            id = "evt_kotlin_http_url_connection_span_001",
+            timestamp = "2026-06-02T10:00:31Z",
+            connection = connection,
+            context = AndroidContext.create().withScreenName("Orders"),
+            metadata = mapOf("routeTemplate" to "/spoofed"),
+        ) { activeConnection ->
+            check(LogBrewTrace.currentTraceContext()?.parentSpanId == trace.spanId)
+            check(activeConnection.getRequestProperty("traceparent") == connection.capturedTraceparent)
+            client.log(
+                "evt_kotlin_http_url_connection_log_001",
+                "2026-06-02T10:00:32Z",
+                LogAttributes
+                    .create("HttpURLConnection request scoped", "info")
+                    .withLogger("HttpURLConnection")
+                    .withMetadata(mapOf("spanId" to "spoofed_span")),
+            )
+            "ok"
+        }
+        check(result == "ok")
+        check(LogBrewTrace.currentTraceContext() == trace)
+    }
+
+    val body = client.previewJson()
+    check(connection.capturedTraceparent?.startsWith("00-${trace.traceId}-") == true)
+    check("\"name\": \"GET /api/orders\"" in body)
+    check("\"statusCode\": 201" in body)
+    check("\"durationMs\"" in body)
+    check("\"traceId\": \"${trace.traceId}\"" in body)
+    check("\"parentSpanId\": \"${trace.spanId}\"" in body)
+    check("spoofed_span" !in body)
+    check("/spoofed" !in body)
+    check("cart=123" !in body)
+    check("#pay" !in body)
+    check("traceparent" !in body)
+    println("http url connection bridge ok")
+}
+KT
+kotlinc "$tmp_dir/HttpUrlConnectionApp.kt" \
+  -classpath "$maven_dir/logbrew-kotlin-0.1.0.jar" \
+  -jvm-target 11 \
+  -Xjdk-release=11 \
+  -Werror \
+  -include-runtime \
+  -d "$tmp_dir/http-url-connection-app.jar"
+java -cp "$tmp_dir/http-url-connection-app.jar:$maven_dir/logbrew-kotlin-0.1.0.jar" HttpUrlConnectionAppKt > "$tmp_dir/http-url-connection-app.out"
+grep -qx 'http url connection bridge ok' "$tmp_dir/http-url-connection-app.out"
+
 extract_dir="$tmp_dir/extracted-jar"
 mkdir -p "$extract_dir"
 (cd "$extract_dir" && jar --extract --file "$tmp_dir/logbrew-kotlin-0.1.0.jar")
@@ -334,6 +425,7 @@ grep -q 'captureProductAction' "$extract_dir/README.md"
 grep -q 'captureNetworkMilestone' "$extract_dir/README.md"
 grep -q 'startRequestSpan' "$extract_dir/README.md"
 grep -q 'captureRequestSpan' "$extract_dir/README.md"
+grep -q 'withHttpURLConnectionSpan' "$extract_dir/README.md"
 grep -q 'applyHeadersTo' "$extract_dir/README.md"
 grep -q 'withTrace' "$extract_dir/README.md"
 grep -q 'LogBrewTrace' "$extract_dir/README.md"

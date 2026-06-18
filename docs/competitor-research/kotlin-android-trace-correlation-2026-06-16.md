@@ -223,6 +223,42 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 
 - Kotlin Android still lacks a typed optional OkHttp interceptor package, automatic lifecycle instrumentation, automatic `HttpURLConnection` instrumentation, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
 
+## 2026-06-19 HttpURLConnection Convenience Follow-Up
+
+### Source Re-Read
+
+- Sentry Java/Android HEAD still resolves to `getsentry/sentry-java@7c1a728e8bd2faa42b8f1c25c9f16a145baab60f`.
+- Re-read `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpInterceptor.kt`: `intercept(...)` creates or reuses an HTTP client span, injects Sentry/W3C headers into an OkHttp request builder, runs `chain.proceed(...)`, records status/errors, and finishes in `finally`.
+- Re-read `sentry/src/main/java/io/sentry/transport/HttpConnection.java`: `createConnection()` shows direct `HttpURLConnection` setup with explicit `setRequestProperty(...)`, method, timeout, SSL, and `connect()` ownership for Sentry's own transport.
+- Datadog Android HEAD still resolves to `DataDog/dd-sdk-android@519550150648592709d441c677437d8b1c3a0707`.
+- Re-read `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/trace/TracingInterceptor.kt`: `intercept(...)`, `interceptAndTrace(...)`, `updateRequest(...)`, `handleResponse(...)`, and `handleThrowable(...)` create spans, inject configured propagation headers, run the OkHttp chain, and finish/drop spans based on response/error.
+- Re-read `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/DatadogInterceptor.kt`: `intercept(...)`, `handleResponse(...)`, and `handleThrowable(...)` combine RUM resource lifecycle with APM request spans.
+- OpenTelemetry Java instrumentation HEAD still resolves to `open-telemetry/opentelemetry-java-instrumentation@63de06bb3c29dd0cdf4059b5b755bb6bbde7fe71`.
+- Re-read `instrumentation/http-url-connection/javaagent/src/main/java/io/opentelemetry/javaagent/instrumentation/httpurlconnection/HttpUrlConnectionInstrumentation.java`: advice around `connect`, `getOutputStream`, `getInputStream`, and `getResponseCode` tracks one operation across `HttpURLConnection` lifecycle calls and handles response-code/error edge cases.
+- Re-read `HttpUrlConnectionSingletons.java`, `HttpUrlState.java`, `HttpUrlHttpAttributesGetter.java`, and `RequestPropertySetter.java`: OTel stores per-connection state, injects propagation through `setRequestProperty(...)`, records request method/status, and clears state after finish.
+
+### Pattern And Tradeoffs
+
+- Mature SDKs improve developer ergonomics by wrapping request execution and finishing spans from response/error paths instead of asking users to remember every step.
+- The automatic versions are stronger for drop-in coverage, but they own interceptors or bytecode instrumentation and may capture broader network/resource details. That is not the right default for LogBrew's dependency-light Kotlin artifact.
+- The safer LogBrew-native subset is an explicit `HttpURLConnection` helper that sets exactly one normalized `traceparent`, scopes only the caller's request block, captures status/duration/error, and keeps URL/header/body data out of telemetry.
+
+### LogBrew Follow-Up Implementation
+
+- Added `LogBrewAndroid.withHttpURLConnectionSpan(...)`.
+- It infers the method from the app-owned connection, defaults the route template from `connection.url` but sanitizes it to path-only, applies the existing request-span `traceparent` with `connection.setRequestProperty(...)`, runs the caller block under the child trace, reads the response code only after successful execution, records non-negative duration, captures exception type/message on thrown errors, and reactivates the previous active trace.
+- The helper does not patch `HttpURLConnection`, open or close the connection, own request/response streams, inspect payloads, copy arbitrary headers, read full URLs/query/fragment, add baggage/tracestate, or create an OkHttp dependency.
+
+### Updated Verification
+
+- TDD red: `bash scripts/check_kotlin_package.sh` failed with unresolved `withHttpURLConnectionSpan`.
+- `AndroidRequestSpanTests.kt` now proves header injection, request-child trace scoping, response status capture, duration metadata, parent trace restoration, route sanitization, and spoofed trace metadata overwrite with a fake `HttpURLConnection`.
+- `scripts/real_user_kotlin_smoke.sh` now compiles an installed-artifact consumer that uses the packaged jar and a fake `HttpURLConnection`; it verifies one traceparent header, child-span correlation, response status/duration capture, query/fragment stripping, and no `traceparent`/spoofed-span leakage in payload previews.
+
+### Remaining Gaps After HttpURLConnection Follow-Up
+
+- Kotlin Android still lacks a typed optional OkHttp interceptor package, automatic lifecycle instrumentation, hidden/global `HttpURLConnection` instrumentation, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
+
 ## Verification
 
 - `bash scripts/check_kotlin_style.sh`: ktlint `1.8.0` passed.

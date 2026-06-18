@@ -146,6 +146,7 @@ for needle in (
     "LogBrewAndroid.startRequestSpan",
     "LogBrewAndroid.captureRequestSpan",
     "applyHeadersTo",
+    "withHttpURLConnectionSpan",
     "withTrace",
     "HttpURLConnection",
 ):
