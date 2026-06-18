@@ -19,6 +19,7 @@ native_symbols_dir="$artifact_root/android/symbols"
 native_so="$native_symbols_dir/lib/arm64-v8a/libcheckout.so"
 unity_symbols_dir="$artifact_root/unity/symbols"
 unity_so="$unity_symbols_dir/arm64-v8a/libil2cpp.sym.so"
+unity_archive="$artifact_root/unity/symbols.zip"
 breakpad_symbols_dir="$artifact_root/native/breakpad"
 breakpad_symbol="$breakpad_symbols_dir/checkout.sym"
 breakpad_public_symbol="$breakpad_symbols_dir/checkout-public.sym"
@@ -51,8 +52,11 @@ PYTHONPATH="$repo_root/tests" python3 - \
   "$dotnet_pe" \
   "$dotnet_duplicate_pe" \
   "$dotnet_pdb" \
-  "$dotnet_embedded_pe" <<'PY'
+  "$dotnet_embedded_pe" \
+  "$unity_archive" \
+  "$unity_symbols_dir" <<'PY'
 import sys
+import zipfile
 from pathlib import Path
 
 from native_breakpad_fixture import write_breakpad_symbol
@@ -69,6 +73,12 @@ write_pe_with_codeview(Path(sys.argv[6]))
 write_pe_with_codeview(Path(sys.argv[7]))
 write_pdb(Path(sys.argv[8]))
 write_pe_with_codeview(Path(sys.argv[9]), embedded_pdb_payload=portable_pdb_payload())
+archive_path = Path(sys.argv[10])
+symbols_dir = Path(sys.argv[11])
+with zipfile.ZipFile(archive_path, "w") as archive:
+    archive.write(symbols_dir / "build_id", "symbols/build_id")
+    archive.write(symbols_dir / "LineNumberMappings.json", "symbols/LineNumberMappings.json")
+    archive.write(symbols_dir / "arm64-v8a" / "libil2cpp.sym.so", "symbols/arm64-v8a/libil2cpp.sym.so")
 PY
 
 ready_manifest="$tmp_dir/native-manifest-ready.json"
@@ -80,7 +90,7 @@ python3 "$repo_root/scripts/create_native_release_artifact_manifest.py" \
   --artifact "ios_dsym=$dsym_dir" \
   --artifact "android_proguard_mapping=$mapping_file" \
   --artifact "android_native_symbols=$native_symbols_dir" \
-  --artifact "unity_symbols=$unity_symbols_dir" \
+  --artifact "unity_symbols=$unity_archive" \
   --artifact "breakpad_symbols=$breakpad_symbols_dir" \
   --artifact "dotnet_pdb=$dotnet_symbols_dir" \
   --artifact "dotnet_pdb=$dotnet_embedded_symbols_dir" \
@@ -129,11 +139,12 @@ unity_details = manifest["artifacts"][3]["unitySymbols"]
 unity_native_file = unity_details["files"][0]
 unity_mapping_file = unity_details["files"][1]
 assert unity_details["buildId"] == "checkout-unity-2026.06.17"
+assert unity_details["archiveFormat"] == "zip"
 assert unity_details["symbolFileCount"] == 2
-assert unity_native_file["path"] == "unity/symbols/arm64-v8a/libil2cpp.sym.so"
+assert unity_native_file["path"] == "unity/symbols.zip!symbols/arm64-v8a/libil2cpp.sym.so"
 assert unity_native_file["symbolFormat"] == "elf"
 assert unity_native_file["symbolSource"] == "debug_info"
-assert unity_mapping_file["path"] == "unity/symbols/LineNumberMappings.json"
+assert unity_mapping_file["path"] == "unity/symbols.zip!symbols/LineNumberMappings.json"
 assert unity_mapping_file["symbolFormat"] == "il2cpp_mapping"
 breakpad_details = manifest["artifacts"][4]["breakpadSymbols"]
 breakpad_warnings = manifest["artifacts"][4]["validation"]["warnings"]

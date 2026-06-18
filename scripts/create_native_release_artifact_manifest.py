@@ -36,8 +36,10 @@ from native_release_artifact_unity import (  # noqa: E402
     UNITY_BUILD_ID_FILE_NAME,
     UNITY_IL2CPP_MAPPING_FILE_NAME,
     il2cpp_mapping_entry,
+    is_unity_symbols_archive,
     read_unity_build_id,
     unity_native_symbol_candidates,
+    validated_unity_symbols_zip,
 )
 
 SCRIPT_VERSION = "0.1.0"
@@ -513,11 +515,29 @@ def build_unity_symbols_artifact(path: Path, root: Path, limits: dict[str, int])
     build_id = ""
     native_symbol_files: list[dict[str, Any]] = []
     il2cpp_mapping_file: dict[str, Any] | None = None
+    archive_format = ""
 
     if not path.exists():
         errors.append("Unity symbols artifact is missing")
+    elif is_unity_symbols_archive(path):
+        symlink_errors = validate_no_symlinks(path, root)
+        errors.extend(symlink_errors)
+        if not symlink_errors:
+            validate_artifact_byte_limit("Unity symbols", path, errors, limits)
+            archive = validated_unity_symbols_zip(
+                path,
+                archive_rel_path=relative(path, root),
+                max_symbol_files=limits["maxSymbolFiles"],
+                max_symbol_file_bytes=limits["maxSymbolFileBytes"],
+            )
+            errors.extend(archive.errors)
+            warnings.extend(archive.warnings)
+            build_id = archive.build_id
+            native_symbol_files = archive.native_symbol_files
+            il2cpp_mapping_file = archive.il2cpp_mapping_file
+            archive_format = archive.archive_format
     elif not path.is_dir():
-        errors.append("Unity symbols artifact must be a directory")
+        errors.append("Unity symbols artifact must be a directory or .zip archive")
     else:
         symlink_errors = validate_no_symlinks(path, root)
         errors.extend(symlink_errors)
@@ -585,6 +605,8 @@ def build_unity_symbols_artifact(path: Path, root: Path, limits: dict[str, int])
             "files": files,
         }
     }
+    if archive_format:
+        details["unitySymbols"]["archiveFormat"] = archive_format
 
     return base_artifact_entry(
         artifact_type="unity_symbols",
