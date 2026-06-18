@@ -22,7 +22,7 @@ Treat logs, issues/errors, traces/spans, and metrics as distinct observability s
 - Keep automatic metric capture opt-in until the source, frequency, and attribute set are bounded. Avoid query strings, raw stack text, document titles, user agents, and unbounded labels by default.
 - When metrics helpers exist, prove them from installed artifacts with counters, gauges, histogram-like values, invalid values, omitted optional fields, batching, retry behavior, flush/shutdown behavior, and machine-parseable JSON separate from trace/log parity fixtures.
 - Treat profiling, native debug-symbol, and source-map workflows as separate release capabilities, not implied by error or trace capture. Document setup and installed-artifact proof before advertising them as supported.
-- Treat release artifact symbolication as a backend-plus-tooling capability. The current source-map/debug-symbol gap is tracked in [the 2026-06-13 competitor review](competitor-research/source-maps-debug-symbols-2026-06-13.md) and [backend contract report](backend-contracts/release-artifact-symbolication-2026-06-13.md); repo-local JavaScript dry-run manifest, Debug ID preparation, Vite build-output proof, native/mobile dry-run manifest, and real-user build-output smoke proof exist, but do not claim support until upload, validation, lookup, and real minified/native symbolication proof exist.
+- Treat release artifact symbolication as a backend-plus-tooling capability. The current source-map/debug-symbol gap is tracked in [the 2026-06-13 competitor review](competitor-research/source-maps-debug-symbols-2026-06-13.md) and [backend contract report](backend-contracts/release-artifact-symbolication-2026-06-13.md); repo-local JavaScript dry-run manifest, Debug ID preparation, Vite and Next.js build-output proof, native/mobile dry-run manifest, and real-user build-output smoke proof exist, but do not claim support until upload, validation, lookup, and real minified/native symbolication proof exist.
 
 ## Real-user QA
 
@@ -125,6 +125,7 @@ For PHP packages specifically, prefer a smoke path that creates a fresh Composer
 - GitHub release safety settings before publishing: `python3 scripts/check_github_release_safety.py`
 - JavaScript release-artifact dry-run proof: `bash scripts/real_user_js_release_artifact_smoke.sh`
 - Vite release-artifact build proof: `bash scripts/real_user_vite_release_artifact_smoke.sh`
+- Next.js release-artifact build proof: `bash scripts/real_user_next_release_artifact_smoke.sh`
 - Native/mobile release-artifact dry-run proof: `bash scripts/real_user_native_release_artifact_smoke.sh`
 - Public registry versions after real publishes: `python3 scripts/check_registry_publication.py --target all`
 - Shared Markdown docs: `python3 scripts/check_markdown_links.py`

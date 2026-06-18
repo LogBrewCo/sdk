@@ -172,6 +172,9 @@ jobs:
       - name: Run Vite release artifact smoke
         run: bash scripts/real_user_vite_release_artifact_smoke.sh
 
+      - name: Run Next.js release artifact smoke
+        run: bash scripts/real_user_next_release_artifact_smoke.sh
+
       - name: Run native release artifact smoke
         run: bash scripts/real_user_native_release_artifact_smoke.sh
 
