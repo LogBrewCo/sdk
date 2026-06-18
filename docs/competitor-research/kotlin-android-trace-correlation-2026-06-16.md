@@ -259,6 +259,49 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 
 - Kotlin Android still lacks a typed optional OkHttp interceptor package, automatic lifecycle instrumentation, hidden/global `HttpURLConnection` instrumentation, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
 
+## 2026-06-19 Optional OkHttp Package Boundary Report
+
+### Source Re-Read
+
+- Sentry Java/Android HEAD still resolves to `getsentry/sentry-java@7c1a728e8bd2faa42b8f1c25c9f16a145baab60f`.
+- Re-read `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpInterceptor.kt`: `intercept(...)` creates or reuses a child HTTP span, injects propagation into a cloned `Request.Builder`, runs `chain.proceed(...)`, records status or `IOException`, captures optional failed-request details, and finishes the span in `finally`.
+- Re-read `SentryOkHttpInterceptor.finishSpan(...)`, `sendBreadcrumb(...)`, and `shouldCaptureClientError(...)`: Sentry adds request breadcrumbs, can capture response/request network detail, lets `BeforeSpanCallback` mutate or drop spans, and filters client-error reporting by status ranges and propagation targets.
+- Datadog Android HEAD still resolves to `DataDog/dd-sdk-android@519550150648592709d441c677437d8b1c3a0707`.
+- Re-read `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/trace/TracingInterceptor.kt`: `intercept(...)`, `interceptAndTrace(...)`, `buildSpan(...)`, `updateRequest(...)`, `handleResponse(...)`, `handleThrowable(...)`, and `Builder.build()` create an OkHttp interceptor, clone immutable requests, inject selected propagation header families, finish or drop spans, and expose a traced-request listener.
+- Re-read `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/DatadogInterceptor.kt`: `intercept(...)`, `onRequestIntercepted(...)`, `handleResponse(...)`, and `handleThrowable(...)` combine RUM resource tracking with trace span completion and optional resource-header extraction.
+- OpenTelemetry Java instrumentation HEAD still resolves to `open-telemetry/opentelemetry-java-instrumentation@63de06bb3c29dd0cdf4059b5b755bb6bbde7fe71`.
+- Re-read `instrumentation/okhttp/okhttp-3.0/library/src/main/java/io/opentelemetry/instrumentation/okhttp/v3_0/internal/TracingInterceptor.java`: `intercept(...)` starts an instrumenter context, injects it into a cloned request, scopes `chain.proceed(...)`, and ends the span from response or throwable.
+- Re-read `instrumentation/okhttp/okhttp-3.0/library/src/main/java/io/opentelemetry/instrumentation/okhttp/v3_0/TracingCallFactory.java`: `newCall(...)`, `execute()`, and callback wrappers preserve the calling context for synchronous and asynchronous OkHttp execution.
+
+### Competitor Pattern
+
+- Mature Android/Kotlin SDKs win on OkHttp ergonomics because developers add one interceptor or call factory and get child spans plus outbound propagation without hand-coding `startRequestSpan(...)`, header mutation, `try/finally`, status capture, and error capture on every call.
+- The cost is real: Sentry and Datadog pull in dedicated OkHttp integration artifacts and larger product coupling. They may capture breadcrumbs, body sizes, header-derived resource data, failed-request events, baggage/tracestate, multiple propagation formats, and RUM/resource lifecycle data. OpenTelemetry's library is cleaner conceptually but still adds OTel dependencies and broader instrumenter abstractions.
+- LogBrew's core `co.logbrew:logbrew-kotlin` should stay dependency-light. Adding `okhttp3.Interceptor` to core would make every Kotlin/JVM consumer pay for OkHttp even when they only need server-side, Android log, `HttpURLConnection`, or custom-client helpers.
+
+### Recommended LogBrew-Native Design
+
+- Add a separate optional Maven artifact, tentatively `co.logbrew:logbrew-kotlin-okhttp`, instead of adding OkHttp to the core artifact.
+- The artifact should depend on `co.logbrew:logbrew-kotlin` and OkHttp, expose one app-owned interceptor such as `LogBrewOkHttpInterceptor`, and keep construction explicit: `OkHttpClient.Builder().addInterceptor(LogBrewOkHttpInterceptor(client, routeTemplate = ...))`.
+- The interceptor should reuse `LogBrewAndroid.startRequestSpan(...)`, `AndroidRequestSpan.applyHeadersTo(...)`, `AndroidRequestSpan.withTrace(...)`, and `LogBrewAndroid.captureRequestSpan(...)` rather than duplicating trace logic.
+- It should clone the immutable OkHttp request with exactly one normalized `traceparent`, run `chain.proceed(...)` under the child trace, capture response code and non-negative duration, capture exception type/message only, rethrow original exceptions, and return to the previous trace scope.
+- It should default route metadata to method plus query/hash-free path, with an optional route-template resolver for apps that want low-cardinality patterns such as `/users/{id}`.
+- It should not capture request/response bodies, arbitrary headers, cookies, full URLs, query strings, fragments, baggage, tracestate, resource-header extraction, RUM state, retry behavior, usage/quota state, or support-ticket diagnostics.
+
+### Next Implementation Task
+
+- Create `kotlin/logbrew-kotlin-okhttp/` as a new optional integration artifact with its own `pom.xml`, source, tests, README, and installed Gradle smoke.
+- Update Maven release packaging only if the repo intentionally supports publishing a third Maven artifact; otherwise keep it source/example-only and explicitly state it is not a published artifact yet.
+- First failing test should compile a fake OkHttp `Interceptor.Chain` or temporary Gradle app against the planned artifact and fail because `LogBrewOkHttpInterceptor` does not exist.
+- Green implementation should prove traceparent injection, child trace scoping, response status/duration, error rethrow, route sanitization, prior trace restoration, no payload/header/full-URL/query leakage, and no core artifact OkHttp dependency.
+- Verification should include `bash scripts/check_kotlin_style.sh`, Kotlin package checks updated for the optional artifact boundary, installed Gradle smoke with OkHttp, markdown links, confidentiality scan, release metadata checks, generated-artifact hygiene, and thermo review before commit.
+
+### Status
+
+- This cycle is a source-backed gap report and package-boundary decision, not an SDK implementation.
+- LogBrew remains weaker than Sentry/Datadog for one-line OkHttp adoption until the optional artifact or source-packaged integration ships.
+- LogBrew remains better for developers who need a small dependency-light core artifact, app-owned instrumentation, and privacy-bounded request spans without body/header/full-URL capture.
+
 ## Verification
 
 - `bash scripts/check_kotlin_style.sh`: ktlint `1.8.0` passed.
