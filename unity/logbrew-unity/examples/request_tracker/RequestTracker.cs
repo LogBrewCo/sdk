@@ -41,7 +41,13 @@ public static class RequestTracker
                 context: UnityContext.Create()
                     .WithFrame(128)
                     .WithMetadata("traceId", "spoofed_trace")
-                    .WithMetadata("traceparent", "spoofed_traceparent"));
+                    .WithMetadata("traceparent", "spoofed_traceparent"),
+                timings: UnityRequestTimings.Create()
+                    .WithQueuedMs(4.25)
+                    .WithSendMs(12.5)
+                    .WithWaitMs(80)
+                    .WithReceiveMs(87.75)
+                    .WithResponseBodyBytes(2048));
         }
 
         System.Console.WriteLine(client.PreviewJson());

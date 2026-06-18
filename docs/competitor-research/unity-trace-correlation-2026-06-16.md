@@ -127,3 +127,23 @@ LogBrew Unity already had source-only UPM packaging, explicit spans, Unity scene
 - This reduces the coroutine convenience gap without creating hidden `MonoBehaviour` objects, scheduling coroutines globally, assuming ambient async context, patching Unity APIs, or owning cancellation/disposal semantics.
 - LogBrew still deliberately avoids Sentry-style automatic coroutine/lifecycle instrumentation, Datadog-style global Unity hooks, OpenTelemetry baggage/tracestate, rich span event arrays, URL/request phase timings, and native crash/symbolication integration.
 - Remaining Unity gaps: OpenTelemetry context ingestion, richer span events/exceptions beyond bounded summary fields, URL/request phase timings, hidden/global instrumentation for teams that explicitly want it, and native crash/symbolication parity.
+
+## 2026-06-18 Request Timing Follow-Up
+
+### Source Reading
+
+- Refreshed Sentry Unity at `a9bebf56a8808b866ff11330bf42030685701cf9` and re-read `src/Sentry.Unity/Integrations/StartupTracingIntegration.cs`, `src/Sentry.Unity/Integrations/SceneManagerTracingIntegration.cs`, and `src/Sentry.Unity/SentryMonoBehaviour.cs`: Sentry is stronger for startup, scene-load, and `Awake` spans, but current public source does not expose a UnityWebRequest user-request timing helper.
+- Refreshed Datadog Unity at `309e84de7c20af6ec47c2ff3e6c6f8d339937e93` and re-read `packages/Datadog.Unity/Runtime/Rum/DatadogTrackedWebRequest.cs`, `ResourceTrackingHelper.cs`, `Runtime/WebGL/ResourceTracker.cs`, and `Runtime/WebGL/DatadogWebGLRum.cs`: Datadog is stronger for resource tracking because its wrapper records resource duration, status, downloaded bytes, content type, error details, and tracing headers, but it owns request wrapping and keeps richer URL/resource metadata than LogBrew should copy by default.
+- Checked Datadog Unity package mirror at `1dbbfe29d72028c430b800107a2cf3271a0aa163` and found the same runtime resource-tracking pattern.
+
+### LogBrew Update
+
+- Added dependency-free `UnityRequestTimings` for optional, fixed app-supplied request phase metadata: queued, name lookup, connect, TLS, send, wait, receive, and response-body byte count.
+- `LogBrewUnity.CaptureRequestSpan(...)` and `UnityRequestTracker.Capture(...)` now merge those timings into the existing sanitized request span path, so request timing phases correlate with active trace context without a `UnityEngine.Networking` dependency.
+- Packaged `examples/request_tracker/RequestTracker.cs` plus `scripts/check_unity_request_tracker_payload.py` prove source and installed UPM tarballs record timing phase metadata while still stripping host/query/hash values and overwriting spoofed trace keys.
+
+### Tradeoffs
+
+- This closes the "URL/request phase timings" gap with an explicit, lighter model suitable for app-owned UnityWebRequest code.
+- LogBrew still deliberately avoids Datadog-style request wrapper ownership, automatic/global UnityWebRequest instrumentation, full URL capture, request/response headers, payloads, content type, error messages, baggage, tracestate, and raw propagation metadata.
+- Remaining Unity gaps: OpenTelemetry context ingestion, richer span events/exceptions beyond bounded summary fields, native crash/symbolication parity, and optional heavier framework-owned instrumentation for teams that explicitly want it.

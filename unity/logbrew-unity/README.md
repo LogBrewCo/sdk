@@ -101,7 +101,12 @@ using (LogBrewTrace.Activate(trace))
         statusCode: 503,
         durationMs: 184.5,
         errorType: "UnityWebRequestError",
-        context: UnityContext.Create().WithSceneName("Checkout"));
+        context: UnityContext.Create().WithSceneName("Checkout"),
+        timings: UnityRequestTimings.Create()
+            .WithSendMs(12.5)
+            .WithWaitMs(80)
+            .WithReceiveMs(92)
+            .WithResponseBodyBytes(2048));
 
     IReadOnlyDictionary<string, string> headers = LogBrewTrace.OutgoingHeaders();
     string traceparent = headers["traceparent"];
@@ -116,14 +121,14 @@ using (LogBrewTrace.Activate(trace))
 }
 ```
 
-Issue, log, action, and Unity helper events inherit active trace metadata while the scope is active. Spans stay explicit through `LogBrewTrace.SpanAttributes(...)`. Request spans are app-owned: `StartRequestSpan(...)` returns only `traceparent`, and `CaptureRequestSpan(...)` records route-only metadata without query strings, payloads, or copied request headers.
-For app-owned `UnityWebRequest` calls, create a `UnityRequestTracker` and pass `request.SetRequestHeader` when starting the request; after `yield return request.SendWebRequest()`, call `Capture(...)` with the response status or Unity error type. The tracker writes exactly one `traceparent`, computes duration from your realtime clock, and records the existing sanitized request span without wrapping or patching Unity networking.
+Issue, log, action, and Unity helper events inherit active trace metadata while the scope is active. Spans stay explicit through `LogBrewTrace.SpanAttributes(...)`. Request spans are app-owned: `StartRequestSpan(...)` returns only `traceparent`, and `CaptureRequestSpan(...)` records route-only metadata, optional fixed `UnityRequestTimings` phase durations, and response byte counts without query strings, payloads, or copied request headers.
+For app-owned `UnityWebRequest` calls, create a `UnityRequestTracker` and pass `request.SetRequestHeader` when starting the request; after `yield return request.SendWebRequest()`, call `Capture(...)` with the response status, Unity error type, and optional fixed request timing phases. The tracker writes exactly one `traceparent`, computes duration from your realtime clock, and records the existing sanitized request span without wrapping or patching Unity networking.
 For app-owned lifecycle callbacks, create a `UnityLifecycleTracker` in your own `MonoBehaviour`, then call `CapturePause(...)` from `OnApplicationPause` or `CaptureFocus(...)` from `OnApplicationFocus`. The tracker deduplicates repeated pause/focus notifications and records previous-state duration spans, but it does not create hidden GameObjects, subscribe globally, infer session health, or patch Unity APIs.
 For app-owned coroutines, use `LogBrewUnity.TraceCoroutine(...)` when you only need trace reactivation across `yield` boundaries. Use `UnityCoroutineTracker` when you also want a completion/failure span with duration from your realtime clock. Both helpers return an `IEnumerator` that you pass to your own `StartCoroutine(...)`; neither creates hidden `MonoBehaviour` objects, patches coroutine scheduling, or subscribes to lifecycle events.
 
 ## Sample Source
 
-The package includes sample source for creating a client, sending through `HttpTransport`, recording scene transitions, mapping Unity logs, capturing exceptions, creating lifecycle, request, and coroutine spans, tracking app-owned lifecycle callbacks, applying app-owned request headers, preserving coroutine trace context, and correlating Unity telemetry with W3C `traceparent` in your own game or realtime app.
+The package includes sample source for creating a client, sending through `HttpTransport`, recording scene transitions, mapping Unity logs, capturing exceptions, creating lifecycle, request, and coroutine spans, tracking app-owned lifecycle callbacks, applying app-owned request headers, recording request timing phases, preserving coroutine trace context, and correlating Unity telemetry with W3C `traceparent` in your own game or realtime app.
 
 ## Behavior
 
@@ -137,8 +142,9 @@ The package includes sample source for creating a client, sending through `HttpT
 - `LogBrewUnity.CaptureLifecycleSpan()` records app-owned lifecycle transitions such as `active -> paused` as spans with previous-state duration.
 - `UnityLifecycleTracker` turns app-owned pause/focus callbacks into deduplicated lifecycle spans without hidden `MonoBehaviour` creation or global subscriptions.
 - `LogBrewUnity.StartRequestSpan()` returns a child trace context plus `traceparent` header for app-owned request clients such as `UnityWebRequest`.
-- `LogBrewUnity.CaptureRequestSpan()` records app-owned request completions as child spans with method, route template, status code, optional error type, and Unity context metadata.
-- `UnityRequestTracker` combines app-owned request header injection with completion capture and duration calculation while leaving `UnityWebRequest` ownership with your code.
+- `LogBrewUnity.CaptureRequestSpan()` records app-owned request completions as child spans with method, route template, status code, optional error type, optional fixed `UnityRequestTimings`, and Unity context metadata.
+- `UnityRequestTimings` records optional request phase durations and response byte counts without capturing URLs, headers, payloads, baggage, or tracestate.
+- `UnityRequestTracker` combines app-owned request header injection with completion capture, duration calculation, and optional request timings while leaving `UnityWebRequest` ownership with your code.
 - `LogBrewUnity.TraceCoroutine()` captures an explicit or active trace and reactivates it while each app-owned coroutine step executes.
 - `UnityCoroutineTracker` wraps an app-owned coroutine with child trace context and records one completion or exception-type-only failure span.
 - `UnityContext` adds scene, object, platform, session, and frame metadata while keeping the core event builders independent from `UnityEngine`.

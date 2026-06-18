@@ -31,9 +31,10 @@ namespace LogBrew.Unity.Tests
             Run("unity_lifecycle_tracker_records_deduplicated_transitions", UnityLifecycleTrackerRecordsDeduplicatedTransitions);
             Run("unity_request_span_uses_child_trace", UnityRequestSpanUsesChildTrace);
             Run("unity_request_tracker_applies_headers_and_captures_duration", UnityRequestTrackerAppliesHeadersAndCapturesDuration);
+            Run("unity_request_timings_are_fixed_and_privacy_bounded", UnityRequestTimingsAreFixedAndPrivacyBounded);
             Run("unity_coroutine_wrapper_reactivates_trace_per_step", UnityCoroutineWrapperReactivatesTracePerStep);
             Run("unity_coroutine_tracker_records_completion_and_failure_spans", UnityCoroutineTrackerRecordsCompletionAndFailureSpans);
-            Console.WriteLine("unity package tests ok (22 tests)");
+            Console.WriteLine("unity package tests ok (23 tests)");
         }
 
         private static void Run(string name, Action test)
@@ -431,10 +432,14 @@ namespace LogBrew.Unity.Tests
                     503,
                     184.5,
                     "UnityWebRequestError",
-                    UnityContext.Create()
+                    context: UnityContext.Create()
                         .WithSceneName("Checkout")
                         .WithMetadata("traceId", "spoofed_trace")
-                        .WithMetadata("traceparent", "spoofed_traceparent"));
+                        .WithMetadata("traceparent", "spoofed_traceparent"),
+                    timings: UnityRequestTimings.Create()
+                        .WithNameLookupMs(2.25)
+                        .WithConnectMs(8.5)
+                        .WithTlsMs(11.75));
             }
 
             Expect("validation_error", () => LogBrewUnity.StartRequestSpan("GET", "ftp://example.test/path"));
@@ -465,6 +470,9 @@ namespace LogBrew.Unity.Tests
             AssertContains(body, "\"routeTemplate\": \"/api/checkout\"");
             AssertContains(body, "\"statusCode\": 503");
             AssertContains(body, "\"errorType\": \"UnityWebRequestError\"");
+            AssertContains(body, "\"requestNameLookupMs\": 2.25");
+            AssertContains(body, "\"requestConnectMs\": 8.5");
+            AssertContains(body, "\"requestTlsMs\": 11.75");
             AssertContains(body, "\"sceneName\": \"Checkout\"");
             AssertDoesNotContain(body, "api.example.test");
             AssertDoesNotContain(body, "cache=1");
@@ -569,6 +577,58 @@ namespace LogBrew.Unity.Tests
             AssertDoesNotContain(body, "spoofed_trace");
             AssertDoesNotContain(body, "spoofed_traceparent");
             AssertDoesNotContain(body, "traceparent");
+        }
+
+        private static void UnityRequestTimingsAreFixedAndPrivacyBounded()
+        {
+            const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+            const string parentSpanId = "00f067aa0ba902b7";
+            var client = NewClient();
+            var ids = new Queue<string>();
+            ids.Enqueue("evt_unity_request_timing_001");
+            var timestamps = new Queue<string>();
+            timestamps.Enqueue("2026-06-02T10:00:41Z");
+            var now = 2000.0;
+            var tracker = new UnityRequestTracker(
+                client,
+                () => ids.Dequeue(),
+                () => timestamps.Dequeue(),
+                () => now);
+            var trace = LogBrewTraceContext.FromTraceparent("00-" + traceId + "-" + parentSpanId + "-01");
+
+            using (LogBrewTrace.Activate(trace))
+            {
+                var request = tracker.Start("GET", "/api/catalog");
+                now = 2142.25;
+                tracker.Capture(
+                    request,
+                    statusCode: 200,
+                    timings: UnityRequestTimings.Create()
+                        .WithQueuedMs(4.25)
+                        .WithSendMs(12.5)
+                        .WithWaitMs(80)
+                        .WithReceiveMs(45.5)
+                        .WithResponseBodyBytes(2048));
+            }
+
+            Expect("validation_error", () => UnityRequestTimings.Create().WithQueuedMs(-1));
+            Expect("validation_error", () => UnityRequestTimings.Create().WithWaitMs(double.PositiveInfinity));
+            Expect("validation_error", () => UnityRequestTimings.Create().WithResponseBodyBytes(-1));
+
+            var body = client.PreviewJson();
+            AssertContains(body, "\"evt_unity_request_timing_001\"");
+            AssertContains(body, "\"name\": \"GET /api/catalog\"");
+            AssertContains(body, "\"status\": \"ok\"");
+            AssertContains(body, "\"durationMs\": 142.25");
+            AssertContains(body, "\"requestQueuedMs\": 4.25");
+            AssertContains(body, "\"requestSendMs\": 12.5");
+            AssertContains(body, "\"requestWaitMs\": 80");
+            AssertContains(body, "\"requestReceiveMs\": 45.5");
+            AssertContains(body, "\"responseBodyBytes\": 2048");
+            AssertDoesNotContain(body, "traceparent");
+            AssertDoesNotContain(body, "api.example.test");
+            AssertDoesNotContain(body, "Authorization");
+            AssertDoesNotContain(body, "payload");
         }
 
         private static void UnityLifecycleTrackerRecordsDeduplicatedTransitions()

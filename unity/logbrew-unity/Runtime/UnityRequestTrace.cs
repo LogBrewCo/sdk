@@ -44,6 +44,82 @@ namespace LogBrew.Unity
         }
     }
 
+    public sealed class UnityRequestTimings
+    {
+        private readonly Dictionary<string, object?> values = new Dictionary<string, object?>();
+
+        private UnityRequestTimings()
+        {
+        }
+
+        public static UnityRequestTimings Create()
+        {
+            return new UnityRequestTimings();
+        }
+
+        public UnityRequestTimings WithQueuedMs(double queuedMs)
+        {
+            return WithDuration("requestQueuedMs", queuedMs);
+        }
+
+        public UnityRequestTimings WithNameLookupMs(double nameLookupMs)
+        {
+            return WithDuration("requestNameLookupMs", nameLookupMs);
+        }
+
+        public UnityRequestTimings WithConnectMs(double connectMs)
+        {
+            return WithDuration("requestConnectMs", connectMs);
+        }
+
+        public UnityRequestTimings WithTlsMs(double tlsMs)
+        {
+            return WithDuration("requestTlsMs", tlsMs);
+        }
+
+        public UnityRequestTimings WithSendMs(double sendMs)
+        {
+            return WithDuration("requestSendMs", sendMs);
+        }
+
+        public UnityRequestTimings WithWaitMs(double waitMs)
+        {
+            return WithDuration("requestWaitMs", waitMs);
+        }
+
+        public UnityRequestTimings WithReceiveMs(double receiveMs)
+        {
+            return WithDuration("requestReceiveMs", receiveMs);
+        }
+
+        public UnityRequestTimings WithResponseBodyBytes(long responseBodyBytes)
+        {
+            if (responseBodyBytes < 0)
+            {
+                throw new SdkException("validation_error", "unity request responseBodyBytes must be non-negative");
+            }
+
+            values["responseBodyBytes"] = responseBodyBytes;
+            return this;
+        }
+
+        internal IDictionary<string, object?> ToMetadata()
+        {
+            return new Dictionary<string, object?>(values);
+        }
+
+        private UnityRequestTimings WithDuration(string key, double value)
+        {
+            if (value < 0 || double.IsNaN(value) || double.IsInfinity(value))
+            {
+                throw new SdkException("validation_error", "unity request timing values must be non-negative");
+            }
+
+            values[key] = value;
+            return this;
+        }
+    }
+
     public sealed class UnityRequestTracker
     {
         private readonly LogBrewClient client;
@@ -89,7 +165,8 @@ namespace LogBrew.Unity
             UnityTrackedRequest request,
             int? statusCode = null,
             string? errorType = null,
-            UnityContext? context = null)
+            UnityContext? context = null,
+            UnityRequestTimings? timings = null)
         {
             if (request == null)
             {
@@ -105,10 +182,10 @@ namespace LogBrew.Unity
                 statusCode,
                 elapsedMs,
                 errorType,
-                MetadataFor(context));
+                MetadataFor(context, timings));
         }
 
-        private Dictionary<string, object?> MetadataFor(UnityContext? currentContext)
+        private Dictionary<string, object?> MetadataFor(UnityContext? currentContext, UnityRequestTimings? timings)
         {
             var metadata = LogBrewUnity.MetadataFromContext(context);
             if (currentContext != null)
@@ -119,6 +196,7 @@ namespace LogBrew.Unity
                 }
             }
 
+            LogBrewUnity.AddRequestTimings(metadata, timings);
             return metadata;
         }
 
@@ -167,7 +245,8 @@ namespace LogBrew.Unity
             int? statusCode = null,
             double? durationMs = null,
             string? errorType = null,
-            UnityContext? context = null)
+            UnityContext? context = null,
+            UnityRequestTimings? timings = null)
         {
             if (client == null)
             {
@@ -187,7 +266,7 @@ namespace LogBrew.Unity
                 statusCode,
                 durationMs,
                 errorType,
-                MetadataFromContext(context));
+                MetadataWithTimings(context, timings));
         }
 
         internal static void CaptureRequestSpanWithMetadata(
@@ -225,6 +304,24 @@ namespace LogBrew.Unity
                     durationMs,
                     metadata,
                     requestSpan.TraceContext));
+        }
+
+        private static Dictionary<string, object?> MetadataWithTimings(UnityContext? context, UnityRequestTimings? timings)
+        {
+            var metadata = MetadataFromContext(context);
+            AddRequestTimings(metadata, timings);
+            return metadata;
+        }
+
+        internal static void AddRequestTimings(Dictionary<string, object?> metadata, UnityRequestTimings? timings)
+        {
+            if (timings != null)
+            {
+                foreach (var item in timings.ToMetadata())
+                {
+                    metadata[item.Key] = item.Value;
+                }
+            }
         }
 
         private static string NormalizeRequestMethod(string method)

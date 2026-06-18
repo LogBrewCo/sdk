@@ -107,7 +107,7 @@ with tarfile.open(package_tgz, "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
 if manifest["name"] != "co.logbrew.unity":
     raise SystemExit("wrong package name")
-for needle in ("LOGBREW_API_KEY", "LogBrewUnity.CreateClient", "HttpTransport", "LogBrewTrace", "UnityLifecycleTracker", "UnityRequestTracker", "UnityCoroutineTracker", "TraceCoroutine", "StartRequestSpan", "CaptureRequestSpan", "traceparent", "https://api.logbrew.com/v1/events", "sample source"):
+for needle in ("LOGBREW_API_KEY", "LogBrewUnity.CreateClient", "HttpTransport", "LogBrewTrace", "UnityLifecycleTracker", "UnityRequestTracker", "UnityRequestTimings", "UnityCoroutineTracker", "TraceCoroutine", "StartRequestSpan", "CaptureRequestSpan", "traceparent", "https://api.logbrew.com/v1/events", "sample source"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
 PY
