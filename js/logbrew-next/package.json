@@ -16,6 +16,17 @@
         "default": "./index.cjs"
       },
       "default": "./index.js"
+    },
+    "./release-artifacts": {
+      "import": {
+        "types": "./release-artifacts.d.ts",
+        "default": "./release-artifacts.js"
+      },
+      "require": {
+        "types": "./release-artifacts.d.cts",
+        "default": "./release-artifacts.cjs"
+      },
+      "default": "./release-artifacts.js"
     }
   },
   "files": [
@@ -23,6 +34,10 @@
     "index.js",
     "index.d.ts",
     "index.d.cts",
+    "release-artifacts.cjs",
+    "release-artifacts.js",
+    "release-artifacts.d.ts",
+    "release-artifacts.d.cts",
     "README.md",
     "examples"
   ],
@@ -51,6 +66,6 @@
     "react-dom": ">=18"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --test"
   }
 }

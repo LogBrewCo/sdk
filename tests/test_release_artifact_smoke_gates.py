@@ -47,7 +47,7 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn(f"JavaScript release-artifact dry-run proof: `{JS_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"JavaScript release-artifact installed CLI prep/manifest/frame proof: `{JS_CLI_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"Vite release-artifact installed plugin proof: `{VITE_SMOKE_COMMAND}`", checklist)
-        self.assertIn(f"Next.js release-artifact build proof: `{NEXT_SMOKE_COMMAND}`", checklist)
+        self.assertIn(f"Next.js release-artifact installed helper proof: `{NEXT_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"React Native release-artifact build proof: `{REACT_NATIVE_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"JavaScript release-artifact upload proof: `{JS_UPLOAD_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"Native/mobile release-artifact dry-run proof: `{NATIVE_SMOKE_COMMAND}`", checklist)

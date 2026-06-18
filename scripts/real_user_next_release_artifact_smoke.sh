@@ -18,6 +18,57 @@ trap remove_tmp_dir EXIT
 app_dir="$tmp_dir/next-artifact-app"
 mkdir -p "$app_dir/app" "$app_dir/components"
 
+sdk_pack_json="$tmp_dir/sdk-pack.json"
+next_pack_json="$tmp_dir/next-pack.json"
+(
+  cd "$repo_root/js/logbrew-js"
+  npm pack --silent --json > "$sdk_pack_json"
+)
+(
+  cd "$repo_root/js/logbrew-next"
+  npm pack --silent --json > "$next_pack_json"
+)
+sdk_tgz="$(
+  python3 - "$sdk_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
+files = {entry["path"] for entry in pack["files"]}
+for expected in {
+    "release-artifacts.js",
+    "release-artifacts-symbolication.js",
+    "vite-release-artifacts.cjs",
+    "vite-release-artifacts.js",
+}:
+    assert expected in files, f"missing packed SDK release-artifact file: {expected}"
+print(pack["filename"])
+PY
+)"
+next_tgz="$(
+  python3 - "$next_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
+files = {entry["path"] for entry in pack["files"]}
+for expected in {
+    "release-artifacts.cjs",
+    "release-artifacts.js",
+    "release-artifacts.d.ts",
+    "release-artifacts.d.cts",
+}:
+    assert expected in files, f"missing packed Next release-artifact helper: {expected}"
+print(pack["filename"])
+PY
+)"
+sdk_tgz="$repo_root/js/logbrew-js/$sdk_tgz"
+next_tgz="$repo_root/js/logbrew-next/$next_tgz"
+cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
+cp "$next_tgz" "$tmp_dir/logbrew-next.tgz"
+
 cat > "$app_dir/package.json" <<'JSON'
 {
   "private": true,
@@ -26,6 +77,8 @@ cat > "$app_dir/package.json" <<'JSON'
     "build": "next build"
   },
   "dependencies": {
+    "@logbrew/sdk": "file:../logbrew-sdk.tgz",
+    "@logbrew/next": "file:../logbrew-next.tgz",
     "next": "16.2.9",
     "react": "19.2.7",
     "react-dom": "19.2.7"
@@ -34,10 +87,20 @@ cat > "$app_dir/package.json" <<'JSON'
 JSON
 
 cat > "$app_dir/next.config.mjs" <<'JS'
-export default {
-  productionBrowserSourceMaps: true,
-  turbopack: {}
-};
+import { withLogBrewNextReleaseArtifacts } from "@logbrew/next/release-artifacts";
+
+export default withLogBrewNextReleaseArtifacts(
+  {
+    turbopack: {}
+  },
+  {
+    release: "2026.06.18-next",
+    environment: "production",
+    service: "checkout-next-web",
+    minifiedPathPrefix: "app:///_next/static/chunks?cache=placeholder#fragment",
+    manifestPath: ".next/logbrew-release-artifacts.json"
+  }
+);
 JS
 
 cat > "$app_dir/app/layout.jsx" <<'JS'
@@ -78,6 +141,20 @@ JS
 (
   cd "$app_dir"
   npm install --silent
+  node --input-type=module - <<'JS'
+import { withLogBrewNextReleaseArtifacts } from "@logbrew/next/release-artifacts";
+
+if (typeof withLogBrewNextReleaseArtifacts !== "function") {
+  throw new Error("expected Next release-artifact helper export");
+}
+JS
+  node - <<'JS'
+const { withLogBrewNextReleaseArtifacts, default: defaultExport } = require("@logbrew/next/release-artifacts");
+
+if (typeof withLogBrewNextReleaseArtifacts !== "function" || defaultExport !== withLogBrewNextReleaseArtifacts) {
+  throw new Error("expected CommonJS Next release-artifact helper export");
+}
+JS
   NEXT_TELEMETRY_DISABLED=1 npm run --silent build >/dev/null
 )
 
@@ -118,54 +195,8 @@ print(source_map_path.resolve())
 PY
 )"
 
-if ! grep -q "sourcesContent" "$target_map"; then
-  echo "expected Next source map to contain sourcesContent before LogBrew stripping" >&2
-  exit 1
-fi
-if ! grep -q "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" "$target_map"; then
-  echo "expected Next source map to contain the local source sentinel before stripping" >&2
-  exit 1
-fi
-
-debug_plan_dry_run="$tmp_dir/next-debug-plan-dry-run.json"
-python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
-  --build-dir "$chunks_dir" \
-  --strip-sources-content \
-  > "$debug_plan_dry_run"
-
-python3 - "$debug_plan_dry_run" "$target_js" "$target_map" "$chunks_dir" "$js_count" <<'PY'
-import json
-import re
-import sys
-from pathlib import Path
-
-plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-target_js = Path(sys.argv[2])
-target_map = Path(sys.argv[3])
-chunks_dir = Path(sys.argv[4]).resolve()
-js_count = int(sys.argv[5])
-target_rel = target_js.resolve().relative_to(chunks_dir).as_posix()
-target_map_rel = target_map.resolve().relative_to(chunks_dir).as_posix()
-
-assert plan["validation"]["status"] == "ready"
-assert plan["writeApplied"] is False
-assert plan["stripSourcesContent"] is True
-assert len(plan["artifacts"]) == js_count
-target = next(artifact for artifact in plan["artifacts"] if artifact["path"] == target_rel)
-assert target["sourceMapPath"] == target_map_rel
-assert "sourceMap.sourcesContent" in target["changes"]
-assert re.match(r"^[0-9a-f-]{36}$", target["debugId"])
-PY
-
-debug_plan_written="$tmp_dir/next-debug-plan-written.json"
-python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
-  --build-dir "$chunks_dir" \
-  --strip-sources-content \
-  --write \
-  > "$debug_plan_written"
-
 if grep -R -q "sourcesContent" "$chunks_dir" --include='*.map'; then
-  echo "LogBrew Debug ID prep did not strip sourcesContent from Next source maps" >&2
+  echo "LogBrew Next helper did not strip sourcesContent from Next source maps" >&2
   exit 1
 fi
 if grep -R -q "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" "$chunks_dir" --include='*.map'; then
@@ -173,14 +204,11 @@ if grep -R -q "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" "$chunks_di
   exit 1
 fi
 
-ready_manifest="$tmp_dir/next-manifest.json"
-python3 "$repo_root/scripts/create_js_release_artifact_manifest.py" \
-  --build-dir "$chunks_dir" \
-  --release "2026.06.18-next" \
-  --environment "production" \
-  --service "checkout-next-web" \
-  --minified-path-prefix "app:///_next/static/chunks?cache=placeholder#fragment" \
-  > "$ready_manifest"
+ready_manifest="$app_dir/.next/logbrew-release-artifacts.json"
+if [[ ! -f "$ready_manifest" ]]; then
+  echo "expected LogBrew Next helper to write .next/logbrew-release-artifacts.json" >&2
+  exit 1
+fi
 
 generated_stack_frame="$tmp_dir/next-stack-frame.txt"
 python3 - "$ready_manifest" "$target_js" "$chunks_dir" > "$generated_stack_frame" <<'PY'
@@ -206,31 +234,34 @@ print(f"at checkoutFailureSignal ({artifact['minifiedSource']['minifiedUrl']}:{l
 PY
 
 symbolication_report="$tmp_dir/next-symbolication-report.json"
-python3 "$repo_root/scripts/verify_js_release_artifact_symbolication.py" \
+(
+  cd "$app_dir"
+  node_modules/.bin/logbrew-release-artifacts \
+  symbolicate-js \
   --build-dir "$chunks_dir" \
   --manifest "$ready_manifest" \
   --stack-frame "$(cat "$generated_stack_frame")" \
   > "$symbolication_report"
+)
 
-python3 - "$debug_plan_written" "$ready_manifest" "$target_js" "$target_map" "$chunks_dir" "$symbolication_report" <<'PY'
+python3 - "$ready_manifest" "$target_js" "$target_map" "$chunks_dir" "$symbolication_report" "$js_count" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-debug_plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-bundle_source = Path(sys.argv[3]).read_text(encoding="utf-8")
-source_map = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
-target_rel = Path(sys.argv[3]).resolve().relative_to(Path(sys.argv[5]).resolve()).as_posix()
-symbolication_report = json.loads(Path(sys.argv[6]).read_text(encoding="utf-8"))
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+bundle_source = Path(sys.argv[2]).read_text(encoding="utf-8")
+source_map = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+target_rel = Path(sys.argv[2]).resolve().relative_to(Path(sys.argv[4]).resolve()).as_posix()
+symbolication_report = json.loads(Path(sys.argv[5]).read_text(encoding="utf-8"))
+js_count = int(sys.argv[6])
 serialized_manifest = json.dumps(manifest)
 serialized_symbolication = json.dumps(symbolication_report)
 
-debug_id = next(artifact["debugId"] for artifact in debug_plan["artifacts"] if artifact["path"] == target_rel)
 artifact = next(candidate for candidate in manifest["artifacts"] if candidate["minifiedSource"]["path"] == target_rel)
+debug_id = artifact["debugId"]
 
-assert debug_plan["validation"]["status"] == "ready"
-assert debug_plan["writeApplied"] is True
+assert len(manifest["artifacts"]) == js_count
 assert "debugId=" in bundle_source
 assert source_map["debug_id"] == debug_id
 assert "sourcesContent" not in source_map

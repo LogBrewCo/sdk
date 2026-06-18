@@ -15,6 +15,28 @@ npm install @logbrew/sdk @logbrew/next next react react-dom
 pnpm add @logbrew/sdk @logbrew/next next react react-dom
 ```
 
+## Release Artifacts
+
+For production Next.js builds, wrap `next.config.mjs` with the build-time release-artifact helper. It enables `productionBrowserSourceMaps` only when your config has not chosen a value, runs after the production compile, injects matching Debug IDs, strips embedded source text by default, and writes a privacy-bounded manifest next to `.next`:
+
+```js
+// next.config.mjs
+import { withLogBrewNextReleaseArtifacts } from "@logbrew/next/release-artifacts";
+
+export default withLogBrewNextReleaseArtifacts(
+  {
+    turbopack: {}
+  },
+  {
+    release: "2026.06.18",
+    environment: "production",
+    service: "checkout-next-web"
+  }
+);
+```
+
+The helper defaults minified URLs to `app:///_next/static/chunks/...`. Use `minifiedPathPrefix`, `manifestPath`, `repositoryUrl`, `commitSha`, or `stripSourcePrefix` when your deploy needs explicit paths or source-link metadata. This helper only prepares local build artifacts and a manifest. It does not upload files, open support tickets, use account/session API values, or claim backend symbolication support.
+
 ## App Router Route Handler
 
 ```js

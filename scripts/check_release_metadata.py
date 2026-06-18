@@ -273,6 +273,24 @@ def validate_js_package(
             require_types="./vite-release-artifacts.d.cts",
             require_default="./vite-release-artifacts.cjs",
         )
+    if expected_name == "@logbrew/next":
+        for expected_file in (
+            "release-artifacts.cjs",
+            "release-artifacts.js",
+            "release-artifacts.d.ts",
+            "release-artifacts.d.cts",
+        ):
+            require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
+        require_js_export_entry(
+            failures,
+            location,
+            manifest,
+            "./release-artifacts",
+            import_types="./release-artifacts.d.ts",
+            import_default="./release-artifacts.js",
+            require_types="./release-artifacts.d.cts",
+            require_default="./release-artifacts.cjs",
+        )
     if expected_name == "@logbrew/react-native":
         require("index.native.js" in files, failures, f"{location}: files must include 'index.native.js'")
 
