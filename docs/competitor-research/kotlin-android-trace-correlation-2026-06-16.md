@@ -154,6 +154,37 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 
 - Kotlin Android still lacks automatic lifecycle instrumentation, automatic OkHttp/HttpURLConnection interceptors, coroutine context propagation beyond explicit thread-local scopes, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
 
+## 2026-06-18 OkHttp Header Setter / Child Scope Follow-Up
+
+### Source Re-Read
+
+- Sentry Java/Android HEAD resolves to `getsentry/sentry-java@7c1a728e8bd2faa42b8f1c25c9f16a145baab60f`.
+- Re-read `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpInterceptor.kt`: `intercept(...)`, `TracingUtils.traceIfAllowed(...)`, request `newBuilder()`, `addHeader(...)`, `chain.proceed(...)`, response/error status handling, breadcrumb emission, and optional network detail/body/header capture paths.
+- OpenTelemetry Java instrumentation HEAD resolves to `open-telemetry/opentelemetry-java-instrumentation@63de06bb3c29dd0cdf4059b5b755bb6bbde7fe71`.
+- Re-read `instrumentation/okhttp/okhttp-3.0/library/src/main/java/io/opentelemetry/instrumentation/okhttp/v3_0/internal/TracingInterceptor.java`: `intercept(...)`, `instrumenter.start(...)`, immutable request rebuilding, propagation injection, scoped `chain.proceed(...)`, and `instrumenter.end(...)`.
+- Re-read `instrumentation/okhttp/okhttp-3.0/library/src/main/java/io/opentelemetry/instrumentation/okhttp/v3_0/internal/RequestHeaderSetter.java`: `TextMapSetter<Request.Builder>.set(...)` uses `carrier.header(key, value)`.
+- Re-read `instrumentation/okhttp/okhttp-3.0/library/src/main/java/io/opentelemetry/instrumentation/okhttp/v3_0/ContextInterceptor.java` and `TracingCallFactory.java`: request execution/callbacks run under the captured calling context via `makeCurrent()`.
+- Datadog Android HEAD resolves to `DataDog/dd-sdk-android@519550150648592709d441c677437d8b1c3a0707`.
+- Re-read `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/trace/TracingInterceptor.kt`: `intercept(...)`, `interceptAndTrace(...)`, `buildSpan(...)`, `updateRequest(...)`, `handleResponse(...)`, and `handleThrowable(...)`.
+- Re-read `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/internal/ApmInstrumentationOkHttpAdapter.kt`: current package layout for the APM/RUM adapter boundary.
+
+### Pattern And Tradeoffs
+
+- Mature OkHttp integrations create a child span, inject propagation into an immutable request builder, run the network call under the request context, and finish spans from response/error paths.
+- Sentry and Datadog also support richer automatic behavior such as body/header/network detail capture and failed-request capture. That can be useful, but it expands dependency weight and privacy/configuration risk for teams that want explicit instrumentation.
+- LogBrew should improve the request-builder ergonomics without adding an OkHttp dependency to the core Kotlin artifact. The safer subset is an app-owned header setter and a scoped block around the app-owned request call.
+
+### LogBrew Follow-Up Implementation
+
+- `AndroidRequestSpan` now exposes `applyHeadersTo(LogBrewHeaderSetter)` so OkHttp, `HttpURLConnection`, and custom clients can receive exactly the existing normalized `traceparent` header through an app-owned setter.
+- `AndroidRequestSpan.withTrace { ... }` runs request-local logs, issues, actions, metrics, or app-defined spans under the request child trace context and reactivates the previous active trace afterward.
+- Added `LogBrewHeaderSetter` as a tiny Java/Kotlin-friendly functional interface instead of importing OkHttp or patching `HttpURLConnection`.
+- Packaged trace-correlation proof now applies the request header through the setter, runs an OkHttp-style request log inside `withTrace`, and validates that the log is parented to the request child span.
+
+### Remaining Gaps After Header Setter Follow-Up
+
+- Kotlin Android still lacks a typed optional OkHttp interceptor package, automatic lifecycle instrumentation, automatic `HttpURLConnection` instrumentation, coroutine context propagation beyond explicit thread-local scopes, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
+
 ## Verification
 
 - `bash scripts/check_kotlin_style.sh`: ktlint `1.8.0` passed.

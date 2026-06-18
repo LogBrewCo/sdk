@@ -56,10 +56,13 @@ def main() -> None:
 
     active_outgoing = stderr_payload.get("activeTraceparent") if isinstance(stderr_payload, dict) else None
     request_outgoing = stderr_payload.get("requestTraceparent") if isinstance(stderr_payload, dict) else None
+    applied_request_outgoing = stderr_payload.get("appliedRequestTraceparent") if isinstance(stderr_payload, dict) else None
     if not isinstance(active_outgoing, str):
         raise SystemExit("missing active outgoing traceparent")
     if not isinstance(request_outgoing, str):
         raise SystemExit("missing request outgoing traceparent")
+    if not isinstance(applied_request_outgoing, str):
+        raise SystemExit("missing applied request traceparent")
     parts = active_outgoing.split("-")
     if len(parts) != 4 or parts[0] != "00" or parts[1] != TRACE_ID or parts[3] != "01":
         raise SystemExit(f"unexpected active outgoing traceparent: {active_outgoing}")
@@ -72,6 +75,8 @@ def main() -> None:
     request_span_id = request_parts[2]
     if not HEX16.match(request_span_id) or request_span_id in {PARENT_SPAN_ID, span_id, "0" * 16}:
         raise SystemExit(f"unexpected request span id: {request_span_id}")
+    if applied_request_outgoing != request_outgoing:
+        raise SystemExit("app-owned header setter did not receive the request traceparent")
 
     issue = event_by_id(events, "evt_kotlin_trace_issue_001")
     log = event_by_id(events, "evt_kotlin_trace_log_001")
@@ -81,6 +86,7 @@ def main() -> None:
     product_action = event_by_id(events, "evt_kotlin_trace_product_action_001")
     network = event_by_id(events, "evt_kotlin_trace_network_001")
     request = event_by_id(events, "evt_kotlin_trace_request_001")
+    request_log = event_by_id(events, "evt_kotlin_trace_request_log_001")
 
     for event in (issue, log, action, metric, product_action, network):
         attributes = event.get("attributes")
@@ -140,6 +146,22 @@ def main() -> None:
     }.items():
         if request_metadata.get(key) != value:
             raise SystemExit(f"unexpected request metadata {key}: {request_metadata.get(key)!r}")
+
+    request_log_attributes = request_log.get("attributes")
+    if not isinstance(request_log_attributes, dict):
+        raise SystemExit("request log attributes must be an object")
+    request_log_metadata = request_log_attributes.get("metadata")
+    if not isinstance(request_log_metadata, dict):
+        raise SystemExit("request log metadata must be an object")
+    for key, value in {
+        "traceId": TRACE_ID,
+        "spanId": request_span_id,
+        "parentSpanId": span_id,
+        "traceFlags": "01",
+        "traceSampled": True,
+    }.items():
+        if request_log_metadata.get(key) != value:
+            raise SystemExit(f"unexpected request log metadata {key}: {request_log_metadata.get(key)!r}")
 
 
 if __name__ == "__main__":

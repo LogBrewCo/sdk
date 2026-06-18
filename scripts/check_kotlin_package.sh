@@ -52,7 +52,7 @@ kotlinc "$package_dir"/src/main/kotlin/co/logbrew/sdk/*.kt \
   -Werror \
   -d "$tmp_dir/classes"
 
-kotlinc "$package_dir"/src/main/kotlin/co/logbrew/sdk/*.kt "$package_dir/tests/LogBrewKotlinTest.kt" \
+kotlinc "$package_dir"/src/main/kotlin/co/logbrew/sdk/*.kt "$package_dir"/tests/*.kt \
   -jvm-target 11 \
   -Xjdk-release=11 \
   -Werror \
@@ -97,6 +97,7 @@ grep -q '^co/logbrew/sdk/LogBrewTraceScope.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySpanContext.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidRequestSpan.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewHeaderSetter.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequester.class$' "$tmp_dir/jar-contents.txt"
@@ -139,6 +140,8 @@ for needle in (
     "traceparent",
     "LogBrewAndroid.startRequestSpan",
     "LogBrewAndroid.captureRequestSpan",
+    "applyHeadersTo",
+    "withTrace",
     "HttpURLConnection",
 ):
     if needle not in readme:

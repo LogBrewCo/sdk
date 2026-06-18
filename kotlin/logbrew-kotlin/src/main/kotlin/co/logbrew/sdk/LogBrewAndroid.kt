@@ -21,6 +21,20 @@ class AndroidRequestSpan internal constructor(
 ) {
     val traceparent: String
         get() = headers.getValue("traceparent")
+
+    fun applyHeadersTo(setHeader: LogBrewHeaderSetter): AndroidRequestSpan {
+        headers.forEach { (name, value) -> setHeader.set(name, value) }
+        return this
+    }
+
+    fun <T> withTrace(block: () -> T): T = LogBrewTrace.withTrace(traceContext, block)
+}
+
+fun interface LogBrewHeaderSetter {
+    fun set(
+        name: String,
+        value: String,
+    )
 }
 
 object LogBrewAndroid {

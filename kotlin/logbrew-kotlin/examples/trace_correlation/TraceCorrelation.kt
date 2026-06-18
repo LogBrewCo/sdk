@@ -83,10 +83,24 @@ fun main() {
                 routeTemplate = "https://mobile.example.test/api/checkout?card=redacted#pay",
                 metadata = mapOf("funnel" to "checkout", "traceId" to "spoofed_trace"),
             )
+        val requestHeaders = linkedMapOf<String, String>()
+        requestSpan.applyHeadersTo { name, value ->
+            requestHeaders[name] = value
+        }
+        requestSpan.withTrace {
+            client.log(
+                "evt_kotlin_trace_request_log_001",
+                "2026-06-02T10:00:27Z",
+                LogAttributes
+                    .create("checkout request started", "info")
+                    .withLogger("OkHttp")
+                    .withMetadata(mapOf("spanId" to "spoofed_span")),
+            )
+        }
         LogBrewAndroid.captureRequestSpan(
             client = client,
             id = "evt_kotlin_trace_request_001",
-            timestamp = "2026-06-02T10:00:27Z",
+            timestamp = "2026-06-02T10:00:28Z",
             requestSpan = requestSpan,
             statusCode = 503,
             durationMs = 38.5,
@@ -94,7 +108,12 @@ fun main() {
             metadata = mapOf("phase" to "payment", "parentSpanId" to "spoofed_parent"),
         )
         val activeTraceparent = LogBrewTrace.outgoingHeaders().getValue("traceparent")
-        System.err.println("""{"activeTraceparent":"$activeTraceparent","requestTraceparent":"${requestSpan.traceparent}"}""")
+        val appliedRequestTraceparent = requestHeaders.getValue("traceparent")
+        System.err.println(
+            """
+            {"activeTraceparent":"$activeTraceparent","requestTraceparent":"${requestSpan.traceparent}","appliedRequestTraceparent":"$appliedRequestTraceparent"}
+            """.trimIndent(),
+        )
     }
 
     println(client.previewJson())

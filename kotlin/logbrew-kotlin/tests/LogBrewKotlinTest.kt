@@ -49,7 +49,8 @@ fun main() {
     run("trace_context_helpers_validate_and_correlate", ::traceContextHelpersValidateAndCorrelate)
     run("opentelemetry_span_context_helpers_validate_and_correlate", ::openTelemetrySpanContextHelpersValidateAndCorrelate)
     run("opentelemetry_reflection_bridge_returns_null_without_otel_types", ::openTelemetryReflectionBridgeReturnsNullWithoutOtelTypes)
-    println("kotlin package tests ok (24 tests)")
+    AndroidRequestSpanTests.runAll()
+    println("kotlin package tests ok (25 tests)")
 }
 
 private fun run(

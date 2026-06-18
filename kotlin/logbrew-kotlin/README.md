@@ -164,21 +164,26 @@ LogBrewTrace.use(trace).use {
             metadata = mapOf("funnel" to "checkout"),
         )
 
-    val headers = requestSpan.headers // attach only traceparent to your request builder
+    requestSpan.applyHeadersTo { name, value ->
+        okHttpRequestBuilder.header(name, value)
+    }
+
+    val response = requestSpan.withTrace {
+        okHttpClient.newCall(okHttpRequestBuilder.build()).execute()
+    }
 
     LogBrewAndroid.captureRequestSpan(
         client = client,
         id = "evt_request_001",
         timestamp = "2026-06-02T10:00:06Z",
         requestSpan = requestSpan,
-        statusCode = 503,
+        statusCode = response.code,
         durationMs = 42.5,
-        error = IllegalStateException("retry budget reached"),
     )
 }
 ```
 
-The request helper sanitizes methods and route templates, strips query strings and fragments, records status, duration, and exception type/message, and overwrites spoofed trace metadata. It does not install an OkHttp interceptor, patch `HttpURLConnection`, capture payloads, copy arbitrary headers, or send baggage/tracestate.
+For `HttpURLConnection`, pass `connection::setRequestProperty` to `applyHeadersTo(...)` before calling `connect()`. `withTrace { ... }` makes logs, issues, actions, and metrics captured during the request inherit the child request span. The request helper sanitizes methods and route templates, strips query strings and fragments, records status, duration, and exception type/message, and overwrites spoofed trace metadata. It does not install an OkHttp interceptor, patch `HttpURLConnection`, capture payloads, copy arbitrary headers, or send baggage/tracestate.
 
 ## HTTP Delivery
 
@@ -258,7 +263,7 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 - `previewJson()` returns the queued batch as pretty JSON.
 - `LogBrewTrace` validates W3C `traceparent`, creates request/task-local-style scopes through `AutoCloseable`, adds active trace metadata to app-owned events, and creates outgoing `traceparent` headers without patching HTTP clients.
 - `LogBrewOpenTelemetry` optionally copies trace ID, span ID, and trace flags from app-owned OpenTelemetry `Span`/`Context` objects when OpenTelemetry is already installed by the app; it returns `null` instead of installing exporters, processors, baggage, or tracestate support.
-- `LogBrewAndroid.startRequestSpan()` and `captureRequestSpan()` create explicit outbound request child spans for app-owned OkHttp, `HttpURLConnection`, or other request clients with one normalized `traceparent` header and sanitized completion metadata.
+- `LogBrewAndroid.startRequestSpan()` and `captureRequestSpan()` create explicit outbound request child spans for app-owned OkHttp, `HttpURLConnection`, or other request clients with one normalized `traceparent` header and sanitized completion metadata. `AndroidRequestSpan.applyHeadersTo(...)` writes only that header through your request builder, and `withTrace { ... }` scopes request-local telemetry under the child span.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
