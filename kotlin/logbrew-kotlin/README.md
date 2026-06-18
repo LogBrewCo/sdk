@@ -153,6 +153,28 @@ Those helpers return `null` when OpenTelemetry is absent, no valid span is activ
 
 While a `LogBrewTraceScope` is active, `LogBrewClient` automatically adds authoritative `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewAndroid.captureProductAction(...)`, `captureNetworkMilestone(...)`, `captureAndroidLog(...)`, and `captureThrowable(...)` receive the same correlation through the client. Trace metadata overwrites spoofed trace keys in app metadata, and the helper never captures raw propagation values, request bodies, response bodies, arbitrary headers, query strings, fragments, or visual replay. Use `LogBrewTrace.outgoingHeaders()` for app-owned HTTP clients when you want to forward only the normalized `traceparent` header.
 
+If your app already uses `kotlinx-coroutines-core`, `LogBrewCoroutines` can create an optional coroutine context element that restores the active LogBrew trace whenever a coroutine resumes. The core LogBrew artifact does not depend on coroutines; the helper returns `null` when `kotlinx.coroutines.ThreadContextElement` is not on the app classpath:
+
+```kotlin
+val trace = LogBrewTrace.continueOrCreate(incomingTraceparent)
+val traceElement = LogBrewCoroutines.traceContextElement(trace)
+
+withContext(Dispatchers.Default + (traceElement ?: EmptyCoroutineContext)) {
+    client.log(
+        "evt_coroutine_worker",
+        "2026-06-02T10:00:29Z",
+        LogAttributes.create("worker resumed with trace", "info"),
+    )
+}
+
+LogBrewTrace.use(trace).use {
+    val currentTraceElement = LogBrewCoroutines.currentTraceContextElement()
+    // Pass currentTraceElement to launch, async, or withContext when work may hop threads.
+}
+```
+
+`LogBrewCoroutines` restores only the immutable `LogBrewTraceContext` that you provide or that is currently active. It does not install coroutine dispatchers, create spans automatically, capture coroutine names, collect baggage/tracestate, or read coroutine-local payloads.
+
 For app-owned Android or JVM request clients such as OkHttp or `HttpURLConnection`, use `LogBrewAndroid.startRequestSpan(...)` to create a child span and get exactly one `traceparent` header to attach to your request. Finish the span explicitly when the response or exception is available:
 
 ```kotlin
@@ -263,6 +285,7 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 - `previewJson()` returns the queued batch as pretty JSON.
 - `LogBrewTrace` validates W3C `traceparent`, creates request/task-local-style scopes through `AutoCloseable`, adds active trace metadata to app-owned events, and creates outgoing `traceparent` headers without patching HTTP clients.
 - `LogBrewOpenTelemetry` optionally copies trace ID, span ID, and trace flags from app-owned OpenTelemetry `Span`/`Context` objects when OpenTelemetry is already installed by the app; it returns `null` instead of installing exporters, processors, baggage, or tracestate support.
+- `LogBrewCoroutines` optionally creates a coroutine `ThreadContextElement` by reflection when `kotlinx-coroutines-core` is already installed by the app; it returns `null` instead of adding a coroutine dependency to LogBrew.
 - `LogBrewAndroid.startRequestSpan()` and `captureRequestSpan()` create explicit outbound request child spans for app-owned OkHttp, `HttpURLConnection`, or other request clients with one normalized `traceparent` header and sanitized completion metadata. `AndroidRequestSpan.applyHeadersTo(...)` writes only that header through your request builder, and `withTrace { ... }` scopes request-local telemetry under the child span.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.

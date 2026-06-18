@@ -127,6 +127,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_release_artifact_upload_verifier_reference(relative_text, line):
         return True
 
+    if is_kotlin_coroutine_context_reference(relative_text, line, terms):
+        return True
+
     if relative_text.endswith(".cs") and is_dotnet_cancellation_token_reference(line):
         return True
 
@@ -270,6 +273,30 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
         lower_line = line.lower()
         return "upload" in lower_line and "artifact" in lower_line
     return False
+
+
+def is_kotlin_coroutine_context_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    if terms != {"restore"}:
+        return False
+
+    lower_line = line.lower()
+    if relative_text == "kotlin/logbrew-kotlin/src/main/kotlin/co/logbrew/sdk/LogBrewCoroutines.kt":
+        return "restoreThreadContext" in line
+
+    return (
+        "coroutine" in lower_line
+        and "restore" in lower_line
+        and relative_text
+        in {
+            "docs/competitor-research/kotlin-android-trace-correlation-2026-06-16.md",
+            "kotlin/logbrew-kotlin/README.md",
+            "memory.md",
+        }
+    )
 
 
 def is_dotnet_cancellation_token_reference(line: str) -> bool:

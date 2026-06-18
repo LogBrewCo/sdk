@@ -9,6 +9,7 @@ import co.logbrew.sdk.IssueAttributes
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewCoroutines
 import co.logbrew.sdk.LogBrewOpenTelemetry
 import co.logbrew.sdk.LogBrewOpenTelemetrySpanContext
 import co.logbrew.sdk.LogBrewTrace
@@ -49,8 +50,12 @@ fun main() {
     run("trace_context_helpers_validate_and_correlate", ::traceContextHelpersValidateAndCorrelate)
     run("opentelemetry_span_context_helpers_validate_and_correlate", ::openTelemetrySpanContextHelpersValidateAndCorrelate)
     run("opentelemetry_reflection_bridge_returns_null_without_otel_types", ::openTelemetryReflectionBridgeReturnsNullWithoutOtelTypes)
+    run(
+        "coroutine_reflection_bridge_returns_null_without_kotlinx_coroutines",
+        ::coroutineReflectionBridgeReturnsNullWithoutKotlinxCoroutines,
+    )
     AndroidRequestSpanTests.runAll()
-    println("kotlin package tests ok (25 tests)")
+    println("kotlin package tests ok (26 tests)")
 }
 
 private fun run(
@@ -719,4 +724,13 @@ private fun openTelemetryReflectionBridgeReturnsNullWithoutOtelTypes() {
     check(LogBrewOpenTelemetry.traceContextFromContext(Any()) == null)
     check(LogBrewOpenTelemetry.spanContextFromCurrentSpan() == null)
     check(LogBrewOpenTelemetry.traceContextFromCurrentSpan() == null)
+}
+
+private fun coroutineReflectionBridgeReturnsNullWithoutKotlinxCoroutines() {
+    val trace = LogBrewTrace.createTraceContext()
+    check(LogBrewCoroutines.traceContextElement(trace) == null)
+    LogBrewTrace.use(trace).use {
+        check(LogBrewCoroutines.currentTraceContextElement() == null)
+    }
+    check(LogBrewTrace.currentTraceContext() == null)
 }

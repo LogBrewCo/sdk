@@ -66,6 +66,7 @@ jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" -C "$tmp_dir/classes" . 
 jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewCoroutines.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySpanContext.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidRequestSpan.class$' "$tmp_dir/jar-contents.txt"
@@ -224,6 +225,102 @@ JAVA
 (cd "$otel_app" && gradle --no-daemon -q run > "$tmp_dir/otel-app.out")
 grep -qx 'otel bridge ok' "$tmp_dir/otel-app.out"
 
+coroutines_app="$tmp_dir/coroutines-gradle-app"
+mkdir -p "$coroutines_app"
+cat > "$coroutines_app/settings.gradle" <<'EOF'
+rootProject.name = "kotlin-coroutines-app"
+EOF
+cat > "$coroutines_app/build.gradle" <<EOF
+plugins {
+    id 'java'
+}
+
+repositories {
+    maven {
+        url = uri('$tmp_dir/maven')
+    }
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'co.logbrew:logbrew-kotlin:0.1.0'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:$kotlin_stdlib_version'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2'
+}
+
+tasks.register('printRuntimeClasspath') {
+    doLast {
+        println configurations.runtimeClasspath.asPath
+    }
+}
+EOF
+cat > "$coroutines_app/CoroutinesApp.kt" <<'KT'
+import co.logbrew.sdk.LogAttributes
+import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewCoroutines
+import co.logbrew.sdk.LogBrewTrace
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+
+fun main() = runBlocking {
+    val client = LogBrewClient.create("LOGBREW_API_KEY", "kotlin-coroutines-app", "0.1.0")
+    val trace = LogBrewTrace.continueOrCreate("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
+    val coroutineElement = LogBrewCoroutines.traceContextElement(trace)
+        ?: error("expected kotlinx.coroutines ThreadContextElement bridge")
+
+    check(LogBrewTrace.currentTraceContext() == null)
+    withContext(Dispatchers.Default + coroutineElement) {
+        delay(1)
+        check(LogBrewTrace.currentTraceContext() == trace)
+        client.log(
+            "evt_kotlin_coroutine_log_001",
+            "2026-06-02T10:00:29Z",
+            LogAttributes
+                .create("coroutine resumed with trace", "info")
+                .withLogger("CoroutineWorker")
+                .withMetadata(mapOf("traceId" to "spoofed_trace")),
+        )
+    }
+    check(LogBrewTrace.currentTraceContext() == null)
+
+    LogBrewTrace.use(trace).use {
+        val currentElement = LogBrewCoroutines.currentTraceContextElement()
+            ?: error("expected current trace coroutine element")
+        withContext(currentElement + Dispatchers.Default) {
+            delay(1)
+            check(LogBrewTrace.currentTraceContext() == trace)
+            client.log(
+                "evt_kotlin_coroutine_log_002",
+                "2026-06-02T10:00:30Z",
+                LogAttributes.create("current trace propagated to coroutine", "info").withLogger("CoroutineWorker"),
+            )
+        }
+        check(LogBrewTrace.currentTraceContext() == trace)
+    }
+    check(LogBrewTrace.currentTraceContext() == null)
+
+    val body = client.previewJson()
+    check("\"traceId\": \"${trace.traceId}\"" in body)
+    check("\"spanId\": \"${trace.spanId}\"" in body)
+    check("\"parentSpanId\": \"${trace.parentSpanId}\"" in body)
+    check("spoofed_trace" !in body)
+    println("coroutine bridge ok")
+}
+KT
+(cd "$coroutines_app" && gradle --no-daemon -q printRuntimeClasspath > "$tmp_dir/coroutines-classpath.txt")
+coroutines_classpath="$(cat "$tmp_dir/coroutines-classpath.txt")"
+kotlinc "$coroutines_app/CoroutinesApp.kt" \
+  -classpath "$coroutines_classpath" \
+  -jvm-target 11 \
+  -Xjdk-release=11 \
+  -Werror \
+  -include-runtime \
+  -d "$tmp_dir/coroutines-app.jar"
+java -cp "$tmp_dir/coroutines-app.jar:$coroutines_classpath" CoroutinesAppKt > "$tmp_dir/coroutines-app.out"
+grep -qx 'coroutine bridge ok' "$tmp_dir/coroutines-app.out"
+
 extract_dir="$tmp_dir/extracted-jar"
 mkdir -p "$extract_dir"
 (cd "$extract_dir" && jar --extract --file "$tmp_dir/logbrew-kotlin-0.1.0.jar")
@@ -240,6 +337,9 @@ grep -q 'captureRequestSpan' "$extract_dir/README.md"
 grep -q 'applyHeadersTo' "$extract_dir/README.md"
 grep -q 'withTrace' "$extract_dir/README.md"
 grep -q 'LogBrewTrace' "$extract_dir/README.md"
+grep -q 'LogBrewCoroutines' "$extract_dir/README.md"
+grep -q 'traceContextElement' "$extract_dir/README.md"
+grep -q 'currentTraceContextElement' "$extract_dir/README.md"
 grep -q 'LogBrewOpenTelemetry' "$extract_dir/README.md"
 grep -q 'LogBrewOpenTelemetrySpanContext' "$extract_dir/README.md"
 grep -q 'spanContextFromCurrentSpan' "$extract_dir/README.md"

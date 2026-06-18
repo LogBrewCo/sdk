@@ -185,6 +185,44 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 
 - Kotlin Android still lacks a typed optional OkHttp interceptor package, automatic lifecycle instrumentation, automatic `HttpURLConnection` instrumentation, coroutine context propagation beyond explicit thread-local scopes, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
 
+## 2026-06-19 Coroutine Context Element Follow-Up
+
+### Source Re-Read
+
+- Sentry Java/Android HEAD still resolves to `getsentry/sentry-java@7c1a728e8bd2faa42b8f1c25c9f16a145baab60f`.
+- Read `sentry-kotlin-extensions/src/main/java/io/sentry/kotlin/SentryContext.kt`: `CopyableThreadContextElement`, `copyForChild()`, `mergeForChild(...)`, `updateThreadContext(...)`, and `restoreThreadContext(...)` keep Sentry scopes current across coroutine suspension and child coroutine copies.
+- Read `sentry-kotlin-extensions/src/main/java/io/sentry/kotlin/SentryCoroutineExceptionHandler.kt`: coroutine exception handler captures handled coroutine exceptions through Sentry scopes.
+- Datadog Android HEAD still resolves to `DataDog/dd-sdk-android@519550150648592709d441c677437d8b1c3a0707`.
+- Read `integrations/dd-sdk-android-trace-coroutines/src/main/kotlin/com/datadog/android/trace/coroutines/CoroutineExt.kt`: `launchTraced(...)`, `asyncTraced(...)`, `runBlockingTraced(...)`, `awaitTraced(...)`, and `withContextTraced(...)` wrap coroutine work in spans.
+- Read `integrations/dd-sdk-android-trace-coroutines/src/main/kotlin/com/datadog/android/trace/internal/coroutines/InternalCoroutineExt.kt` and `CoroutineScopeSpanImpl.kt`: coroutine blocks run inside a Datadog span and expose a scope/span composite.
+- OpenTelemetry Java HEAD resolves to `open-telemetry/opentelemetry-java@824334c552cd800d6b89512f20225b2025fd5d16`.
+- Read `extensions/kotlin/src/main/java/io/opentelemetry/extension/kotlin/KotlinContextElement.java`: `ThreadContextElement<Scope>` calls `Context.makeCurrent()` on resume and closes the scope on suspension.
+- Read `extensions/kotlin/src/main/kotlin/io/opentelemetry/extension/kotlin/ContextExtensions.kt`: `Context.asContextElement()`, `ImplicitContextKeyed.asContextElement()`, and `CoroutineContext.getOpenTelemetryContext()`.
+
+### Pattern And Tradeoffs
+
+- Mature SDKs make coroutine context propagation explicit at the coroutine boundary instead of relying on plain thread-local state surviving dispatcher hops.
+- Sentry and OpenTelemetry solve this with coroutine context elements; Datadog additionally creates traced coroutine spans around launch/async/withContext.
+- LogBrew should close the coroutine propagation gap without adding `kotlinx-coroutines-core` as a required dependency, without creating hidden spans, and without reading coroutine names, baggage, tracestate, or payload-like values.
+
+### LogBrew Follow-Up Implementation
+
+- Added `LogBrewCoroutines.traceContextElement(context)` and `currentTraceContextElement()`.
+- The bridge returns `null` when `kotlinx.coroutines.ThreadContextElement` is absent, so the default Maven artifact remains dependency-light.
+- When coroutines are present, LogBrew creates a reflection-backed `CoroutineContext.Element` that also implements `ThreadContextElement`; coroutine resume pushes the supplied immutable `LogBrewTraceContext`, and suspension closes the pushed scope.
+- The helper propagates only LogBrew trace IDs/span IDs/flags already present in `LogBrewTraceContext`. It does not install dispatchers, launch coroutines, create spans automatically, capture coroutine names, copy baggage/tracestate, inspect coroutine-local payloads, or patch OkHttp/HttpURLConnection.
+
+### Updated Verification
+
+- TDD red: `bash scripts/check_kotlin_package.sh` first failed with unresolved `LogBrewCoroutines`.
+- `LogBrewKotlinTest.kt` now proves the bridge fails closed to `null` without `kotlinx.coroutines`.
+- `scripts/check_kotlin_package.sh` verifies `LogBrewCoroutines.kt` in the sources jar, `LogBrewCoroutines.class` in the runtime jar, README guidance, and the standard Kotlin package/test/example suite.
+- `scripts/real_user_kotlin_smoke.sh` now builds an installed Gradle consumer with `kotlinx-coroutines-core:1.10.2`, runs real `runBlocking` flows with both `withContext(Dispatchers.Default + element)` and `withContext(element + Dispatchers.Default)`, verifies trace metadata survives coroutine dispatcher hops and is restored afterward, and proves spoofed trace metadata is overwritten.
+
+### Remaining Gaps After Coroutine Follow-Up
+
+- Kotlin Android still lacks a typed optional OkHttp interceptor package, automatic lifecycle instrumentation, automatic `HttpURLConnection` instrumentation, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication integration.
+
 ## Verification
 
 - `bash scripts/check_kotlin_style.sh`: ktlint `1.8.0` passed.
