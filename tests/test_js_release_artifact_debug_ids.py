@@ -209,6 +209,41 @@ class JavaScriptReleaseArtifactDebugIdTests(unittest.TestCase):
             self.assertEqual(source_map["debug_id"], plan["artifacts"][0]["debugId"])
             self.assertNotIn("sourcesContent", source_map)
 
+    def test_write_can_strip_absolute_source_prefixes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app_root = Path(tmp) / "app"
+            build_dir = app_root / "dist"
+            self.write_build(
+                build_dir,
+                'console.log("ok");\n//# sourceMappingURL=app.js.map\n',
+                {
+                    "version": 3,
+                    "sources": [
+                        str(app_root / "index.js"),
+                        str(app_root / "node_modules/react-native/index.js"),
+                        "__prelude__",
+                    ],
+                    "names": [],
+                    "mappings": "AAAA",
+                },
+            )
+
+            plan = prepare_js_release_artifact_debug_ids.create_debug_id_plan(
+                build_dir=build_dir,
+                write=True,
+                strip_source_prefixes=[app_root],
+            )
+            source_map = json.loads((build_dir / "app.js.map").read_text(encoding="utf-8"))
+
+            self.assertTrue(plan["writeApplied"])
+            self.assertIn("sourceMap.sources", plan["artifacts"][0]["changes"])
+            self.assertIn(app_root.as_posix(), plan["stripSourcePrefixes"])
+            self.assertIn(app_root.resolve().as_posix(), plan["stripSourcePrefixes"])
+            self.assertEqual(
+                source_map["sources"],
+                ["index.js", "node_modules/react-native/index.js", "__prelude__"],
+            )
+
     def test_mismatched_debug_ids_block_without_partial_writes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             build_dir = Path(tmp) / "dist"

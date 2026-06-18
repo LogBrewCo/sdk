@@ -34,6 +34,18 @@ DEBUG_ID_NAMESPACE = uuid.UUID("16f4a837-7e0b-4d7c-97d9-8a7af1fd2768")
 SOURCE_MAPPING_COMMENT_RE = re.compile(r"(?://#|/\*#)\s*sourceMappingURL=[^\r\n]*")
 
 
+def normalize_source_prefixes(source_prefixes: list[Path] | None) -> list[str]:
+    if not source_prefixes:
+        return []
+    normalized: list[str] = []
+    for prefix in source_prefixes:
+        for candidate in (prefix, prefix.resolve()):
+            value = candidate.as_posix().rstrip("/")
+            if value and value not in normalized:
+                normalized.append(value)
+    return normalized
+
+
 def canonical_source_without_debug_id(source: str) -> str:
     return DEBUG_ID_RE.sub("", source)
 
@@ -70,31 +82,77 @@ def source_with_debug_id(source: str, debug_id: str) -> str:
     return f"{source}{separator}{debug_line}"
 
 
-def source_map_with_debug_id(
+def source_without_prefix(source: str, source_prefixes: list[str]) -> str:
+    normalized_source = source.replace("\\", "/")
+    for prefix in source_prefixes:
+        marker = f"{prefix}/"
+        if normalized_source == prefix:
+            return Path(prefix).name
+        if normalized_source.startswith(marker):
+            return normalized_source[len(marker) :]
+    return source
+
+
+def source_map_with_privacy_updates(
     payload: dict[str, Any],
     debug_id: str,
     *,
     strip_sources_content: bool = False,
+    source_prefixes: list[str] | None = None,
 ) -> dict[str, Any]:
-    if source_map_debug_id(payload) and (not strip_sources_content or "sourcesContent" not in payload):
+    updated_sources = source_map_sources_without_prefixes(payload, source_prefixes or [])
+    has_source_changes = updated_sources is not None
+    if (
+        source_map_debug_id(payload)
+        and (not strip_sources_content or "sourcesContent" not in payload)
+        and not has_source_changes
+    ):
         return payload
     updated = dict(payload)
     if not source_map_debug_id(updated):
         updated["debug_id"] = debug_id
     if strip_sources_content:
         updated.pop("sourcesContent", None)
+    if updated_sources is not None:
+        updated["sources"] = updated_sources
     return updated
 
 
-def source_map_payload_for_debug_id(payload: dict[str, Any], *, strip_sources_content: bool = False) -> dict[str, Any]:
-    if not strip_sources_content or "sourcesContent" not in payload:
+def source_map_sources_without_prefixes(payload: dict[str, Any], source_prefixes: list[str]) -> list[Any] | None:
+    if not source_prefixes or not isinstance(payload.get("sources"), list):
+        return None
+    sources = payload["sources"]
+    updated_sources = [
+        source_without_prefix(source, source_prefixes) if isinstance(source, str) else source
+        for source in sources
+    ]
+    return updated_sources if updated_sources != sources else None
+
+
+def source_map_payload_for_debug_id(
+    payload: dict[str, Any],
+    *,
+    strip_sources_content: bool = False,
+    source_prefixes: list[str] | None = None,
+) -> dict[str, Any]:
+    updated_sources = source_map_sources_without_prefixes(payload, source_prefixes or [])
+    if not strip_sources_content and updated_sources is None:
         return payload
     updated = dict(payload)
-    updated.pop("sourcesContent", None)
+    if strip_sources_content:
+        updated.pop("sourcesContent", None)
+    if updated_sources is not None:
+        updated["sources"] = updated_sources
     return updated
 
 
-def build_artifact_plan(js_path: Path, build_dir: Path, *, strip_sources_content: bool = False) -> dict[str, Any]:
+def build_artifact_plan(
+    js_path: Path,
+    build_dir: Path,
+    *,
+    strip_sources_content: bool = False,
+    source_prefixes: list[str] | None = None,
+) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
     changes: list[str] = []
@@ -136,7 +194,11 @@ def build_artifact_plan(js_path: Path, build_dir: Path, *, strip_sources_content
             debug_id = generate_debug_id(
                 rel_js,
                 js_source,
-                source_map_payload_for_debug_id(source_map_payload, strip_sources_content=strip_sources_content),
+                source_map_payload_for_debug_id(
+                    source_map_payload,
+                    strip_sources_content=strip_sources_content,
+                    source_prefixes=source_prefixes,
+                ),
             )
             changes.extend(["minifiedSource.debugId", "sourceMap.debug_id"])
         else:
@@ -146,6 +208,8 @@ def build_artifact_plan(js_path: Path, build_dir: Path, *, strip_sources_content
                 changes.append("sourceMap.debug_id")
         if strip_sources_content and "sourcesContent" in source_map_payload:
             changes.append("sourceMap.sourcesContent")
+        if source_map_sources_without_prefixes(source_map_payload, source_prefixes or []) is not None:
+            changes.append("sourceMap.sources")
 
     return {
         "path": rel_js,
@@ -160,7 +224,13 @@ def build_artifact_plan(js_path: Path, build_dir: Path, *, strip_sources_content
     }
 
 
-def apply_artifact_plan(artifact: dict[str, Any], build_dir: Path, *, strip_sources_content: bool = False) -> None:
+def apply_artifact_plan(
+    artifact: dict[str, Any],
+    build_dir: Path,
+    *,
+    strip_sources_content: bool = False,
+    source_prefixes: list[str] | None = None,
+) -> None:
     debug_id = artifact["debugId"]
     js_path = build_dir / artifact["path"]
     js_source = js_path.read_text(encoding="utf-8", errors="replace")
@@ -172,7 +242,12 @@ def apply_artifact_plan(artifact: dict[str, Any], build_dir: Path, *, strip_sour
     payload, errors = read_source_map(source_map_path)
     if errors or payload is None:
         raise ValueError(f"{artifact['path']}: source map became unreadable before write")
-    updated_payload = source_map_with_debug_id(payload, debug_id, strip_sources_content=strip_sources_content)
+    updated_payload = source_map_with_privacy_updates(
+        payload,
+        debug_id,
+        strip_sources_content=strip_sources_content,
+        source_prefixes=source_prefixes,
+    )
     if updated_payload != payload:
         source_map_path.write_text(
             f"{json.dumps(updated_payload, indent=2, sort_keys=True)}\n",
@@ -180,14 +255,27 @@ def apply_artifact_plan(artifact: dict[str, Any], build_dir: Path, *, strip_sour
         )
 
 
-def create_debug_id_plan(*, build_dir: Path, write: bool = False, strip_sources_content: bool = False) -> dict[str, Any]:
+def create_debug_id_plan(
+    *,
+    build_dir: Path,
+    write: bool = False,
+    strip_sources_content: bool = False,
+    strip_source_prefixes: list[Path] | None = None,
+) -> dict[str, Any]:
     build_dir = build_dir.resolve()
     if not build_dir.is_dir():
         raise ValueError(f"build directory does not exist: {build_dir}")
 
+    source_prefixes = normalize_source_prefixes(strip_source_prefixes)
     source_files = iter_minified_source_files(build_dir)
     artifacts = [
-        build_artifact_plan(path, build_dir, strip_sources_content=strip_sources_content) for path in source_files
+        build_artifact_plan(
+            path,
+            build_dir,
+            strip_sources_content=strip_sources_content,
+            source_prefixes=source_prefixes,
+        )
+        for path in source_files
     ]
     errors = [] if artifacts else ["no JavaScript release artifact files found in build directory"]
     warnings: list[str] = []
@@ -199,7 +287,12 @@ def create_debug_id_plan(*, build_dir: Path, write: bool = False, strip_sources_
     status = "blocked" if errors else "ready"
     if write and status == "ready":
         for artifact in artifacts:
-            apply_artifact_plan(artifact, build_dir, strip_sources_content=strip_sources_content)
+            apply_artifact_plan(
+                artifact,
+                build_dir,
+                strip_sources_content=strip_sources_content,
+                source_prefixes=source_prefixes,
+            )
 
     return {
         "manifestVersion": 1,
@@ -208,6 +301,7 @@ def create_debug_id_plan(*, build_dir: Path, write: bool = False, strip_sources_
             "version": SCRIPT_VERSION,
         },
         "stripSourcesContent": strip_sources_content,
+        "stripSourcePrefixes": source_prefixes,
         "writeApplied": bool(write and status == "ready"),
         "artifacts": artifacts,
         "validation": {
@@ -236,6 +330,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Dry runs report the planned sourceMap.sourcesContent change without mutating files."
         ),
     )
+    parser.add_argument(
+        "--strip-source-prefix",
+        action="append",
+        default=[],
+        type=Path,
+        help=(
+            "Rewrite source map sources under this absolute path to relative paths during --write. "
+            "Repeat for multiple app roots; dry runs report the planned sourceMap.sources change."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -247,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
             build_dir=args.build_dir,
             write=args.write,
             strip_sources_content=args.strip_sources_content,
+            strip_source_prefixes=args.strip_source_prefix,
         )
     except ValueError as exc:
         print(f"debug-id preparation failed: {exc}", file=sys.stderr)

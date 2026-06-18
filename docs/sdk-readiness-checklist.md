@@ -126,6 +126,7 @@ For PHP packages specifically, prefer a smoke path that creates a fresh Composer
 - JavaScript release-artifact dry-run proof: `bash scripts/real_user_js_release_artifact_smoke.sh`
 - Vite release-artifact build proof: `bash scripts/real_user_vite_release_artifact_smoke.sh`
 - Next.js release-artifact build proof: `bash scripts/real_user_next_release_artifact_smoke.sh`
+- React Native release-artifact build proof: `bash scripts/real_user_react_native_release_artifact_smoke.sh`
 - Native/mobile release-artifact dry-run proof: `bash scripts/real_user_native_release_artifact_smoke.sh`
 - Public registry versions after real publishes: `python3 scripts/check_registry_publication.py --target all`
 - Shared Markdown docs: `python3 scripts/check_markdown_links.py`

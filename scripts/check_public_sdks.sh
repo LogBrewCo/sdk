@@ -84,6 +84,7 @@ STEP_LABELS=(
   "JavaScript release artifact smoke"
   "Vite release artifact smoke"
   "Next.js release artifact smoke"
+  "React Native release artifact smoke"
   "Native release artifact smoke"
   "Generated artifact hygiene"
 )
@@ -621,6 +622,10 @@ mark_step_complete
 
 begin_next_step "Next.js release artifact smoke"
 run_shell_step "bash scripts/real_user_next_release_artifact_smoke.sh"
+mark_step_complete
+
+begin_next_step "React Native release artifact smoke"
+run_shell_step "bash scripts/real_user_react_native_release_artifact_smoke.sh"
 mark_step_complete
 
 begin_next_step "Native release artifact smoke"
