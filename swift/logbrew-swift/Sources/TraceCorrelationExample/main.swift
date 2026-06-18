@@ -93,6 +93,17 @@ try LogBrewTrace.withContext(trace) {
     precondition(propagatedTraceparent == urlSessionSpan.traceContext.traceparent)
     precondition(urlSessionSpan.request.value(forHTTPHeaderField: "x-app-context") == "app-owned-header-value")
     precondition(urlSessionSpan.traceContext.parentSpanId == trace.spanId)
+    let urlSessionTimings = try LogBrewURLSessionTimings(
+        fetchMs: 184.5,
+        nameLookupMs: 2.5,
+        connectMs: 10,
+        tlsMs: 6.5,
+        sendMs: 4,
+        waitMs: 120.25,
+        receiveMs: 25,
+        requestBodyBytes: 512,
+        responseBodyBytes: 4096,
+    )
     try client.captureURLSessionSpan(
         "evt_urlsession_span_001",
         timestamp: "2026-06-02T10:00:08Z",
@@ -100,6 +111,7 @@ try LogBrewTrace.withContext(trace) {
         statusCode: 503,
         durationMs: 184.5,
         metadata: ["component": "pay-api"],
+        timings: urlSessionTimings,
     )
     try client.captureLifecycleSpan(
         "evt_lifecycle_span_001",

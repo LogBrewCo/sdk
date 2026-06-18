@@ -95,6 +95,20 @@ def main() -> int:
         raise SystemExit("URLSession span status code was not preserved")
     if urlsession_metadata.get("component") != "pay-api":
         raise SystemExit("URLSession span custom primitive metadata was not preserved")
+    expected_urlsession_timings = {
+        "requestFetchMs": 184.5,
+        "requestNameLookupMs": 2.5,
+        "requestConnectMs": 10,
+        "requestTlsMs": 6.5,
+        "requestSendMs": 4,
+        "requestWaitMs": 120.25,
+        "requestReceiveMs": 25,
+        "requestBodyBytes": 512,
+        "responseBodyBytes": 4096,
+    }
+    for key, expected in expected_urlsession_timings.items():
+        if urlsession_metadata.get(key) != expected:
+            raise SystemExit(f"URLSession span timing metadata {key} was not preserved")
     assert_trace_metadata(
         "evt_urlsession_span_001",
         urlsession_metadata,

@@ -92,62 +92,6 @@ struct TraceContextTests {
         #expect(headers["baggage"] == nil)
     }
 
-    @Test("URLSession span helper injects child traceparent and captures sanitized span")
-    func urlSessionSpanHelperCapturesSanitizedChildSpan() throws {
-        let client = try LogBrewClient.create(apiKey: "LOGBREW_API_KEY", sdkName: "test", sdkVersion: "0.1.0")
-        let context = try fixedTraceContext()
-        let requestURL = try #require(URL(string: "https://api.example.com/api/checkout?cart_id=123#pay"))
-        var request = URLRequest(url: requestURL)
-        request.httpMethod = "post"
-        request.setValue("app-owned-header-value", forHTTPHeaderField: "x-app-context")
-
-        try LogBrewTrace.withContext(context) {
-            let span = try LogBrewTrace.startURLSessionSpan(for: request)
-            #expect(span.method == "POST")
-            #expect(span.routeTemplate == "/api/checkout")
-            #expect(span.traceContext.traceId == context.traceId)
-            #expect(span.traceContext.parentSpanId == context.spanId)
-            #expect(span.traceContext.spanId != context.spanId)
-            #expect(span.request.value(forHTTPHeaderField: "traceparent") == span.traceContext.traceparent)
-            #expect(span.request.value(forHTTPHeaderField: "x-app-context") == "app-owned-header-value")
-
-            try client.captureURLSessionSpan(
-                "evt_urlsession_span_001",
-                timestamp: "2026-06-02T10:00:07Z",
-                span: span,
-                statusCode: 503,
-                durationMs: 184.5,
-                metadata: ["component": "pay-api"],
-            )
-        }
-
-        let preview = try client.previewJSON()
-        let payload = try parsePayload(preview)
-        let events = try #require(payload["events"] as? [[String: Any]])
-        let event = try #require(events.first { $0["id"] as? String == "evt_urlsession_span_001" })
-        let attributes = try #require(event["attributes"] as? [String: Any])
-        let metadata = try #require(attributes["metadata"] as? [String: Any])
-        let childSpanId = try #require(attributes["spanId"] as? String)
-
-        #expect(attributes["name"] as? String == "POST /api/checkout")
-        #expect(attributes["traceId"] as? String == context.traceId)
-        #expect(attributes["parentSpanId"] as? String == context.spanId)
-        #expect(childSpanId != context.spanId)
-        #expect(attributes["status"] as? String == "error")
-        #expect(attributes["durationMs"] as? Double == 184.5)
-        #expect(metadata["source"] as? String == "swift.urlsession")
-        #expect(metadata["method"] as? String == "POST")
-        #expect(metadata["routeTemplate"] as? String == "/api/checkout")
-        #expect(metadata["statusCode"] as? Int == 503)
-        #expect(metadata["component"] as? String == "pay-api")
-        #expect(metadata["spanId"] as? String == childSpanId)
-        #expect(metadata["parentSpanId"] as? String == context.spanId)
-        #expect(!preview.contains("cart_id"))
-        #expect(!preview.contains("#pay"))
-        #expect(!preview.contains("app-owned-header-value"))
-        #expect(!preview.contains("traceparent"))
-    }
-
     private func fixedTraceContext() throws -> LogBrewTraceContext {
         try LogBrewTraceContext(
             traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
