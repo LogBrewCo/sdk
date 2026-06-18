@@ -30,6 +30,7 @@ from native_release_artifact_pe import (  # noqa: E402
     pe_symbol_candidates,
     read_breakpad_metadata,
     read_pe_codeview_metadata,
+    read_portable_pdb_metadata,
 )
 from native_release_artifact_unity import (  # noqa: E402
     UNITY_BUILD_ID_FILE_NAME,
@@ -693,22 +694,41 @@ def build_dotnet_pdb_artifact(path: Path, root: Path, limits: dict[str, int]) ->
                     f"maximum is {limits['maxSymbolFileBytes']} bytes"
                 )
                 continue
+            pdb_metadata, pdb_metadata_error = read_portable_pdb_metadata(pdb_path)
+            if pdb_metadata_error:
+                errors.append(f"{relative(pdb_path, root)}: {pdb_metadata_error}")
+                continue
+            if pdb_metadata.get("pdbFormat") == "portable_pdb":
+                pdb_payload_debug_id = str(pdb_metadata["pdbDebugId"])
+                if pdb_payload_debug_id != metadata["pdbDebugId"]:
+                    errors.append(
+                        f"{relative(pdb_path, root)}: Portable PDB debug ID {pdb_payload_debug_id} "
+                        f"does not match PE CodeView debug ID {metadata['pdbDebugId']}"
+                    )
+                    continue
+            else:
+                warnings.append(
+                    f"{relative(pdb_path, root)}: PDB payload format is not recognized; "
+                    "PE CodeView identity could not be cross-checked"
+                )
 
-            symbol_files.append(
-                {
-                    "path": rel_path,
-                    "byteSize": candidate.stat().st_size,
-                    "peClass": metadata["peClass"],
-                    "arch": metadata["arch"],
-                    "pdbGuid": metadata["pdbGuid"],
-                    "pdbAge": metadata["pdbAge"],
-                    "pdbDebugId": metadata["pdbDebugId"],
-                    "pdbFileName": metadata["pdbFileName"],
-                    "pdbPath": relative(pdb_path, root),
-                    "pdbByteSize": pdb_path.stat().st_size,
-                    "symbolSource": metadata["symbolSource"],
-                }
-            )
+            symbol_file = {
+                "path": rel_path,
+                "byteSize": candidate.stat().st_size,
+                "peClass": metadata["peClass"],
+                "arch": metadata["arch"],
+                "pdbGuid": metadata["pdbGuid"],
+                "pdbAge": metadata["pdbAge"],
+                "pdbDebugId": metadata["pdbDebugId"],
+                "pdbFileName": metadata["pdbFileName"],
+                "pdbPath": relative(pdb_path, root),
+                "pdbByteSize": pdb_path.stat().st_size,
+                "pdbFormat": pdb_metadata["pdbFormat"],
+                "symbolSource": metadata["symbolSource"],
+            }
+            if pdb_metadata.get("pdbFormat") == "portable_pdb":
+                symbol_file["pdbPayloadDebugId"] = pdb_metadata["pdbDebugId"]
+            symbol_files.append(symbol_file)
         symbol_files = dedupe_pe_symbol_files(symbol_files, warnings, label="PDB symbol")
 
     details = {

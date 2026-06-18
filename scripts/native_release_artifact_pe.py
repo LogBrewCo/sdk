@@ -8,7 +8,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
-from native_release_artifact_io import c_string, read_bytes
+from native_release_artifact_io import align_offset, c_string, read_bytes
 
 
 BREAKPAD_IDENTIFIER_RE = re.compile(r"^[0-9A-F]+$")
@@ -47,6 +47,12 @@ PE_MACHINE_ARCHES = {
     0xAA64: "arm64",
 }
 PE_CANDIDATE_SUFFIXES = {".dll", ".exe"}
+PORTABLE_PDB_SIGNATURE = b"BSJB"
+PORTABLE_PDB_ROOT_HEADER_SIZE = 16
+PORTABLE_PDB_STREAM_HEADER_SIZE = 8
+PORTABLE_PDB_STREAM_NAME_SCAN_LIMIT = 256
+PORTABLE_PDB_PDB_STREAM_HEADER_SIZE = 32
+PORTABLE_PDB_MAX_STREAMS = 64
 SYMBOL_SOURCE_PRIORITY = {
     "debug_info": 3,
     "symbol_table": 2,
@@ -267,6 +273,74 @@ def associated_pdb_candidates(pe_path: Path, pdb_file_name: str) -> list[Path]:
             seen.add(key)
             unique.append(candidate)
     return unique
+
+
+def read_portable_pdb_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
+    try:
+        file_size = path.stat().st_size
+        if file_size < 4:
+            return {"pdbFormat": "unrecognized"}, None
+        if read_bytes(path, 0, 4) != PORTABLE_PDB_SIGNATURE:
+            return {"pdbFormat": "unrecognized"}, None
+        if file_size < PORTABLE_PDB_ROOT_HEADER_SIZE:
+            return {"pdbFormat": "portable_pdb"}, "Portable PDB metadata root is truncated"
+
+        header = read_bytes(path, 0, PORTABLE_PDB_ROOT_HEADER_SIZE)
+        version_length = struct.unpack_from("<I", header, 12)[0]
+        streams_header_offset = PORTABLE_PDB_ROOT_HEADER_SIZE + version_length
+        if streams_header_offset + 4 > file_size:
+            return {"pdbFormat": "portable_pdb"}, "Portable PDB metadata root is truncated"
+
+        streams_header = read_bytes(path, streams_header_offset, 4)
+        stream_count = struct.unpack_from("<H", streams_header, 2)[0]
+        if stream_count <= 0:
+            return {"pdbFormat": "portable_pdb"}, "Portable PDB stream directory is empty"
+        if stream_count > PORTABLE_PDB_MAX_STREAMS:
+            return {"pdbFormat": "portable_pdb"}, (
+                f"Portable PDB stream directory has {stream_count} streams; maximum is {PORTABLE_PDB_MAX_STREAMS}"
+            )
+
+        stream_header_offset = streams_header_offset + 4
+        for _ in range(stream_count):
+            if stream_header_offset + PORTABLE_PDB_STREAM_HEADER_SIZE > file_size:
+                return {"pdbFormat": "portable_pdb"}, "Portable PDB stream header is truncated"
+            stream_header = read_bytes(path, stream_header_offset, PORTABLE_PDB_STREAM_HEADER_SIZE)
+            stream_offset, stream_size = struct.unpack_from("<II", stream_header, 0)
+            name_offset = stream_header_offset + PORTABLE_PDB_STREAM_HEADER_SIZE
+            name_limit = min(file_size, name_offset + PORTABLE_PDB_STREAM_NAME_SCAN_LIMIT)
+            name_probe = read_bytes(path, name_offset, name_limit - name_offset)
+            terminator = name_probe.find(b"\0")
+            if terminator < 0:
+                return {"pdbFormat": "portable_pdb"}, "Portable PDB stream name is unterminated"
+            name_bytes = name_probe[:terminator]
+            try:
+                stream_name = name_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                return {"pdbFormat": "portable_pdb"}, "Portable PDB stream name is not UTF-8"
+            name_end = name_offset + terminator
+            stream_header_offset = align_offset(name_end + 1, 4)
+            if stream_header_offset > file_size:
+                return {"pdbFormat": "portable_pdb"}, "Portable PDB stream header is truncated"
+            if stream_offset + stream_size > file_size:
+                return {"pdbFormat": "portable_pdb"}, f"Portable PDB stream {stream_name or '<empty>'} points outside the file"
+
+            if stream_name != "#Pdb":
+                continue
+            if stream_size < PORTABLE_PDB_PDB_STREAM_HEADER_SIZE:
+                return {"pdbFormat": "portable_pdb"}, "Portable PDB #Pdb stream is truncated"
+            pdb_stream_header = read_bytes(path, stream_offset, PORTABLE_PDB_PDB_STREAM_HEADER_SIZE)
+            pdb_guid = format_codeview_guid(pdb_stream_header[:16])
+            pdb_age = struct.unpack_from("<I", pdb_stream_header, 16)[0]
+            return {
+                "pdbFormat": "portable_pdb",
+                "pdbGuid": pdb_guid,
+                "pdbAge": pdb_age,
+                "pdbDebugId": f"{pdb_guid}_{pdb_age}",
+            }, None
+
+        return {"pdbFormat": "portable_pdb"}, "Portable PDB #Pdb stream is missing"
+    except (OSError, struct.error, ValueError) as exc:
+        return {"pdbFormat": "portable_pdb"}, str(exc)
 
 
 def symbol_source_priority(symbol_source: str | None) -> int:

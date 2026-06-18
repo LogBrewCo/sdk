@@ -27,7 +27,7 @@ from tests.native_pe_fixture import (
     DEFAULT_PDB_AGE,
     DEFAULT_PDB_GUID,
     DEFAULT_PDB_PATH,
-    DEFAULT_PDB_PAYLOAD,
+    DEFAULT_PDB_PAYLOAD_MARKER,
     write_pdb,
     write_pe_with_codeview,
 )
@@ -263,6 +263,8 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertEqual(dotnet_file["pdbDebugId"], f"{DEFAULT_PDB_GUID}_{DEFAULT_PDB_AGE}")
         self.assertEqual(dotnet_file["pdbFileName"], "checkout.pdb")
         self.assertEqual(dotnet_file["pdbPath"], "windows/symbols/checkout.pdb")
+        self.assertEqual(dotnet_file["pdbFormat"], "portable_pdb")
+        self.assertEqual(dotnet_file["pdbPayloadDebugId"], f"{DEFAULT_PDB_GUID}_{DEFAULT_PDB_AGE}")
         self.assertEqual(dotnet_file["symbolSource"], "debug_info")
         self.assertTrue(dotnet_artifact["artifactId"].startswith("lbw_dotnet_pdb_"))
         serialized = json.dumps(manifest)
@@ -274,7 +276,7 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
         self.assertNotIn(DEFAULT_BREAKPAD_SOURCE_PATH, serialized)
         self.assertNotIn(DEFAULT_BREAKPAD_SYMBOL_NAME, serialized)
         self.assertNotIn(DEFAULT_PDB_PATH, serialized)
-        self.assertNotIn(DEFAULT_PDB_PAYLOAD.decode("ascii"), serialized)
+        self.assertNotIn(DEFAULT_PDB_PAYLOAD_MARKER.decode("ascii"), serialized)
         self.assertNotIn("/Users/dev/checkout", serialized)
         self.assertNotIn("Checkout.PlaceOrder", serialized)
 
@@ -471,7 +473,89 @@ class NativeReleaseArtifactManifestTests(unittest.TestCase):
             any("duplicate PDB symbol identity" in warning for warning in artifact["validation"]["warnings"])
         )
         self.assertNotIn(DEFAULT_PDB_PATH, serialized)
-        self.assertNotIn(DEFAULT_PDB_PAYLOAD.decode("ascii"), serialized)
+        self.assertNotIn(DEFAULT_PDB_PAYLOAD_MARKER.decode("ascii"), serialized)
+
+    def test_dotnet_pdb_payload_debug_id_mismatch_blocks_manifest_without_payload_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            symbols_dir = artifact_root / "windows" / "symbols"
+            write_pe_with_codeview(symbols_dir / "checkout.dll")
+            write_pdb(
+                symbols_dir / "checkout.pdb",
+                pdb_guid="11112222-3333-4444-5555-666677778888",
+                pdb_age=7,
+            )
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("dotnet_pdb", symbols_dir)],
+                release="2026.06.18",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        serialized = json.dumps(manifest)
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "windows/symbols: windows/symbols/checkout.pdb: "
+            f"Portable PDB debug ID 11112222-3333-4444-5555-666677778888_7 "
+            f"does not match PE CodeView debug ID {DEFAULT_PDB_GUID}_{DEFAULT_PDB_AGE}",
+            manifest["validation"]["errors"],
+        )
+        self.assertNotIn(DEFAULT_PDB_PAYLOAD_MARKER.decode("ascii"), serialized)
+
+    def test_dotnet_pdb_malformed_portable_pdb_blocks_manifest_without_payload_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            symbols_dir = artifact_root / "windows" / "symbols"
+            write_pe_with_codeview(symbols_dir / "checkout.dll")
+            pdb_path = symbols_dir / "checkout.pdb"
+            pdb_path.parent.mkdir(parents=True, exist_ok=True)
+            pdb_path.write_bytes(b"BSJB" + DEFAULT_PDB_PAYLOAD_MARKER)
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("dotnet_pdb", symbols_dir)],
+                release="2026.06.18",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        serialized = json.dumps(manifest)
+        self.assertEqual(manifest["validation"]["status"], "blocked")
+        self.assertIn(
+            "windows/symbols: windows/symbols/checkout.pdb: Portable PDB metadata root is truncated",
+            manifest["validation"]["errors"],
+        )
+        self.assertNotIn(DEFAULT_PDB_PAYLOAD_MARKER.decode("ascii"), serialized)
+
+    def test_dotnet_pdb_unrecognized_payload_warns_without_payload_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            symbols_dir = artifact_root / "windows" / "symbols"
+            write_pe_with_codeview(symbols_dir / "checkout.dll")
+            pdb_path = symbols_dir / "checkout.pdb"
+            pdb_path.parent.mkdir(parents=True, exist_ok=True)
+            pdb_path.write_bytes(b"classic-pdb-symbol-bytes")
+
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                artifacts=[("dotnet_pdb", symbols_dir)],
+                release="2026.06.18",
+                environment="production",
+                service="checkout-mobile",
+            )
+
+        artifact = manifest["artifacts"][0]
+        symbol_file = artifact["dotnetPdb"]["files"][0]
+        serialized = json.dumps(manifest)
+        self.assertEqual(manifest["validation"]["status"], "ready")
+        self.assertEqual(symbol_file["pdbFormat"], "unrecognized")
+        self.assertNotIn("pdbPayloadDebugId", symbol_file)
+        self.assertTrue(
+            any("PDB payload format is not recognized" in warning for warning in artifact["validation"]["warnings"])
+        )
+        self.assertNotIn("classic-pdb-symbol-bytes", serialized)
 
     def test_unity_symbols_without_build_id_blocks_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -146,7 +146,10 @@ assert dotnet_file["path"] == "windows/symbols/checkout-copy.dll"
 assert dotnet_file["pdbPath"] == "windows/symbols/checkout.pdb"
 assert dotnet_file["pdbGuid"] == "00112233-4455-6677-8899-AABBCCDDEEFF"
 assert dotnet_file["pdbAge"] == 42
+assert dotnet_file["pdbDebugId"] == "00112233-4455-6677-8899-AABBCCDDEEFF_42"
 assert dotnet_file["pdbFileName"] == "checkout.pdb"
+assert dotnet_file["pdbFormat"] == "portable_pdb"
+assert dotnet_file["pdbPayloadDebugId"] == "00112233-4455-6677-8899-AABBCCDDEEFF_42"
 assert dotnet_file["symbolSource"] == "debug_info"
 assert any("duplicate PDB symbol identity" in warning for warning in dotnet_warnings)
 assert tmp_dir not in serialized

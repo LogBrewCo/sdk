@@ -7,7 +7,7 @@ from pathlib import Path
 DEFAULT_PDB_GUID = "00112233-4455-6677-8899-AABBCCDDEEFF"
 DEFAULT_PDB_AGE = 42
 DEFAULT_PDB_PATH = r"C:\Users\dev\checkout.pdb"
-DEFAULT_PDB_PAYLOAD = b"portable-pdb-symbol-bytes"
+DEFAULT_PDB_PAYLOAD_MARKER = b"portable-pdb-symbol-bytes"
 PE_DOS_HEADER_SIZE = 64
 PE_OFFSET = 0x80
 PE_SECTION_RAW_OFFSET = 0x200
@@ -117,6 +117,37 @@ def write_pe_with_codeview(
     output_path.write_bytes(payload)
 
 
-def write_pdb(output_path: Path) -> None:
+def write_pdb(
+    output_path: Path,
+    *,
+    pdb_guid: str = DEFAULT_PDB_GUID,
+    pdb_age: int = DEFAULT_PDB_AGE,
+) -> None:
+    write_portable_pdb(output_path, pdb_guid=pdb_guid, pdb_age=pdb_age)
+
+
+def write_portable_pdb(
+    output_path: Path,
+    *,
+    pdb_guid: str = DEFAULT_PDB_GUID,
+    pdb_age: int = DEFAULT_PDB_AGE,
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(DEFAULT_PDB_PAYLOAD)
+    version = b"LogBrew fixture v1\0"
+    version += b"\0" * ((4 - (len(version) % 4)) % 4)
+    stream_name = b"#Pdb\0"
+    stream_name += b"\0" * ((4 - (len(stream_name) % 4)) % 4)
+    stream_directory_offset = 16 + len(version) + 4
+    pdb_stream_offset = stream_directory_offset + 8 + len(stream_name)
+    pdb_stream = codeview_guid_bytes(pdb_guid) + struct.pack("<I", pdb_age)
+    pdb_stream += struct.pack("<IQ", 0, 0)
+    payload = bytearray()
+    payload += b"BSJB"
+    payload += struct.pack("<HHII", 1, 1, 0, len(version))
+    payload += version
+    payload += struct.pack("<HH", 0, 1)
+    payload += struct.pack("<II", pdb_stream_offset, len(pdb_stream))
+    payload += stream_name
+    payload += pdb_stream
+    payload += DEFAULT_PDB_PAYLOAD_MARKER
+    output_path.write_bytes(payload)
