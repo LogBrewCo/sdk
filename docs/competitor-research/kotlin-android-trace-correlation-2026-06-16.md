@@ -302,6 +302,34 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 - LogBrew remains weaker than Sentry/Datadog for one-line OkHttp adoption until the optional artifact or source-packaged integration ships.
 - LogBrew remains better for developers who need a small dependency-light core artifact, app-owned instrumentation, and privacy-bounded request spans without body/header/full-URL capture.
 
+## 2026-06-19 Optional OkHttp Artifact Implementation
+
+### Source Re-Read
+
+- Refreshed `getsentry/sentry-java@7c1a728e8bd2faa42b8f1c25c9f16a145baab60f` and re-read `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpInterceptor.kt`: `intercept(...)`, `finishSpan(...)`, `sendBreadcrumb(...)`, and `shouldCaptureClientError(...)`.
+- Refreshed `DataDog/dd-sdk-android@519550150648592709d441c677437d8b1c3a0707` and re-read `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/trace/TracingInterceptor.kt`: `intercept(...)`, `interceptAndTrace(...)`, `buildSpan(...)`, `updateRequest(...)`, `handleResponse(...)`, `handleThrowable(...)`, and `Builder.build()`.
+- Re-read Datadog `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/DatadogInterceptor.kt`: `intercept(...)`, `onRequestIntercepted(...)`, `handleResponse(...)`, and `handleThrowable(...)`.
+- Refreshed `open-telemetry/opentelemetry-java-instrumentation@63de06bb3c29dd0cdf4059b5b755bb6bbde7fe71` and re-read OkHttp library `TracingInterceptor.intercept(...)` plus `TracingCallFactory.newCall(...)`, `execute()`, and callback wrappers.
+
+### LogBrew Implementation
+
+- Added optional Maven artifact `co.logbrew:logbrew-kotlin-okhttp:0.1.0` with its own POM, README, source, tests, example, package verifier coverage, local installed smoke, release metadata, registry verification, and Maven Central bundle packaging.
+- `LogBrewOkHttpInterceptor` depends on app-owned OkHttp, reuses `LogBrewAndroid.startRequestSpan(...)`, clones the immutable request, writes exactly one normalized `traceparent` with `Request.Builder.header(...)`, runs `chain.proceed(...)` under the request child trace, captures response status/duration or exception type/message, rethrows original OkHttp failures, and reports telemetry capture failures through `LogBrewOkHttpCaptureFailureHandler` without breaking the HTTP call.
+- Core `co.logbrew:logbrew-kotlin` remains free of OkHttp classes. Apps install the optional artifact only when they already own an `OkHttpClient`.
+- The interceptor intentionally avoids request/response body capture, arbitrary header capture, full URL/query/fragment capture, cookies, baggage, tracestate, RUM resources, support tickets, backend usage/quota state, backend symbolication, automatic retry, or global call-factory wrapping.
+
+### Verification
+
+- TDD red: `bash scripts/check_kotlin_package.sh` failed with unresolved `co.logbrew.sdk.okhttp.LogBrewOkHttpInterceptor`.
+- Green: `bash scripts/check_kotlin_package.sh` passed with 26 core Kotlin tests, 3 OkHttp tests, core/OkHttp Maven metadata checks, source/javadoc/binary jar inspection, and a guard that the core jar contains no `co/logbrew/sdk/okhttp` classes.
+- Installed-artifact proof: `bash scripts/real_user_kotlin_smoke.sh` passed with a temporary Gradle app resolving `co.logbrew:logbrew-kotlin-okhttp:0.1.0`, transitive `co.logbrew:logbrew-kotlin:0.1.0`, and OkHttp `4.12.0`; it ran a real `OkHttpClient` against a loopback JDK HTTP server and verified one outbound `traceparent`, request-child span correlation, route-template span naming, response status/duration, query/fragment stripping, and no raw `traceparent` in event JSON.
+- Release proof: `bash scripts/build_maven_central_bundle.sh --output <tmp>` produced a 60-file bundle containing `logbrew-kotlin-okhttp` binary, sources, javadoc README, POM, and checksums.
+- Supporting gates passed so far: `bash scripts/check_kotlin_style.sh` with ktlint `1.8.0`, `python3 scripts/check_release_metadata.py`, `python3 scripts/check_generated_artifacts.py`, `bash scripts/check_shell_static.sh` with ShellCheck `0.11.0`, and `git diff --check`.
+
+### Remaining Gaps
+
+- Kotlin Android still lacks automatic lifecycle instrumentation, hidden/global URLConnection instrumentation, OkHttp async callback context wrapping beyond normal interceptor scope, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication parity.
+
 ## Verification
 
 - `bash scripts/check_kotlin_style.sh`: ktlint `1.8.0` passed.

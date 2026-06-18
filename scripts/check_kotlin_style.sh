@@ -36,6 +36,9 @@ java -jar "$jar_path" --version
 java -jar "$jar_path" \
 	"$repo_root/kotlin/logbrew-kotlin/src/**/*.kt" \
 	"$repo_root/kotlin/logbrew-kotlin/examples/**/*.kt" \
-	"$repo_root/kotlin/logbrew-kotlin/tests/**/*.kt"
+	"$repo_root/kotlin/logbrew-kotlin/tests/**/*.kt" \
+	"$repo_root/kotlin/logbrew-kotlin-okhttp/src/**/*.kt" \
+	"$repo_root/kotlin/logbrew-kotlin-okhttp/examples/**/*.kt" \
+	"$repo_root/kotlin/logbrew-kotlin-okhttp/tests/**/*.kt"
 
 printf '%s\n' "kotlin style checks passed"

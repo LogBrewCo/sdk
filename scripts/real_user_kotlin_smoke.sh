@@ -3,10 +3,14 @@ set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_dir="$repo_root/kotlin/logbrew-kotlin"
+okhttp_package_dir="$repo_root/kotlin/logbrew-kotlin-okhttp"
 tmp_dir="$(mktemp -d)"
 lock_dir="${TMPDIR:-/tmp}/logbrewco-sdk-kotlin-checks.lock"
 lock_pid_file="$lock_dir/pid"
 intake_pid=""
+
+# shellcheck source=scripts/kotlin_okhttp_deps.sh
+source "$repo_root/scripts/kotlin_okhttp_deps.sh"
 
 acquire_lock() {
   if mkdir "$lock_dir" 2>/dev/null; then
@@ -30,6 +34,7 @@ acquire_lock() {
 
 clean_generated_artifacts() {
   find "$package_dir" -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + 2>/dev/null || true
+  find "$okhttp_package_dir" -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + 2>/dev/null || true
 }
 
 clean_after_run() {
@@ -50,6 +55,7 @@ if ! acquire_lock; then
 fi
 
 mkdir -p "$tmp_dir/classes" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-kotlin"
+mkdir -p "$tmp_dir/okhttp-classes" "$tmp_dir/okhttp-jar-stage/META-INF/maven/co.logbrew/logbrew-kotlin-okhttp"
 kotlinc "$package_dir"/src/main/kotlin/co/logbrew/sdk/*.kt \
   -jvm-target 11 \
   -Xjdk-release=11 \
@@ -76,10 +82,31 @@ grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt
 grep -q '^co/logbrew/sdk/HttpTransportRequester.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.class$' "$tmp_dir/jar-contents.txt"
 
+okhttp_classpath="$tmp_dir/classes:$(fetch_kotlin_okhttp_deps "$tmp_dir/okhttp-deps")"
+kotlinc "$okhttp_package_dir"/src/main/kotlin/co/logbrew/sdk/okhttp/*.kt \
+  -classpath "$okhttp_classpath" \
+  -jvm-target 11 \
+  -Xjdk-release=11 \
+  -Werror \
+  -d "$tmp_dir/okhttp-classes"
+cp "$okhttp_package_dir/pom.xml" "$tmp_dir/okhttp-jar-stage/META-INF/maven/co.logbrew/logbrew-kotlin-okhttp/pom.xml"
+cp "$okhttp_package_dir/README.md" "$tmp_dir/okhttp-jar-stage/README.md"
+mkdir -p "$tmp_dir/okhttp-jar-stage/examples"
+cp -R "$okhttp_package_dir/examples/okhttp_request" "$tmp_dir/okhttp-jar-stage/examples/okhttp_request"
+jar --create --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" -C "$tmp_dir/okhttp-classes" . -C "$tmp_dir/okhttp-jar-stage" .
+jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" > "$tmp_dir/okhttp-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpInterceptor.class$' "$tmp_dir/okhttp-jar-contents.txt"
+grep -q '^META-INF/maven/co.logbrew/logbrew-kotlin-okhttp/pom.xml$' "$tmp_dir/okhttp-jar-contents.txt"
+grep -q '^examples/okhttp_request/OkHttpRequestExample.kt$' "$tmp_dir/okhttp-jar-contents.txt"
+
 maven_dir="$tmp_dir/maven/co/logbrew/logbrew-kotlin/0.1.0"
 mkdir -p "$maven_dir"
 cp "$tmp_dir/logbrew-kotlin-0.1.0.jar" "$maven_dir/logbrew-kotlin-0.1.0.jar"
 cp "$package_dir/pom.xml" "$maven_dir/logbrew-kotlin-0.1.0.pom"
+okhttp_maven_dir="$tmp_dir/maven/co/logbrew/logbrew-kotlin-okhttp/0.1.0"
+mkdir -p "$okhttp_maven_dir"
+cp "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" "$okhttp_maven_dir/logbrew-kotlin-okhttp-0.1.0.jar"
+cp "$okhttp_package_dir/pom.xml" "$okhttp_maven_dir/logbrew-kotlin-okhttp-0.1.0.pom"
 
 gradle_app="$tmp_dir/gradle-app"
 mkdir -p "$gradle_app/src/main/java/app"
@@ -135,8 +162,53 @@ PY
 (cd "$gradle_app" && gradle --no-daemon -q dependencies --configuration runtimeClasspath > "$tmp_dir/gradle-deps-readded.txt")
 grep -q 'co.logbrew:logbrew-kotlin:0.1.0' "$tmp_dir/gradle-deps-readded.txt"
 
-otel_app="$tmp_dir/otel-gradle-app"
+okhttp_app="$tmp_dir/okhttp-gradle-app"
 kotlin_stdlib_version="$(kotlinc -version 2>&1 | sed -E 's/.*kotlinc-jvm ([^ ]+).*/\1/')"
+mkdir -p "$okhttp_app"
+cat > "$okhttp_app/settings.gradle" <<'EOF'
+rootProject.name = "kotlin-okhttp-app"
+EOF
+cat > "$okhttp_app/build.gradle" <<EOF
+plugins {
+    id 'java'
+}
+
+repositories {
+    maven {
+        url = uri('$tmp_dir/maven')
+    }
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'co.logbrew:logbrew-kotlin-okhttp:0.1.0'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:$kotlin_stdlib_version'
+}
+
+tasks.register('printRuntimeClasspath') {
+    doLast {
+        println configurations.runtimeClasspath.asPath
+    }
+}
+EOF
+cp "$okhttp_package_dir/examples/okhttp_request/OkHttpRequestExample.kt" "$okhttp_app/OkHttpApp.kt"
+(cd "$okhttp_app" && gradle --no-daemon -q dependencies --configuration runtimeClasspath > "$tmp_dir/okhttp-gradle-deps.txt")
+grep -q 'co.logbrew:logbrew-kotlin-okhttp:0.1.0' "$tmp_dir/okhttp-gradle-deps.txt"
+grep -q 'co.logbrew:logbrew-kotlin:0.1.0' "$tmp_dir/okhttp-gradle-deps.txt"
+grep -q 'com.squareup.okhttp3:okhttp:4.12.0' "$tmp_dir/okhttp-gradle-deps.txt"
+(cd "$okhttp_app" && gradle --no-daemon -q printRuntimeClasspath > "$tmp_dir/okhttp-classpath.txt")
+okhttp_runtime_classpath="$(cat "$tmp_dir/okhttp-classpath.txt")"
+kotlinc "$okhttp_app/OkHttpApp.kt" \
+  -classpath "$okhttp_runtime_classpath" \
+  -jvm-target 11 \
+  -Xjdk-release=11 \
+  -Werror \
+  -include-runtime \
+  -d "$tmp_dir/okhttp-app.jar"
+java -cp "$tmp_dir/okhttp-app.jar:$okhttp_runtime_classpath" OkHttpAppKt > "$tmp_dir/okhttp-app.out"
+grep -qx 'okhttp bridge ok' "$tmp_dir/okhttp-app.out"
+
+otel_app="$tmp_dir/otel-gradle-app"
 mkdir -p "$otel_app/src/main/java/app"
 cat > "$otel_app/settings.gradle" <<'EOF'
 rootProject.name = "kotlin-otel-app"

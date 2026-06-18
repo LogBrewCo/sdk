@@ -44,7 +44,7 @@ PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-django")
 RUBYGEMS_PACKAGES = ("logbrew-sdk",)
 NUGET_PACKAGES = ("LogBrew",)
 CRATES = ("logbrew",)
-MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin")
+MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin", "logbrew-kotlin-okhttp")
 OPENUPM_PACKAGES = ("co.logbrew.unity",)
 
 def decode_json(raw: bytes) -> Any:

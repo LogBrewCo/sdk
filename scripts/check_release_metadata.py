@@ -877,6 +877,13 @@ def validate(root: Path, npm_versions: dict[str, str] | None = None) -> list[str
     validate_dotnet(root, failures)
     validate_unity(root, failures)
     validate_maven_pom(root, "kotlin/logbrew-kotlin/pom.xml", "logbrew-kotlin", "LogBrew Kotlin SDK", failures)
+    validate_maven_pom(
+        root,
+        "kotlin/logbrew-kotlin-okhttp/pom.xml",
+        "logbrew-kotlin-okhttp",
+        "LogBrew Kotlin OkHttp Integration",
+        failures,
+    )
     validate_ruby(root, failures)
     validate_php(root, failures)
     validate_swift(root, failures)

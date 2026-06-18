@@ -8,6 +8,8 @@ sign_artifacts=false
 
 # shellcheck source=scripts/java_logback_deps.sh
 source "$repo_root/scripts/java_logback_deps.sh"
+# shellcheck source=scripts/kotlin_okhttp_deps.sh
+source "$repo_root/scripts/kotlin_okhttp_deps.sh"
 
 usage() {
   cat <<'EOF'
@@ -86,13 +88,17 @@ PY
 
 java_dir="$repo_root/java/logbrew-java"
 kotlin_dir="$repo_root/kotlin/logbrew-kotlin"
+okhttp_dir="$repo_root/kotlin/logbrew-kotlin-okhttp"
 java_artifact="$(pom_value "$java_dir/pom.xml" artifactId)"
 java_version="$(pom_value "$java_dir/pom.xml" version)"
 kotlin_artifact="$(pom_value "$kotlin_dir/pom.xml" artifactId)"
 kotlin_version="$(pom_value "$kotlin_dir/pom.xml" version)"
+okhttp_artifact="$(pom_value "$okhttp_dir/pom.xml" artifactId)"
+okhttp_version="$(pom_value "$okhttp_dir/pom.xml" version)"
 
-if [[ "$java_version" != "$kotlin_version" ]]; then
-  printf 'Java and Kotlin Maven versions differ: %s vs %s\n' "$java_version" "$kotlin_version" >&2
+if ! [[ "$java_version" == "$kotlin_version" && "$java_version" == "$okhttp_version" ]]; then
+  printf 'Maven versions differ: Java %s, Kotlin %s, Kotlin OkHttp %s\n' \
+    "$java_version" "$kotlin_version" "$okhttp_version" >&2
   exit 1
 fi
 
@@ -149,6 +155,35 @@ build_kotlin_artifacts() {
   cp -R "$package_dir/examples/readme_example" "$jar_stage/examples/readme_example"
   cp -R "$package_dir/examples/real_user_smoke" "$jar_stage/examples/real_user_smoke"
   cp "$package_dir/examples/Makefile" "$jar_stage/examples/Makefile"
+  jar --create --file "$build_dir/$artifact-$version.jar" -C "$classes_dir" . -C "$jar_stage" .
+}
+
+build_kotlin_okhttp_artifacts() {
+  local package_dir="$okhttp_dir"
+  local artifact="$okhttp_artifact"
+  local version="$okhttp_version"
+  local classes_dir="$build_dir/kotlin-okhttp-classes"
+  local jar_stage="$build_dir/kotlin-okhttp-jar-stage"
+  local javadoc_stage="$build_dir/kotlin-okhttp-javadoc-stage"
+  local core_classes_dir="$build_dir/kotlin-classes"
+  local okhttp_classpath
+
+  mkdir -p "$classes_dir" "$javadoc_stage" "$jar_stage/META-INF/maven/co.logbrew/$artifact"
+  okhttp_classpath="$core_classes_dir:$(fetch_kotlin_okhttp_deps "$build_dir/kotlin-okhttp-deps")"
+  kotlinc "$package_dir"/src/main/kotlin/co/logbrew/sdk/okhttp/*.kt \
+    -classpath "$okhttp_classpath" \
+    -jvm-target 11 \
+    -Xjdk-release=11 \
+    -Werror \
+    -d "$classes_dir"
+
+  jar --create --file "$build_dir/$artifact-$version-sources.jar" -C "$package_dir/src/main/kotlin" .
+  cp "$package_dir/README.md" "$javadoc_stage/README.md"
+  jar --create --file "$build_dir/$artifact-$version-javadoc.jar" -C "$javadoc_stage" README.md
+  cp "$package_dir/pom.xml" "$jar_stage/META-INF/maven/co.logbrew/$artifact/pom.xml"
+  cp "$package_dir/README.md" "$jar_stage/README.md"
+  mkdir -p "$jar_stage/examples"
+  cp -R "$package_dir/examples/okhttp_request" "$jar_stage/examples/okhttp_request"
   jar --create --file "$build_dir/$artifact-$version.jar" -C "$classes_dir" . -C "$jar_stage" .
 }
 
@@ -225,14 +260,14 @@ finalize_artifacts() {
 }
 
 validate_staging() {
-  python3 - "$stage_dir" "$java_artifact" "$kotlin_artifact" "$java_version" "$sign_artifacts" <<'PY'
+  python3 - "$stage_dir" "$java_version" "$sign_artifacts" "$java_artifact" "$kotlin_artifact" "$okhttp_artifact" <<'PY'
 import sys
 from pathlib import Path
 
 stage = Path(sys.argv[1])
-artifacts = (sys.argv[2], sys.argv[3])
-version = sys.argv[4]
-signed = sys.argv[5] == "true"
+version = sys.argv[2]
+signed = sys.argv[3] == "true"
+artifacts = sys.argv[4:]
 required_suffixes = (".jar", "-sources.jar", "-javadoc.jar", ".pom")
 checksum_suffixes = (".md5", ".sha1", ".sha256", ".sha512")
 
@@ -273,8 +308,10 @@ PY
 
 build_java_artifacts
 build_kotlin_artifacts
+build_kotlin_okhttp_artifacts
 stage_artifact "$java_artifact" "$java_version" "java/logbrew-java"
 stage_artifact "$kotlin_artifact" "$kotlin_version" "kotlin/logbrew-kotlin"
+stage_artifact "$okhttp_artifact" "$okhttp_version" "kotlin/logbrew-kotlin-okhttp"
 finalize_artifacts
 validate_staging
 zip_bundle

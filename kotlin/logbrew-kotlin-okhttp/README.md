@@ -1,0 +1,65 @@
+# LogBrew Kotlin OkHttp Integration
+
+Optional Kotlin/JVM integration for apps that already use OkHttp and want one interceptor to create privacy-bounded outbound request spans.
+
+Core Kotlin users do not need this package. Install it only where the app already owns an `OkHttpClient`.
+
+## Install
+
+```text
+co.logbrew:logbrew-kotlin-okhttp:0.1.0
+```
+
+The package depends on `co.logbrew:logbrew-kotlin:0.1.0` and OkHttp `4.12.0`.
+
+## Usage
+
+```kotlin
+import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewTrace
+import co.logbrew.sdk.okhttp.LogBrewOkHttpInterceptor
+import okhttp3.OkHttpClient
+import okhttp3.Request
+
+val client = LogBrewClient.create(
+    apiKey = "LOGBREW_API_KEY",
+    sdkName = "checkout-android",
+    sdkVersion = "1.0.0",
+)
+
+val okHttp =
+    OkHttpClient
+        .Builder()
+        .addInterceptor(LogBrewOkHttpInterceptor(client))
+        .build()
+
+LogBrewTrace.use(LogBrewTrace.continueOrCreate(incomingTraceparent)).use {
+    val response =
+        okHttp
+            .newCall(Request.Builder().url("https://api.example.com/api/checkout?cart=123").build())
+            .execute()
+
+    response.close()
+}
+```
+
+`LogBrewOkHttpInterceptor` clones the immutable request, writes exactly one normalized `traceparent` header, runs `chain.proceed(...)` under the request child trace, captures response status or exception type/message, records duration, and rethrows the original OkHttp failure.
+
+The interceptor does not capture request or response bodies, arbitrary headers, full URLs, query strings, fragments, cookies, baggage, tracestate, visual replay, RUM resources, support tickets, backend usage/quota state, or symbolication data. Telemetry capture failures are reported to an optional `LogBrewOkHttpCaptureFailureHandler` and do not break the app-owned HTTP call.
+
+Use `routeTemplate` when you want low-cardinality span names instead of raw path segments:
+
+```kotlin
+val okHttp =
+    OkHttpClient
+        .Builder()
+        .addInterceptor(
+            LogBrewOkHttpInterceptor(
+                client = client,
+                routeTemplate = "/api/checkout/{cart_id}",
+            ),
+        )
+        .build()
+```
+
+For custom clients or `HttpURLConnection`, use the dependency-light helpers in `co.logbrew:logbrew-kotlin` instead of this OkHttp package.

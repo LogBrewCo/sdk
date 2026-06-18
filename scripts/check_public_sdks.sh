@@ -329,6 +329,7 @@ cleanup_build_artifacts() {
   find dotnet/logbrew-dotnet -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
   find unity/logbrew-unity -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
   find kotlin/logbrew-kotlin -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + 2>/dev/null || true
+  find kotlin/logbrew-kotlin-okhttp -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + 2>/dev/null || true
 }
 
 cleanup_generated_artifacts() {

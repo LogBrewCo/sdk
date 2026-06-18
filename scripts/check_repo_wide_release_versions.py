@@ -67,6 +67,12 @@ REPO_WIDE_RELEASE_MANIFESTS = (
     ),
     PackageManifest("maven", "co.logbrew:logbrew-sdk", "java/logbrew-java/pom.xml", "maven-version"),
     PackageManifest("maven", "co.logbrew:logbrew-kotlin", "kotlin/logbrew-kotlin/pom.xml", "maven-version"),
+    PackageManifest(
+        "maven",
+        "co.logbrew:logbrew-kotlin-okhttp",
+        "kotlin/logbrew-kotlin-okhttp/pom.xml",
+        "maven-version",
+    ),
 )
 
 
