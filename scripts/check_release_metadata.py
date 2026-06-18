@@ -247,7 +247,14 @@ def validate_js_package(
     for expected_file in ("README.md", "examples", "index.js", "index.cjs", "index.d.ts", "index.d.cts"):
         require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
     if expected_name == "@logbrew/sdk":
-        for expected_file in ("release-artifacts.js", "release-artifacts-symbolication.js"):
+        for expected_file in (
+            "release-artifacts.js",
+            "release-artifacts-symbolication.js",
+            "vite-release-artifacts.cjs",
+            "vite-release-artifacts.js",
+            "vite-release-artifacts.d.ts",
+            "vite-release-artifacts.d.cts",
+        ):
             require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
         require_equal(
             failures,
@@ -256,16 +263,29 @@ def validate_js_package(
             manifest.get("bin", {}).get("logbrew-release-artifacts"),
             "./release-artifacts.js",
         )
+        require_js_export_entry(
+            failures,
+            location,
+            manifest,
+            "./vite-release-artifacts",
+            import_types="./vite-release-artifacts.d.ts",
+            import_default="./vite-release-artifacts.js",
+            require_types="./vite-release-artifacts.d.cts",
+            require_default="./vite-release-artifacts.cjs",
+        )
     if expected_name == "@logbrew/react-native":
         require("index.native.js" in files, failures, f"{location}: files must include 'index.native.js'")
 
-    exports = manifest.get("exports", {}).get(".")
-    require(isinstance(exports, dict), failures, f"{location}: exports['.'] must be an object")
-    if isinstance(exports, dict):
-        require_equal(failures, location, "exports['.'].import.types", path_text_from_dict(exports, "import", "types"), "./index.d.ts")
-        require_equal(failures, location, "exports['.'].import.default", path_text_from_dict(exports, "import", "default"), "./index.js")
-        require_equal(failures, location, "exports['.'].require.types", path_text_from_dict(exports, "require", "types"), "./index.d.cts")
-        require_equal(failures, location, "exports['.'].require.default", path_text_from_dict(exports, "require", "default"), "./index.cjs")
+    require_js_export_entry(
+        failures,
+        location,
+        manifest,
+        ".",
+        import_types="./index.d.ts",
+        import_default="./index.js",
+        require_types="./index.d.cts",
+        require_default="./index.cjs",
+    )
 
 
 def path_text_from_dict(payload: dict[str, Any], *keys: str) -> Any:
@@ -275,6 +295,32 @@ def path_text_from_dict(payload: dict[str, Any], *keys: str) -> Any:
             return None
         value = value.get(key)
     return value
+
+
+def require_js_export_entry(
+    failures: list[str],
+    location: str,
+    manifest: dict[str, Any],
+    export_name: str,
+    *,
+    import_types: str,
+    import_default: str,
+    require_types: str,
+    require_default: str,
+) -> None:
+    exports = manifest.get("exports", {}).get(export_name)
+    require(isinstance(exports, dict), failures, f"{location}: exports[{export_name!r}] must be an object")
+    if not isinstance(exports, dict):
+        return
+
+    expected_paths = {
+        "import.types": import_types,
+        "import.default": import_default,
+        "require.types": require_types,
+        "require.default": require_default,
+    }
+    for field, expected in expected_paths.items():
+        require_equal(failures, location, f"exports[{export_name!r}].{field}", path_text_from_dict(exports, *field.split(".")), expected)
 
 
 def validate_js_packages(root: Path, failures: list[str], npm_versions: dict[str, str] | None = None) -> None:

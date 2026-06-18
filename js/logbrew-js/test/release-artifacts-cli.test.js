@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 const CLI_PATH = new URL("../release-artifacts.js", import.meta.url);
+const VITE_PLUGIN_PATH = new URL("../vite-release-artifacts.js", import.meta.url);
 
 function makeBuild() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-release-artifacts-"));
@@ -240,6 +241,50 @@ test("symbolicate-js blocks source maps that still expose local source paths", (
     assert.equal(report.status, "validation_failed");
     assert.match(report.validation.errors.join("\n"), /source map source path must be stripped/);
     assert.doesNotMatch(result.stdout, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Vite release-artifact plugin prepares a build output and writes a ready manifest", async () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const { createLogBrewViteReleaseArtifactsPlugin } = await import(VITE_PLUGIN_PATH);
+    const manifestPath = path.join(buildDir, "logbrew-release-artifacts.json");
+    const plugin = createLogBrewViteReleaseArtifactsPlugin({
+      release: "web@1.2.3",
+      environment: "production",
+      service: "checkout-web",
+      minifiedPathPrefix: "https://cdn.example/assets?cache=placeholder#fragment",
+      manifestPath
+    });
+
+    assert.equal(plugin.name, "logbrew-vite-release-artifacts");
+    assert.equal(plugin.apply, "build");
+    assert.equal(plugin.enforce, "post");
+    assert.deepEqual(plugin.config({ build: {} }, { command: "build", mode: "production" }), {
+      build: { sourcemap: "hidden" }
+    });
+
+    plugin.configResolved({ root: appRoot, build: { outDir: "dist" } });
+    await plugin.closeBundle();
+
+    const minified = fs.readFileSync(path.join(buildDir, "assets", "app.js"), "utf8");
+    const sourceMap = JSON.parse(fs.readFileSync(path.join(buildDir, "assets", "app.js.map"), "utf8"));
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const serialized = JSON.stringify(manifest);
+    const artifact = manifest.artifacts[0];
+
+    assert.equal(manifest.validation.status, "ready");
+    assert.equal(manifest.minifiedPathPrefix, "https://cdn.example/assets");
+    assert.equal(artifact.minifiedSource.minifiedUrl, "https://cdn.example/assets/assets/app.js");
+    assert.equal(artifact.sourceMap.hasSourcesContent, false);
+    assert.equal(sourceMap.sourcesContent, undefined);
+    assert.deepEqual(sourceMap.sources, ["src/main.js"]);
+    assert.match(minified, /debugId=[0-9a-f-]{36}/u);
+    assert.equal(sourceMap.debug_id, artifact.debugId);
+    assert.doesNotMatch(serialized, /source-fixture-marker|cache=placeholder|fragment/);
+    assert.doesNotMatch(serialized, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

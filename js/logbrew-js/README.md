@@ -25,6 +25,25 @@ node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline
 npm --prefix node_modules/@logbrew/sdk/examples run agent-timeline
 ```
 
+For Vite apps, add the build-time release-artifact plugin to `vite.config.js`. It enables hidden source maps when your config has not chosen a source-map mode, injects matching Debug IDs after the build, strips embedded source text and local source prefixes, and writes a privacy-bounded manifest next to your output:
+
+```js
+import { createLogBrewViteReleaseArtifactsPlugin } from "@logbrew/sdk/vite-release-artifacts";
+
+export default {
+  plugins: [
+    createLogBrewViteReleaseArtifactsPlugin({
+      release: "web@1.2.3",
+      environment: "production",
+      service: "checkout-web",
+      minifiedPathPrefix: "https://cdn.example/assets"
+    })
+  ]
+};
+```
+
+The plugin runs only during Vite builds. It does not upload source maps, open support tickets, use account/session API values, or claim backend symbolication support.
+
 The package also ships the dependency-free `logbrew-release-artifacts` command for local JavaScript source-map preparation. Use it in CI after your frontend build to inject matching Debug IDs, strip embedded source text by default, and create a privacy-bounded manifest that can be inspected before any backend upload contract exists:
 
 ```bash

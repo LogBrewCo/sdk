@@ -19,6 +19,17 @@
         "default": "./index.cjs"
       },
       "default": "./index.js"
+    },
+    "./vite-release-artifacts": {
+      "import": {
+        "types": "./vite-release-artifacts.d.ts",
+        "default": "./vite-release-artifacts.js"
+      },
+      "require": {
+        "types": "./vite-release-artifacts.d.cts",
+        "default": "./vite-release-artifacts.cjs"
+      },
+      "default": "./vite-release-artifacts.js"
     }
   },
   "files": [
@@ -28,6 +39,10 @@
     "index.d.cts",
     "release-artifacts.js",
     "release-artifacts-symbolication.js",
+    "vite-release-artifacts.cjs",
+    "vite-release-artifacts.js",
+    "vite-release-artifacts.d.ts",
+    "vite-release-artifacts.d.cts",
     "README.md",
     "examples"
   ],

@@ -18,6 +18,31 @@ trap remove_tmp_dir EXIT
 app_dir="$tmp_dir/vite-app"
 mkdir -p "$app_dir/src"
 
+sdk_pack_json="$tmp_dir/sdk-pack.json"
+(
+  cd "$repo_root/js/logbrew-js"
+  npm pack --silent --json > "$sdk_pack_json"
+)
+sdk_tgz="$(
+  python3 - "$sdk_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
+files = {entry["path"] for entry in pack["files"]}
+for expected in {
+    "vite-release-artifacts.cjs",
+    "vite-release-artifacts.js",
+    "vite-release-artifacts.d.ts",
+    "vite-release-artifacts.d.cts",
+}:
+    assert expected in files, f"missing packed Vite release-artifact helper: {expected}"
+print(pack["filename"])
+PY
+)"
+sdk_tgz="$repo_root/js/logbrew-js/$sdk_tgz"
+
 cat > "$app_dir/package.json" <<'JSON'
 {
   "private": true,
@@ -26,11 +51,14 @@ cat > "$app_dir/package.json" <<'JSON'
     "build": "vite build"
   },
   "devDependencies": {
+    "@logbrew/sdk": "file:../logbrew-sdk.tgz",
     "esbuild": "0.28.1",
     "vite": "8.0.16"
   }
 }
 JSON
+
+cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
 
 cat > "$app_dir/index.html" <<'HTML'
 <!doctype html>
@@ -60,22 +88,46 @@ document.querySelector("#app").textContent = `items:${checkoutItems.length}`;
 JS
 
 cat > "$app_dir/vite.config.js" <<'JS'
+import { createLogBrewViteReleaseArtifactsPlugin } from "@logbrew/sdk/vite-release-artifacts";
+
 export default {
   build: {
     minify: "esbuild",
-    sourcemap: "hidden",
     rollupOptions: {
       output: {
         entryFileNames: "assets/[name]-[hash].js"
       }
     }
-  }
+  },
+  plugins: [
+    createLogBrewViteReleaseArtifactsPlugin({
+      release: "2026.06.18-vite",
+      environment: "production",
+      service: "checkout-web",
+      minifiedPathPrefix: "https://cdn.example/static?cache=placeholder#fragment",
+      manifestPath: "dist/logbrew-release-artifacts.json"
+    })
+  ]
 };
 JS
 
 (
   cd "$app_dir"
   npm install --silent
+  node --input-type=module - <<'JS'
+import { createLogBrewViteReleaseArtifactsPlugin } from "@logbrew/sdk/vite-release-artifacts";
+
+if (typeof createLogBrewViteReleaseArtifactsPlugin !== "function") {
+  throw new Error("expected Vite release-artifact plugin export");
+}
+JS
+  node - <<'JS'
+const { createLogBrewViteReleaseArtifactsPlugin, default: defaultExport } = require("@logbrew/sdk/vite-release-artifacts");
+
+if (typeof createLogBrewViteReleaseArtifactsPlugin !== "function" || defaultExport !== createLogBrewViteReleaseArtifactsPlugin) {
+  throw new Error("expected CommonJS Vite release-artifact plugin export");
+}
+JS
   npm run --silent build
 )
 
@@ -96,46 +148,8 @@ if [[ ! -s "$map_file" ]]; then
   exit 1
 fi
 
-if ! grep -q "sourcesContent" "$map_file"; then
-  echo "expected Vite source map to contain sourcesContent before LogBrew stripping" >&2
-  exit 1
-fi
-
-debug_plan_dry_run="$tmp_dir/vite-debug-plan-dry-run.json"
-python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
-  --build-dir "$dist_dir" \
-  --strip-sources-content \
-  > "$debug_plan_dry_run"
-
-python3 - "$debug_plan_dry_run" <<'PY'
-import json
-import re
-import sys
-from pathlib import Path
-
-plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-artifact = plan["artifacts"][0]
-
-assert plan["validation"]["status"] == "ready"
-assert plan["writeApplied"] is False
-assert plan["stripSourcesContent"] is True
-assert len(plan["artifacts"]) == 1
-assert artifact["path"].startswith("assets/")
-assert artifact["sourceMapPath"] == f"{artifact['path']}.map"
-assert "sourceMappingURL comment missing; checked sibling .map fallback" in artifact["validation"]["warnings"]
-assert artifact["changes"] == ["minifiedSource.debugId", "sourceMap.debug_id", "sourceMap.sourcesContent"]
-assert re.match(r"^[0-9a-f-]{36}$", artifact["debugId"])
-PY
-
-debug_plan_written="$tmp_dir/vite-debug-plan-written.json"
-python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
-  --build-dir "$dist_dir" \
-  --strip-sources-content \
-  --write \
-  > "$debug_plan_written"
-
 if grep -q "sourcesContent" "$map_file"; then
-  echo "LogBrew Debug ID prep did not strip sourcesContent from the Vite source map" >&2
+  echo "LogBrew Vite plugin did not strip sourcesContent from the source map" >&2
   exit 1
 fi
 if grep -q "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" "$map_file"; then
@@ -143,14 +157,11 @@ if grep -q "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" "$map_file"; then
   exit 1
 fi
 
-ready_manifest="$tmp_dir/vite-manifest.json"
-python3 "$repo_root/scripts/create_js_release_artifact_manifest.py" \
-  --build-dir "$dist_dir" \
-  --release "2026.06.18-vite" \
-  --environment "production" \
-  --service "checkout-web" \
-  --minified-path-prefix "https://cdn.example/static?cache=placeholder#fragment" \
-  > "$ready_manifest"
+ready_manifest="$dist_dir/logbrew-release-artifacts.json"
+if [[ ! -s "$ready_manifest" ]]; then
+  echo "expected LogBrew Vite plugin to write a release-artifact manifest" >&2
+  exit 1
+fi
 
 actual_stack_frame="$tmp_dir/vite-stack-frame.txt"
 (
@@ -196,33 +207,32 @@ JS
 )
 
 symbolication_report="$tmp_dir/vite-symbolication-report.json"
-python3 "$repo_root/scripts/verify_js_release_artifact_symbolication.py" \
+"$app_dir/node_modules/.bin/logbrew-release-artifacts" symbolicate-js \
   --build-dir "$dist_dir" \
   --manifest "$ready_manifest" \
   --stack-frame "$(cat "$actual_stack_frame")" \
   > "$symbolication_report"
 
-python3 - "$debug_plan_written" "$ready_manifest" "$js_file" "$map_file" "$symbolication_report" <<'PY'
+python3 - "$ready_manifest" "$js_file" "$map_file" "$symbolication_report" "$tmp_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-debug_plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-bundle_source = Path(sys.argv[3]).read_text(encoding="utf-8")
-source_map = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
-symbolication_report = json.loads(Path(sys.argv[5]).read_text(encoding="utf-8"))
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+bundle_source = Path(sys.argv[2]).read_text(encoding="utf-8")
+source_map = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+symbolication_report = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[5]
 serialized_manifest = json.dumps(manifest)
 serialized_symbolication = json.dumps(symbolication_report)
 
-debug_id = debug_plan["artifacts"][0]["debugId"]
 artifact = manifest["artifacts"][0]
+debug_id = artifact["debugId"]
 
-assert debug_plan["validation"]["status"] == "ready"
-assert debug_plan["writeApplied"] is True
 assert "debugId=" in bundle_source
 assert source_map["debug_id"] == debug_id
 assert "sourcesContent" not in source_map
+assert all(tmp_dir not in source for source in source_map["sources"])
 assert manifest["validation"]["status"] == "ready"
 assert artifact["debugId"] == debug_id
 assert artifact["sourceMap"]["hasSourcesContent"] is False
@@ -236,6 +246,8 @@ assert "fragment" not in serialized_manifest
 assert "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_manifest
 assert "checkout exploded" not in serialized_manifest
 assert "checkout exploded" not in serialized_symbolication
+assert tmp_dir not in serialized_manifest
+assert tmp_dir not in serialized_symbolication
 PY
 
-printf '%s\n' "real-user Vite release artifact smoke ok"
+printf '%s\n' "real-user Vite release artifact plugin smoke ok"
