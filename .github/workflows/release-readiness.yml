@@ -178,6 +178,9 @@ jobs:
       - name: Run React Native release artifact smoke
         run: bash scripts/real_user_react_native_release_artifact_smoke.sh
 
+      - name: Run JavaScript release artifact upload smoke
+        run: bash scripts/real_user_js_release_artifact_upload_smoke.sh
+
       - name: Run native release artifact smoke
         run: bash scripts/real_user_native_release_artifact_smoke.sh
 

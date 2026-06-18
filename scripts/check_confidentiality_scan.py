@@ -124,6 +124,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_fake_query_secret_fixture(relative_text, line):
         return True
 
+    if is_release_artifact_upload_verifier_reference(relative_text, line):
+        return True
+
     if relative_text.endswith(".cs") and is_dotnet_cancellation_token_reference(line):
         return True
 
@@ -217,6 +220,43 @@ def is_fake_query_secret_fixture(relative_text: str, line: str) -> bool:
             and relative_text.endswith("/examples/real-user-smoke.mjs")
         )
     )
+
+
+def is_release_artifact_upload_verifier_reference(relative_text: str, line: str) -> bool:
+    if relative_text == "scripts/upload_js_release_artifacts.py":
+        allowed_fragments = (
+            "DEFAULT_TOKEN_ENV",
+            "parsed.hostname",
+            "hostname =",
+            "if not hostname:",
+            "hostname.lower()",
+            "token: str",
+            "Bearer {token}",
+            "--token-env",
+            "release-artifact token",
+            "token = os.environ.get",
+            "if not token:",
+            "token=token",
+            "endpoint, token, body",
+        )
+        return any(fragment in line for fragment in allowed_fragments)
+    if relative_text == "scripts/real_user_js_release_artifact_upload_smoke.sh":
+        allowed_fragments = (
+            "expected_token",
+            "containsToken",
+            "LOGBREW_RELEASE_ARTIFACT_TOKEN",
+            "wrong-token",
+        )
+        return any(fragment in line for fragment in allowed_fragments)
+    if relative_text == "tests/test_js_release_artifact_upload.py" and "?token=ignored" in line:
+        return True
+    if relative_text in {
+        "docs/backend-contracts/release-artifact-symbolication-2026-06-13.md",
+        "docs/competitor-research/source-maps-debug-symbols-2026-06-13.md",
+    }:
+        lower_line = line.lower()
+        return "upload" in lower_line and "artifact" in lower_line
+    return False
 
 
 def is_dotnet_cancellation_token_reference(line: str) -> bool:
