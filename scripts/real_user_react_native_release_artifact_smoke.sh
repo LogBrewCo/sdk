@@ -18,17 +18,19 @@ remove_tmp_dir() {
 trap remove_tmp_dir EXIT
 
 app_dir="$tmp_dir/react-native-artifact-app"
+pack_dir="$tmp_dir/packs"
 mkdir -p "$app_dir"
+mkdir -p "$pack_dir"
 
 sdk_pack_json="$tmp_dir/sdk-pack.json"
 react_native_pack_json="$tmp_dir/react-native-pack.json"
 (
   cd "$repo_root/js/logbrew-js"
-  npm pack --silent --json > "$sdk_pack_json"
+  npm pack --silent --json --pack-destination "$pack_dir" > "$sdk_pack_json"
 )
 (
   cd "$repo_root/js/logbrew-react-native"
-  npm pack --silent --json > "$react_native_pack_json"
+  npm pack --silent --json --pack-destination "$pack_dir" > "$react_native_pack_json"
 )
 sdk_tgz="$(
   python3 - "$sdk_pack_json" <<'PY'
@@ -64,8 +66,8 @@ for expected in {
 print(pack["filename"])
 PY
 )"
-sdk_tgz="$repo_root/js/logbrew-js/$sdk_tgz"
-react_native_tgz="$repo_root/js/logbrew-react-native/$react_native_tgz"
+sdk_tgz="$pack_dir/$sdk_tgz"
+react_native_tgz="$pack_dir/$react_native_tgz"
 cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
 cp "$react_native_tgz" "$tmp_dir/logbrew-react-native.tgz"
 
@@ -173,6 +175,75 @@ if ! grep -q "$app_dir_real" "$map_file"; then
   echo "expected Metro source map to contain absolute app paths before LogBrew prefix stripping" >&2
   exit 1
 fi
+
+hermes_dist_dir="$app_dir/hermes-dist"
+mkdir -p "$hermes_dist_dir"
+hermes_bundle_file="$hermes_dist_dir/index.android.bundle"
+hermes_map_file="$hermes_dist_dir/index.android.hermes.map"
+cp "$bundle_file" "$hermes_bundle_file"
+cp "$map_file" "$hermes_map_file"
+python3 - "$hermes_bundle_file" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+bundle_path = Path(sys.argv[1])
+source = bundle_path.read_text(encoding="utf-8")
+updated = re.sub(r"//# sourceMappingURL=[^\r\n]*", "//# sourceMappingURL=packager.map", source)
+if updated == source:
+    updated = f"{source.rstrip()}\n//# sourceMappingURL=packager.map\n"
+bundle_path.write_text(updated, encoding="utf-8")
+PY
+
+hermes_manifest="$tmp_dir/react-native-hermes-manifest.json"
+hermes_helper_report="$tmp_dir/react-native-hermes-helper-report.json"
+(
+  cd "$app_dir"
+  node --input-type=module - "$hermes_bundle_file" "$hermes_map_file" "$app_dir_real" "$hermes_manifest" > "$hermes_helper_report" <<'JS'
+import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
+
+const [, , bundle, sourcemap, root, manifestPath] = process.argv;
+const result = prepareLogBrewReactNativeReleaseArtifacts({
+  bundle,
+  sourcemap,
+  platform: "android",
+  release: "2026.06.18-react-native-hermes",
+  environment: "production",
+  service: "checkout-react-native",
+  root,
+  manifestPath
+});
+
+process.stdout.write(JSON.stringify({
+  manifestPath: result.manifestPath,
+  manifestStatus: result.manifestReport.validation.status,
+  artifactCount: result.manifestReport.artifacts.length,
+  sourceMapPath: result.manifestReport.artifacts[0].sourceMap.path
+}, null, 2));
+JS
+)
+
+python3 - "$hermes_helper_report" "$hermes_manifest" "$hermes_bundle_file" "$hermes_map_file" "$app_dir_real" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+bundle_source = Path(sys.argv[3]).read_text(encoding="utf-8")
+source_map = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
+app_dir = sys.argv[5]
+
+assert report["manifestStatus"] == "ready"
+assert report["artifactCount"] == 1
+assert report["sourceMapPath"] == "index.android.hermes.map"
+assert manifest["artifacts"][0]["sourceMap"]["path"] == "index.android.hermes.map"
+assert "sourceMappingURL=index.android.hermes.map" in bundle_source
+assert "sourceMappingURL=packager.map" not in bundle_source
+assert "sourcesContent" not in source_map
+assert not any(isinstance(source, str) and source.startswith("/") for source in source_map["sources"])
+assert app_dir not in json.dumps(source_map)
+PY
 
 ready_manifest="$tmp_dir/react-native-manifest.json"
 helper_report="$tmp_dir/react-native-helper-report.json"

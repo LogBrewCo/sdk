@@ -7,6 +7,7 @@ const path = require("node:path");
 const PACKAGE_DIR = path.dirname(require.resolve("./package.json"));
 const DEFAULT_MANIFEST_NAME = "logbrew-release-artifacts.json";
 const SUPPORTED_PLATFORMS = new Set(["android", "ios"]);
+const SOURCE_MAPPING_COMMENT_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=[^\r\n]*/giu;
 
 function requiredString(options, name) {
   const value = options?.[name];
@@ -109,6 +110,25 @@ function artifactForBundle(report, relativeBundlePath) {
   return report?.artifacts?.find((artifact) => artifact?.path === relativeBundlePath) || null;
 }
 
+function sourceMapReferenceForBundle(bundlePath, sourcemapPath) {
+  return path.relative(path.dirname(bundlePath), sourcemapPath).split(path.sep).join("/");
+}
+
+function sourceWithSourceMappingUrl(source, reference) {
+  const comment = `//# sourceMappingURL=${reference}`;
+  const sourceWithoutMapComments = source.replace(SOURCE_MAPPING_COMMENT_RE, "").replace(/[ \t\r\n]*$/u, "");
+  return `${sourceWithoutMapComments}${sourceWithoutMapComments === "" ? "" : "\n"}${comment}\n`;
+}
+
+function applyExplicitSourceMapReference(bundlePath, sourcemapPath) {
+  const reference = sourceMapReferenceForBundle(bundlePath, sourcemapPath);
+  const source = fs.readFileSync(bundlePath, "utf8");
+  const updated = sourceWithSourceMappingUrl(source, reference);
+  if (updated !== source) {
+    fs.writeFileSync(bundlePath, updated, "utf8");
+  }
+}
+
 function defaultMinifiedPathPrefix(platform) {
   return `app:///react-native/${platform}`;
 }
@@ -139,6 +159,7 @@ function prepareLogBrewReactNativeReleaseArtifacts(options = {}) {
   requireExistingFile("sourcemap", sourcemapPath);
   const relativeBundlePath = ensureInsideBuildDir("bundle", bundlePath, buildDir);
   const relativeSourceMapPath = ensureInsideBuildDir("sourcemap", sourcemapPath, buildDir);
+  applyExplicitSourceMapReference(bundlePath, sourcemapPath);
 
   const prepareArgs = ["--build-dir", buildDir, "--write"];
   if (stripSourcesContent) {

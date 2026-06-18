@@ -137,3 +137,55 @@ test("React Native release-artifact helper resolves relative build paths from th
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("React Native release-artifact helper trusts the explicit sourcemap for Hermes-style output", () => {
+  const root = tempDir();
+  try {
+    const buildDir = path.join(root, "dist");
+    fs.mkdirSync(buildDir, { recursive: true });
+    const sourcePath = path.join(root, "index.js");
+    const bundlePath = path.join(buildDir, "index.android.bundle");
+    const finalSourceMapPath = path.join(buildDir, "index.android.hermes.map");
+    fs.writeFileSync(
+      bundlePath,
+      "global.__checkoutProbe=function(){throw new Error('checkout exploded')};\n//# sourceMappingURL=packager.map\n",
+      "utf8",
+    );
+    fs.writeFileSync(
+      finalSourceMapPath,
+      JSON.stringify({
+        version: 3,
+        file: "index.android.bundle",
+        sources: [sourcePath],
+        sourcesContent: ["const localSourceMarker = 'should not ship';"],
+        names: [],
+        mappings: "AAAA",
+      }),
+      "utf8",
+    );
+
+    const result = prepareLogBrewReactNativeReleaseArtifacts({
+      bundle: bundlePath,
+      sourcemap: finalSourceMapPath,
+      platform: "android",
+      release: "2026.06.18-react-native-hermes",
+      environment: "production",
+      service: "checkout-react-native",
+      root,
+    });
+
+    const manifest = JSON.parse(fs.readFileSync(result.manifestPath, "utf8"));
+    const bundleSource = fs.readFileSync(bundlePath, "utf8");
+    const finalSourceMap = JSON.parse(fs.readFileSync(finalSourceMapPath, "utf8"));
+
+    assert.equal(result.manifestReport.validation.status, "ready");
+    assert.equal(manifest.artifacts.length, 1);
+    assert.equal(manifest.artifacts[0].sourceMap.path, "index.android.hermes.map");
+    assert.match(bundleSource, /sourceMappingURL=index\.android\.hermes\.map/u);
+    assert.doesNotMatch(bundleSource, /sourceMappingURL=packager\.map/u);
+    assert.equal(finalSourceMap.sourcesContent, undefined);
+    assert.deepEqual(finalSourceMap.sources, ["index.js"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
