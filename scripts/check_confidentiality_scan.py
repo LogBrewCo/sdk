@@ -223,7 +223,11 @@ def is_fake_query_secret_fixture(relative_text: str, line: str) -> bool:
 
 
 def is_release_artifact_upload_verifier_reference(relative_text: str, line: str) -> bool:
-    if relative_text == "scripts/upload_js_release_artifacts.py":
+    if relative_text in {
+        "scripts/release_artifact_upload_common.py",
+        "scripts/upload_js_release_artifacts.py",
+        "scripts/upload_native_release_artifacts.py",
+    }:
         allowed_fragments = (
             "DEFAULT_TOKEN_ENV",
             "parsed.hostname",
@@ -238,17 +242,26 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
             "if not token:",
             "token=token",
             "endpoint, token, body",
+            "Authorization",
+            "post_multipart",
         )
         return any(fragment in line for fragment in allowed_fragments)
-    if relative_text == "scripts/real_user_js_release_artifact_upload_smoke.sh":
+    if relative_text in {
+        "scripts/real_user_js_release_artifact_upload_smoke.sh",
+        "scripts/real_user_native_release_artifact_upload_smoke.sh",
+    }:
         allowed_fragments = (
             "expected_token",
             "containsToken",
             "LOGBREW_RELEASE_ARTIFACT_TOKEN",
             "wrong-token",
+            "--token-env LOGBREW_RELEASE_ARTIFACT_TOKEN_BAD",
         )
         return any(fragment in line for fragment in allowed_fragments)
-    if relative_text == "tests/test_js_release_artifact_upload.py" and "?token=ignored" in line:
+    if relative_text in {
+        "tests/test_js_release_artifact_upload.py",
+        "tests/test_native_release_artifact_upload.py",
+    } and "?token=ignored" in line:
         return True
     if relative_text in {
         "docs/backend-contracts/release-artifact-symbolication-2026-06-13.md",

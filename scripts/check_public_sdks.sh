@@ -87,6 +87,7 @@ STEP_LABELS=(
   "React Native release artifact smoke"
   "JavaScript release artifact upload smoke"
   "Native release artifact smoke"
+  "Native release artifact upload smoke"
   "Generated artifact hygiene"
 )
 steps_total="${#STEP_LABELS[@]}"
@@ -635,6 +636,10 @@ mark_step_complete
 
 begin_next_step "Native release artifact smoke"
 run_shell_step "bash scripts/real_user_native_release_artifact_smoke.sh"
+mark_step_complete
+
+begin_next_step "Native release artifact upload smoke"
+run_shell_step "bash scripts/real_user_native_release_artifact_upload_smoke.sh"
 mark_step_complete
 
 begin_next_step "Generated artifact hygiene"

@@ -11,6 +11,7 @@ NEXT_SMOKE_COMMAND = "bash scripts/real_user_next_release_artifact_smoke.sh"
 REACT_NATIVE_SMOKE_COMMAND = "bash scripts/real_user_react_native_release_artifact_smoke.sh"
 JS_UPLOAD_SMOKE_COMMAND = "bash scripts/real_user_js_release_artifact_upload_smoke.sh"
 NATIVE_SMOKE_COMMAND = "bash scripts/real_user_native_release_artifact_smoke.sh"
+NATIVE_UPLOAD_SMOKE_COMMAND = "bash scripts/real_user_native_release_artifact_upload_smoke.sh"
 
 
 class ReleaseArtifactSmokeGateTests(unittest.TestCase):
@@ -34,6 +35,8 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
                 self.assertIn(f"run: {JS_UPLOAD_SMOKE_COMMAND}", text)
                 self.assertIn("Run native release artifact smoke", text)
                 self.assertIn(f"run: {NATIVE_SMOKE_COMMAND}", text)
+                self.assertIn("Run native release artifact upload smoke", text)
+                self.assertIn(f"run: {NATIVE_UPLOAD_SMOKE_COMMAND}", text)
 
     def test_readiness_checklist_mentions_release_artifact_smoke(self) -> None:
         checklist = (ROOT / "docs" / "sdk-readiness-checklist.md").read_text(encoding="utf-8")
@@ -44,6 +47,7 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn(f"React Native release-artifact build proof: `{REACT_NATIVE_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"JavaScript release-artifact upload proof: `{JS_UPLOAD_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"Native/mobile release-artifact dry-run proof: `{NATIVE_SMOKE_COMMAND}`", checklist)
+        self.assertIn(f"Native/mobile release-artifact upload proof: `{NATIVE_UPLOAD_SMOKE_COMMAND}`", checklist)
 
 
 if __name__ == "__main__":

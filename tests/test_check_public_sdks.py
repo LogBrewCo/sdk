@@ -146,6 +146,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         self.assertIn('"React Native release artifact smoke"', script)
         self.assertIn('"JavaScript release artifact upload smoke"', script)
         self.assertIn('"Native release artifact smoke"', script)
+        self.assertIn('"Native release artifact upload smoke"', script)
         self.assertRegex(
             script,
             r'begin_next_step "JavaScript release artifact smoke"\n'
@@ -165,6 +166,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete\n\n"
             r'begin_next_step "Native release artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_native_release_artifact_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Native release artifact upload smoke"\n'
+            r'run_shell_step "bash scripts/real_user_native_release_artifact_upload_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Generated artifact hygiene"',
         )

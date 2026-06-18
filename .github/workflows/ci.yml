@@ -130,6 +130,9 @@ jobs:
       - name: Run native release artifact smoke
         run: bash scripts/real_user_native_release_artifact_smoke.sh
 
+      - name: Run native release artifact upload smoke
+        run: bash scripts/real_user_native_release_artifact_upload_smoke.sh
+
       - name: Run Rust SDK tests
         if: ${{ hashFiles('Cargo.toml') != '' }}
         run: cd rust/logbrew && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
