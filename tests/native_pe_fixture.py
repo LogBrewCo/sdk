@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+import zlib
 from pathlib import Path
 
 
@@ -20,6 +21,7 @@ PE_MAGIC64 = 0x20B
 PE_DIRECTORY_ENTRY_DEBUG = 6
 PE_DATA_DIRECTORY64_OFFSET = 112
 PE_DEBUG_TYPE_CODEVIEW = 2
+PE_DEBUG_TYPE_EMBEDDED_PORTABLE_PDB = 17
 
 
 def codeview_guid_bytes(guid: str) -> bytes:
@@ -39,6 +41,9 @@ def write_pe_with_codeview(
     pdb_age: int = DEFAULT_PDB_AGE,
     pdb_path: str = DEFAULT_PDB_PATH,
     include_codeview: bool = True,
+    embedded_pdb_payload: bytes | None = None,
+    embedded_pdb_signature: bytes = b"MPDB",
+    embedded_pdb_uncompressed_size: int | None = None,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     codeview = b""
@@ -47,20 +52,45 @@ def write_pe_with_codeview(
         codeview += pdb_path.encode("utf-8") + b"\0"
 
     debug_directory_rva = PE_SECTION_RVA
-    codeview_rva = PE_SECTION_RVA + PE_DEBUG_DIRECTORY_SIZE
-    codeview_offset = PE_SECTION_RAW_OFFSET + PE_DEBUG_DIRECTORY_SIZE
-    debug_directory = struct.pack(
-        "<IIHHIIII",
-        0,
-        0,
-        0,
-        0,
-        PE_DEBUG_TYPE_CODEVIEW,
-        len(codeview),
-        codeview_rva,
-        codeview_offset,
-    )
-    section_payload = debug_directory + codeview if include_codeview else b""
+    debug_blobs: list[tuple[int, bytes]] = []
+
+    if include_codeview:
+        debug_blobs.append((PE_DEBUG_TYPE_CODEVIEW, codeview))
+
+    if embedded_pdb_payload is not None:
+        compressor = zlib.compressobj(wbits=-15)
+        compressed = compressor.compress(embedded_pdb_payload) + compressor.flush()
+        embedded = embedded_pdb_signature + struct.pack(
+            "<I",
+            len(embedded_pdb_payload)
+            if embedded_pdb_uncompressed_size is None
+            else embedded_pdb_uncompressed_size,
+        )
+        embedded += compressed
+        debug_blobs.append((PE_DEBUG_TYPE_EMBEDDED_PORTABLE_PDB, embedded))
+
+    debug_entries: list[bytes] = []
+    blob_payloads: list[bytes] = []
+    blob_offset = PE_SECTION_RAW_OFFSET + len(debug_blobs) * PE_DEBUG_DIRECTORY_SIZE
+    for debug_type, blob in debug_blobs:
+        debug_entries.append(
+            struct.pack(
+                "<IIHHIIII",
+                0,
+                0,
+                0,
+                0,
+                debug_type,
+                len(blob),
+                PE_SECTION_RVA + (blob_offset - PE_SECTION_RAW_OFFSET),
+                blob_offset,
+            )
+        )
+        blob_payloads.append(blob)
+        blob_offset += len(blob)
+
+    debug_directory = b"".join(debug_entries)
+    section_payload = debug_directory + b"".join(blob_payloads)
     section_raw_size = max(0x200, len(section_payload))
 
     payload = bytearray(PE_SECTION_RAW_OFFSET + section_raw_size)
@@ -93,8 +123,8 @@ def write_pe_with_codeview(
         "<II",
         payload,
         debug_data_directory_offset,
-        debug_directory_rva if include_codeview else 0,
-        PE_DEBUG_DIRECTORY_SIZE if include_codeview else 0,
+        debug_directory_rva if debug_blobs else 0,
+        len(debug_directory),
     )
 
     section_header_offset = optional_header_offset + PE_OPTIONAL_HEADER64_SIZE
@@ -126,13 +156,11 @@ def write_pdb(
     write_portable_pdb(output_path, pdb_guid=pdb_guid, pdb_age=pdb_age)
 
 
-def write_portable_pdb(
-    output_path: Path,
+def portable_pdb_payload(
     *,
     pdb_guid: str = DEFAULT_PDB_GUID,
     pdb_age: int = DEFAULT_PDB_AGE,
-) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+) -> bytes:
     version = b"LogBrew fixture v1\0"
     version += b"\0" * ((4 - (len(version) % 4)) % 4)
     stream_name = b"#Pdb\0"
@@ -150,4 +178,15 @@ def write_portable_pdb(
     payload += stream_name
     payload += pdb_stream
     payload += DEFAULT_PDB_PAYLOAD_MARKER
+    return bytes(payload)
+
+
+def write_portable_pdb(
+    output_path: Path,
+    *,
+    pdb_guid: str = DEFAULT_PDB_GUID,
+    pdb_age: int = DEFAULT_PDB_AGE,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = portable_pdb_payload(pdb_guid=pdb_guid, pdb_age=pdb_age)
     output_path.write_bytes(payload)

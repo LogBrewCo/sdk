@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import struct
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -38,8 +39,11 @@ PE_DIRECTORY_ENTRY_DEBUG = 6
 PE_SECTION_HEADER_SIZE = 40
 PE_DEBUG_DIRECTORY_SIZE = 28
 PE_DEBUG_TYPE_CODEVIEW = 2
+PE_DEBUG_TYPE_EMBEDDED_PORTABLE_PDB = 17
 PE_CODEVIEW_PDB70_SIGNATURE = b"RSDS"
 PE_CODEVIEW_PDB70_SIZE = 24
+PE_EMBEDDED_PORTABLE_PDB_SIGNATURE = b"MPDB"
+PE_EMBEDDED_PORTABLE_PDB_HEADER_SIZE = 8
 PE_MACHINE_ARCHES = {
     0x014C: "x86",
     0x8664: "x64",
@@ -53,6 +57,7 @@ PORTABLE_PDB_STREAM_HEADER_SIZE = 8
 PORTABLE_PDB_STREAM_NAME_SCAN_LIMIT = 256
 PORTABLE_PDB_PDB_STREAM_HEADER_SIZE = 32
 PORTABLE_PDB_MAX_STREAMS = 64
+PORTABLE_PDB_MAX_EMBEDDED_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 SYMBOL_SOURCE_PRIORITY = {
     "debug_info": 3,
     "symbol_table": 2,
@@ -230,35 +235,53 @@ def read_pe_codeview_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
         if debug_offset is None or debug_offset + debug_size > file_size:
             return {"isPe": True}, "PE debug directory points outside the file"
         debug_payload = read_bytes(path, debug_offset, debug_size)
+        metadata: dict[str, Any] | None = None
+        embedded_metadata: dict[str, Any] | None = None
+        embedded_error: str | None = None
         for entry_offset in range(0, debug_size - PE_DEBUG_DIRECTORY_SIZE + 1, PE_DEBUG_DIRECTORY_SIZE):
             debug_type = struct.unpack_from("<I", debug_payload, entry_offset + 12)[0]
-            if debug_type != PE_DEBUG_TYPE_CODEVIEW:
+            data_size = struct.unpack_from("<I", debug_payload, entry_offset + 16)[0]
+            data_rva = struct.unpack_from("<I", debug_payload, entry_offset + 20)[0]
+            data_raw = struct.unpack_from("<I", debug_payload, entry_offset + 24)[0]
+            data_offset = data_raw or rva_to_file_offset(data_rva, sections, file_size)
+            if debug_type == PE_DEBUG_TYPE_CODEVIEW:
+                if data_offset is None or data_offset + data_size > file_size:
+                    return {"isPe": True}, "PE CodeView record points outside the file"
+                codeview = read_bytes(path, data_offset, data_size)
+                if len(codeview) < PE_CODEVIEW_PDB70_SIZE or codeview[:4] != PE_CODEVIEW_PDB70_SIGNATURE:
+                    return {"isPe": True}, "PE CodeView record is not PDB70/RSDS"
+                pdb_guid = format_codeview_guid(codeview[4:20])
+                pdb_age = struct.unpack_from("<I", codeview, 20)[0]
+                pdb_filename = basename_only(c_string(codeview, 24, encoding="utf-8"))
+                if not pdb_filename:
+                    return {"isPe": True}, "PE CodeView PDB filename is empty"
+                metadata = {
+                    "isPe": True,
+                    "peClass": pe_class,
+                    "arch": PE_MACHINE_ARCHES.get(machine, f"unknown({machine})"),
+                    "pdbGuid": pdb_guid,
+                    "pdbAge": pdb_age,
+                    "pdbFileName": pdb_filename,
+                    "pdbDebugId": f"{pdb_guid}_{pdb_age}",
+                    "symbolSource": "debug_info",
+                }
                 continue
-            codeview_size = struct.unpack_from("<I", debug_payload, entry_offset + 16)[0]
-            codeview_rva = struct.unpack_from("<I", debug_payload, entry_offset + 20)[0]
-            codeview_raw = struct.unpack_from("<I", debug_payload, entry_offset + 24)[0]
-            codeview_offset = codeview_raw or rva_to_file_offset(codeview_rva, sections, file_size)
-            if codeview_offset is None or codeview_offset + codeview_size > file_size:
-                return {"isPe": True}, "PE CodeView record points outside the file"
-            codeview = read_bytes(path, codeview_offset, codeview_size)
-            if len(codeview) < PE_CODEVIEW_PDB70_SIZE or codeview[:4] != PE_CODEVIEW_PDB70_SIGNATURE:
-                return {"isPe": True}, "PE CodeView record is not PDB70/RSDS"
-            pdb_guid = format_codeview_guid(codeview[4:20])
-            pdb_age = struct.unpack_from("<I", codeview, 20)[0]
-            pdb_filename = basename_only(c_string(codeview, 24, encoding="utf-8"))
-            if not pdb_filename:
-                return {"isPe": True}, "PE CodeView PDB filename is empty"
-            return {
-                "isPe": True,
-                "peClass": pe_class,
-                "arch": PE_MACHINE_ARCHES.get(machine, f"unknown({machine})"),
-                "pdbGuid": pdb_guid,
-                "pdbAge": pdb_age,
-                "pdbFileName": pdb_filename,
-                "pdbDebugId": f"{pdb_guid}_{pdb_age}",
-                "symbolSource": "debug_info",
-            }, None
-        return {"isPe": True}, "PE file has no CodeView PDB debug information"
+            if debug_type == PE_DEBUG_TYPE_EMBEDDED_PORTABLE_PDB:
+                if data_offset is None or data_offset + data_size > file_size:
+                    embedded_error = "embedded Portable PDB record points outside the file"
+                    continue
+                embedded_metadata, embedded_error = read_embedded_portable_pdb_metadata(
+                    path,
+                    data_offset,
+                    data_size,
+                )
+        if metadata is None:
+            return {"isPe": True}, "PE file has no CodeView PDB debug information"
+        if embedded_error:
+            return metadata, embedded_error
+        if embedded_metadata:
+            metadata["embeddedPortablePdb"] = embedded_metadata
+        return metadata, None
     except (OSError, struct.error, ValueError) as exc:
         return {"isPe": False}, str(exc)
 
@@ -275,23 +298,67 @@ def associated_pdb_candidates(pe_path: Path, pdb_file_name: str) -> list[Path]:
     return unique
 
 
-def read_portable_pdb_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
+def read_embedded_portable_pdb_metadata(
+    path: Path,
+    offset: int,
+    size: int,
+) -> tuple[dict[str, Any], str | None]:
     try:
-        file_size = path.stat().st_size
+        if size < PE_EMBEDDED_PORTABLE_PDB_HEADER_SIZE:
+            return {}, "embedded Portable PDB debug data is truncated"
+        payload = read_bytes(path, offset, size)
+        if payload[:4] != PE_EMBEDDED_PORTABLE_PDB_SIGNATURE:
+            return {}, "embedded Portable PDB signature is invalid"
+        uncompressed_size = struct.unpack_from("<I", payload, 4)[0]
+        if uncompressed_size > PORTABLE_PDB_MAX_EMBEDDED_UNCOMPRESSED_BYTES:
+            return {}, (
+                f"embedded Portable PDB is {uncompressed_size} bytes when decompressed; "
+                f"maximum is {PORTABLE_PDB_MAX_EMBEDDED_UNCOMPRESSED_BYTES} bytes"
+            )
+        try:
+            decompressor = zlib.decompressobj(wbits=-15)
+            decompressed = decompressor.decompress(
+                payload[PE_EMBEDDED_PORTABLE_PDB_HEADER_SIZE:],
+                uncompressed_size + 1,
+            )
+            if len(decompressed) <= uncompressed_size:
+                decompressed += decompressor.flush(uncompressed_size + 1 - len(decompressed))
+        except zlib.error as exc:
+            return {}, f"embedded Portable PDB could not be decompressed: {exc}"
+        if not decompressor.eof or len(decompressed) != uncompressed_size:
+            return {}, "embedded Portable PDB decompressed size does not match its header"
+        metadata, metadata_error = read_portable_pdb_metadata_payload(decompressed)
+        if metadata_error:
+            return {}, f"embedded {metadata_error}"
+        if metadata.get("pdbFormat") != "portable_pdb":
+            return {}, "embedded Portable PDB payload is not a Portable PDB"
+        return {
+            **metadata,
+            "pdbFormat": "embedded_portable_pdb",
+            "compressedByteSize": len(payload) - PE_EMBEDDED_PORTABLE_PDB_HEADER_SIZE,
+            "uncompressedByteSize": uncompressed_size,
+        }, None
+    except (OSError, struct.error, ValueError) as exc:
+        return {}, str(exc)
+
+
+def read_portable_pdb_metadata_payload(payload: bytes) -> tuple[dict[str, Any], str | None]:
+    try:
+        file_size = len(payload)
         if file_size < 4:
             return {"pdbFormat": "unrecognized"}, None
-        if read_bytes(path, 0, 4) != PORTABLE_PDB_SIGNATURE:
+        if payload[:4] != PORTABLE_PDB_SIGNATURE:
             return {"pdbFormat": "unrecognized"}, None
         if file_size < PORTABLE_PDB_ROOT_HEADER_SIZE:
             return {"pdbFormat": "portable_pdb"}, "Portable PDB metadata root is truncated"
 
-        header = read_bytes(path, 0, PORTABLE_PDB_ROOT_HEADER_SIZE)
+        header = payload[:PORTABLE_PDB_ROOT_HEADER_SIZE]
         version_length = struct.unpack_from("<I", header, 12)[0]
         streams_header_offset = PORTABLE_PDB_ROOT_HEADER_SIZE + version_length
         if streams_header_offset + 4 > file_size:
             return {"pdbFormat": "portable_pdb"}, "Portable PDB metadata root is truncated"
 
-        streams_header = read_bytes(path, streams_header_offset, 4)
+        streams_header = payload[streams_header_offset : streams_header_offset + 4]
         stream_count = struct.unpack_from("<H", streams_header, 2)[0]
         if stream_count <= 0:
             return {"pdbFormat": "portable_pdb"}, "Portable PDB stream directory is empty"
@@ -304,11 +371,11 @@ def read_portable_pdb_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
         for _ in range(stream_count):
             if stream_header_offset + PORTABLE_PDB_STREAM_HEADER_SIZE > file_size:
                 return {"pdbFormat": "portable_pdb"}, "Portable PDB stream header is truncated"
-            stream_header = read_bytes(path, stream_header_offset, PORTABLE_PDB_STREAM_HEADER_SIZE)
+            stream_header = payload[stream_header_offset : stream_header_offset + PORTABLE_PDB_STREAM_HEADER_SIZE]
             stream_offset, stream_size = struct.unpack_from("<II", stream_header, 0)
             name_offset = stream_header_offset + PORTABLE_PDB_STREAM_HEADER_SIZE
             name_limit = min(file_size, name_offset + PORTABLE_PDB_STREAM_NAME_SCAN_LIMIT)
-            name_probe = read_bytes(path, name_offset, name_limit - name_offset)
+            name_probe = payload[name_offset:name_limit]
             terminator = name_probe.find(b"\0")
             if terminator < 0:
                 return {"pdbFormat": "portable_pdb"}, "Portable PDB stream name is unterminated"
@@ -328,7 +395,7 @@ def read_portable_pdb_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
                 continue
             if stream_size < PORTABLE_PDB_PDB_STREAM_HEADER_SIZE:
                 return {"pdbFormat": "portable_pdb"}, "Portable PDB #Pdb stream is truncated"
-            pdb_stream_header = read_bytes(path, stream_offset, PORTABLE_PDB_PDB_STREAM_HEADER_SIZE)
+            pdb_stream_header = payload[stream_offset : stream_offset + PORTABLE_PDB_PDB_STREAM_HEADER_SIZE]
             pdb_guid = format_codeview_guid(pdb_stream_header[:16])
             pdb_age = struct.unpack_from("<I", pdb_stream_header, 16)[0]
             return {
@@ -339,7 +406,14 @@ def read_portable_pdb_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
             }, None
 
         return {"pdbFormat": "portable_pdb"}, "Portable PDB #Pdb stream is missing"
-    except (OSError, struct.error, ValueError) as exc:
+    except (struct.error, ValueError) as exc:
+        return {"pdbFormat": "portable_pdb"}, str(exc)
+
+
+def read_portable_pdb_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
+    try:
+        return read_portable_pdb_metadata_payload(path.read_bytes())
+    except OSError as exc:
         return {"pdbFormat": "portable_pdb"}, str(exc)
 
 

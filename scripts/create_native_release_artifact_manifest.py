@@ -682,33 +682,49 @@ def build_dotnet_pdb_artifact(path: Path, root: Path, limits: dict[str, int]) ->
 
             pdb_candidates = associated_pdb_candidates(candidate, metadata["pdbFileName"])
             pdb_path = next((candidate_path for candidate_path in pdb_candidates if candidate_path.is_file()), None)
+            embedded_pdb_metadata = metadata.get("embeddedPortablePdb")
             if pdb_path is None:
-                errors.append(f"{rel_path}: associated PDB file was not found")
-                continue
-            if pdb_path.stat().st_size == 0:
-                errors.append(f"{relative(pdb_path, root)}: PDB file is empty")
-                continue
-            if pdb_path.stat().st_size > limits["maxSymbolFileBytes"]:
-                errors.append(
-                    f"{relative(pdb_path, root)}: symbol file is {pdb_path.stat().st_size} bytes; "
-                    f"maximum is {limits['maxSymbolFileBytes']} bytes"
-                )
-                continue
-            pdb_metadata, pdb_metadata_error = read_portable_pdb_metadata(pdb_path)
-            if pdb_metadata_error:
-                errors.append(f"{relative(pdb_path, root)}: {pdb_metadata_error}")
-                continue
-            if pdb_metadata.get("pdbFormat") == "portable_pdb":
+                if not isinstance(embedded_pdb_metadata, dict):
+                    errors.append(f"{rel_path}: associated PDB file was not found")
+                    continue
+                pdb_metadata = embedded_pdb_metadata
+                pdb_location = None
+                pdb_byte_size = int(embedded_pdb_metadata["uncompressedByteSize"])
+            else:
+                if pdb_path.stat().st_size == 0:
+                    errors.append(f"{relative(pdb_path, root)}: PDB file is empty")
+                    continue
+                if pdb_path.stat().st_size > limits["maxSymbolFileBytes"]:
+                    errors.append(
+                        f"{relative(pdb_path, root)}: symbol file is {pdb_path.stat().st_size} bytes; "
+                        f"maximum is {limits['maxSymbolFileBytes']} bytes"
+                    )
+                    continue
+                pdb_metadata, pdb_metadata_error = read_portable_pdb_metadata(pdb_path)
+                if pdb_metadata_error:
+                    errors.append(f"{relative(pdb_path, root)}: {pdb_metadata_error}")
+                    continue
+                pdb_location = relative(pdb_path, root)
+                pdb_byte_size = pdb_path.stat().st_size
+
+            pdb_format = str(pdb_metadata.get("pdbFormat", ""))
+            if pdb_format in {"portable_pdb", "embedded_portable_pdb"}:
                 pdb_payload_debug_id = str(pdb_metadata["pdbDebugId"])
                 if pdb_payload_debug_id != metadata["pdbDebugId"]:
+                    if pdb_format == "embedded_portable_pdb":
+                        errors.append(
+                            f"{rel_path}: embedded Portable PDB debug ID {pdb_payload_debug_id} "
+                            f"does not match PE CodeView debug ID {metadata['pdbDebugId']}"
+                        )
+                        continue
                     errors.append(
-                        f"{relative(pdb_path, root)}: Portable PDB debug ID {pdb_payload_debug_id} "
+                        f"{pdb_location}: Portable PDB debug ID {pdb_payload_debug_id} "
                         f"does not match PE CodeView debug ID {metadata['pdbDebugId']}"
                     )
                     continue
             else:
                 warnings.append(
-                    f"{relative(pdb_path, root)}: PDB payload format is not recognized; "
+                    f"{pdb_location or rel_path}: PDB payload format is not recognized; "
                     "PE CodeView identity could not be cross-checked"
                 )
 
@@ -721,13 +737,16 @@ def build_dotnet_pdb_artifact(path: Path, root: Path, limits: dict[str, int]) ->
                 "pdbAge": metadata["pdbAge"],
                 "pdbDebugId": metadata["pdbDebugId"],
                 "pdbFileName": metadata["pdbFileName"],
-                "pdbPath": relative(pdb_path, root),
-                "pdbByteSize": pdb_path.stat().st_size,
-                "pdbFormat": pdb_metadata["pdbFormat"],
+                "pdbByteSize": pdb_byte_size,
+                "pdbFormat": pdb_format,
                 "symbolSource": metadata["symbolSource"],
             }
-            if pdb_metadata.get("pdbFormat") == "portable_pdb":
+            if pdb_location:
+                symbol_file["pdbPath"] = pdb_location
+            if pdb_format in {"portable_pdb", "embedded_portable_pdb"}:
                 symbol_file["pdbPayloadDebugId"] = pdb_metadata["pdbDebugId"]
+            if pdb_format == "embedded_portable_pdb":
+                symbol_file["pdbEmbeddedCompressedByteSize"] = pdb_metadata["compressedByteSize"]
             symbol_files.append(symbol_file)
         symbol_files = dedupe_pe_symbol_files(symbol_files, warnings, label="PDB symbol")
 

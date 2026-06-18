@@ -26,8 +26,10 @@ dotnet_symbols_dir="$artifact_root/windows/symbols"
 dotnet_pe="$dotnet_symbols_dir/checkout.dll"
 dotnet_duplicate_pe="$dotnet_symbols_dir/checkout-copy.dll"
 dotnet_pdb="$dotnet_symbols_dir/checkout.pdb"
+dotnet_embedded_symbols_dir="$artifact_root/windows/embedded-symbols"
+dotnet_embedded_pe="$dotnet_embedded_symbols_dir/checkout-embedded.dll"
 
-mkdir -p "$dwarf_dir" "$(dirname "$mapping_file")" "$(dirname "$native_so")" "$(dirname "$unity_so")" "$breakpad_symbols_dir" "$dotnet_symbols_dir"
+mkdir -p "$dwarf_dir" "$(dirname "$mapping_file")" "$(dirname "$native_so")" "$(dirname "$unity_so")" "$breakpad_symbols_dir" "$dotnet_symbols_dir" "$dotnet_embedded_symbols_dir"
 printf '%s\n' '<plist version="1.0" />' > "$dsym_dir/Contents/Info.plist"
 printf '%s\n' \
   'com.example.Checkout -> a:' \
@@ -48,14 +50,15 @@ PYTHONPATH="$repo_root/tests" python3 - \
   "$breakpad_public_symbol" \
   "$dotnet_pe" \
   "$dotnet_duplicate_pe" \
-  "$dotnet_pdb" <<'PY'
+  "$dotnet_pdb" \
+  "$dotnet_embedded_pe" <<'PY'
 import sys
 from pathlib import Path
 
 from native_breakpad_fixture import write_breakpad_symbol
 from native_elf_fixture import write_android_elf_symbol
 from native_macho_fixture import write_macho_dwarf
-from native_pe_fixture import write_pdb, write_pe_with_codeview
+from native_pe_fixture import portable_pdb_payload, write_pdb, write_pe_with_codeview
 
 write_macho_dwarf(Path(sys.argv[1]))
 write_android_elf_symbol(Path(sys.argv[2]))
@@ -65,6 +68,7 @@ write_breakpad_symbol(Path(sys.argv[5]), include_file_records=False)
 write_pe_with_codeview(Path(sys.argv[6]))
 write_pe_with_codeview(Path(sys.argv[7]))
 write_pdb(Path(sys.argv[8]))
+write_pe_with_codeview(Path(sys.argv[9]), embedded_pdb_payload=portable_pdb_payload())
 PY
 
 ready_manifest="$tmp_dir/native-manifest-ready.json"
@@ -79,6 +83,7 @@ python3 "$repo_root/scripts/create_native_release_artifact_manifest.py" \
   --artifact "unity_symbols=$unity_symbols_dir" \
   --artifact "breakpad_symbols=$breakpad_symbols_dir" \
   --artifact "dotnet_pdb=$dotnet_symbols_dir" \
+  --artifact "dotnet_pdb=$dotnet_embedded_symbols_dir" \
   > "$ready_manifest"
 
 python3 - "$ready_manifest" "$tmp_dir" <<'PY'
@@ -103,6 +108,7 @@ assert [artifact["artifactType"] for artifact in manifest["artifacts"]] == [
     "android_native_symbols",
     "unity_symbols",
     "breakpad_symbols",
+    "dotnet_pdb",
     "dotnet_pdb",
 ]
 assert manifest["artifacts"][0]["path"] == "ios/Checkout.app.dSYM"
@@ -152,6 +158,16 @@ assert dotnet_file["pdbFormat"] == "portable_pdb"
 assert dotnet_file["pdbPayloadDebugId"] == "00112233-4455-6677-8899-AABBCCDDEEFF_42"
 assert dotnet_file["symbolSource"] == "debug_info"
 assert any("duplicate PDB symbol identity" in warning for warning in dotnet_warnings)
+embedded_dotnet_details = manifest["artifacts"][6]["dotnetPdb"]
+embedded_dotnet_file = embedded_dotnet_details["files"][0]
+assert embedded_dotnet_details["symbolFileCount"] == 1
+assert embedded_dotnet_file["path"] == "windows/embedded-symbols/checkout-embedded.dll"
+assert embedded_dotnet_file["pdbFileName"] == "checkout.pdb"
+assert embedded_dotnet_file["pdbFormat"] == "embedded_portable_pdb"
+assert embedded_dotnet_file["pdbPayloadDebugId"] == "00112233-4455-6677-8899-AABBCCDDEEFF_42"
+assert "pdbPath" not in embedded_dotnet_file
+assert embedded_dotnet_file["pdbEmbeddedCompressedByteSize"] > 0
+assert embedded_dotnet_file["pdbByteSize"] > embedded_dotnet_file["pdbEmbeddedCompressedByteSize"]
 assert tmp_dir not in serialized
 assert "com.example.Checkout" not in serialized
 assert "macho-debug-payload" not in serialized
