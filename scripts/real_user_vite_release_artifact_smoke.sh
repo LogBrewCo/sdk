@@ -26,7 +26,6 @@ cat > "$app_dir/package.json" <<'JSON'
     "build": "vite build"
   },
   "devDependencies": {
-    "@jridgewell/trace-mapping": "0.3.31",
     "esbuild": "0.28.1",
     "vite": "8.0.16"
   }
@@ -153,32 +152,57 @@ python3 "$repo_root/scripts/create_js_release_artifact_manifest.py" \
   --minified-path-prefix "https://cdn.example/static?cache=placeholder#fragment" \
   > "$ready_manifest"
 
+actual_stack_frame="$tmp_dir/vite-stack-frame.txt"
 (
   cd "$app_dir"
-  node --input-type=module - "$js_file" "$map_file" <<'JS'
+  node --input-type=module - "$js_file" > "$actual_stack_frame" <<'JS'
 import { readFileSync } from "node:fs";
-import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
+import vm from "node:vm";
 
-const [, , jsPath, mapPath] = process.argv;
+const [, , jsPath] = process.argv;
 const jsSource = readFileSync(jsPath, "utf8");
-const needle = "checkout exploded";
-const index = jsSource.indexOf(needle);
-if (index === -1) {
-  throw new Error("expected minified Vite bundle to contain the checkout error marker");
+const sandbox = {
+  document: {
+    createElement() {
+      return {
+        relList: {
+          supports() {
+            return true;
+          },
+        },
+      };
+    },
+    querySelector() {
+      return {};
+    },
+  },
+  window: {},
+};
+vm.runInNewContext(jsSource, sandbox, { filename: jsPath });
+try {
+  sandbox.window.__logbrewViteProbe.checkoutFailureSignal();
+} catch (error) {
+  const frame = String(error.stack || "")
+    .split("\n")
+    .find((line) => line.includes(jsPath));
+  if (!frame) {
+    throw new Error(`expected thrown Vite stack to include ${jsPath}, got ${String(error.stack)}`);
+  }
+  console.log(frame.trim());
+  process.exit(0);
 }
-const before = jsSource.slice(0, index);
-const line = before.split("\n").length;
-const lastNewline = before.lastIndexOf("\n");
-const column = index - (lastNewline + 1);
-const traceMap = new TraceMap(JSON.parse(readFileSync(mapPath, "utf8")));
-const original = originalPositionFor(traceMap, { line, column });
-if (!original.source || !original.source.endsWith("src/main.js")) {
-  throw new Error(`expected source map to resolve to src/main.js, got ${JSON.stringify(original)}`);
-}
+throw new Error("expected Vite checkout probe to throw");
 JS
 )
 
-python3 - "$debug_plan_written" "$ready_manifest" "$js_file" "$map_file" <<'PY'
+symbolication_report="$tmp_dir/vite-symbolication-report.json"
+python3 "$repo_root/scripts/verify_js_release_artifact_symbolication.py" \
+  --build-dir "$dist_dir" \
+  --manifest "$ready_manifest" \
+  --stack-frame "$(cat "$actual_stack_frame")" \
+  > "$symbolication_report"
+
+python3 - "$debug_plan_written" "$ready_manifest" "$js_file" "$map_file" "$symbolication_report" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -187,7 +211,9 @@ debug_plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 bundle_source = Path(sys.argv[3]).read_text(encoding="utf-8")
 source_map = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
+symbolication_report = json.loads(Path(sys.argv[5]).read_text(encoding="utf-8"))
 serialized_manifest = json.dumps(manifest)
+serialized_symbolication = json.dumps(symbolication_report)
 
 debug_id = debug_plan["artifacts"][0]["debugId"]
 artifact = manifest["artifacts"][0]
@@ -201,10 +227,15 @@ assert manifest["validation"]["status"] == "ready"
 assert artifact["debugId"] == debug_id
 assert artifact["sourceMap"]["hasSourcesContent"] is False
 assert artifact["minifiedSource"]["minifiedUrl"].startswith("https://cdn.example/static/assets/")
+assert symbolication_report["status"] == "resolved"
+assert symbolication_report["debugId"] == debug_id
+assert symbolication_report["generated"]["path"] == artifact["minifiedSource"]["path"]
+assert symbolication_report["original"]["source"].endswith("src/main.js")
 assert "cache=placeholder" not in serialized_manifest
 assert "fragment" not in serialized_manifest
 assert "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_manifest
 assert "checkout exploded" not in serialized_manifest
+assert "checkout exploded" not in serialized_symbolication
 PY
 
 printf '%s\n' "real-user Vite release artifact smoke ok"

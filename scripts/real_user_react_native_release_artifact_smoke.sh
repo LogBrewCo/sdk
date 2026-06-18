@@ -30,7 +30,6 @@ cat > "$app_dir/package.json" <<JSON
   "private": true,
   "type": "commonjs",
   "dependencies": {
-    "@jridgewell/trace-mapping": "0.3.31",
     "react": "$react_version",
     "react-native": "$react_native_version"
   },
@@ -67,7 +66,7 @@ JS
 (
   cd "$app_dir"
   npm install --silent
-  npm ls react react-native @react-native-community/cli @react-native/metro-config @jridgewell/trace-mapping >/dev/null
+  npm ls react react-native @react-native-community/cli @react-native/metro-config >/dev/null
   mkdir -p dist
   node node_modules/@react-native-community/cli/build/bin.js bundle \
     --platform android \
@@ -103,31 +102,6 @@ if ! grep -q "$app_dir_real" "$map_file"; then
   echo "expected Metro source map to contain absolute app paths before LogBrew prefix stripping" >&2
   exit 1
 fi
-
-(
-  cd "$app_dir"
-  node --input-type=module - "$bundle_file" "$map_file" <<'JS'
-import { readFileSync } from "node:fs";
-import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
-
-const [, , bundlePath, mapPath] = process.argv;
-const bundleSource = readFileSync(bundlePath, "utf8");
-const needle = "react native checkout exploded";
-const index = bundleSource.indexOf(needle);
-if (index === -1) {
-  throw new Error("expected minified React Native bundle to contain the checkout error marker");
-}
-const before = bundleSource.slice(0, index);
-const line = before.split("\n").length;
-const lastNewline = before.lastIndexOf("\n");
-const column = index - (lastNewline + 1);
-const traceMap = new TraceMap(JSON.parse(readFileSync(mapPath, "utf8")));
-const original = originalPositionFor(traceMap, { line, column });
-if (!original.source || !original.source.endsWith("/index.js")) {
-  throw new Error(`expected source map to resolve to index.js, got ${JSON.stringify(original)}`);
-}
-JS
-)
 
 debug_plan_dry_run="$tmp_dir/react-native-debug-plan-dry-run.json"
 python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
@@ -192,32 +166,35 @@ python3 "$repo_root/scripts/create_js_release_artifact_manifest.py" \
   --minified-path-prefix "app:///react-native?cache=placeholder#fragment" \
   > "$ready_manifest"
 
-(
-  cd "$app_dir"
-  node --input-type=module - "$bundle_file" "$map_file" <<'JS'
-import { readFileSync } from "node:fs";
-import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
+generated_stack_frame="$tmp_dir/react-native-stack-frame.txt"
+python3 - "$ready_manifest" "$bundle_file" > "$generated_stack_frame" <<'PY'
+import json
+import sys
+from pathlib import Path
 
-const [, , bundlePath, mapPath] = process.argv;
-const bundleSource = readFileSync(bundlePath, "utf8");
-const needle = "react native checkout exploded";
-const index = bundleSource.indexOf(needle);
-if (index === -1) {
-  throw new Error("expected minified React Native bundle to contain the checkout error marker");
-}
-const before = bundleSource.slice(0, index);
-const line = before.split("\n").length;
-const lastNewline = before.lastIndexOf("\n");
-const column = index - (lastNewline + 1);
-const traceMap = new TraceMap(JSON.parse(readFileSync(mapPath, "utf8")));
-const original = originalPositionFor(traceMap, { line, column });
-if (original.source !== "index.js") {
-  throw new Error(`expected stripped source map to resolve to index.js, got ${JSON.stringify(original)}`);
-}
-JS
-)
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+bundle_file = Path(sys.argv[2])
+artifact = manifest["artifacts"][0]
+source = bundle_file.read_text(encoding="utf-8")
+needle = "react native checkout exploded"
+index = source.find(needle)
+if index < 0:
+    raise SystemExit("expected minified React Native bundle to contain the checkout error marker")
+before = source[:index]
+line = before.count("\n") + 1
+last_newline = before.rfind("\n")
+column = index - last_newline
+print(f"at checkoutFailureSignal ({artifact['minifiedSource']['minifiedUrl']}:{line}:{column})")
+PY
 
-python3 - "$debug_plan_written" "$ready_manifest" "$bundle_file" "$map_file" "$app_dir_real" <<'PY'
+symbolication_report="$tmp_dir/react-native-symbolication-report.json"
+python3 "$repo_root/scripts/verify_js_release_artifact_symbolication.py" \
+  --build-dir "$dist_dir" \
+  --manifest "$ready_manifest" \
+  --stack-frame "$(cat "$generated_stack_frame")" \
+  > "$symbolication_report"
+
+python3 - "$debug_plan_written" "$ready_manifest" "$bundle_file" "$map_file" "$app_dir_real" "$symbolication_report" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -227,7 +204,9 @@ manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 bundle_source = Path(sys.argv[3]).read_text(encoding="utf-8")
 source_map = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
 app_dir = sys.argv[5]
+symbolication_report = json.loads(Path(sys.argv[6]).read_text(encoding="utf-8"))
 serialized_manifest = json.dumps(manifest)
+serialized_symbolication = json.dumps(symbolication_report)
 
 debug_id = debug_plan["artifacts"][0]["debugId"]
 artifact = manifest["artifacts"][0]
@@ -247,11 +226,17 @@ assert artifact["sourceMap"]["hasSourcesContent"] is False
 assert artifact["minifiedSource"]["path"] == "index.android.bundle"
 assert artifact["sourceMap"]["path"] == "index.android.bundle.map"
 assert artifact["minifiedSource"]["minifiedUrl"] == "app:///react-native/index.android.bundle"
+assert symbolication_report["status"] == "resolved"
+assert symbolication_report["debugId"] == debug_id
+assert symbolication_report["generated"]["path"] == "index.android.bundle"
+assert symbolication_report["original"]["source"] == "index.js"
 assert "cache=placeholder" not in serialized_manifest
 assert "fragment" not in serialized_manifest
 assert "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_manifest
 assert "react native checkout exploded" not in serialized_manifest
+assert "react native checkout exploded" not in serialized_symbolication
 assert app_dir not in serialized_manifest
+assert app_dir not in serialized_symbolication
 PY
 
 printf 'real-user React Native release artifact smoke ok with react-native@%s react@%s cli@%s\n' \

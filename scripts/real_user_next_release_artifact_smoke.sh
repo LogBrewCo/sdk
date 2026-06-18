@@ -26,7 +26,6 @@ cat > "$app_dir/package.json" <<'JSON'
     "build": "next build"
   },
   "dependencies": {
-    "@jridgewell/trace-mapping": "0.3.31",
     "next": "16.2.9",
     "react": "19.2.7",
     "react-dom": "19.2.7"
@@ -183,32 +182,37 @@ python3 "$repo_root/scripts/create_js_release_artifact_manifest.py" \
   --minified-path-prefix "app:///_next/static/chunks?cache=placeholder#fragment" \
   > "$ready_manifest"
 
-(
-  cd "$app_dir"
-  node --input-type=module - "$target_js" "$target_map" <<'JS'
-import { readFileSync } from "node:fs";
-import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
+generated_stack_frame="$tmp_dir/next-stack-frame.txt"
+python3 - "$ready_manifest" "$target_js" "$chunks_dir" > "$generated_stack_frame" <<'PY'
+import json
+import sys
+from pathlib import Path
 
-const [, , jsPath, mapPath] = process.argv;
-const jsSource = readFileSync(jsPath, "utf8");
-const needle = "next checkout exploded";
-const index = jsSource.indexOf(needle);
-if (index === -1) {
-  throw new Error("expected minified Next chunk to contain the checkout error marker");
-}
-const before = jsSource.slice(0, index);
-const line = before.split("\n").length;
-const lastNewline = before.lastIndexOf("\n");
-const column = index - (lastNewline + 1);
-const traceMap = new TraceMap(JSON.parse(readFileSync(mapPath, "utf8")));
-const original = originalPositionFor(traceMap, { line, column });
-if (!original.source || !original.source.endsWith("components/CheckoutProbe.jsx")) {
-  throw new Error(`expected source map to resolve to components/CheckoutProbe.jsx, got ${JSON.stringify(original)}`);
-}
-JS
-)
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+target_js = Path(sys.argv[2]).resolve()
+chunks_dir = Path(sys.argv[3]).resolve()
+target_rel = target_js.relative_to(chunks_dir).as_posix()
+artifact = next(candidate for candidate in manifest["artifacts"] if candidate["minifiedSource"]["path"] == target_rel)
+source = target_js.read_text(encoding="utf-8")
+needle = "next checkout exploded"
+index = source.find(needle)
+if index < 0:
+    raise SystemExit("expected minified Next chunk to contain the checkout error marker")
+before = source[:index]
+line = before.count("\n") + 1
+last_newline = before.rfind("\n")
+column = index - last_newline
+print(f"at checkoutFailureSignal ({artifact['minifiedSource']['minifiedUrl']}:{line}:{column})")
+PY
 
-python3 - "$debug_plan_written" "$ready_manifest" "$target_js" "$target_map" "$chunks_dir" <<'PY'
+symbolication_report="$tmp_dir/next-symbolication-report.json"
+python3 "$repo_root/scripts/verify_js_release_artifact_symbolication.py" \
+  --build-dir "$chunks_dir" \
+  --manifest "$ready_manifest" \
+  --stack-frame "$(cat "$generated_stack_frame")" \
+  > "$symbolication_report"
+
+python3 - "$debug_plan_written" "$ready_manifest" "$target_js" "$target_map" "$chunks_dir" "$symbolication_report" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -218,7 +222,9 @@ manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 bundle_source = Path(sys.argv[3]).read_text(encoding="utf-8")
 source_map = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
 target_rel = Path(sys.argv[3]).resolve().relative_to(Path(sys.argv[5]).resolve()).as_posix()
+symbolication_report = json.loads(Path(sys.argv[6]).read_text(encoding="utf-8"))
 serialized_manifest = json.dumps(manifest)
+serialized_symbolication = json.dumps(symbolication_report)
 
 debug_id = next(artifact["debugId"] for artifact in debug_plan["artifacts"] if artifact["path"] == target_rel)
 artifact = next(candidate for candidate in manifest["artifacts"] if candidate["minifiedSource"]["path"] == target_rel)
@@ -232,10 +238,15 @@ assert manifest["validation"]["status"] == "ready"
 assert artifact["debugId"] == debug_id
 assert artifact["sourceMap"]["hasSourcesContent"] is False
 assert artifact["minifiedSource"]["minifiedUrl"].startswith("app:///_next/static/chunks/")
+assert symbolication_report["status"] == "resolved"
+assert symbolication_report["debugId"] == debug_id
+assert symbolication_report["generated"]["path"] == target_rel
+assert symbolication_report["original"]["source"].endswith("components/CheckoutProbe.jsx")
 assert "cache=placeholder" not in serialized_manifest
 assert "fragment" not in serialized_manifest
 assert "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_manifest
 assert "next checkout exploded" not in serialized_manifest
+assert "next checkout exploded" not in serialized_symbolication
 PY
 
 printf '%s\n' "real-user Next.js release artifact smoke ok"
