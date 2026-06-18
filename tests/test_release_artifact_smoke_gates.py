@@ -53,6 +53,15 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn(f"Native/mobile release-artifact dry-run proof: `{NATIVE_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"Native/mobile release-artifact upload proof: `{NATIVE_UPLOAD_SMOKE_COMMAND}`", checklist)
 
+    def test_native_upload_smoke_proves_unity_zip_transport(self) -> None:
+        smoke = (ROOT / "scripts" / "real_user_native_release_artifact_upload_smoke.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('--artifact "unity_symbols=$unity_archive"', smoke)
+        self.assertIn('"containsUnityZipPart"', smoke)
+        self.assertIn('assert all(event["containsUnityZipPart"] for event in events)', smoke)
+
 
 if __name__ == "__main__":
     unittest.main()

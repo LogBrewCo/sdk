@@ -15,6 +15,7 @@ if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
 from native_elf_fixture import write_android_elf_symbol  # noqa: E402
+from native_unity_fixture import write_unity_symbols_zip  # noqa: E402
 
 MANIFEST_MODULE_PATH = ROOT / "scripts" / "create_native_release_artifact_manifest.py"
 UPLOAD_MODULE_PATH = ROOT / "scripts" / "upload_native_release_artifacts.py"
@@ -109,6 +110,39 @@ class NativeReleaseArtifactUploadTests(unittest.TestCase):
             self.assertIn('name="artifact_1_file_0"; filename="libcheckout.so"', serialized)
             self.assertNotIn(tmp, serialized)
             self.assertNotIn("com.example.Checkout", json.dumps(manifest))
+
+    def test_unity_zip_upload_uses_single_basename_file_part(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_root = Path(tmp) / "artifacts"
+            unity_archive = artifact_root / "unity" / "symbols.zip"
+            write_unity_symbols_zip(unity_archive)
+            manifest = create_native_release_artifact_manifest.create_manifest(
+                artifact_root=artifact_root,
+                release="2026.06.18",
+                environment="production",
+                service="checkout-unity",
+                artifacts=[("unity_symbols", unity_archive)],
+            )
+            self.assertEqual(manifest["validation"]["status"], "ready")
+
+            files = upload_native_release_artifacts.collect_artifact_files(manifest, artifact_root)
+            report = upload_native_release_artifacts.build_report(
+                endpoint="http://127.0.0.1:4319/upload?ignored=query",
+                manifest=manifest,
+                files=files,
+                dry_run=False,
+            )
+            body, _boundary = upload_native_release_artifacts.encode_multipart(manifest, files)
+            serialized = body.decode("utf-8", errors="replace")
+
+            self.assertEqual([(name, path.name) for name, path in files], [("artifact_0_file_0", "symbols.zip")])
+            self.assertEqual(report["artifactTypes"], ["unity_symbols"])
+            self.assertEqual(report["artifactCount"], 1)
+            self.assertEqual(report["filePartCount"], 1)
+            self.assertEqual(report["endpoint"], "http://127.0.0.1:4319/upload")
+            self.assertIn('name="artifact_0_file_0"; filename="symbols.zip"', serialized)
+            self.assertNotIn(tmp, serialized)
+            self.assertNotIn("Checkout.PlaceOrder", json.dumps(manifest))
 
     @unittest.skipUnless(hasattr(os, "symlink"), "symlink support is required")
     def test_artifact_symlink_is_rejected_before_upload(self) -> None:

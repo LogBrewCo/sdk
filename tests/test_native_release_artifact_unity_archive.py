@@ -7,7 +7,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from tests.native_elf_fixture import write_android_elf_symbol
+from tests.native_unity_fixture import write_unity_symbols_zip
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,23 +20,6 @@ SPEC.loader.exec_module(create_native_release_artifact_manifest)
 
 
 class UnityArchiveReleaseArtifactTests(unittest.TestCase):
-    def write_unity_zip(self, archive_path: Path, *, include_mapping: bool = True) -> None:
-        archive_path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory() as tmp:
-            so_path = Path(tmp) / "libil2cpp.sym.so"
-            write_android_elf_symbol(so_path)
-            with zipfile.ZipFile(archive_path, "w") as archive:
-                archive.writestr("symbols/build_id", "checkout-unity-2026.06.18\n")
-                archive.write(so_path, "symbols/arm64-v8a/libil2cpp.sym.so")
-                if include_mapping:
-                    archive.writestr(
-                        "symbols/LineNumberMappings.json",
-                        "{\n"
-                        "  \"files\": [\"/Users/dev/checkout/Assets/Scripts/Checkout.cs\"],\n"
-                        "  \"methods\": [\"Checkout.PlaceOrder\"]\n"
-                        "}\n",
-                    )
-
     def create_manifest_for(self, artifact_root: Path, archive_path: Path) -> dict[str, object]:
         return create_native_release_artifact_manifest.create_manifest(
             artifact_root=artifact_root,
@@ -50,7 +33,10 @@ class UnityArchiveReleaseArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             artifact_root = Path(tmp) / "artifacts"
             archive_path = artifact_root / "unity" / "symbols.zip"
-            self.write_unity_zip(archive_path)
+            write_unity_symbols_zip(
+                archive_path,
+                source_path="/Users/dev/checkout/Assets/Scripts/Checkout.cs",
+            )
             archive_size = archive_path.stat().st_size
 
             manifest = self.create_manifest_for(artifact_root, archive_path)

@@ -21,6 +21,7 @@ dwarf_dir="$dsym_dir/Contents/Resources/DWARF"
 mapping_file="$artifact_root/android/mapping.txt"
 native_symbols_dir="$artifact_root/android/symbols"
 native_so="$native_symbols_dir/lib/arm64-v8a/libcheckout.so"
+unity_archive="$artifact_root/unity/symbols.zip"
 
 mkdir -p "$dwarf_dir" "$(dirname "$mapping_file")" "$(dirname "$native_so")"
 printf '%s\n' '<plist version="1.0" />' > "$dsym_dir/Contents/Info.plist"
@@ -28,15 +29,17 @@ printf '%s\n' \
   'com.example.Checkout -> a:' \
   '    void placeOrder() -> a' \
   > "$mapping_file"
-PYTHONPATH="$repo_root/tests" python3 - "$dwarf_dir/Checkout" "$native_so" <<'PY'
+PYTHONPATH="$repo_root/tests" python3 - "$dwarf_dir/Checkout" "$native_so" "$unity_archive" <<'PY'
 import sys
 from pathlib import Path
 
 from native_elf_fixture import write_android_elf_symbol
 from native_macho_fixture import write_macho_dwarf
+from native_unity_fixture import write_unity_symbols_zip
 
 write_macho_dwarf(Path(sys.argv[1]))
 write_android_elf_symbol(Path(sys.argv[2]))
+write_unity_symbols_zip(Path(sys.argv[3]))
 PY
 
 manifest="$tmp_dir/native-upload-manifest-ready.json"
@@ -48,6 +51,7 @@ python3 "$repo_root/scripts/create_native_release_artifact_manifest.py" \
   --artifact "ios_dsym=$dsym_dir" \
   --artifact "android_proguard_mapping=$mapping_file" \
   --artifact "android_native_symbols=$native_symbols_dir" \
+  --artifact "unity_symbols=$unity_archive" \
   > "$manifest"
 
 port_file="$tmp_dir/fake-intake-port"
@@ -91,6 +95,7 @@ class Handler(BaseHTTPRequestHandler):
             "containsDwarfPart": b'name="artifact_0_file_1"' in body and b'filename="Checkout"' in body,
             "containsMappingPart": b'name="artifact_1_file_0"' in body and b'filename="mapping.txt"' in body,
             "containsNativePart": b'name="artifact_2_file_0"' in body and b'filename="libcheckout.so"' in body,
+            "containsUnityZipPart": b'name="artifact_3_file_0"' in body and b'filename="symbols.zip"' in body,
         }
         state["events"].append(event)
         write_state()
@@ -199,9 +204,14 @@ tmp_dir = sys.argv[7]
 
 assert success["status"] == "uploaded"
 assert success["retryCount"] == 1
-assert success["artifactCount"] == 3
-assert success["filePartCount"] == 4
-assert success["artifactTypes"] == ["ios_dsym", "android_proguard_mapping", "android_native_symbols"]
+assert success["artifactCount"] == 4
+assert success["filePartCount"] == 5
+assert success["artifactTypes"] == [
+    "ios_dsym",
+    "android_proguard_mapping",
+    "android_native_symbols",
+    "unity_symbols",
+]
 assert [attempt["httpStatus"] for attempt in success["attempts"]] == [503, 202]
 assert success["endpoint"].endswith("/retry-success")
 assert "ignored=query" not in json.dumps(success)
@@ -223,6 +233,7 @@ assert all(event["containsDsymPart"] for event in events)
 assert all(event["containsDwarfPart"] for event in events)
 assert all(event["containsMappingPart"] for event in events)
 assert all(event["containsNativePart"] for event in events)
+assert all(event["containsUnityZipPart"] for event in events)
 assert not any(event["containsToken"] for event in events)
 assert not any(event["containsQueryPlaceholder"] for event in events)
 assert not any(event["containsTempPath"] for event in events)
