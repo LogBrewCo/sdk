@@ -20,6 +20,55 @@ trap remove_tmp_dir EXIT
 app_dir="$tmp_dir/react-native-artifact-app"
 mkdir -p "$app_dir"
 
+sdk_pack_json="$tmp_dir/sdk-pack.json"
+react_native_pack_json="$tmp_dir/react-native-pack.json"
+(
+  cd "$repo_root/js/logbrew-js"
+  npm pack --silent --json > "$sdk_pack_json"
+)
+(
+  cd "$repo_root/js/logbrew-react-native"
+  npm pack --silent --json > "$react_native_pack_json"
+)
+sdk_tgz="$(
+  python3 - "$sdk_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
+files = {entry["path"] for entry in pack["files"]}
+for expected in {
+    "release-artifacts.js",
+    "release-artifacts-symbolication.js",
+}:
+    assert expected in files, f"missing packed SDK release-artifact file: {expected}"
+print(pack["filename"])
+PY
+)"
+react_native_tgz="$(
+  python3 - "$react_native_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
+files = {entry["path"] for entry in pack["files"]}
+for expected in {
+    "release-artifacts.cjs",
+    "release-artifacts.js",
+    "release-artifacts.d.ts",
+    "release-artifacts.d.cts",
+}:
+    assert expected in files, f"missing packed React Native release-artifact helper: {expected}"
+print(pack["filename"])
+PY
+)"
+sdk_tgz="$repo_root/js/logbrew-js/$sdk_tgz"
+react_native_tgz="$repo_root/js/logbrew-react-native/$react_native_tgz"
+cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
+cp "$react_native_tgz" "$tmp_dir/logbrew-react-native.tgz"
+
 react_native_version="$(npm view react-native version)"
 react_version="$(npm view react version)"
 react_native_cli_version="$(npm view @react-native-community/cli version)"
@@ -30,6 +79,8 @@ cat > "$app_dir/package.json" <<JSON
   "private": true,
   "type": "commonjs",
   "dependencies": {
+    "@logbrew/sdk": "file:../logbrew-sdk.tgz",
+    "@logbrew/react-native": "file:../logbrew-react-native.tgz",
     "react": "$react_version",
     "react-native": "$react_native_version"
   },
@@ -66,7 +117,27 @@ JS
 (
   cd "$app_dir"
   npm install --silent
-  npm ls react react-native @react-native-community/cli @react-native/metro-config >/dev/null
+  npm ls @logbrew/sdk @logbrew/react-native react react-native @react-native-community/cli @react-native/metro-config >/dev/null
+  node --input-type=module - <<'JS'
+import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
+
+if (typeof prepareLogBrewReactNativeReleaseArtifacts !== "function") {
+  throw new Error("expected React Native release-artifact helper export");
+}
+JS
+  node - <<'JS'
+const {
+  prepareLogBrewReactNativeReleaseArtifacts,
+  default: defaultExport,
+} = require("@logbrew/react-native/release-artifacts");
+
+if (
+  typeof prepareLogBrewReactNativeReleaseArtifacts !== "function" ||
+  defaultExport !== prepareLogBrewReactNativeReleaseArtifacts
+) {
+  throw new Error("expected CommonJS React Native release-artifact helper export");
+}
+JS
   mkdir -p dist
   node node_modules/@react-native-community/cli/build/bin.js bundle \
     --platform android \
@@ -103,49 +174,60 @@ if ! grep -q "$app_dir_real" "$map_file"; then
   exit 1
 fi
 
-debug_plan_dry_run="$tmp_dir/react-native-debug-plan-dry-run.json"
-python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
-  --build-dir "$dist_dir" \
-  --strip-sources-content \
-  --strip-source-prefix "$app_dir_real" \
-  > "$debug_plan_dry_run"
+ready_manifest="$tmp_dir/react-native-manifest.json"
+helper_report="$tmp_dir/react-native-helper-report.json"
+(
+  cd "$app_dir"
+  node --input-type=module - "$bundle_file" "$map_file" "$app_dir_real" "$ready_manifest" > "$helper_report" <<'JS'
+import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
 
-python3 - "$debug_plan_dry_run" "$app_dir_real" <<'PY'
+const [, , bundle, sourcemap, root, manifestPath] = process.argv;
+const result = prepareLogBrewReactNativeReleaseArtifacts({
+  bundle,
+  sourcemap,
+  platform: "android",
+  release: "2026.06.18-react-native",
+  environment: "production",
+  service: "checkout-react-native",
+  root,
+  manifestPath,
+  minifiedPathPrefix: "app:///react-native?cache=placeholder#fragment"
+});
+
+process.stdout.write(JSON.stringify({
+  buildDir: result.buildDir,
+  bundlePath: result.bundlePath,
+  sourcemapPath: result.sourcemapPath,
+  manifestPath: result.manifestPath,
+  prepareStatus: result.prepareReport.validation.status,
+  writeApplied: result.prepareReport.writeApplied,
+  manifestStatus: result.manifestReport.validation.status,
+  artifactCount: result.manifestReport.artifacts.length
+}, null, 2));
+JS
+)
+
+python3 - "$helper_report" "$dist_dir" "$bundle_file" "$map_file" "$ready_manifest" <<'PY'
 import json
-import re
 import sys
 from pathlib import Path
 
-plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-app_dir = sys.argv[2]
-artifact = plan["artifacts"][0]
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 
-assert plan["validation"]["status"] == "ready"
-assert plan["writeApplied"] is False
-assert plan["stripSourcesContent"] is True
-assert plan["stripSourcePrefixes"] == [app_dir]
-assert len(plan["artifacts"]) == 1
-assert artifact["path"] == "index.android.bundle"
-assert artifact["sourceMapPath"] == "index.android.bundle.map"
-assert artifact["changes"] == [
-    "minifiedSource.debugId",
-    "sourceMap.debug_id",
-    "sourceMap.sourcesContent",
-    "sourceMap.sources",
-]
-assert re.match(r"^[0-9a-f-]{36}$", artifact["debugId"])
+assert Path(report["buildDir"]).name == Path(sys.argv[2]).name
+assert Path(report["bundlePath"]).name == Path(sys.argv[3]).name
+assert Path(report["sourcemapPath"]).name == Path(sys.argv[4]).name
+assert Path(report["manifestPath"]).name == Path(sys.argv[5]).name
+assert Path(report["bundlePath"]).parent.name == Path(sys.argv[2]).name
+assert Path(report["sourcemapPath"]).parent.name == Path(sys.argv[2]).name
+assert report["prepareStatus"] == "ready"
+assert report["writeApplied"] is True
+assert report["manifestStatus"] == "ready"
+assert report["artifactCount"] == 1
 PY
 
-debug_plan_written="$tmp_dir/react-native-debug-plan-written.json"
-python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
-  --build-dir "$dist_dir" \
-  --strip-sources-content \
-  --strip-source-prefix "$app_dir_real" \
-  --write \
-  > "$debug_plan_written"
-
 if grep -q "sourcesContent" "$map_file"; then
-  echo "LogBrew Debug ID prep did not strip sourcesContent from the React Native source map" >&2
+  echo "LogBrew React Native helper did not strip sourcesContent from the React Native source map" >&2
   exit 1
 fi
 if grep -q "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" "$map_file"; then
@@ -156,15 +238,6 @@ if grep -q "$app_dir_real" "$map_file"; then
   echo "absolute React Native app paths leaked into the stripped source map" >&2
   exit 1
 fi
-
-ready_manifest="$tmp_dir/react-native-manifest.json"
-python3 "$repo_root/scripts/create_js_release_artifact_manifest.py" \
-  --build-dir "$dist_dir" \
-  --release "2026.06.18-react-native" \
-  --environment "production" \
-  --service "checkout-react-native" \
-  --minified-path-prefix "app:///react-native?cache=placeholder#fragment" \
-  > "$ready_manifest"
 
 generated_stack_frame="$tmp_dir/react-native-stack-frame.txt"
 python3 - "$ready_manifest" "$bundle_file" > "$generated_stack_frame" <<'PY'
@@ -188,31 +261,28 @@ print(f"at checkoutFailureSignal ({artifact['minifiedSource']['minifiedUrl']}:{l
 PY
 
 symbolication_report="$tmp_dir/react-native-symbolication-report.json"
-python3 "$repo_root/scripts/verify_js_release_artifact_symbolication.py" \
+"$app_dir/node_modules/.bin/logbrew-release-artifacts" symbolicate-js \
   --build-dir "$dist_dir" \
   --manifest "$ready_manifest" \
   --stack-frame "$(cat "$generated_stack_frame")" \
   > "$symbolication_report"
 
-python3 - "$debug_plan_written" "$ready_manifest" "$bundle_file" "$map_file" "$app_dir_real" "$symbolication_report" <<'PY'
+python3 - "$ready_manifest" "$bundle_file" "$map_file" "$app_dir_real" "$symbolication_report" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-debug_plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-bundle_source = Path(sys.argv[3]).read_text(encoding="utf-8")
-source_map = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
-app_dir = sys.argv[5]
-symbolication_report = json.loads(Path(sys.argv[6]).read_text(encoding="utf-8"))
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+bundle_source = Path(sys.argv[2]).read_text(encoding="utf-8")
+source_map = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+app_dir = sys.argv[4]
+symbolication_report = json.loads(Path(sys.argv[5]).read_text(encoding="utf-8"))
 serialized_manifest = json.dumps(manifest)
 serialized_symbolication = json.dumps(symbolication_report)
 
-debug_id = debug_plan["artifacts"][0]["debugId"]
 artifact = manifest["artifacts"][0]
+debug_id = artifact["debugId"]
 
-assert debug_plan["validation"]["status"] == "ready"
-assert debug_plan["writeApplied"] is True
 assert "debugId=" in bundle_source
 assert source_map["debug_id"] == debug_id
 assert "sourcesContent" not in source_map

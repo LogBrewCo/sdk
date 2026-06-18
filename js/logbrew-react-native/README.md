@@ -355,6 +355,26 @@ instrumentation.remove();
 
 `createLogBrewReactNativeInstrumentation()` composes existing AppState lifecycle spans, React Navigation spans, target-scoped resource fetch spans, and native bridge scope sync into a removable handle. It does not patch global `fetch`, XHR, React Navigation, AppState, or native modules; it only subscribes to the objects your app passes in and returns `remove()`/`stop()` so setup is reversible. Keep `tracePropagationTargets` narrow and continue to avoid request bodies, response bodies, arbitrary headers, full URLs with query text, and high-cardinality route keys unless your app explicitly opts in.
 
+## Release Artifact Preparation
+
+Use the release-artifacts subpath after your React Native build has emitted a Metro bundle and source map. The helper prepares local bundle artifacts with matching Debug IDs, strips embedded source content by default, writes a local manifest, and leaves upload/symbolication to future backend-owned release-artifact support:
+
+```js
+import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
+
+prepareLogBrewReactNativeReleaseArtifacts({
+  bundle: "dist/index.android.bundle",
+  sourcemap: "dist/index.android.bundle.map",
+  platform: "android",
+  release: "2026.06.18",
+  environment: "production",
+  service: "checkout-mobile",
+  root: process.cwd()
+});
+```
+
+The helper requires explicit `release`, `environment`, `service`, and `platform` metadata. It defaults minified bundle URLs to `app:///react-native/<platform>/...`, removes query strings and hashes from manifest URLs, and strips source paths under `root` or `stripSourcePrefix`. It does not patch Gradle, Xcode, Metro, global fetch/XHR, or app runtime code; it only mutates the bundle and source map files you pass in.
+
 ## Example Source
 
 The package includes example source for screen views, app-state metadata, handled JavaScript errors, provider/hooks, active trace correlation, target-scoped trace propagation, lifecycle/resource spans, native bridge scope sync, and reversible instrumentation setup. After installing, inspect the shipped examples with:
