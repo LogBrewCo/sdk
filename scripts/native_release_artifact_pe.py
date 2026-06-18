@@ -58,6 +58,17 @@ PORTABLE_PDB_STREAM_NAME_SCAN_LIMIT = 256
 PORTABLE_PDB_PDB_STREAM_HEADER_SIZE = 32
 PORTABLE_PDB_MAX_STREAMS = 64
 PORTABLE_PDB_MAX_EMBEDDED_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
+WINDOWS_PDB_SIGNATURE = b"Microsoft C/C++ MSF 7.00\r\n\x1a\x44\x53\x00\x00\x00"
+WINDOWS_PDB_RAW_HEADER_SIZE = len(WINDOWS_PDB_SIGNATURE) + 20
+WINDOWS_PDB_MIN_PAGE_SIZE = 0x100
+WINDOWS_PDB_MAX_PAGE_SIZE = 128 * 0x10000
+WINDOWS_PDB_MAX_DIRECTORY_BYTES = 16 * 1024 * 1024
+WINDOWS_PDB_MAX_STREAMS = 65535
+WINDOWS_PDB_PDB_STREAM = 1
+WINDOWS_PDB_DBI_STREAM = 3
+WINDOWS_PDB_INFO_STREAM_MIN_SIZE = 32
+WINDOWS_PDB_DBI_AGE_OFFSET = 8
+WINDOWS_PDB_DBI_AGE_SIZE = 12
 SYMBOL_SOURCE_PRIORITY = {
     "debug_info": 3,
     "symbol_table": 2,
@@ -410,11 +421,176 @@ def read_portable_pdb_metadata_payload(payload: bytes) -> tuple[dict[str, Any], 
         return {"pdbFormat": "portable_pdb"}, str(exc)
 
 
-def read_portable_pdb_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
+def windows_pdb_pages_needed(byte_count: int, page_size: int) -> int:
+    return (byte_count + page_size - 1) // page_size
+
+
+def validate_windows_pdb_page_number(page_number: int, max_page: int, label: str) -> None:
+    if page_number == 0 or page_number > max_page:
+        raise ValueError(f"Windows PDB {label} page {page_number} is outside the file")
+
+
+def read_windows_pdb_page(payload: bytes, page_number: int, page_size: int, max_page: int, label: str) -> bytes:
+    validate_windows_pdb_page_number(page_number, max_page, label)
+    offset = page_number * page_size
+    if offset + page_size > len(payload):
+        raise ValueError(f"Windows PDB {label} page {page_number} is truncated")
+    return payload[offset : offset + page_size]
+
+
+def read_windows_pdb_stream_payload(payload: bytes, page_size: int, max_page: int, pages: list[int], size: int) -> bytes:
+    stream = bytearray()
+    for page_number in pages:
+        stream += read_windows_pdb_page(payload, page_number, page_size, max_page, "stream")
+    return bytes(stream[:size])
+
+
+def parse_windows_pdb_stream_directory(
+    payload: bytes,
+    page_size: int,
+    max_page: int,
+    directory_size: int,
+) -> list[tuple[int, list[int]] | None]:
+    directory_page_count = windows_pdb_pages_needed(directory_size, page_size)
+    directory_page_list_byte_count = directory_page_count * 4
+    directory_page_list_page_count = windows_pdb_pages_needed(directory_page_list_byte_count, page_size)
+    page_list_header_offset = WINDOWS_PDB_RAW_HEADER_SIZE
+    if page_list_header_offset + directory_page_list_page_count * 4 > min(page_size, len(payload)):
+        raise ValueError("Windows PDB stream directory page list is truncated")
+
+    directory_page_list_pages = [
+        struct.unpack_from("<I", payload, page_list_header_offset + index * 4)[0]
+        for index in range(directory_page_list_page_count)
+    ]
+    directory_page_list = bytearray()
+    for page_number in directory_page_list_pages:
+        directory_page_list += read_windows_pdb_page(
+            payload,
+            page_number,
+            page_size,
+            max_page,
+            "stream directory page-list",
+        )
+    directory_page_list = directory_page_list[:directory_page_list_byte_count]
+
+    directory_pages = [
+        struct.unpack_from("<I", directory_page_list, index * 4)[0] for index in range(directory_page_count)
+    ]
+    directory = bytearray()
+    for page_number in directory_pages:
+        directory += read_windows_pdb_page(payload, page_number, page_size, max_page, "stream directory")
+    directory = directory[:directory_size]
+    if len(directory) < 4:
+        raise ValueError("Windows PDB stream directory is truncated")
+
+    stream_count = struct.unpack_from("<I", directory, 0)[0]
+    if stream_count > WINDOWS_PDB_MAX_STREAMS:
+        raise ValueError(
+            f"Windows PDB stream directory has {stream_count} streams; maximum is {WINDOWS_PDB_MAX_STREAMS}"
+        )
+    sizes_offset = 4
+    stream_pages_offset = sizes_offset + stream_count * 4
+    if stream_pages_offset > len(directory):
+        raise ValueError("Windows PDB stream directory is truncated")
+
+    stream_sizes = [
+        struct.unpack_from("<I", directory, sizes_offset + index * 4)[0] for index in range(stream_count)
+    ]
+    streams: list[tuple[int, list[int]] | None] = []
+    page_cursor = stream_pages_offset
+    for stream_size in stream_sizes:
+        if stream_size == 0xFFFFFFFF:
+            streams.append(None)
+            continue
+        page_count = windows_pdb_pages_needed(stream_size, page_size)
+        if page_cursor + page_count * 4 > len(directory):
+            raise ValueError("Windows PDB stream directory page references are truncated")
+        pages = [struct.unpack_from("<I", directory, page_cursor + index * 4)[0] for index in range(page_count)]
+        page_cursor += page_count * 4
+        for page_number in pages:
+            validate_windows_pdb_page_number(page_number, max_page, "stream")
+        streams.append((stream_size, pages))
+    return streams
+
+
+def read_windows_pdb_stream(
+    payload: bytes,
+    page_size: int,
+    max_page: int,
+    streams: list[tuple[int, list[int]] | None],
+    stream_index: int,
+) -> bytes | None:
+    if len(streams) <= stream_index or streams[stream_index] is None:
+        return None
+    stream_size, pages = streams[stream_index]
+    return read_windows_pdb_stream_payload(payload, page_size, max_page, pages, stream_size)
+
+
+def read_windows_pdb_metadata_payload(payload: bytes) -> tuple[dict[str, Any], str | None]:
     try:
-        return read_portable_pdb_metadata_payload(path.read_bytes())
+        file_size = len(payload)
+        if file_size < WINDOWS_PDB_RAW_HEADER_SIZE:
+            return {"pdbFormat": "windows_pdb"}, "Windows PDB MSF header is truncated"
+        page_size, _free_page_map, pages_used, directory_size, _reserved = struct.unpack_from(
+            "<IIIII",
+            payload,
+            len(WINDOWS_PDB_SIGNATURE),
+        )
+        if (
+            page_size.bit_count() != 1
+            or page_size < WINDOWS_PDB_MIN_PAGE_SIZE
+            or page_size > WINDOWS_PDB_MAX_PAGE_SIZE
+        ):
+            return {"pdbFormat": "windows_pdb"}, f"Windows PDB page size is invalid: {page_size}"
+        if directory_size <= 0:
+            return {"pdbFormat": "windows_pdb"}, "Windows PDB stream directory is empty"
+        if directory_size > WINDOWS_PDB_MAX_DIRECTORY_BYTES:
+            return {"pdbFormat": "windows_pdb"}, (
+                f"Windows PDB stream directory is {directory_size} bytes; "
+                f"maximum is {WINDOWS_PDB_MAX_DIRECTORY_BYTES} bytes"
+            )
+        if page_size > file_size:
+            return {"pdbFormat": "windows_pdb"}, "Windows PDB page size is larger than the file"
+
+        streams = parse_windows_pdb_stream_directory(payload, page_size, pages_used, directory_size)
+        pdb_info = read_windows_pdb_stream(payload, page_size, pages_used, streams, WINDOWS_PDB_PDB_STREAM)
+        if pdb_info is None:
+            return {"pdbFormat": "windows_pdb"}, "Windows PDB information stream is missing"
+        if len(pdb_info) < WINDOWS_PDB_INFO_STREAM_MIN_SIZE:
+            return {"pdbFormat": "windows_pdb"}, "Windows PDB information stream is truncated"
+
+        pdb_info_age = struct.unpack_from("<I", pdb_info, 8)[0]
+        pdb_guid = format_codeview_guid(pdb_info[12:28])
+        pdb_age = pdb_info_age
+        dbi_stream = read_windows_pdb_stream(payload, page_size, pages_used, streams, WINDOWS_PDB_DBI_STREAM)
+        if dbi_stream is not None:
+            if len(dbi_stream) < WINDOWS_PDB_DBI_AGE_SIZE:
+                return {"pdbFormat": "windows_pdb"}, "Windows PDB debug information stream is truncated"
+            dbi_age = struct.unpack_from("<I", dbi_stream, WINDOWS_PDB_DBI_AGE_OFFSET)[0]
+            if dbi_age != 0:
+                pdb_age = dbi_age
+
+        return {
+            "pdbFormat": "windows_pdb",
+            "pdbGuid": pdb_guid,
+            "pdbAge": pdb_age,
+            "pdbDebugId": f"{pdb_guid}_{pdb_age}",
+        }, None
+    except (struct.error, ValueError) as exc:
+        return {"pdbFormat": "windows_pdb"}, str(exc)
+
+
+def read_pdb_metadata_payload(payload: bytes) -> tuple[dict[str, Any], str | None]:
+    if payload.startswith(WINDOWS_PDB_SIGNATURE):
+        return read_windows_pdb_metadata_payload(payload)
+    return read_portable_pdb_metadata_payload(payload)
+
+
+def read_pdb_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
+    try:
+        return read_pdb_metadata_payload(path.read_bytes())
     except OSError as exc:
-        return {"pdbFormat": "portable_pdb"}, str(exc)
+        return {"pdbFormat": "unrecognized"}, str(exc)
 
 
 def symbol_source_priority(symbol_source: str | None) -> int:

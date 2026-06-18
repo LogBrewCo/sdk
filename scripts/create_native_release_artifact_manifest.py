@@ -29,8 +29,8 @@ from native_release_artifact_pe import (  # noqa: E402
     dedupe_pe_symbol_files,
     pe_symbol_candidates,
     read_breakpad_metadata,
+    read_pdb_metadata,
     read_pe_codeview_metadata,
-    read_portable_pdb_metadata,
 )
 from native_release_artifact_unity import (  # noqa: E402
     UNITY_BUILD_ID_FILE_NAME,
@@ -45,6 +45,7 @@ PROGUARD_CLASS_MAPPING_RE = re.compile(r"^\s*[^#\s].+?\s+->\s+[^:]+:\s*$")
 DEFAULT_MAX_SYMBOL_FILES = 500
 DEFAULT_MAX_SYMBOL_FILE_BYTES = 2 * 1024 * 1024 * 1024
 DEFAULT_MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024
+PDB_IDENTITY_FORMATS = {"portable_pdb", "embedded_portable_pdb", "windows_pdb"}
 MACHO_MAGIC_32_LE = b"\xce\xfa\xed\xfe"
 MACHO_MAGIC_32_BE = b"\xfe\xed\xfa\xce"
 MACHO_MAGIC_64_LE = b"\xcf\xfa\xed\xfe"
@@ -700,7 +701,7 @@ def build_dotnet_pdb_artifact(path: Path, root: Path, limits: dict[str, int]) ->
                         f"maximum is {limits['maxSymbolFileBytes']} bytes"
                     )
                     continue
-                pdb_metadata, pdb_metadata_error = read_portable_pdb_metadata(pdb_path)
+                pdb_metadata, pdb_metadata_error = read_pdb_metadata(pdb_path)
                 if pdb_metadata_error:
                     errors.append(f"{relative(pdb_path, root)}: {pdb_metadata_error}")
                     continue
@@ -708,12 +709,18 @@ def build_dotnet_pdb_artifact(path: Path, root: Path, limits: dict[str, int]) ->
                 pdb_byte_size = pdb_path.stat().st_size
 
             pdb_format = str(pdb_metadata.get("pdbFormat", ""))
-            if pdb_format in {"portable_pdb", "embedded_portable_pdb"}:
+            if pdb_format in PDB_IDENTITY_FORMATS:
                 pdb_payload_debug_id = str(pdb_metadata["pdbDebugId"])
                 if pdb_payload_debug_id != metadata["pdbDebugId"]:
                     if pdb_format == "embedded_portable_pdb":
                         errors.append(
                             f"{rel_path}: embedded Portable PDB debug ID {pdb_payload_debug_id} "
+                            f"does not match PE CodeView debug ID {metadata['pdbDebugId']}"
+                        )
+                        continue
+                    if pdb_format == "windows_pdb":
+                        errors.append(
+                            f"{pdb_location}: Windows PDB debug ID {pdb_payload_debug_id} "
                             f"does not match PE CodeView debug ID {metadata['pdbDebugId']}"
                         )
                         continue
@@ -743,7 +750,7 @@ def build_dotnet_pdb_artifact(path: Path, root: Path, limits: dict[str, int]) ->
             }
             if pdb_location:
                 symbol_file["pdbPath"] = pdb_location
-            if pdb_format in {"portable_pdb", "embedded_portable_pdb"}:
+            if pdb_format in PDB_IDENTITY_FORMATS:
                 symbol_file["pdbPayloadDebugId"] = pdb_metadata["pdbDebugId"]
             if pdb_format == "embedded_portable_pdb":
                 symbol_file["pdbEmbeddedCompressedByteSize"] = pdb_metadata["compressedByteSize"]
