@@ -24,6 +24,7 @@ from logbrew_sdk import (
     parse_traceparent,
     span_attributes_from_traceparent,
     trace_metadata,
+    urlopen_with_logbrew_span,
     use_logbrew_trace,
 )
 
@@ -518,6 +519,135 @@ class LogBrewSdkTests(unittest.TestCase):
 
         with self.assertRaisesRegex(TransportError, "http transport failed"):
             transport.send("LOGBREW_API_KEY", '{"events":[]}')
+
+    def test_urlopen_with_logbrew_span_injects_child_trace_and_queues_span(self) -> None:
+        client = sample_client()
+        opener_active_trace: LogBrewTraceContext | None = None
+        sent_requests: list[Request] = []
+        original_request = Request(
+            "https://api.example.test/payments/123?coupon=summer#receipt",
+            headers={"traceparent": "spoofed", "x-caller": "checkout"},
+            method="GET",
+        )
+        parent_trace = LogBrewTraceContext(
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="00f067aa0ba902b7",
+            sampled=True,
+        )
+        clock_values = iter([10.0, 10.043])
+
+        def open_url(request: Request, *, timeout: float | None = None) -> StubHttpResponse:
+            nonlocal opener_active_trace
+            sent_requests.append(request)
+            opener_active_trace = get_active_logbrew_trace()
+            self.assertEqual(timeout, 2.5)
+            return StubHttpResponse(202)
+
+        with use_logbrew_trace(parent_trace):
+            response = urlopen_with_logbrew_span(
+                original_request,
+                client=client,
+                event_id="evt_python_urlopen_client",
+                timestamp="2026-06-19T08:00:00Z",
+                open_url=open_url,
+                timeout=2.5,
+                span_id_factory=lambda: "b7ad6b7169203331",
+                clock=lambda: next(clock_values),
+                metadata={"service": "checkout", "headers": {"authorization": "private"}},
+            )
+
+        self.assertEqual(response.status, 202)
+        self.assertIsNone(get_active_logbrew_trace())
+        self.assertEqual(original_request.get_header("Traceparent"), "spoofed")
+        sent_request = sent_requests[0]
+        self.assertIsNot(sent_request, original_request)
+        self.assertEqual(
+            sent_request.get_header("Traceparent"),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01",
+        )
+        self.assertEqual(sent_request.get_header("X-caller"), "checkout")
+        self.assertEqual(opener_active_trace, LogBrewTraceContext(
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="b7ad6b7169203331",
+            parent_span_id="00f067aa0ba902b7",
+            sampled=True,
+        ))
+
+        payload = json.loads(client.preview_json())
+        event = payload["events"][0]
+        self.assertEqual(event["type"], "span")
+        self.assertEqual(event["id"], "evt_python_urlopen_client")
+        self.assertEqual(
+            event["attributes"],
+            {
+                "name": "GET /payments/123",
+                "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+                "spanId": "b7ad6b7169203331",
+                "parentSpanId": "00f067aa0ba902b7",
+                "status": "ok",
+                "durationMs": 43.0,
+                "metadata": {
+                    "source": "urllib.request",
+                    "service": "checkout",
+                    "routeTemplate": "/payments/123",
+                    "method": "GET",
+                    "statusCode": 202,
+                    "sampled": True,
+                },
+            },
+        )
+        serialized = client.preview_json()
+        self.assertNotIn("coupon=summer", serialized)
+        self.assertNotIn("authorization", serialized)
+        self.assertNotIn("traceparent", serialized)
+
+    def test_urlopen_with_logbrew_span_preserves_http_errors_and_capture_failures(self) -> None:
+        client = sample_client()
+        original_error = HTTPError(
+            url="https://api.example.test/payments/123?coupon=summer",
+            code=503,
+            msg="retry later",
+            hdrs=Message(),
+            fp=None,
+        )
+
+        def open_url(_request: Request, *, timeout: float | None = None) -> StubHttpResponse:
+            raise original_error
+
+        with self.assertRaises(HTTPError) as raised:
+            urlopen_with_logbrew_span(
+                "https://api.example.test/payments/123?coupon=summer",
+                client=client,
+                event_id="evt_python_urlopen_failure",
+                timestamp="2026-06-19T08:00:01Z",
+                open_url=open_url,
+                span_id_factory=lambda: "b7ad6b7169203332",
+                clock=lambda: 20.0,
+            )
+
+        self.assertIs(raised.exception, original_error)
+        event = json.loads(client.preview_json())["events"][0]
+        self.assertEqual(event["attributes"]["status"], "error")
+        self.assertEqual(event["attributes"]["metadata"]["statusCode"], 503)
+        self.assertEqual(event["attributes"]["metadata"]["errorType"], "HTTPError")
+        self.assertNotIn("coupon=summer", client.preview_json())
+
+        closed_client = sample_client()
+        closed_client.closed = True
+        capture_errors: list[str] = []
+        response = urlopen_with_logbrew_span(
+            "https://api.example.test/health",
+            client=closed_client,
+            event_id="evt_python_urlopen_capture_error",
+            timestamp="2026-06-19T08:00:02Z",
+            open_url=lambda _request, *, timeout=None: StubHttpResponse(204),
+            span_id_factory=lambda: "b7ad6b7169203333",
+            on_capture_error=lambda error: capture_errors.append(str(error)),
+        )
+
+        self.assertEqual(response.status, 204)
+        self.assertEqual(len(capture_errors), 1)
+        self.assertIn("client is already shut down", capture_errors[0])
 
     def test_shutdown_flushes_and_prevents_future_events(self) -> None:
         client = sample_client()

@@ -282,6 +282,21 @@ run_http_transport_smoke() {
     grep -q '"source": "python-smoke"' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_urlopen_span_smoke() {
+    local output_prefix="$1"
+
+    python "$tmp_dir/urlopen_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"status": 202' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"activeSpan": "b7ad6b7169203331"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"routeTemplate": "/payments/123"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"method": "GET"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"callerHeader": "checkout"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_reinstall_from_freeze() {
     local freeze_file="$1"
     local expected_suffix="$2"
@@ -321,6 +336,7 @@ run_reinstall_from_freeze() {
     run_smoke_script "smoke-run" "$output_prefix-freeze-smoke"
     run_logging_smoke "$output_prefix-freeze-logging"
     run_http_transport_smoke "$output_prefix-freeze-http-transport"
+    run_urlopen_span_smoke "$output_prefix-freeze-urlopen-span"
 
     deactivate
 }
@@ -367,6 +383,7 @@ run_reinstall_from_direct_requirement() {
     run_smoke_script "smoke-run" "$output_prefix-direct-smoke"
     run_logging_smoke "$output_prefix-direct-logging"
     run_http_transport_smoke "$output_prefix-direct-http-transport"
+    run_urlopen_span_smoke "$output_prefix-direct-urlopen-span"
 
     deactivate
 }
@@ -411,8 +428,10 @@ package_version = os.environ["LOGBREW_PYTHON_PACKAGE_VERSION"]
 with zipfile.ZipFile(wheel_path) as archive:
     names = set(archive.namelist())
     required = {
+        "logbrew_sdk/_http_client.py",
         "logbrew_sdk/__init__.py",
         "logbrew_sdk/_timeline.py",
+        "logbrew_sdk/_trace_context.py",
         "logbrew_sdk/examples/__init__.py",
         "logbrew_sdk/examples/__main__.py",
         "logbrew_sdk/examples/agent_timeline.py",
@@ -436,6 +455,7 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "urlopen_with_logbrew_span",
     "parse_traceparent",
     "create_product_action_attributes",
     "create_network_milestone_attributes",
@@ -466,7 +486,9 @@ with tarfile.open(sdist_path, "r:gz") as archive:
     required = {
         f"{sdist_root}/README.md",
         f"{sdist_root}/pyproject.toml",
+        f"{sdist_root}/src/logbrew_sdk/_http_client.py",
         f"{sdist_root}/src/logbrew_sdk/_timeline.py",
+        f"{sdist_root}/src/logbrew_sdk/_trace_context.py",
         f"{sdist_root}/src/logbrew_sdk/py.typed",
         f"{sdist_root}/src/logbrew_sdk/examples/__init__.py",
         f"{sdist_root}/src/logbrew_sdk/examples/__main__.py",
@@ -497,6 +519,7 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "urlopen_with_logbrew_span",
     "parse_traceparent",
     "create_product_action_attributes",
     "create_network_milestone_attributes",
@@ -764,6 +787,7 @@ python "$tmp_dir/module_doc.py"
 
 cat > "$tmp_dir/typecheck.py" <<'EOF'
 import logging
+from urllib.request import Request
 
 from logbrew_sdk import (
     ActionAttributes,
@@ -785,6 +809,7 @@ from logbrew_sdk import (
     create_traceparent,
     parse_traceparent,
     span_attributes_from_traceparent,
+    urlopen_with_logbrew_span,
 )
 
 release: ReleaseAttributes = {
@@ -877,6 +902,16 @@ if response.status_code != 202:
 
 logging_transport: Transport = RecordingTransport.always_accept()
 http_transport: Transport = HttpTransport(endpoint="http://127.0.0.1:9/v1/events")
+urlopen_response = urlopen_with_logbrew_span(
+    Request("https://api.example.test/health", method="GET"),
+    client=client,
+    event_id="evt_urlopen_typecheck",
+    timestamp="2026-06-02T10:00:07Z",
+    open_url=lambda _request: type("Response", (), {"status": 204})(),
+    span_id_factory=lambda: "b7ad6b7169203331",
+)
+if urlopen_response.status != 204:
+    raise RuntimeError("unexpected urlopen status")
 handler = LogBrewLoggingHandler(
     client,
     logging_transport,
@@ -1183,6 +1218,114 @@ print(
 )
 EOF
 
+cat > "$tmp_dir/urlopen_span_smoke.py" <<'EOF'
+from __future__ import annotations
+
+import json
+from urllib.request import Request
+
+from logbrew_sdk import (
+    LogBrewClient,
+    LogBrewTraceContext,
+    get_active_logbrew_trace,
+    urlopen_with_logbrew_span,
+    use_logbrew_trace,
+)
+
+
+class StubHttpResponse:
+    def __init__(self, status: int) -> None:
+        self.status = status
+
+    def getcode(self) -> int:
+        return self.status
+
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="smoke-app-urlopen",
+    sdk_version="0.1.0",
+)
+parent_trace = LogBrewTraceContext(
+    trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+    span_id="00f067aa0ba902b7",
+    sampled=True,
+)
+request = Request(
+    "https://api.example.test/payments/123?coupon=summer#receipt",
+    headers={"traceparent": "spoofed", "x-caller": "checkout"},
+    method="GET",
+)
+captured: dict[str, object] = {}
+
+
+def open_url(outbound: Request, *, timeout: float | None = None) -> StubHttpResponse:
+    active = get_active_logbrew_trace()
+    captured["timeout"] = timeout
+    captured["traceparent"] = outbound.get_header("Traceparent")
+    captured["callerHeader"] = outbound.get_header("X-caller")
+    captured["activeSpan"] = active.span_id if active is not None else None
+    return StubHttpResponse(202)
+
+
+with use_logbrew_trace(parent_trace):
+    response = urlopen_with_logbrew_span(
+        request,
+        client=client,
+        event_id="evt_python_urlopen_client",
+        timestamp="2026-06-19T08:00:00Z",
+        open_url=open_url,
+        timeout=2.5,
+        span_id_factory=lambda: "b7ad6b7169203331",
+        clock=iter([10.0, 10.043]).__next__,
+        metadata={"service": "checkout", "payload": {"card": "private"}},
+    )
+
+payload = json.loads(client.preview_json())
+event = payload["events"][0]
+metadata = event["attributes"]["metadata"]
+if request.get_header("Traceparent") != "spoofed":
+    raise SystemExit("caller request was mutated")
+if "coupon=summer" in client.preview_json() or "traceparent" in client.preview_json() or "card" in client.preview_json():
+    raise SystemExit("urlopen span leaked query, propagation, or payload data")
+
+closed_client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="smoke-app-urlopen",
+    sdk_version="0.1.0",
+)
+closed_client.closed = True
+capture_errors: list[str] = []
+urlopen_with_logbrew_span(
+    "https://api.example.test/health",
+    client=closed_client,
+    event_id="evt_python_urlopen_capture_failure",
+    timestamp="2026-06-19T08:00:01Z",
+    open_url=lambda _request, *, timeout=None: StubHttpResponse(204),
+    span_id_factory=lambda: "b7ad6b7169203332",
+    on_capture_error=lambda error: capture_errors.append(str(error)),
+)
+
+print(
+    json.dumps(
+        {
+            "activeSpan": captured["activeSpan"],
+            "callerHeader": captured["callerHeader"],
+            "captureErrors": len(capture_errors),
+            "events": len(payload["events"]),
+            "method": metadata["method"],
+            "ok": True,
+            "routeTemplate": metadata["routeTemplate"],
+            "status": response.status,
+            "statusCode": metadata["statusCode"],
+            "timeout": captured["timeout"],
+            "traceparent": captured["traceparent"],
+        },
+        sort_keys=True,
+    )
+)
+EOF
+
 cat > "$tmp_dir/metadata.py" <<'EOF'
 from importlib.metadata import distribution, files, metadata, version
 from pathlib import Path
@@ -1198,6 +1341,8 @@ if version("logbrew-sdk") != package_version:
 
 package_files = {str(path) for path in files("logbrew-sdk") or []}
 required = {
+    "logbrew_sdk/_http_client.py",
+    "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/py.typed",
     "logbrew_sdk/examples/__init__.py",
     "logbrew_sdk/examples/__main__.py",
@@ -1218,6 +1363,7 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "urlopen_with_logbrew_span",
 ):
     if needle not in description:
         raise SystemExit(f"missing installed metadata guidance: {needle}")
@@ -1356,6 +1502,8 @@ required_show_files = {
     f"{dist_info_dir}/WHEEL",
     f"{dist_info_dir}/direct_url.json",
     f"{dist_info_dir}/top_level.txt",
+    "logbrew_sdk/_http_client.py",
+    "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/__init__.py",
     "logbrew_sdk/examples/__init__.py",
     "logbrew_sdk/examples/__main__.py",
@@ -1513,6 +1661,7 @@ run_packaged_examples_entrypoint "smoke-packaged-examples" "wheel-packaged-examp
 run_smoke_script "smoke-run" "smoke"
 run_logging_smoke "wheel-logging"
 run_http_transport_smoke "wheel-http-transport"
+run_urlopen_span_smoke "wheel-urlopen-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/pip-uninstall-list.json"
@@ -1541,6 +1690,7 @@ run_packaged_examples_entrypoint "smoke-packaged-examples" "wheel-reinstall-pack
 run_smoke_script "smoke-run" "smoke-reinstall"
 run_logging_smoke "wheel-reinstall-logging"
 run_http_transport_smoke "wheel-reinstall-http-transport"
+run_urlopen_span_smoke "wheel-reinstall-urlopen-span"
 
 deactivate
 run_reinstall_from_freeze "$tmp_dir/pip-freeze.txt" "$wheel_artifact" "wheel"
@@ -1579,6 +1729,7 @@ run_packaged_examples_entrypoint "smoke-packaged-examples" "sdist-packaged-examp
 run_smoke_script "smoke-run" "sdist-smoke"
 run_logging_smoke "sdist-logging"
 run_http_transport_smoke "sdist-http-transport"
+run_urlopen_span_smoke "sdist-urlopen-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/sdist-pip-uninstall-list.json"
@@ -1607,6 +1758,7 @@ run_packaged_examples_entrypoint "smoke-packaged-examples" "sdist-reinstall-pack
 run_smoke_script "smoke-run" "sdist-smoke-reinstall"
 run_logging_smoke "sdist-reinstall-logging"
 run_http_transport_smoke "sdist-reinstall-http-transport"
+run_urlopen_span_smoke "sdist-reinstall-urlopen-span"
 
 cat > "$tmp_dir/unauth.py" <<'EOF'
 import json

@@ -256,6 +256,33 @@ with use_logbrew_trace(trace):
 
 `parse_traceparent()` validates W3C shape, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `create_logbrew_trace_context()` creates the request-local `LogBrewTraceContext` used to correlate request spans, app-owned logs, issues, actions, metrics, and outgoing milestones with one safe set of IDs. `use_logbrew_trace()` makes that context available through `trace_metadata()` and `get_active_logbrew_trace()` during framework handler work, including async work that keeps Python `contextvars`. `create_traceparent_headers()` returns an explicit outbound carrier with only `traceparent` for app-owned HTTP clients. FastAPI and Django integrations use these helpers automatically for valid inbound `traceparent` headers and start a fresh W3C-shaped local trace when the header is missing or malformed. The helpers do not patch HTTP clients or capture request payloads, headers, cookies, query strings, or the raw `traceparent` value.
 
+## Outbound `urllib.request` Spans
+
+Use `urlopen_with_logbrew_span()` when you want one dependency-free outbound HTTP client span around an app-owned `urllib.request` call:
+
+```python
+from urllib.request import Request
+
+from logbrew_sdk import LogBrewClient, urlopen_with_logbrew_span
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+
+response = urlopen_with_logbrew_span(
+    Request("https://api.example.com/payments/123?coupon=summer", method="GET"),
+    client=client,
+    event_id="evt_payment_lookup",
+    timestamp="2026-06-19T08:00:00Z",
+    route_template="/payments/:payment_id",
+    metadata={"service": "checkout-api"},
+)
+```
+
+The helper clones the caller request, writes exactly one normalized W3C `traceparent`, runs the opener under a child `LogBrewTraceContext`, queues one span with method, query-free route, status, duration, and primitive metadata, then returns the original response or re-raises the original HTTP/network error. Telemetry capture failures are reportable through `on_capture_error` and do not replace the app-owned HTTP result. It does not patch `urllib`, does not capture request or response payloads, does not store headers, cookies, query strings, fragments, baggage, tracestate, or raw propagation values.
+
 ## Agent-Readable Timelines
 
 Use `create_product_action_attributes()` and `create_network_milestone_attributes()` when your service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.
