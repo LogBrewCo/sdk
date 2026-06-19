@@ -420,6 +420,36 @@ profile = cache_operation_with_logbrew_span(
 
 The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the cache system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the cache result. Metadata is intentionally bounded to primitive caller metadata, `cacheSystem`, `cacheOperation`, optional `cacheName`, optional hit state, optional non-negative item size/count, sampled state, and exception type. It drops key-like metadata fields and does not monkeypatch cache clients, open support tickets, capture cache keys, values, commands, payloads, headers, cookies, network addresses, baggage, tracestate, stack traces, or exception messages.
 
+## Queue Operation Spans
+
+Use `queue_operation_with_logbrew_span()` for sync queue calls and `async_queue_operation_with_logbrew_span()` for async calls when you want one app-owned publish/process span without installing or patching Celery, RQ, Dramatiq, or broker clients:
+
+```python
+from logbrew_sdk import LogBrewClient, queue_operation_with_logbrew_span
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-worker",
+    sdk_version="1.0.0",
+)
+
+queued = queue_operation_with_logbrew_span(
+    "publish checkout.email",
+    client=client,
+    event_id="evt_checkout_email_publish",
+    timestamp="2026-06-19T13:00:00Z",
+    operation=lambda: celery_task.apply_async(args=[order_id]),
+    system="celery",
+    operation_kind="publish",
+    queue_name="email",
+    task_name="checkout.email",
+    message_count=1,
+    metadata={"service": "checkout-worker"},
+)
+```
+
+The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the queue system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the queue result. Metadata is intentionally bounded to primitive caller metadata, `queueSystem`, `queueOperation`, optional operation kind, optional queue/task names, optional non-negative message count/attempt, sampled state, and exception type. It drops message-like metadata fields and does not monkeypatch queue frameworks, write broker metadata, open support tickets, capture job arguments, message bodies, headers, cookies, broker URLs, baggage, tracestate, stack traces, or exception messages.
+
 ## Agent-Readable Timelines
 
 Use `create_product_action_attributes()` and `create_network_milestone_attributes()` when your service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.

@@ -49,6 +49,18 @@ def compact_metadata(metadata: Mapping[str, Any] | None) -> Metadata:
     }
 
 
+def compact_metadata_without_keys(
+    metadata: Mapping[str, Any] | None,
+    private_key_parts: tuple[str, ...],
+) -> Metadata:
+    span_metadata = compact_metadata(metadata)
+    return {
+        key: value
+        for key, value in span_metadata.items()
+        if not any(private_part in key.lower() for private_part in private_key_parts)
+    }
+
+
 def duration_ms(start: float, clock: Clock) -> float:
     return round(max((clock() - start) * 1000, 0), 3)
 

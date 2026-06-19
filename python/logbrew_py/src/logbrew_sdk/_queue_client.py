@@ -1,4 +1,4 @@
-"""Explicit cache span helpers for app-owned Python cache calls."""
+"""Explicit queue span helpers for app-owned Python queue calls."""
 
 from __future__ import annotations
 
@@ -18,12 +18,14 @@ T = TypeVar("T")
 Operation: TypeAlias = Callable[[], T]
 AsyncOperation: TypeAlias = Callable[[], Awaitable[T]]
 
-_CACHE_METADATA_DENYLIST = (
+_QUEUE_METADATA_DENYLIST = (
     "arg",
-    "command",
+    "body",
     "cookie",
     "header",
     "key",
+    "kwarg",
+    "message",
     "param",
     "payload",
     "auth",
@@ -32,7 +34,7 @@ _CACHE_METADATA_DENYLIST = (
 )
 
 
-def cache_operation_with_logbrew_span(
+def queue_operation_with_logbrew_span(
     operation_name: str,
     *,
     client: Any,
@@ -41,30 +43,32 @@ def cache_operation_with_logbrew_span(
     system: str,
     timestamp: str | None = None,
     trace: LogBrewTraceContext | None = None,
-    cache_name: str | None = None,
-    cache_hit: bool | None = None,
-    item_size_bytes: int | None = None,
-    item_count: int | None = None,
+    operation_kind: str | None = None,
+    queue_name: str | None = None,
+    task_name: str | None = None,
+    message_count: int | None = None,
+    attempt: int | None = None,
     metadata: Mapping[str, Any] | None = None,
     span_id_factory: Callable[[], str] | None = None,
     clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
 ) -> T:
-    """Run a caller-owned cache operation under a LogBrew child span."""
+    """Run a caller-owned queue operation under a LogBrew child span."""
 
     _require_operation(operation)
-    return _run_cache_operation(
-        _cache_span_request(
+    return _run_queue_operation(
+        _queue_span_request(
             operation_name=operation_name,
             system=system,
             client=client,
             event_id=event_id,
             timestamp=timestamp,
             trace=trace,
-            cache_name=cache_name,
-            cache_hit=cache_hit,
-            item_size_bytes=item_size_bytes,
-            item_count=item_count,
+            operation_kind=operation_kind,
+            queue_name=queue_name,
+            task_name=task_name,
+            message_count=message_count,
+            attempt=attempt,
             metadata=metadata,
             span_id_factory=span_id_factory,
             clock=clock,
@@ -74,7 +78,7 @@ def cache_operation_with_logbrew_span(
     )
 
 
-async def async_cache_operation_with_logbrew_span(
+async def async_queue_operation_with_logbrew_span(
     operation_name: str,
     *,
     client: Any,
@@ -83,29 +87,31 @@ async def async_cache_operation_with_logbrew_span(
     system: str,
     timestamp: str | None = None,
     trace: LogBrewTraceContext | None = None,
-    cache_name: str | None = None,
-    cache_hit: bool | None = None,
-    item_size_bytes: int | None = None,
-    item_count: int | None = None,
+    operation_kind: str | None = None,
+    queue_name: str | None = None,
+    task_name: str | None = None,
+    message_count: int | None = None,
+    attempt: int | None = None,
     metadata: Mapping[str, Any] | None = None,
     span_id_factory: Callable[[], str] | None = None,
     clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
 ) -> T:
-    """Run a caller-owned async cache operation under a LogBrew child span."""
+    """Run a caller-owned async queue operation under a LogBrew child span."""
 
     _require_operation(operation)
-    request = _cache_span_request(
+    request = _queue_span_request(
         operation_name=operation_name,
         system=system,
         client=client,
         event_id=event_id,
         timestamp=timestamp,
         trace=trace,
-        cache_name=cache_name,
-        cache_hit=cache_hit,
-        item_size_bytes=item_size_bytes,
-        item_count=item_count,
+        operation_kind=operation_kind,
+        queue_name=queue_name,
+        task_name=task_name,
+        message_count=message_count,
+        attempt=attempt,
         metadata=metadata,
         span_id_factory=span_id_factory,
         clock=clock,
@@ -122,17 +128,18 @@ async def async_cache_operation_with_logbrew_span(
 
 
 @dataclass(slots=True)
-class _CacheSpanRequest:
+class _QueueSpanRequest:
     operation_name: str
     system: str
     client: Any
     event_id: str
     timestamp: str | None
     trace: LogBrewTraceContext
-    cache_name: str | None
-    cache_hit: bool | None
-    item_size_bytes: int | None
-    item_count: int | None
+    operation_kind: str | None
+    queue_name: str | None
+    task_name: str | None
+    message_count: int | None
+    attempt: int | None
     metadata: Mapping[str, Any] | None
     clock: _instrumentation.Clock
     on_capture_error: Callable[[Exception], None] | None
@@ -147,14 +154,15 @@ class _CacheSpanRequest:
             name=f"{self.system} {self.operation_name}",
             status=status,
             duration_ms=_instrumentation.duration_ms(self.start, self.clock),
-            metadata=_cache_span_metadata(
+            metadata=_queue_span_metadata(
                 metadata=self.metadata,
                 system=self.system,
                 operation_name=self.operation_name,
-                cache_name=self.cache_name,
-                cache_hit=self.cache_hit,
-                item_size_bytes=self.item_size_bytes,
-                item_count=self.item_count,
+                operation_kind=self.operation_kind,
+                queue_name=self.queue_name,
+                task_name=self.task_name,
+                message_count=self.message_count,
+                attempt=self.attempt,
                 sampled=self.trace.sampled,
                 error=error,
             ),
@@ -162,7 +170,7 @@ class _CacheSpanRequest:
         )
 
 
-def _cache_span_request(
+def _queue_span_request(
     *,
     operation_name: str,
     system: str,
@@ -170,28 +178,30 @@ def _cache_span_request(
     event_id: str,
     timestamp: str | None,
     trace: LogBrewTraceContext | None,
-    cache_name: str | None,
-    cache_hit: bool | None,
-    item_size_bytes: int | None,
-    item_count: int | None,
+    operation_kind: str | None,
+    queue_name: str | None,
+    task_name: str | None,
+    message_count: int | None,
+    attempt: int | None,
     metadata: Mapping[str, Any] | None,
     span_id_factory: Callable[[], str] | None,
     clock: _instrumentation.Clock | None,
     on_capture_error: Callable[[Exception], None] | None,
-) -> _CacheSpanRequest:
+) -> _QueueSpanRequest:
     read_clock = clock or perf_counter
     parent_trace = trace if trace is not None else get_active_logbrew_trace()
-    return _CacheSpanRequest(
+    return _QueueSpanRequest(
         operation_name=_instrumentation.required_label("operation_name", operation_name),
         system=_instrumentation.required_label("system", system),
         client=client,
         event_id=event_id,
         timestamp=timestamp,
         trace=_instrumentation.child_trace(parent_trace, span_id_factory),
-        cache_name=_instrumentation.optional_label(cache_name),
-        cache_hit=_instrumentation.optional_bool("cache_hit", cache_hit),
-        item_size_bytes=_instrumentation.normalize_non_negative_int("item_size_bytes", item_size_bytes),
-        item_count=_instrumentation.normalize_non_negative_int("item_count", item_count),
+        operation_kind=_instrumentation.optional_label(operation_kind),
+        queue_name=_instrumentation.optional_label(queue_name),
+        task_name=_instrumentation.optional_label(task_name),
+        message_count=_instrumentation.normalize_non_negative_int("message_count", message_count),
+        attempt=_instrumentation.normalize_non_negative_int("attempt", attempt),
         metadata=metadata,
         clock=read_clock,
         on_capture_error=on_capture_error,
@@ -199,7 +209,7 @@ def _cache_span_request(
     )
 
 
-def _run_cache_operation(request: _CacheSpanRequest, operation: Operation[T]) -> T:
+def _run_queue_operation(request: _QueueSpanRequest, operation: Operation[T]) -> T:
     with use_logbrew_trace(request.trace):
         try:
             result = operation()
@@ -210,42 +220,45 @@ def _run_cache_operation(request: _CacheSpanRequest, operation: Operation[T]) ->
     return result
 
 
-def _cache_span_metadata(
+def _queue_span_metadata(
     *,
     metadata: Mapping[str, Any] | None,
     system: str,
     operation_name: str,
-    cache_name: str | None,
-    cache_hit: bool | None,
-    item_size_bytes: int | None,
-    item_count: int | None,
+    operation_kind: str | None,
+    queue_name: str | None,
+    task_name: str | None,
+    message_count: int | None,
+    attempt: int | None,
     sampled: bool,
     error: Exception | None,
 ) -> _instrumentation.Metadata:
-    span_metadata = _safe_cache_metadata(metadata)
+    span_metadata = _safe_queue_metadata(metadata)
     span_metadata.update(
         {
-            "source": "cache",
-            "cacheSystem": system,
-            "cacheOperation": operation_name,
+            "source": "queue",
+            "queueSystem": system,
+            "queueOperation": operation_name,
             "sampled": sampled,
         }
     )
-    if cache_name is not None:
-        span_metadata["cacheName"] = cache_name
-    if cache_hit is not None:
-        span_metadata["cacheHit"] = cache_hit
-    if item_size_bytes is not None:
-        span_metadata["itemSizeBytes"] = item_size_bytes
-    if item_count is not None:
-        span_metadata["itemCount"] = item_count
+    if operation_kind is not None:
+        span_metadata["queueOperationKind"] = operation_kind
+    if queue_name is not None:
+        span_metadata["queueName"] = queue_name
+    if task_name is not None:
+        span_metadata["taskName"] = task_name
+    if message_count is not None:
+        span_metadata["messageCount"] = message_count
+    if attempt is not None:
+        span_metadata["attempt"] = attempt
     if error is not None:
         span_metadata["errorType"] = type(error).__name__
     return span_metadata
 
 
-def _safe_cache_metadata(metadata: Mapping[str, Any] | None) -> _instrumentation.Metadata:
-    return _instrumentation.compact_metadata_without_keys(metadata, _CACHE_METADATA_DENYLIST)
+def _safe_queue_metadata(metadata: Mapping[str, Any] | None) -> _instrumentation.Metadata:
+    return _instrumentation.compact_metadata_without_keys(metadata, _QUEUE_METADATA_DENYLIST)
 
 
 def _require_operation(operation: object) -> None:

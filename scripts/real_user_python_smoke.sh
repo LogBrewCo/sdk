@@ -367,6 +367,23 @@ run_cache_span_smoke() {
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_queue_span_smoke() {
+    local output_prefix="$1"
+
+    python "$repo_root/scripts/python_queue_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"activeSpan": "b7ad6b7169203361"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncActiveSpan": "b7ad6b7169203362"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"queueSystem": "celery"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"syncOperationKind": "publish"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"queueName": "email"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"taskName": "checkout.email"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"messageCount": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"errorType": "StubQueueError"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_reinstall_from_freeze() {
     local freeze_file="$1"
     local expected_suffix="$2"
@@ -411,6 +428,7 @@ run_reinstall_from_freeze() {
     run_httpx_span_smoke "$output_prefix-freeze-httpx-span"
     run_database_span_smoke "$output_prefix-freeze-database-span"
     run_cache_span_smoke "$output_prefix-freeze-cache-span"
+    run_queue_span_smoke "$output_prefix-freeze-queue-span"
 
     deactivate
 }
@@ -462,6 +480,7 @@ run_reinstall_from_direct_requirement() {
     run_httpx_span_smoke "$output_prefix-direct-httpx-span"
     run_database_span_smoke "$output_prefix-direct-database-span"
     run_cache_span_smoke "$output_prefix-direct-cache-span"
+    run_queue_span_smoke "$output_prefix-direct-queue-span"
 
     deactivate
 }
@@ -510,6 +529,7 @@ with zipfile.ZipFile(wheel_path) as archive:
         "logbrew_sdk/_db_client.py",
         "logbrew_sdk/_http_client.py",
         "logbrew_sdk/_instrumentation.py",
+        "logbrew_sdk/_queue_client.py",
         "logbrew_sdk/__init__.py",
         "logbrew_sdk/_timeline.py",
         "logbrew_sdk/_trace_context.py",
@@ -539,9 +559,11 @@ for needle in (
     "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
+    "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
     "parse_traceparent",
@@ -578,6 +600,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
         f"{sdist_root}/src/logbrew_sdk/_db_client.py",
         f"{sdist_root}/src/logbrew_sdk/_http_client.py",
         f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
+        f"{sdist_root}/src/logbrew_sdk/_queue_client.py",
         f"{sdist_root}/src/logbrew_sdk/_timeline.py",
         f"{sdist_root}/src/logbrew_sdk/_trace_context.py",
         f"{sdist_root}/src/logbrew_sdk/py.typed",
@@ -613,9 +636,11 @@ for needle in (
     "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
+    "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
     "parse_traceparent",
@@ -906,6 +931,7 @@ from logbrew_sdk import (
     async_cache_operation_with_logbrew_span,
     async_database_operation_with_logbrew_span,
     async_httpx_request_with_logbrew_span,
+    async_queue_operation_with_logbrew_span,
     cache_operation_with_logbrew_span,
     create_network_milestone_attributes,
     create_product_action_attributes,
@@ -913,6 +939,7 @@ from logbrew_sdk import (
     database_operation_with_logbrew_span,
     httpx_request_with_logbrew_span,
     parse_traceparent,
+    queue_operation_with_logbrew_span,
     requests_request_with_logbrew_span,
     span_attributes_from_traceparent,
     urlopen_with_logbrew_span,
@@ -1143,6 +1170,47 @@ async def run_async_cache_typecheck() -> None:
 
 
 asyncio.run(run_async_cache_typecheck())
+
+queue_result = queue_operation_with_logbrew_span(
+    "publish health",
+    client=client,
+    event_id="evt_queue_typecheck",
+    timestamp="2026-06-02T10:00:14Z",
+    operation=lambda: "queued",
+    system="celery",
+    operation_kind="publish",
+    queue_name="health",
+    task_name="health.check",
+    message_count=1,
+    span_id_factory=lambda: "b7ad6b7169203339",
+)
+if queue_result != "queued":
+    raise RuntimeError("unexpected queue result")
+
+
+async def async_queue_operation() -> str:
+    return "processed"
+
+
+async def run_async_queue_typecheck() -> None:
+    async_queue_result = await async_queue_operation_with_logbrew_span(
+        "process health",
+        client=client,
+        event_id="evt_queue_async_typecheck",
+        timestamp="2026-06-02T10:00:15Z",
+        operation=async_queue_operation,
+        system="rq",
+        operation_kind="process",
+        queue_name="health",
+        task_name="health.check",
+        attempt=1,
+        span_id_factory=lambda: "b7ad6b7169203340",
+    )
+    if async_queue_result != "processed":
+        raise RuntimeError("unexpected async queue result")
+
+
+asyncio.run(run_async_queue_typecheck())
 handler = LogBrewLoggingHandler(
     client,
     logging_transport,
@@ -1868,6 +1936,7 @@ required = {
     "logbrew_sdk/_db_client.py",
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
+    "logbrew_sdk/_queue_client.py",
     "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/py.typed",
     "logbrew_sdk/examples/__init__.py",
@@ -1892,9 +1961,11 @@ for needle in (
     "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
+    "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
 ):
@@ -2039,6 +2110,7 @@ required_show_files = {
     "logbrew_sdk/_db_client.py",
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
+    "logbrew_sdk/_queue_client.py",
     "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/__init__.py",
     "logbrew_sdk/examples/__init__.py",
@@ -2202,6 +2274,7 @@ run_requests_span_smoke "wheel-requests-span"
 run_httpx_span_smoke "wheel-httpx-span"
 run_database_span_smoke "wheel-database-span"
 run_cache_span_smoke "wheel-cache-span"
+run_queue_span_smoke "wheel-queue-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/pip-uninstall-list.json"
@@ -2235,6 +2308,7 @@ run_requests_span_smoke "wheel-reinstall-requests-span"
 run_httpx_span_smoke "wheel-reinstall-httpx-span"
 run_database_span_smoke "wheel-reinstall-database-span"
 run_cache_span_smoke "wheel-reinstall-cache-span"
+run_queue_span_smoke "wheel-reinstall-queue-span"
 
 deactivate
 run_reinstall_from_freeze "$tmp_dir/pip-freeze.txt" "$wheel_artifact" "wheel"
@@ -2278,6 +2352,7 @@ run_requests_span_smoke "sdist-requests-span"
 run_httpx_span_smoke "sdist-httpx-span"
 run_database_span_smoke "sdist-database-span"
 run_cache_span_smoke "sdist-cache-span"
+run_queue_span_smoke "sdist-queue-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/sdist-pip-uninstall-list.json"
@@ -2311,6 +2386,7 @@ run_requests_span_smoke "sdist-reinstall-requests-span"
 run_httpx_span_smoke "sdist-reinstall-httpx-span"
 run_database_span_smoke "sdist-reinstall-database-span"
 run_cache_span_smoke "sdist-reinstall-cache-span"
+run_queue_span_smoke "sdist-reinstall-queue-span"
 
 cat > "$tmp_dir/unauth.py" <<'EOF'
 import json
