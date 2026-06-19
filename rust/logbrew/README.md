@@ -11,12 +11,13 @@ Public Rust SDK for creating LogBrew event batches, validating them locally, and
 ```bash
 cargo add logbrew
 cargo add logbrew --features http
+cargo add logbrew --features hyper
 cargo add logbrew --features tower
 cargo add logbrew --features tracing
 cargo add logbrew --features tracing-opentelemetry
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry and `TowerHttpClientSpanLayer` for app-owned Tower client services. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `hyper` feature enabled, docs include an explicit `http::Request` async send helper for Hyper-compatible clients without adding Hyper as an SDK dependency. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry and `TowerHttpClientSpanLayer` for app-owned Tower client services. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -295,6 +296,33 @@ let response = HttpClientSpan::new("/api/payments/:payment_id", "GET", "22222222
         "2026-06-02T10:00:02Z",
         &parent,
         reqwest_client.get("https://payments.example.invalid/api/payments/123"),
+    )
+    .await?;
+```
+
+If your app uses Hyper or another client built on `http::Request`/`http::Response`, enable LogBrew's `hyper` feature. The helper injects one `traceparent` into the request you already own, awaits your send closure, records response status or an error-type-only failure, and returns either the original response or a typed setup/request error. LogBrew depends only on the `http` crate for this helper, not Hyper itself:
+
+```toml
+[dependencies]
+logbrew = { version = "0.1", features = ["hyper"] }
+hyper = "1"
+```
+
+```rust
+let response = HttpClientSpan::new("/api/payments/:payment_id", "POST", "3333333333333333")
+    .capture_http_request_send(
+        &mut client,
+        "evt_hyper_payment_lookup",
+        "2026-06-02T10:00:03Z",
+        &parent,
+        hyper::Request::builder()
+            .method("POST")
+            .uri("https://payments.example.invalid/api/payments/123")
+            .body(body)?,
+        |request| async move {
+            // Send with your app-owned Hyper client here.
+            hyper_client.request(request).await
+        },
     )
     .await?;
 ```

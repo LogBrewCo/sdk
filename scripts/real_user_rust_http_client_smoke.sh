@@ -21,6 +21,7 @@ test -f "$crate_dir/src/metadata_safety.rs"
 grep -q 'Outbound HTTP Client Spans' "$crate_dir/README.md"
 grep -q 'HttpClientSpan' "$crate_dir/README.md"
 grep -q 'capture_ureq_call' "$crate_dir/README.md"
+grep -q 'capture_http_request_send' "$crate_dir/README.md"
 grep -q 'capture_reqwest_send' "$crate_dir/README.md"
 grep -q 'rust_http_client' "$crate_dir/README.md"
 
@@ -32,7 +33,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-logbrew = { path = "$crate_dir", features = ["http", "reqwest"] }
+logbrew = { path = "$crate_dir", features = ["http", "hyper", "reqwest"] }
+hyper = "1"
 reqwest = "0.12"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ureq = "3.3"
@@ -150,6 +152,72 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{{\"ok\":true,\"httpClientSpans\":1}}");
     Ok(())
 }
+EOF
+
+cat > "$tmp_dir/app/src/bin/hyper_http_client_span.rs" <<'EOF'
+use hyper::{Request, Response};
+use logbrew::{HttpClientSpan, LogBrewClient, Traceparent};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let context =
+        Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")?;
+    let mut client = LogBrewClient::builder("hyper-http-client-smoke", "0.1.0")
+        .api_key("LOGBREW_API_KEY")
+        .build()?;
+    let request = Request::builder()
+        .method("post")
+        .uri("https://payments.example.invalid/api/payments/123?coupon=sample#debug")
+        .header("x-caller-owned", "kept")
+        .body("safe app-owned body")?;
+
+    let response = HttpClientSpan::new(
+        "https://payments.example.invalid/api/payments/:payment_id?coupon=sample#debug",
+        "post",
+        "3333333333333333",
+    )
+    .capture_http_request_send(
+        &mut client,
+        "evt_hyper_http_client_span",
+        "2026-06-02T10:00:23Z",
+        &context,
+        request,
+        |request| async move {
+            assert_eq!(
+                request
+                    .headers()
+                    .get("traceparent")
+                    .and_then(|value| value.to_str().ok()),
+                Some("00-4bf92f3577b34da6a3ce929d0e0e4736-3333333333333333-01")
+            );
+            assert_eq!(
+                request
+                    .headers()
+                    .get("x-caller-owned")
+                    .and_then(|value| value.to_str().ok()),
+                Some("kept")
+            );
+            Ok::<_, &'static str>(Response::builder().status(202).body("accepted").unwrap())
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status().as_u16(), 202);
+
+    let preview = client.preview_json()?;
+    assert!(preview.contains("\"id\": \"evt_hyper_http_client_span\""));
+    assert!(preview.contains("\"name\": \"http.client:POST /api/payments/:payment_id\""));
+    assert!(preview.contains("\"source\": \"rust_http_client\""));
+    assert!(preview.contains("\"statusCode\": 202"));
+    assert!(preview.contains("\"statusCodeClass\": \"2xx\""));
+    assert!(!preview.contains("coupon=sample"));
+    assert!(!preview.contains("#debug"));
+    assert!(!preview.contains("x-caller-owned"));
+    assert!(!preview.contains("safe app-owned body"));
+    println!("{{\"ok\":true,\"hyperHttpClientSpans\":1}}");
+    Ok(())
+}
+
 EOF
 
 cat > "$tmp_dir/app/src/bin/ureq_http_client_span.rs" <<'EOF'
@@ -276,12 +344,15 @@ EOF
   cd "$tmp_dir/app"
   cargo generate-lockfile --quiet
   cargo run --quiet --locked --bin http_client_span > http-client-span.stdout.json
+  cargo run --quiet --locked --bin hyper_http_client_span > hyper-http-client-span.stdout.json
   cargo run --quiet --locked --bin ureq_http_client_span > ureq-http-client-span.stdout.json
   cargo run --quiet --locked --bin reqwest_http_client_span > reqwest-http-client-span.stdout.json
 )
 
 grep -q '"ok":true' "$tmp_dir/app/http-client-span.stdout.json"
 grep -q '"httpClientSpans":1' "$tmp_dir/app/http-client-span.stdout.json"
+grep -q '"ok":true' "$tmp_dir/app/hyper-http-client-span.stdout.json"
+grep -q '"hyperHttpClientSpans":1' "$tmp_dir/app/hyper-http-client-span.stdout.json"
 grep -q '"ok":true' "$tmp_dir/app/ureq-http-client-span.stdout.json"
 grep -q '"ureqHttpClientSpans":1' "$tmp_dir/app/ureq-http-client-span.stdout.json"
 grep -q '"ok":true' "$tmp_dir/app/reqwest-http-client-span.stdout.json"

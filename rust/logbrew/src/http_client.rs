@@ -5,7 +5,9 @@ use crate::http_fields::{
 use crate::metadata_safety::sanitized_metadata;
 use crate::{Metadata, SdkError, SpanEvent, Traceparent, TraceparentContext, TraceparentSpanInput};
 use serde_json::Value;
-#[cfg(any(feature = "http", feature = "reqwest"))]
+#[cfg(feature = "hyper")]
+use std::future::Future;
+#[cfg(any(feature = "http", feature = "hyper", feature = "reqwest"))]
 use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -208,6 +210,88 @@ impl HttpClientSpan {
         }
 
         result.map_err(ReqwestCaptureError::Request)
+    }
+
+    /// Send an app-owned `http::Request` with one W3C propagation header and queue one span.
+    #[cfg(feature = "hyper")]
+    pub async fn capture_http_request_send<ReqBody, ResBody, E, F, Fut>(
+        self,
+        client: &mut crate::LogBrewClient,
+        event_id: impl AsRef<str>,
+        timestamp: impl AsRef<str>,
+        context: &TraceparentContext,
+        mut request: http_types::Request<ReqBody>,
+        send: F,
+    ) -> Result<http_types::Response<ResBody>, HttpRequestCaptureError<E>>
+    where
+        F: FnOnce(http_types::Request<ReqBody>) -> Fut,
+        Fut: Future<Output = Result<http_types::Response<ResBody>, E>>,
+    {
+        let prepared = self
+            .clone()
+            .from_traceparent_context(context)
+            .map_err(HttpRequestCaptureError::Setup)?;
+        let value =
+            http_types::HeaderValue::from_str(&prepared.outgoing_traceparent).map_err(|error| {
+                HttpRequestCaptureError::Setup(SdkError::new("validation_error", error.to_string()))
+            })?;
+        request.headers_mut().insert("traceparent", value);
+
+        let started = Instant::now();
+        let result = send(request).await;
+        let duration_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+        let mut span = self.with_duration_ms(duration_ms);
+        match &result {
+            Ok(response) => {
+                span = span.with_status_code(response.status().as_u16());
+            }
+            Err(_) => {
+                span = span.with_error_type(std::any::type_name::<E>());
+            }
+        }
+
+        if let Ok(events) = span.from_traceparent_context(context) {
+            let _ = client.span(event_id.as_ref(), timestamp.as_ref(), events.span);
+        }
+
+        result.map_err(HttpRequestCaptureError::Request)
+    }
+}
+
+#[cfg(feature = "hyper")]
+#[derive(Debug, PartialEq)]
+/// Error returned by explicit `http::Request` capture setup or the app-owned request.
+pub enum HttpRequestCaptureError<E> {
+    /// LogBrew rejected the span setup before sending the request.
+    Setup(SdkError),
+    /// The app-owned HTTP request failed.
+    Request(E),
+}
+
+#[cfg(feature = "hyper")]
+impl<E> std::fmt::Display for HttpRequestCaptureError<E>
+where
+    E: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Setup(error) => write!(f, "logbrew http request span setup failed: {error}"),
+            Self::Request(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+#[cfg(feature = "hyper")]
+impl<E> std::error::Error for HttpRequestCaptureError<E>
+where
+    E: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Setup(error) => Some(error),
+            Self::Request(error) => Some(error),
+        }
     }
 }
 

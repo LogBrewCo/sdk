@@ -1,5 +1,9 @@
+#[cfg(feature = "hyper")]
+use logbrew::HttpRequestCaptureError;
 use logbrew::{HttpClientSpan, LogBrewClient, Metadata, MetadataValue, Traceparent};
 use serde_json::Value;
+#[cfg(feature = "hyper")]
+use std::convert::Infallible;
 #[cfg(any(feature = "http", feature = "reqwest"))]
 use std::time::Duration;
 #[cfg(any(feature = "http", feature = "reqwest"))]
@@ -262,6 +266,97 @@ async fn http_client_span_captures_reqwest_send_result_and_preserves_error() {
     assert!(preview.contains("\"status\": \"error\""));
     assert!(!preview.contains("coupon=sample"));
     assert!(!preview.contains("#debug"));
+}
+
+#[cfg(feature = "hyper")]
+#[tokio::test]
+async fn http_client_span_captures_http_request_result_for_hyper_compatible_clients() {
+    let context =
+        Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").unwrap();
+    let mut client = LogBrewClient::builder("rust-hyper-test", "0.1.0")
+        .api_key("LOGBREW_API_KEY")
+        .build()
+        .unwrap();
+    let request = http_types::Request::builder()
+        .method("post")
+        .uri("https://payments.example.invalid/api/payments/123?coupon=sample#debug")
+        .header("x-caller-owned", "kept")
+        .body("safe app-owned body")
+        .unwrap();
+
+    let response = HttpClientSpan::new(
+        "https://payments.example.invalid/api/payments/:payment_id?coupon=sample#debug",
+        "post",
+        "4444444444444444",
+    )
+    .capture_http_request_send(
+        &mut client,
+        "evt_hyper_success",
+        "2026-06-02T10:00:12Z",
+        &context,
+        request,
+        |request| async move {
+            assert_eq!(
+                request
+                    .headers()
+                    .get("traceparent")
+                    .and_then(|value| value.to_str().ok()),
+                Some("00-4bf92f3577b34da6a3ce929d0e0e4736-4444444444444444-01")
+            );
+            assert_eq!(
+                request
+                    .headers()
+                    .get("x-caller-owned")
+                    .and_then(|value| value.to_str().ok()),
+                Some("kept")
+            );
+            Ok::<_, Infallible>(
+                http_types::Response::builder()
+                    .status(202)
+                    .body("accepted")
+                    .unwrap(),
+            )
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status().as_u16(), 202);
+
+    let failing_request = http_types::Request::builder()
+        .method("get")
+        .uri("https://payments.example.invalid/api/payments/456?coupon=sample#debug")
+        .body("")
+        .unwrap();
+    let error = HttpClientSpan::new(
+        "https://payments.example.invalid/api/payments/:payment_id",
+        "get",
+        "5555555555555555",
+    )
+    .capture_http_request_send(
+        &mut client,
+        "evt_hyper_failure",
+        "2026-06-02T10:00:13Z",
+        &context,
+        failing_request,
+        |_request| async move { Err::<http_types::Response<&'static str>, _>("hyper failure") },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error, HttpRequestCaptureError::Request("hyper failure"));
+
+    let preview = client.preview_json().unwrap();
+    assert!(preview.contains("\"id\": \"evt_hyper_success\""));
+    assert!(preview.contains("\"name\": \"http.client:POST /api/payments/:payment_id\""));
+    assert!(preview.contains("\"statusCode\": 202"));
+    assert!(preview.contains("\"statusCodeClass\": \"2xx\""));
+    assert!(preview.contains("\"id\": \"evt_hyper_failure\""));
+    assert!(preview.contains("\"name\": \"http.client:GET /api/payments/:payment_id\""));
+    assert!(preview.contains("\"status\": \"error\""));
+    assert!(preview.contains("str"));
+    assert!(!preview.contains("coupon=sample"));
+    assert!(!preview.contains("#debug"));
+    assert!(!preview.contains("x-caller-owned"));
+    assert!(!preview.contains("safe app-owned body"));
 }
 
 #[cfg(any(feature = "http", feature = "reqwest"))]
