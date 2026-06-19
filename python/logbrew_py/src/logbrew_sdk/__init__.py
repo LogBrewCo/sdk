@@ -901,7 +901,7 @@ def validate_metric(attributes: MetricAttributes) -> dict[str, Any]:
     )
 
 
-from logbrew_sdk._http_client import urlopen_with_logbrew_span  # noqa: E402, I001
+from logbrew_sdk._http_client import requests_request_with_logbrew_span, urlopen_with_logbrew_span  # noqa: E402, I001
 from logbrew_sdk._timeline import create_network_milestone_attributes, create_product_action_attributes  # noqa: E402
 
 
@@ -933,6 +933,7 @@ __all__ = [
     "get_active_logbrew_trace",
     "log_attributes_from_record",
     "parse_traceparent",
+    "requests_request_with_logbrew_span",
     "span_attributes_from_trace_context",
     "span_attributes_from_traceparent",
     "trace_metadata",

@@ -22,6 +22,7 @@ from logbrew_sdk import (
     create_traceparent_headers,
     get_active_logbrew_trace,
     parse_traceparent,
+    requests_request_with_logbrew_span,
     span_attributes_from_traceparent,
     trace_metadata,
     urlopen_with_logbrew_span,
@@ -646,6 +647,144 @@ class LogBrewSdkTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status, 204)
+        self.assertEqual(len(capture_errors), 1)
+        self.assertIn("client is already shut down", capture_errors[0])
+
+    def test_requests_request_with_logbrew_span_injects_child_trace_and_queues_span(self) -> None:
+        client = sample_client()
+        request_active_trace: LogBrewTraceContext | None = None
+        caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout"}
+        calls: list[dict[str, object]] = []
+        parent_trace = LogBrewTraceContext(
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="00f067aa0ba902b7",
+            sampled=True,
+        )
+        clock_values = iter([30.0, 30.052])
+
+        class StubRequestsResponse:
+            status_code = 201
+
+        def request(method: str, url: str, **kwargs: object) -> StubRequestsResponse:
+            nonlocal request_active_trace
+            calls.append({"method": method, "url": url, **kwargs})
+            request_active_trace = get_active_logbrew_trace()
+            return StubRequestsResponse()
+
+        with use_logbrew_trace(parent_trace):
+            response = requests_request_with_logbrew_span(
+                "post",
+                "https://api.example.test/payments/123?coupon=summer#receipt",
+                client=client,
+                event_id="evt_python_requests_client",
+                timestamp="2026-06-19T08:00:03Z",
+                request=request,
+                timeout=3.5,
+                headers=caller_headers,
+                json={"card": "private"},
+                route_template="/payments/:payment_id",
+                span_id_factory=lambda: "b7ad6b7169203334",
+                clock=lambda: next(clock_values),
+                metadata={"service": "checkout", "headers": {"authorization": "private"}},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(caller_headers["Traceparent"], "spoofed")
+        call = calls[0]
+        self.assertEqual(call["method"], "post")
+        self.assertEqual(call["url"], "https://api.example.test/payments/123?coupon=summer#receipt")
+        self.assertEqual(call["timeout"], 3.5)
+        sent_headers = call["headers"]
+        self.assertIsInstance(sent_headers, dict)
+        assert isinstance(sent_headers, dict)
+        self.assertIsNot(sent_headers, caller_headers)
+        self.assertEqual(sent_headers["x-caller"], "checkout")
+        self.assertEqual(
+            sent_headers["traceparent"],
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203334-01",
+        )
+        self.assertNotIn("Traceparent", sent_headers)
+        self.assertEqual(request_active_trace, LogBrewTraceContext(
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="b7ad6b7169203334",
+            parent_span_id="00f067aa0ba902b7",
+            sampled=True,
+        ))
+
+        event = json.loads(client.preview_json())["events"][0]
+        self.assertEqual(
+            event["attributes"],
+            {
+                "name": "POST /payments/:payment_id",
+                "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+                "spanId": "b7ad6b7169203334",
+                "parentSpanId": "00f067aa0ba902b7",
+                "status": "ok",
+                "durationMs": 52.0,
+                "metadata": {
+                    "source": "requests",
+                    "service": "checkout",
+                    "routeTemplate": "/payments/:payment_id",
+                    "method": "POST",
+                    "statusCode": 201,
+                    "sampled": True,
+                },
+            },
+        )
+        serialized = client.preview_json()
+        self.assertNotIn("coupon=summer", serialized)
+        self.assertNotIn("authorization", serialized)
+        self.assertNotIn("traceparent", serialized)
+        self.assertNotIn("card", serialized)
+
+    def test_requests_request_with_logbrew_span_preserves_errors_and_capture_failures(self) -> None:
+        client = sample_client()
+
+        class StubRequestsResponse:
+            status_code = 503
+
+        class StubRequestsError(RuntimeError):
+            def __init__(self) -> None:
+                super().__init__("connection failed for private-url")
+                self.response = StubRequestsResponse()
+
+        original_error = StubRequestsError()
+
+        with self.assertRaises(StubRequestsError) as raised:
+            requests_request_with_logbrew_span(
+                "GET",
+                "https://api.example.test/payments/123?coupon=summer",
+                client=client,
+                event_id="evt_python_requests_failure",
+                timestamp="2026-06-19T08:00:04Z",
+                request=lambda _method, _url, **_kwargs: (_ for _ in ()).throw(original_error),
+                span_id_factory=lambda: "b7ad6b7169203335",
+                clock=lambda: 40.0,
+            )
+
+        self.assertIs(raised.exception, original_error)
+        event = json.loads(client.preview_json())["events"][0]
+        self.assertEqual(event["attributes"]["status"], "error")
+        self.assertEqual(event["attributes"]["metadata"]["source"], "requests")
+        self.assertEqual(event["attributes"]["metadata"]["statusCode"], 503)
+        self.assertEqual(event["attributes"]["metadata"]["errorType"], "StubRequestsError")
+        self.assertNotIn("coupon=summer", client.preview_json())
+
+        closed_client = sample_client()
+        closed_client.closed = True
+        capture_errors: list[str] = []
+        response = requests_request_with_logbrew_span(
+            "GET",
+            "https://api.example.test/health",
+            client=closed_client,
+            event_id="evt_python_requests_capture_error",
+            timestamp="2026-06-19T08:00:05Z",
+            request=lambda _method, _url, **_kwargs: StubRequestsResponse(),
+            span_id_factory=lambda: "b7ad6b7169203336",
+            on_capture_error=lambda error: capture_errors.append(str(error)),
+        )
+
+        self.assertEqual(response.status_code, 503)
         self.assertEqual(len(capture_errors), 1)
         self.assertIn("client is already shut down", capture_errors[0])
 

@@ -297,6 +297,21 @@ run_urlopen_span_smoke() {
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_requests_span_smoke() {
+    local output_prefix="$1"
+
+    python "$tmp_dir/requests_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"status": 201' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"activeSpan": "b7ad6b7169203334"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203334-01"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"method": "POST"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"callerHeader": "checkout"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_reinstall_from_freeze() {
     local freeze_file="$1"
     local expected_suffix="$2"
@@ -337,6 +352,7 @@ run_reinstall_from_freeze() {
     run_logging_smoke "$output_prefix-freeze-logging"
     run_http_transport_smoke "$output_prefix-freeze-http-transport"
     run_urlopen_span_smoke "$output_prefix-freeze-urlopen-span"
+    run_requests_span_smoke "$output_prefix-freeze-requests-span"
 
     deactivate
 }
@@ -384,6 +400,7 @@ run_reinstall_from_direct_requirement() {
     run_logging_smoke "$output_prefix-direct-logging"
     run_http_transport_smoke "$output_prefix-direct-http-transport"
     run_urlopen_span_smoke "$output_prefix-direct-urlopen-span"
+    run_requests_span_smoke "$output_prefix-direct-requests-span"
 
     deactivate
 }
@@ -455,6 +472,7 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
     "parse_traceparent",
     "create_product_action_attributes",
@@ -519,6 +537,7 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
     "parse_traceparent",
     "create_product_action_attributes",
@@ -808,6 +827,7 @@ from logbrew_sdk import (
     create_product_action_attributes,
     create_traceparent,
     parse_traceparent,
+    requests_request_with_logbrew_span,
     span_attributes_from_traceparent,
     urlopen_with_logbrew_span,
 )
@@ -912,6 +932,18 @@ urlopen_response = urlopen_with_logbrew_span(
 )
 if urlopen_response.status != 204:
     raise RuntimeError("unexpected urlopen status")
+
+requests_response = requests_request_with_logbrew_span(
+    "GET",
+    "https://api.example.test/health?coupon=summer#fragment",
+    client=client,
+    event_id="evt_requests_typecheck",
+    timestamp="2026-06-02T10:00:07Z",
+    request=lambda _method, _url, **_kwargs: type("Response", (), {"status_code": 204})(),
+    span_id_factory=lambda: "b7ad6b7169203332",
+)
+if requests_response.status_code != 204:
+    raise RuntimeError("unexpected requests status")
 handler = LogBrewLoggingHandler(
     client,
     logging_transport,
@@ -1326,6 +1358,122 @@ print(
 )
 EOF
 
+cat > "$tmp_dir/requests_span_smoke.py" <<'EOF'
+from __future__ import annotations
+
+import json
+
+from logbrew_sdk import (
+    LogBrewClient,
+    LogBrewTraceContext,
+    get_active_logbrew_trace,
+    requests_request_with_logbrew_span,
+    use_logbrew_trace,
+)
+
+
+class StubRequestsResponse:
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+
+class StubRequestsSession:
+    def __init__(self) -> None:
+        self.captured: dict[str, object] = {}
+
+    def request(self, method: str, url: str, **kwargs: object) -> StubRequestsResponse:
+        active = get_active_logbrew_trace()
+        headers = kwargs.get("headers")
+        if not isinstance(headers, dict):
+            raise RuntimeError("headers were not cloned into a dict")
+        self.captured = {
+            "activeSpan": active.span_id if active is not None else None,
+            "callerHeader": headers.get("x-caller"),
+            "json": kwargs.get("json"),
+            "method": method,
+            "timeout": kwargs.get("timeout"),
+            "traceparent": headers.get("traceparent"),
+            "url": url,
+        }
+        return StubRequestsResponse(201)
+
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="smoke-app-requests",
+    sdk_version="0.1.0",
+)
+parent_trace = LogBrewTraceContext(
+    trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+    span_id="00f067aa0ba902b7",
+    sampled=True,
+)
+caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout"}
+session = StubRequestsSession()
+
+with use_logbrew_trace(parent_trace):
+    response = requests_request_with_logbrew_span(
+        "post",
+        "https://api.example.test/payments/123?coupon=summer#receipt",
+        client=client,
+        event_id="evt_python_requests_client",
+        timestamp="2026-06-19T08:00:03Z",
+        session=session,
+        timeout=3.5,
+        headers=caller_headers,
+        json={"card": "private"},
+        route_template="/payments/:payment_id",
+        span_id_factory=lambda: "b7ad6b7169203334",
+        clock=iter([30.0, 30.052]).__next__,
+        metadata={"service": "checkout", "payload": {"private": True}},
+    )
+
+payload = json.loads(client.preview_json())
+event = payload["events"][0]
+metadata = event["attributes"]["metadata"]
+if caller_headers["Traceparent"] != "spoofed":
+    raise SystemExit("caller headers were mutated")
+if "coupon=summer" in client.preview_json() or "traceparent" in client.preview_json() or "card" in client.preview_json():
+    raise SystemExit("requests span leaked query, propagation, or payload data")
+
+closed_client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="smoke-app-requests",
+    sdk_version="0.1.0",
+)
+closed_client.closed = True
+capture_errors: list[str] = []
+requests_request_with_logbrew_span(
+    "GET",
+    "https://api.example.test/health",
+    client=closed_client,
+    event_id="evt_python_requests_capture_failure",
+    timestamp="2026-06-19T08:00:04Z",
+    request=lambda _method, _url, **_kwargs: StubRequestsResponse(204),
+    span_id_factory=lambda: "b7ad6b7169203335",
+    on_capture_error=lambda error: capture_errors.append(str(error)),
+)
+
+print(
+    json.dumps(
+        {
+            "activeSpan": session.captured["activeSpan"],
+            "callerHeader": session.captured["callerHeader"],
+            "captureErrors": len(capture_errors),
+            "events": len(payload["events"]),
+            "method": metadata["method"],
+            "ok": True,
+            "routeTemplate": metadata["routeTemplate"],
+            "status": response.status_code,
+            "statusCode": metadata["statusCode"],
+            "timeout": session.captured["timeout"],
+            "traceparent": session.captured["traceparent"],
+        },
+        sort_keys=True,
+    )
+)
+EOF
+
 cat > "$tmp_dir/metadata.py" <<'EOF'
 from importlib.metadata import distribution, files, metadata, version
 from pathlib import Path
@@ -1363,6 +1511,7 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
 ):
     if needle not in description:
@@ -1662,6 +1811,7 @@ run_smoke_script "smoke-run" "smoke"
 run_logging_smoke "wheel-logging"
 run_http_transport_smoke "wheel-http-transport"
 run_urlopen_span_smoke "wheel-urlopen-span"
+run_requests_span_smoke "wheel-requests-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/pip-uninstall-list.json"
@@ -1691,6 +1841,7 @@ run_smoke_script "smoke-run" "smoke-reinstall"
 run_logging_smoke "wheel-reinstall-logging"
 run_http_transport_smoke "wheel-reinstall-http-transport"
 run_urlopen_span_smoke "wheel-reinstall-urlopen-span"
+run_requests_span_smoke "wheel-reinstall-requests-span"
 
 deactivate
 run_reinstall_from_freeze "$tmp_dir/pip-freeze.txt" "$wheel_artifact" "wheel"
@@ -1730,6 +1881,7 @@ run_smoke_script "smoke-run" "sdist-smoke"
 run_logging_smoke "sdist-logging"
 run_http_transport_smoke "sdist-http-transport"
 run_urlopen_span_smoke "sdist-urlopen-span"
+run_requests_span_smoke "sdist-requests-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/sdist-pip-uninstall-list.json"
@@ -1759,6 +1911,7 @@ run_smoke_script "smoke-run" "sdist-smoke-reinstall"
 run_logging_smoke "sdist-reinstall-logging"
 run_http_transport_smoke "sdist-reinstall-http-transport"
 run_urlopen_span_smoke "sdist-reinstall-urlopen-span"
+run_requests_span_smoke "sdist-reinstall-requests-span"
 
 cat > "$tmp_dir/unauth.py" <<'EOF'
 import json

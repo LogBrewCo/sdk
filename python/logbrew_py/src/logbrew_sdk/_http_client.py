@@ -1,4 +1,4 @@
-"""Explicit outbound HTTP span helpers for app-owned urllib calls."""
+"""Explicit outbound HTTP span helpers for app-owned Python HTTP calls."""
 
 from __future__ import annotations
 
@@ -6,8 +6,9 @@ import re
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from datetime import UTC, datetime
+from importlib import import_module
 from time import perf_counter
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, cast
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -73,6 +74,7 @@ def urlopen_with_logbrew_span(
                 _status_from_error(error),
                 error,
                 on_capture_error,
+                "urllib.request",
             )
             raise
 
@@ -92,6 +94,84 @@ def urlopen_with_logbrew_span(
         status_code,
         None,
         on_capture_error,
+        "urllib.request",
+    )
+    return response
+
+
+def requests_request_with_logbrew_span(
+    method: str,
+    url: str,
+    *,
+    client: Any,
+    event_id: str,
+    timestamp: str | None = None,
+    request: Callable[..., Any] | None = None,
+    session: Any | None = None,
+    headers: Mapping[str, str] | None = None,
+    timeout: Any | None = None,
+    trace: LogBrewTraceContext | None = None,
+    route_template: str | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    span_id_factory: Callable[[], str] | None = None,
+    clock: Clock | None = None,
+    on_capture_error: Callable[[Exception], None] | None = None,
+    **request_kwargs: Any,
+) -> Any:
+    """Run a caller-owned ``requests`` call under a LogBrew child span and W3C trace header."""
+
+    method_value = _method_name(method)
+    _require_url(url)
+    parent_trace = trace if trace is not None else get_active_logbrew_trace()
+    child_trace = _child_trace(parent_trace, span_id_factory)
+    request_callable = _requests_callable(request=request, session=session)
+    call_kwargs = dict(request_kwargs)
+    call_kwargs["headers"] = _headers_with_traceparent(headers, child_trace)
+    if timeout is not None:
+        call_kwargs["timeout"] = timeout
+    route = _route_from_url(url, route_template)
+    read_clock = clock or perf_counter
+    start = read_clock()
+
+    with use_logbrew_trace(child_trace):
+        try:
+            response = request_callable(method, url, **call_kwargs)
+        except Exception as error:
+            duration_ms = _duration_ms(start, read_clock)
+            _capture_http_span(
+                client,
+                event_id,
+                timestamp,
+                child_trace,
+                method_value,
+                route,
+                "error",
+                duration_ms,
+                metadata,
+                _status_from_error(error),
+                error,
+                on_capture_error,
+                "requests",
+            )
+            raise
+
+    duration_ms = _duration_ms(start, read_clock)
+    status_code = _status_from_response(response)
+    span_status = "error" if status_code is not None and status_code >= 400 else "ok"
+    _capture_http_span(
+        client,
+        event_id,
+        timestamp,
+        child_trace,
+        method_value,
+        route,
+        span_status,
+        duration_ms,
+        metadata,
+        status_code,
+        None,
+        on_capture_error,
+        "requests",
     )
     return response
 
@@ -167,6 +247,7 @@ def _capture_http_span(
     status_code: int | None,
     error: Exception | None,
     on_capture_error: Callable[[Exception], None] | None,
+    source: str,
 ) -> None:
     try:
         client.span(
@@ -186,6 +267,7 @@ def _capture_http_span(
                     metadata=metadata,
                     status_code=status_code,
                     error=error,
+                    source=source,
                 ),
             },
         )
@@ -203,11 +285,12 @@ def _span_metadata(
     metadata: Mapping[str, Any] | None,
     status_code: int | None,
     error: Exception | None,
+    source: str,
 ) -> Metadata:
     span_metadata: Metadata = _compact_metadata(metadata)
     span_metadata.update(
         {
-            "source": "urllib.request",
+            "source": source,
             "routeTemplate": route,
             "method": method,
             "sampled": sampled,
@@ -233,12 +316,19 @@ def _compact_metadata(metadata: Mapping[str, Any] | None) -> Metadata:
 
 def _route_from_request(request: Request, route_template: str | None) -> str:
     candidate = route_template if route_template is not None else request.full_url
+    return _route_from_url(candidate, None)
+
+
+def _route_from_url(url: str, route_template: str | None) -> str:
+    candidate = route_template if route_template is not None else url
     parsed = urlsplit(candidate)
     return parsed.path or "/"
 
 
 def _status_from_response(response: Any) -> int | None:
     status = getattr(response, "status", None)
+    if status is None:
+        status = getattr(response, "status_code", None)
     if status is None:
         getcode = getattr(response, "getcode", None)
         if callable(getcode):
@@ -249,6 +339,9 @@ def _status_from_response(response: Any) -> int | None:
 def _status_from_error(error: Exception) -> int | None:
     if isinstance(error, HTTPError):
         return int(error.code)
+    response = getattr(error, "response", None)
+    if response is not None:
+        return _status_from_response(response)
     return None
 
 
@@ -273,3 +366,51 @@ def _default_span_id() -> str:
 def _require_span_id(span_id: str) -> None:
     if HEX16.fullmatch(span_id) is None or span_id == ZERO_SPAN_ID:
         raise ValueError("span_id_factory must return a non-zero 16-character hex span id")
+
+
+def _method_name(method: str) -> str:
+    if not isinstance(method, str) or not method.strip():
+        raise TypeError("method must be a non-empty string")
+    return method.upper()
+
+
+def _require_url(url: str) -> None:
+    if not isinstance(url, str) or not url.strip():
+        raise TypeError("url must be a non-empty string")
+
+
+def _headers_with_traceparent(headers: Mapping[str, str] | None, trace: LogBrewTraceContext) -> dict[str, str]:
+    traced_headers = {
+        name: value
+        for name, value in (headers or {}).items()
+        if isinstance(name, str) and name.lower() != "traceparent"
+    }
+    traced_headers["traceparent"] = (
+        f"00-{trace.trace_id}-{trace.span_id}-{'01' if trace.sampled else '00'}"
+    )
+    return traced_headers
+
+
+def _requests_callable(
+    *,
+    request: Callable[..., Any] | None,
+    session: Any | None,
+) -> Callable[..., Any]:
+    if request is not None and session is not None:
+        raise TypeError("pass either request or session, not both")
+    if request is not None:
+        return request
+    if session is not None:
+        session_request = getattr(session, "request", None)
+        if not callable(session_request):
+            raise TypeError("session must expose a callable request method")
+        return cast("Callable[..., Any]", session_request)
+    try:
+        requests_request = cast("Callable[..., Any]", import_module("requests").request)
+    except ImportError as error:
+        raise ImportError(
+            "requests_request_with_logbrew_span requires requests to be installed or a request callable/session"
+        ) from error
+    if not callable(requests_request):
+        raise TypeError("requests.request must be callable")
+    return requests_request
