@@ -255,6 +255,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 `HttpClientSpan` strips query strings and hash fragments, reduces full URLs to route paths, normalizes methods, records status/duration metadata with source `rust_http_client`, marks `4xx`/`5xx` or `with_error_type(...)` spans as `error`, and keeps only primitive, safe metadata fields. It does not read request or response bodies, capture arbitrary transport fields, create support tickets, derive quota/usage, or own retry behavior.
 
+If your app already uses `ureq`, enable LogBrew's `http` feature and let the helper time the call, inject the returned propagation value, queue the span, and return the original `ureq` result:
+
+```toml
+[dependencies]
+logbrew = { version = "0.1", features = ["http"] }
+ureq = "3"
+```
+
+```rust
+let response = HttpClientSpan::new("/api/payments/:payment_id", "GET", "1111111111111111")
+    .capture_ureq_call(
+        &mut client,
+        "evt_ureq_payment_lookup",
+        "2026-06-02T10:00:01Z",
+        &parent,
+        |traceparent| {
+            agent
+                .get("https://payments.example.invalid/api/payments/123")
+                .header("traceparent", traceparent)
+                .call()
+        },
+    )?;
+```
+
 ## Axum Middleware Example
 
 For Axum apps, enable the optional Tower integration and use `route_layer` so LogBrew receives Axum's matched route template instead of the raw request URI. Axum, Tokio, and Tower stay out of default `cargo add logbrew`; only apps that opt in to the `tower` feature pay for the integration.

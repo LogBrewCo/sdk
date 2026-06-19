@@ -5,6 +5,8 @@ use crate::http_fields::{
 use crate::metadata_safety::sanitized_metadata;
 use crate::{Metadata, SdkError, SpanEvent, Traceparent, TraceparentContext, TraceparentSpanInput};
 use serde_json::Value;
+#[cfg(feature = "http")]
+use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
 /// Explicit app-owned outbound HTTP span builder.
@@ -98,6 +100,46 @@ impl HttpClientSpan {
             outgoing_traceparent,
         })
     }
+
+    /// Run an explicit `ureq` call with one W3C propagation header and queue one span.
+    #[cfg(feature = "http")]
+    pub fn capture_ureq_call<F>(
+        self,
+        client: &mut crate::LogBrewClient,
+        event_id: impl AsRef<str>,
+        timestamp: impl AsRef<str>,
+        context: &TraceparentContext,
+        call: F,
+    ) -> Result<ureq::http::Response<ureq::Body>, ureq::Error>
+    where
+        F: FnOnce(&str) -> Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+    {
+        let prepared = self
+            .clone()
+            .from_traceparent_context(context)
+            .map_err(ureq_error_from_sdk)?;
+        let started = Instant::now();
+        let result = call(&prepared.outgoing_traceparent);
+        let duration_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+        let mut span = self.with_duration_ms(duration_ms);
+        match &result {
+            Ok(response) => {
+                span = span.with_status_code(response.status().as_u16());
+            }
+            Err(error) => {
+                if let ureq::Error::StatusCode(status_code) = error {
+                    span = span.with_status_code(*status_code);
+                }
+                span = span.with_error_type(ureq_error_type(error));
+            }
+        }
+
+        if let Ok(events) = span.from_traceparent_context(context) {
+            let _ = client.span(event_id.as_ref(), timestamp.as_ref(), events.span);
+        }
+        result
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -144,5 +186,33 @@ fn client_span_status(status_code: Option<u16>, error_type: Option<&str>) -> &'s
         "error"
     } else {
         "ok"
+    }
+}
+
+#[cfg(feature = "http")]
+fn ureq_error_from_sdk(error: SdkError) -> ureq::Error {
+    ureq::Error::BadUri(format!(
+        "logbrew http client span setup failed: {}",
+        error.message
+    ))
+}
+
+#[cfg(feature = "http")]
+fn ureq_error_type(error: &ureq::Error) -> &'static str {
+    match error {
+        ureq::Error::StatusCode(_) => "ureq::StatusCode",
+        ureq::Error::Http(_) => "ureq::Http",
+        ureq::Error::BadUri(_) => "ureq::BadUri",
+        ureq::Error::Protocol(_) => "ureq::Protocol",
+        ureq::Error::Io(_) => "ureq::Io",
+        ureq::Error::Timeout(_) => "ureq::Timeout",
+        ureq::Error::HostNotFound => "ureq::HostNotFound",
+        ureq::Error::RedirectFailed => "ureq::RedirectFailed",
+        ureq::Error::InvalidProxyUrl => "ureq::InvalidProxyUrl",
+        ureq::Error::ConnectionFailed => "ureq::ConnectionFailed",
+        ureq::Error::BodyExceedsLimit(_) => "ureq::BodyExceedsLimit",
+        ureq::Error::TooManyRedirects => "ureq::TooManyRedirects",
+        ureq::Error::Tls(_) => "ureq::Tls",
+        _ => "ureq::Error",
     }
 }
