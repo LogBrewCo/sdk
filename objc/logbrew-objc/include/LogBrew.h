@@ -158,6 +158,8 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
                            requestBodyBytes:(nullable NSNumber *)requestBodyBytes
                           responseBodyBytes:(nullable NSNumber *)responseBodyBytes
                                       error:(NSError *_Nullable *_Nullable)error;
++ (nullable instancetype)timingsWithTaskMetrics:(NSURLSessionTaskMetrics *)metrics
+                                           error:(NSError *_Nullable *_Nullable)error;
 
 - (instancetype)init NS_UNAVAILABLE;
 

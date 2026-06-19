@@ -183,6 +183,9 @@ LBWURLSessionTimings *urlSessionTimings =
                            responseBodyBytes:@4096
                                        error:&error];
 
+// If your NSURLSessionTaskDelegate receives task metrics, prefer the typed helper:
+// urlSessionTimings = [LBWURLSessionTimings timingsWithTaskMetrics:metrics error:&error];
+
 // Use urlSessionSpan.request with your own NSURLSession call, then capture the completion.
 [client captureURLSessionSpanWithID:@"evt_trace_urlsession_001"
                            timestamp:@"2026-06-02T10:00:08Z"
@@ -242,7 +245,7 @@ NSDictionary *spanAttributes =
                                                  error:&error];
 ```
 
-`continueOrCreateContextFromTraceparent:` accepts valid W3C `traceparent` values, creates a fresh local span ID, and falls back to a local root trace for malformed propagation. While a scope is active on the current thread, issue, log, action, and metric metadata receive `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled`; active trace fields override caller-supplied trace metadata so telemetry stays internally consistent. `outgoingHeaders` returns only a normalized `traceparent` header for app-owned HTTP clients. `startURLSessionSpanForRequest:error:` copies your request, adds only `traceparent`, strips query strings and fragments from the span route, and returns a child span context for `captureURLSessionSpanWithID:...` when your request completes. `LBWURLSessionTimings` lets your own `NSURLSessionTaskDelegate` pass numeric phase durations and request/response byte counts; timing values overwrite spoofed timing keys from caller metadata.
+`continueOrCreateContextFromTraceparent:` accepts valid W3C `traceparent` values, creates a fresh local span ID, and falls back to a local root trace for malformed propagation. While a scope is active on the current thread, issue, log, action, and metric metadata receive `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled`; active trace fields override caller-supplied trace metadata so telemetry stays internally consistent. `outgoingHeaders` returns only a normalized `traceparent` header for app-owned HTTP clients. `startURLSessionSpanForRequest:error:` copies your request, adds only `traceparent`, strips query strings and fragments from the span route, and returns a child span context for `captureURLSessionSpanWithID:...` when your request completes. `LBWURLSessionTimings` lets your own `NSURLSessionTaskDelegate` pass `NSURLSessionTaskMetrics` directly or provide numeric phase durations and request/response byte counts; timing values overwrite spoofed timing keys from caller metadata.
 
 Use `captureLifecycleSpanWithID:...` from app-owned AppDelegate, SceneDelegate, UIKit, or AppKit lifecycle hooks when a foreground/background or view lifecycle transition is already known to your app. It creates a child span under the active trace, stores primitive lifecycle metadata such as `previousState`, `currentState`, `screen`, and `durationSource`, and leaves session-health decisions to your application and backend-owned setup state.
 

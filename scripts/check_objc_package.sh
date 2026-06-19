@@ -107,6 +107,7 @@ for needle in (
     "LBWTrace",
     "LBWURLSessionSpan",
     "LBWURLSessionTimings",
+    "timingsWithTaskMetrics",
     "startURLSessionSpanForRequest",
     "captureURLSessionSpanWithID",
     "captureLifecycleSpanWithID",

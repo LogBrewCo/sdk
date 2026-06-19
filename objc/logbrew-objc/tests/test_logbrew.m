@@ -102,6 +102,42 @@ static NSString *LBWStableCode(NSError *error) {
 
 @end
 
+@interface LBWFakeURLSessionTransactionMetrics : NSObject
+
+@property(nonatomic, copy, nullable) NSDate *fetchStartDate;
+@property(nonatomic, copy, nullable) NSDate *domainLookupStartDate;
+@property(nonatomic, copy, nullable) NSDate *domainLookupEndDate;
+@property(nonatomic, copy, nullable) NSDate *connectStartDate;
+@property(nonatomic, copy, nullable) NSDate *connectEndDate;
+@property(nonatomic, copy, nullable) NSDate *secureConnectionStartDate;
+@property(nonatomic, copy, nullable) NSDate *secureConnectionEndDate;
+@property(nonatomic, copy, nullable) NSDate *requestStartDate;
+@property(nonatomic, copy, nullable) NSDate *requestEndDate;
+@property(nonatomic, copy, nullable) NSDate *responseStartDate;
+@property(nonatomic, copy, nullable) NSDate *responseEndDate;
+@property(nonatomic) NSURLSessionTaskMetricsResourceFetchType resourceFetchType;
+@property(nonatomic) int64_t countOfRequestBodyBytesSent;
+@property(nonatomic) int64_t countOfResponseBodyBytesReceived;
+
+@end
+
+@implementation LBWFakeURLSessionTransactionMetrics
+@end
+
+@interface LBWFakeURLSessionTaskMetrics : NSObject
+
+@property(nonatomic, copy) NSDateInterval *taskInterval;
+@property(nonatomic, copy) NSArray<LBWFakeURLSessionTransactionMetrics *> *transactionMetrics;
+
+@end
+
+@implementation LBWFakeURLSessionTaskMetrics
+@end
+
+static NSDate *LBWTestDate(NSTimeInterval offset) {
+  return [NSDate dateWithTimeIntervalSinceReferenceDate:offset];
+}
+
 static LBWClient *LBWNewClient(void) {
   NSError *error = nil;
   LBWConfig *config = [LBWConfig configWithAPIKey:@"LOGBREW_API_KEY"];
@@ -617,6 +653,42 @@ static void LBWExerciseTraceHelpers(void) {
                                       errorType:nil
                                        metadata:@{@"component": @"pay-api"}
                                           error:&error], @"URLSession span capture failed");
+  LBWFakeURLSessionTransactionMetrics *redirectMetrics = [LBWFakeURLSessionTransactionMetrics new];
+  redirectMetrics.resourceFetchType = NSURLSessionTaskMetricsResourceFetchTypeNetworkLoad;
+  redirectMetrics.fetchStartDate = LBWTestDate(1);
+  redirectMetrics.responseEndDate = LBWTestDate(2);
+  LBWFakeURLSessionTransactionMetrics *mainMetrics = [LBWFakeURLSessionTransactionMetrics new];
+  mainMetrics.resourceFetchType = NSURLSessionTaskMetricsResourceFetchTypeNetworkLoad;
+  mainMetrics.domainLookupStartDate = LBWTestDate(3);
+  mainMetrics.domainLookupEndDate = LBWTestDate(4);
+  mainMetrics.connectStartDate = LBWTestDate(4);
+  mainMetrics.connectEndDate = LBWTestDate(5);
+  mainMetrics.secureConnectionStartDate = LBWTestDate(4);
+  mainMetrics.secureConnectionEndDate = LBWTestDate(5);
+  mainMetrics.requestStartDate = LBWTestDate(6);
+  mainMetrics.requestEndDate = LBWTestDate(7);
+  mainMetrics.responseStartDate = LBWTestDate(8);
+  mainMetrics.responseEndDate = LBWTestDate(10);
+  mainMetrics.countOfRequestBodyBytesSent = 123;
+  mainMetrics.countOfResponseBodyBytesReceived = 456;
+  LBWFakeURLSessionTaskMetrics *taskMetrics = [LBWFakeURLSessionTaskMetrics new];
+  taskMetrics.taskInterval = [[NSDateInterval alloc] initWithStartDate:LBWTestDate(0)
+                                                                endDate:LBWTestDate(10)];
+  taskMetrics.transactionMetrics = @[ redirectMetrics, mainMetrics ];
+  LBWURLSessionTimings *taskMetricTimings =
+      [LBWURLSessionTimings timingsWithTaskMetrics:(NSURLSessionTaskMetrics *)taskMetrics error:&error];
+  LBWAssert(taskMetricTimings != nil, @"URLSession task metrics timing creation failed");
+  NSDictionary<NSString *, NSNumber *> *taskMetricMetadata = taskMetricTimings.metadata;
+  LBWAssert([taskMetricMetadata[@"requestFetchMs"] isEqual:@10000], @"task metrics fetch timing failed");
+  LBWAssert([taskMetricMetadata[@"requestRedirectMs"] isEqual:@1000], @"task metrics redirect timing failed");
+  LBWAssert([taskMetricMetadata[@"requestNameLookupMs"] isEqual:@1000], @"task metrics name lookup failed");
+  LBWAssert([taskMetricMetadata[@"requestConnectMs"] isEqual:@1000], @"task metrics connect timing failed");
+  LBWAssert([taskMetricMetadata[@"requestTlsMs"] isEqual:@1000], @"task metrics TLS timing failed");
+  LBWAssert([taskMetricMetadata[@"requestSendMs"] isEqual:@1000], @"task metrics send timing failed");
+  LBWAssert([taskMetricMetadata[@"requestWaitMs"] isEqual:@1000], @"task metrics wait timing failed");
+  LBWAssert([taskMetricMetadata[@"requestReceiveMs"] isEqual:@2000], @"task metrics receive timing failed");
+  LBWAssert([taskMetricMetadata[@"requestBodyBytes"] isEqual:@123], @"task metrics request byte count failed");
+  LBWAssert([taskMetricMetadata[@"responseBodyBytes"] isEqual:@456], @"task metrics response byte count failed");
   LBWURLSessionSpan *timedURLSessionSpan = [LBWTrace startURLSessionSpanForRequest:request error:&error];
   LBWAssert(timedURLSessionSpan != nil, @"timed URLSession span start failed");
   LBWURLSessionTimings *urlTimings =
@@ -763,6 +835,17 @@ static void LBWExerciseTraceHelpers(void) {
                                                error:&error] == nil &&
                 [LBWStableCode(error) isEqualToString:@"validation_error"],
             @"bad URLSession byte count failed");
+  LBWFakeURLSessionTaskMetrics *badTaskMetrics = [LBWFakeURLSessionTaskMetrics new];
+  LBWFakeURLSessionTransactionMetrics *badMainMetrics = [LBWFakeURLSessionTransactionMetrics new];
+  badMainMetrics.resourceFetchType = NSURLSessionTaskMetricsResourceFetchTypeNetworkLoad;
+  badMainMetrics.requestStartDate = LBWTestDate(9);
+  badMainMetrics.requestEndDate = LBWTestDate(8);
+  badTaskMetrics.taskInterval = [[NSDateInterval alloc] initWithStartDate:LBWTestDate(0) endDate:LBWTestDate(10)];
+  badTaskMetrics.transactionMetrics = @[ badMainMetrics ];
+  LBWAssert([LBWURLSessionTimings timingsWithTaskMetrics:(NSURLSessionTaskMetrics *)badTaskMetrics error:&error] ==
+                    nil &&
+                [LBWStableCode(error) isEqualToString:@"validation_error"],
+            @"bad URLSession task metrics duration failed");
   [scope close];
   LBWAssert([LBWTrace currentContext] == nil, @"trace scope close failed");
 }

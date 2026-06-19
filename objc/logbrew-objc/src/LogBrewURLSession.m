@@ -82,6 +82,29 @@ static BOOL LBWURLSessionAddByteCount(
   return YES;
 }
 
+static BOOL LBWURLSessionAddDateDuration(
+    NSMutableDictionary<NSString *, NSNumber *> *metadata,
+    NSString *key,
+    NSDate *_Nullable startDate,
+    NSDate *_Nullable endDate,
+    NSError *_Nullable *_Nullable error) {
+  if (startDate == nil || endDate == nil) {
+    return YES;
+  }
+  return LBWURLSessionAddTimingDuration(metadata, key, @([endDate timeIntervalSinceDate:startDate] * 1000.0), error);
+}
+
+static NSArray<NSURLSessionTaskTransactionMetrics *> *LBWURLSessionNetworkTransactions(
+    NSURLSessionTaskMetrics *metrics) {
+  NSMutableArray<NSURLSessionTaskTransactionMetrics *> *transactions = [NSMutableArray array];
+  for (NSURLSessionTaskTransactionMetrics *transaction in metrics.transactionMetrics) {
+    if (transaction.resourceFetchType != NSURLSessionTaskMetricsResourceFetchTypeLocalCache) {
+      [transactions addObject:transaction];
+    }
+  }
+  return transactions;
+}
+
 @implementation LBWURLSessionSpan
 
 - (instancetype)initWithRequest:(NSURLRequest *)request
@@ -134,6 +157,84 @@ static BOOL LBWURLSessionAddByteCount(
       !LBWURLSessionAddByteCount(metadata, @"responseBodyBytes", responseBodyBytes, error)) {
     return nil;
   }
+  return [[LBWURLSessionTimings alloc] initWithMetadata:metadata];
+}
+
++ (LBWURLSessionTimings *)timingsWithTaskMetrics:(NSURLSessionTaskMetrics *)metrics error:(NSError **)error {
+  if (metrics == nil) {
+    LBWURLSessionSetError(error, LBWURLSessionError(@"URLSession task metrics are required"));
+    return nil;
+  }
+
+  NSMutableDictionary<NSString *, NSNumber *> *metadata = [NSMutableDictionary dictionary];
+  NSDateInterval *taskInterval = metrics.taskInterval;
+  if (taskInterval != nil &&
+      !LBWURLSessionAddTimingDuration(metadata, @"requestFetchMs", @(taskInterval.duration * 1000.0), error)) {
+    return nil;
+  }
+
+  NSArray<NSURLSessionTaskTransactionMetrics *> *transactions = LBWURLSessionNetworkTransactions(metrics);
+  NSURLSessionTaskTransactionMetrics *mainTransaction = [transactions lastObject];
+  if ([transactions count] > 1) {
+    NSURLSessionTaskTransactionMetrics *firstRedirect = transactions[0];
+    NSURLSessionTaskTransactionMetrics *lastRedirect = transactions[[transactions count] - 2];
+    if (!LBWURLSessionAddDateDuration(metadata,
+                                      @"requestRedirectMs",
+                                      firstRedirect.fetchStartDate,
+                                      lastRedirect.responseEndDate,
+                                      error)) {
+      return nil;
+    }
+  }
+
+  if (mainTransaction != nil) {
+    if (!LBWURLSessionAddDateDuration(metadata,
+                                      @"requestNameLookupMs",
+                                      mainTransaction.domainLookupStartDate,
+                                      mainTransaction.domainLookupEndDate,
+                                      error) ||
+        !LBWURLSessionAddDateDuration(metadata,
+                                      @"requestConnectMs",
+                                      mainTransaction.connectStartDate,
+                                      mainTransaction.connectEndDate,
+                                      error) ||
+        !LBWURLSessionAddDateDuration(metadata,
+                                      @"requestTlsMs",
+                                      mainTransaction.secureConnectionStartDate,
+                                      mainTransaction.secureConnectionEndDate,
+                                      error) ||
+        !LBWURLSessionAddDateDuration(metadata,
+                                      @"requestSendMs",
+                                      mainTransaction.requestStartDate,
+                                      mainTransaction.requestEndDate,
+                                      error) ||
+        !LBWURLSessionAddDateDuration(metadata,
+                                      @"requestWaitMs",
+                                      mainTransaction.requestEndDate,
+                                      mainTransaction.responseStartDate,
+                                      error) ||
+        !LBWURLSessionAddDateDuration(metadata,
+                                      @"requestReceiveMs",
+                                      mainTransaction.responseStartDate,
+                                      mainTransaction.responseEndDate,
+                                      error)) {
+      return nil;
+    }
+
+    if (@available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)) {
+      if (!LBWURLSessionAddByteCount(metadata,
+                                     @"requestBodyBytes",
+                                     @(mainTransaction.countOfRequestBodyBytesSent),
+                                     error) ||
+          !LBWURLSessionAddByteCount(metadata,
+                                     @"responseBodyBytes",
+                                     @(mainTransaction.countOfResponseBodyBytesReceived),
+                                     error)) {
+        return nil;
+      }
+    }
+  }
+
   return [[LBWURLSessionTimings alloc] initWithMetadata:metadata];
 }
 

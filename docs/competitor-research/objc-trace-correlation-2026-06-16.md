@@ -108,6 +108,7 @@ Implemented dependency-free Objective-C URLSession timing metadata:
 
 - Added `LBWURLSessionTimings` with explicit numeric phase durations: `requestFetchMs`, `requestRedirectMs`, `requestNameLookupMs`, `requestConnectMs`, `requestTlsMs`, `requestSendMs`, `requestWaitMs`, and `requestReceiveMs`.
 - Added request/response byte-count metadata through `requestBodyBytes` and `responseBodyBytes`.
+- Added `timingsWithTaskMetrics:error:` so app-owned `NSURLSessionTaskDelegate` callbacks can convert `NSURLSessionTaskMetrics` into the same privacy-bounded timing keys without computing durations manually.
 - Added a source-compatible `captureURLSessionSpanWithID:...metadata:timings:error:` overload. Existing callers can keep using the old selector.
 - Timing values are validated as finite non-negative numbers, byte counts are non-negative integers, and timing metadata is merged after caller metadata so spoofed timing keys are overwritten.
 - Packaged `trace_correlation.m` and `scripts/check_objc_trace_correlation_payload.py` now prove URLSession timing metadata from an installed source archive while checking that query text, fragments, app-owned headers, and raw `traceparent` values do not leak.
