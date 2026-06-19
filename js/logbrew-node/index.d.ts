@@ -160,6 +160,57 @@ export type DatabaseOperationWithLogBrewSpanOptions<Result = unknown> = {
   ) => void | Promise<void>;
 };
 
+export type CacheOperationWithLogBrewSpanOptions<Result = unknown> = {
+  client: LogBrewClient;
+  operation: () => Result | Promise<Result>;
+  system?: string;
+  operationKind?: string;
+  cacheName?: string;
+  hit?: boolean;
+  itemSizeBytes?: number;
+  itemCount?: number;
+  trace?: LogBrewTraceContext;
+  id?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  now?: () => string;
+  nowMs?: () => number;
+  spanIdFactory?: () => string;
+  traceIdFactory?: () => string;
+  onCaptureError?: (
+    error: unknown,
+    context: {
+      client: LogBrewClient;
+      error?: unknown;
+      trace: LogBrewTraceContext;
+    }
+  ) => void | Promise<void>;
+};
+
+export type QueueOperationWithLogBrewSpanOptions<Result = unknown> = {
+  client: LogBrewClient;
+  operation: () => Result | Promise<Result>;
+  system?: string;
+  operationKind?: string;
+  queueName?: string;
+  taskName?: string;
+  messageCount?: number;
+  trace?: LogBrewTraceContext;
+  id?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  now?: () => string;
+  nowMs?: () => number;
+  spanIdFactory?: () => string;
+  traceIdFactory?: () => string;
+  onCaptureError?: (
+    error: unknown,
+    context: {
+      client: LogBrewClient;
+      error?: unknown;
+      trace: LogBrewTraceContext;
+    }
+  ) => void | Promise<void>;
+};
+
 export declare function createLogBrewNodeClient(
   config?: CreateLogBrewNodeClientConfig
 ): LogBrewClient;
@@ -190,6 +241,16 @@ export declare function fetchWithLogBrewSpan(
 export declare function databaseOperationWithLogBrewSpan<Result>(
   operationName: string,
   options: DatabaseOperationWithLogBrewSpanOptions<Result>
+): Promise<Awaited<Result>>;
+
+export declare function cacheOperationWithLogBrewSpan<Result>(
+  operationName: string,
+  options: CacheOperationWithLogBrewSpanOptions<Result>
+): Promise<Awaited<Result>>;
+
+export declare function queueOperationWithLogBrewSpan<Result>(
+  operationName: string,
+  options: QueueOperationWithLogBrewSpanOptions<Result>
 ): Promise<Awaited<Result>>;
 
 export declare function createHttpRequestEvent(
@@ -229,6 +290,7 @@ declare module "node:http" {
 }
 
 declare const defaultExport: {
+  cacheOperationWithLogBrewSpan: typeof cacheOperationWithLogBrewSpan;
   captureHttpError: typeof captureHttpError;
   createNodeFetchTransport: typeof createNodeFetchTransport;
   createHttpErrorEvent: typeof createHttpErrorEvent;
@@ -238,6 +300,7 @@ declare const defaultExport: {
   databaseOperationWithLogBrewSpan: typeof databaseOperationWithLogBrewSpan;
   fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
+  queueOperationWithLogBrewSpan: typeof queueOperationWithLogBrewSpan;
   withLogBrewHttpHandler: typeof withLogBrewHttpHandler;
 };
 

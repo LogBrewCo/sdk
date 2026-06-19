@@ -6,7 +6,7 @@
 
 Node.js HTTP helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, outbound `fetch` and database operation span capture, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, outbound `fetch`, database/cache/queue operation span capture, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
 
 ## Install
 
@@ -89,6 +89,7 @@ For a Node.js API, start with the signals that make incidents and product flows 
 - Add explicit product actions for business steps such as checkout, signup, or billing.
 - Add explicit network milestones for important downstream calls.
 - Wrap important database calls with safe operation names and statement templates.
+- Wrap important cache and queue calls with safe operation names and bounded metadata.
 - Add low-cardinality metrics for request or workflow duration.
 - Flush on completion or shutdown so queued events are not left in memory.
 
@@ -212,6 +213,48 @@ const orders = await databaseOperationWithLogBrewSpan("orders.select_by_id", {
 ```
 
 The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Metadata records the DB system, operation name, operation kind, optional database name, optional safe statement template, row count, duration, sampled flag, and W3C trace IDs. It does not monkey-patch drivers, capture raw SQL, serialize parameters, record connection strings, store auth values, collect result rows, or include database error messages/stacks.
+
+## Cache Operation Spans
+
+Use `cacheOperationWithLogBrewSpan()` around important app-owned cache calls when you want cache timing and hit/miss correlation without installing Redis or memcached instrumentation:
+
+```js
+import { cacheOperationWithLogBrewSpan } from "@logbrew/node";
+
+const profile = await cacheOperationWithLogBrewSpan("profile.get", {
+  client: logbrew.client,
+  trace: logbrew.trace,
+  system: "redis",
+  operationKind: "GET",
+  cacheName: "profiles",
+  hit: true,
+  itemSizeBytes: 128,
+  operation: () => redis.get(profileKey)
+});
+```
+
+The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Metadata records the cache system, operation name, operation kind, optional cache name, hit flag, item size/count, duration, sampled flag, and W3C trace IDs. It does not monkey-patch cache clients, capture cache keys, serialize values, store commands, record headers, or include cache error messages/stacks.
+
+## Queue Operation Spans
+
+Use `queueOperationWithLogBrewSpan()` around important producer or consumer work when you want queue timing correlation without installing AMQP, Kafka, BullMQ, or cloud queue instrumentation:
+
+```js
+import { queueOperationWithLogBrewSpan } from "@logbrew/node";
+
+await queueOperationWithLogBrewSpan("email.publish", {
+  client: logbrew.client,
+  trace: logbrew.trace,
+  system: "amqp",
+  operationKind: "publish",
+  queueName: "email",
+  taskName: "send_welcome_email",
+  messageCount: 1,
+  operation: () => channel.sendToQueue("email", payload)
+});
+```
+
+The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Metadata records the queue system, operation name, operation kind, optional queue/task names, message count, duration, sampled flag, and W3C trace IDs. It does not monkey-patch queue clients, mutate broker headers, capture message bodies, serialize job arguments, record broker URLs, or include queue error messages/stacks.
 
 ## HTTP Delivery
 

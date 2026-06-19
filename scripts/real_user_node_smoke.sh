@@ -50,7 +50,9 @@ grep -q 'npm install @logbrew/sdk @logbrew/node' "$tmp_dir/node-readme.md"
 grep -q 'pnpm add @logbrew/sdk @logbrew/node' "$tmp_dir/node-readme.md"
 grep -q 'LOGBREW_API_KEY' "$tmp_dir/node-readme.md"
 grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/node-readme.md"
+grep -q 'cacheOperationWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'serverApiKey' "$tmp_dir/node-readme.md"
+grep -q 'queueOperationWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'createNodeFetchTransport' "$tmp_dir/node-readme.md"
 grep -q 'databaseOperationWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'fetchWithLogBrewSpan' "$tmp_dir/node-readme.md"
@@ -100,6 +102,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
+  cacheOperationWithLogBrewSpan,
   captureHttpError,
   createNodeFetchTransport,
   createHttpErrorEvent,
@@ -109,6 +112,7 @@ import {
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
+  queueOperationWithLogBrewSpan,
   withLogBrewHttpHandler
 } from "@logbrew/node";
 
@@ -329,6 +333,8 @@ if (manualResponse.status !== 200) {
 await waitFor(() => manualErrorTransport.sentBodies.length === 1);
 await closeServer(manualServer);
 
+const operationTrace = { traceId: "4bf92f3577b34da6a3ce929d0e0e4736", spanId: "b7ad6b7169203331", sampled: true };
+
 const databaseClient = createLogBrewNodeClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "node-database-span-smoke",
@@ -352,11 +358,7 @@ const databaseResult = await databaseOperationWithLogBrewSpan("orders.select_by_
   spanIdFactory: () => "d7ad6b7169203331",
   statementTemplate: "SELECT * FROM orders WHERE id = ?",
   system: "postgresql",
-  trace: {
-    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-    spanId: "b7ad6b7169203331",
-    sampled: true
-  }
+  trace: operationTrace
 });
 if (databaseResult[0]?.id !== 42) {
   throw new Error(`database span helper changed the operation result: ${JSON.stringify(databaseResult)}`);
@@ -374,11 +376,7 @@ await databaseOperationWithLogBrewSpan("orders.insert", {
   operationKind: "INSERT",
   spanIdFactory: () => "d7ad6b7169203332",
   system: "postgresql",
-  trace: {
-    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-    spanId: "b7ad6b7169203331",
-    sampled: true
-  }
+  trace: operationTrace
 }).catch((error) => {
   databaseErrorRethrown = error instanceof TypeError;
 });
@@ -428,6 +426,159 @@ if (
   databasePayloadJson.includes("db.statement")
 ) {
   throw new Error(`database span leaked query details or unsafe metadata: ${databaseClient.previewJson()}`);
+}
+
+const cacheClient = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY", sdkName: "node-cache-span-smoke", sdkVersion: "0.1.0" });
+const cacheClock = [200, 214, 220, 235];
+const cacheResult = await cacheOperationWithLogBrewSpan("profile.get", {
+  cacheName: "profiles",
+  client: cacheClient,
+  hit: true,
+  id: "evt_node_cache_span_001",
+  itemCount: 1,
+  itemSizeBytes: 128,
+  metadata: {
+    cacheKey: "user:42",
+    safeFeature: "profile"
+  },
+  now: () => "2026-06-02T10:00:11Z",
+  nowMs: () => cacheClock.shift() ?? 214,
+  operation: async () => ({ name: "Ada" }),
+  operationKind: "GET",
+  spanIdFactory: () => "e7ad6b7169203331",
+  system: "redis",
+  trace: operationTrace
+});
+if (cacheResult.name !== "Ada") {
+  throw new Error(`cache span helper changed the operation result: ${JSON.stringify(cacheResult)}`);
+}
+let cacheErrorRethrown = false;
+await cacheOperationWithLogBrewSpan("profile.set", {
+  client: cacheClient,
+  id: "evt_node_cache_span_error",
+  now: () => "2026-06-02T10:00:12Z",
+  nowMs: () => cacheClock.shift() ?? 235,
+  operation: async () => {
+    throw new RangeError("redis value for user@example.com was too large");
+  },
+  operationKind: "SET",
+  spanIdFactory: () => "e7ad6b7169203332",
+  system: "redis",
+  trace: operationTrace
+}).catch((error) => {
+  cacheErrorRethrown = error instanceof RangeError;
+});
+if (!cacheErrorRethrown) {
+  throw new Error("cache span helper should rethrow operation errors");
+}
+const cachePayload = JSON.parse(cacheClient.previewJson());
+const cacheSpanEvent = cachePayload.events.find((event) => event.id === "evt_node_cache_span_001");
+const cacheErrorSpanEvent = cachePayload.events.find((event) => event.id === "evt_node_cache_span_error");
+if (!cacheSpanEvent || cacheSpanEvent.type !== "span") {
+  throw new Error(`missing cache span payload: ${cacheClient.previewJson()}`);
+}
+if (cacheSpanEvent.attributes.name !== "redis GET profile.get") {
+  throw new Error(`unexpected cache span name: ${cacheClient.previewJson()}`);
+}
+if (
+  cacheSpanEvent.attributes.metadata.framework !== "node:cache" ||
+  cacheSpanEvent.attributes.metadata.cacheSystem !== "redis" ||
+  cacheSpanEvent.attributes.metadata.cacheOperation !== "profile.get" ||
+  cacheSpanEvent.attributes.metadata.cacheOperationKind !== "GET" ||
+  cacheSpanEvent.attributes.metadata.cacheName !== "profiles" ||
+  cacheSpanEvent.attributes.metadata.cacheHit !== true ||
+  cacheSpanEvent.attributes.metadata.itemSizeBytes !== 128 ||
+  cacheSpanEvent.attributes.metadata.itemCount !== 1 ||
+  cacheSpanEvent.attributes.metadata.safeFeature !== "profile"
+) {
+  throw new Error(`cache span metadata was not useful and privacy bounded: ${cacheClient.previewJson()}`);
+}
+if (!cacheErrorSpanEvent || cacheErrorSpanEvent.attributes.metadata.errorType !== "RangeError") {
+  throw new Error(`cache error should include error type only: ${cacheClient.previewJson()}`);
+}
+const cachePayloadJson = JSON.stringify(cachePayload);
+if (
+  cachePayloadJson.includes("user:42") ||
+  cachePayloadJson.includes("user@example.com") ||
+  cachePayloadJson.includes("cacheKey")
+) {
+  throw new Error(`cache span leaked key or value details: ${cacheClient.previewJson()}`);
+}
+
+const queueClient = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY", sdkName: "node-queue-span-smoke", sdkVersion: "0.1.0" });
+const queueClock = [300, 329, 340, 377];
+const queueResult = await queueOperationWithLogBrewSpan("email.publish", {
+  client: queueClient,
+  id: "evt_node_queue_span_001",
+  messageCount: 2,
+  metadata: {
+    body: "hello user@example.com",
+    safeFeature: "notifications"
+  },
+  now: () => "2026-06-02T10:00:13Z",
+  nowMs: () => queueClock.shift() ?? 329,
+  operation: async () => "queued",
+  operationKind: "publish",
+  queueName: "email",
+  spanIdFactory: () => "f7ad6b7169203331",
+  system: "amqp",
+  taskName: "send_welcome_email",
+  trace: operationTrace
+});
+if (queueResult !== "queued") {
+  throw new Error(`queue span helper changed the operation result: ${JSON.stringify(queueResult)}`);
+}
+let queueErrorRethrown = false;
+await queueOperationWithLogBrewSpan("email.process", {
+  client: queueClient,
+  id: "evt_node_queue_span_error",
+  now: () => "2026-06-02T10:00:14Z",
+  nowMs: () => queueClock.shift() ?? 377,
+  operation: async () => {
+    throw new SyntaxError("bad payload for user@example.com");
+  },
+  operationKind: "process",
+  queueName: "email",
+  spanIdFactory: () => "f7ad6b7169203332",
+  system: "amqp",
+  trace: operationTrace
+}).catch((error) => {
+  queueErrorRethrown = error instanceof SyntaxError;
+});
+if (!queueErrorRethrown) {
+  throw new Error("queue span helper should rethrow operation errors");
+}
+const queuePayload = JSON.parse(queueClient.previewJson());
+const queueSpanEvent = queuePayload.events.find((event) => event.id === "evt_node_queue_span_001");
+const queueErrorSpanEvent = queuePayload.events.find((event) => event.id === "evt_node_queue_span_error");
+if (!queueSpanEvent || queueSpanEvent.type !== "span") {
+  throw new Error(`missing queue span payload: ${queueClient.previewJson()}`);
+}
+if (queueSpanEvent.attributes.name !== "amqp publish email.publish") {
+  throw new Error(`unexpected queue span name: ${queueClient.previewJson()}`);
+}
+if (
+  queueSpanEvent.attributes.metadata.framework !== "node:queue" ||
+  queueSpanEvent.attributes.metadata.queueSystem !== "amqp" ||
+  queueSpanEvent.attributes.metadata.queueOperation !== "email.publish" ||
+  queueSpanEvent.attributes.metadata.queueOperationKind !== "publish" ||
+  queueSpanEvent.attributes.metadata.queueName !== "email" ||
+  queueSpanEvent.attributes.metadata.taskName !== "send_welcome_email" ||
+  queueSpanEvent.attributes.metadata.messageCount !== 2 ||
+  queueSpanEvent.attributes.metadata.safeFeature !== "notifications"
+) {
+  throw new Error(`queue span metadata was not useful and privacy bounded: ${queueClient.previewJson()}`);
+}
+if (!queueErrorSpanEvent || queueErrorSpanEvent.attributes.metadata.errorType !== "SyntaxError") {
+  throw new Error(`queue error should include error type only: ${queueClient.previewJson()}`);
+}
+const queuePayloadJson = JSON.stringify(queuePayload);
+if (
+  queuePayloadJson.includes("hello user@example.com") ||
+  queuePayloadJson.includes("bad payload") ||
+  queuePayloadJson.includes("body")
+) {
+  throw new Error(`queue span leaked message details: ${queueClient.previewJson()}`);
 }
 
 const intakeRequests = [];
@@ -662,12 +813,14 @@ grep -q '"requestHelper":"evt_node_request_001"' "$tmp_dir/node-smoke.stderr.jso
 cat > consumer.ts <<'EOF'
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
+  cacheOperationWithLogBrewSpan,
   createNodeFetchTransport,
   fetchWithLogBrewSpan,
   createHttpRequestEvent,
   createLogBrewNodeClient,
   databaseOperationWithLogBrewSpan,
   getActiveLogBrewTrace,
+  queueOperationWithLogBrewSpan,
   type LogBrewNodeContext,
   type LogBrewTraceContext,
   withLogBrewHttpHandler
@@ -702,6 +855,24 @@ const databaseResult = await databaseOperationWithLogBrewSpan("orders.select_by_
   trace
 });
 databaseResult[0]?.id.toFixed();
+const cacheResult = await cacheOperationWithLogBrewSpan("profile.get", {
+  client,
+  hit: true,
+  operation: async () => ({ name: "Ada" }),
+  operationKind: "GET",
+  system: "redis",
+  trace
+});
+cacheResult.name.toUpperCase();
+const queueResult = await queueOperationWithLogBrewSpan("email.publish", {
+  client,
+  operation: async () => "queued",
+  operationKind: "publish",
+  queueName: "email",
+  system: "amqp",
+  trace
+});
+queueResult.toUpperCase();
 
 const handler = withLogBrewHttpHandler((
   req: IncomingMessage,

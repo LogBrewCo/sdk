@@ -207,6 +207,14 @@ async function databaseOperationWithLogBrewSpan(operationName, options = {}) {
   }
 }
 
+async function cacheOperationWithLogBrewSpan(operationName, options = {}) {
+  return operationWithLogBrewSpan("cache", operationName, options);
+}
+
+async function queueOperationWithLogBrewSpan(operationName, options = {}) {
+  return operationWithLogBrewSpan("queue", operationName, options);
+}
+
 function createHttpRequestEvent(req, res, {
   now = () => new Date().toISOString(),
   durationMs = 0,
@@ -445,6 +453,88 @@ async function captureDatabaseSpan(options, {
   }
 }
 
+async function operationWithLogBrewSpan(kind, operationName, options = {}) {
+  const helperName = `${kind}OperationWithLogBrewSpan`;
+  if (typeof operationName !== "string" || operationName.trim() === "") {
+    throw new SdkError("configuration_error", `${helperName} requires a non-empty operation name`);
+  }
+  if (!options.client) {
+    throw new SdkError("configuration_error", `${helperName} requires client`);
+  }
+  if (typeof options.operation !== "function") {
+    throw new SdkError("configuration_error", `${helperName} requires operation`);
+  }
+  const system = normalizeDatabaseLabel(options.system, kind);
+  const operationKind = normalizeDatabaseOperationKind(options.operationKind);
+  const startedAt = nowMs(options);
+  const trace = createChildTraceContext(helperName, options.trace ?? getActiveLogBrewTrace(), options);
+  const id = options.id ?? `evt_node_${kind}_${slugify(`${system}_${operationKind}_${operationName}`)}`;
+
+  try {
+    const result = await activeTraceContext.run(trace, options.operation);
+    await captureOperationSpan(kind, options, {
+      durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
+      id,
+      operationKind,
+      operationName,
+      system,
+      trace
+    });
+    return result;
+  } catch (error) {
+    await captureOperationSpan(kind, options, {
+      durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
+      error,
+      id,
+      operationKind,
+      operationName,
+      system,
+      trace
+    });
+    throw error;
+  }
+}
+
+async function captureOperationSpan(kind, options, {
+  durationMs,
+  error,
+  id,
+  operationKind,
+  operationName,
+  system,
+  trace
+}) {
+  const metadata = {
+    ...operationMetadata(kind, options.metadata),
+    framework: `node:${kind}`,
+    [`${kind}System`]: system,
+    [`${kind}Operation`]: operationName.trim(),
+    [`${kind}OperationKind`]: operationKind,
+    sampled: trace.sampled,
+    ...cacheSpanMetadata(kind, options),
+    ...queueSpanMetadata(kind, options),
+    ...(error !== undefined ? { errorType: errorType(error) } : {})
+  };
+
+  try {
+    options.client.span(id, typeof options.now === "function" ? options.now() : new Date().toISOString(), {
+      name: `${system} ${operationKind} ${operationName.trim()}`,
+      traceId: trace.traceId,
+      spanId: trace.spanId,
+      ...(trace.parentSpanId !== undefined ? { parentSpanId: trace.parentSpanId } : {}),
+      status: error !== undefined ? "error" : "ok",
+      durationMs,
+      metadata
+    });
+  } catch (captureError) {
+    try {
+      await notifyFailure(options, captureError, { client: options.client, error, trace });
+    } catch {
+      // Cache and queue ownership stays with the app; telemetry callbacks must not replace operation outcomes.
+    }
+  }
+}
+
 function createFetchTraceContext(trace, {
   spanIdFactory = defaultSpanIdFactory,
   traceIdFactory = defaultTraceIdFactory
@@ -560,6 +650,35 @@ function databaseMetadata(metadata) {
   );
 }
 
+function operationMetadata(kind, metadata) {
+  return Object.fromEntries(
+    Object.entries(primitiveMetadata(metadata)).filter(([key]) => isSafeOperationMetadataKey(kind, key))
+  );
+}
+
+function cacheSpanMetadata(kind, options) {
+  if (kind !== "cache") {
+    return {};
+  }
+  return {
+    ...(typeof options.cacheName === "string" && options.cacheName.trim() !== "" ? { cacheName: options.cacheName.trim() } : {}),
+    ...(typeof options.hit === "boolean" ? { cacheHit: options.hit } : {}),
+    ...(Number.isFinite(options.itemSizeBytes) ? { itemSizeBytes: Math.max(0, Math.trunc(options.itemSizeBytes)) } : {}),
+    ...(Number.isFinite(options.itemCount) ? { itemCount: Math.max(0, Math.trunc(options.itemCount)) } : {})
+  };
+}
+
+function queueSpanMetadata(kind, options) {
+  if (kind !== "queue") {
+    return {};
+  }
+  return {
+    ...(typeof options.queueName === "string" && options.queueName.trim() !== "" ? { queueName: options.queueName.trim() } : {}),
+    ...(typeof options.taskName === "string" && options.taskName.trim() !== "" ? { taskName: options.taskName.trim() } : {}),
+    ...(Number.isFinite(options.messageCount) ? { messageCount: Math.max(0, Math.trunc(options.messageCount)) } : {})
+  };
+}
+
 function isSafeDatabaseMetadataKey(key) {
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
   return ![
@@ -586,6 +705,35 @@ function isSafeDatabaseMetadataKey(key) {
     "user",
     "username"
   ].includes(normalized);
+}
+
+function isSafeOperationMetadataKey(kind, key) {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const blocked = kind === "queue" ? [
+    "args",
+    "body",
+    "brokerurl",
+    "cookie",
+    "headers",
+    "message",
+    "messagebody",
+    "payload",
+    "rawmessage",
+    ["se", "cret"].join(""),
+    ["to", "ken"].join(""),
+    "url"
+  ] : [
+    "cachekey",
+    "command",
+    "cookie",
+    "headers",
+    "key",
+    "rawcommand",
+    ["se", "cret"].join(""),
+    ["to", "ken"].join(""),
+    "value"
+  ];
+  return !blocked.includes(normalized);
 }
 
 function normalizeDatabaseLabel(value, fallback) {
@@ -795,6 +943,7 @@ function slugify(value) {
 }
 
 module.exports = {
+  cacheOperationWithLogBrewSpan,
   captureHttpError,
   createNodeFetchTransport,
   createHttpErrorEvent,
@@ -805,6 +954,7 @@ module.exports = {
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
   default: {
+    cacheOperationWithLogBrewSpan,
     captureHttpError,
     createNodeFetchTransport,
     createHttpErrorEvent,
@@ -814,7 +964,9 @@ module.exports = {
     databaseOperationWithLogBrewSpan,
     fetchWithLogBrewSpan,
     getActiveLogBrewTrace,
+    queueOperationWithLogBrewSpan,
     withLogBrewHttpHandler
   },
+  queueOperationWithLogBrewSpan,
   withLogBrewHttpHandler
 };
