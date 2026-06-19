@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -56,7 +57,7 @@ public final class LogBrewOperationTracing {
     public static <T> T databaseOperation(
         LogBrewClient client,
         String operationName,
-        Operation<T> operation,
+        Callable<T> operation,
         DatabaseOperation config
     ) throws Exception {
         DatabaseOperation safeConfig = config == null ? DatabaseOperation.create() : config;
@@ -78,7 +79,7 @@ public final class LogBrewOperationTracing {
     public static <T> T cacheOperation(
         LogBrewClient client,
         String operationName,
-        Operation<T> operation,
+        Callable<T> operation,
         CacheOperation config
     ) throws Exception {
         CacheOperation safeConfig = config == null ? CacheOperation.create() : config;
@@ -100,7 +101,7 @@ public final class LogBrewOperationTracing {
     public static <T> T queueOperation(
         LogBrewClient client,
         String operationName,
-        Operation<T> operation,
+        Callable<T> operation,
         QueueOperation config
     ) throws Exception {
         QueueOperation safeConfig = config == null ? QueueOperation.create() : config;
@@ -119,7 +120,7 @@ public final class LogBrewOperationTracing {
     private static <T> T operationSpan(
         LogBrewClient client,
         String operationName,
-        Operation<T> operation,
+        Callable<T> operation,
         BaseOperation<?> config,
         String spanNamePrefix,
         String source,
@@ -135,7 +136,7 @@ public final class LogBrewOperationTracing {
         Exception operationError = null;
         LogBrewTrace.Scope scope = LogBrewTrace.activate(trace);
         try {
-            return operation.run();
+            return operation.call();
         } catch (Exception error) {
             operationError = error;
             throw error;
@@ -292,14 +293,6 @@ public final class LogBrewOperationTracing {
         } catch (RuntimeException ignored) {
             // Preserve the app-owned operation result even if diagnostics handling fails.
         }
-    }
-
-    /**
-     * App-owned operation callback used by explicit dependency span helpers.
-     */
-    @FunctionalInterface
-    public interface Operation<T> {
-        T run() throws Exception;
     }
 
     /**
