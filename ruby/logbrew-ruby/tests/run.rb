@@ -690,3 +690,4 @@ tests += 1
 
 puts "ruby package tests ok (#{tests} tests)"
 load File.expand_path("trace_correlation.rb", __dir__)
+load File.expand_path("operation_tracing.rb", __dir__)

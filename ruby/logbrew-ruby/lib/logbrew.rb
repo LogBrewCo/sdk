@@ -997,3 +997,4 @@ end
 require_relative "logbrew/product_timeline"
 require_relative "logbrew/traceparent"
 require_relative "logbrew/trace"
+require_relative "logbrew/operation_tracing"

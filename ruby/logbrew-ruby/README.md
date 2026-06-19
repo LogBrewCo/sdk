@@ -150,6 +150,25 @@ rack = LogBrew::RackMiddleware.new(app, client: client)
 
 The middleware reads only W3C `traceparent`, creates a request-local span ID, exposes `LogBrew::Trace.current` while your app runs, and uses that same span ID on the emitted request span. `LogBrew::Logger`, direct `client.log`, `client.issue`, `client.action`, `client.metric`, and `LogBrew::RailsErrorSubscriber` add active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata when a request trace is active. Malformed propagation falls back to a local root trace without raising into the app. Raw propagation values, request bodies, arbitrary headers, cookies, and query strings are not captured.
 
+## Dependency Operation Spans
+
+Use `LogBrew::OperationTracing` when your app owns the database, cache, or queue call and wants one correlated dependency span without monkeypatching ActiveRecord, Redis, Sidekiq, or other Ruby libraries:
+
+```ruby
+result = LogBrew::OperationTracing.database_operation(
+  client,
+  "users.lookup",
+  system: "postgresql",
+  operation: "select",
+  target: "users",
+  metadata: { service: "api", rowCount: 1 }
+) do
+  User.find_by(email: email)
+end
+```
+
+`database_operation`, `cache_operation`, and `queue_operation` run your block under a child `LogBrew::Trace` context, preserve the block result or original exception, and emit exactly one span with primitive metadata. Capture failures can be observed with `on_error:` without replacing app behavior. The helpers intentionally drop SQL statements, query params, connection strings, cache keys/values, message bodies, job IDs, headers, cookies, URLs, auth-like fields, and other sensitive-looking metadata; exception spans include only the exception type by default.
+
 ## Metrics
 
 Use `metric` for explicit, application-owned measurements. LogBrew validates the metric name, kind, value, unit, temporality, and optional metadata before queueing the event:

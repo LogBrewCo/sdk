@@ -27,6 +27,7 @@ test -f "$unpacked_dir/lib/logbrew.rb"
 test -f "$unpacked_dir/lib/logbrew/product_timeline.rb"
 test -f "$unpacked_dir/lib/logbrew/traceparent.rb"
 test -f "$unpacked_dir/lib/logbrew/trace.rb"
+test -f "$unpacked_dir/lib/logbrew/operation_tracing.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
 test -f "$unpacked_dir/examples/real_user_smoke.rb"
@@ -51,6 +52,8 @@ grep -q 'LogBrew::Trace.current' "$unpacked_dir/README.md"
 grep -q 'HTTP Request Trace Correlation' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RackMiddleware' "$unpacked_dir/README.md"
 grep -q 'Rack And Rails Middleware' "$unpacked_dir/README.md"
+grep -q 'LogBrew::OperationTracing' "$unpacked_dir/README.md"
+grep -q 'Dependency Operation Spans' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$unpacked_dir/README.md"
 grep -q 'Rails Error Subscriber' "$unpacked_dir/README.md"
 grep -q 'Rails.error.subscribe' "$unpacked_dir/README.md"
@@ -94,11 +97,14 @@ GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBr
 grep -qx 'true' "$tmp_dir/installed-traceparent.out"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::Trace.respond_to?(:current)); puts(LogBrew::Trace.respond_to?(:with_context)); puts(LogBrew::Trace.respond_to?(:create_headers))' > "$tmp_dir/installed-trace.out"
 grep -qx 'true' "$tmp_dir/installed-trace.out"
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::OperationTracing.respond_to?(:database_operation)); puts(LogBrew::OperationTracing.respond_to?(:cache_operation)); puts(LogBrew::OperationTracing.respond_to?(:queue_operation))' > "$tmp_dir/installed-operation-tracing.out"
+grep -qx 'true' "$tmp_dir/installed-operation-tracing.out"
 gem_dir="$(GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "rubygems"; puts Gem::Specification.find_by_name("logbrew-sdk").gem_dir')"
 test -f "$gem_dir/README.md"
 test -f "$gem_dir/lib/logbrew/product_timeline.rb"
 test -f "$gem_dir/lib/logbrew/traceparent.rb"
 test -f "$gem_dir/lib/logbrew/trace.rb"
+test -f "$gem_dir/lib/logbrew/operation_tracing.rb"
 test -f "$gem_dir/examples/readme_example.rb"
 test -f "$gem_dir/examples/real_user_smoke.rb"
 test -f "$gem_dir/examples/first_useful_telemetry.rb"
@@ -116,6 +122,8 @@ grep -q 'LogBrew::ProductTimeline' "$gem_dir/README.md"
 grep -q 'Product And Network Timelines' "$gem_dir/README.md"
 grep -q 'do not patch `Net::HTTP`' "$gem_dir/README.md"
 grep -q 'Rack And Rails Middleware' "$gem_dir/README.md"
+grep -q 'LogBrew::OperationTracing' "$gem_dir/README.md"
+grep -q 'Dependency Operation Spans' "$gem_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$gem_dir/README.md"
 grep -q 'Rails Error Subscriber' "$gem_dir/README.md"
 grep -q 'Rails.error.subscribe' "$gem_dir/README.md"
@@ -132,6 +140,45 @@ GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/real_user_smok
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
+cat > "$tmp_dir/installed-operation-tracing.rb" <<'RUBY'
+# frozen_string_literal: true
+
+require "json"
+require "logbrew"
+
+client = LogBrew::Client.create(api_key: "LOGBREW_API_KEY", sdk_name: "installed-ruby-app", sdk_version: "0.1.0")
+parent = LogBrew::Trace.create(trace_id: "11111111111111111111111111111111", span_id: "2222222222222222")
+result = LogBrew::Trace.with_context(parent) do
+  LogBrew::OperationTracing.database_operation(
+    client,
+    "users.lookup",
+    event_id: "evt_installed_db_span",
+    timestamp: "2026-06-02T10:00:13Z",
+    duration_ms: 12.5,
+    system: "postgresql",
+    operation: "select",
+    metadata: {
+      service: "api",
+      sql: "select * from users where email = ?",
+      connectionString: "postgres://placeholder.example/db",
+      rowCount: 1
+    }
+  ) { "ok" }
+end
+payload = JSON.parse(client.preview_json)
+span = payload.fetch("events").fetch(0).fetch("attributes")
+metadata = span.fetch("metadata")
+raise "result mismatch" unless result == "ok"
+raise "span status mismatch" unless span.fetch("status") == "ok"
+raise "trace mismatch" unless span.fetch("traceId") == parent.trace_id
+raise "parent mismatch" unless span.fetch("parentSpanId") == parent.span_id
+raise "source mismatch" unless metadata.fetch("source") == "database.operation"
+raise "safe metadata missing" unless metadata.fetch("service") == "api" && metadata.fetch("rowCount") == 1
+raise "unsafe metadata leaked" if metadata.key?("sql") || metadata.key?("connectionString")
+puts "installed operation tracing ok"
+RUBY
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$tmp_dir/installed-operation-tracing.rb" > "$tmp_dir/installed-operation-tracing-smoke.out"
+grep -qx 'installed operation tracing ok' "$tmp_dir/installed-operation-tracing-smoke.out"
 (cd "$gem_dir/examples" && GEM_HOME="$gem_home" GEM_PATH="$gem_home" make) > "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/installed-examples-help.txt"
