@@ -401,6 +401,9 @@ jobs:
       - name: Run Rust real-user smoke test
         run: bash scripts/real_user_rust_smoke.sh
 
+      - name: Run Rust dependency-span real-user smoke test
+        run: bash scripts/real_user_rust_dependency_smoke.sh
+
       - name: Run Rust Axum real-user smoke test
         run: bash scripts/real_user_rust_axum_smoke.sh
 
