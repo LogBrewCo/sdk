@@ -123,7 +123,7 @@ def utc_timestamp() -> str:
 def request_name(request: HttpRequest) -> str:
     """Return the stable request name used for span and issue titles."""
 
-    return f"{request.method} {request.path}"
+    return f"{request.method} {request_route_template(request)}"
 
 
 def request_metadata(
@@ -134,11 +134,14 @@ def request_metadata(
 ) -> dict[str, Any]:
     """Return request metadata without including query strings or request bodies."""
 
+    route_template = request_route_template(request)
     metadata: dict[str, Any] = {
         "framework": "django",
         "method": request.method,
-        "path": request.path,
+        "routeTemplate": route_template,
     }
+    if route_template == request.path:
+        metadata["path"] = request.path
     resolver_match = getattr(request, "resolver_match", None)
     route = getattr(resolver_match, "route", None)
     view_name = getattr(resolver_match, "view_name", None)

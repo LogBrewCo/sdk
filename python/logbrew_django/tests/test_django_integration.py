@@ -40,11 +40,16 @@ def boom(_request: HttpRequest) -> HttpResponse:
     raise RuntimeError("broken handler")
 
 
+def order_boom(_request: HttpRequest, order_id: int) -> HttpResponse:
+    raise RuntimeError(f"broken order {order_id}")
+
+
 urlpatterns = [
     path("health/", health, name="health"),
     path("orders/<int:order_id>/", order_detail, name="order-detail"),
     path("traced-orders/<int:order_id>/", traced_order, name="traced-order"),
     path("boom/", boom, name="boom"),
+    path("orders/<int:order_id>/boom/", order_boom, name="order-boom"),
 ]
 
 
@@ -209,10 +214,13 @@ class DjangoIntegrationTests(unittest.TestCase):
         self.assertEqual([event["type"] for event in payload["events"]], ["log", "span"])
         log = payload["events"][0]["attributes"]
         span = payload["events"][1]["attributes"]
+        self.assertEqual(span["name"], "GET /traced-orders/<int:order_id>/")
+        self.assertEqual(span["metadata"]["routeTemplate"], "/traced-orders/<int:order_id>/")
         self.assertEqual(log["metadata"]["traceId"], span["traceId"])
         self.assertEqual(log["metadata"]["spanId"], span["spanId"])
         self.assertEqual(log["metadata"]["parentSpanId"], span["parentSpanId"])
         self.assertIs(log["metadata"]["sampled"], True)
+        self.assertNotIn("/traced-orders/42", json.dumps(span))
         self.assertNotIn("debug", json.dumps(payload))
 
     def test_exception_captures_issue_and_error_span(self) -> None:
@@ -236,6 +244,21 @@ class DjangoIntegrationTests(unittest.TestCase):
         self.assertEqual(span["metadata"]["status_code"], 500)
         self.assertEqual(issue["metadata"]["traceId"], span["traceId"])
         self.assertEqual(issue["metadata"]["spanId"], span["spanId"])
+
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        configure_logbrew(client=sdk_client, transport=transport)
+
+        response = Client(raise_request_exception=False).get("/orders/42/boom/?debug=true")
+
+        self.assertEqual(response.status_code, 500)
+        payload = json.loads(transport.sent_bodies[0])
+        issue = payload["events"][0]["attributes"]
+        span = payload["events"][1]["attributes"]
+        self.assertEqual(issue["title"], "GET /orders/<int:order_id>/boom/ failed")
+        self.assertEqual(span["name"], "GET /orders/<int:order_id>/boom/")
+        self.assertEqual(span["metadata"]["routeTemplate"], "/orders/<int:order_id>/boom/")
+        self.assertNotIn("/orders/42", json.dumps(payload))
 
     def test_flush_errors_do_not_break_application_by_default(self) -> None:
         sdk_client = make_client()

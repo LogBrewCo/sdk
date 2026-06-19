@@ -55,3 +55,44 @@ Improve LogBrew Python, FastAPI, and Django tracing where competitors are strong
 - `python3 scripts/check_python_sources.py python/logbrew_py python/logbrew_fastapi python/logbrew_django`
 - `bash scripts/check_shell_static.sh`
 - `python3 scripts/check_markdown_links.py`
+
+## Route-Template Naming Follow-Up - 2026-06-19
+
+Fresh source refresh:
+
+- Sentry Python SDK, [`getsentry/sentry-python`](https://github.com/getsentry/sentry-python/tree/883e585baf564ff650e2292b70262aef852adec0) at commit `883e585baf564ff650e2292b70262aef852adec0`.
+- Sentry source paths/functions read:
+  - `sentry_sdk/integrations/starlette.py`: `_transaction_name_from_router`, `_set_transaction_name_and_source`, `_get_transaction_from_middleware`.
+  - `sentry_sdk/integrations/asgi.py`: `SentryAsgiMiddleware._get_transaction_name_and_source`.
+  - `sentry_sdk/integrations/django/__init__.py`: `DjangoIntegration.__init__`, `_set_transaction_name_and_source`, `_attempt_resolve_again`.
+  - `sentry_sdk/integrations/django/transactions.py`: resolver route normalization.
+- Datadog `dd-trace-py`, [`DataDog/dd-trace-py`](https://github.com/DataDog/dd-trace-py/tree/187cfc3700200ec8f33d6f610280924ef17e1696) at commit `187cfc3700200ec8f33d6f610280924ef17e1696`.
+- Datadog source paths/functions read:
+  - `ddtrace/contrib/internal/asgi/middleware.py`: `TraceMiddleware.__call__`, request `resource` setup, 404 resource handling.
+  - `ddtrace/contrib/internal/starlette/patch.py`: `_collect_routes_from_app`, `traced_route_init`, `traced_handler`.
+  - `ddtrace/contrib/internal/fastapi/patch.py`: FastAPI middleware/route patching.
+  - `ddtrace/contrib/internal/django/patch.py`: `_collect_django_routes`, `_collect_routes_once`, `traced_get_response`.
+- OpenTelemetry Python Contrib, [`open-telemetry/opentelemetry-python-contrib`](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/a5081cddcd6ca7f529abb2dbdebce6d2a4f062fb) at commit `a5081cddcd6ca7f529abb2dbdebce6d2a4f062fb`.
+- OpenTelemetry source paths/functions read:
+  - `instrumentation/opentelemetry-instrumentation-fastapi/src/opentelemetry/instrumentation/fastapi/__init__.py`: `_get_route_details`, `_get_default_span_details`.
+  - `instrumentation/opentelemetry-instrumentation-asgi/src/opentelemetry/instrumentation/asgi/__init__.py`: route/path format handling.
+  - `instrumentation/opentelemetry-instrumentation-django/src/opentelemetry/instrumentation/django/middleware/otel_middleware.py`: `_get_span_name`, `process_response`.
+  - `instrumentation/opentelemetry-instrumentation-flask/src/opentelemetry/instrumentation/flask/__init__.py`: `get_default_span_name`, `HTTP_ROUTE` handling.
+
+Pattern update:
+
+- Sentry Starlette/FastAPI defaults to URL-style transaction naming from route objects, and Django resolves URL patterns or view names instead of relying only on raw paths.
+- Datadog ASGI starts with a method/path resource but its Starlette/FastAPI/Django integrations collect route trees so resources can be normalized by framework route.
+- OpenTelemetry FastAPI/Django/Flask span names use `METHOD route-template` and attach `http.route`-style metadata where framework routing is known.
+
+LogBrew follow-up:
+
+- `logbrew-fastapi` request spans and exception titles now use `request_route_template(request)`, for example `GET /orders/{order_id}`.
+- `logbrew-django` request spans and exception titles now use `request_route_template(request)`, for example `GET /orders/<int:order_id>/`.
+- Span metadata now includes `routeTemplate`; concrete dynamic paths are omitted when a route template is available. Static routes still include `path` because the path and route template are identical.
+- LogBrew stays lighter than competitor auto-instrumentation by using explicit app-installed middleware only, with no route-tree walking, framework patching, request body/header/cookie/query capture, baggage, or tracestate.
+
+Verifier evidence:
+
+- Focused TDD red failed because FastAPI/Django dynamic request spans still used concrete paths.
+- Focused green: `PYTHONPATH=python/logbrew_py/src:python/logbrew_fastapi/src:python/logbrew_django/src python3 -m unittest python/logbrew_fastapi/tests/test_fastapi_integration.py python/logbrew_django/tests/test_django_integration.py` ran 16 tests in a temporary dependency venv.

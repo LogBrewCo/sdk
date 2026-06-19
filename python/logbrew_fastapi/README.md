@@ -49,7 +49,9 @@ def health() -> dict[str, bool]:
 
 `add_logbrew_middleware()` records successful requests as span events, records unhandled handler exceptions as issue plus error-span events, and flushes through the provided transport after each response. If no transport is provided, events stay queued on the core client so the app can flush them itself.
 
-When an incoming request has a valid W3C `traceparent` header, request capture continues that trace by using the incoming `traceId` and parent span id while creating a fresh child span id. The same request-local trace is available from `get_active_logbrew_trace()` while your handler runs, and `LogBrewLoggingHandler` automatically adds `traceId`, `spanId`, `parentSpanId`, and `sampled` metadata to standard-library logs emitted inside that context. Missing or malformed `traceparent` headers start a fresh W3C-shaped local trace so bad client headers do not break the app. Automatic metadata uses the request path without query text, and the trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
+When an incoming request has a valid W3C `traceparent` header, request capture continues that trace by using the incoming `traceId` and parent span id while creating a fresh child span id. The same request-local trace is available from `get_active_logbrew_trace()` while your handler runs, and `LogBrewLoggingHandler` automatically adds `traceId`, `spanId`, `parentSpanId`, and `sampled` metadata to standard-library logs emitted inside that context. Missing or malformed `traceparent` headers start a fresh W3C-shaped local trace so bad client headers do not break the app.
+
+Request spans use the FastAPI route template, such as `GET /orders/{order_id}`, for low-noise grouping. Span metadata includes `routeTemplate`; concrete dynamic paths are not emitted when a route template is available. The trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
 
 Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests:
 

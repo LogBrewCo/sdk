@@ -183,10 +183,13 @@ class FastAPIIntegrationTests(unittest.TestCase):
         self.assertEqual([event["type"] for event in payload["events"]], ["log", "span"])
         log = payload["events"][0]["attributes"]
         span = payload["events"][1]["attributes"]
+        self.assertEqual(span["name"], "GET /orders/{order_id}")
+        self.assertEqual(span["metadata"]["routeTemplate"], "/orders/{order_id}")
         self.assertEqual(log["metadata"]["traceId"], span["traceId"])
         self.assertEqual(log["metadata"]["spanId"], span["spanId"])
         self.assertEqual(log["metadata"]["parentSpanId"], span["parentSpanId"])
         self.assertIs(log["metadata"]["sampled"], True)
+        self.assertNotIn("/orders/42", json.dumps(span))
         self.assertNotIn("debug", json.dumps(payload))
 
     def test_exception_captures_issue_and_error_span(self) -> None:
@@ -216,6 +219,27 @@ class FastAPIIntegrationTests(unittest.TestCase):
         self.assertEqual(span["metadata"]["status_code"], 500)
         self.assertEqual(issue["metadata"]["traceId"], span["traceId"])
         self.assertEqual(issue["metadata"]["spanId"], span["spanId"])
+
+        sdk_client = make_client()
+        transport = RecordingTransport.always_accept()
+        app = FastAPI()
+        add_logbrew_middleware(app, client=sdk_client, transport=transport)
+
+        @app.get("/orders/{order_id}/boom")
+        def dynamic_order_boom(order_id: int) -> dict[str, int]:
+            raise RuntimeError(f"broken order {order_id}")
+
+        with TestClient(app, raise_server_exceptions=False) as http:
+            response = http.get("/orders/42/boom?debug=true")
+
+        self.assertEqual(response.status_code, 500)
+        payload = json.loads(transport.sent_bodies[0])
+        issue = payload["events"][0]["attributes"]
+        span = payload["events"][1]["attributes"]
+        self.assertEqual(issue["title"], "GET /orders/{order_id}/boom failed")
+        self.assertEqual(span["name"], "GET /orders/{order_id}/boom")
+        self.assertEqual(span["metadata"]["routeTemplate"], "/orders/{order_id}/boom")
+        self.assertNotIn("/orders/42", json.dumps(payload))
 
     def test_flush_errors_do_not_break_application_by_default(self) -> None:
         sdk_client = make_client()

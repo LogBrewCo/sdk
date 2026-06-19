@@ -54,7 +54,7 @@ def utc_timestamp() -> str:
 def request_name(request: Request) -> str:
     """Return the stable request name used for span and issue titles."""
 
-    return f"{request.method} {request.url.path}"
+    return f"{request.method} {request_route_template(request)}"
 
 
 def request_metadata(
@@ -65,11 +65,14 @@ def request_metadata(
 ) -> dict[str, Any]:
     """Return metadata that is useful for request-level troubleshooting without including query strings."""
 
+    route_template = request_route_template(request)
     metadata: dict[str, Any] = {
         "framework": "fastapi",
         "method": request.method,
-        "path": request.url.path,
+        "routeTemplate": route_template,
     }
+    if route_template == request.url.path:
+        metadata["path"] = request.url.path
     route = request.scope.get("route")
     route_path = getattr(route, "path", None)
     if isinstance(route_path, str):

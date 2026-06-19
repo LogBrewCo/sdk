@@ -57,7 +57,9 @@ def checkout_view(request):
     ...
 ```
 
-Missing or malformed `traceparent` headers start a fresh W3C-shaped local trace so bad client headers do not break the project. Automatic metadata uses the request path without query text, and the trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
+Missing or malformed `traceparent` headers start a fresh W3C-shaped local trace so bad client headers do not break the project.
+
+Request spans use the Django resolver route template, such as `GET /orders/<int:order_id>/`, for low-noise grouping. Span metadata includes `routeTemplate`; concrete dynamic paths are not emitted when a route template is available. The trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
 
 Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests:
 
