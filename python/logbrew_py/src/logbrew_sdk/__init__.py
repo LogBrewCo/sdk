@@ -911,6 +911,10 @@ from logbrew_sdk._db_client import (  # noqa: E402
     async_database_operation_with_logbrew_span,
     database_operation_with_logbrew_span,
 )
+from logbrew_sdk._cache_client import (  # noqa: E402
+    async_cache_operation_with_logbrew_span,
+    cache_operation_with_logbrew_span,
+)
 from logbrew_sdk._timeline import create_network_milestone_attributes, create_product_action_attributes  # noqa: E402
 
 
@@ -934,8 +938,10 @@ __all__ = [
     "Transport",
     "TransportError",
     "TransportResponse",
+    "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
+    "cache_operation_with_logbrew_span",
     "create_logbrew_trace_context",
     "create_network_milestone_attributes",
     "create_product_action_attributes",

@@ -349,6 +349,24 @@ run_database_span_smoke() {
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_cache_span_smoke() {
+    local output_prefix="$1"
+
+    python "$repo_root/scripts/python_cache_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"activeSpan": "b7ad6b7169203351"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncActiveSpan": "b7ad6b7169203352"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"cacheSystem": "redis"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncCacheSystem": "memcached"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"cacheHit": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"itemSizeBytes": 14' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncItemSizeBytes": 64' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"itemCount": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"errorType": "StubCacheError"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_reinstall_from_freeze() {
     local freeze_file="$1"
     local expected_suffix="$2"
@@ -392,6 +410,7 @@ run_reinstall_from_freeze() {
     run_requests_span_smoke "$output_prefix-freeze-requests-span"
     run_httpx_span_smoke "$output_prefix-freeze-httpx-span"
     run_database_span_smoke "$output_prefix-freeze-database-span"
+    run_cache_span_smoke "$output_prefix-freeze-cache-span"
 
     deactivate
 }
@@ -442,6 +461,7 @@ run_reinstall_from_direct_requirement() {
     run_requests_span_smoke "$output_prefix-direct-requests-span"
     run_httpx_span_smoke "$output_prefix-direct-httpx-span"
     run_database_span_smoke "$output_prefix-direct-database-span"
+    run_cache_span_smoke "$output_prefix-direct-cache-span"
 
     deactivate
 }
@@ -486,6 +506,7 @@ package_version = os.environ["LOGBREW_PYTHON_PACKAGE_VERSION"]
 with zipfile.ZipFile(wheel_path) as archive:
     names = set(archive.namelist())
     required = {
+        "logbrew_sdk/_cache_client.py",
         "logbrew_sdk/_db_client.py",
         "logbrew_sdk/_http_client.py",
         "logbrew_sdk/_instrumentation.py",
@@ -515,8 +536,10 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
+    "cache_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "requests_request_with_logbrew_span",
@@ -551,6 +574,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
     required = {
         f"{sdist_root}/README.md",
         f"{sdist_root}/pyproject.toml",
+        f"{sdist_root}/src/logbrew_sdk/_cache_client.py",
         f"{sdist_root}/src/logbrew_sdk/_db_client.py",
         f"{sdist_root}/src/logbrew_sdk/_http_client.py",
         f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
@@ -586,8 +610,10 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
+    "cache_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "requests_request_with_logbrew_span",
@@ -877,8 +903,10 @@ from logbrew_sdk import (
     TraceparentContext,
     Transport,
     TransportResponse,
+    async_cache_operation_with_logbrew_span,
     async_database_operation_with_logbrew_span,
     async_httpx_request_with_logbrew_span,
+    cache_operation_with_logbrew_span,
     create_network_milestone_attributes,
     create_product_action_attributes,
     create_traceparent,
@@ -1077,6 +1105,44 @@ async def run_async_database_typecheck() -> None:
 
 
 asyncio.run(run_async_database_typecheck())
+
+cache_result = cache_operation_with_logbrew_span(
+    "GET health",
+    client=client,
+    event_id="evt_cache_typecheck",
+    timestamp="2026-06-02T10:00:12Z",
+    operation=lambda: b"ok",
+    system="redis",
+    cache_hit=True,
+    item_size_bytes=2,
+    item_count=1,
+    span_id_factory=lambda: "b7ad6b7169203337",
+)
+if cache_result != b"ok":
+    raise RuntimeError("unexpected cache result")
+
+
+async def async_cache_operation() -> str:
+    return "stored"
+
+
+async def run_async_cache_typecheck() -> None:
+    async_cache_result = await async_cache_operation_with_logbrew_span(
+        "SET health",
+        client=client,
+        event_id="evt_cache_async_typecheck",
+        timestamp="2026-06-02T10:00:13Z",
+        operation=async_cache_operation,
+        system="memcached",
+        cache_hit=False,
+        item_size_bytes=6,
+        span_id_factory=lambda: "b7ad6b7169203338",
+    )
+    if async_cache_result != "stored":
+        raise RuntimeError("unexpected async cache result")
+
+
+asyncio.run(run_async_cache_typecheck())
 handler = LogBrewLoggingHandler(
     client,
     logging_transport,
@@ -1798,6 +1864,7 @@ if version("logbrew-sdk") != package_version:
 
 package_files = {str(path) for path in files("logbrew-sdk") or []}
 required = {
+    "logbrew_sdk/_cache_client.py",
     "logbrew_sdk/_db_client.py",
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
@@ -1822,8 +1889,10 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
+    "cache_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "requests_request_with_logbrew_span",
@@ -1966,6 +2035,7 @@ required_show_files = {
     f"{dist_info_dir}/WHEEL",
     f"{dist_info_dir}/direct_url.json",
     f"{dist_info_dir}/top_level.txt",
+    "logbrew_sdk/_cache_client.py",
     "logbrew_sdk/_db_client.py",
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
@@ -2131,6 +2201,7 @@ run_urlopen_span_smoke "wheel-urlopen-span"
 run_requests_span_smoke "wheel-requests-span"
 run_httpx_span_smoke "wheel-httpx-span"
 run_database_span_smoke "wheel-database-span"
+run_cache_span_smoke "wheel-cache-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/pip-uninstall-list.json"
@@ -2163,6 +2234,7 @@ run_urlopen_span_smoke "wheel-reinstall-urlopen-span"
 run_requests_span_smoke "wheel-reinstall-requests-span"
 run_httpx_span_smoke "wheel-reinstall-httpx-span"
 run_database_span_smoke "wheel-reinstall-database-span"
+run_cache_span_smoke "wheel-reinstall-cache-span"
 
 deactivate
 run_reinstall_from_freeze "$tmp_dir/pip-freeze.txt" "$wheel_artifact" "wheel"
@@ -2205,6 +2277,7 @@ run_urlopen_span_smoke "sdist-urlopen-span"
 run_requests_span_smoke "sdist-requests-span"
 run_httpx_span_smoke "sdist-httpx-span"
 run_database_span_smoke "sdist-database-span"
+run_cache_span_smoke "sdist-cache-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/sdist-pip-uninstall-list.json"
@@ -2237,6 +2310,7 @@ run_urlopen_span_smoke "sdist-reinstall-urlopen-span"
 run_requests_span_smoke "sdist-reinstall-requests-span"
 run_httpx_span_smoke "sdist-reinstall-httpx-span"
 run_database_span_smoke "sdist-reinstall-database-span"
+run_cache_span_smoke "sdist-reinstall-cache-span"
 
 cat > "$tmp_dir/unauth.py" <<'EOF'
 import json

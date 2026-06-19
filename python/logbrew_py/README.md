@@ -391,6 +391,35 @@ result = database_operation_with_logbrew_span(
 
 The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the DB system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the database result. Metadata is intentionally bounded to primitive caller metadata, `dbSystem`, `dbOperation`, optional `dbName`, optional `statementTemplate`, optional non-negative `rowCount`, sampled state, and exception type. It does not monkeypatch SQLAlchemy or DB-API drivers, does not open support tickets, and does not capture SQL parameters, result rows, connection strings, network addresses, sensitive configuration values, payloads, baggage, tracestate, stack traces, or exception messages.
 
+## Cache Operation Spans
+
+Use `cache_operation_with_logbrew_span()` for sync cache calls and `async_cache_operation_with_logbrew_span()` for async calls when you want one app-owned cache span without installing or patching Redis, memcached, Django cache, or Flask cache clients:
+
+```python
+from logbrew_sdk import LogBrewClient, cache_operation_with_logbrew_span
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+
+profile = cache_operation_with_logbrew_span(
+    "GET profile",
+    client=client,
+    event_id="evt_checkout_profile_cache_get",
+    timestamp="2026-06-19T11:15:00Z",
+    operation=lambda: redis_client.get(profile_cache_key),
+    system="redis",
+    cache_name="profiles",
+    cache_hit=True,
+    item_count=1,
+    metadata={"service": "checkout-api"},
+)
+```
+
+The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the cache system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the cache result. Metadata is intentionally bounded to primitive caller metadata, `cacheSystem`, `cacheOperation`, optional `cacheName`, optional hit state, optional non-negative item size/count, sampled state, and exception type. It drops key-like metadata fields and does not monkeypatch cache clients, open support tickets, capture cache keys, values, commands, payloads, headers, cookies, network addresses, baggage, tracestate, stack traces, or exception messages.
+
 ## Agent-Readable Timelines
 
 Use `create_product_action_attributes()` and `create_network_milestone_attributes()` when your service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.
