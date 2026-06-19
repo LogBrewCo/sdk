@@ -1,6 +1,6 @@
 use logbrew::{
-    ActionEvent, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent, MetricEvent,
-    RecordingTransport, ReleaseEvent, SpanEvent,
+    ActionEvent, DependencyOperationSpan, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent,
+    Metadata, MetadataValue, MetricEvent, RecordingTransport, ReleaseEvent, SpanEvent, Traceparent,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -52,6 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         response.status_code, response.attempts
     );
     exercise_metric_helper()?;
+    exercise_dependency_operation_span_helper()?;
 
     Ok(())
 }
@@ -83,5 +84,36 @@ fn exercise_metric_helper() -> Result<(), Box<dyn std::error::Error>> {
             )
             .is_err()
     );
+    Ok(())
+}
+
+fn exercise_dependency_operation_span_helper() -> Result<(), Box<dyn std::error::Error>> {
+    let context = Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")?;
+    let mut metadata = Metadata::new();
+    metadata.insert(
+        "pool".to_string(),
+        MetadataValue::String("primary".to_string()),
+    );
+    metadata.insert(
+        "sql.statement".to_string(),
+        MetadataValue::String("select * from users".to_string()),
+    );
+
+    let span = DependencyOperationSpan::database("checkout lookup", "abcdef1234567890")
+        .with_system("postgres")
+        .with_operation("select")
+        .with_target("orders")
+        .with_duration_ms(8.25)
+        .with_metadata(metadata)
+        .from_traceparent_context(&context)?;
+
+    let mut client = LogBrewClient::builder("logbrew-rust", "0.1.0")
+        .api_key("LOGBREW_API_KEY")
+        .build()?;
+    client.span("evt_dependency_001", "2026-06-02T10:00:20Z", span)?;
+    let preview = client.preview_json()?;
+    assert!(preview.contains("\"database.operation:checkout lookup\""));
+    assert!(preview.contains("\"db.system\": \"postgres\""));
+    assert!(!preview.contains("sql.statement"));
     Ok(())
 }

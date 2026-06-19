@@ -16,7 +16,7 @@ cargo add logbrew --features tracing
 cargo add logbrew --features tracing-opentelemetry
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -528,6 +528,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 `Traceparent` validates W3C shape, rejects forbidden or all-zero IDs, normalizes identifiers, exposes the sampled flag, creates one-header outbound carriers, and derives LogBrew child span events. `OpenTelemetrySpanContext` accepts the trace ID, span ID, and trace flags from an app-owned OpenTelemetry span context, then creates LogBrew child spans with the OTel span as parent. It does not install OpenTelemetry, patch HTTP clients, read tracestate/baggage, or capture request payloads or headers.
+
+## Dependency Operation Spans
+
+Use `DependencyOperationSpan` for explicit app-owned DB, cache, and queue work that should be correlated with an existing request or OpenTelemetry span. It builds normal LogBrew `SpanEvent`s, so transport retry, flush, and shutdown behavior stays the same.
+
+```rust
+use logbrew::{DependencyOperationSpan, LogBrewClient, Traceparent};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let trace = Traceparent::parse(
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    )?;
+    let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+        .api_key("LOGBREW_API_KEY")
+        .build()?;
+
+    let span = DependencyOperationSpan::database("checkout lookup", "abcdef1234567890")
+        .with_system("postgres")
+        .with_operation("select")
+        .with_target("orders")
+        .with_duration_ms(8.25)
+        .from_traceparent_context(&trace)?;
+
+    client.span("evt_db_span", "2026-06-02T10:00:20Z", span)?;
+    println!("{}", client.preview_json()?);
+    Ok(())
+}
+```
+
+The helper intentionally avoids global SQL/cache/queue patching and does not capture statements, commands, payloads, headers, raw URLs, query strings, or user-specific identifiers. Metadata uses sources such as `database.operation`, `cache.operation`, and `queue.operation`; unsafe key names and non-primitive values are dropped before the span is built. Use `with_error_type(...)` to mark a dependency span as failed without recording exception messages or stacks.
 
 ## Metrics
 

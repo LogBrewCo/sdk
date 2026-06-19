@@ -70,7 +70,7 @@ assert_contains "$real_user_stderr" '"ok":true' 'expected success status in Rust
 assert_contains "$real_user_stderr" '"events":6' 'expected event count in Rust real-user smoke stderr'
 
 make_help_output="$(cd "$package_root/examples" && make)"
-expected_help_output=$'run-readme-example -> make run-readme-example\nrun (real-user-smoke) -> make run\nrun-real-user-smoke -> make run-real-user-smoke'
+expected_help_output=$'run-readme-example -> make run-readme-example\nrun (real-user-smoke) -> make run\nrun-real-user-smoke -> make run-real-user-smoke\nrun-first-useful-telemetry -> make run-first-useful-telemetry\nrun-http-server-request -> make run-http-server-request\nrun-axum-request-middleware -> make run-axum-request-middleware\nrun-actix-request-middleware -> make run-actix-request-middleware\nrun-rocket-request-fairing -> make run-rocket-request-fairing\nrun-tracing-bridge -> make run-tracing-bridge'
 if [[ "$make_help_output" != "$expected_help_output" ]]; then
   printf 'unexpected Rust examples make output\n' >&2
   exit 1

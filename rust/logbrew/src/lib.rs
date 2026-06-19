@@ -10,6 +10,7 @@ use std::time::Duration;
 mod http_fields;
 mod http_server;
 mod metric;
+mod operation_tracing;
 mod product_timeline;
 #[cfg(feature = "tower")]
 mod tower_layer;
@@ -18,6 +19,7 @@ mod traceparent;
 mod tracing_layer;
 pub use http_server::{HttpRequestTelemetry, HttpRequestTelemetryEvents};
 pub use metric::MetricEvent;
+pub use operation_tracing::{DependencyOperationKind, DependencyOperationSpan};
 pub use product_timeline::{NetworkMilestoneTimeline, ProductActionTimeline, ProductTimeline};
 pub use serde_json::Value as MetadataValue;
 #[cfg(any(feature = "tower", feature = "tracing"))]
