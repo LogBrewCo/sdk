@@ -50,6 +50,10 @@ grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/binary-jar-conten
 grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace\$Scope.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$DatabaseOperation.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$CacheOperation.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$QueueOperation.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewJulHandler.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewLogbackAppender.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/Transport.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -68,6 +72,7 @@ grep -q '^src/main/java/co/logbrew/sdk/Traceparent.java$' "$tmp_dir/source-jar-c
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewTraceContext.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewTrace.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/LogBrewOperationTracing.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewJulHandler.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewLogbackAppender.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^examples/FirstUsefulTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
@@ -84,6 +89,7 @@ grep -q 'HttpTransport' "$package_dir/README.md"
 grep -q 'MetricAttributes' "$package_dir/README.md"
 grep -q 'ProductTimeline' "$package_dir/README.md"
 grep -q 'Traceparent' "$package_dir/README.md"
+grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
 grep -q 'first useful LogBrew payload' "$package_dir/README.md"
 grep -q 'without visual replay, HTTP client patching, request/response payload capture, or header capture' "$package_dir/README.md"
 grep -q 'This SDK does not automatically collect JVM, runtime, or framework metrics yet.' "$package_dir/README.md"
@@ -145,7 +151,7 @@ public final class LifecycleApp {
     private LifecycleApp() {
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "lifecycle-app", "0.1.0");
         System.out.println(client.pendingEvents());
     }
@@ -175,6 +181,7 @@ import co.logbrew.sdk.LogAttributes;
 import co.logbrew.sdk.LogBrewClient;
 import co.logbrew.sdk.LogBrewJulHandler;
 import co.logbrew.sdk.LogBrewLogbackAppender;
+import co.logbrew.sdk.LogBrewOperationTracing;
 import co.logbrew.sdk.MetricAttributes;
 import co.logbrew.sdk.ProductTimeline;
 import co.logbrew.sdk.RecordingTransport;
@@ -190,7 +197,9 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Handler;
@@ -203,7 +212,7 @@ public final class Main {
     private Main() {
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
         enqueueAll(client);
         System.out.println(client.previewJson());
@@ -281,6 +290,65 @@ public final class Main {
         require(timelinePayload.contains("\"status\": \"failure\""), "network failure status");
         require(!timelinePayload.contains("cart=sample"), "timeline strips product query");
         require(!timelinePayload.contains("debug=sample"), "timeline strips network query");
+
+        LogBrewClient dependencies = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
+        String dbResult = LogBrewOperationTracing.databaseOperation(
+            dependencies,
+            "select checkout",
+            () -> "order-123",
+            LogBrewOperationTracing.DatabaseOperation.create()
+                .system("postgresql")
+                .operationKind("query")
+                .databaseName("orders")
+                .statementTemplate("SELECT * FROM orders WHERE id = ?")
+                .rowCount(1)
+                .eventIdPrefix("java_db_smoke")
+                .spanId("b7ad6b7169203331")
+                .metadata(Map.of("service", "checkout", "query", "SELECT private", "host", "db.internal"))
+                .nowSequence(Instant.parse("2026-06-02T10:00:00Z"), Instant.parse("2026-06-02T10:00:00.025Z"))
+        );
+        require("order-123".equals(dbResult), "database operation result");
+        LogBrewOperationTracing.cacheOperation(
+            dependencies,
+            "get cart",
+            () -> Integer.valueOf(42),
+            LogBrewOperationTracing.CacheOperation.create()
+                .system("redis")
+                .operationKind("get")
+                .cacheName("checkout-cache")
+                .hit(true)
+                .itemCount(1)
+                .eventIdPrefix("java_cache_smoke")
+                .spanId("b7ad6b7169203332")
+                .metadata(Map.of("service", "checkout", "cacheKey", "cart:private"))
+                .nowSequence(Instant.parse("2026-06-02T10:00:01Z"), Instant.parse("2026-06-02T10:00:01.005Z"))
+        );
+        LogBrewOperationTracing.queueOperation(
+            dependencies,
+            "publish invoice",
+            () -> "delivered",
+            LogBrewOperationTracing.QueueOperation.create()
+                .system("kafka")
+                .operationKind("publish")
+                .queueName("billing-events")
+                .taskName("invoice.created")
+                .messageCount(1)
+                .eventIdPrefix("java_queue_smoke")
+                .spanId("b7ad6b7169203333")
+                .metadata(Map.of("component", "billing", "messageBody", "private body"))
+                .nowSequence(Instant.parse("2026-06-02T10:00:02Z"), Instant.parse("2026-06-02T10:00:02.010Z"))
+        );
+        String dependencyPayload = dependencies.previewJson();
+        require(dependencies.pendingEvents() == 3, "dependency helpers queue three spans");
+        require(dependencyPayload.contains("\"source\": \"database.operation\""), "database span source");
+        require(dependencyPayload.contains("\"dbSystem\": \"postgresql\""), "database span system");
+        require(dependencyPayload.contains("\"source\": \"cache.operation\""), "cache span source");
+        require(dependencyPayload.contains("\"cacheHit\": true"), "cache span hit");
+        require(dependencyPayload.contains("\"source\": \"queue.operation\""), "queue span source");
+        require(dependencyPayload.contains("\"queueName\": \"billing-events\""), "queue span name");
+        require(!dependencyPayload.contains("db.internal"), "dependency metadata drops host");
+        require(!dependencyPayload.contains("cart:private"), "dependency metadata drops cache key");
+        require(!dependencyPayload.contains("private body"), "dependency metadata drops message body");
 
         expect("validation_error", () -> client.log(
             "evt_log_bad",
