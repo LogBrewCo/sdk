@@ -71,7 +71,7 @@ npm install \
   "$fastify_tgz" \
   "fastify@$fastify_version" \
   "typescript" \
-  "@types/node" \
+  "@types/node@22" \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
