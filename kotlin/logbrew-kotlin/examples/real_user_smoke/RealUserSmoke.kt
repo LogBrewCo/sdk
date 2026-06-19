@@ -5,6 +5,7 @@ import co.logbrew.sdk.HttpTransportRequester
 import co.logbrew.sdk.LogAttributes
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.MetricAttributes
 import co.logbrew.sdk.RecordingTransport
 import co.logbrew.sdk.TransportException
@@ -92,6 +93,52 @@ fun main() {
     check("?itemId" !in timelinePreview)
     check("#pay" !in timelinePreview)
 
+    val lifecycleClient = LogBrewAndroid.createClient("LOGBREW_API_KEY", "android-lifecycle")
+    val lifecycleParent =
+        LogBrewTrace.continueOrCreate(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+        )
+    val lifecycleTracker =
+        LogBrewTrace.use(lifecycleParent).use {
+            LogBrewAndroid.createLifecycleTracker(
+                initialState = "created",
+                realtimeMs = 1_000.0,
+                context = context,
+                metadata = mapOf("phase" to "cold_start"),
+            )
+        }
+    check(LogBrewTrace.currentTraceContext() == null)
+    check(
+        lifecycleTracker.captureTransition(
+            client = lifecycleClient,
+            id = "evt_android_lifecycle_001",
+            timestamp = "2026-06-02T10:00:11Z",
+            nextState = "started",
+            realtimeMs = 1_120.0,
+            metadata = mapOf("traceId" to "spoofed_trace", "previousState" to "spoofed"),
+        ),
+    )
+    check(
+        !lifecycleTracker.captureTransition(
+            client = lifecycleClient,
+            id = "evt_android_lifecycle_duplicate",
+            timestamp = "2026-06-02T10:00:12Z",
+            nextState = "started",
+            realtimeMs = 1_200.0,
+        ),
+    )
+    val lifecyclePreview = lifecycleClient.previewJson()
+    check("\"name\": \"android.lifecycle:created->started\"" in lifecyclePreview)
+    check("\"durationMs\": 120.0" in lifecyclePreview)
+    check("\"traceId\": \"${lifecycleParent.traceId}\"" in lifecyclePreview)
+    check("\"parentSpanId\": \"${lifecycleParent.spanId}\"" in lifecyclePreview)
+    check("\"source\": \"android.lifecycle\"" in lifecyclePreview)
+    check("\"activityName\": \"MainActivity\"" in lifecyclePreview)
+    check("\"phase\": \"cold_start\"" in lifecyclePreview)
+    check("spoofed" !in lifecyclePreview)
+    check("evt_android_lifecycle_duplicate" !in lifecyclePreview)
+    check("traceparent" !in lifecyclePreview)
+
     val metricClient = LogBrewClient.create("LOGBREW_API_KEY", "logbrew-kotlin-metrics", "0.1.0")
     metricClient.metric(
         "evt_metric_001",
@@ -137,6 +184,6 @@ fun main() {
     check(capturedAuthorization == "Bearer LOGBREW_API_KEY")
 
     System.err.println(
-        """{"ok":true,"status":${response.statusCode},"retryAttempts":${response.attempts},"androidHelperEvents":3,"androidTimelineEvents":2,"androidNetworkAction":"POST /api/checkout","metricEvents":1,"httpAttempts":${httpResponse.attempts}}""",
+        """{"ok":true,"status":${response.statusCode},"retryAttempts":${response.attempts},"androidHelperEvents":3,"androidTimelineEvents":2,"androidLifecycleSpans":1,"androidNetworkAction":"POST /api/checkout","metricEvents":1,"httpAttempts":${httpResponse.attempts}}""",
     )
 }

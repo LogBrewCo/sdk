@@ -206,6 +206,7 @@ grep -q '^co/logbrew/sdk/LogBrewCoroutines.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySpanContext.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidRequestSpan.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AndroidLifecycleTracker.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHeaderSetter.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransportRequest.class$' "$tmp_dir/jar-contents.txt"
@@ -252,6 +253,10 @@ for needle in (
     "traceparent",
     "LogBrewAndroid.startRequestSpan",
     "LogBrewAndroid.captureRequestSpan",
+    "LogBrewAndroid.createLifecycleTracker",
+    "AndroidLifecycleTracker",
+    "captureTransition",
+    "android.lifecycle",
     "applyHeadersTo",
     "withHttpURLConnectionSpan",
     "withTrace",
@@ -302,6 +307,7 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdo
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"androidHelperEvents":3' "$tmp_dir/real-user-smoke.stderr.json"
+grep -q '"androidLifecycleSpans":1' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/real-user-smoke.stderr.json"
 

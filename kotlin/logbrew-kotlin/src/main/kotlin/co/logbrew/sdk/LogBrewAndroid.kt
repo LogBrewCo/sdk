@@ -38,6 +38,63 @@ fun interface LogBrewHeaderSetter {
     )
 }
 
+class AndroidLifecycleTracker internal constructor(
+    initialState: String,
+    initialRealtimeMs: Double,
+    private val baseContext: AndroidContext,
+    private val parentTraceContext: LogBrewTraceContext,
+    private val baseMetadata: Map<String, Any?>,
+) {
+    private var currentState = initialState
+    private var currentStateStartedAtMs = initialRealtimeMs
+
+    fun captureTransition(
+        client: LogBrewClient,
+        id: String,
+        timestamp: String,
+        nextState: String,
+        realtimeMs: Double,
+        context: AndroidContext? = null,
+        metadata: Map<String, Any?> = emptyMap(),
+    ): Boolean {
+        val safeNextState = checkedLifecycleState("android lifecycle nextState", nextState)
+        val safeRealtimeMs = checkedLifecycleRealtimeMs("android lifecycle realtimeMs", realtimeMs)
+        if (safeNextState == currentState) {
+            return false
+        }
+
+        val previousState = currentState
+        val durationMs = (safeRealtimeMs - currentStateStartedAtMs).coerceAtLeast(0.0)
+        val spanContext = LogBrewTrace.childContext(parentTraceContext)
+        val safeMetadata =
+            baseContext.toMetadata() +
+                (context?.toMetadata() ?: emptyMap()) +
+                baseMetadata +
+                compactMetadata(metadata) +
+                mapOf(
+                    "source" to "android.lifecycle",
+                    "previousState" to previousState,
+                    "nextState" to safeNextState,
+                )
+
+        client.span(
+            id,
+            timestamp,
+            LogBrewTrace.spanAttributes(
+                name = "android.lifecycle:$previousState->$safeNextState",
+                status = "ok",
+                durationMs = durationMs,
+                metadata = safeMetadata,
+                context = spanContext,
+            ),
+        )
+
+        currentState = safeNextState
+        currentStateStartedAtMs = safeRealtimeMs
+        return true
+    }
+}
+
 object LogBrewAndroid {
     private const val SDK_VERSION: String = "0.1.0"
 
@@ -149,6 +206,25 @@ object LogBrewAndroid {
             traceContext = requestContext,
             headers = LogBrewTrace.outgoingHeaders(requestContext),
             metadata = safeMetadata,
+        )
+    }
+
+    fun createLifecycleTracker(
+        initialState: String,
+        realtimeMs: Double,
+        context: AndroidContext = AndroidContext.create(),
+        traceContext: LogBrewTraceContext? = null,
+        metadata: Map<String, Any?> = emptyMap(),
+    ): AndroidLifecycleTracker {
+        val safeInitialState = checkedLifecycleState("android lifecycle initialState", initialState)
+        val safeRealtimeMs = checkedLifecycleRealtimeMs("android lifecycle realtimeMs", realtimeMs)
+        val parentContext = traceContext ?: LogBrewTrace.currentTraceContext() ?: LogBrewTrace.createTraceContext()
+        return AndroidLifecycleTracker(
+            initialState = safeInitialState,
+            initialRealtimeMs = safeRealtimeMs,
+            baseContext = context,
+            parentTraceContext = parentContext,
+            baseMetadata = compactMetadata(metadata),
         )
     }
 
@@ -391,9 +467,6 @@ object LogBrewAndroid {
 
     private fun statusFromStatusCode(statusCode: Int?): String = if (statusCode != null && statusCode >= 400) "failure" else "success"
 
-    private fun compactMetadata(metadata: Map<String, Any?>): Map<String, Any?> =
-        metadata.mapValues { (key, value) -> Validation.requireMetadataValue(key, value) }
-
     private fun optionalMetadata(
         key: String,
         value: Any?,
@@ -433,3 +506,24 @@ object LogBrewAndroid {
         return metadata
     }
 }
+
+private fun checkedLifecycleState(
+    label: String,
+    state: String,
+): String {
+    Validation.requireNonEmpty(label, state)
+    return state.trim()
+}
+
+private fun checkedLifecycleRealtimeMs(
+    label: String,
+    realtimeMs: Double,
+): Double {
+    if (realtimeMs < 0 || realtimeMs.isNaN() || realtimeMs.isInfinite()) {
+        throw SdkException("validation_error", "$label must be non-negative")
+    }
+    return realtimeMs
+}
+
+private fun compactMetadata(metadata: Map<String, Any?>): Map<String, Any?> =
+    metadata.mapValues { (key, value) -> Validation.requireMetadataValue(key, value) }

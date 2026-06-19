@@ -14,6 +14,10 @@ object AndroidRequestSpanTests {
             "http_url_connection_span_applies_header_scopes_and_captures_status",
             ::httpUrlConnectionSpanAppliesHeaderScopesAndCapturesStatus,
         )
+        run(
+            "android_lifecycle_tracker_captures_previous_state_duration_span",
+            ::androidLifecycleTrackerCapturesPreviousStateDurationSpan,
+        )
     }
 
     private fun run(
@@ -141,6 +145,80 @@ object AndroidRequestSpanTests {
         check("/spoofed" !in body)
         check("cart=123" !in body)
         check("#pay" !in body)
+        check("traceparent" !in body)
+    }
+
+    private fun androidLifecycleTrackerCapturesPreviousStateDurationSpan() {
+        val parent =
+            LogBrewTrace.continueOrCreate(
+                "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+            )
+        val client =
+            LogBrewClient.create(
+                apiKey = "LOGBREW_API_KEY",
+                sdkName = "logbrew-kotlin-android-lifecycle-tests",
+                sdkVersion = "0.1.0",
+            )
+        val context =
+            AndroidContext
+                .create()
+                .withActivityName("CheckoutActivity")
+                .withScreenName("Checkout")
+                .withSessionId("session_123")
+        val tracker =
+            LogBrewTrace.use(parent).use {
+                LogBrewAndroid.createLifecycleTracker(
+                    initialState = "created",
+                    realtimeMs = 1_000.0,
+                    context = context,
+                    metadata = mapOf("phase" to "cold_start"),
+                )
+            }
+        check(LogBrewTrace.currentTraceContext() == null)
+
+        val captured =
+            tracker.captureTransition(
+                client = client,
+                id = "evt_android_lifecycle_span_001",
+                timestamp = "2026-06-02T10:00:16Z",
+                nextState = "started",
+                realtimeMs = 1_124.5,
+                metadata =
+                    mapOf(
+                        "previousState" to "spoofed",
+                        "nextState" to "spoofed",
+                        "traceId" to "spoofed_trace",
+                        "spanId" to "spoofed_span",
+                    ),
+            )
+        val duplicate =
+            tracker.captureTransition(
+                client = client,
+                id = "evt_android_lifecycle_duplicate",
+                timestamp = "2026-06-02T10:00:17Z",
+                nextState = "started",
+                realtimeMs = 1_200.0,
+            )
+
+        check(captured)
+        check(!duplicate)
+        check(LogBrewTrace.currentTraceContext() == null)
+
+        val body = client.previewJson()
+        check("\"id\": \"evt_android_lifecycle_span_001\"" in body)
+        check("\"name\": \"android.lifecycle:created->started\"" in body)
+        check("\"durationMs\": 124.5" in body)
+        check("\"traceId\": \"${parent.traceId}\"" in body)
+        check("\"parentSpanId\": \"${parent.spanId}\"" in body)
+        check("\"source\": \"android.lifecycle\"" in body)
+        check("\"previousState\": \"created\"" in body)
+        check("\"nextState\": \"started\"" in body)
+        check("\"activityName\": \"CheckoutActivity\"" in body)
+        check("\"screenName\": \"Checkout\"" in body)
+        check("\"sessionId\": \"session_123\"" in body)
+        check("\"phase\": \"cold_start\"" in body)
+        check("spoofed" !in body)
+        check("evt_android_lifecycle_duplicate" !in body)
         check("traceparent" !in body)
     }
 

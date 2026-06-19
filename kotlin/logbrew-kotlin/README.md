@@ -290,7 +290,29 @@ LogBrewAndroid.captureNetworkMilestone(
 )
 ```
 
-`routeTemplate` is stripped of query strings and hashes before capture. Keep metadata primitive and low-cardinality: screen names, route templates, funnel names, step names, status codes, durations, session IDs, and trace IDs are appropriate. Do not send request bodies, response bodies, headers, user-entered form values, or full URLs with private query text. These helpers do not patch HTTP clients or record visual replay.
+When your app already owns Activity, Fragment, Compose, or navigation lifecycle callbacks, create an explicit lifecycle tracker and call it from those callbacks. LogBrew records the previous state duration as a child span under the active trace and ignores duplicate same-state transitions:
+
+```kotlin
+val lifecycleTracker =
+    LogBrewTrace.use(trace).use {
+        LogBrewAndroid.createLifecycleTracker(
+            initialState = "created",
+            realtimeMs = 1_000.0,
+            context = context,
+            metadata = mapOf("phase" to "cold_start"),
+        )
+    }
+
+lifecycleTracker.captureTransition(
+    client = client,
+    id = "evt_android_lifecycle_001",
+    timestamp = "2026-06-02T10:00:11Z",
+    nextState = "started",
+    realtimeMs = 1_124.5,
+)
+```
+
+`routeTemplate` is stripped of query strings and hashes before capture. Keep metadata primitive and low-cardinality: screen names, route templates, funnel names, lifecycle states, status codes, durations, session IDs, and trace IDs are appropriate. Do not send request bodies, response bodies, headers, user-entered form values, or full URLs with private query text. These helpers do not patch HTTP clients, install hidden `ActivityLifecycleCallbacks`, own navigation observers, or record visual replay.
 
 ## Examples
 
@@ -303,6 +325,7 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 - `LogBrewOpenTelemetry` optionally copies trace ID, span ID, and trace flags from app-owned OpenTelemetry `Span`/`Context` objects when OpenTelemetry is already installed by the app; it returns `null` instead of installing exporters, processors, baggage, or tracestate support.
 - `LogBrewCoroutines` optionally creates a coroutine `ThreadContextElement` by reflection when `kotlinx-coroutines-core` is already installed by the app; it returns `null` instead of adding a coroutine dependency to LogBrew.
 - `LogBrewAndroid.startRequestSpan()` and `captureRequestSpan()` create explicit outbound request child spans for app-owned OkHttp, `HttpURLConnection`, or other request clients with one normalized `traceparent` header and sanitized completion metadata. `AndroidRequestSpan.applyHeadersTo(...)` writes only that header through your request builder, `withTrace { ... }` scopes request-local telemetry under the child span, and `withHttpURLConnectionSpan(...)` handles the same pattern for app-owned `HttpURLConnection` calls.
+- `LogBrewAndroid.createLifecycleTracker()` returns an `AndroidLifecycleTracker` for app-owned lifecycle callbacks; `captureTransition()` emits one `android.lifecycle:<previous>-><next>` span with previous-state duration, active trace correlation, primitive metadata, and same-state dedupe.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.

@@ -363,6 +363,39 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 
 - Kotlin Android still lacks automatic lifecycle instrumentation, hidden/global URLConnection instrumentation, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication parity.
 
+## 2026-06-19 Android Lifecycle Trace Follow-Up
+
+### Source Re-Read
+
+- Re-read Sentry Java/Android `getsentry/sentry-java@7c1a728e8bd2faa42b8f1c25c9f16a145baab60f` `sentry-android-core/src/main/java/io/sentry/android/core/ActivityLifecycleIntegration.java`: `register(...)`, `startTracing(...)`, `onActivityPreCreated(...)`, `onActivityCreated(...)`, `onActivityStarted(...)`, `onActivityResumed(...)`, `onActivityPrePaused(...)`, `onActivityPaused(...)`, and `onActivityDestroyed(...)`.
+- Re-read Sentry `sentry-android-core/src/main/java/io/sentry/android/core/AppState.java` and `LifecycleWatcher.java`: `onStart(...)`, `onStop(...)`, `onForeground(...)`, and `onBackground(...)`.
+- Re-read Datadog Android `DataDog/dd-sdk-android@519550150648592709d441c677437d8b1c3a0707` Activity lifecycle tracking source under `features/dd-sdk-android-rum/src/main/kotlin/com/datadog/android/rum/tracking/`: `register(...)`, `unregister(...)`, activity resumed, and activity stopped callbacks.
+- Re-read Datadog Activity view and Navigation view tracking sources under the same directory: activity resumed, activity stopped, and `onDestinationChanged(...)`.
+- Re-read Datadog Compose integration `integrations/dd-sdk-android-compose/src/main/kotlin/com/datadog/android/compose/internal/ComposeNavigationObserver.kt`: `onDestinationChanged(...)`, and `Navigation3.kt`: `rememberIsResumed(...)`.
+- Re-read PostHog Android `posthog/src/main/java/com/posthog/PostHog.kt` at `screen(...)` and `stampCachedScreenName(...)`.
+
+### Pattern And Tradeoffs
+
+- Sentry and Datadog are stronger for automatic Activity, navigation, Compose, foreground/background, view, and session/RUM lifecycle capture. The tradeoff is heavier Android integration, hidden lifecycle registration, broader product coupling, and more chances to collect route/view/session details that LogBrew should keep app-owned unless a future integration package explicitly owns it.
+- PostHog is lighter: apps call `screen(...)`, and the SDK stamps cached screen context onto later events. That is easier to reason about but is product-analytics oriented and does not provide trace-linked lifecycle spans.
+- LogBrew should take the middle path for core Kotlin: explicit app-owned lifecycle callbacks, active trace correlation, previous-state duration spans, primitive metadata only, and no hidden `ActivityLifecycleCallbacks`, Navigation/Compose observers, session-health derivation, replay/profiling, baggage, tracestate, payload, header, or full URL capture.
+
+### LogBrew Follow-Up Implementation
+
+- Added dependency-free `AndroidLifecycleTracker` plus `LogBrewAndroid.createLifecycleTracker(...)`.
+- Apps instantiate the tracker from their own lifecycle callback context, optionally under an active `LogBrewTrace`. `captureTransition(...)` emits one `android.lifecycle:<previous>-><next>` span with the previous state's duration, active trace correlation, primitive Android context metadata, spoofed trace-key overwrite, and same-state dedupe.
+- The core Kotlin jar still has no Android SDK, OkHttp, coroutine, or OpenTelemetry dependency. This is explicit lifecycle telemetry, not hidden automatic instrumentation.
+
+### Verification
+
+- TDD red: `bash scripts/check_kotlin_package.sh` failed with unresolved `createLifecycleTracker` and `captureTransition`.
+- Green: `bash scripts/check_kotlin_package.sh` passed with 26 core tests and 5 OkHttp tests, package metadata checks, source/javadoc/binary jar inspection, README guidance checks, packaged `AndroidLifecycleTracker.class`, and installed real-user smoke output proving one lifecycle span.
+- Installed-artifact proof: `kotlin/logbrew-kotlin/examples/real_user_smoke/RealUserSmoke.kt` now creates a lifecycle tracker from the packaged jar, emits a `created->started` span under a parent trace, verifies duplicate transition dedupe, previous-state duration, Android context metadata, spoofed metadata dropping, and no raw `traceparent` leakage.
+
+### Remaining Gaps After Lifecycle Follow-Up
+
+- Kotlin Android still lacks hidden/global Activity/Navigation/Compose instrumentation for teams that want automatic RUM-style view tracking, hidden/global URLConnection instrumentation, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication parity.
+
 ## Verification
 
 - `bash scripts/check_kotlin_style.sh`: ktlint `1.8.0` passed.
