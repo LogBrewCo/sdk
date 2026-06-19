@@ -7,8 +7,10 @@ use std::fmt;
 #[cfg(feature = "http")]
 use std::time::Duration;
 
+mod http_client;
 mod http_fields;
 mod http_server;
+mod metadata_safety;
 mod metric;
 mod operation_tracing;
 mod product_timeline;
@@ -17,6 +19,7 @@ mod tower_layer;
 mod traceparent;
 #[cfg(feature = "tracing")]
 mod tracing_layer;
+pub use http_client::{HttpClientSpan, HttpClientSpanEvents};
 pub use http_server::{HttpRequestTelemetry, HttpRequestTelemetryEvents};
 pub use metric::MetricEvent;
 pub use operation_tracing::{DependencyOperationKind, DependencyOperationSpan};

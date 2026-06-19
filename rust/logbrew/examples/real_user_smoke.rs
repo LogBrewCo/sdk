@@ -1,6 +1,7 @@
 use logbrew::{
-    ActionEvent, DependencyOperationSpan, EnvironmentEvent, IssueEvent, LogBrewClient, LogEvent,
-    Metadata, MetadataValue, MetricEvent, RecordingTransport, ReleaseEvent, SpanEvent, Traceparent,
+    ActionEvent, DependencyOperationSpan, EnvironmentEvent, HttpClientSpan, IssueEvent,
+    LogBrewClient, LogEvent, Metadata, MetadataValue, MetricEvent, RecordingTransport,
+    ReleaseEvent, SpanEvent, Traceparent,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -52,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         response.status_code, response.attempts
     );
     exercise_metric_helper()?;
+    exercise_http_client_span_helper()?;
     exercise_dependency_operation_span_helper()?;
 
     Ok(())
@@ -84,6 +86,44 @@ fn exercise_metric_helper() -> Result<(), Box<dyn std::error::Error>> {
             )
             .is_err()
     );
+    Ok(())
+}
+
+fn exercise_http_client_span_helper() -> Result<(), Box<dyn std::error::Error>> {
+    let context = Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")?;
+    let mut metadata = Metadata::new();
+    metadata.insert("retryAttempt".to_string(), MetadataValue::from(1));
+    metadata.insert(
+        "authorizationHeader".to_string(),
+        MetadataValue::String("Bearer not-for-telemetry".to_string()),
+    );
+
+    let outbound = HttpClientSpan::new(
+        "https://payments.example.invalid/api/payments/:payment_id?card=sample#debug",
+        "POST",
+        "b7ad6b7169203331",
+    )
+    .with_status_code(503)
+    .with_duration_ms(183.4)
+    .with_metadata(metadata)
+    .from_traceparent_context(&context)?;
+
+    assert_eq!(
+        outbound.outgoing_traceparent,
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
+    );
+
+    let mut client = LogBrewClient::builder("logbrew-rust", "0.1.0")
+        .api_key("LOGBREW_API_KEY")
+        .build()?;
+    client.span("evt_http_client_001", "2026-06-02T10:00:19Z", outbound.span)?;
+    let preview = client.preview_json()?;
+    assert!(preview.contains("\"http.client:POST /api/payments/:payment_id\""));
+    assert!(preview.contains("\"source\": \"rust_http_client\""));
+    assert!(preview.contains("\"statusCode\": 503"));
+    assert!(preview.contains("\"retryAttempt\": 1"));
+    assert!(!preview.contains("card=sample"));
+    assert!(!preview.contains("authorizationHeader"));
     Ok(())
 }
 

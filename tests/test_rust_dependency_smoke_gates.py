@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RUST_DEPENDENCY_SMOKE_COMMAND = "bash scripts/real_user_rust_dependency_smoke.sh"
+RUST_HTTP_CLIENT_SMOKE_COMMAND = "bash scripts/real_user_rust_http_client_smoke.sh"
 
 
 class RustDependencySmokeGateTests(unittest.TestCase):
@@ -19,12 +20,16 @@ class RustDependencySmokeGateTests(unittest.TestCase):
             with self.subTest(workflow=workflow.name):
                 self.assertIn("Run Rust dependency-span real-user smoke test", text)
                 self.assertIn(f"run: {RUST_DEPENDENCY_SMOKE_COMMAND}", text)
+                self.assertIn("Run Rust http-client real-user smoke test", text)
+                self.assertIn(f"run: {RUST_HTTP_CLIENT_SMOKE_COMMAND}", text)
 
     def test_public_verifier_runs_rust_dependency_smoke(self) -> None:
         script = (ROOT / "scripts" / "check_public_sdks.sh").read_text(encoding="utf-8")
 
         self.assertIn('"Rust dependency-span real-user smoke"', script)
         self.assertIn(f'run_shell_step "{RUST_DEPENDENCY_SMOKE_COMMAND}"', script)
+        self.assertIn('"Rust http-client real-user smoke"', script)
+        self.assertIn(f'run_shell_step "{RUST_HTTP_CLIENT_SMOKE_COMMAND}"', script)
 
 
 if __name__ == "__main__":

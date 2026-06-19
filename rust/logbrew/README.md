@@ -16,7 +16,7 @@ cargo add logbrew --features tracing
 cargo add logbrew --features tracing-opentelemetry
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -216,6 +216,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 `HttpRequestTelemetry` strips query strings and hash fragments from route templates, normalizes HTTP methods, adds primitive metadata such as `routeTemplate`, `method`, `statusCode`, and `statusCodeClass`, treats valid incoming W3C `traceparent` values as parent context, and falls back to the explicit app trace ID when propagation is missing or malformed. It does not create backend setup state, inspect account sessions, capture arbitrary headers, or read request/response bodies.
+
+## Outbound HTTP Client Spans
+
+Use `HttpClientSpan` when your Rust app owns the HTTP client call and wants one correlated outbound span plus one W3C propagation header. The helper does not patch `reqwest`, `ureq`, Hyper, or global clients; your code sets the returned `traceparent` header on the request it already owns.
+
+```rust
+use logbrew::{HttpClientSpan, LogBrewClient, Metadata, MetadataValue, Traceparent};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let parent = Traceparent::parse(
+        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    )?;
+    let mut metadata = Metadata::new();
+    metadata.insert("retryAttempt".to_string(), MetadataValue::from(1));
+
+    let outbound = HttpClientSpan::new(
+        "https://payments.example.invalid/api/payments/:payment_id?card=sample#debug",
+        "POST",
+        "b7ad6b7169203331",
+    )
+    .with_status_code(202)
+    .with_duration_ms(183.4)
+    .with_metadata(metadata)
+    .from_traceparent_context(&parent)?;
+
+    // Set only this W3C header on your app-owned request.
+    eprintln!("traceparent: {}", outbound.outgoing_traceparent);
+
+    let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+        .api_key("LOGBREW_API_KEY")
+        .build()?;
+    client.span("evt_http_client_span", "2026-06-02T10:00:00Z", outbound.span)?;
+    println!("{}", client.preview_json()?);
+    Ok(())
+}
+```
+
+`HttpClientSpan` strips query strings and hash fragments, reduces full URLs to route paths, normalizes methods, records status/duration metadata with source `rust_http_client`, marks `4xx`/`5xx` or `with_error_type(...)` spans as `error`, and keeps only primitive, safe metadata fields. It does not read request or response bodies, capture arbitrary transport fields, create support tickets, derive quota/usage, or own retry behavior.
 
 ## Axum Middleware Example
 

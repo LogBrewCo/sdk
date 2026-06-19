@@ -144,6 +144,10 @@ jobs:
         if: ${{ hashFiles('Cargo.toml') != '' }}
         run: bash scripts/real_user_rust_smoke.sh
 
+      - name: Run Rust http-client real-user smoke test
+        if: ${{ hashFiles('Cargo.toml') != '' }}
+        run: bash scripts/real_user_rust_http_client_smoke.sh
+
       - name: Run Rust dependency-span real-user smoke test
         if: ${{ hashFiles('Cargo.toml') != '' }}
         run: bash scripts/real_user_rust_dependency_smoke.sh

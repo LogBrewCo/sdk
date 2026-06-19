@@ -38,6 +38,7 @@ STEP_LABELS=(
   "Ruby package checks"
   "Swift package checks"
   "Rust real-user smoke"
+  "Rust http-client real-user smoke"
   "Rust dependency-span real-user smoke"
   "Rust Axum real-user smoke"
   "Rust Actix real-user smoke"
@@ -443,6 +444,10 @@ mark_step_complete
 
 begin_next_step "Rust real-user smoke"
 run_shell_step "bash scripts/real_user_rust_smoke.sh"
+mark_step_complete
+
+begin_next_step "Rust http-client real-user smoke"
+run_shell_step "bash scripts/real_user_rust_http_client_smoke.sh"
 mark_step_complete
 
 begin_next_step "Rust dependency-span real-user smoke"
