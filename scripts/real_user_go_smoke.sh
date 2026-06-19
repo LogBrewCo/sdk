@@ -89,6 +89,9 @@ with zipfile.ZipFile(zip_path) as archive:
     http_client_trace_source_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/http_client_trace.go"
     if http_client_trace_source_path not in names:
         raise SystemExit("missing http_client_trace.go in proxy module zip")
+    operation_trace_source_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/operation_trace.go"
+    if operation_trace_source_path not in names:
+        raise SystemExit("missing operation_trace.go in proxy module zip")
     readme_example_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/readme_example/main.go"
     if readme_example_path not in names:
         raise SystemExit("missing examples/readme_example/main.go in proxy module zip")
@@ -128,6 +131,9 @@ for needle in (
     "NewHTTPHandler",
     "NewHTTPClientTransport",
     "NewSlogHandler",
+    "DatabaseOperationWithLogBrewSpan",
+    "CacheOperationWithLogBrewSpan",
+    "QueueOperationWithLogBrewSpan",
     "CreateProductActionAttributes",
     "CreateNetworkMilestoneAttributes",
     "HTTPTransport",
@@ -164,6 +170,7 @@ PY
 module_dir="$module_src_root/github.com/LogBrewCo/sdk/go/logbrew@v0.1.0"
 test -f "$module_dir/go.mod"
 test -f "$module_dir/http_client_trace.go"
+test -f "$module_dir/operation_trace.go"
 test -f "$module_dir/examples/Makefile"
 test -f "$module_dir/examples/agent_timeline/main.go"
 test -f "$module_dir/examples/first_useful_telemetry/main.go"
@@ -910,6 +917,9 @@ for needle in (
     "IssueAttributesWithTrace",
     "NewHTTPHandler",
     "NewSlogHandler",
+    "DatabaseOperationWithLogBrewSpan",
+    "CacheOperationWithLogBrewSpan",
+    "QueueOperationWithLogBrewSpan",
     "CreateProductActionAttributes",
     "CreateNetworkMilestoneAttributes",
     "HTTPTransport",
@@ -992,6 +1002,24 @@ GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.MetricAttribute
 grep -q '^type MetricAttributes struct {' metric-attributes-doc.txt
 grep -q 'MetricAttributes describes the public payload fields for an explicit metric' metric-attributes-doc.txt
 grep -q 'event' metric-attributes-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.DatabaseOperationConfig > database-operation-config-doc.txt
+grep -q '^type DatabaseOperationConfig struct {' database-operation-config-doc.txt
+grep -q 'DatabaseOperationConfig configures an explicit app-owned database span' database-operation-config-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.CacheOperationConfig > cache-operation-config-doc.txt
+grep -q '^type CacheOperationConfig struct {' cache-operation-config-doc.txt
+grep -q 'CacheOperationConfig configures an explicit app-owned cache span' cache-operation-config-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.QueueOperationConfig > queue-operation-config-doc.txt
+grep -q '^type QueueOperationConfig struct {' queue-operation-config-doc.txt
+grep -q 'QueueOperationConfig configures an explicit app-owned queue span' queue-operation-config-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.DatabaseOperationWithLogBrewSpan > database-operation-doc.txt
+grep -q '^func DatabaseOperationWithLogBrewSpan' database-operation-doc.txt
+grep -q 'queues one privacy-bounded database span' database-operation-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.CacheOperationWithLogBrewSpan > cache-operation-doc.txt
+grep -q '^func CacheOperationWithLogBrewSpan' cache-operation-doc.txt
+grep -q 'queues one privacy-bounded cache span' cache-operation-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.QueueOperationWithLogBrewSpan > queue-operation-doc.txt
+grep -q '^func QueueOperationWithLogBrewSpan' queue-operation-doc.txt
+grep -q 'queues one privacy-bounded queue span' queue-operation-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.TraceparentContext > traceparent-context-doc.txt
 grep -q '^type TraceparentContext struct {' traceparent-context-doc.txt
 grep -q 'TraceparentContext describes an incoming W3C traceparent header after' traceparent-context-doc.txt

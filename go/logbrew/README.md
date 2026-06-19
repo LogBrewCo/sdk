@@ -236,6 +236,25 @@ response, err := httpClient.Do(request)
 
 The transport clones the request before writing exactly one W3C `traceparent`, scopes the downstream call under a child `TraceContext`, queues one span with method, query-free route, status, duration, sampled flag, and primitive metadata, then returns the original response or error. HTTP 4xx/5xx responses and transport errors are marked as failed dependency spans. Malformed active trace state falls back to a local trace and reports through `OnError`; telemetry capture failures also report through `OnError` and do not replace the app-owned HTTP result. It does not patch global clients, does not capture request or response payloads, does not store headers, cookies, full URLs, query strings, fragments, baggage, tracestate, or raw propagation values. Run `go run ./examples/http_client_trace` for a local example of downstream propagation and span capture.
 
+## Dependency Spans
+
+Use `DatabaseOperationWithLogBrewSpan`, `CacheOperationWithLogBrewSpan`, and `QueueOperationWithLogBrewSpan` around app-owned database, cache, or queue calls when you want request-to-dependency timing without driver monkeypatching:
+
+```go
+result, err := logbrew.DatabaseOperationWithLogBrewSpan(r.Context(), client, "select checkout", func(ctx context.Context) (string, error) {
+  // Use ctx for your database call so logs inside the callback can share the child trace.
+  return "order_123", nil
+}, logbrew.DatabaseOperationConfig{
+  System:            "postgresql",
+  OperationKind:     "query",
+  DatabaseName:      "orders",
+  StatementTemplate: "SELECT * FROM orders WHERE id = ?",
+  Metadata:          map[string]any{"service": "checkout"},
+})
+```
+
+Each helper creates a child `TraceContext`, activates it for the callback, records one span, returns the original result, and re-raises the original error. Metadata is primitive-only and intentionally drops SQL text, parameters, connection details, cache keys/values, commands, message bodies, broker URLs, headers, cookies, and auth-like fields. These helpers do not import or patch `database/sql`, Redis, Kafka, AMQP, or queue clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
+
 ## Agent-Readable Timelines
 
 Use `CreateProductActionAttributes` and `CreateNetworkMilestoneAttributes` when your Go service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.
