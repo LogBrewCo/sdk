@@ -143,6 +143,26 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 
 @end
 
+@interface LBWURLSessionTimings : NSObject
+
+@property(nonatomic, copy, readonly) NSDictionary<NSString *, NSNumber *> *metadata;
+
++ (nullable instancetype)timingsWithFetchMs:(nullable NSNumber *)fetchMs
+                                 redirectMs:(nullable NSNumber *)redirectMs
+                               nameLookupMs:(nullable NSNumber *)nameLookupMs
+                                  connectMs:(nullable NSNumber *)connectMs
+                                      tlsMs:(nullable NSNumber *)tlsMs
+                                     sendMs:(nullable NSNumber *)sendMs
+                                     waitMs:(nullable NSNumber *)waitMs
+                                  receiveMs:(nullable NSNumber *)receiveMs
+                           requestBodyBytes:(nullable NSNumber *)requestBodyBytes
+                          responseBodyBytes:(nullable NSNumber *)responseBodyBytes
+                                      error:(NSError *_Nullable *_Nullable)error;
+
+- (instancetype)init NS_UNAVAILABLE;
+
+@end
+
 @interface LBWTrace : NSObject
 
 + (nullable LBWTraceContext *)currentContext;
@@ -271,6 +291,15 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
                           durationMs:(nullable NSNumber *)durationMs
                            errorType:(nullable NSString *)errorType
                             metadata:(nullable NSDictionary<NSString *, id> *)metadata
+                               error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)captureURLSessionSpanWithID:(NSString *)eventID
+                           timestamp:(NSString *)timestamp
+                                span:(LBWURLSessionSpan *)span
+                          statusCode:(nullable NSNumber *)statusCode
+                          durationMs:(nullable NSNumber *)durationMs
+                           errorType:(nullable NSString *)errorType
+                            metadata:(nullable NSDictionary<NSString *, id> *)metadata
+                             timings:(nullable LBWURLSessionTimings *)timings
                                error:(NSError *_Nullable *_Nullable)error;
 
 @end

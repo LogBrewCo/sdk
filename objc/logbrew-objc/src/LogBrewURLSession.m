@@ -2,6 +2,8 @@
 
 #import "LogBrewNetworkValidation.h"
 
+#import <math.h>
+
 @interface LBWURLSessionSpan ()
 
 @property(nonatomic, copy) NSURLRequest *request;
@@ -13,6 +15,14 @@
                    traceContext:(LBWTraceContext *)traceContext
                           method:(NSString *)method
                    routeTemplate:(NSString *)routeTemplate NS_DESIGNATED_INITIALIZER;
+
+@end
+
+@interface LBWURLSessionTimings ()
+
+@property(nonatomic, copy) NSDictionary<NSString *, NSNumber *> *metadata;
+
+- (instancetype)initWithMetadata:(NSDictionary<NSString *, NSNumber *> *)metadata NS_DESIGNATED_INITIALIZER;
 
 @end
 
@@ -39,6 +49,39 @@ static NSString *LBWURLSessionSpanStatus(NSNumber *_Nullable statusCode, NSStrin
   return statusCode != nil && [statusCode integerValue] >= 400 ? @"error" : @"ok";
 }
 
+static BOOL LBWURLSessionAddTimingDuration(
+    NSMutableDictionary<NSString *, NSNumber *> *metadata,
+    NSString *key,
+    NSNumber *_Nullable value,
+    NSError *_Nullable *_Nullable error) {
+  NSNumber *checkedValue = LBWNetworkValidatedDurationMs(value, @"URLSession timing values", error);
+  if (value != nil && checkedValue == nil) {
+    return NO;
+  }
+  if (checkedValue != nil) {
+    metadata[key] = checkedValue;
+  }
+  return YES;
+}
+
+static BOOL LBWURLSessionAddByteCount(
+    NSMutableDictionary<NSString *, NSNumber *> *metadata,
+    NSString *key,
+    NSNumber *_Nullable value,
+    NSError *_Nullable *_Nullable error) {
+  if (value == nil) {
+    return YES;
+  }
+  double doubleValue = [value doubleValue];
+  long long integerValue = [value longLongValue];
+  if (!isfinite(doubleValue) || doubleValue != (double)integerValue || integerValue < 0LL) {
+    LBWURLSessionSetError(error, LBWURLSessionError(@"URLSession byte counts must be non-negative integers"));
+    return NO;
+  }
+  metadata[key] = @(integerValue);
+  return YES;
+}
+
 @implementation LBWURLSessionSpan
 
 - (instancetype)initWithRequest:(NSURLRequest *)request
@@ -53,6 +96,45 @@ static NSString *LBWURLSessionSpanStatus(NSNumber *_Nullable statusCode, NSStrin
     _routeTemplate = [routeTemplate copy];
   }
   return self;
+}
+
+@end
+
+@implementation LBWURLSessionTimings
+
+- (instancetype)initWithMetadata:(NSDictionary<NSString *, NSNumber *> *)metadata {
+  self = [super init];
+  if (self != nil) {
+    _metadata = [metadata copy];
+  }
+  return self;
+}
+
++ (LBWURLSessionTimings *)timingsWithFetchMs:(NSNumber *)fetchMs
+                                  redirectMs:(NSNumber *)redirectMs
+                                nameLookupMs:(NSNumber *)nameLookupMs
+                                   connectMs:(NSNumber *)connectMs
+                                       tlsMs:(NSNumber *)tlsMs
+                                      sendMs:(NSNumber *)sendMs
+                                      waitMs:(NSNumber *)waitMs
+                                   receiveMs:(NSNumber *)receiveMs
+                            requestBodyBytes:(NSNumber *)requestBodyBytes
+                           responseBodyBytes:(NSNumber *)responseBodyBytes
+                                       error:(NSError **)error {
+  NSMutableDictionary<NSString *, NSNumber *> *metadata = [NSMutableDictionary dictionary];
+  if (!LBWURLSessionAddTimingDuration(metadata, @"requestFetchMs", fetchMs, error) ||
+      !LBWURLSessionAddTimingDuration(metadata, @"requestRedirectMs", redirectMs, error) ||
+      !LBWURLSessionAddTimingDuration(metadata, @"requestNameLookupMs", nameLookupMs, error) ||
+      !LBWURLSessionAddTimingDuration(metadata, @"requestConnectMs", connectMs, error) ||
+      !LBWURLSessionAddTimingDuration(metadata, @"requestTlsMs", tlsMs, error) ||
+      !LBWURLSessionAddTimingDuration(metadata, @"requestSendMs", sendMs, error) ||
+      !LBWURLSessionAddTimingDuration(metadata, @"requestWaitMs", waitMs, error) ||
+      !LBWURLSessionAddTimingDuration(metadata, @"requestReceiveMs", receiveMs, error) ||
+      !LBWURLSessionAddByteCount(metadata, @"requestBodyBytes", requestBodyBytes, error) ||
+      !LBWURLSessionAddByteCount(metadata, @"responseBodyBytes", responseBodyBytes, error)) {
+    return nil;
+  }
+  return [[LBWURLSessionTimings alloc] initWithMetadata:metadata];
 }
 
 @end
@@ -103,6 +185,26 @@ static NSString *LBWURLSessionSpanStatus(NSNumber *_Nullable statusCode, NSStrin
                            errorType:(NSString *)errorType
                             metadata:(NSDictionary<NSString *, id> *)metadata
                                error:(NSError **)error {
+  return [self captureURLSessionSpanWithID:eventID
+                                 timestamp:timestamp
+                                      span:span
+                                statusCode:statusCode
+                                durationMs:durationMs
+                                 errorType:errorType
+                                  metadata:metadata
+                                   timings:nil
+                                     error:error];
+}
+
+- (BOOL)captureURLSessionSpanWithID:(NSString *)eventID
+                           timestamp:(NSString *)timestamp
+                                span:(LBWURLSessionSpan *)span
+                          statusCode:(NSNumber *)statusCode
+                          durationMs:(NSNumber *)durationMs
+                           errorType:(NSString *)errorType
+                            metadata:(NSDictionary<NSString *, id> *)metadata
+                             timings:(LBWURLSessionTimings *)timings
+                               error:(NSError **)error {
   if (span == nil) {
     LBWURLSessionSetError(error, LBWURLSessionError(@"URLSession span is required"));
     return NO;
@@ -123,6 +225,9 @@ static NSString *LBWURLSessionSpanStatus(NSNumber *_Nullable statusCode, NSStrin
   }
   if (!LBWNetworkStringIsBlank(errorType)) {
     spanMetadata[@"errorType"] = errorType;
+  }
+  if (timings != nil) {
+    [spanMetadata addEntriesFromDictionary:timings.metadata];
   }
 
   NSString *name = [NSString stringWithFormat:@"%@ %@", span.method, span.routeTemplate];

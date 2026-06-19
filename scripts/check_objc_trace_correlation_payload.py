@@ -123,6 +123,21 @@ def main() -> None:
         fail("URLSession metadata did not preserve sanitized method/route")
     if url_metadata.get("statusCode") != 503 or url_metadata.get("component") != "pay-api":
         fail("URLSession metadata did not preserve status/app metadata")
+    expected_timings = {
+        "requestFetchMs": 188.5,
+        "requestRedirectMs": 3.25,
+        "requestNameLookupMs": 2.5,
+        "requestConnectMs": 10,
+        "requestTlsMs": 6.5,
+        "requestSendMs": 4,
+        "requestWaitMs": 120.25,
+        "requestReceiveMs": 25,
+        "requestBodyBytes": 512,
+        "responseBodyBytes": 4096,
+    }
+    for key, expected in expected_timings.items():
+        if url_metadata.get(key) != expected:
+            fail(f"URLSession timing metadata {key} was not preserved: {url_metadata.get(key)}")
     for forbidden in ("cart=123", "#pay", "app-owned-header-value", "traceparent"):
         if forbidden in raw_payload:
             fail(f"URLSession span leaked forbidden text: {forbidden}")

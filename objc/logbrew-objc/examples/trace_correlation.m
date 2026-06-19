@@ -94,13 +94,27 @@ int main(void) {
     [request setValue:@"app-owned-header-value" forHTTPHeaderField:@"x-app-context"];
     LBWURLSessionSpan *urlSessionSpan = [LBWTrace startURLSessionSpanForRequest:request error:&error];
     LBWMust(urlSessionSpan != nil, error);
+    LBWURLSessionTimings *urlSessionTimings =
+        [LBWURLSessionTimings timingsWithFetchMs:@188.5
+                                      redirectMs:@3.25
+                                    nameLookupMs:@2.5
+                                       connectMs:@10
+                                           tlsMs:@6.5
+                                          sendMs:@4
+                                          waitMs:@120.25
+                                       receiveMs:@25
+                                requestBodyBytes:@512
+                               responseBodyBytes:@4096
+                                           error:&error];
+    LBWMust(urlSessionTimings != nil, error);
     LBWMust([client captureURLSessionSpanWithID:@"evt_trace_urlsession_001"
                                       timestamp:@"2026-06-02T10:00:08Z"
                                            span:urlSessionSpan
                                      statusCode:@503
                                      durationMs:@184.5
                                       errorType:nil
-                                       metadata:@{@"component": @"pay-api"}
+                                       metadata:@{@"component": @"pay-api", @"requestWaitMs": @999}
+                                        timings:urlSessionTimings
                                           error:&error], error);
     LBWMust([client captureLifecycleSpanWithID:@"evt_trace_lifecycle_001"
                                      timestamp:@"2026-06-02T10:00:09Z"

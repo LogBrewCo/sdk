@@ -617,6 +617,34 @@ static void LBWExerciseTraceHelpers(void) {
                                       errorType:nil
                                        metadata:@{@"component": @"pay-api"}
                                           error:&error], @"URLSession span capture failed");
+  LBWURLSessionSpan *timedURLSessionSpan = [LBWTrace startURLSessionSpanForRequest:request error:&error];
+  LBWAssert(timedURLSessionSpan != nil, @"timed URLSession span start failed");
+  LBWURLSessionTimings *urlTimings =
+      [LBWURLSessionTimings timingsWithFetchMs:@188.5
+                                    redirectMs:@3.25
+                                  nameLookupMs:@2.5
+                                     connectMs:@10
+                                         tlsMs:@6.5
+                                        sendMs:@4
+                                        waitMs:@120.25
+                                     receiveMs:@25
+                              requestBodyBytes:@512
+                             responseBodyBytes:@4096
+                                         error:&error];
+  LBWAssert(urlTimings != nil, @"URLSession timings creation failed");
+  LBWAssert([client captureURLSessionSpanWithID:@"evt_trace_urlsession_timing_001"
+                                      timestamp:@"2026-06-02T10:00:08Z"
+                                           span:timedURLSessionSpan
+                                     statusCode:@202
+                                     durationMs:@188.5
+                                      errorType:nil
+                                       metadata:@{
+                                         @"component": @"pay-api",
+                                         @"requestWaitMs": @999,
+                                         @"responseBodyBytes": @999
+                                       }
+                                        timings:urlTimings
+                                          error:&error], @"URLSession timing span capture failed");
   LBWAssert([client captureLifecycleSpanWithID:@"evt_trace_lifecycle_001"
                                      timestamp:@"2026-06-02T10:00:09Z"
                                  previousState:@" active "
@@ -652,6 +680,23 @@ static void LBWExerciseTraceHelpers(void) {
   LBWAssert([urlMetadata[@"method"] isEqualToString:@"POST"], @"URLSession metadata method failed");
   LBWAssert([urlMetadata[@"statusCode"] isEqual:@503], @"URLSession statusCode failed");
   LBWAssert([urlMetadata[@"component"] isEqualToString:@"pay-api"], @"URLSession app metadata failed");
+  NSDictionary<NSString *, id> *timingSpan =
+      LBWEventWithID(payload, @"evt_trace_urlsession_timing_001")[@"attributes"];
+  LBWAssert([timingSpan[@"traceId"] isEqualToString:context.traceID], @"URLSession timing trace id failed");
+  LBWAssert([timingSpan[@"parentSpanId"] isEqualToString:context.spanID], @"URLSession timing parent failed");
+  LBWAssert(![timingSpan[@"spanId"] isEqualToString:urlSpan[@"spanId"]], @"URLSession timing reused prior span");
+  NSDictionary<NSString *, id> *timingMetadata = timingSpan[@"metadata"];
+  LBWAssert([timingMetadata[@"source"] isEqualToString:@"objc.urlsession"], @"URLSession timing source failed");
+  LBWAssert([timingMetadata[@"requestFetchMs"] isEqual:@188.5], @"URLSession fetch timing failed");
+  LBWAssert([timingMetadata[@"requestRedirectMs"] isEqual:@3.25], @"URLSession redirect timing failed");
+  LBWAssert([timingMetadata[@"requestNameLookupMs"] isEqual:@2.5], @"URLSession name lookup timing failed");
+  LBWAssert([timingMetadata[@"requestConnectMs"] isEqual:@10], @"URLSession connect timing failed");
+  LBWAssert([timingMetadata[@"requestTlsMs"] isEqual:@6.5], @"URLSession TLS timing failed");
+  LBWAssert([timingMetadata[@"requestSendMs"] isEqual:@4], @"URLSession send timing failed");
+  LBWAssert([timingMetadata[@"requestWaitMs"] isEqual:@120.25], @"URLSession wait timing failed");
+  LBWAssert([timingMetadata[@"requestReceiveMs"] isEqual:@25], @"URLSession receive timing failed");
+  LBWAssert([timingMetadata[@"requestBodyBytes"] isEqual:@512], @"URLSession request byte count failed");
+  LBWAssert([timingMetadata[@"responseBodyBytes"] isEqual:@4096], @"URLSession response byte count failed");
   NSDictionary<NSString *, id> *lifecycleSpan = LBWEventWithID(payload, @"evt_trace_lifecycle_001")[@"attributes"];
   LBWAssert([lifecycleSpan[@"traceId"] isEqualToString:context.traceID], @"lifecycle trace id failed");
   LBWAssert([lifecycleSpan[@"parentSpanId"] isEqualToString:context.spanID], @"lifecycle parent failed");
@@ -692,6 +737,32 @@ static void LBWExerciseTraceHelpers(void) {
                                  metadata:nil
                                     error:&error];
   LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"validation_error"], @"bad lifecycle duration failed");
+  LBWAssert([LBWURLSessionTimings timingsWithFetchMs:@-1
+                                          redirectMs:nil
+                                        nameLookupMs:nil
+                                           connectMs:nil
+                                               tlsMs:nil
+                                              sendMs:nil
+                                              waitMs:nil
+                                           receiveMs:nil
+                                    requestBodyBytes:nil
+                                   responseBodyBytes:nil
+                                               error:&error] == nil &&
+                [LBWStableCode(error) isEqualToString:@"validation_error"],
+            @"bad URLSession timing duration failed");
+  LBWAssert([LBWURLSessionTimings timingsWithFetchMs:nil
+                                          redirectMs:nil
+                                        nameLookupMs:nil
+                                           connectMs:nil
+                                               tlsMs:nil
+                                              sendMs:nil
+                                              waitMs:nil
+                                           receiveMs:nil
+                                    requestBodyBytes:@-1
+                                   responseBodyBytes:nil
+                                               error:&error] == nil &&
+                [LBWStableCode(error) isEqualToString:@"validation_error"],
+            @"bad URLSession byte count failed");
   [scope close];
   LBWAssert([LBWTrace currentContext] == nil, @"trace scope close failed");
 }

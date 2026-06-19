@@ -96,6 +96,24 @@ Implemented a dependency-free Objective-C live-object bridge:
 
 The bridge intentionally does not read Swift-only OTel structs directly, install `opentelemetry-swift-core`, inspect `OpenTelemetry.instance`, serialize raw propagation metadata, ingest baggage/tracestate, copy attributes/events/links, patch `NSURLSession`, or capture payloads/headers/full URLs. Mixed Swift/Objective-C apps can expose an app-owned `NSObject` adapter when they want Objective-C code to copy the active OTel parent into LogBrew.
 
+## 2026-06-19 URLSession Timing Follow-Up
+
+Public source re-read for this follow-up:
+
+- Sentry Cocoa `getsentry/sentry-cocoa@1caa2120fe0b75e2e9d2b30ad51a63de6bc0e05c`: read `Sources/Sentry/SentryNetworkTracker.m` `addBreadcrumbForSessionTask(...)`, request-start tracking, `countOfBytesSent`, `countOfBytesReceived`, status-code/error breadcrumb handling, and optional query/fragment breadcrumb fields. Pattern: Sentry is broad and automatic, with useful request/response byte metadata but a larger capture surface than LogBrew core should copy.
+- Datadog iOS `DataDog/dd-sdk-ios@72544f98732c6e216e211fb6e1e799848f8f8c35`: read `DatadogInternal/Sources/NetworkInstrumentation/NetworkInstrumentationFeature.swift` `task(_:didFinishCollecting:)`, response-size fallback logic, `DatadogInternal/Sources/NetworkInstrumentation/URLSession/URLSessionTaskInterception.swift` `ResourceMetrics.init(taskMetrics:)`, and `DatadogRUM/Sources/RUMMonitorProtocol+Internal.swift` `addResourceMetrics(...)`. Pattern: delegate-collected `URLSessionTaskMetrics` are split into fetch, redirection, name lookup, connect, SSL, first-byte, download, request-size, and response-size metadata, then attached to resource telemetry.
+- OpenTelemetry Swift `open-telemetry/opentelemetry-swift@291fe3fff413ae9277ac36aec9fd9b51c1caa7e0`: read `Sources/Instrumentation/URLSession/URLSessionLogger.swift` `processAndLogRequest(...)`, `instrumentedRequest(...)`, `tracePropagationHTTPHeaders(...)`, and `Sources/Instrumentation/URLSession/URLSessionInstrumentation.swift` swizzled task creation plus `urlSession(_:task:didFinishCollecting:)`. Pattern: OTel owns automatic span/header instrumentation and task-metric callbacks; LogBrew should keep the smaller explicit boundary in Objective-C core.
+
+Implemented dependency-free Objective-C URLSession timing metadata:
+
+- Added `LBWURLSessionTimings` with explicit numeric phase durations: `requestFetchMs`, `requestRedirectMs`, `requestNameLookupMs`, `requestConnectMs`, `requestTlsMs`, `requestSendMs`, `requestWaitMs`, and `requestReceiveMs`.
+- Added request/response byte-count metadata through `requestBodyBytes` and `responseBodyBytes`.
+- Added a source-compatible `captureURLSessionSpanWithID:...metadata:timings:error:` overload. Existing callers can keep using the old selector.
+- Timing values are validated as finite non-negative numbers, byte counts are non-negative integers, and timing metadata is merged after caller metadata so spoofed timing keys are overwritten.
+- Packaged `trace_correlation.m` and `scripts/check_objc_trace_correlation_payload.py` now prove URLSession timing metadata from an installed source archive while checking that query text, fragments, app-owned headers, and raw `traceparent` values do not leak.
+
+The follow-up still avoids automatic `NSURLSession` patching, delegate ownership, request/response body capture, arbitrary header capture, full URL/query/fragment capture, cookies, baggage, tracestate, raw propagation metadata, local session-health inference, and backend symbolication claims.
+
 ## Remaining Gaps
 
-- Objective-C still lacks direct Swift-only OTel `Context`/`Span` extraction without an app-owned adapter, automatic UIKit/AppKit lifecycle instrumentation, automatic `NSURLSession` instrumentation, baggage/tracestate, rich span events/exceptions, URLSession metrics phase breakdown, and native symbolication parity.
+- Objective-C still lacks direct Swift-only OTel `Context`/`Span` extraction without an app-owned adapter, automatic UIKit/AppKit lifecycle instrumentation, automatic `NSURLSession` instrumentation, baggage/tracestate, rich span events/exceptions, and native symbolication parity.

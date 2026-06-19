@@ -170,6 +170,18 @@ NSMutableURLRequest *request =
     [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.example.com/api/checkout?cart=123#pay"]];
 request.HTTPMethod = @"POST";
 LBWURLSessionSpan *urlSessionSpan = [LBWTrace startURLSessionSpanForRequest:request error:&error];
+LBWURLSessionTimings *urlSessionTimings =
+    [LBWURLSessionTimings timingsWithFetchMs:@188.5
+                                  redirectMs:@3.25
+                                nameLookupMs:@2.5
+                                   connectMs:@10
+                                       tlsMs:@6.5
+                                      sendMs:@4
+                                      waitMs:@120.25
+                                   receiveMs:@25
+                            requestBodyBytes:@512
+                           responseBodyBytes:@4096
+                                       error:&error];
 
 // Use urlSessionSpan.request with your own NSURLSession call, then capture the completion.
 [client captureURLSessionSpanWithID:@"evt_trace_urlsession_001"
@@ -179,6 +191,7 @@ LBWURLSessionSpan *urlSessionSpan = [LBWTrace startURLSessionSpanForRequest:requ
                           durationMs:@184.5
                            errorType:nil
                             metadata:@{@"component": @"pay-api"}
+                             timings:urlSessionTimings
                                error:&error];
 
 [client captureLifecycleSpanWithID:@"evt_trace_lifecycle_001"
@@ -229,11 +242,11 @@ NSDictionary *spanAttributes =
                                                  error:&error];
 ```
 
-`continueOrCreateContextFromTraceparent:` accepts valid W3C `traceparent` values, creates a fresh local span ID, and falls back to a local root trace for malformed propagation. While a scope is active on the current thread, issue, log, action, and metric metadata receive `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled`; active trace fields override caller-supplied trace metadata so telemetry stays internally consistent. `outgoingHeaders` returns only a normalized `traceparent` header for app-owned HTTP clients. `startURLSessionSpanForRequest:error:` copies your request, adds only `traceparent`, strips query strings and fragments from the span route, and returns a child span context for `captureURLSessionSpanWithID:...` when your request completes.
+`continueOrCreateContextFromTraceparent:` accepts valid W3C `traceparent` values, creates a fresh local span ID, and falls back to a local root trace for malformed propagation. While a scope is active on the current thread, issue, log, action, and metric metadata receive `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled`; active trace fields override caller-supplied trace metadata so telemetry stays internally consistent. `outgoingHeaders` returns only a normalized `traceparent` header for app-owned HTTP clients. `startURLSessionSpanForRequest:error:` copies your request, adds only `traceparent`, strips query strings and fragments from the span route, and returns a child span context for `captureURLSessionSpanWithID:...` when your request completes. `LBWURLSessionTimings` lets your own `NSURLSessionTaskDelegate` pass numeric phase durations and request/response byte counts; timing values overwrite spoofed timing keys from caller metadata.
 
 Use `captureLifecycleSpanWithID:...` from app-owned AppDelegate, SceneDelegate, UIKit, or AppKit lifecycle hooks when a foreground/background or view lifecycle transition is already known to your app. It creates a child span under the active trace, stores primitive lifecycle metadata such as `previousState`, `currentState`, `screen`, and `durationSource`, and leaves session-health decisions to your application and backend-owned setup state.
 
-The OpenTelemetry helpers are copy helpers only: they do not install OpenTelemetry exporters, processors, or global context hooks, and they do not ingest baggage or tracestate. Swift-only OpenTelemetry values may need an app-owned `NSObject` adapter before Objective-C can inspect them. The trace helpers do not patch `NSURLSession`, do not observe application lifecycle notifications, do not swizzle UIKit/AppKit methods, do not collect headers or payloads, do not serialize the raw incoming `traceparent`, and do not capture query strings or fragments. Use only the project-scoped client key shown by LogBrew setup examples when sending telemetry.
+The OpenTelemetry helpers are copy helpers only: they do not install OpenTelemetry exporters, processors, or global context hooks, and they do not ingest baggage or tracestate. Swift-only OpenTelemetry values may need an app-owned `NSObject` adapter before Objective-C can inspect them. The trace helpers do not patch `NSURLSession`, do not observe application lifecycle notifications, do not swizzle UIKit/AppKit methods, do not collect headers or payloads, do not serialize the raw incoming `traceparent`, and do not capture query strings or fragments. URLSession timing metadata is limited to numeric phase durations and byte counts; do not place raw URLs, headers, payloads, cookies, or user-entered text in timing or span metadata. Use only the project-scoped client key shown by LogBrew setup examples when sending telemetry.
 
 ## Error Shape
 
