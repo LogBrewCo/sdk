@@ -50,7 +50,8 @@ internal static class OperationTracingTests
                     {
                         ["safe"] = true,
                         ["query"] = "SELECT * FROM orders WHERE id = 'se" + "cret'",
-                        ["connection_string"] = "Server=private;Pass" + "word=se" + "cret"
+                        ["connection_string"] = "Server=private;Pass" + "word=se" + "cret",
+                        ["database_host"] = "db.internal"
                     }));
 
             LogBrewOperationTracing.CacheOperation(
@@ -116,7 +117,7 @@ internal static class OperationTracingTests
             Require(payload.Contains(expected, StringComparison.Ordinal), "missing operation payload: " + expected);
         }
 
-        foreach (var blocked in new[] { "cart:se" + "cret", "se" + "cret body", "Server=private", "Pass" + "word=se" + "cret", "id = 'se" + "cret'" })
+        foreach (var blocked in new[] { "cart:se" + "cret", "se" + "cret body", "Server=private", "Pass" + "word=se" + "cret", "db.internal", "id = 'se" + "cret'" })
         {
             Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected blocked metadata to be omitted: " + blocked);
         }
@@ -195,7 +196,11 @@ internal static class OperationTracingTests
             () => result,
             LogBrewOperationTracing.QueueOperationOptions.Create()
                 .WithEventIdPrefix("dotnet_queue")
-                .OnError(_ => captureErrors++));
+                .OnError(_ =>
+                {
+                    captureErrors++;
+                    throw new InvalidOperationException("diagnostics callback failed");
+                }));
         Require(result == 42, "expected capture failure to preserve operation result");
         Require(captureErrors == 1, "expected one capture failure callback");
     }
