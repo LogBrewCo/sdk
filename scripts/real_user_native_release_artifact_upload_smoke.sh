@@ -18,6 +18,7 @@ trap cleanup EXIT
 artifact_root="$tmp_dir/artifacts"
 dsym_dir="$artifact_root/ios/Checkout.app.dSYM"
 dwarf_dir="$dsym_dir/Contents/Resources/DWARF"
+dsym_archive="$artifact_root/ios/Checkout.dSYMs.zip"
 mapping_file="$artifact_root/android/mapping.txt"
 native_symbols_dir="$artifact_root/android/symbols"
 native_so="$native_symbols_dir/lib/arm64-v8a/libcheckout.so"
@@ -29,8 +30,9 @@ printf '%s\n' \
   'com.example.Checkout -> a:' \
   '    void placeOrder() -> a' \
   > "$mapping_file"
-PYTHONPATH="$repo_root/tests" python3 - "$dwarf_dir/Checkout" "$native_so" "$unity_archive" <<'PY'
+PYTHONPATH="$repo_root/tests" python3 - "$dwarf_dir/Checkout" "$native_so" "$unity_archive" "$dsym_archive" <<'PY'
 import sys
+import zipfile
 from pathlib import Path
 
 from native_elf_fixture import write_android_elf_symbol
@@ -40,6 +42,9 @@ from native_unity_fixture import write_unity_symbols_zip
 write_macho_dwarf(Path(sys.argv[1]))
 write_android_elf_symbol(Path(sys.argv[2]))
 write_unity_symbols_zip(Path(sys.argv[3]))
+with zipfile.ZipFile(Path(sys.argv[4]), "w") as archive:
+    archive.write(Path(sys.argv[1]), "Payload/Checkout.app.dSYM/Contents/Resources/DWARF/Checkout")
+    archive.write(Path(sys.argv[1]).parents[2] / "Info.plist", "Payload/Checkout.app.dSYM/Contents/Info.plist")
 PY
 
 manifest="$tmp_dir/native-upload-manifest-ready.json"
@@ -48,7 +53,7 @@ python3 "$repo_root/scripts/create_native_release_artifact_manifest.py" \
   --release "2026.06.18" \
   --environment "production" \
   --service "checkout-mobile" \
-  --artifact "ios_dsym=$dsym_dir" \
+  --artifact "ios_dsym=$dsym_archive" \
   --artifact "android_proguard_mapping=$mapping_file" \
   --artifact "android_native_symbols=$native_symbols_dir" \
   --artifact "unity_symbols=$unity_archive" \
@@ -91,8 +96,7 @@ class Handler(BaseHTTPRequestHandler):
             "containsToken": expected_token.encode("utf-8") in body,
             "containsQueryPlaceholder": b"ignored=query" in body,
             "containsTempPath": str(state_file.parent).encode("utf-8") in body,
-            "containsDsymPart": b'name="artifact_0_file_0"' in body and b'filename="Info.plist"' in body,
-            "containsDwarfPart": b'name="artifact_0_file_1"' in body and b'filename="Checkout"' in body,
+            "containsDsymZipPart": b'name="artifact_0_file_0"' in body and b'filename="Checkout.dSYMs.zip"' in body,
             "containsMappingPart": b'name="artifact_1_file_0"' in body and b'filename="mapping.txt"' in body,
             "containsNativePart": b'name="artifact_2_file_0"' in body and b'filename="libcheckout.so"' in body,
             "containsUnityZipPart": b'name="artifact_3_file_0"' in body and b'filename="symbols.zip"' in body,
@@ -205,7 +209,7 @@ tmp_dir = sys.argv[7]
 assert success["status"] == "uploaded"
 assert success["retryCount"] == 1
 assert success["artifactCount"] == 4
-assert success["filePartCount"] == 5
+assert success["filePartCount"] == 4
 assert success["artifactTypes"] == [
     "ios_dsym",
     "android_proguard_mapping",
@@ -229,8 +233,7 @@ assert [event["path"] for event in events].count("/retry-success") == 2
 assert [event["path"] for event in events].count("/auth-failure") == 1
 assert [event["path"] for event in events].count("/validation-failure") == 1
 assert all(event["containsManifest"] for event in events)
-assert all(event["containsDsymPart"] for event in events)
-assert all(event["containsDwarfPart"] for event in events)
+assert all(event["containsDsymZipPart"] for event in events)
 assert all(event["containsMappingPart"] for event in events)
 assert all(event["containsNativePart"] for event in events)
 assert all(event["containsUnityZipPart"] for event in events)

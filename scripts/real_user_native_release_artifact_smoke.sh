@@ -14,6 +14,7 @@ trap remove_tmp_dir EXIT
 artifact_root="$tmp_dir/artifacts"
 dsym_dir="$artifact_root/ios/Checkout.app.dSYM"
 dwarf_dir="$dsym_dir/Contents/Resources/DWARF"
+dsym_archive="$artifact_root/ios/Checkout.dSYMs.zip"
 mapping_file="$artifact_root/android/mapping.txt"
 native_symbols_dir="$artifact_root/android/symbols"
 native_so="$native_symbols_dir/lib/arm64-v8a/libcheckout.so"
@@ -54,7 +55,8 @@ PYTHONPATH="$repo_root/tests" python3 - \
   "$dotnet_pdb" \
   "$dotnet_embedded_pe" \
   "$unity_archive" \
-  "$unity_symbols_dir" <<'PY'
+  "$unity_symbols_dir" \
+  "$dsym_archive" <<'PY'
 import sys
 import zipfile
 from pathlib import Path
@@ -79,6 +81,10 @@ with zipfile.ZipFile(archive_path, "w") as archive:
     archive.write(symbols_dir / "build_id", "symbols/build_id")
     archive.write(symbols_dir / "LineNumberMappings.json", "symbols/LineNumberMappings.json")
     archive.write(symbols_dir / "arm64-v8a" / "libil2cpp.sym.so", "symbols/arm64-v8a/libil2cpp.sym.so")
+dsym_archive = Path(sys.argv[12])
+with zipfile.ZipFile(dsym_archive, "w") as archive:
+    archive.write(Path(sys.argv[1]), "Payload/Checkout.app.dSYM/Contents/Resources/DWARF/Checkout")
+    archive.write(Path(sys.argv[1]).parents[2] / "Info.plist", "Payload/Checkout.app.dSYM/Contents/Info.plist")
 PY
 
 ready_manifest="$tmp_dir/native-manifest-ready.json"
@@ -87,7 +93,7 @@ python3 "$repo_root/scripts/create_native_release_artifact_manifest.py" \
   --release "2026.06.17" \
   --environment "production" \
   --service "checkout-mobile" \
-  --artifact "ios_dsym=$dsym_dir" \
+  --artifact "ios_dsym=$dsym_archive" \
   --artifact "android_proguard_mapping=$mapping_file" \
   --artifact "android_native_symbols=$native_symbols_dir" \
   --artifact "unity_symbols=$unity_archive" \
@@ -121,9 +127,17 @@ assert [artifact["artifactType"] for artifact in manifest["artifacts"]] == [
     "dotnet_pdb",
     "dotnet_pdb",
 ]
-assert manifest["artifacts"][0]["path"] == "ios/Checkout.app.dSYM"
+assert manifest["artifacts"][0]["path"] == "ios/Checkout.dSYMs.zip"
+assert manifest["artifacts"][0]["fileCount"] == 1
+assert manifest["artifacts"][0]["dsym"]["archiveFormat"] == "zip"
+assert manifest["artifacts"][0]["dsym"]["bundleName"] == "Checkout.app.dSYM"
+assert manifest["artifacts"][0]["dsym"]["bundleCount"] == 1
 assert manifest["artifacts"][0]["dsym"]["hasInfoPlist"] is True
 assert manifest["artifacts"][0]["dsym"]["uuidCount"] == 1
+assert (
+    manifest["artifacts"][0]["dsym"]["dwarfFiles"][0]["path"]
+    == "ios/Checkout.dSYMs.zip!Payload/Checkout.app.dSYM/Contents/Resources/DWARF/Checkout"
+)
 assert manifest["artifacts"][0]["dsym"]["dwarfFiles"][0]["uuids"] == [
     {"uuid": "C8469F85-B060-3085-B69D-E46C645560EA", "arch": "arm64"}
 ]

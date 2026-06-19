@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import struct
+import tempfile
+import zipfile
 from pathlib import Path
 
 
@@ -70,3 +72,14 @@ def write_fat_macho_dwarf(output_path: Path) -> None:
     payload[arm64_offset : arm64_offset + len(arm64_slice)] = arm64_slice
     payload[x86_offset : x86_offset + len(x86_slice)] = x86_slice
     output_path.write_bytes(payload)
+
+
+def write_dsym_zip(archive_path: Path, *, include_info_plist: bool = True) -> None:
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        dwarf_path = Path(tmp) / "Checkout.app.dSYM" / "Contents" / "Resources" / "DWARF" / "Checkout"
+        write_macho_dwarf(dwarf_path)
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.write(dwarf_path, "Payload/Checkout.app.dSYM/Contents/Resources/DWARF/Checkout")
+            if include_info_plist:
+                archive.writestr("Payload/Checkout.app.dSYM/Contents/Info.plist", "<plist version=\"1.0\" />\n")
