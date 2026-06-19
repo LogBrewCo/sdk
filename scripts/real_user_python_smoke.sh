@@ -312,6 +312,27 @@ run_requests_span_smoke() {
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_httpx_span_smoke() {
+    local output_prefix="$1"
+
+    python "$tmp_dir/httpx_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"status": 202' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncStatus": 204' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 2' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"activeSpan": "b7ad6b7169203336"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncActiveSpan": "b7ad6b7169203337"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203336-01"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203337-01"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncRouteTemplate": "/payments/:payment_id/refunds/:refund_id"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"method": "POST"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncMethod": "DELETE"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"callerHeader": "checkout"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncCallerHeader": "checkout-async"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_reinstall_from_freeze() {
     local freeze_file="$1"
     local expected_suffix="$2"
@@ -353,6 +374,7 @@ run_reinstall_from_freeze() {
     run_http_transport_smoke "$output_prefix-freeze-http-transport"
     run_urlopen_span_smoke "$output_prefix-freeze-urlopen-span"
     run_requests_span_smoke "$output_prefix-freeze-requests-span"
+    run_httpx_span_smoke "$output_prefix-freeze-httpx-span"
 
     deactivate
 }
@@ -401,6 +423,7 @@ run_reinstall_from_direct_requirement() {
     run_http_transport_smoke "$output_prefix-direct-http-transport"
     run_urlopen_span_smoke "$output_prefix-direct-urlopen-span"
     run_requests_span_smoke "$output_prefix-direct-requests-span"
+    run_httpx_span_smoke "$output_prefix-direct-httpx-span"
 
     deactivate
 }
@@ -472,6 +495,8 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "async_httpx_request_with_logbrew_span",
+    "httpx_request_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
     "parse_traceparent",
@@ -537,6 +562,8 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "async_httpx_request_with_logbrew_span",
+    "httpx_request_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
     "parse_traceparent",
@@ -805,6 +832,7 @@ EOF
 python "$tmp_dir/module_doc.py"
 
 cat > "$tmp_dir/typecheck.py" <<'EOF'
+import asyncio
 import logging
 from urllib.request import Request
 
@@ -823,9 +851,11 @@ from logbrew_sdk import (
     TraceparentContext,
     Transport,
     TransportResponse,
+    async_httpx_request_with_logbrew_span,
     create_network_milestone_attributes,
     create_product_action_attributes,
     create_traceparent,
+    httpx_request_with_logbrew_span,
     parse_traceparent,
     requests_request_with_logbrew_span,
     span_attributes_from_traceparent,
@@ -944,6 +974,39 @@ requests_response = requests_request_with_logbrew_span(
 )
 if requests_response.status_code != 204:
     raise RuntimeError("unexpected requests status")
+
+httpx_response = httpx_request_with_logbrew_span(
+    "GET",
+    "https://api.example.test/health?coupon=summer#fragment",
+    client=client,
+    event_id="evt_httpx_typecheck",
+    timestamp="2026-06-02T10:00:08Z",
+    request=lambda _method, _url, **_kwargs: type("Response", (), {"status_code": 202})(),
+    span_id_factory=lambda: "b7ad6b7169203333",
+)
+if httpx_response.status_code != 202:
+    raise RuntimeError("unexpected httpx status")
+
+
+async def async_httpx_request(_method: str, _url: str, **_kwargs: object) -> object:
+    return type("Response", (), {"status_code": 204})()
+
+
+async def run_async_httpx_typecheck() -> None:
+    async_httpx_response = await async_httpx_request_with_logbrew_span(
+        "GET",
+        "https://api.example.test/health?coupon=summer#fragment",
+        client=client,
+        event_id="evt_httpx_async_typecheck",
+        timestamp="2026-06-02T10:00:09Z",
+        request=async_httpx_request,
+        span_id_factory=lambda: "b7ad6b7169203334",
+    )
+    if async_httpx_response.status_code != 204:
+        raise RuntimeError("unexpected async httpx status")
+
+
+asyncio.run(run_async_httpx_typecheck())
 handler = LogBrewLoggingHandler(
     client,
     logging_transport,
@@ -1474,6 +1537,182 @@ print(
 )
 EOF
 
+cat > "$tmp_dir/httpx_span_smoke.py" <<'EOF'
+from __future__ import annotations
+
+import asyncio
+import json
+
+from logbrew_sdk import (
+    LogBrewClient,
+    LogBrewTraceContext,
+    async_httpx_request_with_logbrew_span,
+    get_active_logbrew_trace,
+    httpx_request_with_logbrew_span,
+    use_logbrew_trace,
+)
+
+
+class StubHttpxResponse:
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+
+class StubHttpxSession:
+    def __init__(self, status_code: int) -> None:
+        self.captured: dict[str, object] = {}
+        self.status_code = status_code
+
+    def request(self, method: str, url: str, **kwargs: object) -> StubHttpxResponse:
+        active = get_active_logbrew_trace()
+        headers = kwargs.get("headers")
+        if not isinstance(headers, dict):
+            raise RuntimeError("headers were not cloned into a dict")
+        self.captured = {
+            "activeSpan": active.span_id if active is not None else None,
+            "callerHeader": headers.get("x-caller"),
+            "json": kwargs.get("json"),
+            "method": method,
+            "timeout": kwargs.get("timeout"),
+            "traceparent": headers.get("traceparent"),
+            "url": url,
+        }
+        return StubHttpxResponse(self.status_code)
+
+
+class StubAsyncHttpxSession:
+    def __init__(self, status_code: int) -> None:
+        self.captured: dict[str, object] = {}
+        self.status_code = status_code
+
+    async def request(self, method: str, url: str, **kwargs: object) -> StubHttpxResponse:
+        active = get_active_logbrew_trace()
+        headers = kwargs.get("headers")
+        if not isinstance(headers, dict):
+            raise RuntimeError("headers were not cloned into a dict")
+        self.captured = {
+            "activeSpan": active.span_id if active is not None else None,
+            "callerHeader": headers.get("x-caller"),
+            "json": kwargs.get("json"),
+            "method": method,
+            "timeout": kwargs.get("timeout"),
+            "traceparent": headers.get("traceparent"),
+            "url": url,
+        }
+        return StubHttpxResponse(self.status_code)
+
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="smoke-app-httpx",
+    sdk_version="0.1.0",
+)
+parent_trace = LogBrewTraceContext(
+    trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+    span_id="00f067aa0ba902b7",
+    sampled=True,
+)
+caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout"}
+async_caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout-async"}
+session = StubHttpxSession(202)
+async_session = StubAsyncHttpxSession(204)
+
+with use_logbrew_trace(parent_trace):
+    response = httpx_request_with_logbrew_span(
+        "post",
+        "https://api.example.test/payments/123?coupon=summer#receipt",
+        client=client,
+        event_id="evt_python_httpx_client",
+        timestamp="2026-06-19T09:00:03Z",
+        session=session,
+        timeout=3.5,
+        headers=caller_headers,
+        json={"card": "private"},
+        route_template="/payments/:payment_id",
+        span_id_factory=lambda: "b7ad6b7169203336",
+        clock=iter([40.0, 40.057]).__next__,
+        metadata={"service": "checkout", "payload": {"private": True}},
+    )
+
+
+async def run_async_request() -> StubHttpxResponse:
+    with use_logbrew_trace(parent_trace):
+        return await async_httpx_request_with_logbrew_span(
+            "delete",
+            "https://api.example.test/payments/123/refunds/456?coupon=summer#receipt",
+            client=client,
+            event_id="evt_python_httpx_async_client",
+            timestamp="2026-06-19T09:00:04Z",
+            session=async_session,
+            timeout=4.5,
+            headers=async_caller_headers,
+            json={"card": "private"},
+            route_template="/payments/:payment_id/refunds/:refund_id",
+            span_id_factory=lambda: "b7ad6b7169203337",
+            clock=iter([50.0, 50.063]).__next__,
+            metadata={"service": "checkout", "headers": {"authorization": "private"}},
+        )
+
+
+async_response = asyncio.run(run_async_request())
+payload = json.loads(client.preview_json())
+sync_event = payload["events"][0]
+async_event = payload["events"][1]
+sync_metadata = sync_event["attributes"]["metadata"]
+async_metadata = async_event["attributes"]["metadata"]
+serialized = client.preview_json()
+if caller_headers["Traceparent"] != "spoofed" or async_caller_headers["Traceparent"] != "spoofed":
+    raise SystemExit("caller headers were mutated")
+for forbidden in ("coupon=summer", "traceparent", "card", "authorization"):
+    if forbidden in serialized:
+        raise SystemExit(f"httpx span leaked private data: {forbidden}")
+
+closed_client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="smoke-app-httpx",
+    sdk_version="0.1.0",
+)
+closed_client.closed = True
+capture_errors: list[str] = []
+httpx_request_with_logbrew_span(
+    "GET",
+    "https://api.example.test/health",
+    client=closed_client,
+    event_id="evt_python_httpx_capture_failure",
+    timestamp="2026-06-19T09:00:05Z",
+    request=lambda _method, _url, **_kwargs: StubHttpxResponse(204),
+    span_id_factory=lambda: "b7ad6b7169203338",
+    on_capture_error=lambda error: capture_errors.append(str(error)),
+)
+
+print(
+    json.dumps(
+        {
+            "activeSpan": session.captured["activeSpan"],
+            "asyncActiveSpan": async_session.captured["activeSpan"],
+            "asyncCallerHeader": async_session.captured["callerHeader"],
+            "asyncMethod": async_metadata["method"],
+            "asyncRouteTemplate": async_metadata["routeTemplate"],
+            "asyncStatus": async_response.status_code,
+            "asyncStatusCode": async_metadata["statusCode"],
+            "asyncTimeout": async_session.captured["timeout"],
+            "asyncTraceparent": async_session.captured["traceparent"],
+            "callerHeader": session.captured["callerHeader"],
+            "captureErrors": len(capture_errors),
+            "events": len(payload["events"]),
+            "method": sync_metadata["method"],
+            "ok": True,
+            "routeTemplate": sync_metadata["routeTemplate"],
+            "status": response.status_code,
+            "statusCode": sync_metadata["statusCode"],
+            "timeout": session.captured["timeout"],
+            "traceparent": session.captured["traceparent"],
+        },
+        sort_keys=True,
+    )
+)
+EOF
+
 cat > "$tmp_dir/metadata.py" <<'EOF'
 from importlib.metadata import distribution, files, metadata, version
 from pathlib import Path
@@ -1511,6 +1750,8 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "async_httpx_request_with_logbrew_span",
+    "httpx_request_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
 ):
@@ -1812,6 +2053,7 @@ run_logging_smoke "wheel-logging"
 run_http_transport_smoke "wheel-http-transport"
 run_urlopen_span_smoke "wheel-urlopen-span"
 run_requests_span_smoke "wheel-requests-span"
+run_httpx_span_smoke "wheel-httpx-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/pip-uninstall-list.json"
@@ -1842,6 +2084,7 @@ run_logging_smoke "wheel-reinstall-logging"
 run_http_transport_smoke "wheel-reinstall-http-transport"
 run_urlopen_span_smoke "wheel-reinstall-urlopen-span"
 run_requests_span_smoke "wheel-reinstall-requests-span"
+run_httpx_span_smoke "wheel-reinstall-httpx-span"
 
 deactivate
 run_reinstall_from_freeze "$tmp_dir/pip-freeze.txt" "$wheel_artifact" "wheel"
@@ -1882,6 +2125,7 @@ run_logging_smoke "sdist-logging"
 run_http_transport_smoke "sdist-http-transport"
 run_urlopen_span_smoke "sdist-urlopen-span"
 run_requests_span_smoke "sdist-requests-span"
+run_httpx_span_smoke "sdist-httpx-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/sdist-pip-uninstall-list.json"
@@ -1912,6 +2156,7 @@ run_logging_smoke "sdist-reinstall-logging"
 run_http_transport_smoke "sdist-reinstall-http-transport"
 run_urlopen_span_smoke "sdist-reinstall-urlopen-span"
 run_requests_span_smoke "sdist-reinstall-requests-span"
+run_httpx_span_smoke "sdist-reinstall-httpx-span"
 
 cat > "$tmp_dir/unauth.py" <<'EOF'
 import json

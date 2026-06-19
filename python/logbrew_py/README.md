@@ -314,6 +314,54 @@ response = requests_request_with_logbrew_span(
 
 The `requests` helper clones caller headers, replaces any caller-supplied `traceparent` with one normalized child header, runs the request under that child trace context, queues one sanitized dependency span, and returns the original `requests.Response` or re-raises the original exception. It records method, route template, status code, duration, sampled flag, and primitive metadata only. It does not capture payloads, response bodies, headers, cookies, full URLs, query strings, fragments, baggage, tracestate, or raw propagation values.
 
+For apps that use `httpx`, use `httpx_request_with_logbrew_span()` for sync calls or `async_httpx_request_with_logbrew_span()` for async calls. LogBrew does not add `httpx` as a dependency and does not patch `httpx.Client`, `httpx.AsyncClient`, or transports:
+
+```python
+import httpx
+
+from logbrew_sdk import (
+    LogBrewClient,
+    async_httpx_request_with_logbrew_span,
+    httpx_request_with_logbrew_span,
+)
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+
+with httpx.Client() as session:
+    response = httpx_request_with_logbrew_span(
+        "POST",
+        "https://api.example.com/payments/123?coupon=summer",
+        client=client,
+        event_id="evt_payment_submit",
+        timestamp="2026-06-19T09:00:00Z",
+        session=session,
+        timeout=3.5,
+        headers={"x-caller": "checkout-api"},
+        json={"amount": 42},
+        route_template="/payments/:payment_id",
+        metadata={"service": "checkout-api"},
+    )
+
+async def submit_payment(async_session: httpx.AsyncClient) -> httpx.Response:
+    return await async_httpx_request_with_logbrew_span(
+        "POST",
+        "https://api.example.com/payments/123?coupon=summer",
+        client=client,
+        event_id="evt_payment_submit_async",
+        timestamp="2026-06-19T09:00:01Z",
+        session=async_session,
+        timeout=3.5,
+        route_template="/payments/:payment_id",
+        metadata={"service": "checkout-api"},
+    )
+```
+
+The `httpx` helpers follow the same privacy and failure behavior as the `requests` helper: cloned caller headers, exactly one normalized child `traceparent`, active child trace context during the call or awaited call, sanitized dependency span capture, original response/error preservation, and optional `on_capture_error` reporting for telemetry failures. They do not capture payloads, response bodies, headers, cookies, full URLs, query strings, fragments, baggage, tracestate, or raw propagation values.
+
 ## Agent-Readable Timelines
 
 Use `create_product_action_attributes()` and `create_network_milestone_attributes()` when your service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.
