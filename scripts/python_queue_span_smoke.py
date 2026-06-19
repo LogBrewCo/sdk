@@ -7,6 +7,7 @@ from logbrew_sdk import (
     LogBrewClient,
     LogBrewTraceContext,
     async_queue_operation_with_logbrew_span,
+    celery_operation_with_logbrew_span,
     get_active_logbrew_trace,
     queue_operation_with_logbrew_span,
     rq_operation_with_logbrew_span,
@@ -23,6 +24,19 @@ class StubRqJob:
     origin = "email"
     args = ("raw-order-id",)
     kwargs = {"payload": "raw job payload"}
+
+
+class StubCeleryTask:
+    name = "checkout.send_receipt"
+    request = {
+        "delivery_info": {
+            "routing_key": "receipts",
+            "broker_url": "amqp://user:pass@broker.internal/vhost",
+        },
+        "args": ["raw receipt id"],
+        "kwargs": {"payload": "raw celery body"},
+        "headers": {"traceparent": "raw celery header"},
+    }
 
 
 client = LogBrewClient.create(
@@ -122,6 +136,19 @@ with use_logbrew_trace(parent_trace):
         metadata={"service": "checkout", "jobArgs": "raw rq args"},
     )
 
+with use_logbrew_trace(parent_trace):
+    celery_result = celery_operation_with_logbrew_span(
+        client=client,
+        event_id="evt_python_celery_publish",
+        timestamp="2026-06-19T13:00:05Z",
+        task=StubCeleryTask(),
+        operation=lambda: "celery published",
+        operation_kind="publish",
+        span_id_factory=lambda: "b7ad6b7169203371",
+        clock=iter([350.0, 350.008]).__next__,
+        metadata={"service": "checkout", "headers": "raw celery headers"},
+    )
+
 closed_client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
     sdk_name="smoke-app-queue",
@@ -154,6 +181,11 @@ for forbidden in (
     "refused",
     "raw-order-id",
     "raw rq args",
+    "raw receipt id",
+    "raw celery body",
+    "raw celery header",
+    "raw celery headers",
+    "amqp://",
 ):
     if forbidden in serialized:
         raise SystemExit(f"queue span leaked private data: {forbidden}")
@@ -163,6 +195,7 @@ publish_metadata = payload["events"][0]["attributes"]["metadata"]
 process_metadata = payload["events"][1]["attributes"]["metadata"]
 error_metadata = payload["events"][2]["attributes"]["metadata"]
 rq_metadata = payload["events"][3]["attributes"]["metadata"]
+celery_metadata = payload["events"][4]["attributes"]["metadata"]
 
 print(
     json.dumps(
@@ -171,6 +204,10 @@ print(
             "asyncActiveSpan": captured["asyncActiveSpan"],
             "asyncProcessed": process_result["status"],
             "captureErrors": len(capture_errors),
+            "celeryOperation": celery_metadata["queueOperation"],
+            "celeryQueueName": celery_metadata["queueName"],
+            "celeryResult": celery_result,
+            "celeryTaskName": celery_metadata["taskName"],
             "errorType": error_metadata["errorType"],
             "events": len(payload["events"]),
             "messageCount": publish_metadata["messageCount"],

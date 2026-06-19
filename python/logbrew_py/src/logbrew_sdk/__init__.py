@@ -915,6 +915,7 @@ from logbrew_sdk._cache_client import (  # noqa: E402
     async_cache_operation_with_logbrew_span,
     cache_operation_with_logbrew_span,
 )
+from logbrew_sdk._celery_client import celery_operation_with_logbrew_span  # noqa: E402
 from logbrew_sdk._queue_client import (  # noqa: E402
     async_queue_operation_with_logbrew_span,
     queue_operation_with_logbrew_span,
@@ -948,6 +949,7 @@ __all__ = [
     "async_httpx_request_with_logbrew_span",
     "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
+    "celery_operation_with_logbrew_span",
     "create_logbrew_trace_context",
     "create_network_milestone_attributes",
     "create_product_action_attributes",

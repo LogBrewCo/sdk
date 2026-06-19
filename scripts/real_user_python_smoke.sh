@@ -372,9 +372,13 @@ run_queue_span_smoke() {
 
     python "$repo_root/scripts/python_queue_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 5' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"activeSpan": "b7ad6b7169203361"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"asyncActiveSpan": "b7ad6b7169203362"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"celeryOperation": "publish checkout.send_receipt"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"celeryQueueName": "receipts"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"celeryResult": "celery published"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"celeryTaskName": "checkout.send_receipt"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"queueSystem": "celery"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"syncOperationKind": "publish"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"queueName": "email"' "$tmp_dir/$output_prefix.stdout.json"
@@ -530,6 +534,7 @@ with zipfile.ZipFile(wheel_path) as archive:
     names = set(archive.namelist())
     required = {
         "logbrew_sdk/_cache_client.py",
+        "logbrew_sdk/_celery_client.py",
         "logbrew_sdk/_db_client.py",
         "logbrew_sdk/_http_client.py",
         "logbrew_sdk/_instrumentation.py",
@@ -566,6 +571,7 @@ for needle in (
     "async_httpx_request_with_logbrew_span",
     "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
+    "celery_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "queue_operation_with_logbrew_span",
@@ -603,6 +609,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
         f"{sdist_root}/README.md",
         f"{sdist_root}/pyproject.toml",
         f"{sdist_root}/src/logbrew_sdk/_cache_client.py",
+        f"{sdist_root}/src/logbrew_sdk/_celery_client.py",
         f"{sdist_root}/src/logbrew_sdk/_db_client.py",
         f"{sdist_root}/src/logbrew_sdk/_http_client.py",
         f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
@@ -645,6 +652,7 @@ for needle in (
     "async_httpx_request_with_logbrew_span",
     "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
+    "celery_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "queue_operation_with_logbrew_span",
@@ -1941,6 +1949,7 @@ if version("logbrew-sdk") != package_version:
 package_files = {str(path) for path in files("logbrew-sdk") or []}
 required = {
     "logbrew_sdk/_cache_client.py",
+    "logbrew_sdk/_celery_client.py",
     "logbrew_sdk/_db_client.py",
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
@@ -1972,6 +1981,7 @@ for needle in (
     "async_httpx_request_with_logbrew_span",
     "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
+    "celery_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "queue_operation_with_logbrew_span",
@@ -2117,6 +2127,7 @@ required_show_files = {
     f"{dist_info_dir}/direct_url.json",
     f"{dist_info_dir}/top_level.txt",
     "logbrew_sdk/_cache_client.py",
+    "logbrew_sdk/_celery_client.py",
     "logbrew_sdk/_db_client.py",
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",

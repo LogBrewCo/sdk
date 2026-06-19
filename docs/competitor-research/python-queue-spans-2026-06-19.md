@@ -111,3 +111,40 @@ Verifier evidence:
 Remaining gap after this follow-up:
 
 - LogBrew is now better for privacy-bounded explicit RQ adoption, but Sentry and Datadog remain ahead for teams that want hidden RQ patching and broker metadata propagation. That should stay out of core; the next step would be a separate opt-in `logbrew-rq` integration package only if the extra dependency and patching surface are justified.
+
+## Celery Convenience Follow-Up
+
+Fresh source refresh reused from the RQ follow-up:
+
+- Sentry Python `getsentry/sentry-python@883e585baf564ff650e2292b70262aef852adec0`
+- `sentry_sdk/integrations/celery/__init__.py`: `CeleryIntegration.setup_once`, `_patch_task_apply_async`, `_patch_celery_send_task`, `_patch_producer_publish`, `_update_celery_task_headers`, `_capture_exception`, `_make_event_processor`.
+- Datadog dd-trace-py `DataDog/dd-trace-py@187cfc3700200ec8f33d6f610280924ef17e1696`
+- `ddtrace/contrib/internal/celery/signals.py`: `trace_before_publish`, `trace_after_publish`, `trace_prerun`, `trace_postrun`, `_inject_distributed_headers`, `trace_failure`, `trace_retry`.
+- OpenTelemetry Python Contrib `open-telemetry/opentelemetry-python-contrib@a5081cddcd6ca7f529abb2dbdebce6d2a4f062fb`
+- `instrumentation/opentelemetry-instrumentation-celery/src/opentelemetry/instrumentation/celery/__init__.py`: `CeleryInstrumentor._instrument`, `_trace_before_publish`, `_trace_after_publish`, `_trace_prerun`, `_trace_postrun`, `_trace_failure`, `_trace_retry`.
+
+Pattern update:
+
+- Sentry Celery patches task publish/run paths, updates task headers with trace and baggage data, tracks enqueue timestamps, and can enrich exceptions with task IDs and args/kwargs subject to PII settings.
+- Datadog Celery uses Celery signals, stores span state against task IDs, injects distributed headers into nested Celery header structures, and records broker host/port metadata.
+- OpenTelemetry Celery uses signal hooks, task-local span lifecycle state, producer/consumer spans, and propagator injection/extraction.
+
+LogBrew follow-up:
+
+- Added dependency-free `celery_operation_with_logbrew_span(...)` in core for app-owned Celery `apply_async` or task-processing calls.
+- The helper duck-types only string-like `task.name` and an optional `task.request.delivery_info.routing_key`, derives `taskName`, `queueName`, `queueOperation`, and a single-message count, and delegates to the existing queue span capture path.
+- It preserves caller result/error, activates a child LogBrew trace during the operation, and keeps capture failures isolated through `on_capture_error`.
+- It does not import Celery, register signals, patch `apply_async`, mutate headers, record broker URLs, capture task IDs, args, kwargs, request headers, baggage, tracestate, exception messages, or stack traces.
+
+Verifier evidence:
+
+- Focused TDD red failed on missing `celery_operation_with_logbrew_span` export.
+- `PYTHONPATH=python/logbrew_py/src python3 -m unittest python/logbrew_py/tests/test_celery_client.py python/logbrew_py/tests/test_rq_client.py python/logbrew_py/tests/test_queue_client.py` passed.
+- `PYTHONPATH=python/logbrew_py/src python3 scripts/python_queue_span_smoke.py` proved five queue events, Celery task/queue metadata, RQ metadata, and no Celery/RQ payload/header/broker leakage.
+- `PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'` ran 64 tests.
+- `bash scripts/check_python_static.sh` passed Ruff and mypy over 44 source files.
+- `bash scripts/real_user_python_smoke.sh` passed wheel, wheel reinstall, freeze/direct reinstall, sdist, and sdist reinstall installed-artifact checks with `_celery_client.py` and `_rq_client.py` included.
+
+Remaining gap after this follow-up:
+
+- LogBrew is now better for privacy-bounded explicit Celery and RQ adoption, but Sentry, Datadog, and OpenTelemetry remain ahead for teams that want hidden signal/patch-based queue instrumentation and propagation through broker metadata. That should stay out of `logbrew-sdk`; a future opt-in `logbrew-celery` package would need separate dependency, patching, privacy, and uninstall proof.

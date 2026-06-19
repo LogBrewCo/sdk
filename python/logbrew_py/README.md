@@ -475,6 +475,31 @@ queued = rq_operation_with_logbrew_span(
 
 The RQ helper records one `rq` queue span using explicit caller control. It reads only string-like `job.func_name` and `job.origin` by default, lets you override queue/task names, and still avoids job args, kwargs, descriptions, broker metadata writes, global worker patching, baggage, and tracestate.
 
+For Celery tasks, use `celery_operation_with_logbrew_span()` when you want safe task and queue metadata without registering Celery signals, mutating task headers, or patching `apply_async`:
+
+```python
+from logbrew_sdk import LogBrewClient, celery_operation_with_logbrew_span
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-worker",
+    sdk_version="1.0.0",
+)
+
+queued = celery_operation_with_logbrew_span(
+    client=client,
+    event_id="evt_checkout_receipt_celery_publish",
+    timestamp="2026-06-19T15:00:00Z",
+    task=send_receipt_task,
+    operation=lambda: send_receipt_task.apply_async(args=[order_id]),
+    operation_kind="publish",
+    queue_name="receipts",
+    metadata={"service": "checkout-worker"},
+)
+```
+
+The Celery helper reads only string-like `task.name` and an optional routing key from `task.request.delivery_info`, lets you override queue/task names, and still avoids task args, kwargs, request headers, broker URLs, signal registration, header mutation, baggage, and tracestate.
+
 ## Agent-Readable Timelines
 
 Use `create_product_action_attributes()` and `create_network_milestone_attributes()` when your service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.
