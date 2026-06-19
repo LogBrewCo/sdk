@@ -46,16 +46,90 @@ mkdir -p "$crate_src_root"
 tar -xf "$crate_path" -C "$crate_src_root"
 crate_dir="$crate_src_root/logbrew-0.1.0"
 test -f "$crate_dir/examples/axum_request_middleware.rs"
+grep -q 'TowerHttpClientSpanLayer' "$crate_dir/README.md"
 
 cd "$tmp_dir"
 cargo new --quiet axum-app
 cd axum-app
 cargo add logbrew --path "$crate_dir" --features tower >/dev/null
 cargo add axum@0.8 >/dev/null
+cargo add serde_json@1 >/dev/null
 cargo add tokio@1 --features macros,rt-multi-thread >/dev/null
 cargo add tower@0.5 --features util >/dev/null
 assert_logbrew_path_dependency Cargo.toml axum-app "/extracted-crate/logbrew-0.1.0"
 cp "$crate_dir/examples/axum_request_middleware.rs" src/main.rs
+mkdir -p src/bin
+cat > src/bin/tower_http_client_span.rs <<'EOF'
+use axum::{
+    body::Body,
+    http::{Request, Response, StatusCode},
+};
+use logbrew::{LogBrewClient, TowerHttpClientSpanLayer, TowerRequestIds};
+use serde_json::Value;
+use std::{
+    convert::Infallible,
+    sync::{Arc, Mutex},
+};
+use tower::{Layer, ServiceExt, service_fn};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Arc::new(Mutex::new(
+        LogBrewClient::builder("tower-http-client-smoke", "0.1.0")
+            .api_key("LOGBREW_API_KEY")
+            .build()?,
+    ));
+    let layer = TowerHttpClientSpanLayer::new(
+        Arc::clone(&client),
+        |request: &Request<Body>| request.uri().path().replace("/123", "/:payment_id"),
+        || {
+            TowerRequestIds::new("4bf92f3577b34da6a3ce929d0e0e4736", "2222222222222222")
+                .with_parent_span_id("00f067aa0ba902b7")
+        },
+        || "2026-06-02T10:00:11Z".to_string(),
+    );
+    let service = service_fn(|request: Request<Body>| async move {
+        assert_eq!(
+            request
+                .headers()
+                .get("traceparent")
+                .and_then(|value| value.to_str().ok()),
+            Some("00-4bf92f3577b34da6a3ce929d0e0e4736-2222222222222222-01")
+        );
+        Ok::<_, Infallible>(
+            Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(Body::empty())
+                .unwrap(),
+        )
+    });
+    let response = layer
+        .layer(service)
+        .oneshot(
+            Request::builder()
+                .method("post")
+                .uri("/payments/123?coupon=sample#debug")
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+
+    let payload: Value = serde_json::from_str(&client.lock().unwrap().preview_json()?)?;
+    let events = payload["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    let span = &events[0]["attributes"];
+    assert_eq!(span["name"], "http.client:POST /payments/:payment_id");
+    assert_eq!(span["metadata"]["source"], "rust_http_client");
+    assert_eq!(span["metadata"]["statusCode"], 502);
+    assert_eq!(span["metadata"]["statusCodeClass"], "5xx");
+    assert_eq!(span["status"], "error");
+    let text = payload.to_string();
+    assert!(!text.contains("coupon=sample"));
+    assert!(!text.contains("#debug"));
+    println!("{{\"ok\":true,\"towerHttpClientSpans\":1}}");
+    Ok(())
+}
+EOF
 
 grep -q '^name = "logbrew"$' Cargo.lock
 grep -q '^name = "axum"$' Cargo.lock
@@ -88,5 +162,8 @@ grep -q 'logbrew v0\.1\.0 .*extracted-crate/logbrew-0\.1\.0' axum-cargo-tree.txt
 grep -q 'axum v0\.8\.' axum-cargo-tree.txt
 grep -q 'tokio v1\.' axum-cargo-tree.txt
 grep -q 'tower v0\.5\.' axum-cargo-tree.txt
-cargo run --quiet --locked > axum.stdout.json 2> axum.stderr.json
+cargo run --quiet --locked --bin axum-app > axum.stdout.json 2> axum.stderr.json
 python3 "$repo_root/scripts/check_rust_axum_payload.py" axum.stdout.json axum.stderr.json >/dev/null
+cargo run --quiet --locked --bin tower_http_client_span > tower-http-client-span.stdout.json
+grep -q '"ok":true' tower-http-client-span.stdout.json
+grep -q '"towerHttpClientSpans":1' tower-http-client-span.stdout.json

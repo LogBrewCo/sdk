@@ -16,7 +16,7 @@ cargo add logbrew --features tracing
 cargo add logbrew --features tracing-opentelemetry
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry and `TowerHttpClientSpanLayer` for app-owned Tower client services. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -347,6 +347,33 @@ fn logbrew_layer(
 ```
 
 Attach the layer with `Router::route(...).route_layer(logbrew_layer(client.clone()))`, keep the LogBrew client in your own state management, generate unique trace/span IDs per request, and flush on your normal lifecycle boundary. The layer reads only the W3C `traceparent` propagation header and framework-owned route/status metadata; do not capture arbitrary headers, raw request URIs, payloads, account session values, or user-specific identifiers.
+
+For outbound Tower client services, the same `tower` feature also exposes `TowerHttpClientSpanLayer`. The layer injects exactly one W3C `traceparent` into the app-owned request, queues one sanitized `rust_http_client` span after the service resolves, preserves the original response/error, and does not capture request bodies, arbitrary headers, raw URLs, query strings, fragments, baggage, or tracestate.
+
+```rust
+use axum::{body::Body, http::Request};
+use logbrew::{
+    LogBrewClient, TowerHttpClientSpanLayer, TowerRequestIds,
+};
+use std::sync::{Arc, Mutex};
+use tower::Layer;
+
+let client = Arc::new(Mutex::new(
+    LogBrewClient::builder("checkout-service", "1.2.3")
+        .api_key("LOGBREW_API_KEY")
+        .build()?,
+));
+let layer = TowerHttpClientSpanLayer::new(
+    client,
+    |request: &Request<Body>| request.uri().path().replace("/123", "/:payment_id"),
+    || {
+        TowerRequestIds::new("4bf92f3577b34da6a3ce929d0e0e4736", "2222222222222222")
+            .with_parent_span_id("00f067aa0ba902b7")
+    },
+    || "2026-06-02T10:00:11Z".to_string(),
+);
+let service = layer.layer(app_owned_tower_service);
+```
 
 ## Actix Middleware Example
 

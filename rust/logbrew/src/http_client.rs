@@ -67,20 +67,48 @@ impl HttpClientSpan {
         self,
         context: &TraceparentContext,
     ) -> Result<HttpClientSpanEvents, SdkError> {
+        self.build_from_trace_parts(
+            &context.trace_id,
+            Some(&context.parent_span_id),
+            &context.trace_flags,
+        )
+    }
+
+    pub(crate) fn build_from_trace_parts(
+        self,
+        trace_id: &str,
+        parent_span_id: Option<&str>,
+        trace_flags: &str,
+    ) -> Result<HttpClientSpanEvents, SdkError> {
         let route = sanitize_route_template("http client route_template", self.route_template)?;
         let method = normalize_method("http client method", &self.method)?;
         validate_status_code("http client status_code", self.status_code)?;
         validate_duration_ms("http client duration_ms", self.duration_ms)?;
 
         let span_id = self.span_id;
-        let outgoing_traceparent =
-            Traceparent::create(&context.trace_id, &span_id, &context.trace_flags)?;
+        let outgoing_traceparent = Traceparent::create(trace_id, &span_id, trace_flags)?;
         let status = client_span_status(self.status_code, self.error_type.as_deref());
         let span_name = format!("http.client:{method} {route}");
-        let mut span = Traceparent::span_attributes_from_context(
-            context,
-            TraceparentSpanInput::new(span_name, span_id.clone(), status),
-        )?;
+        let mut span = match parent_span_id {
+            Some(parent_span_id) => {
+                let context = Traceparent::parse(format!(
+                    "00-{}-{}-{}",
+                    trace_id.trim(),
+                    parent_span_id.trim(),
+                    trace_flags.trim()
+                ))?;
+                Traceparent::span_attributes_from_context(
+                    &context,
+                    TraceparentSpanInput::new(span_name, span_id.clone(), status),
+                )?
+            }
+            None => SpanEvent::new(
+                span_name,
+                trace_id.trim().to_ascii_lowercase(),
+                &span_id,
+                status,
+            ),
+        };
         if let Some(duration_ms) = self.duration_ms {
             span = span.with_duration_ms(duration_ms);
         }
@@ -94,9 +122,9 @@ impl HttpClientSpan {
         )?;
         Ok(HttpClientSpanEvents {
             span: span.with_metadata(metadata),
-            trace_id: context.trace_id.clone(),
+            trace_id: trace_id.trim().to_ascii_lowercase(),
             span_id,
-            parent_span_id: Some(context.parent_span_id.clone()),
+            parent_span_id: parent_span_id.map(|span_id| span_id.trim().to_ascii_lowercase()),
             outgoing_traceparent,
         })
     }

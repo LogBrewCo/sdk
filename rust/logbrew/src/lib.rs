@@ -31,7 +31,10 @@ pub use serde_json::Value as MetadataValue;
 /// Shared thread-safe client handle used by optional framework and logging integrations.
 pub type SharedLogBrewClient = std::sync::Arc<std::sync::Mutex<LogBrewClient>>;
 #[cfg(feature = "tower")]
-pub use tower_layer::{TowerRequestIds, TowerRequestTelemetryLayer, TowerRequestTelemetryService};
+pub use tower_layer::{
+    TowerHttpClientSpanLayer, TowerHttpClientSpanService, TowerRequestIds,
+    TowerRequestTelemetryLayer, TowerRequestTelemetryService,
+};
 pub use traceparent::{
     OpenTelemetrySpanContext, Traceparent, TraceparentContext, TraceparentSpanInput,
 };
