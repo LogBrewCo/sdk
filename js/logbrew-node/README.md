@@ -6,7 +6,7 @@
 
 Node.js HTTP helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, outbound `fetch` span capture, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
 
 ## Install
 
@@ -166,7 +166,30 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
 server.listen(3000);
 ```
 
-The wrapper keeps app response ownership, records URL path without query text, and does not collect request bodies, response bodies, arbitrary headers, or outgoing calls. Use the explicit action and network milestone helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
+The wrapper keeps app response ownership, records URL path without query text, and does not collect request bodies, response bodies, arbitrary headers, or outgoing calls automatically. Use the explicit action, network milestone, and outbound fetch helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
+
+## Outbound Fetch Spans
+
+Use `fetchWithLogBrewSpan()` for important downstream calls you want linked to the active request trace. It wraps one app-owned `fetch` call, clones caller headers, writes one normalized W3C `traceparent`, queues one client span, and leaves flushing/shutdown to your existing `LogBrewClient` lifecycle:
+
+```js
+import { fetchWithLogBrewSpan } from "@logbrew/node";
+
+const response = await fetchWithLogBrewSpan("https://payments.example/payments/123?coupon=summer", {
+  method: "POST",
+  headers: { accept: "application/json" }
+}, {
+  client: logbrew.client,
+  trace: logbrew.trace,
+  routeTemplate: "/payments/:paymentId"
+});
+
+if (!response.ok) {
+  throw new Error("payment authorization failed");
+}
+```
+
+The emitted span records the method, route template or URL path, status code, duration, sampled flag, and W3C trace IDs. It does not globally patch `fetch`, capture payloads, serialize arbitrary headers, store the raw propagation header, or keep query strings/fragments.
 
 ## HTTP Delivery
 

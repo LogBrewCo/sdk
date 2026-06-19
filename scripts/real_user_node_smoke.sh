@@ -52,6 +52,7 @@ grep -q 'LOGBREW_API_KEY' "$tmp_dir/node-readme.md"
 grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/node-readme.md"
 grep -q 'serverApiKey' "$tmp_dir/node-readme.md"
 grep -q 'createNodeFetchTransport' "$tmp_dir/node-readme.md"
+grep -q 'fetchWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'withLogBrewHttpHandler' "$tmp_dir/node-readme.md"
 grep -q 'node:http' "$tmp_dir/node-readme.md"
 grep -q 'traceparent' "$tmp_dir/node-readme.md"
@@ -104,6 +105,7 @@ import {
   createHttpRequestEvent,
   createLogBrewNodeClient,
   createLogBrewNodeContext,
+  fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
   withLogBrewHttpHandler
 } from "@logbrew/node";
@@ -173,12 +175,49 @@ const captureClient = createLogBrewNodeClient({
   sdkVersion: "0.1.0"
 });
 let activeTraceFromAsync;
-const captureServer = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
+const downstreamRequests = [];
+const downstreamServer = createServer((req, res) => {
+  downstreamRequests.push({
+    traceparent: req.headers.traceparent,
+    url: req.url
+  });
+  res.statusCode = 202;
+  res.end("accepted");
+});
+downstreamServer.listen(0);
+await once(downstreamServer, "listening");
+const downstreamPort = downstreamServer.address().port;
+const captureServer = createServer(withLogBrewHttpHandler(async (req, res, logbrew) => {
   Promise.resolve().then(() => {
     activeTraceFromAsync = getActiveLogBrewTrace();
   });
   if (logbrew.trace?.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
     throw new Error(`missing request trace context: ${JSON.stringify(logbrew.trace)}`);
+  }
+  const callerTraceparent = "00-11111111111111111111111111111111-2222222222222222-01";
+  const fetchInit = {
+    method: "POST",
+    headers: { traceparent: callerTraceparent, accept: "application/json" }
+  };
+  const fetchClock = [10, 43];
+  const downstreamResponse = await fetchWithLogBrewSpan(
+    `http://127.0.0.1:${downstreamPort}/payments/123?coupon=summer#frag`,
+    fetchInit,
+    {
+      client: logbrew.client,
+      trace: logbrew.trace,
+      id: "evt_node_fetch_span_001",
+      routeTemplate: "/payments/:paymentId",
+      now: () => "2026-06-02T10:00:07Z",
+      nowMs: () => fetchClock.shift() ?? 43,
+      spanIdFactory: () => "c7ad6b7169203331"
+    }
+  );
+  if (downstreamResponse.status !== 202) {
+    throw new Error(`unexpected downstream status: ${downstreamResponse.status}`);
+  }
+  if (fetchInit.headers.traceparent !== callerTraceparent) {
+    throw new Error("fetchWithLogBrewSpan mutated caller headers");
   }
   res.statusCode = req.url?.startsWith("/captured") ? 204 : 404;
   res.end();
@@ -192,7 +231,7 @@ const captureServer = createServer(withLogBrewHttpHandler((req, res, logbrew) =>
 captureServer.listen(0);
 await once(captureServer, "listening");
 const capturePort = captureServer.address().port;
-const captureResponse = await fetch(`http://127.0.0.1:${capturePort}/captured?token=secret`, {
+const captureResponse = await fetch(`http://127.0.0.1:${capturePort}/captured?coupon=summer`, {
   headers: {
     traceparent
   }
@@ -202,6 +241,31 @@ if (captureResponse.status !== 204) {
 }
 await waitFor(() => captureTransport.sentBodies.length === 1 && activeTraceFromAsync);
 await closeServer(captureServer);
+await closeServer(downstreamServer);
+
+let captureFailureCallbackRan = false;
+const nonFatalCaptureResponse = await fetchWithLogBrewSpan("https://payments.example.invalid/capture-failure", undefined, {
+  client: {
+    span() {
+      throw new Error("telemetry capture failed");
+    }
+  },
+  fetchImpl: async () => new Response("accepted", { status: 203 }),
+  onCaptureError(error) {
+    captureFailureCallbackRan = error instanceof Error && error.message === "telemetry capture failed";
+    throw new Error("callback failure should not replace fetch response");
+  },
+  spanIdFactory: () => "c7ad6b7169203332",
+  trace: {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    parentSpanId: "00f067aa0ba902b7",
+    sampled: true
+  }
+});
+if (nonFatalCaptureResponse.status !== 203 || !captureFailureCallbackRan) {
+  throw new Error("fetch span capture failures should not replace the fetch response");
+}
 
 const errorTransport = RecordingTransport.alwaysAccept();
 const errorClient = createLogBrewNodeClient({
@@ -228,7 +292,7 @@ const errorServer = createServer(withLogBrewHttpHandler(() => {
 errorServer.listen(0);
 await once(errorServer, "listening");
 const errorPort = errorServer.address().port;
-const errorResponse = await fetch(`http://127.0.0.1:${errorPort}/explode?token=secret`, {
+const errorResponse = await fetch(`http://127.0.0.1:${errorPort}/explode?coupon=summer`, {
   headers: {
     traceparent
   }
@@ -256,7 +320,7 @@ const manualServer = createServer(async (req, res) => {
 manualServer.listen(0);
 await once(manualServer, "listening");
 const manualPort = manualServer.address().port;
-const manualResponse = await fetch(`http://127.0.0.1:${manualPort}/manual?token=secret`);
+const manualResponse = await fetch(`http://127.0.0.1:${manualPort}/manual?coupon=summer`);
 if (manualResponse.status !== 200) {
   throw new Error(`unexpected manual status: ${manualResponse.status}`);
 }
@@ -325,32 +389,65 @@ if (intakePayload.events[0].id !== "evt_node_fetch_transport") {
 const capturePayload = JSON.parse(captureTransport.lastBody());
 const errorPayload = JSON.parse(errorTransport.lastBody());
 const manualErrorPayload = JSON.parse(manualErrorTransport.lastBody());
-if (capturePayload.events[0].id !== "evt_node_request_auto") {
+const captureRequestEvent = capturePayload.events.find((event) => event.id === "evt_node_request_auto");
+const fetchSpanEvent = capturePayload.events.find((event) => event.id === "evt_node_fetch_span_001");
+if (!captureRequestEvent) {
   throw new Error(`unexpected request capture payload: ${captureTransport.lastBody()}`);
 }
-if (capturePayload.events[0].attributes.metadata.path !== "/captured") {
+if (captureRequestEvent.attributes.metadata.path !== "/captured") {
   throw new Error(`request capture should omit query text: ${captureTransport.lastBody()}`);
 }
-if (capturePayload.events[0].type !== "span") {
+if (captureRequestEvent.type !== "span") {
   throw new Error(`expected node request span payload: ${captureTransport.lastBody()}`);
 }
-if (capturePayload.events[0].attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+if (captureRequestEvent.attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
   throw new Error(`unexpected node trace id: ${captureTransport.lastBody()}`);
 }
-if (capturePayload.events[0].attributes.parentSpanId !== "00f067aa0ba902b7") {
+if (captureRequestEvent.attributes.parentSpanId !== "00f067aa0ba902b7") {
   throw new Error(`unexpected node parent span id: ${captureTransport.lastBody()}`);
 }
-if (capturePayload.events[0].attributes.spanId !== "b7ad6b7169203331") {
+if (captureRequestEvent.attributes.spanId !== "b7ad6b7169203331") {
   throw new Error(`unexpected node request span id: ${captureTransport.lastBody()}`);
 }
-if (capturePayload.events[0].attributes.metadata.framework !== "node:http") {
+if (captureRequestEvent.attributes.metadata.framework !== "node:http") {
   throw new Error(`missing node span metadata: ${captureTransport.lastBody()}`);
 }
-if (capturePayload.events[0].attributes.metadata.sampled !== true) {
+if (captureRequestEvent.attributes.metadata.sampled !== true) {
   throw new Error(`missing sampled request metadata: ${captureTransport.lastBody()}`);
 }
 if (activeTraceFromAsync?.spanId !== "b7ad6b7169203331") {
   throw new Error(`async trace context was not preserved: ${JSON.stringify(activeTraceFromAsync)}`);
+}
+if (!fetchSpanEvent) {
+  throw new Error(`missing outbound fetch span: ${captureTransport.lastBody()}`);
+}
+if (fetchSpanEvent.type !== "span" || fetchSpanEvent.attributes.name !== "POST /payments/:paymentId") {
+  throw new Error(`unexpected fetch span shape: ${captureTransport.lastBody()}`);
+}
+if (
+  fetchSpanEvent.attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736" ||
+  fetchSpanEvent.attributes.parentSpanId !== "b7ad6b7169203331" ||
+  fetchSpanEvent.attributes.spanId !== "c7ad6b7169203331"
+) {
+  throw new Error(`fetch span did not correlate with active request trace: ${captureTransport.lastBody()}`);
+}
+if (fetchSpanEvent.attributes.durationMs !== 33 || fetchSpanEvent.attributes.status !== "ok") {
+  throw new Error(`fetch span did not capture response timing/status: ${captureTransport.lastBody()}`);
+}
+if (
+  fetchSpanEvent.attributes.metadata.framework !== "node:fetch" ||
+  fetchSpanEvent.attributes.metadata.method !== "POST" ||
+  fetchSpanEvent.attributes.metadata.path !== "/payments/:paymentId" ||
+  fetchSpanEvent.attributes.metadata.statusCode !== 202
+) {
+  throw new Error(`fetch span metadata was not useful and privacy bounded: ${captureTransport.lastBody()}`);
+}
+if (downstreamRequests[0]?.traceparent !== "00-4bf92f3577b34da6a3ce929d0e0e4736-c7ad6b7169203331-01") {
+  throw new Error(`fetch span did not inject one normalized traceparent: ${JSON.stringify(downstreamRequests)}`);
+}
+const capturePayloadJson = JSON.stringify(capturePayload);
+if (capturePayloadJson.includes("coupon=summer") || capturePayloadJson.includes("11111111111111111111111111111111")) {
+  throw new Error(`fetch span leaked query text or caller propagation headers: ${captureTransport.lastBody()}`);
 }
 if (errorPayload.events[0].id !== "evt_node_error_001") {
   throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
@@ -380,8 +477,9 @@ console.error(JSON.stringify({
   httpAttempts: httpResponse.attempts,
   httpEvents: intakePayload.events.length,
   manualErrorCaptured: manualErrorPayload.events[0].attributes.title,
-  requestCaptured: capturePayload.events[0].attributes.name,
-  requestTraceId: capturePayload.events[0].attributes.traceId,
+  fetchCaptured: fetchSpanEvent.attributes.name,
+  requestCaptured: captureRequestEvent.attributes.name,
+  requestTraceId: captureRequestEvent.attributes.traceId,
   requestHelper: "evt_node_request_001"
 }));
 
@@ -461,6 +559,7 @@ cat > consumer.ts <<'EOF'
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   createNodeFetchTransport,
+  fetchWithLogBrewSpan,
   createHttpRequestEvent,
   createLogBrewNodeClient,
   getActiveLogBrewTrace,
@@ -477,6 +576,15 @@ const client = createLogBrewNodeClient({
 const transport = createNodeFetchTransport({
   endpoint: "http://127.0.0.1:4318/v1/events",
   fetchImpl: async () => new Response("accepted", { status: 202 })
+});
+const trace = getActiveLogBrewTrace();
+await fetchWithLogBrewSpan("https://payments.example.invalid/payments/123?coupon=summer", {
+  method: "POST"
+}, {
+  client,
+  fetchImpl: async () => new Response("accepted", { status: 202 }),
+  routeTemplate: "/payments/:paymentId",
+  trace
 });
 
 const handler = withLogBrewHttpHandler((

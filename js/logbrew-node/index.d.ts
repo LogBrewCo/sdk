@@ -25,7 +25,7 @@ export type NodeFetchTransportConfig = {
 export type LogBrewTraceContext = {
   traceId: string;
   spanId: string;
-  parentSpanId: string;
+  parentSpanId?: string;
   sampled: boolean;
 };
 
@@ -113,6 +113,28 @@ export type LogBrewNodeOptions = CreateLogBrewNodeClientConfig & {
   ) => void | Promise<void>;
 };
 
+export type FetchWithLogBrewSpanOptions = {
+  client: LogBrewClient;
+  fetchImpl?: typeof fetch;
+  trace?: LogBrewTraceContext;
+  id?: string;
+  routeTemplate?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  now?: () => string;
+  nowMs?: () => number;
+  spanIdFactory?: () => string;
+  traceIdFactory?: () => string;
+  onCaptureError?: (
+    error: unknown,
+    context: {
+      client: LogBrewClient;
+      error?: unknown;
+      response?: Response;
+      trace: LogBrewTraceContext;
+    }
+  ) => void | Promise<void>;
+};
+
 export declare function createLogBrewNodeClient(
   config?: CreateLogBrewNodeClientConfig
 ): LogBrewClient;
@@ -133,6 +155,12 @@ export declare function createLogBrewNodeContext(
 ): LogBrewNodeContext;
 
 export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
+
+export declare function fetchWithLogBrewSpan(
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1] | undefined,
+  options: FetchWithLogBrewSpanOptions
+): Promise<Response>;
 
 export declare function createHttpRequestEvent(
   req: IncomingMessage,
@@ -177,6 +205,7 @@ declare const defaultExport: {
   createHttpRequestEvent: typeof createHttpRequestEvent;
   createLogBrewNodeClient: typeof createLogBrewNodeClient;
   createLogBrewNodeContext: typeof createLogBrewNodeContext;
+  fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   withLogBrewHttpHandler: typeof withLogBrewHttpHandler;
 };

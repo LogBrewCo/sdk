@@ -3,6 +3,7 @@
 const {
   LogBrewClient,
   RecordingTransport,
+  createTraceparentHeaders,
   parseTraceparent,
   SdkError,
   TransportError
@@ -117,6 +118,52 @@ function createLogBrewNodeContext(client, transport, trace) {
 
 function getActiveLogBrewTrace() {
   return activeTraceContext.getStore();
+}
+
+async function fetchWithLogBrewSpan(input, init = {}, options = {}) {
+  const fetchImpl = options.fetchImpl ?? defaultFetch();
+  if (typeof fetchImpl !== "function") {
+    throw new SdkError("configuration_error", "fetchWithLogBrewSpan requires fetch");
+  }
+  if (!options.client) {
+    throw new SdkError("configuration_error", "fetchWithLogBrewSpan requires client");
+  }
+
+  const method = getFetchMethod(input, init);
+  const path = pathOnly(options.routeTemplate ?? getFetchUrl(input));
+  const startedAt = nowMs(options);
+  const trace = createFetchTraceContext(options.trace ?? getActiveLogBrewTrace(), options);
+  const traceFlags = trace.sampled ? "01" : "00";
+  const traceparent = createTraceparentHeaders({
+    traceId: trace.traceId,
+    spanId: trace.spanId,
+    traceFlags
+  }).traceparent;
+  const fetchInit = withFetchTraceparent(input, init, traceparent);
+  const id = options.id ?? defaultFetchSpanId({ method, path });
+
+  try {
+    const response = await activeTraceContext.run(trace, () => fetchImpl(input, fetchInit));
+    await captureFetchSpan(options, {
+      durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
+      id,
+      method,
+      path,
+      response,
+      trace
+    });
+    return response;
+  } catch (error) {
+    await captureFetchSpan(options, {
+      durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
+      error,
+      id,
+      method,
+      path,
+      trace
+    });
+    throw error;
+  }
 }
 
 function createHttpRequestEvent(req, res, {
@@ -268,6 +315,146 @@ async function notifyFailure(options, error, context) {
   }
 }
 
+async function captureFetchSpan(options, {
+  durationMs,
+  error,
+  id,
+  method,
+  path,
+  response,
+  trace
+}) {
+  const statusCode = response?.status;
+  const metadata = {
+    ...primitiveMetadata(options.metadata),
+    framework: "node:fetch",
+    method,
+    path,
+    sampled: trace.sampled,
+    ...(statusCode !== undefined ? { statusCode } : {}),
+    ...(error !== undefined ? {
+      errorMessage: errorMessage(error),
+      errorType: errorType(error)
+    } : {})
+  };
+
+  try {
+    options.client.span(id, typeof options.now === "function" ? options.now() : new Date().toISOString(), {
+      name: `${method} ${path}`,
+      traceId: trace.traceId,
+      spanId: trace.spanId,
+      ...(trace.parentSpanId !== undefined ? { parentSpanId: trace.parentSpanId } : {}),
+      status: error !== undefined || Number(statusCode ?? 0) >= 400 ? "error" : "ok",
+      durationMs,
+      metadata
+    });
+  } catch (captureError) {
+    try {
+      await notifyFailure(options, captureError, { client: options.client, error, response, trace });
+    } catch {
+      // Outbound fetch ownership stays with the app; telemetry callbacks must not replace HTTP outcomes.
+    }
+  }
+}
+
+function createFetchTraceContext(trace, {
+  spanIdFactory = defaultSpanIdFactory,
+  traceIdFactory = defaultTraceIdFactory
+} = {}) {
+  const spanId = normalizeSpanId(spanIdFactory());
+  if (!spanId) {
+    throw new SdkError("configuration_error", "fetchWithLogBrewSpan requires spanIdFactory to return a valid span id");
+  }
+  if (trace) {
+    return {
+      traceId: trace.traceId,
+      spanId,
+      parentSpanId: trace.spanId,
+      sampled: trace.sampled
+    };
+  }
+
+  const traceId = normalizeTraceId(traceIdFactory());
+  if (!traceId) {
+    throw new SdkError("configuration_error", "fetchWithLogBrewSpan requires traceIdFactory to return a valid trace id");
+  }
+  return {
+    traceId,
+    spanId,
+    sampled: true
+  };
+}
+
+function withFetchTraceparent(input, init = {}, traceparent) {
+  return {
+    ...(init ?? {}),
+    headers: fetchHeadersWithTraceparent(init?.headers ?? getFetchInputHeaders(input), traceparent)
+  };
+}
+
+function fetchHeadersWithTraceparent(headers, traceparent) {
+  if (typeof globalThis.Headers === "function") {
+    const nextHeaders = new globalThis.Headers(headers ?? undefined);
+    nextHeaders.set("traceparent", traceparent);
+    return nextHeaders;
+  }
+  if (Array.isArray(headers)) {
+    return [
+      ...headers.filter(([key]) => String(key).toLowerCase() !== "traceparent"),
+      ["traceparent", traceparent]
+    ];
+  }
+  return {
+    ...(headers ?? {}),
+    traceparent
+  };
+}
+
+function getFetchInputHeaders(input) {
+  return isRequest(input) ? input.headers : undefined;
+}
+
+function getFetchMethod(input, init = {}) {
+  const method = init?.method ?? (isRequest(input) ? input.method : "GET");
+  return String(method).toUpperCase();
+}
+
+function getFetchUrl(input) {
+  if (isRequest(input)) {
+    return input.url;
+  }
+  if (typeof globalThis.URL === "function" && input instanceof globalThis.URL) {
+    return input.href;
+  }
+  return String(input);
+}
+
+function isRequest(input) {
+  return typeof globalThis.Request === "function" && input instanceof globalThis.Request;
+}
+
+function defaultFetchSpanId({ method, path }) {
+  return `evt_node_fetch_${slugify(`${method}_${path}`)}`;
+}
+
+function defaultTraceIdFactory() {
+  return randomHex(16);
+}
+
+function primitiveMetadata(metadata) {
+  if (!metadata || Array.isArray(metadata) || typeof metadata !== "object") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(metadata).filter(([, value]) => (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ))
+  );
+}
+
 function defaultRequestEventId(req, res) {
   return `evt_node_request_${slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${res.statusCode ?? 0}`)}`;
 }
@@ -398,6 +585,17 @@ function normalizeSpanId(value) {
   return spanId;
 }
 
+function normalizeTraceId(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const traceId = value.toLowerCase();
+  if (!/^[0-9a-f]{32}$/u.test(traceId) || traceId === "00000000000000000000000000000000") {
+    return undefined;
+  }
+  return traceId;
+}
+
 function traceMetadata(trace) {
   if (!trace) {
     return {};
@@ -433,6 +631,10 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function errorType(error) {
+  return error instanceof Error && error.name ? error.name : "Error";
+}
+
 function isPromiseLike(value) {
   return value !== null && typeof value === "object" && typeof value.then === "function";
 }
@@ -451,6 +653,7 @@ module.exports = {
   createHttpRequestEvent,
   createLogBrewNodeClient,
   createLogBrewNodeContext,
+  fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
   default: {
     captureHttpError,
@@ -459,6 +662,7 @@ module.exports = {
     createHttpRequestEvent,
     createLogBrewNodeClient,
     createLogBrewNodeContext,
+    fetchWithLogBrewSpan,
     getActiveLogBrewTrace,
     withLogBrewHttpHandler
   },
