@@ -25,6 +25,13 @@ let openTelemetryParent = try LogBrewTrace.openTelemetrySpanContext(
 let trace = LogBrewTrace.context(fromOpenTelemetrySpanContext: openTelemetryParent)
 precondition(trace.traceId == openTelemetryParent.traceId)
 precondition(trace.parentSpanId == openTelemetryParent.spanId)
+let lifecycleTracker = try LogBrewLifecycleTracker(
+    client: client,
+    initialState: "active",
+    initialTimestampMs: 1000,
+    eventIDPrefix: "evt_lifecycle_span",
+    context: ["screen": "Checkout", "traceId": "spoofed_trace"],
+)
 
 try client.release(
     "evt_release_001",
@@ -113,15 +120,20 @@ try LogBrewTrace.withContext(trace) {
         metadata: ["component": "pay-api"],
         timings: urlSessionTimings,
     )
-    try client.captureLifecycleSpan(
-        "evt_lifecycle_span_001",
+    let lifecycleCaptured = try lifecycleTracker.captureTransition(
+        to: "background",
         timestamp: "2026-06-02T10:00:09Z",
-        previousState: "active",
-        currentState: "background",
-        durationMs: 1532.25,
-        context: ["screen": "Checkout", "traceId": "spoofed_trace"],
+        atMs: 2532.25,
         metadata: ["component": "scene-delegate"],
     )
+    precondition(lifecycleCaptured)
+    let duplicateLifecycle = try lifecycleTracker.captureTransition(
+        to: "background",
+        timestamp: "2026-06-02T10:00:10Z",
+        atMs: 2600,
+        metadata: ["component": "scene-delegate"],
+    )
+    precondition(!duplicateLifecycle)
 
     let headers = LogBrewTrace.outgoingHeaders()
     precondition(headers["traceparent"] == trace.traceparent)

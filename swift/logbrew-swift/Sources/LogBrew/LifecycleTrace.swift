@@ -1,5 +1,70 @@
 import Foundation
 
+public final class LogBrewLifecycleTracker {
+    private let client: LogBrewClient
+    private let eventIDPrefix: String
+    private let context: Metadata?
+    private let lock = NSLock()
+    private var currentState: String
+    private var currentStartedAtMs: Double
+    private var nextEventSequence = 1
+
+    public init(
+        client: LogBrewClient,
+        initialState: String,
+        initialTimestampMs: Double,
+        eventIDPrefix: String = "evt_lifecycle",
+        context: Metadata? = nil,
+    ) throws {
+        self.client = client
+        currentState = try normalizedLifecycleState("lifecycle initialState", initialState)
+        currentStartedAtMs = try validatedLifecycleTimestampMs("lifecycle initialTimestampMs", initialTimestampMs)
+        self.eventIDPrefix = try normalizedLifecycleEventIDPrefix(eventIDPrefix)
+        self.context = context
+    }
+
+    @discardableResult
+    public func captureTransition(
+        to nextState: String,
+        timestamp: String,
+        atMs: Double,
+        metadata: Metadata? = nil,
+    ) throws -> Bool {
+        let normalizedNextState = try normalizedLifecycleState("lifecycle nextState", nextState)
+        let checkedAtMs = try validatedLifecycleTimestampMs("lifecycle atMs", atMs)
+
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        if normalizedNextState == currentState {
+            return false
+        }
+        if checkedAtMs < currentStartedAtMs {
+            throw SdkError(
+                code: "validation_error",
+                message: "lifecycle atMs must be greater than or equal to the current state start",
+            )
+        }
+        let eventID = "\(eventIDPrefix)_\(nextEventSequence)"
+        let previousState = currentState
+        let durationMs = checkedAtMs - currentStartedAtMs
+        try client.captureLifecycleSpan(
+            eventID,
+            timestamp: timestamp,
+            previousState: previousState,
+            currentState: normalizedNextState,
+            durationMs: durationMs,
+            context: context,
+            metadata: metadata,
+        )
+        nextEventSequence += 1
+        currentState = normalizedNextState
+        currentStartedAtMs = checkedAtMs
+        return true
+    }
+}
+
 public extension LogBrewClient {
     func captureLifecycleSpan(
         _ id: String,
@@ -55,4 +120,17 @@ private func validatedLifecycleDurationMs(_ durationMs: Double?) throws -> Doubl
         throw SdkError(code: "validation_error", message: "lifecycle durationMs must be finite and non-negative")
     }
     return durationMs
+}
+
+private func validatedLifecycleTimestampMs(_ label: String, _ timestampMs: Double) throws -> Double {
+    guard timestampMs.isFinite, timestampMs >= 0 else {
+        throw SdkError(code: "validation_error", message: "\(label) must be finite and non-negative")
+    }
+    return timestampMs
+}
+
+private func normalizedLifecycleEventIDPrefix(_ prefix: String) throws -> String {
+    let normalized = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+    try requireNonEmpty("lifecycle eventIDPrefix", normalized)
+    return normalized
 }

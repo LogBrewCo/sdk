@@ -33,7 +33,7 @@ def main() -> int:
         "evt_metric_001",
         "evt_span_001",
         "evt_urlsession_span_001",
-        "evt_lifecycle_span_001",
+        "evt_lifecycle_span_1",
     ]
     missing = [event_id for event_id in required_ids if event_id not in by_id]
     if missing:
@@ -116,7 +116,7 @@ def main() -> int:
         parent_span_id=span_id,
     )
 
-    lifecycle_span = require_dict(by_id["evt_lifecycle_span_001"].get("attributes"), "lifecycle span attributes")
+    lifecycle_span = require_dict(by_id["evt_lifecycle_span_1"].get("attributes"), "lifecycle span attributes")
     lifecycle_span_id = lifecycle_span.get("spanId")
     if lifecycle_span.get("traceId") != TRACE_ID:
         raise SystemExit("lifecycle span did not continue the active trace id")
@@ -144,7 +144,7 @@ def main() -> int:
     if lifecycle_metadata.get("component") != "scene-delegate":
         raise SystemExit("lifecycle span custom primitive metadata was not preserved")
     assert_trace_metadata(
-        "evt_lifecycle_span_001",
+        "evt_lifecycle_span_1",
         lifecycle_metadata,
         lifecycle_span_id,
         parent_span_id=span_id,
