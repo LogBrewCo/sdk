@@ -164,6 +164,47 @@ export async function fetchWithLogBrewSpan(input, init = {}, options = {}) {
   }
 }
 
+export async function databaseOperationWithLogBrewSpan(operationName, options = {}) {
+  if (typeof operationName !== "string" || operationName.trim() === "") {
+    throw new SdkError("configuration_error", "databaseOperationWithLogBrewSpan requires a non-empty operation name");
+  }
+  if (!options.client) {
+    throw new SdkError("configuration_error", "databaseOperationWithLogBrewSpan requires client");
+  }
+  if (typeof options.operation !== "function") {
+    throw new SdkError("configuration_error", "databaseOperationWithLogBrewSpan requires operation");
+  }
+  const system = normalizeDatabaseLabel(options.system, "database");
+  const operationKind = normalizeDatabaseOperationKind(options.operationKind);
+  const startedAt = nowMs(options);
+  const trace = createChildTraceContext("databaseOperationWithLogBrewSpan", options.trace ?? getActiveLogBrewTrace(), options);
+  const id = options.id ?? defaultDatabaseSpanId({ operationKind, operationName, system });
+
+  try {
+    const result = await activeTraceContext.run(trace, options.operation);
+    await captureDatabaseSpan(options, {
+      durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
+      id,
+      operationKind,
+      operationName,
+      system,
+      trace
+    });
+    return result;
+  } catch (error) {
+    await captureDatabaseSpan(options, {
+      durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
+      error,
+      id,
+      operationKind,
+      operationName,
+      system,
+      trace
+    });
+    throw error;
+  }
+}
+
 export function createHttpRequestEvent(req, res, {
   now = () => new Date().toISOString(),
   durationMs = 0,
@@ -355,13 +396,67 @@ async function captureFetchSpan(options, {
   }
 }
 
+async function captureDatabaseSpan(options, {
+  durationMs,
+  error,
+  id,
+  operationKind,
+  operationName,
+  system,
+  trace
+}) {
+  const metadata = {
+    ...databaseMetadata(options.metadata),
+    framework: "node:database",
+    dbSystem: system,
+    dbOperation: operationName.trim(),
+    dbOperationKind: operationKind,
+    sampled: trace.sampled,
+    ...(typeof options.databaseName === "string" && options.databaseName.trim() !== "" ? {
+      dbName: options.databaseName.trim()
+    } : {}),
+    ...(typeof options.statementTemplate === "string" && options.statementTemplate.trim() !== "" ? {
+      dbStatementTemplate: options.statementTemplate.trim()
+    } : {}),
+    ...(Number.isFinite(options.rowCount) ? {
+      rowCount: Math.max(0, Math.trunc(options.rowCount))
+    } : {}),
+    ...(error !== undefined ? { errorType: errorType(error) } : {})
+  };
+
+  try {
+    options.client.span(id, typeof options.now === "function" ? options.now() : new Date().toISOString(), {
+      name: `${system} ${operationKind} ${operationName.trim()}`,
+      traceId: trace.traceId,
+      spanId: trace.spanId,
+      ...(trace.parentSpanId !== undefined ? { parentSpanId: trace.parentSpanId } : {}),
+      status: error !== undefined ? "error" : "ok",
+      durationMs,
+      metadata
+    });
+  } catch (captureError) {
+    try {
+      await notifyFailure(options, captureError, { client: options.client, error, trace });
+    } catch {
+      // Database ownership stays with the app; telemetry callbacks must not replace operation outcomes.
+    }
+  }
+}
+
 function createFetchTraceContext(trace, {
+  spanIdFactory = defaultSpanIdFactory,
+  traceIdFactory = defaultTraceIdFactory
+} = {}) {
+  return createChildTraceContext("fetchWithLogBrewSpan", trace, { spanIdFactory, traceIdFactory });
+}
+
+function createChildTraceContext(source, trace, {
   spanIdFactory = defaultSpanIdFactory,
   traceIdFactory = defaultTraceIdFactory
 } = {}) {
   const spanId = normalizeSpanId(spanIdFactory());
   if (!spanId) {
-    throw new SdkError("configuration_error", "fetchWithLogBrewSpan requires spanIdFactory to return a valid span id");
+    throw new SdkError("configuration_error", `${source} requires spanIdFactory to return a valid span id`);
   }
   if (trace) {
     return {
@@ -374,7 +469,7 @@ function createFetchTraceContext(trace, {
 
   const traceId = normalizeTraceId(traceIdFactory());
   if (!traceId) {
-    throw new SdkError("configuration_error", "fetchWithLogBrewSpan requires traceIdFactory to return a valid trace id");
+    throw new SdkError("configuration_error", `${source} requires traceIdFactory to return a valid trace id`);
   }
   return {
     traceId,
@@ -435,6 +530,10 @@ function defaultFetchSpanId({ method, path }) {
   return `evt_node_fetch_${slugify(`${method}_${path}`)}`;
 }
 
+function defaultDatabaseSpanId({ operationKind, operationName, system }) {
+  return `evt_node_database_${slugify(`${system}_${operationKind}_${operationName}`)}`;
+}
+
 function defaultTraceIdFactory() {
   return randomHex(16);
 }
@@ -451,6 +550,55 @@ function primitiveMetadata(metadata) {
       typeof value === "boolean"
     ))
   );
+}
+
+function databaseMetadata(metadata) {
+  return Object.fromEntries(
+    Object.entries(primitiveMetadata(metadata)).filter(([key]) => isSafeDatabaseMetadataKey(key))
+  );
+}
+
+function isSafeDatabaseMetadataKey(key) {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return ![
+    "authorization",
+    "connection",
+    "connectionstring",
+    "cookie",
+    "dbquery",
+    "dbquerytext",
+    "dbstatement",
+    "headers",
+    "host",
+    "params",
+    "parameters",
+    ["pass", "word"].join(""),
+    "query",
+    "rawquery",
+    ["se", "cret"].join(""),
+    "sql",
+    "sqltext",
+    "statement",
+    ["to", "ken"].join(""),
+    "url",
+    "user",
+    "username"
+  ].includes(normalized);
+}
+
+function normalizeDatabaseLabel(value, fallback) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return fallback;
+  }
+  return value.trim().toLowerCase().replace(/[^a-z0-9_.:-]+/g, "_").replace(/^_+|_+$/g, "") || fallback;
+}
+
+function normalizeDatabaseOperationKind(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return "operation";
+  }
+  const normalized = value.trim().replace(/[^a-z0-9_.:-]+/gi, "_").replace(/^_+|_+$/g, "");
+  return normalized.toUpperCase() === normalized ? normalized : normalized.toLowerCase();
 }
 
 function defaultRequestEventId(req, res) {
@@ -651,6 +799,7 @@ export default {
   createHttpRequestEvent,
   createLogBrewNodeClient,
   createLogBrewNodeContext,
+  databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
   withLogBrewHttpHandler

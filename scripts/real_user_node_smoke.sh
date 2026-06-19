@@ -52,6 +52,7 @@ grep -q 'LOGBREW_API_KEY' "$tmp_dir/node-readme.md"
 grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/node-readme.md"
 grep -q 'serverApiKey' "$tmp_dir/node-readme.md"
 grep -q 'createNodeFetchTransport' "$tmp_dir/node-readme.md"
+grep -q 'databaseOperationWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'fetchWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'withLogBrewHttpHandler' "$tmp_dir/node-readme.md"
 grep -q 'node:http' "$tmp_dir/node-readme.md"
@@ -105,6 +106,7 @@ import {
   createHttpRequestEvent,
   createLogBrewNodeClient,
   createLogBrewNodeContext,
+  databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
   withLogBrewHttpHandler
@@ -327,6 +329,107 @@ if (manualResponse.status !== 200) {
 await waitFor(() => manualErrorTransport.sentBodies.length === 1);
 await closeServer(manualServer);
 
+const databaseClient = createLogBrewNodeClient({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "node-database-span-smoke",
+  sdkVersion: "0.1.0"
+});
+const databaseClock = [50, 87, 100, 119];
+const databaseResult = await databaseOperationWithLogBrewSpan("orders.select_by_id", {
+  client: databaseClient,
+  databaseName: "checkout",
+  id: "evt_node_database_span_001",
+  metadata: {
+    "db.statement": "SELECT * FROM orders WHERE id = 42",
+    params: "sensitive-id",
+    safeFeature: "checkout"
+  },
+  now: () => "2026-06-02T10:00:09Z",
+  nowMs: () => databaseClock.shift() ?? 87,
+  operation: async () => [{ id: 42 }],
+  operationKind: "SELECT",
+  rowCount: 1,
+  spanIdFactory: () => "d7ad6b7169203331",
+  statementTemplate: "SELECT * FROM orders WHERE id = ?",
+  system: "postgresql",
+  trace: {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    sampled: true
+  }
+});
+if (databaseResult[0]?.id !== 42) {
+  throw new Error(`database span helper changed the operation result: ${JSON.stringify(databaseResult)}`);
+}
+let databaseErrorRethrown = false;
+await databaseOperationWithLogBrewSpan("orders.insert", {
+  client: databaseClient,
+  databaseName: "checkout",
+  id: "evt_node_database_span_error",
+  now: () => "2026-06-02T10:00:10Z",
+  nowMs: () => databaseClock.shift() ?? 119,
+  operation: async () => {
+    throw new TypeError("duplicate key for email value@example.com");
+  },
+  operationKind: "INSERT",
+  spanIdFactory: () => "d7ad6b7169203332",
+  system: "postgresql",
+  trace: {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    sampled: true
+  }
+}).catch((error) => {
+  databaseErrorRethrown = error instanceof TypeError;
+});
+if (!databaseErrorRethrown) {
+  throw new Error("database span helper should rethrow operation errors");
+}
+const databasePayload = JSON.parse(databaseClient.previewJson());
+const databaseSpanEvent = databasePayload.events.find((event) => event.id === "evt_node_database_span_001");
+const databaseErrorSpanEvent = databasePayload.events.find((event) => event.id === "evt_node_database_span_error");
+if (!databaseSpanEvent || databaseSpanEvent.type !== "span") {
+  throw new Error(`missing database span payload: ${databaseClient.previewJson()}`);
+}
+if (databaseSpanEvent.attributes.name !== "postgresql SELECT orders.select_by_id") {
+  throw new Error(`unexpected database span name: ${databaseClient.previewJson()}`);
+}
+if (
+  databaseSpanEvent.attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736" ||
+  databaseSpanEvent.attributes.parentSpanId !== "b7ad6b7169203331" ||
+  databaseSpanEvent.attributes.spanId !== "d7ad6b7169203331"
+) {
+  throw new Error(`database span did not correlate with request trace: ${databaseClient.previewJson()}`);
+}
+if (
+  databaseSpanEvent.attributes.metadata.framework !== "node:database" ||
+  databaseSpanEvent.attributes.metadata.dbSystem !== "postgresql" ||
+  databaseSpanEvent.attributes.metadata.dbOperation !== "orders.select_by_id" ||
+  databaseSpanEvent.attributes.metadata.dbOperationKind !== "SELECT" ||
+  databaseSpanEvent.attributes.metadata.dbName !== "checkout" ||
+  databaseSpanEvent.attributes.metadata.dbStatementTemplate !== "SELECT * FROM orders WHERE id = ?" ||
+  databaseSpanEvent.attributes.metadata.rowCount !== 1 ||
+  databaseSpanEvent.attributes.metadata.safeFeature !== "checkout"
+) {
+  throw new Error(`database span metadata was not useful and privacy bounded: ${databaseClient.previewJson()}`);
+}
+if (!databaseErrorSpanEvent || databaseErrorSpanEvent.attributes.status !== "error") {
+  throw new Error(`database error span missing: ${databaseClient.previewJson()}`);
+}
+if (databaseErrorSpanEvent.attributes.metadata.errorType !== "TypeError") {
+  throw new Error(`database error should include error type only: ${databaseClient.previewJson()}`);
+}
+const databasePayloadJson = JSON.stringify(databasePayload);
+if (
+  databasePayloadJson.includes("sens" + "itive-id") ||
+  databasePayloadJson.includes("email") ||
+  databasePayloadJson.includes("id = 42") ||
+  databasePayloadJson.includes("params") ||
+  databasePayloadJson.includes("db.statement")
+) {
+  throw new Error(`database span leaked query details or unsafe metadata: ${databaseClient.previewJson()}`);
+}
+
 const intakeRequests = [];
 const intakeServer = createServer((req, res) => {
   let body = "";
@@ -477,6 +580,7 @@ console.error(JSON.stringify({
   httpAttempts: httpResponse.attempts,
   httpEvents: intakePayload.events.length,
   manualErrorCaptured: manualErrorPayload.events[0].attributes.title,
+  databaseCaptured: databaseSpanEvent.attributes.name,
   fetchCaptured: fetchSpanEvent.attributes.name,
   requestCaptured: captureRequestEvent.attributes.name,
   requestTraceId: captureRequestEvent.attributes.traceId,
@@ -562,6 +666,7 @@ import {
   fetchWithLogBrewSpan,
   createHttpRequestEvent,
   createLogBrewNodeClient,
+  databaseOperationWithLogBrewSpan,
   getActiveLogBrewTrace,
   type LogBrewNodeContext,
   type LogBrewTraceContext,
@@ -586,6 +691,17 @@ await fetchWithLogBrewSpan("https://payments.example.invalid/payments/123?coupon
   routeTemplate: "/payments/:paymentId",
   trace
 });
+const databaseResult = await databaseOperationWithLogBrewSpan("orders.select_by_id", {
+  client,
+  databaseName: "checkout",
+  operation: async () => [{ id: 42 }],
+  operationKind: "SELECT",
+  rowCount: 1,
+  statementTemplate: "SELECT * FROM orders WHERE id = ?",
+  system: "postgresql",
+  trace
+});
+databaseResult[0]?.id.toFixed();
 
 const handler = withLogBrewHttpHandler((
   req: IncomingMessage,

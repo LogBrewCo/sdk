@@ -6,7 +6,7 @@
 
 Node.js HTTP helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, outbound `fetch` span capture, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, outbound `fetch` and database operation span capture, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
 
 ## Install
 
@@ -88,6 +88,7 @@ For a Node.js API, start with the signals that make incidents and product flows 
 - Wrap the `node:http` handler so completed requests become logs or W3C-linked spans.
 - Add explicit product actions for business steps such as checkout, signup, or billing.
 - Add explicit network milestones for important downstream calls.
+- Wrap important database calls with safe operation names and statement templates.
 - Add low-cardinality metrics for request or workflow duration.
 - Flush on completion or shutdown so queued events are not left in memory.
 
@@ -190,6 +191,27 @@ if (!response.ok) {
 ```
 
 The emitted span records the method, route template or URL path, status code, duration, sampled flag, and W3C trace IDs. It does not globally patch `fetch`, capture payloads, serialize arbitrary headers, store the raw propagation header, or keep query strings/fragments.
+
+## Database Operation Spans
+
+Use `databaseOperationWithLogBrewSpan()` around important app-owned database calls when you want request, log, error, and DB timing correlation without installing driver instrumentation:
+
+```js
+import { databaseOperationWithLogBrewSpan } from "@logbrew/node";
+
+const orders = await databaseOperationWithLogBrewSpan("orders.select_by_id", {
+  client: logbrew.client,
+  trace: logbrew.trace,
+  system: "postgresql",
+  operationKind: "SELECT",
+  databaseName: "checkout",
+  statementTemplate: "SELECT * FROM orders WHERE id = ?",
+  rowCount: 1,
+  operation: () => db.query("SELECT * FROM orders WHERE id = $1", [orderId])
+});
+```
+
+The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Metadata records the DB system, operation name, operation kind, optional database name, optional safe statement template, row count, duration, sampled flag, and W3C trace IDs. It does not monkey-patch drivers, capture raw SQL, serialize parameters, record connection strings, store auth values, collect result rows, or include database error messages/stacks.
 
 ## HTTP Delivery
 
