@@ -246,6 +246,43 @@ $outgoingHeaders = $request->outgoingHeaders();
 
 For a copyable service example, run `php vendor/logbrew/sdk/examples/http_trace_correlation.php` or `make run-http-trace-correlation` from `vendor/logbrew/sdk/examples`.
 
+## Dependency Spans
+
+Use `LogBrewOperationTracing` around app-owned database, cache, or queue calls when you want the operation to show up as a child span under the active request trace. The helper creates one span per callback, returns to the previous trace scope, preserves your callback return value or original exception, and reports telemetry capture failures only through the optional `onCaptureError` callback.
+
+```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use LogBrew\LogBrewClient;
+use LogBrew\LogBrewOperationTracing;
+use LogBrew\LogBrewTrace;
+use LogBrew\LogBrewTraceContext;
+
+$client = LogBrewClient::create('LOGBREW_API_KEY', 'checkout-php-service', '1.4.2');
+$trace = LogBrewTraceContext::fromIncomingTraceparentOrCreateRoot($_SERVER['HTTP_TRACEPARENT'] ?? null);
+$scope = LogBrewTrace::activate($trace);
+
+try {
+    $cart = LogBrewOperationTracing::databaseOperation(
+        $client,
+        'db.select checkout_cart',
+        static fn (): array => ['id' => 'cart_123'],
+        [
+            'system' => 'mysql',
+            'operation' => 'select',
+            'target' => 'checkout.cart',
+            'metadata' => ['table' => 'carts', 'rowCount' => 1],
+        ]
+    );
+} finally {
+    $scope->close();
+}
+```
+
+`databaseOperation`, `cacheOperation`, and `queueOperation` keep instrumentation explicit and dependency-free. They do not patch PDO, Doctrine, Redis, Laravel queues, or global PHP runtime hooks; they avoid SQL text, connection strings, network locations, login fields, cache identifiers, message bodies, arbitrary headers, baggage, and tracestate. Metadata is primitive-only and sensitive-looking keys are dropped before enqueue.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:

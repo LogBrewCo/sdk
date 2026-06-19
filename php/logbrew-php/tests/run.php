@@ -427,6 +427,8 @@ expectThrows(
     'metadata value for bad must be a string, number, boolean, or null'
 );
 
+require __DIR__ . '/operation_tracing.php';
+
 $client = sampleClient();
 $client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [
     'name' => 'queue.depth',

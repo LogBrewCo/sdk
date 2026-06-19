@@ -41,6 +41,7 @@ $traceparentSpanInput = null;
 $traceContext = null;
 $traceScope = null;
 $trace = null;
+$operationTracing = null;
 $httpRequestTelemetry = null;
 $psrLogger = null;
 $monologHandler = null;
@@ -93,6 +94,9 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
     }
     if ($name === "src/LogBrewTrace.php" || str_ends_with($name, "/src/LogBrewTrace.php")) {
         $trace = $zip->getFromIndex($i);
+    }
+    if ($name === "src/LogBrewOperationTracing.php" || str_ends_with($name, "/src/LogBrewOperationTracing.php")) {
+        $operationTracing = $zip->getFromIndex($i);
     }
     if ($name === "src/LogBrewHttpRequestTelemetry.php" || str_ends_with($name, "/src/LogBrewHttpRequestTelemetry.php")) {
         $httpRequestTelemetry = $zip->getFromIndex($i);
@@ -165,6 +169,10 @@ if (!is_string($trace)) {
     fwrite(STDERR, "missing src/LogBrewTrace.php in composer archive\n");
     exit(1);
 }
+if (!is_string($operationTracing)) {
+    fwrite(STDERR, "missing src/LogBrewOperationTracing.php in composer archive\n");
+    exit(1);
+}
 if (!is_string($httpRequestTelemetry)) {
     fwrite(STDERR, "missing src/LogBrewHttpRequestTelemetry.php in composer archive\n");
     exit(1);
@@ -211,6 +219,12 @@ foreach ([
     "LogBrewTrace::current()" => "missing composer archive active trace guidance\n",
     "metadataWithCurrentTrace" => "missing composer archive trace metadata guidance\n",
     "run-http-trace-correlation" => "missing composer archive HTTP trace example guidance\n",
+    "LogBrewOperationTracing" => "missing composer archive operation tracing guidance\n",
+    "Dependency Spans" => "missing composer archive dependency spans heading\n",
+    "databaseOperation" => "missing composer archive database operation guidance\n",
+    "cacheOperation" => "missing composer archive cache operation guidance\n",
+    "queueOperation" => "missing composer archive queue operation guidance\n",
+    "they avoid SQL text, connection strings, network locations, login fields, cache identifiers" => "missing composer archive operation privacy guidance\n",
     "first useful PHP service telemetry" => "missing composer archive first useful telemetry guidance\n",
     "HttpTransport" => "missing composer archive HTTP transport guidance\n",
     "HTTP Delivery" => "missing composer archive HTTP delivery heading\n",
@@ -434,6 +448,7 @@ test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
 test -f vendor/logbrew/sdk/src/LogBrewTraceContext.php
 test -f vendor/logbrew/sdk/src/LogBrewTraceScope.php
 test -f vendor/logbrew/sdk/src/LogBrewTrace.php
+test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
 test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
@@ -470,6 +485,12 @@ foreach ([
     "LogBrewTrace::current()" => "missing installed README active trace guidance\n",
     "metadataWithCurrentTrace" => "missing installed README trace metadata guidance\n",
     "run-http-trace-correlation" => "missing installed README HTTP trace example guidance\n",
+    "LogBrewOperationTracing" => "missing installed README operation tracing guidance\n",
+    "Dependency Spans" => "missing installed README dependency spans heading\n",
+    "databaseOperation" => "missing installed README database operation guidance\n",
+    "cacheOperation" => "missing installed README cache operation guidance\n",
+    "queueOperation" => "missing installed README queue operation guidance\n",
+    "they avoid SQL text, connection strings, network locations, login fields, cache identifiers" => "missing installed README operation privacy guidance\n",
     "first useful PHP service telemetry" => "missing installed README first useful telemetry guidance\n",
     "HttpTransport" => "missing installed README HTTP transport guidance\n",
     "HTTP Delivery" => "missing installed README HTTP delivery heading\n",
@@ -723,6 +744,7 @@ test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
 test -f vendor/logbrew/sdk/src/LogBrewTraceContext.php
 test -f vendor/logbrew/sdk/src/LogBrewTraceScope.php
 test -f vendor/logbrew/sdk/src/LogBrewTrace.php
+test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
 test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
@@ -782,11 +804,67 @@ require __DIR__ . '/vendor/autoload.php';
 
 $client = LogBrew\LogBrewClient::create('LOGBREW_API_KEY', 'smoke-app-test', '0.1.0');
 $client->release('evt_release_test', '2026-06-02T10:00:00Z', ['version' => '1.2.3']);
+$trace = LogBrew\LogBrewTraceContext::fromTraceparent(
+    '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+    '1111111111111111'
+);
+$scope = LogBrew\LogBrewTrace::activate($trace);
+try {
+    $result = LogBrew\LogBrewOperationTracing::databaseOperation(
+        $client,
+        'db.select checkout_cart',
+        static fn (): string => 'cart_123',
+        [
+            'eventId' => 'evt_dependency_db',
+            'timestamp' => '2026-06-02T10:00:08Z',
+            'durationMs' => 7.5,
+            'system' => 'mysql',
+            'operation' => 'select',
+            'target' => 'checkout.cart',
+            'metadata' => [
+                'table' => 'carts',
+                'rowCount' => 1,
+                'database_host' => 'db.internal.example',
+                'query' => 'select * from carts',
+            ],
+        ]
+    );
+} finally {
+    $scope->close();
+}
+if ($result !== 'cart_123') {
+    fwrite(STDERR, "installed-user dependency wrapper changed result\n");
+    exit(1);
+}
 $preview = $client->previewJson();
 
 if (!str_contains($preview, '"type": "release"')) {
     fwrite(STDERR, "installed-user test preview missing release event\n");
     exit(1);
+}
+foreach ([
+    '"id": "evt_dependency_db"',
+    '"source": "database.operation"',
+    '"system": "mysql"',
+    '"operation": "select"',
+    '"target": "checkout.cart"',
+    '"table": "carts"',
+    '"rowCount": 1',
+    '"parentSpanId": "1111111111111111"',
+] as $needle) {
+    if (!str_contains($preview, $needle)) {
+        fwrite(STDERR, "installed-user dependency span missing: {$needle}\n");
+        exit(1);
+    }
+}
+foreach ([
+    'db.internal.example',
+    'select * from carts',
+] as $needle) {
+    if (str_contains($preview, $needle)) {
+        fwrite(STDERR, "installed-user dependency span leaked sensitive metadata: {$needle}\n");
+        exit(1);
+    }
 }
 EOF
 
@@ -1488,6 +1566,7 @@ test -f vendor/logbrew/sdk/src/TraceparentSpanInput.php
 test -f vendor/logbrew/sdk/src/LogBrewTraceContext.php
 test -f vendor/logbrew/sdk/src/LogBrewTraceScope.php
 test -f vendor/logbrew/sdk/src/LogBrewTrace.php
+test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
 test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
