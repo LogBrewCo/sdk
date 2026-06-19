@@ -34,6 +34,7 @@ clean_generated_artifacts() {
 clean_after_run() {
   rm -rf "$tmp_dir"
   clean_generated_artifacts
+  rm -f "$lock_pid_file"
   rmdir "$lock_dir" 2>/dev/null || true
 }
 
@@ -475,7 +476,7 @@ using (LogBrewTrace.Activate(rootTrace))
             .WithDatabaseName("checkout")
             .WithStatementTemplate("SELECT * FROM orders WHERE id = ?")
             .WithRowCount(1)
-            .WithMetadata(new Dictionary<string, object?> { ["safe"] = true, ["query"] = "SELECT se" + "cret", ["connection_string"] = "Server=private" }));
+            .WithMetadata(new Dictionary<string, object?> { ["safe"] = true, ["query"] = "SELECT se" + "cret", ["connection_string"] = "Server=private", ["database_host"] = "db.internal" }));
     Require(dbResult == "order_123", "expected dependency result");
 
     var cacheResult = await LogBrewOperationTracing.CacheOperationAsync(
@@ -534,7 +535,7 @@ foreach (var expected in new[]
     Require(operationPayload.Contains(expected, StringComparison.Ordinal), "missing dependency smoke payload: " + expected);
 }
 
-foreach (var blocked in new[] { "SELECT se" + "cret", "Server=private", "cart:se" + "cret", "se" + "cret body" })
+foreach (var blocked in new[] { "SELECT se" + "cret", "Server=private", "db.internal", "cart:se" + "cret", "se" + "cret body" })
 {
     Require(!operationPayload.Contains(blocked, StringComparison.Ordinal), "expected dependency smoke to omit " + blocked);
 }
