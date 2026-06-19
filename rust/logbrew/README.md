@@ -16,7 +16,7 @@ cargo add logbrew --features tracing
 cargo add logbrew --features tracing-opentelemetry
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, and `HttpTransport`. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -219,7 +219,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Outbound HTTP Client Spans
 
-Use `HttpClientSpan` when your Rust app owns the HTTP client call and wants one correlated outbound span plus one W3C propagation header. The helper does not patch `reqwest`, `ureq`, Hyper, or global clients; your code sets the returned `traceparent` header on the request it already owns.
+Use `HttpClientSpan` when your Rust app owns the HTTP client call and wants one correlated outbound span plus one W3C propagation header. The dependency-free helper does not patch `reqwest`, `ureq`, Hyper, or global clients; your code sets the returned `traceparent` header on the request it already owns. If your app already uses `ureq` or `reqwest`, opt into the matching feature for a typed helper that still keeps the client app-owned.
 
 ```rust
 use logbrew::{HttpClientSpan, LogBrewClient, Metadata, MetadataValue, Traceparent};
@@ -277,6 +277,26 @@ let response = HttpClientSpan::new("/api/payments/:payment_id", "GET", "11111111
                 .call()
         },
     )?;
+```
+
+If your app already uses `reqwest`, enable LogBrew's `reqwest` feature and pass the app-owned request builder. LogBrew injects exactly one `traceparent`, times the send, queues a sanitized span, records HTTP status when available, and returns either the original `reqwest::Response` or a `ReqwestCaptureError::Request(reqwest::Error)`:
+
+```toml
+[dependencies]
+logbrew = { version = "0.1", features = ["reqwest"] }
+reqwest = "0.12"
+```
+
+```rust
+let response = HttpClientSpan::new("/api/payments/:payment_id", "GET", "2222222222222222")
+    .capture_reqwest_send(
+        &mut client,
+        "evt_reqwest_payment_lookup",
+        "2026-06-02T10:00:02Z",
+        &parent,
+        reqwest_client.get("https://payments.example.invalid/api/payments/123"),
+    )
+    .await?;
 ```
 
 ## Axum Middleware Example

@@ -5,7 +5,7 @@ use crate::http_fields::{
 use crate::metadata_safety::sanitized_metadata;
 use crate::{Metadata, SdkError, SpanEvent, Traceparent, TraceparentContext, TraceparentSpanInput};
 use serde_json::Value;
-#[cfg(feature = "http")]
+#[cfg(any(feature = "http", feature = "reqwest"))]
 use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -139,6 +139,77 @@ impl HttpClientSpan {
             let _ = client.span(event_id.as_ref(), timestamp.as_ref(), events.span);
         }
         result
+    }
+
+    /// Send an explicit `reqwest` request with one W3C propagation header and queue one span.
+    #[cfg(feature = "reqwest")]
+    pub async fn capture_reqwest_send(
+        self,
+        client: &mut crate::LogBrewClient,
+        event_id: impl AsRef<str>,
+        timestamp: impl AsRef<str>,
+        context: &TraceparentContext,
+        request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, ReqwestCaptureError> {
+        let prepared = self
+            .clone()
+            .from_traceparent_context(context)
+            .map_err(ReqwestCaptureError::Setup)?;
+        let started = Instant::now();
+        let result = request
+            .header("traceparent", prepared.outgoing_traceparent)
+            .send()
+            .await;
+        let duration_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+        let mut span = self.with_duration_ms(duration_ms);
+        match &result {
+            Ok(response) => {
+                span = span.with_status_code(response.status().as_u16());
+            }
+            Err(error) => {
+                if let Some(status_code) = error.status() {
+                    span = span.with_status_code(status_code.as_u16());
+                }
+                span = span.with_error_type("reqwest::Error");
+            }
+        }
+
+        if let Ok(events) = span.from_traceparent_context(context) {
+            let _ = client.span(event_id.as_ref(), timestamp.as_ref(), events.span);
+        }
+
+        result.map_err(ReqwestCaptureError::Request)
+    }
+}
+
+#[cfg(feature = "reqwest")]
+#[derive(Debug)]
+/// Error returned by explicit `reqwest` capture setup or the app-owned request.
+pub enum ReqwestCaptureError {
+    /// LogBrew rejected the span setup before sending the request.
+    Setup(SdkError),
+    /// The app-owned `reqwest` request failed.
+    Request(reqwest::Error),
+}
+
+#[cfg(feature = "reqwest")]
+impl std::fmt::Display for ReqwestCaptureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Setup(error) => write!(f, "logbrew reqwest span setup failed: {error}"),
+            Self::Request(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+#[cfg(feature = "reqwest")]
+impl std::error::Error for ReqwestCaptureError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Setup(error) => Some(error),
+            Self::Request(error) => Some(error),
+        }
     }
 }
 

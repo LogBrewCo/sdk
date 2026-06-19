@@ -1,8 +1,8 @@
 use logbrew::{HttpClientSpan, LogBrewClient, Metadata, MetadataValue, Traceparent};
 use serde_json::Value;
-#[cfg(feature = "http")]
+#[cfg(any(feature = "http", feature = "reqwest"))]
 use std::time::Duration;
-#[cfg(feature = "http")]
+#[cfg(any(feature = "http", feature = "reqwest"))]
 use std::{
     collections::BTreeMap,
     io::{Read, Write},
@@ -189,13 +189,88 @@ fn http_client_span_captures_ureq_call_result_and_preserves_error() {
     assert!(!preview.contains("#debug"));
 }
 
-#[cfg(feature = "http")]
+#[cfg(feature = "reqwest")]
+#[tokio::test]
+async fn http_client_span_captures_reqwest_send_result_and_preserves_error() {
+    let context =
+        Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").unwrap();
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
+    let mut client = LogBrewClient::builder("rust-reqwest-test", "0.1.0")
+        .api_key("LOGBREW_API_KEY")
+        .build()
+        .unwrap();
+
+    let ok_intake = UreqIntake::start(204);
+    let ok_response = HttpClientSpan::new(
+        format!(
+            "{}/api/orders/:order_id?coupon=sample#debug",
+            ok_intake.endpoint
+        ),
+        "post",
+        "2222222222222222",
+    )
+    .capture_reqwest_send(
+        &mut client,
+        "evt_reqwest_success",
+        "2026-06-02T10:00:09Z",
+        &context,
+        http.post(format!(
+            "{}/api/orders/123?coupon=sample#debug",
+            ok_intake.endpoint
+        )),
+    )
+    .await
+    .unwrap();
+    assert_eq!(ok_response.status().as_u16(), 204);
+    let ok_requests = ok_intake.requests();
+    assert_eq!(ok_requests.len(), 1);
+    assert_eq!(
+        ok_requests[0].header("traceparent"),
+        Some("00-4bf92f3577b34da6a3ce929d0e0e4736-2222222222222222-01")
+    );
+
+    let failing_intake = UreqIntake::start(502);
+    let error = HttpClientSpan::new(
+        format!("{}/api/orders/:order_id", failing_intake.endpoint),
+        "post",
+        "3333333333333333",
+    )
+    .capture_reqwest_send(
+        &mut client,
+        "evt_reqwest_failure",
+        "2026-06-02T10:00:10Z",
+        &context,
+        http.post(format!("{}/api/orders/456", failing_intake.endpoint)),
+    )
+    .await
+    .unwrap()
+    .error_for_status()
+    .unwrap_err();
+    assert_eq!(error.status().map(|status| status.as_u16()), Some(502));
+
+    let preview = client.preview_json().unwrap();
+    assert!(preview.contains("\"id\": \"evt_reqwest_success\""));
+    assert!(preview.contains("\"name\": \"http.client:POST /api/orders/:order_id\""));
+    assert!(preview.contains("\"statusCode\": 204"));
+    assert!(preview.contains("\"statusCodeClass\": \"2xx\""));
+    assert!(preview.contains("\"id\": \"evt_reqwest_failure\""));
+    assert!(preview.contains("\"statusCode\": 502"));
+    assert!(preview.contains("\"statusCodeClass\": \"5xx\""));
+    assert!(preview.contains("\"status\": \"error\""));
+    assert!(!preview.contains("coupon=sample"));
+    assert!(!preview.contains("#debug"));
+}
+
+#[cfg(any(feature = "http", feature = "reqwest"))]
 #[derive(Clone, Debug)]
 struct UreqRecordedRequest {
     headers: BTreeMap<String, String>,
 }
 
-#[cfg(feature = "http")]
+#[cfg(any(feature = "http", feature = "reqwest"))]
 impl UreqRecordedRequest {
     fn header(&self, name: &str) -> Option<&str> {
         self.headers
@@ -204,13 +279,13 @@ impl UreqRecordedRequest {
     }
 }
 
-#[cfg(feature = "http")]
+#[cfg(any(feature = "http", feature = "reqwest"))]
 struct UreqIntake {
     endpoint: String,
     requests: Arc<Mutex<Vec<UreqRecordedRequest>>>,
 }
 
-#[cfg(feature = "http")]
+#[cfg(any(feature = "http", feature = "reqwest"))]
 impl UreqIntake {
     fn start(status_code: u16) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -235,7 +310,7 @@ impl UreqIntake {
     }
 }
 
-#[cfg(feature = "http")]
+#[cfg(any(feature = "http", feature = "reqwest"))]
 fn read_request(stream: &mut TcpStream) -> UreqRecordedRequest {
     let mut buffer = [0_u8; 4096];
     let bytes = stream.read(&mut buffer).unwrap();

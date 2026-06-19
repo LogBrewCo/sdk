@@ -19,6 +19,8 @@ mod tower_layer;
 mod traceparent;
 #[cfg(feature = "tracing")]
 mod tracing_layer;
+#[cfg(feature = "reqwest")]
+pub use http_client::ReqwestCaptureError;
 pub use http_client::{HttpClientSpan, HttpClientSpanEvents};
 pub use http_server::{HttpRequestTelemetry, HttpRequestTelemetryEvents};
 pub use metric::MetricEvent;
