@@ -99,6 +99,8 @@ python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
 
 jar --create --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0-sources.jar" -C "$okhttp_package_dir/src/main/kotlin" .
 jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0-sources.jar" > "$tmp_dir/okhttp-sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallbacks.kt$' "$tmp_dir/okhttp-sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallFactory.kt$' "$tmp_dir/okhttp-sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpInterceptor.kt$' "$tmp_dir/okhttp-sources-jar-contents.txt"
 
 mkdir -p "$tmp_dir/okhttp-javadoc-stage"
@@ -113,6 +115,10 @@ mkdir -p "$tmp_dir/okhttp-jar-stage/examples"
 cp -R "$okhttp_package_dir/examples/okhttp_request" "$tmp_dir/okhttp-jar-stage/examples/okhttp_request"
 jar --create --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" -C "$tmp_dir/okhttp-classes" . -C "$tmp_dir/okhttp-jar-stage" .
 jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" > "$tmp_dir/okhttp-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallbacks.class$' "$tmp_dir/okhttp-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallbacks\$TracedCallback.class$' "$tmp_dir/okhttp-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallFactory.class$' "$tmp_dir/okhttp-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallFactory\$TracedCall.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpInterceptor.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpEventIdProvider.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpTimestampProvider.class$' "$tmp_dir/okhttp-jar-contents.txt"
@@ -133,7 +139,12 @@ for needle in (
     "co.logbrew:logbrew-kotlin-okhttp:0.1.0",
     "co.logbrew:logbrew-kotlin:0.1.0",
     "LogBrewOkHttpInterceptor",
+    "LogBrewOkHttpCallbacks",
+    "LogBrewOkHttpCallFactory",
     "LogBrewOkHttpCaptureFailureHandler",
+    "enqueue",
+    "dispatcher threads",
+    "callback exceptions",
     "traceparent",
     "routeTemplate",
     "request or response bodies",

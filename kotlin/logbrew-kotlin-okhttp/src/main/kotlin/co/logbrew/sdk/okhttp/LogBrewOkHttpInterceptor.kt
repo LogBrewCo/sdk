@@ -3,6 +3,8 @@ package co.logbrew.sdk.okhttp
 import co.logbrew.sdk.AndroidContext
 import co.logbrew.sdk.LogBrewAndroid
 import co.logbrew.sdk.LogBrewClient
+import co.logbrew.sdk.LogBrewTrace
+import co.logbrew.sdk.LogBrewTraceContext
 import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
@@ -34,6 +36,15 @@ class LogBrewOkHttpInterceptor
     ) : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             val originalRequest = chain.request()
+            return withTaggedTrace(originalRequest) {
+                interceptWithCurrentTrace(chain, originalRequest)
+            }
+        }
+
+        private fun interceptWithCurrentTrace(
+            chain: Interceptor.Chain,
+            originalRequest: Request,
+        ): Response {
             val requestSpan =
                 try {
                     LogBrewAndroid.startRequestSpan(
@@ -80,6 +91,21 @@ class LogBrewOkHttpInterceptor
                     reportCaptureFailure(captureError)
                 }
             }
+        }
+
+        private fun <T> withTaggedTrace(
+            request: Request,
+            block: () -> T,
+        ): T {
+            val traceContext = request.tag(LogBrewTraceContext::class.java) ?: return block()
+            val scope =
+                try {
+                    LogBrewTrace.use(traceContext)
+                } catch (error: Throwable) {
+                    reportCaptureFailure(error)
+                    return block()
+                }
+            return scope.use { block() }
         }
 
         private fun reportCaptureFailure(error: Throwable) {

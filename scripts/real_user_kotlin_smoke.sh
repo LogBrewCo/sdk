@@ -95,6 +95,8 @@ mkdir -p "$tmp_dir/okhttp-jar-stage/examples"
 cp -R "$okhttp_package_dir/examples/okhttp_request" "$tmp_dir/okhttp-jar-stage/examples/okhttp_request"
 jar --create --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" -C "$tmp_dir/okhttp-classes" . -C "$tmp_dir/okhttp-jar-stage" .
 jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" > "$tmp_dir/okhttp-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallbacks.class$' "$tmp_dir/okhttp-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallFactory.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpInterceptor.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^META-INF/maven/co.logbrew/logbrew-kotlin-okhttp/pom.xml$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^examples/okhttp_request/OkHttpRequestExample.kt$' "$tmp_dir/okhttp-jar-contents.txt"

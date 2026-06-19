@@ -328,7 +328,40 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 
 ### Remaining Gaps
 
-- Kotlin Android still lacks automatic lifecycle instrumentation, hidden/global URLConnection instrumentation, OkHttp async callback context wrapping beyond normal interceptor scope, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication parity.
+- Kotlin Android still lacks automatic lifecycle instrumentation, hidden/global URLConnection instrumentation, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication parity.
+
+## 2026-06-19 OkHttp Async Context Follow-Up
+
+### Source Re-Read
+
+- Refreshed `open-telemetry/opentelemetry-java-instrumentation@8e25e07fb2bab7bd4e954d7bb744f977e9dbe785` and re-read `instrumentation/okhttp/okhttp-3.0/library/src/main/java/io/opentelemetry/instrumentation/okhttp/v3_0/TracingCallFactory.java`: `newCall(...)`, `attachContextToRequest(...)`, `TracingCall.execute()`, `TracingCall.enqueue(...)`, `TracingCall.clone()`, and the internal callback wrapper.
+- Re-read OpenTelemetry `instrumentation/okhttp/okhttp-3.0/library/src/main/java/io/opentelemetry/instrumentation/okhttp/v3_0/internal/TracingInterceptor.java`: `intercept(...)` starts context, injects into immutable requests, scopes `chain.proceed(...)`, and ends spans on response/error.
+- Re-read Sentry Java/Android `getsentry/sentry-java@7c1a728e8bd2faa42b8f1c25c9f16a145baab60f` `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpInterceptor.kt`: `intercept(...)`, `finishSpan(...)`, `sendBreadcrumb(...)`, and `shouldCaptureClientError(...)`.
+- Re-read Sentry `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpEventListener.kt`: `callStart(...)`, phase event callbacks, `callEnd(...)`, and `callFailed(...)`.
+- Re-read Datadog Android `DataDog/dd-sdk-android@519550150648592709d441c677437d8b1c3a0707` `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/trace/TracingInterceptor.kt`: `interceptAndTrace(...)`, `updateRequest(...)`, `handleResponse(...)`, and `handleThrowable(...)`.
+
+### Pattern And Tradeoffs
+
+- The important async pattern is OpenTelemetry's call-factory wrapper: capture the calling context at `newCall(...)`, attach it to the immutable request for later interceptor work, scope blocking `execute()`, and wrap `Callback.onResponse(...)` / `onFailure(...)` so app code sees the same context even on OkHttp dispatcher threads.
+- Sentry and Datadog are stronger for rich network phase spans, breadcrumbs, RUM/resource correlation, and failed-request capture; they also accept more product coupling and broader capture surfaces.
+- LogBrew's safer subset is explicit, app-owned wrapping: no global OkHttp patching, no body/header/full URL capture, no baggage/tracestate, no RUM/session replay, no support ticket creation, and no backend-owned symbolication behavior.
+
+### LogBrew Follow-Up Implementation
+
+- Added `LogBrewOkHttpCallFactory`, which wraps an app-owned `Call.Factory`, captures the active `LogBrewTraceContext` at `newCall(...)`, stores it in an OkHttp request tag, scopes blocking `execute()`, wraps async callbacks, and retags cloned calls with the current trace when available.
+- Added `LogBrewOkHttpCallbacks.wrap(...)` for custom call flows that only need callback trace reactivation.
+- Updated `LogBrewOkHttpInterceptor` to honor a request-tagged `LogBrewTraceContext` before starting its request child span. This lets async dispatcher-thread execution still inject a `traceparent` under the original app trace.
+- Updated the installed OkHttp example to use `LogBrewOkHttpCallFactory(okHttp)` and prove both sync and async requests share the parent trace while still emitting request child spans through the interceptor.
+
+### Verification
+
+- TDD red: `bash scripts/check_kotlin_package.sh` first failed with unresolved `LogBrewOkHttpCallbacks`, then with unresolved `LogBrewOkHttpCallFactory`.
+- Green: `bash scripts/check_kotlin_package.sh` passed with 26 core tests, 5 OkHttp tests, package metadata checks, source/javadoc/binary jar inspection, README guidance checks, and core-jar isolation from OkHttp classes.
+- Installed-artifact proof: `bash scripts/real_user_kotlin_smoke.sh` passed after resolving the optional OkHttp artifact from a temporary Maven repository into a Gradle app; it runs sync and async OkHttp calls against a loopback HTTP server and verifies outbound `traceparent`, parent-trace callback scope, two captured request spans, route-template naming, status/duration capture, query/fragment stripping, and no raw `traceparent` leakage.
+
+### Remaining Gaps After Async Follow-Up
+
+- Kotlin Android still lacks automatic lifecycle instrumentation, hidden/global URLConnection instrumentation, baggage/tracestate, rich span events/exceptions, DB/cache/queue spans, and native crash/symbolication parity.
 
 ## Verification
 

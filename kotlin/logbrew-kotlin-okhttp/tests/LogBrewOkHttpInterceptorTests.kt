@@ -1,11 +1,15 @@
 import co.logbrew.sdk.LogBrewClient
 import co.logbrew.sdk.LogBrewTrace
+import co.logbrew.sdk.LogBrewTraceContext
 import co.logbrew.sdk.SdkException
+import co.logbrew.sdk.okhttp.LogBrewOkHttpCallFactory
+import co.logbrew.sdk.okhttp.LogBrewOkHttpCallbacks
 import co.logbrew.sdk.okhttp.LogBrewOkHttpCaptureFailureHandler
 import co.logbrew.sdk.okhttp.LogBrewOkHttpEventIdProvider
 import co.logbrew.sdk.okhttp.LogBrewOkHttpInterceptor
 import co.logbrew.sdk.okhttp.LogBrewOkHttpTimestampProvider
 import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.Connection
 import okhttp3.Interceptor
 import okhttp3.Protocol
@@ -19,7 +23,9 @@ fun main() {
     run("okhttp_interceptor_injects_traceparent_and_captures_response_span", ::okHttpInterceptorCapturesResponse)
     run("okhttp_interceptor_rethrows_original_failure_and_captures_error_span", ::okHttpInterceptorCapturesFailure)
     run("okhttp_interceptor_reports_capture_failure_without_breaking_request", ::okHttpInterceptorReportsCaptureFailure)
-    println("kotlin okhttp package tests ok (3 tests)")
+    run("okhttp_callback_wrapper_reactivates_registration_trace", ::okHttpCallbackWrapperReactivatesTrace)
+    run("okhttp_call_factory_carries_trace_into_async_request_and_callback", ::okHttpCallFactoryCarriesTrace)
+    println("kotlin okhttp package tests ok (5 tests)")
 }
 
 private fun run(
@@ -146,6 +152,139 @@ private fun okHttpInterceptorReportsCaptureFailure() {
     check(capturedFailure is SdkException)
 }
 
+private fun okHttpCallbackWrapperReactivatesTrace() {
+    val parent =
+        LogBrewTrace.continueOrCreate(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+        )
+    val request = Request.Builder().url("https://mobile.example.test/api/async").build()
+    val call = FakeCall(request)
+    var responseTraceSpanId: String? = null
+    var failureTraceSpanId: String? = null
+    val callback =
+        object : Callback {
+            override fun onFailure(
+                call: Call,
+                e: IOException,
+            ) {
+                failureTraceSpanId = LogBrewTrace.currentTraceContext()?.spanId
+            }
+
+            override fun onResponse(
+                call: Call,
+                response: Response,
+            ) {
+                responseTraceSpanId = LogBrewTrace.currentTraceContext()?.spanId
+            }
+        }
+
+    val wrapped =
+        LogBrewTrace.use(parent).use {
+            LogBrewOkHttpCallbacks.wrap(callback)
+        }
+    check(LogBrewTrace.currentTraceContext() == null)
+
+    wrapped.onResponse(call, fakeResponse(request, 202))
+    check(responseTraceSpanId == parent.spanId)
+    check(LogBrewTrace.currentTraceContext() == null)
+
+    wrapped.onFailure(call, IOException("async network failure"))
+    check(failureTraceSpanId == parent.spanId)
+    check(LogBrewTrace.currentTraceContext() == null)
+
+    val callbackFailure = IOException("callback failed")
+    val throwingCallback =
+        object : Callback {
+            override fun onFailure(
+                call: Call,
+                e: IOException,
+            ) = Unit
+
+            override fun onResponse(
+                call: Call,
+                response: Response,
+            ) {
+                check(LogBrewTrace.currentTraceContext()?.spanId == parent.spanId)
+                throw callbackFailure
+            }
+        }
+    val throwingWrapped =
+        LogBrewTrace.use(parent).use {
+            LogBrewOkHttpCallbacks.wrap(throwingCallback)
+        }
+    try {
+        throwingWrapped.onResponse(call, fakeResponse(request, 204))
+        error("expected callback IOException")
+    } catch (error: IOException) {
+        check(error === callbackFailure)
+    }
+    check(LogBrewTrace.currentTraceContext() == null)
+}
+
+private fun okHttpCallFactoryCarriesTrace() {
+    val parent =
+        LogBrewTrace.continueOrCreate(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+        )
+    val request = Request.Builder().url("https://mobile.example.test/api/async?debug=1").build()
+    var delegatedRequest: Request? = null
+    var callbackTraceSpanId: String? = null
+    val callFactory =
+        LogBrewTrace.use(parent).use {
+            LogBrewOkHttpCallFactory(
+                Call.Factory { delegated ->
+                    delegatedRequest = delegated
+                    FakeCall(delegated)
+                },
+            ).newCall(request)
+        }
+
+    check(LogBrewTrace.currentTraceContext() == null)
+    callFactory.enqueue(
+        object : Callback {
+            override fun onFailure(
+                call: Call,
+                e: IOException,
+            ) = Unit
+
+            override fun onResponse(
+                call: Call,
+                response: Response,
+            ) {
+                callbackTraceSpanId = LogBrewTrace.currentTraceContext()?.spanId
+            }
+        },
+    )
+    check(callbackTraceSpanId == parent.spanId)
+    val taggedRequest = delegatedRequest ?: error("expected delegated request")
+    check(taggedRequest.tag(LogBrewTraceContext::class.java)?.spanId == parent.spanId)
+    check(LogBrewTrace.currentTraceContext() == null)
+
+    val client = newClient()
+    val chain =
+        FakeChain(
+            taggedRequest,
+            code = 202,
+        ) {
+            val active = LogBrewTrace.currentTraceContext() ?: error("expected active child trace")
+            check(active.traceId == parent.traceId)
+            check(active.parentSpanId == parent.spanId)
+        }
+    val interceptor =
+        LogBrewOkHttpInterceptor(
+            client = client,
+            eventIdProvider = LogBrewOkHttpEventIdProvider { "evt_okhttp_request_004" },
+            timestampProvider = LogBrewOkHttpTimestampProvider { "2026-06-02T10:00:36Z" },
+        )
+
+    check(interceptor.intercept(chain).code == 202)
+    val body = client.previewJson()
+    check("\"id\": \"evt_okhttp_request_004\"" in body)
+    check("\"traceId\": \"${parent.traceId}\"" in body)
+    check("\"parentSpanId\": \"${parent.spanId}\"" in body)
+    check("debug=1" !in body)
+}
+
 private fun newClient(): LogBrewClient =
     LogBrewClient.create(
         apiKey = "LOGBREW_API_KEY",
@@ -218,3 +357,37 @@ private class FakeChain(
         unit: TimeUnit,
     ): Interceptor.Chain = this
 }
+
+private class FakeCall(
+    private val request: Request,
+) : Call {
+    override fun request(): Request = request
+
+    override fun execute(): Response = fakeResponse(request, 200)
+
+    override fun enqueue(responseCallback: Callback) {
+        responseCallback.onResponse(this, fakeResponse(request, 200))
+    }
+
+    override fun cancel() = Unit
+
+    override fun isExecuted(): Boolean = false
+
+    override fun isCanceled(): Boolean = false
+
+    override fun clone(): Call = FakeCall(request)
+
+    override fun timeout(): Timeout = Timeout.NONE
+}
+
+private fun fakeResponse(
+    request: Request,
+    code: Int,
+): Response =
+    Response
+        .Builder()
+        .request(request)
+        .protocol(Protocol.HTTP_1_1)
+        .code(code)
+        .message("OK")
+        .build()
