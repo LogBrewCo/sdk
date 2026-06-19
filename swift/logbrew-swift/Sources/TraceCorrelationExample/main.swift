@@ -4,6 +4,13 @@ import Foundation
 #endif
 import LogBrew
 
+struct AppOwnedOpenTelemetrySpanContext: LogBrewOpenTelemetrySpanContextCarrier {
+    let logBrewOpenTelemetryTraceId: String
+    let logBrewOpenTelemetrySpanId: String
+    let logBrewOpenTelemetryTraceFlags: String
+    let logBrewOpenTelemetryIsValid: Bool
+}
+
 let client = try LogBrewClient.create(
     apiKey: "LOGBREW_API_KEY",
     sdkName: "logbrew-swift-trace",
@@ -22,6 +29,15 @@ let openTelemetryParent = try LogBrewTrace.openTelemetrySpanContext(
     spanId: "00f067aa0ba902b7",
     traceFlags: "01",
 )
+let liveOpenTelemetryParent = try LogBrewTrace.openTelemetrySpanContext(
+    from: AppOwnedOpenTelemetrySpanContext(
+        logBrewOpenTelemetryTraceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+        logBrewOpenTelemetrySpanId: "00f067aa0ba902b7",
+        logBrewOpenTelemetryTraceFlags: "01",
+        logBrewOpenTelemetryIsValid: true,
+    ),
+)
+precondition(liveOpenTelemetryParent == openTelemetryParent)
 let trace = LogBrewTrace.context(fromOpenTelemetrySpanContext: openTelemetryParent)
 precondition(trace.traceId == openTelemetryParent.traceId)
 precondition(trace.parentSpanId == openTelemetryParent.spanId)

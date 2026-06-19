@@ -150,6 +150,13 @@ public struct LogBrewOpenTelemetrySpanContext: Equatable, Sendable {
     }
 }
 
+public protocol LogBrewOpenTelemetrySpanContextCarrier {
+    var logBrewOpenTelemetryTraceId: String { get }
+    var logBrewOpenTelemetrySpanId: String { get }
+    var logBrewOpenTelemetryTraceFlags: String { get }
+    var logBrewOpenTelemetryIsValid: Bool { get }
+}
+
 public enum LogBrewTrace {
     @TaskLocal private static var activeContext: LogBrewTraceContext?
 
@@ -177,6 +184,19 @@ public enum LogBrewTrace {
         try LogBrewOpenTelemetrySpanContext(traceId: traceId, spanId: spanId, sampled: sampled)
     }
 
+    public static func openTelemetrySpanContext(
+        from carrier: some LogBrewOpenTelemetrySpanContextCarrier,
+    ) throws -> LogBrewOpenTelemetrySpanContext? {
+        guard carrier.logBrewOpenTelemetryIsValid else {
+            return nil
+        }
+        return try LogBrewOpenTelemetrySpanContext(
+            traceId: carrier.logBrewOpenTelemetryTraceId,
+            spanId: carrier.logBrewOpenTelemetrySpanId,
+            traceFlags: carrier.logBrewOpenTelemetryTraceFlags,
+        )
+    }
+
     public static func childContext(of parent: LogBrewTraceContext) -> LogBrewTraceContext {
         LogBrewTraceContext.child(of: parent)
     }
@@ -189,6 +209,15 @@ public enum LogBrewTrace {
             parentSpanId: spanContext.spanId,
             traceFlags: spanContext.traceFlags,
         )
+    }
+
+    public static func context(
+        fromOpenTelemetrySpanContextCarrier carrier: some LogBrewOpenTelemetrySpanContextCarrier,
+    ) throws -> LogBrewTraceContext? {
+        guard let spanContext = try openTelemetrySpanContext(from: carrier) else {
+            return nil
+        }
+        return context(fromOpenTelemetrySpanContext: spanContext)
     }
 
     public static func continueOrCreateContext(fromTraceparent traceparent: String?) -> LogBrewTraceContext {

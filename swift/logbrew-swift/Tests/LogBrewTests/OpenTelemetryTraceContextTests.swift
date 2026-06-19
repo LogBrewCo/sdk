@@ -57,6 +57,40 @@ struct OpenTelemetryTraceContextTests {
         #expect(context.traceFlags == "00")
     }
 
+    @Test("OpenTelemetry carrier protocol copies valid live span context fields")
+    func openTelemetryCarrierProtocolCopiesValidFields() throws {
+        let carrier = FakeOpenTelemetrySpanContext(
+            traceId: "4BF92F3577B34DA6A3CE929D0E0E4736",
+            spanId: "00F067AA0BA902B7",
+            traceFlags: "01",
+            isValid: true,
+        )
+        let parentCandidate = try LogBrewTrace.openTelemetrySpanContext(from: carrier)
+        let contextCandidate = try LogBrewTrace.context(fromOpenTelemetrySpanContextCarrier: carrier)
+        let parent = try #require(parentCandidate)
+        let context = try #require(contextCandidate)
+
+        #expect(parent.traceId == "4bf92f3577b34da6a3ce929d0e0e4736")
+        #expect(parent.spanId == "00f067aa0ba902b7")
+        #expect(parent.traceFlags == "01")
+        #expect(context.traceId == parent.traceId)
+        #expect(context.parentSpanId == parent.spanId)
+        #expect(context.spanId != parent.spanId)
+    }
+
+    @Test("OpenTelemetry carrier protocol returns nil for invalid live span contexts")
+    func openTelemetryCarrierProtocolReturnsNilForInvalidContexts() throws {
+        let carrier = FakeOpenTelemetrySpanContext(
+            traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+            spanId: "00f067aa0ba902b7",
+            traceFlags: "01",
+            isValid: false,
+        )
+
+        #expect(try LogBrewTrace.openTelemetrySpanContext(from: carrier) == nil)
+        #expect(try LogBrewTrace.context(fromOpenTelemetrySpanContextCarrier: carrier) == nil)
+    }
+
     @Test("OpenTelemetry span context rejects malformed ids and flags")
     func openTelemetrySpanContextRejectsMalformedValues() throws {
         let parent = try makeOpenTelemetryParent()
@@ -88,5 +122,28 @@ struct OpenTelemetryTraceContextTests {
             spanId: "00F067AA0BA902B7",
             traceFlags: "01",
         )
+    }
+}
+
+private struct FakeOpenTelemetrySpanContext: LogBrewOpenTelemetrySpanContextCarrier {
+    let traceId: String
+    let spanId: String
+    let traceFlags: String
+    let isValid: Bool
+
+    var logBrewOpenTelemetryTraceId: String {
+        traceId
+    }
+
+    var logBrewOpenTelemetrySpanId: String {
+        spanId
+    }
+
+    var logBrewOpenTelemetryTraceFlags: String {
+        traceFlags
+    }
+
+    var logBrewOpenTelemetryIsValid: Bool {
+        isValid
     }
 }

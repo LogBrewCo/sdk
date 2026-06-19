@@ -66,6 +66,7 @@ grep -q 'LogBrewLifecycleTracker' "$tmp_dir/archive-lifecycle.swift"
 grep -q 'captureTransition' "$tmp_dir/archive-lifecycle.swift"
 unzip -p "$archive_path" '*/Sources/LogBrew/LogBrewTrace.swift' > "$tmp_dir/archive-trace.swift"
 grep -q 'LogBrewOpenTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
+grep -q 'LogBrewOpenTelemetrySpanContextCarrier' "$tmp_dir/archive-trace.swift"
 grep -q 'openTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
 grep -q 'context(fromOpenTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
 grep -q 'spanAttributesFromOpenTelemetrySpanContext' "$tmp_dir/archive-trace.swift"
@@ -73,6 +74,9 @@ unzip -p "$archive_path" '*/Sources/LogBrew/URLSessionTrace.swift' > "$tmp_dir/a
 grep -q 'LogBrewURLSessionTimings' "$tmp_dir/archive-urlsession.swift"
 grep -q 'init(taskMetrics: URLSessionTaskMetrics)' "$tmp_dir/archive-urlsession.swift"
 unzip -p "$archive_path" '*/Sources/TraceCorrelationExample/main.swift' > "$tmp_dir/archive-trace-example.swift"
+grep -q 'AppOwnedOpenTelemetrySpanContext' "$tmp_dir/archive-trace-example.swift"
+grep -q 'openTelemetrySpanContext(' "$tmp_dir/archive-trace-example.swift"
+grep -q 'from: AppOwnedOpenTelemetrySpanContext' "$tmp_dir/archive-trace-example.swift"
 grep -q 'LogBrewLifecycleTracker' "$tmp_dir/archive-trace-example.swift"
 
 echo "swift real-user smoke: packaged README example" >&2
