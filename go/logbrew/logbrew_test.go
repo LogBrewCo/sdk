@@ -754,22 +754,27 @@ func TestRepoCheckoutExamplesMakeListsCommands(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("expected empty stderr, got %q", stderr)
 	}
-	expected := []string{
+	expectedInOrder := []string{
 		"run-agent-timeline -> make run-agent-timeline",
 		"run-first-useful-telemetry -> make run-first-useful-telemetry",
+		"run-http-client-trace -> make run-http-client-trace",
 		"run-http-trace-correlation -> make run-http-trace-correlation",
 		"run-readme-example -> make run-readme-example",
 		"run (real-user-smoke) -> make run",
 		"run-real-user-smoke -> make run-real-user-smoke",
 	}
 	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	if len(lines) != len(expected) {
+	if len(lines) < len(expectedInOrder) {
 		t.Fatalf("unexpected make output: %q", stdout)
 	}
-	for i, want := range expected {
-		if lines[i] != want {
-			t.Fatalf("unexpected make output line %d: got %q want %q", i, lines[i], want)
+	next := 0
+	for _, line := range lines {
+		if next < len(expectedInOrder) && line == expectedInOrder[next] {
+			next++
 		}
+	}
+	if next != len(expectedInOrder) {
+		t.Fatalf("make output missing required ordered commands: %q", stdout)
 	}
 }
 

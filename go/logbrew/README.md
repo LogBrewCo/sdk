@@ -205,6 +205,37 @@ http.Handle("/checkout/", handler)
 
 The HTTP and slog helpers are dependency-free and explicit. They do not patch global HTTP clients, do not capture request or response bodies, do not capture arbitrary headers, and strip query/hash text from route metadata. Run `go run ./examples/http_trace_correlation` for a copyable local example where release, environment, slog, issue, request span, and request-duration metric events share the same W3C trace.
 
+## Outbound `net/http` Client Spans
+
+Use `NewHTTPClientTransport` when you want one outbound client span around app-owned `http.Client` calls:
+
+```go
+transport, err := logbrew.NewHTTPClientTransport(logbrew.HTTPClientTransportConfig{
+  Client:        client,
+  Base:          http.DefaultTransport,
+  RouteTemplate: "/payments/:payment_id",
+  EventIDPrefix: "checkout_http",
+  Metadata:      map[string]any{"service": "checkout-api"},
+})
+if err != nil {
+  panic(err)
+}
+
+httpClient := &http.Client{Transport: transport}
+request, err := http.NewRequestWithContext(
+  r.Context(),
+  http.MethodGet,
+  "https://api.example.com/payments/123?coupon=summer",
+  nil,
+)
+if err != nil {
+  panic(err)
+}
+response, err := httpClient.Do(request)
+```
+
+The transport clones the request before writing exactly one W3C `traceparent`, scopes the downstream call under a child `TraceContext`, queues one span with method, query-free route, status, duration, sampled flag, and primitive metadata, then returns the original response or error. HTTP 4xx/5xx responses and transport errors are marked as failed dependency spans. Malformed active trace state falls back to a local trace and reports through `OnError`; telemetry capture failures also report through `OnError` and do not replace the app-owned HTTP result. It does not patch global clients, does not capture request or response payloads, does not store headers, cookies, full URLs, query strings, fragments, baggage, tracestate, or raw propagation values. Run `go run ./examples/http_client_trace` for a local example of downstream propagation and span capture.
+
 ## Agent-Readable Timelines
 
 Use `CreateProductActionAttributes` and `CreateNetworkMilestoneAttributes` when your Go service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.

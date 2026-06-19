@@ -86,6 +86,9 @@ with zipfile.ZipFile(zip_path) as archive:
     readme_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/README.md"
     if readme_path not in names:
         raise SystemExit("missing README.md in proxy module zip")
+    http_client_trace_source_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/http_client_trace.go"
+    if http_client_trace_source_path not in names:
+        raise SystemExit("missing http_client_trace.go in proxy module zip")
     readme_example_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/readme_example/main.go"
     if readme_example_path not in names:
         raise SystemExit("missing examples/readme_example/main.go in proxy module zip")
@@ -95,6 +98,9 @@ with zipfile.ZipFile(zip_path) as archive:
     first_useful_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/first_useful_telemetry/main.go"
     if first_useful_path not in names:
         raise SystemExit("missing examples/first_useful_telemetry/main.go in proxy module zip")
+    http_client_trace_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/http_client_trace/main.go"
+    if http_client_trace_path not in names:
+        raise SystemExit("missing examples/http_client_trace/main.go in proxy module zip")
     http_trace_path = "github.com/LogBrewCo/sdk/go/logbrew@v0.1.0/examples/http_trace_correlation/main.go"
     if http_trace_path not in names:
         raise SystemExit("missing examples/http_trace_correlation/main.go in proxy module zip")
@@ -120,6 +126,7 @@ for needle in (
     "LogAttributesWithTrace",
     "IssueAttributesWithTrace",
     "NewHTTPHandler",
+    "NewHTTPClientTransport",
     "NewSlogHandler",
     "CreateProductActionAttributes",
     "CreateNetworkMilestoneAttributes",
@@ -156,23 +163,27 @@ with zipfile.ZipFile(zip_path) as archive:
 PY
 module_dir="$module_src_root/github.com/LogBrewCo/sdk/go/logbrew@v0.1.0"
 test -f "$module_dir/go.mod"
+test -f "$module_dir/http_client_trace.go"
 test -f "$module_dir/examples/Makefile"
 test -f "$module_dir/examples/agent_timeline/main.go"
 test -f "$module_dir/examples/first_useful_telemetry/main.go"
+test -f "$module_dir/examples/http_client_trace/main.go"
 test -f "$module_dir/examples/http_trace_correlation/main.go"
 test -f "$module_dir/examples/readme_example/main.go"
 test -f "$module_dir/examples/real_user_smoke/main.go"
 test -f "$module_dir/examples/real_user_smoke/Makefile"
-grep -q '^\.PHONY: help run run-agent-timeline run-first-useful-telemetry run-http-trace-correlation run-readme-example run-real-user-smoke$' "$module_dir/examples/Makefile"
+grep -q '^\.PHONY: help run run-agent-timeline run-first-useful-telemetry run-http-client-trace run-http-trace-correlation run-readme-example run-real-user-smoke$' "$module_dir/examples/Makefile"
 grep -q '^help:$' "$module_dir/examples/Makefile"
 grep -q '^run: run-real-user-smoke$' "$module_dir/examples/Makefile"
 grep -q '^run-agent-timeline:$' "$module_dir/examples/Makefile"
 grep -q '^run-first-useful-telemetry:$' "$module_dir/examples/Makefile"
+grep -q '^run-http-client-trace:$' "$module_dir/examples/Makefile"
 grep -q '^run-http-trace-correlation:$' "$module_dir/examples/Makefile"
 grep -q '^run-readme-example:$' "$module_dir/examples/Makefile"
 grep -q '^run-real-user-smoke:$' "$module_dir/examples/Makefile"
 grep -q '^	@go run \./agent_timeline$' "$module_dir/examples/Makefile"
 grep -q '^	@go run \./first_useful_telemetry$' "$module_dir/examples/Makefile"
+grep -q '^	@go run \./http_client_trace$' "$module_dir/examples/Makefile"
 grep -q '^	@go run \./http_trace_correlation$' "$module_dir/examples/Makefile"
 grep -q '^	@go run \./readme_example$' "$module_dir/examples/Makefile"
 grep -q '^	@go run \./real_user_smoke$' "$module_dir/examples/Makefile"
@@ -195,11 +206,12 @@ grep -q '"ok":' "$tmp_dir/packaged-readme-example.stderr.json"
 (cd "$module_dir/examples" && make) > "$tmp_dir/packaged-examples-make-help.txt"
 grep -qx 'run-agent-timeline -> make run-agent-timeline' <(sed -n '1p' "$tmp_dir/packaged-examples-make-help.txt")
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '2p' "$tmp_dir/packaged-examples-make-help.txt")
-grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' <(sed -n '3p' "$tmp_dir/packaged-examples-make-help.txt")
-grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '4p' "$tmp_dir/packaged-examples-make-help.txt")
-grep -qx 'run (real-user-smoke) -> make run' <(sed -n '5p' "$tmp_dir/packaged-examples-make-help.txt")
-grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '6p' "$tmp_dir/packaged-examples-make-help.txt")
-test "$(wc -l < "$tmp_dir/packaged-examples-make-help.txt" | tr -d ' ')" = "6"
+grep -qx 'run-http-client-trace -> make run-http-client-trace' <(sed -n '3p' "$tmp_dir/packaged-examples-make-help.txt")
+grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' <(sed -n '4p' "$tmp_dir/packaged-examples-make-help.txt")
+grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '5p' "$tmp_dir/packaged-examples-make-help.txt")
+grep -qx 'run (real-user-smoke) -> make run' <(sed -n '6p' "$tmp_dir/packaged-examples-make-help.txt")
+grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '7p' "$tmp_dir/packaged-examples-make-help.txt")
+test "$(wc -l < "$tmp_dir/packaged-examples-make-help.txt" | tr -d ' ')" = "7"
 (cd "$module_dir/examples" && make run-agent-timeline) > "$tmp_dir/packaged-agent-timeline.stdout.txt" 2> "$tmp_dir/packaged-agent-timeline.stderr.txt"
 grep -q '"source": "product.action"' "$tmp_dir/packaged-agent-timeline.stdout.txt"
 grep -q '"source": "network.milestone"' "$tmp_dir/packaged-agent-timeline.stdout.txt"
@@ -219,6 +231,19 @@ grep -q '"type": "metric"' "$tmp_dir/packaged-first-useful.stdout.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-first-useful.stdout.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_go_first_useful_payload.py" "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json" >/dev/null
+(cd "$module_dir/examples" && make run-http-client-trace) > "$tmp_dir/packaged-http-client-trace.stdout.json" 2> "$tmp_dir/packaged-http-client-trace.stderr.json"
+grep -q '"type": "span"' "$tmp_dir/packaged-http-client-trace.stdout.json"
+grep -q '"source": "net/http.client"' "$tmp_dir/packaged-http-client-trace.stdout.json"
+grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/packaged-http-client-trace.stdout.json"
+grep -q '"method": "GET"' "$tmp_dir/packaged-http-client-trace.stdout.json"
+grep -q '"statusCode": 202' "$tmp_dir/packaged-http-client-trace.stdout.json"
+grep -q '"downstreamTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$tmp_dir/packaged-http-client-trace.stderr.json"
+grep -q '"callerTraceparent":"spoofed"' "$tmp_dir/packaged-http-client-trace.stderr.json"
+grep -q '"events":1' "$tmp_dir/packaged-http-client-trace.stderr.json"
+if grep -Eq 'coupon=summer|receipt|traceparent|spoofed|authorization' "$tmp_dir/packaged-http-client-trace.stdout.json"; then
+	echo "packaged HTTP client trace leaked unsafe route or propagation values" >&2
+	exit 1
+fi
 (cd "$module_dir/examples" && make run-http-trace-correlation) > "$tmp_dir/packaged-http-trace.stdout.json" 2> "$tmp_dir/packaged-http-trace.stderr.json"
 grep -q '"type": "release"' "$tmp_dir/packaged-http-trace.stdout.json"
 grep -q '"type": "environment"' "$tmp_dir/packaged-http-trace.stdout.json"
