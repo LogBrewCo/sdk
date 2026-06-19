@@ -450,6 +450,31 @@ queued = queue_operation_with_logbrew_span(
 
 The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the queue system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the queue result. Metadata is intentionally bounded to primitive caller metadata, `queueSystem`, `queueOperation`, optional operation kind, optional queue/task names, optional non-negative message count/attempt, sampled state, and exception type. It drops message-like metadata fields and does not monkeypatch queue frameworks, write broker metadata, open support tickets, capture job arguments, message bodies, headers, cookies, broker URLs, baggage, tracestate, stack traces, or exception messages.
 
+For RQ jobs, use `rq_operation_with_logbrew_span()` when you want LogBrew to derive safe `func_name` and `origin` metadata from an app-owned job object without installing RQ as a LogBrew dependency or patching `Queue`/`Worker` globally:
+
+```python
+from logbrew_sdk import LogBrewClient, rq_operation_with_logbrew_span
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-worker",
+    sdk_version="1.0.0",
+)
+
+job = queue.create_job(checkout_email_task, args=[order_id])
+queued = rq_operation_with_logbrew_span(
+    client=client,
+    event_id="evt_checkout_email_rq_publish",
+    timestamp="2026-06-19T14:00:00Z",
+    job=job,
+    operation=lambda: queue.enqueue_job(job),
+    operation_kind="publish",
+    metadata={"service": "checkout-worker"},
+)
+```
+
+The RQ helper records one `rq` queue span using explicit caller control. It reads only string-like `job.func_name` and `job.origin` by default, lets you override queue/task names, and still avoids job args, kwargs, descriptions, broker metadata writes, global worker patching, baggage, and tracestate.
+
 ## Agent-Readable Timelines
 
 Use `create_product_action_attributes()` and `create_network_milestone_attributes()` when your service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.

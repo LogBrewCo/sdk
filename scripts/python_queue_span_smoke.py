@@ -9,12 +9,20 @@ from logbrew_sdk import (
     async_queue_operation_with_logbrew_span,
     get_active_logbrew_trace,
     queue_operation_with_logbrew_span,
+    rq_operation_with_logbrew_span,
     use_logbrew_trace,
 )
 
 
 class StubQueueError(RuntimeError):
     pass
+
+
+class StubRqJob:
+    func_name = "checkout.send_email"
+    origin = "email"
+    args = ("raw-order-id",)
+    kwargs = {"payload": "raw job payload"}
 
 
 client = LogBrewClient.create(
@@ -101,6 +109,19 @@ try:
 except StubQueueError:
     pass
 
+with use_logbrew_trace(parent_trace):
+    rq_result = rq_operation_with_logbrew_span(
+        client=client,
+        event_id="evt_python_rq_publish",
+        timestamp="2026-06-19T13:00:04Z",
+        job=StubRqJob(),
+        operation=lambda: "rq queued",
+        operation_kind="publish",
+        span_id_factory=lambda: "b7ad6b7169203365",
+        clock=iter([340.0, 340.006]).__next__,
+        metadata={"service": "checkout", "jobArgs": "raw rq args"},
+    )
+
 closed_client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
     sdk_name="smoke-app-queue",
@@ -131,6 +152,8 @@ for forbidden in (
     "raw task kwargs",
     '"kwargs"',
     "refused",
+    "raw-order-id",
+    "raw rq args",
 ):
     if forbidden in serialized:
         raise SystemExit(f"queue span leaked private data: {forbidden}")
@@ -139,6 +162,7 @@ payload = json.loads(serialized)
 publish_metadata = payload["events"][0]["attributes"]["metadata"]
 process_metadata = payload["events"][1]["attributes"]["metadata"]
 error_metadata = payload["events"][2]["attributes"]["metadata"]
+rq_metadata = payload["events"][3]["attributes"]["metadata"]
 
 print(
     json.dumps(
@@ -153,6 +177,10 @@ print(
             "ok": True,
             "publishResult": publish_result,
             "queueName": publish_metadata["queueName"],
+            "rqOperation": rq_metadata["queueOperation"],
+            "rqQueueName": rq_metadata["queueName"],
+            "rqResult": rq_result,
+            "rqTaskName": rq_metadata["taskName"],
             "queueSystem": publish_metadata["queueSystem"],
             "syncOperationKind": publish_metadata["queueOperationKind"],
             "taskName": process_metadata["taskName"],

@@ -74,3 +74,40 @@ LogBrew adds explicit `queue_operation_with_logbrew_span(...)` and `async_queue_
 ## Remaining Gap
 
 Competitors still lead for automatic queue framework adoption. The next stronger LogBrew step should be optional framework-owned queue integration packages or source snippets, starting with Celery/RQ if user demand justifies the extra dependency and patching surface.
+
+## RQ Convenience Follow-Up
+
+Fresh source refresh on 2026-06-19:
+
+- Sentry Python `getsentry/sentry-python@883e585baf564ff650e2292b70262aef852adec0`
+- `sentry_sdk/integrations/rq.py`: `RqIntegration.setup_once`, `sentry_patched_perform_job`, `sentry_patched_enqueue_job`, `_make_event_processor`, `_capture_exception`.
+- Datadog dd-trace-py `DataDog/dd-trace-py@187cfc3700200ec8f33d6f610280924ef17e1696`
+- `ddtrace/contrib/internal/rq/patch.py`: `traced_queue_enqueue_job`, `traced_queue_fetch_job`, `traced_perform_job`, `traced_job_perform`, `patch`, `unpatch`.
+- OpenTelemetry Python Contrib `open-telemetry/opentelemetry-python-contrib@a5081cddcd6ca7f529abb2dbdebce6d2a4f062fb`
+- `instrumentation/opentelemetry-instrumentation-celery/src/opentelemetry/instrumentation/celery/__init__.py`: `CeleryInstrumentor._instrument`, `_trace_before_publish`, `_trace_prerun`, `_trace_postrun`, `_trace_failure`, `_trace_retry`.
+
+Pattern update:
+
+- Sentry RQ patches `Queue.enqueue_job` and worker `perform_job`, stores `_sentry_trace_headers` in `job.meta`, and can enrich error events with RQ job data.
+- Datadog RQ wraps `Queue.enqueue_job`, `Queue.fetch_job`, `Worker.perform_job`, and `Job.perform`, adds producer/consumer span tags such as queue name, job ID, and function name, and unpatches reversibly.
+- OpenTelemetry Celery still validates the signal-based producer/consumer model with explicit context injection/extraction and task-local span lifecycle state.
+
+LogBrew follow-up:
+
+- Added dependency-free `rq_operation_with_logbrew_span(...)` in core for app-owned RQ enqueue/perform calls.
+- The helper duck-types only string-like `job.func_name` and `job.origin`, derives `taskName`, `queueName`, `queueOperation`, and a single-message count, and delegates to the existing queue span capture path.
+- It preserves the caller's operation result/error, activates a child LogBrew trace during the operation, and keeps capture failures isolated through `on_capture_error`.
+- It does not import RQ, patch `Queue` or `Worker`, write `job.meta`, capture job IDs, args, kwargs, descriptions, headers, broker URLs, baggage, tracestate, exception messages, or stack traces.
+
+Verifier evidence:
+
+- Focused TDD red failed on missing `rq_operation_with_logbrew_span` export.
+- `PYTHONPATH=python/logbrew_py/src python3 -m unittest python/logbrew_py/tests/test_rq_client.py python/logbrew_py/tests/test_queue_client.py` passed.
+- `PYTHONPATH=python/logbrew_py/src python3 scripts/python_queue_span_smoke.py` proved four queue events, RQ task/queue metadata, and no RQ args/kwargs/header leakage.
+- `PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'` ran 62 tests.
+- `bash scripts/check_python_static.sh` passed Ruff and mypy over 42 source files.
+- `bash scripts/real_user_python_smoke.sh` passed wheel, wheel reinstall, freeze/direct reinstall, sdist, and sdist reinstall installed-artifact checks with `_rq_client.py` included.
+
+Remaining gap after this follow-up:
+
+- LogBrew is now better for privacy-bounded explicit RQ adoption, but Sentry and Datadog remain ahead for teams that want hidden RQ patching and broker metadata propagation. That should stay out of core; the next step would be a separate opt-in `logbrew-rq` integration package only if the extra dependency and patching surface are justified.

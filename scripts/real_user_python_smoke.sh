@@ -372,13 +372,17 @@ run_queue_span_smoke() {
 
     python "$repo_root/scripts/python_queue_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"activeSpan": "b7ad6b7169203361"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"asyncActiveSpan": "b7ad6b7169203362"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"queueSystem": "celery"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"syncOperationKind": "publish"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"queueName": "email"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"taskName": "checkout.email"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"rqOperation": "publish checkout.send_email"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"rqQueueName": "email"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"rqResult": "rq queued"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"rqTaskName": "checkout.send_email"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"messageCount": 1' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"errorType": "StubQueueError"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
@@ -530,6 +534,7 @@ with zipfile.ZipFile(wheel_path) as archive:
         "logbrew_sdk/_http_client.py",
         "logbrew_sdk/_instrumentation.py",
         "logbrew_sdk/_queue_client.py",
+        "logbrew_sdk/_rq_client.py",
         "logbrew_sdk/__init__.py",
         "logbrew_sdk/_timeline.py",
         "logbrew_sdk/_trace_context.py",
@@ -565,6 +570,7 @@ for needle in (
     "httpx_request_with_logbrew_span",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
+    "rq_operation_with_logbrew_span",
     "urlopen_with_logbrew_span",
     "parse_traceparent",
     "create_product_action_attributes",
@@ -601,6 +607,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
         f"{sdist_root}/src/logbrew_sdk/_http_client.py",
         f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
         f"{sdist_root}/src/logbrew_sdk/_queue_client.py",
+        f"{sdist_root}/src/logbrew_sdk/_rq_client.py",
         f"{sdist_root}/src/logbrew_sdk/_timeline.py",
         f"{sdist_root}/src/logbrew_sdk/_trace_context.py",
         f"{sdist_root}/src/logbrew_sdk/py.typed",
@@ -642,6 +649,7 @@ for needle in (
     "httpx_request_with_logbrew_span",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
+    "rq_operation_with_logbrew_span",
     "urlopen_with_logbrew_span",
     "parse_traceparent",
     "create_product_action_attributes",
@@ -1937,6 +1945,7 @@ required = {
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
     "logbrew_sdk/_queue_client.py",
+    "logbrew_sdk/_rq_client.py",
     "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/py.typed",
     "logbrew_sdk/examples/__init__.py",
@@ -1967,6 +1976,7 @@ for needle in (
     "httpx_request_with_logbrew_span",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
+    "rq_operation_with_logbrew_span",
     "urlopen_with_logbrew_span",
 ):
     if needle not in description:
@@ -2111,6 +2121,7 @@ required_show_files = {
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
     "logbrew_sdk/_queue_client.py",
+    "logbrew_sdk/_rq_client.py",
     "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/__init__.py",
     "logbrew_sdk/examples/__init__.py",

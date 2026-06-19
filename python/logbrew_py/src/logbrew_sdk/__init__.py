@@ -919,6 +919,7 @@ from logbrew_sdk._queue_client import (  # noqa: E402
     async_queue_operation_with_logbrew_span,
     queue_operation_with_logbrew_span,
 )
+from logbrew_sdk._rq_client import rq_operation_with_logbrew_span  # noqa: E402
 from logbrew_sdk._timeline import create_network_milestone_attributes, create_product_action_attributes  # noqa: E402
 
 
@@ -959,6 +960,7 @@ __all__ = [
     "parse_traceparent",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
+    "rq_operation_with_logbrew_span",
     "span_attributes_from_trace_context",
     "span_attributes_from_traceparent",
     "trace_metadata",
