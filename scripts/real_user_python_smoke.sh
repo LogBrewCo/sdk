@@ -333,6 +333,22 @@ run_httpx_span_smoke() {
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_database_span_smoke() {
+    local output_prefix="$1"
+
+    python "$repo_root/scripts/python_database_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"activeSpan": "b7ad6b7169203341"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncActiveSpan": "b7ad6b7169203342"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"dbSystem": "postgresql"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncDbSystem": "mysql"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"rowCount": 3' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncRowCount": 2' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"errorType": "StubDatabaseError"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_reinstall_from_freeze() {
     local freeze_file="$1"
     local expected_suffix="$2"
@@ -375,6 +391,7 @@ run_reinstall_from_freeze() {
     run_urlopen_span_smoke "$output_prefix-freeze-urlopen-span"
     run_requests_span_smoke "$output_prefix-freeze-requests-span"
     run_httpx_span_smoke "$output_prefix-freeze-httpx-span"
+    run_database_span_smoke "$output_prefix-freeze-database-span"
 
     deactivate
 }
@@ -424,6 +441,7 @@ run_reinstall_from_direct_requirement() {
     run_urlopen_span_smoke "$output_prefix-direct-urlopen-span"
     run_requests_span_smoke "$output_prefix-direct-requests-span"
     run_httpx_span_smoke "$output_prefix-direct-httpx-span"
+    run_database_span_smoke "$output_prefix-direct-database-span"
 
     deactivate
 }
@@ -468,7 +486,9 @@ package_version = os.environ["LOGBREW_PYTHON_PACKAGE_VERSION"]
 with zipfile.ZipFile(wheel_path) as archive:
     names = set(archive.namelist())
     required = {
+        "logbrew_sdk/_db_client.py",
         "logbrew_sdk/_http_client.py",
+        "logbrew_sdk/_instrumentation.py",
         "logbrew_sdk/__init__.py",
         "logbrew_sdk/_timeline.py",
         "logbrew_sdk/_trace_context.py",
@@ -495,7 +515,9 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
+    "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
@@ -529,7 +551,9 @@ with tarfile.open(sdist_path, "r:gz") as archive:
     required = {
         f"{sdist_root}/README.md",
         f"{sdist_root}/pyproject.toml",
+        f"{sdist_root}/src/logbrew_sdk/_db_client.py",
         f"{sdist_root}/src/logbrew_sdk/_http_client.py",
+        f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
         f"{sdist_root}/src/logbrew_sdk/_timeline.py",
         f"{sdist_root}/src/logbrew_sdk/_trace_context.py",
         f"{sdist_root}/src/logbrew_sdk/py.typed",
@@ -562,7 +586,9 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
+    "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
@@ -851,10 +877,12 @@ from logbrew_sdk import (
     TraceparentContext,
     Transport,
     TransportResponse,
+    async_database_operation_with_logbrew_span,
     async_httpx_request_with_logbrew_span,
     create_network_milestone_attributes,
     create_product_action_attributes,
     create_traceparent,
+    database_operation_with_logbrew_span,
     httpx_request_with_logbrew_span,
     parse_traceparent,
     requests_request_with_logbrew_span,
@@ -1007,6 +1035,48 @@ async def run_async_httpx_typecheck() -> None:
 
 
 asyncio.run(run_async_httpx_typecheck())
+
+
+class TypecheckRows:
+    rowcount = 1
+
+
+database_result = database_operation_with_logbrew_span(
+    "SELECT health",
+    client=client,
+    event_id="evt_database_typecheck",
+    timestamp="2026-06-02T10:00:10Z",
+    operation=TypecheckRows,
+    system="sqlite",
+    row_count_from_result=lambda rows: rows.rowcount,
+    span_id_factory=lambda: "b7ad6b7169203335",
+)
+if database_result.rowcount != 1:
+    raise RuntimeError("unexpected database row count")
+
+
+async def async_database_operation() -> TypecheckRows:
+    rows = TypecheckRows()
+    rows.rowcount = 2
+    return rows
+
+
+async def run_async_database_typecheck() -> None:
+    async_database_result = await async_database_operation_with_logbrew_span(
+        "SELECT async_health",
+        client=client,
+        event_id="evt_database_async_typecheck",
+        timestamp="2026-06-02T10:00:11Z",
+        operation=async_database_operation,
+        system="sqlite",
+        row_count_from_result=lambda rows: rows.rowcount,
+        span_id_factory=lambda: "b7ad6b7169203336",
+    )
+    if async_database_result.rowcount != 2:
+        raise RuntimeError("unexpected async database row count")
+
+
+asyncio.run(run_async_database_typecheck())
 handler = LogBrewLoggingHandler(
     client,
     logging_transport,
@@ -1728,7 +1798,9 @@ if version("logbrew-sdk") != package_version:
 
 package_files = {str(path) for path in files("logbrew-sdk") or []}
 required = {
+    "logbrew_sdk/_db_client.py",
     "logbrew_sdk/_http_client.py",
+    "logbrew_sdk/_instrumentation.py",
     "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/py.typed",
     "logbrew_sdk/examples/__init__.py",
@@ -1750,7 +1822,9 @@ for needle in (
     "preview_json()",
     "HttpTransport",
     "LogBrewLoggingHandler",
+    "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
+    "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "urlopen_with_logbrew_span",
@@ -1892,7 +1966,9 @@ required_show_files = {
     f"{dist_info_dir}/WHEEL",
     f"{dist_info_dir}/direct_url.json",
     f"{dist_info_dir}/top_level.txt",
+    "logbrew_sdk/_db_client.py",
     "logbrew_sdk/_http_client.py",
+    "logbrew_sdk/_instrumentation.py",
     "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/__init__.py",
     "logbrew_sdk/examples/__init__.py",
@@ -2054,6 +2130,7 @@ run_http_transport_smoke "wheel-http-transport"
 run_urlopen_span_smoke "wheel-urlopen-span"
 run_requests_span_smoke "wheel-requests-span"
 run_httpx_span_smoke "wheel-httpx-span"
+run_database_span_smoke "wheel-database-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/pip-uninstall-list.json"
@@ -2085,6 +2162,7 @@ run_http_transport_smoke "wheel-reinstall-http-transport"
 run_urlopen_span_smoke "wheel-reinstall-urlopen-span"
 run_requests_span_smoke "wheel-reinstall-requests-span"
 run_httpx_span_smoke "wheel-reinstall-httpx-span"
+run_database_span_smoke "wheel-reinstall-database-span"
 
 deactivate
 run_reinstall_from_freeze "$tmp_dir/pip-freeze.txt" "$wheel_artifact" "wheel"
@@ -2126,6 +2204,7 @@ run_http_transport_smoke "sdist-http-transport"
 run_urlopen_span_smoke "sdist-urlopen-span"
 run_requests_span_smoke "sdist-requests-span"
 run_httpx_span_smoke "sdist-httpx-span"
+run_database_span_smoke "sdist-database-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
 assert_python_package_removed "$tmp_dir/sdist-pip-uninstall-list.json"
@@ -2157,6 +2236,7 @@ run_http_transport_smoke "sdist-reinstall-http-transport"
 run_urlopen_span_smoke "sdist-reinstall-urlopen-span"
 run_requests_span_smoke "sdist-reinstall-requests-span"
 run_httpx_span_smoke "sdist-reinstall-httpx-span"
+run_database_span_smoke "sdist-reinstall-database-span"
 
 cat > "$tmp_dir/unauth.py" <<'EOF'
 import json

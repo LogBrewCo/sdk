@@ -362,6 +362,35 @@ async def submit_payment(async_session: httpx.AsyncClient) -> httpx.Response:
 
 The `httpx` helpers follow the same privacy and failure behavior as the `requests` helper: cloned caller headers, exactly one normalized child `traceparent`, active child trace context during the call or awaited call, sanitized dependency span capture, original response/error preservation, and optional `on_capture_error` reporting for telemetry failures. They do not capture payloads, response bodies, headers, cookies, full URLs, query strings, fragments, baggage, tracestate, or raw propagation values.
 
+## Database Operation Spans
+
+Use `database_operation_with_logbrew_span()` for sync database calls and `async_database_operation_with_logbrew_span()` for async calls when you want one app-owned DB span without installing or patching a database driver:
+
+```python
+from logbrew_sdk import LogBrewClient, database_operation_with_logbrew_span
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+
+result = database_operation_with_logbrew_span(
+    "SELECT checkout_order",
+    client=client,
+    event_id="evt_checkout_db_query",
+    timestamp="2026-06-19T10:30:00Z",
+    operation=lambda: session.execute("SELECT * FROM checkout_order WHERE id = ?", [cart_id]),
+    system="postgresql",
+    db_name="checkout",
+    statement_template="SELECT * FROM checkout_order WHERE id = ?",
+    row_count_from_result=lambda rows: rows.rowcount,
+    metadata={"service": "checkout-api"},
+)
+```
+
+The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the DB system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the database result. Metadata is intentionally bounded to primitive caller metadata, `dbSystem`, `dbOperation`, optional `dbName`, optional `statementTemplate`, optional non-negative `rowCount`, sampled state, and exception type. It does not monkeypatch SQLAlchemy or DB-API drivers, does not open support tickets, and does not capture SQL parameters, result rows, connection strings, network addresses, sensitive configuration values, payloads, baggage, tracestate, stack traces, or exception messages.
+
 ## Agent-Readable Timelines
 
 Use `create_product_action_attributes()` and `create_network_milestone_attributes()` when your service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.

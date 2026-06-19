@@ -2,32 +2,24 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
-from datetime import UTC, datetime
 from importlib import import_module
 from time import perf_counter
 from typing import Any, TypeAlias, cast
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
-from uuid import uuid4
 
+from logbrew_sdk import _instrumentation
 from logbrew_sdk._trace_context import (
     LogBrewTraceContext,
     get_active_logbrew_trace,
     use_logbrew_trace,
 )
 
-MetadataValue: TypeAlias = str | int | float | bool | None
-Metadata: TypeAlias = dict[str, MetadataValue]
-Clock: TypeAlias = Callable[[], float]
 RequestCallable: TypeAlias = Callable[..., Any]
 AsyncRequestCallable: TypeAlias = Callable[..., Awaitable[Any]]
-
-HEX16 = re.compile(r"^[0-9a-fA-F]{16}$")
-ZERO_SPAN_ID = "0000000000000000"
 
 
 def urlopen_with_logbrew_span(
@@ -43,13 +35,13 @@ def urlopen_with_logbrew_span(
     route_template: str | None = None,
     metadata: Mapping[str, Any] | None = None,
     span_id_factory: Callable[[], str] | None = None,
-    clock: Clock | None = None,
+    clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
 ) -> Any:
     """Run ``urllib.request.urlopen`` under a LogBrew child span and W3C trace header."""
 
     parent_trace = trace if trace is not None else get_active_logbrew_trace()
-    child_trace = _child_trace(parent_trace, span_id_factory)
+    child_trace = _instrumentation.child_trace(parent_trace, span_id_factory)
     source_request = _request_from_input(request, data)
     traced_request = _clone_request_with_traceparent(source_request, child_trace)
     method = traced_request.get_method().upper()
@@ -62,7 +54,7 @@ def urlopen_with_logbrew_span(
         try:
             response = _call_urlopen(open_callable, traced_request, timeout)
         except Exception as error:
-            duration_ms = _duration_ms(start, read_clock)
+            duration_ms = _instrumentation.duration_ms(start, read_clock)
             _capture_http_span(
                 client,
                 event_id,
@@ -80,7 +72,7 @@ def urlopen_with_logbrew_span(
             )
             raise
 
-    duration_ms = _duration_ms(start, read_clock)
+    duration_ms = _instrumentation.duration_ms(start, read_clock)
     status_code = _status_from_response(response)
     span_status = "error" if status_code is not None and status_code >= 400 else "ok"
     _capture_http_span(
@@ -116,7 +108,7 @@ def requests_request_with_logbrew_span(
     route_template: str | None = None,
     metadata: Mapping[str, Any] | None = None,
     span_id_factory: Callable[[], str] | None = None,
-    clock: Clock | None = None,
+    clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
     **request_kwargs: Any,
 ) -> Any:
@@ -157,7 +149,7 @@ def httpx_request_with_logbrew_span(
     route_template: str | None = None,
     metadata: Mapping[str, Any] | None = None,
     span_id_factory: Callable[[], str] | None = None,
-    clock: Clock | None = None,
+    clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
     **request_kwargs: Any,
 ) -> Any:
@@ -198,7 +190,7 @@ async def async_httpx_request_with_logbrew_span(
     route_template: str | None = None,
     metadata: Mapping[str, Any] | None = None,
     span_id_factory: Callable[[], str] | None = None,
-    clock: Clock | None = None,
+    clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
     **request_kwargs: Any,
 ) -> Any:
@@ -238,7 +230,7 @@ def _sync_request_with_logbrew_span(
     route_template: str | None,
     metadata: Mapping[str, Any] | None,
     span_id_factory: Callable[[], str] | None,
-    clock: Clock | None,
+    clock: _instrumentation.Clock | None,
     on_capture_error: Callable[[Exception], None] | None,
     source: str,
     request_kwargs: Mapping[str, Any],
@@ -246,7 +238,7 @@ def _sync_request_with_logbrew_span(
     method_value = _method_name(method)
     _require_url(url)
     parent_trace = trace if trace is not None else get_active_logbrew_trace()
-    child_trace = _child_trace(parent_trace, span_id_factory)
+    child_trace = _instrumentation.child_trace(parent_trace, span_id_factory)
     call_kwargs = _outbound_request_kwargs(request_kwargs, headers, timeout, child_trace)
     route = _route_from_url(url, route_template)
     read_clock = clock or perf_counter
@@ -303,7 +295,7 @@ async def _async_request_with_logbrew_span(
     route_template: str | None,
     metadata: Mapping[str, Any] | None,
     span_id_factory: Callable[[], str] | None,
-    clock: Clock | None,
+    clock: _instrumentation.Clock | None,
     on_capture_error: Callable[[Exception], None] | None,
     source: str,
     request_kwargs: Mapping[str, Any],
@@ -311,7 +303,7 @@ async def _async_request_with_logbrew_span(
     method_value = _method_name(method)
     _require_url(url)
     parent_trace = trace if trace is not None else get_active_logbrew_trace()
-    child_trace = _child_trace(parent_trace, span_id_factory)
+    child_trace = _instrumentation.child_trace(parent_trace, span_id_factory)
     call_kwargs = _outbound_request_kwargs(request_kwargs, headers, timeout, child_trace)
     route = _route_from_url(url, route_template)
     read_clock = clock or perf_counter
@@ -375,7 +367,7 @@ def _capture_failed_http_span(
     method: str,
     route: str,
     start: float,
-    clock: Clock,
+    clock: _instrumentation.Clock,
     metadata: Mapping[str, Any] | None,
     error: Exception,
     on_capture_error: Callable[[Exception], None] | None,
@@ -389,7 +381,7 @@ def _capture_failed_http_span(
         method,
         route,
         "error",
-        _duration_ms(start, clock),
+                _instrumentation.duration_ms(start, clock),
         metadata,
         _status_from_error(error),
         error,
@@ -406,7 +398,7 @@ def _capture_successful_http_span(
     method: str,
     route: str,
     start: float,
-    clock: Clock,
+    clock: _instrumentation.Clock,
     metadata: Mapping[str, Any] | None,
     response: Any,
     on_capture_error: Callable[[Exception], None] | None,
@@ -422,7 +414,7 @@ def _capture_successful_http_span(
         method,
         route,
         span_status,
-        _duration_ms(start, clock),
+        _instrumentation.duration_ms(start, clock),
         metadata,
         status_code,
         None,
@@ -444,26 +436,6 @@ def _request_from_input(request: str | Request, data: bytes | None) -> Request:
     if isinstance(request, str):
         return Request(request, data=data)
     raise TypeError("request must be a URL string or urllib.request.Request")
-
-
-def _child_trace(
-    parent_trace: LogBrewTraceContext | None,
-    span_id_factory: Callable[[], str] | None,
-) -> LogBrewTraceContext:
-    span_id = (span_id_factory or _default_span_id)().lower()
-    _require_span_id(span_id)
-    if parent_trace is None:
-        return LogBrewTraceContext(
-            trace_id=_default_trace_id(),
-            span_id=span_id,
-            sampled=False,
-        )
-    return LogBrewTraceContext(
-        trace_id=parent_trace.trace_id,
-        span_id=span_id,
-        parent_span_id=parent_trace.span_id,
-        sampled=parent_trace.sampled,
-    )
 
 
 def _clone_request_with_traceparent(request: Request, trace: LogBrewTraceContext) -> Request:
@@ -507,7 +479,7 @@ def _capture_http_span(
     try:
         client.span(
             event_id,
-            timestamp or _now_timestamp(),
+            timestamp or _instrumentation.now_timestamp(),
             {
                 "name": f"{method} {route}",
                 "traceId": trace.trace_id,
@@ -541,8 +513,8 @@ def _span_metadata(
     status_code: int | None,
     error: Exception | None,
     source: str,
-) -> Metadata:
-    span_metadata: Metadata = _compact_metadata(metadata)
+) -> _instrumentation.Metadata:
+    span_metadata = _instrumentation.compact_metadata(metadata)
     span_metadata.update(
         {
             "source": source,
@@ -557,16 +529,6 @@ def _span_metadata(
         span_metadata["errorType"] = type(error).__name__
         span_metadata["errorMessage"] = str(error)
     return span_metadata
-
-
-def _compact_metadata(metadata: Mapping[str, Any] | None) -> Metadata:
-    if metadata is None:
-        return {}
-    return {
-        key: value
-        for key, value in metadata.items()
-        if isinstance(key, str) and (isinstance(value, str | int | float | bool) or value is None)
-    }
 
 
 def _route_from_request(request: Request, route_template: str | None) -> str:
@@ -598,29 +560,6 @@ def _status_from_error(error: Exception) -> int | None:
     if response is not None:
         return _status_from_response(response)
     return None
-
-
-def _duration_ms(start: float, clock: Clock) -> float:
-    return round(max((clock() - start) * 1000, 0), 3)
-
-
-def _now_timestamp() -> str:
-    return datetime.now(tz=UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def _default_trace_id() -> str:
-    trace_id = uuid4().hex
-    return "00000000000000000000000000000001" if trace_id == "0" * 32 else trace_id
-
-
-def _default_span_id() -> str:
-    span_id = uuid4().hex[:16]
-    return "0000000000000001" if span_id == ZERO_SPAN_ID else span_id
-
-
-def _require_span_id(span_id: str) -> None:
-    if HEX16.fullmatch(span_id) is None or span_id == ZERO_SPAN_ID:
-        raise ValueError("span_id_factory must return a non-zero 16-character hex span id")
 
 
 def _method_name(method: str) -> str:
