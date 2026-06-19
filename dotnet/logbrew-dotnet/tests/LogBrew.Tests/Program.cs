@@ -483,6 +483,7 @@ AssertTrue(flushOnLogTransport.SentBodies.Count == 1, "expected flush-on-log tra
 tests++;
 
 tests += TraceCorrelationTests.Run();
+tests += OperationTracingTests.Run();
 
 Console.WriteLine("dotnet package tests ok (" + tests.ToString(CultureInfo.InvariantCulture) + " tests)");
 

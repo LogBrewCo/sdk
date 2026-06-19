@@ -101,6 +101,7 @@ for needle in (
     "LogBrewTrace.Current",
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",
+    "LogBrewOperationTracing",
     "first useful .NET service telemetry",
     "HttpTransport",
     "System.Net.Http",
@@ -453,6 +454,91 @@ using (var httpTransport = new HttpTransport(new HttpTransportOptions
     Require(intake.Bodies[0] == intake.Bodies[1], "expected retry body to stay unchanged");
 }
 
+var operationClient = NewClient();
+var rootTrace = LogBrewTraceContext.FromTraceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "b7ad6b7169203331");
+using (LogBrewTrace.Activate(rootTrace))
+{
+    var dbResult = LogBrewOperationTracing.DatabaseOperation(
+        operationClient,
+        "orders.select",
+        () =>
+        {
+            Require(LogBrewTrace.Current != null, "expected active dependency trace");
+            Require(LogBrewTrace.Current!.TraceId == rootTrace.TraceId, "expected dependency trace id");
+            Require(LogBrewTrace.Current.ParentSpanId == rootTrace.SpanId, "expected dependency parent span");
+            return "order_123";
+        },
+        LogBrewOperationTracing.DatabaseOperationOptions.Create()
+            .WithEventIdPrefix("smoke_db")
+            .WithSystem("sqlserver")
+            .WithOperationKind("select")
+            .WithDatabaseName("checkout")
+            .WithStatementTemplate("SELECT * FROM orders WHERE id = ?")
+            .WithRowCount(1)
+            .WithMetadata(new Dictionary<string, object?> { ["safe"] = true, ["query"] = "SELECT se" + "cret", ["connection_string"] = "Server=private" }));
+    Require(dbResult == "order_123", "expected dependency result");
+
+    var cacheResult = await LogBrewOperationTracing.CacheOperationAsync(
+        operationClient,
+        "cart.get",
+        async () =>
+        {
+            await Task.Yield();
+            Require(LogBrewTrace.Current != null, "expected async dependency trace");
+            return 1;
+        },
+        LogBrewOperationTracing.CacheOperationOptions.Create()
+            .WithEventIdPrefix("smoke_cache")
+            .WithSystem("redis")
+            .WithOperationKind("get")
+            .WithCacheName("cart")
+            .WithHit(true)
+            .WithItemCount(1)
+            .WithMetadata(new Dictionary<string, object?> { ["safeCache"] = "yes", ["cacheKey"] = "cart:se" + "cret" }));
+    Require(cacheResult == 1, "expected cache result");
+
+    LogBrewOperationTracing.QueueOperation(
+        operationClient,
+        "invoice.publish",
+        () => true,
+        LogBrewOperationTracing.QueueOperationOptions.Create()
+            .WithEventIdPrefix("smoke_queue")
+            .WithSystem("kafka")
+            .WithOperationKind("publish")
+            .WithQueueName("invoices")
+            .WithTaskName("invoice.created")
+            .WithMessageCount(2)
+            .WithMetadata(new Dictionary<string, object?> { ["safeQueue"] = "yes", ["messageBody"] = "se" + "cret body" }));
+}
+
+var operationPayload = operationClient.PreviewJson();
+Require(operationClient.PendingEvents() == 3, "expected dependency spans");
+foreach (var expected in new[]
+{
+    "\"name\": \"database:orders.select\"",
+    "\"source\": \"database.operation\"",
+    "\"dbSystem\": \"sqlserver\"",
+    "\"dbStatementTemplate\": \"SELECT * FROM orders WHERE id = ?\"",
+    "\"rowCount\": 1",
+    "\"name\": \"cache:cart.get\"",
+    "\"source\": \"cache.operation\"",
+    "\"cacheSystem\": \"redis\"",
+    "\"cacheHit\": true",
+    "\"name\": \"queue:invoice.publish\"",
+    "\"source\": \"queue.operation\"",
+    "\"queueSystem\": \"kafka\"",
+    "\"messageCount\": 2",
+    "\"parentSpanId\": \"b7ad6b7169203331\""
+})
+{
+    Require(operationPayload.Contains(expected, StringComparison.Ordinal), "missing dependency smoke payload: " + expected);
+}
+
+foreach (var blocked in new[] { "SELECT se" + "cret", "Server=private", "cart:se" + "cret", "se" + "cret body" })
+{
+    Require(!operationPayload.Contains(blocked, StringComparison.Ordinal), "expected dependency smoke to omit " + blocked);
+}
+
 var closed = NewClient();
 EnqueueAll(closed);
 closed.Shutdown(RecordingTransport.AlwaysAccept());
@@ -463,6 +549,8 @@ Console.Error.WriteLine(
     + httpAttempts.ToString(CultureInfo.InvariantCulture)
     + ",\"metricEvents\":1"
     + ",\"timelineEvents\":2"
+    + ",\"dependencySpans\":"
+    + operationClient.PendingEvents().ToString(CultureInfo.InvariantCulture)
     + ",\"httpRequests\":"
     + httpRequests.ToString(CultureInfo.InvariantCulture)
     + "}");
@@ -615,6 +703,7 @@ grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"timelineEvents":2' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"dependencySpans":3' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 
 echo "dotnet real-user smoke passed"

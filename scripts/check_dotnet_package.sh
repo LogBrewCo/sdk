@@ -89,6 +89,7 @@ for needle in (
     "LogBrewTrace.Current",
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",
+    "LogBrewOperationTracing",
     "first useful .NET service telemetry",
     "HttpTransport",
     "System.Net.Http",

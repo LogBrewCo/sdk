@@ -212,6 +212,30 @@ IReadOnlyDictionary<string, string> outgoingHeaders = request.OutgoingHeaders;
 
 `LogBrewTraceContext` generates W3C-shaped non-zero trace/span IDs, continues valid incoming `traceparent` values, preserves sampled flags, and omits malformed propagation values non-fatally for request helpers. `LogBrewTrace.Activate()` uses .NET `AsyncLocal` so standard async work keeps the active trace context. The `ILogger` provider automatically adds `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata when a trace is active. `MetadataWithCurrentTrace()` is useful for app-owned errors or product events that should join the same request. The packaged `examples/HttpTraceCorrelation.cs` file shows copyable request trace, async logger, handler error, span, metric, and outgoing propagation usage.
 
+## Dependency Spans
+
+Use `LogBrewOperationTracing` around app-owned database, cache, or queue calls when you want dependency timing without a profiler, Entity Framework interceptor, Redis/Kafka client dependency, or global patching:
+
+```csharp
+using System.Collections.Generic;
+using LogBrew;
+
+var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "1.0.0");
+var orderId = LogBrewOperationTracing.DatabaseOperation(
+    client,
+    "orders.select",
+    () => "order_123",
+    LogBrewOperationTracing.DatabaseOperationOptions.Create()
+        .WithSystem("sqlserver")
+        .WithOperationKind("select")
+        .WithDatabaseName("checkout")
+        .WithStatementTemplate("SELECT * FROM orders WHERE id = ?")
+        .WithRowCount(1)
+        .WithMetadata(new Dictionary<string, object?> { ["routeTemplate"] = "/orders/:id" }));
+```
+
+Sync and async helpers are available for database, cache, and queue operations. They create one child span under `LogBrewTrace.Current` when a trace is active, keep that child trace active while the callback runs, preserve the callback result or original exception, and report SDK capture failures through optional `OnError(...)` callbacks without interrupting app work. Metadata is primitive-only, and the helpers drop unsafe dependency details such as raw statements, connection details, cache identifiers, message contents, broker details, request metadata, and unsafe values. For broad automatic JDBC/EF/Redis/Kafka-style coverage, use a future explicit integration package rather than relying on hidden behavior in this core package.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:
@@ -281,6 +305,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 - `Flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `HttpTransport` sends queued batches through `System.Net.Http` with configurable endpoint, headers, timeout, and app-owned `HttpClient` support.
 - `ProductTimeline` queues app-owned product and network milestone events without visual replay, HTTP client patching, payload capture, or header capture.
+- `LogBrewOperationTracing` creates app-owned database, cache, and queue spans without adding driver dependencies, profilers, interceptors, or automatic client patching.
 - `Shutdown(transport)` flushes queued events and rejects later writes.
 - `AddLogBrew(client, options)` connects existing `ILogger` calls to LogBrew without global logging side effects.
 - `RecordingTransport.AlwaysAccept()` is useful when you want to inspect queued JSON before network delivery.
