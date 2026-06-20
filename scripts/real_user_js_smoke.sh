@@ -547,6 +547,9 @@ if (!readme.includes("createProductActionAttributes")) {
 if (!readme.includes("createNetworkMilestoneAttributes")) {
   throw new Error("missing installed README network milestone timeline guidance");
 }
+if (!readme.includes("createSupportTicketDraft")) {
+  throw new Error("missing installed README support ticket draft guidance");
+}
 if (!readme.includes("agent-timeline")) {
   throw new Error("missing installed README agent timeline packaged example guidance");
 }
@@ -637,6 +640,18 @@ if (!declarations.includes("App-owned product step input for agent-readable acti
 }
 if (!declarations.includes("App-owned API milestone input for agent-readable network timelines.")) {
   throw new Error("missing installed NetworkMilestoneInput declaration docs");
+}
+if (!declarations.includes("Planned backend support-ticket sources accepted by explicit draft helpers.")) {
+  throw new Error("missing installed SupportTicketSource declaration docs");
+}
+if (!declarations.includes("Planned backend support-ticket categories accepted by explicit draft helpers.")) {
+  throw new Error("missing installed SupportTicketCategory declaration docs");
+}
+if (!declarations.includes("Explicit local-only support-ticket draft input. This does not open a ticket.")) {
+  throw new Error("missing installed SupportTicketDraftInput declaration docs");
+}
+if (!declarations.includes("Planned backend create payload produced locally for explicit user or agent action.")) {
+  throw new Error("missing installed SupportTicketDraft declaration docs");
 }
 if (!declarations.includes("Shared timeline helper options for primitive app metadata.")) {
   throw new Error("missing installed TimelineAttributesOptions declaration docs");
@@ -1040,6 +1055,7 @@ grep -q '^package/package.json$' package-contents.txt
 grep -q '^package/README.md$' package-contents.txt
 grep -q '^package/index.d.ts$' package-contents.txt
 grep -q '^package/index.d.cts$' package-contents.txt
+grep -q '^package/support-ticket.cjs$' package-contents.txt
 grep -q '^package/examples/package.json$' package-contents.txt
 grep -q '^package/examples/agent-timeline.mjs$' package-contents.txt
 grep -q '^package/examples/agent-timeline.cjs$' package-contents.txt
@@ -1077,7 +1093,7 @@ function validatePackMetadata(payload, label) {
     throw new Error(`missing ${label} file list`);
   }
   const packedPaths = new Set(entry.files.map((item) => item.path));
-  for (const requiredPath of ["README.md", "package.json", "index.d.ts", "index.d.cts", "index.js", "index.cjs", "examples/package.json", "examples/index.mjs", "examples/agent-timeline.mjs", "examples/agent-timeline.cjs", "examples/readme-example.mjs", "examples/readme-example.cjs", "examples/real-user-smoke.mjs", "examples/real-user-smoke.cjs"]) {
+  for (const requiredPath of ["README.md", "package.json", "index.d.ts", "index.d.cts", "index.js", "index.cjs", "support-ticket.cjs", "examples/package.json", "examples/index.mjs", "examples/agent-timeline.mjs", "examples/agent-timeline.cjs", "examples/readme-example.mjs", "examples/readme-example.cjs", "examples/real-user-smoke.mjs", "examples/real-user-smoke.cjs"]) {
     if (!packedPaths.has(requiredPath)) {
       throw new Error(`missing ${label} file metadata for ${requiredPath}`);
     }
@@ -1217,6 +1233,9 @@ if (!readme.includes("createProductActionAttributes")) {
 if (!readme.includes("createNetworkMilestoneAttributes")) {
   throw new Error("missing packed README network milestone timeline guidance");
 }
+if (!readme.includes("createSupportTicketDraft")) {
+  throw new Error("missing packed README support ticket draft guidance");
+}
 if (!readme.includes("agent-timeline")) {
   throw new Error("missing packed README agent timeline packaged example guidance");
 }
@@ -1352,6 +1371,9 @@ if (!declarations.includes("Convert a parsed Pino JSON log record into safe LogB
 }
 if (!declarations.includes("Create a dependency-free Winston object-mode transport that queues LogBrew log events.")) {
   throw new Error("missing packed Winston transport declaration docs");
+}
+if (!declarations.includes("Build a local-only, token-free support-ticket create payload draft without calling backend routes.")) {
+  throw new Error("missing packed support ticket draft declaration docs");
 }
 if (!declarations.includes("Convert a Winston info object into safe LogBrew log attributes without installing a transport.")) {
   throw new Error("missing packed Winston info declaration docs");
@@ -1630,6 +1652,7 @@ cat > types-smoke.ts <<'EOF'
 import {
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
+  createSupportTicketDraft,
   createTraceparent,
   createTraceparentHeaders,
   createLogBrewPinoDestination,
@@ -1655,6 +1678,8 @@ import {
   type ProductActionInput,
   type ReleaseAttributes,
   type SpanAttributes,
+  type SupportTicketDraft,
+  type SupportTicketDraftInput,
   type TimelineAttributesOptions,
   type TraceparentContext,
   type TraceparentInput,
@@ -1716,6 +1741,28 @@ const networkMilestone: NetworkMilestoneInput = {
 const timelineOptions: TimelineAttributesOptions = {
   metadata: { region: "global" }
 };
+const supportTicketInput: SupportTicketDraftInput = {
+  source: "sdk",
+  category: "ingest_failure",
+  title: "Telemetry flush failed",
+  description: "Flush returned usage_limit_exceeded",
+  projectId: "proj_123",
+  environment: "production",
+  runtime: "node@22",
+  framework: "express",
+  sdkPackage: "@logbrew/sdk",
+  sdkVersion: "0.1.3",
+  release: "checkout@1.2.3",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  eventId: "evt_checkout_flush",
+  diagnostics: {
+    attemptCount: 2,
+    retryable: false,
+    apiKey: "lbw_ingest_hidden",
+    endpoint: "https://api.example/ingest?debug=true",
+    localPath: "/Users/example/app/.env"
+  }
+};
 const metric: MetricAttributes = {
   name: "checkout.requests",
   kind: "counter",
@@ -1762,11 +1809,15 @@ async function main() {
   const outgoingHeaders: { traceparent: string } = createTraceparentHeaders(traceInput);
   const productTimelineAction: ActionAttributes = createProductActionAttributes(productAction, timelineOptions);
   const networkTimelineAction: ActionAttributes = createNetworkMilestoneAttributes(networkMilestone, timelineOptions);
+  const supportTicketDraft: SupportTicketDraft = createSupportTicketDraft(supportTicketInput);
   if (productTimelineAction.metadata?.routeTemplate !== "/checkout/:step") {
     throw new Error("unexpected product timeline route template");
   }
   if (networkTimelineAction.metadata?.method !== "POST") {
     throw new Error("unexpected network timeline method");
+  }
+  if (supportTicketDraft.diagnostics?.apiKey !== "[redacted]") {
+    throw new Error("unexpected support ticket diagnostic redaction");
   }
   if (continuedSpan.traceId !== traceContext.traceId || continuedSpan.parentSpanId !== traceInput.spanId) {
     throw new Error("unexpected trace context");
@@ -1872,11 +1923,25 @@ const timelineOptions: sdk.TimelineAttributesOptions = {
 };
 const productTimelineAction: sdk.ActionAttributes = sdk.createProductActionAttributes(productAction, timelineOptions);
 const networkTimelineAction: sdk.ActionAttributes = sdk.createNetworkMilestoneAttributes(networkMilestone, timelineOptions);
+const supportTicketInput: sdk.SupportTicketDraftInput = {
+  source: "sdk",
+  category: "ingest_failure",
+  title: "Telemetry flush failed",
+  description: "Flush returned usage_limit_exceeded",
+  diagnostics: {
+    authHeader: "Bearer hidden",
+    endpoint: "https://api.example/ingest?debug=true"
+  }
+};
+const supportTicketDraft: sdk.SupportTicketDraft = sdk.createSupportTicketDraft(supportTicketInput);
 if (productTimelineAction.metadata?.routeTemplate !== "/checkout/:step") {
   throw new Error("unexpected product timeline route template");
 }
 if (networkTimelineAction.metadata?.method !== "POST") {
   throw new Error("unexpected network timeline method");
+}
+if (supportTicketDraft.diagnostics?.authHeader !== "[redacted]") {
+  throw new Error("unexpected support ticket diagnostic redaction");
 }
 const metric: sdk.MetricAttributes = {
   name: "checkout.requests",
@@ -1952,6 +2017,7 @@ cat > installed-user.test.mjs <<'EOF'
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  createSupportTicketDraft,
   createTraceparent,
   createLogBrewPinoDestination,
   createLogBrewWinstonTransport,
@@ -2012,6 +2078,39 @@ test("installed traceparent helpers continue W3C trace context", () => {
     () => parseTraceparent("00-00000000000000000000000000000000-00f067aa0ba902b7-01"),
     /traceparent traceId must not be all zeros/
   );
+});
+
+test("installed support ticket draft stays local and redacts diagnostics", () => {
+  const draft = createSupportTicketDraft({
+    source: "sdk",
+    category: "ingest_failure",
+    title: "Telemetry flush failed",
+    description: "Flush returned usage_limit_exceeded",
+    projectId: "proj_123",
+    runtime: "node@22",
+    sdkPackage: "@logbrew/sdk",
+    sdkVersion: "0.1.3",
+    traceId: "4BF92F3577B34DA6A3CE929D0E0E4736",
+    diagnostics: {
+      apiKey: "lbw_ingest_hidden",
+      endpoint: "https://api.example/ingest?debug=true#frag",
+      localPath: "/Users/example/app/.env",
+      authHeader: "Bearer hidden",
+      error: new Error("hidden message")
+    }
+  });
+  const serialized = JSON.stringify(draft);
+
+  assert.equal(draft.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736");
+  assert.equal(draft.diagnostics.apiKey, "[redacted]");
+  assert.equal(draft.diagnostics.endpoint, "[redacted-url]/ingest");
+  assert.equal(draft.diagnostics.localPath, "[redacted-path]");
+  assert.equal(draft.diagnostics.authHeader, "[redacted]");
+  assert.equal(draft.diagnostics.error.name, "Error");
+  assert.equal(serialized.includes("hidden"), false);
+  assert.equal(serialized.includes("api.example"), false);
+  assert.equal(serialized.includes("/Users/example"), false);
+  assert.equal(serialized.includes("traceparent"), false);
 });
 
 test("installed console capture preserves output and sends log records", async () => {

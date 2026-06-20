@@ -1,3 +1,5 @@
+const { buildCreateSupportTicketDraft } = require("./support-ticket.cjs");
+
 const SEVERITY_ALIASES = new Map([
   ["trace", "info"],
   ["debug", "info"],
@@ -26,7 +28,6 @@ const WINSTON_RESERVED_FIELDS = new Set(["level", "message", "timestamp", "time"
 const TRACEPARENT_PATTERN = /^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$/u;
 const ZERO_TRACE_ID = "00000000000000000000000000000000";
 const ZERO_SPAN_ID = "0000000000000000";
-
 class SdkError extends Error {
   constructor(code, message) {
     super(message);
@@ -449,6 +450,13 @@ function createTraceparent({ traceId, spanId, traceFlags = "01" }) {
 function createTraceparentHeaders(input) {
   return { traceparent: createTraceparent(input) };
 }
+
+const createSupportTicketDraft = buildCreateSupportTicketDraft({
+  SdkError,
+  requireAllowedValue,
+  requireNonEmpty,
+  requireTraceId
+});
 
 function spanAttributesFromTraceparent(traceparent, attributes) {
   if (!attributes || Array.isArray(attributes) || typeof attributes !== "object") {
@@ -1319,6 +1327,7 @@ function formatConsoleArgument(value, includeErrorStack) {
 module.exports = {
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
+  createSupportTicketDraft,
   createTraceparent,
   createTraceparentHeaders,
   createLogBrewPinoDestination,

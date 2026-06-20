@@ -37,6 +37,7 @@
     "index.js",
     "index.d.ts",
     "index.d.cts",
+    "support-ticket.cjs",
     "release-artifacts.js",
     "release-artifacts-symbolication.js",
     "vite-release-artifacts.cjs",

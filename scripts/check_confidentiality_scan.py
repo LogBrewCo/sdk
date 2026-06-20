@@ -127,6 +127,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_release_artifact_upload_verifier_reference(relative_text, line):
         return True
 
+    if is_support_ticket_diagnostics_reference(relative_text, line):
+        return True
+
     if is_kotlin_coroutine_context_reference(relative_text, line, terms):
         return True
 
@@ -272,6 +275,45 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
     }:
         lower_line = line.lower()
         return "upload" in lower_line and "artifact" in lower_line
+    return False
+
+
+def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bool:
+    lower_line = line.lower()
+    support_docs = {
+        "docs/competitor-research/js-support-ticket-diagnostics-2026-06-20.md",
+        "js/logbrew-js/README.md",
+        "js/logbrew-js/index.d.cts",
+        "js/logbrew-js/index.d.ts",
+        "memory.md",
+        "scripts/real_user_js_smoke.sh",
+    }
+    if relative_text in support_docs:
+        return (
+            "support-ticket" in lower_line
+            or "support ticket" in lower_line
+            or "diagnostic" in lower_line
+            or "redact" in lower_line
+        )
+
+    if relative_text == "js/logbrew-js/support-ticket.cjs":
+        return line.strip() in {
+            "\"authtoken\",",
+            "\"clientsecret\",",
+            "\"credential\",",
+            "\"password\",",
+            "\"refreshtoken\",",
+            "\"secret\",",
+            "\"token\"",
+            "return /(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\\s*[:=]/iu.test(value)",
+        }
+
+    if relative_text == "js/logbrew-js/test/sdk.test.js":
+        return line.strip() in {
+            "{ token: \"hidden\" }",
+            "{ token: \"[redacted]\" }",
+        }
+
     return False
 
 

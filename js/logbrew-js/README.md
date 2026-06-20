@@ -15,7 +15,7 @@ pnpm add @logbrew/sdk
 
 The package supports both ESM `import` and CommonJS `require`.
 The shipped package also includes `.d.ts` and `.d.cts` declarations so ESM and CommonJS TypeScript consumers can install it directly without a separate build step.
-The package ships copyable examples under `node_modules/@logbrew/sdk/examples/`. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in your app configuration, and call `previewJson()` when you want to inspect queued JSON before sending. Type declarations document payload shapes such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, transport responses, SDK errors, lifecycle helpers, W3C trace helpers, product timeline helpers, console capture, Pino destination, and Winston transport APIs.
+The package ships copyable examples under `node_modules/@logbrew/sdk/examples/`. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in your app configuration, and call `previewJson()` when you want to inspect queued JSON before sending. Type declarations document payload shapes such as `ReleaseAttributes`, `SpanAttributes`, `MetricAttributes`, transport responses, SDK errors, lifecycle helpers, W3C trace helpers, support-ticket draft helpers, product timeline helpers, console capture, Pino destination, and Winston transport APIs.
 
 After install, discover and run the packaged examples:
 
@@ -197,6 +197,40 @@ const client = LogBrewClient.create({
 ```
 
 Prefer removing sensitive values at the source before calling LogBrew. `eventFilter` is intentionally drop-only: it avoids broad mutable event processing, global scopes, and hidden context that can make observability payloads harder to reason about.
+
+## Support Ticket Drafts
+
+Use `createSupportTicketDraft()` when a developer or support agent needs a local JSON payload for the planned LogBrew support-ticket API. The helper validates the public source/category contract, converts JavaScript camelCase inputs to the planned backend create payload fields, and redacts token-like diagnostics before returning the object.
+
+```js
+import { createSupportTicketDraft } from "@logbrew/sdk";
+
+const draft = createSupportTicketDraft({
+  source: "sdk",
+  category: "ingest_failure",
+  title: "Telemetry flush failed",
+  description: "Flush returned usage_limit_exceeded",
+  projectId: "proj_123",
+  environment: "production",
+  runtime: "node@22",
+  framework: "express",
+  sdkPackage: "@logbrew/sdk",
+  sdkVersion: "0.1.3",
+  release: "checkout@1.2.3",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  eventId: "evt_checkout_flush",
+  diagnostics: {
+    attemptCount: 2,
+    retryable: false,
+    endpoint: "https://api.example/ingest?debug=true",
+    apiKey: "redacted by helper"
+  }
+});
+
+console.log(JSON.stringify(draft, null, 2));
+```
+
+This helper does not send data, open support tickets, call `POST /api/support/tickets`, use account/session API credentials, or infer backend usage/quota state. Support routes are backend-owned and should only be called by an explicit user or agent action after backend reports deployed support-ticket routes. Diagnostics are bounded to JSON-like values; auth values, cookies, tokens, local paths, URL origins, hidden payloads, and unsupported objects are redacted or omitted.
 
 ## Agent-Readable Timelines
 

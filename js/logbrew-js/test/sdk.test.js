@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import {
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
+  createSupportTicketDraft,
   createTraceparent,
   createTraceparentHeaders,
   createLogBrewPinoDestination,
@@ -317,6 +318,7 @@ test("CommonJS entry exposes the public API", () => {
   assert.equal(typeof sdk.RecordingTransport.alwaysAccept, "function");
   assert.equal(typeof sdk.createProductActionAttributes, "function");
   assert.equal(typeof sdk.createNetworkMilestoneAttributes, "function");
+  assert.equal(typeof sdk.createSupportTicketDraft, "function");
   assert.equal(typeof sdk.installLogBrewConsoleCapture, "function");
   assert.equal(typeof sdk.parseTraceparent, "function");
   assert.match(client.previewJson(), /"type": "release"/);
@@ -394,6 +396,112 @@ test("traceparent helpers reject malformed W3C trace context", () => {
       status: "ok"
     }),
     /traceparent must use W3C/
+  );
+});
+
+test("support ticket draft creates planned payload and redacts diagnostics", () => {
+  const draft = createSupportTicketDraft({
+    source: "sdk",
+    category: "ingest_failure",
+    title: "Telemetry flush failed",
+    description: "Flush returned usage_limit_exceeded",
+    projectId: "proj_123",
+    environment: "production",
+    runtime: "node@22",
+    framework: "express",
+    sdkPackage: "@logbrew/sdk",
+    sdkVersion: "0.1.3",
+    release: "checkout@1.2.3",
+    traceId: "4BF92F3577B34DA6A3CE929D0E0E4736",
+    eventId: "evt_checkout_flush",
+    diagnostics: {
+      attemptCount: 2,
+      retryable: false,
+      apiKey: ["lbw", "ingest", "hidden"].join("_"),
+      endpoint: "https://api.example/ingest?debug=true#frag",
+      localPath: "/Users/example/app/.env",
+      error: new Error("contains hidden message"),
+      headers: {
+        authorization: ["Bearer", "hidden"].join(" "),
+        cookie: "sid=hidden",
+        accept: "application/json"
+      },
+      events: [
+        { id: "evt_checkout_flush", type: "span" },
+        { token: "hidden" }
+      ],
+      callback: () => "ignored"
+    }
+  });
+
+  assert.deepEqual(draft, {
+    source: "sdk",
+    category: "ingest_failure",
+    title: "Telemetry flush failed",
+    description: "Flush returned usage_limit_exceeded",
+    project_id: "proj_123",
+    environment: "production",
+    runtime: "node@22",
+    framework: "express",
+    sdk_package: "@logbrew/sdk",
+    sdk_version: "0.1.3",
+    release: "checkout@1.2.3",
+    trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
+    event_id: "evt_checkout_flush",
+    diagnostics: {
+      attemptCount: 2,
+      retryable: false,
+      apiKey: "[redacted]",
+      endpoint: "[redacted-url]/ingest",
+      localPath: "[redacted-path]",
+      error: { name: "Error" },
+      headers: {
+        authorization: "[redacted]",
+        cookie: "[redacted]",
+        accept: "application/json"
+      },
+      events: [
+        { id: "evt_checkout_flush", type: "span" },
+        { token: "[redacted]" }
+      ]
+    }
+  });
+  const serialized = JSON.stringify(draft);
+  assert.equal(serialized.includes("hidden"), false);
+  assert.equal(serialized.includes("api.example"), false);
+  assert.equal(serialized.includes("/Users/example"), false);
+  assert.equal(serialized.includes("traceparent"), false);
+});
+
+test("support ticket draft rejects invalid route-owned values", () => {
+  assert.throws(
+    () => createSupportTicketDraft({
+      source: "daemon",
+      category: "ingest_failure",
+      title: "Telemetry failed",
+      description: "Flush failed"
+    }),
+    /support ticket source must be one of: cli, sdk, website, docs, mobile/
+  );
+  assert.throws(
+    () => createSupportTicketDraft({
+      source: "sdk",
+      category: "ingest_failure",
+      title: "Telemetry failed",
+      description: "Flush failed",
+      traceId: "00000000000000000000000000000000"
+    }),
+    /traceId must not be all zeros/
+  );
+  assert.throws(
+    () => createSupportTicketDraft({
+      source: "sdk",
+      category: "ingest_failure",
+      title: "Telemetry failed",
+      description: "Flush failed",
+      diagnostics: ["not", "an", "object"]
+    }),
+    /support ticket diagnostics must be an object/
   );
 });
 

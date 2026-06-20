@@ -214,6 +214,67 @@ export type TimelineAttributesOptions = {
   metadata?: Metadata;
 };
 
+/** Planned backend support-ticket sources accepted by explicit draft helpers. */
+export type SupportTicketSource = "cli" | "sdk" | "website" | "docs" | "mobile";
+
+/** Planned backend support-ticket categories accepted by explicit draft helpers. */
+export type SupportTicketCategory =
+  | "sdk_install_failure"
+  | "ingest_failure"
+  | "auth_failure"
+  | "project_setup"
+  | "dashboard_issue"
+  | "docs_confusion"
+  | "cli_issue"
+  | "mobile_issue"
+  | "billing_question"
+  | "other";
+
+/** JSON-like diagnostics input sanitized before a support-ticket draft is returned. */
+export type SupportDiagnosticsValue =
+  | string
+  | number
+  | boolean
+  | null
+  | SupportDiagnosticsValue[]
+  | { [key: string]: SupportDiagnosticsValue };
+
+/** Explicit local-only support-ticket draft input. This does not open a ticket. */
+export type SupportTicketDraftInput = {
+  source: SupportTicketSource;
+  category: SupportTicketCategory;
+  title: string;
+  description: string;
+  projectId?: string;
+  environment?: string;
+  runtime?: string;
+  framework?: string;
+  sdkPackage?: string;
+  sdkVersion?: string;
+  release?: string;
+  traceId?: string;
+  eventId?: string;
+  diagnostics?: Record<string, unknown>;
+};
+
+/** Planned backend create payload produced locally for explicit user or agent action. */
+export type SupportTicketDraft = {
+  source: SupportTicketSource;
+  category: SupportTicketCategory;
+  title: string;
+  description: string;
+  project_id?: string;
+  environment?: string;
+  runtime?: string;
+  framework?: string;
+  sdk_package?: string;
+  sdk_version?: string;
+  release?: string;
+  trace_id?: string;
+  event_id?: string;
+  diagnostics?: Record<string, SupportDiagnosticsValue>;
+};
+
 /** Public metric event attributes. Use low-cardinality metadata only. */
 export type MetricAttributes = {
   name: string;
@@ -325,6 +386,9 @@ export declare function createNetworkMilestoneAttributes(
   request: NetworkMilestoneInput,
   options?: TimelineAttributesOptions
 ): ActionAttributes;
+
+/** Build a local-only, token-free support-ticket create payload draft without calling backend routes. */
+export declare function createSupportTicketDraft(input: SupportTicketDraftInput): SupportTicketDraft;
 
 /** Convert console arguments into safe LogBrew log attributes without installing capture. */
 export declare function logAttributesFromConsoleArgs(

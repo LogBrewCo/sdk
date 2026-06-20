@@ -3,6 +3,7 @@ import sdk from "./index.cjs";
 export const {
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
+  createSupportTicketDraft,
   createTraceparent,
   createTraceparentHeaders,
   createLogBrewPinoDestination,
