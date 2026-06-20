@@ -108,6 +108,7 @@ typedef struct {
 #define LOGBREW_TRACE_FLAGS_LENGTH 2U
 #define LOGBREW_TRACEPARENT_LENGTH 55U
 #define LOGBREW_TRACE_METADATA_ENTRY_COUNT 5U
+#define LOGBREW_HTTP_CLIENT_SPAN_NAME_LENGTH 192U
 
 typedef enum {
   LOGBREW_METADATA_STRING,
@@ -141,6 +142,12 @@ typedef struct {
   const LogBrewTraceContext *previous;
   bool active;
 } LogBrewTraceScope;
+
+typedef struct {
+  LogBrewTraceContext trace;
+  char traceparent[LOGBREW_TRACEPARENT_LENGTH + 1U];
+  char name[LOGBREW_HTTP_CLIENT_SPAN_NAME_LENGTH];
+} LogBrewHttpClientSpan;
 
 typedef struct {
   const char *name;
@@ -318,6 +325,11 @@ LogBrewStatus logbrew_trace_continue_or_create_context(
     LogBrewTraceContext *out_context,
     LogBrewError *error);
 
+LogBrewStatus logbrew_trace_child_context(
+    const LogBrewTraceContext *parent,
+    LogBrewTraceContext *out_context,
+    LogBrewError *error);
+
 LogBrewStatus logbrew_trace_create_headers(
     const LogBrewTraceContext *context,
     char out_traceparent[LOGBREW_TRACEPARENT_LENGTH + 1U],
@@ -344,6 +356,23 @@ LogBrewStatus logbrew_trace_span_attributes(
     const LogBrewTraceContext *context,
     const char *name,
     const char *status,
+    double duration_ms,
+    bool has_duration_ms,
+    LogBrewSpanAttributes *out_attributes,
+    LogBrewError *error);
+
+LogBrewStatus logbrew_trace_http_client_span_start(
+    const LogBrewTraceContext *parent,
+    const char *method,
+    const char *route_template,
+    LogBrewHttpClientSpan *out_span,
+    LogBrewError *error);
+
+LogBrewStatus logbrew_trace_http_client_span_attributes(
+    const LogBrewHttpClientSpan *span,
+    int status_code,
+    bool has_status_code,
+    bool network_error,
     double duration_ms,
     bool has_duration_ms,
     LogBrewSpanAttributes *out_attributes,

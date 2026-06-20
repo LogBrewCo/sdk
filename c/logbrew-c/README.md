@@ -117,9 +117,36 @@ logbrew_trace_create_headers(&trace, traceparent, &error);
 logbrew_trace_scope_exit(&scope);
 ```
 
+For app-owned outbound HTTP calls, create a child span before the call, attach only the generated `traceparent`, and finish the span after your HTTP client returns:
+
+```c
+LogBrewHttpClientSpan outbound;
+LogBrewSpanAttributes outbound_span;
+
+logbrew_trace_http_client_span_start(
+    &trace,
+    "POST",
+    "/v1/payments/{payment_id}",
+    &outbound,
+    &error);
+
+/* Add outbound.traceparent to the request you own, then execute the request. */
+
+logbrew_trace_http_client_span_attributes(
+    &outbound,
+    503,
+    true,
+    false,
+    42.75,
+    true,
+    &outbound_span,
+    &error);
+logbrew_client_span(client, "evt_span_payments_http", "2026-06-02T10:00:06Z", outbound_span, &error);
+```
+
 While a `LogBrewTraceScope` is active, `logbrew_client_issue()`, `logbrew_client_log()`, and `logbrew_client_action()` automatically include trace metadata. For metrics and product timeline helpers, use `logbrew_trace_metadata()` or `logbrew_trace_product_timeline_context()` so the correlation stays explicit at the call site.
 
-`logbrew_trace_continue_or_create_context()` is useful for request boundaries: valid incoming W3C context is continued; missing or malformed context falls back to a fresh local root without failing the request. The SDK never serializes the raw incoming `traceparent` into telemetry, does not patch HTTP clients, and does not capture headers, request bodies, response bodies, raw URLs, query strings, or fragments.
+`logbrew_trace_continue_or_create_context()` is useful for request boundaries: valid incoming W3C context is continued; missing or malformed context falls back to a fresh local root without failing the request. `logbrew_trace_http_client_span_start()` creates a child span name from an HTTP method and sanitized route template, stripping query strings and fragments even when a full URL is passed. The SDK never serializes the raw incoming `traceparent` into telemetry, does not patch HTTP clients, and does not capture headers, request bodies, response bodies, raw URLs, query strings, or fragments.
 
 ## Product Timelines
 

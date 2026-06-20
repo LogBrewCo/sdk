@@ -17,6 +17,8 @@ int main(void) {
   LogBrewTraceContext trace;
   LogBrewTraceScope scope;
   LogBrewSpanAttributes span;
+  LogBrewHttpClientSpan outbound;
+  LogBrewSpanAttributes outbound_span;
   LogBrewMetadataEntry trace_entries[LOGBREW_TRACE_METADATA_ENTRY_COUNT];
   LogBrewMetadata trace_metadata;
   LogBrewProductTimelineContext timeline_context = {
@@ -39,6 +41,9 @@ int main(void) {
   trace_metadata = logbrew_trace_metadata(&trace, trace_entries);
   timeline_context = logbrew_trace_product_timeline_context(&trace, timeline_context);
   must(logbrew_trace_span_attributes(&trace, "POST /checkout/{cart_id}", "error", 37.5, true, &span, &error), &error);
+  must(logbrew_trace_http_client_span_start(&trace, "post",
+      "https://payments.example.test/v1/payments/{payment_id}?card=redacted#receipt", &outbound, &error), &error);
+  must(logbrew_trace_http_client_span_attributes(&outbound, 503, true, false, 42.75, true, &outbound_span, &error), &error);
 
   must(logbrew_client_issue(client, "evt_c_trace_issue_001", "2026-06-02T10:00:02Z",
       (LogBrewIssueAttributes){"Checkout request failed", "error", "request failed after retry budget"}, &error), &error);
@@ -47,6 +52,7 @@ int main(void) {
   must(logbrew_client_action(client, "evt_c_trace_action_001", "2026-06-02T10:00:04Z",
       (LogBrewActionAttributes){"checkout.submit", "failure"}, &error), &error);
   must(logbrew_client_span(client, "evt_c_trace_span_001", "2026-06-02T10:00:05Z", span, &error), &error);
+  must(logbrew_client_span(client, "evt_c_trace_http_client_span_001", "2026-06-02T10:00:05Z", outbound_span, &error), &error);
   must(logbrew_client_metric(client, "evt_c_trace_metric_001", "2026-06-02T10:00:06Z",
       (LogBrewMetricAttributes){"http.server.duration", "histogram", 37.5, "ms", "delta", trace_metadata}, &error), &error);
   must(logbrew_client_product_action(client, "evt_c_trace_product_action_001", "2026-06-02T10:00:07Z",
@@ -66,7 +72,7 @@ int main(void) {
   must(logbrew_client_preview_json(client, &preview, &error), &error);
 
   printf("%s\n", preview);
-  fprintf(stderr, "{\"traceparent\":\"%s\"}\n", traceparent);
+  fprintf(stderr, "{\"traceparent\":\"%s\",\"outboundTraceparent\":\"%s\"}\n", traceparent, outbound.traceparent);
 
   logbrew_free_string(preview);
   logbrew_trace_scope_exit(&scope);

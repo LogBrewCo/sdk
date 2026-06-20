@@ -55,6 +55,7 @@ def main() -> None:
             raise SystemExit(f"forbidden value leaked into payload: {forbidden}")
 
     outgoing = stderr_payload.get("traceparent") if isinstance(stderr_payload, dict) else None
+    outbound = stderr_payload.get("outboundTraceparent") if isinstance(stderr_payload, dict) else None
     if not isinstance(outgoing, str):
         raise SystemExit("missing outgoing traceparent")
     parts = outgoing.split("-")
@@ -63,11 +64,20 @@ def main() -> None:
     span_id = parts[2]
     if not HEX16.match(span_id) or span_id == PARENT_SPAN_ID or span_id == "0" * 16:
         raise SystemExit(f"unexpected local span id: {span_id}")
+    if not isinstance(outbound, str):
+        raise SystemExit("missing outbound traceparent")
+    outbound_parts = outbound.split("-")
+    if len(outbound_parts) != 4 or outbound_parts[0] != "00" or outbound_parts[1] != TRACE_ID or outbound_parts[3] != "01":
+        raise SystemExit(f"unexpected outbound traceparent: {outbound}")
+    outbound_span_id = outbound_parts[2]
+    if not HEX16.match(outbound_span_id) or outbound_span_id in {PARENT_SPAN_ID, span_id, "0" * 16}:
+        raise SystemExit(f"unexpected outbound span id: {outbound_span_id}")
 
     issue = event_by_id(events, "evt_c_trace_issue_001")
     log = event_by_id(events, "evt_c_trace_log_001")
     action = event_by_id(events, "evt_c_trace_action_001")
     span = event_by_id(events, "evt_c_trace_span_001")
+    outbound_span = event_by_id(events, "evt_c_trace_http_client_span_001")
     metric = event_by_id(events, "evt_c_trace_metric_001")
     product_action = event_by_id(events, "evt_c_trace_product_action_001")
     network = event_by_id(events, "evt_c_trace_network_001")
@@ -91,6 +101,20 @@ def main() -> None:
     }.items():
         if span_attributes.get(key) != value:
             raise SystemExit(f"unexpected span {key}: {span_attributes.get(key)!r}")
+
+    outbound_attributes = outbound_span.get("attributes")
+    if not isinstance(outbound_attributes, dict):
+        raise SystemExit("outbound span attributes must be an object")
+    for key, value in {
+        "name": "POST /v1/payments/{payment_id}",
+        "traceId": TRACE_ID,
+        "spanId": outbound_span_id,
+        "parentSpanId": span_id,
+        "status": "error",
+        "durationMs": 42.75,
+    }.items():
+        if outbound_attributes.get(key) != value:
+            raise SystemExit(f"unexpected outbound span {key}: {outbound_attributes.get(key)!r}")
 
     metric_attributes = metric.get("attributes")
     if not isinstance(metric_attributes, dict):

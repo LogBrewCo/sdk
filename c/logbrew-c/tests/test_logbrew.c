@@ -348,6 +348,65 @@ static void trace_context_helpers_validate_and_correlate(void) {
   logbrew_client_free(client);
 }
 
+static void http_client_span_helpers_create_child_propagation(void) {
+  static const char *incoming = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
+  LogBrewClient *client = new_client();
+  LogBrewError error;
+  LogBrewTraceContext parent;
+  LogBrewHttpClientSpan outbound;
+  LogBrewSpanAttributes outbound_attributes;
+  char *json = NULL;
+
+  logbrew_error_clear(&error);
+  EXPECT_TRUE(logbrew_trace_context_from_traceparent(incoming, &parent, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_trace_http_client_span_start(
+      &parent,
+      "post",
+      "https://payments.example.test/v1/payments/{payment_id}?card=private#receipt",
+      &outbound,
+      &error) == LOGBREW_OK);
+  EXPECT_TRUE(strcmp(outbound.trace.trace_id, parent.trace_id) == 0);
+  EXPECT_TRUE(strcmp(outbound.trace.parent_span_id, parent.span_id) == 0);
+  EXPECT_TRUE(strcmp(outbound.trace.span_id, parent.span_id) != 0);
+  EXPECT_TRUE(strcmp(outbound.name, "POST /v1/payments/{payment_id}") == 0);
+  EXPECT_TRUE(strstr(outbound.traceparent, "00-4bf92f3577b34da6a3ce929d0e0e4736-") == outbound.traceparent);
+  EXPECT_TRUE(strcmp(outbound.traceparent + 52, "-01") == 0);
+
+  EXPECT_TRUE(logbrew_trace_http_client_span_attributes(
+      &outbound,
+      503,
+      true,
+      false,
+      42.75,
+      true,
+      &outbound_attributes,
+      &error) == LOGBREW_OK);
+  EXPECT_TRUE(strcmp(outbound_attributes.name, "POST /v1/payments/{payment_id}") == 0);
+  EXPECT_TRUE(strcmp(outbound_attributes.status, "error") == 0);
+  EXPECT_TRUE(strcmp(outbound_attributes.trace_id, parent.trace_id) == 0);
+  EXPECT_TRUE(strcmp(outbound_attributes.parent_span_id, parent.span_id) == 0);
+  EXPECT_TRUE(strcmp(outbound_attributes.span_id, outbound.trace.span_id) == 0);
+  EXPECT_TRUE(outbound_attributes.has_duration_ms);
+  EXPECT_TRUE(logbrew_client_span(client, "evt_http_client_span", "2026-06-02T10:00:08Z",
+      outbound_attributes, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_preview_json(client, &json, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strstr(json, "\"name\":\"POST /v1/payments/{payment_id}\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"status\":\"error\"") != NULL);
+  EXPECT_TRUE(strstr(json, "\"parentSpanId\":\"") != NULL);
+  EXPECT_TRUE(strstr(json, "card=private") == NULL);
+  EXPECT_TRUE(strstr(json, "#receipt") == NULL);
+  EXPECT_TRUE(strstr(json, "traceparent") == NULL);
+  logbrew_free_string(json);
+  logbrew_client_free(client);
+
+  EXPECT_TRUE(logbrew_trace_http_client_span_start(&parent, "GET /bad", "/health", &outbound, &error) == LOGBREW_VALIDATION_ERROR);
+  EXPECT_TRUE(logbrew_trace_http_client_span_start(&parent, "GET", "?debug=true", &outbound, &error) == LOGBREW_VALIDATION_ERROR);
+  EXPECT_TRUE(logbrew_trace_http_client_span_attributes(
+      &outbound, 700, true, false, 1.0, true, &outbound_attributes, &error) == LOGBREW_VALIDATION_ERROR);
+  EXPECT_TRUE(logbrew_trace_http_client_span_attributes(
+      &outbound, 200, true, false, -1.0, true, &outbound_attributes, &error) == LOGBREW_VALIDATION_ERROR);
+}
+
 static void unauthenticated_response_surfaces_clean_error(void) {
   LogBrewClient *client = new_client();
   LogBrewRecordingStep steps[] = {LOGBREW_RECORD_STATUS_CODE(401)};
@@ -455,6 +514,7 @@ int main(void) {
   product_timeline_helpers_capture_safe_metadata();
   metric_helper_validates_and_serializes();
   trace_context_helpers_validate_and_correlate();
+  http_client_span_helpers_create_child_propagation();
   flush_success_clears_queue();
   empty_flush_is_no_op();
   validation_failures_are_stable();
