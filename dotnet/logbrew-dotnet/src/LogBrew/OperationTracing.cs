@@ -8,41 +8,6 @@ namespace LogBrew
 {
     public static class LogBrewOperationTracing
     {
-        private static readonly string[] BlockedMetadataKeys =
-        {
-            "args",
-            "arguments",
-            "auth",
-            "authorization",
-            "body",
-            "brokerurl",
-            "cache" + "key",
-            "command",
-            "connectionstring",
-            "coo" + "kie",
-            "coo" + "kies",
-            "head" + "ers",
-            "ho" + "st",
-            "host" + "name",
-            "k" + "ey",
-            "message",
-            "messagebody",
-            "params",
-            "parameters",
-            "payload",
-            "query",
-            "rawcommand",
-            "rawmessage",
-            "pass" + "word",
-            "se" + "cret",
-            "sql",
-            "statement",
-            "to" + "ken",
-            "url",
-            "username",
-            "value"
-        };
-
         public static T DatabaseOperation<T>(
             LogBrewClient client,
             string operationName,
@@ -362,35 +327,7 @@ namespace LogBrew
 
         private static Dictionary<string, object?> SafeMetadata(IDictionary<string, object?>? metadata)
         {
-            var copied = Validation.CopyPrimitiveMetadata(metadata);
-            foreach (var key in new List<string>(copied.Keys))
-            {
-                if (IsBlockedMetadataKey(key))
-                {
-                    copied.Remove(key);
-                }
-            }
-
-            return copied;
-        }
-
-        private static bool IsBlockedMetadataKey(string key)
-        {
-            var normalized = NormalizeMetadataKey(key);
-            foreach (var blocked in BlockedMetadataKeys)
-            {
-                if (normalized == blocked || normalized.Contains(blocked, StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static string NormalizeMetadataKey(string key)
-        {
-            return key.Replace("_", string.Empty).Replace("-", string.Empty).Replace(".", string.Empty).ToLowerInvariant();
+            return TelemetryMetadata.CopySafeDependencyMetadata(metadata);
         }
 
         private static void AddString(IDictionary<string, object?> metadata, string key, string? value)

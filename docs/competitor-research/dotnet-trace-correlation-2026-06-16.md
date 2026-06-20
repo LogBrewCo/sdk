@@ -160,3 +160,47 @@ This follow-up uses the source already recorded above: Sentry .NET `getsentry/se
 ### Remaining Gap
 
 LogBrew is now better for explicit, dependency-free .NET OTel/W3C interop when an app already owns `Activity` instrumentation. It is still weaker than Sentry/Datadog/OpenTelemetry for transparent automatic ASP.NET instrumentation, baggage/tracestate, rich span events/exceptions/links, profiling, and deep outbound `HttpClient`/EF/SqlClient/Redis/Kafka auto-instrumentation.
+
+## 2026-06-21 Outbound HttpClient Follow-Up
+
+### Additional Source Reviewed
+
+- Sentry .NET `getsentry/sentry-dotnet@2f2842f20f9581468a0ab4e971bfd507557161b3`.
+- Read `src/Sentry/SentryMessageHandler.cs`: `SendAsync`, `Send`, `PropagateTraceHeaders`, `AddTraceparentHeader`, and duplicate-header checks.
+- Read `src/Sentry/SentryHttpMessageHandler.cs`: `ProcessRequest`, `HandleResponse`, HTTP span origin, method/server metadata, breadcrumb/status handling, and original exception preservation.
+- OpenTelemetry .NET contrib `open-telemetry/opentelemetry-dotnet-contrib@b04a8ba4d4dadee7723fb0dac5c818de69ba3c50`.
+- Read `src/OpenTelemetry.Instrumentation.Http/Implementation/HttpHandlerDiagnosticListener.cs`: DiagnosticSource start/stop/exception handling, propagator injection, request filtering, method/status tags, URL redaction path, and enrichment callbacks.
+- Read `src/OpenTelemetry.Instrumentation.Http/HttpClientTraceInstrumentationOptions.cs`: `FilterHttpRequestMessage`, enrichment hooks, exception enrichment, and query-redaction configuration.
+- Datadog .NET tracer `DataDog/dd-trace-dotnet@b92777ccdbd8bc7f7ad0a7cb59d5d53f638e93e1`.
+- Read `tracer/src/Datadog.Trace/SpanContextInjector.cs`: explicit context injection seam for unsupported libraries.
+- Read `tracer/src/Datadog.Trace/ClrProfiler/ScopeFactory.cs`: outbound HTTP scope creation, nested-instrumentation avoidance, cleaned URI resource naming, status/tag population, and excluded URL handling.
+- Read `tracer/src/Datadog.Trace/Activity/Handlers/ActivityHandlerCommon.cs`: Activity trace/span mapping and invalid Activity suppression.
+- PostHog .NET `PostHog/posthog-dotnet@620bc6785fc864d9534fb21a6e2f50295fc9b65d`.
+- Re-read `src/PostHog.AspNetCore/Tracing/PostHogRequestContextMiddleware.cs` and `PostHogTracingHeaders.cs`: request-local context and bounded header extraction; no outbound W3C `HttpClient` span propagation was found in inspected source.
+
+### Pattern
+
+Sentry, Datadog, and OpenTelemetry are stronger for transparent outbound HTTP instrumentation: they wrap handlers or subscribe to `System.Net.Http` DiagnosticSource/Activity events, inject propagation, create client spans, enrich status/error metadata, and avoid duplicate instrumentation. That power comes with broader capture surfaces, handler/global instrumentation, richer URL/host tagging, baggage/tracestate paths, and more moving parts.
+
+The source-backed lightweight pattern LogBrew can safely adopt in the core SDK is explicit app-owned send wrapping: the app chooses the `HttpClient`, request, route template, and metadata; LogBrew creates one child span, injects one normalized W3C `traceparent`, keeps the child trace active during the send, and records only sanitized primitive metadata.
+
+### LogBrew Change
+
+- Added `LogBrewHttpClientTelemetry.SendAsync(...)` and `LogBrewHttpClientOptions`.
+- The helper creates a child context from `LogBrewTrace.Current`, or from `Activity.Current` when no LogBrew trace is active, otherwise a local root.
+- It overwrites any existing request `traceparent` with one normalized child-span header, sends through the app-owned `HttpClient`, preserves the original response/exception/cancellation behavior, and captures one `HTTP {METHOD} {routeTemplate}` span.
+- Span metadata is privacy-bounded: `source=http.client`, normalized method, route template, status code, sampled flag, exception type only, and safe primitive app metadata after dropping unsafe dependency keys.
+- Added shared `TelemetryMetadata.CopySafeDependencyMetadata(...)` so operation spans and outbound HTTP spans use the same unsafe dependency metadata filter.
+- Added packaged `examples/HttpClientOutboundTelemetry.cs`, `scripts/check_dotnet_http_client_payload.py`, README guidance, Makefile target, source package proof, installed NuGet proof, and release metadata validation.
+
+### Evidence
+
+- Red TDD: focused .NET tests failed on missing `LogBrewHttpClientTelemetry` and `LogBrewHttpClientOptions`.
+- `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release`: 47 tests passed, including outbound `HttpClient` traceparent injection, active child context during send, sanitized span metadata, original exception preservation, capture-failure isolation, and option validation.
+- `bash scripts/check_dotnet_package.sh`: passed with NuGet pack proof, packaged example inclusion, source example execution, and outbound HTTP payload validation.
+- `bash scripts/real_user_dotnet_smoke.sh`: passed after a retry; first run failed because the existing ASP.NET readiness loop expired while `dotnet run` was still at `Building...`. The readiness loop was increased from 20s to 40s to reduce cold-build flake.
+- Static and hygiene gates passed: release metadata, ShellCheck 0.11.0, markdown links, backend contract reports, confidentiality scan, generated-artifact hygiene, `git diff --check`, automation TOML parse/prompt-size check, and thermo review.
+
+### Remaining Gap
+
+LogBrew is now better for teams that want explicit installed-package outbound HTTP trace propagation without handler/global patching, baggage/tracestate, URL/header/body capture, or profiler setup. Sentry, Datadog, and OpenTelemetry remain stronger for automatic transparent `HttpClient` instrumentation, request filtering at instrumentation level, richer semantic conventions, baggage/tracestate, span events/exceptions/links, and deep automatic EF/SqlClient/Redis/Kafka instrumentation.

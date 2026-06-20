@@ -237,6 +237,35 @@ if (LogBrewTraceContext.TryCreateChildFromCurrentActivity(out var trace) && trac
 
 `TryCreateChildFromCurrentActivity()`, `TryCreateChildFromActivity(...)`, and `TryCreateChildFromActivityContext(...)` copy only valid W3C Activity trace ID, span ID, and recorded flag into a fresh LogBrew child span. Use the `ActivityContext` form when your app already has an OpenTelemetry-style context value instead of a live `Activity`. These helpers return `false` for null, unstarted, non-W3C, or default/all-zero contexts. They do not add an OpenTelemetry dependency, own exporters/processors, read tracestate or baggage, patch HTTP clients, capture payloads, serialize raw propagation headers, or change `Activity.Current`. The packaged `examples/ActivityTraceCorrelation.cs` file shows installed-package Activity-to-LogBrew log/action/span/metric correlation.
 
+For outbound calls, use `LogBrewHttpClientTelemetry` when your app owns the `HttpClient` request and wants one child span plus one normalized downstream `traceparent`:
+
+```csharp
+using System.Collections.Generic;
+using System.Net.Http;
+using LogBrew;
+
+var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "1.0.0");
+var parent = LogBrewTraceContext.FromTraceparent(
+    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    "b7ad6b7169203331");
+
+using var httpClient = new HttpClient();
+using var request = new HttpRequestMessage(HttpMethod.Post, "https://payments.example/v1/payments/cart_123?card=sample");
+using (LogBrewTrace.Activate(parent))
+using (var response = await LogBrewHttpClientTelemetry.SendAsync(
+    client,
+    httpClient,
+    request,
+    LogBrewHttpClientOptions.Create()
+        .WithRouteTemplate("/v1/payments/:id")
+        .WithMetadata(new Dictionary<string, object?> { ["provider"] = "payments" })))
+{
+    response.EnsureSuccessStatusCode();
+}
+```
+
+`LogBrewHttpClientTelemetry.SendAsync(...)` preserves the app-owned `HttpClient`, `HttpRequestMessage`, response, cancellation token, and original exception. It keeps `LogBrewTrace.Current` active while the request runs, overwrites any existing `traceparent` with one normalized child span header, captures one `http.client` span, records status code or exception type only, and reports SDK capture failures through optional `OnError(...)` without replacing the HTTP result. It does not patch `HttpClient` globally, install a handler, capture request/response bodies, serialize arbitrary headers, include full URLs, hostnames, query strings, baggage, tracestate, or open support tickets. The packaged `examples/HttpClientOutboundTelemetry.cs` file proves installed-package outbound `HttpClient` span and logger correlation.
+
 For ASP.NET Core, keep the middleware app-owned and use `LogBrewServerRequestTelemetry` to wrap the request pipeline. This captures one request span, an optional `http.server.duration` metric, and an optional exception issue while preserving the original response or exception:
 
 ```csharp
@@ -408,6 +437,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 - `Flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `HttpTransport` sends queued batches through `System.Net.Http` with configurable endpoint, headers, timeout, and app-owned `HttpClient` support.
 - `ProductTimeline` queues app-owned product and network milestone events without visual replay, HTTP client patching, payload capture, or header capture.
+- `LogBrewHttpClientTelemetry` wraps app-owned outbound `HttpClient` sends with one child span and one normalized `traceparent`, without global client patching or payload/header capture.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans without adding driver dependencies, profilers, interceptors, or automatic client patching.
 - `SupportTicketDraft` builds local-only support-ticket create payload drafts and redacts diagnostics without calling backend support routes.
 - `Shutdown(transport)` flushes queued events and rejects later writes.

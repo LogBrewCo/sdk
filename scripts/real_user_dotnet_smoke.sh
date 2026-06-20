@@ -86,6 +86,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "examples/FirstUsefulTelemetry.cs",
         "examples/HttpTraceCorrelation.cs",
         "examples/ActivityTraceCorrelation.cs",
+        "examples/HttpClientOutboundTelemetry.cs",
         "examples/AspNetCoreRequestTelemetry.cs",
         "examples/Makefile",
     ):
@@ -109,6 +110,8 @@ for needle in (
     "TryCreateChildFromCurrentActivity",
     "TryCreateChildFromActivityContext",
     "ActivityTraceCorrelation.cs",
+    "LogBrewHttpClientTelemetry",
+    "HttpClientOutboundTelemetry.cs",
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",
     "LogBrewOperationTracing",
@@ -164,6 +167,10 @@ run_packaged_example ActivityTraceCorrelation.cs PackagedActivityTrace "$tmp_dir
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-activity-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_activity_trace_payload.py" "$tmp_dir/packaged-activity-trace.stdout.json" "$tmp_dir/packaged-activity-trace.stderr.json" >/dev/null
 
+run_packaged_example HttpClientOutboundTelemetry.cs PackagedHttpClient "$tmp_dir/packaged-http-client.stdout.json" "$tmp_dir/packaged-http-client.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-http-client.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_http_client_payload.py" "$tmp_dir/packaged-http-client.stdout.json" "$tmp_dir/packaged-http-client.stderr.json" >/dev/null
+
 aspnet_dir="$tmp_dir/aspnetcore-app"
 dotnet new web --framework net10.0 --name AspNetCoreApp --output "$aspnet_dir" >/dev/null
 cp "$extract_dir/examples/AspNetCoreRequestTelemetry.cs" "$aspnet_dir/Program.cs"
@@ -180,7 +187,7 @@ server_pid=""
 dotnet run --project "$aspnet_dir/AspNetCoreApp.csproj" --configuration Release --urls "$server_url" > "$tmp_dir/aspnetcore-server.stdout.txt" 2> "$tmp_dir/aspnetcore-server.stderr.txt" &
 server_pid="$!"
 ready=false
-for _ in {1..80}; do
+for _ in {1..160}; do
   if curl -fsS "$server_url/ready" > "$tmp_dir/aspnetcore-ready.json" 2>/dev/null; then
     ready=true
     break

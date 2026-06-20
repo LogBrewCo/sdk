@@ -486,6 +486,7 @@ tests += TraceCorrelationTests.Run();
 tests += OperationTracingTests.Run();
 tests += SupportTicketDraftTests.Run();
 tests += ServerRequestTelemetryTests.Run();
+tests += HttpClientTelemetryTests.Run();
 
 Console.WriteLine("dotnet package tests ok (" + tests.ToString(CultureInfo.InvariantCulture) + " tests)");
 

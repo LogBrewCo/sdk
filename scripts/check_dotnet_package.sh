@@ -66,6 +66,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "examples/FirstUsefulTelemetry.cs",
         "examples/HttpTraceCorrelation.cs",
         "examples/ActivityTraceCorrelation.cs",
+        "examples/HttpClientOutboundTelemetry.cs",
         "examples/AspNetCoreRequestTelemetry.cs",
         "examples/Makefile",
     }
@@ -92,6 +93,8 @@ for needle in (
     "TryCreateChildFromCurrentActivity",
     "TryCreateChildFromActivityContext",
     "ActivityTraceCorrelation.cs",
+    "LogBrewHttpClientTelemetry",
+    "HttpClientOutboundTelemetry.cs",
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",
     "LogBrewOperationTracing",
@@ -160,6 +163,10 @@ run_example ActivityTraceCorrelation.cs ActivityTraceCorrelation "$tmp_dir/activ
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/activity-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_activity_trace_payload.py" "$tmp_dir/activity-trace.stdout.json" "$tmp_dir/activity-trace.stderr.json" >/dev/null
 
+run_example HttpClientOutboundTelemetry.cs HttpClientOutboundTelemetry "$tmp_dir/http-client.stdout.json" "$tmp_dir/http-client.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/http-client.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_http_client_payload.py" "$tmp_dir/http-client.stdout.json" "$tmp_dir/http-client.stderr.json" >/dev/null
+
 web_dir="$tmp_dir/AspNetCoreRequestTelemetry"
 dotnet new web --framework net10.0 --name AspNetCoreRequestTelemetry --output "$web_dir" >/dev/null
 cp "$package_dir/examples/AspNetCoreRequestTelemetry.cs" "$web_dir/Program.cs"
@@ -185,6 +192,7 @@ grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-he
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/examples-help.txt"
 grep -qx 'run-activity-trace-correlation -> make run-activity-trace-correlation' "$tmp_dir/examples-help.txt"
+grep -qx 'run-http-client-outbound-telemetry -> make run-http-client-outbound-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-request-telemetry -> make run-aspnetcore-request-telemetry' "$tmp_dir/examples-help.txt"
 
 echo "dotnet package checks passed"
