@@ -144,6 +144,37 @@ logbrew_trace_http_client_span_attributes(
 logbrew_client_span(client, "evt_span_payments_http", "2026-06-02T10:00:06Z", outbound_span, &error);
 ```
 
+If your app already measures request phases, send those fixed values as primitive network milestone metadata using the same privacy-bounded keys across LogBrew SDKs:
+
+```c
+LogBrewMetadataEntry request_timing_metadata[] = {
+  LOGBREW_METADATA_NUMBER_VALUE("requestQueuedMs", 1.25),
+  LOGBREW_METADATA_NUMBER_VALUE("requestNameLookupMs", 2.5),
+  LOGBREW_METADATA_NUMBER_VALUE("requestConnectMs", 4.0),
+  LOGBREW_METADATA_NUMBER_VALUE("requestTlsMs", 8.5),
+  LOGBREW_METADATA_NUMBER_VALUE("requestSendMs", 3.25),
+  LOGBREW_METADATA_NUMBER_VALUE("requestWaitMs", 12.75),
+  LOGBREW_METADATA_NUMBER_VALUE("requestReceiveMs", 5.25),
+  LOGBREW_METADATA_NUMBER_VALUE("responseBodyBytes", 2048.0)
+};
+
+logbrew_client_network_milestone(
+    client,
+    "evt_network_payments",
+    "2026-06-02T10:00:07Z",
+    (LogBrewNetworkMilestoneAttributes){
+      "POST",
+      "/v1/payments/{payment_id}",
+      503,
+      true,
+      42.75,
+      true,
+      logbrew_trace_product_timeline_context(&trace, (LogBrewProductTimelineContext){0}),
+      {request_timing_metadata, sizeof(request_timing_metadata) / sizeof(request_timing_metadata[0])}
+    },
+    &error);
+```
+
 While a `LogBrewTraceScope` is active, `logbrew_client_issue()`, `logbrew_client_log()`, and `logbrew_client_action()` automatically include trace metadata. For metrics and product timeline helpers, use `logbrew_trace_metadata()` or `logbrew_trace_product_timeline_context()` so the correlation stays explicit at the call site.
 
 `logbrew_trace_continue_or_create_context()` is useful for request boundaries: valid incoming W3C context is continued; missing or malformed context falls back to a fresh local root without failing the request. `logbrew_trace_http_client_span_start()` creates a child span name from an HTTP method and sanitized route template, stripping query strings and fragments even when a full URL is passed. The SDK never serializes the raw incoming `traceparent` into telemetry, does not patch HTTP clients, and does not capture headers, request bodies, response bodies, raw URLs, query strings, or fragments.

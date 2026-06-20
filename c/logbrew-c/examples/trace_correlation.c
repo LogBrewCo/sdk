@@ -21,6 +21,16 @@ int main(void) {
   LogBrewSpanAttributes outbound_span;
   LogBrewMetadataEntry trace_entries[LOGBREW_TRACE_METADATA_ENTRY_COUNT];
   LogBrewMetadata trace_metadata;
+  LogBrewMetadataEntry request_timing_entries[] = {
+    LOGBREW_METADATA_NUMBER_VALUE("requestQueuedMs", 1.25),
+    LOGBREW_METADATA_NUMBER_VALUE("requestNameLookupMs", 2.5),
+    LOGBREW_METADATA_NUMBER_VALUE("requestConnectMs", 4.0),
+    LOGBREW_METADATA_NUMBER_VALUE("requestTlsMs", 8.5),
+    LOGBREW_METADATA_NUMBER_VALUE("requestSendMs", 3.25),
+    LOGBREW_METADATA_NUMBER_VALUE("requestWaitMs", 12.75),
+    LOGBREW_METADATA_NUMBER_VALUE("requestReceiveMs", 5.25),
+    LOGBREW_METADATA_NUMBER_VALUE("responseBodyBytes", 2048.0)
+  };
   LogBrewProductTimelineContext timeline_context = {
     "session_123",
     NULL,
@@ -66,7 +76,7 @@ int main(void) {
         37.5,
         true,
         timeline_context,
-        {NULL, 0U}
+        {request_timing_entries, sizeof(request_timing_entries) / sizeof(request_timing_entries[0])}
       }, &error), &error);
   must(logbrew_trace_create_headers(&trace, traceparent, &error), &error);
   must(logbrew_client_preview_json(client, &preview, &error), &error);

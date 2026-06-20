@@ -129,6 +129,18 @@ def main() -> None:
         raise SystemExit("missing network trace metadata")
     if network.get("attributes", {}).get("name") != "POST /api/checkout":  # type: ignore[union-attr]
         raise SystemExit("network route was not sanitized")
+    for key, value in {
+        "requestQueuedMs": 1.25,
+        "requestNameLookupMs": 2.5,
+        "requestConnectMs": 4.0,
+        "requestTlsMs": 8.5,
+        "requestSendMs": 3.25,
+        "requestWaitMs": 12.75,
+        "requestReceiveMs": 5.25,
+        "responseBodyBytes": 2048,
+    }.items():
+        if network_metadata.get(key) != value:
+            raise SystemExit(f"unexpected network timing {key}: {network_metadata.get(key)!r}")
 
 
 if __name__ == "__main__":
