@@ -29,6 +29,19 @@ retry_response = retry_client.flush(
   LogBrew::RecordingTransport.new([LogBrew::TransportError.network("temporary outage"), 202])
 )
 
+support_draft = LogBrew::SupportTicketDraft.create(
+  source: "sdk",
+  category: "ingest_failure",
+  title: "Telemetry flush failed",
+  description: "Flush returned usage_limit_exceeded",
+  trace_id: "4BF92F3577B34DA6A3CE929D0E0E4736",
+  diagnostics: {
+    apiKey: "lbw_ingest_hidden",
+    endpoint: "https://api.example/ingest?debug=true#frag",
+    error: RuntimeError.new("contains hidden token")
+  }
+)
+
 rejected_after_shutdown = false
 begin
   client.action("evt_action_002", "2026-06-02T10:00:06Z", name: "deploy", status: "success")
@@ -41,5 +54,7 @@ $stderr.puts JSON.generate(
   status: response.status_code,
   attempts: response.attempts,
   retryAttempts: retry_response.attempts,
+  supportDraftRedacted: support_draft.dig("diagnostics", "apiKey") == "[redacted]",
+  supportDraftTrace: support_draft.fetch("trace_id"),
   events: 6
 )

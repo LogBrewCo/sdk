@@ -225,6 +225,31 @@ client.action(
 
 The helpers return normal `action` attributes, so they work with the existing queue, preview, flush, and retry behavior. They accept only primitive metadata, copy it defensively, strip query strings and hashes from route templates, reduce full HTTP URLs to paths, normalize HTTP methods, and infer failed network milestones from `4xx`/`5xx` status codes. They do not patch `Net::HTTP`, capture request or response payloads, capture arbitrary headers, auto-capture clicks, or claim visual replay.
 
+## Support Ticket Draft Diagnostics
+
+Use `LogBrew::SupportTicketDraft.create` when a developer or support agent explicitly asks for a local JSON payload for the planned LogBrew support-ticket routes. The helper validates the public source/category contract, normalizes W3C trace IDs, redacts diagnostics, and returns a plain Ruby hash:
+
+```ruby
+draft = LogBrew::SupportTicketDraft.create(
+  source: "sdk",
+  category: "ingest_failure",
+  title: "Telemetry flush failed",
+  description: "Flush returned usage_limit_exceeded",
+  sdk_package: "logbrew-sdk",
+  sdk_version: "0.1.0",
+  trace_id: "4BF92F3577B34DA6A3CE929D0E0E4736",
+  diagnostics: {
+    endpoint: "https://api.example/ingest?debug=true",
+    apiKey: "lbw_ingest_redacted",
+    error: RuntimeError.new("hidden token")
+  }
+)
+
+puts JSON.generate(draft)
+```
+
+This helper is local-only. It does not send data, open a ticket, call backend support-ticket routes, use account/session API credentials, or infer backend ownership. Diagnostics are bounded to JSON-like values; token-like keys and strings are redacted, HTTP URLs keep only the path, local filesystem paths are replaced, exceptions keep only the class name, and unsupported Ruby objects are omitted.
+
 ## HTTP Delivery
 
 Use `LogBrew::HttpTransport` when you want the SDK to POST queued batches to LogBrew:
@@ -349,6 +374,7 @@ The subscriber implements `report(error, handled:, severity:, context:, source:,
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `LogBrew::ProductTimeline` builds explicit, application-owned product action and network milestone timeline events with primitive metadata and query/hash-free routes.
+- `LogBrew::SupportTicketDraft.create` builds explicit, local-only support-ticket create payload drafts with redacted diagnostics and no backend route calls.
 - `LogBrew::HttpTransport` sends queued batches through Ruby's standard `Net::HTTP` with configurable endpoint, headers, timeout, and app-owned HTTP client support.
 - `LogBrew::RackMiddleware` captures Rack request spans and unhandled app exceptions without requiring Rails or Rack at runtime.
 - `LogBrew::RailsErrorSubscriber` captures handled/manual Rails error reports without requiring Rails at runtime.

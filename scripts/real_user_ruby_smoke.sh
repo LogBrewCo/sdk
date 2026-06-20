@@ -99,12 +99,15 @@ GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBr
 grep -qx 'true' "$tmp_dir/installed-trace.out"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::OperationTracing.respond_to?(:database_operation)); puts(LogBrew::OperationTracing.respond_to?(:cache_operation)); puts(LogBrew::OperationTracing.respond_to?(:queue_operation))' > "$tmp_dir/installed-operation-tracing.out"
 grep -qx 'true' "$tmp_dir/installed-operation-tracing.out"
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::SupportTicketDraft.respond_to?(:create))' > "$tmp_dir/installed-support-ticket.out"
+grep -qx 'true' "$tmp_dir/installed-support-ticket.out"
 gem_dir="$(GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "rubygems"; puts Gem::Specification.find_by_name("logbrew-sdk").gem_dir')"
 test -f "$gem_dir/README.md"
 test -f "$gem_dir/lib/logbrew/product_timeline.rb"
 test -f "$gem_dir/lib/logbrew/traceparent.rb"
 test -f "$gem_dir/lib/logbrew/trace.rb"
 test -f "$gem_dir/lib/logbrew/operation_tracing.rb"
+test -f "$gem_dir/lib/logbrew/support_ticket.rb"
 test -f "$gem_dir/examples/readme_example.rb"
 test -f "$gem_dir/examples/real_user_smoke.rb"
 test -f "$gem_dir/examples/first_useful_telemetry.rb"
@@ -123,6 +126,9 @@ grep -q 'Product And Network Timelines' "$gem_dir/README.md"
 grep -q 'do not patch `Net::HTTP`' "$gem_dir/README.md"
 grep -q 'Rack And Rails Middleware' "$gem_dir/README.md"
 grep -q 'LogBrew::OperationTracing' "$gem_dir/README.md"
+grep -q 'Support Ticket Draft Diagnostics' "$gem_dir/README.md"
+grep -q 'LogBrew::SupportTicketDraft.create' "$gem_dir/README.md"
+grep -q 'support-ticket routes' "$gem_dir/README.md"
 grep -q 'Dependency Operation Spans' "$gem_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$gem_dir/README.md"
 grep -q 'Rails Error Subscriber' "$gem_dir/README.md"
@@ -140,6 +146,8 @@ GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$gem_dir/examples/real_user_smok
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/installed-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
+grep -q '"supportDraftRedacted":true' "$tmp_dir/installed-smoke.stderr.json"
+grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/installed-smoke.stderr.json"
 cat > "$tmp_dir/installed-operation-tracing.rb" <<'RUBY'
 # frozen_string_literal: true
 
@@ -179,6 +187,40 @@ puts "installed operation tracing ok"
 RUBY
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$tmp_dir/installed-operation-tracing.rb" > "$tmp_dir/installed-operation-tracing-smoke.out"
 grep -qx 'installed operation tracing ok' "$tmp_dir/installed-operation-tracing-smoke.out"
+cat > "$tmp_dir/installed-support-ticket.rb" <<'RUBY'
+# frozen_string_literal: true
+
+require "json"
+require "logbrew"
+
+draft = LogBrew::SupportTicketDraft.create(
+  source: "sdk",
+  category: "ingest_failure",
+  title: "Telemetry flush failed",
+  description: "Flush returned usage_limit_exceeded",
+  trace_id: "4BF92F3577B34DA6A3CE929D0E0E4736",
+  diagnostics: {
+    apiKey: "lbw_ingest_hidden",
+    endpoint: "https://api.example/ingest?debug=true#frag",
+    localPath: "/Users/example/app/.env",
+    error: RuntimeError.new("hidden token"),
+    values: Hash[(0...25).map { |index| ["item#{index}", index] }]
+  }
+)
+
+diagnostics = draft.fetch("diagnostics")
+raise "trace mismatch" unless draft.fetch("trace_id") == "4bf92f3577b34da6a3ce929d0e0e4736"
+raise "api key leaked" unless diagnostics.fetch("apiKey") == "[redacted]"
+raise "url leaked" unless diagnostics.fetch("endpoint") == "[redacted-url]/ingest"
+raise "path leaked" unless diagnostics.fetch("localPath") == "[redacted-path]"
+raise "exception leaked" unless diagnostics.fetch("error").fetch("type") == "RuntimeError" && !diagnostics.fetch("error").key?("message")
+raise "diagnostic map not bounded" unless diagnostics.fetch("values").length == 20 && !diagnostics.fetch("values").key?("item24")
+payload = JSON.generate(draft)
+raise "unsafe support payload leaked" if payload.include?("hidden") || payload.include?("api.example") || payload.include?("/Users/example")
+puts "installed support ticket draft ok"
+RUBY
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$tmp_dir/installed-support-ticket.rb" > "$tmp_dir/installed-support-ticket-smoke.out"
+grep -qx 'installed support ticket draft ok' "$tmp_dir/installed-support-ticket-smoke.out"
 (cd "$gem_dir/examples" && GEM_HOME="$gem_home" GEM_PATH="$gem_home" make) > "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/installed-examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/installed-examples-help.txt"

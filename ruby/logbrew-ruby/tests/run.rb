@@ -688,6 +688,118 @@ assert(errors.length == 1, "expected Rails subscriber capture error callback")
 assert(errors[0].message.include?("client is already shut down"), "expected Rails subscriber capture error message")
 tests += 1
 
+support_draft = LogBrew::SupportTicketDraft.create(
+  source: "sdk",
+  category: "ingest_failure",
+  title: "Telemetry flush failed",
+  description: "Flush returned usage_limit_exceeded",
+  project_id: "proj_123",
+  environment: "production",
+  runtime: "ruby #{RUBY_VERSION}",
+  framework: "rack",
+  sdk_package: "logbrew-sdk",
+  sdk_version: "0.1.0",
+  release: "checkout@1.2.3",
+  trace_id: "4BF92F3577B34DA6A3CE929D0E0E4736",
+  event_id: "evt_checkout_flush",
+  diagnostics: {
+    attemptCount: 2,
+    retryable: false,
+    apiKey: "lbw_ingest_hidden",
+    endpoint: "https://api.example/ingest?debug=true#frag",
+    errorMessage: "api key leaked in camel case message",
+    exception_message: "password leaked in snake case message",
+    localPath: "/Users/example/app/.env",
+    error: RuntimeError.new("contains hidden token"),
+    headers: {
+      authorization: "Bearer hidden",
+      cookie: "sid=hidden",
+      accept: "application/json"
+    },
+    events: [
+      { id: "evt_checkout_flush", type: "span" },
+      { token: "hidden" }
+    ],
+    callback: -> { "ignored" }
+  }
+)
+assert(support_draft.fetch("source") == "sdk", "expected support source")
+assert(support_draft.fetch("category") == "ingest_failure", "expected support category")
+assert(support_draft.fetch("title") == "Telemetry flush failed", "expected support title")
+assert(support_draft.fetch("description") == "Flush returned usage_limit_exceeded", "expected support description")
+assert(support_draft.fetch("project_id") == "proj_123", "expected support project")
+assert(support_draft.fetch("environment") == "production", "expected support environment")
+assert(support_draft.fetch("runtime").start_with?("ruby "), "expected support runtime")
+assert(support_draft.fetch("framework") == "rack", "expected support framework")
+assert(support_draft.fetch("sdk_package") == "logbrew-sdk", "expected support sdk package")
+assert(support_draft.fetch("sdk_version") == "0.1.0", "expected support sdk version")
+assert(support_draft.fetch("release") == "checkout@1.2.3", "expected support release")
+assert(support_draft.fetch("trace_id") == "4bf92f3577b34da6a3ce929d0e0e4736", "expected normalized support trace id")
+assert(support_draft.fetch("event_id") == "evt_checkout_flush", "expected support event id")
+support_diagnostics = support_draft.fetch("diagnostics")
+assert(support_diagnostics.fetch("attemptCount") == 2, "expected support primitive diagnostic")
+assert(support_diagnostics.fetch("retryable") == false, "expected support boolean diagnostic")
+assert(support_diagnostics.fetch("apiKey") == "[redacted]", "expected support api key redaction")
+assert(support_diagnostics.fetch("endpoint") == "[redacted-url]/ingest", "expected support URL redaction")
+assert(support_diagnostics.fetch("errorMessage") == "[redacted]", "expected support error message redaction")
+assert(support_diagnostics.fetch("exception_message") == "[redacted]", "expected support exception message redaction")
+assert(support_diagnostics.fetch("localPath") == "[redacted-path]", "expected support path redaction")
+assert(support_diagnostics.fetch("error").fetch("type") == "RuntimeError", "expected support exception type")
+assert(!support_diagnostics.fetch("error").key?("message"), "expected support exception message omission")
+headers = support_diagnostics.fetch("headers")
+assert(headers.fetch("authorization") == "[redacted]", "expected support authorization redaction")
+assert(headers.fetch("cookie") == "[redacted]", "expected support cookie redaction")
+assert(headers.fetch("accept") == "application/json", "expected support harmless header")
+events = support_diagnostics.fetch("events")
+assert(events.length == 2, "expected support event diagnostics")
+assert(events[1].fetch("token") == "[redacted]", "expected support nested token redaction")
+assert(!support_diagnostics.key?("callback"), "expected support unsupported diagnostic omission")
+support_json = JSON.generate(support_draft)
+%w[hidden api.example /Users/example traceparent].each do |unsafe|
+  assert(!support_json.include?(unsafe), "support draft leaked #{unsafe}: #{support_json}")
+end
+tests += 1
+
+large_support_draft = LogBrew::SupportTicketDraft.create(
+  source: "sdk",
+  category: "other",
+  title: "Large diagnostics",
+  description: "Diagnostic maps should be bounded",
+  diagnostics: Hash[(0...25).map { |index| ["item#{index}", index] }]
+)
+large_support_diagnostics = large_support_draft.fetch("diagnostics")
+assert(large_support_diagnostics.length == 20, "expected support diagnostic map item bound")
+assert(!large_support_diagnostics.key?("item24"), "expected support diagnostic map tail truncation")
+tests += 1
+
+expect_error("validation_error", "support ticket source must be one of") do
+  LogBrew::SupportTicketDraft.create(
+    source: "daemon",
+    category: "ingest_failure",
+    title: "Telemetry failed",
+    description: "Flush failed"
+  )
+end
+expect_error("validation_error", "support ticket trace_id must be 32 non-zero hex characters") do
+  LogBrew::SupportTicketDraft.create(
+    source: "sdk",
+    category: "ingest_failure",
+    title: "Telemetry failed",
+    description: "Flush failed",
+    trace_id: "00000000000000000000000000000000"
+  )
+end
+expect_error("validation_error", "support ticket diagnostics must be an object") do
+  LogBrew::SupportTicketDraft.create(
+    source: "sdk",
+    category: "other",
+    title: "Telemetry failed",
+    description: "Flush failed",
+    diagnostics: []
+  )
+end
+tests += 1
+
 puts "ruby package tests ok (#{tests} tests)"
 load File.expand_path("trace_correlation.rb", __dir__)
 load File.expand_path("operation_tracing.rb", __dir__)

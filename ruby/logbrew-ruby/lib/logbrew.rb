@@ -994,7 +994,6 @@ module LogBrew
   end
 end
 
-require_relative "logbrew/product_timeline"
-require_relative "logbrew/traceparent"
-require_relative "logbrew/trace"
-require_relative "logbrew/operation_tracing"
+%w[product_timeline traceparent trace operation_tracing support_ticket].each do |path|
+  require_relative "logbrew/#{path}"
+end
