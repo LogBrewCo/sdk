@@ -100,6 +100,39 @@ go run ./examples/first_useful_telemetry
 
 The example uses a fake API key, emits a local `PreviewJSON` payload, and then flushes to `AlwaysAcceptTransport`. It keeps the SDK dependency-free, app-owned, and explicit: no global `net/http` patching, no request or response payload capture, no arbitrary header capture, and no query or hash text in route metadata. Use `NewHTTPTransport` only when you are ready to send to the hosted LogBrew intake.
 
+## Support Ticket Drafts
+
+Use `CreateSupportTicketDraft` when a developer or support agent explicitly asks for a local JSON payload for the planned LogBrew support-ticket routes. The helper validates the public source/category contract, normalizes W3C trace IDs, redacts diagnostics, and returns a `SupportTicketDraft`. It does not send data, open a ticket, call backend support-ticket routes, use account/session API credentials, or infer backend ownership.
+
+```go
+draft, err := logbrew.CreateSupportTicketDraft(logbrew.SupportTicketDraftInput{
+  Source:      "sdk",
+  Category:    "ingest_failure",
+  Title:       "Telemetry flush failed",
+  Description: "Flush returned usage_limit_exceeded",
+  ProjectID:   "proj_123",
+  Environment: "production",
+  Runtime:     "go1.25",
+  Framework:   "net/http",
+  SDKPackage:  "github.com/LogBrewCo/sdk/go/logbrew",
+  SDKVersion:  "0.1.0",
+  Release:     "checkout@1.2.3",
+  TraceID:     "4bf92f3577b34da6a3ce929d0e0e4736",
+  EventID:     "evt_checkout_flush",
+  Diagnostics: map[string]any{
+    "attemptCount": 2,
+    "endpoint":    "https://api.example/ingest?debug=true",
+    "localPath":   "<local-app-path>",
+  },
+})
+if err != nil {
+  panic(err)
+}
+_ = draft
+```
+
+Diagnostics are bounded to JSON-like values. Auth-like keys, cookies, tokens, URL origins, local paths, unsupported objects, and raw error messages are redacted or omitted before the draft is returned. Network ticket creation should remain a separate explicit user or agent action only after backend reports deployed support-ticket storage and routes.
+
 ## Metrics
 
 Use `Metric` for explicit, application-owned measurements. LogBrew validates the metric name, kind, value, unit, temporality, and optional metadata before queueing the event:

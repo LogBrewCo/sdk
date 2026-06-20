@@ -284,14 +284,23 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
 
 def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bool:
     lower_line = line.lower()
+    if relative_text == "scripts/real_user_go_support_ticket_smoke.sh":
+        return line.strip() in {
+            'token := strings.Join([]string{"lbw", "ingest", "hidden"}, "_")',
+            '"apiKey":      token,',
+        }
+
     support_docs = {
         "docs/competitor-research/js-support-ticket-diagnostics-2026-06-20.md",
+        "docs/competitor-research/go-support-ticket-diagnostics-2026-06-20.md",
         "docs/competitor-research/python-support-ticket-diagnostics-2026-06-20.md",
+        "go/logbrew/README.md",
         "js/logbrew-js/README.md",
         "js/logbrew-js/index.d.cts",
         "js/logbrew-js/index.d.ts",
         "memory.md",
         "python/logbrew_py/README.md",
+        "scripts/real_user_go_support_ticket_smoke.sh",
         "scripts/real_user_js_smoke.sh",
         "scripts/real_user_python_smoke.sh",
     }
@@ -318,6 +327,26 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
             "return /(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\\s*[:=]/iu.test(value)",
         }
 
+    if relative_text == "go/logbrew/support_ticket.go":
+        return line.strip() in {
+            '"authtoken":        {},',
+            '"clientsecret":     {},',
+            '"credential":       {},',
+            '"credentials":      {},',
+            '"password":         {},',
+            '"refreshtoken":     {},',
+            '"secret":           {},',
+            '"token":            {},',
+            '"credential",',
+            '"password",',
+            '"secret",',
+            '"token",',
+            "supportSensitiveAssignmentPattern = regexp.MustCompile(`(?i)(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\\s*[:=]`)",
+            "supportTokenPattern               = regexp.MustCompile(`(?i)(?:\\bBearer\\s+[A-Za-z0-9._~+/=-]+|\\blbw_ingest_[A-Za-z0-9._-]+|\\b(?:sk|pk|xox[abprs]?)-[A-Za-z0-9_-]{10,}|\\bAKIA[0-9A-Z]{16}\\b)`)",
+            "// CreateSupportTicketDraft builds a local-only, token-free support-ticket",
+            "if supportSensitiveAssignmentPattern.MatchString(value) || supportTokenPattern.MatchString(value) {",
+        }
+
     if relative_text == "python/logbrew_py/src/logbrew_sdk/_support_ticket.py":
         return line.strip() in {
             "\"authtoken\",",
@@ -340,6 +369,12 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
         return line.strip() in {
             "{ token: \"hidden\" }",
             "{ token: \"[redacted]\" }",
+        }
+
+    if relative_text == "go/logbrew/support_ticket_test.go":
+        return line.strip() in {
+            'map[string]any{"token": "hidden"},',
+            'if len(events) != 2 || events[1].(map[string]any)["token"] != "[redacted]" {',
         }
 
     if relative_text == "python/logbrew_py/tests/test_support_ticket.py":

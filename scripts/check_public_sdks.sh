@@ -60,6 +60,7 @@ STEP_LABELS=(
   "FastAPI real-user smoke"
   "Django real-user smoke"
   "Go real-user smoke"
+  "Go support-ticket real-user smoke"
   "C real-user smoke"
   "C++ real-user smoke"
   "Java real-user smoke"
@@ -532,6 +533,10 @@ mark_step_complete
 
 begin_next_step "Go real-user smoke"
 run_shell_step "bash scripts/real_user_go_smoke.sh"
+mark_step_complete
+
+begin_next_step "Go support-ticket real-user smoke"
+run_shell_step "bash scripts/real_user_go_support_ticket_smoke.sh"
 mark_step_complete
 
 begin_next_step "C real-user smoke"
