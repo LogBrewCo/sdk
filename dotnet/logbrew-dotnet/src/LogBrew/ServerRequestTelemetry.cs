@@ -153,7 +153,7 @@ namespace LogBrew
         {
             try
             {
-                var finalStatusCode = handlerError == null || statusCode >= 500 ? statusCode : 500;
+                var finalStatusCode = handlerError == null ? statusCode : 500;
                 var timestamp = options.TimestampProvider();
                 if (handlerError != null && options.CaptureExceptionIssue)
                 {
