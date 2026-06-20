@@ -227,6 +227,34 @@ String orderId = LogBrewOperationTracing.databaseOperation(
 
 The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Metadata is primitive-only and intentionally drops SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, headers, cookies, and auth-like fields. These helpers do not import or patch JDBC, Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
 
+## Support Ticket Drafts
+
+Use `SupportTicketDraft` when a developer or support agent explicitly asks for a local JSON payload for the planned LogBrew support-ticket API. The helper validates the public source/category contract, normalizes W3C trace IDs, redacts diagnostics, and returns a local draft:
+
+```java
+import co.logbrew.sdk.SupportTicketDraft;
+import java.util.Map;
+
+SupportTicketDraft draft = SupportTicketDraft.create(SupportTicketDraft.Input
+    .create("sdk", "ingest_failure", "Telemetry flush failed", "Flush returned usage_limit_exceeded")
+    .runtime("java 21")
+    .framework("spring")
+    .sdkPackage("co.logbrew:logbrew-sdk")
+    .sdkVersion("0.1.0")
+    .release("checkout@1.2.3")
+    .traceId("4BF92F3577B34DA6A3CE929D0E0E4736")
+    .diagnostics(Map.of(
+        "attemptCount", 2,
+        "apiKey", "lbw_ingest_hidden",
+        "endpoint", "https://api.example/ingest?debug=true",
+        "error", new IllegalStateException("contains local details")
+    )));
+
+System.out.println(draft.toJson());
+```
+
+This helper does not send data, open support tickets, call `POST /api/support/tickets`, use account/session API credentials, or infer backend usage/quota state. Support routes are backend-owned and should only be called by an explicit user or agent action after backend reports deployed support-ticket routes. Diagnostics are bounded to JSON-like values; auth values, cookies, tokens, local paths, URL origins, unsupported objects, and exception messages are redacted or omitted.
+
 ## HTTP Delivery
 
 Use `HttpTransport` for real outbound delivery from server-side Java apps:

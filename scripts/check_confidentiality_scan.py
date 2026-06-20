@@ -293,8 +293,10 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
     support_docs = {
         "docs/competitor-research/js-support-ticket-diagnostics-2026-06-20.md",
         "docs/competitor-research/go-support-ticket-diagnostics-2026-06-20.md",
+        "docs/competitor-research/java-support-ticket-diagnostics-2026-06-20.md",
         "docs/competitor-research/python-support-ticket-diagnostics-2026-06-20.md",
         "go/logbrew/README.md",
+        "java/logbrew-java/README.md",
         "js/logbrew-js/README.md",
         "js/logbrew-js/index.d.cts",
         "js/logbrew-js/index.d.ts",
@@ -347,6 +349,26 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
             "if supportSensitiveAssignmentPattern.MatchString(value) || supportTokenPattern.MatchString(value) {",
         }
 
+    if relative_text == "java/logbrew-java/src/main/java/co/logbrew/sdk/SupportTicketDraft.java":
+        return line.strip() in {
+            "* credentials.</p>",
+            "\"authtoken\",",
+            "\"clientsecret\",",
+            "\"credential\",",
+            "\"credentials\",",
+            "\"password\",",
+            "\"refreshtoken\",",
+            "\"secret\",",
+            "\"token\"",
+            "\"credential\",",
+            "\"password\",",
+            "\"secret\",",
+            "\"token\"",
+            "\"(?i)(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\\\\s*[:=]\"",
+            "private static final Pattern TOKEN_PATTERN = Pattern.compile(",
+            "if (SENSITIVE_ASSIGNMENT_PATTERN.matcher(value).find() || TOKEN_PATTERN.matcher(value).find()) {",
+        }
+
     if relative_text == "python/logbrew_py/src/logbrew_sdk/_support_ticket.py":
         return line.strip() in {
             "\"authtoken\",",
@@ -375,6 +397,12 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
         return line.strip() in {
             'map[string]any{"token": "hidden"},',
             'if len(events) != 2 || events[1].(map[string]any)["token"] != "[redacted]" {',
+        }
+
+    if relative_text == "java/logbrew-java/src/test/java/co/logbrew/sdk/SupportTicketDraftTest.java":
+        return line.strip() in {
+            "secondEvent.put(\"token\", \"hidden\");",
+            "assertEquals(\"[redacted]\", safeSecondEvent.get(\"token\"), \"event token\");",
         }
 
     if relative_text == "python/logbrew_py/tests/test_support_ticket.py":

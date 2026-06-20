@@ -30,6 +30,7 @@ javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/classes:$java_logback_classp
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_logback_classpath" co.logbrew.sdk.LogBrewClientTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_logback_classpath" co.logbrew.sdk.LogBrewTraceTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_logback_classpath" co.logbrew.sdk.LogBrewOperationTracingTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_logback_classpath" co.logbrew.sdk.SupportTicketDraftTest
 
 python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
   "$package_dir/pom.xml" \
@@ -47,6 +48,7 @@ test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewTraceContext.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewTrace.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewHttpRequestTelemetry.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewOperationTracing.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/SupportTicketDraft.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewJulHandler.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewLogbackAppender.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/RecordingTransport.html"
@@ -63,6 +65,7 @@ grep -q '^co/logbrew/sdk/LogBrewTraceContext.java$' "$tmp_dir/sources-jar-conten
 grep -q '^co/logbrew/sdk/LogBrewTrace.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/SupportTicketDraft.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/package-info.java$' "$tmp_dir/sources-jar-contents.txt"
 
 jar --create --file "$tmp_dir/logbrew-sdk-0.1.0-javadoc.jar" -C "$tmp_dir/javadoc" .
@@ -77,6 +80,7 @@ grep -q '^co/logbrew/sdk/LogBrewTraceContext.html$' "$tmp_dir/javadoc-jar-conten
 grep -q '^co/logbrew/sdk/LogBrewTrace.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/SupportTicketDraft.html$' "$tmp_dir/javadoc-jar-contents.txt"
 
 mkdir -p "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk"
 cp "$package_dir/pom.xml" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk/pom.xml"
@@ -102,6 +106,8 @@ grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/jar-contents.
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$DatabaseOperation.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$CacheOperation.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$QueueOperation.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/SupportTicketDraft.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/SupportTicketDraft\$Input.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewJulHandler.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewLogbackAppender.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/RecordingTransport.class$' "$tmp_dir/jar-contents.txt"
@@ -114,6 +120,7 @@ grep -q 'Traceparent' "$package_dir/README.md"
 grep -q 'LogBrewTraceContext' "$package_dir/README.md"
 grep -q 'LogBrewHttpRequestTelemetry' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
+grep -q 'SupportTicketDraft' "$package_dir/README.md"
 grep -q 'first useful LogBrew payload' "$package_dir/README.md"
 grep -q 'without visual replay, HTTP client patching, request/response payload capture, or header capture' "$package_dir/README.md"
 grep -q 'This SDK does not automatically collect JVM, runtime, or framework metrics yet.' "$package_dir/README.md"
