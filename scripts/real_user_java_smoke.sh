@@ -54,6 +54,8 @@ grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/binary-jar-co
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$DatabaseOperation.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$CacheOperation.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$QueueOperation.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/SupportTicketDraft.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/SupportTicketDraft\$Input.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewJulHandler.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewLogbackAppender.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/Transport.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -73,6 +75,7 @@ grep -q '^src/main/java/co/logbrew/sdk/LogBrewTraceContext.java$' "$tmp_dir/sour
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewTrace.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewOperationTracing.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/SupportTicketDraft.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewJulHandler.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewLogbackAppender.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^examples/FirstUsefulTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
@@ -90,6 +93,7 @@ grep -q 'MetricAttributes' "$package_dir/README.md"
 grep -q 'ProductTimeline' "$package_dir/README.md"
 grep -q 'Traceparent' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
+grep -q 'SupportTicketDraft' "$package_dir/README.md"
 grep -q 'first useful LogBrew payload' "$package_dir/README.md"
 grep -q 'without visual replay, HTTP client patching, request/response payload capture, or header capture' "$package_dir/README.md"
 grep -q 'This SDK does not automatically collect JVM, runtime, or framework metrics yet.' "$package_dir/README.md"
@@ -118,6 +122,7 @@ grep -q '"ok":true' "$tmp_dir/extracted-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-smoke-alias.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/extracted-smoke-alias.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/extracted-smoke-alias.stderr.json"
+grep -q '"supportDraftRedacted":true' "$tmp_dir/extracted-smoke-alias.stderr.json"
 (cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_logback_classpath" run-first-useful-telemetry) > "$tmp_dir/extracted-first-useful.stdout.json" 2> "$tmp_dir/extracted-first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/extracted-first-useful.stdout.json" "$tmp_dir/extracted-first-useful.stderr.json" >/dev/null
@@ -134,6 +139,7 @@ java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/packaged-smoke.stderr.json"
+grep -q '"supportDraftRedacted":true' "$tmp_dir/packaged-smoke.stderr.json"
 java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" FirstUsefulTelemetry > "$tmp_dir/packaged-first-useful.stdout.json" 2> "$tmp_dir/packaged-first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json" >/dev/null
@@ -188,6 +194,7 @@ import co.logbrew.sdk.RecordingTransport;
 import co.logbrew.sdk.ReleaseAttributes;
 import co.logbrew.sdk.SdkException;
 import co.logbrew.sdk.SpanAttributes;
+import co.logbrew.sdk.SupportTicketDraft;
 import co.logbrew.sdk.TransportException;
 import co.logbrew.sdk.TransportResponse;
 import com.sun.net.httpserver.HttpExchange;
@@ -223,6 +230,26 @@ public final class Main {
 
         TransportResponse empty = client.flush(RecordingTransport.alwaysAccept());
         require(empty.statusCode() == 204 && empty.attempts() == 0, "empty flush");
+
+        SupportTicketDraft supportDraft = SupportTicketDraft.create(SupportTicketDraft.Input
+            .create("sdk", "ingest_failure", "Telemetry flush failed", "Flush returned usage_limit_exceeded")
+            .runtime("java 21")
+            .sdkPackage("co.logbrew:logbrew-sdk")
+            .sdkVersion("0.1.0")
+            .traceId("4BF92F3577B34DA6A3CE929D0E0E4736")
+            .diagnostics(Map.of(
+                "apiKey", "lbw_ingest_hidden",
+                "endpoint", "https://api.example/ingest?debug=true",
+                "error", new IllegalStateException("private detail")
+            )));
+        String supportDraftJson = supportDraft.toJson();
+        require(supportDraft.traceId().equals("4bf92f3577b34da6a3ce929d0e0e4736"), "support draft trace id");
+        require(supportDraftJson.contains("[redacted]"), "support draft redaction placeholder");
+        require(supportDraftJson.contains("[redacted-url]/ingest"), "support draft redacts URL origin");
+        require(supportDraftJson.contains("java.lang.IllegalStateException"), "support draft keeps exception type");
+        require(!supportDraftJson.contains("hidden"), "support draft omits raw sample");
+        require(!supportDraftJson.contains("api.example"), "support draft omits URL origin");
+        require(!supportDraftJson.contains("private detail"), "support draft omits exception message");
 
         LogBrewClient metrics = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
         metrics.metric(

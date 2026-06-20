@@ -313,7 +313,7 @@ public final class SupportTicketDraft {
         private String release;
         private String traceId;
         private String eventId;
-        private Map<String, Object> diagnostics;
+        private Map<String, ?> diagnostics;
 
         private Input(String source, String category, String title, String description) {
             this.source = source;
@@ -405,7 +405,7 @@ public final class SupportTicketDraft {
          * Sets optional diagnostics. Values are sanitized while creating the draft.
          */
         public Input diagnostics(Map<String, ?> diagnostics) {
-            this.diagnostics = sanitizeDiagnostics(diagnostics);
+            this.diagnostics = diagnostics == null ? null : new LinkedHashMap<>(diagnostics);
             return this;
         }
     }
