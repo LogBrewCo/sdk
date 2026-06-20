@@ -96,6 +96,8 @@ for needle in (
     "AddLogBrew(client",
     "Microsoft.Extensions.Logging",
     "IncludeExceptionStackTrace",
+    "SupportTicketDraft",
+    "This helper does not send data, open support tickets",
     "copyable snippets",
 ):
     if needle not in readme:
@@ -136,6 +138,7 @@ run_example RealUserSmoke.cs RealUserSmoke "$tmp_dir/real-user-smoke.stdout.json
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
+grep -q '"supportDraftRedacted":true' "$tmp_dir/real-user-smoke.stderr.json"
 
 run_example FirstUsefulTelemetry.cs FirstUsefulTelemetry "$tmp_dir/first-useful.stdout.json" "$tmp_dir/first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/first-useful.stdout.json" >/dev/null

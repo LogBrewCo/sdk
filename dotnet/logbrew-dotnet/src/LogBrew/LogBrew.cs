@@ -1059,6 +1059,12 @@ namespace LogBrew
                 return;
             }
 
+            if (value is IEnumerable<object?> jsonValues)
+            {
+                WriteArray(builder, jsonValues, depth);
+                return;
+            }
+
             if (value is int || value is long || value is short || value is byte || value is double || value is float || value is decimal)
             {
                 builder.Append(Convert.ToString(value, CultureInfo.InvariantCulture));

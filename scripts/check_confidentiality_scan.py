@@ -301,6 +301,8 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
         "js/logbrew-js/index.d.cts",
         "js/logbrew-js/index.d.ts",
         "memory.md",
+        "dotnet/logbrew-dotnet/README.md",
+        "docs/competitor-research/dotnet-support-ticket-diagnostics-2026-06-20.md",
         "python/logbrew_py/README.md",
         "scripts/real_user_go_support_ticket_smoke.sh",
         "scripts/real_user_js_smoke.sh",
@@ -369,6 +371,30 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
             "if (SENSITIVE_ASSIGNMENT_PATTERN.matcher(value).find() || TOKEN_PATTERN.matcher(value).find()) {",
         }
 
+    if relative_text == "dotnet/logbrew-dotnet/src/LogBrew/SupportTicketDraft.cs":
+        return line.strip() in {
+            "/// account/session API credentials.",
+        }
+
+    if relative_text == "dotnet/logbrew-dotnet/src/LogBrew/SupportDiagnosticsSanitizer.cs":
+        return line.strip() in {
+            "\"authtoken\",",
+            "\"clientsecret\",",
+            "\"credential\",",
+            "\"credentials\",",
+            "\"password\",",
+            "\"refreshtoken\",",
+            "\"secret\",",
+            "\"token\",",
+            "\"credential\",",
+            "\"password\",",
+            "\"secret\",",
+            "\"token\",",
+            "\"(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\\\\s*[:=]\",",
+            "private static readonly Regex TokenPattern = new Regex(",
+            "if (SensitiveAssignmentPattern.IsMatch(value) || TokenPattern.IsMatch(value))",
+        }
+
     if relative_text == "python/logbrew_py/src/logbrew_sdk/_support_ticket.py":
         return line.strip() in {
             "\"authtoken\",",
@@ -403,6 +429,12 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
         return line.strip() in {
             "secondEvent.put(\"token\", \"hidden\");",
             "assertEquals(\"[redacted]\", safeSecondEvent.get(\"token\"), \"event token\");",
+        }
+
+    if relative_text == "dotnet/logbrew-dotnet/tests/LogBrew.Tests/SupportTicketDraftTests.cs":
+        return line.strip() in {
+            "new Dictionary<string, object?> { [\"token\"] = \"hidden\" }",
+            "Require((string)secondEvent[\"token\"]! == \"[redacted]\", \"expected nested token redaction\");",
         }
 
     if relative_text == "python/logbrew_py/tests/test_support_ticket.py":

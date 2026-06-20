@@ -109,6 +109,8 @@ for needle in (
     "AddLogBrew(client",
     "Microsoft.Extensions.Logging",
     "IncludeExceptionStackTrace",
+    "SupportTicketDraft",
+    "This helper does not send data, open support tickets",
     "copyable snippets",
 ):
     if needle not in readme:
@@ -136,6 +138,7 @@ run_packaged_example RealUserSmoke.cs PackagedSmoke "$tmp_dir/packaged-smoke.std
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/packaged-smoke.stderr.json"
+grep -q '"supportDraftRedacted":true' "$tmp_dir/packaged-smoke.stderr.json"
 
 run_packaged_example FirstUsefulTelemetry.cs PackagedFirstUseful "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
@@ -545,6 +548,30 @@ EnqueueAll(closed);
 closed.Shutdown(RecordingTransport.AlwaysAccept());
 Expect("shutdown_error", () => closed.Action("evt_action_002", "2026-06-02T10:00:06Z", ActionAttributes.Create("deploy", "success")));
 
+var supportDraft = SupportTicketDraft.Create(
+    SupportTicketDraftInput.Create("sdk", "ingest_failure", "Telemetry failed", "Flush failed")
+        .WithProjectId("proj_123")
+        .WithRuntime(".NET 10")
+        .WithSdkPackage("LogBrew")
+        .WithTraceId("4BF92F3577B34DA6A3CE929D0E0E4736")
+        .WithDiagnostics(new Dictionary<string, object?>
+        {
+            ["apiKey"] = string.Concat("lbw", "_ingest_", "sample"),
+            ["endpoint"] = "https://api.example/ingest?debug=true#fragment",
+            ["localPath"] = "/Users/example/app/.env",
+            ["error"] = new InvalidOperationException("raw message is omitted")
+        }));
+var supportJson = supportDraft.ToJson();
+Require(supportJson.Contains("\"apiKey\": \"[redacted]\"", StringComparison.Ordinal), "expected support API key redaction");
+Require(supportJson.Contains("\"endpoint\": \"[redacted-url]/ingest\"", StringComparison.Ordinal), "expected support URL origin redaction");
+Require(supportJson.Contains("\"localPath\": \"[redacted-path]\"", StringComparison.Ordinal), "expected support local path redaction");
+Require(supportJson.Contains("\"trace_id\": \"4bf92f3577b34da6a3ce929d0e0e4736\"", StringComparison.Ordinal), "expected support trace normalization");
+Require(supportJson.Contains("\"type\": \"System.InvalidOperationException\"", StringComparison.Ordinal), "expected support exception type");
+foreach (var blocked in new[] { "lbw_ingest_sample", "api.example", "/Users/example", "raw message" })
+{
+    Require(!supportJson.Contains(blocked, StringComparison.Ordinal), "expected support draft to omit " + blocked);
+}
+
 Console.Error.WriteLine(
     "{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"httpAttempts\":"
     + httpAttempts.ToString(CultureInfo.InvariantCulture)
@@ -552,6 +579,7 @@ Console.Error.WriteLine(
     + ",\"timelineEvents\":2"
     + ",\"dependencySpans\":"
     + operationClient.PendingEvents().ToString(CultureInfo.InvariantCulture)
+    + ",\"supportDraftRedacted\":true"
     + ",\"httpRequests\":"
     + httpRequests.ToString(CultureInfo.InvariantCulture)
     + "}");

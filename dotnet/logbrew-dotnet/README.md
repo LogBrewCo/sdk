@@ -236,6 +236,43 @@ var orderId = LogBrewOperationTracing.DatabaseOperation(
 
 Sync and async helpers are available for database, cache, and queue operations. They create one child span under `LogBrewTrace.Current` when a trace is active, keep that child trace active while the callback runs, preserve the callback result or original exception, and report SDK capture failures through optional `OnError(...)` callbacks without interrupting app work. Metadata is primitive-only, and the helpers drop unsafe dependency details such as raw statements, connection details, cache identifiers, message contents, broker details, request metadata, and unsafe values. For broad automatic JDBC/EF/Redis/Kafka-style coverage, use a future explicit integration package rather than relying on hidden behavior in this core package.
 
+## Support Ticket Diagnostics Drafts
+
+Use `SupportTicketDraft` when a developer or support agent needs a local JSON payload for the planned LogBrew support-ticket API. The helper validates the public source/category contract, uses the planned backend create payload fields, and redacts token-like diagnostics before returning the draft.
+
+```csharp
+using System;
+using System.Collections.Generic;
+using LogBrew;
+
+var draft = SupportTicketDraft.Create(
+    SupportTicketDraftInput.Create(
+            "sdk",
+            "ingest_failure",
+            "Telemetry flush failed",
+            "Flush returned usage_limit_exceeded")
+        .WithProjectId("proj_123")
+        .WithEnvironment("production")
+        .WithRuntime(".NET 10")
+        .WithFramework("ASP.NET Core")
+        .WithSdkPackage("LogBrew")
+        .WithSdkVersion("0.1.0")
+        .WithRelease("checkout@1.2.3")
+        .WithTraceId("4BF92F3577B34DA6A3CE929D0E0E4736")
+        .WithEventId("evt_checkout_flush")
+        .WithDiagnostics(new Dictionary<string, object?>
+        {
+            ["attemptCount"] = 2,
+            ["apiKey"] = "lbw_ingest_placeholder",
+            ["endpoint"] = "https://api.example/ingest?debug=true#frag",
+            ["error"] = new InvalidOperationException("raw message is omitted")
+        }));
+
+Console.WriteLine(draft.ToJson());
+```
+
+This helper does not send data, open support tickets, call `POST /api/support/tickets`, use account/session API credentials, or infer backend usage/quota state. Support routes are backend-owned and should only be called by an explicit user or agent action after backend reports deployed support-ticket routes. Diagnostics are bounded to JSON-like values; auth values, cookies, tokens, local paths, URL origins, exception messages, exception stacks, hidden payloads, and unsupported objects are redacted or omitted.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:
@@ -306,6 +343,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 - `HttpTransport` sends queued batches through `System.Net.Http` with configurable endpoint, headers, timeout, and app-owned `HttpClient` support.
 - `ProductTimeline` queues app-owned product and network milestone events without visual replay, HTTP client patching, payload capture, or header capture.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans without adding driver dependencies, profilers, interceptors, or automatic client patching.
+- `SupportTicketDraft` builds local-only support-ticket create payload drafts and redacts diagnostics without calling backend support routes.
 - `Shutdown(transport)` flushes queued events and rejects later writes.
 - `AddLogBrew(client, options)` connects existing `ILogger` calls to LogBrew without global logging side effects.
 - `RecordingTransport.AlwaysAccept()` is useful when you want to inspect queued JSON before network delivery.
