@@ -323,11 +323,13 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
             "\"password\",",
             "\"refreshtoken\",",
             "\"secret\",",
+            "_SENSITIVE_KEY_MARKERS = (",
             "\"token\",",
             "_TOKEN_PATTERN = re.compile(",
             "\"Build a local-only, token-free support-ticket create payload draft without calling backend routes.\"",
             "r\"(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\\s*[:=]\",",
             "if _SENSITIVE_ASSIGNMENT_PATTERN.search(value) or _TOKEN_PATTERN.search(value):",
+            "return normalized in _SENSITIVE_KEYS or any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS)",
         }
 
     if relative_text == "js/logbrew-js/test/sdk.test.js":
@@ -338,8 +340,12 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
 
     if relative_text == "python/logbrew_py/tests/test_support_ticket.py":
         return line.strip() in {
+            '"access_token": "hidden",',
+            '"access_token": "[redacted]",',
             '"api_key": "hidden",',
             '"api_key": "[redacted]",',
+            '"cookie_header": "cookie=hidden",',
+            '"cookie_header": "[redacted]",',
             '"events": [{"token": "hidden"}, {"ok": True}],',
             '"events": [{"token": "[redacted]"}, {"ok": True}],',
         }

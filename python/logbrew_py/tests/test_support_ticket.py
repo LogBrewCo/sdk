@@ -24,6 +24,8 @@ class SupportTicketDraftTests(unittest.TestCase):
             event_id="evt_python_support",
             diagnostics={
                 "api_key": "hidden",
+                "access_token": "hidden",
+                "cookie_header": "cookie=hidden",
                 "endpoint": "https://api.example.test/v1/events?debug=true#frag",
                 "local_path": "/Users/example/service/app.py",
                 "headers": {"Authorization": "Bearer hidden", "x-request-id": "req_123"},
@@ -51,6 +53,8 @@ class SupportTicketDraftTests(unittest.TestCase):
                 "event_id": "evt_python_support",
                 "diagnostics": {
                     "api_key": "[redacted]",
+                    "access_token": "[redacted]",
+                    "cookie_header": "[redacted]",
                     "endpoint": "[redacted-url]/v1/events",
                     "local_path": "[redacted-path]",
                     "headers": {"Authorization": "[redacted]", "x-request-id": "req_123"},

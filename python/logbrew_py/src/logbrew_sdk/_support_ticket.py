@@ -114,6 +114,19 @@ _SENSITIVE_KEYS = {
     "setcookie",
     "token",
 }
+_SENSITIVE_KEY_MARKERS = (
+    "auth",
+    "connectionstring",
+    "cookie",
+    "credential",
+    "dsn",
+    "password",
+    "passwd",
+    "privatekey",
+    "secret",
+    "session",
+    "token",
+)
 _SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
     r"(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\s*[:=]",
     re.IGNORECASE,
@@ -286,7 +299,7 @@ def _is_support_diagnostics_value(value: _SanitizedValue) -> TypeGuard[SupportDi
 
 def _is_sensitive_key(key: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]", "", key.lower())
-    return normalized in _SENSITIVE_KEYS
+    return normalized in _SENSITIVE_KEYS or any(marker in normalized for marker in _SENSITIVE_KEY_MARKERS)
 
 
 def _sanitize_string(value: str) -> str:
