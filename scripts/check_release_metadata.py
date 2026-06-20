@@ -63,7 +63,7 @@ PYTHON_PACKAGES = {
         "description": "Public LogBrew Python SDK",
         "dependencies": set(),
         "package": "logbrew_sdk",
-        "version": "0.1.1",
+        "version": "0.1.2",
     },
 }
 

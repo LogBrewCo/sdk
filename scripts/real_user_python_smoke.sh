@@ -1044,7 +1044,7 @@ support_ticket: SupportTicketDraft = create_support_ticket_draft(
     runtime="python 3.13",
     framework="fastapi",
     sdk_package="logbrew-sdk",
-    sdk_version="0.1.1",
+    sdk_version="0.1.2",
     trace_id=trace_context.trace_id,
     diagnostics={
         "endpoint": "https://api.example.test/v1/events?debug=true",
@@ -1330,7 +1330,7 @@ class InstalledUserTest(unittest.TestCase):
             environment="production",
             runtime="python 3.13",
             sdk_package="logbrew-sdk",
-            sdk_version="0.1.1",
+            sdk_version="0.1.2",
             diagnostics={
                 "endpoint": "https://api.example.test/v1/events?debug=true",
                 "authorization": "Bearer hidden",
