@@ -88,6 +88,11 @@ namespace LogBrew
 
             foreach (var item in diagnostics)
             {
+                if (safe.Count >= MaxDiagnosticItems)
+                {
+                    break;
+                }
+
                 if (string.IsNullOrEmpty(item.Key))
                 {
                     continue;
@@ -183,6 +188,11 @@ namespace LogBrew
             var safe = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (DictionaryEntry entry in values)
             {
+                if (safe.Count >= MaxDiagnosticItems)
+                {
+                    break;
+                }
+
                 if (!(entry.Key is string key) || string.IsNullOrEmpty(key))
                 {
                     continue;
