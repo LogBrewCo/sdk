@@ -14,6 +14,13 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
+from logbrew_sdk._support_ticket import (
+    SupportDiagnosticsValue,
+    SupportTicketCategory,
+    SupportTicketDraft,
+    SupportTicketSource,
+    build_create_support_ticket_draft,
+)
 from logbrew_sdk._trace_context import (
     LogBrewTraceContext,
     get_active_logbrew_trace,
@@ -901,6 +908,14 @@ def validate_metric(attributes: MetricAttributes) -> dict[str, Any]:
     )
 
 
+create_support_ticket_draft = build_create_support_ticket_draft(
+    sdk_error_type=SdkError,
+    require_allowed_value=require_allowed_value,
+    require_non_empty=require_non_empty,
+    require_trace_id=require_trace_id,
+)
+
+
 from logbrew_sdk._http_client import (  # noqa: E402, I001
     async_httpx_request_with_logbrew_span,
     httpx_request_with_logbrew_span,
@@ -940,6 +955,10 @@ __all__ = [
     "ReleaseAttributes",
     "SdkError",
     "SpanAttributes",
+    "SupportDiagnosticsValue",
+    "SupportTicketCategory",
+    "SupportTicketDraft",
+    "SupportTicketSource",
     "TraceparentContext",
     "Transport",
     "TransportError",
@@ -953,6 +972,7 @@ __all__ = [
     "create_logbrew_trace_context",
     "create_network_milestone_attributes",
     "create_product_action_attributes",
+    "create_support_ticket_draft",
     "create_traceparent",
     "create_traceparent_headers",
     "database_operation_with_logbrew_span",

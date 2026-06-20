@@ -282,18 +282,24 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
     lower_line = line.lower()
     support_docs = {
         "docs/competitor-research/js-support-ticket-diagnostics-2026-06-20.md",
+        "docs/competitor-research/python-support-ticket-diagnostics-2026-06-20.md",
         "js/logbrew-js/README.md",
         "js/logbrew-js/index.d.cts",
         "js/logbrew-js/index.d.ts",
         "memory.md",
+        "python/logbrew_py/README.md",
         "scripts/real_user_js_smoke.sh",
+        "scripts/real_user_python_smoke.sh",
     }
     if relative_text in support_docs:
         return (
             "support-ticket" in lower_line
             or "support ticket" in lower_line
+            or "support routes" in lower_line
+            or "account/session api credentials" in lower_line
             or "diagnostic" in lower_line
             or "redact" in lower_line
+            or "token-free" in lower_line
         )
 
     if relative_text == "js/logbrew-js/support-ticket.cjs":
@@ -308,10 +314,34 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
             "return /(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\\s*[:=]/iu.test(value)",
         }
 
+    if relative_text == "python/logbrew_py/src/logbrew_sdk/_support_ticket.py":
+        return line.strip() in {
+            "\"authtoken\",",
+            "\"clientsecret\",",
+            "\"credential\",",
+            "\"credentials\",",
+            "\"password\",",
+            "\"refreshtoken\",",
+            "\"secret\",",
+            "\"token\",",
+            "_TOKEN_PATTERN = re.compile(",
+            "\"Build a local-only, token-free support-ticket create payload draft without calling backend routes.\"",
+            "r\"(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\\s*[:=]\",",
+            "if _SENSITIVE_ASSIGNMENT_PATTERN.search(value) or _TOKEN_PATTERN.search(value):",
+        }
+
     if relative_text == "js/logbrew-js/test/sdk.test.js":
         return line.strip() in {
             "{ token: \"hidden\" }",
             "{ token: \"[redacted]\" }",
+        }
+
+    if relative_text == "python/logbrew_py/tests/test_support_ticket.py":
+        return line.strip() in {
+            '"api_key": "hidden",',
+            '"api_key": "[redacted]",',
+            '"events": [{"token": "hidden"}, {"ok": True}],',
+            '"events": [{"token": "[redacted]"}, {"ok": True}],',
         }
 
     return False

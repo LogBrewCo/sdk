@@ -540,6 +540,7 @@ with zipfile.ZipFile(wheel_path) as archive:
         "logbrew_sdk/_instrumentation.py",
         "logbrew_sdk/_queue_client.py",
         "logbrew_sdk/_rq_client.py",
+        "logbrew_sdk/_support_ticket.py",
         "logbrew_sdk/__init__.py",
         "logbrew_sdk/_timeline.py",
         "logbrew_sdk/_trace_context.py",
@@ -578,6 +579,7 @@ for needle in (
     "requests_request_with_logbrew_span",
     "rq_operation_with_logbrew_span",
     "urlopen_with_logbrew_span",
+    "create_support_ticket_draft",
     "parse_traceparent",
     "create_product_action_attributes",
     "create_network_milestone_attributes",
@@ -615,6 +617,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
         f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
         f"{sdist_root}/src/logbrew_sdk/_queue_client.py",
         f"{sdist_root}/src/logbrew_sdk/_rq_client.py",
+        f"{sdist_root}/src/logbrew_sdk/_support_ticket.py",
         f"{sdist_root}/src/logbrew_sdk/_timeline.py",
         f"{sdist_root}/src/logbrew_sdk/_trace_context.py",
         f"{sdist_root}/src/logbrew_sdk/py.typed",
@@ -659,6 +662,7 @@ for needle in (
     "requests_request_with_logbrew_span",
     "rq_operation_with_logbrew_span",
     "urlopen_with_logbrew_span",
+    "create_support_ticket_draft",
     "parse_traceparent",
     "create_product_action_attributes",
     "create_network_milestone_attributes",
@@ -941,6 +945,7 @@ from logbrew_sdk import (
     RecordingTransport,
     ReleaseAttributes,
     SpanAttributes,
+    SupportTicketDraft,
     TraceparentContext,
     Transport,
     TransportResponse,
@@ -951,6 +956,7 @@ from logbrew_sdk import (
     cache_operation_with_logbrew_span,
     create_network_milestone_attributes,
     create_product_action_attributes,
+    create_support_ticket_draft,
     create_traceparent,
     database_operation_with_logbrew_span,
     httpx_request_with_logbrew_span,
@@ -1029,6 +1035,26 @@ network_milestone: ActionAttributes = create_network_milestone_attributes(
         "metadata": {"service": "checkout", "headers": {"authorization": "private"}},
     }
 )
+support_ticket: SupportTicketDraft = create_support_ticket_draft(
+    source="sdk",
+    category="sdk_install_failure",
+    title="Python install failed",
+    description="Installed package cannot be imported",
+    environment="production",
+    runtime="python 3.13",
+    framework="fastapi",
+    sdk_package="logbrew-sdk",
+    sdk_version="0.1.1",
+    trace_id=trace_context.trace_id,
+    diagnostics={
+        "endpoint": "https://api.example.test/v1/events?debug=true",
+        "authorization": "Bearer hidden",
+        "local_path": "/Users/example/service/app.py",
+        "error": RuntimeError("private failure message"),
+    },
+)
+if support_ticket["diagnostics"]["endpoint"] != "[redacted-url]/v1/events":
+    raise RuntimeError("support ticket draft did not redact URL origin")
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
@@ -1255,7 +1281,7 @@ EOF
 cat > "$tmp_dir/installed_user_test.py" <<'EOF'
 import unittest
 
-from logbrew_sdk import LogBrewClient
+from logbrew_sdk import LogBrewClient, create_support_ticket_draft
 
 
 class InstalledUserTest(unittest.TestCase):
@@ -1294,6 +1320,30 @@ class InstalledUserTest(unittest.TestCase):
         payload = client.preview_json()
         self.assertIn('"type": "metric"', payload)
         self.assertIn('"temporality": "instant"', payload)
+
+    def test_support_ticket_draft_is_local_and_redacted(self) -> None:
+        draft = create_support_ticket_draft(
+            source="sdk",
+            category="sdk_install_failure",
+            title="Python install failed",
+            description="Installed package cannot be imported",
+            environment="production",
+            runtime="python 3.13",
+            sdk_package="logbrew-sdk",
+            sdk_version="0.1.1",
+            diagnostics={
+                "endpoint": "https://api.example.test/v1/events?debug=true",
+                "authorization": "Bearer hidden",
+                "local_path": "/Users/example/service/app.py",
+                "error": RuntimeError("private failure message"),
+            },
+        )
+        self.assertEqual(draft["diagnostics"]["endpoint"], "[redacted-url]/v1/events")
+        serialized = str(draft)
+        self.assertNotIn("api.example.test", serialized)
+        self.assertNotIn("/Users/example", serialized)
+        self.assertNotIn("private failure", serialized)
+        self.assertNotIn("Bearer hidden", serialized)
 
 
 if __name__ == "__main__":
@@ -1955,6 +2005,7 @@ required = {
     "logbrew_sdk/_instrumentation.py",
     "logbrew_sdk/_queue_client.py",
     "logbrew_sdk/_rq_client.py",
+    "logbrew_sdk/_support_ticket.py",
     "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/py.typed",
     "logbrew_sdk/examples/__init__.py",
@@ -1988,6 +2039,7 @@ for needle in (
     "requests_request_with_logbrew_span",
     "rq_operation_with_logbrew_span",
     "urlopen_with_logbrew_span",
+    "create_support_ticket_draft",
 ):
     if needle not in description:
         raise SystemExit(f"missing installed metadata guidance: {needle}")
@@ -2133,6 +2185,7 @@ required_show_files = {
     "logbrew_sdk/_instrumentation.py",
     "logbrew_sdk/_queue_client.py",
     "logbrew_sdk/_rq_client.py",
+    "logbrew_sdk/_support_ticket.py",
     "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/__init__.py",
     "logbrew_sdk/examples/__init__.py",

@@ -192,6 +192,37 @@ python -m logbrew_sdk.examples first-useful-telemetry
 
 This path is intentionally app-owned. It uses Python's standard logging module, explicit W3C `traceparent` continuation, and explicit product, network, and metric helpers. It does not patch global HTTP clients, does not collect request or response bodies, does not capture arbitrary headers, and timeline helpers strip query strings and hashes from route templates.
 
+## Support Ticket Drafts
+
+Use `create_support_ticket_draft()` when a user or agent explicitly asks to prepare a support ticket payload. The helper is local-only: it validates the planned public support-ticket fields, redacts diagnostics, and returns a dictionary. It does not send data, open a ticket, use account/session API credentials, or call backend support routes.
+
+```python
+from logbrew_sdk import create_support_ticket_draft
+
+draft = create_support_ticket_draft(
+    source="sdk",
+    category="sdk_install_failure",
+    title="Python import fails after install",
+    description="Wheel installs, but the app cannot import logbrew_sdk.",
+    environment="production",
+    runtime="python 3.13",
+    framework="fastapi",
+    sdk_package="logbrew-sdk",
+    sdk_version="0.1.1",
+    release="checkout-api@1.4.0",
+    trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+    diagnostics={
+        "install_command": "python3 -m pip install logbrew-sdk",
+        "endpoint": "https://api.example.com/v1/events?debug=true",
+        "authorization": "Bearer hidden",
+        "local_path": "/Users/example/service/app.py",
+        "error": RuntimeError("private failure message"),
+    },
+)
+```
+
+The returned draft keeps only structured JSON-like diagnostics. Auth-like keys, cookies, tokens, URL origins, local paths, unsupported objects, and exception messages/stacks are redacted or omitted before the dictionary is returned.
+
 ## Metrics
 
 Use `metric()` for explicit, application-owned measurements. LogBrew validates the metric name, kind, value, unit, temporality, and optional metadata before queueing the event:
