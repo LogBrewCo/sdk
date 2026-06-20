@@ -14,6 +14,41 @@ composer require logbrew/sdk
 
 The public API is annotated with shaped-array PHPDoc, including `MetricAttributes`, so static-analysis tools can understand common consumer calls directly. The package includes copyable examples for PHP services, PSR-3 loggers, Monolog, and Laravel. Use the fake `LOGBREW_API_KEY` placeholder in docs, keep the real key in app configuration, and call `previewJson()` when you want to inspect queued JSON before sending.
 
+## Support Ticket Drafts
+
+Use `SupportTicketDraft` only when a user or agent explicitly wants a local payload draft for the planned support-ticket API. It validates the public create fields, normalizes W3C trace IDs, and redacts token-free diagnostics before handoff. It does not open a ticket, call backend support routes, send telemetry, or use account/session API credentials.
+
+```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use LogBrew\SupportTicketDraft;
+
+$draft = SupportTicketDraft::create(
+    source: 'sdk',
+    category: 'ingest_failure',
+    title: 'PHP ingest failed',
+    description: 'Events reached the retry limit in production.',
+    projectId: 'proj_public_123',
+    environment: 'production',
+    runtime: PHP_VERSION,
+    framework: 'laravel',
+    sdkPackage: 'logbrew/sdk',
+    sdkVersion: '0.1.0',
+    release: 'checkout@1.2.3',
+    traceId: '4bf92f3577b34da6a3ce929d0e0e4736',
+    eventId: 'evt_issue_001',
+    diagnostics: [
+        'endpoint' => 'https://api.example.com/v1/events?debug=sample',
+        'authorization' => 'Bearer lbw_ingest_sample',
+        'exception' => new RuntimeException('local message is not included'),
+    ],
+);
+```
+
+Diagnostics keep primitive JSON-friendly values, URL paths without host/query/fragment text, and exception types only. Sensitive keys such as `authorization`, `cookie`, `secret`, `session`, and `token` are replaced with `[redacted]`; local filesystem paths are replaced with `[redacted-path]`.
+
 ## Example
 
 ```php

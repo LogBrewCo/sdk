@@ -428,6 +428,7 @@ expectThrows(
 );
 
 require __DIR__ . '/operation_tracing.php';
+require __DIR__ . '/support_ticket.php';
 
 $client = sampleClient();
 $client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [

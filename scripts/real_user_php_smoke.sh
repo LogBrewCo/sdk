@@ -45,6 +45,7 @@ $operationTracing = null;
 $httpRequestTelemetry = null;
 $psrLogger = null;
 $monologHandler = null;
+$supportTicketDraft = null;
 for ($i = 0; $i < $zip->numFiles; $i++) {
     $name = $zip->getNameIndex($i);
     if ($name === false) {
@@ -106,6 +107,9 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
     }
     if ($name === "src/LogBrewMonologHandler.php" || str_ends_with($name, "/src/LogBrewMonologHandler.php")) {
         $monologHandler = $zip->getFromIndex($i);
+    }
+    if ($name === "src/SupportTicketDraft.php" || str_ends_with($name, "/src/SupportTicketDraft.php")) {
+        $supportTicketDraft = $zip->getFromIndex($i);
     }
 }
 $zip->close();
@@ -185,6 +189,10 @@ if (!is_string($monologHandler)) {
     fwrite(STDERR, "missing src/LogBrewMonologHandler.php in composer archive\n");
     exit(1);
 }
+if (!is_string($supportTicketDraft)) {
+    fwrite(STDERR, "missing src/SupportTicketDraft.php in composer archive\n");
+    exit(1);
+}
 $manifest = json_decode($composerJson, true, 512, JSON_THROW_ON_ERROR);
 if (($manifest["name"] ?? null) !== "logbrew/sdk") {
     fwrite(STDERR, "unexpected composer archive package name\n");
@@ -233,6 +241,9 @@ foreach ([
     "PSR-3 Logger" => "missing composer archive PSR logger heading\n",
     "LogBrewMonologHandler" => "missing composer archive Monolog handler guidance\n",
     "Monolog And Laravel" => "missing composer archive Laravel heading\n",
+    "SupportTicketDraft" => "missing composer archive support ticket draft guidance\n",
+    "does not open a ticket, call backend support routes, send telemetry, or use account/session API credentials" => "missing composer archive support ticket boundary guidance\n",
+    "token-free diagnostics" => "missing composer archive support ticket diagnostics guidance\n",
     "config/logging.php" => "missing composer archive Laravel logging config guidance\n",
     "Log::channel" => "missing composer archive Laravel channel guidance\n",
     "warning(...)" => "missing composer archive Laravel warning guidance\n",
@@ -452,6 +463,7 @@ test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
 test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
+test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
 test -f vendor/logbrew/sdk/examples/readme_example.php
 test -f vendor/logbrew/sdk/examples/real_user_smoke.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
@@ -499,6 +511,9 @@ foreach ([
     "PSR-3 Logger" => "missing installed README PSR logger heading\n",
     "LogBrewMonologHandler" => "missing installed README Monolog handler guidance\n",
     "Monolog And Laravel" => "missing installed README Laravel heading\n",
+    "SupportTicketDraft" => "missing installed README support ticket draft guidance\n",
+    "does not open a ticket, call backend support routes, send telemetry, or use account/session API credentials" => "missing installed README support ticket boundary guidance\n",
+    "token-free diagnostics" => "missing installed README support ticket diagnostics guidance\n",
     "config/logging.php" => "missing installed README Laravel logging config guidance\n",
     "Log::channel" => "missing installed README Laravel channel guidance\n",
     "warning(...)" => "missing installed README Laravel warning guidance\n",
@@ -568,12 +583,18 @@ python3 "$repo_root/scripts/validate_fixtures.py" vendor-example.stdout.json >/d
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example.stdout.json >/dev/null
 grep -q '"events":6' vendor-example.stderr.json
 grep -q '"ok":true' vendor-example.stderr.json
+grep -q '"supportDraftRedacted":true' vendor-example.stderr.json
+grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' vendor-example.stderr.json
 (cd vendor/logbrew/sdk/examples && make run-real-user-smoke) > vendor-example-make.stdout.json 2> vendor-example-make.stderr.json
 grep -q '"type": "release"' vendor-example-make.stdout.json
 grep -q '"events":6' vendor-example-make.stderr.json
+grep -q '"supportDraftRedacted":true' vendor-example-make.stderr.json
+grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' vendor-example-make.stderr.json
 (cd vendor/logbrew/sdk/examples && make run) > vendor-example-make-run.stdout.json 2> vendor-example-make-run.stderr.json
 grep -q '"type": "release"' vendor-example-make-run.stdout.json
 grep -q '"events":6' vendor-example-make-run.stderr.json
+grep -q '"supportDraftRedacted":true' vendor-example-make-run.stderr.json
+grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' vendor-example-make-run.stderr.json
 grep -q '"type": "release"' vendor-example-make.stdout.json
 grep -q '"type": "environment"' vendor-example-make.stdout.json
 grep -q '"type": "issue"' vendor-example-make.stdout.json
@@ -748,6 +769,7 @@ test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
 test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
+test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
 test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
 test -f vendor/composer/installed.json
@@ -863,6 +885,72 @@ foreach ([
 ] as $needle) {
     if (str_contains($preview, $needle)) {
         fwrite(STDERR, "installed-user dependency span leaked sensitive metadata: {$needle}\n");
+        exit(1);
+    }
+}
+
+$draft = LogBrew\SupportTicketDraft::create(
+    source: 'sdk',
+    category: 'ingest_failure',
+    title: '  PHP ingest failed  ',
+    description: '  Local support draft for explicit user handoff.  ',
+    projectId: 'proj_public_123',
+    environment: 'production',
+    runtime: PHP_VERSION,
+    framework: 'laravel',
+    sdkPackage: 'logbrew/sdk',
+    sdkVersion: '0.1.0',
+    release: 'checkout@1.2.3',
+    traceId: '4BF92F3577B34DA6A3CE929D0E0E4736',
+    eventId: 'evt_issue_001',
+    diagnostics: [
+        'authorization' => 'Bearer lbw_ingest_secret_value',
+        'endpoint' => 'https://api.example.com/v1/events?token=secret#fragment',
+        'localPath' => '/Users/example/project/.env',
+        'debugNote' => 'failed at https://api.example.com/v1/events?token=secret from /Users/example/project/.env',
+        'exception' => new RuntimeException('do not include this message'),
+        'safe' => 'kept',
+    ]
+);
+
+if (($draft['title'] ?? '') !== 'PHP ingest failed') {
+    fwrite(STDERR, "installed-user support draft did not trim title\n");
+    exit(1);
+}
+if (($draft['trace_id'] ?? '') !== '4bf92f3577b34da6a3ce929d0e0e4736') {
+    fwrite(STDERR, "installed-user support draft did not normalize trace id\n");
+    exit(1);
+}
+if (($draft['diagnostics']['authorization'] ?? null) !== '[redacted]') {
+    fwrite(STDERR, "installed-user support draft did not redact authorization\n");
+    exit(1);
+}
+if (($draft['diagnostics']['endpoint'] ?? null) !== '[redacted-url]/v1/events') {
+    fwrite(STDERR, "installed-user support draft did not redact URL\n");
+    exit(1);
+}
+if (($draft['diagnostics']['localPath'] ?? null) !== '[redacted-path]') {
+    fwrite(STDERR, "installed-user support draft did not redact local path\n");
+    exit(1);
+}
+if (($draft['diagnostics']['debugNote'] ?? null) !== 'failed at [redacted-url]/v1/events from [redacted-path]') {
+    fwrite(STDERR, "installed-user support draft did not redact embedded URL and path\n");
+    exit(1);
+}
+if (($draft['diagnostics']['exception']['type'] ?? null) !== 'RuntimeException') {
+    fwrite(STDERR, "installed-user support draft did not keep exception type only\n");
+    exit(1);
+}
+$draftJson = json_encode($draft, JSON_THROW_ON_ERROR);
+foreach ([
+    'lbw_ingest_secret_value',
+    'api.example.com',
+    'token=secret',
+    '/Users/example/project',
+    'do not include this message',
+] as $needle) {
+    if (str_contains($draftJson, $needle)) {
+        fwrite(STDERR, "installed-user support draft leaked diagnostic value: {$needle}\n");
         exit(1);
     }
 }
@@ -1570,6 +1658,7 @@ test -f vendor/logbrew/sdk/src/LogBrewOperationTracing.php
 test -f vendor/logbrew/sdk/src/LogBrewHttpRequestTelemetry.php
 test -f vendor/logbrew/sdk/src/LogBrewMonologHandler.php
 test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
+test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
 test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
 test -f vendor/composer/installed.json
@@ -1811,6 +1900,8 @@ python3 "$repo_root/scripts/validate_fixtures.py" vendor-example-reinstall.stdou
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example-reinstall.stdout.json >/dev/null
 grep -q '"events":6' vendor-example-reinstall.stderr.json
 grep -q '"ok":true' vendor-example-reinstall.stderr.json
+grep -q '"supportDraftRedacted":true' vendor-example-reinstall.stderr.json
+grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' vendor-example-reinstall.stderr.json
 (cd vendor/logbrew/sdk/examples && make) > vendor-example-make-reinstall-help.txt
 grep -qx 'run-readme-example -> make run-readme-example' <(sed -n '1p' vendor-example-make-reinstall-help.txt)
 grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' vendor-example-make-reinstall-help.txt)
@@ -1832,9 +1923,13 @@ grep -q '"ok":true' vendor-readme-example-make-reinstall.stderr.json
 (cd vendor/logbrew/sdk/examples && make run-real-user-smoke) > vendor-example-make-reinstall.stdout.json 2> vendor-example-make-reinstall.stderr.json
 grep -q '"type": "release"' vendor-example-make-reinstall.stdout.json
 grep -q '"events":6' vendor-example-make-reinstall.stderr.json
+grep -q '"supportDraftRedacted":true' vendor-example-make-reinstall.stderr.json
+grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' vendor-example-make-reinstall.stderr.json
 (cd vendor/logbrew/sdk/examples && make run) > vendor-example-make-reinstall-run.stdout.json 2> vendor-example-make-reinstall-run.stderr.json
 grep -q '"type": "release"' vendor-example-make-reinstall-run.stdout.json
 grep -q '"events":6' vendor-example-make-reinstall-run.stderr.json
+grep -q '"supportDraftRedacted":true' vendor-example-make-reinstall-run.stderr.json
+grep -q '"supportDraftTrace":"4bf92f3577b34da6a3ce929d0e0e4736"' vendor-example-make-reinstall-run.stderr.json
 grep -q '"type": "release"' vendor-example-make-reinstall.stdout.json
 grep -q '"type": "environment"' vendor-example-make-reinstall.stdout.json
 grep -q '"type": "issue"' vendor-example-make-reinstall.stdout.json
@@ -1845,6 +1940,7 @@ python3 "$repo_root/scripts/validate_fixtures.py" vendor-example-make-reinstall.
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" vendor-example-make-reinstall.stdout.json >/dev/null
 grep -q '"events":6' vendor-example-make-reinstall.stderr.json
 grep -q '"ok":true' vendor-example-make-reinstall.stderr.json
+grep -q '"supportDraftRedacted":true' vendor-example-make-reinstall.stderr.json
 php vendor/logbrew/sdk/examples/first_useful_telemetry.php > vendor-first-useful-reinstall.stdout.json 2> vendor-first-useful-reinstall.stderr.json
 grep -q '"type": "metric"' vendor-first-useful-reinstall.stdout.json
 grep -q '"type": "span"' vendor-first-useful-reinstall.stdout.json
@@ -2076,6 +2172,21 @@ if (!str_contains($monologHandlerDoc, '@phpstan-type MetadataValue string|int|fl
 }
 if (!$monologHandler->isSubclassOf(\Monolog\Handler\AbstractProcessingHandler::class)) {
     fwrite(STDERR, "expected LogBrewMonologHandler to extend Monolog processing handler\n");
+    exit(1);
+}
+
+$supportTicketDraft = new ReflectionClass(\LogBrew\SupportTicketDraft::class);
+$supportTicketDraftDoc = $supportTicketDraft->getDocComment() ?: '';
+if (!str_contains($supportTicketDraftDoc, 'Local-only support-ticket draft helper for explicit user or agent handoff.')) {
+    fwrite(STDERR, "missing SupportTicketDraft class doc summary\n");
+    exit(1);
+}
+if (!str_contains($supportTicketDraftDoc, 'It does not open a ticket, call backend routes, or send telemetry.')) {
+    fwrite(STDERR, "missing SupportTicketDraft backend boundary doc\n");
+    exit(1);
+}
+if (!$supportTicketDraft->hasMethod('create')) {
+    fwrite(STDERR, "missing SupportTicketDraft create method\n");
     exit(1);
 }
 

@@ -296,6 +296,7 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
         "docs/competitor-research/java-support-ticket-diagnostics-2026-06-20.md",
         "docs/competitor-research/python-support-ticket-diagnostics-2026-06-20.md",
         "docs/competitor-research/ruby-support-ticket-diagnostics-2026-06-20.md",
+        "docs/competitor-research/php-support-ticket-diagnostics-2026-06-20.md",
         "go/logbrew/README.md",
         "java/logbrew-java/README.md",
         "js/logbrew-js/README.md",
@@ -304,6 +305,7 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
         "memory.md",
         "dotnet/logbrew-dotnet/README.md",
         "docs/competitor-research/dotnet-support-ticket-diagnostics-2026-06-20.md",
+        "php/logbrew-php/README.md",
         "python/logbrew_py/README.md",
         "ruby/logbrew-ruby/README.md",
         "scripts/real_user_go_support_ticket_smoke.sh",
@@ -327,6 +329,56 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
                 relative_text == "ruby/logbrew-ruby/README.md"
                 and 'runtimeerror.new("hidden token")' in lower_line
             )
+            or (
+                relative_text == "docs/competitor-research/php-support-ticket-diagnostics-2026-06-20.md"
+                and "masktokensinurl" in lower_line
+            )
+        )
+
+    if relative_text == "php/logbrew-php/src/SupportTicketDraft.php":
+        return line.strip() in {
+            "'authtoken',",
+            "'clientsecret',",
+            "'credential',",
+            "'credentials',",
+            "'password',",
+            "'refreshtoken',",
+            "'secret',",
+            "'token',",
+            "return preg_match('/(?:authorization|api[_-]?key|token|secret|password|passwd|cookie)\\s*[:=]/i', $value) === 1",
+            "|| preg_match('/\\blbw_(?:ingest|client|api)_[A-Za-z0-9._-]+/i', $value) === 1;",
+        }
+
+    if relative_text == "php/logbrew-php/tests/support_ticket.php":
+        return line.strip() in {
+            "'authorization' => 'Bearer lbw_ingest_secret_value',",
+            "'endpoint' => 'https://api.example.com/v1/events?token=secret#fragment',",
+            "'debugNote' => 'failed at https://api.example.com/v1/events?token=secret from /Users/example/project/.env',",
+            "'cookie' => 'session=secret',",
+            "'tokenText' => 'token=secret',",
+            "'lbw_ingest_secret_value',",
+            "'token=secret',",
+            "assertTrue(($supportNested['tokenText'] ?? null) === '[redacted]', 'expected support draft nested token text redaction');",
+        }
+
+    if relative_text == "php/logbrew-php/examples/real_user_smoke.php":
+        return line.strip() in {
+            "'authorization' => 'Bearer lbw_ingest_secret_value',",
+            "'endpoint' => 'https://api.example.com/v1/events?token=secret#fragment',",
+        }
+
+    if relative_text == "scripts/real_user_php_smoke.sh":
+        return line.strip() in {
+            "'authorization' => 'Bearer lbw_ingest_secret_value',",
+            "'endpoint' => 'https://api.example.com/v1/events?token=secret#fragment',",
+            "'debugNote' => 'failed at https://api.example.com/v1/events?token=secret from /Users/example/project/.env',",
+            "'lbw_ingest_secret_value',",
+            "'token=secret',",
+        } or (
+            "support ticket" in lower_line
+            or "supportdraft" in lower_line
+            or "token-free" in lower_line
+            or "account/session api credentials" in lower_line
         )
 
     if relative_text == "ruby/logbrew-ruby/lib/logbrew/support_ticket.rb":
