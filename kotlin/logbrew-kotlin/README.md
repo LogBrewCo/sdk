@@ -223,6 +223,31 @@ val body = LogBrewAndroid.withHttpURLConnectionSpan(
 
 If you use OkHttp or another request client, keep using `startRequestSpan(...)`, `applyHeadersTo(...)`, `withTrace { ... }`, and `captureRequestSpan(...)` around the app-owned request execution. The request helpers sanitize methods and route templates, strip query strings and fragments, record status, duration, and exception type/message, and overwrite spoofed trace metadata. They do not install an OkHttp interceptor, patch `HttpURLConnection`, capture payloads, copy arbitrary headers, or send baggage/tracestate.
 
+## Dependency Operation Spans
+
+Use `LogBrewOperationTracing` when your app owns the database, cache, or queue call and wants one child span around the work without adding JDBC, Redis, Kafka, or Android framework dependencies to LogBrew:
+
+```kotlin
+val orderId = LogBrewOperationTracing.databaseOperation(
+    client = client,
+    operationName = "select checkout",
+    config = DatabaseOperation(
+        system = "postgresql",
+        operationKind = "query",
+        databaseName = "orders",
+        statementTemplate = "SELECT * FROM orders WHERE id = ?",
+        rowCount = 1,
+        metadata = mapOf("component" to "checkout"),
+    ),
+) {
+    repository.loadOrder(orderId)
+}
+```
+
+`databaseOperation`, `cacheOperation`, and `queueOperation` activate a fresh child `LogBrewTraceContext` while the callable runs, queue one span, preserve the original result or exception, and report telemetry capture failures through `onCaptureFailure` without replacing the app-owned operation result. Use `DatabaseOperation`, `CacheOperation`, and `QueueOperation` for low-cardinality system, operation kind, name, count, hit, `dbStatementTemplate`, and primitive metadata fields.
+
+The helpers intentionally do not patch drivers or clients, open support tickets, inspect raw dependency statements or identifiers, capture payload-like values, copy arbitrary request metadata, collect network locations, add baggage, or send tracestate. Metadata keys that look like raw statements, parameters, identifiers, payloads, broker addresses, request metadata, browser state, access material, or resource locations are dropped before enqueue.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when a JVM or Android app is ready to send queued batches to LogBrew. It posts JSON to the production intake by default, passes the SDK key through the `authorization` header, and supports custom endpoints, headers, and timeouts for local collectors or proxies:
@@ -326,6 +351,7 @@ The `examples` directory contains copyable snippets for creating a client, sendi
 - `LogBrewCoroutines` optionally creates a coroutine `ThreadContextElement` by reflection when `kotlinx-coroutines-core` is already installed by the app; it returns `null` instead of adding a coroutine dependency to LogBrew.
 - `LogBrewAndroid.startRequestSpan()` and `captureRequestSpan()` create explicit outbound request child spans for app-owned OkHttp, `HttpURLConnection`, or other request clients with one normalized `traceparent` header and sanitized completion metadata. `AndroidRequestSpan.applyHeadersTo(...)` writes only that header through your request builder, `withTrace { ... }` scopes request-local telemetry under the child span, and `withHttpURLConnectionSpan(...)` handles the same pattern for app-owned `HttpURLConnection` calls.
 - `LogBrewAndroid.createLifecycleTracker()` returns an `AndroidLifecycleTracker` for app-owned lifecycle callbacks; `captureTransition()` emits one `android.lifecycle:<previous>-><next>` span with previous-state duration, active trace correlation, primitive metadata, and same-state dedupe.
+- `LogBrewOperationTracing` creates explicit database, cache, and queue child spans around app-owned callables without driver patching, Java agents, client dependencies, query/parameter capture, cache key/value capture, message-body capture, arbitrary header capture, baggage, or tracestate.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.

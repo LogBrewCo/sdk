@@ -55,7 +55,8 @@ fun main() {
         ::coroutineReflectionBridgeReturnsNullWithoutKotlinxCoroutines,
     )
     AndroidRequestSpanTests.runAll()
-    println("kotlin package tests ok (26 tests)")
+    OperationTracingTests.runAll()
+    println("kotlin package tests ok (29 tests)")
 }
 
 private fun run(

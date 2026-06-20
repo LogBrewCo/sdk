@@ -175,6 +175,7 @@ grep -q '^co/logbrew/sdk/LogBrewClient.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewAndroid.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewCoroutines.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.kt$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOperationTracing.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/PublicTypes.kt$' "$tmp_dir/sources-jar-contents.txt"
 
@@ -205,6 +206,10 @@ grep -q '^co/logbrew/sdk/LogBrewTraceScope.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewCoroutines.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySpanContext.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DatabaseOperation.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/CacheOperation.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/QueueOperation.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidRequestSpan.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidLifecycleTracker.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHeaderSetter.class$' "$tmp_dir/jar-contents.txt"
@@ -244,6 +249,15 @@ for needle in (
     "LogBrewOpenTelemetry",
     "LogBrewOpenTelemetrySpanContext",
     "LogBrewCoroutines",
+    "LogBrewOperationTracing",
+    "DatabaseOperation",
+    "CacheOperation",
+    "QueueOperation",
+    "databaseOperation",
+    "cacheOperation",
+    "queueOperation",
+    "dbStatementTemplate",
+    "payload-like values",
     "traceContextElement",
     "currentTraceContextElement",
     "spanContextFromCurrentSpan",
