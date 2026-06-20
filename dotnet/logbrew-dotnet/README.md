@@ -212,6 +212,31 @@ IReadOnlyDictionary<string, string> outgoingHeaders = request.OutgoingHeaders;
 
 `LogBrewTraceContext` generates W3C-shaped non-zero trace/span IDs, continues valid incoming `traceparent` values, preserves sampled flags, and omits malformed propagation values non-fatally for request helpers. `LogBrewTrace.Activate()` uses .NET `AsyncLocal` so standard async work keeps the active trace context. The `ILogger` provider automatically adds `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata when a trace is active. `MetadataWithCurrentTrace()` is useful for app-owned errors or product events that should join the same request. The packaged `examples/HttpTraceCorrelation.cs` file shows copyable request trace, async logger, handler error, span, metric, and outgoing propagation usage.
 
+If your service already creates `System.Diagnostics.Activity` spans through OpenTelemetry or framework instrumentation, create a LogBrew child context from the current Activity instead of reparsing headers:
+
+```csharp
+using System.Diagnostics;
+using LogBrew;
+
+if (LogBrewTraceContext.TryCreateChildFromCurrentActivity(out var trace) && trace != null)
+{
+    var request = LogBrewHttpRequestTelemetry.StartWithTraceContext(
+        client,
+        "POST",
+        "/checkout/:cart_id",
+        trace);
+
+    using (request.Activate())
+    {
+        logger.LogInformation("checkout Activity correlation for {CartId}", "cart_123");
+    }
+
+    request.FinishSpanAndMetric("evt_span_activity", "evt_metric_activity", "2026-06-02T10:00:06Z", 202);
+}
+```
+
+`TryCreateChildFromCurrentActivity()`, `TryCreateChildFromActivity(...)`, and `TryCreateChildFromActivityContext(...)` copy only valid W3C Activity trace ID, span ID, and recorded flag into a fresh LogBrew child span. Use the `ActivityContext` form when your app already has an OpenTelemetry-style context value instead of a live `Activity`. These helpers return `false` for null, unstarted, non-W3C, or default/all-zero contexts. They do not add an OpenTelemetry dependency, own exporters/processors, read tracestate or baggage, patch HTTP clients, capture payloads, serialize raw propagation headers, or change `Activity.Current`. The packaged `examples/ActivityTraceCorrelation.cs` file shows installed-package Activity-to-LogBrew log/action/span/metric correlation.
+
 For ASP.NET Core, keep the middleware app-owned and use `LogBrewServerRequestTelemetry` to wrap the request pipeline. This captures one request span, an optional `http.server.duration` metric, and an optional exception issue while preserving the original response or exception:
 
 ```csharp

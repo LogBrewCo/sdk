@@ -614,6 +614,7 @@ def validate_dotnet(root: Path, failures: list[str]) -> None:
     project_path = require_path(root, "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj", failures)
     require_path(root, "dotnet/logbrew-dotnet/README.md", failures)
     require_path(root, "dotnet/logbrew-dotnet/examples/FirstUsefulTelemetry.cs", failures)
+    require_path(root, "dotnet/logbrew-dotnet/examples/ActivityTraceCorrelation.cs", failures)
     require_path(root, "dotnet/logbrew-dotnet/examples/AspNetCoreRequestTelemetry.cs", failures)
     require_path(root, "assets/brand/logbrew-logo-transparent-128.png", failures)
     if not project_path.exists():
@@ -644,6 +645,11 @@ def validate_dotnet(root: Path, failures: list[str]) -> None:
         "examples/FirstUsefulTelemetry.cs" in project_text,
         failures,
         f"{location}: package must include examples/FirstUsefulTelemetry.cs",
+    )
+    require(
+        "examples/ActivityTraceCorrelation.cs" in project_text,
+        failures,
+        f"{location}: package must include examples/ActivityTraceCorrelation.cs",
     )
     require(
         "examples/AspNetCoreRequestTelemetry.cs" in project_text,

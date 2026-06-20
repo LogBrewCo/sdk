@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Threading.Tasks;
 using LogBrew;
@@ -8,11 +9,21 @@ using Microsoft.Extensions.Logging;
 internal static class TraceCorrelationTests
 {
     private const string IncomingTraceparent = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
+    private const string IncomingTraceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+    private const string IncomingParentSpanId = "00f067aa0ba902b7";
 
     internal static int Run()
     {
         var tests = 0;
         TraceContextCreatesW3CHeaders();
+        tests++;
+        ActivityCreatesChildTraceContext();
+        tests++;
+        ActivityContextCreatesChildTraceContext();
+        tests++;
+        CurrentActivityContextCreatesChildTraceContext();
+        tests++;
+        ActivityContextIgnoresInvalidActivities();
         tests++;
         ActiveTraceFlowsThroughAsyncWork();
         tests++;
@@ -39,6 +50,76 @@ internal static class TraceCorrelationTests
             context.Headers["traceparent"] == "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01",
             "expected outgoing traceparent header");
         Require(!context.ToMetadata().ContainsKey("traceparent"), "expected raw traceparent to stay out of metadata");
+    }
+
+    private static void ActivityCreatesChildTraceContext()
+    {
+        using var activity = new Activity("checkout.activity");
+        activity.SetIdFormat(ActivityIdFormat.W3C);
+        activity.SetParentId(
+            ActivityTraceId.CreateFromString(IncomingTraceId.AsSpan()),
+            ActivitySpanId.CreateFromString(IncomingParentSpanId.AsSpan()),
+            ActivityTraceFlags.Recorded);
+        activity.ActivityTraceFlags = ActivityTraceFlags.Recorded;
+        activity.Start();
+
+        Require(LogBrewTraceContext.TryCreateChildFromActivity(activity, out var context), "expected valid Activity to create LogBrew context");
+        var activityContext = context ?? throw new InvalidOperationException("expected Activity context");
+        Require(activityContext.TraceId == "4bf92f3577b34da6a3ce929d0e0e4736", "expected Activity trace id");
+        Require(activityContext.ParentSpanId == activity.SpanId.ToHexString(), "expected Activity span id to become parent span id");
+        Require(activityContext.SpanId != activity.SpanId.ToHexString(), "expected LogBrew child span id");
+        Require(activityContext.TraceFlags == "01", "expected recorded Activity flags");
+        Require(activityContext.Sampled, "expected sampled Activity context");
+        Require(
+            activityContext.Headers["traceparent"] == "00-4bf92f3577b34da6a3ce929d0e0e4736-" + activityContext.SpanId + "-01",
+            "expected outgoing child traceparent");
+    }
+
+    private static void ActivityContextCreatesChildTraceContext()
+    {
+        var sourceContext = new ActivityContext(
+            ActivityTraceId.CreateFromString(IncomingTraceId.AsSpan()),
+            ActivitySpanId.CreateFromString(IncomingParentSpanId.AsSpan()),
+            ActivityTraceFlags.Recorded);
+
+        Require(LogBrewTraceContext.TryCreateChildFromActivityContext(sourceContext, out var context), "expected valid ActivityContext to create LogBrew context");
+        var activityContext = context ?? throw new InvalidOperationException("expected ActivityContext context");
+        Require(activityContext.TraceId == IncomingTraceId, "expected ActivityContext trace id");
+        Require(activityContext.ParentSpanId == IncomingParentSpanId, "expected ActivityContext span id to become parent span id");
+        Require(activityContext.SpanId != IncomingParentSpanId, "expected LogBrew child span id from ActivityContext");
+        Require(activityContext.TraceFlags == "01", "expected ActivityContext recorded flags");
+        Require(activityContext.Sampled, "expected sampled ActivityContext");
+
+        Require(!LogBrewTraceContext.TryCreateChildFromActivityContext(default, out var missing), "expected default ActivityContext to be ignored");
+        Require(missing == null, "expected no default ActivityContext context");
+    }
+
+    private static void CurrentActivityContextCreatesChildTraceContext()
+    {
+        using var activity = new Activity("checkout.current");
+        activity.SetIdFormat(ActivityIdFormat.W3C);
+        activity.SetParentId(
+            ActivityTraceId.CreateFromString(IncomingTraceId.AsSpan()),
+            ActivitySpanId.CreateFromString("00f067aa0ba902b8".AsSpan()),
+            ActivityTraceFlags.None);
+        activity.Start();
+
+        Require(LogBrewTraceContext.TryCreateChildFromCurrentActivity(out var context), "expected current Activity to create LogBrew context");
+        var currentContext = context ?? throw new InvalidOperationException("expected current Activity context");
+        Require(currentContext.TraceId == activity.TraceId.ToHexString(), "expected current Activity trace id");
+        Require(currentContext.ParentSpanId == activity.SpanId.ToHexString(), "expected current Activity span id to become parent span id");
+        Require(currentContext.TraceFlags == "00", "expected unrecorded Activity flags");
+        Require(!currentContext.Sampled, "expected unsampled Activity context");
+    }
+
+    private static void ActivityContextIgnoresInvalidActivities()
+    {
+        Require(!LogBrewTraceContext.TryCreateChildFromActivity(null, out var missing), "expected null Activity to be ignored");
+        Require(missing == null, "expected no null Activity context");
+
+        using var invalid = new Activity("checkout.invalid");
+        Require(!LogBrewTraceContext.TryCreateChildFromActivity(invalid, out var invalidContext), "expected unstarted Activity to be ignored");
+        Require(invalidContext == null, "expected no invalid Activity context");
     }
 
     private static void ActiveTraceFlowsThroughAsyncWork()

@@ -45,7 +45,7 @@ Follow-up to the all-SDK tracing priority. The .NET SDK already had explicit W3C
 ## Where LogBrew Is Still Worse
 
 - No automatic ASP.NET Core middleware/filter package yet; users still wire the explicit `LogBrewServerRequestTelemetry` helper from app-owned middleware.
-- No `Activity.Current` / OpenTelemetry context bridge yet, so apps already using OTel must explicitly pass W3C `traceparent` or a LogBrew trace context.
+- No automatic `ActivitySource`/OpenTelemetry exporter or ASP.NET Core instrumentation package yet; apps still opt into the explicit LogBrew bridge.
 - No outbound `HttpClient`, database, messaging, cache, or rich child-span auto-instrumentation.
 - No baggage, tracestate, span events, or exception event modeling beyond primitive metadata.
 
@@ -93,4 +93,70 @@ Sentry, Datadog, and OpenTelemetry are stronger for automatic ASP.NET Core instr
 
 ### Remaining Gap
 
-LogBrew is now safer and lighter than automatic ASP.NET instrumentation for teams that want explicit app-owned request telemetry and installed-artifact proof. It remains weaker than Sentry/Datadog/OpenTelemetry for transparent automatic ASP.NET coverage, `Activity.Current` integration, baggage/tracestate, rich span events/exceptions/links, profiling, and deep outbound/DB/cache/queue auto-instrumentation.
+LogBrew is now safer and lighter than automatic ASP.NET instrumentation for teams that want explicit app-owned request telemetry and installed-artifact proof. It remains weaker than Sentry/Datadog/OpenTelemetry for transparent automatic ASP.NET coverage, baggage/tracestate, rich span events/exceptions/links, profiling, and deep outbound/DB/cache/queue auto-instrumentation.
+
+## 2026-06-21 Activity / OpenTelemetry Context Follow-Up
+
+### Additional Source Reviewed
+
+- Sentry .NET `getsentry/sentry-dotnet@2f2842f20f9581468a0ab4e971bfd507557161b3`.
+- Read `src/Sentry.OpenTelemetry.Exporter/OtelPropagationContext.cs`: `Snapshot`, `Current`, `TraceId`, `SpanId`, `ParentSpanId`, and `IsSampled` read from `Activity.Current`.
+- Read `src/Sentry.OpenTelemetry.Exporter/SentryPropagator.cs`: `Extract` and `Inject` mapping between Sentry trace headers and `ActivityContext`.
+- Read `src/Sentry/HubExtensions.cs`: `GetTraceIdAndSpanId(...)` prefers an external propagation context snapshot before hub/scope fallbacks for logs and metrics.
+- OpenTelemetry .NET `open-telemetry/opentelemetry-dotnet@98c3e0cda87f98b770166594549ab9888f450a0f`.
+- Read `src/OpenTelemetry.Api/ActivityContextExtensions.cs`: validity check shape for default contexts.
+- Read `src/OpenTelemetry/Logs/ILogger/OpenTelemetryLogger.cs`: `Log(...)` captures `Activity.Current` once while building log records.
+- Read `src/OpenTelemetry.Api/Logs/LogRecordData.cs`: `SetActivityContext(...)` copies `TraceId`, `SpanId`, and `TraceFlags` or clears them when no activity exists.
+- Datadog .NET tracer `DataDog/dd-trace-dotnet@b92777ccdbd8bc7f7ad0a7cb59d5d53f638e93e1`.
+- Read `tracer/src/Datadog.Trace/Activity/ActivityListener.cs`: reflective `Activity.Current` access and DiagnosticSource compatibility.
+- Read `tracer/src/Datadog.Trace/Activity/Handlers/ActivityHandlerCommon.cs`: W3C Activity trace/span/parent mapping into Datadog span context.
+- Read `tracer/src/Datadog.Trace/Activity/OtlpHelpers.cs`: OTLP Activity trace/span conversion and validity checks.
+- PostHog .NET `PostHog/posthog-dotnet@620bc6785fc864d9534fb21a6e2f50295fc9b65d`.
+- Re-read `src/PostHog.AspNetCore/Tracing/PostHogRequestContextMiddleware.cs` and `PostHogTracingHeaders.cs`: explicit request-local scope and bounded request metadata extraction, but no W3C Activity bridge in the inspected source.
+
+### Pattern
+
+Sentry and OpenTelemetry make existing .NET `Activity` context the bridge between traces and logs: they snapshot or read `Activity.Current`, copy trace ID/span ID/flags, and avoid crashing when context is absent or invalid. Datadog is much heavier and maps Activity events through listener/profiler infrastructure. PostHog's inspected ASP.NET helper remains request-context oriented rather than W3C trace-context oriented.
+
+### LogBrew Change
+
+- Added `LogBrewTraceContext.TryCreateChildFromCurrentActivity(...)`, `TryCreateChildFromActivity(...)`, and `TryCreateChildFromActivityContext(...)`.
+- The helpers copy only valid W3C `Activity` / `ActivityContext` trace ID, span ID, and recorded flag into a fresh LogBrew child context. The source Activity span becomes `parentSpanId`; LogBrew generates its own child span ID for local log/action/span/metric correlation.
+- Null, unstarted, non-W3C, default, and all-zero contexts return `false` without throwing.
+- The bridge does not add an OpenTelemetry package dependency, own exporters/processors, read tracestate or baggage, patch HTTP clients, capture payloads, serialize raw propagation headers, mutate `Activity.Current`, open support tickets, or infer usage/quota.
+- Added packaged `examples/ActivityTraceCorrelation.cs`, README guidance, `scripts/check_dotnet_activity_trace_payload.py`, and source plus installed NuGet verifier coverage.
+
+### Evidence
+
+- Red TDD: focused .NET tests failed on missing `TryCreateChildFromActivity(...)` and `TryCreateChildFromCurrentActivity(...)`.
+- `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release`: 43 tests passed, including Activity, Activity.Current, ActivityContext, and invalid-context cases.
+- `bash scripts/check_dotnet_package.sh`: passed with NuGet pack proof, README guidance, packaged Activity example inclusion, source example run, and payload validation.
+- `bash scripts/real_user_dotnet_smoke.sh`: passed with installed local NuGet proof, packaged Activity example run, log/action/span/metric correlation, Activity parent-span linkage, outgoing W3C `traceparent`, and checks that raw propagation text, incoming parent span ID, and non-primitive metadata do not appear in telemetry.
+
+### Remaining Gap
+
+LogBrew is now better for developers who want a lightweight, explicit bridge from existing .NET Activity/OpenTelemetry context into LogBrew without taking over exporters or global instrumentation. Sentry/Datadog/OpenTelemetry remain stronger for automatic ActivitySource collection, ASP.NET/HttpClient/DB/cache/queue instrumentation, baggage/tracestate, rich span events/exceptions/links, profiling, and deep framework auto-discovery.
+
+## 2026-06-21 Activity and ActivityContext Bridge Follow-Up
+
+### Source Basis
+
+This follow-up uses the source already recorded above: Sentry .NET `getsentry/sentry-dotnet@2f2842f20f9581468a0ab4e971bfd507557161b3` OpenTelemetry exporter propagation context, OpenTelemetry .NET `open-telemetry/opentelemetry-dotnet@41d2bb5a5f29aa8ad8f6566041434dccfb6b3252` log `Activity` context capture, and Datadog .NET `DataDog/dd-trace-dotnet@f308e58bebac1cf0f977fae6ddbe68e2f3ff399a` async scope/log correlation paths. The source-backed pattern is that .NET users expect the platform `Activity` context to be the bridge between framework/OTel spans and logs.
+
+### LogBrew Change
+
+- Added `LogBrewTraceContext.TryCreateChildFromCurrentActivity(...)`, `TryCreateChildFromActivity(...)`, and `TryCreateChildFromActivityContext(...)`.
+- The helpers copy only W3C trace ID, parent span ID, and sampled flag from an existing `Activity` or `ActivityContext`, reject null/non-W3C/default/all-zero contexts, and always create a fresh LogBrew child span.
+- The bridge remains dependency-free: no OpenTelemetry package reference, exporters, processors, global ASP.NET/HTTP patching, baggage, tracestate, payload/header capture, raw propagation serialization, or mutation of `Activity.Current`.
+- Added packaged `examples/ActivityTraceCorrelation.cs` plus README guidance and installed-artifact validation for Activity-to-LogBrew log/action/span/metric correlation.
+
+### Evidence
+
+- Red TDD: focused .NET tests failed on missing `TryCreateChildFromActivityContext(...)`.
+- `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release`: 43 tests passed, including Activity, ActivityContext, current Activity, and invalid-context coverage.
+- `bash scripts/check_dotnet_package.sh`: passed with NuGet pack proof, README guidance, source example build, packaged `ActivityTraceCorrelation.cs` inclusion, and payload validation.
+- `bash scripts/real_user_dotnet_smoke.sh`: passed with packed NuGet install/remove/reinstall proof and installed Activity/ActivityContext bridge validation.
+
+### Remaining Gap
+
+LogBrew is now better for explicit, dependency-free .NET OTel/W3C interop when an app already owns `Activity` instrumentation. It is still weaker than Sentry/Datadog/OpenTelemetry for transparent automatic ASP.NET instrumentation, baggage/tracestate, rich span events/exceptions/links, profiling, and deep outbound `HttpClient`/EF/SqlClient/Redis/Kafka auto-instrumentation.

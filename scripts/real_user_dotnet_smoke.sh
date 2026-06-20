@@ -85,6 +85,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "examples/RealUserSmoke.cs",
         "examples/FirstUsefulTelemetry.cs",
         "examples/HttpTraceCorrelation.cs",
+        "examples/ActivityTraceCorrelation.cs",
         "examples/AspNetCoreRequestTelemetry.cs",
         "examples/Makefile",
     ):
@@ -105,6 +106,9 @@ for needle in (
     "Traceparent",
     "LogBrewHttpRequestTelemetry",
     "LogBrewTrace.Current",
+    "TryCreateChildFromCurrentActivity",
+    "TryCreateChildFromActivityContext",
+    "ActivityTraceCorrelation.cs",
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",
     "LogBrewOperationTracing",
@@ -155,6 +159,10 @@ python3 "$repo_root/scripts/check_dotnet_first_useful_payload.py" "$tmp_dir/pack
 run_packaged_example HttpTraceCorrelation.cs PackagedHttpTrace "$tmp_dir/packaged-http-trace.stdout.json" "$tmp_dir/packaged-http-trace.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_http_trace_payload.py" "$tmp_dir/packaged-http-trace.stdout.json" "$tmp_dir/packaged-http-trace.stderr.json" >/dev/null
+
+run_packaged_example ActivityTraceCorrelation.cs PackagedActivityTrace "$tmp_dir/packaged-activity-trace.stdout.json" "$tmp_dir/packaged-activity-trace.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-activity-trace.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_activity_trace_payload.py" "$tmp_dir/packaged-activity-trace.stdout.json" "$tmp_dir/packaged-activity-trace.stderr.json" >/dev/null
 
 aspnet_dir="$tmp_dir/aspnetcore-app"
 dotnet new web --framework net10.0 --name AspNetCoreApp --output "$aspnet_dir" >/dev/null

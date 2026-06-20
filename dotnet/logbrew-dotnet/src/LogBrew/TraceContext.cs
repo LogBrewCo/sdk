@@ -73,6 +73,40 @@ namespace LogBrew
             return new LogBrewTraceContext(parent.TraceId, GenerateSpanId(), parent.SpanId, parent.TraceFlags);
         }
 
+        public static bool TryCreateChildFromActivityContext(ActivityContext activityContext, out LogBrewTraceContext? context)
+        {
+            return TryCreateChildFromIds(
+                activityContext.TraceId.ToHexString(),
+                activityContext.SpanId.ToHexString(),
+                TraceFlagsFromActivityContext(activityContext),
+                out context);
+        }
+
+        public static bool TryCreateChildFromCurrentActivity(out LogBrewTraceContext? context)
+        {
+            return TryCreateChildFromActivity(Activity.Current, out context);
+        }
+
+        public static bool TryCreateChildFromActivity(Activity? activity, out LogBrewTraceContext? context)
+        {
+            context = null;
+            if (activity == null)
+            {
+                return false;
+            }
+
+            if (activity.IdFormat != ActivityIdFormat.W3C)
+            {
+                return false;
+            }
+
+            return TryCreateChildFromIds(
+                activity.TraceId.ToHexString(),
+                activity.SpanId.ToHexString(),
+                TraceFlagsFromActivity(activity),
+                out context);
+        }
+
         public static bool TryFromTraceparent(string? traceparent, out LogBrewTraceContext? context)
         {
             context = null;
@@ -175,6 +209,37 @@ namespace LogBrew
             var normalized = string.IsNullOrWhiteSpace(traceFlags) ? "01" : traceFlags.Trim().ToLowerInvariant();
             global::LogBrew.Traceparent.Create("11111111111111111111111111111111", "1111111111111111", normalized);
             return normalized;
+        }
+
+        private static string TraceFlagsFromActivity(Activity activity)
+        {
+            return activity.ActivityTraceFlags.HasFlag(ActivityTraceFlags.Recorded) ? "01" : "00";
+        }
+
+        private static string TraceFlagsFromActivityContext(ActivityContext activityContext)
+        {
+            return activityContext.TraceFlags.HasFlag(ActivityTraceFlags.Recorded) ? "01" : "00";
+        }
+
+        private static bool TryCreateChildFromIds(string traceId, string parentSpanId, string traceFlags, out LogBrewTraceContext? context)
+        {
+            context = null;
+            if (string.Equals(traceId, ZeroTraceId, StringComparison.Ordinal)
+                || string.Equals(parentSpanId, ZeroSpanId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            try
+            {
+                context = new LogBrewTraceContext(traceId, GenerateSpanId(), parentSpanId, traceFlags);
+                return true;
+            }
+            catch (SdkException)
+            {
+                context = null;
+                return false;
+            }
         }
     }
 
