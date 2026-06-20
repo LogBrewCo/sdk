@@ -88,7 +88,10 @@ grep -q 'LogBrewMetricAttributes' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_client_metric' "$sdk_dir/include/logbrew.h"
 grep -q 'LogBrewTraceContext' "$sdk_dir/include/logbrew.h"
 grep -q 'LogBrewHttpClientSpan' "$sdk_dir/include/logbrew.h"
+grep -q 'LogBrewOpenTelemetrySpanContext' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_trace_context_from_traceparent' "$sdk_dir/include/logbrew.h"
+grep -q 'logbrew_trace_context_from_opentelemetry_span_context' "$sdk_dir/include/logbrew.h"
+grep -q 'logbrew_trace_span_attributes_from_opentelemetry_span_context' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_trace_http_client_span_start' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_trace_http_client_span_attributes' "$sdk_dir/include/logbrew.h"
 grep -q 'logbrew_trace_scope_enter' "$sdk_dir/include/logbrew.h"
@@ -308,6 +311,53 @@ static void exercise_metric_helper(void) {
   logbrew_client_free(client);
 }
 
+static void exercise_opentelemetry_trace_bridge(void) {
+  LogBrewClient *client = new_client();
+  LogBrewError error;
+  LogBrewSpanAttributes span;
+  LogBrewTraceContext child;
+  LogBrewTraceContext span_context;
+  LogBrewStatus status;
+  char *preview = NULL;
+  LogBrewOpenTelemetrySpanContext otel_parent = {
+    "4BF92F3577B34DA6A3CE929D0E0E4736",
+    "00F067AA0BA902B7",
+    "01"
+  };
+
+  logbrew_error_clear(&error);
+  must(logbrew_trace_context_from_opentelemetry_span_context(otel_parent, &child, &error), &error);
+  if (strcmp(child.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736") != 0 ||
+      strcmp(child.parent_span_id, "00f067aa0ba902b7") != 0 ||
+      strlen(child.span_id) != LOGBREW_SPAN_ID_LENGTH ||
+      strcmp(child.span_id, child.parent_span_id) == 0 ||
+      !child.sampled ||
+      strcmp(child.trace_flags, "01") != 0) {
+    fprintf(stderr, "OpenTelemetry trace bridge context failed\n");
+    exit(1);
+  }
+  must(logbrew_trace_span_attributes_from_opentelemetry_span_context(
+      "GET /otel-parent", "ok", otel_parent, 12.0, true, &span_context, &span, &error), &error);
+  must(logbrew_client_span(client, "evt_otel_span_001", "2026-06-02T10:00:08Z", span, &error), &error);
+  must(logbrew_client_preview_json(client, &preview, &error), &error);
+  if (strstr(preview, "\"traceId\":\"4bf92f3577b34da6a3ce929d0e0e4736\"") == NULL ||
+      strstr(preview, "\"parentSpanId\":\"00f067aa0ba902b7\"") == NULL ||
+      strstr(preview, "traceparent") != NULL) {
+    fprintf(stderr, "OpenTelemetry trace bridge preview failed\n");
+    exit(1);
+  }
+  logbrew_free_string(preview);
+  status = logbrew_trace_context_from_opentelemetry_span_context(
+      (LogBrewOpenTelemetrySpanContext){"00000000000000000000000000000000", "00f067aa0ba902b7", "01"},
+      &child,
+      &error);
+  if (status != LOGBREW_VALIDATION_ERROR || strcmp(error.code, "validation_error") != 0) {
+    fprintf(stderr, "OpenTelemetry trace bridge validation failed\n");
+    exit(1);
+  }
+  logbrew_client_free(client);
+}
+
 int main(void) {
   LogBrewClient *client = new_client();
   LogBrewRecordingStep steps[] = {
@@ -336,6 +386,7 @@ int main(void) {
 
   exercise_timeline_helpers();
   exercise_metric_helper();
+  exercise_opentelemetry_trace_bridge();
   exercise_failure_paths();
   return 0;
 }

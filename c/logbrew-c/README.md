@@ -117,6 +117,31 @@ logbrew_trace_create_headers(&trace, traceparent, &error);
 logbrew_trace_scope_exit(&scope);
 ```
 
+If your app already runs OpenTelemetry, copy the active OTel span context into the dependency-free LogBrew carrier. Pass only the W3C trace ID, span ID, and trace flags from your app-owned OTel context; LogBrew validates and lowercases them, creates a fresh child span ID, and does not capture baggage, tracestate, headers, or payloads:
+
+```c
+LogBrewOpenTelemetrySpanContext otel_parent = {
+  "4bf92f3577b34da6a3ce929d0e0e4736",
+  "00f067aa0ba902b7",
+  "01"
+};
+LogBrewTraceContext otel_child;
+LogBrewTraceContext otel_span_context;
+LogBrewSpanAttributes otel_span;
+
+logbrew_trace_context_from_opentelemetry_span_context(otel_parent, &otel_child, &error);
+logbrew_trace_span_attributes_from_opentelemetry_span_context(
+    "GET /otel-parent",
+    "ok",
+    otel_parent,
+    12.0,
+    true,
+    &otel_span_context,
+    &otel_span,
+    &error);
+logbrew_client_span(client, "evt_span_otel_parent", "2026-06-02T10:00:06Z", otel_span, &error);
+```
+
 For app-owned outbound HTTP calls, create a child span before the call, attach only the generated `traceparent`, and finish the span after your HTTP client returns:
 
 ```c

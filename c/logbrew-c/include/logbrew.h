@@ -138,6 +138,12 @@ typedef struct {
 } LogBrewTraceContext;
 
 typedef struct {
+  const char *trace_id;
+  const char *span_id;
+  const char *trace_flags;
+} LogBrewOpenTelemetrySpanContext;
+
+typedef struct {
   LogBrewTraceContext context;
   const LogBrewTraceContext *previous;
   bool active;
@@ -330,6 +336,11 @@ LogBrewStatus logbrew_trace_child_context(
     LogBrewTraceContext *out_context,
     LogBrewError *error);
 
+LogBrewStatus logbrew_trace_context_from_opentelemetry_span_context(
+    LogBrewOpenTelemetrySpanContext context,
+    LogBrewTraceContext *out_context,
+    LogBrewError *error);
+
 LogBrewStatus logbrew_trace_create_headers(
     const LogBrewTraceContext *context,
     char out_traceparent[LOGBREW_TRACEPARENT_LENGTH + 1U],
@@ -358,6 +369,16 @@ LogBrewStatus logbrew_trace_span_attributes(
     const char *status,
     double duration_ms,
     bool has_duration_ms,
+    LogBrewSpanAttributes *out_attributes,
+    LogBrewError *error);
+
+LogBrewStatus logbrew_trace_span_attributes_from_opentelemetry_span_context(
+    const char *name,
+    const char *status,
+    LogBrewOpenTelemetrySpanContext context,
+    double duration_ms,
+    bool has_duration_ms,
+    LogBrewTraceContext *out_context,
     LogBrewSpanAttributes *out_attributes,
     LogBrewError *error);
 

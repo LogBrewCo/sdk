@@ -77,6 +77,17 @@ static void copy_lower_hex(char *destination, const char *source, size_t offset,
   destination[length] = '\0';
 }
 
+static bool trace_flags_are_sampled(const char *trace_flags) {
+  return (trace_flags[1] == '1' ||
+          trace_flags[1] == '3' ||
+          trace_flags[1] == '5' ||
+          trace_flags[1] == '7' ||
+          trace_flags[1] == '9' ||
+          trace_flags[1] == 'b' ||
+          trace_flags[1] == 'd' ||
+          trace_flags[1] == 'f');
+}
+
 static LogBrewStatus validate_trace_context(const LogBrewTraceContext *context, LogBrewError *error) {
   char traceparent[LOGBREW_TRACEPARENT_LENGTH + 1U];
   if (context == NULL) {
@@ -262,14 +273,7 @@ LogBrewStatus logbrew_trace_context_from_traceparent(
   copy_lower_hex(out_context->parent_span_id, traceparent, 36U, LOGBREW_SPAN_ID_LENGTH);
   copy_lower_hex(out_context->trace_flags, traceparent, 53U, LOGBREW_TRACE_FLAGS_LENGTH);
   fill_generated_hex(out_context->span_id, LOGBREW_SPAN_ID_LENGTH);
-  out_context->sampled = (out_context->trace_flags[1] == '1' ||
-                          out_context->trace_flags[1] == '3' ||
-                          out_context->trace_flags[1] == '5' ||
-                          out_context->trace_flags[1] == '7' ||
-                          out_context->trace_flags[1] == '9' ||
-                          out_context->trace_flags[1] == 'b' ||
-                          out_context->trace_flags[1] == 'd' ||
-                          out_context->trace_flags[1] == 'f');
+  out_context->sampled = trace_flags_are_sampled(out_context->trace_flags);
   return LOGBREW_OK;
 }
 
@@ -305,6 +309,31 @@ LogBrewStatus logbrew_trace_child_context(
   out_context->sampled = parent->sampled;
   fill_generated_hex(out_context->span_id, LOGBREW_SPAN_ID_LENGTH);
   return LOGBREW_OK;
+}
+
+LogBrewStatus logbrew_trace_context_from_opentelemetry_span_context(
+    LogBrewOpenTelemetrySpanContext context,
+    LogBrewTraceContext *out_context,
+    LogBrewError *error) {
+  char traceparent[LOGBREW_TRACEPARENT_LENGTH + 1U];
+  int written;
+  if (out_context == NULL) {
+    set_trace_error(error, "config_error", "out_context is required");
+    return LOGBREW_CONFIG_ERROR;
+  }
+  if (trace_blank(context.trace_id) || trace_blank(context.span_id) || trace_blank(context.trace_flags)) {
+    memset(out_context, 0, sizeof(*out_context));
+    set_trace_error(error, "validation_error", "OpenTelemetry span context is incomplete");
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  written = snprintf(traceparent, sizeof(traceparent), "00-%s-%s-%s",
+                     context.trace_id, context.span_id, context.trace_flags);
+  if (written != (int)LOGBREW_TRACEPARENT_LENGTH) {
+    memset(out_context, 0, sizeof(*out_context));
+    set_trace_error(error, "validation_error", "OpenTelemetry span context is invalid");
+    return LOGBREW_VALIDATION_ERROR;
+  }
+  return logbrew_trace_context_from_traceparent(traceparent, out_context, error);
 }
 
 LogBrewStatus logbrew_trace_create_headers(
@@ -460,6 +489,23 @@ LogBrewStatus logbrew_trace_span_attributes(
   out_attributes->duration_ms = duration_ms;
   out_attributes->has_duration_ms = has_duration_ms;
   return LOGBREW_OK;
+}
+
+LogBrewStatus logbrew_trace_span_attributes_from_opentelemetry_span_context(
+    const char *name,
+    const char *status,
+    LogBrewOpenTelemetrySpanContext context,
+    double duration_ms,
+    bool has_duration_ms,
+    LogBrewTraceContext *out_context,
+    LogBrewSpanAttributes *out_attributes,
+    LogBrewError *error) {
+  LogBrewStatus result = logbrew_trace_context_from_opentelemetry_span_context(context, out_context, error);
+  if (result != LOGBREW_OK) {
+    return result;
+  }
+  return logbrew_trace_span_attributes(
+      out_context, name, status, duration_ms, has_duration_ms, out_attributes, error);
 }
 
 LogBrewStatus logbrew_trace_http_client_span_start(

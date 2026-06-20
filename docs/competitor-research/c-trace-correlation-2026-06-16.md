@@ -52,3 +52,11 @@ LogBrew C already had explicit span attributes, product timeline helpers, metric
 - `bash scripts/real_user_c_smoke.sh` passed with Apple clang `21.0.0`.
 - `scripts/check_c_trace_correlation_payload.py` validates trace/span IDs, active issue/log/action metadata, metric metadata, timeline trace IDs, outgoing `traceparent`, query/fragment stripping, and no raw incoming propagation leakage.
 - 2026-06-19 outbound HTTP follow-up: `bash scripts/check_c_package.sh` passed 220 checks and `bash scripts/real_user_c_smoke.sh` passed with Apple clang `21.0.0`; installed archive proof validates `LogBrewHttpClientSpan`, public helper symbols, a sanitized outbound child span, downstream `traceparent`, no query/fragment leakage, and no serialized raw propagation header.
+
+## 2026-06-20 OpenTelemetry SpanContext Follow-Up
+
+- Added dependency-free `LogBrewOpenTelemetrySpanContext`, `logbrew_trace_context_from_opentelemetry_span_context(...)`, and `logbrew_trace_span_attributes_from_opentelemetry_span_context(...)`.
+- C apps that already run OpenTelemetry can copy only W3C trace ID, span ID, and trace flags from an app-owned OTel span context. LogBrew validates/normalizes those values, creates a fresh child `LogBrewTraceContext`, and preserves sampled flags without linking OpenTelemetry headers or libraries.
+- The span-attribute helper requires caller-owned `LogBrewTraceContext` storage because C span attributes hold pointers. The installed smoke caught the unsafe local-storage version before completion; keeping explicit caller storage prevents dangling span pointers after queueing telemetry.
+- The bridge still intentionally does not ingest baggage, tracestate, OTel `Context`, processors/exporters, links/events/exceptions, payloads, headers, or automatic HTTP/lifecycle/crash instrumentation.
+- Evidence: TDD red failed on missing C OTel type/functions; `bash scripts/check_c_package.sh` passed 243 checks with Apple clang `21.0.0`; `bash scripts/real_user_c_smoke.sh` passed installed archive proof with Apple clang `21.0.0`; ShellCheck `0.11.0`, markdown links, and generated-artifact hygiene passed.

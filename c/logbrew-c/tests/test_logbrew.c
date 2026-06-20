@@ -348,6 +348,67 @@ static void trace_context_helpers_validate_and_correlate(void) {
   logbrew_client_free(client);
 }
 
+static void opentelemetry_span_context_helpers_create_child_context(void) {
+  LogBrewError error;
+  LogBrewOpenTelemetrySpanContext otel_parent = {
+    "4BF92F3577B34DA6A3CE929D0E0E4736",
+    "00F067AA0BA902B7",
+    "01"
+  };
+  LogBrewOpenTelemetrySpanContext unsampled_parent = {
+    "4bf92f3577b34da6a3ce929d0e0e4736",
+    "00f067aa0ba902b7",
+    "00"
+  };
+  LogBrewOpenTelemetrySpanContext invalid_parent = {
+    "00000000000000000000000000000000",
+    "00f067aa0ba902b7",
+    "01"
+  };
+  LogBrewTraceContext context;
+  LogBrewTraceContext unsampled_context;
+  LogBrewTraceContext span_context;
+  LogBrewSpanAttributes span;
+
+  logbrew_error_clear(&error);
+  EXPECT_TRUE(logbrew_trace_context_from_opentelemetry_span_context(
+      otel_parent, &context, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strcmp(context.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736") == 0);
+  EXPECT_TRUE(strcmp(context.parent_span_id, "00f067aa0ba902b7") == 0);
+  EXPECT_TRUE(strlen(context.span_id) == LOGBREW_SPAN_ID_LENGTH);
+  EXPECT_TRUE(strcmp(context.span_id, context.parent_span_id) != 0);
+  EXPECT_TRUE(context.sampled);
+  EXPECT_TRUE(strcmp(context.trace_flags, "01") == 0);
+
+  EXPECT_TRUE(logbrew_trace_context_from_opentelemetry_span_context(
+      unsampled_parent, &unsampled_context, &error) == LOGBREW_OK);
+  EXPECT_TRUE(!unsampled_context.sampled);
+  EXPECT_TRUE(strcmp(unsampled_context.trace_flags, "00") == 0);
+
+  EXPECT_TRUE(logbrew_trace_span_attributes_from_opentelemetry_span_context(
+      "GET /otel-parent", "ok", otel_parent, 12.0, true, &span_context, &span, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strcmp(span.name, "GET /otel-parent") == 0);
+  EXPECT_TRUE(strcmp(span.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736") == 0);
+  EXPECT_TRUE(strcmp(span.parent_span_id, "00f067aa0ba902b7") == 0);
+  EXPECT_TRUE(strlen(span.span_id) == LOGBREW_SPAN_ID_LENGTH);
+  EXPECT_TRUE(strcmp(span.span_id, "00f067aa0ba902b7") != 0);
+  EXPECT_TRUE(strcmp(span.span_id, span_context.span_id) == 0);
+  EXPECT_TRUE(strcmp(span.status, "ok") == 0);
+  EXPECT_TRUE(span.has_duration_ms);
+  EXPECT_TRUE(span.duration_ms == 12.0);
+
+  EXPECT_TRUE(logbrew_trace_context_from_opentelemetry_span_context(
+      invalid_parent, &context, &error) == LOGBREW_VALIDATION_ERROR);
+  EXPECT_TRUE(logbrew_trace_context_from_opentelemetry_span_context(
+      (LogBrewOpenTelemetrySpanContext){"4bf92f3577b34da6a3ce929d0e0e4736", "0000000000000000", "01"},
+      &context,
+      &error) == LOGBREW_VALIDATION_ERROR);
+  EXPECT_TRUE(logbrew_trace_context_from_opentelemetry_span_context(
+      (LogBrewOpenTelemetrySpanContext){"4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", "zz"},
+      &context,
+      &error) == LOGBREW_VALIDATION_ERROR);
+}
+
 static void http_client_span_helpers_create_child_propagation(void) {
   static const char *incoming = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
   LogBrewClient *client = new_client();
@@ -514,6 +575,7 @@ int main(void) {
   product_timeline_helpers_capture_safe_metadata();
   metric_helper_validates_and_serializes();
   trace_context_helpers_validate_and_correlate();
+  opentelemetry_span_context_helpers_create_child_context();
   http_client_span_helpers_create_child_propagation();
   flush_success_clears_queue();
   empty_flush_is_no_op();

@@ -102,10 +102,42 @@ import tarfile
 with tarfile.open(sys.argv[1], "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
     header = archive.extractfile("include/logbrew.h").read().decode()
-for needle in ("LOGBREW_API_KEY", "copy into your own native application", "logbrew_client_flush", "LogBrewMetricAttributes", "logbrew_client_metric", "logbrew_client_product_action", "logbrew_client_network_milestone", "logbrew_trace_context_from_traceparent", "logbrew_trace_scope_enter", "logbrew_http_transport_init"):
+readme_needles = (
+    "LOGBREW_API_KEY",
+    "copy into your own native application",
+    "logbrew_client_flush",
+    "LogBrewMetricAttributes",
+    "logbrew_client_metric",
+    "logbrew_client_product_action",
+    "logbrew_client_network_milestone",
+    "LogBrewOpenTelemetrySpanContext",
+    "logbrew_trace_context_from_traceparent",
+    "logbrew_trace_context_from_opentelemetry_span_context",
+    "logbrew_trace_span_attributes_from_opentelemetry_span_context",
+    "logbrew_trace_scope_enter",
+    "logbrew_http_transport_init",
+)
+header_needles = (
+    "LOGBREW_C_VERSION",
+    "LogBrewClient",
+    "LogBrewRecordingTransport",
+    "LogBrewMetricAttributes",
+    "logbrew_client_metric",
+    "LogBrewProductTimelineContext",
+    "logbrew_client_product_action",
+    "logbrew_client_network_milestone",
+    "LogBrewTraceContext",
+    "LogBrewOpenTelemetrySpanContext",
+    "logbrew_trace_context_from_opentelemetry_span_context",
+    "logbrew_trace_span_attributes_from_opentelemetry_span_context",
+    "logbrew_trace_current_context",
+    "LogBrewHttpTransport",
+    "logbrew_http_transport_init",
+)
+for needle in readme_needles:
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
-for needle in ("LOGBREW_C_VERSION", "LogBrewClient", "LogBrewRecordingTransport", "LogBrewMetricAttributes", "logbrew_client_metric", "LogBrewProductTimelineContext", "logbrew_client_product_action", "logbrew_client_network_milestone", "LogBrewTraceContext", "logbrew_trace_current_context", "LogBrewHttpTransport", "logbrew_http_transport_init"):
+for needle in header_needles:
     if needle not in header:
         raise SystemExit(f"missing public header symbol: {needle}")
 PY
