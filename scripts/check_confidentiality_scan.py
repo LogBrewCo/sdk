@@ -51,7 +51,11 @@ SELF_PATH = Path("scripts/check_confidentiality_scan.py")
 def iter_scanned_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for current_root, dirnames, filenames in os.walk(root):
-        dirnames[:] = [dirname for dirname in dirnames if dirname not in SKIPPED_DIRS]
+        dirnames[:] = [
+            dirname
+            for dirname in dirnames
+            if dirname not in SKIPPED_DIRS and not dirname.endswith(".egg-info")
+        ]
         current_path = Path(current_root)
         for filename in filenames:
             path = current_path / filename
