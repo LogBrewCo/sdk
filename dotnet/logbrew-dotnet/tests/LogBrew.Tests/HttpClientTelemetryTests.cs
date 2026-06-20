@@ -20,6 +20,10 @@ internal static class HttpClientTelemetryTests
         tests++;
         OutboundHttpClientHandlerInjectsTraceparentAndCapturesSpan();
         tests++;
+        OutboundHttpClientHandlerSkipsCaptureWhenRequestFilterRejects();
+        tests++;
+        OutboundHttpClientHandlerUsesRouteTemplateSelector();
+        tests++;
         OutboundHttpClientHelperPreservesOriginalException();
         tests++;
         CaptureFailureDoesNotReplaceHttpResponse();
@@ -170,6 +174,82 @@ internal static class HttpClientTelemetryTests
         {
             Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected unsafe handler metadata to be omitted: " + blocked);
         }
+    }
+
+    private static void OutboundHttpClientHandlerSkipsCaptureWhenRequestFilterRejects()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "http-client-tests", "0.1.0");
+        var root = LogBrewTraceContext.FromTraceparent(IncomingTraceparent, "b7ad6b7169203331");
+        LogBrewTraceContext? activeDuringSend = null;
+        List<string>? traceparents = null;
+        using var logbrewHandler = new LogBrewHttpClientHandler(
+            client,
+            LogBrewHttpClientOptions.Create()
+                .WithEventIdPrefix("dotnet_filtered")
+                .WithRouteTemplate("/filtered")
+                .WithRequestFilter(_ => false))
+        {
+            InnerHandler = new Handler(request =>
+            {
+                activeDuringSend = LogBrewTrace.Current;
+                traceparents = request.Headers.TryGetValues("traceparent", out var values)
+                    ? values.ToList()
+                    : new List<string>();
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+            })
+        };
+        using var httpClient = new HttpClient(logbrewHandler);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.example/health?debug=sample");
+        request.Headers.TryAddWithoutValidation("traceparent", "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01");
+
+        using (LogBrewTrace.Activate(root))
+        {
+            using var response = httpClient.SendAsync(request).GetAwaiter().GetResult();
+            Require(response.StatusCode == HttpStatusCode.NoContent, "expected filtered response status");
+        }
+
+        Require(object.ReferenceEquals(activeDuringSend, root), "expected filtered request to keep existing active trace");
+        Require(traceparents != null && traceparents.Count == 1, "expected filtered request to preserve caller traceparent");
+        Require(traceparents![0] == "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01", "expected caller traceparent to remain unchanged");
+        Require(!client.PreviewJson().Contains("dotnet_filtered", StringComparison.Ordinal), "expected filtered request to skip span capture");
+    }
+
+    private static void OutboundHttpClientHandlerUsesRouteTemplateSelector()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "http-client-tests", "0.1.0");
+        var root = LogBrewTraceContext.FromTraceparent(IncomingTraceparent, "b7ad6b7169203331");
+        LogBrewTraceContext? activeDuringSend = null;
+        using var logbrewHandler = new LogBrewHttpClientHandler(
+            client,
+            LogBrewHttpClientOptions.Create()
+                .WithEventIdPrefix("dotnet_selected_route")
+                .WithRouteTemplateSelector(request =>
+                    request.RequestUri != null && request.RequestUri.AbsolutePath.StartsWith("/v1/orders/", StringComparison.Ordinal)
+                        ? "/v1/orders/:id"
+                        : "/outbound"))
+        {
+            InnerHandler = new Handler(request =>
+            {
+                activeDuringSend = LogBrewTrace.Current;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            })
+        };
+        using var httpClient = new HttpClient(logbrewHandler);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.example/v1/orders/order_123?card=sample");
+
+        using (LogBrewTrace.Activate(root))
+        {
+            using var response = httpClient.SendAsync(request).GetAwaiter().GetResult();
+            Require(response.StatusCode == HttpStatusCode.OK, "expected selector response status");
+        }
+
+        var child = activeDuringSend ?? throw new InvalidOperationException("expected selector child trace");
+        var payload = client.PreviewJson();
+        Require(payload.Contains("\"id\": \"dotnet_selected_route_span_" + child.SpanId + "\"", StringComparison.Ordinal), "missing selected route span");
+        Require(payload.Contains("\"name\": \"HTTP POST /v1/orders/:id\"", StringComparison.Ordinal), "expected selected route in span name");
+        Require(payload.Contains("\"routeTemplate\": \"/v1/orders/:id\"", StringComparison.Ordinal), "expected selected route metadata");
+        Require(!payload.Contains("order_123", StringComparison.Ordinal), "expected raw order id to be omitted");
+        Require(!payload.Contains("card=sample", StringComparison.Ordinal), "expected query to be omitted");
     }
 
     private static void OutboundHttpClientHelperPreservesOriginalException()

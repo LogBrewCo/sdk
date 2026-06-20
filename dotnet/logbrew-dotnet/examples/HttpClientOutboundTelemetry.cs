@@ -34,7 +34,11 @@ public static class Program
             client,
             LogBrewHttpClientOptions.Create()
                 .WithEventIdPrefix("dotnet_http_client")
-                .WithRouteTemplate("/v1/payments/:id")
+                .WithRouteTemplateSelector(request =>
+                    request.RequestUri != null && request.RequestUri.AbsolutePath.StartsWith("/v1/payments/", StringComparison.Ordinal)
+                        ? "/v1/payments/:id"
+                        : "/outbound")
+                .WithRequestFilter(request => request.Method == HttpMethod.Post)
                 .WithTimestampProvider(() => "2026-06-02T10:00:04Z")
                 .WithMetadata(new Dictionary<string, object?>
                 {

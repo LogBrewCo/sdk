@@ -112,6 +112,8 @@ for needle in (
     "ActivityTraceCorrelation.cs",
     "LogBrewHttpClientTelemetry",
     "LogBrewHttpClientHandler",
+    "WithRouteTemplateSelector",
+    "WithRequestFilter",
     "HttpClientOutboundTelemetry.cs",
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",

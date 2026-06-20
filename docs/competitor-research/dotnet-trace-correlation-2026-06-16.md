@@ -188,6 +188,7 @@ The source-backed lightweight pattern LogBrew can safely adopt in the core SDK i
 
 - Added `LogBrewHttpClientTelemetry.SendAsync(...)` and `LogBrewHttpClientOptions`.
 - Added `LogBrewHttpClientHandler` for apps that already compose outbound clients through `DelegatingHandler` or `IHttpClientFactory` pipelines.
+- Added `WithRequestFilter(...)` and `WithRouteTemplateSelector(...)` so handler/typed-client users can skip noisy calls and choose low-cardinality route names per request without global instrumentation.
 - The helper creates a child context from `LogBrewTrace.Current`, or from `Activity.Current` when no LogBrew trace is active, otherwise a local root.
 - `SendAsync(...)` and `LogBrewHttpClientHandler` share one telemetry core: overwrite any existing request `traceparent` with one normalized child-span header, send through the app-owned HTTP path, preserve the original response/exception/cancellation behavior, and capture one `HTTP {METHOD} {routeTemplate}` span.
 - Span metadata is privacy-bounded: `source=http.client`, normalized method, route template, status code, sampled flag, exception type only, and safe primitive app metadata after dropping unsafe dependency keys.
@@ -196,9 +197,9 @@ The source-backed lightweight pattern LogBrew can safely adopt in the core SDK i
 
 ### Evidence
 
-- Red TDD: focused .NET tests failed on missing `LogBrewHttpClientTelemetry`/`LogBrewHttpClientOptions`, then failed again on missing `LogBrewHttpClientHandler`.
-- `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release`: 48 tests passed, including outbound helper and handler traceparent injection, active child context during send, sanitized span metadata, original exception preservation, capture-failure isolation, and option validation.
-- `bash scripts/check_dotnet_package.sh`: passed with NuGet pack proof, packaged example inclusion, source example execution through `LogBrewHttpClientHandler`, handler symbol inclusion, and outbound HTTP payload validation.
+- Red TDD: focused .NET tests failed on missing `LogBrewHttpClientTelemetry`/`LogBrewHttpClientOptions`, then missing `LogBrewHttpClientHandler`, then missing `WithRequestFilter(...)` and `WithRouteTemplateSelector(...)`.
+- `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release`: 50 tests passed, including outbound helper and handler traceparent injection, active child context during send, filtered-request no-capture/no-header-mutation behavior, per-request route template selection, sanitized span metadata, original exception preservation, capture-failure isolation, and option validation.
+- `bash scripts/check_dotnet_package.sh`: passed with NuGet pack proof, packaged example inclusion, source example execution through `LogBrewHttpClientHandler`, handler/filter/selector symbol inclusion, and outbound HTTP payload validation.
 - `bash scripts/real_user_dotnet_smoke.sh`: passed after a retry; first run failed because the existing ASP.NET readiness loop expired while `dotnet run` was still at `Building...`. The readiness loop was increased from 20s to 40s to reduce cold-build flake.
 - Static and hygiene gates passed: release metadata, ShellCheck 0.11.0, markdown links, backend contract reports, confidentiality scan, generated-artifact hygiene, `git diff --check`, automation TOML parse/prompt-size check, and thermo review.
 

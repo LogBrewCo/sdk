@@ -271,13 +271,20 @@ If your app already builds clients through a message-handler pipeline or `IHttpC
 ```csharp
 var handler = new LogBrewHttpClientHandler(
     client,
-    LogBrewHttpClientOptions.Create().WithRouteTemplate("/v1/payments/:id"))
+    LogBrewHttpClientOptions.Create()
+        .WithRequestFilter(request => request.Method == HttpMethod.Post)
+        .WithRouteTemplateSelector(request =>
+            request.RequestUri != null && request.RequestUri.AbsolutePath.StartsWith("/v1/payments/", StringComparison.Ordinal)
+                ? "/v1/payments/:id"
+                : "/outbound"))
 {
     InnerHandler = new HttpClientHandler()
 };
 
 using var httpClient = new HttpClient(handler);
 ```
+
+Use `WithRequestFilter(...)` to skip noisy internal calls without modifying the request or injecting propagation headers. Use `WithRouteTemplateSelector(...)` when one typed client sends multiple route families and you want stable low-cardinality span names. Selector output is validated like `WithRouteTemplate(...)`; keep it query-free and route-shaped.
 
 For ASP.NET Core, keep the middleware app-owned and use `LogBrewServerRequestTelemetry` to wrap the request pipeline. This captures one request span, an optional `http.server.duration` metric, and an optional exception issue while preserving the original response or exception:
 

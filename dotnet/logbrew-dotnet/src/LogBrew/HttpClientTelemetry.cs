@@ -14,6 +14,10 @@ namespace LogBrew
 
         internal string? RouteTemplate { get; private set; }
 
+        internal Func<HttpRequestMessage, string>? RouteTemplateSelector { get; private set; }
+
+        internal Func<HttpRequestMessage, bool>? RequestFilter { get; private set; }
+
         internal IDictionary<string, object?>? Metadata { get; private set; }
 
         internal Func<string> TimestampProvider { get; private set; } = DefaultTimestamp;
@@ -35,6 +39,18 @@ namespace LogBrew
         public LogBrewHttpClientOptions WithRouteTemplate(string value)
         {
             RouteTemplate = NormalizeRouteTemplate(value);
+            return this;
+        }
+
+        public LogBrewHttpClientOptions WithRouteTemplateSelector(Func<HttpRequestMessage, string> value)
+        {
+            RouteTemplateSelector = value ?? throw new ArgumentNullException(nameof(value));
+            return this;
+        }
+
+        public LogBrewHttpClientOptions WithRequestFilter(Func<HttpRequestMessage, bool> value)
+        {
+            RequestFilter = value ?? throw new ArgumentNullException(nameof(value));
             return this;
         }
 
@@ -135,8 +151,13 @@ namespace LogBrew
             Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send,
             CancellationToken cancellation)
         {
+            if (safeOptions.RequestFilter != null && !safeOptions.RequestFilter(request))
+            {
+                return await send(request, cancellation).ConfigureAwait(false);
+            }
+
             var method = NormalizeMethod(request.Method?.Method);
-            var routeTemplate = safeOptions.RouteTemplate ?? RouteTemplateFromRequest(request);
+            var routeTemplate = RouteTemplateForRequest(safeOptions, request);
             var trace = CreateChildTrace();
             var startedAt = Stopwatch.GetTimestamp();
             HttpResponseMessage? response = null;
@@ -160,6 +181,16 @@ namespace LogBrew
                     CaptureSpan(client, method, routeTemplate, trace, response, requestError, startedAt, safeOptions);
                 }
             }
+        }
+
+        private static string RouteTemplateForRequest(LogBrewHttpClientOptions options, HttpRequestMessage request)
+        {
+            if (options.RouteTemplateSelector != null)
+            {
+                return LogBrewHttpClientOptions.NormalizeRouteTemplate(options.RouteTemplateSelector(request));
+            }
+
+            return options.RouteTemplate ?? RouteTemplateFromRequest(request);
         }
 
         private static LogBrewTraceContext CreateChildTrace()
