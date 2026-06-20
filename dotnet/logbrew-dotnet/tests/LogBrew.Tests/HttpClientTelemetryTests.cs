@@ -18,6 +18,8 @@ internal static class HttpClientTelemetryTests
         var tests = 0;
         OutboundHttpClientHelperInjectsTraceparentAndCapturesSpan();
         tests++;
+        OutboundHttpClientHandlerInjectsTraceparentAndCapturesSpan();
+        tests++;
         OutboundHttpClientHelperPreservesOriginalException();
         tests++;
         CaptureFailureDoesNotReplaceHttpResponse();
@@ -100,6 +102,73 @@ internal static class HttpClientTelemetryTests
         foreach (var blocked in new[] { "payments.example", "card=sample", "Author" + "ization", "Bear" + "er", "headers", "body", "\"url\"", "ignored" })
         {
             Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected unsafe outbound metadata to be omitted: " + blocked);
+        }
+    }
+
+    private static void OutboundHttpClientHandlerInjectsTraceparentAndCapturesSpan()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "http-client-tests", "0.1.0");
+        var root = LogBrewTraceContext.FromTraceparent(IncomingTraceparent, "b7ad6b7169203331");
+        LogBrewTraceContext? activeDuringSend = null;
+        List<string>? traceparents = null;
+        using var logbrewHandler = new LogBrewHttpClientHandler(
+            client,
+            LogBrewHttpClientOptions.Create()
+                .WithEventIdPrefix("dotnet_handler")
+                .WithRouteTemplate("/v1/refunds/:id")
+                .WithTimestampProvider(() => "2026-06-02T10:00:12Z")
+                .WithMetadata(new Dictionary<string, object?>
+                {
+                    ["safe"] = "handler",
+                    ["url"] = "https://payments.example/private?card=sample",
+                    ["headers"] = "Author" + "ization: Bear" + "er sample"
+                }))
+        {
+            InnerHandler = new Handler(request =>
+            {
+                activeDuringSend = LogBrewTrace.Current;
+                traceparents = request.Headers.TryGetValues("traceparent", out var values)
+                    ? values.ToList()
+                    : new List<string>();
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            })
+        };
+        using var httpClient = new HttpClient(logbrewHandler);
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            "https://payments.example/v1/refunds/ref_123?card=sample#frag");
+
+        using (LogBrewTrace.Activate(root))
+        {
+            using var response = httpClient.SendAsync(request).GetAwaiter().GetResult();
+            Require(response.StatusCode == HttpStatusCode.OK, "expected handler response status");
+        }
+
+        var child = activeDuringSend ?? throw new InvalidOperationException("expected handler child trace during send");
+        Require(child.TraceId == root.TraceId, "expected handler trace id to follow active root");
+        Require(child.ParentSpanId == root.SpanId, "expected handler parent span");
+        Require(traceparents != null && traceparents.Count == 1, "expected exactly one handler traceparent");
+        Require(traceparents![0] == child.Traceparent, "expected handler traceparent from child span");
+
+        var payload = client.PreviewJson();
+        foreach (var expected in new[]
+        {
+            "\"id\": \"dotnet_handler_span_" + child.SpanId + "\"",
+            "\"name\": \"HTTP GET /v1/refunds/:id\"",
+            "\"status\": \"ok\"",
+            "\"source\": \"http.client\"",
+            "\"method\": \"GET\"",
+            "\"routeTemplate\": \"/v1/refunds/:id\"",
+            "\"statusCode\": 200",
+            "\"safe\": \"handler\""
+        })
+        {
+            Require(payload.Contains(expected, StringComparison.Ordinal), "missing handler HTTP payload: " + expected);
+        }
+
+        foreach (var blocked in new[] { "payments.example", "card=sample", "Author" + "ization", "Bear" + "er", "headers", "\"url\"" })
+        {
+            Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected unsafe handler metadata to be omitted: " + blocked);
         }
     }
 

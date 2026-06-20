@@ -187,20 +187,21 @@ The source-backed lightweight pattern LogBrew can safely adopt in the core SDK i
 ### LogBrew Change
 
 - Added `LogBrewHttpClientTelemetry.SendAsync(...)` and `LogBrewHttpClientOptions`.
+- Added `LogBrewHttpClientHandler` for apps that already compose outbound clients through `DelegatingHandler` or `IHttpClientFactory` pipelines.
 - The helper creates a child context from `LogBrewTrace.Current`, or from `Activity.Current` when no LogBrew trace is active, otherwise a local root.
-- It overwrites any existing request `traceparent` with one normalized child-span header, sends through the app-owned `HttpClient`, preserves the original response/exception/cancellation behavior, and captures one `HTTP {METHOD} {routeTemplate}` span.
+- `SendAsync(...)` and `LogBrewHttpClientHandler` share one telemetry core: overwrite any existing request `traceparent` with one normalized child-span header, send through the app-owned HTTP path, preserve the original response/exception/cancellation behavior, and capture one `HTTP {METHOD} {routeTemplate}` span.
 - Span metadata is privacy-bounded: `source=http.client`, normalized method, route template, status code, sampled flag, exception type only, and safe primitive app metadata after dropping unsafe dependency keys.
 - Added shared `TelemetryMetadata.CopySafeDependencyMetadata(...)` so operation spans and outbound HTTP spans use the same unsafe dependency metadata filter.
 - Added packaged `examples/HttpClientOutboundTelemetry.cs`, `scripts/check_dotnet_http_client_payload.py`, README guidance, Makefile target, source package proof, installed NuGet proof, and release metadata validation.
 
 ### Evidence
 
-- Red TDD: focused .NET tests failed on missing `LogBrewHttpClientTelemetry` and `LogBrewHttpClientOptions`.
-- `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release`: 47 tests passed, including outbound `HttpClient` traceparent injection, active child context during send, sanitized span metadata, original exception preservation, capture-failure isolation, and option validation.
-- `bash scripts/check_dotnet_package.sh`: passed with NuGet pack proof, packaged example inclusion, source example execution, and outbound HTTP payload validation.
+- Red TDD: focused .NET tests failed on missing `LogBrewHttpClientTelemetry`/`LogBrewHttpClientOptions`, then failed again on missing `LogBrewHttpClientHandler`.
+- `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release`: 48 tests passed, including outbound helper and handler traceparent injection, active child context during send, sanitized span metadata, original exception preservation, capture-failure isolation, and option validation.
+- `bash scripts/check_dotnet_package.sh`: passed with NuGet pack proof, packaged example inclusion, source example execution through `LogBrewHttpClientHandler`, handler symbol inclusion, and outbound HTTP payload validation.
 - `bash scripts/real_user_dotnet_smoke.sh`: passed after a retry; first run failed because the existing ASP.NET readiness loop expired while `dotnet run` was still at `Building...`. The readiness loop was increased from 20s to 40s to reduce cold-build flake.
 - Static and hygiene gates passed: release metadata, ShellCheck 0.11.0, markdown links, backend contract reports, confidentiality scan, generated-artifact hygiene, `git diff --check`, automation TOML parse/prompt-size check, and thermo review.
 
 ### Remaining Gap
 
-LogBrew is now better for teams that want explicit installed-package outbound HTTP trace propagation without handler/global patching, baggage/tracestate, URL/header/body capture, or profiler setup. Sentry, Datadog, and OpenTelemetry remain stronger for automatic transparent `HttpClient` instrumentation, request filtering at instrumentation level, richer semantic conventions, baggage/tracestate, span events/exceptions/links, and deep automatic EF/SqlClient/Redis/Kafka instrumentation.
+LogBrew is now better for teams that want explicit installed-package outbound HTTP trace propagation through either a one-off send helper or normal handler pipeline without global patching, baggage/tracestate, URL/header/body capture, or profiler setup. Sentry, Datadog, and OpenTelemetry remain stronger for automatic transparent `HttpClient` instrumentation, request filtering at instrumentation level, richer semantic conventions, baggage/tracestate, span events/exceptions/links, and deep automatic EF/SqlClient/Redis/Kafka instrumentation.

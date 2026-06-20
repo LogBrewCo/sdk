@@ -67,6 +67,34 @@ namespace LogBrew
         }
     }
 
+    public sealed class LogBrewHttpClientHandler : DelegatingHandler
+    {
+        private readonly LogBrewClient client;
+
+        private readonly LogBrewHttpClientOptions options;
+
+        public LogBrewHttpClientHandler(LogBrewClient client, LogBrewHttpClientOptions? options = null)
+        {
+            this.client = client ?? throw new ArgumentNullException(nameof(client));
+            this.options = options ?? LogBrewHttpClientOptions.Create();
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
+        {
+            if (request == null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
+
+            return LogBrewHttpClientTelemetry.SendWithTelemetryAsync(
+                client,
+                request,
+                options,
+                (message, cancellation) => base.SendAsync(message, cancellation),
+                cancellation);
+        }
+    }
+
     public static class LogBrewHttpClientTelemetry
     {
         public static async Task<HttpResponseMessage> SendAsync(
@@ -92,6 +120,21 @@ namespace LogBrew
             }
 
             var safeOptions = options ?? LogBrewHttpClientOptions.Create();
+            return await SendWithTelemetryAsync(
+                client,
+                request,
+                safeOptions,
+                (message, requestCancellation) => httpClient.SendAsync(message, requestCancellation),
+                cancellation).ConfigureAwait(false);
+        }
+
+        internal static async Task<HttpResponseMessage> SendWithTelemetryAsync(
+            LogBrewClient client,
+            HttpRequestMessage request,
+            LogBrewHttpClientOptions safeOptions,
+            Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send,
+            CancellationToken cancellation)
+        {
             var method = NormalizeMethod(request.Method?.Method);
             var routeTemplate = safeOptions.RouteTemplate ?? RouteTemplateFromRequest(request);
             var trace = CreateChildTrace();
@@ -104,7 +147,7 @@ namespace LogBrew
                 InjectTraceparent(request, trace);
                 try
                 {
-                    response = await httpClient.SendAsync(request, cancellation).ConfigureAwait(false);
+                    response = await send(request, cancellation).ConfigureAwait(false);
                     return response;
                 }
                 catch (Exception error)

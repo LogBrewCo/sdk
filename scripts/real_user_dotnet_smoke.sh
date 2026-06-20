@@ -111,6 +111,7 @@ for needle in (
     "TryCreateChildFromActivityContext",
     "ActivityTraceCorrelation.cs",
     "LogBrewHttpClientTelemetry",
+    "LogBrewHttpClientHandler",
     "HttpClientOutboundTelemetry.cs",
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",

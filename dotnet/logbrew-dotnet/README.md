@@ -266,6 +266,19 @@ using (var response = await LogBrewHttpClientTelemetry.SendAsync(
 
 `LogBrewHttpClientTelemetry.SendAsync(...)` preserves the app-owned `HttpClient`, `HttpRequestMessage`, response, cancellation token, and original exception. It keeps `LogBrewTrace.Current` active while the request runs, overwrites any existing `traceparent` with one normalized child span header, captures one `http.client` span, records status code or exception type only, and reports SDK capture failures through optional `OnError(...)` without replacing the HTTP result. It does not patch `HttpClient` globally, install a handler, capture request/response bodies, serialize arbitrary headers, include full URLs, hostnames, query strings, baggage, tracestate, or open support tickets. The packaged `examples/HttpClientOutboundTelemetry.cs` file proves installed-package outbound `HttpClient` span and logger correlation.
 
+If your app already builds clients through a message-handler pipeline or `IHttpClientFactory`, use `LogBrewHttpClientHandler` instead of wrapping each send. The handler uses the same options and privacy rules as `SendAsync(...)`, but fits normal .NET `DelegatingHandler` composition:
+
+```csharp
+var handler = new LogBrewHttpClientHandler(
+    client,
+    LogBrewHttpClientOptions.Create().WithRouteTemplate("/v1/payments/:id"))
+{
+    InnerHandler = new HttpClientHandler()
+};
+
+using var httpClient = new HttpClient(handler);
+```
+
 For ASP.NET Core, keep the middleware app-owned and use `LogBrewServerRequestTelemetry` to wrap the request pipeline. This captures one request span, an optional `http.server.duration` metric, and an optional exception issue while preserving the original response or exception:
 
 ```csharp
@@ -437,7 +450,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 - `Flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `HttpTransport` sends queued batches through `System.Net.Http` with configurable endpoint, headers, timeout, and app-owned `HttpClient` support.
 - `ProductTimeline` queues app-owned product and network milestone events without visual replay, HTTP client patching, payload capture, or header capture.
-- `LogBrewHttpClientTelemetry` wraps app-owned outbound `HttpClient` sends with one child span and one normalized `traceparent`, without global client patching or payload/header capture.
+- `LogBrewHttpClientTelemetry` and `LogBrewHttpClientHandler` wrap app-owned outbound `HttpClient` sends with one child span and one normalized `traceparent`, without global client patching or payload/header capture.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans without adding driver dependencies, profilers, interceptors, or automatic client patching.
 - `SupportTicketDraft` builds local-only support-ticket create payload drafts and redacts diagnostics without calling backend support routes.
 - `Shutdown(transport)` flushes queued events and rejects later writes.

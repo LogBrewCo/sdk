@@ -30,16 +30,32 @@ public static class Program
         });
         var logger = loggerFactory.CreateLogger("CheckoutHttpClient");
 
-        using var handler = new RecordingHandler(request =>
+        using var handler = new LogBrewHttpClientHandler(
+            client,
+            LogBrewHttpClientOptions.Create()
+                .WithEventIdPrefix("dotnet_http_client")
+                .WithRouteTemplate("/v1/payments/:id")
+                .WithTimestampProvider(() => "2026-06-02T10:00:04Z")
+                .WithMetadata(new Dictionary<string, object?>
+                {
+                    ["provider"] = "payments",
+                    ["url"] = "https://payments.example/private?card=sample",
+                    ["headers"] = "Authorization: Bearer sample",
+                    ["body"] = "card=sample",
+                    ["ignored"] = new object()
+                }))
         {
-            activeTraceDuringSend = LogBrewTrace.Current;
-            outgoingTraceparent = request.Headers.TryGetValues("traceparent", out var values)
-                ? string.Join(",", values)
-                : string.Empty;
-            logger.LogInformation("payment provider returned {StatusCode}", 202);
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Accepted));
-        });
-        using var httpClient = new HttpClient(handler, disposeHandler: false);
+            InnerHandler = new RecordingHandler(request =>
+            {
+                activeTraceDuringSend = LogBrewTrace.Current;
+                outgoingTraceparent = request.Headers.TryGetValues("traceparent", out var values)
+                    ? string.Join(",", values)
+                    : string.Empty;
+                logger.LogInformation("payment provider returned {StatusCode}", 202);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Accepted));
+            })
+        };
+        using var httpClient = new HttpClient(handler);
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
             "https://payments.example/v1/payments/cart_123?card=sample#review");
@@ -55,22 +71,7 @@ public static class Program
             EnvironmentAttributes.Create("production").WithRegion("global"));
 
         using (LogBrewTrace.Activate(rootTrace))
-        using (var response = await LogBrewHttpClientTelemetry.SendAsync(
-            client,
-            httpClient,
-            request,
-            LogBrewHttpClientOptions.Create()
-                .WithEventIdPrefix("dotnet_http_client")
-                .WithRouteTemplate("/v1/payments/:id")
-                .WithTimestampProvider(() => "2026-06-02T10:00:04Z")
-                .WithMetadata(new Dictionary<string, object?>
-                {
-                    ["provider"] = "payments",
-                    ["url"] = "https://payments.example/private?card=sample",
-                    ["headers"] = "Authorization: Bearer sample",
-                    ["body"] = "card=sample",
-                    ["ignored"] = new object()
-                })).ConfigureAwait(false))
+        using (var response = await httpClient.SendAsync(request).ConfigureAwait(false))
         {
             if (response.StatusCode != HttpStatusCode.Accepted)
             {
