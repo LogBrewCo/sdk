@@ -65,6 +65,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "examples/RealUserSmoke.cs",
         "examples/FirstUsefulTelemetry.cs",
         "examples/HttpTraceCorrelation.cs",
+        "examples/AspNetCoreRequestTelemetry.cs",
         "examples/Makefile",
     }
     missing = sorted(required - names)
@@ -90,6 +91,9 @@ for needle in (
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",
     "LogBrewOperationTracing",
+    "LogBrewServerRequestTelemetry",
+    "AspNetCoreRequestTelemetry.cs",
+    "does not patch ASP.NET Core",
     "first useful .NET service telemetry",
     "HttpTransport",
     "System.Net.Http",
@@ -148,11 +152,30 @@ run_example HttpTraceCorrelation.cs HttpTraceCorrelation "$tmp_dir/http-trace.st
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_http_trace_payload.py" "$tmp_dir/http-trace.stdout.json" "$tmp_dir/http-trace.stderr.json" >/dev/null
 
+web_dir="$tmp_dir/AspNetCoreRequestTelemetry"
+dotnet new web --framework net10.0 --name AspNetCoreRequestTelemetry --output "$web_dir" >/dev/null
+cp "$package_dir/examples/AspNetCoreRequestTelemetry.cs" "$web_dir/Program.cs"
+cat > "$web_dir/AspNetCoreRequestTelemetry.csproj" <<EOF
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$package_dir/src/LogBrew/LogBrew.csproj" />
+  </ItemGroup>
+</Project>
+EOF
+dotnet build "$web_dir/AspNetCoreRequestTelemetry.csproj" --configuration Release >/dev/null
+
 make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/examples-help.txt"
+grep -qx 'run-aspnetcore-request-telemetry -> make run-aspnetcore-request-telemetry' "$tmp_dir/examples-help.txt"
 
 echo "dotnet package checks passed"

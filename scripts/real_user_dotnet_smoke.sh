@@ -32,6 +32,10 @@ clean_generated_artifacts() {
 }
 
 clean_after_run() {
+  if [[ -n "${server_pid:-}" ]]; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
   rm -rf "$tmp_dir"
   clean_generated_artifacts
   rm -f "$lock_pid_file"
@@ -81,6 +85,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "examples/RealUserSmoke.cs",
         "examples/FirstUsefulTelemetry.cs",
         "examples/HttpTraceCorrelation.cs",
+        "examples/AspNetCoreRequestTelemetry.cs",
         "examples/Makefile",
     ):
         if required not in names:
@@ -103,6 +108,9 @@ for needle in (
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",
     "LogBrewOperationTracing",
+    "LogBrewServerRequestTelemetry",
+    "AspNetCoreRequestTelemetry.cs",
+    "does not patch ASP.NET Core",
     "first useful .NET service telemetry",
     "HttpTransport",
     "System.Net.Http",
@@ -147,6 +155,47 @@ python3 "$repo_root/scripts/check_dotnet_first_useful_payload.py" "$tmp_dir/pack
 run_packaged_example HttpTraceCorrelation.cs PackagedHttpTrace "$tmp_dir/packaged-http-trace.stdout.json" "$tmp_dir/packaged-http-trace.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_http_trace_payload.py" "$tmp_dir/packaged-http-trace.stdout.json" "$tmp_dir/packaged-http-trace.stderr.json" >/dev/null
+
+aspnet_dir="$tmp_dir/aspnetcore-app"
+dotnet new web --framework net10.0 --name AspNetCoreApp --output "$aspnet_dir" >/dev/null
+cp "$extract_dir/examples/AspNetCoreRequestTelemetry.cs" "$aspnet_dir/Program.cs"
+dotnet add "$aspnet_dir/AspNetCoreApp.csproj" package LogBrew --version 0.1.0 >/dev/null
+port="$(python3 - <<'PY'
+import socket
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)"
+server_url="http://127.0.0.1:$port"
+server_pid=""
+dotnet run --project "$aspnet_dir/AspNetCoreApp.csproj" --configuration Release --urls "$server_url" > "$tmp_dir/aspnetcore-server.stdout.txt" 2> "$tmp_dir/aspnetcore-server.stderr.txt" &
+server_pid="$!"
+ready=false
+for _ in {1..80}; do
+  if curl -fsS "$server_url/ready" > "$tmp_dir/aspnetcore-ready.json" 2>/dev/null; then
+    ready=true
+    break
+  fi
+  sleep 0.25
+done
+if [[ "$ready" != true ]]; then
+  cat "$tmp_dir/aspnetcore-server.stdout.txt" >&2 || true
+  cat "$tmp_dir/aspnetcore-server.stderr.txt" >&2 || true
+  echo "ASP.NET Core example did not become ready" >&2
+  exit 1
+fi
+curl -fsS \
+  -H 'traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01' \
+  "$server_url/checkout/cart_123?coupon=dropme" \
+  > "$tmp_dir/aspnetcore-response.json"
+curl -fsS "$server_url/logbrew-preview" > "$tmp_dir/aspnetcore-preview.json"
+python3 "$repo_root/scripts/check_dotnet_aspnetcore_request_payload.py" \
+  "$tmp_dir/aspnetcore-preview.json" \
+  "$tmp_dir/aspnetcore-response.json" >/dev/null
+kill "$server_pid" 2>/dev/null || true
+wait "$server_pid" 2>/dev/null || true
+server_pid=""
 
 lifecycle_dir="$tmp_dir/lifecycle-app"
 dotnet new console --framework net10.0 --name LifecycleApp --output "$lifecycle_dir" >/dev/null

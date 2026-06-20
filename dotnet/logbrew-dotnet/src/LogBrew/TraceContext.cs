@@ -419,7 +419,7 @@ namespace LogBrew
             var value = routeTemplate.Trim();
             if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
             {
-                value = uri.AbsolutePath;
+                value = Uri.UnescapeDataString(uri.AbsolutePath);
             }
 
             var queryIndex = value.IndexOf('?');

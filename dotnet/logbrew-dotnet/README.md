@@ -212,6 +212,47 @@ IReadOnlyDictionary<string, string> outgoingHeaders = request.OutgoingHeaders;
 
 `LogBrewTraceContext` generates W3C-shaped non-zero trace/span IDs, continues valid incoming `traceparent` values, preserves sampled flags, and omits malformed propagation values non-fatally for request helpers. `LogBrewTrace.Activate()` uses .NET `AsyncLocal` so standard async work keeps the active trace context. The `ILogger` provider automatically adds `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata when a trace is active. `MetadataWithCurrentTrace()` is useful for app-owned errors or product events that should join the same request. The packaged `examples/HttpTraceCorrelation.cs` file shows copyable request trace, async logger, handler error, span, metric, and outgoing propagation usage.
 
+For ASP.NET Core, keep the middleware app-owned and use `LogBrewServerRequestTelemetry` to wrap the request pipeline. This captures one request span, an optional `http.server.duration` metric, and an optional exception issue while preserving the original response or exception:
+
+```csharp
+using System.Collections.Generic;
+using LogBrew;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Routing;
+
+var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-aspnetcore", "1.0.0");
+var app = WebApplication.CreateBuilder(args).Build();
+
+app.UseRouting();
+app.Use(async (context, next) =>
+{
+    var endpoint = context.GetEndpoint() as RouteEndpoint;
+    var routeTemplate = endpoint?.RoutePattern.RawText is { Length: > 0 } rawRoute
+        ? "/" + rawRoute.TrimStart('/')
+        : context.Request.Path.Value ?? "/";
+
+    await LogBrewServerRequestTelemetry.CaptureAsync(
+        client,
+        context.Request.Method,
+        routeTemplate,
+        context.Request.Headers.TryGetValue("traceparent", out var traceparent) ? traceparent.ToString() : null,
+        async request =>
+        {
+            await next(context);
+            return context.Response.StatusCode;
+        },
+        LogBrewServerRequestOptions.Create()
+            .WithEventIdPrefix("aspnetcore_request")
+            .WithMetadata(new Dictionary<string, object?>
+            {
+                ["framework"] = "aspnetcore",
+                ["component"] = "checkout-api"
+            }));
+});
+```
+
+The helper does not patch ASP.NET Core globally, read request or response bodies, capture arbitrary headers, serialize `traceparent`, include query strings, open support tickets, infer usage/quota, or flush automatically. The app still owns middleware order, response handling, and shutdown/flush. The packaged `examples/AspNetCoreRequestTelemetry.cs` file shows a local Kestrel app with route-template extraction and copyable middleware wiring.
+
 ## Dependency Spans
 
 Use `LogBrewOperationTracing` around app-owned database, cache, or queue calls when you want dependency timing without a profiler, Entity Framework interceptor, Redis/Kafka client dependency, or global patching:

@@ -28,6 +28,7 @@
     <None Include="../../examples/RealUserSmoke.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/FirstUsefulTelemetry.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/HttpTraceCorrelation.cs" Pack="true" PackagePath="examples/" />
+    <None Include="../../examples/AspNetCoreRequestTelemetry.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/Makefile" Pack="true" PackagePath="examples/" />
   </ItemGroup>
 
