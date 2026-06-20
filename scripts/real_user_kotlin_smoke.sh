@@ -67,6 +67,7 @@ mkdir -p "$tmp_dir/jar-stage/examples"
 cp -R "$package_dir/examples/readme_example" "$tmp_dir/jar-stage/examples/readme_example"
 cp -R "$package_dir/examples/real_user_smoke" "$tmp_dir/jar-stage/examples/real_user_smoke"
 cp -R "$package_dir/examples/trace_correlation" "$tmp_dir/jar-stage/examples/trace_correlation"
+cp -R "$package_dir/examples/dependency_spans" "$tmp_dir/jar-stage/examples/dependency_spans"
 cp "$package_dir/examples/Makefile" "$tmp_dir/jar-stage/examples/Makefile"
 jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" -C "$tmp_dir/classes" . -C "$tmp_dir/jar-stage" .
 jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
@@ -490,102 +491,6 @@ kotlinc "$tmp_dir/HttpUrlConnectionApp.kt" \
 java -cp "$tmp_dir/http-url-connection-app.jar:$maven_dir/logbrew-kotlin-0.1.0.jar" HttpUrlConnectionAppKt > "$tmp_dir/http-url-connection-app.out"
 grep -qx 'http url connection bridge ok' "$tmp_dir/http-url-connection-app.out"
 
-cat > "$tmp_dir/OperationTracingApp.kt" <<'KT'
-import co.logbrew.sdk.CacheOperation
-import co.logbrew.sdk.DatabaseOperation
-import co.logbrew.sdk.LogBrewClient
-import co.logbrew.sdk.LogBrewOperationTracing
-import co.logbrew.sdk.LogBrewTrace
-import co.logbrew.sdk.QueueOperation
-
-fun main() {
-    val client = LogBrewClient.create("LOGBREW_API_KEY", "kotlin-dependency-app", "0.1.0")
-    val trace = LogBrewTrace.continueOrCreate("00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
-
-    LogBrewTrace.use(trace).use {
-        val orderId = LogBrewOperationTracing.databaseOperation(
-            client = client,
-            operationName = "select checkout",
-            config = DatabaseOperation(
-                system = "postgresql",
-                operationKind = "query",
-                databaseName = "orders",
-                statementTemplate = "SELECT * FROM orders WHERE id = ?",
-                rowCount = 1,
-                metadata = mapOf("component" to "checkout", "query" to "SELECT private", "host" to "db.internal"),
-            ),
-        ) {
-            check(LogBrewTrace.currentTraceContext()?.parentSpanId == trace.spanId)
-            "order-123"
-        }
-        check(orderId == "order-123")
-
-        try {
-            LogBrewOperationTracing.cacheOperation(
-                client = client,
-                operationName = "get cart",
-                config = CacheOperation(
-                    system = "redis",
-                    operationKind = "get",
-                    cacheName = "checkout-cache",
-                    hit = false,
-                    metadata = mapOf("cacheKey" to "cart:private", "service" to "checkout"),
-                ),
-            ) {
-                throw IllegalStateException("cache value contained private data")
-            }
-        } catch (error: IllegalStateException) {
-            check(error.message == "cache value contained private data")
-        }
-
-        try {
-            LogBrewOperationTracing.queueOperation(
-                client = client,
-                operationName = "publish invoice",
-                config = QueueOperation(
-                    system = "kafka",
-                    operationKind = "publish",
-                    queueName = "billing-events",
-                    taskName = "invoice.created",
-                    messageCount = 1,
-                    metadata = mapOf("messageBody" to "private body", "component" to "billing"),
-                ),
-            ) {
-                throw IllegalStateException("queue payload contained private data")
-            }
-        } catch (error: IllegalStateException) {
-            check(error.message == "queue payload contained private data")
-        }
-    }
-
-    val body = client.previewJson()
-    check("\"name\": \"database:select checkout\"" in body)
-    check("\"name\": \"cache:get cart\"" in body)
-    check("\"name\": \"queue:publish invoice\"" in body)
-    check("\"traceId\": \"${trace.traceId}\"" in body)
-    check("\"parentSpanId\": \"${trace.spanId}\"" in body)
-    check("\"dbSystem\": \"postgresql\"" in body)
-    check("\"cacheSystem\": \"redis\"" in body)
-    check("\"queueSystem\": \"kafka\"" in body)
-    check("\"errorType\": \"IllegalStateException\"" in body)
-    check("db.internal" !in body)
-    check("cart:private" !in body)
-    check("private body" !in body)
-    check("private data" !in body)
-    check("traceparent" !in body)
-    println("operation tracing ok")
-}
-KT
-kotlinc "$tmp_dir/OperationTracingApp.kt" \
-  -classpath "$maven_dir/logbrew-kotlin-0.1.0.jar" \
-  -jvm-target 11 \
-  -Xjdk-release=11 \
-  -Werror \
-  -include-runtime \
-  -d "$tmp_dir/operation-tracing-app.jar"
-java -cp "$tmp_dir/operation-tracing-app.jar:$maven_dir/logbrew-kotlin-0.1.0.jar" OperationTracingAppKt > "$tmp_dir/operation-tracing-app.out"
-grep -qx 'operation tracing ok' "$tmp_dir/operation-tracing-app.out"
-
 extract_dir="$tmp_dir/extracted-jar"
 mkdir -p "$extract_dir"
 (cd "$extract_dir" && jar --extract --file "$tmp_dir/logbrew-kotlin-0.1.0.jar")
@@ -593,6 +498,7 @@ test -f "$extract_dir/README.md"
 test -f "$extract_dir/examples/readme_example/ReadmeExample.kt"
 test -f "$extract_dir/examples/real_user_smoke/RealUserSmoke.kt"
 test -f "$extract_dir/examples/trace_correlation/TraceCorrelation.kt"
+test -f "$extract_dir/examples/dependency_spans/DependencySpans.kt"
 test -f "$extract_dir/examples/Makefile"
 grep -q 'HttpTransport' "$extract_dir/README.md"
 grep -q 'captureProductAction' "$extract_dir/README.md"
@@ -616,6 +522,19 @@ grep -q 'spanContextFromCurrentSpan' "$extract_dir/README.md"
 grep -q 'spanContextFromSpan' "$extract_dir/README.md"
 grep -q 'spanContextFromContext' "$extract_dir/README.md"
 grep -q 'fromOpenTelemetrySpanContext' "$extract_dir/README.md"
+
+kotlinc "$extract_dir/examples/dependency_spans/DependencySpans.kt" \
+  -classpath "$maven_dir/logbrew-kotlin-0.1.0.jar" \
+  -jvm-target 11 \
+  -Xjdk-release=11 \
+  -Werror \
+  -include-runtime \
+  -d "$tmp_dir/dependency-spans.jar"
+java -cp "$tmp_dir/dependency-spans.jar:$maven_dir/logbrew-kotlin-0.1.0.jar" DependencySpansKt \
+  > "$tmp_dir/dependency-spans.stdout.json" \
+  2> "$tmp_dir/dependency-spans.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/dependency-spans.stdout.json" >/dev/null
+grep -q '"dependencySpans":3' "$tmp_dir/dependency-spans.stderr.json"
 
 run_app() {
   local name="$1"

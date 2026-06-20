@@ -191,6 +191,7 @@ mkdir -p "$tmp_dir/jar-stage/examples"
 cp -R "$package_dir/examples/readme_example" "$tmp_dir/jar-stage/examples/readme_example"
 cp -R "$package_dir/examples/real_user_smoke" "$tmp_dir/jar-stage/examples/real_user_smoke"
 cp -R "$package_dir/examples/trace_correlation" "$tmp_dir/jar-stage/examples/trace_correlation"
+cp -R "$package_dir/examples/dependency_spans" "$tmp_dir/jar-stage/examples/dependency_spans"
 cp "$package_dir/examples/Makefile" "$tmp_dir/jar-stage/examples/Makefile"
 jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" -C "$tmp_dir/classes" . -C "$tmp_dir/jar-stage" .
 jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
@@ -224,6 +225,7 @@ grep -q '^README.md$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/readme_example/ReadmeExample.kt$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/real_user_smoke/RealUserSmoke.kt$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/trace_correlation/TraceCorrelation.kt$' "$tmp_dir/jar-contents.txt"
+grep -q '^examples/dependency_spans/DependencySpans.kt$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/Makefile$' "$tmp_dir/jar-contents.txt"
 
 python3 - "$tmp_dir/logbrew-kotlin-0.1.0.jar" <<'PY'
@@ -330,6 +332,16 @@ grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 grep -qx 'run-trace-correlation -> make run-trace-correlation' "$tmp_dir/examples-help.txt"
+grep -qx 'run-dependency-spans -> make run-dependency-spans' "$tmp_dir/examples-help.txt"
+
+run_example \
+  dependency-spans \
+  DependencySpansKt \
+  "$tmp_dir/dependency-spans.stdout.json" \
+  "$tmp_dir/dependency-spans.stderr.json" \
+  "$package_dir/examples/dependency_spans/DependencySpans.kt"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/dependency-spans.stdout.json" >/dev/null
+grep -q '"dependencySpans":3' "$tmp_dir/dependency-spans.stderr.json"
 
 run_example \
   trace-correlation \

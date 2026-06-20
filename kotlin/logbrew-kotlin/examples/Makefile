@@ -1,4 +1,4 @@
-.PHONY: help run run-readme-example run-real-user-smoke run-trace-correlation
+.PHONY: help run run-readme-example run-real-user-smoke run-trace-correlation run-dependency-spans
 
 PACKAGE_DIR := $(abspath ..)
 
@@ -7,6 +7,7 @@ help:
 	@printf '%s\n' 'run (real-user-smoke) -> make run'
 	@printf '%s\n' 'run-real-user-smoke -> make run-real-user-smoke'
 	@printf '%s\n' 'run-trace-correlation -> make run-trace-correlation'
+	@printf '%s\n' 'run-dependency-spans -> make run-dependency-spans'
 
 run: run-real-user-smoke
 
@@ -18,3 +19,6 @@ run-real-user-smoke:
 
 run-trace-correlation:
 	@tmp_dir="$$(mktemp -d)" && trap 'rm -rf "$$tmp_dir"' EXIT && kotlinc "$(PACKAGE_DIR)"/src/main/kotlin/co/logbrew/sdk/*.kt "$(PACKAGE_DIR)"/examples/trace_correlation/TraceCorrelation.kt -jvm-target 11 -Werror -include-runtime -Xjdk-release=11 -d "$$tmp_dir/trace-correlation.jar" && java -cp "$$tmp_dir/trace-correlation.jar" TraceCorrelationKt
+
+run-dependency-spans:
+	@tmp_dir="$$(mktemp -d)" && trap 'rm -rf "$$tmp_dir"' EXIT && kotlinc "$(PACKAGE_DIR)"/src/main/kotlin/co/logbrew/sdk/*.kt "$(PACKAGE_DIR)"/examples/dependency_spans/DependencySpans.kt -jvm-target 11 -Werror -include-runtime -Xjdk-release=11 -d "$$tmp_dir/dependency-spans.jar" && java -cp "$$tmp_dir/dependency-spans.jar" DependencySpansKt

@@ -39,4 +39,4 @@ Reduce the Kotlin/JVM dependency-tracing gap after LogBrew already shipped Kotli
 
 - Red: `bash scripts/check_kotlin_package.sh` failed because `CacheOperation`, `DatabaseOperation`, `QueueOperation`, and `LogBrewOperationTracing` did not exist.
 - Green: `bash scripts/check_kotlin_package.sh` passed with 29 Kotlin core tests, 5 OkHttp tests, source/binary jar class checks, README guidance checks, and Maven metadata checks.
-- Installed proof: `bash scripts/real_user_kotlin_smoke.sh` passed after compiling a temporary app against the built jar and exercising DB/cache/queue spans, original result/error preservation, unsafe metadata dropping, and packaged README/class presence.
+- Installed proof: `bash scripts/real_user_kotlin_smoke.sh` passed after extracting the built jar, compiling the packaged `examples/dependency_spans/DependencySpans.kt` example against it, and exercising DB/cache/queue spans, original result/error preservation, unsafe metadata dropping, and packaged README/class presence.
