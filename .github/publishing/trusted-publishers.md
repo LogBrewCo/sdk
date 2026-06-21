@@ -85,6 +85,8 @@ Create a trusted publisher or pending trusted publisher for gem `logbrew-sdk`. T
 
 Create a nuget.org trusted publishing policy with the shared GitHub identity above. Add `NUGET_USER` as a `release` environment secret containing the NuGet username or organization user that owns the package policy.
 
+The NuGet job reads the package version from `dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj` before packing and verifies that exact `LogBrew=<version>` is public after a real publish. Do not treat a NuGet release as available based only on the default repo-wide public version check.
+
 ## Packagist
 
 Packagist does not use GitHub OIDC trusted publishing. The public `logbrew/sdk` package is auto-updated from `https://github.com/LogBrewCo/sdk`, so the workflow validates Composer metadata and then verifies Packagist's public version after tags move. `PACKAGIST_USERNAME` and `PACKAGIST_API_TOKEN` are optional `release` environment secrets for triggering the official update-package endpoint sooner; when they are absent, the workflow relies on Packagist auto-update instead of skipping the registry.

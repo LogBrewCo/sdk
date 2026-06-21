@@ -449,6 +449,18 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Read NuGet package version
+        id: nuget-version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          if [[ -z "$version" ]]; then
+            echo "Could not read NuGet package version from LogBrew.csproj" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Pack NuGet package
         run: dotnet pack dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj --configuration Release --output dist/nuget
 
@@ -471,7 +483,7 @@ jobs:
 
       - name: Verify public NuGet package
         if: ${{ ! inputs.dry_run }}
-        run: python3 scripts/check_registry_publication.py --target nuget --retries 20 --retry-delay 30
+        run: python3 scripts/check_registry_publication.py --target nuget --nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}" --retries 20 --retry-delay 30
 
   packagist:
     name: Packagist package

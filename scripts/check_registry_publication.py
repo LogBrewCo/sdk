@@ -421,6 +421,7 @@ def success_summary(args: argparse.Namespace) -> str:
         for formatted in (
             format_overrides("npm", args.npm_versions),
             format_overrides("pypi", args.pypi_versions),
+            format_overrides("nuget", args.nuget_versions),
         )
         if formatted is not None
     ]
@@ -460,6 +461,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="PACKAGE=VERSION",
         help="Expected version for one PyPI package. May be passed more than once.",
     )
+    parser.add_argument(
+        "--nuget-version",
+        action="append",
+        default=[],
+        metavar="PACKAGE=VERSION",
+        help="Expected version for one NuGet package. May be passed more than once.",
+    )
     parser.add_argument("--include-pypi-extras", action="store_true")
     parser.add_argument("--include-crates", action="store_true")
     parser.add_argument("--include-packagist", action="store_true")
@@ -476,6 +484,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--npm-package requires --target npm or --target all")
     if args.pypi_version and "pypi" not in args.target and "all" not in args.target:
         parser.error("--pypi-version requires --target pypi or --target all")
+    if args.nuget_version and "nuget" not in args.target and "all" not in args.target:
+        parser.error("--nuget-version requires --target nuget or --target all")
     try:
         args.npm_versions = parse_package_versions(args.npm_version)
         args.pypi_versions = parse_package_versions(
@@ -483,9 +493,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             allowed_packages=PYPI_PACKAGES + PYPI_EXTRA_PACKAGES,
             package_family="PyPI",
         )
+        args.nuget_versions = parse_package_versions(
+            args.nuget_version,
+            allowed_packages=NUGET_PACKAGES,
+            package_family="NuGet",
+        )
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
-    args.package_versions = {**args.npm_versions, **args.pypi_versions}
+    args.package_versions = {**args.npm_versions, **args.pypi_versions, **args.nuget_versions}
     return args
 
 

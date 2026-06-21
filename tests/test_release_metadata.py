@@ -19,6 +19,66 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_repo_release_metadata_passes(self) -> None:
         self.assertEqual(check_release_metadata.validate(ROOT), [])
 
+    def test_publish_packages_workflow_requires_exact_nuget_version_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = root / ".github" / "workflows"
+            docs_dir = root / "docs"
+            publisher_dir = root / ".github" / "publishing"
+            workflow_dir.mkdir(parents=True)
+            docs_dir.mkdir(parents=True)
+            publisher_dir.mkdir(parents=True)
+            (workflow_dir / "publish-release.yml").write_text(
+                """
+name: Publish Release
+jobs:
+  dispatch-publish:
+    steps:
+      - name: Check out release ref
+        run: true
+      - name: Resolve release publish inputs
+        run: |
+          if [[ "$RELEASE_TAG" == */* ]]; then
+            publish_packages="false"
+          elif [[ "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$ ]]; then
+            release_kind="repo-wide"
+          fi
+      - name: Guard repo-wide release package versions
+        run: python3 scripts/check_repo_wide_release_versions.py "$REF"
+      - name: Dispatch publish-packages.yml
+        if: ${{ steps.release.outputs.publish_packages == 'true' }}
+        run: gh workflow run publish-packages.yml
+      - name: Summarize release publish decision
+        run: echo "Skipped package publishing for scoped GitHub Release"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            (workflow_dir / "publish-packages.yml").write_text(
+                """
+name: Publish Packages
+jobs:
+  nuget:
+    steps:
+      - name: Verify public NuGet package
+        run: python3 scripts/check_registry_publication.py --target nuget --retries 20 --retry-delay 30
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            for relative in check_release_metadata.RELEASE_SAFETY_DOCS:
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    "release tag's commit historical tags check_repo_wide_release_versions.py\n",
+                    encoding="utf-8",
+                )
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("NuGet exact public version verification" in failure for failure in failures))
+
     def test_publish_release_workflow_requires_scoped_release_skip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

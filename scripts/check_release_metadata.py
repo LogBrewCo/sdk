@@ -38,6 +38,7 @@ JS_PACKAGES = {
 
 OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
 PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
+PUBLISH_PACKAGES_WORKFLOW = ".github/workflows/publish-packages.yml"
 RELEASE_SAFETY_DOCS = (
     "docs/github-actions.md",
     ".github/publishing/trusted-publishers.md",
@@ -842,23 +843,33 @@ def validate_root(root: Path, failures: list[str]) -> None:
 
 def validate_release_workflows(root: Path, failures: list[str]) -> None:
     workflow_path = require_path(root, PUBLISH_RELEASE_WORKFLOW, failures)
-    if not workflow_path.exists():
-        return
-    text = workflow_path.read_text(encoding="utf-8")
-    required_needles = {
-        "release ref checkout": "Check out release ref",
-        "scoped GitHub Release skip guard": 'if [[ "$RELEASE_TAG" == */* ]]; then',
-        "scoped GitHub Release publish disable": 'publish_packages="false"',
-        "repo-wide SemVer release gate": (
-            'elif [[ "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+'
-            '(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$ ]]; then'
-        ),
-        "repo-wide version guard": "python3 scripts/check_repo_wide_release_versions.py \"$REF\"",
-        "publish dispatch output guard": "if: ${{ steps.release.outputs.publish_packages == 'true' }}",
-        "scoped GitHub Release summary": "Skipped package publishing for scoped GitHub Release",
-    }
-    for description, needle in required_needles.items():
-        require(needle in text, failures, f"{PUBLISH_RELEASE_WORKFLOW}: missing {description}")
+    if workflow_path.exists():
+        text = workflow_path.read_text(encoding="utf-8")
+        required_needles = {
+            "release ref checkout": "Check out release ref",
+            "scoped GitHub Release skip guard": 'if [[ "$RELEASE_TAG" == */* ]]; then',
+            "scoped GitHub Release publish disable": 'publish_packages="false"',
+            "repo-wide SemVer release gate": (
+                'elif [[ "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+'
+                '(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$ ]]; then'
+            ),
+            "repo-wide version guard": "python3 scripts/check_repo_wide_release_versions.py \"$REF\"",
+            "publish dispatch output guard": "if: ${{ steps.release.outputs.publish_packages == 'true' }}",
+            "scoped GitHub Release summary": "Skipped package publishing for scoped GitHub Release",
+        }
+        for description, needle in required_needles.items():
+            require(needle in text, failures, f"{PUBLISH_RELEASE_WORKFLOW}: missing {description}")
+    publish_packages_path = require_path(root, PUBLISH_PACKAGES_WORKFLOW, failures)
+    if publish_packages_path.exists():
+        publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
+        required_publish_needles = {
+            "NuGet package version output": "id: nuget-version",
+            "NuGet exact public version verification": (
+                '--nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}"'
+            ),
+        }
+        for description, needle in required_publish_needles.items():
+            require(needle in publish_packages_text, failures, f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}")
     for relative_path in RELEASE_SAFETY_DOCS:
         docs_path = require_path(root, relative_path, failures)
         if not docs_path.exists():

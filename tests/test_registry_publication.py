@@ -140,12 +140,23 @@ class RegistryPublicationTests(unittest.TestCase):
             {"logbrew-fastapi": "0.1.2"},
         )
 
+    def test_parse_nuget_package_versions(self) -> None:
+        self.assertEqual(
+            check_registry_publication.parse_package_versions(
+                ["LogBrew=0.1.1"],
+                allowed_packages=check_registry_publication.NUGET_PACKAGES,
+                package_family="NuGet",
+            ),
+            {"LogBrew": "0.1.1"},
+        )
+
     def test_success_summary_reports_npm_version_overrides(self) -> None:
         args = argparse.Namespace(
             target=["npm"],
             version="0.1.0",
             npm_versions={"@logbrew/nestjs": "0.1.1"},
             pypi_versions={},
+            nuget_versions={},
         )
 
         summary = check_registry_publication.success_summary(args)
@@ -159,6 +170,7 @@ class RegistryPublicationTests(unittest.TestCase):
             version="0.1.1",
             npm_versions={},
             pypi_versions={"logbrew-fastapi": "0.1.2", "logbrew-django": "0.1.2"},
+            nuget_versions={},
         )
 
         summary = check_registry_publication.success_summary(args)
@@ -166,6 +178,20 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertIn("public registry versions ok for pypi at 0.1.1", summary)
         self.assertIn("logbrew-fastapi@0.1.2", summary)
         self.assertIn("logbrew-django@0.1.2", summary)
+
+    def test_success_summary_reports_nuget_version_overrides(self) -> None:
+        args = argparse.Namespace(
+            target=["nuget"],
+            version="0.1.0",
+            npm_versions={},
+            pypi_versions={},
+            nuget_versions={"LogBrew": "0.1.1"},
+        )
+
+        summary = check_registry_publication.success_summary(args)
+
+        self.assertIn("public registry versions ok for nuget at 0.1.0", summary)
+        self.assertIn("LogBrew@0.1.1", summary)
 
     def test_parse_args_combines_npm_and_pypi_version_overrides(self) -> None:
         args = check_registry_publication.parse_args(
@@ -176,12 +202,14 @@ class RegistryPublicationTests(unittest.TestCase):
                 "@logbrew/nestjs=0.1.1",
                 "--pypi-version",
                 "logbrew-fastapi=0.1.2",
+                "--nuget-version",
+                "LogBrew=0.1.3",
             ]
         )
 
         self.assertEqual(
             args.package_versions,
-            {"@logbrew/nestjs": "0.1.1", "logbrew-fastapi": "0.1.2"},
+            {"@logbrew/nestjs": "0.1.1", "logbrew-fastapi": "0.1.2", "LogBrew": "0.1.3"},
         )
 
     def test_validate_check_passes_when_expected_version_is_found(self) -> None:
