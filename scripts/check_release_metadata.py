@@ -12,6 +12,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
+from release_metadata_dotnet import validate_dotnet_packages
+
 
 PUBLIC_VERSION = "0.1.0"
 DOTNET_VERSION = "0.1.2"
@@ -36,7 +38,7 @@ JS_PACKAGES = {
     "js/logbrew-svelte": "@logbrew/svelte",
     "js/logbrew-vue": "@logbrew/vue",
 }
-NUGET_PACKAGES = {"LogBrew"}
+NUGET_PACKAGES = {"LogBrew", "LogBrew.AspNetCore"}
 
 OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
 PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
@@ -615,60 +617,6 @@ def validate_maven_pom(
         require_equal(failures, relative_path, "properties.maven.compiler.release", path_text(project, "properties", "maven.compiler.release"), "11")
 
 
-def validate_dotnet(root: Path, failures: list[str], expected_version: str = DOTNET_VERSION) -> None:
-    project_path = require_path(root, "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj", failures)
-    require_path(root, "dotnet/logbrew-dotnet/README.md", failures)
-    require_path(root, "dotnet/logbrew-dotnet/examples/FirstUsefulTelemetry.cs", failures)
-    require_path(root, "dotnet/logbrew-dotnet/examples/ActivityTraceCorrelation.cs", failures)
-    require_path(root, "dotnet/logbrew-dotnet/examples/HttpClientOutboundTelemetry.cs", failures)
-    require_path(root, "dotnet/logbrew-dotnet/examples/AspNetCoreRequestTelemetry.cs", failures)
-    require_path(root, "assets/brand/logbrew-logo-transparent-128.png", failures)
-    if not project_path.exists():
-        return
-    project = parse_xml(project_path, failures)
-    if project is None:
-        return
-    property_groups = direct_children(project, "PropertyGroup")
-    properties = property_groups[0] if property_groups else ET.Element("PropertyGroup")
-    location = "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj"
-    expected = {
-        "TargetFramework": "netstandard2.0",
-        "PackageId": "LogBrew",
-        "Version": expected_version,
-        "Authors": "LogBrew",
-        "Company": "LogBrew",
-        "PackageLicenseExpression": PUBLIC_LICENSE,
-        "PackageProjectUrl": REPO_URL,
-        "RepositoryUrl": REPO_URL,
-        "PackageReadmeFile": "README.md",
-        "PackageIcon": "logbrew-logo-transparent-128.png",
-    }
-    for field, value in expected.items():
-        require_equal(failures, location, field, child_text(properties, field), value)
-    require_contains(failures, location, "Description", child_text(properties, "Description"), "LogBrew")
-    project_text = project_path.read_text(encoding="utf-8")
-    require(
-        "examples/FirstUsefulTelemetry.cs" in project_text,
-        failures,
-        f"{location}: package must include examples/FirstUsefulTelemetry.cs",
-    )
-    require(
-        "examples/ActivityTraceCorrelation.cs" in project_text,
-        failures,
-        f"{location}: package must include examples/ActivityTraceCorrelation.cs",
-    )
-    require(
-        "examples/HttpClientOutboundTelemetry.cs" in project_text,
-        failures,
-        f"{location}: package must include examples/HttpClientOutboundTelemetry.cs",
-    )
-    require(
-        "examples/AspNetCoreRequestTelemetry.cs" in project_text,
-        failures,
-        f"{location}: package must include examples/AspNetCoreRequestTelemetry.cs",
-    )
-
-
 def validate_unity(root: Path, failures: list[str]) -> None:
     manifest_path = require_path(root, "unity/logbrew-unity/package.json", failures)
     require_path(root, "unity/logbrew-unity/README.md", failures)
@@ -868,11 +816,21 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
         required_publish_needles = {
             "NuGet package version output": "id: nuget-version",
+            "NuGet ASP.NET Core version output": "aspnetcore_version=",
             "NuGet exact metadata version validation": (
-                'python3 scripts/check_release_metadata.py --nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}"'
+                '--nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}"'
+            ),
+            "NuGet ASP.NET Core metadata version validation": (
+                '--nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"'
             ),
             "NuGet exact public version verification": (
-                '--nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}"'
+                '--nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}"'
+            ),
+            "NuGet ASP.NET Core public version verification": (
+                '--nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"'
+            ),
+            "NuGet duplicate-safe publish": (
+                "--skip-duplicate"
             ),
             "verify target exact version input": "verify_version:",
             "verify target exact version argument": 'verify_args+=(--version "$VERIFY_VERSION")',
@@ -922,7 +880,14 @@ def validate(
         failures,
         require_compiler_release=True,
     )
-    validate_dotnet(root, failures, expected_version=nuget_versions.get("LogBrew", DOTNET_VERSION))
+    validate_dotnet_packages(
+        root,
+        failures,
+        nuget_versions.get("LogBrew", DOTNET_VERSION),
+        nuget_versions.get("LogBrew.AspNetCore", PUBLIC_VERSION),
+        PUBLIC_LICENSE,
+        REPO_URL,
+    )
     validate_unity(root, failures)
     validate_maven_pom(root, "kotlin/logbrew-kotlin/pom.xml", "logbrew-kotlin", "LogBrew Kotlin SDK", failures)
     validate_maven_pom(

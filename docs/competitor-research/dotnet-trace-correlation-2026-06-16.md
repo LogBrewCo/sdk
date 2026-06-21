@@ -245,6 +245,48 @@ The safer LogBrew core pattern is explicit capture from an app-owned `Activity`:
 - `bash scripts/check_dotnet_package.sh`: passed with NuGet pack proof, README guidance, source example execution, packaged Activity example inclusion, and payload validation for the Activity span plus privacy exclusions.
 - `bash scripts/real_user_dotnet_smoke.sh`: passed with packed NuGet install/remove/reinstall proof and installed Activity span payload validation.
 
+## 2026-06-21 Optional ASP.NET Core Middleware Package Follow-Up
+
+### Additional Source Reviewed
+
+- Sentry .NET `getsentry/sentry-dotnet@2f2842f20f9581468a0ab4e971bfd507557161b3`.
+- Read `src/Sentry.AspNetCore/SentryTracingMiddleware.cs`: `TryStartTransaction(...)`, `InvokeAsync(...)`, request transaction activation, route/status finishing, and original exception rethrow.
+- Read `src/Sentry.AspNetCore/SentryMiddleware.cs`: `InvokeAsync(...)`, trace/baggage continuation through `HttpContext.Items`, request scope setup, exception capture, and flush behavior.
+- Read `src/Sentry.AspNetCore/ApplicationBuilderExtensions.cs`, `SentryTracingMiddlewareExtensions.cs`, `RouteUtils.cs`, and `Extensions/HttpContextExtensions.cs`: middleware registration, duplicate-registration guard, route-template formatting, and transaction-name selection.
+- OpenTelemetry .NET contrib `open-telemetry/opentelemetry-dotnet-contrib@b04a8ba4d4dadee7723fb0dac5c818de69ba3c50`.
+- Read `src/OpenTelemetry.Instrumentation.AspNetCore/Implementation/HttpInListener.cs`: `OnStartActivity(...)`, `OnStopActivity(...)`, `OnException(...)`, W3C extraction, route/status/error tagging, query redaction, and enrichment failure isolation.
+- Read `src/OpenTelemetry.Instrumentation.AspNetCore/AspNetCoreTraceInstrumentationOptions.cs` and `AspNetCoreInstrumentationTracerProviderBuilderExtensions.cs`: filter/enrich options, instrumentation registration, ActivitySource selection, and duplicate DiagnosticSource subscription protection.
+- Datadog .NET tracer `DataDog/dd-trace-dotnet@b92777ccdbd8bc7f7ad0a7cb59d5d53f638e93e1`.
+- Read `tracer/src/Datadog.Trace/PlatformHelpers/AspNetCoreHttpRequestHandler.cs`: `StartAspNetCorePipelineScope(...)`, `StopAspNetCorePipelineScope(...)`, `HandleAspNetCoreException(...)`, and `CopyAspNetCoreActivityTagsIfRequired(...)`.
+- Read `tracer/src/Datadog.Trace/DiagnosticListeners/AspNetCoreDiagnosticObserver.cs`, `AspNetCoreResourceNameHelper.cs`, `Tagging/AspNetCoreTags.cs`, and `AspNetCoreEndpointTags.cs`: DiagnosticSource routing, endpoint route simplification, and route/status tag shape.
+- PostHog .NET `PostHog/posthog-dotnet@620bc6785fc864d9534fb21a6e2f50295fc9b65d`.
+- Read `src/PostHog.AspNetCore/Tracing/PostHogRequestContextMiddleware.cs`, `PostHogRequestContextMiddlewareExtensions.cs`, `PostHogRequestContextOptions.cs`, and `PostHogTracingHeaders.cs`: explicit middleware-owned request scope, optional exception capture, bounded header/context parsing, and original exception preservation.
+
+### Pattern
+
+Sentry, Datadog, and OpenTelemetry are stronger for automatic ASP.NET Core coverage because they own middleware or DiagnosticSource listeners, derive route/status/error context after the framework has selected an endpoint, keep request-local scope active while handlers run, and finish spans after the downstream pipeline returns or throws. PostHog shows a lighter explicit package pattern: opt-in middleware, bounded request context, failure isolation, and original exception rethrow.
+
+### LogBrew Change
+
+- Added a separate `LogBrew.AspNetCore` package instead of adding ASP.NET Core framework dependencies to the base `LogBrew` NuGet package.
+- Added `app.UseLogBrewRequestTelemetry(client, options => ...)` with `LogBrewAspNetCoreOptions`.
+- The middleware extracts a route template from `RouteEndpoint.RoutePattern.RawText` by default, supports `WithRouteTemplateSelector(...)` for low-cardinality app-owned names, and supports `WithRequestFilter(...)` for health/noisy route suppression.
+- It delegates serialization to the existing `LogBrewServerRequestTelemetry` core helper: one request span, optional `http.server.duration` metric, optional exception issue, active `LogBrewTrace.Current` while downstream handlers run, original response status, and original exception rethrow.
+- It supports static metadata and per-request `WithMetadataProvider(...)`; unsafe keys and non-primitive values are still filtered by the core request helper.
+- It intentionally avoids request/response bodies, arbitrary headers, raw `traceparent` serialization, query strings, network origins, baggage, tracestate, support-ticket creation, usage/quota inference, global ASP.NET patching, DiagnosticSource subscription, Activity processors, and automatic flush.
+- Added packaged `examples/AspNetCoreMiddlewareTelemetry.cs`, a dedicated `LogBrew.AspNetCore` README, release metadata validation for both NuGet packages, duplicate-safe NuGet push wiring, and registry verification support for `LogBrew.AspNetCore`.
+
+### Evidence
+
+- Red TDD: focused ASP.NET Core tests failed on missing `UseLogBrewRequestTelemetry(...)`.
+- `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.AspNetCore.Tests/LogBrew.AspNetCore.Tests.csproj --configuration Release`: 4 tests passed, covering active trace/log correlation, route-template span/metric output, absolute-selector URL stripping, unsafe metadata dropping, exception preservation, and filter skip behavior.
+- `bash scripts/check_dotnet_package.sh`: passed with 54 core tests, 4 ASP.NET Core tests, both NuGet package builds, nupkg metadata/readme/example inspection, source example builds, and Makefile helper discovery.
+- `bash scripts/real_user_dotnet_smoke.sh`: passed with packed local `LogBrew` plus `LogBrew.AspNetCore` packages, installed package graph/install-remove-reinstall proof, manual ASP.NET Core request helper proof, and installed `LogBrew.AspNetCore` Kestrel middleware proof using incoming W3C `traceparent` while checking that query text, raw propagation, local URL, headers, cookies, and sensitive-looking text are absent from emitted telemetry.
+
+### Remaining Gap
+
+LogBrew is now stronger for teams that want a small opt-in ASP.NET Core middleware package with installed-package proof, predictable privacy boundaries, and no global instrumentation. Sentry, Datadog, and OpenTelemetry remain stronger for transparent DiagnosticSource/ActivitySource instrumentation, richer semantic conventions, baggage/tracestate, span events/exceptions/links, profiling, and automatic outbound/EF/SqlClient/Redis/Kafka coverage.
+
 ### Remaining Gap
 
 LogBrew is now better for teams that want explicit, lightweight Activity span capture without taking over OpenTelemetry exporters/processors or globally listening to all `ActivitySource` data. Sentry, Datadog, and OpenTelemetry remain stronger for automatic ActivitySource/ASP.NET/HttpClient/EF/SqlClient/Redis/Kafka instrumentation, baggage/tracestate, rich span events/exceptions/links, resource attributes, profiling, and deeper semantic conventions.

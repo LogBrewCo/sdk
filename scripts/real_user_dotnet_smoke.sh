@@ -50,9 +50,13 @@ if ! acquire_lock; then
 fi
 
 dotnet pack "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
+dotnet pack "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 package_version="$(dotnet msbuild "$package_dir/src/LogBrew/LogBrew.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
+aspnetcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 nupkg="$tmp_dir/packages/LogBrew.${package_version}.nupkg"
+aspnetcore_nupkg="$tmp_dir/packages/LogBrew.AspNetCore.${aspnetcore_package_version}.nupkg"
 test -f "$nupkg"
+test -f "$aspnetcore_nupkg"
 export NUGET_PACKAGES="$tmp_dir/nuget-packages"
 nuget_org_source="https://api.nuget.org/v3/index.json"
 cat > "$tmp_dir/NuGet.config" <<EOF
@@ -121,6 +125,9 @@ for needle in (
     "LogBrewOperationTracing",
     "LogBrewServerRequestTelemetry",
     "AspNetCoreRequestTelemetry.cs",
+    "dotnet add package LogBrew.AspNetCore",
+    "UseLogBrewRequestTelemetry",
+    "AspNetCoreMiddlewareTelemetry.cs",
     "does not patch ASP.NET Core",
     "first useful .NET service telemetry",
     "HttpTransport",
@@ -134,6 +141,42 @@ for needle in (
 ):
     if needle not in readme:
         raise SystemExit(f"missing packaged README guidance: {needle}")
+PY
+
+aspnetcore_extract_dir="$tmp_dir/aspnetcore-package-extract"
+mkdir -p "$aspnetcore_extract_dir"
+python3 - "$aspnetcore_nupkg" "$aspnetcore_extract_dir" <<'PY'
+import sys
+import zipfile
+from pathlib import Path
+
+nupkg = Path(sys.argv[1])
+extract_dir = Path(sys.argv[2])
+with zipfile.ZipFile(nupkg) as archive:
+    archive.extractall(extract_dir)
+    names = set(archive.namelist())
+    for required in (
+        "LogBrew.AspNetCore.nuspec",
+        "lib/net10.0/LogBrew.AspNetCore.dll",
+        "README.md",
+        "examples/AspNetCoreMiddlewareTelemetry.cs",
+    ):
+        if required not in names:
+            raise SystemExit(f"missing ASP.NET Core nupkg file: {required}")
+    readme = archive.read("README.md").decode()
+    nuspec = archive.read("LogBrew.AspNetCore.nuspec").decode()
+if 'dependency id="LogBrew"' not in nuspec:
+    raise SystemExit("missing LogBrew dependency metadata")
+for needle in (
+    "dotnet add package LogBrew.AspNetCore",
+    "UseLogBrewRequestTelemetry",
+    "WithRequestFilter",
+    "WithRouteTemplateSelector",
+    "does not read request or response bodies",
+    "AspNetCoreMiddlewareTelemetry.cs",
+):
+    if needle not in readme:
+        raise SystemExit(f"missing ASP.NET Core packaged README guidance: {needle}")
 PY
 
 run_packaged_example() {
@@ -216,20 +259,71 @@ kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
 server_pid=""
 
+aspnet_middleware_dir="$tmp_dir/aspnetcore-middleware-app"
+dotnet new web --framework net10.0 --name AspNetCoreMiddlewareApp --output "$aspnet_middleware_dir" >/dev/null
+cp "$aspnetcore_extract_dir/examples/AspNetCoreMiddlewareTelemetry.cs" "$aspnet_middleware_dir/Program.cs"
+dotnet add "$aspnet_middleware_dir/AspNetCoreMiddlewareApp.csproj" package LogBrew.AspNetCore --version "$aspnetcore_package_version" >/dev/null
+port="$(python3 - <<'PY'
+import socket
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)"
+server_url="http://127.0.0.1:$port"
+server_pid=""
+dotnet run --project "$aspnet_middleware_dir/AspNetCoreMiddlewareApp.csproj" --configuration Release --urls "$server_url" > "$tmp_dir/aspnetcore-middleware-server.stdout.txt" 2> "$tmp_dir/aspnetcore-middleware-server.stderr.txt" &
+server_pid="$!"
+ready=false
+for _ in {1..160}; do
+  if curl -fsS "$server_url/ready" > "$tmp_dir/aspnetcore-middleware-ready.json" 2>/dev/null; then
+    ready=true
+    break
+  fi
+  sleep 0.25
+done
+if [[ "$ready" != true ]]; then
+  cat "$tmp_dir/aspnetcore-middleware-server.stdout.txt" >&2 || true
+  cat "$tmp_dir/aspnetcore-middleware-server.stderr.txt" >&2 || true
+  echo "ASP.NET Core middleware example did not become ready" >&2
+  exit 1
+fi
+curl -fsS \
+  -H 'traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01' \
+  "$server_url/checkout/cart_123?coupon=dropme" \
+  > "$tmp_dir/aspnetcore-middleware-response.json"
+curl -fsS "$server_url/logbrew-preview" > "$tmp_dir/aspnetcore-middleware-preview.json"
+python3 "$repo_root/scripts/check_dotnet_aspnetcore_request_payload.py" \
+  "$tmp_dir/aspnetcore-middleware-preview.json" \
+  "$tmp_dir/aspnetcore-middleware-response.json" >/dev/null
+kill "$server_pid" 2>/dev/null || true
+wait "$server_pid" 2>/dev/null || true
+server_pid=""
+
 lifecycle_dir="$tmp_dir/lifecycle-app"
 dotnet new console --framework net10.0 --name LifecycleApp --output "$lifecycle_dir" >/dev/null
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version "$package_version" >/dev/null
+dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.AspNetCore --version "$aspnetcore_package_version" >/dev/null
 dotnet list "$lifecycle_dir/LifecycleApp.csproj" package > "$tmp_dir/lifecycle-packages.txt"
 grep -q 'LogBrew' "$tmp_dir/lifecycle-packages.txt"
+grep -q 'LogBrew.AspNetCore' "$tmp_dir/lifecycle-packages.txt"
 dotnet list "$lifecycle_dir/LifecycleApp.csproj" package --include-transitive > "$tmp_dir/lifecycle-packages-transitive.txt"
 grep -q 'Microsoft.Extensions.Logging' "$tmp_dir/lifecycle-packages-transitive.txt"
+grep -q 'LogBrew' "$tmp_dir/lifecycle-packages-transitive.txt"
+dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.AspNetCore >/dev/null
+if grep -q 'PackageReference Include="LogBrew.AspNetCore"' "$lifecycle_dir/LifecycleApp.csproj"; then
+  echo "expected dotnet remove package to remove LogBrew.AspNetCore reference" >&2
+  exit 1
+fi
 dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package LogBrew >/dev/null
 if grep -q 'PackageReference Include="LogBrew"' "$lifecycle_dir/LifecycleApp.csproj"; then
   echo "expected dotnet remove package to remove LogBrew reference" >&2
   exit 1
 fi
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version "$package_version" >/dev/null
+dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.AspNetCore --version "$aspnetcore_package_version" >/dev/null
 grep -q "PackageReference Include=\"LogBrew\" Version=\"$package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
+grep -q "PackageReference Include=\"LogBrew.AspNetCore\" Version=\"$aspnetcore_package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
 
 logging_dir="$tmp_dir/logging-app"
 dotnet new console --framework net10.0 --name LoggingApp --output "$logging_dir" >/dev/null

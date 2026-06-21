@@ -474,18 +474,25 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
-          if [[ -z "$version" ]]; then
+          core_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          aspnetcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          if [[ -z "$core_version" || -z "$aspnetcore_version" ]]; then
             echo "Could not read NuGet package version from LogBrew.csproj" >&2
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "core_version=$core_version" >> "$GITHUB_OUTPUT"
+          echo "aspnetcore_version=$aspnetcore_version" >> "$GITHUB_OUTPUT"
 
       - name: Validate NuGet release metadata
-        run: python3 scripts/check_release_metadata.py --nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}"
+        run: |
+          python3 scripts/check_release_metadata.py \
+            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
+            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"
 
       - name: Pack NuGet package
-        run: dotnet pack dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj --configuration Release --output dist/nuget
+        run: |
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj --configuration Release --output dist/nuget
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj --configuration Release --output dist/nuget
 
       - name: Authenticate to NuGet
         if: ${{ ! inputs.dry_run }}
@@ -496,7 +503,7 @@ jobs:
 
       - name: Publish NuGet package
         if: ${{ ! inputs.dry_run }}
-        run: dotnet nuget push dist/nuget/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json
+        run: dotnet nuget push dist/nuget/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Set up Python for registry verification
         if: ${{ ! inputs.dry_run }}
@@ -506,7 +513,11 @@ jobs:
 
       - name: Verify public NuGet package
         if: ${{ ! inputs.dry_run }}
-        run: python3 scripts/check_registry_publication.py --target nuget --nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}" --retries 20 --retry-delay 30
+        run: |
+          python3 scripts/check_registry_publication.py --target nuget \
+            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
+            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
+            --retries 20 --retry-delay 30
 
   packagist:
     name: Packagist package

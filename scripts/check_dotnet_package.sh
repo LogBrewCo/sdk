@@ -45,11 +45,17 @@ if ! acquire_lock; then
 fi
 
 dotnet build "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release -warnaserror >/dev/null
+dotnet build "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release -warnaserror >/dev/null
 dotnet run --project "$package_dir/tests/LogBrew.Tests/LogBrew.Tests.csproj" --configuration Release
+dotnet run --project "$package_dir/tests/LogBrew.AspNetCore.Tests/LogBrew.AspNetCore.Tests.csproj" --configuration Release
 dotnet pack "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
+dotnet pack "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 package_version="$(dotnet msbuild "$package_dir/src/LogBrew/LogBrew.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
+aspnetcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 nupkg="$tmp_dir/packages/LogBrew.${package_version}.nupkg"
+aspnetcore_nupkg="$tmp_dir/packages/LogBrew.AspNetCore.${aspnetcore_package_version}.nupkg"
 test -f "$nupkg"
+test -f "$aspnetcore_nupkg"
 
 python3 - "$nupkg" <<'PY'
 import sys
@@ -104,6 +110,9 @@ for needle in (
     "LogBrewOperationTracing",
     "LogBrewServerRequestTelemetry",
     "AspNetCoreRequestTelemetry.cs",
+    "dotnet add package LogBrew.AspNetCore",
+    "UseLogBrewRequestTelemetry",
+    "AspNetCoreMiddlewareTelemetry.cs",
     "does not patch ASP.NET Core",
     "first useful .NET service telemetry",
     "HttpTransport",
@@ -117,6 +126,40 @@ for needle in (
 ):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
+PY
+
+python3 - "$aspnetcore_nupkg" <<'PY'
+import sys
+import zipfile
+
+nupkg = sys.argv[1]
+with zipfile.ZipFile(nupkg) as archive:
+    names = set(archive.namelist())
+    required = {
+        "lib/net10.0/LogBrew.AspNetCore.dll",
+        "README.md",
+        "logbrew-logo-espresso-bg-128.png",
+        "examples/AspNetCoreMiddlewareTelemetry.cs",
+    }
+    missing = sorted(required - names)
+    if missing:
+        raise SystemExit(f"missing ASP.NET Core nupkg files: {missing}")
+    readme = archive.read("README.md").decode()
+    nuspec = archive.read("LogBrew.AspNetCore.nuspec").decode()
+if 'dependency id="LogBrew"' not in nuspec:
+    raise SystemExit("missing LogBrew dependency metadata")
+if "<icon>logbrew-logo-espresso-bg-128.png</icon>" not in nuspec:
+    raise SystemExit("missing ASP.NET Core NuGet package icon metadata")
+for needle in (
+    "dotnet add package LogBrew.AspNetCore",
+    "UseLogBrewRequestTelemetry",
+    "WithRequestFilter",
+    "WithRouteTemplateSelector",
+    "does not read request or response bodies",
+    "AspNetCoreMiddlewareTelemetry.cs",
+):
+    if needle not in readme:
+        raise SystemExit(f"missing ASP.NET Core README guidance: {needle}")
 PY
 
 run_example() {
@@ -189,6 +232,25 @@ cat > "$web_dir/AspNetCoreRequestTelemetry.csproj" <<EOF
 EOF
 dotnet build "$web_dir/AspNetCoreRequestTelemetry.csproj" --configuration Release >/dev/null
 
+middleware_web_dir="$tmp_dir/AspNetCoreMiddlewareTelemetry"
+dotnet new web --framework net10.0 --name AspNetCoreMiddlewareTelemetry --output "$middleware_web_dir" >/dev/null
+cp "$package_dir/examples/AspNetCoreMiddlewareTelemetry.cs" "$middleware_web_dir/Program.cs"
+cat > "$middleware_web_dir/AspNetCoreMiddlewareTelemetry.csproj" <<EOF
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$package_dir/src/LogBrew/LogBrew.csproj" />
+    <ProjectReference Include="$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" />
+  </ItemGroup>
+</Project>
+EOF
+dotnet build "$middleware_web_dir/AspNetCoreMiddlewareTelemetry.csproj" --configuration Release >/dev/null
+
 make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
@@ -198,5 +260,6 @@ grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_d
 grep -qx 'run-activity-trace-correlation -> make run-activity-trace-correlation' "$tmp_dir/examples-help.txt"
 grep -qx 'run-http-client-outbound-telemetry -> make run-http-client-outbound-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-request-telemetry -> make run-aspnetcore-request-telemetry' "$tmp_dir/examples-help.txt"
+grep -qx 'run-aspnetcore-middleware-telemetry -> make run-aspnetcore-middleware-telemetry' "$tmp_dir/examples-help.txt"
 
 echo "dotnet package checks passed"

@@ -334,6 +334,14 @@ app.Use(async (context, next) =>
 
 The helper does not patch ASP.NET Core globally, read request or response bodies, capture arbitrary headers, serialize `traceparent`, include query strings, open support tickets, infer usage/quota, or flush automatically. The app still owns middleware order, response handling, and shutdown/flush. The packaged `examples/AspNetCoreRequestTelemetry.cs` file shows a local Kestrel app with route-template extraction and copyable middleware wiring.
 
+If you want package-owned ASP.NET Core middleware instead of copying the wrapper into your app, install the optional integration package:
+
+```bash
+dotnet add package LogBrew.AspNetCore
+```
+
+`LogBrew.AspNetCore` adds `app.UseLogBrewRequestTelemetry(client, options => ...)`, uses the same privacy-bounded request span/metric/issue path as the explicit helper, keeps `LogBrewTrace.Current` active for downstream `ILogger` calls, and still avoids body/header/query/raw propagation capture. The packaged `examples/AspNetCoreMiddlewareTelemetry.cs` file in that integration package shows the complete middleware version.
+
 ## Dependency Spans
 
 Use `LogBrewOperationTracing` around app-owned database, cache, or queue calls when you want dependency timing without a profiler, Entity Framework interceptor, Redis/Kafka client dependency, or global patching:

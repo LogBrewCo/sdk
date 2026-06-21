@@ -1,4 +1,4 @@
-.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation run-activity-trace-correlation run-http-client-outbound-telemetry run-aspnetcore-request-telemetry
+.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation run-activity-trace-correlation run-http-client-outbound-telemetry run-aspnetcore-request-telemetry run-aspnetcore-middleware-telemetry
 
 help:
 	@printf '%s\n' 'run-readme-example -> make run-readme-example'
@@ -9,6 +9,7 @@ help:
 	@printf '%s\n' 'run-activity-trace-correlation -> make run-activity-trace-correlation'
 	@printf '%s\n' 'run-http-client-outbound-telemetry -> make run-http-client-outbound-telemetry'
 	@printf '%s\n' 'run-aspnetcore-request-telemetry -> make run-aspnetcore-request-telemetry'
+	@printf '%s\n' 'run-aspnetcore-middleware-telemetry -> make run-aspnetcore-middleware-telemetry'
 
 run: run-real-user-smoke
 
@@ -32,3 +33,6 @@ run-http-client-outbound-telemetry:
 
 run-aspnetcore-request-telemetry:
 	@tmp_dir="$$(realpath "$$(mktemp -d)")" && app_dir="$$tmp_dir/app" && project_path="$$(cd .. && pwd -P)/src/LogBrew/LogBrew.csproj" && trap 'rm -rf "$$tmp_dir"' EXIT && dotnet new web --framework net10.0 --name AspNetCoreRequestTelemetry --output "$$app_dir" >/dev/null && cp AspNetCoreRequestTelemetry.cs "$$app_dir/Program.cs" && printf '%s\n' '<Project Sdk="Microsoft.NET.Sdk.Web">' '  <PropertyGroup>' '    <TargetFramework>net10.0</TargetFramework>' '    <Nullable>enable</Nullable>' '    <ImplicitUsings>enable</ImplicitUsings>' '    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>' '  </PropertyGroup>' '  <ItemGroup>' "    <ProjectReference Include=\"$$project_path\" />" '  </ItemGroup>' '</Project>' > "$$app_dir/AspNetCoreRequestTelemetry.csproj" && dotnet build "$$app_dir/AspNetCoreRequestTelemetry.csproj" --configuration Release >/dev/null && printf '%s\n' 'aspnetcore request telemetry example builds'
+
+run-aspnetcore-middleware-telemetry:
+	@tmp_dir="$$(realpath "$$(mktemp -d)")" && app_dir="$$tmp_dir/app" && package_dir="$$(cd .. && pwd -P)" && trap 'rm -rf "$$tmp_dir"' EXIT && dotnet new web --framework net10.0 --name AspNetCoreMiddlewareTelemetry --output "$$app_dir" >/dev/null && cp AspNetCoreMiddlewareTelemetry.cs "$$app_dir/Program.cs" && printf '%s\n' '<Project Sdk="Microsoft.NET.Sdk.Web">' '  <PropertyGroup>' '    <TargetFramework>net10.0</TargetFramework>' '    <Nullable>enable</Nullable>' '    <ImplicitUsings>enable</ImplicitUsings>' '    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>' '  </PropertyGroup>' '  <ItemGroup>' "    <ProjectReference Include=\"$$package_dir/src/LogBrew/LogBrew.csproj\" />" "    <ProjectReference Include=\"$$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj\" />" '  </ItemGroup>' '</Project>' > "$$app_dir/AspNetCoreMiddlewareTelemetry.csproj" && dotnet build "$$app_dir/AspNetCoreMiddlewareTelemetry.csproj" --configuration Release >/dev/null && printf '%s\n' 'aspnetcore middleware telemetry example builds'
