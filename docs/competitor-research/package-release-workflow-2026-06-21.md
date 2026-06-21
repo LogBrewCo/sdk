@@ -77,3 +77,9 @@ The release workflow now also validates package metadata against the exact NuGet
 `LogBrew` `0.1.1` is now public on NuGet. GitHub Actions publish run `27906664270` completed the NuGet package job successfully, and independent public registry verification passed with `python3 scripts/check_registry_publication.py --target nuget --nuget-version LogBrew=0.1.1 --retries 20 --retry-delay 30`.
 
 The release was correctly scoped to NuGet; unrelated ecosystems did not need version bumps for this .NET-only release. The next .NET competitor gap is not package availability anymore, but optional automatic ActivitySource/ASP.NET/HttpClient/EF/SqlClient/Redis/Kafka integration packages with richer semantics/events, where Sentry/Datadog/OpenTelemetry remain stronger.
+
+## Activity Span Follow-Up
+
+`LogBrew` `0.1.2` is now public on NuGet for the explicit .NET `Activity` span capture improvement. GitHub Actions CI run `27907943588` passed Contract, Swift, Kotlin, and Objective-C checks for commit `e112c067bc433aaf0136a4ada16516650beebf03`. The scoped NuGet dry run `27908494575` passed package creation without publishing, and real publish run `27908514040` published and verified the public package. Independent registry verification also passed with `python3 scripts/check_registry_publication.py --target nuget --nuget-version LogBrew=0.1.2 --retries 20 --retry-delay 30`.
+
+This keeps the release scoped to the changed .NET package. The remaining .NET market gap is still optional automatic ActivitySource/ASP.NET/HttpClient/EF/SqlClient/Redis/Kafka integration packages with richer semantics/events; the current `0.1.2` release deliberately improves explicit app-owned Activity capture without adding global listeners, exporters, baggage, tracestate, or raw request data capture.
