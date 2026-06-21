@@ -39,7 +39,7 @@ Important: GitHub evaluates `release` workflows from the release tag's commit, n
 - Keep local and CI release-readiness checks aligned: if local smoke tests install packaged artifacts, CI should continue to exercise those same artifact-oriented paths
 - Prefer verifiers with a machine-readable summary mode so CI and automation can consume pass/fail plus step metadata without scraping logs
 - Use Blacksmith runners for publish preflight and OIDC-capable registry jobs where supported, but keep npm's final trusted-publishing job on GitHub-hosted runners because npm does not currently support self-hosted runners for trusted publishing.
-- After publishing, verify public registry metadata through `python3 scripts/check_registry_publication.py` or the `publish-packages.yml` `target=verify` mode before treating a release as externally available. Package-specific publishes should verify the exact package version that was just built, for example the NuGet job reads `LogBrew.csproj` and passes that version to the registry verifier.
+- After publishing, verify public registry metadata through `python3 scripts/check_registry_publication.py` or the `publish-packages.yml` `target=verify` mode before treating a release as externally available. Package-specific publishes should verify the exact package version that was just built, for example the NuGet job reads `LogBrew.csproj` and passes that version to the registry verifier. For later standalone verification, dispatch `target=verify` with `verify_version` or package-specific `verify_npm_versions`, `verify_pypi_versions`, and `verify_nuget_versions` overrides.
 
 ## What to do next
 

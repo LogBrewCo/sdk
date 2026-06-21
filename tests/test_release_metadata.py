@@ -14,22 +14,7 @@ check_release_metadata = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(check_release_metadata)
 
-
-class ReleaseMetadataTests(unittest.TestCase):
-    def test_repo_release_metadata_passes(self) -> None:
-        self.assertEqual(check_release_metadata.validate(ROOT), [])
-
-    def test_publish_packages_workflow_requires_exact_nuget_version_verification(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            workflow_dir = root / ".github" / "workflows"
-            docs_dir = root / "docs"
-            publisher_dir = root / ".github" / "publishing"
-            workflow_dir.mkdir(parents=True)
-            docs_dir.mkdir(parents=True)
-            publisher_dir.mkdir(parents=True)
-            (workflow_dir / "publish-release.yml").write_text(
-                """
+MINIMAL_PUBLISH_RELEASE_WORKFLOW = """
 name: Publish Release
 jobs:
   dispatch-publish:
@@ -51,9 +36,33 @@ jobs:
       - name: Summarize release publish decision
         run: echo "Skipped package publishing for scoped GitHub Release"
 """.strip()
-                + "\n",
-                encoding="utf-8",
-            )
+
+
+def write_release_workflow_fixture(root: Path) -> Path:
+    workflow_dir = root / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "publish-release.yml").write_text(
+        MINIMAL_PUBLISH_RELEASE_WORKFLOW + "\n",
+        encoding="utf-8",
+    )
+    for relative in check_release_metadata.RELEASE_SAFETY_DOCS:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "release tag's commit historical tags check_repo_wide_release_versions.py\n",
+            encoding="utf-8",
+        )
+    return workflow_dir
+
+
+class ReleaseMetadataTests(unittest.TestCase):
+    def test_repo_release_metadata_passes(self) -> None:
+        self.assertEqual(check_release_metadata.validate(ROOT), [])
+
+    def test_publish_packages_workflow_requires_exact_nuget_version_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
             (workflow_dir / "publish-packages.yml").write_text(
                 """
 name: Publish Packages
@@ -66,18 +75,43 @@ jobs:
                 + "\n",
                 encoding="utf-8",
             )
-            for relative in check_release_metadata.RELEASE_SAFETY_DOCS:
-                path = root / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(
-                    "release tag's commit historical tags check_repo_wide_release_versions.py\n",
-                    encoding="utf-8",
-                )
 
             failures: list[str] = []
             check_release_metadata.validate_release_workflows(root, failures)
 
         self.assertTrue(any("NuGet exact public version verification" in failure for failure in failures))
+
+    def test_publish_packages_verify_target_requires_exact_version_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
+            (workflow_dir / "publish-packages.yml").write_text(
+                """
+name: Publish Packages
+jobs:
+  nuget:
+    steps:
+      - name: Read NuGet package version
+        id: nuget-version
+        run: echo "version=0.1.0" >> "$GITHUB_OUTPUT"
+      - name: Verify public NuGet package
+        run: python3 scripts/check_registry_publication.py --target nuget --nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}"
+  verify:
+    name: Public registry verification
+    if: ${{ inputs.target == 'verify' }}
+    steps:
+      - name: Verify public registry packages
+        run: python3 scripts/check_registry_publication.py --target all
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("verify target exact version input" in failure for failure in failures))
+        self.assertTrue(any("verify target NuGet version override" in failure for failure in failures))
 
     def test_publish_release_workflow_requires_scoped_release_skip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

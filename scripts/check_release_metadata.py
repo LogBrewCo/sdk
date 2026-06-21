@@ -867,6 +867,13 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "NuGet exact public version verification": (
                 '--nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}"'
             ),
+            "verify target exact version input": "verify_version:",
+            "verify target exact version argument": 'verify_args+=(--version "$VERIFY_VERSION")',
+            "verify target npm version override": 'append_version_overrides --npm-version "$VERIFY_NPM_VERSIONS"',
+            "verify target PyPI version override": 'append_version_overrides --pypi-version "$VERIFY_PYPI_VERSIONS"',
+            "verify target NuGet version override": (
+                'append_version_overrides --nuget-version "$VERIFY_NUGET_VERSIONS"'
+            ),
         }
         for description, needle in required_publish_needles.items():
             require(needle in publish_packages_text, failures, f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}")

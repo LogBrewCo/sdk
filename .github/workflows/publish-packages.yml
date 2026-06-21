@@ -62,6 +62,26 @@ on:
         required: true
         type: boolean
         default: false
+      verify_version:
+        description: "Default public package version expected by target=verify; empty uses verifier default"
+        required: false
+        type: string
+        default: ""
+      verify_npm_versions:
+        description: "Comma-separated npm PACKAGE=VERSION overrides for target=verify"
+        required: false
+        type: string
+        default: ""
+      verify_pypi_versions:
+        description: "Comma-separated PyPI PACKAGE=VERSION overrides for target=verify"
+        required: false
+        type: string
+        default: ""
+      verify_nuget_versions:
+        description: "Comma-separated NuGet PACKAGE=VERSION overrides for target=verify"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -639,9 +659,35 @@ jobs:
 
       - name: Verify public registry packages
         shell: bash
+        env:
+          VERIFY_VERSION: ${{ inputs.verify_version }}
+          VERIFY_NPM_VERSIONS: ${{ inputs.verify_npm_versions }}
+          VERIFY_PYPI_VERSIONS: ${{ inputs.verify_pypi_versions }}
+          VERIFY_NUGET_VERSIONS: ${{ inputs.verify_nuget_versions }}
         run: |
           set -Eeuo pipefail
           verify_args=(--target all)
+          append_version_overrides() {
+            local flag="$1"
+            local raw_versions="$2"
+            local version_entry
+            if [[ -z "$raw_versions" ]]; then
+              return
+            fi
+            IFS=',' read -ra version_entries <<< "$raw_versions"
+            for version_entry in "${version_entries[@]}"; do
+              version_entry="$(printf '%s' "$version_entry" | xargs)"
+              if [[ -n "$version_entry" ]]; then
+                verify_args+=("$flag" "$version_entry")
+              fi
+            done
+          }
+          if [[ -n "$VERIFY_VERSION" ]]; then
+            verify_args+=(--version "$VERIFY_VERSION")
+          fi
+          append_version_overrides --npm-version "$VERIFY_NPM_VERSIONS"
+          append_version_overrides --pypi-version "$VERIFY_PYPI_VERSIONS"
+          append_version_overrides --nuget-version "$VERIFY_NUGET_VERSIONS"
           if [[ "${{ inputs.include_unity_npm }}" == "true" ]]; then
             verify_args+=(--include-unity-npm)
           fi

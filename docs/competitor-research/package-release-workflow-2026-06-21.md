@@ -26,6 +26,19 @@ LogBrew already supports repo-wide version gating, but the manual NuGet publish 
 - `scripts/check_registry_publication.py` now supports NuGet package-version overrides in the same style as npm and PyPI overrides.
 - `scripts/check_release_metadata.py` now guards that the workflow keeps exact NuGet version verification wired.
 
+## Verify-Only Follow-Up
+
+The first fix made real NuGet publishes verify the exact built version. A second release-confidence gap remained: manual `target=verify` still checked only default public versions, so maintainers could not recheck a package-specific release without republishing.
+
+`publish-packages.yml` now accepts verify-only inputs:
+
+- `verify_version`
+- `verify_npm_versions`
+- `verify_pypi_versions`
+- `verify_nuget_versions`
+
+The `target=verify` job passes those values to `scripts/check_registry_publication.py`, letting a maintainer recheck examples such as `verify_nuget_versions=LogBrew=0.1.1` after a scoped NuGet publish.
+
 ## Verification
 
 - Red tests first:
@@ -35,6 +48,9 @@ LogBrew already supports repo-wide version gating, but the manual NuGet publish 
   - `python3 -m unittest tests/test_registry_publication.py tests/test_release_metadata.py`
   - `python3 scripts/check_release_metadata.py`
   - `python3 scripts/check_registry_publication.py --target nuget --nuget-version LogBrew=0.1.0 --retries 1 --retry-delay 1`
+- Verify-only follow-up proof:
+  - `python3 -m unittest tests.test_release_metadata.ReleaseMetadataTests.test_publish_packages_verify_target_requires_exact_version_inputs`
+  - `python3 -m unittest tests/test_registry_publication.py tests/test_release_metadata.py`
 
 ## Honest Status
 
