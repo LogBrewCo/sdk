@@ -206,3 +206,45 @@ The source-backed lightweight pattern LogBrew can safely adopt in the core SDK i
 ### Remaining Gap
 
 LogBrew is now better for teams that want explicit installed-package outbound HTTP trace propagation through either a one-off send helper or normal handler pipeline without global patching, baggage/tracestate, URL/header/body capture, or profiler setup. Sentry, Datadog, and OpenTelemetry remain stronger for automatic transparent `HttpClient` instrumentation, request filtering at instrumentation level, richer semantic conventions, baggage/tracestate, span events/exceptions/links, and deep automatic EF/SqlClient/Redis/Kafka instrumentation.
+
+## 2026-06-21 Explicit Activity Span Capture Follow-Up
+
+### Additional Source Reviewed
+
+- Sentry .NET `getsentry/sentry-dotnet@2f2842f20f9581468a0ab4e971bfd507557161b3`.
+- Read `src/Sentry.OpenTelemetry/SentrySpanProcessor.cs`: `SentrySpanProcessor.OnStart(...)`, `OnEnd(...)`, Activity-to-transaction/span mapping, tag/resource copying, HTTP status mapping, status/description parsing, and exception-event synthesis.
+- Read `src/Sentry.OpenTelemetry.Exporter/ActivityExtensions.cs`: `ActivitySpanId`/`ActivityTraceId` to Sentry ID conversion.
+- Read `src/Sentry.OpenTelemetry/OpenTelemetryExtensions.cs`: HTTP method/full-URL/status attribute helpers.
+- Read `src/Sentry.OpenTelemetry/TracerProviderBuilderExtensions.cs`: `AddSentry(...)` processor registration and propagator setup.
+- OpenTelemetry .NET `open-telemetry/opentelemetry-dotnet@98c3e0c`.
+- Read `src/OpenTelemetry/BaseProcessor.cs`: processor lifecycle contract for `OnStart(...)`, `OnEnd(...)`, force flush, and shutdown.
+- Read `src/OpenTelemetry.Exporter.Console/ConsoleActivityExporter.cs`: exported Activity fields for trace ID, span ID, parent span ID, flags, kind, display name, status, duration, tags, events, links, source, and resource attributes.
+- Datadog .NET tracer `DataDog/dd-trace-dotnet@b92777ccdbd8bc7f7ad0a7cb59d5d53f638e93e1`.
+- Read `tracer/src/Datadog.Trace/Activity/ActivityListener.cs`, `ActivityListenerHandler.cs`, `Activity/OtlpHelpers.cs`, and `Activity/Handlers/DisableActivityHandler.cs`: ActivitySource listener setup, W3C ID forcing, disabled-source matching, tag/event/link/status copying, and OTel semantic mapping.
+
+### Pattern
+
+Sentry, Datadog, and OpenTelemetry are still stronger for automatic `ActivitySource` collection because they install processors/listeners, receive every matching Activity, and copy richer Activity tags/events/links/resources into exported spans. That improves transparent coverage but also broadens dependency, lifecycle, and privacy surfaces through global registration, richer attribute capture, baggage/tracestate paths, and automatic framework ownership.
+
+The safer LogBrew core pattern is explicit capture from an app-owned `Activity`: use the Activity's W3C trace/span IDs when the caller asks, copy only a small safe semantic allowlist, and preserve existing app/framework instrumentation ownership.
+
+### LogBrew Change
+
+- Added `LogBrewActivitySpanTelemetry.Capture(...)` and `LogBrewActivitySpanOptions`.
+- The helper captures one LogBrew span from a valid W3C `System.Diagnostics.Activity`, using the Activity trace ID/span ID, optional parent span ID, recorded flag, duration, Activity name/kind/source metadata, and a safe primitive tag allowlist for HTTP method/route/status, DB system/operation, and messaging system/operation.
+- Invalid null, unstarted, non-W3C, default, or all-zero Activities return `false` without queuing telemetry.
+- SDK capture failures, such as invalid timestamps, report through optional `OnError(...)` and do not interrupt app-owned Activity or request flows.
+- The helper remains dependency-free: no OpenTelemetry package reference, exporters, processors, ActivityListener, DiagnosticSource subscription, global HTTP/ASP.NET patching, baggage, tracestate, raw traceparent serialization, headers, payloads, full URLs, query strings, or support-ticket behavior.
+- Updated packaged `examples/ActivityTraceCorrelation.cs`, README guidance, and `scripts/check_dotnet_activity_trace_payload.py` so installed-package proof covers both Activity-to-child LogBrew correlation and the Activity span itself.
+- Bumped the scoped NuGet package version to `LogBrew` `0.1.2` for a changed-package release after CI/publish verification.
+
+### Evidence
+
+- Red TDD: focused .NET tests failed on missing `LogBrewActivitySpanTelemetry` and `LogBrewActivitySpanOptions`.
+- `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release`: 54 tests passed, including explicit Activity span capture, invalid Activity suppression, capture-failure isolation, and option validation.
+- `bash scripts/check_dotnet_package.sh`: passed with NuGet pack proof, README guidance, source example execution, packaged Activity example inclusion, and payload validation for the Activity span plus privacy exclusions.
+- `bash scripts/real_user_dotnet_smoke.sh`: passed with packed NuGet install/remove/reinstall proof and installed Activity span payload validation.
+
+### Remaining Gap
+
+LogBrew is now better for teams that want explicit, lightweight Activity span capture without taking over OpenTelemetry exporters/processors or globally listening to all `ActivitySource` data. Sentry, Datadog, and OpenTelemetry remain stronger for automatic ActivitySource/ASP.NET/HttpClient/EF/SqlClient/Redis/Kafka instrumentation, baggage/tracestate, rich span events/exceptions/links, resource attributes, profiling, and deeper semantic conventions.

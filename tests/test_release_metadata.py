@@ -300,7 +300,7 @@ jobs:
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <PackageId>LogBrew</PackageId>
-    <Version>0.1.2</Version>
+    <Version>0.1.3</Version>
     <Authors>LogBrew</Authors>
     <Company>LogBrew</Company>
     <Description>Public LogBrew .NET SDK.</Description>
@@ -325,7 +325,7 @@ jobs:
             default_failures: list[str] = []
             check_release_metadata.validate_dotnet(root, default_failures)
             override_failures: list[str] = []
-            check_release_metadata.validate_dotnet(root, override_failures, expected_version="0.1.2")
+            check_release_metadata.validate_dotnet(root, override_failures, expected_version="0.1.3")
 
         self.assertTrue(any("Version" in failure for failure in default_failures))
         self.assertEqual(override_failures, [])

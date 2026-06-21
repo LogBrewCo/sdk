@@ -218,7 +218,8 @@ If your service already creates `System.Diagnostics.Activity` spans through Open
 using System.Diagnostics;
 using LogBrew;
 
-if (LogBrewTraceContext.TryCreateChildFromCurrentActivity(out var trace) && trace != null)
+var activity = Activity.Current;
+if (activity != null && LogBrewTraceContext.TryCreateChildFromActivity(activity, out var trace) && trace != null)
 {
     var request = LogBrewHttpRequestTelemetry.StartWithTraceContext(
         client,
@@ -232,10 +233,16 @@ if (LogBrewTraceContext.TryCreateChildFromCurrentActivity(out var trace) && trac
     }
 
     request.FinishSpanAndMetric("evt_span_activity", "evt_metric_activity", "2026-06-02T10:00:06Z", 202);
+
+    LogBrewActivitySpanTelemetry.Capture(
+        client,
+        activity,
+        LogBrewActivitySpanOptions.Create()
+            .WithEventIdPrefix("dotnet_activity_source"));
 }
 ```
 
-`TryCreateChildFromCurrentActivity()`, `TryCreateChildFromActivity(...)`, and `TryCreateChildFromActivityContext(...)` copy only valid W3C Activity trace ID, span ID, and recorded flag into a fresh LogBrew child span. Use the `ActivityContext` form when your app already has an OpenTelemetry-style context value instead of a live `Activity`. These helpers return `false` for null, unstarted, non-W3C, or default/all-zero contexts. They do not add an OpenTelemetry dependency, own exporters/processors, read tracestate or baggage, patch HTTP clients, capture payloads, serialize raw propagation headers, or change `Activity.Current`. The packaged `examples/ActivityTraceCorrelation.cs` file shows installed-package Activity-to-LogBrew log/action/span/metric correlation.
+`TryCreateChildFromCurrentActivity()`, `TryCreateChildFromActivity(...)`, and `TryCreateChildFromActivityContext(...)` copy only valid W3C Activity trace ID, span ID, and recorded flag into a fresh LogBrew child span. Use `LogBrewActivitySpanTelemetry.Capture(...)` when you also want the app-owned `Activity` itself represented as one LogBrew span, usually after your app or framework has finished that Activity. It copies W3C trace/span IDs, parent span ID, recorded flag, duration, Activity name/kind/source, and a small allowlist of safe primitive semantic tags such as HTTP method/route/status, DB system/operation, and messaging system/operation. These helpers return `false` for null, unstarted, non-W3C, or default/all-zero contexts and report capture failures through optional `OnError(...)`. They do not add an OpenTelemetry dependency, own exporters/processors, install Activity listeners, read tracestate or baggage, patch HTTP clients, capture payloads, serialize raw propagation headers, include full URLs/headers/query strings, or change `Activity.Current`. The packaged `examples/ActivityTraceCorrelation.cs` file shows installed-package Activity-to-LogBrew log/action/span/metric correlation.
 
 For outbound calls, use `LogBrewHttpClientTelemetry` when your app owns the `HttpClient` request and wants one child span plus one normalized downstream `traceparent`:
 

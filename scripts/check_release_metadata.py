@@ -14,7 +14,7 @@ from typing import Any
 
 
 PUBLIC_VERSION = "0.1.0"
-DOTNET_VERSION = "0.1.1"
+DOTNET_VERSION = "0.1.2"
 PUBLIC_LICENSE = "MIT"
 REPO_URL = "https://github.com/LogBrewCo/sdk"
 NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"

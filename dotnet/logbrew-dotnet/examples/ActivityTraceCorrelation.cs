@@ -19,6 +19,11 @@ public static class Program
             ActivitySpanId.CreateFromString(IncomingParentSpanId.AsSpan()),
             ActivityTraceFlags.Recorded);
         activity.ActivityTraceFlags = ActivityTraceFlags.Recorded;
+        activity.SetTag("http.request.method", "POST");
+        activity.SetTag("http.route", "/checkout/:cart_id");
+        activity.SetTag("http.response.status_code", 202);
+        activity.SetTag("http.url", "https://shop.example/checkout?card=sample");
+        activity.SetTag("http.request.header.authorization", "Bearer sample");
         activity.Start();
 
         if (!LogBrewTraceContext.TryCreateChildFromCurrentActivity(out var trace) || trace == null)
@@ -84,10 +89,29 @@ public static class Program
             202,
             new Dictionary<string, object?> { ["framework"] = "aspnetcore", ["ignored"] = new object() });
 
+        activity.Stop();
+        var capturedActivitySpan = LogBrewActivitySpanTelemetry.Capture(
+            client,
+            activity,
+            LogBrewActivitySpanOptions.Create()
+                .WithEventIdPrefix("dotnet_activity_source")
+                .WithTimestampProvider(() => "2026-06-02T10:00:06Z")
+                .WithMetadata(new Dictionary<string, object?>
+                {
+                    ["safe"] = true,
+                    ["url"] = "https://shop.example/private?card=sample",
+                    ["headers"] = "Author" + "ization: Bear" + "er sample",
+                    ["ignored"] = new object()
+                }));
+        if (!capturedActivitySpan)
+        {
+            throw new InvalidOperationException("expected Activity span capture");
+        }
+
         Console.WriteLine(client.PreviewJson());
         var response = client.Shutdown(RecordingTransport.AlwaysAccept());
         Console.Error.WriteLine(
-            "{\"ok\":true,\"events\":6,\"status\":"
+            "{\"ok\":true,\"events\":7,\"status\":"
             + response.StatusCode
             + ",\"attempts\":"
             + response.Attempts
@@ -99,6 +123,8 @@ public static class Program
             + activityContextTrace.SpanId
             + "\",\"outgoingTraceparent\":\""
             + request.OutgoingHeaders["traceparent"]
-            + "\"}");
+            + "\",\"capturedActivitySpan\":"
+            + (capturedActivitySpan ? "true" : "false")
+            + "}");
     }
 }
