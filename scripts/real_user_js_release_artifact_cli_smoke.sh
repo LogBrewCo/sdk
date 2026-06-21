@@ -21,7 +21,9 @@ package_tgz="$(node -e 'const fs = require("node:fs"); const item = JSON.parse(f
 package_path="$tmp_dir/$package_tgz"
 
 tar -tf "$package_path" > "$tmp_dir/package-contents.txt"
+grep -q '^package/release-artifacts-common.js$' "$tmp_dir/package-contents.txt"
 grep -q '^package/release-artifacts.js$' "$tmp_dir/package-contents.txt"
+grep -q '^package/release-artifacts-upload.js$' "$tmp_dir/package-contents.txt"
 grep -q '^package/release-artifacts-symbolication.js$' "$tmp_dir/package-contents.txt"
 tar -xOf "$package_path" package/package.json > "$tmp_dir/packed-package.json"
 
@@ -36,8 +38,14 @@ if (packageJson.version !== expectedVersion) {
 if (packageJson.bin?.["logbrew-release-artifacts"] !== "./release-artifacts.js") {
   throw new Error(`unexpected package bin: ${JSON.stringify(packageJson.bin)}`);
 }
+if (!packageJson.files?.includes("release-artifacts-common.js")) {
+  throw new Error("release-artifacts-common.js missing from package files list");
+}
 if (!packageJson.files?.includes("release-artifacts.js")) {
   throw new Error("release-artifacts.js missing from package files list");
+}
+if (!packageJson.files?.includes("release-artifacts-upload.js")) {
+  throw new Error("release-artifacts-upload.js missing from package files list");
 }
 if (!packageJson.files?.includes("release-artifacts-symbolication.js")) {
   throw new Error("release-artifacts-symbolication.js missing from package files list");
@@ -54,6 +62,7 @@ grep -q '^Usage:$' "$tmp_dir/cli-help.txt"
 grep -q 'prepare-js --build-dir <dir>' "$tmp_dir/cli-help.txt"
 grep -q 'manifest-js --build-dir <dir>' "$tmp_dir/cli-help.txt"
 grep -q 'symbolicate-js --build-dir <dir>' "$tmp_dir/cli-help.txt"
+grep -q 'upload-js --build-dir <dir>' "$tmp_dir/cli-help.txt"
 
 app_root="$tmp_dir/checkout-app"
 build_dir="$app_root/dist"
@@ -105,6 +114,14 @@ node_modules/.bin/logbrew-release-artifacts \
   --stack-frame "at checkout (https://cdn.example/assets/assets/app.js:1:1)" \
   > "$tmp_dir/symbolicated-frame.json"
 
+node_modules/.bin/logbrew-release-artifacts \
+  upload-js \
+  --build-dir "$build_dir" \
+  --manifest "$tmp_dir/manifest.json" \
+  --endpoint "http://127.0.0.1:4319/upload?token=placeholder#ignored" \
+  --dry-run \
+  > "$tmp_dir/upload-dry-run.json"
+
 node - "$tmp_dir" "$build_dir" <<'EOF'
 const fs = require("node:fs");
 const path = require("node:path");
@@ -114,9 +131,10 @@ const buildDir = process.argv[3];
 const prepareReport = JSON.parse(fs.readFileSync(path.join(tmpDir, "prepare-report.json"), "utf8"));
 const manifest = JSON.parse(fs.readFileSync(path.join(tmpDir, "manifest.json"), "utf8"));
 const symbolicatedFrame = JSON.parse(fs.readFileSync(path.join(tmpDir, "symbolicated-frame.json"), "utf8"));
+const uploadDryRun = JSON.parse(fs.readFileSync(path.join(tmpDir, "upload-dry-run.json"), "utf8"));
 const minified = fs.readFileSync(path.join(buildDir, "assets", "app.js"), "utf8");
 const sourceMap = JSON.parse(fs.readFileSync(path.join(buildDir, "assets", "app.js.map"), "utf8"));
-const serialized = `${JSON.stringify(prepareReport)}\n${JSON.stringify(manifest)}\n${JSON.stringify(symbolicatedFrame)}`;
+const serialized = `${JSON.stringify(prepareReport)}\n${JSON.stringify(manifest)}\n${JSON.stringify(symbolicatedFrame)}\n${JSON.stringify(uploadDryRun)}`;
 
 if (prepareReport.validation.status !== "ready") {
   throw new Error(`prepare-js was not ready: ${JSON.stringify(prepareReport.validation)}`);
@@ -159,7 +177,13 @@ if (sourceMap.sourcesContent !== undefined || artifact.sourceMap.hasSourcesConte
 if (sourceMap.sources.length !== 1 || sourceMap.sources[0] !== "src/main.js") {
   throw new Error(`source prefix was not stripped safely: ${JSON.stringify(sourceMap.sources)}`);
 }
-if (/source fixture marker|flag=debug|#fragment/.test(serialized)) {
+if (uploadDryRun.status !== "dry_run" || uploadDryRun.endpoint !== "http://127.0.0.1:4319/upload") {
+  throw new Error(`unexpected upload dry-run report: ${JSON.stringify(uploadDryRun)}`);
+}
+if (uploadDryRun.artifactCount !== 1 || uploadDryRun.filePartCount !== 2 || uploadDryRun.attempts.length !== 0) {
+  throw new Error(`unexpected upload dry-run shape: ${JSON.stringify(uploadDryRun)}`);
+}
+if (/source fixture marker|flag=debug|#fragment|token=placeholder/.test(serialized)) {
   throw new Error("release artifact CLI report leaked source marker or URL data");
 }
 EOF

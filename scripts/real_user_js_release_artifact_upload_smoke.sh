@@ -18,6 +18,25 @@ trap cleanup EXIT
 dist_dir="$tmp_dir/dist"
 mkdir -p "$dist_dir"
 
+sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+
+(
+  cd "$repo_root/js/logbrew-js"
+  npm pack --json --pack-destination "$tmp_dir" > "$tmp_dir/npm-pack.json"
+)
+
+package_tgz="$(node -e 'const fs = require("node:fs"); const item = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))[0]; process.stdout.write(item.filename);' "$tmp_dir/npm-pack.json")"
+package_path="$tmp_dir/$package_tgz"
+
+(
+  cd "$tmp_dir"
+  npm init -y >/dev/null
+  npm install --ignore-scripts --no-audit --fund=false "$package_path" >/dev/null
+)
+
+release_artifacts_cli="$tmp_dir/node_modules/.bin/logbrew-release-artifacts"
+test -x "$release_artifacts_cli"
+
 printf 'console.log("compiled app");//# sourceMappingURL=app.js.map\n' > "$dist_dir/app.js"
 python3 - "$dist_dir/app.js.map" <<'PY'
 import json
@@ -39,14 +58,16 @@ Path(sys.argv[1]).write_text(
 )
 PY
 
-python3 "$repo_root/scripts/prepare_js_release_artifact_debug_ids.py" \
+"$release_artifacts_cli" \
+  prepare-js \
   --build-dir "$dist_dir" \
   --strip-sources-content \
   --write \
   > "$tmp_dir/debug-plan.json"
 
 manifest="$tmp_dir/manifest-ready.json"
-python3 "$repo_root/scripts/create_js_release_artifact_manifest.py" \
+"$release_artifacts_cli" \
+  manifest-js \
   --build-dir "$dist_dir" \
   --release "2026.06.18" \
   --environment "production" \
@@ -137,7 +158,8 @@ fi
 endpoint_base="http://127.0.0.1:$(cat "$port_file")"
 export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_token"
 
-python3 "$repo_root/scripts/upload_js_release_artifacts.py" \
+"$release_artifacts_cli" \
+  upload-js \
   --build-dir "$dist_dir" \
   --manifest "$manifest" \
   --endpoint "$endpoint_base/retry-success?ignored=query#ignored" \
@@ -146,7 +168,8 @@ python3 "$repo_root/scripts/upload_js_release_artifacts.py" \
   > "$tmp_dir/upload-success.json"
 
 export LOGBREW_RELEASE_ARTIFACT_TOKEN_BAD="wrong-token"
-if python3 "$repo_root/scripts/upload_js_release_artifacts.py" \
+if "$release_artifacts_cli" \
+  upload-js \
   --build-dir "$dist_dir" \
   --manifest "$manifest" \
   --endpoint "$endpoint_base/auth-failure" \
@@ -158,7 +181,8 @@ if python3 "$repo_root/scripts/upload_js_release_artifacts.py" \
   exit 1
 fi
 
-if python3 "$repo_root/scripts/upload_js_release_artifacts.py" \
+if "$release_artifacts_cli" \
+  upload-js \
   --build-dir "$dist_dir" \
   --manifest "$manifest" \
   --endpoint "$endpoint_base/validation-failure" \
@@ -170,7 +194,8 @@ if python3 "$repo_root/scripts/upload_js_release_artifacts.py" \
 fi
 
 printf 'tampered map\n' >> "$dist_dir/app.js.map"
-if python3 "$repo_root/scripts/upload_js_release_artifacts.py" \
+if "$release_artifacts_cli" \
+  upload-js \
   --build-dir "$dist_dir" \
   --manifest "$manifest" \
   --endpoint "$endpoint_base/retry-success" \
@@ -218,4 +243,4 @@ assert not any(event["containsTempPath"] for event in events)
 assert tmp_dir not in json.dumps(success)
 PY
 
-printf '%s\n' "real-user JavaScript release artifact upload smoke ok"
+printf 'real-user JavaScript release artifact upload smoke ok (@logbrew/sdk %s)\n' "$sdk_package_version"

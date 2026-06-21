@@ -249,7 +249,9 @@ def validate_js_package(
         require(expected_file in files, failures, f"{location}: files must include {expected_file!r}")
     if expected_name == "@logbrew/sdk":
         for expected_file in (
+            "release-artifacts-common.js",
             "release-artifacts.js",
+            "release-artifacts-upload.js",
             "release-artifacts-symbolication.js",
             "vite-release-artifacts.cjs",
             "vite-release-artifacts.js",

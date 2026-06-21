@@ -233,26 +233,43 @@ def is_fake_query_secret_fixture(relative_text: str, line: str) -> bool:
 
 
 def is_release_artifact_upload_verifier_reference(relative_text: str, line: str) -> bool:
+    if relative_text == "js/logbrew-js/release-artifacts.js" and "upload-js" in line and "--token-env" in line:
+        return True
     if relative_text in {
+        "js/logbrew-js/release-artifacts-upload.js",
         "scripts/release_artifact_upload_common.py",
         "scripts/upload_js_release_artifacts.py",
         "scripts/upload_native_release_artifacts.py",
     }:
         allowed_fragments = (
+            "DEFAULT_UPLOAD_TOKEN_ENV",
             "DEFAULT_TOKEN_ENV",
             "parsed.hostname",
+            "const hostname =",
             "hostname =",
+            "hostname ===",
+            "net.isIP(hostname)",
             "if not hostname:",
             "hostname.lower()",
             "token: str",
+            "Bearer ${token}",
             "Bearer {token}",
+            '"token-env": "string"',
             "--token-env",
             "release-artifact token",
+            "const tokenEnv",
+            "if (tokenEnv",
+            "const token =",
             "token = os.environ.get",
+            "if (!token)",
             "if not token:",
+            "auth: { tokenEnv }",
             "token=token",
             "endpoint, token, body",
+            "token,",
+            "Authorization:",
             "Authorization",
+            "postMultipart",
             "post_multipart",
         )
         return any(fragment in line for fragment in allowed_fragments)
@@ -274,8 +291,14 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
     } and "?token=ignored" in line:
         return True
     if relative_text in {
+        "js/logbrew-js/test/release-artifacts-cli.test.js",
+        "scripts/real_user_js_release_artifact_cli_smoke.sh",
+    } and "token=placeholder" in line:
+        return True
+    if relative_text in {
         "docs/backend-contracts/release-artifact-symbolication-2026-06-13.md",
         "docs/competitor-research/source-maps-debug-symbols-2026-06-13.md",
+        "js/logbrew-js/README.md",
     }:
         lower_line = line.lower()
         return "upload" in lower_line and "artifact" in lower_line

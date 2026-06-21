@@ -65,9 +65,15 @@ npx logbrew-release-artifacts symbolicate-js \
   --build-dir dist \
   --manifest logbrew-release-artifacts.json \
   --stack-frame "at checkout (https://cdn.example/assets/app.js:1:1)"
+
+npx logbrew-release-artifacts upload-js \
+  --build-dir dist \
+  --manifest logbrew-release-artifacts.json \
+  --endpoint http://127.0.0.1:4319/release-artifacts \
+  --dry-run
 ```
 
-The command validates local files only. The `symbolicate-js` check resolves one generated stack frame through the prepared manifest so you can catch bad path prefixes, embedded source content, and local source-path leaks before deploy. It does not upload source maps, open support tickets, use account/session API values, or claim backend symbolication support.
+The command validates local files only. The `symbolicate-js` check resolves one generated stack frame through the prepared manifest so you can catch bad path prefixes, embedded source content, and local source-path leaks before deploy. The `upload-js` check revalidates the manifest and can post the manifest/minified/source-map parts only to a loopback fake intake for local CI transport checks; it rejects non-loopback endpoints until backend-owned release-artifact upload routes exist. It does not upload source maps to LogBrew, open support tickets, use account/session API values, or claim backend symbolication support.
 
 ## Example
 

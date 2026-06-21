@@ -4,6 +4,17 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  byteSize,
+  printJson,
+  readJsonObject,
+  requireBuildDir,
+  safeResolve,
+  sha256File,
+  sortJson,
+  stableJson
+} from "./release-artifacts-common.js";
+import { runUploadJs } from "./release-artifacts-upload.js";
 import { verifyJavaScriptSymbolication } from "./release-artifacts-symbolication.js";
 
 const DEBUG_ID_NAMESPACE = "16f4a837-7e0b-4d7c-97d9-8a7af1fd2768";
@@ -14,37 +25,16 @@ const SOURCE_MAP_DEBUG_ID_KEYS = ["debug_id", "debugId", "debugID", "x_debug_id"
 const SOURCE_MAPPING_COMMENT_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=[^\r\n]*/giu;
 const SOURCE_MAPPING_RE = /(?:\/\/#|\/\*#)\s*sourceMappingURL=([^\s*]+)/iu;
 
-function printJson(payload) {
-  process.stdout.write(`${JSON.stringify(sortJson(payload), null, 2)}\n`);
-}
-
-function sortJson(value) {
-  if (Array.isArray(value)) {
-    return value.map(sortJson);
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, sortJson(value[key])])
-    );
-  }
-  return value;
-}
-
-function stableJson(value) {
-  return JSON.stringify(sortJson(value));
-}
-
 function usage() {
   return [
     "Usage:",
     "  logbrew-release-artifacts prepare-js --build-dir <dir> [--write] [--strip-sources-content] [--strip-source-prefix <path>...]",
     "  logbrew-release-artifacts manifest-js --build-dir <dir> --release <id> --environment <env> --service <name> --minified-path-prefix <url-or-path> [--repository-url <url>] [--commit-sha <sha>] [--allow-sources-content]",
     "  logbrew-release-artifacts symbolicate-js --build-dir <dir> --manifest <file> --stack-frame <frame>",
+    "  logbrew-release-artifacts upload-js --build-dir <dir> --manifest <file> --endpoint <loopback-url> [--token-env <env>] [--dry-run] [--max-retries <n>] [--retry-delay <seconds>] [--timeout <seconds>]",
     "",
-    "This installed-package helper prepares and validates local JavaScript source-map artifacts.",
-    "It does not upload files or claim backend symbolication support."
+    "This installed-package helper prepares, validates, resolves, and loopback-tests JavaScript source-map artifacts.",
+    "upload-js is loopback-only until backend-owned release-artifact upload and symbolication routes exist."
   ].join("\n");
 }
 
@@ -99,35 +89,6 @@ function relativeTo(root, filePath) {
   return toPosix(path.relative(root, filePath));
 }
 
-function safeResolve(candidate, root) {
-  const resolvedRoot = fs.realpathSync(root);
-  const resolved = path.resolve(candidate);
-  const comparable = fs.existsSync(resolved) ? fs.realpathSync(resolved) : resolved;
-  const relative = path.relative(resolvedRoot, comparable);
-  if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
-    return comparable;
-  }
-  return null;
-}
-
-function byteSize(filePath) {
-  return fs.statSync(filePath).size;
-}
-
-function sha256File(filePath) {
-  const digest = crypto.createHash("sha256");
-  digest.update(fs.readFileSync(filePath));
-  return digest.digest("hex");
-}
-
-function requireBuildDir(value) {
-  const buildDir = path.resolve(value);
-  if (!fs.existsSync(buildDir) || !fs.statSync(buildDir).isDirectory()) {
-    throw new Error(`build directory does not exist: ${value}`);
-  }
-  return fs.realpathSync(buildDir);
-}
-
 function readText(filePath) {
   return fs.readFileSync(filePath, "utf8");
 }
@@ -147,19 +108,6 @@ function readSourceMap(filePath) {
     return [null, ["source map must be a JSON object"]];
   }
   return [payload, []];
-}
-
-function readJsonObject(filePath, label) {
-  let payload;
-  try {
-    payload = JSON.parse(readText(filePath));
-  } catch (error) {
-    throw new Error(`${label} is not valid JSON: ${error.message}`, { cause: error });
-  }
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new Error(`${label} must be a JSON object`);
-  }
-  return payload;
 }
 
 function findLastMatch(source, regex) {
@@ -734,7 +682,7 @@ function runSymbolicateJs(args) {
   }
 }
 
-function main(argv) {
+async function main(argv) {
   const [command, ...args] = argv;
   if (!command || command === "--help" || command === "-h") {
     process.stdout.write(`${usage()}\n`);
@@ -750,6 +698,9 @@ function main(argv) {
     if (command === "symbolicate-js") {
       return runSymbolicateJs(args);
     }
+    if (command === "upload-js") {
+      return await runUploadJs(args);
+    }
     throw new Error(`unknown command: ${command}`);
   } catch (error) {
     process.stderr.write(`${error.message}\n\n${usage()}\n`);
@@ -757,4 +708,4 @@ function main(argv) {
   }
 }
 
-process.exitCode = main(process.argv.slice(2));
+process.exitCode = await main(process.argv.slice(2));

@@ -197,6 +197,62 @@ test("symbolicate-js resolves a sanitized minified frame through a ready manifes
   }
 });
 
+test("upload-js validates a ready manifest and prints a dry-run upload plan", () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const prep = runCli([
+      "prepare-js",
+      "--build-dir",
+      buildDir,
+      "--strip-sources-content",
+      "--strip-source-prefix",
+      appRoot,
+      "--write"
+    ]);
+    assert.equal(prep.status, 0, prep.stderr);
+
+    const manifestResult = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets"
+    ]);
+    assert.equal(manifestResult.status, 0, manifestResult.stderr);
+    const manifestPath = path.join(root, "manifest.json");
+    fs.writeFileSync(manifestPath, manifestResult.stdout, "utf8");
+
+    const result = runCli([
+      "upload-js",
+      "--build-dir",
+      buildDir,
+      "--manifest",
+      manifestPath,
+      "--endpoint",
+      "http://127.0.0.1:4319/upload?token=placeholder#ignored",
+      "--dry-run"
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const report = jsonFromStdout(result);
+    assert.equal(report.status, "dry_run");
+    assert.equal(report.endpoint, "http://127.0.0.1:4319/upload");
+    assert.equal(report.artifactCount, 1);
+    assert.equal(report.filePartCount, 2);
+    assert.deepEqual(report.attempts, []);
+    assert.doesNotMatch(result.stdout, /source-fixture-marker|token=placeholder|#ignored/);
+    assert.doesNotMatch(result.stdout, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("symbolicate-js blocks source maps that still expose local source paths", () => {
   const { root, buildDir } = makeBuild();
   try {
