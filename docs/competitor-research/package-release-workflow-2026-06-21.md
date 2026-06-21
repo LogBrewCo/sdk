@@ -74,4 +74,6 @@ The release workflow now also validates package metadata against the exact NuGet
 
 ## Honest Status
 
-This prepares public package availability but does not prove registry availability until the NuGet publish workflow succeeds and public registry verification sees `LogBrew` `0.1.1`. The package-specific release should remain scoped to NuGet; unrelated ecosystems do not need version bumps for this .NET-only release.
+`LogBrew` `0.1.1` is now public on NuGet. GitHub Actions publish run `27906664270` completed the NuGet package job successfully, and independent public registry verification passed with `python3 scripts/check_registry_publication.py --target nuget --nuget-version LogBrew=0.1.1 --retries 20 --retry-delay 30`.
+
+The release was correctly scoped to NuGet; unrelated ecosystems did not need version bumps for this .NET-only release. The next .NET competitor gap is not package availability anymore, but optional automatic ActivitySource/ASP.NET/HttpClient/EF/SqlClient/Redis/Kafka integration packages with richer semantics/events, where Sentry/Datadog/OpenTelemetry remain stronger.
