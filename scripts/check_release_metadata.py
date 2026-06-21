@@ -14,6 +14,7 @@ from typing import Any
 
 
 PUBLIC_VERSION = "0.1.0"
+DOTNET_VERSION = "0.1.1"
 PUBLIC_LICENSE = "MIT"
 REPO_URL = "https://github.com/LogBrewCo/sdk"
 NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"
@@ -35,6 +36,7 @@ JS_PACKAGES = {
     "js/logbrew-svelte": "@logbrew/svelte",
     "js/logbrew-vue": "@logbrew/vue",
 }
+NUGET_PACKAGES = {"LogBrew"}
 
 OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
 PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
@@ -613,7 +615,7 @@ def validate_maven_pom(
         require_equal(failures, relative_path, "properties.maven.compiler.release", path_text(project, "properties", "maven.compiler.release"), "11")
 
 
-def validate_dotnet(root: Path, failures: list[str]) -> None:
+def validate_dotnet(root: Path, failures: list[str], expected_version: str = DOTNET_VERSION) -> None:
     project_path = require_path(root, "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj", failures)
     require_path(root, "dotnet/logbrew-dotnet/README.md", failures)
     require_path(root, "dotnet/logbrew-dotnet/examples/FirstUsefulTelemetry.cs", failures)
@@ -632,7 +634,7 @@ def validate_dotnet(root: Path, failures: list[str]) -> None:
     expected = {
         "TargetFramework": "netstandard2.0",
         "PackageId": "LogBrew",
-        "Version": PUBLIC_VERSION,
+        "Version": expected_version,
         "Authors": "LogBrew",
         "Company": "LogBrew",
         "PackageLicenseExpression": PUBLIC_LICENSE,
@@ -866,6 +868,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
         required_publish_needles = {
             "NuGet package version output": "id: nuget-version",
+            "NuGet exact metadata version validation": (
+                'python3 scripts/check_release_metadata.py --nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}"'
+            ),
             "NuGet exact public version verification": (
                 '--nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}"'
             ),
@@ -893,8 +898,13 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         )
 
 
-def validate(root: Path, npm_versions: dict[str, str] | None = None) -> list[str]:
+def validate(
+    root: Path,
+    npm_versions: dict[str, str] | None = None,
+    nuget_versions: dict[str, str] | None = None,
+) -> list[str]:
     failures: list[str] = []
+    nuget_versions = nuget_versions or {}
     validate_root(root, failures)
     validate_release_workflows(root, failures)
     validate_js_packages(root, failures, npm_versions)
@@ -912,7 +922,7 @@ def validate(root: Path, npm_versions: dict[str, str] | None = None) -> list[str
         failures,
         require_compiler_release=True,
     )
-    validate_dotnet(root, failures)
+    validate_dotnet(root, failures, expected_version=nuget_versions.get("LogBrew", DOTNET_VERSION))
     validate_unity(root, failures)
     validate_maven_pom(root, "kotlin/logbrew-kotlin/pom.xml", "logbrew-kotlin", "LogBrew Kotlin SDK", failures)
     validate_maven_pom(
@@ -928,18 +938,20 @@ def validate(root: Path, npm_versions: dict[str, str] | None = None) -> list[str
     return failures
 
 
-def parse_package_versions(raw_versions: list[str]) -> dict[str, str]:
+def parse_package_versions(raw_versions: list[str], allowed_packages: set[str] | None = None) -> dict[str, str]:
     versions: dict[str, str] = {}
+    if allowed_packages is None:
+        allowed_packages = set(JS_PACKAGES.values())
     for raw_version in raw_versions:
         package_name, separator, version = raw_version.partition("=")
         package_name = package_name.strip()
         version = version.strip()
         if not separator or not package_name or not version:
             raise argparse.ArgumentTypeError(
-                f"expected npm package version in name=version form, got {raw_version!r}"
+                f"expected package version in name=version form, got {raw_version!r}"
             )
-        if package_name not in JS_PACKAGES.values():
-            raise argparse.ArgumentTypeError(f"unknown npm package: {package_name}")
+        if package_name not in allowed_packages:
+            raise argparse.ArgumentTypeError(f"unknown package: {package_name}")
         versions[package_name] = version
     return versions
 
@@ -954,14 +966,22 @@ def main() -> int:
         metavar="PACKAGE=VERSION",
         help="Expected version for one npm package. May be passed more than once.",
     )
+    parser.add_argument(
+        "--nuget-version",
+        action="append",
+        default=[],
+        metavar="PACKAGE=VERSION",
+        help="Expected version for one NuGet package. May be passed more than once.",
+    )
     args = parser.parse_args()
 
     try:
         npm_versions = parse_package_versions(args.npm_version)
+        nuget_versions = parse_package_versions(args.nuget_version, NUGET_PACKAGES)
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
 
-    failures = validate(args.root.resolve(), npm_versions)
+    failures = validate(args.root.resolve(), npm_versions, nuget_versions)
     if failures:
         for failure in failures:
             print(failure, file=sys.stderr)

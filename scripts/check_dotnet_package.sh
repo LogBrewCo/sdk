@@ -47,7 +47,8 @@ fi
 dotnet build "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release -warnaserror >/dev/null
 dotnet run --project "$package_dir/tests/LogBrew.Tests/LogBrew.Tests.csproj" --configuration Release
 dotnet pack "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
-nupkg="$tmp_dir/packages/LogBrew.0.1.0.nupkg"
+package_version="$(dotnet msbuild "$package_dir/src/LogBrew/LogBrew.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
+nupkg="$tmp_dir/packages/LogBrew.${package_version}.nupkg"
 test -f "$nupkg"
 
 python3 - "$nupkg" <<'PY'

@@ -81,6 +81,31 @@ jobs:
 
         self.assertTrue(any("NuGet exact public version verification" in failure for failure in failures))
 
+    def test_publish_packages_workflow_requires_exact_nuget_metadata_version_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
+            (workflow_dir / "publish-packages.yml").write_text(
+                """
+name: Publish Packages
+jobs:
+  nuget:
+    steps:
+      - name: Read NuGet package version
+        id: nuget-version
+        run: echo "version=0.1.1" >> "$GITHUB_OUTPUT"
+      - name: Verify public NuGet package
+        run: python3 scripts/check_registry_publication.py --target nuget --nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("NuGet exact metadata version validation" in failure for failure in failures))
+
     def test_publish_packages_verify_target_requires_exact_version_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -249,6 +274,61 @@ jobs:
             )
 
         self.assertEqual(failures, [])
+
+    def test_dotnet_package_accepts_expected_version_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package_dir = root / "dotnet" / "logbrew-dotnet"
+            project_dir = package_dir / "src" / "LogBrew"
+            examples_dir = package_dir / "examples"
+            assets_dir = root / "assets" / "brand"
+            project_dir.mkdir(parents=True)
+            examples_dir.mkdir(parents=True)
+            assets_dir.mkdir(parents=True)
+            (package_dir / "README.md").write_text("# LogBrew .NET\n", encoding="utf-8")
+            for example in (
+                "FirstUsefulTelemetry.cs",
+                "ActivityTraceCorrelation.cs",
+                "HttpClientOutboundTelemetry.cs",
+                "AspNetCoreRequestTelemetry.cs",
+            ):
+                (examples_dir / example).write_text("// example\n", encoding="utf-8")
+            (assets_dir / "logbrew-logo-transparent-128.png").write_bytes(b"png")
+            (project_dir / "LogBrew.csproj").write_text(
+                """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>LogBrew</PackageId>
+    <Version>0.1.2</Version>
+    <Authors>LogBrew</Authors>
+    <Company>LogBrew</Company>
+    <Description>Public LogBrew .NET SDK.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logbrew-logo-transparent-128.png</PackageIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="../../examples/FirstUsefulTelemetry.cs" Pack="true" PackagePath="examples/" />
+    <None Include="../../examples/ActivityTraceCorrelation.cs" Pack="true" PackagePath="examples/" />
+    <None Include="../../examples/HttpClientOutboundTelemetry.cs" Pack="true" PackagePath="examples/" />
+    <None Include="../../examples/AspNetCoreRequestTelemetry.cs" Pack="true" PackagePath="examples/" />
+  </ItemGroup>
+</Project>
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            default_failures: list[str] = []
+            check_release_metadata.validate_dotnet(root, default_failures)
+            override_failures: list[str] = []
+            check_release_metadata.validate_dotnet(root, override_failures, expected_version="0.1.2")
+
+        self.assertTrue(any("Version" in failure for failure in default_failures))
+        self.assertEqual(override_failures, [])
 
     def test_maven_metadata_requires_license_url_developer_and_scm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

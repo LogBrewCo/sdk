@@ -9,7 +9,7 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
     <PackageId>LogBrew</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>LogBrew</Authors>
     <Company>LogBrew</Company>
     <Description>Public LogBrew .NET SDK for building, validating, and flushing event batches.</Description>
@@ -35,6 +35,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.9" />
   </ItemGroup>
 </Project>

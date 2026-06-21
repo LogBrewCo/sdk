@@ -50,7 +50,8 @@ if ! acquire_lock; then
 fi
 
 dotnet pack "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
-nupkg="$tmp_dir/packages/LogBrew.0.1.0.nupkg"
+package_version="$(dotnet msbuild "$package_dir/src/LogBrew/LogBrew.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
+nupkg="$tmp_dir/packages/LogBrew.${package_version}.nupkg"
 test -f "$nupkg"
 export NUGET_PACKAGES="$tmp_dir/nuget-packages"
 nuget_org_source="https://api.nuget.org/v3/index.json"
@@ -143,7 +144,7 @@ run_packaged_example() {
   local app_dir="$tmp_dir/$project_name"
   dotnet new console --framework net10.0 --name "$project_name" --output "$app_dir" >/dev/null
   cp "$extract_dir/examples/$source_file" "$app_dir/Program.cs"
-  dotnet add "$app_dir/$project_name.csproj" package LogBrew --version 0.1.0 >/dev/null
+  dotnet add "$app_dir/$project_name.csproj" package LogBrew --version "$package_version" >/dev/null
   dotnet run --project "$app_dir/$project_name.csproj" --configuration Release > "$stdout_path" 2> "$stderr_path"
 }
 
@@ -177,7 +178,7 @@ python3 "$repo_root/scripts/check_dotnet_http_client_payload.py" "$tmp_dir/packa
 aspnet_dir="$tmp_dir/aspnetcore-app"
 dotnet new web --framework net10.0 --name AspNetCoreApp --output "$aspnet_dir" >/dev/null
 cp "$extract_dir/examples/AspNetCoreRequestTelemetry.cs" "$aspnet_dir/Program.cs"
-dotnet add "$aspnet_dir/AspNetCoreApp.csproj" package LogBrew --version 0.1.0 >/dev/null
+dotnet add "$aspnet_dir/AspNetCoreApp.csproj" package LogBrew --version "$package_version" >/dev/null
 port="$(python3 - <<'PY'
 import socket
 with socket.socket() as sock:
@@ -217,7 +218,7 @@ server_pid=""
 
 lifecycle_dir="$tmp_dir/lifecycle-app"
 dotnet new console --framework net10.0 --name LifecycleApp --output "$lifecycle_dir" >/dev/null
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version 0.1.0 >/dev/null
+dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version "$package_version" >/dev/null
 dotnet list "$lifecycle_dir/LifecycleApp.csproj" package > "$tmp_dir/lifecycle-packages.txt"
 grep -q 'LogBrew' "$tmp_dir/lifecycle-packages.txt"
 dotnet list "$lifecycle_dir/LifecycleApp.csproj" package --include-transitive > "$tmp_dir/lifecycle-packages-transitive.txt"
@@ -227,12 +228,12 @@ if grep -q 'PackageReference Include="LogBrew"' "$lifecycle_dir/LifecycleApp.csp
   echo "expected dotnet remove package to remove LogBrew reference" >&2
   exit 1
 fi
-dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version 0.1.0 >/dev/null
-grep -q 'PackageReference Include="LogBrew" Version="0.1.0"' "$lifecycle_dir/LifecycleApp.csproj"
+dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version "$package_version" >/dev/null
+grep -q "PackageReference Include=\"LogBrew\" Version=\"$package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
 
 logging_dir="$tmp_dir/logging-app"
 dotnet new console --framework net10.0 --name LoggingApp --output "$logging_dir" >/dev/null
-dotnet add "$logging_dir/LoggingApp.csproj" package LogBrew --version 0.1.0 >/dev/null
+dotnet add "$logging_dir/LoggingApp.csproj" package LogBrew --version "$package_version" >/dev/null
 cat > "$logging_dir/Program.cs" <<'CS'
 using System;
 using System.Collections.Generic;
@@ -314,7 +315,7 @@ grep -q '"logging":true' "$tmp_dir/logging-app.stderr.json"
 
 smoke_dir="$tmp_dir/smoke-app"
 dotnet new console --framework net10.0 --name SmokeApp --output "$smoke_dir" >/dev/null
-dotnet add "$smoke_dir/SmokeApp.csproj" package LogBrew --version 0.1.0 >/dev/null
+dotnet add "$smoke_dir/SmokeApp.csproj" package LogBrew --version "$package_version" >/dev/null
 cat > "$smoke_dir/Program.cs" <<'CS'
 using System;
 using System.Collections.Generic;

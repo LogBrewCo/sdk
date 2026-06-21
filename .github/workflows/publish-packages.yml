@@ -481,6 +481,9 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - name: Validate NuGet release metadata
+        run: python3 scripts/check_release_metadata.py --nuget-version "LogBrew=${{ steps.nuget-version.outputs.version }}"
+
       - name: Pack NuGet package
         run: dotnet pack dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj --configuration Release --output dist/nuget
 

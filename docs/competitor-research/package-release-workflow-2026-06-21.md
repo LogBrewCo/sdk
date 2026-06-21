@@ -39,11 +39,24 @@ The first fix made real NuGet publishes verify the exact built version. A second
 
 The `target=verify` job passes those values to `scripts/check_registry_publication.py`, letting a maintainer recheck examples such as `verify_nuget_versions=LogBrew=0.1.1` after a scoped NuGet publish.
 
+## Changed-Package Readiness Follow-Up
+
+The release workflow now also validates package metadata against the exact NuGet version read from `LogBrew.csproj` before packing, so a package-specific .NET bump does not fail the repo-wide default metadata gate or accidentally validate an older public package.
+
+`LogBrew` is prepared for a `0.1.1` NuGet publish:
+
+- `dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj` now declares package version `0.1.1`.
+- `Microsoft.Extensions.Logging` is updated from `10.0.1` to `10.0.9`; `dotnet list ... package --outdated` reports no updates.
+- `scripts/check_dotnet_package.sh` and `scripts/real_user_dotnet_smoke.sh` derive the packed `.nupkg` version from `LogBrew.csproj` instead of hard-coding `LogBrew.0.1.0.nupkg`.
+- The installed-package smoke installs the locally packed `LogBrew=<package version>` in every temporary user app, including install/remove/reinstall proof.
+
 ## Verification
 
 - Red tests first:
   - `python3 -m unittest tests/test_registry_publication.py` failed because `--nuget-version` was unsupported and summaries omitted NuGet overrides.
   - `python3 -m unittest tests.test_release_metadata.ReleaseMetadataTests.test_publish_packages_workflow_requires_exact_nuget_version_verification` failed because the release metadata checker did not guard exact NuGet verification.
+  - `python3 -m unittest tests.test_release_metadata.ReleaseMetadataTests.test_dotnet_package_accepts_expected_version_override` failed because `validate_dotnet(...)` did not accept a package-specific expected version.
+  - `python3 -m unittest tests.test_release_metadata.ReleaseMetadataTests.test_publish_packages_workflow_requires_exact_nuget_metadata_version_validation` failed because the NuGet publish job did not validate metadata against the built package version.
 - Green focused proof:
   - `python3 -m unittest tests/test_registry_publication.py tests/test_release_metadata.py`
   - `python3 scripts/check_release_metadata.py`
@@ -51,7 +64,14 @@ The `target=verify` job passes those values to `scripts/check_registry_publicati
 - Verify-only follow-up proof:
   - `python3 -m unittest tests.test_release_metadata.ReleaseMetadataTests.test_publish_packages_verify_target_requires_exact_version_inputs`
   - `python3 -m unittest tests/test_registry_publication.py tests/test_release_metadata.py`
+- Changed-package readiness proof:
+  - `python3 -m unittest tests/test_release_metadata.py`
+  - `python3 scripts/check_release_metadata.py`
+  - `python3 scripts/check_release_metadata.py --nuget-version LogBrew=0.1.1`
+  - `bash scripts/check_dotnet_package.sh`
+  - `bash scripts/real_user_dotnet_smoke.sh`
+  - `dotnet list dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj package --outdated`
 
 ## Honest Status
 
-This improves release evidence, not public package availability. The current public NuGet package remains `LogBrew` `0.1.0`; the recent .NET SDK improvements still need a deliberate changed-package or repo-wide version release before NuGet users can install them from the public registry.
+This prepares public package availability but does not prove registry availability until the NuGet publish workflow succeeds and public registry verification sees `LogBrew` `0.1.1`. The package-specific release should remain scoped to NuGet; unrelated ecosystems do not need version bumps for this .NET-only release.
