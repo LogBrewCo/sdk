@@ -54,6 +54,17 @@ class BackendContractReportTests(unittest.TestCase):
     def test_repo_backend_contract_reports_pass(self) -> None:
         self.assertEqual(check_backend_contract_reports.validate(ROOT), [])
 
+    def test_release_artifact_report_tracks_react_native_native_artifact_paths(self) -> None:
+        report = (
+            ROOT
+            / "docs"
+            / "backend-contracts"
+            / "release-artifact-symbolication-2026-06-13.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("React Native-shaped Android mapping/native `.so`", report)
+        self.assertIn("iOS `.xcarchive/dSYMs`", report)
+
     def test_valid_report_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
