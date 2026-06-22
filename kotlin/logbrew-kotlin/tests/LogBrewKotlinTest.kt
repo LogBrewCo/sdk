@@ -20,10 +20,15 @@ import co.logbrew.sdk.ReleaseAttributes
 import co.logbrew.sdk.SdkException
 import co.logbrew.sdk.SpanAttributes
 import co.logbrew.sdk.TransportException
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 fun main() {
     run("preview_json_contains_all_supported_event_types", ::previewJsonContainsAllSupportedEventTypes)
     run("flush_success_clears_queue", ::flushSuccessClearsQueue)
+    run("concurrent_logging_preserves_queue_and_flushes", ::concurrentLoggingPreservesQueueAndFlushes)
     run("empty_flush_is_noop", ::emptyFlushIsNoop)
     run("invalid_timestamp_fails_validation", ::invalidTimestampFailsValidation)
     run("invalid_timestamp_shape_fails_validation", ::invalidTimestampShapeFailsValidation)
@@ -56,7 +61,7 @@ fun main() {
     )
     AndroidRequestSpanTests.runAll()
     OperationTracingTests.runAll()
-    println("kotlin package tests ok (29 tests)")
+    println("kotlin package tests ok (30 tests)")
 }
 
 private fun run(
@@ -183,6 +188,57 @@ private fun flushSuccessClearsQueue() {
     check(response.attempts == 1)
     check(client.pendingEvents() == 0)
     check(transport.sentBodies.size == 1)
+}
+
+private fun concurrentLoggingPreservesQueueAndFlushes() {
+    val client = newClient()
+    val workerCount = 16
+    val eventsPerWorker = 1_000
+    val expectedEvents = workerCount * eventsPerWorker
+    val executor = Executors.newFixedThreadPool(workerCount)
+    val start = CountDownLatch(1)
+    val done = CountDownLatch(workerCount)
+    val failures = ConcurrentLinkedQueue<Throwable>()
+
+    repeat(workerCount) { worker ->
+        executor.execute {
+            try {
+                check(start.await(10, TimeUnit.SECONDS)) { "timed out waiting for start signal" }
+                repeat(eventsPerWorker) { index ->
+                    client.log(
+                        id = "evt_kotlin_load_${worker}_$index",
+                        timestamp = "2026-06-02T10:00:03Z",
+                        attributes =
+                            LogAttributes
+                                .create("high-load log event", "info")
+                                .withLogger("kotlin-load-test"),
+                    )
+                }
+            } catch (error: Throwable) {
+                failures += error
+            } finally {
+                done.countDown()
+            }
+        }
+    }
+
+    start.countDown()
+    check(done.await(30, TimeUnit.SECONDS)) { "timed out waiting for load workers" }
+    executor.shutdown()
+    check(executor.awaitTermination(30, TimeUnit.SECONDS)) { "timed out shutting down load executor" }
+    failures.poll()?.let { throw it }
+
+    check(client.pendingEvents() == expectedEvents) {
+        "expected $expectedEvents queued events but found ${client.pendingEvents()}"
+    }
+    val body = client.previewJson()
+    check("\"id\": \"evt_kotlin_load_0_0\"" in body)
+    check("\"id\": \"evt_kotlin_load_${workerCount - 1}_${eventsPerWorker - 1}\"" in body)
+
+    val response = client.flush(RecordingTransport.alwaysAccept())
+    check(response.statusCode == 202)
+    check(response.attempts == 1)
+    check(client.pendingEvents() == 0)
 }
 
 private fun emptyFlushIsNoop() {

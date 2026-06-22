@@ -11,12 +11,15 @@ class LogBrewClient private constructor(
             .add("name", sdkName)
             .add("language", "kotlin")
             .add("version", sdkVersion)
+    private val stateLock = Any()
     private val events = mutableListOf<Event>()
     private var closed = false
 
-    fun pendingEvents(): Int = events.size
+    fun pendingEvents(): Int = synchronized(stateLock) { events.size }
 
-    fun previewJson(): String =
+    fun previewJson(): String = synchronized(stateLock) { previewJsonLocked() }
+
+    private fun previewJsonLocked(): String =
         JsonWriter.write(
             OrderedJsonObject()
                 .add("sdk", sdk)
@@ -80,19 +83,23 @@ class LogBrewClient private constructor(
     }
 
     fun flush(transport: Transport): TransportResponse {
-        if (closed) {
-            throw SdkException("shutdown_error", "client is already shut down")
+        synchronized(stateLock) {
+            if (closed) {
+                throw SdkException("shutdown_error", "client is already shut down")
+            }
+            return flushInternal(transport)
         }
-        return flushInternal(transport)
     }
 
     fun shutdown(transport: Transport): TransportResponse {
-        if (closed) {
-            throw SdkException("shutdown_error", "client is already shut down")
+        synchronized(stateLock) {
+            if (closed) {
+                throw SdkException("shutdown_error", "client is already shut down")
+            }
+            val response = flushInternal(transport)
+            closed = true
+            return response
         }
-        val response = flushInternal(transport)
-        closed = true
-        return response
     }
 
     private fun pushEvent(
@@ -101,12 +108,14 @@ class LogBrewClient private constructor(
         timestamp: String,
         attributes: OrderedJsonObject,
     ) {
-        if (closed) {
-            throw SdkException("shutdown_error", "client is already shut down")
-        }
         Validation.requireNonEmpty("event id", id)
         Validation.requireTimestamp(timestamp)
-        events += Event(type, timestamp, id, attributes)
+        synchronized(stateLock) {
+            if (closed) {
+                throw SdkException("shutdown_error", "client is already shut down")
+            }
+            events += Event(type, timestamp, id, attributes)
+        }
     }
 
     private fun flushInternal(transport: Transport): TransportResponse {
@@ -114,7 +123,7 @@ class LogBrewClient private constructor(
             return TransportResponse(204, 0)
         }
 
-        val body = previewJson()
+        val body = previewJsonLocked()
         val maxAttempts = maxRetries + 1
         for (attempt in 1..maxAttempts) {
             try {
