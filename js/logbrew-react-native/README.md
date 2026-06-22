@@ -375,6 +375,8 @@ prepareLogBrewReactNativeReleaseArtifacts({
 
 The helper requires explicit `release`, `environment`, `service`, and `platform` metadata. It defaults minified bundle URLs to `app:///react-native/<platform>/...`, removes query strings and hashes from manifest URLs, and strips source paths under `root` or `stripSourcePrefix`. When `sourcemap` points at a final Hermes-composed map, the helper makes the bundle's `sourceMappingURL` point at that explicit map before injecting Debug IDs, so stale packager-map comments do not block manifest generation. It does not patch Gradle, Xcode, Metro, global fetch/XHR, or app runtime code; it only mutates the bundle and source map files you pass in.
 
+React Native native symbols are handled as release artifacts, not runtime telemetry. For local dry-run validation, use the repo release-artifact tooling against app-owned build outputs such as `ios/build/.../*.dSYM`, `android/app/build/outputs/mapping/release/mapping.txt`, and `android/app/build/intermediates/merged_native_libs/.../*.so`. The current public SDK validates metadata and privacy boundaries only; backend upload, storage, lookup, and native symbolication are still backend-owned future support, so do not rely on normal runtime error capture for native crash symbolication yet.
+
 ## Example Source
 
 The package includes example source for screen views, app-state metadata, handled JavaScript errors, provider/hooks, active trace correlation, target-scoped trace propagation, lifecycle/resource spans, native bridge scope sync, and reversible instrumentation setup. After installing, inspect the shipped examples with:

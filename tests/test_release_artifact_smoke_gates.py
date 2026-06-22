@@ -10,6 +10,7 @@ JS_CLI_SMOKE_COMMAND = "bash scripts/real_user_js_release_artifact_cli_smoke.sh"
 VITE_SMOKE_COMMAND = "bash scripts/real_user_vite_release_artifact_smoke.sh"
 NEXT_SMOKE_COMMAND = "bash scripts/real_user_next_release_artifact_smoke.sh"
 REACT_NATIVE_SMOKE_COMMAND = "bash scripts/real_user_react_native_release_artifact_smoke.sh"
+REACT_NATIVE_NATIVE_SMOKE_COMMAND = "bash scripts/real_user_react_native_native_release_artifact_smoke.sh"
 JS_UPLOAD_SMOKE_COMMAND = "bash scripts/real_user_js_release_artifact_upload_smoke.sh"
 NATIVE_SMOKE_COMMAND = "bash scripts/real_user_native_release_artifact_smoke.sh"
 NATIVE_UPLOAD_SMOKE_COMMAND = "bash scripts/real_user_native_release_artifact_upload_smoke.sh"
@@ -34,6 +35,8 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
                 self.assertIn(f"run: {NEXT_SMOKE_COMMAND}", text)
                 self.assertIn("Run React Native release artifact smoke", text)
                 self.assertIn(f"run: {REACT_NATIVE_SMOKE_COMMAND}", text)
+                self.assertIn("Run React Native native release artifact smoke", text)
+                self.assertIn(f"run: {REACT_NATIVE_NATIVE_SMOKE_COMMAND}", text)
                 self.assertIn("Run JavaScript release artifact upload smoke", text)
                 self.assertIn(f"run: {JS_UPLOAD_SMOKE_COMMAND}", text)
                 self.assertIn("Run native release artifact smoke", text)
@@ -49,6 +52,10 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn(f"Vite release-artifact installed plugin proof: `{VITE_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"Next.js release-artifact installed helper proof: `{NEXT_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"React Native release-artifact installed helper/build proof: `{REACT_NATIVE_SMOKE_COMMAND}`", checklist)
+        self.assertIn(
+            f"React Native native release-artifact proof: `{REACT_NATIVE_NATIVE_SMOKE_COMMAND}`",
+            checklist,
+        )
         self.assertIn(f"JavaScript release-artifact upload proof: `{JS_UPLOAD_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"Native/mobile release-artifact dry-run proof: `{NATIVE_SMOKE_COMMAND}`", checklist)
         self.assertIn(f"Native/mobile release-artifact upload proof: `{NATIVE_UPLOAD_SMOKE_COMMAND}`", checklist)
@@ -61,6 +68,18 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn('--artifact "unity_symbols=$unity_archive"', smoke)
         self.assertIn('"containsUnityZipPart"', smoke)
         self.assertIn('assert all(event["containsUnityZipPart"] for event in events)', smoke)
+
+    def test_react_native_native_smoke_uses_framework_build_paths(self) -> None:
+        smoke = (ROOT / "scripts" / "real_user_react_native_native_release_artifact_smoke.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("android/app/build/outputs/mapping/release/mapping.txt", smoke)
+        self.assertIn("android/app/build/intermediates/merged_native_libs/release/out/lib/arm64-v8a", smoke)
+        self.assertIn("ios/build/ReactNativeCheckout.xcarchive/dSYMs/ReactNativeCheckout.app.dSYM", smoke)
+        self.assertIn('artifact_types == ["ios_dsym", "android_proguard_mapping", "android_native_symbols"]', smoke)
+        self.assertIn('assert tmp_dir not in serialized', smoke)
+        self.assertIn('assert "com.logbrew.checkout" not in serialized', smoke)
 
 
 if __name__ == "__main__":

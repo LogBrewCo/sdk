@@ -128,6 +128,7 @@ For PHP packages specifically, prefer a smoke path that creates a fresh Composer
 - Vite release-artifact installed plugin proof: `bash scripts/real_user_vite_release_artifact_smoke.sh`
 - Next.js release-artifact installed helper proof: `bash scripts/real_user_next_release_artifact_smoke.sh`
 - React Native release-artifact installed helper/build proof: `bash scripts/real_user_react_native_release_artifact_smoke.sh`
+- React Native native release-artifact proof: `bash scripts/real_user_react_native_native_release_artifact_smoke.sh`
 - JavaScript release-artifact upload proof: `bash scripts/real_user_js_release_artifact_upload_smoke.sh`
 - Native/mobile release-artifact dry-run proof: `bash scripts/real_user_native_release_artifact_smoke.sh`
 - Native/mobile release-artifact upload proof: `bash scripts/real_user_native_release_artifact_upload_smoke.sh`
