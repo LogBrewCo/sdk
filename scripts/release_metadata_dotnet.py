@@ -20,6 +20,7 @@ def validate_dotnet_packages(
             "dotnet/logbrew-dotnet/README.md",
             "dotnet/logbrew-dotnet/examples/FirstUsefulTelemetry.cs",
             "dotnet/logbrew-dotnet/examples/ActivityTraceCorrelation.cs",
+            "dotnet/logbrew-dotnet/examples/ActivitySourceListenerTelemetry.cs",
             "dotnet/logbrew-dotnet/examples/HttpClientOutboundTelemetry.cs",
             "dotnet/logbrew-dotnet/examples/AspNetCoreRequestTelemetry.cs",
             "assets/brand/logbrew-logo-transparent-128.png",
@@ -39,6 +40,7 @@ def validate_dotnet_packages(
         project_needles=(
             ("examples/FirstUsefulTelemetry.cs", "package must include examples/FirstUsefulTelemetry.cs"),
             ("examples/ActivityTraceCorrelation.cs", "package must include examples/ActivityTraceCorrelation.cs"),
+            ("examples/ActivitySourceListenerTelemetry.cs", "package must include examples/ActivitySourceListenerTelemetry.cs"),
             ("examples/HttpClientOutboundTelemetry.cs", "package must include examples/HttpClientOutboundTelemetry.cs"),
             ("examples/AspNetCoreRequestTelemetry.cs", "package must include examples/AspNetCoreRequestTelemetry.cs"),
         ),

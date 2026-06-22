@@ -273,6 +273,8 @@ using (var activity = source.StartActivity("checkout.pay", ActivityKind.Client))
 
 `LogBrewActivitySourceListener` captures only stopped Activities from explicit `WithSourceName(...)` entries, delegates payload construction to `LogBrewActivitySpanTelemetry`, and reports SDK capture errors through optional `OnError(...)`. Calling `Start(client)` without source names is fail-closed and captures no Activities. It does not create OpenTelemetry processors, exporters, tracestate, baggage, global HTTP instrumentation, payload/header capture, or full URL/query capture.
 
+The packaged `examples/ActivitySourceListenerTelemetry.cs` file shows the same listener in a small console app, including safe route naming, explicit source filtering, and primitive-only metadata.
+
 For outbound calls, use `LogBrewHttpClientTelemetry` when your app owns the `HttpClient` request and wants one child span plus one normalized downstream `traceparent`:
 
 ```csharp
