@@ -74,6 +74,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "examples/HttpTraceCorrelation.cs",
         "examples/ActivityTraceCorrelation.cs",
         "examples/ActivitySourceListenerTelemetry.cs",
+        "examples/DependencySpansTelemetry.cs",
         "examples/HttpClientOutboundTelemetry.cs",
         "examples/AspNetCoreRequestTelemetry.cs",
         "examples/Makefile",
@@ -102,6 +103,7 @@ for needle in (
     "TryCreateChildFromActivityContext",
     "ActivityTraceCorrelation.cs",
     "ActivitySourceListenerTelemetry.cs",
+    "DependencySpansTelemetry.cs",
     "LogBrewActivitySourceListener",
     "WithSourceName(\"Checkout.Service\")",
     "Calling `Start(client)` without source names is fail-closed",
@@ -220,6 +222,10 @@ run_example ActivitySourceListenerTelemetry.cs ActivitySourceListenerTelemetry "
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/activity-source-listener.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_activity_source_listener_payload.py" "$tmp_dir/activity-source-listener.stdout.json" "$tmp_dir/activity-source-listener.stderr.json" >/dev/null
 
+run_example DependencySpansTelemetry.cs DependencySpansTelemetry "$tmp_dir/dependency-spans.stdout.json" "$tmp_dir/dependency-spans.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/dependency-spans.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_dependency_spans_payload.py" "$tmp_dir/dependency-spans.stdout.json" "$tmp_dir/dependency-spans.stderr.json" >/dev/null
+
 run_example HttpClientOutboundTelemetry.cs HttpClientOutboundTelemetry "$tmp_dir/http-client.stdout.json" "$tmp_dir/http-client.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/http-client.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_http_client_payload.py" "$tmp_dir/http-client.stdout.json" "$tmp_dir/http-client.stderr.json" >/dev/null
@@ -269,6 +275,7 @@ grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_d
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/examples-help.txt"
 grep -qx 'run-activity-trace-correlation -> make run-activity-trace-correlation' "$tmp_dir/examples-help.txt"
 grep -qx 'run-activity-source-listener-telemetry -> make run-activity-source-listener-telemetry' "$tmp_dir/examples-help.txt"
+grep -qx 'run-dependency-spans-telemetry -> make run-dependency-spans-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-http-client-outbound-telemetry -> make run-http-client-outbound-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-request-telemetry -> make run-aspnetcore-request-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-middleware-telemetry -> make run-aspnetcore-middleware-telemetry' "$tmp_dir/examples-help.txt"

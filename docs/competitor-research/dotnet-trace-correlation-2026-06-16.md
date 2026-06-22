@@ -290,3 +290,27 @@ LogBrew is now stronger for teams that want a small opt-in ASP.NET Core middlewa
 ### Remaining Gap
 
 LogBrew is now better for teams that want explicit, lightweight Activity span capture without taking over OpenTelemetry exporters/processors or globally listening to all `ActivitySource` data. Sentry, Datadog, and OpenTelemetry remain stronger for automatic ActivitySource/ASP.NET/HttpClient/EF/SqlClient/Redis/Kafka instrumentation, baggage/tracestate, rich span events/exceptions/links, resource attributes, profiling, and deeper semantic conventions.
+
+## 2026-06-22 Dependency Span Installed-Artifact Proof
+
+### Source Basis
+
+This verifier-focused follow-up uses the existing source evidence above for Sentry .NET outbound/Activity patterns, OpenTelemetry .NET HTTP/ASP.NET instrumentation, and Datadog .NET scope/HTTP/Activity handling. The same competitor pattern applies to dependency spans: Sentry, Datadog, and OpenTelemetry are stronger where they can auto-instrument EF/SqlClient/Redis/Kafka-style libraries, while LogBrew's safer current boundary is explicit app-owned operation wrapping with low-cardinality names and primitive metadata.
+
+### LogBrew Change
+
+- Added packaged `examples/DependencySpansTelemetry.cs` for the existing `LogBrewOperationTracing` database, cache, and queue helpers.
+- Added `scripts/check_dotnet_dependency_spans_payload.py` and wired it into `bash scripts/check_dotnet_package.sh`.
+- The temporary-app proof creates one database span, one cache span, and one queue span under the same W3C parent trace, verifies callback result preservation, and checks dependency metadata redaction for raw statements, connection details, cache identifiers, and message contents.
+- No new runtime dependency, profiler, EF/Redis/Kafka client hook, global instrumentation, body/header/query capture, baggage, tracestate, support-ticket behavior, or usage/quota inference was added.
+
+### Evidence
+
+- Red TDD: `python3 scripts/check_release_metadata.py` failed on missing `examples/DependencySpansTelemetry.cs` and missing package include.
+- `python3 scripts/check_release_metadata.py`: passed after implementation.
+- `python3 -m unittest tests/test_release_metadata.py`: 12 tests passed.
+- `bash scripts/check_dotnet_package.sh`: passed with 59 core tests, 4 ASP.NET Core tests, NuGet pack proof, source example execution, and dependency span payload validation.
+
+### Remaining Gap
+
+LogBrew now has installed-artifact proof for explicit DB/cache/queue operation spans, which is safer and easier to audit than hidden dependency auto-instrumentation. It is still weaker than Sentry/Datadog/OpenTelemetry for automatic EF/SqlClient/Redis/Kafka discovery, richer semantic conventions, span events/exceptions/links, baggage/tracestate, and profiling.

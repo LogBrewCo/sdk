@@ -397,6 +397,8 @@ var orderId = LogBrewOperationTracing.DatabaseOperation(
 
 Sync and async helpers are available for database, cache, and queue operations. They create one child span under `LogBrewTrace.Current` when a trace is active, keep that child trace active while the callback runs, preserve the callback result or original exception, and report SDK capture failures through optional `OnError(...)` callbacks without interrupting app work. Metadata is primitive-only, and the helpers drop unsafe dependency details such as raw statements, connection details, cache identifiers, message contents, broker details, request metadata, and unsafe values. For broad automatic JDBC/EF/Redis/Kafka-style coverage, use a future explicit integration package rather than relying on hidden behavior in this core package.
 
+The packaged `examples/DependencySpansTelemetry.cs` file shows database, cache, and queue spans running from a small console app, with trace correlation and dependency metadata redaction.
+
 ## Support Ticket Diagnostics Drafts
 
 Use `SupportTicketDraft` when a developer or support agent needs a local JSON payload for the planned LogBrew support-ticket API. The helper validates the public source/category contract, uses the planned backend create payload fields, and redacts token-like diagnostics before returning the draft.

@@ -293,6 +293,7 @@ jobs:
                 "FirstUsefulTelemetry.cs",
                 "ActivityTraceCorrelation.cs",
                 "ActivitySourceListenerTelemetry.cs",
+                "DependencySpansTelemetry.cs",
                 "HttpClientOutboundTelemetry.cs",
                 "AspNetCoreRequestTelemetry.cs",
                 "AspNetCoreMiddlewareTelemetry.cs",
@@ -320,6 +321,7 @@ jobs:
     <None Include="../../examples/FirstUsefulTelemetry.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/ActivityTraceCorrelation.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/ActivitySourceListenerTelemetry.cs" Pack="true" PackagePath="examples/" />
+    <None Include="../../examples/DependencySpansTelemetry.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/HttpClientOutboundTelemetry.cs" Pack="true" PackagePath="examples/" />
     <None Include="../../examples/AspNetCoreRequestTelemetry.cs" Pack="true" PackagePath="examples/" />
   </ItemGroup>
