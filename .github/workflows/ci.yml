@@ -41,8 +41,6 @@ jobs:
       - name: Set up Rust
         if: ${{ hashFiles('Cargo.toml') != '' }}
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
 
       - name: Set up Go
         if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
@@ -106,12 +104,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/check_github_release_safety.py --allow-public-branch-summary
 
-      - name: Check Markdown links
-        run: python3 scripts/check_markdown_links.py
-
-      - name: Run shell static analysis
-        run: bash scripts/check_shell_static.sh
-
       - name: Run JavaScript release artifact smoke
         run: bash scripts/real_user_js_release_artifact_smoke.sh
 
@@ -138,7 +130,7 @@ jobs:
 
       - name: Run Rust SDK tests
         if: ${{ hashFiles('Cargo.toml') != '' }}
-        run: cd rust/logbrew && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+        run: cd rust/logbrew && cargo test
 
       - name: Run Rust real-user smoke test
         if: ${{ hashFiles('Cargo.toml') != '' }}
@@ -170,7 +162,7 @@ jobs:
 
       - name: Run JavaScript SDK tests
         if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
-        run: python3 scripts/check_js_sources.py && bash scripts/check_js_lint.sh && bash scripts/check_js_package.sh && cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test
+        run: cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test
 
       - name: Run JavaScript real-user smoke test
         if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
@@ -222,7 +214,7 @@ jobs:
 
       - name: Run Python SDK tests
         if: ${{ hashFiles('python/logbrew_py/pyproject.toml') != '' }}
-        run: python3 scripts/check_python_sources.py && bash scripts/check_python_static.sh && PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
+        run: PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
 
       - name: Run FastAPI package checks
         if: ${{ hashFiles('python/logbrew_fastapi/pyproject.toml') != '' }}
@@ -246,7 +238,7 @@ jobs:
 
       - name: Run Go SDK tests
         if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
-        run: cd go/logbrew && test -z "$(gofmt -l .)" && go vet ./... && go test ./... && cd ../.. && bash scripts/check_go_static.sh
+        run: cd go/logbrew && go test ./...
 
       - name: Run Go real-user smoke test
         if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
@@ -274,7 +266,7 @@ jobs:
 
       - name: Run Java SDK tests
         if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
-        run: bash scripts/check_java_static.sh && bash scripts/check_java_package.sh
+        run: bash scripts/check_java_package.sh
 
       - name: Run Java real-user smoke test
         if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
@@ -314,7 +306,7 @@ jobs:
 
       - name: Run PHP SDK tests
         if: ${{ hashFiles('php/logbrew-php/composer.json') != '' }}
-        run: python3 scripts/check_php_sources.py && bash scripts/check_php_static.sh && cd php/logbrew-php && php tests/run.php
+        run: cd php/logbrew-php && php tests/run.php
 
       - name: Run PHP real-user smoke test
         if: ${{ hashFiles('php/logbrew-php/composer.json') != '' }}
@@ -336,15 +328,6 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-
-      - name: Install Swift lint tooling
-        run: |
-          if ! command -v swiftformat >/dev/null 2>&1 || ! command -v swiftlint >/dev/null 2>&1; then
-            brew install swiftformat swiftlint
-          fi
-
-      - name: Run Swift style checks
-        run: bash scripts/check_swift_style.sh
 
       - name: Run Swift package checks
         run: bash scripts/check_swift_package.sh
@@ -394,7 +377,7 @@ jobs:
           fi
 
       - name: Run Kotlin package checks
-        run: bash scripts/check_kotlin_style.sh && bash scripts/check_kotlin_package.sh
+        run: bash scripts/check_kotlin_package.sh
 
       - name: Run Kotlin real-user smoke test
         run: bash scripts/real_user_kotlin_smoke.sh

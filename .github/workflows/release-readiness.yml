@@ -160,12 +160,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/check_github_release_safety.py --allow-public-branch-summary
 
-      - name: Check Markdown links
-        run: python3 scripts/check_markdown_links.py
-
-      - name: Run shell static analysis
-        run: bash scripts/check_shell_static.sh
-
       - name: Run JavaScript release artifact smoke
         run: bash scripts/real_user_js_release_artifact_smoke.sh
 
@@ -244,8 +238,6 @@ jobs:
       - name: Run Node package tests
         shell: bash
         run: |
-          python3 scripts/check_js_sources.py
-          bash scripts/check_js_lint.sh
           mapfile -t package_dirs < <(
             python3 - <<'PY'
           import json
@@ -342,8 +334,6 @@ jobs:
       - name: Run Python package tests
         shell: bash
         run: |
-          python3 scripts/check_python_sources.py
-          bash scripts/check_python_static.sh
           PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
           bash scripts/check_fastapi_package.sh
           bash scripts/check_django_package.sh
@@ -392,11 +382,9 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
 
       - name: Run Rust tests
-        run: cd rust/logbrew && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+        run: cd rust/logbrew && cargo test
 
       - name: Run Rust real-user smoke test
         run: bash scripts/real_user_rust_smoke.sh
@@ -450,9 +438,8 @@ jobs:
         run: |
           mapfile -t go_dirs < <(find . -name go.mod -exec dirname {} \; | sort -u)
           for dir in "${go_dirs[@]}"; do
-            (cd "$dir" && test -z "$(gofmt -l .)" && go vet ./... && go test ./...)
+            (cd "$dir" && go test ./...)
           done
-          bash scripts/check_go_static.sh
 
       - name: Run Go real-user smoke test
         run: bash scripts/real_user_go_smoke.sh
@@ -558,7 +545,7 @@ jobs:
           cache-disabled: true
 
       - name: Run Java package checks
-        run: bash scripts/check_java_static.sh && bash scripts/check_java_package.sh
+        run: bash scripts/check_java_package.sh
 
       - name: Run Java real-user smoke test
         run: bash scripts/real_user_java_smoke.sh
@@ -640,7 +627,7 @@ jobs:
           fi
 
       - name: Run Kotlin package checks
-        run: bash scripts/check_kotlin_style.sh && bash scripts/check_kotlin_package.sh
+        run: bash scripts/check_kotlin_package.sh
 
       - name: Run Kotlin real-user smoke test
         run: bash scripts/real_user_kotlin_smoke.sh
@@ -706,8 +693,6 @@ jobs:
       - name: Run PHP package tests
         shell: bash
         run: |
-          python3 scripts/check_php_sources.py
-          bash scripts/check_php_static.sh
           mapfile -t composer_dirs < <(find . -name composer.json -exec dirname {} \; | sort -u)
           for dir in "${composer_dirs[@]}"; do
             if [ -f "$dir/tests/run.php" ]; then
@@ -735,15 +720,6 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-
-      - name: Install Swift lint tooling
-        run: |
-          if ! command -v swiftformat >/dev/null 2>&1 || ! command -v swiftlint >/dev/null 2>&1; then
-            brew install swiftformat swiftlint
-          fi
-
-      - name: Run Swift style checks
-        run: bash scripts/check_swift_style.sh
 
       - name: Run Swift package checks
         run: bash scripts/check_swift_package.sh

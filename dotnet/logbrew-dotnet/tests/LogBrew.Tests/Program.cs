@@ -56,6 +56,19 @@ static void EnqueueAll(LogBrewClient client)
     client.Action("evt_action_001", "2026-06-02T10:00:05Z", ActionAttributes.Create("deploy", "success"));
 }
 
+static int CountOccurrences(string text, string value)
+{
+    var count = 0;
+    var index = 0;
+    while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+    {
+        count++;
+        index += value.Length;
+    }
+
+    return count;
+}
+
 var tests = 0;
 
 var previewClient = SampleClient();
@@ -457,6 +470,56 @@ AssertTrue(loggingResponse.StatusCode == 202, "expected logger provider flush");
 AssertTrue(loggingTransport.SentBodies.Count == 1, "expected one logger provider body");
 tests++;
 
+var heavyLoggingClient = SampleClient();
+var heavyLoggingTransport = RecordingTransport.AlwaysAccept();
+var heavyLoggingErrors = 0;
+const int heavyLoggingWorkers = 8;
+const int heavyLoggingEventsPerWorker = 1250;
+var heavyLoggingTotal = heavyLoggingWorkers * heavyLoggingEventsPerWorker;
+using (var factory = LoggerFactory.Create(builder =>
+{
+    builder.SetMinimumLevel(LogLevel.Information);
+    builder.AddLogBrew(heavyLoggingClient, new LogBrewLoggerOptions
+    {
+        MinimumLevel = LogLevel.Information,
+        Metadata = new Dictionary<string, object?> { ["service"] = "checkout", ["loadTest"] = true },
+        EventIdPrefix = "dotnet_load",
+        TimestampProvider = () => DateTimeOffset.Parse("2026-06-02T10:01:00Z", System.Globalization.CultureInfo.InvariantCulture),
+        OnError = _ => Interlocked.Increment(ref heavyLoggingErrors)
+    });
+}))
+{
+    var logger = factory.CreateLogger("HeavyLoadWorker");
+    Parallel.For(0, heavyLoggingWorkers, worker =>
+    {
+        for (var index = 0; index < heavyLoggingEventsPerWorker; index++)
+        {
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                logger.Log(
+                    LogLevel.Information,
+                    new EventId(index + 1, "HeavyLoad"),
+                    new Dictionary<string, object?> { ["worker"] = worker, ["eventIndex"] = index, ["phase"] = "load" },
+                    null,
+                    static (_, _) => "heavy logging event");
+            }
+        }
+    });
+}
+
+AssertTrue(heavyLoggingErrors == 0, "expected heavy logging load not to report provider errors");
+AssertTrue(heavyLoggingClient.PendingEvents() == heavyLoggingTotal, "expected all heavy logging events to be queued");
+var heavyPreview = heavyLoggingClient.PreviewJson();
+AssertTrue(heavyPreview.Contains("\"id\": \"dotnet_load_1\"", StringComparison.Ordinal), "expected first heavy logging event id");
+AssertTrue(heavyPreview.Contains("\"id\": \"dotnet_load_" + heavyLoggingTotal.ToString(CultureInfo.InvariantCulture) + "\"", StringComparison.Ordinal), "expected last heavy logging event id");
+AssertTrue(!heavyPreview.Contains("exceptionStackTrace", StringComparison.Ordinal), "expected heavy logging load not to add stack traces");
+var heavyResponse = heavyLoggingClient.Flush(heavyLoggingTransport);
+AssertTrue(heavyResponse.StatusCode == 202, "expected heavy logging flush");
+AssertTrue(heavyLoggingClient.PendingEvents() == 0, "expected heavy logging flush to clear queue");
+AssertTrue(heavyLoggingTransport.LastBody != null, "expected heavy logging transport body");
+AssertTrue(CountOccurrences(heavyLoggingTransport.LastBody!, "\"type\": \"log\"") == heavyLoggingTotal, "expected heavy logging body to include every log event");
+tests++;
+
 var flushOnLogClient = SampleClient();
 var flushOnLogTransport = RecordingTransport.AlwaysAccept();
 using (var factory = LoggerFactory.Create(builder => builder.AddLogBrew(flushOnLogClient, new LogBrewLoggerOptions
@@ -488,6 +551,7 @@ tests += SupportTicketDraftTests.Run();
 tests += ServerRequestTelemetryTests.Run();
 tests += HttpClientTelemetryTests.Run();
 tests += ActivitySpanTelemetryTests.Run();
+tests += ActivitySourceListenerTests.Run();
 
 Console.WriteLine("dotnet package tests ok (" + tests.ToString(CultureInfo.InvariantCulture) + " tests)");
 

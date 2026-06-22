@@ -244,6 +244,35 @@ if (activity != null && LogBrewTraceContext.TryCreateChildFromActivity(activity,
 
 `TryCreateChildFromCurrentActivity()`, `TryCreateChildFromActivity(...)`, and `TryCreateChildFromActivityContext(...)` copy only valid W3C Activity trace ID, span ID, and recorded flag into a fresh LogBrew child span. Use `LogBrewActivitySpanTelemetry.Capture(...)` when you also want the app-owned `Activity` itself represented as one LogBrew span, usually after your app or framework has finished that Activity. It copies W3C trace/span IDs, parent span ID, recorded flag, duration, Activity name/kind/source, and a small allowlist of safe primitive semantic tags such as HTTP method/route/status, DB system/operation, and messaging system/operation. These helpers return `false` for null, unstarted, non-W3C, or default/all-zero contexts and report capture failures through optional `OnError(...)`. They do not add an OpenTelemetry dependency, own exporters/processors, install Activity listeners, read tracestate or baggage, patch HTTP clients, capture payloads, serialize raw propagation headers, include full URLs/headers/query strings, or change `Activity.Current`. The packaged `examples/ActivityTraceCorrelation.cs` file shows installed-package Activity-to-LogBrew log/action/span/metric correlation.
 
+If your app already emits `ActivitySource` spans and you want one opt-in bridge without owning OpenTelemetry exporters, start a source-filtered listener during app setup:
+
+```csharp
+using System.Collections.Generic;
+using System.Diagnostics;
+using LogBrew;
+
+var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "1.0.0");
+using var listener = LogBrewActivitySourceListener.Start(
+    client,
+    options => options
+        .WithSourceName("Checkout.Service")
+        .WithEventIdPrefix("dotnet_activity_source")
+        .WithMetadataProvider(activity => new Dictionary<string, object?>
+        {
+            ["component"] = activity.Source.Name
+        }));
+
+using var source = new ActivitySource("Checkout.Service", "1.0.0");
+using (var activity = source.StartActivity("checkout.pay", ActivityKind.Client))
+{
+    activity?.SetTag("http.request.method", "POST");
+    activity?.SetTag("http.route", "/checkout/:cart_id");
+    activity?.SetTag("http.response.status_code", 202);
+}
+```
+
+`LogBrewActivitySourceListener` captures only stopped Activities from explicit `WithSourceName(...)` entries, delegates payload construction to `LogBrewActivitySpanTelemetry`, and reports SDK capture errors through optional `OnError(...)`. Calling `Start(client)` without source names is fail-closed and captures no Activities. It does not create OpenTelemetry processors, exporters, tracestate, baggage, global HTTP instrumentation, payload/header capture, or full URL/query capture.
+
 For outbound calls, use `LogBrewHttpClientTelemetry` when your app owns the `HttpClient` request and wants one child span plus one normalized downstream `traceparent`:
 
 ```csharp

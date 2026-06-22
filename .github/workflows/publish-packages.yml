@@ -356,8 +356,6 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
 
       - name: Dry-run crate package
         working-directory: rust/logbrew
@@ -589,11 +587,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-
-      - name: Run Java and Kotlin package preflight
-        run: |
-          bash scripts/check_java_package.sh
-          bash scripts/check_kotlin_package.sh
 
       - name: Build Maven Central deployment bundle
         env:

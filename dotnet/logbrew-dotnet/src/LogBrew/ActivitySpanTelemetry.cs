@@ -15,6 +15,8 @@ namespace LogBrew
 
         internal Action<SdkException>? OnErrorHandler { get; private set; }
 
+        internal string? ActivityNameOverride { get; private set; }
+
         public static LogBrewActivitySpanOptions Create()
         {
             return new LogBrewActivitySpanOptions();
@@ -45,6 +47,13 @@ namespace LogBrew
             return this;
         }
 
+        internal LogBrewActivitySpanOptions WithActivityNameOverride(string value)
+        {
+            Validation.RequireNonEmpty("Activity span name", value);
+            ActivityNameOverride = value.Trim();
+            return this;
+        }
+
         private static string DefaultTimestamp()
         {
             return DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
@@ -72,7 +81,8 @@ namespace LogBrew
 
             var capturedActivity = activity!;
             var safeOptions = options ?? LogBrewActivitySpanOptions.Create();
-            var attributes = SpanAttributes.Create(ActivityName(capturedActivity), context.TraceId, context.SpanId, StatusFromActivity(capturedActivity))
+            var activityName = ActivityName(capturedActivity, safeOptions);
+            var attributes = SpanAttributes.Create(activityName, context.TraceId, context.SpanId, StatusFromActivity(capturedActivity))
                 .WithDurationMs(Math.Max(0, capturedActivity.Duration.TotalMilliseconds))
                 .WithMetadata(ActivityMetadata(capturedActivity, context, safeOptions));
             if (context.ParentSpanId != null)
@@ -102,7 +112,7 @@ namespace LogBrew
         {
             var metadata = TelemetryMetadata.CopySafeDependencyMetadata(options.Metadata);
             metadata["source"] = "dotnet.activity";
-            metadata["activityName"] = ActivityName(activity);
+            metadata["activityName"] = ActivityName(activity, options);
             metadata["activityKind"] = activity.Kind.ToString().ToLowerInvariant();
             metadata["traceFlags"] = context.TraceFlags;
             metadata["traceSampled"] = context.Sampled;
@@ -160,7 +170,7 @@ namespace LogBrew
                     AddString(metadata, "httpMethod", value);
                     break;
                 case "http.route":
-                    AddString(metadata, "httpRoute", value);
+                    AddRouteTemplate(metadata, value);
                     break;
                 case "http.response.status_code":
                 case "http.status_code":
@@ -210,12 +220,28 @@ namespace LogBrew
             return string.IsNullOrWhiteSpace(activity.DisplayName) ? activity.OperationName : activity.DisplayName;
         }
 
+        private static string ActivityName(Activity activity, LogBrewActivitySpanOptions options)
+        {
+            return options.ActivityNameOverride ?? ActivityName(activity);
+        }
+
         private static void AddStatusCode(IDictionary<string, object?> metadata, object? value)
         {
             if (TryStatusCode(value, out var statusCode))
             {
                 metadata["httpStatusCode"] = statusCode;
             }
+        }
+
+        private static void AddRouteTemplate(IDictionary<string, object?> metadata, object? value)
+        {
+            var text = Convert.ToString(value, CultureInfo.InvariantCulture);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            metadata["httpRoute"] = TimelineMetadata.SanitizeRouteTemplate("Activity route", text);
         }
 
         private static bool TryStatusCode(object? value, out int statusCode)
