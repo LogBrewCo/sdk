@@ -28,6 +28,7 @@ const WINSTON_RESERVED_FIELDS = new Set(["level", "message", "timestamp", "time"
 const TRACEPARENT_PATTERN = /^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$/u;
 const ZERO_TRACE_ID = "00000000000000000000000000000000";
 const ZERO_SPAN_ID = "0000000000000000";
+const DEFAULT_MAX_QUEUE_SIZE = 1000;
 class SdkError extends Error {
   constructor(code, message) {
     super(message);
@@ -80,17 +81,31 @@ class RecordingTransport {
 }
 
 class LogBrewClient {
-  static create({ apiKey, sdkName, sdkVersion, maxRetries = 2, eventFilter }) {
+  static create({
+    apiKey,
+    sdkName,
+    sdkVersion,
+    maxRetries = 2,
+    eventFilter,
+    maxQueueSize = DEFAULT_MAX_QUEUE_SIZE,
+    onEventDropped
+  }) {
     requireNonEmpty("apiKey", apiKey);
     requireNonEmpty("sdkName", sdkName);
     requireNonEmpty("sdkVersion", sdkVersion);
     if (eventFilter !== undefined && typeof eventFilter !== "function") {
       throw new SdkError("validation_error", "eventFilter must be a function");
     }
+    requirePositiveInteger("maxQueueSize", maxQueueSize);
+    if (onEventDropped !== undefined && typeof onEventDropped !== "function") {
+      throw new SdkError("validation_error", "onEventDropped must be a function");
+    }
 
     return new LogBrewClient({
       apiKey,
       eventFilter,
+      maxQueueSize,
+      onEventDropped,
       sdk: {
         name: sdkName,
         language: "javascript",
@@ -100,17 +115,24 @@ class LogBrewClient {
     });
   }
 
-  constructor({ apiKey, sdk, maxRetries, eventFilter }) {
+  constructor({ apiKey, sdk, maxRetries, eventFilter, maxQueueSize, onEventDropped }) {
     this.apiKey = apiKey;
     this.eventFilter = eventFilter;
+    this.maxQueueSize = maxQueueSize;
+    this.onEventDropped = onEventDropped;
     this.sdk = sdk;
     this.maxRetries = maxRetries;
     this.events = [];
     this.closed = false;
+    this.droppedEventCount = 0;
   }
 
   pendingEvents() {
     return this.events.length;
+  }
+
+  droppedEvents() {
+    return this.droppedEventCount;
   }
 
   previewJson() {
@@ -171,7 +193,28 @@ class LogBrewClient {
     if (this.eventFilter && this.eventFilter(cloneEvent(event)) === false) {
       return;
     }
+    if (this.events.length >= this.maxQueueSize) {
+      this.#recordDroppedEvent(event);
+      return;
+    }
     this.events.push(event);
+  }
+
+  #recordDroppedEvent(event) {
+    this.droppedEventCount += 1;
+    if (!this.onEventDropped) {
+      return;
+    }
+    try {
+      this.onEventDropped({
+        droppedEvents: this.droppedEventCount,
+        eventId: event.id,
+        eventType: event.type,
+        reason: "queue_overflow"
+      });
+    } catch {
+      // Drop callbacks are advisory and must not interrupt application logging.
+    }
   }
 
   async #flushInternal(transport) {
@@ -969,6 +1012,12 @@ function requireAllowedValue(label, value, allowedValues) {
 function requireFiniteNumber(label, value) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new SdkError("validation_error", `${label} must be a finite number`);
+  }
+}
+
+function requirePositiveInteger(label, value) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new SdkError("validation_error", `${label} must be a positive integer`);
   }
 }
 

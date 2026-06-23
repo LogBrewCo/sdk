@@ -289,6 +289,46 @@ test("network failure retries before succeeding", async () => {
   assert.equal(transport.sentBodies.length, 2);
 });
 
+test("bounded queue reports overflow without mutating queued events", () => {
+  const dropped = [];
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    maxQueueSize: 2,
+    onEventDropped(drop) {
+      dropped.push(drop);
+    }
+  });
+
+  client.log("evt_queue_001", "2026-06-02T10:00:00Z", { message: "first", level: "info" });
+  client.log("evt_queue_002", "2026-06-02T10:00:01Z", { message: "second", level: "warning" });
+  client.log("evt_queue_003", "2026-06-02T10:00:02Z", { message: "third", level: "error" });
+
+  const payload = JSON.parse(client.previewJson());
+  assert.deepEqual(payload.events.map((event) => event.id), ["evt_queue_001", "evt_queue_002"]);
+  assert.equal(client.pendingEvents(), 2);
+  assert.equal(client.droppedEvents(), 1);
+  assert.deepEqual(dropped, [{
+    droppedEvents: 1,
+    eventId: "evt_queue_003",
+    eventType: "log",
+    reason: "queue_overflow"
+  }]);
+});
+
+test("invalid queue bound fails client configuration", () => {
+  assert.throws(
+    () => LogBrewClient.create({
+      apiKey: "LOGBREW_API_KEY",
+      sdkName: "logbrew-js",
+      sdkVersion: "0.1.0",
+      maxQueueSize: 0
+    }),
+    /maxQueueSize must be a positive integer/
+  );
+});
+
 test("shutdown flushes and prevents future events", async () => {
   const client = sampleClient();
   enqueueAll(client);

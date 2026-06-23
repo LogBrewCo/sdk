@@ -204,6 +204,24 @@ const client = LogBrewClient.create({
 
 Prefer removing sensitive values at the source before calling LogBrew. `eventFilter` is intentionally drop-only: it avoids broad mutable event processing, global scopes, and hidden context that can make observability payloads harder to reason about.
 
+## Queue Bounds
+
+`LogBrewClient` keeps a bounded in-memory queue so heavy logging bursts cannot grow without limit before the next flush. The default `maxQueueSize` is 1000 events. When the queue is full, LogBrew drops the incoming event, keeps already queued events unchanged, increments `droppedEvents()`, and calls `onEventDropped` if provided.
+
+```js
+const client = LogBrewClient.create({
+  apiKey: "LOGBREW_API_KEY",
+  sdkName: "checkout-api",
+  sdkVersion: "1.0.0",
+  maxQueueSize: 500,
+  onEventDropped(drop) {
+    console.warn("LogBrew dropped telemetry", drop.reason, drop.eventType);
+  }
+});
+```
+
+Drop callbacks are advisory and must not interrupt application logging. This is not offline persistence; flush regularly and use app-owned retry/shutdown handling for production delivery.
+
 ## Support Ticket Drafts
 
 Use `createSupportTicketDraft()` when a developer or support agent needs a local JSON payload for the planned LogBrew support-ticket API. The helper validates the public source/category contract, converts JavaScript camelCase inputs to the planned backend create payload fields, and redacts token-like diagnostics before returning the object.

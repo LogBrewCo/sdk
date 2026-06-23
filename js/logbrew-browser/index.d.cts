@@ -1,5 +1,6 @@
 import type {
   ActionAttributes,
+  DroppedEvent,
   IssueAttributes,
   LogBrewClient,
   Metadata,
@@ -14,6 +15,8 @@ export type CreateLogBrewBrowserClientConfig = {
   sdkName?: string;
   sdkVersion?: string;
   maxRetries?: number;
+  maxQueueSize?: number;
+  onEventDropped?: (drop: DroppedEvent) => void;
 };
 
 export type FetchTransportConfig = {

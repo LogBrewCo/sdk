@@ -15,15 +15,17 @@ const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 export function createLogBrewBrowserClient({
   apiKey,
   clientKey,
+  maxQueueSize,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
-  maxRetries = 2
+  maxRetries = 2,
+  onEventDropped
 } = {}) {
   const authKey = clientKey ?? apiKey;
   if (!authKey) {
     throw new SdkError("configuration_error", "createLogBrewBrowserClient requires clientKey or apiKey");
   }
-  return LogBrewClient.create({ apiKey: authKey, sdkName, sdkVersion, maxRetries });
+  return LogBrewClient.create({ apiKey: authKey, maxQueueSize, maxRetries, onEventDropped, sdkName, sdkVersion });
 }
 
 export function createFetchTransport({

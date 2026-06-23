@@ -216,6 +216,37 @@ try {
   ));
   assertEqual(cjsKeepaliveError.code, "keepalive_body_too_large", "CJS oversized keepalive error code");
 
+  const dropped = [];
+  const boundedClient = createLogBrewBrowserClient({
+    clientKey,
+    maxQueueSize: 2,
+    onEventDropped(drop) {
+      dropped.push(drop);
+    },
+    sdkName: "logbrew-browser-fake-intake-smoke",
+    sdkVersion: "0.1.0"
+  });
+  boundedClient.log("evt_browser_queue_001", timestamp(800), {
+    level: "info",
+    logger: "browser.queue",
+    message: "first bounded event"
+  });
+  boundedClient.log("evt_browser_queue_002", timestamp(801), {
+    level: "info",
+    logger: "browser.queue",
+    message: "second bounded event"
+  });
+  boundedClient.log("evt_browser_queue_003", timestamp(802), {
+    level: "warning",
+    logger: "browser.queue",
+    message: "dropped bounded event"
+  });
+  assertEqual(boundedClient.pendingEvents(), 2, "bounded browser client queue count");
+  assertEqual(boundedClient.droppedEvents(), 1, "bounded browser client dropped count");
+  assertEqual(dropped.length, 1, "bounded browser client drop callback count");
+  assertEqual(dropped[0].reason, "queue_overflow", "bounded browser client drop reason");
+  assertEqual(dropped[0].eventId, "evt_browser_queue_003", "bounded browser client drop event id");
+
   const originalTextEncoder = globalThis.TextEncoder;
   let utf8FallbackFetchCalls = 0;
   try {
@@ -244,6 +275,7 @@ try {
     fakeIntakeInvalidKey: invalidError.code,
     fakeIntakeKeepaliveBodyLimit: keepaliveBodyError.code,
     fakeIntakeKeepaliveCjs: cjsKeepaliveError.code,
+    fakeIntakeQueueDrops: boundedClient.droppedEvents(),
     fakeIntakeUtf8Fallback: utf8FallbackFetchCalls,
     fakeIntakeRequests: retryIntake.requests.length,
     fakeIntakeShutdownStatus: shutdownResponse.statusCode,
