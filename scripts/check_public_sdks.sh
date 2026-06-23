@@ -46,6 +46,7 @@ STEP_LABELS=(
   "Rust tracing real-user smoke"
   "JavaScript real-user smoke"
   "Browser real-user smoke"
+  "Browser installed-artifact fake-intake smoke"
   "Node.js real-user smoke"
   "Express real-user smoke"
   "Fastify real-user smoke"
@@ -477,6 +478,10 @@ mark_step_complete
 
 begin_next_step "Browser real-user smoke"
 run_shell_step "bash scripts/real_user_browser_smoke.sh"
+mark_step_complete
+
+begin_next_step "Browser installed-artifact fake-intake smoke"
+run_shell_step "bash scripts/real_user_browser_fake_intake_smoke.sh"
 mark_step_complete
 
 begin_next_step "Node.js real-user smoke"

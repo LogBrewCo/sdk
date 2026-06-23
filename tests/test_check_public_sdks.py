@@ -177,6 +177,20 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "Generated artifact hygiene"',
         )
 
+    def test_public_verifier_runs_browser_fake_intake_smoke(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"Browser installed-artifact fake-intake smoke"', script)
+        self.assertRegex(
+            script,
+            r'begin_next_step "Browser real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_browser_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Browser installed-artifact fake-intake smoke"\n'
+            r'run_shell_step "bash scripts/real_user_browser_fake_intake_smoke\.sh"\n'
+            r"mark_step_complete",
+        )
+
     def test_public_verifier_runs_github_release_safety_gate(self) -> None:
         script = SCRIPT.read_text()
 

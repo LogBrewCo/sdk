@@ -1,0 +1,380 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+tmp_dir="$(mktemp -d)"
+export npm_config_cache="$tmp_dir/npm-cache"
+
+remove_tmp_dir() {
+  rm -rf "$tmp_dir"
+}
+
+trap remove_tmp_dir EXIT
+
+core_pack_json="$tmp_dir/core-pack.json"
+browser_pack_json="$tmp_dir/browser-pack.json"
+(cd "$repo_root/js/logbrew-js" && npm pack --json --pack-destination "$tmp_dir") > "$core_pack_json"
+(cd "$repo_root/js/logbrew-browser" && npm pack --json --pack-destination "$tmp_dir") > "$browser_pack_json"
+
+core_tgz="$(python3 - "$core_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+print(payload[0]["filename"])
+PY
+)"
+browser_tgz="$(python3 - "$browser_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+print(payload[0]["filename"])
+PY
+)"
+core_tgz="$tmp_dir/$core_tgz"
+browser_tgz="$tmp_dir/$browser_tgz"
+test -f "$core_tgz"
+test -f "$browser_tgz"
+
+app_dir="$tmp_dir/browser-fake-intake-app"
+mkdir -p "$app_dir"
+cd "$app_dir"
+npm init -y >/dev/null
+npm pkg set type=module >/dev/null
+npm install \
+  --save-exact \
+  --no-audit \
+  --fund=false \
+  "$core_tgz" \
+  "$browser_tgz" \
+  >/dev/null
+
+grep -q '"@logbrew/sdk": "file:' package.json
+grep -q '"@logbrew/browser": "file:' package.json
+grep -q '"@logbrew/sdk"' package-lock.json
+grep -q '"@logbrew/browser"' package-lock.json
+npm ls @logbrew/sdk @logbrew/browser >/dev/null
+npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
+grep -q '@logbrew/browser@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
+
+cat > smoke.mjs <<'EOF'
+import http from "node:http";
+import { createFetchTransport, createLogBrewBrowserClient } from "@logbrew/browser";
+import { SdkError } from "@logbrew/sdk";
+
+const highVolumeLogs = 250;
+const clientKey = "LOGBREW_BROWSER_KEY";
+const wrongClientKey = "WRONG_LOGBREW_BROWSER_KEY";
+const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+const parentSpanId = "00f067aa0ba902b7";
+const childSpanId = "b7ad6b7169203331";
+
+const retryIntake = await startFakeIntake({
+  expectedAuthorization: `Bearer ${clientKey}`,
+  statuses: [503, 202]
+});
+const invalidIntake = await startFakeIntake({
+  expectedAuthorization: `Bearer ${wrongClientKey}`,
+  statuses: [401]
+});
+const shutdownIntake = await startFakeIntake({
+  expectedAuthorization: `Bearer ${clientKey}`,
+  statuses: [202]
+});
+
+try {
+  const retryClient = createLogBrewBrowserClient({
+    clientKey,
+    maxRetries: 1,
+    sdkName: "logbrew-browser-fake-intake-smoke",
+    sdkVersion: "0.1.0"
+  });
+  queueAccountRecoveryEvents(retryClient);
+  for (let index = 0; index < highVolumeLogs; index += 1) {
+    retryClient.log(`evt_browser_fake_intake_load_${index.toString().padStart(3, "0")}`, timestamp(index + 10), {
+      level: index % 5 === 0 ? "warning" : "info",
+      logger: "browser.account-recovery",
+      message: "account recovery heartbeat",
+      metadata: baseMetadata({
+        sequence: index,
+        traceId
+      })
+    });
+  }
+
+  const retryResponse = await retryClient.flush(createFetchTransport({
+    endpoint: `${retryIntake.url}/v1/events`
+  }));
+  const retryPayload = parsePayload(retryIntake.requests.at(-1)?.body);
+  assertEqual(retryResponse.statusCode, 202, "retry flush status");
+  assertEqual(retryResponse.attempts, 2, "retry flush attempts");
+  assertEqual(retryIntake.requests.length, 2, "retry request count");
+  assertEqual(retryPayload.events.length, highVolumeLogs + 7, "retry payload event count");
+  assertEqual(retryClient.pendingEvents(), 0, "retry client queue after flush");
+  assertNoUnsafeContent(retryIntake.requests);
+  assertCorrelation(retryPayload);
+
+  const invalidClient = createLogBrewBrowserClient({
+    clientKey: wrongClientKey,
+    maxRetries: 1,
+    sdkName: "logbrew-browser-fake-intake-smoke",
+    sdkVersion: "0.1.0"
+  });
+  invalidClient.log("evt_browser_invalid_key_001", timestamp(500), {
+    level: "error",
+    logger: "browser.account-recovery",
+    message: "invalid client key smoke",
+    metadata: baseMetadata({ traceId })
+  });
+
+  const invalidError = await captureError(() => invalidClient.flush(createFetchTransport({
+    endpoint: `${invalidIntake.url}/v1/events`
+  })));
+  if (!(invalidError instanceof SdkError)) {
+    throw new Error(`expected SdkError for invalid key, got ${invalidError}`);
+  }
+  assertEqual(invalidError.code, "unauthenticated", "invalid key error code");
+  if (String(invalidError.message).includes(wrongClientKey)) {
+    throw new Error("invalid key error leaked the rejected key");
+  }
+  assertEqual(invalidClient.pendingEvents(), 1, "invalid key keeps event queued");
+
+  const shutdownClient = createLogBrewBrowserClient({
+    clientKey,
+    maxRetries: 0,
+    sdkName: "logbrew-browser-fake-intake-smoke",
+    sdkVersion: "0.1.0"
+  });
+  shutdownClient.log("evt_browser_shutdown_001", timestamp(700), {
+    level: "info",
+    logger: "browser.account-recovery",
+    message: "shutdown flush smoke",
+    metadata: baseMetadata({ traceId })
+  });
+  const shutdownResponse = await shutdownClient.shutdown(createFetchTransport({
+    endpoint: `${shutdownIntake.url}/v1/events`
+  }));
+  assertEqual(shutdownResponse.statusCode, 202, "shutdown status");
+  const shutdownError = await captureError(() => Promise.resolve().then(() => {
+    shutdownClient.log("evt_browser_shutdown_after_001", timestamp(701), {
+      level: "info",
+      message: "after shutdown"
+    });
+  }));
+  assertEqual(shutdownError.code, "shutdown_error", "post-shutdown error code");
+
+  console.error(JSON.stringify({
+    fakeIntakeAttempts: retryResponse.attempts,
+    fakeIntakeEvents: retryPayload.events.length,
+    fakeIntakeHighVolumeLogs: highVolumeLogs,
+    fakeIntakeInvalidKey: invalidError.code,
+    fakeIntakeRequests: retryIntake.requests.length,
+    fakeIntakeShutdownStatus: shutdownResponse.statusCode,
+    ok: true
+  }));
+} finally {
+  await retryIntake.close();
+  await invalidIntake.close();
+  await shutdownIntake.close();
+}
+
+function queueAccountRecoveryEvents(client) {
+  client.release("rel_browser_fake_intake_001", timestamp(0), {
+    version: "web-2026.06.22",
+    metadata: baseMetadata({ serviceName: "example-web" })
+  });
+  client.environment("env_browser_fake_intake_001", timestamp(1), {
+    name: "local-fake-intake",
+    metadata: baseMetadata({ serviceName: "example-web" })
+  });
+  client.log("evt_browser_fake_intake_log_001", timestamp(2), {
+    level: "info",
+    logger: "browser.account-recovery",
+    message: "account recovery started",
+    metadata: baseMetadata({
+      release: "web-2026.06.22",
+      traceId
+    })
+  });
+  client.issue("iss_browser_fake_intake_001", timestamp(3), {
+    level: "error",
+    message: "Account recovery request returned a retryable response",
+    title: "Account recovery request failed",
+    metadata: baseMetadata({
+      recoveryStep: "send-link",
+      traceId
+    })
+  });
+  client.span("span_browser_fake_intake_001", timestamp(4), {
+    durationMs: 842,
+    name: "POST /api/recovery",
+    parentSpanId,
+    spanId: childSpanId,
+    status: "error",
+    traceId,
+    metadata: baseMetadata({
+      method: "POST",
+      routeTemplate: "/api/recovery",
+      statusCode: 503
+    })
+  });
+  client.action("act_browser_fake_intake_001", timestamp(5), {
+    name: "account.recovery",
+    status: "failure",
+    metadata: baseMetadata({
+      routeTemplate: "/account/recovery",
+      traceId
+    })
+  });
+  client.metric("met_browser_fake_intake_001", timestamp(6), {
+    kind: "counter",
+    name: "account.recovery.attempts",
+    temporality: "delta",
+    unit: "attempt",
+    value: 1,
+    metadata: baseMetadata({
+      routeTemplate: "/account/recovery",
+      traceId
+    })
+  });
+}
+
+function baseMetadata(extra = {}) {
+  return {
+    environment: "local-fake-intake",
+    routeTemplate: "/account/recovery",
+    serviceName: "example-web",
+    ...extra
+  };
+}
+
+async function startFakeIntake({ expectedAuthorization, statuses }) {
+  const requests = [];
+  const pendingStatuses = [...statuses];
+  const server = http.createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) {
+      chunks.push(chunk);
+    }
+    const body = Buffer.concat(chunks).toString("utf8");
+    requests.push({
+      authorization: request.headers.authorization,
+      body,
+      method: request.method,
+      url: request.url
+    });
+
+    const status = pendingStatuses.length > 0 ? pendingStatuses.shift() : 202;
+    if (request.method !== "POST" || request.url !== "/v1/events") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ code: "not_found" }));
+      return;
+    }
+    if (request.headers.authorization !== expectedAuthorization) {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ code: "ingest_key_invalid" }));
+      return;
+    }
+    response.writeHead(status, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: status >= 200 && status < 300 }));
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  return {
+    requests,
+    url: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    })
+  };
+}
+
+function parsePayload(body) {
+  if (typeof body !== "string" || body.trim() === "") {
+    throw new Error("expected fake intake body");
+  }
+  return JSON.parse(body);
+}
+
+function assertCorrelation(payload) {
+  const events = payload.events;
+  if (!events.some((event) => event.type === "release")) {
+    throw new Error("missing release event");
+  }
+  if (!events.some((event) => event.type === "environment")) {
+    throw new Error("missing environment event");
+  }
+  if (!events.some((event) => event.type === "log" && event.attributes.logger === "browser.account-recovery")) {
+    throw new Error("missing logger-correlated log event");
+  }
+  if (!events.some((event) => event.type === "span" && event.attributes.traceId === traceId && event.attributes.parentSpanId === parentSpanId)) {
+    throw new Error("missing request trace/span correlation");
+  }
+  if (!events.every((event) => event.attributes.metadata?.serviceName === "example-web")) {
+    throw new Error("missing primitive serviceName metadata");
+  }
+}
+
+function assertNoUnsafeContent(requests) {
+  for (const request of requests) {
+    if (request.authorization !== `Bearer ${clientKey}`) {
+      throw new Error(`unexpected auth header: ${request.authorization}`);
+    }
+    if (!request.body.includes("LOGBREW_BROWSER_KEY")) {
+      continue;
+    }
+    throw new Error("payload body echoed the client key");
+  }
+  const body = requests.map((request) => request.body).join("\n");
+  if (body.includes("dev@example.test") || body.includes("?email=") || body.includes("#section")) {
+    throw new Error("payload body included query, hash, or email data");
+  }
+}
+
+async function captureError(callback) {
+  try {
+    await callback();
+  } catch (error) {
+    return error;
+  }
+  throw new Error("expected callback to throw");
+}
+
+function timestamp(offsetSeconds) {
+  return new Date(Date.UTC(2026, 5, 22, 10, 0, offsetSeconds)).toISOString();
+}
+
+function assertEqual(actual, expected, label) {
+  if (actual !== expected) {
+    throw new Error(`${label}: expected ${expected}, got ${actual}`);
+  }
+}
+EOF
+
+if ! node smoke.mjs > "$tmp_dir/browser-fake-intake.stdout.json" 2> "$tmp_dir/browser-fake-intake.stderr.json"; then
+  cat "$tmp_dir/browser-fake-intake.stdout.json" >&2
+  cat "$tmp_dir/browser-fake-intake.stderr.json" >&2
+  exit 1
+fi
+grep -q '"ok":true' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeEvents":257' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeAttempts":2' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeRequests":2' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeInvalidKey":"unauthenticated"' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeShutdownStatus":202' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeHighVolumeLogs":250' "$tmp_dir/browser-fake-intake.stderr.json"

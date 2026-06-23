@@ -44,7 +44,7 @@ Measured with Cargo 1.94.1 and Rust 1.94.1 using a fresh Cargo home per package.
 - No automatic Rust framework instrumentation yet for Axum, Actix, Rocket, or Tower layers.
 - No native Rust `tracing` subscriber/layer integration yet, so users must call LogBrew explicitly instead of bridging existing spans/logs.
 - Source-map/native symbolication remains a broader product gap compared with Sentry and Datadog.
-- Backend-owned setup status, usage/quota APIs, and project-scoped write-only ingest configuration are still contract-pending, so SDK dogfooding remains pending.
+- Backend-owned setup status, usage/quota APIs, and project-scoped write-only ingest configuration are still contract-pending, so SDK-facing project-scoped setup examples should remain placeholder-only.
 
 ## Next Focus
 
