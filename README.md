@@ -28,6 +28,7 @@ Install only the package your application needs. The package names below are reg
 - Frontend and mobile packages use public `clientKey` setup. Server packages should use server-side keys from app configuration.
 - A change to one ecosystem package should not require developers in other ecosystems to update unless their package also changed.
 - Apple app setup should start from the Swift/SwiftPM path. Objective-C remains available as an advanced source/header variant for mixed or Objective-C-only apps, not a separate first-step platform choice.
+- Product setup pickers should show user-facing runtime/platform families instead of helper package names; see the [SDK setup picker guidance](docs/sdk-setup-picker-guidance.md).
 
 | Ecosystem | Package | Use it for |
 | --- | --- | --- |

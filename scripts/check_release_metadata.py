@@ -769,23 +769,33 @@ def validate_php(root: Path, failures: list[str]) -> None:
 
 
 def validate_swift(root: Path, failures: list[str]) -> None:
-    manifest_path = require_path(root, "swift/logbrew-swift/Package.swift", failures)
     require_path(root, "swift/logbrew-swift/README.md", failures)
-    if not manifest_path.exists():
-        return
-    text = manifest_path.read_text(encoding="utf-8")
-    location = "swift/logbrew-swift/Package.swift"
-    for needle in (
-        'name: "logbrew-swift"',
-        '.macOS(.v13)',
-        '.iOS(.v15)',
-        '.library(name: "LogBrew", targets: ["LogBrew"])',
-        '.executable(name: "ReadmeExample", targets: ["ReadmeExample"])',
-        '.executable(name: "RealUserSmoke", targets: ["RealUserSmoke"])',
-        '.target(name: "LogBrew")',
-        '.testTarget(name: "LogBrewTests", dependencies: ["LogBrew"])',
-    ):
-        require(needle in text, failures, f"{location}: missing manifest entry {needle}")
+    manifest_expectations = {
+        "swift/logbrew-swift/Package.swift": (
+            'name: "logbrew-swift"',
+            '.macOS(.v13)',
+            '.iOS(.v15)',
+            '.library(name: "LogBrew", targets: ["LogBrew"])',
+            '.executable(name: "ReadmeExample", targets: ["ReadmeExample"])',
+            '.executable(name: "RealUserSmoke", targets: ["RealUserSmoke"])',
+            '.target(name: "LogBrew")',
+            '.testTarget(name: "LogBrewTests", dependencies: ["LogBrew"])',
+        ),
+        "Package.swift": (
+            'name: "logbrew-swift"',
+            '.macOS(.v13)',
+            '.iOS(.v15)',
+            '.library(name: "LogBrew", targets: ["LogBrew"])',
+            'path: "swift/logbrew-swift/Sources/LogBrew"',
+            'path: "swift/logbrew-swift/Tests/LogBrewTests"',
+        ),
+    }
+    for relative_path, required_entries in manifest_expectations.items():
+        manifest_path = require_path(root, relative_path, failures)
+        if manifest_path.exists():
+            text = manifest_path.read_text(encoding="utf-8")
+            for needle in required_entries:
+                require(needle in text, failures, f"{relative_path}: missing manifest entry {needle}")
 
 
 def validate_root(root: Path, failures: list[str]) -> None:

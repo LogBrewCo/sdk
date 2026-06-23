@@ -59,6 +59,17 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_repo_release_metadata_passes(self) -> None:
         self.assertEqual(check_release_metadata.validate(ROOT), [])
 
+    def test_swift_metadata_requires_root_swiftpm_package(self) -> None:
+        manifest_path = ROOT / "Package.swift"
+
+        self.assertTrue(manifest_path.exists(), "root Package.swift must support the documented SwiftPM URL install")
+
+        manifest = manifest_path.read_text(encoding="utf-8")
+        self.assertIn('name: "logbrew-swift"', manifest)
+        self.assertIn('.library(name: "LogBrew", targets: ["LogBrew"])', manifest)
+        self.assertIn('path: "swift/logbrew-swift/Sources/LogBrew"', manifest)
+        self.assertIn('path: "swift/logbrew-swift/Tests/LogBrewTests"', manifest)
+
     def test_publish_packages_workflow_requires_exact_nuget_version_verification(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

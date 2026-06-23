@@ -14,7 +14,7 @@ For Apple app setup flows, choose the Swift path first. Use this SDK for iOS, ma
 .package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.0")
 ```
 
-Use the `LogBrew` product from the `swift/logbrew-swift` package directory.
+Use the `LogBrew` product from the repository root SwiftPM package. Local contributors can also open the Swift package directly from `swift/logbrew-swift`.
 
 The package ships a `LogBrew` library product plus copyable examples for creating a client, previewing queued JSON, flushing through a transport, and using the Swift logger facade in your own app. If you use an AI coding assistant, ask it to install the `LogBrew` product, create one app-owned client, wire your chosen signals, and keep personally sensitive values out of messages and metadata.
 

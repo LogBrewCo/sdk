@@ -24,16 +24,20 @@ Use one top-level Apple app surface in setup/docs/pickers, preferably `iOS / Swi
 
 This matches the competitor pattern while preserving LogBrew's current packaging reality:
 
-- Swift is the primary Apple path through the SwiftPM `LogBrew` product in `swift/logbrew-swift`.
+- Swift is the primary Apple path through the root SwiftPM `LogBrew` product, which points at `swift/logbrew-swift`.
 - Objective-C is currently a separate dependency-light source/header package in `objc/logbrew-objc`, not the primary SwiftPM install path.
 
 ## Tradeoffs
 
 - Better for users: fewer first-step choices and the common Apple app path starts with Swift/SwiftPM.
 - Better than hiding Objective-C: mixed and legacy apps can still find the source/header variant.
-- Current gap: LogBrew does not yet provide a single root SwiftPM package that exposes both Swift and Objective-C variants like Sentry does. Until packaging changes, docs should avoid implying Objective-C is installed through the Swift package.
+- Current gap: LogBrew does not yet provide one SwiftPM package that exposes both Swift and Objective-C variants like Sentry does. Until packaging changes, docs should avoid implying Objective-C is installed through the Swift package.
 
 ## Follow-Up
 
-- If the public repo later adds a root Apple SwiftPM package or XCFramework-style artifact, revisit whether Objective-C should become a product variant under the same Apple package.
+- If the public repo later adds an XCFramework-style artifact or Objective-C product under the same Apple package, revisit whether Objective-C should become a product variant under the same Apple setup.
 - Keep setup examples clear that SDK ingest uses project-scoped placeholder SDK keys only.
+
+## 2026-06-23 Root SwiftPM Follow-Up
+
+The repository root now includes a minimal SwiftPM manifest for the documented URL install path. It exposes the `LogBrew` library product from `swift/logbrew-swift/Sources/LogBrew` and runs the existing Swift tests from `swift/logbrew-swift/Tests/LogBrewTests`. This closes the first-install gap for SwiftPM users while keeping Objective-C as an advanced source/header variant.
