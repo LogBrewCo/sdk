@@ -403,3 +403,36 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 - `bash scripts/real_user_kotlin_smoke.sh`: installs from a local Maven-style artifact into a temporary Gradle app, proves dependency remove/re-add, validates installed examples, and runs installed trace correlation proof.
 - `scripts/check_kotlin_trace_correlation_payload.py`: validates trace/span IDs, active issue/log/action/metric/product/network metadata, span attributes, outgoing `traceparent`, route query/fragment stripping, and no raw incoming propagation or spoofed trace leakage.
 - Repo hygiene also passed: generated-artifact scan, ShellCheck, markdown links, confidentiality scan, backend contract reports, release metadata, and diff whitespace.
+
+## 2026-06-23 Span Event Summary Follow-Up
+
+### Source Re-Read
+
+- Re-read Sentry Java/Android `getsentry/sentry-java@main` `sentry/src/main/java/io/sentry/ISpan.java`: `setThrowable(...)`, `setData(...)`, `setMeasurement(...)`, `setContext(...)`, `startChild(...)`, and span status/tag APIs.
+- Re-read Sentry Java/Android `getsentry/sentry-java@main` `sentry/src/main/java/io/sentry/Span.java`: throwable/data/measurement capture and span finish behavior.
+- Re-read Sentry Java/Android `getsentry/sentry-java@main` `sentry/src/main/java/io/sentry/SpanContext.java`: serialized tags, data, origin, baggage, measurements, and feature flags.
+- Re-read OpenTelemetry Java `open-telemetry/opentelemetry-java@main` `api/all/src/main/java/io/opentelemetry/api/trace/Span.java`: `addEvent(...)`, `recordException(...)`, `addLink(...)`, attributes, and status APIs.
+
+### Pattern And Tradeoffs
+
+- Sentry and OpenTelemetry are stronger for rich span data, events, exceptions, links, baggage, and broader instrumentation context.
+- The safer LogBrew subset for Kotlin dependency spans is a small `SpanEventSummary` list: low-cardinality event names, optional timestamp, primitive metadata, no links, no baggage, no tracestate, no stack traces, no exception messages, and no payload/header/query capture.
+- Operation helpers sanitize event metadata with the same blocked-key policy as dependency metadata and cap events at eight entries to keep payloads bounded.
+
+### LogBrew Follow-Up Implementation
+
+- Added public `SpanEventSummary` and `SpanAttributes.withEvent(...)` / `withEvents(...)`.
+- Added optional `events` to `DatabaseOperation`, `CacheOperation`, and `QueueOperation`; dependency spans include sanitized event summaries when supplied.
+- Failed operations now add one type-only `exception` span event while preserving the existing `errorType` metadata and rethrowing the original app exception.
+- Updated `spec/event-batch.schema.json` and `scripts/validate_fixtures.py` so span `events` are an explicit public payload contract with a maximum of eight summaries and primitive metadata only.
+
+### Verification
+
+- TDD red: `bash scripts/check_kotlin_package.sh` first failed with unresolved `SpanEventSummary` and missing operation `events`.
+- TDD red: `python3 -m unittest tests.test_validate_fixtures` first failed because span `events` were not accepted by the fixture validator.
+- Green: `python3 -m unittest tests.test_validate_fixtures` passed with coverage for primitive span-event metadata, nested metadata rejection, and max-event rejection.
+- Green: `bash scripts/check_kotlin_package.sh` passed with 31 core Kotlin tests, 5 OkHttp tests, package metadata checks, README checks, jar-content checks, direct span-event cap validation, and the dependency-span example proving event sanitization and type-only exception events.
+
+### Remaining Gaps After Span Event Summaries
+
+- Kotlin still lacks OpenTelemetry-style links, baggage, tracestate, full exception payloads, automatic event capture, automatic HttpURLConnection instrumentation, and native symbolication parity. Those remain deliberate gaps until they have source-backed, privacy-bounded designs.

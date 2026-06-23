@@ -19,6 +19,7 @@ import co.logbrew.sdk.RecordingTransport
 import co.logbrew.sdk.ReleaseAttributes
 import co.logbrew.sdk.SdkException
 import co.logbrew.sdk.SpanAttributes
+import co.logbrew.sdk.SpanEventSummary
 import co.logbrew.sdk.TransportException
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
@@ -35,6 +36,7 @@ fun main() {
     run("invalid_issue_level_fails_validation", ::invalidIssueLevelFailsValidation)
     run("severity_aliases_normalize_before_preview", ::severityAliasesNormalizeBeforePreview)
     run("negative_span_duration_fails_validation", ::negativeSpanDurationFailsValidation)
+    run("too_many_span_events_fail_validation", ::tooManySpanEventsFailValidation)
     run("metric_event_validates_and_serializes_attributes", ::metricEventValidatesAndSerializesAttributes)
     run("metric_value_and_temporality_validation_fails_cleanly", ::metricValueAndTemporalityValidationFailsCleanly)
     run("unauthenticated_response_surfaces_clean_error", ::unauthenticatedResponseSurfacesCleanError)
@@ -61,7 +63,7 @@ fun main() {
     )
     AndroidRequestSpanTests.runAll()
     OperationTracingTests.runAll()
-    println("kotlin package tests ok (30 tests)")
+    println("kotlin package tests ok (31 tests)")
 }
 
 private fun run(
@@ -175,6 +177,18 @@ private fun metricValueAndTemporalityValidationFailsCleanly() {
             "evt_metric_bad_finite",
             "2026-06-02T10:00:06Z",
             MetricAttributes.create("queue.depth", "gauge", Double.NaN, "{items}", "instant"),
+        )
+    }
+}
+
+private fun tooManySpanEventsFailValidation() {
+    expect("validation_error") {
+        newClient().span(
+            "evt_span_many_events",
+            "2026-06-02T10:00:04Z",
+            SpanAttributes
+                .create("GET /health", "trace_001", "span_001", "ok")
+                .withEvents(List(9) { index -> SpanEventSummary.create("step.$index") }),
         )
     }
 }

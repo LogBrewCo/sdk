@@ -10,6 +10,7 @@ data class DatabaseOperation(
     val statementTemplate: String? = null,
     val rowCount: Int? = null,
     val metadata: Map<String, Any?> = emptyMap(),
+    val events: List<SpanEventSummary> = emptyList(),
     val onCaptureFailure: ((SdkException) -> Unit)? = null,
 )
 
@@ -21,6 +22,7 @@ data class CacheOperation(
     val itemSizeBytes: Int? = null,
     val itemCount: Int? = null,
     val metadata: Map<String, Any?> = emptyMap(),
+    val events: List<SpanEventSummary> = emptyList(),
     val onCaptureFailure: ((SdkException) -> Unit)? = null,
 )
 
@@ -31,6 +33,7 @@ data class QueueOperation(
     val taskName: String? = null,
     val messageCount: Int? = null,
     val metadata: Map<String, Any?> = emptyMap(),
+    val events: List<SpanEventSummary> = emptyList(),
     val onCaptureFailure: ((SdkException) -> Unit)? = null,
 )
 
@@ -83,6 +86,7 @@ object LogBrewOperationTracing {
             spanNamePrefix = "database",
             eventIdPrefix = "kotlin_database",
             metadata = databaseMetadata(operationName, config),
+            events = safeSpanEvents(config.events),
             onCaptureFailure = config.onCaptureFailure,
             operation = operation,
         )
@@ -100,6 +104,7 @@ object LogBrewOperationTracing {
             spanNamePrefix = "cache",
             eventIdPrefix = "kotlin_cache",
             metadata = cacheMetadata(operationName, config),
+            events = safeSpanEvents(config.events),
             onCaptureFailure = config.onCaptureFailure,
             operation = operation,
         )
@@ -117,6 +122,7 @@ object LogBrewOperationTracing {
             spanNamePrefix = "queue",
             eventIdPrefix = "kotlin_queue",
             metadata = queueMetadata(operationName, config),
+            events = safeSpanEvents(config.events),
             onCaptureFailure = config.onCaptureFailure,
             operation = operation,
         )
@@ -128,6 +134,7 @@ object LogBrewOperationTracing {
         spanNamePrefix: String,
         eventIdPrefix: String,
         metadata: Map<String, Any?>,
+        events: List<SpanEventSummary>,
         onCaptureFailure: ((SdkException) -> Unit)?,
         operation: () -> T,
     ): T {
@@ -151,6 +158,7 @@ object LogBrewOperationTracing {
                 traceContext = traceContext,
                 durationMs = (monotonicTimeMs() - startedAtMs).coerceAtLeast(0.0),
                 metadata = metadata,
+                events = events,
                 operationError = operationError,
                 onCaptureFailure = onCaptureFailure,
             )
@@ -165,6 +173,7 @@ object LogBrewOperationTracing {
         traceContext: LogBrewTraceContext,
         durationMs: Double,
         metadata: Map<String, Any?>,
+        events: List<SpanEventSummary>,
         operationError: Throwable?,
         onCaptureFailure: ((SdkException) -> Unit)?,
     ) {
@@ -175,7 +184,7 @@ object LogBrewOperationTracing {
                     "sampled" to traceContext.sampled,
                 ) +
                 (operationError?.let { mapOf("errorType" to throwableTitle(it)) } ?: emptyMap())
-        val attributes =
+        val baseAttributes =
             LogBrewTrace.spanAttributes(
                 name = spanName,
                 status = if (operationError == null) "ok" else "error",
@@ -183,6 +192,7 @@ object LogBrewOperationTracing {
                 metadata = spanMetadata,
                 context = traceContext,
             )
+        val attributes = baseAttributes.withEvents(events + exceptionEvent(operationError))
 
         try {
             client.span(
@@ -242,6 +252,33 @@ object LogBrewOperationTracing {
         }
         return copied
     }
+
+    private fun safeSpanEvents(events: List<SpanEventSummary>): List<SpanEventSummary> {
+        if (events.size > 8) {
+            throw SdkException("validation_error", "span events must contain at most 8 entries")
+        }
+        return events.map { event ->
+            SpanEventSummary(
+                name = event.name,
+                timestamp = event.timestamp,
+                metadata = safeOperationMetadata(event.metadata),
+            )
+        }
+    }
+
+    private fun exceptionEvent(operationError: Throwable?): List<SpanEventSummary> =
+        operationError?.let {
+            listOf(
+                SpanEventSummary
+                    .create("exception")
+                    .withMetadata(
+                        mapOf(
+                            "exceptionType" to throwableTitle(it),
+                            "exceptionEscaped" to true,
+                        ),
+                    ),
+            )
+        } ?: emptyList()
 
     private fun isBlockedOperationMetadataKey(key: String): Boolean {
         val normalized =

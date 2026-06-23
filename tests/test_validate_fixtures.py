@@ -96,6 +96,34 @@ class ValidateFixturesTests(unittest.TestCase):
         ):
             validate_payload(payload)
 
+    def test_span_events_pass_with_primitive_metadata(self) -> None:
+        payload = self.load_valid_payload()
+        payload["events"][4]["attributes"]["events"] = [
+            {
+                "name": "db.pool.wait",
+                "timestamp": "2026-06-02T10:00:04Z",
+                "metadata": {"phase": "before_query", "attempt": 1, "retryable": False},
+            }
+        ]
+        validate_payload(payload)
+
+    def test_rejects_nested_span_event_metadata_values(self) -> None:
+        payload = self.load_valid_payload()
+        payload["events"][4]["attributes"]["events"] = [
+            {"name": "db.pool.wait", "metadata": {"nested": {"nope": True}}}
+        ]
+        with self.assertRaisesRegex(
+            ValidationError,
+            "event 4 span event 0 metadata value for nested must be a string, number, boolean, or null",
+        ):
+            validate_payload(payload)
+
+    def test_rejects_too_many_span_events(self) -> None:
+        payload = self.load_valid_payload()
+        payload["events"][4]["attributes"]["events"] = [{"name": f"step.{index}"} for index in range(9)]
+        with self.assertRaisesRegex(ValidationError, "event 4 span events must contain at most 8 entries"):
+            validate_payload(payload)
+
     def test_metric_event_passes(self) -> None:
         payload = self.load_valid_payload()
         payload["events"].append(self.metric_event())

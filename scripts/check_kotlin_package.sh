@@ -211,6 +211,7 @@ grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/jar-contents.
 grep -q '^co/logbrew/sdk/DatabaseOperation.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/CacheOperation.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/QueueOperation.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/SpanEventSummary.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidRequestSpan.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/AndroidLifecycleTracker.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHeaderSetter.class$' "$tmp_dir/jar-contents.txt"
@@ -255,9 +256,11 @@ for needle in (
     "DatabaseOperation",
     "CacheOperation",
     "QueueOperation",
+    "SpanEventSummary",
     "databaseOperation",
     "cacheOperation",
     "queueOperation",
+    "type-only `exception` event",
     "dbStatementTemplate",
     "payload-like values",
     "traceContextElement",

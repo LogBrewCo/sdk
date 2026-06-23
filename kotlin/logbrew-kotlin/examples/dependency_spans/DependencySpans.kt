@@ -4,6 +4,7 @@ import co.logbrew.sdk.LogBrewClient
 import co.logbrew.sdk.LogBrewOperationTracing
 import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.QueueOperation
+import co.logbrew.sdk.SpanEventSummary
 
 fun main() {
     val client = LogBrewClient.create("LOGBREW_API_KEY", "kotlin-dependency-app", "0.1.0")
@@ -26,6 +27,17 @@ fun main() {
                                 "component" to "checkout",
                                 "query" to "SELECT hidden",
                                 ("ho" + "st") to "db.internal",
+                            ),
+                        events =
+                            listOf(
+                                SpanEventSummary
+                                    .create("db.pool.wait")
+                                    .withMetadata(
+                                        mapOf(
+                                            "phase" to "before_query",
+                                            "payload" to "hidden payload",
+                                        ),
+                                    ),
                             ),
                     ),
             ) {
@@ -83,11 +95,17 @@ fun main() {
     check("\"dbSystem\": \"postgresql\"" in body)
     check("\"cacheSystem\": \"redis\"" in body)
     check("\"queueSystem\": \"kafka\"" in body)
+    check("\"events\"" in body)
+    check("\"name\": \"db.pool.wait\"" in body)
+    check("\"phase\": \"before_query\"" in body)
+    check("\"name\": \"exception\"" in body)
+    check("\"exceptionType\": \"IllegalStateException\"" in body)
     check("\"errorType\": \"IllegalStateException\"" in body)
     check("db.internal" !in body)
     check("cart:hidden" !in body)
     check("hidden body" !in body)
     check("hidden data" !in body)
+    check("hidden payload" !in body)
     check("traceparent" !in body)
     println(body)
     System.err.println("""{"dependencySpans":3,"ok":true}""")

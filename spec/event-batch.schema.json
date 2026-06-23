@@ -40,6 +40,16 @@
         "type": ["string", "number", "integer", "boolean", "null"]
       }
     },
+    "spanEventSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "metadata": { "$ref": "#/$defs/metadata" }
+      }
+    },
     "eventBase": {
       "type": "object",
       "additionalProperties": false,
@@ -171,6 +181,11 @@
                   "enum": ["ok", "error"]
                 },
                 "durationMs": { "type": "number", "minimum": 0 },
+                "events": {
+                  "type": "array",
+                  "maxItems": 8,
+                  "items": { "$ref": "#/$defs/spanEventSummary" }
+                },
                 "metadata": { "$ref": "#/$defs/metadata" }
               }
             }

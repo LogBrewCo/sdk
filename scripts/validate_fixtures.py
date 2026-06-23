@@ -40,7 +40,7 @@ OPTIONAL_ATTRIBUTES = {
     "environment": {"region", "metadata"},
     "issue": {"message", "metadata"},
     "log": {"logger", "metadata"},
-    "span": {"parentSpanId", "durationMs", "metadata"},
+    "span": {"parentSpanId", "durationMs", "metadata", "events"},
     "action": {"metadata"},
     "metric": {"metadata"},
 }
@@ -97,6 +97,41 @@ def _validate_metadata(index: int, attributes: dict[str, Any]) -> None:
             raise ValidationError(
                 f"event {index} metadata value for {key} must be a string, number, boolean, or null"
             )
+
+
+def _validate_span_events(index: int, attributes: dict[str, Any]) -> None:
+    events = attributes.get("events")
+    if events is None:
+        return
+    if not isinstance(events, list):
+        raise ValidationError(f"event {index} span events must be an array")
+    if len(events) > 8:
+        raise ValidationError(f"event {index} span events must contain at most 8 entries")
+    for event_index, event in enumerate(events):
+        if not isinstance(event, dict):
+            raise ValidationError(f"event {index} span event {event_index} must be an object")
+        _reject_unknown_keys(event, {"name", "timestamp", "metadata"}, f"event {index} span event {event_index}")
+        name = event.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValidationError(f"event {index} span event {event_index} name must be a non-empty string")
+        timestamp = event.get("timestamp")
+        if timestamp is not None:
+            if not isinstance(timestamp, str) or not timestamp:
+                raise ValidationError(f"event {index} span event {event_index} timestamp must be a non-empty string")
+            _parse_timestamp(timestamp)
+        metadata = event.get("metadata")
+        if metadata is None:
+            continue
+        if not isinstance(metadata, dict):
+            raise ValidationError(f"event {index} span event {event_index} metadata must be an object")
+        for key, value in metadata.items():
+            if not isinstance(key, str):
+                raise ValidationError(f"event {index} span event {event_index} metadata keys must be strings")
+            if not isinstance(value, (str, int, float, bool)) and value is not None:
+                raise ValidationError(
+                    f"event {index} span event {event_index} metadata value for {key} "
+                    "must be a string, number, boolean, or null"
+                )
 
 
 def _validate_optional_attributes(index: int, event_type: str, attributes: dict[str, Any]) -> None:
@@ -186,6 +221,9 @@ def validate_payload(payload: dict[str, Any]) -> None:
             duration = attributes["durationMs"]
             if isinstance(duration, bool) or not isinstance(duration, (int, float)) or duration < 0:
                 raise ValidationError(f"event {index} attribute durationMs must be a non-negative number")
+
+        if event_type == "span":
+            _validate_span_events(index, attributes)
 
         if event_type == "metric":
             _validate_metric_attributes(index, attributes)

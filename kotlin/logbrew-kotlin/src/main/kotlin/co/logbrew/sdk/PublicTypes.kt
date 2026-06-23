@@ -340,12 +340,17 @@ data class SpanAttributes(
     val parentSpanId: String? = null,
     val durationMs: Double? = null,
     val metadata: Map<String, Any?> = emptyMap(),
+    val events: List<SpanEventSummary> = emptyList(),
 ) {
     fun withParentSpanId(parentSpanId: String): SpanAttributes = copy(parentSpanId = parentSpanId)
 
     fun withDurationMs(durationMs: Double): SpanAttributes = copy(durationMs = durationMs)
 
     fun withMetadata(metadata: Map<String, Any?>): SpanAttributes = copy(metadata = metadata)
+
+    fun withEvent(event: SpanEventSummary): SpanAttributes = copy(events = events + event)
+
+    fun withEvents(events: List<SpanEventSummary>): SpanAttributes = copy(events = this.events + events)
 
     internal fun toJsonObject(): OrderedJsonObject {
         Validation.requireNonEmpty("span name", name)
@@ -355,6 +360,9 @@ data class SpanAttributes(
         parentSpanId?.let { Validation.requireNonEmpty("span parentSpanId", it) }
         if (durationMs != null && (durationMs < 0 || durationMs.isNaN() || durationMs.isInfinite())) {
             throw SdkException("validation_error", "span durationMs must be non-negative")
+        }
+        if (events.size > 8) {
+            throw SdkException("validation_error", "span events must contain at most 8 entries")
         }
 
         return OrderedJsonObject()
@@ -367,6 +375,9 @@ data class SpanAttributes(
                 if (durationMs != null) {
                     payload.add("durationMs", durationMs)
                 }
+                if (events.isNotEmpty()) {
+                    payload.add("events", events.map { it.toJsonObject() })
+                }
             }.addMetadata(metadata)
     }
 
@@ -377,6 +388,29 @@ data class SpanAttributes(
             spanId: String,
             status: String,
         ): SpanAttributes = SpanAttributes(name, traceId, spanId, status)
+    }
+}
+
+data class SpanEventSummary(
+    val name: String,
+    val timestamp: String? = null,
+    val metadata: Map<String, Any?> = emptyMap(),
+) {
+    fun withTimestamp(timestamp: String): SpanEventSummary = copy(timestamp = timestamp)
+
+    fun withMetadata(metadata: Map<String, Any?>): SpanEventSummary = copy(metadata = metadata)
+
+    internal fun toJsonObject(): OrderedJsonObject {
+        Validation.requireNonEmpty("span event name", name)
+        timestamp?.let { Validation.requireTimestamp(it) }
+        return OrderedJsonObject()
+            .add("name", name)
+            .addIfNotNull("timestamp", timestamp)
+            .addMetadata(metadata)
+    }
+
+    companion object {
+        fun create(name: String): SpanEventSummary = SpanEventSummary(name)
     }
 }
 

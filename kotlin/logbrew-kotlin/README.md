@@ -238,15 +238,20 @@ val orderId = LogBrewOperationTracing.databaseOperation(
         statementTemplate = "SELECT * FROM orders WHERE id = ?",
         rowCount = 1,
         metadata = mapOf("component" to "checkout"),
+        events = listOf(
+            SpanEventSummary
+                .create("db.pool.wait")
+                .withMetadata(mapOf("phase" to "before_query")),
+        ),
     ),
 ) {
     repository.loadOrder(orderId)
 }
 ```
 
-`databaseOperation`, `cacheOperation`, and `queueOperation` activate a fresh child `LogBrewTraceContext` while the callable runs, queue one span, preserve the original result or exception, and report telemetry capture failures through `onCaptureFailure` without replacing the app-owned operation result. Use `DatabaseOperation`, `CacheOperation`, and `QueueOperation` for low-cardinality system, operation kind, name, count, hit, `dbStatementTemplate`, and primitive metadata fields.
+`databaseOperation`, `cacheOperation`, and `queueOperation` activate a fresh child `LogBrewTraceContext` while the callable runs, queue one span, preserve the original result or exception, and report telemetry capture failures through `onCaptureFailure` without replacing the app-owned operation result. Use `DatabaseOperation`, `CacheOperation`, and `QueueOperation` for low-cardinality system, operation kind, name, count, hit, `dbStatementTemplate`, primitive metadata fields, and optional `SpanEventSummary` entries. When an operation throws, LogBrew adds a type-only `exception` event and still rethrows the original error.
 
-The helpers intentionally do not patch drivers or clients, open support tickets, inspect raw dependency statements or identifiers, capture payload-like values, copy arbitrary request metadata, collect network locations, add baggage, or send tracestate. Metadata keys that look like raw statements, parameters, identifiers, payloads, broker addresses, request metadata, browser state, access material, or resource locations are dropped before enqueue.
+The helpers intentionally do not patch drivers or clients, open support tickets, inspect raw dependency statements or identifiers, capture payload-like values, copy arbitrary request metadata, collect network locations, add baggage, or send tracestate. Metadata keys that look like raw statements, parameters, identifiers, payloads, broker addresses, request metadata, browser state, access material, or resource locations are dropped before enqueue. Span events are capped to eight entries and accept only primitive metadata; exception summaries include the exception type only, not messages or stacks.
 
 ## HTTP Delivery
 

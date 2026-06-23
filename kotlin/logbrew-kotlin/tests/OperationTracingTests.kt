@@ -7,10 +7,12 @@ import co.logbrew.sdk.LogBrewTraceContext
 import co.logbrew.sdk.QueueOperation
 import co.logbrew.sdk.RecordingTransport
 import co.logbrew.sdk.SdkException
+import co.logbrew.sdk.SpanEventSummary
 
 object OperationTracingTests {
     fun runAll() {
         run("dependency_spans_correlate_and_sanitize_metadata", ::dependencySpansCorrelateAndSanitizeMetadata)
+        run("dependency_spans_include_bounded_span_events", ::dependencySpansIncludeBoundedSpanEvents)
         run("dependency_spans_preserve_original_errors", ::dependencySpansPreserveOriginalErrors)
         run("dependency_span_capture_failure_does_not_replace_result", ::dependencySpanCaptureFailureDoesNotReplaceResult)
     }
@@ -90,6 +92,39 @@ object OperationTracingTests {
         check("spoofed" !in body)
     }
 
+    private fun dependencySpansIncludeBoundedSpanEvents() {
+        val client = newClient()
+
+        LogBrewOperationTracing.databaseOperation(
+            client = client,
+            operationName = "select checkout",
+            config =
+                DatabaseOperation(
+                    events =
+                        listOf(
+                            SpanEventSummary
+                                .create("db.pool.wait")
+                                .withMetadata(
+                                    mapOf(
+                                        "phase" to "before_query",
+                                        "payload" to "private body",
+                                        "query" to "SELECT * FROM private_orders",
+                                    ),
+                                ),
+                        ),
+                ),
+        ) {
+            "order-123"
+        }
+
+        val body = client.previewJson()
+        check("\"events\"" in body)
+        check("\"name\": \"db.pool.wait\"" in body)
+        check("\"phase\": \"before_query\"" in body)
+        check("private body" !in body)
+        check("private_orders" !in body)
+    }
+
     private fun dependencySpansPreserveOriginalErrors() {
         val client = newClient()
         val original = IllegalStateException("broker payload contained private order")
@@ -154,6 +189,8 @@ object OperationTracingTests {
         check("\"queueName\": \"billing-events\"" in body)
         check("\"taskName\": \"invoice.created\"" in body)
         check("\"messageCount\": 1" in body)
+        check("\"name\": \"exception\"" in body)
+        check("\"exceptionType\": \"IllegalStateException\"" in body)
         check("\"errorType\": \"IllegalStateException\"" in body)
         check("cart:private" !in body)
         check("sensitive" !in body)
