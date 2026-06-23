@@ -6,6 +6,8 @@
 
 Public Swift SDK for sending logs, errors, spans, actions, releases, environments, and explicit metrics from your Swift or Apple-platform app to the hosted LogBrew observability service.
 
+For Apple app setup flows, choose the Swift path first. Use this SDK for iOS, macOS, tvOS, and watchOS Swift apps through SwiftPM. Objective-C and mixed Swift/Objective-C apps that cannot consume the Swift package can use the advanced source/header variant in [`objc/logbrew-objc`](../../objc/logbrew-objc).
+
 ## Install
 
 ```swift

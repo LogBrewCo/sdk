@@ -6,6 +6,8 @@
 
 Public Objective-C SDK for Apple and mixed Swift/Objective-C apps. It ships as a small Foundation-based source/header package with no third-party runtime dependencies.
 
+Start new Apple setup flows with the Swift/SwiftPM SDK in [`swift/logbrew-swift`](../../swift/logbrew-swift) when your app can use SwiftPM. Use this Objective-C package as an advanced source/header variant for Objective-C-only targets, mixed legacy apps, or apps that intentionally vendor SDK source.
+
 ## Install From Source
 
 Copy `include/LogBrew.h` and the Objective-C files in `src/` into your app target, or vendor the source package and compile it with Foundation:

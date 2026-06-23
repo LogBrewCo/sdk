@@ -27,6 +27,7 @@ Install only the package your application needs. The package names below are reg
 - Add framework packages only when your app uses that framework, such as `@logbrew/react`, `@logbrew/express`, `logbrew-fastapi`, or `logbrew-django`.
 - Frontend and mobile packages use public `clientKey` setup. Server packages should use server-side keys from app configuration.
 - A change to one ecosystem package should not require developers in other ecosystems to update unless their package also changed.
+- Apple app setup should start from the Swift/SwiftPM path. Objective-C remains available as an advanced source/header variant for mixed or Objective-C-only apps, not a separate first-step platform choice.
 
 | Ecosystem | Package | Use it for |
 | --- | --- | --- |
@@ -51,13 +52,12 @@ Install only the package your application needs. The package names below are reg
 | PHP | [`logbrew/sdk`](php/logbrew-php) | Core PHP client, HTTP delivery, PSR-3 and Monolog/Laravel support |
 | Ruby | [`logbrew-sdk`](ruby/logbrew-ruby) | Core Ruby client, HTTP delivery, stdlib `Logger`, Rack/Rails-compatible helpers |
 | Rust | [`logbrew`](rust/logbrew) | Core Rust client and optional blocking HTTP delivery |
-| Swift | [`logbrew-swift`](swift/logbrew-swift) | SwiftPM client, Apple-style logger ergonomics, URLSession delivery |
+| Apple apps | [`logbrew-swift`](swift/logbrew-swift) primary; [`logbrew-objc`](objc/logbrew-objc) advanced source/header variant | SwiftPM `LogBrew` product for iOS, macOS, tvOS, watchOS, Apple-style logger ergonomics, URLSession delivery; Objective-C vendoring for mixed or Objective-C-only apps |
 | Kotlin | [`co.logbrew:logbrew-kotlin`](kotlin/logbrew-kotlin) | Kotlin/JVM client, Android-style helper APIs, HTTP delivery |
 | Kotlin OkHttp | [`co.logbrew:logbrew-kotlin-okhttp`](kotlin/logbrew-kotlin-okhttp) | Optional OkHttp interceptor for outbound request spans and W3C traceparent propagation |
 | Unity | [`co.logbrew.unity`](unity/logbrew-unity) | Unity package with runtime helpers and HTTP delivery |
 | C | [`logbrew-c`](c/logbrew-c) | C source/header client |
 | C++ | [`logbrew-cpp`](cpp/logbrew-cpp) | C++ RAII source/header client with optional HTTP delivery |
-| Objective-C | [`logbrew-objc`](objc/logbrew-objc) | Foundation source/header client with optional HTTP delivery |
 
 ## Quick Start
 
