@@ -10,8 +10,8 @@ def main() -> int:
     payload = json.loads(Path(sys.argv[1]).read_text())
     delivery = json.loads(Path(sys.argv[2]).read_text())
     events = payload["events"]
-    if len(events) != 7:
-        raise SystemExit(f"expected seven instrumentation events, got {len(events)}")
+    if len(events) != 8:
+        raise SystemExit(f"expected eight instrumentation events, got {len(events)}")
     sources = [event["attributes"].get("metadata", {}).get("source") for event in events]
     for source in (
         "react-native.instrumentation",
@@ -34,14 +34,25 @@ def main() -> int:
         for event in events
         if event["attributes"].get("metadata", {}).get("source") == "react-native.resource"
     ]
-    for resource_name in ("POST /api/checkout", "GET /api/global"):
+    for resource_name in ("POST /api/checkout", "GET /api/global", "PUT /api/xhr"):
         if resource_name not in resource_names:
             raise SystemExit(f"missing resource span {resource_name}: {resource_names}")
+    xhr = next((event["attributes"] for event in events if event["attributes"].get("name") == "PUT /api/xhr"), None)
+    if xhr is None:
+        raise SystemExit("missing XHR resource span")
+    xhr_metadata = xhr.get("metadata", {})
+    if xhr_metadata.get("transport") != "xhr":
+        raise SystemExit(f"expected XHR transport metadata: {xhr_metadata}")
+    if xhr_metadata.get("responseStartDurationMs") != 15:
+        raise SystemExit(f"unexpected XHR response-start timing: {xhr_metadata}")
+    if "body" in xhr_metadata:
+        raise SystemExit(f"XHR body must not be captured: {xhr_metadata}")
     summary = {
         "ok": True,
-        "events": 7,
+        "events": 8,
         "calls": ["set", "set", "clear", "clear"],
         "globalFetchPutBack": True,
+        "globalXMLHttpRequestPutBack": True,
         "propagatedTraceparent": f"00-{trace_id}-{span_id}-01",
     }
     for key, value in summary.items():

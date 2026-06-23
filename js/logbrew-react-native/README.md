@@ -353,7 +353,7 @@ await instrumentation.resourceFetch("https://api.example.com/checkout", {
 instrumentation.remove();
 ```
 
-`createLogBrewReactNativeInstrumentation()` composes existing AppState lifecycle spans, React Navigation spans, target-scoped resource fetch spans, and native bridge scope sync into a removable handle. It does not patch global `fetch`, XHR, React Navigation, AppState, or native modules by default; it only subscribes to the objects your app passes in and returns `remove()`/`stop()` so setup is reversible. Keep `tracePropagationTargets` narrow and continue to avoid request bodies, response bodies, arbitrary headers, full URLs with query text, and high-cardinality route keys unless your app explicitly opts in.
+`createLogBrewReactNativeInstrumentation()` composes existing AppState lifecycle spans, React Navigation spans, target-scoped resource fetch spans, and native bridge scope sync into a removable handle. It does not patch global `fetch`, XHR, React Navigation, AppState, or native modules by default; it only subscribes to the objects your app passes in and returns `remove()`/`stop()` so setup is reversible. Keep `tracePropagationTargets` narrow and continue to avoid request bodies, response bodies, arbitrary headers, full URLs with query text, and high-cardinality route keys.
 
 If migrating an app with many existing `fetch(...)` calls, opt into reversible global fetch instrumentation explicitly:
 
@@ -370,6 +370,24 @@ instrumentation.remove();
 ```
 
 With `instrumentGlobalFetch: true`, LogBrew wraps the current `globalThis.fetch`, records the same sanitized resource spans as `resourceFetch`, and puts the original function back only if LogBrew still owns the `fetch` slot. Outbound `traceparent` remains target-scoped; LogBrew still does not patch XHR, read request or response bodies, copy arbitrary headers, persist offline requests, capture full URLs with query/hash text, or inspect GraphQL payloads.
+
+Apps with older libraries that still use `XMLHttpRequest` can opt into reversible XHR instrumentation separately:
+
+```js
+const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+  trace,
+  screen: "Checkout",
+  instrumentGlobalXMLHttpRequest: true,
+  tracePropagationTargets: ["https://api.example.com/"]
+});
+
+const xhr = new XMLHttpRequest();
+xhr.open("POST", "https://api.example.com/checkout?email=hidden");
+xhr.send(JSON.stringify({ ignored: "body is not captured" }));
+instrumentation.remove();
+```
+
+With `instrumentGlobalXMLHttpRequest: true`, LogBrew patches only `XMLHttpRequest.prototype.open` and `send`, records sanitized XHR resource spans with status and response-start timing, and puts the original methods back when it is safe to do so. It writes a single `traceparent` through the app's existing `setRequestHeader` only for configured targets. It does not capture request bodies, response bodies, arbitrary request headers, response headers, cookies, GraphQL payloads, full URLs with query/hash text, baggage, or tracestate.
 
 ## Release Artifact Preparation
 

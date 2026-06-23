@@ -54,7 +54,52 @@ const globalObject = {
     return { status: 206 };
   }
 };
+class MockXMLHttpRequest {
+  static HEADERS_RECEIVED = 2;
+  static DONE = 4;
+
+  constructor() {
+    this.headers = {};
+    this.listeners = new Map();
+    this.readyState = 0;
+    this.status = 0;
+  }
+
+  addEventListener(name, listener) {
+    this.listeners.set(name, listener);
+  }
+
+  open(method, url) {
+    this.method = method;
+    this.url = url;
+  }
+
+  send(body) {
+    requests.push({
+      body,
+      headers: { ...this.headers },
+      method: this.method,
+      source: "xhr",
+      url: this.url
+    });
+    this.readyState = MockXMLHttpRequest.HEADERS_RECEIVED;
+    this.onreadystatechange?.();
+    this.listeners.get("readystatechange")?.();
+    this.status = 207;
+    this.readyState = MockXMLHttpRequest.DONE;
+    this.onreadystatechange?.();
+    this.listeners.get("readystatechange")?.();
+  }
+
+  setRequestHeader(name, value) {
+    this.headers[String(name).toLowerCase()] = String(value);
+  }
+}
+globalObject.XMLHttpRequest = MockXMLHttpRequest;
 const originalGlobalFetch = globalObject.fetch;
+const originalXhrOpen = MockXMLHttpRequest.prototype.open;
+const originalXhrSend = MockXMLHttpRequest.prototype.send;
+const originalXhrSetRequestHeader = MockXMLHttpRequest.prototype.setRequestHeader;
 const client = createLogBrewReactNativeClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "logbrew-react-native-instrumentation-kit",
@@ -71,9 +116,10 @@ const timestamps = [
   "2026-06-02T10:40:02Z",
   "2026-06-02T10:40:03Z",
   "2026-06-02T10:40:04Z",
-  "2026-06-02T10:40:05Z"
+  "2026-06-02T10:40:05Z",
+  "2026-06-02T10:40:06Z"
 ];
-const times = [1000, 1125, 1300, 1380, 1600, 1775, 1900, 1945];
+const times = [1000, 1125, 1300, 1380, 1600, 1775, 1900, 1945, 2100, 2115, 2160];
 
 const instrumentation = createLogBrewReactNativeInstrumentation(client, {
   appState,
@@ -85,6 +131,7 @@ const instrumentation = createLogBrewReactNativeInstrumentation(client, {
   },
   globalObject,
   instrumentGlobalFetch: true,
+  instrumentGlobalXMLHttpRequest: true,
   logger: "NativeCheckout",
   metadata: { flow: "checkout", nested: { dropped: true }, traceId: "spoofed" },
   nativeBridge,
@@ -134,6 +181,13 @@ if (globalObject.fetch === originalGlobalFetch) {
 await globalObject.fetch("https://api.example.test/api/global?email=dev@example.test#pay", {
   method: "GET"
 });
+if (MockXMLHttpRequest.prototype.open === originalXhrOpen) {
+  throw new Error("instrumentGlobalXMLHttpRequest should patch the supplied XMLHttpRequest prototype");
+}
+const xhr = new globalObject.XMLHttpRequest();
+xhr.open("PUT", "https://api.example.test/api/xhr?email=dev@example.test#pay");
+xhr.setRequestHeader("Accept", "application/json");
+xhr.send("ignored-body");
 
 instrumentation.remove();
 navigation.route = { key: "Ignored-ghi789", name: "Ignored", path: "/ignored" };
@@ -145,16 +199,26 @@ instrumentation.stop();
 if (globalObject.fetch !== originalGlobalFetch) {
   throw new Error("instrumentation remove should put global fetch back");
 }
+if (
+  MockXMLHttpRequest.prototype.open !== originalXhrOpen ||
+  MockXMLHttpRequest.prototype.send !== originalXhrSend ||
+  MockXMLHttpRequest.prototype.setRequestHeader !== originalXhrSetRequestHeader
+) {
+  throw new Error("instrumentation remove should put XHR open/send back and leave setRequestHeader untouched");
+}
 
 const events = JSON.parse(client.previewJson()).events;
-if (events.length !== 7) {
-  throw new Error(`expected seven instrumentation events, got ${events.length}`);
+if (events.length !== 8) {
+  throw new Error(`expected eight instrumentation events, got ${events.length}`);
 }
 if (requests[0].init.headers.traceparent !== `00-${trace.traceId}-${trace.spanId}-01`) {
   throw new Error(`expected propagated traceparent, got ${requests[0].init.headers.traceparent}`);
 }
 if (requests[1].init.headers.traceparent !== `00-${trace.traceId}-${trace.spanId}-01`) {
   throw new Error(`expected global fetch traceparent, got ${requests[1].init.headers.traceparent}`);
+}
+if (requests[2].headers.traceparent !== `00-${trace.traceId}-${trace.spanId}-01`) {
+  throw new Error(`expected global XHR traceparent, got ${requests[2].headers.traceparent}`);
 }
 if (appStateListeners.size !== 0 || navigationListeners.size !== 0) {
   throw new Error("instrumentation remove should detach lifecycle and navigation listeners");
@@ -189,6 +253,15 @@ const globalResource = events.find((event) => event.attributes.name === "GET /ap
 if (globalResource?.metadata.routeTemplate !== "/api/global" || globalResource.metadata.statusCode !== 206) {
   throw new Error(`unexpected global fetch span: ${JSON.stringify(globalResource)}`);
 }
+const xhrResource = events.find((event) => event.attributes.name === "PUT /api/xhr")?.attributes;
+if (
+  xhrResource?.metadata.routeTemplate !== "/api/xhr" ||
+  xhrResource.metadata.statusCode !== 207 ||
+  xhrResource.metadata.responseStartDurationMs !== 15 ||
+  xhrResource.metadata.body !== undefined
+) {
+  throw new Error(`unexpected global XHR span: ${JSON.stringify(xhrResource)}`);
+}
 const navigationSpan = events.find((event) => event.attributes.name === "navigation:CheckoutComplete")?.attributes;
 if (navigationSpan?.durationMs !== 220 || navigationSpan.metadata.routePath !== "/checkout/complete") {
   throw new Error(`unexpected navigation span: ${JSON.stringify(navigationSpan)}`);
@@ -206,6 +279,7 @@ console.error(JSON.stringify({
   calls: nativeBridgeCalls.map((call) => call.kind),
   events: events.length,
   globalFetchPutBack: globalObject.fetch === originalGlobalFetch,
+  globalXMLHttpRequestPutBack: MockXMLHttpRequest.prototype.open === originalXhrOpen,
   propagatedTraceparent: requests[0].init.headers.traceparent,
   status: response.statusCode,
   traceId: trace.traceId

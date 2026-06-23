@@ -18,6 +18,7 @@ export type ReactNativeInstrumentationOptions<TInput = unknown, TInit = unknown,
   globalObject?: ReactNativeGlobalObjectLike;
   includeRouteKey?: boolean;
   instrumentGlobalFetch?: boolean;
+  instrumentGlobalXMLHttpRequest?: boolean;
   logger?: string;
   metadata?: Metadata;
   nativeBridge?: LogBrewNativeBridgeLike;
@@ -39,6 +40,7 @@ export type ReactNativeInstrumentationOptions<TInput = unknown, TInit = unknown,
 
 export type ReactNativeGlobalObjectLike = {
   fetch?: unknown;
+  XMLHttpRequest?: unknown;
 };
 
 export type ReactNativeGlobalFetchInstrumentation<TInput = unknown, TInit = unknown, TResponse = unknown> = {
@@ -47,9 +49,15 @@ export type ReactNativeGlobalFetchInstrumentation<TInput = unknown, TInit = unkn
   stop(): void;
 };
 
+export type ReactNativeGlobalXMLHttpRequestInstrumentation = {
+  remove(): void;
+  stop(): void;
+};
+
 export type ReactNativeInstrumentation<TInput = unknown, TInit = unknown, TResponse = unknown> = {
   readonly trace: ReactNativeTraceContext;
   readonly globalFetch?: ReactNativeGlobalFetchInstrumentation<TInput, TInit, TResponse>;
+  readonly globalXMLHttpRequest?: ReactNativeGlobalXMLHttpRequestInstrumentation;
   readonly resourceFetch: (input: TInput, init?: TInit) => Promise<TResponse>;
   remove(): void;
   stop(): void;

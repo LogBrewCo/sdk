@@ -206,3 +206,108 @@ test("React Native global fetch setup failure tears down earlier instrumentation
     assert.deepEqual(nativeBridgeCalls.map((call) => call.kind), ["set", "clear"]);
   });
 });
+
+test("React Native instrumentation can opt into reversible global XHR spans", async () => {
+  await withInstalledPackage(async ({
+    createLogBrewReactNativeClient,
+    createLogBrewReactNativeInstrumentation,
+    createReactNativeTraceContext
+  }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+    const trace = makeTrace(createReactNativeTraceContext);
+    const requests = [];
+
+    class MockXMLHttpRequest {
+      static HEADERS_RECEIVED = 2;
+      static DONE = 4;
+
+      constructor() {
+        this.headers = {};
+        this.listeners = new Map();
+        this.readyState = 0;
+        this.status = 0;
+      }
+
+      addEventListener(name, listener) {
+        this.listeners.set(name, listener);
+      }
+
+      open(method, url) {
+        this.method = method;
+        this.url = url;
+      }
+
+      send(body) {
+        requests.push({
+          body,
+          headers: { ...this.headers },
+          method: this.method,
+          url: this.url
+        });
+        this.readyState = MockXMLHttpRequest.HEADERS_RECEIVED;
+        this.onreadystatechange?.();
+        this.listeners.get("readystatechange")?.();
+        this.status = 201;
+        this.readyState = MockXMLHttpRequest.DONE;
+        this.onreadystatechange?.();
+        this.listeners.get("readystatechange")?.();
+      }
+
+      setRequestHeader(name, value) {
+        this.headers[String(name).toLowerCase()] = String(value);
+      }
+    }
+
+    const globalObject = { XMLHttpRequest: MockXMLHttpRequest };
+    const originalOpen = MockXMLHttpRequest.prototype.open;
+    const originalSend = MockXMLHttpRequest.prototype.send;
+    const originalSetRequestHeader = MockXMLHttpRequest.prototype.setRequestHeader;
+    const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+      globalObject,
+      instrumentGlobalXMLHttpRequest: true,
+      metadata: { flow: "checkout", nested: { dropped: true } },
+      now: () => "2026-06-23T11:00:00Z",
+      nowMs: (() => {
+        const values = [1000, 1007, 1042];
+        return () => values.shift();
+      })(),
+      screen: "Checkout",
+      sessionId: "session_mobile_001",
+      trace,
+      tracePropagationTargets: ["https://api.example.test/"]
+    });
+
+    assert.notEqual(MockXMLHttpRequest.prototype.open, originalOpen);
+    assert.notEqual(MockXMLHttpRequest.prototype.send, originalSend);
+    assert.equal(MockXMLHttpRequest.prototype.setRequestHeader, originalSetRequestHeader);
+    assert.equal(typeof instrumentation.globalXMLHttpRequest?.remove, "function");
+
+    const xhr = new globalObject.XMLHttpRequest();
+    xhr.open("POST", "https://api.example.test/api/xhr?email=hidden#pay");
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.send("ignored-body");
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].headers.accept, "application/json");
+    assert.equal(
+      requests[0].headers.traceparent,
+      `00-${trace.traceId}-${trace.spanId}-01`
+    );
+
+    const events = JSON.parse(client.previewJson()).events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0].attributes.name, "POST /api/xhr");
+    assert.equal(events[0].attributes.durationMs, 42);
+    assert.equal(events[0].attributes.metadata.routeTemplate, "/api/xhr");
+    assert.equal(events[0].attributes.metadata.responseStartDurationMs, 7);
+    assert.equal(events[0].attributes.metadata.statusCode, 201);
+    assert.equal(events[0].attributes.metadata.traceId, trace.traceId);
+    assert.equal(events[0].attributes.metadata.nested, undefined);
+    assert.equal(events[0].attributes.metadata.body, undefined);
+
+    instrumentation.remove();
+    assert.equal(MockXMLHttpRequest.prototype.open, originalOpen);
+    assert.equal(MockXMLHttpRequest.prototype.send, originalSend);
+    assert.equal(MockXMLHttpRequest.prototype.setRequestHeader, originalSetRequestHeader);
+  });
+});

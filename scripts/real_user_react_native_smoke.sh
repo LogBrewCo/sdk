@@ -850,14 +850,24 @@ const resourceFetch = createReactNativeResourceFetch(client, {
   tracePropagationTargets: traceTargets
 });
 void resourceFetch("/mobile-api/resource", { method: "POST" });
-const globalObject: { fetch: (input: string, init?: { method?: string }) => Promise<{ status: number }> } = {
-  fetch: async () => ({ status: 202 })
+class MockXMLHttpRequest {
+  open(_method: string, _url: string) {}
+  send(_body?: unknown) {}
+  setRequestHeader(_name: string, _value: string) {}
+}
+const globalObject: {
+  fetch: (input: string, init?: { method?: string }) => Promise<{ status: number }>;
+  XMLHttpRequest: typeof MockXMLHttpRequest;
+} = {
+  fetch: async () => ({ status: 202 }),
+  XMLHttpRequest: MockXMLHttpRequest
 };
 const instrumentation: ReactNativeInstrumentation<string, { method?: string }, { status: number }> = createLogBrewReactNativeInstrumentation(client, {
   appState,
   fetchImpl: async () => ({ status: 202 }),
   globalObject,
   instrumentGlobalFetch: true,
+  instrumentGlobalXMLHttpRequest: true,
   nativeBridge: bridge,
   platform,
   screen: "Checkout",
@@ -867,6 +877,7 @@ const instrumentation: ReactNativeInstrumentation<string, { method?: string }, {
 void instrumentation.resourceFetch("/mobile-api/instrumented", { method: "POST" });
 void globalObject.fetch("/mobile-api/global", { method: "GET" });
 void instrumentation.globalFetch?.fetch("/mobile-api/direct", { method: "GET" });
+instrumentation.globalXMLHttpRequest?.stop();
 instrumentation.withNativeBridgeScope(scope => scope.metadata);
 instrumentation.remove();
 

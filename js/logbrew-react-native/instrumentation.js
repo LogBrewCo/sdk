@@ -1,8 +1,11 @@
 import { SdkError } from "@logbrew/sdk";
 import {
+  captureReactNativeResourceSpan,
   createReactNavigationSpanListener,
   createReactNativeTraceContext,
-  getActiveLogBrewTrace
+  createReactNativeTraceHeaders,
+  getActiveLogBrewTrace,
+  shouldPropagateTraceparent
 } from "./index.js";
 import { createAppStateLifecycleSpanListener } from "./lifecycle.js";
 import {
@@ -20,6 +23,7 @@ export function createLogBrewReactNativeInstrumentation(client, {
   globalObject = globalThis,
   includeRouteKey = false,
   instrumentGlobalFetch = false,
+  instrumentGlobalXMLHttpRequest = false,
   logger,
   metadata = {},
   nativeBridge,
@@ -99,6 +103,7 @@ export function createLogBrewReactNativeInstrumentation(client, {
     tracePropagationTargets
   });
   let globalFetch;
+  let globalXMLHttpRequest;
   try {
     globalFetch = instrumentGlobalFetch ? installGlobalFetchInstrumentation(client, {
       appState,
@@ -116,12 +121,29 @@ export function createLogBrewReactNativeInstrumentation(client, {
       traceFlags,
       tracePropagationTargets
     }) : undefined;
+    if (globalFetch) {
+      removers.push(globalFetch.remove);
+    }
+    globalXMLHttpRequest = instrumentGlobalXMLHttpRequest ? installGlobalXMLHttpRequestInstrumentation(client, {
+      appState,
+      globalObject,
+      metadata,
+      now,
+      nowMs,
+      platform,
+      routeTemplate,
+      routeTemplateFactory,
+      screen,
+      sessionId,
+      trace: activeTrace,
+      tracePropagationTargets
+    }) : undefined;
+    if (globalXMLHttpRequest) {
+      removers.push(globalXMLHttpRequest.remove);
+    }
   } catch (error) {
     removeConfiguredInstrumentation({ nativeBridge, removers });
     throw error;
-  }
-  if (globalFetch) {
-    removers.push(globalFetch.remove);
   }
 
   let removed = false;
@@ -135,6 +157,7 @@ export function createLogBrewReactNativeInstrumentation(client, {
 
   const handle = {
     globalFetch,
+    globalXMLHttpRequest,
     remove,
     resourceFetch,
     stop: remove,
@@ -267,6 +290,231 @@ function installGlobalFetchInstrumentation(client, {
     stop: remove
   });
 }
+
+/* eslint-disable no-invalid-this */
+function installGlobalXMLHttpRequestInstrumentation(client, {
+  appState,
+  globalObject,
+  metadata,
+  now,
+  nowMs,
+  platform,
+  routeTemplate,
+  routeTemplateFactory,
+  screen,
+  sessionId,
+  trace,
+  tracePropagationTargets
+}) {
+  if ((typeof globalObject !== "object" && typeof globalObject !== "function") || globalObject === null) {
+    throw new SdkError("configuration_error", "instrumentGlobalXMLHttpRequest requires a globalObject");
+  }
+  const xhrType = globalObject.XMLHttpRequest;
+  if (typeof xhrType !== "function" || !xhrType.prototype) {
+    throw new SdkError("configuration_error", "instrumentGlobalXMLHttpRequest requires globalObject.XMLHttpRequest");
+  }
+  const prototype = xhrType.prototype;
+  const originalOpen = prototype.open;
+  const originalSend = prototype.send;
+  const originalSetRequestHeader = prototype.setRequestHeader;
+  if (typeof originalOpen !== "function" || typeof originalSend !== "function" || typeof originalSetRequestHeader !== "function") {
+    throw new SdkError("configuration_error", "instrumentGlobalXMLHttpRequest requires open, send, and setRequestHeader");
+  }
+
+  const contextKey = Symbol("logbrew.xhr");
+  const headersReceivedState = typeof xhrType.HEADERS_RECEIVED === "number" ? xhrType.HEADERS_RECEIVED : 2;
+  const doneState = typeof xhrType.DONE === "number" ? xhrType.DONE : 4;
+  const safeRouteTemplateFactory = routeTemplateFactory ?? defaultXhrRouteTemplateFactory;
+
+  function wrappedOpen(method, url) {
+    this[contextKey] = {
+      method: normalizeXhrMethod(method),
+      reported: false,
+      url: xhrUrl(url)
+    };
+    return originalOpen.apply(this, arguments);
+  }
+
+  function wrappedSend() {
+    const context = this[contextKey];
+    if (!context) {
+      return originalSend.apply(this, arguments);
+    }
+    context.startedAtMs = nowMs();
+    context.timestamp = now();
+    installXhrReadyStateTracker(this, context, {
+      appState,
+      client,
+      doneState,
+      headersReceivedState,
+      metadata,
+      nowMs,
+      platform,
+      routeTemplate,
+      routeTemplateFactory: safeRouteTemplateFactory,
+      screen,
+      sessionId,
+      trace
+    });
+    if (shouldPropagateTraceparent(context.url, tracePropagationTargets)) {
+      originalSetRequestHeader.call(this, "traceparent", createReactNativeTraceHeaders(trace).traceparent);
+    }
+    try {
+      return originalSend.apply(this, arguments);
+    } catch (error) {
+      captureXhrResourceSpan(this, context, {
+        appState,
+        client,
+        metadata: {
+          ...metadata,
+          xhrErrorName: errorName(error),
+          xhrErrorValueType: typeof error
+        },
+        nowMs,
+        platform,
+        routeTemplate,
+        routeTemplateFactory: safeRouteTemplateFactory,
+        screen,
+        sessionId,
+        status: "error",
+        trace
+      });
+      throw error;
+    }
+  }
+
+  prototype.open = wrappedOpen;
+  prototype.send = wrappedSend;
+  if (prototype.open !== wrappedOpen || prototype.send !== wrappedSend) {
+    throw new SdkError("configuration_error", "instrumentGlobalXMLHttpRequest could not patch XMLHttpRequest");
+  }
+
+  let removed = false;
+  const remove = () => {
+    if (removed) {
+      return;
+    }
+    removed = true;
+    if (prototype.open === wrappedOpen) {
+      prototype.open = originalOpen;
+    }
+    if (prototype.send === wrappedSend) {
+      prototype.send = originalSend;
+    }
+  };
+
+  return Object.freeze({
+    remove,
+    stop: remove
+  });
+}
+
+function installXhrReadyStateTracker(xhr, context, options) {
+  const onReadyStateChange = () => {
+    if (xhr.readyState === options.headersReceivedState && context.responseStartAtMs === undefined) {
+      context.responseStartAtMs = options.nowMs();
+      return;
+    }
+    if (xhr.readyState === options.doneState && !context.reported) {
+      captureXhrResourceSpan(xhr, context, options);
+    }
+  };
+  if (typeof xhr.addEventListener === "function") {
+    xhr.addEventListener("readystatechange", onReadyStateChange);
+    return;
+  }
+  const originalOnReadyStateChange = xhr.onreadystatechange;
+  xhr.onreadystatechange = function logBrewOnReadyStateChange() {
+    onReadyStateChange();
+    if (typeof originalOnReadyStateChange === "function") {
+      return originalOnReadyStateChange.apply(this, arguments);
+    }
+    return undefined;
+  };
+}
+
+function captureXhrResourceSpan(xhr, context, {
+  appState,
+  client,
+  metadata,
+  nowMs,
+  platform,
+  routeTemplate,
+  routeTemplateFactory,
+  screen,
+  sessionId,
+  status,
+  trace
+}) {
+  if (context.reported) {
+    return;
+  }
+  context.reported = true;
+  const durationMs = elapsedMs(context.startedAtMs, nowMs);
+  const responseStartDurationMs = context.responseStartAtMs === undefined
+    ? undefined
+    : elapsedMs(context.startedAtMs, () => context.responseStartAtMs);
+  captureReactNativeResourceSpan(client, {
+    appState,
+    durationMs,
+    metadata: {
+      ...metadata,
+      responseStartDurationMs,
+      transport: "xhr"
+    },
+    method: context.method,
+    platform,
+    routeTemplate: routeTemplate ?? routeTemplateFactory({ url: context.url }),
+    screen,
+    sessionId,
+    status: status ?? undefined,
+    statusCode: xhrStatusCode(xhr),
+    timestamp: context.timestamp,
+    trace
+  });
+}
+
+function normalizeXhrMethod(method) {
+  return String(method ?? "GET").toUpperCase();
+}
+
+function xhrUrl(url) {
+  if (typeof url === "string") {
+    return url;
+  }
+  try {
+    return url.toString();
+  } catch {
+    return String(url);
+  }
+}
+
+function defaultXhrRouteTemplateFactory({ url }) {
+  const URLConstructor = globalThis.URL;
+  if (typeof URLConstructor === "function") {
+    try {
+      const parsedUrl = new URLConstructor(url, "https://logbrew.local");
+      return parsedUrl.pathname;
+    } catch {
+      // Fall back to query/hash stripping below for non-standard request keys.
+    }
+  }
+  return String(url).split(/[?#]/u, 1)[0];
+}
+
+function elapsedMs(startedAtMs, nowMs) {
+  const durationMs = nowMs() - startedAtMs;
+  return Number.isFinite(durationMs) ? Math.max(0, durationMs) : undefined;
+}
+
+function xhrStatusCode(xhr) {
+  return typeof xhr?.status === "number" && Number.isFinite(xhr.status) ? xhr.status : undefined;
+}
+
+function errorName(error) {
+  return typeof error?.name === "string" && error.name.trim() !== "" ? error.name : "Error";
+}
+/* eslint-enable no-invalid-this */
 
 export default {
   createLogBrewReactNativeInstrumentation
