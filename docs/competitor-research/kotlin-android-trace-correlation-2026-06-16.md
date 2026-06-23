@@ -431,7 +431,7 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 - TDD red: `bash scripts/check_kotlin_package.sh` first failed with unresolved `SpanEventSummary` and missing operation `events`.
 - TDD red: `python3 -m unittest tests.test_validate_fixtures` first failed because span `events` were not accepted by the fixture validator.
 - Green: `python3 -m unittest tests.test_validate_fixtures` passed with coverage for primitive span-event metadata, nested metadata rejection, and max-event rejection.
-- Green: `bash scripts/check_kotlin_package.sh` passed with 31 core Kotlin tests, 5 OkHttp tests, package metadata checks, README checks, jar-content checks, direct span-event cap validation, and the dependency-span example proving event sanitization and type-only exception events.
+- Green: `bash scripts/check_kotlin_package.sh` passed with 32 core Kotlin tests, 5 OkHttp tests, package metadata checks, README checks, jar-content checks, direct span-event cap validation, automatic exception-event budget validation, and the dependency-span example proving event sanitization and type-only exception events.
 
 ### Remaining Gaps After Span Event Summaries
 

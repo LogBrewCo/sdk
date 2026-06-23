@@ -38,6 +38,8 @@ data class QueueOperation(
 )
 
 object LogBrewOperationTracing {
+    private const val MAX_SPAN_EVENT_SUMMARIES = 8
+
     private val blockedOperationMetadataKeys =
         setOf(
             "args",
@@ -192,7 +194,7 @@ object LogBrewOperationTracing {
                 metadata = spanMetadata,
                 context = traceContext,
             )
-        val attributes = baseAttributes.withEvents(events + exceptionEvent(operationError))
+        val attributes = baseAttributes.withEvents(spanEvents(events, operationError))
 
         try {
             client.span(
@@ -254,8 +256,8 @@ object LogBrewOperationTracing {
     }
 
     private fun safeSpanEvents(events: List<SpanEventSummary>): List<SpanEventSummary> {
-        if (events.size > 8) {
-            throw SdkException("validation_error", "span events must contain at most 8 entries")
+        if (events.size > MAX_SPAN_EVENT_SUMMARIES) {
+            throw SdkException("validation_error", "span events must contain at most $MAX_SPAN_EVENT_SUMMARIES entries")
         }
         return events.map { event ->
             SpanEventSummary(
@@ -279,6 +281,17 @@ object LogBrewOperationTracing {
                     ),
             )
         } ?: emptyList()
+
+    private fun spanEvents(
+        events: List<SpanEventSummary>,
+        operationError: Throwable?,
+    ): List<SpanEventSummary> {
+        val exceptionEvents = exceptionEvent(operationError)
+        if (exceptionEvents.isEmpty()) {
+            return events
+        }
+        return events.take(MAX_SPAN_EVENT_SUMMARIES - exceptionEvents.size) + exceptionEvents
+    }
 
     private fun isBlockedOperationMetadataKey(key: String): Boolean {
         val normalized =

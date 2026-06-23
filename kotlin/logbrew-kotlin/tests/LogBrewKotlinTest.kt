@@ -63,7 +63,7 @@ fun main() {
     )
     AndroidRequestSpanTests.runAll()
     OperationTracingTests.runAll()
-    println("kotlin package tests ok (31 tests)")
+    println("kotlin package tests ok (32 tests)")
 }
 
 private fun run(

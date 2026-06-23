@@ -13,6 +13,7 @@ object OperationTracingTests {
     fun runAll() {
         run("dependency_spans_correlate_and_sanitize_metadata", ::dependencySpansCorrelateAndSanitizeMetadata)
         run("dependency_spans_include_bounded_span_events", ::dependencySpansIncludeBoundedSpanEvents)
+        run("dependency_span_exception_event_stays_inside_event_cap", ::dependencySpanExceptionEventStaysInsideEventCap)
         run("dependency_spans_preserve_original_errors", ::dependencySpansPreserveOriginalErrors)
         run("dependency_span_capture_failure_does_not_replace_result", ::dependencySpanCaptureFailureDoesNotReplaceResult)
     }
@@ -123,6 +124,36 @@ object OperationTracingTests {
         check("\"phase\": \"before_query\"" in body)
         check("private body" !in body)
         check("private_orders" !in body)
+    }
+
+    private fun dependencySpanExceptionEventStaysInsideEventCap() {
+        val client = newClient()
+        var reported: SdkException? = null
+        val original = IllegalStateException("private failure detail")
+
+        val queueError =
+            expect<IllegalStateException> {
+                LogBrewOperationTracing.queueOperation(
+                    client = client,
+                    operationName = "publish invoice",
+                    config =
+                        QueueOperation(
+                            events = List(8) { index -> SpanEventSummary.create("queue.step.$index") },
+                            onCaptureFailure = { reported = it },
+                        ),
+                ) {
+                    throw original
+                }
+            }
+
+        check(queueError === original)
+        check(reported == null)
+        val body = client.previewJson()
+        check("\"name\": \"queue.step.0\"" in body)
+        check("\"name\": \"queue.step.7\"" !in body)
+        check("\"name\": \"exception\"" in body)
+        check("\"exceptionType\": \"IllegalStateException\"" in body)
+        check("private failure detail" !in body)
     }
 
     private fun dependencySpansPreserveOriginalErrors() {
