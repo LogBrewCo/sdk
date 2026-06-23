@@ -21,6 +21,7 @@ export type FetchTransportConfig = {
   fetchImpl?: typeof fetch;
   headers?: Record<string, string>;
   keepalive?: boolean;
+  maxKeepaliveBodyBytes?: number;
 };
 
 export type TracePropagationTarget = string | RegExp | ((url: string) => boolean);

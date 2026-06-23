@@ -89,10 +89,13 @@ import { createFetchTransport, installLogBrewBrowser } from "@logbrew/browser";
 installLogBrewBrowser({
   clientKey: "LOGBREW_BROWSER_KEY",
   transport: createFetchTransport({
-    endpoint: "https://api.logbrew.com/v1/events"
+    endpoint: "https://api.logbrew.com/v1/events",
+    maxKeepaliveBodyBytes: 64 * 1024
   })
 });
 ```
+
+`createFetchTransport()` uses browser `fetch` with `keepalive: true` by default so explicit page-lifecycle flushes can finish during navigation. To keep that behavior predictable, LogBrew refuses keepalive payloads above `maxKeepaliveBodyBytes` before calling `fetch`; the queued events remain available for a later non-keepalive flush. Set `keepalive: false` for app-owned large-batch delivery.
 
 Use `RecordingTransport.alwaysAccept()` from `@logbrew/sdk` when you want to inspect queued browser events before network delivery.
 

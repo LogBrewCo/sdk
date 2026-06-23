@@ -12,6 +12,7 @@ const {
 const DEFAULT_SDK_NAME = "logbrew-browser";
 const DEFAULT_SDK_VERSION = "0.1.0";
 const DEFAULT_ENDPOINT = "https://api.logbrew.com/v1/events";
+const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 
 function createLogBrewBrowserClient({
   apiKey,
@@ -31,7 +32,8 @@ function createFetchTransport({
   endpoint = DEFAULT_ENDPOINT,
   fetchImpl = defaultFetch(),
   headers = {},
-  keepalive = true
+  keepalive = true,
+  maxKeepaliveBodyBytes = DEFAULT_MAX_KEEPALIVE_BODY_BYTES
 } = {}) {
   if (typeof endpoint !== "string" || endpoint.trim() === "") {
     throw new SdkError("configuration_error", "createFetchTransport requires a non-empty endpoint");
@@ -39,9 +41,17 @@ function createFetchTransport({
   if (typeof fetchImpl !== "function") {
     throw new SdkError("configuration_error", "createFetchTransport requires fetch");
   }
+  validateKeepaliveBodyLimit(maxKeepaliveBodyBytes);
 
   return {
     async send(apiKey, body) {
+      if (keepalive && utf8ByteLength(body) > maxKeepaliveBodyBytes) {
+        throw new TransportError(
+          "keepalive_body_too_large",
+          `keepalive request body exceeds maxKeepaliveBodyBytes (${maxKeepaliveBodyBytes})`,
+          false
+        );
+      }
       try {
         const response = await fetchImpl(endpoint, {
           body,
@@ -682,6 +692,44 @@ function defaultRandomValues(length) {
 
 function defaultWindow() {
   return typeof globalThis.window === "object" ? globalThis.window : undefined;
+}
+
+function validateKeepaliveBodyLimit(value) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new SdkError("configuration_error", "maxKeepaliveBodyBytes must be a positive integer");
+  }
+}
+
+function utf8ByteLength(value) {
+  const text = typeof value === "string" ? value : String(value);
+  const TextEncoderConstructor = globalThis.TextEncoder;
+  if (typeof TextEncoderConstructor === "function") {
+    return new TextEncoderConstructor().encode(text).byteLength;
+  }
+  return fallbackUtf8ByteLength(text);
+}
+
+function fallbackUtf8ByteLength(text) {
+  let bytes = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const codePoint = text.codePointAt(index);
+    if (codePoint === undefined) {
+      continue;
+    }
+    if (codePoint > 0xffff) {
+      index += 1;
+    }
+    if (codePoint <= 0x7f) {
+      bytes += 1;
+    } else if (codePoint <= 0x7ff) {
+      bytes += 2;
+    } else if (codePoint <= 0xffff) {
+      bytes += 3;
+    } else {
+      bytes += 4;
+    }
+  }
+  return bytes;
 }
 
 function headersWithTraceparent(headers, traceparent) {

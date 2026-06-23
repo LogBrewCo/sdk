@@ -64,9 +64,12 @@ grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 
 cat > smoke.mjs <<'EOF'
 import http from "node:http";
+import { createRequire } from "node:module";
 import { createFetchTransport, createLogBrewBrowserClient } from "@logbrew/browser";
-import { SdkError } from "@logbrew/sdk";
+import { SdkError, TransportError } from "@logbrew/sdk";
 
+const require = createRequire(import.meta.url);
+const { createFetchTransport: createCjsFetchTransport } = require("@logbrew/browser");
 const highVolumeLogs = 250;
 const clientKey = "LOGBREW_BROWSER_KEY";
 const wrongClientKey = "WRONG_LOGBREW_BROWSER_KEY";
@@ -108,7 +111,8 @@ try {
   }
 
   const retryResponse = await retryClient.flush(createFetchTransport({
-    endpoint: `${retryIntake.url}/v1/events`
+    endpoint: `${retryIntake.url}/v1/events`,
+    keepalive: false
   }));
   const retryPayload = parsePayload(retryIntake.requests.at(-1)?.body);
   assertEqual(retryResponse.statusCode, 202, "retry flush status");
@@ -168,11 +172,79 @@ try {
   }));
   assertEqual(shutdownError.code, "shutdown_error", "post-shutdown error code");
 
+  let keepaliveFetchCalls = 0;
+  const keepaliveLimitedTransport = createFetchTransport({
+    fetchImpl: async () => {
+      keepaliveFetchCalls += 1;
+      return { status: 202 };
+    },
+    maxKeepaliveBodyBytes: 64
+  });
+  const keepaliveBodyError = await captureError(() => keepaliveLimitedTransport.send(
+    clientKey,
+    JSON.stringify({ message: "x".repeat(80) })
+  ));
+  if (!(keepaliveBodyError instanceof TransportError)) {
+    throw new Error(`expected TransportError for oversized keepalive body, got ${keepaliveBodyError}`);
+  }
+  assertEqual(keepaliveBodyError.code, "keepalive_body_too_large", "oversized keepalive error code");
+  assertEqual(keepaliveBodyError.retryable, false, "oversized keepalive retryability");
+  assertEqual(keepaliveFetchCalls, 0, "oversized keepalive should not call fetch");
+
+  const largeBodyTransport = createFetchTransport({
+    fetchImpl: async (_endpoint, init = {}) => {
+      keepaliveFetchCalls += 1;
+      assertEqual(init.keepalive, false, "large non-keepalive request option");
+      return { status: 202 };
+    },
+    keepalive: false,
+    maxKeepaliveBodyBytes: 64
+  });
+  const largeBodyResponse = await largeBodyTransport.send(clientKey, JSON.stringify({ message: "x".repeat(80) }));
+  assertEqual(largeBodyResponse.statusCode, 202, "large non-keepalive status");
+  assertEqual(keepaliveFetchCalls, 1, "large non-keepalive fetch call");
+
+  const cjsKeepaliveTransport = createCjsFetchTransport({
+    fetchImpl: async () => {
+      throw new Error("CJS oversized keepalive should not call fetch");
+    },
+    maxKeepaliveBodyBytes: 16
+  });
+  const cjsKeepaliveError = await captureError(() => cjsKeepaliveTransport.send(
+    clientKey,
+    JSON.stringify({ message: "cjs-over-limit" })
+  ));
+  assertEqual(cjsKeepaliveError.code, "keepalive_body_too_large", "CJS oversized keepalive error code");
+
+  const originalTextEncoder = globalThis.TextEncoder;
+  let utf8FallbackFetchCalls = 0;
+  try {
+    globalThis.TextEncoder = undefined;
+    const utf8FallbackTransport = createFetchTransport({
+      fetchImpl: async () => {
+        utf8FallbackFetchCalls += 1;
+        return { status: 202 };
+      },
+      maxKeepaliveBodyBytes: 18
+    });
+    const utf8FallbackError = await captureError(() => utf8FallbackTransport.send(
+      clientKey,
+      JSON.stringify({ message: "€€" })
+    ));
+    assertEqual(utf8FallbackError.code, "keepalive_body_too_large", "UTF-8 fallback keepalive error code");
+    assertEqual(utf8FallbackFetchCalls, 0, "UTF-8 fallback oversized keepalive should not call fetch");
+  } finally {
+    globalThis.TextEncoder = originalTextEncoder;
+  }
+
   console.error(JSON.stringify({
     fakeIntakeAttempts: retryResponse.attempts,
     fakeIntakeEvents: retryPayload.events.length,
     fakeIntakeHighVolumeLogs: highVolumeLogs,
     fakeIntakeInvalidKey: invalidError.code,
+    fakeIntakeKeepaliveBodyLimit: keepaliveBodyError.code,
+    fakeIntakeKeepaliveCjs: cjsKeepaliveError.code,
+    fakeIntakeUtf8Fallback: utf8FallbackFetchCalls,
     fakeIntakeRequests: retryIntake.requests.length,
     fakeIntakeShutdownStatus: shutdownResponse.statusCode,
     ok: true
