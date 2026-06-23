@@ -19,7 +19,9 @@ function createLogBrewReactNativeInstrumentation(client, {
   captureInitialLifecycleState = false,
   captureInitialNavigationRoute = false,
   fetchImpl,
+  globalObject = globalThis,
   includeRouteKey = false,
+  instrumentGlobalFetch = false,
   logger,
   metadata = {},
   nativeBridge,
@@ -98,6 +100,31 @@ function createLogBrewReactNativeInstrumentation(client, {
     traceFlags,
     tracePropagationTargets
   });
+  let globalFetch;
+  try {
+    globalFetch = instrumentGlobalFetch ? installGlobalFetchInstrumentation(client, {
+      appState,
+      globalObject,
+      metadata,
+      now,
+      nowMs,
+      platform,
+      randomValues,
+      routeTemplate,
+      routeTemplateFactory,
+      screen,
+      sessionId,
+      trace: activeTrace,
+      traceFlags,
+      tracePropagationTargets
+    }) : undefined;
+  } catch (error) {
+    removeConfiguredInstrumentation({ nativeBridge, removers });
+    throw error;
+  }
+  if (globalFetch) {
+    removers.push(globalFetch.remove);
+  }
 
   let removed = false;
   const remove = () => {
@@ -105,15 +132,11 @@ function createLogBrewReactNativeInstrumentation(client, {
       return;
     }
     removed = true;
-    if (nativeBridge) {
-      clearLogBrewNativeBridgeScope(nativeBridge);
-    }
-    for (const removeListener of removers.splice(0).reverse()) {
-      removeListener();
-    }
+    removeConfiguredInstrumentation({ nativeBridge, removers });
   };
 
   const handle = {
+    globalFetch,
     remove,
     resourceFetch,
     stop: remove,
@@ -171,6 +194,80 @@ function requireClient(client) {
   if (!client) {
     throw new SdkError("configuration_error", "createLogBrewReactNativeInstrumentation requires a client");
   }
+}
+
+function removeConfiguredInstrumentation({ nativeBridge, removers }) {
+  if (nativeBridge) {
+    clearLogBrewNativeBridgeScope(nativeBridge);
+  }
+  for (const removeListener of removers.splice(0).reverse()) {
+    removeListener();
+  }
+}
+
+function installGlobalFetchInstrumentation(client, {
+  appState,
+  globalObject,
+  metadata,
+  now,
+  nowMs,
+  platform,
+  randomValues,
+  routeTemplate,
+  routeTemplateFactory,
+  screen,
+  sessionId,
+  trace,
+  traceFlags,
+  tracePropagationTargets
+}) {
+  if ((typeof globalObject !== "object" && typeof globalObject !== "function") || globalObject === null) {
+    throw new SdkError("configuration_error", "instrumentGlobalFetch requires a globalObject");
+  }
+  const originalFetch = globalObject.fetch;
+  if (typeof originalFetch !== "function") {
+    throw new SdkError("configuration_error", "instrumentGlobalFetch requires globalObject.fetch");
+  }
+  const globalResourceFetch = createReactNativeResourceFetch(client, {
+    appState,
+    fetchImpl: (input, init) => originalFetch.call(globalObject, input, init),
+    metadata,
+    now,
+    nowMs,
+    platform,
+    randomValues,
+    routeTemplate,
+    routeTemplateFactory,
+    screen,
+    sessionId,
+    trace,
+    traceFlags,
+    tracePropagationTargets
+  });
+  let removed = false;
+  const wrappedFetch = (input, init) => globalResourceFetch(input, init);
+  try {
+    globalObject.fetch = wrappedFetch;
+  } catch {
+    throw new SdkError("configuration_error", "instrumentGlobalFetch could not patch globalObject.fetch");
+  }
+  if (globalObject.fetch !== wrappedFetch) {
+    throw new SdkError("configuration_error", "instrumentGlobalFetch could not patch globalObject.fetch");
+  }
+  const remove = () => {
+    if (removed) {
+      return;
+    }
+    removed = true;
+    if (globalObject.fetch === wrappedFetch) {
+      globalObject.fetch = originalFetch;
+    }
+  };
+  return Object.freeze({
+    fetch: wrappedFetch,
+    remove,
+    stop: remove
+  });
 }
 
 module.exports = {

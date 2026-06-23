@@ -6,7 +6,7 @@
 
 React Native helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, opt-in resource fetch spans, app-owned native bridge scope sync, and reversible instrumentation setup.
+This package is intentionally thin. It keeps all event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`, while adding mobile-friendly helpers for screen views, app-state changes, product actions, API milestones, handled JavaScript errors, provider/hook usage, active W3C trace correlation, explicit W3C trace propagation, opt-in lifecycle spans, opt-in resource fetch spans, opt-in reversible global fetch spans, app-owned native bridge scope sync, and reversible instrumentation setup.
 
 ## Install
 
@@ -353,7 +353,23 @@ await instrumentation.resourceFetch("https://api.example.com/checkout", {
 instrumentation.remove();
 ```
 
-`createLogBrewReactNativeInstrumentation()` composes existing AppState lifecycle spans, React Navigation spans, target-scoped resource fetch spans, and native bridge scope sync into a removable handle. It does not patch global `fetch`, XHR, React Navigation, AppState, or native modules; it only subscribes to the objects your app passes in and returns `remove()`/`stop()` so setup is reversible. Keep `tracePropagationTargets` narrow and continue to avoid request bodies, response bodies, arbitrary headers, full URLs with query text, and high-cardinality route keys unless your app explicitly opts in.
+`createLogBrewReactNativeInstrumentation()` composes existing AppState lifecycle spans, React Navigation spans, target-scoped resource fetch spans, and native bridge scope sync into a removable handle. It does not patch global `fetch`, XHR, React Navigation, AppState, or native modules by default; it only subscribes to the objects your app passes in and returns `remove()`/`stop()` so setup is reversible. Keep `tracePropagationTargets` narrow and continue to avoid request bodies, response bodies, arbitrary headers, full URLs with query text, and high-cardinality route keys unless your app explicitly opts in.
+
+If migrating an app with many existing `fetch(...)` calls, opt into reversible global fetch instrumentation explicitly:
+
+```js
+const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+  trace,
+  screen: "Checkout",
+  instrumentGlobalFetch: true,
+  tracePropagationTargets: ["https://api.example.com/"]
+});
+
+await fetch("https://api.example.com/checkout", { method: "POST" });
+instrumentation.remove();
+```
+
+With `instrumentGlobalFetch: true`, LogBrew wraps the current `globalThis.fetch`, records the same sanitized resource spans as `resourceFetch`, and puts the original function back only if LogBrew still owns the `fetch` slot. Outbound `traceparent` remains target-scoped; LogBrew still does not patch XHR, read request or response bodies, copy arbitrary headers, persist offline requests, capture full URLs with query/hash text, or inspect GraphQL payloads.
 
 ## Release Artifact Preparation
 

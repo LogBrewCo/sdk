@@ -15,7 +15,9 @@ export type ReactNativeInstrumentationOptions<TInput = unknown, TInit = unknown,
   captureInitialLifecycleState?: boolean;
   captureInitialNavigationRoute?: boolean;
   fetchImpl?: ReactNativeResourceFetchOptions<TInput, TInit, TResponse>["fetchImpl"];
+  globalObject?: ReactNativeGlobalObjectLike;
   includeRouteKey?: boolean;
+  instrumentGlobalFetch?: boolean;
   logger?: string;
   metadata?: Metadata;
   nativeBridge?: LogBrewNativeBridgeLike;
@@ -35,8 +37,19 @@ export type ReactNativeInstrumentationOptions<TInput = unknown, TInit = unknown,
   tracePropagationTargets?: TracePropagationTarget[];
 };
 
+export type ReactNativeGlobalObjectLike = {
+  fetch?: unknown;
+};
+
+export type ReactNativeGlobalFetchInstrumentation<TInput = unknown, TInit = unknown, TResponse = unknown> = {
+  readonly fetch: (input: TInput, init?: TInit) => Promise<TResponse>;
+  remove(): void;
+  stop(): void;
+};
+
 export type ReactNativeInstrumentation<TInput = unknown, TInit = unknown, TResponse = unknown> = {
   readonly trace: ReactNativeTraceContext;
+  readonly globalFetch?: ReactNativeGlobalFetchInstrumentation<TInput, TInit, TResponse>;
   readonly resourceFetch: (input: TInput, init?: TInit) => Promise<TResponse>;
   remove(): void;
   stop(): void;

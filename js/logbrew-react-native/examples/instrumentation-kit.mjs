@@ -48,6 +48,13 @@ const nativeBridge = {
   }
 };
 const requests = [];
+const globalObject = {
+  async fetch(input, init = {}) {
+    requests.push({ input, init, source: "global" });
+    return { status: 206 };
+  }
+};
+const originalGlobalFetch = globalObject.fetch;
 const client = createLogBrewReactNativeClient({
   clientKey: "LOGBREW_CLIENT_KEY",
   sdkName: "logbrew-react-native-instrumentation-kit",
@@ -63,18 +70,21 @@ const timestamps = [
   "2026-06-02T10:40:01Z",
   "2026-06-02T10:40:02Z",
   "2026-06-02T10:40:03Z",
-  "2026-06-02T10:40:04Z"
+  "2026-06-02T10:40:04Z",
+  "2026-06-02T10:40:05Z"
 ];
-const times = [1000, 1125, 1300, 1380, 1600, 1775];
+const times = [1000, 1125, 1300, 1380, 1600, 1775, 1900, 1945];
 
 const instrumentation = createLogBrewReactNativeInstrumentation(client, {
   appState,
   captureInitialLifecycleState: true,
   captureInitialNavigationRoute: true,
   fetchImpl: async (input, init = {}) => {
-    requests.push({ input, init });
+    requests.push({ input, init, source: "resourceFetch" });
     return { status: 202 };
   },
+  globalObject,
+  instrumentGlobalFetch: true,
   logger: "NativeCheckout",
   metadata: { flow: "checkout", nested: { dropped: true }, traceId: "spoofed" },
   nativeBridge,
@@ -118,6 +128,13 @@ for (const listener of appStateListeners) {
   listener("background");
 }
 
+if (globalObject.fetch === originalGlobalFetch) {
+  throw new Error("instrumentGlobalFetch should patch the supplied global object");
+}
+await globalObject.fetch("https://api.example.test/api/global?email=dev@example.test#pay", {
+  method: "GET"
+});
+
 instrumentation.remove();
 navigation.route = { key: "Ignored-ghi789", name: "Ignored", path: "/ignored" };
 navigationListeners.get("state")?.();
@@ -125,13 +142,19 @@ for (const listener of appStateListeners) {
   listener("active");
 }
 instrumentation.stop();
+if (globalObject.fetch !== originalGlobalFetch) {
+  throw new Error("instrumentation remove should put global fetch back");
+}
 
 const events = JSON.parse(client.previewJson()).events;
-if (events.length !== 6) {
-  throw new Error(`expected six instrumentation events, got ${events.length}`);
+if (events.length !== 7) {
+  throw new Error(`expected seven instrumentation events, got ${events.length}`);
 }
 if (requests[0].init.headers.traceparent !== `00-${trace.traceId}-${trace.spanId}-01`) {
   throw new Error(`expected propagated traceparent, got ${requests[0].init.headers.traceparent}`);
+}
+if (requests[1].init.headers.traceparent !== `00-${trace.traceId}-${trace.spanId}-01`) {
+  throw new Error(`expected global fetch traceparent, got ${requests[1].init.headers.traceparent}`);
 }
 if (appStateListeners.size !== 0 || navigationListeners.size !== 0) {
   throw new Error("instrumentation remove should detach lifecycle and navigation listeners");
@@ -162,6 +185,10 @@ const resource = events.find((event) => event.attributes.metadata?.source === "r
 if (resource?.name !== "POST /api/checkout" || resource.metadata.routeTemplate !== "/api/checkout") {
   throw new Error(`unexpected resource span: ${JSON.stringify(resource)}`);
 }
+const globalResource = events.find((event) => event.attributes.name === "GET /api/global")?.attributes;
+if (globalResource?.metadata.routeTemplate !== "/api/global" || globalResource.metadata.statusCode !== 206) {
+  throw new Error(`unexpected global fetch span: ${JSON.stringify(globalResource)}`);
+}
 const navigationSpan = events.find((event) => event.attributes.name === "navigation:CheckoutComplete")?.attributes;
 if (navigationSpan?.durationMs !== 220 || navigationSpan.metadata.routePath !== "/checkout/complete") {
   throw new Error(`unexpected navigation span: ${JSON.stringify(navigationSpan)}`);
@@ -178,6 +205,7 @@ console.error(JSON.stringify({
   ok: true,
   calls: nativeBridgeCalls.map((call) => call.kind),
   events: events.length,
+  globalFetchPutBack: globalObject.fetch === originalGlobalFetch,
   propagatedTraceparent: requests[0].init.headers.traceparent,
   status: response.statusCode,
   traceId: trace.traceId

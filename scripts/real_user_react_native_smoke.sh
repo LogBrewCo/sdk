@@ -850,9 +850,14 @@ const resourceFetch = createReactNativeResourceFetch(client, {
   tracePropagationTargets: traceTargets
 });
 void resourceFetch("/mobile-api/resource", { method: "POST" });
+const globalObject: { fetch: (input: string, init?: { method?: string }) => Promise<{ status: number }> } = {
+  fetch: async () => ({ status: 202 })
+};
 const instrumentation: ReactNativeInstrumentation<string, { method?: string }, { status: number }> = createLogBrewReactNativeInstrumentation(client, {
   appState,
   fetchImpl: async () => ({ status: 202 }),
+  globalObject,
+  instrumentGlobalFetch: true,
   nativeBridge: bridge,
   platform,
   screen: "Checkout",
@@ -860,6 +865,8 @@ const instrumentation: ReactNativeInstrumentation<string, { method?: string }, {
   tracePropagationTargets: traceTargets
 });
 void instrumentation.resourceFetch("/mobile-api/instrumented", { method: "POST" });
+void globalObject.fetch("/mobile-api/global", { method: "GET" });
+void instrumentation.globalFetch?.fetch("/mobile-api/direct", { method: "GET" });
 instrumentation.withNativeBridgeScope(scope => scope.metadata);
 instrumentation.remove();
 
