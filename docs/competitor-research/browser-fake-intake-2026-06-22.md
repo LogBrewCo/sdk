@@ -29,13 +29,14 @@ Prove the browser SDK behaves like a real installed package without turning the 
 - 2026-06-23 update: `LogBrewClient` now has a default 1000-event in-memory queue bound, `maxQueueSize`, `droppedEvents()`, and `onEventDropped`. Overflow drops the incoming event, preserves already queued context, and reports `queue_overflow` without throwing from the callback.
 - 2026-06-23 update: core flush now treats HTTP `429` as `SdkError` code `rate_limited`, preserves queued events, and avoids immediate retry. `RecordingTransport` and browser `createFetchTransport()` can carry `retryAfterMs`; the browser transport parses the standard `Retry-After` seconds/date header from local fake-intake responses.
 - 2026-06-23 update: browser lifecycle flush callbacks now include `details.reason` as `capture`, `pagehide`, or `visibility_hidden`. The installed smoke proves a fake `pagehide` dispatch flushes via the real packed browser package, reports reason `pagehide`, clears the queue, uses the documented fetch header path for client-key delivery, and stops flushing after `uninstall()`.
+- 2026-06-23 update: browser connectivity recovery now flushes queued in-memory events when the browser emits `online`, reports `details.reason` as `online`, and removes the listener on `uninstall()`. This follows the competitor pattern of retrying buffered work after transport disruption, but stays explicit and memory-only instead of adding persisted offline storage, background workers, or a hidden beacon contract.
 - Wired the smoke into the local `scripts/check_public_sdks.sh` gate as `Browser installed-artifact fake-intake smoke` without adding another GitHub Actions or Blacksmith duplicate lint/static check.
 
 ## Tradeoffs
 
 - Better for LogBrew's current public SDK boundary: the proof is realistic, local, installed-artifact based, and inert by default. It does not silently add network telemetry to public repos/packages.
-- Lighter than Sentry/Datadog/PostHog: no hidden global browser batching layer, no background queue worker, no default `sendBeacon` path that would need a different client-key delivery contract, no persisted offline queue, and no local usage/quota derivation. Keepalive delivery, queue pressure, lifecycle reason callbacks, and rate-limit recovery signals are explicit and bounded instead of best-effort browser-dependent.
-- Still worse than Sentry/Datadog/PostHog for production browser delivery under unload/offline pressure, sendBeacon-style exit delivery, and category-aware rate-limit stores. Future work should add lifecycle delivery upgrades only when the SDK owns an authorization-safe browser contract explicitly.
+- Lighter than Sentry/Datadog/PostHog: no hidden global browser batching layer, no background queue worker, no default `sendBeacon` path that would need a different client-key delivery contract, no persisted offline queue, and no local usage/quota derivation. Keepalive delivery, queue pressure, lifecycle/connectivity reason callbacks, and rate-limit recovery signals are explicit and bounded instead of best-effort browser-dependent.
+- Still worse than Sentry/Datadog/PostHog for production browser delivery under unload/offline pressure, sendBeacon-style exit delivery, persisted offline recovery, and category-aware rate-limit stores. Future work should add lifecycle delivery upgrades only when the SDK owns an authorization-safe browser contract explicitly.
 
 ## Verification
 
@@ -46,7 +47,9 @@ Prove the browser SDK behaves like a real installed package without turning the 
 - Red: `node --test js/logbrew-js/test/sdk.test.js --test-name-pattern 'rate-limited response surfaces retry-after without retrying'` failed because `429` still raised generic `transport_error`.
 - Red: `bash scripts/real_user_browser_fake_intake_smoke.sh` failed because the installed browser package surfaced the local fake-intake `429` as generic `transport_error` instead of `rate_limited`.
 - Red: `bash scripts/real_user_browser_fake_intake_smoke.sh` failed because lifecycle-triggered `onFlush` callbacks did not identify `pagehide` as the flush reason.
+- Red: `bash scripts/real_user_browser_fake_intake_smoke.sh` failed because fake `online` dispatch timed out waiting for a connectivity recovery flush.
 - Green: `bash scripts/real_user_browser_fake_intake_smoke.sh` passed with a local fake intake after unsandboxed execution allowed loopback binding.
 - Green: focused JS rate-limit test passed, and the installed browser fake-intake smoke passed with `Retry-After: 2` parsed as `retryAfterMs: 2000`, one request, retained queue, and no immediate retry.
 - Green: installed browser fake-intake smoke passed with fake `pagehide` dispatch, reason `pagehide`, queue clear, one loopback request, and no flush after `uninstall()`.
+- Green: installed browser fake-intake smoke passed with fake `online` dispatch, reason `online`, queue clear, one loopback request, and no flush after `uninstall()`.
 - Green: focused public-check tests passed for the new smoke wiring and step-label ordering.

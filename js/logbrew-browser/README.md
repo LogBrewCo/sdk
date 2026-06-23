@@ -31,15 +31,15 @@ logbrew.client.log("evt_log_001", new Date().toISOString(), {
 });
 ```
 
-`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, flushes queued events when the page becomes hidden or receives `pagehide`, and returns a handle with `client`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`.
+`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, flushes queued events when the page becomes hidden, receives `pagehide`, or comes back `online`, and returns a handle with `client`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`.
 
-`onFlush(response, context, details)` and `onCaptureError(error, context, details)` receive `details.reason` as `capture`, `pagehide`, or `visibility_hidden`, so apps can distinguish normal capture flushes from lifecycle delivery without parsing browser events globally.
+`onFlush(response, context, details)` and `onCaptureError(error, context, details)` receive `details.reason` as `capture`, `online`, `pagehide`, or `visibility_hidden`, so apps can distinguish normal capture flushes from lifecycle and connectivity delivery without parsing browser events globally.
 
 For browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples.
 
 By default, browser metadata keeps the current path without query string or hash. It does not include document title or user agent unless `includeDocumentTitle` or `includeUserAgent` is enabled. Pass `sanitizeMetadata(metadata, kind)` to remove or rewrite metadata before events are queued.
 
-Set `flushOnPageHide: false` or `flushOnVisibilityHidden: false` if your app wants to own page lifecycle delivery itself.
+Set `flushOnOnline: false`, `flushOnPageHide: false`, or `flushOnVisibilityHidden: false` if your app wants to own lifecycle or connectivity delivery itself.
 
 ## Structured Actions
 
@@ -101,7 +101,7 @@ installLogBrewBrowser({
 
 When an intake returns HTTP `429`, the browser transport reads the standard `Retry-After` header and passes it to the core SDK as `retryAfterMs`. The flush then raises `SdkError` code `rate_limited`, preserves queued events, and avoids immediate retry; use that signal for app-owned retry timing or user-facing recovery.
 
-Browser clients inherit the core SDK's bounded in-memory queue. Pass `maxQueueSize` and `onEventDropped` to `installLogBrewBrowser()` or `createLogBrewBrowserClient()` when the app wants explicit drop reporting during high-volume browser logging. This reports local queue pressure only; it does not install offline storage, replay, or hidden background delivery.
+Browser clients inherit the core SDK's bounded in-memory queue. Pass `maxQueueSize` and `onEventDropped` to `installLogBrewBrowser()` or `createLogBrewBrowserClient()` when the app wants explicit drop reporting during high-volume browser logging. LogBrew also flushes queued in-memory events on the browser `online` event by default, which helps after temporary connectivity loss. This is recovery signaling only; it does not install offline storage, replay, or hidden background delivery.
 
 Use `RecordingTransport.alwaysAccept()` from `@logbrew/sdk` when you want to inspect queued browser events before network delivery.
 

@@ -96,6 +96,10 @@ const lifecycleIntake = await startFakeIntake({
   expectedAuthorization: `Bearer ${clientKey}`,
   statuses: [202]
 });
+const onlineIntake = await startFakeIntake({
+  expectedAuthorization: `Bearer ${clientKey}`,
+  statuses: [202]
+});
 const shutdownIntake = await startFakeIntake({
   expectedAuthorization: `Bearer ${clientKey}`,
   statuses: [202]
@@ -182,49 +186,20 @@ try {
   assertEqual(rateLimitClient.pendingEvents(), 1, "rate limit keeps event queued");
   assertEqual(rateLimitIntake.requests.length, 1, "rate limit should not retry immediately");
 
-  const lifecycleWindow = createFakeBrowserWindow();
-  const lifecycleFlushes = [];
-  const lifecycleContext = installLogBrewBrowser({
-    browserWindow: lifecycleWindow,
-    capturePageViews: false,
-    clientKey,
-    flushOnCapture: false,
-    onFlush(response, context, details) {
-      lifecycleFlushes.push({
-        pendingEvents: context.client.pendingEvents(),
-        reason: details?.reason,
-        statusCode: response.statusCode
-      });
-    },
-    sdkName: "logbrew-browser-fake-intake-smoke",
-    sdkVersion: "0.1.0",
-    transport: createFetchTransport({
-      endpoint: `${lifecycleIntake.url}/v1/events`
-    })
+  const lifecycleReason = await assertBrowserEventFlush({
+    eventType: "pagehide",
+    intake: lifecycleIntake,
+    label: "pagehide",
+    reason: "pagehide",
+    timestampOffset: 650
   });
-  lifecycleContext.client.log("evt_browser_lifecycle_001", timestamp(650), {
-    level: "info",
-    logger: "browser.lifecycle",
-    message: "pagehide flush smoke",
-    metadata: baseMetadata({ traceId })
+  const onlineReason = await assertBrowserEventFlush({
+    eventType: "online",
+    intake: onlineIntake,
+    label: "online",
+    reason: "online",
+    timestampOffset: 660
   });
-  lifecycleWindow.dispatchEvent("pagehide");
-  await waitFor("pagehide lifecycle flush", () => lifecycleFlushes.length === 1);
-  assertEqual(lifecycleFlushes[0].reason, "pagehide", "pagehide flush reason");
-  assertEqual(lifecycleFlushes[0].statusCode, 202, "pagehide flush status");
-  assertEqual(lifecycleFlushes[0].pendingEvents, 0, "pagehide flush queue count");
-  assertEqual(lifecycleIntake.requests.length, 1, "pagehide fake intake request count");
-  assertNoUnsafeContent(lifecycleIntake.requests);
-  lifecycleContext.client.log("evt_browser_lifecycle_002", timestamp(651), {
-    level: "info",
-    logger: "browser.lifecycle",
-    message: "post-uninstall pagehide smoke",
-    metadata: baseMetadata({ traceId })
-  });
-  lifecycleContext.uninstall();
-  lifecycleWindow.dispatchEvent("pagehide");
-  await delay(20);
-  assertEqual(lifecycleFlushes.length, 1, "uninstalled pagehide should not flush");
 
   const shutdownClient = createLogBrewBrowserClient({
     clientKey,
@@ -354,7 +329,8 @@ try {
     fakeIntakeKeepaliveBodyLimit: keepaliveBodyError.code,
     fakeIntakeKeepaliveCjs: cjsKeepaliveError.code,
     fakeIntakeQueueDrops: boundedClient.droppedEvents(),
-    fakeIntakeLifecycleReason: lifecycleFlushes[0].reason,
+    fakeIntakeLifecycleReason: lifecycleReason,
+    fakeIntakeOnlineReason: onlineReason,
     fakeIntakeRateLimit: rateLimitError.code,
     fakeIntakeRateLimitRetryAfterMs: rateLimitError.retryAfterMs,
     fakeIntakeUtf8Fallback: utf8FallbackFetchCalls,
@@ -367,6 +343,7 @@ try {
   await invalidIntake.close();
   await rateLimitIntake.close();
   await lifecycleIntake.close();
+  await onlineIntake.close();
   await shutdownIntake.close();
 }
 
@@ -538,6 +515,53 @@ function assertNoUnsafeContent(requests) {
   }
 }
 
+async function assertBrowserEventFlush({ eventType, intake, label, reason, timestampOffset }) {
+  const browserWindow = createFakeBrowserWindow();
+  const flushes = [];
+  const context = installLogBrewBrowser({
+    browserWindow,
+    capturePageViews: false,
+    clientKey,
+    flushOnCapture: false,
+    onFlush(response, browserContext, details) {
+      flushes.push({
+        pendingEvents: browserContext.client.pendingEvents(),
+        reason: details?.reason,
+        statusCode: response.statusCode
+      });
+    },
+    sdkName: "logbrew-browser-fake-intake-smoke",
+    sdkVersion: "0.1.0",
+    transport: createFetchTransport({
+      endpoint: `${intake.url}/v1/events`
+    })
+  });
+  context.client.log(`evt_browser_${label}_001`, timestamp(timestampOffset), {
+    level: "info",
+    logger: "browser.lifecycle",
+    message: `${reason} flush smoke`,
+    metadata: baseMetadata({ traceId })
+  });
+  browserWindow.dispatchEvent(eventType);
+  await waitFor(`${reason} lifecycle flush`, () => flushes.length === 1);
+  assertEqual(flushes[0].reason, reason, `${reason} flush reason`);
+  assertEqual(flushes[0].statusCode, 202, `${reason} flush status`);
+  assertEqual(flushes[0].pendingEvents, 0, `${reason} flush queue count`);
+  assertEqual(intake.requests.length, 1, `${reason} fake intake request count`);
+  assertNoUnsafeContent(intake.requests);
+  context.client.log(`evt_browser_${label}_002`, timestamp(timestampOffset + 1), {
+    level: "info",
+    logger: "browser.lifecycle",
+    message: `post-uninstall ${reason} smoke`,
+    metadata: baseMetadata({ traceId })
+  });
+  context.uninstall();
+  browserWindow.dispatchEvent(eventType);
+  await delay(20);
+  assertEqual(flushes.length, 1, `uninstalled ${reason} should not flush`);
+  return flushes[0].reason;
+}
+
 async function captureError(callback) {
   try {
     await callback();
@@ -628,6 +652,7 @@ grep -q '"fakeIntakeAttempts":2' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeRequests":2' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeInvalidKey":"unauthenticated"' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeLifecycleReason":"pagehide"' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeOnlineReason":"online"' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeRateLimit":"rate_limited"' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeRateLimitRetryAfterMs":2000' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeShutdownStatus":202' "$tmp_dir/browser-fake-intake.stderr.json"

@@ -86,7 +86,7 @@ export type BrowserNetworkInput = string | {
 
 export type BrowserMetadataKind = "page_view" | "action" | "network" | "error" | "unhandledrejection";
 
-export type BrowserFlushReason = "capture" | "pagehide" | "visibility_hidden";
+export type BrowserFlushReason = "capture" | "online" | "pagehide" | "visibility_hidden";
 
 export type BrowserFlushDetails = {
   reason: BrowserFlushReason;
@@ -100,6 +100,7 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
   captureUnhandledRejections?: boolean;
   capturePageViews?: boolean;
   flushOnCapture?: boolean;
+  flushOnOnline?: boolean;
   flushOnPageHide?: boolean;
   flushOnVisibilityHidden?: boolean;
   includeDocumentTitle?: boolean;

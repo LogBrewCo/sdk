@@ -174,6 +174,9 @@ export function installLogBrewBrowser(options = {}) {
     pagehide: () => {
       void flushForLifecycle(context, options, "pagehide");
     },
+    online: () => {
+      void flushForLifecycle(context, options, "online");
+    },
     rejection: (event) => {
       void captureUnhandledRejection(event, context, options);
     },
@@ -192,6 +195,9 @@ export function installLogBrewBrowser(options = {}) {
   }
   if (options.flushOnPageHide !== false) {
     browserWindow.addEventListener("pagehide", listeners.pagehide);
+  }
+  if (options.flushOnOnline !== false) {
+    browserWindow.addEventListener("online", listeners.online);
   }
   if (options.flushOnVisibilityHidden !== false && typeof browserWindow.document?.addEventListener === "function") {
     browserWindow.document.addEventListener("visibilitychange", listeners.visibilitychange);
@@ -476,6 +482,7 @@ function removeListeners(browserWindow, listeners) {
   browserWindow.removeEventListener("error", listeners.error);
   browserWindow.removeEventListener("unhandledrejection", listeners.rejection);
   browserWindow.removeEventListener("pagehide", listeners.pagehide);
+  browserWindow.removeEventListener("online", listeners.online);
   if (typeof browserWindow.document?.removeEventListener === "function") {
     browserWindow.document.removeEventListener("visibilitychange", listeners.visibilitychange);
   }
