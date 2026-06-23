@@ -47,7 +47,44 @@ clean_after_run() {
   rmdir "$lock_dir" 2>/dev/null || true
 }
 
+on_error() {
+  local status=$?
+  echo "real_user_kotlin_smoke failed at line ${BASH_LINENO[0]} while running: ${BASH_COMMAND}" >&2
+  if [[ -n "$intake_pid" ]]; then
+    echo "real_user_kotlin_smoke intake process" >&2
+    ps -p "$intake_pid" -o pid,ppid,stat,etime,command >&2 || true
+  fi
+  for diagnostic in \
+    "$tmp_dir/gradle-deps.txt" \
+    "$tmp_dir/gradle-deps-readded.txt" \
+    "$tmp_dir/okhttp-gradle-deps.txt" \
+    "$tmp_dir/okhttp-classpath.txt" \
+    "$tmp_dir/okhttp-app.out" \
+    "$tmp_dir/otel-app.out" \
+    "$tmp_dir/coroutines-classpath.txt" \
+    "$tmp_dir/coroutines-app.out" \
+    "$tmp_dir/http-url-connection-app.out" \
+    "$tmp_dir/dependency-spans.stdout.json" \
+    "$tmp_dir/dependency-spans.stderr.json" \
+    "$tmp_dir/installed-readme.stdout.json" \
+    "$tmp_dir/installed-readme.stderr.json" \
+    "$tmp_dir/installed-smoke.stdout.json" \
+    "$tmp_dir/installed-smoke.stderr.json" \
+    "$tmp_dir/installed-trace-correlation.stdout.json" \
+    "$tmp_dir/installed-trace-correlation.stderr.json" \
+    "$tmp_dir/smoke-app.stdout.json" \
+    "$tmp_dir/smoke-app.stderr.json" \
+    "$tmp_dir/intake.jsonl"; do
+    if [[ -f "$diagnostic" ]]; then
+      echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
+      sed -n '1,120p' "$diagnostic" >&2
+    fi
+  done
+  exit "$status"
+}
+
 trap clean_after_run EXIT
+trap on_error ERR
 
 if ! acquire_lock; then
   echo "another Kotlin SDK verifier run is already in progress" >&2
