@@ -86,6 +86,12 @@ export type BrowserNetworkInput = string | {
 
 export type BrowserMetadataKind = "page_view" | "action" | "network" | "error" | "unhandledrejection";
 
+export type BrowserFlushReason = "capture" | "pagehide" | "visibility_hidden";
+
+export type BrowserFlushDetails = {
+  reason: BrowserFlushReason;
+};
+
 export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTransportConfig & {
   browserWindow?: Window;
   client?: LogBrewClient;
@@ -135,11 +141,13 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
   }) => string;
   onFlush?: (
     response: TransportResponse,
-    context: LogBrewBrowserContext
+    context: LogBrewBrowserContext,
+    details: BrowserFlushDetails
   ) => void | Promise<void>;
   onCaptureError?: (
     error: unknown,
-    context: LogBrewBrowserContext
+    context: LogBrewBrowserContext,
+    details: BrowserFlushDetails
   ) => void | Promise<void>;
 };
 

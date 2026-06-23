@@ -172,14 +172,14 @@ export function installLogBrewBrowser(options = {}) {
       void captureBrowserError(event, context, options);
     },
     pagehide: () => {
-      void flushForLifecycle(context, options);
+      void flushForLifecycle(context, options, "pagehide");
     },
     rejection: (event) => {
       void captureUnhandledRejection(event, context, options);
     },
     visibilitychange: () => {
       if (browserWindow.document?.visibilityState === "hidden") {
-        void flushForLifecycle(context, options);
+        void flushForLifecycle(context, options, "visibility_hidden");
       }
     }
   };
@@ -441,26 +441,26 @@ async function flushAfterCapture(context, options) {
     return undefined;
   }
 
-  return flushWithCallbacks(context, options);
+  return flushWithCallbacks(context, options, { reason: "capture" });
 }
 
-async function flushForLifecycle(context, options) {
+async function flushForLifecycle(context, options, reason) {
   if (context.client.pendingEvents() === 0) {
     return undefined;
   }
-  return flushWithCallbacks(context, options);
+  return flushWithCallbacks(context, options, { reason });
 }
 
-async function flushWithCallbacks(context, options) {
+async function flushWithCallbacks(context, options, details) {
   try {
     const response = await context.client.flush(context.transport);
     if (typeof options.onFlush === "function") {
-      await options.onFlush(response, context);
+      await options.onFlush(response, context, details);
     }
     return response;
   } catch (error) {
     if (typeof options.onCaptureError === "function") {
-      await options.onCaptureError(error, context);
+      await options.onCaptureError(error, context, details);
     }
     if (options.raiseCaptureErrors === true) {
       throw error;

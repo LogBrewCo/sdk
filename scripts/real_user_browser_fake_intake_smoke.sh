@@ -65,7 +65,7 @@ grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 cat > smoke.mjs <<'EOF'
 import http from "node:http";
 import { createRequire } from "node:module";
-import { createFetchTransport, createLogBrewBrowserClient } from "@logbrew/browser";
+import { createFetchTransport, createLogBrewBrowserClient, installLogBrewBrowser } from "@logbrew/browser";
 import { SdkError, TransportError } from "@logbrew/sdk";
 
 const require = createRequire(import.meta.url);
@@ -91,6 +91,10 @@ const rateLimitIntake = await startFakeIntake({
     headers: { "retry-after": "2" },
     status: 429
   }]
+});
+const lifecycleIntake = await startFakeIntake({
+  expectedAuthorization: `Bearer ${clientKey}`,
+  statuses: [202]
 });
 const shutdownIntake = await startFakeIntake({
   expectedAuthorization: `Bearer ${clientKey}`,
@@ -177,6 +181,50 @@ try {
   assertEqual(rateLimitError.retryAfterMs, 2000, "rate limit retry-after milliseconds");
   assertEqual(rateLimitClient.pendingEvents(), 1, "rate limit keeps event queued");
   assertEqual(rateLimitIntake.requests.length, 1, "rate limit should not retry immediately");
+
+  const lifecycleWindow = createFakeBrowserWindow();
+  const lifecycleFlushes = [];
+  const lifecycleContext = installLogBrewBrowser({
+    browserWindow: lifecycleWindow,
+    capturePageViews: false,
+    clientKey,
+    flushOnCapture: false,
+    onFlush(response, context, details) {
+      lifecycleFlushes.push({
+        pendingEvents: context.client.pendingEvents(),
+        reason: details?.reason,
+        statusCode: response.statusCode
+      });
+    },
+    sdkName: "logbrew-browser-fake-intake-smoke",
+    sdkVersion: "0.1.0",
+    transport: createFetchTransport({
+      endpoint: `${lifecycleIntake.url}/v1/events`
+    })
+  });
+  lifecycleContext.client.log("evt_browser_lifecycle_001", timestamp(650), {
+    level: "info",
+    logger: "browser.lifecycle",
+    message: "pagehide flush smoke",
+    metadata: baseMetadata({ traceId })
+  });
+  lifecycleWindow.dispatchEvent("pagehide");
+  await waitFor("pagehide lifecycle flush", () => lifecycleFlushes.length === 1);
+  assertEqual(lifecycleFlushes[0].reason, "pagehide", "pagehide flush reason");
+  assertEqual(lifecycleFlushes[0].statusCode, 202, "pagehide flush status");
+  assertEqual(lifecycleFlushes[0].pendingEvents, 0, "pagehide flush queue count");
+  assertEqual(lifecycleIntake.requests.length, 1, "pagehide fake intake request count");
+  assertNoUnsafeContent(lifecycleIntake.requests);
+  lifecycleContext.client.log("evt_browser_lifecycle_002", timestamp(651), {
+    level: "info",
+    logger: "browser.lifecycle",
+    message: "post-uninstall pagehide smoke",
+    metadata: baseMetadata({ traceId })
+  });
+  lifecycleContext.uninstall();
+  lifecycleWindow.dispatchEvent("pagehide");
+  await delay(20);
+  assertEqual(lifecycleFlushes.length, 1, "uninstalled pagehide should not flush");
 
   const shutdownClient = createLogBrewBrowserClient({
     clientKey,
@@ -306,6 +354,7 @@ try {
     fakeIntakeKeepaliveBodyLimit: keepaliveBodyError.code,
     fakeIntakeKeepaliveCjs: cjsKeepaliveError.code,
     fakeIntakeQueueDrops: boundedClient.droppedEvents(),
+    fakeIntakeLifecycleReason: lifecycleFlushes[0].reason,
     fakeIntakeRateLimit: rateLimitError.code,
     fakeIntakeRateLimitRetryAfterMs: rateLimitError.retryAfterMs,
     fakeIntakeUtf8Fallback: utf8FallbackFetchCalls,
@@ -317,6 +366,7 @@ try {
   await retryIntake.close();
   await invalidIntake.close();
   await rateLimitIntake.close();
+  await lifecycleIntake.close();
   await shutdownIntake.close();
 }
 
@@ -497,6 +547,65 @@ async function captureError(callback) {
   throw new Error("expected callback to throw");
 }
 
+function createFakeBrowserWindow() {
+  const listeners = new Map();
+  const documentListeners = new Map();
+  const document = {
+    visibilityState: "visible",
+    addEventListener(type, listener) {
+      addListener(documentListeners, type, listener);
+    },
+    removeEventListener(type, listener) {
+      removeListener(documentListeners, type, listener);
+    }
+  };
+  return {
+    document,
+    addEventListener(type, listener) {
+      addListener(listeners, type, listener);
+    },
+    removeEventListener(type, listener) {
+      removeListener(listeners, type, listener);
+    },
+    dispatchDocumentEvent(type) {
+      dispatchListeners(documentListeners, type, {});
+    },
+    dispatchEvent(type, event = {}) {
+      dispatchListeners(listeners, type, event);
+    }
+  };
+}
+
+function addListener(listeners, type, listener) {
+  const existing = listeners.get(type) ?? [];
+  existing.push(listener);
+  listeners.set(type, existing);
+}
+
+function removeListener(listeners, type, listener) {
+  listeners.set(type, (listeners.get(type) ?? []).filter((candidate) => candidate !== listener));
+}
+
+function dispatchListeners(listeners, type, event) {
+  for (const listener of listeners.get(type) ?? []) {
+    listener(event);
+  }
+}
+
+async function waitFor(label, predicate) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await delay(10);
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 function timestamp(offsetSeconds) {
   return new Date(Date.UTC(2026, 5, 22, 10, 0, offsetSeconds)).toISOString();
 }
@@ -518,6 +627,7 @@ grep -q '"fakeIntakeEvents":257' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeAttempts":2' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeRequests":2' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeInvalidKey":"unauthenticated"' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeLifecycleReason":"pagehide"' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeRateLimit":"rate_limited"' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeRateLimitRetryAfterMs":2000' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeShutdownStatus":202' "$tmp_dir/browser-fake-intake.stderr.json"

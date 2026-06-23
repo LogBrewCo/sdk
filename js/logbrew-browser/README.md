@@ -33,6 +33,8 @@ logbrew.client.log("evt_log_001", new Date().toISOString(), {
 
 `installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, flushes queued events when the page becomes hidden or receives `pagehide`, and returns a handle with `client`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`.
 
+`onFlush(response, context, details)` and `onCaptureError(error, context, details)` receive `details.reason` as `capture`, `pagehide`, or `visibility_hidden`, so apps can distinguish normal capture flushes from lifecycle delivery without parsing browser events globally.
+
 For browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples.
 
 By default, browser metadata keeps the current path without query string or hash. It does not include document title or user agent unless `includeDocumentTitle` or `includeUserAgent` is enabled. Pass `sanitizeMetadata(metadata, kind)` to remove or rewrite metadata before events are queued.
@@ -95,7 +97,7 @@ installLogBrewBrowser({
 });
 ```
 
-`createFetchTransport()` uses browser `fetch` with `keepalive: true` by default so explicit page-lifecycle flushes can finish during navigation. To keep that behavior predictable, LogBrew refuses keepalive payloads above `maxKeepaliveBodyBytes` before calling `fetch`; the queued events remain available for a later non-keepalive flush. Set `keepalive: false` for app-owned large-batch delivery.
+`createFetchTransport()` uses browser `fetch` with `keepalive: true` by default so explicit page-lifecycle flushes can finish during navigation. To keep that behavior predictable, LogBrew refuses keepalive payloads above `maxKeepaliveBodyBytes` before calling `fetch`; the queued events remain available for a later non-keepalive flush. Set `keepalive: false` for app-owned large-batch delivery. LogBrew does not use `sendBeacon` by default because it cannot preserve the same header-based client-key delivery as `fetch`; keep browser delivery on the documented fetch transport unless your own integration owns a different public contract.
 
 When an intake returns HTTP `429`, the browser transport reads the standard `Retry-After` header and passes it to the core SDK as `retryAfterMs`. The flush then raises `SdkError` code `rate_limited`, preserves queued events, and avoids immediate retry; use that signal for app-owned retry timing or user-facing recovery.
 
