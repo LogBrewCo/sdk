@@ -191,6 +191,21 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete",
         )
 
+    def test_public_verifier_runs_js_high_load_smoke(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"JavaScript high-load installed-artifact smoke"', script)
+        self.assertRegex(
+            script,
+            r'begin_next_step "JavaScript real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_js_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "JavaScript high-load installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_js_high_load_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Browser real-user smoke"',
+        )
+
     def test_public_verifier_runs_github_release_safety_gate(self) -> None:
         script = SCRIPT.read_text()
 

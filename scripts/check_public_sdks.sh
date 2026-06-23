@@ -45,6 +45,7 @@ STEP_LABELS=(
   "Rust Rocket real-user smoke"
   "Rust tracing real-user smoke"
   "JavaScript real-user smoke"
+  "JavaScript high-load installed-artifact smoke"
   "Browser real-user smoke"
   "Browser installed-artifact fake-intake smoke"
   "Node.js real-user smoke"
@@ -474,6 +475,10 @@ mark_step_complete
 
 begin_next_step "JavaScript real-user smoke"
 run_shell_step "bash scripts/real_user_js_smoke.sh"
+mark_step_complete
+
+begin_next_step "JavaScript high-load installed-artifact smoke"
+run_shell_step "bash scripts/real_user_js_high_load_smoke.sh"
 mark_step_complete
 
 begin_next_step "Browser real-user smoke"
