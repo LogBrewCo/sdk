@@ -83,6 +83,27 @@ on_error() {
   exit "$status"
 }
 
+wait_for_intake_ready() {
+  local attempts=300
+  local attempt=1
+  while ((attempt <= attempts)); do
+    if [[ -f "$intake_ready" ]]; then
+      return 0
+    fi
+    if ! kill -0 "$intake_pid" 2>/dev/null; then
+      echo "Kotlin fake intake exited before readiness file was written" >&2
+      wait "$intake_pid" 2>/dev/null || true
+      return 1
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+
+  echo "Kotlin fake intake did not become ready after ${attempts} attempts" >&2
+  ps -p "$intake_pid" -o pid,ppid,stat,etime,command >&2 || true
+  return 1
+}
+
 trap clean_after_run EXIT
 trap on_error ERR
 
@@ -898,13 +919,7 @@ intake_ready="$tmp_dir/intake.ready"
 intake_log="$tmp_dir/intake.jsonl"
 python3 "$tmp_dir/kotlin_intake.py" "$intake_port" "$intake_ready" "$intake_log" &
 intake_pid="$!"
-for _attempt in {1..50}; do
-  if [[ -f "$intake_ready" ]]; then
-    break
-  fi
-  sleep 0.1
-done
-test -f "$intake_ready"
+wait_for_intake_ready
 
 LOGBREW_KOTLIN_HTTP_ENDPOINT="http://127.0.0.1:$intake_port/v1/events" \
 run_app \
