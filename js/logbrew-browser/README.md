@@ -97,6 +97,8 @@ installLogBrewBrowser({
 
 `createFetchTransport()` uses browser `fetch` with `keepalive: true` by default so explicit page-lifecycle flushes can finish during navigation. To keep that behavior predictable, LogBrew refuses keepalive payloads above `maxKeepaliveBodyBytes` before calling `fetch`; the queued events remain available for a later non-keepalive flush. Set `keepalive: false` for app-owned large-batch delivery.
 
+When an intake returns HTTP `429`, the browser transport reads the standard `Retry-After` header and passes it to the core SDK as `retryAfterMs`. The flush then raises `SdkError` code `rate_limited`, preserves queued events, and avoids immediate retry; use that signal for app-owned retry timing or user-facing recovery.
+
 Browser clients inherit the core SDK's bounded in-memory queue. Pass `maxQueueSize` and `onEventDropped` to `installLogBrewBrowser()` or `createLogBrewBrowserClient()` when the app wants explicit drop reporting during high-volume browser logging. This reports local queue pressure only; it does not install offline storage, replay, or hidden background delivery.
 
 Use `RecordingTransport.alwaysAccept()` from `@logbrew/sdk` when you want to inspect queued browser events before network delivery.

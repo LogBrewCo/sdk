@@ -85,6 +85,13 @@ const invalidIntake = await startFakeIntake({
   expectedAuthorization: `Bearer ${wrongClientKey}`,
   statuses: [401]
 });
+const rateLimitIntake = await startFakeIntake({
+  expectedAuthorization: `Bearer ${clientKey}`,
+  statuses: [{
+    headers: { "retry-after": "2" },
+    status: 429
+  }]
+});
 const shutdownIntake = await startFakeIntake({
   expectedAuthorization: `Bearer ${clientKey}`,
   statuses: [202]
@@ -147,6 +154,29 @@ try {
     throw new Error("invalid key error leaked the rejected key");
   }
   assertEqual(invalidClient.pendingEvents(), 1, "invalid key keeps event queued");
+
+  const rateLimitClient = createLogBrewBrowserClient({
+    clientKey,
+    maxRetries: 2,
+    sdkName: "logbrew-browser-fake-intake-smoke",
+    sdkVersion: "0.1.0"
+  });
+  rateLimitClient.log("evt_browser_rate_limit_001", timestamp(600), {
+    level: "warning",
+    logger: "browser.account-recovery",
+    message: "rate limit smoke",
+    metadata: baseMetadata({ traceId })
+  });
+  const rateLimitError = await captureError(() => rateLimitClient.flush(createFetchTransport({
+    endpoint: `${rateLimitIntake.url}/v1/events`
+  })));
+  if (!(rateLimitError instanceof SdkError)) {
+    throw new Error(`expected SdkError for rate limit, got ${rateLimitError}`);
+  }
+  assertEqual(rateLimitError.code, "rate_limited", "rate limit error code");
+  assertEqual(rateLimitError.retryAfterMs, 2000, "rate limit retry-after milliseconds");
+  assertEqual(rateLimitClient.pendingEvents(), 1, "rate limit keeps event queued");
+  assertEqual(rateLimitIntake.requests.length, 1, "rate limit should not retry immediately");
 
   const shutdownClient = createLogBrewBrowserClient({
     clientKey,
@@ -276,6 +306,8 @@ try {
     fakeIntakeKeepaliveBodyLimit: keepaliveBodyError.code,
     fakeIntakeKeepaliveCjs: cjsKeepaliveError.code,
     fakeIntakeQueueDrops: boundedClient.droppedEvents(),
+    fakeIntakeRateLimit: rateLimitError.code,
+    fakeIntakeRateLimitRetryAfterMs: rateLimitError.retryAfterMs,
     fakeIntakeUtf8Fallback: utf8FallbackFetchCalls,
     fakeIntakeRequests: retryIntake.requests.length,
     fakeIntakeShutdownStatus: shutdownResponse.statusCode,
@@ -284,6 +316,7 @@ try {
 } finally {
   await retryIntake.close();
   await invalidIntake.close();
+  await rateLimitIntake.close();
   await shutdownIntake.close();
 }
 
@@ -373,7 +406,12 @@ async function startFakeIntake({ expectedAuthorization, statuses }) {
       url: request.url
     });
 
-    const status = pendingStatuses.length > 0 ? pendingStatuses.shift() : 202;
+    const statusEntry = pendingStatuses.length > 0 ? pendingStatuses.shift() : 202;
+    const status = typeof statusEntry === "number" ? statusEntry : statusEntry.status;
+    const responseHeaders = {
+      "content-type": "application/json",
+      ...(typeof statusEntry === "number" ? {} : statusEntry.headers ?? {})
+    };
     if (request.method !== "POST" || request.url !== "/v1/events") {
       response.writeHead(404, { "content-type": "application/json" });
       response.end(JSON.stringify({ code: "not_found" }));
@@ -384,7 +422,7 @@ async function startFakeIntake({ expectedAuthorization, statuses }) {
       response.end(JSON.stringify({ code: "ingest_key_invalid" }));
       return;
     }
-    response.writeHead(status, { "content-type": "application/json" });
+    response.writeHead(status, responseHeaders);
     response.end(JSON.stringify({ ok: status >= 200 && status < 300 }));
   });
 
@@ -480,5 +518,7 @@ grep -q '"fakeIntakeEvents":257' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeAttempts":2' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeRequests":2' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeInvalidKey":"unauthenticated"' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeRateLimit":"rate_limited"' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeRateLimitRetryAfterMs":2000' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeShutdownStatus":202' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeHighVolumeLogs":250' "$tmp_dir/browser-fake-intake.stderr.json"

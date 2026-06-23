@@ -30,10 +30,14 @@ const ZERO_TRACE_ID = "00000000000000000000000000000000";
 const ZERO_SPAN_ID = "0000000000000000";
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 class SdkError extends Error {
-  constructor(code, message) {
+  constructor(code, message, details = {}) {
     super(message);
     this.name = "SdkError";
     this.code = code;
+    const retryAfterMs = retryAfterMsOrUndefined(details?.retryAfterMs);
+    if (retryAfterMs !== undefined) {
+      this.retryAfterMs = retryAfterMs;
+    }
   }
 }
 
@@ -76,7 +80,10 @@ class RecordingTransport {
       throw next;
     }
 
-    return { statusCode: next.statusCode, attempts: 1 };
+    const retryAfterMs = retryAfterMsOrUndefined(next.retryAfterMs);
+    return retryAfterMs === undefined
+      ? { statusCode: next.statusCode, attempts: 1 }
+      : { statusCode: next.statusCode, attempts: 1, retryAfterMs };
   }
 }
 
@@ -232,6 +239,11 @@ class LogBrewClient {
         const response = await transport.send(this.apiKey, body);
         if (response.statusCode === 401) {
           throw new SdkError("unauthenticated", "transport rejected the API key");
+        }
+        if (response.statusCode === 429) {
+          throw new SdkError("rate_limited", "transport rate limited the batch", {
+            retryAfterMs: response.retryAfterMs
+          });
         }
         if (response.statusCode >= 200 && response.statusCode < 300) {
           this.events = [];
@@ -1019,6 +1031,13 @@ function requirePositiveInteger(label, value) {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new SdkError("validation_error", `${label} must be a positive integer`);
   }
+}
+
+function retryAfterMsOrUndefined(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 function requireTraceId(traceId) {

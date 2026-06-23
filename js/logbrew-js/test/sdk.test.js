@@ -71,6 +71,15 @@ function enqueueAll(client) {
   });
 }
 
+async function captureRejection(callback) {
+  try {
+    await callback();
+  } catch (error) {
+    return error;
+  }
+  throw new Error("expected callback to reject");
+}
+
 test("previewJson contains all supported event types", () => {
   const client = sampleClient();
   enqueueAll(client);
@@ -275,6 +284,21 @@ test("unauthenticated response surfaces clean error", async () => {
   assert.equal(client.pendingEvents(), EXPECTED_EVENT_COUNT);
 });
 
+test("rate-limited response surfaces retry-after without retrying", async () => {
+  const client = sampleClient();
+  enqueueAll(client);
+  const transport = new RecordingTransport([{ statusCode: 429, retryAfterMs: 120_000 }]);
+
+  const error = await captureRejection(() => client.flush(transport));
+
+  assert.equal(error instanceof SdkError, true);
+  assert.equal(error.code, "rate_limited");
+  assert.equal(error.retryAfterMs, 120_000);
+  assert.equal(error.message, "transport rate limited the batch");
+  assert.equal(client.pendingEvents(), EXPECTED_EVENT_COUNT);
+  assert.equal(transport.sentBodies.length, 1);
+});
+
 test("network failure retries before succeeding", async () => {
   const client = sampleClient();
   enqueueAll(client);
@@ -327,6 +351,14 @@ test("invalid queue bound fails client configuration", () => {
     }),
     /maxQueueSize must be a positive integer/
   );
+});
+
+test("SDK error ignores unsafe optional retry-after details", () => {
+  const nullDetails = new SdkError("transport_error", "transport failed", null);
+  const negativeDelay = new SdkError("rate_limited", "transport rate limited the batch", { retryAfterMs: -1 });
+
+  assert.equal(nullDetails.retryAfterMs, undefined);
+  assert.equal(negativeDelay.retryAfterMs, undefined);
 });
 
 test("shutdown flushes and prevents future events", async () => {

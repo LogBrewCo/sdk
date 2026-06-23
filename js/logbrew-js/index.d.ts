@@ -319,6 +319,8 @@ export type TransportResponse = {
   statusCode: number;
   /** Number of transport attempts used for the flush. */
   attempts: number;
+  /** Optional retry delay from a rate-limit response, in milliseconds. */
+  retryAfterMs?: number;
 };
 
 /** Minimal transport interface accepted by flush and shutdown operations. */
@@ -329,7 +331,8 @@ export type Transport = {
 /** Stable public SDK error with parseable code and message fields. */
 export declare class SdkError extends Error {
   code: string;
-  constructor(code: string, message: string);
+  retryAfterMs?: number;
+  constructor(code: string, message: string, details?: { retryAfterMs?: number });
 }
 
 /** Transport error that can optionally be marked retryable by the caller. */
@@ -343,7 +346,7 @@ export declare class TransportError extends Error {
 
 /** Scripted transport for previewing, accepting, or failing queued event flushes. */
 export declare class RecordingTransport {
-  constructor(scriptedResponses?: Array<{ statusCode: number } | Error>);
+  constructor(scriptedResponses?: Array<{ statusCode: number; retryAfterMs?: number } | Error>);
   /** Every request body sent through this transport instance. */
   sentBodies: string[];
   /** Create a transport that accepts queued flushes with a 202 response. */

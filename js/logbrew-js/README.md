@@ -222,6 +222,10 @@ const client = LogBrewClient.create({
 
 Drop callbacks are advisory and must not interrupt application logging. This is not offline persistence; flush regularly and use app-owned retry/shutdown handling for production delivery.
 
+## Flush Failures
+
+`flush()` keeps queued events when delivery fails. A `401` transport response raises `SdkError` with code `unauthenticated`; a `429` response raises code `rate_limited` and includes `retryAfterMs` when the transport exposes a `Retry-After` delay. LogBrew does not derive account usage locally, sleep in the SDK, or drop queued events on rate limits; the app can decide when to retry or ask the backend-owned usage/quota APIs for current account state.
+
 ## Support Ticket Drafts
 
 Use `createSupportTicketDraft()` when a developer or support agent needs a local JSON payload for the planned LogBrew support-ticket API. The helper validates the public source/category contract, converts JavaScript camelCase inputs to the planned backend create payload fields, and redacts token-like diagnostics before returning the object.
