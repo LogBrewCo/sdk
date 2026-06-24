@@ -74,6 +74,8 @@ class BackendContractReportTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("code-level verified locally but not deploy/live verified", report)
+        self.assertIn("redacted post-deploy live verifier", report)
+        self.assertIn("does not clear SDK network-call gating", report)
         self.assertIn("SDKs must not call `POST /api/support/tickets`", report)
         self.assertIn("explicit local diagnostics draft", report)
 
