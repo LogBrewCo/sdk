@@ -8,6 +8,10 @@ This checklist is public-facing and intentionally excludes private systems and o
 - Use fake/public placeholders in examples such as `LOGBREW_API_KEY`, and prefer `LOGBREW_CLIENT_KEY` plus `clientKey` naming for browser, frontend, and mobile examples where the value is expected to ship in an app bundle.
 - Document event contracts, validation rules, retries, flush behavior, shutdown behavior, and error shapes.
 - Ensure all emitted payloads are machine-parseable JSON.
+- Treat support-ticket creation as a backend-gated capability. Local SDK
+  diagnostics drafts are allowed, but SDKs must not call support-ticket routes
+  or claim hosted ticket creation until [the support-ticket backend contract](backend-contracts/support-ticket-routes-2026-06-24.md)
+  has deploy/live verification.
 
 ## Public documentation requirements
 

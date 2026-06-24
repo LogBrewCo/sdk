@@ -65,6 +65,18 @@ class BackendContractReportTests(unittest.TestCase):
         self.assertIn("React Native-shaped Android mapping/native `.so`", report)
         self.assertIn("iOS `.xcarchive/dSYMs`", report)
 
+    def test_support_ticket_report_blocks_sdk_network_calls_until_live_verified(self) -> None:
+        report = (
+            ROOT
+            / "docs"
+            / "backend-contracts"
+            / "support-ticket-routes-2026-06-24.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("code-level verified locally but not deploy/live verified", report)
+        self.assertIn("SDKs must not call `POST /api/support/tickets`", report)
+        self.assertIn("explicit local diagnostics draft", report)
+
     def test_valid_report_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
