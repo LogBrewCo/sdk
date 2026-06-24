@@ -10,6 +10,10 @@ export npm_config_fund=false
 export npm_config_audit=false
 
 remove_tmp_dir() {
+  if [[ -n "${server_pid:-}" ]]; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
   rm -rf "$tmp_dir"
 }
 
@@ -206,8 +210,9 @@ throw new Error("expected Vite checkout probe to throw");
 JS
 )
 
+release_artifacts_cli="$app_dir/node_modules/.bin/logbrew-release-artifacts"
 symbolication_report="$tmp_dir/vite-symbolication-report.json"
-"$app_dir/node_modules/.bin/logbrew-release-artifacts" symbolicate-js \
+"$release_artifacts_cli" symbolicate-js \
   --build-dir "$dist_dir" \
   --manifest "$ready_manifest" \
   --stack-frame "$(cat "$actual_stack_frame")" \
@@ -248,6 +253,122 @@ assert "checkout exploded" not in serialized_manifest
 assert "checkout exploded" not in serialized_symbolication
 assert tmp_dir not in serialized_manifest
 assert tmp_dir not in serialized_symbolication
+PY
+
+port_file="$tmp_dir/fake-intake-port"
+state_file="$tmp_dir/fake-intake-state.json"
+expected_bearer="fake-vite-release-artifact-auth-value"
+
+python3 - "$port_file" "$state_file" "$expected_bearer" <<'PY' &
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+port_file = Path(sys.argv[1])
+state_file = Path(sys.argv[2])
+expected_bearer = sys.argv[3]
+state = {"events": []}
+
+
+def write_state() -> None:
+    state_file.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, _format: str, *_args: object) -> None:
+        return
+
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length)
+        auth = self.headers.get("Authorization", "")
+        route = self.path.split("?", 1)[0]
+        event = {
+            "path": route,
+            "authorized": auth == f"Bearer {expected_bearer}",
+            "bodyLength": len(body),
+            "containsManifest": b"javascript_source_map_manifest" in body,
+            "containsSourceSentinel": b"LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" in body,
+            "containsAuthValue": expected_bearer.encode("utf-8") in body,
+            "containsQueryPlaceholder": b"cache=placeholder" in body,
+            "containsHashFragment": b"fragment" in body,
+            "containsTempPath": str(state_file.parent).encode("utf-8") in body,
+            "containsSourceMapPart": b'name="source_map_0"' in body,
+            "containsMinifiedPart": b'name="minified_source_0"' in body,
+        }
+        state["events"].append(event)
+        write_state()
+
+        if route == "/retry-success":
+            if not event["authorized"]:
+                self.send_response(401)
+            elif sum(1 for seen in state["events"] if seen["path"] == "/retry-success") == 1:
+                self.send_response(503)
+            else:
+                self.send_response(202)
+        else:
+            self.send_response(404)
+        self.end_headers()
+        self.wfile.write(b"{}")
+
+
+server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+port_file.write_text(str(server.server_address[1]), encoding="utf-8")
+write_state()
+server.serve_forever()
+PY
+server_pid=$!
+
+for _ in $(seq 1 100); do
+  if [[ -s "$port_file" ]]; then
+    break
+  fi
+  sleep 0.05
+done
+
+if [[ ! -s "$port_file" ]]; then
+  echo "fake Vite release-artifact intake did not start" >&2
+  exit 1
+fi
+
+endpoint_base="http://127.0.0.1:$(cat "$port_file")"
+export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_bearer"
+upload_report="$tmp_dir/vite-upload-report.json"
+"$release_artifacts_cli" upload-js \
+  --build-dir "$dist_dir" \
+  --manifest "$ready_manifest" \
+  --endpoint "$endpoint_base/retry-success?ignored=query#ignored" \
+  --retry-delay 0 \
+  --max-retries 2 \
+  > "$upload_report"
+
+python3 - "$upload_report" "$state_file" "$tmp_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+upload_report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+state = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[3]
+
+assert upload_report["status"] == "uploaded"
+assert upload_report["retryCount"] == 1
+assert [attempt["httpStatus"] for attempt in upload_report["attempts"]] == [503, 202]
+assert upload_report["endpoint"].endswith("/retry-success")
+assert "ignored=query" not in json.dumps(upload_report)
+
+events = state["events"]
+assert [event["path"] for event in events].count("/retry-success") == 2
+assert all(event["containsManifest"] for event in events)
+assert all(event["containsSourceMapPart"] for event in events)
+assert all(event["containsMinifiedPart"] for event in events)
+assert not any(event["containsSourceSentinel"] for event in events)
+assert not any(event["containsAuthValue"] for event in events)
+assert not any(event["containsQueryPlaceholder"] for event in events)
+assert not any(event["containsHashFragment"] for event in events)
+assert not any(event["containsTempPath"] for event in events)
+assert tmp_dir not in json.dumps(upload_report)
 PY
 
 printf '%s\n' "real-user Vite release artifact plugin smoke ok"
