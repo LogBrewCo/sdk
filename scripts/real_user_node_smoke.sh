@@ -412,6 +412,7 @@ if (
 ) {
   throw new Error(`database span metadata was not useful and privacy bounded: ${databaseClient.previewJson()}`);
 }
+assertMetadata(databaseSpanEvent.attributes.metadata, { "db.system.name": "postgresql", "db.namespace": "checkout", "db.operation.name": "SELECT" }, "database span missing portable DB semantic metadata", databaseClient.previewJson());
 assertJsonEqual(databaseSpanEvent.attributes.events, [{ name: "db.pool.wait", timestamp: "2026-06-02T10:00:09Z", metadata: { phase: "before_query", retryable: false } }], "database span should include bounded user span events", databaseClient.previewJson());
 assertJsonEqual(databaseSpanEvent.attributes.links, [{ traceId: "11111111111111111111111111111111", spanId: "2222222222222222", sampled: true, metadata: { relation: "batch_item" } }], "database span should include bounded span links", databaseClient.previewJson());
 if (!databaseErrorSpanEvent || databaseErrorSpanEvent.attributes.status !== "error") {
@@ -497,6 +498,7 @@ if (
 ) {
   throw new Error(`cache span metadata was not useful and privacy bounded: ${cacheClient.previewJson()}`);
 }
+assertMetadata(cacheSpanEvent.attributes.metadata, { "db.system.name": "redis", "db.namespace": "profiles", "db.operation.name": "GET" }, "cache span missing portable DB semantic metadata", cacheClient.previewJson());
 if (!cacheErrorSpanEvent || cacheErrorSpanEvent.attributes.metadata.errorType !== "RangeError") {
   throw new Error(`cache error should include error type only: ${cacheClient.previewJson()}`);
 }
@@ -672,6 +674,7 @@ if (captureRequestEvent.attributes.spanId !== "b7ad6b7169203331") {
 if (captureRequestEvent.attributes.metadata.framework !== "node:http") {
   throw new Error(`missing node span metadata: ${captureTransport.lastBody()}`);
 }
+assertMetadata(captureRequestEvent.attributes.metadata, { "http.request.method": "GET", "http.response.status_code": 204, "url.path": "/captured" }, "request span missing portable HTTP semantic metadata", captureTransport.lastBody());
 if (captureRequestEvent.attributes.metadata.sampled !== true) {
   throw new Error(`missing sampled request metadata: ${captureTransport.lastBody()}`);
 }
@@ -702,6 +705,7 @@ if (
 ) {
   throw new Error(`fetch span metadata was not useful and privacy bounded: ${captureTransport.lastBody()}`);
 }
+assertMetadata(fetchSpanEvent.attributes.metadata, { "http.request.method": "POST", "http.response.status_code": 202, "http.route": "/payments/:paymentId", "url.path": "/payments/:paymentId" }, "fetch span missing portable HTTP semantic metadata", captureTransport.lastBody());
 if (downstreamRequests[0]?.traceparent !== "00-4bf92f3577b34da6a3ce929d0e0e4736-c7ad6b7169203331-01") {
   throw new Error(`fetch span did not inject one normalized traceparent: ${JSON.stringify(downstreamRequests)}`);
 }
@@ -788,13 +792,9 @@ async function waitFor(predicate) {
   throw new Error("timed out waiting for Node.js capture");
 }
 
-function assertJsonEqual(actual, expected, message, preview) {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${message}: ${preview}`);
-}
-
-function exceptionEvents(exceptionType) {
-  return [{ name: "exception", metadata: { exceptionEscaped: true, exceptionType } }];
-}
+function assertJsonEqual(actual, expected, message, preview) { if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${message}: ${preview}`); }
+function assertMetadata(actual, expected, message, preview) { for (const [key, value] of Object.entries(expected)) if (actual[key] !== value) throw new Error(`${message}: ${preview}`); }
+function exceptionEvents(exceptionType) { return [{ name: "exception", metadata: { exceptionEscaped: true, exceptionType } }]; }
 
 async function closeServer(server) {
   await new Promise((resolve, reject) => {

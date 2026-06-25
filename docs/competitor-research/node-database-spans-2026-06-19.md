@@ -12,6 +12,8 @@ Close the Node server-side database span gap after request and outbound fetch tr
 - OpenTelemetry files/functions: `packages/instrumentation-pg/src/instrumentation.ts` (`_getClientQueryPatch`, `recordOperationDuration`, `requestHook` handling, optional trace context propagation) and `packages/instrumentation-pg/src/utils.ts` (`handleConfigQuery`, `parseNormalizedOperationName`, `sanitizedErrorMessage`); `packages/instrumentation-mongodb/src/instrumentation.ts` (`_getV3SpanAttributes`, `_getV4SpanAttributes`, `_getSpanAttributes`, `_spanNameFromAttrs`).
 - Datadog dd-trace-js: `https://github.com/DataDog/dd-trace-js.git` at `13c5eaab4e3331c7e2b4f25e42cf364518edc000`.
 - Datadog files/functions: `packages/datadog-plugin-prisma/src/index.js` (`PrismaPlugin.startEngineSpan`, `bindStart`, `formatResourceName`) and `packages/datadog-plugin-mongodb-core/src/index.js` (`MongodbCorePlugin.bindStart`, query resource/meta construction, DBM comment path).
+- 2026-06-25 refresh: OpenTelemetry JS contrib `open-telemetry/opentelemetry-js-contrib@166db7bc8e8e810596ef5e87e69506aca58c6039` and OpenTelemetry JS `open-telemetry/opentelemetry-js@53337962f2506e2422196b532cb058a533f0b5e3`.
+- Read `packages/instrumentation-pg/src/utils.ts`: `getSemanticAttributesFromConnection(...)`, `getSemanticAttributesFromPoolConnection(...)`, `getQuerySpanName(...)`, and `parseNormalizedOperationName(...)` derive stable DB semantic metadata while avoiding raw auth material in connection strings. Read `semantic-conventions/src/stable_attributes.ts` for `db.system.name`, `db.namespace`, and `db.operation.name`.
 
 ## Competitor Patterns
 
@@ -24,7 +26,8 @@ Close the Node server-side database span gap after request and outbound fetch tr
 - Added `databaseOperationWithLogBrewSpan(...)` to `@logbrew/node`.
 - The helper is explicit and dependency-free: apps pass an operation callback around important DB work instead of LogBrew patching `pg`, MongoDB, Prisma, MySQL, ORMs, or global async hooks beyond the existing request-local trace context.
 - It creates a child trace context from the supplied or active request trace, activates it while the operation runs, queues one span, returns the original result, and rethrows the original exception.
-- Metadata is privacy-bounded: `framework=node:database`, `dbSystem`, `dbOperation`, `dbOperationKind`, optional `dbName`, optional safe `dbStatementTemplate`, optional non-negative `rowCount`, sampled flag, primitive safe caller metadata, and exception type only.
+- Metadata is privacy-bounded: `framework=node:database`, `dbSystem`, `dbOperation`, `dbOperationKind`, optional `dbName`, optional safe `dbStatementTemplate`, optional non-negative `rowCount`, sampled flag, primitive safe caller metadata, exception type only, and a portable DB semantic subset: `db.system.name`, `db.operation.name`, and optional `db.namespace`.
+- Cache helper spans now emit the same safe DB semantic aliases for cache systems such as Redis when the app provides `system`, `operationKind`, and `cacheName`.
 - It drops unsafe metadata keys such as SQL/query/statement text, params/parameters, headers, connection strings, hosts, usernames, auth values, URLs, cookies, and sensitive values. It does not capture result rows, connection details, raw propagation metadata, baggage, tracestate, error messages, or stack traces.
 
 ## Tradeoffs
@@ -37,10 +40,11 @@ Close the Node server-side database span gap after request and outbound fetch tr
 
 - Red installed proof: `bash scripts/real_user_node_smoke.sh` failed after adding the README/import/type/runtime expectations because `databaseOperationWithLogBrewSpan` did not exist.
 - Green installed proof: `bash scripts/real_user_node_smoke.sh` passed on Node `v22.18.0`, including packed install, README proof, runtime DB success/error spans, TypeScript declaration consumption, result preservation, error rethrow, trace correlation, and no raw SQL/params/error-message leakage.
+- 2026-06-25 green installed proof: the same Node smoke verifies `db.system.name`, `db.operation.name`, and `db.namespace` on DB/cache spans from the packed package.
 - Package/static checks: `npm test --prefix js/logbrew-node`, `bash scripts/check_js_package.sh`, `bash scripts/check_js_lint.sh`, and `python3 scripts/check_generated_artifacts.py` passed.
 
 ## Remaining Gaps
 
 - Node still lacks optional automatic driver integrations for teams that explicitly want Sentry/Datadog-style drop-in coverage.
 - Cache and queue spans are still thinner than competitor automatic instrumentation.
-- LogBrew still avoids baggage, tracestate, DB semantic conventions beyond the current safe subset, query comments, and database-side trace propagation. Bounded span events and span links now exist, but they are explicit summaries/references rather than automatic full OpenTelemetry/Sentry event/link streams.
+- LogBrew still avoids baggage, tracestate, query comments, database-side trace propagation, and the broader automatic semantic conventions competitors can fill from patched drivers. Bounded span events and span links now exist, but they are explicit summaries/references rather than automatic full OpenTelemetry/Sentry event/link streams.

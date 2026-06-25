@@ -378,10 +378,13 @@ async function captureFetchSpan(options, {
   const metadata = {
     ...primitiveMetadata(options.metadata),
     framework: "node:fetch",
+    "http.request.method": method,
+    "http.route": path,
     method,
     path,
     sampled: trace.sampled,
-    ...(statusCode !== undefined ? { statusCode } : {}),
+    "url.path": path,
+    ...(statusCode !== undefined ? { "http.response.status_code": statusCode, statusCode } : {}),
     ...(error !== undefined ? {
       errorMessage: errorMessage(error),
       errorType: errorType(error)
@@ -421,11 +424,14 @@ async function captureDatabaseSpan(options, {
   const metadata = {
     ...databaseMetadata(options.metadata),
     framework: "node:database",
+    "db.system.name": system,
+    "db.operation.name": operationKind,
     dbSystem: system,
     dbOperation: operationName.trim(),
     dbOperationKind: operationKind,
     sampled: trace.sampled,
     ...(typeof options.databaseName === "string" && options.databaseName.trim() !== "" ? {
+      "db.namespace": options.databaseName.trim(),
       dbName: options.databaseName.trim()
     } : {}),
     ...(typeof options.statementTemplate === "string" && options.statementTemplate.trim() !== "" ? {
@@ -512,6 +518,7 @@ async function captureOperationSpan(kind, options, {
   const metadata = {
     ...operationMetadata(kind, options.metadata),
     framework: `node:${kind}`,
+    ...(kind === "cache" ? { "db.system.name": system, "db.operation.name": operationKind, ...(typeof options.cacheName === "string" && options.cacheName.trim() !== "" ? { "db.namespace": options.cacheName.trim() } : {}) } : {}),
     [`${kind}System`]: system,
     [`${kind}Operation`]: operationName.trim(),
     [`${kind}OperationKind`]: operationKind,
@@ -837,10 +844,11 @@ function createTraceparentRequestSpan(traceContext, {
       durationMs,
       metadata: {
         framework: "node:http",
-        method,
-        path,
+        "http.request.method": method,
+        "http.response.status_code": statusCode,
+        method, path,
         sampled: traceContext.sampled,
-        statusCode
+        statusCode, "url.path": path
       }
     }
   };
@@ -969,7 +977,7 @@ function slugify(value) {
     .replace(/^_+|_+$/g, "") || "event";
 }
 
-module.exports = {
+const exported = {
   cacheOperationWithLogBrewSpan,
   captureHttpError,
   createNodeFetchTransport,
@@ -980,20 +988,8 @@ module.exports = {
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
-  default: {
-    cacheOperationWithLogBrewSpan,
-    captureHttpError,
-    createNodeFetchTransport,
-    createHttpErrorEvent,
-    createHttpRequestEvent,
-    createLogBrewNodeClient,
-    createLogBrewNodeContext,
-    databaseOperationWithLogBrewSpan,
-    fetchWithLogBrewSpan,
-    getActiveLogBrewTrace,
-    queueOperationWithLogBrewSpan,
-    withLogBrewHttpHandler
-  },
   queueOperationWithLogBrewSpan,
   withLogBrewHttpHandler
 };
+
+module.exports = { ...exported, default: exported };

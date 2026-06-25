@@ -168,7 +168,7 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
 server.listen(3000);
 ```
 
-The wrapper keeps app response ownership, records URL path without query text, and does not collect request bodies, response bodies, arbitrary headers, or outgoing calls automatically. Use the explicit action, network milestone, and outbound fetch helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
+The wrapper keeps app response ownership, records URL path without query text, and adds portable HTTP semantic metadata such as `http.request.method`, `http.response.status_code`, and `url.path`. It does not collect request bodies, response bodies, arbitrary headers, or outgoing calls automatically. Use the explicit action, network milestone, and outbound fetch helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
 
 ## Outbound Fetch Spans
 
@@ -191,7 +191,7 @@ if (!response.ok) {
 }
 ```
 
-The emitted span records the method, route template or URL path, status code, duration, sampled flag, and W3C trace IDs. It does not globally patch `fetch`, capture payloads, serialize arbitrary headers, store the raw propagation header, or keep query strings/fragments.
+The emitted span records the method, route template or URL path, status code, duration, sampled flag, W3C trace IDs, and portable HTTP semantic metadata (`http.request.method`, `http.response.status_code`, `http.route`, `url.path`). It does not globally patch `fetch`, capture payloads, serialize arbitrary headers, store the raw propagation header, or keep query strings/fragments.
 
 ## Database Operation Spans
 
@@ -214,7 +214,7 @@ const orders = await databaseOperationWithLogBrewSpan("orders.select_by_id", {
 });
 ```
 
-The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Metadata records the DB system, operation name, operation kind, optional database name, optional safe statement template, row count, duration, sampled flag, and W3C trace IDs. Optional `events` record up to eight explicit low-cardinality span milestones with primitive metadata; optional `links` record up to eight related trace/span IDs with primitive metadata for fan-out, batch, retry, or queue relationships; failed operations add a type-only `exception` event. It does not monkey-patch drivers, capture raw SQL, serialize parameters, record connection strings, store auth values, collect result rows, include database error messages/stacks, infer baggage/tracestate, or store raw propagation headers.
+The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Metadata records the DB system, operation name, operation kind, optional database name, optional safe statement template, row count, duration, sampled flag, W3C trace IDs, and portable DB semantic metadata (`db.system.name`, `db.operation.name`, `db.namespace`). Optional `events` record up to eight explicit low-cardinality span milestones with primitive metadata; optional `links` record up to eight related trace/span IDs with primitive metadata for fan-out, batch, retry, or queue relationships; failed operations add a type-only `exception` event. It does not monkey-patch drivers, capture raw SQL, serialize parameters, record connection strings, store auth values, collect result rows, include database error messages/stacks, infer baggage/tracestate, or store raw propagation headers.
 
 ## Cache Operation Spans
 
@@ -235,7 +235,7 @@ const profile = await cacheOperationWithLogBrewSpan("profile.get", {
 });
 ```
 
-The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Metadata records the cache system, operation name, operation kind, optional cache name, hit flag, item size/count, duration, sampled flag, and W3C trace IDs. Optional `events` record up to eight explicit low-cardinality span milestones with primitive metadata; optional `links` record up to eight related trace/span IDs with primitive metadata; failed operations add a type-only `exception` event. It does not monkey-patch cache clients, capture cache keys, serialize values, store commands, record headers, include cache error messages/stacks, infer baggage/tracestate, or store raw propagation headers.
+The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Metadata records the cache system, operation name, operation kind, optional cache name, hit flag, item size/count, duration, sampled flag, W3C trace IDs, and portable Redis-like DB semantic metadata when available (`db.system.name`, `db.operation.name`, `db.namespace`). Optional `events` record up to eight explicit low-cardinality span milestones with primitive metadata; optional `links` record up to eight related trace/span IDs with primitive metadata; failed operations add a type-only `exception` event. It does not monkey-patch cache clients, capture cache keys, serialize values, store commands, record headers, include cache error messages/stacks, infer baggage/tracestate, or store raw propagation headers.
 
 ## Queue Operation Spans
 
