@@ -1,5 +1,15 @@
 __pycache__/
 *.pyc
+
+# Local-only agent guidance and planning artifacts.
+AGENTS.md
+CLAUDE.md
+.agents/
+skills-lock.json
+docs/superpowers/
+plans/
+*plan*.md
+
 /target/
 Cargo.lock
 python/logbrew_py/build/
