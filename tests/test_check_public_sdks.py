@@ -206,6 +206,21 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "Browser real-user smoke"',
         )
 
+    def test_public_verifier_runs_node_queue_high_load_smoke(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"Node queue high-load fake-intake smoke"', script)
+        self.assertRegex(
+            script,
+            r'begin_next_step "Node\.js real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_node_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Node queue high-load fake-intake smoke"\n'
+            r'run_shell_step "bash scripts/real_user_node_queue_high_load_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Express real-user smoke"',
+        )
+
     def test_public_verifier_runs_github_release_safety_gate(self) -> None:
         script = SCRIPT.read_text()
 

@@ -49,6 +49,7 @@ STEP_LABELS=(
   "Browser real-user smoke"
   "Browser installed-artifact fake-intake smoke"
   "Node.js real-user smoke"
+  "Node queue high-load fake-intake smoke"
   "Express real-user smoke"
   "Fastify real-user smoke"
   "NestJS real-user smoke"
@@ -491,6 +492,10 @@ mark_step_complete
 
 begin_next_step "Node.js real-user smoke"
 run_shell_step "bash scripts/real_user_node_smoke.sh"
+mark_step_complete
+
+begin_next_step "Node queue high-load fake-intake smoke"
+run_shell_step "bash scripts/real_user_node_queue_high_load_smoke.sh"
 mark_step_complete
 
 begin_next_step "Express real-user smoke"

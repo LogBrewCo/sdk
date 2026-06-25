@@ -39,10 +39,12 @@ The tradeoff is a larger dependency and privacy surface: global/module patching,
 - GREEN: the same installed smoke passed on Node `v22.18.0`, proving batch span links from real message headers, malformed-carrier skip, primitive metadata filtering, ESM and TypeScript export coverage, and no raw `traceparent`, header, body, or payload storage.
 - RED: the installed queue trace smoke failed again after adding the `queueBatchOperationWithLogBrewSpan(...)` import and 512-message batch assertion because `@logbrew/node` did not export that helper.
 - GREEN: the same installed smoke passed on Node `v22.18.0`, proving one-call batch span creation, message-header link extraction, eight-link cap across a 512-message batch, derived `messageCount`, TypeScript export coverage, and no body/payload/raw propagation leakage.
+- RED: focused public-verifier tests failed because no Node queue high-load fake-intake smoke existed or ran after the Node real-user smoke.
+- GREEN: `bash scripts/real_user_node_queue_high_load_smoke.sh` passed on Node `v22.18.0`, proving packed `@logbrew/sdk` and `@logbrew/node` install into a temporary app, 1,500 queue batch spans produce 1,000 flushed spans plus 500 advisory `queue_overflow` drops, local 503-to-202 retry reports two attempts, queue links and message counts stay sanitized, helper capture failures after shutdown do not interrupt app results, and direct post-shutdown client writes fail with `shutdown_error`.
 - Focused syntax proof: `npm test --prefix js/logbrew-node` passed.
 - Focused package proof: `bash scripts/check_js_lint.sh`, `bash scripts/check_js_package.sh`, and `NPM_CONFIG_CACHE=/private/tmp/logbrew-node-npm-cache bash scripts/real_user_node_smoke.sh` passed.
 
 ## Remaining Gaps
 
 - Sentry, Datadog, and OpenTelemetry remain stronger for automatic Kafka/AMQP/BullMQ/SQS instrumentation, automatic broker header injection/extraction, partition/offset diagnostics, data-stream monitoring, baggage/tracestate, and framework-owned queue integrations.
-- Next LogBrew steps should stay opt-in and evidence-backed: optional framework/integration packages for popular queues, richer explicit span links/events in real queue examples, and local fake-intake proof for queue-heavy production failure behavior.
+- Next LogBrew steps should stay opt-in and evidence-backed: optional framework/integration packages for popular queues plus richer explicit span links/events in real queue examples, without hidden broker patching in the core package.
