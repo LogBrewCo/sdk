@@ -84,8 +84,22 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
     def test_vite_smoke_uploads_real_build_artifacts_to_loopback_intake(self) -> None:
         smoke = (ROOT / "scripts" / "real_user_vite_release_artifact_smoke.sh").read_text(encoding="utf-8")
 
+        self.assertIn("js_release_artifact_fake_intake.py", smoke)
         self.assertIn("upload-js \\", smoke)
         self.assertIn('--build-dir "$dist_dir"', smoke)
+        self.assertIn('--manifest "$ready_manifest"', smoke)
+        self.assertIn("/retry-success", smoke)
+        self.assertIn('assert upload_report["status"] == "uploaded"', smoke)
+        self.assertIn('assert upload_report["retryCount"] == 1', smoke)
+        self.assertIn('assert not any(event["containsSourceSentinel"] for event in events)', smoke)
+        self.assertIn('assert not any(event["containsAuthValue"] for event in events)', smoke)
+
+    def test_next_smoke_uploads_real_build_artifacts_to_loopback_intake(self) -> None:
+        smoke = (ROOT / "scripts" / "real_user_next_release_artifact_smoke.sh").read_text(encoding="utf-8")
+
+        self.assertIn("js_release_artifact_fake_intake.py", smoke)
+        self.assertIn("upload-js \\", smoke)
+        self.assertIn('--build-dir "$chunks_dir"', smoke)
         self.assertIn('--manifest "$ready_manifest"', smoke)
         self.assertIn("/retry-success", smoke)
         self.assertIn('assert upload_report["status"] == "uploaded"', smoke)

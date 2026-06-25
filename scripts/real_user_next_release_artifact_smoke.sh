@@ -10,6 +10,10 @@ export npm_config_fund=false
 export npm_config_audit=false
 
 remove_tmp_dir() {
+  if [[ -n "${server_pid:-}" ]]; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
   rm -rf "$tmp_dir"
 }
 
@@ -97,7 +101,7 @@ export default withLogBrewNextReleaseArtifacts(
     release: "2026.06.18-next",
     environment: "production",
     service: "checkout-next-web",
-    minifiedPathPrefix: "app:///_next/static/chunks?cache=placeholder#fragment",
+    minifiedPathPrefix: "app:///_next/static/chunks?logbrew_next_cache_placeholder=1#logbrew_next_hash_placeholder",
     manifestPath: ".next/logbrew-release-artifacts.json"
   }
 );
@@ -233,15 +237,16 @@ column = index - last_newline
 print(f"at checkoutFailureSignal ({artifact['minifiedSource']['minifiedUrl']}:{line}:{column})")
 PY
 
+release_artifacts_cli="$app_dir/node_modules/.bin/logbrew-release-artifacts"
 symbolication_report="$tmp_dir/next-symbolication-report.json"
 (
   cd "$app_dir"
-  node_modules/.bin/logbrew-release-artifacts \
-  symbolicate-js \
-  --build-dir "$chunks_dir" \
-  --manifest "$ready_manifest" \
-  --stack-frame "$(cat "$generated_stack_frame")" \
-  > "$symbolication_report"
+  "$release_artifacts_cli" \
+    symbolicate-js \
+    --build-dir "$chunks_dir" \
+    --manifest "$ready_manifest" \
+    --stack-frame "$(cat "$generated_stack_frame")" \
+    > "$symbolication_report"
 )
 
 python3 - "$ready_manifest" "$target_js" "$target_map" "$chunks_dir" "$symbolication_report" "$js_count" <<'PY'
@@ -273,11 +278,75 @@ assert symbolication_report["status"] == "resolved"
 assert symbolication_report["debugId"] == debug_id
 assert symbolication_report["generated"]["path"] == target_rel
 assert symbolication_report["original"]["source"].endswith("components/CheckoutProbe.jsx")
-assert "cache=placeholder" not in serialized_manifest
-assert "fragment" not in serialized_manifest
+assert "logbrew_next_cache_placeholder" not in serialized_manifest
+assert "logbrew_next_hash_placeholder" not in serialized_manifest
 assert "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_manifest
 assert "next checkout exploded" not in serialized_manifest
 assert "next checkout exploded" not in serialized_symbolication
+PY
+
+port_file="$tmp_dir/fake-intake-port"
+state_file="$tmp_dir/fake-intake-state.json"
+expected_bearer="fake-next-release-artifact-auth-value"
+
+python3 "$repo_root/scripts/js_release_artifact_fake_intake.py" \
+  --port-file "$port_file" \
+  --state-file "$state_file" \
+  --expected-bearer "$expected_bearer" \
+  --source-sentinel "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" \
+  --query-placeholder "logbrew_next_cache_placeholder" \
+  --hash-fragment "logbrew_next_hash_placeholder" &
+server_pid=$!
+
+for _ in $(seq 1 100); do
+  if [[ -s "$port_file" ]]; then
+    break
+  fi
+  sleep 0.05
+done
+
+if [[ ! -s "$port_file" ]]; then
+  echo "fake Next.js release-artifact intake did not start" >&2
+  exit 1
+fi
+
+endpoint_base="http://127.0.0.1:$(cat "$port_file")"
+export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_bearer"
+upload_report="$tmp_dir/next-upload-report.json"
+"$release_artifacts_cli" upload-js \
+  --build-dir "$chunks_dir" \
+  --manifest "$ready_manifest" \
+  --endpoint "$endpoint_base/retry-success?ignored=query#ignored" \
+  --retry-delay 0 \
+  --max-retries 2 \
+  > "$upload_report"
+
+python3 - "$upload_report" "$state_file" "$tmp_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+upload_report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+state = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[3]
+
+assert upload_report["status"] == "uploaded"
+assert upload_report["retryCount"] == 1
+assert [attempt["httpStatus"] for attempt in upload_report["attempts"]] == [503, 202]
+assert upload_report["endpoint"].endswith("/retry-success")
+assert "ignored=query" not in json.dumps(upload_report)
+
+events = state["events"]
+assert [event["path"] for event in events].count("/retry-success") == 2
+assert all(event["containsManifest"] for event in events)
+assert all(event["containsSourceMapPart"] for event in events)
+assert all(event["containsMinifiedPart"] for event in events)
+assert not any(event["containsSourceSentinel"] for event in events)
+assert not any(event["containsAuthValue"] for event in events)
+assert not any(event["containsQueryPlaceholder"] for event in events)
+assert not any(event["containsHashFragment"] for event in events)
+assert not any(event["containsTempPath"] for event in events)
+assert tmp_dir not in json.dumps(upload_report)
 PY
 
 printf '%s\n' "real-user Next.js release artifact smoke ok"

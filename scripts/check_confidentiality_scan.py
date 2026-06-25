@@ -276,6 +276,7 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
     if relative_text in {
         "scripts/real_user_js_release_artifact_upload_smoke.sh",
         "scripts/real_user_native_release_artifact_upload_smoke.sh",
+        "scripts/real_user_next_release_artifact_smoke.sh",
         "scripts/real_user_vite_release_artifact_smoke.sh",
     }:
         allowed_fragments = (

@@ -259,65 +259,13 @@ port_file="$tmp_dir/fake-intake-port"
 state_file="$tmp_dir/fake-intake-state.json"
 expected_bearer="fake-vite-release-artifact-auth-value"
 
-python3 - "$port_file" "$state_file" "$expected_bearer" <<'PY' &
-import json
-import sys
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-
-port_file = Path(sys.argv[1])
-state_file = Path(sys.argv[2])
-expected_bearer = sys.argv[3]
-state = {"events": []}
-
-
-def write_state() -> None:
-    state_file.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
-
-
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, _format: str, *_args: object) -> None:
-        return
-
-    def do_POST(self) -> None:
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length)
-        auth = self.headers.get("Authorization", "")
-        route = self.path.split("?", 1)[0]
-        event = {
-            "path": route,
-            "authorized": auth == f"Bearer {expected_bearer}",
-            "bodyLength": len(body),
-            "containsManifest": b"javascript_source_map_manifest" in body,
-            "containsSourceSentinel": b"LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" in body,
-            "containsAuthValue": expected_bearer.encode("utf-8") in body,
-            "containsQueryPlaceholder": b"cache=placeholder" in body,
-            "containsHashFragment": b"fragment" in body,
-            "containsTempPath": str(state_file.parent).encode("utf-8") in body,
-            "containsSourceMapPart": b'name="source_map_0"' in body,
-            "containsMinifiedPart": b'name="minified_source_0"' in body,
-        }
-        state["events"].append(event)
-        write_state()
-
-        if route == "/retry-success":
-            if not event["authorized"]:
-                self.send_response(401)
-            elif sum(1 for seen in state["events"] if seen["path"] == "/retry-success") == 1:
-                self.send_response(503)
-            else:
-                self.send_response(202)
-        else:
-            self.send_response(404)
-        self.end_headers()
-        self.wfile.write(b"{}")
-
-
-server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-port_file.write_text(str(server.server_address[1]), encoding="utf-8")
-write_state()
-server.serve_forever()
-PY
+python3 "$repo_root/scripts/js_release_artifact_fake_intake.py" \
+  --port-file "$port_file" \
+  --state-file "$state_file" \
+  --expected-bearer "$expected_bearer" \
+  --source-sentinel "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" \
+  --query-placeholder "cache=placeholder" \
+  --hash-fragment "fragment" &
 server_pid=$!
 
 for _ in $(seq 1 100); do
