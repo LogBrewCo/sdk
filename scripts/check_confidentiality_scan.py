@@ -46,6 +46,14 @@ SKIPPED_EXTENSIONS = {
 }
 
 SELF_PATH = Path("scripts/check_confidentiality_scan.py")
+FORBIDDEN_PUBLIC_PLANNING_PATHS = (
+    Path(".agents"),
+    Path("AGENTS.md"),
+    Path("CLAUDE.md"),
+    Path("docs/superpowers"),
+    Path("plans"),
+    Path("skills-lock.json"),
+)
 
 
 def iter_scanned_files(root: Path) -> list[Path]:
@@ -72,6 +80,7 @@ def iter_scanned_files(root: Path) -> list[Path]:
 
 def validate(root: Path) -> list[str]:
     failures: list[str] = []
+    failures.extend(validate_forbidden_public_planning_paths(root))
     for path in iter_scanned_files(root):
         relative = path.relative_to(root)
         try:
@@ -88,6 +97,19 @@ def validate(root: Path) -> list[str]:
                 continue
             failures.append(f"./{relative.as_posix()}:{line_number}:{line}")
     failures.extend(validate_public_readme_language(root))
+    return failures
+
+
+def validate_forbidden_public_planning_paths(root: Path) -> list[str]:
+    failures: list[str] = []
+    for relative in FORBIDDEN_PUBLIC_PLANNING_PATHS:
+        path = root / relative
+        if not path.exists():
+            continue
+        failures.append(
+            f"./{relative.as_posix()}: forbidden public planning file; keep agent guidance and "
+            "private plans in private coordination, not public SDK repos"
+        )
     return failures
 
 

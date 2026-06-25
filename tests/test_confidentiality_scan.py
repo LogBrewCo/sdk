@@ -72,6 +72,17 @@ class ConfidentialityScanTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("production " + "pass" + "word", failures[0])
 
+    def test_reports_forbidden_public_planning_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "skills-lock.json").write_text('{"version": 1}\n', encoding="utf-8")
+
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("skills-lock.json", failures[0])
+        self.assertIn("forbidden public planning file", failures[0])
+
 
 if __name__ == "__main__":
     unittest.main()
