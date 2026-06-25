@@ -35,6 +35,12 @@ export type LogBrewQueueTraceHeaders = {
   traceparent?: string;
 };
 
+export type LogBrewQueueTraceCarrier = string | {
+  traceparent?: unknown;
+  traceParent?: unknown;
+  get?: (name: string) => unknown;
+};
+
 export type LogBrewNodeContext = {
   client: LogBrewClient;
   logbrew: LogBrewClient;
@@ -251,6 +257,11 @@ export declare function createLogBrewQueueTraceHeaders(
   trace?: LogBrewTraceContext
 ): LogBrewQueueTraceHeaders;
 
+export declare function createLogBrewQueueTraceLinks(
+  carriers?: LogBrewQueueTraceCarrier | Array<LogBrewQueueTraceCarrier | undefined>,
+  metadata?: Record<string, string | number | boolean | null>
+): SpanLinkSummary[];
+
 export declare function fetchWithLogBrewSpan(
   input: Parameters<typeof fetch>[0],
   init: Parameters<typeof fetch>[1] | undefined,
@@ -317,6 +328,7 @@ declare const defaultExport: {
   createLogBrewNodeClient: typeof createLogBrewNodeClient;
   createLogBrewNodeContext: typeof createLogBrewNodeContext;
   createLogBrewQueueTraceHeaders: typeof createLogBrewQueueTraceHeaders;
+  createLogBrewQueueTraceLinks: typeof createLogBrewQueueTraceLinks;
   databaseOperationWithLogBrewSpan: typeof databaseOperationWithLogBrewSpan;
   fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;

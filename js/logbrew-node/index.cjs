@@ -11,6 +11,7 @@ const {
 const { AsyncLocalStorage } = require("node:async_hooks");
 const {
   createLogBrewQueueTraceHeaders: createQueueTraceHeaders,
+  createLogBrewQueueTraceLinks: createQueueTraceLinks,
   normalizeSpanId,
   normalizeTraceId,
   resolveOperationTrace
@@ -129,6 +130,10 @@ function getActiveLogBrewTrace() {
 
 function createLogBrewQueueTraceHeaders(trace = getActiveLogBrewTrace()) {
   return createQueueTraceHeaders(trace);
+}
+
+function createLogBrewQueueTraceLinks(carriers, metadata) {
+  return createQueueTraceLinks(carriers, metadata);
 }
 
 async function fetchWithLogBrewSpan(input, init = {}, options = {}) {
@@ -975,6 +980,7 @@ const exported = {
   createLogBrewNodeClient,
   createLogBrewNodeContext,
   createLogBrewQueueTraceHeaders,
+  createLogBrewQueueTraceLinks,
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,

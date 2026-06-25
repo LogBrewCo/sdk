@@ -44,6 +44,7 @@ cat > smoke.mjs <<'EOF'
 import {
   createLogBrewNodeClient,
   createLogBrewQueueTraceHeaders,
+  createLogBrewQueueTraceLinks,
   getActiveLogBrewTrace,
   queueOperationWithLogBrewSpan
 } from "@logbrew/node";
@@ -107,6 +108,51 @@ if (
 ) {
   throw new Error(`consumer did not continue producer trace: ${JSON.stringify(activeConsumerTrace)}`);
 }
+const batchLinks = createLogBrewQueueTraceLinks([
+  publishedHeaders,
+  { traceparent: "not-a-traceparent" },
+  { traceparent: ["00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-00"] },
+  { traceparent: Buffer.from("00-cccccccccccccccccccccccccccccccc-dddddddddddddddd-01") }
+], {
+  body: "hello user@example.com",
+  relation: "batch_item"
+});
+if (JSON.stringify(batchLinks) !== JSON.stringify([
+  {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "f7ad6b7169203331",
+    sampled: true,
+    metadata: { relation: "batch_item" }
+  },
+  {
+    traceId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    spanId: "bbbbbbbbbbbbbbbb",
+    sampled: false,
+    metadata: { relation: "batch_item" }
+  },
+  {
+    traceId: "cccccccccccccccccccccccccccccccc",
+    spanId: "dddddddddddddddd",
+    sampled: true,
+    metadata: { relation: "batch_item" }
+  }
+])) {
+  throw new Error(`batch queue trace links were not safe and useful: ${JSON.stringify(batchLinks)}`);
+}
+await queueOperationWithLogBrewSpan("email.batch_process", {
+  client,
+  id: "evt_node_queue_batch_trace",
+  links: batchLinks,
+  messageCount: 3,
+  now: () => "2026-06-25T10:00:02Z",
+  nowMs: () => 25,
+  operation: async () => "batch-processed",
+  operationKind: "process",
+  queueName: "email",
+  spanIdFactory: () => "a7ad6b7169203333",
+  system: "amqp",
+  traceIdFactory: () => "66666666666666666666666666666666"
+});
 
 await queueOperationWithLogBrewSpan("email.dead_letter", {
   client,
@@ -128,6 +174,7 @@ if (Object.keys(createLogBrewQueueTraceHeaders(undefined)).length !== 0) {
 const payload = JSON.parse(client.previewJson());
 const producerSpan = payload.events.find((event) => event.id === "evt_node_queue_publish_trace");
 const consumerSpan = payload.events.find((event) => event.id === "evt_node_queue_consume_trace");
+const batchSpan = payload.events.find((event) => event.id === "evt_node_queue_batch_trace");
 const fallbackSpan = payload.events.find((event) => event.id === "evt_node_queue_bad_context");
 if (
   producerSpan?.attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736" ||
@@ -144,6 +191,16 @@ if (
   throw new Error(`consumer span did not continue producer trace: ${client.previewJson()}`);
 }
 if (
+  batchSpan?.attributes.links?.length !== 3 ||
+  batchSpan.attributes.links[0].traceId !== "4bf92f3577b34da6a3ce929d0e0e4736" ||
+  batchSpan.attributes.links[0].spanId !== "f7ad6b7169203331" ||
+  batchSpan.attributes.links[0].metadata.relation !== "batch_item" ||
+  batchSpan.attributes.links[1].sampled !== false ||
+  batchSpan.attributes.links[2].sampled !== true
+) {
+  throw new Error(`batch span did not link producer traces: ${client.previewJson()}`);
+}
+if (
   fallbackSpan?.attributes.traceId !== "55555555555555555555555555555555" ||
   fallbackSpan?.attributes.parentSpanId !== undefined ||
   fallbackSpan?.attributes.spanId !== "a7ad6b7169203332"
@@ -151,7 +208,7 @@ if (
   throw new Error(`malformed traceparent fallback was not safe: ${client.previewJson()}`);
 }
 const payloadJson = JSON.stringify(payload);
-if (payloadJson.includes(publishedHeaders.traceparent) || payloadJson.includes("not-a-traceparent")) {
+if (payloadJson.includes(publishedHeaders.traceparent) || payloadJson.includes("not-a-traceparent") || payloadJson.includes("hello user@example.com") || payloadJson.includes("body")) {
   throw new Error(`queue trace payload leaked raw propagation details: ${client.previewJson()}`);
 }
 
@@ -175,13 +232,16 @@ cat > consumer.ts <<'EOF'
 import {
   createLogBrewNodeClient,
   createLogBrewQueueTraceHeaders,
+  createLogBrewQueueTraceLinks,
   queueOperationWithLogBrewSpan
 } from "@logbrew/node";
 
 const client = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY" });
 const headers: { traceparent?: string } = createLogBrewQueueTraceHeaders();
+const links = createLogBrewQueueTraceLinks([headers], { relation: "batch_item" });
 await queueOperationWithLogBrewSpan("email.process", {
   client,
+  links,
   operation: async () => "processed",
   operationKind: "process",
   queueName: "email",

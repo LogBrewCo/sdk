@@ -9,6 +9,7 @@ import {
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   createLogBrewQueueTraceHeaders as createQueueTraceHeaders,
+  createLogBrewQueueTraceLinks as createQueueTraceLinks,
   normalizeSpanId,
   normalizeTraceId,
   resolveOperationTrace
@@ -127,6 +128,10 @@ export function getActiveLogBrewTrace() {
 
 export function createLogBrewQueueTraceHeaders(trace = getActiveLogBrewTrace()) {
   return createQueueTraceHeaders(trace);
+}
+
+export function createLogBrewQueueTraceLinks(carriers, metadata) {
+  return createQueueTraceLinks(carriers, metadata);
 }
 
 export async function fetchWithLogBrewSpan(input, init = {}, options = {}) {
@@ -976,6 +981,7 @@ export default {
   createLogBrewNodeClient,
   createLogBrewNodeContext,
   createLogBrewQueueTraceHeaders,
+  createLogBrewQueueTraceLinks,
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
