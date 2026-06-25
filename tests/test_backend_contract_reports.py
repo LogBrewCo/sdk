@@ -65,6 +65,18 @@ class BackendContractReportTests(unittest.TestCase):
         self.assertIn("React Native-shaped Android mapping/native `.so`", report)
         self.assertIn("iOS `.xcarchive/dSYMs`", report)
 
+    def test_release_artifact_report_tracks_backend_confirmed_absence(self) -> None:
+        report = (
+            ROOT
+            / "docs"
+            / "backend-contracts"
+            / "release-artifact-symbolication-2026-06-13.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("sent to backend coordination", report)
+        self.assertIn("no backend release-artifact route/schema/lookup surface", report)
+        self.assertNotIn("no backend automation/thread target is exposed", report)
+
     def test_support_ticket_report_blocks_sdk_network_calls_until_live_verified(self) -> None:
         report = (
             ROOT
