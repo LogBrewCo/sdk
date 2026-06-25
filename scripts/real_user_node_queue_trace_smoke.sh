@@ -46,6 +46,7 @@ import {
   createLogBrewQueueTraceHeaders,
   createLogBrewQueueTraceLinks,
   getActiveLogBrewTrace,
+  queueBatchOperationWithLogBrewSpan,
   queueOperationWithLogBrewSpan
 } from "@logbrew/node";
 
@@ -139,11 +140,19 @@ if (JSON.stringify(batchLinks) !== JSON.stringify([
 ])) {
   throw new Error(`batch queue trace links were not safe and useful: ${JSON.stringify(batchLinks)}`);
 }
-await queueOperationWithLogBrewSpan("email.batch_process", {
+await queueBatchOperationWithLogBrewSpan("email.batch_process", {
   client,
   id: "evt_node_queue_batch_trace",
-  links: batchLinks,
-  messageCount: 3,
+  linkMetadata: {
+    body: "hello user@example.com",
+    relation: "batch_item"
+  },
+  messages: [
+    { headers: publishedHeaders, body: "hello user@example.com" },
+    { headers: { traceparent: "not-a-traceparent" }, body: "malformed" },
+    { headers: { traceparent: ["00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-00"] } },
+    { headers: { traceparent: Buffer.from("00-cccccccccccccccccccccccccccccccc-dddddddddddddddd-01") } }
+  ],
   now: () => "2026-06-25T10:00:02Z",
   nowMs: () => 25,
   operation: async () => "batch-processed",
@@ -152,6 +161,29 @@ await queueOperationWithLogBrewSpan("email.batch_process", {
   spanIdFactory: () => "a7ad6b7169203333",
   system: "amqp",
   traceIdFactory: () => "66666666666666666666666666666666"
+});
+const heavyMessages = Array.from({ length: 512 }, (_, index) => ({
+  headers: {
+    traceparent: `00-${(index + 1).toString(16).padStart(32, "0")}-${(index + 1).toString(16).padStart(16, "0")}-01`
+  },
+  payload: `private-payload-${index}`
+}));
+await queueBatchOperationWithLogBrewSpan("email.heavy_batch_process", {
+  client,
+  id: "evt_node_queue_heavy_batch_trace",
+  linkMetadata: {
+    payload: "private-payload-0",
+    relation: "batch_item"
+  },
+  messages: heavyMessages,
+  now: () => "2026-06-25T10:00:03Z",
+  nowMs: () => 35,
+  operation: async () => "heavy-batch-processed",
+  operationKind: "process",
+  queueName: "email",
+  spanIdFactory: () => "a7ad6b7169203334",
+  system: "amqp",
+  traceIdFactory: () => "77777777777777777777777777777777"
 });
 
 await queueOperationWithLogBrewSpan("email.dead_letter", {
@@ -175,6 +207,7 @@ const payload = JSON.parse(client.previewJson());
 const producerSpan = payload.events.find((event) => event.id === "evt_node_queue_publish_trace");
 const consumerSpan = payload.events.find((event) => event.id === "evt_node_queue_consume_trace");
 const batchSpan = payload.events.find((event) => event.id === "evt_node_queue_batch_trace");
+const heavyBatchSpan = payload.events.find((event) => event.id === "evt_node_queue_heavy_batch_trace");
 const fallbackSpan = payload.events.find((event) => event.id === "evt_node_queue_bad_context");
 if (
   producerSpan?.attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736" ||
@@ -201,6 +234,15 @@ if (
   throw new Error(`batch span did not link producer traces: ${client.previewJson()}`);
 }
 if (
+  heavyBatchSpan?.attributes.links?.length !== 8 ||
+  heavyBatchSpan?.attributes.metadata.messageCount !== 512 ||
+  heavyBatchSpan?.attributes.metadata["messaging.batch.message_count"] !== 512 ||
+  heavyBatchSpan?.attributes.links[0].metadata.relation !== "batch_item" ||
+  Object.prototype.hasOwnProperty.call(heavyBatchSpan.attributes.links[0].metadata, "payload")
+) {
+  throw new Error(`heavy batch span did not cap links or report safe batch size: ${client.previewJson()}`);
+}
+if (
   fallbackSpan?.attributes.traceId !== "55555555555555555555555555555555" ||
   fallbackSpan?.attributes.parentSpanId !== undefined ||
   fallbackSpan?.attributes.spanId !== "a7ad6b7169203332"
@@ -208,7 +250,7 @@ if (
   throw new Error(`malformed traceparent fallback was not safe: ${client.previewJson()}`);
 }
 const payloadJson = JSON.stringify(payload);
-if (payloadJson.includes(publishedHeaders.traceparent) || payloadJson.includes("not-a-traceparent") || payloadJson.includes("hello user@example.com") || payloadJson.includes("body")) {
+if (payloadJson.includes(publishedHeaders.traceparent) || payloadJson.includes("not-a-traceparent") || payloadJson.includes("hello user@example.com") || payloadJson.includes("private-payload") || payloadJson.includes("body")) {
   throw new Error(`queue trace payload leaked raw propagation details: ${client.previewJson()}`);
 }
 
@@ -233,6 +275,7 @@ import {
   createLogBrewNodeClient,
   createLogBrewQueueTraceHeaders,
   createLogBrewQueueTraceLinks,
+  queueBatchOperationWithLogBrewSpan,
   queueOperationWithLogBrewSpan
 } from "@logbrew/node";
 
@@ -246,6 +289,12 @@ await queueOperationWithLogBrewSpan("email.process", {
   operationKind: "process",
   queueName: "email",
   traceparent: headers.traceparent
+});
+await queueBatchOperationWithLogBrewSpan("email.batch", {
+  client,
+  messages: [{ headers }],
+  operation: async () => "processed",
+  queueName: "email"
 });
 EOF
 

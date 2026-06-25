@@ -245,6 +245,7 @@ Use `queueOperationWithLogBrewSpan()` around important producer or consumer work
 import {
   createLogBrewQueueTraceHeaders,
   createLogBrewQueueTraceLinks,
+  queueBatchOperationWithLogBrewSpan,
   queueOperationWithLogBrewSpan
 } from "@logbrew/node";
 
@@ -283,9 +284,19 @@ await queueOperationWithLogBrewSpan("email.batch_process", {
   links,
   operation: () => processBatch(messages)
 });
+
+await queueBatchOperationWithLogBrewSpan("email.batch_process", {
+  client: logbrew.client,
+  system: "amqp",
+  operationKind: "process",
+  queueName: "email",
+  messages,
+  linkMetadata: { relation: "batch_item" },
+  operation: () => processBatch(messages)
+});
 ```
 
-The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Call `createLogBrewQueueTraceHeaders()` inside a producer operation to create one normalized W3C `traceparent` header from the active queue span, then pass that header into a consumer span through `traceparent` when you process one message. For batch consumers, pass message header carriers into `createLogBrewQueueTraceLinks()` and attach the returned links to the batch span so each message can point back to its producer trace. Malformed incoming propagation is ignored and falls back to a fresh trace or skipped link so bad broker headers do not break workers.
+The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Call `createLogBrewQueueTraceHeaders()` inside a producer operation to create one normalized W3C `traceparent` header from the active queue span, then pass that header into a consumer span through `traceparent` when you process one message. For batch consumers, use `queueBatchOperationWithLogBrewSpan()` with message objects that expose `headers`, or call `createLogBrewQueueTraceLinks()` directly when your queue library has a different carrier shape. Both paths cap links at eight, skip malformed propagation, and avoid retaining raw broker headers.
 
 Metadata records the queue system, operation name, operation kind, optional queue/task names, message count, duration, sampled flag, W3C trace IDs, and portable messaging semantic metadata when available (`messaging.system`, `messaging.destination.name`, `messaging.operation.name`, `messaging.operation.type`, `messaging.batch.message_count`). Optional `events` record up to eight explicit low-cardinality span milestones with primitive metadata; optional `links` record up to eight related trace/span IDs with primitive metadata; failed operations add a type-only `exception` event. Queue link metadata is primitive-only and drops unsafe keys such as bodies, payloads, headers, raw messages, URLs, traceparents, and auth-like values. It does not monkey-patch queue clients, mutate broker headers outside your explicit call, capture message bodies, serialize job arguments, record broker URLs, include queue error messages/stacks, infer baggage/tracestate, or store raw propagation headers.
 

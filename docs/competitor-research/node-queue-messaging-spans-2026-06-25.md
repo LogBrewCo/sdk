@@ -2,14 +2,14 @@
 
 ## Sources Read
 
-- Sentry JavaScript: `getsentry/sentry-javascript@5b0f83c39bcdce5eb67fca5361821d595c26d47e`.
+- Sentry JavaScript: `getsentry/sentry-javascript@3bfeb64e312fbafbd6fea4b2aafdb73ea94febec`.
 - Read `packages/node/src/integrations/tracing/kafka/vendored/instrumentation.ts`: `KafkaJsInstrumentation`, `_getProducerPatch()`, `_getConsumerPatch()`, `_getSendPatch()`, `_getSendBatchPatch()`, `_getConsumerEachMessagePatch()`, and `_getConsumerEachBatchPatch()`.
 - Read `packages/node/src/integrations/tracing/kafka/vendored/utils.ts`: `startProducerSpan(...)`, `startConsumerSpan(...)`, `getHeaderAsString(...)`, `getLinksFromHeaders(...)`, and `endSpansOnPromise(...)`.
 - Read `packages/node/src/integrations/tracing/kafka/vendored/semconv.ts` and `packages/node/src/integrations/tracing/amqplib/vendored/semconv.ts` for vendored messaging semantic keys.
 - OpenTelemetry JS contrib: `open-telemetry/opentelemetry-js-contrib@166db7bc8e8e810596ef5e87e69506aca58c6039`.
 - Read `packages/instrumentation-kafkajs/src/instrumentation.ts`: `_getConsumerEachMessagePatch()`, `_getConsumerEachBatchPatch()`, `_getSendPatch()`, `_getSendBatchPatch()`, `_startConsumerSpan(...)`, `_startProducerSpan(...)`, and `_endSpansOnPromise(...)`.
 - Read `packages/instrumentation-kafkajs/src/semconv.ts` and `packages/instrumentation-amqplib/src/semconv.ts` for `messaging.system`, `messaging.destination.name`, `messaging.operation.name`, `messaging.operation.type`, and `messaging.batch.message_count`.
-- Datadog dd-trace-js: `DataDog/dd-trace-js@4638d8ec5136d176c017b0546b30f79bf52ad3cb`.
+- Datadog dd-trace-js: `DataDog/dd-trace-js@59c8164e78f2866f9773e0043e59b3ca8ec753f5`.
 - Read `packages/datadog-plugin-kafkajs/src/producer.js` and `packages/datadog-plugin-kafkajs/src/consumer.js`: producer/consumer plugins set destination/topic metadata, batch size, partition/offset metadata, trace header injection/extraction, and data-stream checkpoints.
 
 ## Competitor Pattern
@@ -25,6 +25,7 @@ The tradeoff is a larger dependency and privacy surface: global/module patching,
 - It now emits a safe portable messaging subset from already sanitized app inputs: `messaging.system`, `messaging.destination.name`, `messaging.operation.name`, `messaging.operation.type`, and `messaging.batch.message_count` for batches larger than one.
 - It now exposes `createLogBrewQueueTraceHeaders()` so producers can create exactly one normalized W3C `traceparent` from the active queue span, and `queueOperationWithLogBrewSpan(...)` accepts an incoming `traceparent` to continue a consumed message trace.
 - It now exposes `createLogBrewQueueTraceLinks()` so batch consumers can turn string, header-like, array-valued, or Buffer-like `traceparent` carriers into bounded `SpanLinkSummary[]` values without throwing on malformed propagation or retaining raw headers.
+- It now exposes `queueBatchOperationWithLogBrewSpan(...)` so batch consumers can pass message objects with app-owned `headers`; LogBrew derives a bounded link set, derives `messageCount` from the batch when absent, and keeps the same explicit no-client-patching boundary.
 - It preserves existing LogBrew metadata (`queueSystem`, `queueOperation`, `queueOperationKind`, `queueName`, `taskName`, `messageCount`) for readable agent/debug output.
 - It avoids hidden Kafka/AMQP/BullMQ/SQS patching, broker URL capture, header mutation, arbitrary header capture, message bodies, job arguments, message keys, partition/offset tags, baggage, tracestate, and raw propagation metadata.
 
@@ -36,6 +37,8 @@ The tradeoff is a larger dependency and privacy surface: global/module patching,
 - GREEN: `bash scripts/real_user_node_queue_trace_smoke.sh` passed on Node `v22.18.0`, proving installed producer traceparent creation, consumer trace continuation, malformed propagation fallback, TypeScript export coverage, and no raw propagation header storage.
 - RED: `NPM_CONFIG_CACHE=/private/tmp/logbrew-node-queue-npm-cache bash scripts/real_user_node_queue_trace_smoke.sh` failed from an installed app because `@logbrew/node` did not export `createLogBrewQueueTraceLinks`.
 - GREEN: the same installed smoke passed on Node `v22.18.0`, proving batch span links from real message headers, malformed-carrier skip, primitive metadata filtering, ESM and TypeScript export coverage, and no raw `traceparent`, header, body, or payload storage.
+- RED: the installed queue trace smoke failed again after adding the `queueBatchOperationWithLogBrewSpan(...)` import and 512-message batch assertion because `@logbrew/node` did not export that helper.
+- GREEN: the same installed smoke passed on Node `v22.18.0`, proving one-call batch span creation, message-header link extraction, eight-link cap across a 512-message batch, derived `messageCount`, TypeScript export coverage, and no body/payload/raw propagation leakage.
 - Focused syntax proof: `npm test --prefix js/logbrew-node` passed.
 - Focused package proof: `bash scripts/check_js_lint.sh`, `bash scripts/check_js_package.sh`, and `NPM_CONFIG_CACHE=/private/tmp/logbrew-node-npm-cache bash scripts/real_user_node_smoke.sh` passed.
 

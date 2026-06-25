@@ -8,6 +8,7 @@ import {
 } from "@logbrew/sdk";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+  createLogBrewQueueBatchSpanOptions as createQueueBatchSpanOptions,
   createLogBrewQueueTraceHeaders as createQueueTraceHeaders,
   createLogBrewQueueTraceLinks as createQueueTraceLinks,
   normalizeSpanId,
@@ -227,6 +228,10 @@ export async function cacheOperationWithLogBrewSpan(operationName, options = {})
 
 export async function queueOperationWithLogBrewSpan(operationName, options = {}) {
   return operationWithLogBrewSpan("queue", operationName, options);
+}
+
+export async function queueBatchOperationWithLogBrewSpan(operationName, options = {}) {
+  return queueOperationWithLogBrewSpan(operationName, createQueueBatchSpanOptions(options));
 }
 
 export function createHttpRequestEvent(req, res, {
@@ -985,6 +990,7 @@ export default {
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
+  queueBatchOperationWithLogBrewSpan,
   queueOperationWithLogBrewSpan,
   withLogBrewHttpHandler
 };

@@ -10,6 +10,7 @@ const {
 } = require("@logbrew/sdk");
 const { AsyncLocalStorage } = require("node:async_hooks");
 const {
+  createLogBrewQueueBatchSpanOptions: createQueueBatchSpanOptions,
   createLogBrewQueueTraceHeaders: createQueueTraceHeaders,
   createLogBrewQueueTraceLinks: createQueueTraceLinks,
   normalizeSpanId,
@@ -229,6 +230,10 @@ async function cacheOperationWithLogBrewSpan(operationName, options = {}) {
 
 async function queueOperationWithLogBrewSpan(operationName, options = {}) {
   return operationWithLogBrewSpan("queue", operationName, options);
+}
+
+async function queueBatchOperationWithLogBrewSpan(operationName, options = {}) {
+  return queueOperationWithLogBrewSpan(operationName, createQueueBatchSpanOptions(options));
 }
 
 function createHttpRequestEvent(req, res, {
@@ -984,6 +989,7 @@ const exported = {
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
+  queueBatchOperationWithLogBrewSpan,
   queueOperationWithLogBrewSpan,
   withLogBrewHttpHandler
 };

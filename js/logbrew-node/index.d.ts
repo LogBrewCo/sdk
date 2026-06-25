@@ -41,6 +41,11 @@ export type LogBrewQueueTraceCarrier = string | {
   get?: (name: string) => unknown;
 };
 
+export type LogBrewQueueBatchMessage = LogBrewQueueTraceCarrier | {
+  headers?: LogBrewQueueTraceCarrier;
+  [key: string]: unknown;
+};
+
 export type LogBrewNodeContext = {
   client: LogBrewClient;
   logbrew: LogBrewClient;
@@ -232,6 +237,11 @@ export type QueueOperationWithLogBrewSpanOptions<Result = unknown> = {
   ) => void | Promise<void>;
 };
 
+export type QueueBatchOperationWithLogBrewSpanOptions<Result = unknown> = QueueOperationWithLogBrewSpanOptions<Result> & {
+  messages?: LogBrewQueueBatchMessage[];
+  linkMetadata?: Record<string, string | number | boolean | null>;
+};
+
 export declare function createLogBrewNodeClient(
   config?: CreateLogBrewNodeClientConfig
 ): LogBrewClient;
@@ -283,6 +293,11 @@ export declare function queueOperationWithLogBrewSpan<Result>(
   options: QueueOperationWithLogBrewSpanOptions<Result>
 ): Promise<Awaited<Result>>;
 
+export declare function queueBatchOperationWithLogBrewSpan<Result>(
+  operationName: string,
+  options: QueueBatchOperationWithLogBrewSpanOptions<Result>
+): Promise<Awaited<Result>>;
+
 export declare function createHttpRequestEvent(
   req: IncomingMessage,
   res: ServerResponse,
@@ -332,6 +347,7 @@ declare const defaultExport: {
   databaseOperationWithLogBrewSpan: typeof databaseOperationWithLogBrewSpan;
   fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
+  queueBatchOperationWithLogBrewSpan: typeof queueBatchOperationWithLogBrewSpan;
   queueOperationWithLogBrewSpan: typeof queueOperationWithLogBrewSpan;
   withLogBrewHttpHandler: typeof withLogBrewHttpHandler;
 };

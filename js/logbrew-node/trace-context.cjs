@@ -43,6 +43,19 @@ function createLogBrewQueueTraceLinks(carriers, metadata) {
   return links;
 }
 
+function createLogBrewQueueBatchSpanOptions(options = {}) {
+  const messages = Array.isArray(options.messages) ? options.messages : undefined;
+  const generatedLinks = messages
+    ? createLogBrewQueueTraceLinks(messages.map(queueMessageTraceCarrier), options.linkMetadata)
+    : [];
+  const links = mergeQueueSpanLinks(generatedLinks, options.links);
+  return {
+    ...options,
+    ...(messages && options.messageCount === undefined ? { messageCount: messages.length } : {}),
+    ...(links.length > 0 ? { links } : {})
+  };
+}
+
 function resolveOperationTrace(options, activeTrace) {
   return options.trace ?? traceContextFromTraceparent(options.traceparent) ?? activeTrace;
 }
@@ -132,6 +145,32 @@ function isNodeBufferValue(value) {
   );
 }
 
+function queueMessageTraceCarrier(message) {
+  if (message && typeof message === "object" && "headers" in message) {
+    return message.headers;
+  }
+  return message;
+}
+
+function mergeQueueSpanLinks(generatedLinks, explicitLinks) {
+  const links = [];
+  for (const link of generatedLinks) {
+    if (links.length >= MAX_QUEUE_TRACE_LINKS) {
+      return links;
+    }
+    links.push(link);
+  }
+  if (Array.isArray(explicitLinks)) {
+    for (const link of explicitLinks) {
+      if (links.length >= MAX_QUEUE_TRACE_LINKS) {
+        break;
+      }
+      links.push(link);
+    }
+  }
+  return links;
+}
+
 function safeQueueLinkMetadata(metadata) {
   const safeMetadata = primitiveMetadata(metadata);
   return Object.keys(safeMetadata).length > 0 ? { metadata: safeMetadata } : {};
@@ -173,6 +212,7 @@ function isSafeQueueLinkMetadataKey(key) {
 }
 
 module.exports = {
+  createLogBrewQueueBatchSpanOptions,
   createLogBrewQueueTraceHeaders,
   createLogBrewQueueTraceLinks,
   normalizeSpanId,
