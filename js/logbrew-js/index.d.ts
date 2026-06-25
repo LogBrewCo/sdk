@@ -165,6 +165,13 @@ export type WinstonTransportHandle = {
   end(callback?: () => void): unknown;
 };
 
+/** Privacy-bounded milestone recorded inside a span. */
+export type SpanEventSummary = {
+  name: string;
+  timestamp?: string;
+  metadata?: Metadata;
+};
+
 /** Public span event attributes. */
 export type SpanAttributes = {
   name: string;
@@ -173,6 +180,7 @@ export type SpanAttributes = {
   parentSpanId?: string;
   status: "ok" | "error";
   durationMs?: number;
+  events?: SpanEventSummary[];
   metadata?: Metadata;
 };
 

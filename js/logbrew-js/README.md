@@ -165,6 +165,7 @@ const span = spanAttributesFromTraceparent(incomingTraceparent, {
   spanId: "b7ad6b7169203331",
   status: "ok",
   durationMs: 18.4,
+  events: [{ name: "cache.lookup", metadata: { hit: false, system: "redis" } }],
   metadata: { service: "checkout" }
 });
 client.span("evt_checkout_span", "2026-06-02T10:00:04Z", span);
@@ -180,7 +181,7 @@ await fetch("https://example.invalid/payments", {
 await client.flush(RecordingTransport.alwaysAccept());
 ```
 
-The helpers validate the W3C `version-traceId-parentSpanId-traceFlags` shape, reject all-zero trace/span ids, normalize valid ids to lowercase, expose the sampled flag from `traceFlags`, and keep span metadata primitive-only. `createTraceparentHeaders()` returns an explicit outbound carrier with only `traceparent`. The helpers do not install OpenTelemetry or patch HTTP clients; use them when you need explicit interop in code you own.
+The helpers validate the W3C `version-traceId-parentSpanId-traceFlags` shape, reject all-zero trace/span ids, normalize valid ids to lowercase, expose the sampled flag from `traceFlags`, and keep span metadata primitive-only. Optional span `events` record up to eight low-cardinality milestones with optional timestamps and primitive metadata only. `createTraceparentHeaders()` returns an explicit outbound carrier with only `traceparent`. The helpers do not install OpenTelemetry or patch HTTP clients; use them when you need explicit interop in code you own.
 
 LogBrew severity categories are `info`, `warning`, `error`, and `critical`. The JavaScript SDK accepts common runtime aliases such as `trace`, `debug`, `warn`, and `fatal` for compatibility, then serializes canonical values before queued events are sent. The shared mapping is documented in the [LogBrew severity contract](../../docs/severity-contract.md).
 

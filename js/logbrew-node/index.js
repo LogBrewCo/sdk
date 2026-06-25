@@ -11,6 +11,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 const DEFAULT_SDK_NAME = "logbrew-node";
 const DEFAULT_SDK_VERSION = "0.1.0";
 const DEFAULT_ENDPOINT = "https://api.logbrew.com/v1/events";
+const MAX_SPAN_EVENTS = 8;
 const activeTraceContext = new AsyncLocalStorage();
 
 export function createLogBrewNodeClient({
@@ -384,6 +385,7 @@ async function captureFetchSpan(options, {
       errorType: errorType(error)
     } : {})
   };
+  const events = spanEvents(options.events, error);
 
   try {
     options.client.span(id, typeof options.now === "function" ? options.now() : new Date().toISOString(), {
@@ -393,6 +395,7 @@ async function captureFetchSpan(options, {
       ...(trace.parentSpanId !== undefined ? { parentSpanId: trace.parentSpanId } : {}),
       status: error !== undefined || Number(statusCode ?? 0) >= 400 ? "error" : "ok",
       durationMs,
+      ...(events !== undefined ? { events } : {}),
       metadata
     });
   } catch (captureError) {
@@ -431,6 +434,7 @@ async function captureDatabaseSpan(options, {
     } : {}),
     ...(error !== undefined ? { errorType: errorType(error) } : {})
   };
+  const events = spanEvents(options.events, error);
 
   try {
     options.client.span(id, typeof options.now === "function" ? options.now() : new Date().toISOString(), {
@@ -440,6 +444,7 @@ async function captureDatabaseSpan(options, {
       ...(trace.parentSpanId !== undefined ? { parentSpanId: trace.parentSpanId } : {}),
       status: error !== undefined ? "error" : "ok",
       durationMs,
+      ...(events !== undefined ? { events } : {}),
       metadata
     });
   } catch (captureError) {
@@ -513,6 +518,7 @@ async function captureOperationSpan(kind, options, {
     ...queueSpanMetadata(kind, options),
     ...(error !== undefined ? { errorType: errorType(error) } : {})
   };
+  const events = spanEvents(options.events, error);
 
   try {
     options.client.span(id, typeof options.now === "function" ? options.now() : new Date().toISOString(), {
@@ -522,6 +528,7 @@ async function captureOperationSpan(kind, options, {
       ...(trace.parentSpanId !== undefined ? { parentSpanId: trace.parentSpanId } : {}),
       status: error !== undefined ? "error" : "ok",
       durationMs,
+      ...(events !== undefined ? { events } : {}),
       metadata
     });
   } catch (captureError) {
@@ -652,6 +659,26 @@ function operationMetadata(kind, metadata) {
   return Object.fromEntries(
     Object.entries(primitiveMetadata(metadata)).filter(([key]) => isSafeOperationMetadataKey(kind, key))
   );
+}
+
+function spanEvents(events, error) {
+  const exceptionEvents = exceptionSpanEvent(error);
+  if (events === undefined) {
+    return exceptionEvents.length > 0 ? exceptionEvents : undefined;
+  }
+  if (!Array.isArray(events) || events.length > MAX_SPAN_EVENTS) {
+    return events;
+  }
+  if (exceptionEvents.length === 0) {
+    return events.length > 0 ? events : undefined;
+  }
+  return events.slice(0, MAX_SPAN_EVENTS - exceptionEvents.length).concat(exceptionEvents);
+}
+
+function exceptionSpanEvent(error) {
+  return error === undefined
+    ? []
+    : [{ name: "exception", metadata: { exceptionEscaped: true, exceptionType: errorType(error) } }];
 }
 
 function cacheSpanMetadata(kind, options) {

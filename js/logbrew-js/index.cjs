@@ -29,6 +29,7 @@ const TRACEPARENT_PATTERN = /^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16
 const ZERO_TRACE_ID = "00000000000000000000000000000000";
 const ZERO_SPAN_ID = "0000000000000000";
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
+const MAX_SPAN_EVENTS = 8;
 class SdkError extends Error {
   constructor(code, message, details = {}) {
     super(message);
@@ -526,6 +527,7 @@ function spanAttributesFromTraceparent(traceparent, attributes) {
       throw new SdkError("validation_error", "span durationMs must be non-negative");
     }
   }
+  const events = validateSpanEvents(attributes.events);
 
   return {
     name: attributes.name,
@@ -534,6 +536,7 @@ function spanAttributesFromTraceparent(traceparent, attributes) {
     parentSpanId: context.parentSpanId,
     status: attributes.status,
     ...(attributes.durationMs !== undefined ? { durationMs: attributes.durationMs } : {}),
+    ...(events !== undefined ? { events } : {}),
     ...(attributes.metadata !== undefined ? { metadata: compactMetadata(attributes.metadata) } : {})
   };
 }
@@ -1089,10 +1092,20 @@ function cloneMetadata(metadata) {
   return { ...metadata };
 }
 
+function cloneSpanEvents(events) {
+  return events.map((event) => event.metadata === undefined
+    ? { ...event }
+    : { ...event, metadata: { ...event.metadata } });
+}
+
 function cloneEvent(event) {
-  const attributes = event.attributes.metadata === undefined
-    ? { ...event.attributes }
-    : { ...event.attributes, metadata: { ...event.attributes.metadata } };
+  const attributes = { ...event.attributes };
+  if (event.attributes.metadata !== undefined) {
+    attributes.metadata = { ...event.attributes.metadata };
+  }
+  if (Array.isArray(event.attributes.events)) {
+    attributes.events = cloneSpanEvents(event.attributes.events);
+  }
   return { ...event, attributes };
 }
 
@@ -1154,14 +1167,52 @@ function validateSpan(attributes) {
       throw new SdkError("validation_error", "span durationMs must be non-negative");
     }
   }
+  const events = validateSpanEvents(attributes.events);
   return withMetadata({
     name: attributes.name,
     traceId: attributes.traceId,
     spanId: attributes.spanId,
     status: attributes.status,
     ...(attributes.parentSpanId !== undefined ? { parentSpanId: attributes.parentSpanId } : {}),
-    ...(attributes.durationMs !== undefined ? { durationMs: attributes.durationMs } : {})
+    ...(attributes.durationMs !== undefined ? { durationMs: attributes.durationMs } : {}),
+    ...(events !== undefined ? { events } : {})
   }, attributes.metadata);
+}
+
+function validateSpanEvents(events) {
+  if (events === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(events)) {
+    throw new SdkError("validation_error", "span events must be an array");
+  }
+  if (events.length > MAX_SPAN_EVENTS) {
+    throw new SdkError("validation_error", `span events must contain at most ${MAX_SPAN_EVENTS} entries`);
+  }
+  if (events.length === 0) {
+    return undefined;
+  }
+
+  return events.map((event) => {
+    if (!event || Array.isArray(event) || typeof event !== "object") {
+      throw new SdkError("validation_error", "span event must be an object");
+    }
+    requireNonEmpty("span event name", event.name);
+    if (event.timestamp !== undefined) {
+      requireTimestamp(event.timestamp);
+    }
+    const summary = {
+      name: event.name,
+      ...(event.timestamp !== undefined ? { timestamp: event.timestamp } : {})
+    };
+    if (event.metadata !== undefined) {
+      const metadata = compactMetadata(event.metadata);
+      if (Object.keys(metadata).length > 0) {
+        summary.metadata = metadata;
+      }
+    }
+    return summary;
+  });
 }
 
 function validateAction(attributes) {

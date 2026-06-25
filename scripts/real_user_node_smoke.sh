@@ -345,6 +345,7 @@ const databaseResult = await databaseOperationWithLogBrewSpan("orders.select_by_
   client: databaseClient,
   databaseName: "checkout",
   id: "evt_node_database_span_001",
+  events: [{ name: "db.pool.wait", timestamp: "2026-06-02T10:00:09Z", metadata: { ignoredObject: { nested: true }, phase: "before_query", retryable: false } }],
   metadata: {
     "db.statement": "SELECT * FROM orders WHERE id = 42",
     params: "sensitive-id",
@@ -411,12 +412,14 @@ if (
 ) {
   throw new Error(`database span metadata was not useful and privacy bounded: ${databaseClient.previewJson()}`);
 }
+assertJsonEqual(databaseSpanEvent.attributes.events, [{ name: "db.pool.wait", timestamp: "2026-06-02T10:00:09Z", metadata: { phase: "before_query", retryable: false } }], "database span should include bounded user span events", databaseClient.previewJson());
 if (!databaseErrorSpanEvent || databaseErrorSpanEvent.attributes.status !== "error") {
   throw new Error(`database error span missing: ${databaseClient.previewJson()}`);
 }
 if (databaseErrorSpanEvent.attributes.metadata.errorType !== "TypeError") {
   throw new Error(`database error should include error type only: ${databaseClient.previewJson()}`);
 }
+assertJsonEqual(databaseErrorSpanEvent.attributes.events, exceptionEvents("TypeError"), "database error span should include a bounded exception span event", databaseClient.previewJson());
 const databasePayloadJson = JSON.stringify(databasePayload);
 if (
   databasePayloadJson.includes("sens" + "itive-id") ||
@@ -496,6 +499,7 @@ if (
 if (!cacheErrorSpanEvent || cacheErrorSpanEvent.attributes.metadata.errorType !== "RangeError") {
   throw new Error(`cache error should include error type only: ${cacheClient.previewJson()}`);
 }
+assertJsonEqual(cacheErrorSpanEvent.attributes.events, exceptionEvents("RangeError"), "cache error span should include a bounded exception span event", cacheClient.previewJson());
 const cachePayloadJson = JSON.stringify(cachePayload);
 if (
   cachePayloadJson.includes("user:42") ||
@@ -572,6 +576,7 @@ if (
 if (!queueErrorSpanEvent || queueErrorSpanEvent.attributes.metadata.errorType !== "SyntaxError") {
   throw new Error(`queue error should include error type only: ${queueClient.previewJson()}`);
 }
+assertJsonEqual(queueErrorSpanEvent.attributes.events, exceptionEvents("SyntaxError"), "queue error span should include a bounded exception span event", queueClient.previewJson());
 const queuePayloadJson = JSON.stringify(queuePayload);
 if (
   queuePayloadJson.includes("hello user@example.com") ||
@@ -783,6 +788,14 @@ async function waitFor(predicate) {
   throw new Error("timed out waiting for Node.js capture");
 }
 
+function assertJsonEqual(actual, expected, message, preview) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${message}: ${preview}`);
+}
+
+function exceptionEvents(exceptionType) {
+  return [{ name: "exception", metadata: { exceptionEscaped: true, exceptionType } }];
+}
+
 async function closeServer(server) {
   await new Promise((resolve, reject) => {
     server.close((error) => {
@@ -847,6 +860,7 @@ await fetchWithLogBrewSpan("https://payments.example.invalid/payments/123?coupon
 const databaseResult = await databaseOperationWithLogBrewSpan("orders.select_by_id", {
   client,
   databaseName: "checkout",
+  events: [{ name: "db.pool.wait", metadata: { phase: "before_query" } }],
   operation: async () => [{ id: 42 }],
   operationKind: "SELECT",
   rowCount: 1,
@@ -937,23 +951,12 @@ grep -q 'real-user-smoke -> node node_modules/@logbrew/node/examples/index.mjs r
 node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry > "$tmp_dir/example-first-useful.stdout.json" 2> "$tmp_dir/example-first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-first-useful.stdout.json" >/dev/null
 python3 - "$tmp_dir/example-first-useful.stdout.json" "$tmp_dir/example-first-useful.stderr.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text())
-summary = json.loads(Path(sys.argv[2]).read_text())
+import json, sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+summary = json.load(open(sys.argv[2], encoding="utf-8"))
 events = payload.get("events", [])
 ids = {event.get("id") for event in events}
-required_ids = {
-    "evt_release_checkout_api",
-    "evt_environment_checkout_api",
-    "evt_log_checkout_received",
-    "evt_action_checkout_started",
-    "evt_network_payment_authorized",
-    "evt_metric_checkout_duration",
-    "evt_span_checkout_request",
-}
+required_ids = {"evt_release_checkout_api", "evt_environment_checkout_api", "evt_log_checkout_received", "evt_action_checkout_started", "evt_network_payment_authorized", "evt_metric_checkout_duration", "evt_span_checkout_request"}
 missing = sorted(required_ids - ids)
 if missing:
     raise SystemExit(f"missing first useful telemetry ids: {missing}")

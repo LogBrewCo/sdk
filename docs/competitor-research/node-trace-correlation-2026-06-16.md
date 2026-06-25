@@ -42,3 +42,27 @@ Follow-up to the all-SDK tracing priority. Tested the Node.js gap where apps alr
 - `bash scripts/real_user_node_smoke.sh` with Node `v22.18.0`
 
 The installed-artifact Node smoke packages local `@logbrew/sdk` and `@logbrew/node`, installs them into a temporary app, verifies ESM/CJS exports, type-checks the new trace types, runs the packaged first-useful and real-user examples, proves request span continuation from W3C `traceparent`, verifies async `getActiveLogBrewTrace()` preservation, and checks handler-error metadata correlation.
+
+## 2026-06-25 Rich Span Events Follow-Up
+
+Refreshed source reads:
+
+- Sentry JavaScript `getsentry/sentry-javascript@83fd9601d266897deb43c6ca1756f77533509dc8`: `packages/core/src/types/span.ts` (`Span.addEvent`, `addLink`, `addLinks`, `recordException`), `packages/core/src/tracing/sentrySpan.ts` (`SentrySpan.addEvent`, link storage, span JSON/streamed JSON conversion), `packages/core/src/utils/spanUtils.ts` (`convertSpanLinksForEnvelope`, `spanToJSON`, OpenTelemetry SDK span handling), `packages/core/src/types/link.ts` (`SpanLink`), and `packages/node/src/integrations/tracing/postgres/{vendored/instrumentation.ts,vendored/utils.ts}` (`query` wrapping, `handleConfigQuery`, DB attributes, error status/end behavior).
+- OpenTelemetry JS `open-telemetry/opentelemetry-js@53337962f2506e2422196b532cb058a533f0b5e3`: `api/src/trace/span.ts` (`addEvent`, `addLink`, `addLinks`, `recordException`), `api/src/trace/link.ts` (`Link`), and `api/src/trace/SpanOptions.ts` (`links` at span creation).
+
+Competitor pattern: mature JS tracing models spans as recording objects with attributes, events, links, status, exception hooks, and many automatic driver/framework integrations. Sentry's Postgres integration wraps driver calls and ends spans on callback/promise completion; OpenTelemetry's API treats events and links as first-class trace data. The tradeoff is much larger patching/exporter surface and higher privacy risk if raw SQL, headers, payloads, or exception text is captured.
+
+LogBrew now ships the safer subset in JavaScript/Node:
+
+- Core `@logbrew/sdk` `SpanAttributes` accepts optional `events: SpanEventSummary[]`, capped at eight entries, with non-empty event names, optional timestamp validation, and primitive-only event metadata.
+- `spanAttributesFromTraceparent(...)` preserves the same safe span events for W3C-derived spans.
+- `@logbrew/node` fetch/database/cache/queue helpers accept optional app-supplied event summaries and add a type-only `exception` event on failed dependency operations.
+- The helper-generated exception event includes only `exceptionType` and `exceptionEscaped`; it does not include exception messages, stacks, SQL, cache keys, message bodies, headers, raw propagation data, full URLs, query strings, baggage, or tracestate.
+
+Evidence:
+
+- TDD red: `npm test --prefix js/logbrew-js` failed because span events were dropped, oversized event lists were accepted, and traceparent-derived spans lost events.
+- TDD red installed proof: `scripts/real_user_node_smoke.sh` reached the generated app and failed before Node helpers emitted dependency exception events.
+- Green proof: `npm test --prefix js/logbrew-js`, `npm test --prefix js/logbrew-node`, and `NPM_CONFIG_CACHE=/private/tmp/logbrew-node-npm-cache bash scripts/real_user_node_smoke.sh` passed with Node `v22.18.0`.
+
+Remaining Node rich-trace gaps: Sentry/Datadog/OpenTelemetry remain stronger for automatic driver/framework instrumentation, span links, baggage/tracestate, full OpenTelemetry exporter/processor interop, richer semantic conventions, phase timing, response-size heuristics, and optional deep auto-instrumentation packages.

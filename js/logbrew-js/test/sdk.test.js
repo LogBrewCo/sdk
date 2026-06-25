@@ -214,6 +214,103 @@ test("negative span duration fails validation", () => {
   );
 });
 
+test("span events serialize bounded primitive metadata", () => {
+  const client = sampleClient();
+  client.span("evt_span_001", "2026-06-02T10:00:04Z", {
+    name: "postgresql SELECT orders.select_by_id",
+    traceId: "trace_001",
+    spanId: "span_001",
+    status: "error",
+    durationMs: 33,
+    events: [
+      {
+        name: "db.pool.wait",
+        timestamp: "2026-06-02T10:00:04Z",
+        metadata: {
+          attempt: 1,
+          ignoredObject: { nested: true },
+          phase: "before_query",
+          retryable: false
+        }
+      },
+      {
+        name: "exception",
+        metadata: {
+          exceptionEscaped: true,
+          exceptionMessage: ["should not serialize"],
+          exceptionType: "TypeError"
+        }
+      }
+    ],
+    metadata: { service: "checkout" }
+  });
+
+  const payload = JSON.parse(client.previewJson());
+  assert.deepEqual(payload.events[0].attributes.events, [
+    {
+      name: "db.pool.wait",
+      timestamp: "2026-06-02T10:00:04Z",
+      metadata: {
+        attempt: 1,
+        phase: "before_query",
+        retryable: false
+      }
+    },
+    {
+      name: "exception",
+      metadata: {
+        exceptionEscaped: true,
+        exceptionType: "TypeError"
+      }
+    }
+  ]);
+});
+
+test("too many span events fail validation", () => {
+  const client = sampleClient();
+  assert.throws(
+    () => client.span("evt_span_many_events", "2026-06-02T10:00:04Z", {
+      name: "GET /health",
+      traceId: "trace_001",
+      spanId: "span_001",
+      status: "ok",
+      events: Array.from({ length: 9 }, (_, index) => ({ name: `step.${index}` }))
+    }),
+    /span events must contain at most 8 entries/
+  );
+});
+
+test("traceparent span helper preserves safe span events", () => {
+  const span = spanAttributesFromTraceparent(
+    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    {
+      name: "GET /orders/:id",
+      spanId: "b7ad6b7169203331",
+      status: "ok",
+      events: [
+        {
+          name: "cache.lookup",
+          metadata: {
+            hit: false,
+            ignored: { nested: true },
+            system: "redis"
+          }
+        }
+      ]
+    }
+  );
+
+  assert.deepEqual(span.events, [
+    {
+      name: "cache.lookup",
+      metadata: {
+        hit: false,
+        system: "redis"
+      }
+    }
+  ]);
+});
+
 test("metric helper validates explicit metric attributes", () => {
   const client = sampleClient();
   client.metric("evt_metric_001", "2026-06-02T10:00:06Z", {
