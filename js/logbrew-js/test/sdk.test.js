@@ -280,6 +280,58 @@ test("too many span events fail validation", () => {
   );
 });
 
+test("span links serialize bounded primitive metadata", () => {
+  const client = sampleClient();
+  client.span("evt_span_with_link", "2026-06-02T10:00:04Z", {
+    name: "queue publish email.welcome",
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    status: "ok",
+    links: [
+      {
+        traceId: "11111111111111111111111111111111",
+        spanId: "2222222222222222",
+        sampled: true,
+        metadata: {
+          ignoredNested: { nope: true },
+          relation: "batch_item",
+          shard: 3
+        }
+      }
+    ]
+  });
+
+  const payload = JSON.parse(client.previewJson());
+  assert.deepEqual(payload.events[0].attributes.links, [
+    {
+      traceId: "11111111111111111111111111111111",
+      spanId: "2222222222222222",
+      sampled: true,
+      metadata: {
+        relation: "batch_item",
+        shard: 3
+      }
+    }
+  ]);
+});
+
+test("too many span links fail validation", () => {
+  const client = sampleClient();
+  assert.throws(
+    () => client.span("evt_span_many_links", "2026-06-02T10:00:04Z", {
+      name: "queue publish email.welcome",
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      spanId: "b7ad6b7169203331",
+      status: "ok",
+      links: Array.from({ length: 9 }, (_, index) => ({
+        traceId: `${String(index + 1).padStart(32, "0")}`,
+        spanId: "2222222222222222"
+      }))
+    }),
+    /span links must contain at most 8 entries/
+  );
+});
+
 test("traceparent span helper preserves safe span events", () => {
   const span = spanAttributesFromTraceparent(
     "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
@@ -306,6 +358,39 @@ test("traceparent span helper preserves safe span events", () => {
       metadata: {
         hit: false,
         system: "redis"
+      }
+    }
+  ]);
+});
+
+test("traceparent span helper preserves safe span links", () => {
+  const span = spanAttributesFromTraceparent(
+    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+    {
+      name: "queue publish email.welcome",
+      spanId: "b7ad6b7169203331",
+      status: "ok",
+      links: [
+        {
+          traceId: "11111111111111111111111111111111",
+          spanId: "2222222222222222",
+          sampled: false,
+          metadata: {
+            ignoredNested: { nope: true },
+            relation: "batch_item"
+          }
+        }
+      ]
+    }
+  );
+
+  assert.deepEqual(span.links, [
+    {
+      traceId: "11111111111111111111111111111111",
+      spanId: "2222222222222222",
+      sampled: false,
+      metadata: {
+        relation: "batch_item"
       }
     }
   ]);

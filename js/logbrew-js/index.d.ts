@@ -31,7 +31,9 @@ export type TraceparentSpanInput = {
   spanId: string;
   status: "ok" | "error";
   durationMs?: number;
+  links?: SpanLinkSummary[];
   metadata?: Metadata;
+  events?: SpanEventSummary[];
 };
 
 /** Public release event attributes. */
@@ -172,6 +174,14 @@ export type SpanEventSummary = {
   metadata?: Metadata;
 };
 
+/** Privacy-bounded reference from this span to another trace/span. */
+export type SpanLinkSummary = {
+  traceId: string;
+  spanId: string;
+  sampled?: boolean;
+  metadata?: Metadata;
+};
+
 /** Public span event attributes. */
 export type SpanAttributes = {
   name: string;
@@ -181,6 +191,7 @@ export type SpanAttributes = {
   status: "ok" | "error";
   durationMs?: number;
   events?: SpanEventSummary[];
+  links?: SpanLinkSummary[];
   metadata?: Metadata;
 };
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -40,7 +41,7 @@ OPTIONAL_ATTRIBUTES = {
     "environment": {"region", "metadata"},
     "issue": {"message", "metadata"},
     "log": {"logger", "metadata"},
-    "span": {"parentSpanId", "durationMs", "metadata", "events"},
+    "span": {"parentSpanId", "durationMs", "metadata", "events", "links"},
     "action": {"metadata"},
     "metric": {"metadata"},
 }
@@ -56,6 +57,10 @@ OPTIONAL_STRING_ATTRIBUTES = {
     ("log", "logger"): False,
     ("span", "parentSpanId"): True,
 }
+TRACE_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{32}$")
+SPAN_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{16}$")
+ZERO_TRACE_ID = "0" * 32
+ZERO_SPAN_ID = "0" * 16
 
 
 class ValidationError(Exception):
@@ -130,6 +135,45 @@ def _validate_span_events(index: int, attributes: dict[str, Any]) -> None:
             if not isinstance(value, (str, int, float, bool)) and value is not None:
                 raise ValidationError(
                     f"event {index} span event {event_index} metadata value for {key} "
+                    "must be a string, number, boolean, or null"
+                )
+
+
+def _validate_span_links(index: int, attributes: dict[str, Any]) -> None:
+    links = attributes.get("links")
+    if links is None:
+        return
+    if not isinstance(links, list):
+        raise ValidationError(f"event {index} span links must be an array")
+    if len(links) > 8:
+        raise ValidationError(f"event {index} span links must contain at most 8 entries")
+    for link_index, link in enumerate(links):
+        if not isinstance(link, dict):
+            raise ValidationError(f"event {index} span link {link_index} must be an object")
+        _reject_unknown_keys(link, {"traceId", "spanId", "sampled", "metadata"}, f"event {index} span link {link_index}")
+        trace_id = link.get("traceId")
+        if not isinstance(trace_id, str) or not TRACE_ID_PATTERN.fullmatch(trace_id):
+            raise ValidationError(f"event {index} span link {link_index} traceId must be 32 hex characters")
+        if trace_id.lower() == ZERO_TRACE_ID:
+            raise ValidationError(f"event {index} span link {link_index} traceId must not be all zeros")
+        span_id = link.get("spanId")
+        if not isinstance(span_id, str) or not SPAN_ID_PATTERN.fullmatch(span_id):
+            raise ValidationError(f"event {index} span link {link_index} spanId must be 16 hex characters")
+        if span_id.lower() == ZERO_SPAN_ID:
+            raise ValidationError(f"event {index} span link {link_index} spanId must not be all zeros")
+        if "sampled" in link and not isinstance(link["sampled"], bool):
+            raise ValidationError(f"event {index} span link {link_index} sampled must be a boolean")
+        metadata = link.get("metadata")
+        if metadata is None:
+            continue
+        if not isinstance(metadata, dict):
+            raise ValidationError(f"event {index} span link {link_index} metadata must be an object")
+        for key, value in metadata.items():
+            if not isinstance(key, str):
+                raise ValidationError(f"event {index} span link {link_index} metadata keys must be strings")
+            if not isinstance(value, (str, int, float, bool)) and value is not None:
+                raise ValidationError(
+                    f"event {index} span link {link_index} metadata value for {key} "
                     "must be a string, number, boolean, or null"
                 )
 
@@ -224,6 +268,7 @@ def validate_payload(payload: dict[str, Any]) -> None:
 
         if event_type == "span":
             _validate_span_events(index, attributes)
+            _validate_span_links(index, attributes)
 
         if event_type == "metric":
             _validate_metric_attributes(index, attributes)

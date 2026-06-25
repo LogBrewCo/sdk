@@ -396,6 +396,7 @@ async function captureFetchSpan(options, {
       status: error !== undefined || Number(statusCode ?? 0) >= 400 ? "error" : "ok",
       durationMs,
       ...(events !== undefined ? { events } : {}),
+      ...(options.links !== undefined ? { links: options.links } : {}),
       metadata
     });
   } catch (captureError) {
@@ -445,6 +446,7 @@ async function captureDatabaseSpan(options, {
       status: error !== undefined ? "error" : "ok",
       durationMs,
       ...(events !== undefined ? { events } : {}),
+      ...(options.links !== undefined ? { links: options.links } : {}),
       metadata
     });
   } catch (captureError) {
@@ -529,6 +531,7 @@ async function captureOperationSpan(kind, options, {
       status: error !== undefined ? "error" : "ok",
       durationMs,
       ...(events !== undefined ? { events } : {}),
+      ...(options.links !== undefined ? { links: options.links } : {}),
       metadata
     });
   } catch (captureError) {

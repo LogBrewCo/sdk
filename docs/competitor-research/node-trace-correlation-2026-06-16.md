@@ -65,4 +65,29 @@ Evidence:
 - TDD red installed proof: `scripts/real_user_node_smoke.sh` reached the generated app and failed before Node helpers emitted dependency exception events.
 - Green proof: `npm test --prefix js/logbrew-js`, `npm test --prefix js/logbrew-node`, and `NPM_CONFIG_CACHE=/private/tmp/logbrew-node-npm-cache bash scripts/real_user_node_smoke.sh` passed with Node `v22.18.0`.
 
-Remaining Node rich-trace gaps: Sentry/Datadog/OpenTelemetry remain stronger for automatic driver/framework instrumentation, span links, baggage/tracestate, full OpenTelemetry exporter/processor interop, richer semantic conventions, phase timing, response-size heuristics, and optional deep auto-instrumentation packages.
+Remaining Node rich-trace gaps after events: Sentry/Datadog/OpenTelemetry remain stronger for automatic driver/framework instrumentation, span links, baggage/tracestate, full OpenTelemetry exporter/processor interop, richer semantic conventions, phase timing, response-size heuristics, and optional deep auto-instrumentation packages.
+
+## 2026-06-25 Span Links Follow-Up
+
+Refreshed source reads:
+
+- Sentry JavaScript `getsentry/sentry-javascript@a5957d9960765da8b7686df1a802319cc25a1826`: `packages/core/src/types/span.ts` (`Span.addLink`, `Span.addLinks`, creation-context `links`), `packages/core/src/types/link.ts` (`SpanLink`, `SpanLinkJSON`), `packages/core/src/tracing/sentrySpan.ts` (`_links`, `addLink`, `addLinks`, JSON/stream conversion), and `packages/core/src/utils/spanUtils.ts` (`convertSpanLinksForEnvelope`, `getStreamedSpanLinks`).
+- OpenTelemetry JS `open-telemetry/opentelemetry-js@53337962f2506e2422196b532cb058a533f0b5e3`: `api/src/trace/link.ts` (`Link`), `api/src/trace/SpanOptions.ts` (`links` at span creation), and `api/src/trace/span.ts` (`addLink`, `addLinks`). The OTel API documents links for batch processing and untrusted public endpoint context where parent-child is not the right model.
+
+Competitor pattern: Sentry and OpenTelemetry treat links as first-class span relationships, preferably supplied at span creation so sampling/exporters can see them. Sentry flattens link context into envelope/stream JSON. OTel keeps a `SpanContext` plus attributes and supports dropped-attribute accounting. This is powerful for fan-out, batch, queue, and cross-trace debugging, but it also expands the shape that SDKs may serialize.
+
+LogBrew now ships the lighter safe subset:
+
+- Core `@logbrew/sdk` `SpanAttributes` accepts optional `links: SpanLinkSummary[]`, capped at eight entries.
+- Each link requires valid non-zero W3C-shaped `traceId` and `spanId`, optional `sampled`, and optional primitive-only metadata.
+- `spanAttributesFromTraceparent(...)` preserves the same sanitized links for W3C-derived spans.
+- `@logbrew/node` fetch/database/cache/queue helpers pass app-supplied links through core validation so users can explain fan-out, retry, batch, and queue relationships from installed packages.
+- LogBrew still does not copy Sentry/OTel baggage, tracestate, arbitrary attributes, raw propagation headers, payloads, SQL, headers, stack traces, automatic link inference, exporter/processor behavior, or dropped-attribute accounting.
+
+Evidence:
+
+- TDD red: `npm test --prefix js/logbrew-js` failed because links were dropped, oversized link lists were accepted, and traceparent-derived spans lost links.
+- TDD red: `python3 -m unittest tests.test_validate_fixtures` failed because public fixtures rejected the new `links` field before validating it.
+- Green proof: `npm test --prefix js/logbrew-js`, `python3 -m unittest tests.test_validate_fixtures`, `npm test --prefix js/logbrew-node`, and `NPM_CONFIG_CACHE=/private/tmp/logbrew-node-npm-cache bash scripts/real_user_node_smoke.sh` passed with Node `v22.18.0`.
+
+Remaining Node rich-trace gaps: Sentry/Datadog/OpenTelemetry remain stronger for automatic driver/framework instrumentation, automatic or SDK-generated links, baggage/tracestate, full OTel exporter/processor interop, richer semantic conventions, phase timing, response-size heuristics, and optional deep auto-instrumentation packages.

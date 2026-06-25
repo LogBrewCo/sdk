@@ -5,6 +5,7 @@ import type {
   LogBrewClient,
   SpanAttributes,
   SpanEventSummary,
+  SpanLinkSummary,
   Transport,
   TransportResponse
 } from "@logbrew/sdk";
@@ -121,6 +122,7 @@ export type FetchWithLogBrewSpanOptions = {
   id?: string;
   routeTemplate?: string;
   events?: SpanEventSummary[];
+  links?: SpanLinkSummary[];
   metadata?: Record<string, string | number | boolean | null>;
   now?: () => string;
   nowMs?: () => number;
@@ -148,6 +150,7 @@ export type DatabaseOperationWithLogBrewSpanOptions<Result = unknown> = {
   trace?: LogBrewTraceContext;
   id?: string;
   events?: SpanEventSummary[];
+  links?: SpanLinkSummary[];
   metadata?: Record<string, string | number | boolean | null>;
   now?: () => string;
   nowMs?: () => number;
@@ -175,6 +178,7 @@ export type CacheOperationWithLogBrewSpanOptions<Result = unknown> = {
   trace?: LogBrewTraceContext;
   id?: string;
   events?: SpanEventSummary[];
+  links?: SpanLinkSummary[];
   metadata?: Record<string, string | number | boolean | null>;
   now?: () => string;
   nowMs?: () => number;
@@ -201,6 +205,7 @@ export type QueueOperationWithLogBrewSpanOptions<Result = unknown> = {
   trace?: LogBrewTraceContext;
   id?: string;
   events?: SpanEventSummary[];
+  links?: SpanLinkSummary[];
   metadata?: Record<string, string | number | boolean | null>;
   now?: () => string;
   nowMs?: () => number;

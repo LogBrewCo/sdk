@@ -30,6 +30,7 @@ const ZERO_TRACE_ID = "00000000000000000000000000000000";
 const ZERO_SPAN_ID = "0000000000000000";
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const MAX_SPAN_EVENTS = 8;
+const MAX_SPAN_LINKS = 8;
 class SdkError extends Error {
   constructor(code, message, details = {}) {
     super(message);
@@ -528,6 +529,7 @@ function spanAttributesFromTraceparent(traceparent, attributes) {
     }
   }
   const events = validateSpanEvents(attributes.events);
+  const links = validateSpanLinks(attributes.links);
 
   return {
     name: attributes.name,
@@ -537,6 +539,7 @@ function spanAttributesFromTraceparent(traceparent, attributes) {
     status: attributes.status,
     ...(attributes.durationMs !== undefined ? { durationMs: attributes.durationMs } : {}),
     ...(events !== undefined ? { events } : {}),
+    ...(links !== undefined ? { links } : {}),
     ...(attributes.metadata !== undefined ? { metadata: compactMetadata(attributes.metadata) } : {})
   };
 }
@@ -1098,6 +1101,12 @@ function cloneSpanEvents(events) {
     : { ...event, metadata: { ...event.metadata } });
 }
 
+function cloneSpanLinks(links) {
+  return links.map((link) => link.metadata === undefined
+    ? { ...link }
+    : { ...link, metadata: { ...link.metadata } });
+}
+
 function cloneEvent(event) {
   const attributes = { ...event.attributes };
   if (event.attributes.metadata !== undefined) {
@@ -1105,6 +1114,9 @@ function cloneEvent(event) {
   }
   if (Array.isArray(event.attributes.events)) {
     attributes.events = cloneSpanEvents(event.attributes.events);
+  }
+  if (Array.isArray(event.attributes.links)) {
+    attributes.links = cloneSpanLinks(event.attributes.links);
   }
   return { ...event, attributes };
 }
@@ -1168,6 +1180,7 @@ function validateSpan(attributes) {
     }
   }
   const events = validateSpanEvents(attributes.events);
+  const links = validateSpanLinks(attributes.links);
   return withMetadata({
     name: attributes.name,
     traceId: attributes.traceId,
@@ -1175,7 +1188,8 @@ function validateSpan(attributes) {
     status: attributes.status,
     ...(attributes.parentSpanId !== undefined ? { parentSpanId: attributes.parentSpanId } : {}),
     ...(attributes.durationMs !== undefined ? { durationMs: attributes.durationMs } : {}),
-    ...(events !== undefined ? { events } : {})
+    ...(events !== undefined ? { events } : {}),
+    ...(links !== undefined ? { links } : {})
   }, attributes.metadata);
 }
 
@@ -1207,6 +1221,44 @@ function validateSpanEvents(events) {
     };
     if (event.metadata !== undefined) {
       const metadata = compactMetadata(event.metadata);
+      if (Object.keys(metadata).length > 0) {
+        summary.metadata = metadata;
+      }
+    }
+    return summary;
+  });
+}
+
+function validateSpanLinks(links) {
+  if (links === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(links)) {
+    throw new SdkError("validation_error", "span links must be an array");
+  }
+  if (links.length > MAX_SPAN_LINKS) {
+    throw new SdkError("validation_error", `span links must contain at most ${MAX_SPAN_LINKS} entries`);
+  }
+  if (links.length === 0) {
+    return undefined;
+  }
+
+  return links.map((link) => {
+    if (!link || Array.isArray(link) || typeof link !== "object") {
+      throw new SdkError("validation_error", "span link must be an object");
+    }
+    requireTraceId(link.traceId);
+    requireSpanId("span link spanId", link.spanId);
+    if (link.sampled !== undefined && typeof link.sampled !== "boolean") {
+      throw new SdkError("validation_error", "span link sampled must be a boolean");
+    }
+    const summary = {
+      traceId: link.traceId.toLowerCase(),
+      spanId: link.spanId.toLowerCase(),
+      ...(link.sampled !== undefined ? { sampled: link.sampled } : {})
+    };
+    if (link.metadata !== undefined) {
+      const metadata = compactMetadata(link.metadata);
       if (Object.keys(metadata).length > 0) {
         summary.metadata = metadata;
       }

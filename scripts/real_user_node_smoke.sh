@@ -334,7 +334,6 @@ await waitFor(() => manualErrorTransport.sentBodies.length === 1);
 await closeServer(manualServer);
 
 const operationTrace = { traceId: "4bf92f3577b34da6a3ce929d0e0e4736", spanId: "b7ad6b7169203331", sampled: true };
-
 const databaseClient = createLogBrewNodeClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
   sdkName: "node-database-span-smoke",
@@ -346,6 +345,7 @@ const databaseResult = await databaseOperationWithLogBrewSpan("orders.select_by_
   databaseName: "checkout",
   id: "evt_node_database_span_001",
   events: [{ name: "db.pool.wait", timestamp: "2026-06-02T10:00:09Z", metadata: { ignoredObject: { nested: true }, phase: "before_query", retryable: false } }],
+  links: [{ traceId: "11111111111111111111111111111111", spanId: "2222222222222222", sampled: true, metadata: { ignoredObject: { nested: true }, relation: "batch_item" } }],
   metadata: {
     "db.statement": "SELECT * FROM orders WHERE id = 42",
     params: "sensitive-id",
@@ -413,6 +413,7 @@ if (
   throw new Error(`database span metadata was not useful and privacy bounded: ${databaseClient.previewJson()}`);
 }
 assertJsonEqual(databaseSpanEvent.attributes.events, [{ name: "db.pool.wait", timestamp: "2026-06-02T10:00:09Z", metadata: { phase: "before_query", retryable: false } }], "database span should include bounded user span events", databaseClient.previewJson());
+assertJsonEqual(databaseSpanEvent.attributes.links, [{ traceId: "11111111111111111111111111111111", spanId: "2222222222222222", sampled: true, metadata: { relation: "batch_item" } }], "database span should include bounded span links", databaseClient.previewJson());
 if (!databaseErrorSpanEvent || databaseErrorSpanEvent.attributes.status !== "error") {
   throw new Error(`database error span missing: ${databaseClient.previewJson()}`);
 }
@@ -726,7 +727,6 @@ if (manualErrorPayload.events[0].id !== "evt_node_error_manual") {
 if (manualErrorPayload.events[0].attributes.metadata.path !== "/manual") {
   throw new Error(`manual error capture should omit query text: ${manualErrorTransport.lastBody()}`);
 }
-
 console.log(payload);
 console.error(JSON.stringify({
   ok: true,
@@ -861,6 +861,7 @@ const databaseResult = await databaseOperationWithLogBrewSpan("orders.select_by_
   client,
   databaseName: "checkout",
   events: [{ name: "db.pool.wait", metadata: { phase: "before_query" } }],
+  links: [{ traceId: "11111111111111111111111111111111", spanId: "2222222222222222" }],
   operation: async () => [{ id: 42 }],
   operationKind: "SELECT",
   rowCount: 1,
@@ -917,7 +918,6 @@ const handler = withLogBrewHttpHandler((
 });
 
 const server = createServer(handler);
-
 export { handler, server };
 EOF
 

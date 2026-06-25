@@ -124,6 +124,41 @@ class ValidateFixturesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "event 4 span events must contain at most 8 entries"):
             validate_payload(payload)
 
+    def test_span_links_pass_with_primitive_metadata(self) -> None:
+        payload = self.load_valid_payload()
+        payload["events"][4]["attributes"]["links"] = [
+            {
+                "traceId": "11111111111111111111111111111111",
+                "spanId": "2222222222222222",
+                "sampled": True,
+                "metadata": {"relation": "batch_item", "shard": 3},
+            }
+        ]
+        validate_payload(payload)
+
+    def test_rejects_nested_span_link_metadata_values(self) -> None:
+        payload = self.load_valid_payload()
+        payload["events"][4]["attributes"]["links"] = [
+            {
+                "traceId": "11111111111111111111111111111111",
+                "spanId": "2222222222222222",
+                "metadata": {"nested": {"nope": True}},
+            }
+        ]
+        with self.assertRaisesRegex(
+            ValidationError,
+            "event 4 span link 0 metadata value for nested must be a string, number, boolean, or null",
+        ):
+            validate_payload(payload)
+
+    def test_rejects_too_many_span_links(self) -> None:
+        payload = self.load_valid_payload()
+        payload["events"][4]["attributes"]["links"] = [
+            {"traceId": f"{index + 1:032x}", "spanId": "2222222222222222"} for index in range(9)
+        ]
+        with self.assertRaisesRegex(ValidationError, "event 4 span links must contain at most 8 entries"):
+            validate_payload(payload)
+
     def test_metric_event_passes(self) -> None:
         payload = self.load_valid_payload()
         payload["events"].append(self.metric_event())

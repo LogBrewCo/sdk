@@ -43,4 +43,4 @@ Close the Node server-side database span gap after request and outbound fetch tr
 
 - Node still lacks optional automatic driver integrations for teams that explicitly want Sentry/Datadog-style drop-in coverage.
 - Cache and queue spans are still thinner than competitor automatic instrumentation.
-- LogBrew still avoids baggage, tracestate, span links, DB semantic conventions beyond the current safe subset, query comments, and database-side trace propagation. Bounded span events now exist, but they are explicit summaries rather than automatic full OpenTelemetry/Sentry event streams.
+- LogBrew still avoids baggage, tracestate, DB semantic conventions beyond the current safe subset, query comments, and database-side trace propagation. Bounded span events and span links now exist, but they are explicit summaries/references rather than automatic full OpenTelemetry/Sentry event/link streams.

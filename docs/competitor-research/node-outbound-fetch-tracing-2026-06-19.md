@@ -39,4 +39,4 @@ Sentry, Datadog, and OpenTelemetry are stronger for hidden automatic coverage. L
 
 - Node still lacks optional framework-owned automatic Undici/global fetch instrumentation for teams that explicitly want it.
 - Server SDKs outside Node still need deeper outbound HTTP, DB, cache, and queue spans.
-- LogBrew still avoids baggage/tracestate, span links, response-body capture, and phase-timing streams. Bounded span events now exist for explicit milestones and exception type summaries, not automatic full OpenTelemetry/Sentry event streams.
+- LogBrew still avoids baggage/tracestate, response-body capture, and phase-timing streams. Bounded span events and span links now exist for explicit milestones, exception type summaries, and app-owned fan-out/batch relationships, not automatic full OpenTelemetry/Sentry event/link streams.

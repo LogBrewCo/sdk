@@ -388,7 +388,6 @@ async function captureFetchSpan(options, {
     } : {})
   };
   const events = spanEvents(options.events, error);
-
   try {
     options.client.span(id, typeof options.now === "function" ? options.now() : new Date().toISOString(), {
       name: `${method} ${path}`,
@@ -398,6 +397,7 @@ async function captureFetchSpan(options, {
       status: error !== undefined || Number(statusCode ?? 0) >= 400 ? "error" : "ok",
       durationMs,
       ...(events !== undefined ? { events } : {}),
+      ...(options.links !== undefined ? { links: options.links } : {}),
       metadata
     });
   } catch (captureError) {
@@ -437,7 +437,6 @@ async function captureDatabaseSpan(options, {
     ...(error !== undefined ? { errorType: errorType(error) } : {})
   };
   const events = spanEvents(options.events, error);
-
   try {
     options.client.span(id, typeof options.now === "function" ? options.now() : new Date().toISOString(), {
       name: `${system} ${operationKind} ${operationName.trim()}`,
@@ -447,6 +446,7 @@ async function captureDatabaseSpan(options, {
       status: error !== undefined ? "error" : "ok",
       durationMs,
       ...(events !== undefined ? { events } : {}),
+      ...(options.links !== undefined ? { links: options.links } : {}),
       metadata
     });
   } catch (captureError) {
@@ -521,7 +521,6 @@ async function captureOperationSpan(kind, options, {
     ...(error !== undefined ? { errorType: errorType(error) } : {})
   };
   const events = spanEvents(options.events, error);
-
   try {
     options.client.span(id, typeof options.now === "function" ? options.now() : new Date().toISOString(), {
       name: `${system} ${operationKind} ${operationName.trim()}`,
@@ -531,6 +530,7 @@ async function captureOperationSpan(kind, options, {
       status: error !== undefined ? "error" : "ok",
       durationMs,
       ...(events !== undefined ? { events } : {}),
+      ...(options.links !== undefined ? { links: options.links } : {}),
       metadata
     });
   } catch (captureError) {
