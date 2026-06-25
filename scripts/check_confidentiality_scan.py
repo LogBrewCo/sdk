@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -59,15 +60,21 @@ FORBIDDEN_PUBLIC_PLANNING_PATHS = (
 def iter_scanned_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for current_root, dirnames, filenames in os.walk(root):
+        current_path = Path(current_root)
+        current_relative = current_path.relative_to(root)
+        if current_relative != Path(".") and is_git_ignored(root, current_relative):
+            dirnames[:] = []
+            continue
         dirnames[:] = [
             dirname
             for dirname in dirnames
             if dirname not in SKIPPED_DIRS and not dirname.endswith(".egg-info")
         ]
-        current_path = Path(current_root)
         for filename in filenames:
             path = current_path / filename
             relative = path.relative_to(root)
+            if is_git_ignored(root, relative):
+                continue
             if relative == SELF_PATH:
                 continue
             if filename in SKIPPED_FILES:
@@ -76,6 +83,16 @@ def iter_scanned_files(root: Path) -> list[Path]:
                 continue
             files.append(path)
     return sorted(files)
+
+
+def is_git_ignored(root: Path, relative: Path) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(root), "check-ignore", "--quiet", "--", relative.as_posix()],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
 
 
 def validate(root: Path) -> list[str]:
@@ -106,6 +123,8 @@ def validate_forbidden_public_planning_paths(root: Path) -> list[str]:
         path = root / relative
         if not path.exists():
             continue
+        if is_git_ignored(root, relative):
+            continue
         failures.append(
             f"./{relative.as_posix()}: forbidden public planning file; keep agent guidance and "
             "private plans in private coordination, not public SDK repos"
@@ -118,6 +137,8 @@ def validate_public_readme_language(root: Path) -> list[str]:
     for path in sorted(root.rglob("README.md")):
         relative = path.relative_to(root)
         if any(part in SKIPPED_DIRS for part in relative.parts):
+            continue
+        if is_git_ignored(root, relative):
             continue
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if not PUBLIC_README_FORBIDDEN_RE.search(line):

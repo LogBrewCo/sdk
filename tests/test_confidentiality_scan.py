@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -82,6 +83,25 @@ class ConfidentialityScanTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("skills-lock.json", failures[0])
         self.assertIn("forbidden public planning file", failures[0])
+
+    def test_allows_local_ignored_agent_redirect_and_plans(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+            (root / ".gitignore").write_text("AGENTS.md\nplans/\n", encoding="utf-8")
+            sensitive_term = "cre" + "dential"
+            planning_term = "stra" + "tegy"
+            (root / "AGENTS.md").write_text(
+                f"Read private guidance. Do not copy {sensitive_term} or backend/storage details.\n",
+                encoding="utf-8",
+            )
+            (root / "plans").mkdir()
+            (root / "plans" / "private-plan.md").write_text(
+                f"Local private plan with {planning_term} notes.\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
 
 
 if __name__ == "__main__":
