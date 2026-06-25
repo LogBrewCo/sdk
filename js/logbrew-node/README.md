@@ -242,7 +242,7 @@ The helper returns or rethrows exactly what your `operation` does, records one c
 Use `queueOperationWithLogBrewSpan()` around important producer or consumer work when you want queue timing correlation without installing AMQP, Kafka, BullMQ, or cloud queue instrumentation:
 
 ```js
-import { queueOperationWithLogBrewSpan } from "@logbrew/node";
+import { createLogBrewQueueTraceHeaders, queueOperationWithLogBrewSpan } from "@logbrew/node";
 
 await queueOperationWithLogBrewSpan("email.publish", {
   client: logbrew.client,
@@ -252,11 +252,24 @@ await queueOperationWithLogBrewSpan("email.publish", {
   queueName: "email",
   taskName: "send_welcome_email",
   messageCount: 1,
-  operation: () => channel.sendToQueue("email", payload)
+  operation: () => channel.sendToQueue("email", payload, {
+    headers: createLogBrewQueueTraceHeaders()
+  })
+});
+
+await queueOperationWithLogBrewSpan("email.process", {
+  client: logbrew.client,
+  system: "amqp",
+  operationKind: "process",
+  queueName: "email",
+  traceparent: message.headers?.traceparent,
+  operation: () => processMessage(message)
 });
 ```
 
-The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Metadata records the queue system, operation name, operation kind, optional queue/task names, message count, duration, sampled flag, W3C trace IDs, and portable messaging semantic metadata when available (`messaging.system`, `messaging.destination.name`, `messaging.operation.name`, `messaging.operation.type`, `messaging.batch.message_count`). Optional `events` record up to eight explicit low-cardinality span milestones with primitive metadata; optional `links` record up to eight related trace/span IDs with primitive metadata; failed operations add a type-only `exception` event. It does not monkey-patch queue clients, mutate broker headers, capture message bodies, serialize job arguments, record broker URLs, include queue error messages/stacks, infer baggage/tracestate, or store raw propagation headers.
+The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Call `createLogBrewQueueTraceHeaders()` inside a producer operation to create one normalized W3C `traceparent` header from the active queue span, then pass that header into a consumer span through `traceparent` when you process the message. Malformed incoming propagation is ignored and falls back to a fresh trace so bad broker headers do not break workers.
+
+Metadata records the queue system, operation name, operation kind, optional queue/task names, message count, duration, sampled flag, W3C trace IDs, and portable messaging semantic metadata when available (`messaging.system`, `messaging.destination.name`, `messaging.operation.name`, `messaging.operation.type`, `messaging.batch.message_count`). Optional `events` record up to eight explicit low-cardinality span milestones with primitive metadata; optional `links` record up to eight related trace/span IDs with primitive metadata; failed operations add a type-only `exception` event. It does not monkey-patch queue clients, mutate broker headers outside your explicit call, capture message bodies, serialize job arguments, record broker URLs, include queue error messages/stacks, infer baggage/tracestate, or store raw propagation headers.
 
 ## HTTP Delivery
 

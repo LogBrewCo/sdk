@@ -31,6 +31,10 @@ export type LogBrewTraceContext = {
   sampled: boolean;
 };
 
+export type LogBrewQueueTraceHeaders = {
+  traceparent?: string;
+};
+
 export type LogBrewNodeContext = {
   client: LogBrewClient;
   logbrew: LogBrewClient;
@@ -202,6 +206,7 @@ export type QueueOperationWithLogBrewSpanOptions<Result = unknown> = {
   queueName?: string;
   taskName?: string;
   messageCount?: number;
+  traceparent?: string;
   trace?: LogBrewTraceContext;
   id?: string;
   events?: SpanEventSummary[];
@@ -241,6 +246,10 @@ export declare function createLogBrewNodeContext(
 ): LogBrewNodeContext;
 
 export declare function getActiveLogBrewTrace(): LogBrewTraceContext | undefined;
+
+export declare function createLogBrewQueueTraceHeaders(
+  trace?: LogBrewTraceContext
+): LogBrewQueueTraceHeaders;
 
 export declare function fetchWithLogBrewSpan(
   input: Parameters<typeof fetch>[0],
@@ -307,6 +316,7 @@ declare const defaultExport: {
   createHttpRequestEvent: typeof createHttpRequestEvent;
   createLogBrewNodeClient: typeof createLogBrewNodeClient;
   createLogBrewNodeContext: typeof createLogBrewNodeContext;
+  createLogBrewQueueTraceHeaders: typeof createLogBrewQueueTraceHeaders;
   databaseOperationWithLogBrewSpan: typeof databaseOperationWithLogBrewSpan;
   fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;

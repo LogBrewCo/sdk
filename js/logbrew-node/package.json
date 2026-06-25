@@ -21,6 +21,8 @@
   "files": [
     "index.cjs",
     "index.js",
+    "trace-context.cjs",
+    "trace-context.js",
     "index.d.ts",
     "index.d.cts",
     "README.md",

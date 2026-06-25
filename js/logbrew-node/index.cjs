@@ -9,6 +9,12 @@ const {
   TransportError
 } = require("@logbrew/sdk");
 const { AsyncLocalStorage } = require("node:async_hooks");
+const {
+  createLogBrewQueueTraceHeaders: createQueueTraceHeaders,
+  normalizeSpanId,
+  normalizeTraceId,
+  resolveOperationTrace
+} = require("./trace-context.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-node";
 const DEFAULT_SDK_VERSION = "0.1.0";
@@ -119,6 +125,10 @@ function createLogBrewNodeContext(client, transport, trace) {
 
 function getActiveLogBrewTrace() {
   return activeTraceContext.getStore();
+}
+
+function createLogBrewQueueTraceHeaders(trace = getActiveLogBrewTrace()) {
+  return createQueueTraceHeaders(trace);
 }
 
 async function fetchWithLogBrewSpan(input, init = {}, options = {}) {
@@ -478,7 +488,7 @@ async function operationWithLogBrewSpan(kind, operationName, options = {}) {
   const system = normalizeDatabaseLabel(options.system, kind);
   const operationKind = normalizeDatabaseOperationKind(options.operationKind);
   const startedAt = nowMs(options);
-  const trace = createChildTraceContext(helperName, options.trace ?? getActiveLogBrewTrace(), options);
+  const trace = createChildTraceContext(helperName, resolveOperationTrace(options, getActiveLogBrewTrace()), options);
   const id = options.id ?? `evt_node_${kind}_${slugify(`${system}_${operationKind}_${operationName}`)}`;
 
   try {
@@ -906,28 +916,6 @@ function getRequestTraceContext(req) {
   return req.logbrew?.trace;
 }
 
-function normalizeSpanId(value) {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const spanId = value.toLowerCase();
-  if (!/^[0-9a-f]{16}$/u.test(spanId) || spanId === "0000000000000000") {
-    return undefined;
-  }
-  return spanId;
-}
-
-function normalizeTraceId(value) {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const traceId = value.toLowerCase();
-  if (!/^[0-9a-f]{32}$/u.test(traceId) || traceId === "00000000000000000000000000000000") {
-    return undefined;
-  }
-  return traceId;
-}
-
 function traceMetadata(trace) {
   if (!trace) {
     return {};
@@ -986,6 +974,7 @@ const exported = {
   createHttpRequestEvent,
   createLogBrewNodeClient,
   createLogBrewNodeContext,
+  createLogBrewQueueTraceHeaders,
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
