@@ -266,6 +266,9 @@ jobs:
       - name: Run Node.js real-user smoke test
         run: bash scripts/real_user_node_smoke.sh
 
+      - name: Run BullMQ real-user smoke test
+        run: bash scripts/real_user_bullmq_smoke.sh
+
       - name: Run Express real-user smoke test
         run: bash scripts/real_user_express_smoke.sh
 
