@@ -6,7 +6,10 @@ import {
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
   createSupportTicketDraft,
+  createBaggage,
   createTraceparent,
+  createTraceContextHeaders,
+  createTracestate,
   createTraceparentHeaders,
   createLogBrewPinoDestination,
   createLogBrewWinstonTransport,
@@ -16,7 +19,9 @@ import {
   logAttributesFromPinoRecord,
   logAttributesFromWinstonInfo,
   logbrewLevelFromConsoleMethod,
+  parseBaggage,
   parseTraceparent,
+  parseTracestate,
   RecordingTransport,
   SdkError,
   spanAttributesFromTraceparent,
@@ -624,6 +629,76 @@ test("traceparent helpers parse, create, and continue W3C trace context", () => 
       durationMs: 12.5,
       metadata: { service: "checkout" }
     }
+  );
+});
+
+test("trace context helpers create explicit tracestate and baggage carriers", () => {
+  assert.deepEqual(
+    parseTracestate("rojo=00f067aa0ba902b7, congo=t61rcWkgMzE"),
+    [
+      { key: "rojo", value: "00f067aa0ba902b7" },
+      { key: "congo", value: "t61rcWkgMzE" }
+    ]
+  );
+  assert.equal(
+    createTracestate([
+      { key: "rojo", value: "00f067aa0ba902b7" },
+      { key: "congo", value: "t61rcWkgMzE" }
+    ]),
+    "rojo=00f067aa0ba902b7,congo=t61rcWkgMzE"
+  );
+  assert.deepEqual(
+    parseBaggage("release=checkout%401.2.3, region = eu-west ; sampled=true"),
+    [
+      { key: "release", value: "checkout@1.2.3" },
+      { key: "region", value: "eu-west", properties: ["sampled=true"] }
+    ]
+  );
+  assert.equal(
+    createBaggage([
+      { key: "release", value: "checkout@1.2.3" },
+      { key: "region", value: "eu-west", properties: ["sampled=true"] }
+    ]),
+    "release=checkout%401.2.3,region=eu-west;sampled=true"
+  );
+  assert.deepEqual(
+    createTraceContextHeaders({
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      spanId: "b7ad6b7169203331",
+      traceFlags: "01",
+      tracestate: [{ key: "rojo", value: "00f067aa0ba902b7" }],
+      baggage: [{ key: "release", value: "checkout@1.2.3" }]
+    }),
+    {
+      traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01",
+      tracestate: "rojo=00f067aa0ba902b7",
+      baggage: "release=checkout%401.2.3"
+    }
+  );
+});
+
+test("trace context helpers reject oversized or malformed carriers", () => {
+  assert.throws(
+    () => createTracestate([{ key: "Vendor", value: "opaque" }]),
+    /tracestate key must be lowercase/
+  );
+  assert.throws(
+    () => createTracestate(Array.from({ length: 33 }, (_, index) => ({
+      key: `v${index}`,
+      value: "opaque"
+    }))),
+    /tracestate must contain at most 32 entries/
+  );
+  assert.throws(
+    () => createBaggage([{ key: "bad key", value: "value" }]),
+    /baggage key must use RFC header-name characters/
+  );
+  assert.throws(
+    () => createBaggage(Array.from({ length: 65 }, (_, index) => ({
+      key: `k${index}`,
+      value: "v"
+    }))),
+    /baggage must contain at most 64 entries/
   );
 });
 

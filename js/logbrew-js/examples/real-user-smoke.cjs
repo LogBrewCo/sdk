@@ -9,7 +9,7 @@ try {
   }
 }
 
-const { createTraceparentHeaders, LogBrewClient, RecordingTransport } = sdk;
+const { createTraceContextHeaders, createTraceparentHeaders, LogBrewClient, RecordingTransport } = sdk;
 
 const outgoingHeaders = createTraceparentHeaders({
   traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -18,6 +18,20 @@ const outgoingHeaders = createTraceparentHeaders({
 });
 if (outgoingHeaders.traceparent !== "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01") {
   throw new Error("createTraceparentHeaders produced an unexpected carrier");
+}
+const outgoingContextHeaders = createTraceContextHeaders({
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  spanId: "b7ad6b7169203331",
+  traceFlags: "01",
+  tracestate: [{ key: "rojo", value: "00f067aa0ba902b7" }],
+  baggage: [{ key: "release", value: "checkout@1.2.3" }]
+});
+if (
+  outgoingContextHeaders.traceparent !== outgoingHeaders.traceparent
+  || outgoingContextHeaders.tracestate !== "rojo=00f067aa0ba902b7"
+  || outgoingContextHeaders.baggage !== "release=checkout%401.2.3"
+) {
+  throw new Error("createTraceContextHeaders produced an unexpected carrier");
 }
 
 const client = LogBrewClient.create({

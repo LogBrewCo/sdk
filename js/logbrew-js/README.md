@@ -147,6 +147,7 @@ Use `parseTraceparent()`, `createTraceparent()`, and `spanAttributesFromTracepar
 
 ```js
 import {
+  createTraceContextHeaders,
   createTraceparentHeaders,
   LogBrewClient,
   RecordingTransport,
@@ -184,10 +185,20 @@ await fetch("https://example.invalid/payments", {
   })
 });
 
+await fetch("https://example.invalid/fulfillment", {
+  headers: createTraceContextHeaders({
+    traceId: span.traceId,
+    spanId: span.spanId,
+    traceFlags: "01",
+    tracestate: [{ key: "rojo", value: "00f067aa0ba902b7" }],
+    baggage: [{ key: "release", value: "checkout@1.2.3" }]
+  })
+});
+
 await client.flush(RecordingTransport.alwaysAccept());
 ```
 
-The helpers validate the W3C `version-traceId-parentSpanId-traceFlags` shape, reject all-zero trace/span ids, normalize valid ids to lowercase, expose the sampled flag from `traceFlags`, and keep span metadata primitive-only. Optional span `events` record up to eight low-cardinality milestones with optional timestamps and primitive metadata only. Optional span `links` record up to eight privacy-bounded references to related trace/span IDs for batch, fan-out, queue, or retry workflows. `createTraceparentHeaders()` returns an explicit outbound carrier with only `traceparent`. The helpers do not install OpenTelemetry, patch HTTP clients, infer baggage/tracestate, or capture payloads; use them when you need explicit interop in code you own.
+The helpers validate the W3C `version-traceId-parentSpanId-traceFlags` shape, reject all-zero trace/span ids, normalize valid ids to lowercase, expose the sampled flag from `traceFlags`, and keep span metadata primitive-only. Optional span `events` record up to eight low-cardinality milestones with optional timestamps and primitive metadata only. Optional span `links` record up to eight privacy-bounded references to related trace/span IDs for batch, fan-out, queue, or retry workflows. `createTraceparentHeaders()` returns an explicit outbound carrier with only `traceparent`. `parseTracestate()`, `createTracestate()`, `parseBaggage()`, `createBaggage()`, and `createTraceContextHeaders()` add opt-in W3C `tracestate` and `baggage` propagation with bounded entry counts and header sizes. The helpers do not install OpenTelemetry, patch HTTP clients, infer baggage/tracestate automatically, or capture payloads; use them when you need explicit interop in code you own.
 
 LogBrew severity categories are `info`, `warning`, `error`, and `critical`. The JavaScript SDK accepts common runtime aliases such as `trace`, `debug`, `warn`, and `fatal` for compatibility, then serializes canonical values before queued events are sent. The shared mapping is documented in the [LogBrew severity contract](../../docs/severity-contract.md).
 

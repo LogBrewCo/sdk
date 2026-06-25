@@ -1,4 +1,5 @@
 const { buildCreateSupportTicketDraft } = require("./support-ticket.cjs");
+const { buildTraceContextHelpers } = require("./trace-context.cjs");
 
 const SEVERITY_ALIASES = new Map([
   ["trace", "info"],
@@ -507,6 +508,17 @@ function createTraceparent({ traceId, spanId, traceFlags = "01" }) {
 function createTraceparentHeaders(input) {
   return { traceparent: createTraceparent(input) };
 }
+
+const {
+  createBaggage,
+  createTraceContextHeaders,
+  createTracestate,
+  parseBaggage,
+  parseTracestate
+} = buildTraceContextHelpers({
+  SdkError,
+  createTraceparent
+});
 
 const createSupportTicketDraft = buildCreateSupportTicketDraft({
   SdkError,
@@ -1496,11 +1508,14 @@ function formatConsoleArgument(value, includeErrorStack) {
 }
 
 module.exports = {
+  createBaggage,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
   createSupportTicketDraft,
+  createTraceContextHeaders,
   createTraceparent,
   createTraceparentHeaders,
+  createTracestate,
   createLogBrewPinoDestination,
   createLogBrewWinstonTransport,
   installLogBrewConsoleCapture,
@@ -1509,7 +1524,9 @@ module.exports = {
   logAttributesFromPinoRecord,
   logAttributesFromWinstonInfo,
   logbrewLevelFromConsoleMethod,
+  parseBaggage,
   parseTraceparent,
+  parseTracestate,
   RecordingTransport,
   SdkError,
   spanAttributesFromTraceparent,

@@ -25,6 +25,25 @@ export type TraceparentInput = {
   traceFlags?: string;
 };
 
+/** Privacy-bounded W3C tracestate entry for explicit propagation. */
+export type TracestateEntry = {
+  key: string;
+  value: string;
+};
+
+/** W3C baggage entry for explicit propagation. */
+export type BaggageEntry = {
+  key: string;
+  value: string;
+  properties?: string[];
+};
+
+/** Inputs for creating an explicit W3C trace context header carrier. */
+export type TraceContextInput = TraceparentInput & {
+  tracestate?: string | TracestateEntry[];
+  baggage?: string | BaggageEntry[];
+};
+
 /** Span fields supplied when deriving LogBrew span attributes from traceparent. */
 export type TraceparentSpanInput = {
   name: string;
@@ -446,6 +465,25 @@ export declare function createTraceparent(input: TraceparentInput): string;
 
 /** Create an explicit outbound header carrier containing only traceparent. */
 export declare function createTraceparentHeaders(input: TraceparentInput): { traceparent: string };
+
+/** Parse a W3C tracestate header into normalized entries. */
+export declare function parseTracestate(tracestate: string): TracestateEntry[];
+
+/** Create a normalized W3C tracestate header from explicit entries. */
+export declare function createTracestate(entries: TracestateEntry[]): string;
+
+/** Parse a W3C baggage header into decoded entries. */
+export declare function parseBaggage(baggage: string): BaggageEntry[];
+
+/** Create a W3C baggage header from explicit entries. */
+export declare function createBaggage(entries: BaggageEntry[]): string;
+
+/** Create an explicit outbound carrier for traceparent plus optional tracestate and baggage. */
+export declare function createTraceContextHeaders(input: TraceContextInput): {
+  traceparent: string;
+  tracestate?: string;
+  baggage?: string;
+};
 
 /** Build LogBrew span attributes that continue an incoming W3C traceparent value. */
 export declare function spanAttributesFromTraceparent(

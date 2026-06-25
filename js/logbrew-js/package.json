@@ -38,6 +38,7 @@
     "index.d.ts",
     "index.d.cts",
     "support-ticket.cjs",
+    "trace-context.cjs",
     "release-artifacts-common.js",
     "release-artifacts.js",
     "release-artifacts-upload.js",
