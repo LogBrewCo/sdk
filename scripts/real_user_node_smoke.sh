@@ -511,7 +511,6 @@ if (
 ) {
   throw new Error(`cache span leaked key or value details: ${cacheClient.previewJson()}`);
 }
-
 const queueClient = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY", sdkName: "node-queue-span-smoke", sdkVersion: "0.1.0" });
 const queueClock = [300, 329, 340, 377];
 const queueResult = await queueOperationWithLogBrewSpan("email.publish", {
@@ -576,6 +575,7 @@ if (
 ) {
   throw new Error(`queue span metadata was not useful and privacy bounded: ${queueClient.previewJson()}`);
 }
+assertMetadata(queueSpanEvent.attributes.metadata, { "messaging.system": "amqp", "messaging.destination.name": "email", "messaging.operation.name": "publish", "messaging.operation.type": "publish", "messaging.batch.message_count": 2 }, "queue span missing portable messaging semantic metadata", queueClient.previewJson());
 if (!queueErrorSpanEvent || queueErrorSpanEvent.attributes.metadata.errorType !== "SyntaxError") {
   throw new Error(`queue error should include error type only: ${queueClient.previewJson()}`);
 }

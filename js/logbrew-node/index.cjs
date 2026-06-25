@@ -519,6 +519,7 @@ async function captureOperationSpan(kind, options, {
     ...operationMetadata(kind, options.metadata),
     framework: `node:${kind}`,
     ...(kind === "cache" ? { "db.system.name": system, "db.operation.name": operationKind, ...(typeof options.cacheName === "string" && options.cacheName.trim() !== "" ? { "db.namespace": options.cacheName.trim() } : {}) } : {}),
+    ...(kind === "queue" ? { "messaging.system": system, "messaging.operation.name": operationKind, "messaging.operation.type": operationKind, ...(typeof options.queueName === "string" && options.queueName.trim() !== "" ? { "messaging.destination.name": options.queueName.trim() } : {}), ...(Number.isFinite(options.messageCount) && Math.max(0, Math.trunc(options.messageCount)) > 1 ? { "messaging.batch.message_count": Math.max(0, Math.trunc(options.messageCount)) } : {}) } : {}),
     [`${kind}System`]: system,
     [`${kind}Operation`]: operationName.trim(),
     [`${kind}OperationKind`]: operationKind,
