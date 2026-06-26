@@ -65,7 +65,7 @@ class BackendContractReportTests(unittest.TestCase):
         self.assertIn("React Native-shaped Android mapping/native `.so`", report)
         self.assertIn("iOS `.xcarchive/dSYMs`", report)
 
-    def test_release_artifact_report_tracks_backend_confirmed_absence(self) -> None:
+    def test_release_artifact_report_tracks_backend_partial_symbolication_rollout(self) -> None:
         report = (
             ROOT
             / "docs"
@@ -74,7 +74,9 @@ class BackendContractReportTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("sent to backend coordination", report)
-        self.assertIn("no backend release-artifact route/schema/lookup surface", report)
+        self.assertIn("auth-gated release-artifact upload, lookup, byte retention, and one-frame JavaScript symbolication", report)
+        self.assertIn("scoped live upload/lookup/retention/symbolication verification", report)
+        self.assertNotIn("no backend release-artifact route/schema/lookup surface", report)
         self.assertNotIn("no backend automation/thread target is exposed", report)
 
     def test_support_ticket_report_blocks_sdk_network_calls_until_live_verified(self) -> None:
