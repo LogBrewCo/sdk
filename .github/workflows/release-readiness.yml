@@ -275,6 +275,9 @@ jobs:
       - name: Run AMQP/RabbitMQ real-user smoke test
         run: bash scripts/real_user_amqplib_smoke.sh
 
+      - name: Run AWS SQS real-user smoke test
+        run: bash scripts/real_user_aws_sqs_smoke.sh
+
       - name: Run Express real-user smoke test
         run: bash scripts/real_user_express_smoke.sh
 

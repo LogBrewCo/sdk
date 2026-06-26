@@ -38,6 +38,7 @@ Install only the package your application needs. The package names below are reg
 | BullMQ | [`@logbrew/bullmq`](js/logbrew-bullmq) | Explicit BullMQ producer/worker trace correlation |
 | KafkaJS | [`@logbrew/kafkajs`](js/logbrew-kafkajs) | Explicit KafkaJS producer/consumer trace correlation |
 | RabbitMQ / amqplib | [`@logbrew/amqplib`](js/logbrew-amqplib) | Explicit RabbitMQ publish/consume trace correlation |
+| Amazon SQS | [`@logbrew/aws-sqs`](js/logbrew-aws-sqs) | Explicit SQS send/receive/process trace correlation |
 | Express | [`@logbrew/express`](js/logbrew-express) | Express request/error middleware |
 | Fastify | [`@logbrew/fastify`](js/logbrew-fastify) | Fastify plugin and request hooks |
 | NestJS | [`@logbrew/nestjs`](js/logbrew-nestjs) | NestJS interceptor capture |

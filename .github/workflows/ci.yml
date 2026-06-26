@@ -165,7 +165,7 @@ jobs:
 
       - name: Run JavaScript SDK tests
         if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
-        run: cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test
+        run: cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test
 
       - name: Run JavaScript real-user smoke test
         if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
@@ -190,6 +190,10 @@ jobs:
       - name: Run AMQP/RabbitMQ real-user smoke test
         if: ${{ hashFiles('js/logbrew-amqplib/package.json') != '' }}
         run: bash scripts/real_user_amqplib_smoke.sh
+
+      - name: Run AWS SQS real-user smoke test
+        if: ${{ hashFiles('js/logbrew-aws-sqs/package.json') != '' }}
+        run: bash scripts/real_user_aws_sqs_smoke.sh
 
       - name: Run Express real-user smoke test
         if: ${{ hashFiles('js/logbrew-express/package.json') != '' }}

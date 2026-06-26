@@ -227,6 +227,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "AMQP/RabbitMQ real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_amqplib_smoke\.sh"\n'
             r"mark_step_complete\n\n"
+            r'begin_next_step "AWS SQS real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_aws_sqs_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
             r'begin_next_step "Express real-user smoke"',
         )
 
