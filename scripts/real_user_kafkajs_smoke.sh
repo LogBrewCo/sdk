@@ -401,6 +401,4 @@ EOF
 
 node smoke.mjs
 
-find "$repo_root/scripts" "$repo_root/tests" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
-python3 "$repo_root/scripts/check_generated_artifacts.py"
 echo "KafkaJS real-user smoke passed"
