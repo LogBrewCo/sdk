@@ -221,6 +221,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "BullMQ real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_bullmq_smoke\.sh"\n'
             r"mark_step_complete\n\n"
+            r'begin_next_step "KafkaJS real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_kafkajs_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
             r'begin_next_step "Express real-user smoke"',
         )
 

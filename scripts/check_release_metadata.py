@@ -33,6 +33,7 @@ JS_PACKAGES = {
     "js/logbrew-express": "@logbrew/express",
     "js/logbrew-fastify": "@logbrew/fastify",
     "js/logbrew-js": "@logbrew/sdk",
+    "js/logbrew-kafkajs": "@logbrew/kafkajs",
     "js/logbrew-nestjs": "@logbrew/nestjs",
     "js/logbrew-next": "@logbrew/next",
     "js/logbrew-node": "@logbrew/node",
