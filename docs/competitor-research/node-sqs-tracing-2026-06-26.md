@@ -27,6 +27,7 @@ The tradeoff is broader hidden runtime coupling: AWS SDK patching, queue URL/res
 
 `@logbrew/aws-sqs` adds explicit app-owned SQS helpers:
 
+- `instrumentLogBrewSqsClient(...)`
 - `sqsSendMessageWithLogBrewSpan(...)`
 - `sqsSendMessageBatchWithLogBrewSpan(...)`
 - `sqsReceiveMessageWithLogBrewSpan(...)`
@@ -39,7 +40,9 @@ The tradeoff is broader hidden runtime coupling: AWS SDK patching, queue URL/res
 
 Producer helpers clone AWS SDK v3 command inputs, add one normalized W3C `traceparent` message attribute when the ten-attribute SQS limit permits it, and call the app-owned `SQSClient.send()` with the command constructor supplied by the app. Receive helpers clone receive inputs, request the `traceparent` message attribute, and add bounded span links from returned messages. Message processors continue valid incoming `traceparent` values from `MessageAttributes`; malformed propagation falls back to a new trace.
 
-The package intentionally avoids hidden AWS SDK patching, queue URL capture, queue ARN/account/region capture, arbitrary message attributes, message bodies, receipt handles, message IDs, MD5 values, payload sizes, baggage, tracestate, body parsing, data-stream monitoring, stack traces, exception messages, support-ticket calls, and backend-owned release-artifact behavior.
+The follow-up `instrumentLogBrewSqsClient(...)` helper narrows the automatic instrumentation gap without adopting global patching. Apps explicitly pass one owned SQS client plus the three AWS SDK v3 command constructors; LogBrew wraps only that client's `send()` method, detects `SendMessageCommand`, `SendMessageBatchCommand`, and `ReceiveMessageCommand`, reuses the same safe helper paths, passes unknown commands and AWS SDK send options through, blocks double-install, and reinstates the prior `send()` function on `uninstall()`.
+
+The package intentionally avoids hidden/global AWS SDK patching, queue URL capture, queue ARN/account/region capture, arbitrary message attributes, message bodies, receipt handles, message IDs, MD5 values, payload sizes, baggage, tracestate, body parsing, data-stream monitoring, stack traces, exception messages, support-ticket calls, and backend-owned release-artifact behavior.
 
 ## Verification
 
@@ -48,7 +51,8 @@ The package intentionally avoids hidden AWS SDK patching, queue URL capture, que
 - GREEN: `npm test --prefix js/logbrew-aws-sqs` passed.
 - GREEN: `bash scripts/real_user_aws_sqs_smoke.sh` passed. It packs `@logbrew/sdk`, `@logbrew/node`, and `@logbrew/aws-sqs`, installs them in a temporary npm app with `@aws-sdk/client-sqs@3.1075.0`, proves TypeScript/CJS/ESM package surfaces, producer traceparent message-attribute injection without mutating caller command inputs, receive-input trace attribute requests, SQS ten-attribute limit behavior, receive span links, single-message parent-child processor correlation, type-only processor failure spans, local 503-to-202 fake-intake retry, and no queue URL/body/message-attribute/message-id/receipt-handle/error-detail leakage.
 - GREEN high-load proof: the same installed smoke sends 1,200 traced SQS `SendMessageCommand` operations through a fake app-owned SQS client, verifies the 1,000-event in-memory queue bound, 200 `queue_overflow` drop callbacks, app result preservation, local 503-to-202 fake-intake retry, flushed-event count, and no message body, generated message ID, account-like QueueUrl segment, host, or dropped-event leakage.
+- GREEN instrumentation proof: the installed smoke typechecks `instrumentLogBrewSqsClient(...)`, checks CommonJS/default exports, wraps a fake app-owned SQS client, proves automatic send/batch/receive tracing through normal `client.send(new Command(...))`, preserves AWS SDK send options, passes unknown commands through, rejects duplicate install, puts the prior `send()` function back on uninstall, and proves the instrumentation payload through local 503-to-202 fake-intake retry with the same redaction boundaries.
 
 ## Remaining Gaps
 
-OpenTelemetry and Datadog remain stronger for automatic AWS SDK patching, receive-command spans, SNS-to-SQS/EventBridge body propagation recovery, data-stream monitoring, custom hooks, and automatic cloud resource metadata. LogBrew should keep SQS explicit until source-backed proof shows automatic AWS SDK instrumentation can stay privacy-bounded and stable enough to justify the coupling.
+Sentry, OpenTelemetry, and Datadog remain stronger for zero-code/global AWS SDK patching, SNS-to-SQS/EventBridge body propagation recovery, data-stream monitoring, custom hooks, and automatic cloud resource metadata. LogBrew now has an opt-in one-client automatic path, but should not add global AWS SDK patching unless source-backed proof shows it can stay privacy-bounded and stable enough to justify the coupling.

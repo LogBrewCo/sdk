@@ -54,6 +54,7 @@ grep -q 'project-scoped server ingest key' "$tmp_dir/aws-sqs-readme.md"
 grep -q 'sqsSendMessageWithLogBrewSpan' "$tmp_dir/aws-sqs-readme.md"
 grep -q 'sqsSendMessageBatchWithLogBrewSpan' "$tmp_dir/aws-sqs-readme.md"
 grep -q 'sqsReceiveMessageWithLogBrewSpan' "$tmp_dir/aws-sqs-readme.md"
+grep -q 'instrumentLogBrewSqsClient' "$tmp_dir/aws-sqs-readme.md"
 
 app_dir="$tmp_dir/aws-sqs-smoke-app"
 mkdir -p "$app_dir"
@@ -117,6 +118,7 @@ import {
   createLogBrewSqsSendMessageBatchInput,
   createLogBrewSqsSendMessageInput,
   extractLogBrewSqsTraceparent,
+  instrumentLogBrewSqsClient,
   sqsReceiveMessageWithLogBrewSpan,
   sqsSendMessageBatchWithLogBrewSpan,
   sqsSendMessageWithLogBrewSpan,
@@ -143,12 +145,20 @@ const sendResult = sqsSendMessageWithLogBrewSpan(sqsClient, SendMessageCommand, 
 const batchResult = sqsSendMessageBatchWithLogBrewSpan(sqsClient, SendMessageBatchCommand, batchInput, { client });
 const receiveResult = sqsReceiveMessageWithLogBrewSpan(sqsClient, ReceiveMessageCommand, receiveInput, { client });
 const processMessage = withLogBrewSqsMessageProcessor(async (msg: Message) => msg.MessageId, { client, queueName: "orders" });
+const instrumentation = instrumentLogBrewSqsClient(
+  sqsClient,
+  { ReceiveMessageCommand, SendMessageBatchCommand, SendMessageCommand },
+  { client, queueName: "orders" }
+);
+const installed = instrumentation.isInstalled();
+instrumentation.uninstall();
 
 void extracted;
 void sendResult;
 void batchResult;
 void receiveResult;
 void processMessage(message);
+void installed;
 EOF
 
 npx tsc --noEmit
@@ -158,6 +168,9 @@ const logbrewSqs = require("@logbrew/aws-sqs");
 
 if (typeof logbrewSqs.sqsSendMessageWithLogBrewSpan !== "function") {
   throw new Error("missing CommonJS send export");
+}
+if (typeof logbrewSqs.instrumentLogBrewSqsClient !== "function") {
+  throw new Error("missing CommonJS instrumentation export");
 }
 if (typeof logbrewSqs.default.withLogBrewSqsMessageProcessor !== "function") {
   throw new Error("missing CommonJS default export");
@@ -182,6 +195,7 @@ import {
   createLogBrewSqsSendMessageBatchInput,
   createLogBrewSqsSendMessageInput,
   extractLogBrewSqsTraceparent,
+  instrumentLogBrewSqsClient,
   sqsReceiveMessageWithLogBrewSpan,
   sqsSendMessageBatchWithLogBrewSpan,
   sqsSendMessageWithLogBrewSpan,
@@ -385,6 +399,155 @@ for (const expected of ["aws_sqs", "orders", "publish", "receive", "process", "e
 }
 if (client.pendingEvents() !== 0) {
   throw new Error("client queue did not drain");
+}
+
+const instrumentationClient = LogBrewClient.create({
+  apiKey: "LOGBREW_SERVER_API_KEY",
+  maxRetries: 1,
+  sdkName: "aws-sqs-instrumentation-smoke",
+  sdkVersion: "0.1.0"
+});
+const instrumentedCommands = [];
+const instrumentedSqsClient = {
+  async send(command, sendOptions) {
+    instrumentedCommands.push({ command, sendOptions });
+    if (command instanceof SendMessageCommand) {
+      return { MessageId: "auto-msg-1" };
+    }
+    if (command instanceof SendMessageBatchCommand) {
+      return { Successful: [{ Id: "auto-a", MessageId: "auto-msg-a" }] };
+    }
+    if (command instanceof ReceiveMessageCommand) {
+      return {
+        Messages: [
+          {
+            MessageId: "auto-msg-2",
+            MessageAttributes: {
+              traceparent: {
+                DataType: "String",
+                StringValue: extractLogBrewSqsTraceparent(instrumentedCommands[0].command.input)
+              }
+            }
+          }
+        ]
+      };
+    }
+    return { passthrough: true, sendOptions };
+  }
+};
+const instrumentation = instrumentLogBrewSqsClient(
+  instrumentedSqsClient,
+  { ReceiveMessageCommand, SendMessageBatchCommand, SendMessageCommand },
+  { client: instrumentationClient, queueName: "orders" }
+);
+if (!instrumentation.isInstalled()) {
+  throw new Error("SQS instrumentation did not report installed");
+}
+try {
+  instrumentLogBrewSqsClient(
+    instrumentedSqsClient,
+    { ReceiveMessageCommand, SendMessageBatchCommand, SendMessageCommand },
+    { client: instrumentationClient, queueName: "orders" }
+  );
+  throw new Error("expected duplicate instrumentation to fail");
+} catch (error) {
+  if (error.code !== "configuration_error") {
+    throw error;
+  }
+}
+
+const originalSendBeforeUninstall = instrumentedSqsClient.send;
+await instrumentedSqsClient.send(new SendMessageCommand({
+  QueueUrl: queueUrl,
+  MessageBody: "automatic body must not appear",
+  MessageAttributes: {
+    app: { DataType: "String", StringValue: "checkout" }
+  }
+}), { abortSignal: "kept" });
+await instrumentedSqsClient.send(new SendMessageBatchCommand({
+  QueueUrl: queueUrl,
+  Entries: [
+    { Id: "auto-a", MessageBody: "automatic batch body", MessageAttributes: { app: { DataType: "String", StringValue: "checkout" } } },
+    { Id: "auto-b", MessageBody: "automatic batch body two" }
+  ]
+}));
+await instrumentedSqsClient.send(new ReceiveMessageCommand({ QueueUrl: queueUrl, MessageAttributeNames: ["custom"] }));
+const passthroughResult = await instrumentedSqsClient.send({ input: { QueueUrl: queueUrl } }, { marker: "passthrough" });
+if (passthroughResult.passthrough !== true || passthroughResult.sendOptions?.marker !== "passthrough") {
+  throw new Error("SQS instrumentation did not pass unknown commands through");
+}
+if (instrumentedCommands.length !== 4) {
+  throw new Error(`expected 4 instrumented sends, saw ${instrumentedCommands.length}`);
+}
+if (!extractLogBrewSqsTraceparent(instrumentedCommands[0].command.input)) {
+  throw new Error("instrumented SQS send did not inject traceparent");
+}
+if (!instrumentedCommands[1].command.input.Entries.every((entry) => extractLogBrewSqsTraceparent(entry))) {
+  throw new Error("instrumented SQS batch did not inject traceparent into every entry");
+}
+if (!instrumentedCommands[2].command.input.MessageAttributeNames.includes("traceparent")) {
+  throw new Error("instrumented SQS receive did not request traceparent");
+}
+if (instrumentedCommands[0].sendOptions?.abortSignal !== "kept") {
+  throw new Error("instrumented SQS send did not preserve send options");
+}
+instrumentation.uninstall();
+if (instrumentation.isInstalled()) {
+  throw new Error("SQS instrumentation still reported installed after uninstall");
+}
+if (instrumentedSqsClient.send === originalSendBeforeUninstall) {
+  throw new Error("SQS instrumentation did not put back the prior send method");
+}
+await instrumentedSqsClient.send(new SendMessageCommand({ QueueUrl: queueUrl, MessageBody: "after uninstall" }));
+if (instrumentedCommands.length !== 5 || extractLogBrewSqsTraceparent(instrumentedCommands[4].command.input)) {
+  throw new Error("SQS instrumentation kept modifying commands after uninstall");
+}
+
+const instrumentationEvents = [];
+const instrumentationServer = http.createServer(async (req, res) => {
+  const body = await new Promise((resolve) => {
+    let data = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      data += chunk;
+    });
+    req.on("end", () => resolve(data));
+  });
+  instrumentationEvents.push(JSON.parse(body));
+  res.writeHead(instrumentationEvents.length === 1 ? 503 : 202, { "content-type": "application/json" });
+  res.end("{}");
+});
+instrumentationServer.listen(0, "127.0.0.1");
+await once(instrumentationServer, "listening");
+const instrumentationEndpoint = `http://127.0.0.1:${instrumentationServer.address().port}/v1/events`;
+const instrumentationTransport = createNodeFetchTransport({ endpoint: instrumentationEndpoint, timeoutMs: 2000 });
+const instrumentationResponse = await instrumentationClient.flush(instrumentationTransport);
+instrumentationServer.close();
+await once(instrumentationServer, "close");
+if (instrumentationEvents.length !== 2 || instrumentationResponse.statusCode !== 202 || instrumentationResponse.attempts !== 2) {
+  throw new Error(`expected instrumentation retry success, got requests=${instrumentationEvents.length} status=${instrumentationResponse.statusCode} attempts=${instrumentationResponse.attempts}`);
+}
+const instrumentationPayloadText = JSON.stringify(instrumentationEvents);
+for (const forbidden of [
+  "automatic body must not appear",
+  "automatic batch body",
+  "after uninstall",
+  "auto-msg",
+  "123456789012",
+  "sqs.us-east-1.amazonaws.com",
+  "checkout"
+]) {
+  if (instrumentationPayloadText.includes(forbidden)) {
+    throw new Error(`instrumented SQS payload leaked ${forbidden}`);
+  }
+}
+for (const expected of ["aws_sqs", "orders", "publish", "receive"]) {
+  if (!instrumentationPayloadText.includes(expected)) {
+    throw new Error(`instrumented SQS payload missing ${expected}`);
+  }
+}
+if (instrumentationClient.pendingEvents() !== 0) {
+  throw new Error("instrumented SQS client queue did not drain");
 }
 
 const highVolumeSqsSpans = 1200;

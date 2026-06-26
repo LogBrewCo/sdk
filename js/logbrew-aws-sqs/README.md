@@ -14,6 +14,7 @@ Do not use dashboard login or session values as SDK ingest configuration.
 import { LogBrewClient } from "@logbrew/sdk";
 import { SQSClient, SendMessageCommand, SendMessageBatchCommand, ReceiveMessageCommand } from "@aws-sdk/client-sqs";
 import {
+  instrumentLogBrewSqsClient,
   sqsReceiveMessageWithLogBrewSpan,
   sqsSendMessageBatchWithLogBrewSpan,
   sqsSendMessageWithLogBrewSpan,
@@ -70,6 +71,28 @@ for (const message of output.Messages ?? []) {
 }
 ```
 
+For teams that want client-level automatic coverage without global patching,
+instrument one app-owned SQS client explicitly:
+
+```js
+const sqsInstrumentation = instrumentLogBrewSqsClient(
+  sqs,
+  { SendMessageCommand, SendMessageBatchCommand, ReceiveMessageCommand },
+  { client: logbrew, queueName: "orders" }
+);
+
+await sqs.send(new SendMessageCommand({
+  QueueUrl: queueUrl,
+  MessageBody: JSON.stringify({ type: "checkout.created" })
+}));
+
+sqsInstrumentation.uninstall();
+```
+
+The instrumentation only wraps that client instance's `send()` method, passes
+unknown commands through unchanged, preserves AWS SDK send options, and
+reinstates the prior `send()` function when uninstalled.
+
 ## What It Captures
 
 The helpers create producer, receive, and message-processing spans with safe
@@ -81,10 +104,11 @@ trace context.
 
 ## What It Does Not Capture
 
-This package does not monkey-patch AWS SDK clients, create SQS clients, own
-delete/visibility/ack behavior, read message bodies, capture raw `QueueUrl`,
+This package does not globally monkey-patch AWS SDK modules, create SQS clients,
+own delete/visibility/ack behavior, read message bodies, capture raw `QueueUrl`,
 account IDs, regions, hosts, receipt handles, message IDs, arbitrary message
-attributes, payloads, baggage, tracestate, or error messages/stacks.
+attributes, payloads, baggage, tracestate, or error messages/stacks. The
+optional client instrumentation is explicit, one-client-only, and reversible.
 
 If a message already has ten SQS message attributes and does not already have
 `traceparent`, LogBrew leaves the attributes unchanged rather than violating the

@@ -6,6 +6,7 @@ import {
   SQSClient
 } from "@aws-sdk/client-sqs";
 import {
+  instrumentLogBrewSqsClient,
   sqsReceiveMessageWithLogBrewSpan,
   sqsSendMessageBatchWithLogBrewSpan,
   sqsSendMessageWithLogBrewSpan,
@@ -64,4 +65,12 @@ export async function receiveAndProcessOrders() {
   for (const message of output.Messages ?? []) {
     await processMessage(message);
   }
+}
+
+export function instrumentOrdersClient() {
+  return instrumentLogBrewSqsClient(
+    sqs,
+    { ReceiveMessageCommand, SendMessageBatchCommand, SendMessageCommand },
+    { client: logbrew, queueName: "orders" }
+  );
 }

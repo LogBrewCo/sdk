@@ -10,6 +10,7 @@ const DEFAULT_SYSTEM = "aws_sqs";
 const DEFAULT_QUEUE_NAME = "sqs";
 const TRACEPARENT_ATTRIBUTE = "traceparent";
 const MAX_MESSAGE_ATTRIBUTES = 10;
+const INSTRUMENTED_SEND = Symbol.for("@logbrew/aws-sqs.instrumentedSend");
 
 export async function sqsSendMessageWithLogBrewSpan(client, SendMessageCommand, input = {}, options = {}) {
   validateSqsClient(client, "sqsSendMessageWithLogBrewSpan");
@@ -76,6 +77,63 @@ export function withLogBrewSqsMessageProcessor(processor, options = {}) {
       system: DEFAULT_SYSTEM,
       traceparent: extractLogBrewSqsTraceparent(message)
     });
+  };
+}
+
+export function instrumentLogBrewSqsClient(client, commands, options = {}) {
+  validateSqsClient(client, "instrumentLogBrewSqsClient");
+  validateInstrumentationOptions(options);
+  const {
+    ReceiveMessageCommand,
+    SendMessageBatchCommand,
+    SendMessageCommand
+  } = validateInstrumentationCommands(commands);
+  const originalSend = client.send;
+  if (originalSend?.[INSTRUMENTED_SEND] === true) {
+    throw new SdkError(
+      "configuration_error",
+      "instrumentLogBrewSqsClient requires an uninstrumented SQS client; uninstall the existing LogBrew instrumentation first"
+    );
+  }
+
+  let installed = true;
+  function logBrewInstrumentedSqsSend(command, ...args) {
+    if (!installed) {
+      return originalSend.call(client, command, ...args);
+    }
+    const sendClient = {
+      send(nextCommand) {
+        return originalSend.call(client, nextCommand, ...args);
+      }
+    };
+
+    if (command instanceof SendMessageCommand) {
+      return sqsSendMessageWithLogBrewSpan(sendClient, SendMessageCommand, commandInput(command), options);
+    }
+    if (command instanceof SendMessageBatchCommand) {
+      return sqsSendMessageBatchWithLogBrewSpan(sendClient, SendMessageBatchCommand, commandInput(command), options);
+    }
+    if (command instanceof ReceiveMessageCommand) {
+      return sqsReceiveMessageWithLogBrewSpan(sendClient, ReceiveMessageCommand, commandInput(command), options);
+    }
+    return originalSend.call(client, command, ...args);
+  }
+
+  Object.defineProperty(logBrewInstrumentedSqsSend, INSTRUMENTED_SEND, {
+    value: true
+  });
+  client.send = logBrewInstrumentedSqsSend;
+
+  return {
+    isInstalled() {
+      return installed && client.send === logBrewInstrumentedSqsSend;
+    },
+    uninstall() {
+      installed = false;
+      if (client.send === logBrewInstrumentedSqsSend) {
+        client.send = originalSend;
+      }
+    }
   };
 }
 
@@ -238,6 +296,26 @@ function validateCommand(Command, source, name) {
   }
 }
 
+function validateInstrumentationOptions(options) {
+  if (!options?.client) {
+    throw new SdkError("configuration_error", "instrumentLogBrewSqsClient requires client");
+  }
+}
+
+function validateInstrumentationCommands(commands) {
+  if (!isObject(commands)) {
+    throw new SdkError("configuration_error", "instrumentLogBrewSqsClient requires SQS command constructors");
+  }
+  validateCommand(commands.SendMessageCommand, "instrumentLogBrewSqsClient", "SendMessageCommand");
+  validateCommand(commands.SendMessageBatchCommand, "instrumentLogBrewSqsClient", "SendMessageBatchCommand");
+  validateCommand(commands.ReceiveMessageCommand, "instrumentLogBrewSqsClient", "ReceiveMessageCommand");
+  return commands;
+}
+
+function commandInput(command) {
+  return isObject(command?.input) ? command.input : {};
+}
+
 function normalizeTraceparent(value) {
   if (typeof value !== "string" || value.trim() === "") {
     return undefined;
@@ -282,6 +360,7 @@ export default {
   createLogBrewSqsSendMessageInput,
   createLogBrewSqsTraceLinks,
   extractLogBrewSqsTraceparent,
+  instrumentLogBrewSqsClient,
   sqsReceiveMessageWithLogBrewSpan,
   sqsSendMessageBatchWithLogBrewSpan,
   sqsSendMessageWithLogBrewSpan,

@@ -6,7 +6,8 @@ import type {
   SendMessageBatchCommandInput,
   SendMessageBatchCommandOutput,
   SendMessageCommandInput,
-  SendMessageCommandOutput
+  SendMessageCommandOutput,
+  SQSClient
 } from "@aws-sdk/client-sqs";
 import type { LogBrewClient, SpanLinkSummary } from "@logbrew/sdk";
 import type {
@@ -19,6 +20,19 @@ export type LogBrewSqsClientLike<Output> = {
 };
 
 export type LogBrewSqsCommandConstructor<Input> = new (input: Input) => unknown;
+
+export type LogBrewSqsInstrumentableClient = Pick<SQSClient, "send">;
+
+export type LogBrewSqsInstrumentationCommands = {
+  ReceiveMessageCommand: LogBrewSqsCommandConstructor<ReceiveMessageCommandInput>;
+  SendMessageBatchCommand: LogBrewSqsCommandConstructor<SendMessageBatchCommandInput>;
+  SendMessageCommand: LogBrewSqsCommandConstructor<SendMessageCommandInput>;
+};
+
+export type LogBrewSqsInstrumentation = {
+  isInstalled(): boolean;
+  uninstall(): void;
+};
 
 export type LogBrewSqsOperationOptions<Result = unknown> =
   Omit<QueueOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent"> & {
@@ -58,6 +72,12 @@ export declare function withLogBrewSqsMessageProcessor<Result = unknown>(
   options: LogBrewSqsOperationOptions<Result>
 ): (message: Message) => Promise<Awaited<Result>>;
 
+export declare function instrumentLogBrewSqsClient(
+  client: LogBrewSqsInstrumentableClient,
+  commands: LogBrewSqsInstrumentationCommands,
+  options: LogBrewSqsOperationOptions<unknown>
+): LogBrewSqsInstrumentation;
+
 export declare function createLogBrewSqsSendMessageInput(
   input?: SendMessageCommandInput,
   traceparent?: string
@@ -87,6 +107,7 @@ declare const api: {
   createLogBrewSqsSendMessageInput: typeof createLogBrewSqsSendMessageInput;
   createLogBrewSqsTraceLinks: typeof createLogBrewSqsTraceLinks;
   extractLogBrewSqsTraceparent: typeof extractLogBrewSqsTraceparent;
+  instrumentLogBrewSqsClient: typeof instrumentLogBrewSqsClient;
   sqsReceiveMessageWithLogBrewSpan: typeof sqsReceiveMessageWithLogBrewSpan;
   sqsSendMessageBatchWithLogBrewSpan: typeof sqsSendMessageBatchWithLogBrewSpan;
   sqsSendMessageWithLogBrewSpan: typeof sqsSendMessageWithLogBrewSpan;
