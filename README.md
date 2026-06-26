@@ -35,6 +35,9 @@ Install only the package your application needs. The package names below are reg
 | JavaScript | [`@logbrew/sdk`](js/logbrew-js) | Core event client, transports, trace helpers, console/Pino/Winston logger adapters |
 | Browser | [`@logbrew/browser`](js/logbrew-browser) | Browser page views, handled errors, lifecycle flushing, fetch delivery, target-scoped trace propagation |
 | Node.js | [`@logbrew/node`](js/logbrew-node) | Built-in `node:http` request capture and server delivery |
+| BullMQ | [`@logbrew/bullmq`](js/logbrew-bullmq) | Explicit BullMQ producer/worker trace correlation |
+| KafkaJS | [`@logbrew/kafkajs`](js/logbrew-kafkajs) | Explicit KafkaJS producer/consumer trace correlation |
+| RabbitMQ / amqplib | [`@logbrew/amqplib`](js/logbrew-amqplib) | Explicit RabbitMQ publish/consume trace correlation |
 | Express | [`@logbrew/express`](js/logbrew-express) | Express request/error middleware |
 | Fastify | [`@logbrew/fastify`](js/logbrew-fastify) | Fastify plugin and request hooks |
 | NestJS | [`@logbrew/nestjs`](js/logbrew-nestjs) | NestJS interceptor capture |

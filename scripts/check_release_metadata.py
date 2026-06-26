@@ -28,6 +28,7 @@ BRAND_LOGO_URL = "https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/br
 
 JS_PACKAGES = {
     "js/logbrew-angular": "@logbrew/angular",
+    "js/logbrew-amqplib": "@logbrew/amqplib",
     "js/logbrew-browser": "@logbrew/browser",
     "js/logbrew-bullmq": "@logbrew/bullmq",
     "js/logbrew-express": "@logbrew/express",

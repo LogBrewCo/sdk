@@ -272,6 +272,9 @@ jobs:
       - name: Run KafkaJS real-user smoke test
         run: bash scripts/real_user_kafkajs_smoke.sh
 
+      - name: Run AMQP/RabbitMQ real-user smoke test
+        run: bash scripts/real_user_amqplib_smoke.sh
+
       - name: Run Express real-user smoke test
         run: bash scripts/real_user_express_smoke.sh
 
