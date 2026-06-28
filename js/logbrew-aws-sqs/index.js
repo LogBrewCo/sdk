@@ -7,11 +7,16 @@ import {
 } from "@logbrew/node";
 
 const DEFAULT_SYSTEM = "aws_sqs";
+const DEFAULT_EVENTBRIDGE_SYSTEM = "aws_eventbridge";
 const DEFAULT_QUEUE_NAME = "sqs";
+const DEFAULT_SNS_SYSTEM = "aws_sns";
+const DEFAULT_TOPIC_NAME = "sns";
+const DEFAULT_EVENT_BUS_NAME = "eventbridge";
 const TRACEPARENT_ATTRIBUTE = "traceparent";
 const MAX_MESSAGE_ATTRIBUTES = 10;
 const DEFAULT_MAX_ENVELOPE_BYTES = 256 * 1024;
 const MAX_ENVELOPE_BYTES = 1024 * 1024;
+const MAX_EVENTBRIDGE_PUT_EVENTS_BYTES = 1024 * 1024;
 const INSTRUMENTED_SEND = Symbol.for("@logbrew/aws-sqs.instrumentedSend");
 
 export async function sqsSendMessageWithLogBrewSpan(client, SendMessageCommand, input = {}, options = {}) {
@@ -66,6 +71,52 @@ export async function sqsReceiveMessageWithLogBrewSpan(client, ReceiveMessageCom
   };
 
   return queueOperationWithLogBrewSpan("ReceiveMessage", operationOptions);
+}
+
+export async function snsPublishWithLogBrewSpan(client, PublishCommand, input = {}, options = {}) {
+  validateAwsClient(client, "snsPublishWithLogBrewSpan", "SNS");
+  validateCommand(PublishCommand, "snsPublishWithLogBrewSpan", "PublishCommand");
+  const { spanOptions, topicName } = splitAwsProducerOptions(options);
+
+  return queueOperationWithLogBrewSpan("Publish", {
+    ...spanOptions,
+    operation: () => client.send(new PublishCommand(createLogBrewSnsPublishInput(input))),
+    operationKind: "publish",
+    queueName: resolveSnsDestinationName(input, topicName),
+    system: DEFAULT_SNS_SYSTEM
+  });
+}
+
+export async function snsPublishBatchWithLogBrewSpan(client, PublishBatchCommand, input = {}, options = {}) {
+  validateAwsClient(client, "snsPublishBatchWithLogBrewSpan", "SNS");
+  validateCommand(PublishBatchCommand, "snsPublishBatchWithLogBrewSpan", "PublishBatchCommand");
+  const { spanOptions, topicName } = splitAwsProducerOptions(options);
+  const entries = Array.isArray(input?.PublishBatchRequestEntries) ? input.PublishBatchRequestEntries : [];
+
+  return queueBatchOperationWithLogBrewSpan("PublishBatch", {
+    ...spanOptions,
+    messageCount: entries.length,
+    operation: () => client.send(new PublishBatchCommand(createLogBrewSnsPublishBatchInput(input))),
+    operationKind: "publish",
+    queueName: resolveSnsDestinationName(input, topicName),
+    system: DEFAULT_SNS_SYSTEM
+  });
+}
+
+export async function eventBridgePutEventsWithLogBrewSpan(client, PutEventsCommand, input = {}, options = {}) {
+  validateAwsClient(client, "eventBridgePutEventsWithLogBrewSpan", "EventBridge");
+  validateCommand(PutEventsCommand, "eventBridgePutEventsWithLogBrewSpan", "PutEventsCommand");
+  const { eventBusName, eventBridgeOptions, spanOptions } = splitAwsProducerOptions(options);
+  const entries = Array.isArray(input?.Entries) ? input.Entries : [];
+
+  return queueBatchOperationWithLogBrewSpan("PutEvents", {
+    ...spanOptions,
+    messageCount: entries.length,
+    operation: () => client.send(new PutEventsCommand(createLogBrewEventBridgePutEventsInput(input, undefined, eventBridgeOptions))),
+    operationKind: "publish",
+    queueName: resolveEventBridgeDestinationName(input, eventBusName),
+    system: DEFAULT_EVENTBRIDGE_SYSTEM
+  });
 }
 
 export function withLogBrewSqsMessageProcessor(processor, options = {}) {
@@ -178,6 +229,53 @@ export function createLogBrewSqsReceiveMessageInput(input = {}) {
   };
 }
 
+export function createLogBrewSnsPublishInput(input = {}, traceparent = undefined) {
+  const source = cloneObject(input);
+  return {
+    ...source,
+    MessageAttributes: withTraceparentAttribute(source.MessageAttributes, traceparent)
+  };
+}
+
+export function createLogBrewSnsPublishBatchInput(input = {}, traceparent = undefined) {
+  const source = cloneObject(input);
+  const normalizedTraceparent = normalizeTraceparent(traceparent ?? createLogBrewQueueTraceHeaders().traceparent);
+  const entries = Array.isArray(source.PublishBatchRequestEntries)
+    ? source.PublishBatchRequestEntries.map((entry) => {
+      const nextEntry = cloneObject(entry);
+      return {
+        ...nextEntry,
+        MessageAttributes: withTraceparentAttribute(nextEntry.MessageAttributes, normalizedTraceparent)
+      };
+    })
+    : source.PublishBatchRequestEntries;
+
+  return {
+    ...source,
+    ...(entries !== undefined ? { PublishBatchRequestEntries: entries } : {})
+  };
+}
+
+export function createLogBrewEventBridgePutEventsInput(input = {}, traceparent = undefined, options = {}) {
+  const source = cloneObject(input);
+  if (!Array.isArray(source.Entries)) {
+    return source;
+  }
+  const entries = source.Entries.map((entry) => cloneObject(entry));
+  const normalizedTraceparent = normalizeTraceparent(traceparent ?? createLogBrewQueueTraceHeaders().traceparent);
+  if (!normalizedTraceparent) {
+    return { ...source, Entries: entries };
+  }
+
+  const nextEntries = entries.map((entry) => withEventBridgeDetailTraceparent(entry, normalizedTraceparent));
+  const maxRequestBytes = normalizeEventBridgeRequestByteLimit(options.maxEventBridgeRequestBytes ?? options.maxRequestBytes);
+  if (putEventsRequestSize(nextEntries) >= maxRequestBytes) {
+    return { ...source, Entries: entries };
+  }
+
+  return { ...source, Entries: nextEntries };
+}
+
 export function createLogBrewSqsTraceLinks(messages, metadata = undefined, options = {}) {
   const carriers = Array.isArray(messages)
     ? messages.map((message) => sqsMessageTraceCarrier(message, options))
@@ -244,6 +342,22 @@ function splitSqsOptions(options) {
       extractSnsEnvelopeTraceparent,
       maxEnvelopeBytes
     })
+  };
+}
+
+function splitAwsProducerOptions(options) {
+  const {
+    eventBusName,
+    maxEventBridgeRequestBytes,
+    maxRequestBytes,
+    topicName,
+    ...spanOptions
+  } = isObject(options) ? options : {};
+  return {
+    eventBridgeOptions: { maxRequestBytes: maxEventBridgeRequestBytes ?? maxRequestBytes },
+    eventBusName,
+    spanOptions,
+    topicName
   };
 }
 
@@ -330,6 +444,13 @@ function normalizeEnvelopeByteLimit(value) {
   return Math.min(Math.floor(value), MAX_ENVELOPE_BYTES);
 }
 
+function normalizeEventBridgeRequestByteLimit(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return MAX_EVENTBRIDGE_PUT_EVENTS_BYTES;
+  }
+  return Math.min(Math.floor(value), MAX_EVENTBRIDGE_PUT_EVENTS_BYTES);
+}
+
 function utf8ByteLength(value) {
   if (typeof globalThis.Buffer?.byteLength === "function") {
     return globalThis.Buffer.byteLength(value, "utf8");
@@ -401,6 +522,44 @@ function mergeLinks(generatedLinks, explicitLinks) {
   return links.length > 0 ? links.slice(0, 8) : undefined;
 }
 
+function withEventBridgeDetailTraceparent(entry, traceparent) {
+  const nextEntry = cloneObject(entry);
+  if (typeof nextEntry.Detail !== "string" || nextEntry.Detail.trim() === "") {
+    return nextEntry;
+  }
+  const detail = parseJsonEnvelope(nextEntry.Detail, MAX_EVENTBRIDGE_PUT_EVENTS_BYTES);
+  if (!isObject(detail)) {
+    return nextEntry;
+  }
+  nextEntry.Detail = JSON.stringify({ ...detail, traceparent });
+  return nextEntry;
+}
+
+function putEventsRequestSize(entries) {
+  return entries.reduce((total, entry) => total + putEventEntrySize(entry), 0);
+}
+
+function putEventEntrySize(entry) {
+  if (!isObject(entry)) {
+    return 0;
+  }
+  let size = entry.Time === null || entry.Time === undefined ? 0 : 14;
+  size += byteLengthIfString(entry.Source);
+  size += byteLengthIfString(entry.DetailType);
+  size += byteLengthIfString(entry.Detail);
+  size += byteLengthIfString(entry.EventBusName);
+  if (Array.isArray(entry.Resources)) {
+    for (const resource of entry.Resources) {
+      size += byteLengthIfString(resource);
+    }
+  }
+  return size;
+}
+
+function byteLengthIfString(value) {
+  return typeof value === "string" ? utf8ByteLength(value) : 0;
+}
+
 function resolveQueueName(source, fallback) {
   const explicit = normalizeLabel(fallback, "");
   if (explicit) {
@@ -414,9 +573,39 @@ function resolveQueueName(source, fallback) {
   return normalizeLabel(parts[parts.length - 1], DEFAULT_QUEUE_NAME);
 }
 
+function resolveSnsDestinationName(source, fallback) {
+  const explicit = normalizeLabel(fallback, "");
+  if (explicit) {
+    return explicit;
+  }
+  return normalizeArnLabel(source?.TopicArn, DEFAULT_TOPIC_NAME);
+}
+
+function resolveEventBridgeDestinationName(source, fallback) {
+  const explicit = normalizeLabel(fallback, "");
+  if (explicit) {
+    return explicit;
+  }
+  const firstEntry = Array.isArray(source?.Entries) ? source.Entries.find(isObject) : undefined;
+  return normalizeArnLabel(firstEntry?.EventBusName, DEFAULT_EVENT_BUS_NAME);
+}
+
+function normalizeArnLabel(value, fallback) {
+  const label = normalizeLabel(value, "");
+  if (!label) {
+    return fallback;
+  }
+  const parts = label.split(":").flatMap((part) => part.split("/")).filter(Boolean);
+  return normalizeLabel(parts[parts.length - 1], fallback);
+}
+
 function validateSqsClient(client, source) {
+  validateAwsClient(client, source, "SQS");
+}
+
+function validateAwsClient(client, source, service) {
   if (!client || typeof client.send !== "function") {
-    throw new SdkError("configuration_error", `${source} requires an AWS SDK SQS client`);
+    throw new SdkError("configuration_error", `${source} requires an AWS SDK ${service} client`);
   }
 }
 
@@ -485,12 +674,18 @@ function isNodeBufferValue(value) {
 }
 
 export default {
+  createLogBrewEventBridgePutEventsInput,
+  createLogBrewSnsPublishBatchInput,
+  createLogBrewSnsPublishInput,
   createLogBrewSqsReceiveMessageInput,
   createLogBrewSqsSendMessageBatchInput,
   createLogBrewSqsSendMessageInput,
   createLogBrewSqsTraceLinks,
+  eventBridgePutEventsWithLogBrewSpan,
   extractLogBrewSqsTraceparent,
   instrumentLogBrewSqsClient,
+  snsPublishBatchWithLogBrewSpan,
+  snsPublishWithLogBrewSpan,
   sqsReceiveMessageWithLogBrewSpan,
   sqsSendMessageBatchWithLogBrewSpan,
   sqsSendMessageWithLogBrewSpan,

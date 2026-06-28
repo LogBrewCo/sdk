@@ -52,6 +52,26 @@ export type LogBrewSqsBatchOperationOptions<Result = unknown> =
     queueName?: string;
   } & LogBrewSqsTraceExtractionOptions;
 
+export type LogBrewSnsOperationOptions<Result = unknown> =
+  Omit<QueueOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent"> & {
+    client: LogBrewClient;
+    topicName?: string;
+  };
+
+export type LogBrewSnsBatchOperationOptions<Result = unknown> =
+  Omit<QueueBatchOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent" | "messages" | "messageCount" | "linkMetadata"> & {
+    client: LogBrewClient;
+    topicName?: string;
+  };
+
+export type LogBrewEventBridgeOperationOptions<Result = unknown> =
+  Omit<QueueBatchOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent" | "messages" | "messageCount" | "linkMetadata"> & {
+    client: LogBrewClient;
+    eventBusName?: string;
+    maxEventBridgeRequestBytes?: number;
+    maxRequestBytes?: number;
+  };
+
 export declare function sqsSendMessageWithLogBrewSpan(
   client: LogBrewSqsClientLike<SendMessageCommandOutput>,
   SendMessageCommand: LogBrewSqsCommandConstructor<SendMessageCommandInput>,
@@ -65,6 +85,27 @@ export declare function sqsSendMessageBatchWithLogBrewSpan(
   input: SendMessageBatchCommandInput,
   options: LogBrewSqsBatchOperationOptions<SendMessageBatchCommandOutput>
 ): Promise<Awaited<SendMessageBatchCommandOutput>>;
+
+export declare function snsPublishWithLogBrewSpan<Input extends object, Output>(
+  client: LogBrewSqsClientLike<Output>,
+  PublishCommand: LogBrewSqsCommandConstructor<Input>,
+  input: Input,
+  options: LogBrewSnsOperationOptions<Output>
+): Promise<Awaited<Output>>;
+
+export declare function snsPublishBatchWithLogBrewSpan<Input extends object, Output>(
+  client: LogBrewSqsClientLike<Output>,
+  PublishBatchCommand: LogBrewSqsCommandConstructor<Input>,
+  input: Input,
+  options: LogBrewSnsBatchOperationOptions<Output>
+): Promise<Awaited<Output>>;
+
+export declare function eventBridgePutEventsWithLogBrewSpan<Input extends object, Output>(
+  client: LogBrewSqsClientLike<Output>,
+  PutEventsCommand: LogBrewSqsCommandConstructor<Input>,
+  input: Input,
+  options: LogBrewEventBridgeOperationOptions<Output>
+): Promise<Awaited<Output>>;
 
 export declare function sqsReceiveMessageWithLogBrewSpan(
   client: LogBrewSqsClientLike<ReceiveMessageCommandOutput>,
@@ -98,6 +139,22 @@ export declare function createLogBrewSqsReceiveMessageInput(
   input?: ReceiveMessageCommandInput
 ): ReceiveMessageCommandInput;
 
+export declare function createLogBrewSnsPublishInput<Input extends object = Record<string, unknown>>(
+  input?: Input,
+  traceparent?: string
+): Input & { MessageAttributes: Record<string, MessageAttributeValue> };
+
+export declare function createLogBrewSnsPublishBatchInput<Input extends object = Record<string, unknown>>(
+  input?: Input,
+  traceparent?: string
+): Input;
+
+export declare function createLogBrewEventBridgePutEventsInput<Input extends object = Record<string, unknown>>(
+  input?: Input,
+  traceparent?: string,
+  options?: { maxEventBridgeRequestBytes?: number; maxRequestBytes?: number }
+): Input;
+
 export declare function createLogBrewSqsTraceLinks(
   messages?: Message | Message[],
   metadata?: Record<string, string | number | boolean | null>,
@@ -110,12 +167,18 @@ export declare function extractLogBrewSqsTraceparent(
 ): string | undefined;
 
 declare const api: {
+  createLogBrewEventBridgePutEventsInput: typeof createLogBrewEventBridgePutEventsInput;
+  createLogBrewSnsPublishBatchInput: typeof createLogBrewSnsPublishBatchInput;
+  createLogBrewSnsPublishInput: typeof createLogBrewSnsPublishInput;
   createLogBrewSqsReceiveMessageInput: typeof createLogBrewSqsReceiveMessageInput;
   createLogBrewSqsSendMessageBatchInput: typeof createLogBrewSqsSendMessageBatchInput;
   createLogBrewSqsSendMessageInput: typeof createLogBrewSqsSendMessageInput;
   createLogBrewSqsTraceLinks: typeof createLogBrewSqsTraceLinks;
+  eventBridgePutEventsWithLogBrewSpan: typeof eventBridgePutEventsWithLogBrewSpan;
   extractLogBrewSqsTraceparent: typeof extractLogBrewSqsTraceparent;
   instrumentLogBrewSqsClient: typeof instrumentLogBrewSqsClient;
+  snsPublishBatchWithLogBrewSpan: typeof snsPublishBatchWithLogBrewSpan;
+  snsPublishWithLogBrewSpan: typeof snsPublishWithLogBrewSpan;
   sqsReceiveMessageWithLogBrewSpan: typeof sqsReceiveMessageWithLogBrewSpan;
   sqsSendMessageBatchWithLogBrewSpan: typeof sqsSendMessageBatchWithLogBrewSpan;
   sqsSendMessageWithLogBrewSpan: typeof sqsSendMessageWithLogBrewSpan;

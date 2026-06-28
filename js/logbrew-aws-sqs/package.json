@@ -1,7 +1,7 @@
 {
   "name": "@logbrew/aws-sqs",
   "version": "0.1.0",
-  "description": "Amazon SQS tracing helpers for the public LogBrew JavaScript SDK.",
+  "description": "Amazon SQS, SNS, and EventBridge tracing helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
   "types": "./index.d.ts",
@@ -29,6 +29,8 @@
   "keywords": [
     "logbrew",
     "aws",
+    "sns",
+    "eventbridge",
     "sqs",
     "node",
     "queue",

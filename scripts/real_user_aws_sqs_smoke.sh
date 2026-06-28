@@ -57,6 +57,8 @@ grep -q 'sqsReceiveMessageWithLogBrewSpan' "$tmp_dir/aws-sqs-readme.md"
 grep -q 'instrumentLogBrewSqsClient' "$tmp_dir/aws-sqs-readme.md"
 grep -q 'extractSnsEnvelopeTraceparent' "$tmp_dir/aws-sqs-readme.md"
 grep -q 'extractEventBridgeEnvelopeTraceparent' "$tmp_dir/aws-sqs-readme.md"
+grep -q 'snsPublishWithLogBrewSpan' "$tmp_dir/aws-sqs-readme.md"
+grep -q 'eventBridgePutEventsWithLogBrewSpan' "$tmp_dir/aws-sqs-readme.md"
 
 app_dir="$tmp_dir/aws-sqs-smoke-app"
 mkdir -p "$app_dir"
@@ -70,6 +72,8 @@ npm install \
   "$core_tgz" \
   "$node_tgz" \
   "$sqs_tgz" \
+  @aws-sdk/client-eventbridge@3.1075.0 \
+  @aws-sdk/client-sns@3.1075.0 \
   @aws-sdk/client-sqs@3.1075.0 \
   typescript@6.0.3 \
   @types/node@26.0.1 \
@@ -78,15 +82,19 @@ npm install \
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/node": "file:' package.json
 grep -q '"@logbrew/aws-sqs": "file:' package.json
+grep -q '"@aws-sdk/client-eventbridge": "3.1075.0"' package.json
+grep -q '"@aws-sdk/client-sns": "3.1075.0"' package.json
 grep -q '"@aws-sdk/client-sqs": "3.1075.0"' package.json
 grep -q '"@logbrew/aws-sqs"' package-lock.json
 grep -q '"@logbrew/node"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
-npm ls @logbrew/sdk @logbrew/node @logbrew/aws-sqs @aws-sdk/client-sqs >/dev/null
+npm ls @logbrew/sdk @logbrew/node @logbrew/aws-sqs @aws-sdk/client-eventbridge @aws-sdk/client-sns @aws-sdk/client-sqs >/dev/null
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q '@logbrew/node@0.1.0' "$tmp_dir/npm-list-depth0.txt"
 grep -q '@logbrew/aws-sqs@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q '@aws-sdk/client-eventbridge@3.1075.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q '@aws-sdk/client-sns@3.1075.0' "$tmp_dir/npm-list-depth0.txt"
 grep -q '@aws-sdk/client-sqs@3.1075.0' "$tmp_dir/npm-list-depth0.txt"
 test -f node_modules/@logbrew/aws-sqs/index.js
 test -f node_modules/@logbrew/aws-sqs/index.cjs
@@ -108,6 +116,8 @@ EOF
 
 cat > types.ts <<'EOF'
 import { LogBrewClient } from "@logbrew/sdk";
+import { PutEventsCommand, type EventBridgeClient } from "@aws-sdk/client-eventbridge";
+import { PublishBatchCommand, PublishCommand, type SNSClient } from "@aws-sdk/client-sns";
 import {
   ReceiveMessageCommand,
   SendMessageBatchCommand,
@@ -116,11 +126,17 @@ import {
   type Message
 } from "@aws-sdk/client-sqs";
 import {
+  createLogBrewEventBridgePutEventsInput,
+  createLogBrewSnsPublishBatchInput,
+  createLogBrewSnsPublishInput,
   createLogBrewSqsReceiveMessageInput,
   createLogBrewSqsSendMessageBatchInput,
   createLogBrewSqsSendMessageInput,
+  eventBridgePutEventsWithLogBrewSpan,
   extractLogBrewSqsTraceparent,
   instrumentLogBrewSqsClient,
+  snsPublishBatchWithLogBrewSpan,
+  snsPublishWithLogBrewSpan,
   type LogBrewSqsTraceExtractionOptions,
   sqsReceiveMessageWithLogBrewSpan,
   sqsSendMessageBatchWithLogBrewSpan,
@@ -133,6 +149,8 @@ const client = LogBrewClient.create({
   sdkName: "aws-sqs-type-smoke",
   sdkVersion: "0.1.0"
 });
+declare const eventBridgeClient: EventBridgeClient;
+declare const snsClient: SNSClient;
 declare const sqsClient: SQSClient;
 declare const message: Message;
 const queueUrl = "https://sqs.us-east-1.amazonaws.com/123456789012/orders";
@@ -147,8 +165,22 @@ const batchInput = createLogBrewSqsSendMessageBatchInput({
   QueueUrl: queueUrl,
   Entries: [{ Id: "1", MessageBody: "hello" }]
 }, traceparent);
+const snsInput = createLogBrewSnsPublishInput({
+  TopicArn: "arn:aws:sns:us-east-1:123456789012:orders",
+  Message: "hello"
+}, traceparent);
+const snsBatchInput = createLogBrewSnsPublishBatchInput({
+  TopicArn: "arn:aws:sns:us-east-1:123456789012:orders",
+  PublishBatchRequestEntries: [{ Id: "1", Message: "hello" }]
+}, traceparent);
+const eventBridgeInput = createLogBrewEventBridgePutEventsInput({
+  Entries: [{ Source: "checkout", DetailType: "created", Detail: "{\"type\":\"checkout.created\"}" }]
+}, traceparent);
 const receiveInput = createLogBrewSqsReceiveMessageInput({ QueueUrl: queueUrl, MessageAttributeNames: ["custom"] });
 const extracted = extractLogBrewSqsTraceparent(message, extractionOptions);
+const snsResult = snsPublishWithLogBrewSpan(snsClient, PublishCommand, snsInput, { client, topicName: "orders" });
+const snsBatchResult = snsPublishBatchWithLogBrewSpan(snsClient, PublishBatchCommand, snsBatchInput, { client, topicName: "orders" });
+const eventBridgeResult = eventBridgePutEventsWithLogBrewSpan(eventBridgeClient, PutEventsCommand, eventBridgeInput, { client, eventBusName: "checkout" });
 const sendResult = sqsSendMessageWithLogBrewSpan(sqsClient, SendMessageCommand, sendInput, { client });
 const batchResult = sqsSendMessageBatchWithLogBrewSpan(sqsClient, SendMessageBatchCommand, batchInput, { client });
 const receiveResult = sqsReceiveMessageWithLogBrewSpan(sqsClient, ReceiveMessageCommand, receiveInput, { client, ...extractionOptions });
@@ -162,6 +194,9 @@ const installed = instrumentation.isInstalled();
 instrumentation.uninstall();
 
 void extracted;
+void snsResult;
+void snsBatchResult;
+void eventBridgeResult;
 void sendResult;
 void batchResult;
 void receiveResult;
@@ -183,6 +218,12 @@ if (typeof logbrewSqs.instrumentLogBrewSqsClient !== "function") {
 if (typeof logbrewSqs.default.withLogBrewSqsMessageProcessor !== "function") {
   throw new Error("missing CommonJS default export");
 }
+if (typeof logbrewSqs.snsPublishWithLogBrewSpan !== "function") {
+  throw new Error("missing CommonJS SNS publish export");
+}
+if (typeof logbrewSqs.eventBridgePutEventsWithLogBrewSpan !== "function") {
+  throw new Error("missing CommonJS EventBridge publish export");
+}
 EOF
 
 node cjs-smoke.cjs
@@ -190,6 +231,8 @@ node cjs-smoke.cjs
 cat > smoke.mjs <<'EOF'
 import http from "node:http";
 import { once } from "node:events";
+import { PutEventsCommand } from "@aws-sdk/client-eventbridge";
+import { PublishBatchCommand, PublishCommand } from "@aws-sdk/client-sns";
 import {
   ReceiveMessageCommand,
   SendMessageBatchCommand,
@@ -199,11 +242,17 @@ import {
 import { LogBrewClient } from "@logbrew/sdk";
 import { createNodeFetchTransport } from "@logbrew/node";
 import {
+  createLogBrewEventBridgePutEventsInput,
+  createLogBrewSnsPublishBatchInput,
+  createLogBrewSnsPublishInput,
   createLogBrewSqsReceiveMessageInput,
   createLogBrewSqsSendMessageBatchInput,
   createLogBrewSqsSendMessageInput,
+  eventBridgePutEventsWithLogBrewSpan,
   extractLogBrewSqsTraceparent,
   instrumentLogBrewSqsClient,
+  snsPublishBatchWithLogBrewSpan,
+  snsPublishWithLogBrewSpan,
   sqsReceiveMessageWithLogBrewSpan,
   sqsSendMessageBatchWithLogBrewSpan,
   sqsSendMessageWithLogBrewSpan,
@@ -218,6 +267,29 @@ const client = LogBrewClient.create({
 });
 
 const capturedCommands = [];
+const capturedEventBridgeCommands = [];
+const capturedSnsCommands = [];
+const eventBridgeClient = {
+  async send(command) {
+    capturedEventBridgeCommands.push(command);
+    if (command instanceof PutEventsCommand) {
+      return { Entries: [{ EventId: "event-id-must-not-appear" }] };
+    }
+    throw new Error("unexpected EventBridge command");
+  }
+};
+const snsClient = {
+  async send(command) {
+    capturedSnsCommands.push(command);
+    if (command instanceof PublishCommand) {
+      return { MessageId: "sns-message-id-must-not-appear" };
+    }
+    if (command instanceof PublishBatchCommand) {
+      return { Successful: [{ Id: "a", MessageId: "sns-batch-id-must-not-appear" }] };
+    }
+    throw new Error("unexpected SNS command");
+  }
+};
 const sqsClient = {
   async send(command) {
     capturedCommands.push(command);
@@ -284,6 +356,73 @@ for (let index = 0; index < 10; index += 1) {
 const fullInput = createLogBrewSqsSendMessageInput({ QueueUrl: queueUrl, MessageBody: "hello", MessageAttributes: fullAttributes }, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
 if (fullInput.MessageAttributes.traceparent) {
   throw new Error("SQS helper exceeded the message attribute limit");
+}
+
+const snsTopicArn = "arn:aws:sns:us-east-1:123456789012:orders-topic";
+const snsInput = {
+  TopicArn: snsTopicArn,
+  Message: "sns message body must not appear",
+  MessageAttributes: {
+    app: { DataType: "String", StringValue: "checkout" }
+  }
+};
+const clonedSnsInput = createLogBrewSnsPublishInput(snsInput, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+if (clonedSnsInput === snsInput || clonedSnsInput.MessageAttributes === snsInput.MessageAttributes) {
+  throw new Error("SNS publish input was not cloned");
+}
+if (snsInput.MessageAttributes.traceparent) {
+  throw new Error("SNS helper mutated caller message attributes");
+}
+if (clonedSnsInput.MessageAttributes.traceparent.StringValue !== "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01") {
+  throw new Error("SNS helper did not inject normalized traceparent");
+}
+const fullSnsInput = createLogBrewSnsPublishInput({ TopicArn: snsTopicArn, Message: "hello", MessageAttributes: fullAttributes }, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+if (fullSnsInput.MessageAttributes.traceparent) {
+  throw new Error("SNS helper exceeded the message attribute limit");
+}
+const snsBatchInput = createLogBrewSnsPublishBatchInput({
+  TopicArn: snsTopicArn,
+  PublishBatchRequestEntries: [
+    { Id: "a", Message: "sns batch body one", MessageAttributes: { app: { DataType: "String", StringValue: "checkout" } } },
+    { Id: "b", Message: "sns batch body two" }
+  ]
+}, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+if (!snsBatchInput.PublishBatchRequestEntries.every((entry) => extractLogBrewSqsTraceparent(entry))) {
+  throw new Error("SNS batch helper did not inject traceparent into every entry");
+}
+
+const eventBridgeInput = {
+  Entries: [
+    {
+      EventBusName: "orders-bus",
+      Source: "checkout.source.must.not.appear",
+      DetailType: "checkout.created",
+      Detail: JSON.stringify({ type: "checkout.created", payload: "event detail must not appear" })
+    }
+  ]
+};
+const clonedEventBridgeInput = createLogBrewEventBridgePutEventsInput(eventBridgeInput, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+if (clonedEventBridgeInput === eventBridgeInput || clonedEventBridgeInput.Entries === eventBridgeInput.Entries) {
+  throw new Error("EventBridge input was not cloned");
+}
+if (eventBridgeInput.Entries[0].Detail.includes("traceparent")) {
+  throw new Error("EventBridge helper mutated caller detail");
+}
+if (JSON.parse(clonedEventBridgeInput.Entries[0].Detail).traceparent !== "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01") {
+  throw new Error("EventBridge helper did not inject normalized traceparent");
+}
+const invalidEventBridgeInput = createLogBrewEventBridgePutEventsInput({ Entries: [{ Detail: "not-json" }] }, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+if (invalidEventBridgeInput.Entries[0].Detail !== "not-json") {
+  throw new Error("EventBridge helper changed non-JSON detail");
+}
+const oversizedDetail = JSON.stringify({ payload: "x".repeat(1024 * 1024) });
+const oversizedEventBridgeInput = createLogBrewEventBridgePutEventsInput({ Entries: [{ Detail: oversizedDetail }] }, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+if (oversizedEventBridgeInput.Entries[0].Detail !== oversizedDetail) {
+  throw new Error("EventBridge helper injected into an oversized request");
+}
+const aliasLimitedEventBridgeInput = createLogBrewEventBridgePutEventsInput({ Entries: [{ Detail: "{\"type\":\"alias\"}" }] }, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", { maxEventBridgeRequestBytes: 1 });
+if (aliasLimitedEventBridgeInput.Entries[0].Detail.includes("traceparent")) {
+  throw new Error("EventBridge helper ignored maxEventBridgeRequestBytes");
 }
 
 const receiveInput = createLogBrewSqsReceiveMessageInput({ QueueUrl: queueUrl, MessageAttributeNames: ["custom"] });
@@ -371,6 +510,27 @@ if (extractLogBrewSqsTraceparent({
 }
 
 await sqsSendMessageWithLogBrewSpan(sqsClient, SendMessageCommand, input, { client });
+await snsPublishWithLogBrewSpan(snsClient, PublishCommand, snsInput, {
+  client,
+  id: "evt_sns_publish_001",
+  topicName: "orders-topic"
+});
+await snsPublishBatchWithLogBrewSpan(snsClient, PublishBatchCommand, {
+  TopicArn: snsTopicArn,
+  PublishBatchRequestEntries: [
+    { Id: "a", Message: "sns batch body one" },
+    { Id: "b", Message: "sns batch body two" }
+  ]
+}, {
+  client,
+  id: "evt_sns_batch_001",
+  topicName: "orders-topic"
+});
+await eventBridgePutEventsWithLogBrewSpan(eventBridgeClient, PutEventsCommand, eventBridgeInput, {
+  client,
+  eventBusName: "orders-events",
+  id: "evt_eventbridge_put_001"
+});
 await sqsSendMessageBatchWithLogBrewSpan(sqsClient, SendMessageBatchCommand, {
   QueueUrl: queueUrl,
   Entries: [
@@ -408,6 +568,22 @@ try {
 if (capturedCommands.length !== 3) {
   throw new Error(`expected 3 SQS commands, saw ${capturedCommands.length}`);
 }
+if (capturedSnsCommands.length !== 2) {
+  throw new Error(`expected 2 SNS commands, saw ${capturedSnsCommands.length}`);
+}
+if (!extractLogBrewSqsTraceparent(capturedSnsCommands[0].input)) {
+  throw new Error("SNS publish command missing traceparent");
+}
+if (!capturedSnsCommands[1].input.PublishBatchRequestEntries.every((entry) => extractLogBrewSqsTraceparent(entry))) {
+  throw new Error("SNS batch command missing entry traceparents");
+}
+if (capturedEventBridgeCommands.length !== 1) {
+  throw new Error(`expected 1 EventBridge command, saw ${capturedEventBridgeCommands.length}`);
+}
+const eventBridgeCommandTraceparent = JSON.parse(capturedEventBridgeCommands[0].input.Entries[0].Detail).traceparent;
+if (typeof eventBridgeCommandTraceparent !== "string" || eventBridgeCommandTraceparent.split("-").length !== 4) {
+  throw new Error("EventBridge command missing detail traceparent");
+}
 if (capturedCommands[0].input.MessageBody !== "body must not appear") {
   throw new Error("SQS send command changed message body");
 }
@@ -425,6 +601,18 @@ if (!capturedCommands[2].input.MessageAttributeNames.includes("traceparent")) {
 }
 
 const queuedPayload = JSON.parse(client.previewJson());
+const snsPublishSpan = queuedPayload.events.find((event) => event.id === "evt_sns_publish_001");
+if (!snsPublishSpan || snsPublishSpan.attributes.metadata["messaging.system"] !== "aws_sns") {
+  throw new Error("SNS publish span was not queued with SNS metadata");
+}
+const snsBatchSpan = queuedPayload.events.find((event) => event.id === "evt_sns_batch_001");
+if (!snsBatchSpan || snsBatchSpan.attributes.metadata["messaging.batch.message_count"] !== 2) {
+  throw new Error("SNS batch span did not record the publish batch count");
+}
+const eventBridgeSpan = queuedPayload.events.find((event) => event.id === "evt_eventbridge_put_001");
+if (!eventBridgeSpan || eventBridgeSpan.attributes.metadata["messaging.system"] !== "aws_eventbridge") {
+  throw new Error("EventBridge put span was not queued with EventBridge metadata");
+}
 const receiveSpan = queuedPayload.events.find((event) => event.id === "evt_sqs_receive_001");
 if (!receiveSpan) {
   throw new Error("SQS receive span was not queued");
@@ -487,8 +675,15 @@ for (const forbidden of [
   "first",
   "second",
   "SNS payload must not appear",
+  "sns message body must not appear",
+  "sns batch body",
+  "sns-message-id",
+  "event-id-must-not-appear",
   "eventbridge detail must not appear",
   "eventbridge-event-id",
+  "event detail must not appear",
+  "checkout.source.must.not.appear",
+  "arn:aws:sns",
   "123456789012",
   "sqs.us-east-1.amazonaws.com",
   "details must not appear",
@@ -500,7 +695,7 @@ for (const forbidden of [
     throw new Error(`SQS payload leaked ${forbidden}`);
   }
 }
-for (const expected of ["aws_sqs", "orders", "publish", "receive", "process", "exception", "TypeError"]) {
+for (const expected of ["aws_sqs", "aws_sns", "aws_eventbridge", "orders", "orders-topic", "orders-events", "publish", "receive", "process", "exception", "TypeError"]) {
   if (!payloadText.includes(expected)) {
     throw new Error(`SQS payload missing ${expected}`);
   }
