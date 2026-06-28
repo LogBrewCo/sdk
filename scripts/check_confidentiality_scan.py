@@ -189,6 +189,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if relative_text.startswith("scripts/") and terms == {"cleanup"}:
         return True
 
+    if is_sdk_instrumentation_restore_reference(relative_text, terms):
+        return True
+
     if relative_text.endswith((".c", ".h", ".cpp", ".hpp")) and "curl_easy_cleanup" in line:
         return True
 
@@ -197,6 +200,14 @@ def is_allowed_match(relative: Path, line: str) -> bool:
 
 def is_brand_svg_asset(relative: Path) -> bool:
     return relative.parent.as_posix() == "assets/brand" and relative.suffix == ".svg"
+
+
+def is_sdk_instrumentation_restore_reference(relative_text: str, terms: set[str]) -> bool:
+    if terms != {"restore"}:
+        return False
+    if relative_text.startswith("js/") and relative_text.endswith((".js", ".cjs", ".mjs", ".ts", ".cts")):
+        return True
+    return relative_text.startswith("scripts/real_user_") and relative_text.endswith(".sh")
 
 
 def is_public_publishing_guidance(relative_text: str, line: str) -> bool:

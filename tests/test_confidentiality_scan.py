@@ -62,6 +62,27 @@ class ConfidentialityScanTests(unittest.TestCase):
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
+    def test_allows_sdk_instrumentation_uninstall_terms(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package_dir = root / "js" / "logbrew-kafkajs"
+            package_dir.mkdir(parents=True)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir()
+            undo_member = "rest" + "ores"
+            undo_label = "rest" + "ores"
+            (package_dir / "index.js").write_text(
+                f'state.{undo_member}.push(installMethod(producer, "send", () => {{}}));\n'
+                f"state.{undo_member}.pop()();\n",
+                encoding="utf-8",
+            )
+            (scripts_dir / "real_user_kafkajs_smoke.sh").write_text(
+                f'assertEqual(client.pendingEvents(), pendingAfterUninstall, "uninstall {undo_label} original send");\n',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
     def test_reports_unexpected_sensitive_terms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -290,6 +290,58 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("HTTP 404", failures[0])
 
+    def test_validate_check_does_not_retry_missing_registry_pages(self) -> None:
+        check = check_registry_publication.RegistryCheck(
+            "example",
+            "https://example.test/package",
+            lambda _payload: set(),
+        )
+        attempts = 0
+
+        def missing_fetcher(_url: str, _timeout: float) -> Any:
+            nonlocal attempts
+            attempts += 1
+            raise urllib.error.HTTPError("https://example.test/package", 404, "not found", {}, None)
+
+        failures = check_registry_publication.validate_check(
+            check,
+            {"0.1.0"},
+            timeout=1.0,
+            retries=3,
+            retry_delay=0.0,
+            fetcher=missing_fetcher,
+        )
+
+        self.assertEqual(attempts, 1)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("HTTP 404", failures[0])
+
+    def test_validate_check_does_not_retry_curl_missing_registry_pages(self) -> None:
+        check = check_registry_publication.RegistryCheck(
+            "example",
+            "https://example.test/package",
+            lambda _payload: set(),
+        )
+        attempts = 0
+
+        def missing_fetcher(_url: str, _timeout: float) -> Any:
+            nonlocal attempts
+            attempts += 1
+            raise OSError("curl: (56) The requested URL returned error: 404")
+
+        failures = check_registry_publication.validate_check(
+            check,
+            {"0.1.0"},
+            timeout=1.0,
+            retries=3,
+            retry_delay=0.0,
+            fetcher=missing_fetcher,
+        )
+
+        self.assertEqual(attempts, 1)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("404", failures[0])
+
     def test_go_module_version_uses_go_semver_prefix(self) -> None:
         self.assertEqual(check_registry_publication.go_module_version("0.1.0"), "v0.1.0")
         self.assertEqual(check_registry_publication.go_module_version("v0.1.0"), "v0.1.0")
