@@ -55,6 +55,8 @@ grep -q 'sqsSendMessageWithLogBrewSpan' "$tmp_dir/aws-sqs-readme.md"
 grep -q 'sqsSendMessageBatchWithLogBrewSpan' "$tmp_dir/aws-sqs-readme.md"
 grep -q 'sqsReceiveMessageWithLogBrewSpan' "$tmp_dir/aws-sqs-readme.md"
 grep -q 'instrumentLogBrewSqsClient' "$tmp_dir/aws-sqs-readme.md"
+grep -q 'extractSnsEnvelopeTraceparent' "$tmp_dir/aws-sqs-readme.md"
+grep -q 'extractEventBridgeEnvelopeTraceparent' "$tmp_dir/aws-sqs-readme.md"
 
 app_dir="$tmp_dir/aws-sqs-smoke-app"
 mkdir -p "$app_dir"
@@ -119,6 +121,7 @@ import {
   createLogBrewSqsSendMessageInput,
   extractLogBrewSqsTraceparent,
   instrumentLogBrewSqsClient,
+  type LogBrewSqsTraceExtractionOptions,
   sqsReceiveMessageWithLogBrewSpan,
   sqsSendMessageBatchWithLogBrewSpan,
   sqsSendMessageWithLogBrewSpan,
@@ -134,17 +137,22 @@ declare const sqsClient: SQSClient;
 declare const message: Message;
 const queueUrl = "https://sqs.us-east-1.amazonaws.com/123456789012/orders";
 const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+const extractionOptions: LogBrewSqsTraceExtractionOptions = {
+  extractEventBridgeEnvelopeTraceparent: true,
+  extractSnsEnvelopeTraceparent: true,
+  maxEnvelopeBytes: 4096
+};
 const sendInput = createLogBrewSqsSendMessageInput({ QueueUrl: queueUrl, MessageBody: "hello" }, traceparent);
 const batchInput = createLogBrewSqsSendMessageBatchInput({
   QueueUrl: queueUrl,
   Entries: [{ Id: "1", MessageBody: "hello" }]
 }, traceparent);
 const receiveInput = createLogBrewSqsReceiveMessageInput({ QueueUrl: queueUrl, MessageAttributeNames: ["custom"] });
-const extracted = extractLogBrewSqsTraceparent(message);
+const extracted = extractLogBrewSqsTraceparent(message, extractionOptions);
 const sendResult = sqsSendMessageWithLogBrewSpan(sqsClient, SendMessageCommand, sendInput, { client });
 const batchResult = sqsSendMessageBatchWithLogBrewSpan(sqsClient, SendMessageBatchCommand, batchInput, { client });
-const receiveResult = sqsReceiveMessageWithLogBrewSpan(sqsClient, ReceiveMessageCommand, receiveInput, { client });
-const processMessage = withLogBrewSqsMessageProcessor(async (msg: Message) => msg.MessageId, { client, queueName: "orders" });
+const receiveResult = sqsReceiveMessageWithLogBrewSpan(sqsClient, ReceiveMessageCommand, receiveInput, { client, ...extractionOptions });
+const processMessage = withLogBrewSqsMessageProcessor(async (msg: Message) => msg.MessageId, { client, queueName: "orders", ...extractionOptions });
 const instrumentation = instrumentLogBrewSqsClient(
   sqsClient,
   { ReceiveMessageCommand, SendMessageBatchCommand, SendMessageCommand },
@@ -231,6 +239,7 @@ const sqsClient = {
               }
             }
           },
+          snsWrappedMessage,
           {
             MessageId: "msg-2",
             MessageAttributes: {
@@ -248,6 +257,8 @@ const sqsClient = {
 };
 
 const queueUrl = "https://sqs.us-east-1.amazonaws.com/123456789012/orders";
+const snsEnvelopeTraceparent = "00-11111111111111111111111111111111-2222222222222222-01";
+const eventBridgeTraceparent = "00-33333333333333333333333333333333-4444444444444444-01";
 const input = {
   QueueUrl: queueUrl,
   MessageBody: "body must not appear",
@@ -284,6 +295,81 @@ if (allReceiveInput.MessageAttributeNames.filter((name) => name === "traceparent
   throw new Error("SQS receive input duplicated traceparent when All is present");
 }
 
+const snsWrappedMessage = {
+  MessageId: "sns-msg-1",
+  Body: JSON.stringify({
+    Type: "Notification",
+    Message: "SNS payload must not appear",
+    MessageAttributes: {
+      traceparent: {
+        Type: "String",
+        Value: snsEnvelopeTraceparent
+      }
+    }
+  })
+};
+const eventBridgeMessage = {
+  MessageId: "eventbridge-msg-1",
+  Body: JSON.stringify({
+    version: "0",
+    id: "eventbridge-event-id",
+    "detail-type": "checkout.created",
+    source: "checkout.app",
+    detail: {
+      traceparent: eventBridgeTraceparent,
+      payload: "eventbridge detail must not appear"
+    }
+  })
+};
+const snsWrappedEventBridgeMessage = {
+  Body: JSON.stringify({
+    Type: "Notification",
+    Message: JSON.stringify({
+      version: "0",
+      "detail-type": "checkout.confirmed",
+      source: "checkout.app",
+      detail: { traceparent: eventBridgeTraceparent }
+    })
+  })
+};
+if (extractLogBrewSqsTraceparent(snsWrappedMessage) !== undefined) {
+  throw new Error("SQS helper parsed SNS body without explicit opt-in");
+}
+if (extractLogBrewSqsTraceparent(eventBridgeMessage) !== undefined) {
+  throw new Error("SQS helper parsed EventBridge body without explicit opt-in");
+}
+if (extractLogBrewSqsTraceparent(snsWrappedMessage, { extractSnsEnvelopeTraceparent: true }) !== snsEnvelopeTraceparent) {
+  throw new Error("SQS helper did not extract SNS envelope traceparent");
+}
+if (extractLogBrewSqsTraceparent(eventBridgeMessage, { extractEventBridgeEnvelopeTraceparent: true }) !== eventBridgeTraceparent) {
+  throw new Error("SQS helper did not extract EventBridge detail traceparent");
+}
+if (extractLogBrewSqsTraceparent(snsWrappedEventBridgeMessage, {
+  extractEventBridgeEnvelopeTraceparent: true,
+  extractSnsEnvelopeTraceparent: true
+}) !== eventBridgeTraceparent) {
+  throw new Error("SQS helper did not extract SNS-wrapped EventBridge traceparent");
+}
+if (extractLogBrewSqsTraceparent(snsWrappedEventBridgeMessage, {
+  extractEventBridgeEnvelopeTraceparent: true
+}) !== eventBridgeTraceparent) {
+  throw new Error("SQS helper made SNS-wrapped EventBridge extraction depend on the SNS flag");
+}
+if (extractLogBrewSqsTraceparent({ Body: "not-json" }, {
+  extractEventBridgeEnvelopeTraceparent: true,
+  extractSnsEnvelopeTraceparent: true
+}) !== undefined) {
+  throw new Error("SQS helper did not tolerate malformed envelope JSON");
+}
+if (extractLogBrewSqsTraceparent({
+  Body: JSON.stringify({
+    Type: "Notification",
+    MessageAttributes: { traceparent: { Type: "String", Value: "malformed" } }
+  })
+}, { extractSnsEnvelopeTraceparent: true }) !== undefined) {
+  throw new Error("SQS helper accepted malformed SNS envelope traceparent");
+}
+
 await sqsSendMessageWithLogBrewSpan(sqsClient, SendMessageCommand, input, { client });
 await sqsSendMessageBatchWithLogBrewSpan(sqsClient, SendMessageBatchCommand, {
   QueueUrl: queueUrl,
@@ -294,10 +380,19 @@ await sqsSendMessageBatchWithLogBrewSpan(sqsClient, SendMessageBatchCommand, {
 }, { client });
 const receiveOutput = await sqsReceiveMessageWithLogBrewSpan(sqsClient, ReceiveMessageCommand, { QueueUrl: queueUrl }, {
   client,
+  extractSnsEnvelopeTraceparent: true,
   id: "evt_sqs_receive_001"
 });
 const processor = withLogBrewSqsMessageProcessor(async (message) => message.MessageId, { client, queueName: "orders" });
 await processor(receiveOutput.Messages[0]);
+const snsProcessor = withLogBrewSqsMessageProcessor(async (message) => message.MessageId, {
+  client,
+  extractSnsEnvelopeTraceparent: true,
+  id: "evt_sqs_sns_process_001",
+  queueName: "orders",
+  spanIdFactory: () => "5555555555555555"
+});
+await snsProcessor(snsWrappedMessage);
 const failingProcessor = withLogBrewSqsMessageProcessor(() => {
   throw new TypeError("details must not appear");
 }, { client, queueName: "orders" });
@@ -334,10 +429,10 @@ const receiveSpan = queuedPayload.events.find((event) => event.id === "evt_sqs_r
 if (!receiveSpan) {
   throw new Error("SQS receive span was not queued");
 }
-if (receiveSpan.attributes.metadata["messaging.batch.message_count"] !== 2) {
+if (receiveSpan.attributes.metadata["messaging.batch.message_count"] !== 3) {
   throw new Error("SQS receive span did not record the received message count");
 }
-if (!Array.isArray(receiveSpan.attributes.links) || receiveSpan.attributes.links.length !== 1) {
+if (!Array.isArray(receiveSpan.attributes.links) || receiveSpan.attributes.links.length !== 2) {
   throw new Error("SQS receive span did not include the generated message trace link");
 }
 const [, expectedTraceId, expectedSpanId] = capturedTraceparent().split("-");
@@ -346,6 +441,16 @@ if (receiveSpan.attributes.links[0].traceId !== expectedTraceId || receiveSpan.a
 }
 if (receiveSpan.attributes.links[0].metadata?.relation !== "sqs_receive") {
   throw new Error("SQS receive span link did not keep its relation metadata");
+}
+if (receiveSpan.attributes.links[1].traceId !== snsEnvelopeTraceparent.split("-")[1]) {
+  throw new Error("SQS receive span did not link the SNS envelope traceparent");
+}
+const snsProcessSpan = queuedPayload.events.find((event) => event.id === "evt_sqs_sns_process_001");
+if (!snsProcessSpan) {
+  throw new Error("SQS SNS processor span was not queued");
+}
+if (snsProcessSpan.attributes.traceId !== snsEnvelopeTraceparent.split("-")[1] || snsProcessSpan.attributes.parentSpanId !== snsEnvelopeTraceparent.split("-")[2]) {
+  throw new Error("SQS SNS processor did not continue the envelope traceparent");
 }
 
 const events = [];
@@ -381,6 +486,9 @@ for (const forbidden of [
   "body must not appear",
   "first",
   "second",
+  "SNS payload must not appear",
+  "eventbridge detail must not appear",
+  "eventbridge-event-id",
   "123456789012",
   "sqs.us-east-1.amazonaws.com",
   "details must not appear",

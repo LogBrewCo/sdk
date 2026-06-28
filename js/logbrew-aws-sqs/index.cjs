@@ -12,17 +12,20 @@ const DEFAULT_SYSTEM = "aws_sqs";
 const DEFAULT_QUEUE_NAME = "sqs";
 const TRACEPARENT_ATTRIBUTE = "traceparent";
 const MAX_MESSAGE_ATTRIBUTES = 10;
+const DEFAULT_MAX_ENVELOPE_BYTES = 256 * 1024;
+const MAX_ENVELOPE_BYTES = 1024 * 1024;
 const INSTRUMENTED_SEND = Symbol.for("@logbrew/aws-sqs.instrumentedSend");
 
 async function sqsSendMessageWithLogBrewSpan(client, SendMessageCommand, input = {}, options = {}) {
   validateSqsClient(client, "sqsSendMessageWithLogBrewSpan");
   validateCommand(SendMessageCommand, "sqsSendMessageWithLogBrewSpan", "SendMessageCommand");
+  const { spanOptions } = splitSqsOptions(options);
 
   return queueOperationWithLogBrewSpan("SendMessage", {
-    ...options,
+    ...spanOptions,
     operation: () => client.send(new SendMessageCommand(createLogBrewSqsSendMessageInput(input))),
     operationKind: "publish",
-    queueName: resolveQueueName(input, options.queueName),
+    queueName: resolveQueueName(input, spanOptions.queueName),
     system: DEFAULT_SYSTEM
   });
 }
@@ -30,14 +33,15 @@ async function sqsSendMessageWithLogBrewSpan(client, SendMessageCommand, input =
 async function sqsSendMessageBatchWithLogBrewSpan(client, SendMessageBatchCommand, input = {}, options = {}) {
   validateSqsClient(client, "sqsSendMessageBatchWithLogBrewSpan");
   validateCommand(SendMessageBatchCommand, "sqsSendMessageBatchWithLogBrewSpan", "SendMessageBatchCommand");
+  const { spanOptions } = splitSqsOptions(options);
   const entries = Array.isArray(input?.Entries) ? input.Entries : [];
 
   return queueBatchOperationWithLogBrewSpan("SendMessageBatch", {
-    ...options,
+    ...spanOptions,
     messageCount: entries.length,
     operation: () => client.send(new SendMessageBatchCommand(createLogBrewSqsSendMessageBatchInput(input))),
     operationKind: "publish",
-    queueName: resolveQueueName(input, options.queueName),
+    queueName: resolveQueueName(input, spanOptions.queueName),
     system: DEFAULT_SYSTEM
   });
 }
@@ -45,39 +49,41 @@ async function sqsSendMessageBatchWithLogBrewSpan(client, SendMessageBatchComman
 async function sqsReceiveMessageWithLogBrewSpan(client, ReceiveMessageCommand, input = {}, options = {}) {
   validateSqsClient(client, "sqsReceiveMessageWithLogBrewSpan");
   validateCommand(ReceiveMessageCommand, "sqsReceiveMessageWithLogBrewSpan", "ReceiveMessageCommand");
-  const spanOptions = {
-    ...options,
+  const { spanOptions, traceExtractionOptions } = splitSqsOptions(options);
+  const operationOptions = {
+    ...spanOptions,
     operation: async () => {
       const output = await client.send(new ReceiveMessageCommand(createLogBrewSqsReceiveMessageInput(input)));
       const messages = Array.isArray(output?.Messages) ? output.Messages : [];
-      spanOptions.messageCount = messages.length;
-      spanOptions.links = mergeLinks(
-        createLogBrewSqsTraceLinks(messages, { relation: "sqs_receive" }),
-        options.links
+      operationOptions.messageCount = messages.length;
+      operationOptions.links = mergeLinks(
+        createLogBrewSqsTraceLinks(messages, { relation: "sqs_receive" }, traceExtractionOptions),
+        spanOptions.links
       );
       return output;
     },
     operationKind: "receive",
-    queueName: resolveQueueName(input, options.queueName),
+    queueName: resolveQueueName(input, spanOptions.queueName),
     system: DEFAULT_SYSTEM
   };
 
-  return queueOperationWithLogBrewSpan("ReceiveMessage", spanOptions);
+  return queueOperationWithLogBrewSpan("ReceiveMessage", operationOptions);
 }
 
 function withLogBrewSqsMessageProcessor(processor, options = {}) {
   if (typeof processor !== "function") {
     throw new SdkError("configuration_error", "withLogBrewSqsMessageProcessor requires a message processor");
   }
+  const { spanOptions, traceExtractionOptions } = splitSqsOptions(options);
 
   return async function logBrewSqsMessageProcessor(message) {
     return queueOperationWithLogBrewSpan("ProcessMessage", {
-      ...options,
+      ...spanOptions,
       operation: () => processor(message),
       operationKind: "process",
-      queueName: resolveQueueName(message, options.queueName),
+      queueName: resolveQueueName(message, spanOptions.queueName),
       system: DEFAULT_SYSTEM,
-      traceparent: extractLogBrewSqsTraceparent(message)
+      traceparent: extractLogBrewSqsTraceparent(message, traceExtractionOptions)
     });
   };
 }
@@ -174,13 +180,23 @@ function createLogBrewSqsReceiveMessageInput(input = {}) {
   };
 }
 
-function createLogBrewSqsTraceLinks(messages, metadata = undefined) {
-  const carriers = Array.isArray(messages) ? messages.map(sqsMessageTraceCarrier) : [sqsMessageTraceCarrier(messages)];
+function createLogBrewSqsTraceLinks(messages, metadata = undefined, options = {}) {
+  const carriers = Array.isArray(messages)
+    ? messages.map((message) => sqsMessageTraceCarrier(message, options))
+    : [sqsMessageTraceCarrier(messages, options)];
   return createLogBrewQueueTraceLinks(carriers, metadata);
 }
 
-function extractLogBrewSqsTraceparent(messageOrAttributes) {
-  return normalizeTraceparent(readSqsAttributeValue(readSqsAttributes(messageOrAttributes), TRACEPARENT_ATTRIBUTE));
+function extractLogBrewSqsTraceparent(messageOrAttributes, options = {}) {
+  const traceparent = normalizeTraceparent(readSqsAttributeValue(readSqsAttributes(messageOrAttributes), TRACEPARENT_ATTRIBUTE));
+  if (traceparent) {
+    return traceparent;
+  }
+  const traceExtractionOptions = normalizeSqsTraceExtractionOptions(options);
+  if (!traceExtractionOptions.extractSnsEnvelopeTraceparent && !traceExtractionOptions.extractEventBridgeEnvelopeTraceparent) {
+    return undefined;
+  }
+  return extractEnvelopeTraceparent(messageOrAttributes, traceExtractionOptions);
 }
 
 function withTraceparentAttribute(attributes, traceparent = undefined) {
@@ -211,9 +227,123 @@ function withTraceparentAttributeName(attributeNames) {
   return [...names, TRACEPARENT_ATTRIBUTE];
 }
 
-function sqsMessageTraceCarrier(message) {
-  const traceparent = extractLogBrewSqsTraceparent(message);
+function sqsMessageTraceCarrier(message, options = {}) {
+  const traceparent = extractLogBrewSqsTraceparent(message, options);
   return traceparent ? { traceparent } : undefined;
+}
+
+function splitSqsOptions(options) {
+  const {
+    extractEventBridgeEnvelopeTraceparent,
+    extractSnsEnvelopeTraceparent,
+    maxEnvelopeBytes,
+    ...spanOptions
+  } = isObject(options) ? options : {};
+  return {
+    spanOptions,
+    traceExtractionOptions: normalizeSqsTraceExtractionOptions({
+      extractEventBridgeEnvelopeTraceparent,
+      extractSnsEnvelopeTraceparent,
+      maxEnvelopeBytes
+    })
+  };
+}
+
+function normalizeSqsTraceExtractionOptions(options = {}) {
+  return {
+    extractEventBridgeEnvelopeTraceparent: options.extractEventBridgeEnvelopeTraceparent === true,
+    extractSnsEnvelopeTraceparent: options.extractSnsEnvelopeTraceparent === true,
+    maxEnvelopeBytes: normalizeEnvelopeByteLimit(options.maxEnvelopeBytes)
+  };
+}
+
+function extractEnvelopeTraceparent(messageOrEnvelope, options) {
+  const envelope = readSqsEnvelope(messageOrEnvelope, options.maxEnvelopeBytes);
+  if (!isObject(envelope)) {
+    return undefined;
+  }
+  if (options.extractSnsEnvelopeTraceparent) {
+    const snsTraceparent = readSnsEnvelopeTraceparent(envelope);
+    if (snsTraceparent) {
+      return snsTraceparent;
+    }
+  }
+  if (options.extractEventBridgeEnvelopeTraceparent) {
+    return readEventBridgeEnvelopeTraceparent(envelope, options);
+  }
+  return undefined;
+}
+
+function readSqsEnvelope(messageOrEnvelope, maxEnvelopeBytes) {
+  if (typeof messageOrEnvelope === "string") {
+    return parseJsonEnvelope(messageOrEnvelope, maxEnvelopeBytes);
+  }
+  if (!isObject(messageOrEnvelope)) {
+    return undefined;
+  }
+  if (typeof messageOrEnvelope.Body === "string") {
+    return parseJsonEnvelope(messageOrEnvelope.Body, maxEnvelopeBytes);
+  }
+  return messageOrEnvelope;
+}
+
+function readSnsEnvelopeTraceparent(envelope) {
+  if (!isSnsEnvelope(envelope)) {
+    return undefined;
+  }
+  return normalizeTraceparent(readSqsAttributeValue(envelope.MessageAttributes, TRACEPARENT_ATTRIBUTE));
+}
+
+function readEventBridgeEnvelopeTraceparent(envelope, options) {
+  const direct = readEventBridgeDetailTraceparent(envelope);
+  if (direct) {
+    return direct;
+  }
+  if (!isSnsEnvelope(envelope) || typeof envelope.Message !== "string") {
+    return undefined;
+  }
+  return readEventBridgeDetailTraceparent(parseJsonEnvelope(envelope.Message, options.maxEnvelopeBytes));
+}
+
+function readEventBridgeDetailTraceparent(envelope) {
+  if (!isObject(envelope) || typeof envelope["detail-type"] !== "string" || !isObject(envelope.detail)) {
+    return undefined;
+  }
+  const detail = envelope.detail;
+  return normalizeTraceparent(detail.traceparent ?? detail.traceParent);
+}
+
+function parseJsonEnvelope(value, maxEnvelopeBytes) {
+  if (typeof value !== "string" || value.trim() === "" || utf8ByteLength(value) > maxEnvelopeBytes) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return isObject(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeEnvelopeByteLimit(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return DEFAULT_MAX_ENVELOPE_BYTES;
+  }
+  return Math.min(Math.floor(value), MAX_ENVELOPE_BYTES);
+}
+
+function utf8ByteLength(value) {
+  if (typeof globalThis.Buffer?.byteLength === "function") {
+    return globalThis.Buffer.byteLength(value, "utf8");
+  }
+  if (typeof globalThis.TextEncoder === "function") {
+    return new globalThis.TextEncoder().encode(value).byteLength;
+  }
+  return value.length;
+}
+
+function isSnsEnvelope(value) {
+  return isObject(value) && value.Type === "Notification";
 }
 
 function readSqsAttributes(messageOrAttributes) {

@@ -34,17 +34,23 @@ export type LogBrewSqsInstrumentation = {
   uninstall(): void;
 };
 
+export type LogBrewSqsTraceExtractionOptions = {
+  extractEventBridgeEnvelopeTraceparent?: boolean;
+  extractSnsEnvelopeTraceparent?: boolean;
+  maxEnvelopeBytes?: number;
+};
+
 export type LogBrewSqsOperationOptions<Result = unknown> =
   Omit<QueueOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent"> & {
     client: LogBrewClient;
     queueName?: string;
-  };
+  } & LogBrewSqsTraceExtractionOptions;
 
 export type LogBrewSqsBatchOperationOptions<Result = unknown> =
   Omit<QueueBatchOperationWithLogBrewSpanOptions<Result>, "operation" | "operationKind" | "queueName" | "system" | "traceparent" | "messages" | "messageCount" | "linkMetadata"> & {
     client: LogBrewClient;
     queueName?: string;
-  };
+  } & LogBrewSqsTraceExtractionOptions;
 
 export declare function sqsSendMessageWithLogBrewSpan(
   client: LogBrewSqsClientLike<SendMessageCommandOutput>,
@@ -94,11 +100,13 @@ export declare function createLogBrewSqsReceiveMessageInput(
 
 export declare function createLogBrewSqsTraceLinks(
   messages?: Message | Message[],
-  metadata?: Record<string, string | number | boolean | null>
+  metadata?: Record<string, string | number | boolean | null>,
+  options?: LogBrewSqsTraceExtractionOptions
 ): SpanLinkSummary[];
 
 export declare function extractLogBrewSqsTraceparent(
-  messageOrAttributes?: Message | SendMessageCommandInput | Record<string, MessageAttributeValue | string | unknown>
+  messageOrAttributes?: Message | SendMessageCommandInput | Record<string, MessageAttributeValue | string | unknown>,
+  options?: LogBrewSqsTraceExtractionOptions
 ): string | undefined;
 
 declare const api: {

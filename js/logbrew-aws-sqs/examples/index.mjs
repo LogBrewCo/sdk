@@ -60,7 +60,11 @@ export async function receiveAndProcessOrders() {
   );
   const processMessage = withLogBrewSqsMessageProcessor(async (message) => {
     console.log("received", message.MessageId);
-  }, { client: logbrew, queueName: "orders" });
+  }, {
+    client: logbrew,
+    extractSnsEnvelopeTraceparent: true,
+    queueName: "orders"
+  });
 
   for (const message of output.Messages ?? []) {
     await processMessage(message);

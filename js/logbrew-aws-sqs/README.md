@@ -14,6 +14,7 @@ Do not use dashboard login or session values as SDK ingest configuration.
 import { LogBrewClient } from "@logbrew/sdk";
 import { SQSClient, SendMessageCommand, SendMessageBatchCommand, ReceiveMessageCommand } from "@aws-sdk/client-sqs";
 import {
+  extractLogBrewSqsTraceparent,
   instrumentLogBrewSqsClient,
   sqsReceiveMessageWithLogBrewSpan,
   sqsSendMessageBatchWithLogBrewSpan,
@@ -64,7 +65,11 @@ const output = await sqsReceiveMessageWithLogBrewSpan(
 
 const processMessage = withLogBrewSqsMessageProcessor(async (message) => {
   console.log("processing", message.MessageId);
-}, { client: logbrew, queueName: "orders" });
+}, {
+  client: logbrew,
+  queueName: "orders",
+  extractSnsEnvelopeTraceparent: true
+});
 
 for (const message of output.Messages ?? []) {
   await processMessage(message);
@@ -93,6 +98,30 @@ The instrumentation only wraps that client instance's `send()` method, passes
 unknown commands through unchanged, preserves AWS SDK send options, and
 reinstates the prior `send()` function when uninstalled.
 
+If your queue receives SNS notification envelopes or EventBridge events that
+carry a W3C `traceparent`, opt in explicitly when linking receives or processing
+messages:
+
+```js
+const traceparent = extractLogBrewSqsTraceparent(message, {
+  extractSnsEnvelopeTraceparent: true,
+  extractEventBridgeEnvelopeTraceparent: true
+});
+
+const processMessage = withLogBrewSqsMessageProcessor(handleMessage, {
+  client: logbrew,
+  queueName: "orders",
+  extractSnsEnvelopeTraceparent: true,
+  extractEventBridgeEnvelopeTraceparent: true
+});
+```
+
+Envelope parsing is bounded to the SQS payload size by default and only returns
+one normalized `traceparent`. LogBrew does not store or send the body,
+EventBridge detail, SNS message, arbitrary message attributes, or malformed
+propagation values. `extractEventBridgeEnvelopeTraceparent` also covers
+EventBridge events wrapped by an SNS notification.
+
 ## What It Captures
 
 The helpers create producer, receive, and message-processing spans with safe
@@ -100,15 +129,19 @@ messaging metadata: `messaging.system=aws_sqs`, queue name, operation type, and
 message count for batch receives/sends. Producers inject one normalized W3C
 `traceparent` SQS message attribute. Receive calls request the `traceparent`
 attribute and add bounded span links for received messages that carry valid
-trace context.
+trace context. With explicit opt-in, receive and processor helpers can also
+continue W3C trace context from SNS notification envelopes and EventBridge
+`detail.traceparent` values delivered through SQS.
 
 ## What It Does Not Capture
 
 This package does not globally monkey-patch AWS SDK modules, create SQS clients,
-own delete/visibility/ack behavior, read message bodies, capture raw `QueueUrl`,
-account IDs, regions, hosts, receipt handles, message IDs, arbitrary message
-attributes, payloads, baggage, tracestate, or error messages/stacks. The
-optional client instrumentation is explicit, one-client-only, and reversible.
+own delete/visibility/ack behavior, capture raw `QueueUrl`, account IDs,
+regions, hosts, receipt handles, message IDs, arbitrary message attributes,
+payloads, baggage, tracestate, or error messages/stacks. It only parses message
+bodies when you opt in to SNS/EventBridge trace extraction, and that path keeps
+payload bytes out of telemetry. The optional client instrumentation is explicit,
+one-client-only, and reversible.
 
 If a message already has ten SQS message attributes and does not already have
 `traceparent`, LogBrew leaves the attributes unchanged rather than violating the

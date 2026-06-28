@@ -46,7 +46,11 @@ const output = await sqsReceiveMessageWithLogBrewSpan(
 
 const processMessage = withLogBrewSqsMessageProcessor(async (message) => {
   console.log("processing", message.MessageId);
-}, { client: logbrew, queueName: "orders" });
+}, {
+  client: logbrew,
+  extractSnsEnvelopeTraceparent: true,
+  queueName: "orders"
+});
 
 for (const message of output.Messages ?? []) {
   await processMessage(message);
