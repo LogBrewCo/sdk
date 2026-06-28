@@ -61,7 +61,7 @@ export type LogBrewBullMqProcessor<Result = unknown, Data = unknown, Name extend
   signal?: AbortSignal
 ) => Result | Promise<Result>;
 
-export type LogBrewBullMqProcessorMethod = (...args: any[]) => unknown;
+export type LogBrewBullMqProcessorMethod = (...args: never[]) => unknown;
 
 export type LogBrewBullMqProcessorMethodTarget<MethodName extends string = "process"> =
   Record<MethodName, LogBrewBullMqProcessorMethod>;
