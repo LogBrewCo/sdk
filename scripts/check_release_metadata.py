@@ -858,6 +858,12 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         }
         for description, needle in required_publish_needles.items():
             require(needle in publish_packages_text, failures, f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}")
+        for relative_dir in JS_PACKAGES:
+            require(
+                relative_dir in publish_packages_text,
+                failures,
+                f"{PUBLISH_PACKAGES_WORKFLOW}: missing npm package dir {relative_dir}",
+            )
     for relative_path in RELEASE_SAFETY_DOCS:
         docs_path = require_path(root, relative_path, failures)
         if not docs_path.exists():
