@@ -75,6 +75,44 @@ export type LogBrewRequestMetricEvent = {
   attributes: MetricAttributes;
 };
 
+export type LogBrewNestLoggerLevel = "info" | "warning" | "error" | "critical";
+
+export type LogBrewNestBaseLogger = {
+  log?: (message: unknown, context?: string) => void;
+  error?: (message: unknown, stack?: string, context?: string) => void;
+  warn?: (message: unknown, context?: string) => void;
+  debug?: (message: unknown, context?: string) => void;
+  verbose?: (message: unknown, context?: string) => void;
+  fatal?: (message: unknown, stack?: string, context?: string) => void;
+  setLogLevels?: (levels: readonly string[]) => void;
+};
+
+export type LogBrewNestLogger = {
+  client: LogBrewClient;
+  transport?: Transport;
+  log(message: unknown, context?: string): void;
+  error(message: unknown, stack?: string, context?: string): void;
+  warn(message: unknown, context?: string): void;
+  debug(message: unknown, context?: string): void;
+  verbose(message: unknown, context?: string): void;
+  fatal(message: unknown, stack?: string, context?: string): void;
+  setLogLevels(levels: readonly string[]): void;
+  flush(): Promise<TransportResponse | null>;
+  shutdown(): Promise<TransportResponse | null>;
+};
+
+export type LogBrewNestLoggerOptions = CreateLogBrewNestClientConfig & {
+  client?: LogBrewClient;
+  baseLogger?: LogBrewNestBaseLogger;
+  logger?: string;
+  transport?: Transport;
+  now?: () => string;
+  idFactory?: (level: LogBrewNestLoggerLevel, message: unknown, context: string | undefined, sequence: number) => string;
+  captureErrorsAsIssues?: boolean;
+  flushOnCapture?: boolean;
+  onCaptureError?: (error: unknown) => void | Promise<void>;
+};
+
 export type LogBrewNestOptions = CreateLogBrewNestClientConfig & {
   client?: LogBrewClient | LogBrewClientFactory;
   transport?: Transport | LogBrewTransportFactory;
@@ -102,6 +140,7 @@ export type LogBrewNestOptions = CreateLogBrewNestClientConfig & {
 };
 
 export declare function createLogBrewNestClient(config?: CreateLogBrewNestClientConfig): LogBrewClient;
+export declare function createLogBrewNestLogger(options?: LogBrewNestLoggerOptions): LogBrewNestLogger;
 export declare class LogBrewInterceptor implements NestInterceptor {
   constructor(options?: LogBrewNestOptions);
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown>;
@@ -149,6 +188,7 @@ declare global {
 declare const defaultExport: {
   createErrorEvent: typeof createErrorEvent;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
+  createLogBrewNestLogger: typeof createLogBrewNestLogger;
   createLogBrewNestClient: typeof createLogBrewNestClient;
   createRequestMetricEvent: typeof createRequestMetricEvent;
   createRequestEvent: typeof createRequestEvent;

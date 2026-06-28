@@ -4,6 +4,7 @@ import { NestFactory } from "@nestjs/core";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   createErrorEvent,
+  createLogBrewNestLogger,
   createLogBrewNestClient,
   createRequestEvent,
   LogBrewInterceptor
@@ -12,6 +13,16 @@ import {
 const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
 const autoTransport = RecordingTransport.alwaysAccept();
 const errorTransport = RecordingTransport.alwaysAccept();
+const autoClient = createLogBrewNestClient({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "nestjs-auto-smoke",
+  sdkVersion: "0.1.1"
+});
+const logbrewLogger = createLogBrewNestLogger({
+  client: autoClient,
+  idFactory: (level, _message, context) => `evt_nestjs_logger_${level}_${String(context ?? "app").toLowerCase()}`,
+  now: () => "2026-06-02T10:00:12Z"
+});
 
 const explicitClient = createLogBrewNestClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
@@ -51,10 +62,12 @@ await manualApp.close();
 
 class AutoController {
   auto() {
+    logbrewLogger.log("auto route reached", "AutoController");
     return { ok: true };
   }
 
   fail() {
+    logbrewLogger.error("route failed", undefined, "AutoController");
     throw new Error("route exploded");
   }
 }
@@ -66,7 +79,7 @@ Module({ controllers: [AutoController] })(AutoModule);
 
 const autoApp = await NestFactory.create(AutoModule, { logger: false });
 autoApp.useGlobalInterceptors(new LogBrewInterceptor({
-  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  client: autoClient,
   errorEvent(error, { request }) {
     return createErrorEvent(error, request, {
       idFactory: () => "evt_nestjs_error_001",
@@ -82,8 +95,6 @@ autoApp.useGlobalInterceptors(new LogBrewInterceptor({
       now: () => "2026-06-02T10:00:06Z"
     });
   },
-  sdkName: "nestjs-auto-smoke",
-  sdkVersion: "0.1.1",
   transport({ request }) {
     return request.url?.startsWith("/fail") ? errorTransport : autoTransport;
   }
@@ -100,14 +111,24 @@ await waitFor(() => errorTransport.sentBodies.length === 1);
 await autoApp.close();
 
 const autoPayload = JSON.parse(autoTransport.lastBody());
-if (autoPayload.events[0].type !== "log" || autoPayload.events[0].id !== "evt_nestjs_request_001") {
+const autoRequestEvent = autoPayload.events.find((event) => event.id === "evt_nestjs_request_001");
+const autoLoggerEvent = autoPayload.events.find((event) => event.id === "evt_nestjs_logger_info_autocontroller");
+if (!autoRequestEvent || autoRequestEvent.type !== "log") {
   throw new Error(`unexpected auto request payload: ${autoTransport.lastBody()}`);
 }
+if (!autoLoggerEvent || autoLoggerEvent.type !== "log" || autoLoggerEvent.attributes.level !== "info") {
+  throw new Error(`unexpected auto logger payload: ${autoTransport.lastBody()}`);
+}
 const errorPayload = JSON.parse(errorTransport.lastBody());
-if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "evt_nestjs_error_001") {
+const errorEvent = errorPayload.events.find((event) => event.id === "evt_nestjs_error_001");
+const errorLoggerEvent = errorPayload.events.find((event) => event.id === "evt_nestjs_logger_error_autocontroller");
+if (!errorEvent || errorEvent.type !== "issue") {
   throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
 }
-if (errorPayload.events[0].attributes.metadata.path !== "/fail") {
+if (!errorLoggerEvent || errorLoggerEvent.type !== "issue" || errorLoggerEvent.attributes.level !== "error") {
+  throw new Error(`unexpected error logger payload: ${errorTransport.lastBody()}`);
+}
+if (errorEvent.attributes.metadata.path !== "/fail") {
   throw new Error(`error capture should omit query text: ${errorTransport.lastBody()}`);
 }
 const errorPreview = createErrorEvent(new Error("manual failure"), { method: "POST", originalUrl: "/manual" }, {
@@ -122,10 +143,11 @@ console.log(okText);
 console.error(JSON.stringify({
   ok: true,
   attempts: requestTransport.sentBodies.length,
-  autoCaptured: autoPayload.events[0].attributes.message,
-  errorCaptured: errorPayload.events[0].attributes.title,
+  autoCaptured: autoRequestEvent.attributes.message,
+  loggerCaptured: autoLoggerEvent.attributes.message,
+  errorCaptured: errorEvent.attributes.title,
   errorStatus: failResponse.status,
-  events: 6,
+  events: 8,
   status: okResponse.status
 }));
 

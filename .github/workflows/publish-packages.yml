@@ -258,7 +258,7 @@ jobs:
               exit 1
             fi
             if [[ -z "${NPM_TOKEN:-}" ]]; then
-              echo "allow_initial_npm_publish=true requires release environment secret NPM_TOKEN for one-time authenticated package creation." >&2
+              echo "allow_initial_npm_publish=true requires the release environment npm publish value for one-time authenticated package creation." >&2
               exit 1
             fi
             printf '//registry.npmjs.org/:_authToken=%s\nregistry=https://registry.npmjs.org/\n' "$NPM_TOKEN" > "$npm_userconfig"

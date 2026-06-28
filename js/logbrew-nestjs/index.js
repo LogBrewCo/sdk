@@ -40,9 +40,10 @@ export class LogBrewInterceptor {
     const client = resolveClient(this.options, executionContext, request, response);
     const transport = resolveTransport(this.options, executionContext, request, response, client);
     const trace = createRequestTraceContext(request, response, this.options);
+    const shutdownClient = shouldShutdownClient(this.options);
     const startedAt = nowMs(this.options);
 
-    request.logbrew = createRequestContext(client, transport, trace);
+    request.logbrew = createRequestContext(client, transport, trace, shutdownClient);
 
     return new Observable((subscriber) => activeTraceContext.run(trace, () =>
       next.handle().pipe(
@@ -54,6 +55,7 @@ export class LogBrewInterceptor {
                 executionContext,
                 request,
                 response,
+                shutdownClient,
                 startedAt,
                 trace,
                 transport
@@ -68,6 +70,7 @@ export class LogBrewInterceptor {
             executionContext,
             request,
             response,
+            shutdownClient,
             trace,
             transport
           });
@@ -179,7 +182,118 @@ export function createRequestMetricEvent(request, response, {
   };
 }
 
-function createRequestContext(client, transport, trace) {
+export function createLogBrewNestLogger(options = {}) {
+  const client = options.client ?? createLogBrewNestClient(options);
+  const logger = options.logger ?? "nestjs";
+  const now = typeof options.now === "function" ? options.now : () => new Date().toISOString();
+  const idFactory = typeof options.idFactory === "function" ? options.idFactory : defaultLoggerEventId;
+  const onCaptureError = typeof options.onCaptureError === "function" ? options.onCaptureError : () => {};
+  const state = {
+    captured: 0,
+    pendingFlush: Promise.resolve(null)
+  };
+  const baseLogger = options.baseLogger;
+
+  function notifyCaptureError(error) {
+    try {
+      void Promise.resolve(onCaptureError(error)).catch(() => {});
+    } catch {
+      // Logger error handlers must not make application logging throw.
+    }
+  }
+
+  function capture(level, message, context) {
+    try {
+      state.captured += 1;
+      const normalizedLevel = normalizeLoggerLevel(level);
+      const timestamp = now();
+      const metadata = loggerMetadata({
+        context,
+        logger,
+        message,
+        trace: getActiveLogBrewTrace()
+      });
+      const id = idFactory(normalizedLevel, message, context, state.captured);
+
+      if ((normalizedLevel === "error" || normalizedLevel === "critical") && options.captureErrorsAsIssues !== false) {
+        client.issue(id, timestamp, {
+          title: `${context || logger} ${normalizedLevel === "critical" ? "critical" : "error"}`,
+          level: normalizedLevel,
+          message: messageText(message),
+          metadata
+        });
+      } else {
+        client.log(id, timestamp, {
+          message: messageText(message),
+          level: normalizedLevel,
+          logger,
+          metadata
+        });
+      }
+
+      if (options.flushOnCapture === true && options.transport) {
+        state.pendingFlush = Promise.resolve(client.flush(options.transport)).catch((error) => {
+          notifyCaptureError(error);
+          return null;
+        });
+      }
+    } catch (error) {
+      notifyCaptureError(error);
+    }
+  }
+
+  return {
+    client,
+    transport: options.transport,
+    log(message, context) {
+      forwardLoggerCall(baseLogger, "log", [message, context]);
+      capture("info", message, context);
+    },
+    error(message, stack, context) {
+      forwardLoggerCall(baseLogger, "error", [message, stack, context]);
+      capture("error", message, context);
+    },
+    warn(message, context) {
+      forwardLoggerCall(baseLogger, "warn", [message, context]);
+      capture("warning", message, context);
+    },
+    debug(message, context) {
+      forwardLoggerCall(baseLogger, "debug", [message, context]);
+      capture("info", message, context);
+    },
+    verbose(message, context) {
+      forwardLoggerCall(baseLogger, "verbose", [message, context]);
+      capture("info", message, context);
+    },
+    fatal(message, stack, context) {
+      forwardLoggerCall(baseLogger, "fatal", [message, stack, context]);
+      capture("critical", message, context);
+    },
+    setLogLevels(levels) {
+      forwardLoggerCall(baseLogger, "setLogLevels", [levels]);
+    },
+    flush() {
+      if (options.transport && client.pendingEvents() > 0) {
+        state.pendingFlush = Promise.resolve(client.flush(options.transport)).catch((error) => {
+          notifyCaptureError(error);
+          return null;
+        });
+      }
+      return state.pendingFlush;
+    },
+    shutdown() {
+      if (options.transport) {
+        state.pendingFlush = Promise.resolve(client.shutdown(options.transport)).catch((error) => {
+          notifyCaptureError(error);
+          return null;
+        });
+      }
+      return state.pendingFlush;
+    }
+  };
+}
+
+function createRequestContext(client, transport, trace, shutdownClient) {
   return {
     client,
     logbrew: client,
@@ -187,7 +301,7 @@ function createRequestContext(client, transport, trace) {
     transport,
     previewJson: () => client.previewJson(),
     flush: () => client.flush(transport),
-    shutdown: () => client.shutdown(transport)
+    shutdown: () => flushCapturedClient(client, transport, shutdownClient)
   };
 }
 
@@ -196,6 +310,7 @@ async function captureRequestFinish(options, {
   executionContext,
   request,
   response,
+  shutdownClient,
   startedAt,
   trace,
   transport
@@ -218,7 +333,7 @@ async function captureRequestFinish(options, {
         });
       captureRequestMetricEvent(client, metricEvent);
     }
-    const transportResponse = await client.shutdown(transport);
+    const transportResponse = await flushCapturedClient(client, transport, shutdownClient);
     await notifyFlush(options, transportResponse, { client, executionContext, request, response, trace });
   } catch (error) {
     await notifyFailure(options, error, { client, executionContext, request, response, trace });
@@ -231,6 +346,7 @@ async function captureRequestError(options, {
   executionContext,
   request,
   response,
+  shutdownClient,
   trace,
   transport
 }) {
@@ -241,7 +357,7 @@ async function captureRequestError(options, {
 
   try {
     client.issue(event.id, event.timestamp, event.attributes);
-    const transportResponse = await client.shutdown(transport);
+    const transportResponse = await flushCapturedClient(client, transport, shutdownClient);
     await notifyFlush(options, transportResponse, { client, executionContext, request, response, trace: requestTrace });
   } catch (captureError) {
     await notifyFailure(options, captureError, { client, executionContext, request, response, trace: requestTrace });
@@ -263,6 +379,14 @@ function resolveTransport(options, executionContext, request, response, client) 
     return options.transport({ client, executionContext, request, response });
   }
   return options.transport ?? RecordingTransport.alwaysAccept();
+}
+
+function shouldShutdownClient(options) {
+  return !options.client;
+}
+
+function flushCapturedClient(client, transport, shutdownClient) {
+  return shutdownClient ? client.shutdown(transport) : client.flush(transport);
 }
 
 async function notifyFlush(options, response, context) {
@@ -379,6 +503,57 @@ function traceMetadata(trace) {
   };
 }
 
+function loggerMetadata({ context, logger, message, trace }) {
+  return {
+    framework: "nestjs",
+    logger,
+    ...(context ? { context } : {}),
+    ...errorMetadata(message),
+    ...traceMetadata(trace)
+  };
+}
+
+function errorMetadata(message) {
+  if (message instanceof Error) {
+    return { errorType: message.name || "Error" };
+  }
+  return {};
+}
+
+function normalizeLoggerLevel(level) {
+  if (level === "warning" || level === "error" || level === "critical") {
+    return level;
+  }
+  return "info";
+}
+
+function messageText(message) {
+  if (message instanceof Error) {
+    return message.message;
+  }
+  if (typeof message === "string") {
+    return message;
+  }
+  if (typeof message === "number" || typeof message === "boolean" || typeof message === "bigint") {
+    return String(message);
+  }
+  if (message === undefined || message === null) {
+    return String(message);
+  }
+  return Object.prototype.toString.call(message);
+}
+
+function forwardLoggerCall(baseLogger, method, args) {
+  const target = baseLogger?.[method];
+  if (typeof target === "function") {
+    target.apply(baseLogger, args);
+  }
+}
+
+function defaultLoggerEventId(level, _message, context, sequence) {
+  return `evt_nestjs_logger_${level}_${slugify(context || "app")}_${sequence}`;
+}
+
 function createTraceparentRequestSpan(traceContext, {
   durationMs,
   id,
@@ -470,6 +645,7 @@ function randomHex(byteLength) {
 export default {
   createErrorEvent,
   getActiveLogBrewTrace,
+  createLogBrewNestLogger,
   createLogBrewNestClient,
   createRequestMetricEvent,
   createRequestEvent,

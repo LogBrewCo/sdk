@@ -103,6 +103,48 @@ app.useGlobalInterceptors(new LogBrewInterceptor({
 
 This emits an explicit `http.server.duration` histogram with primitive metadata for `framework`, `method`, `routeTemplate`, `statusCode`, and `statusCodeClass`. Route templates are preferred when Nest exposes them through the underlying HTTP adapter, and query strings or hashes are omitted by default. Use `captureRequests: false` with `captureRequestMetrics: true` when you only want request metrics.
 
+## NestJS Logger
+
+Use `createLogBrewNestLogger` when you want Nest's own logger calls to share the same release, environment, request, trace, and span context as the interceptor:
+
+```ts
+import { Logger } from "@nestjs/common";
+import { NestFactory } from "@nestjs/core";
+import { RecordingTransport } from "@logbrew/sdk";
+import {
+  createLogBrewNestClient,
+  createLogBrewNestLogger,
+  LogBrewInterceptor
+} from "@logbrew/nestjs";
+import { AppModule } from "./app.module";
+
+const app = await NestFactory.create(AppModule, { logger: false });
+const transport = RecordingTransport.alwaysAccept();
+const client = createLogBrewNestClient({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "logbrew-nestjs",
+  sdkVersion: "0.1.1"
+});
+
+const logger = createLogBrewNestLogger({
+  client,
+  transport,
+  baseLogger: new Logger("LogBrew")
+});
+
+app.useLogger(logger);
+app.useGlobalInterceptors(new LogBrewInterceptor({
+  client,
+  transport
+}));
+
+await app.listen(3000);
+```
+
+The logger implements the Nest logger shape (`log`, `warn`, `error`, `debug`, `verbose`, `fatal`, and `setLogLevels`). It forwards to `baseLogger` first so existing console/file behavior stays app-owned, then captures LogBrew `log` events for `log`/`warn`/`debug`/`verbose` and `issue` events for `error`/`fatal`. Error and fatal calls keep the message and error type when available, but omit stack text, request headers, query strings, bodies, raw `traceparent`, and arbitrary object payloads.
+
+When the logger shares a client with `LogBrewInterceptor`, request completion flushes captured logger events without shutting down the shared app-owned client. If you use the logger outside a request path, call `await logger.flush()` during graceful shutdown or set `flushOnCapture: true` with an explicit transport for small standalone scripts.
+
 ## Packaged Examples
 
 The package includes example source for the interceptor, controller access, and app-owned response handling. Use the snippets above as the starting point for wiring LogBrew into your NestJS application.

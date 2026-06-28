@@ -29,10 +29,24 @@ Follow-up to the all-SDK tracing priority after Node, Express, and Fastify got r
 
 ## Where LogBrew Is Still Worse
 
-- No automatic Nest logger trace injection yet; Sentry/Datadog ecosystems can provide more automatic correlation for common logging paths.
+- No hidden automatic Nest logger patching yet; Sentry/Datadog ecosystems can provide more automatic correlation for common logging paths.
 - No OpenTelemetry context manager interop yet; LogBrew continues W3C headers but does not read/write an existing OTel active span.
 - Next.js still needs the Node/Express/Fastify/NestJS active-trace/error-correlation pattern.
 - Source-map/native symbolication and backend-owned setup/usage/quota contracts remain broader product gaps.
+
+## 2026-06-28 Logger Correlation Source Reads
+
+Current public source checked before this follow-up:
+
+- Sentry JavaScript `54e995da76381f18f61f39b0ceecadf5a0b06b11`: `packages/nestjs/src/integrations/sentry-nest-instrumentation.ts`, `packages/nestjs/src/integrations/sentry-nest-bullmq-instrumentation.ts`, `packages/nestjs/src/setup.ts`, `packages/nestjs/src/index.ts`, `packages/core/src/logs/console-integration.ts`, and `packages/core/src/instrument/console.ts`.
+- OpenTelemetry JS contrib `eb98ccc85069304a1f0c2e6b33be1b2ca961b4be`: `packages/instrumentation-nestjs-core/src/instrumentation.ts`, `packages/instrumentation-pino/src/instrumentation.ts`, and `packages/instrumentation-winston/src/instrumentation.ts`.
+- Datadog `dd-trace-js` `27dcc31908d9a6264b1536a2118534c8bc4da0f6`: `packages/datadog-plugin-pino/src/index.js`, `packages/datadog-plugin-winston/src/index.js`, and `packages/datadog-plugin-bunyan/src/index.js`.
+
+Competitor pattern: mature SDKs often auto-patch framework/logger internals or inject active trace IDs into pino/winston/bunyan/console records. That is convenient, but it increases runtime coupling and can surprise apps that already own logger formatting.
+
+LogBrew-native follow-up: `@logbrew/nestjs` now exposes `createLogBrewNestLogger(...)`, an explicit Nest logger-shape helper. Apps share one LogBrew client between `LogBrewInterceptor` and the logger, keep their existing base logger, and get request trace/span correlation for `log`/`warn`/`error`/`fatal` calls without global monkey-patching. Request completion now flushes app-supplied shared clients instead of shutting them down, while SDK-created per-request clients still shut down after capture.
+
+Tradeoff: LogBrew is still less automatic than Sentry/Datadog for zero-code logger correlation, but it is safer for public SDK defaults: no hidden logger patching, no request body/header/query capture, no raw propagation header capture, no stack text by default, and no arbitrary object serialization.
 
 ## Updated Proof
 
@@ -40,4 +54,4 @@ Follow-up to the all-SDK tracing priority after Node, Express, and Fastify got r
 - `python3 scripts/check_js_sources.py js/logbrew-nestjs`
 - `bash scripts/real_user_nestjs_smoke.sh` with `@nestjs/common@11.1.27`, `@nestjs/core@11.1.27`, and `@nestjs/platform-express@11.1.27`
 
-The installed-artifact NestJS smoke packages local `@logbrew/sdk` and `@logbrew/nestjs`, installs them into a temporary app, verifies ESM/CJS exports, type-checks trace-aware interceptor callbacks, proves controller async active-trace preservation, verifies request span continuation from W3C `traceparent`, and checks error metadata correlation without raw propagation leakage.
+The installed-artifact NestJS smoke packages local `@logbrew/sdk` and `@logbrew/nestjs`, installs them into a temporary app, verifies ESM/CJS exports, type-checks trace-aware interceptor callbacks and the Nest logger helper, proves controller async active-trace preservation, verifies request span continuation from W3C `traceparent`, proves logger log/error correlation through the active request trace, proves app-supplied shared clients are flushed rather than shut down between requests, and checks error metadata correlation without raw propagation leakage.

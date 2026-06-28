@@ -61,6 +61,8 @@ grep -q 'captureRequests: false' "$tmp_dir/nestjs-readme.md"
 grep -q 'captureRequestMetrics' "$tmp_dir/nestjs-readme.md"
 grep -q 'http.server.duration' "$tmp_dir/nestjs-readme.md"
 grep -q 'low-cardinality' "$tmp_dir/nestjs-readme.md"
+grep -q 'createLogBrewNestLogger' "$tmp_dir/nestjs-readme.md"
+grep -q 'app.useLogger' "$tmp_dir/nestjs-readme.md"
 
 app_dir="$tmp_dir/nestjs-smoke-app"
 mkdir -p "$app_dir"
@@ -131,11 +133,13 @@ import type { Request, Response } from "express";
 import { RecordingTransport, type LogAttributes } from "@logbrew/sdk";
 import {
   createErrorEvent,
+  createLogBrewNestLogger,
   createLogBrewNestClient,
   createRequestMetricEvent,
   createRequestEvent,
   getActiveLogBrewTrace,
   LogBrewInterceptor,
+  type LogBrewNestLogger,
   type LogBrewTraceContext
 } from "@logbrew/nestjs";
 
@@ -190,6 +194,28 @@ await manualApp.close();
 
 let requestTraceFromAuto: LogBrewTraceContext | undefined;
 let activeTraceFromAuto: LogBrewTraceContext | undefined;
+const forwardedLoggerCalls: string[] = [];
+const autoClient = createLogBrewNestClient({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "nestjs-auto-smoke",
+  sdkVersion: "0.1.1"
+});
+const logbrewLogger: LogBrewNestLogger = createLogBrewNestLogger({
+  client: autoClient,
+  baseLogger: {
+    log(message: unknown, context?: string) {
+      forwardedLoggerCalls.push(`log:${String(message)}:${context ?? ""}`);
+    },
+    error(message: unknown, stack?: string, context?: string) {
+      forwardedLoggerCalls.push(`error:${String(message)}:${stack ?? ""}:${context ?? ""}`);
+    },
+    warn(message: unknown, context?: string) {
+      forwardedLoggerCalls.push(`warn:${String(message)}:${context ?? ""}`);
+    }
+  },
+  idFactory: (level, message, context) => `evt_nestjs_logger_${level}_${String(context ?? "app").toLowerCase()}`,
+  now: () => "2026-06-02T10:00:12Z"
+});
 
 @Controller()
 class AutoController {
@@ -198,6 +224,8 @@ class AutoController {
     requestTraceFromAuto = request.logbrew?.trace;
     await Promise.resolve();
     activeTraceFromAuto = getActiveLogBrewTrace();
+    logbrewLogger.log("checkout route reached", "CheckoutController");
+    logbrewLogger.warn("retry budget low", "CheckoutController");
     const trace = requestTraceFromAuto ?? activeTraceFromAuto;
     const attributes: LogAttributes = {
       message: "auto route reached",
@@ -220,6 +248,7 @@ class AutoController {
 
   @Get("/fail")
   fail(): never {
+    logbrewLogger.error("route failed", "STACK_SENTINEL", "CheckoutController");
     throw new Error("route exploded");
   }
 }
@@ -228,8 +257,9 @@ class AutoController {
 class AutoModule {}
 
 const autoApp = await NestFactory.create(AutoModule, { logger: false });
+const autoCaptureErrors: string[] = [];
 autoApp.useGlobalInterceptors(new LogBrewInterceptor({
-  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  client: autoClient,
   errorEvent(error, { request, trace }) {
     return createErrorEvent(error, request, {
       idFactory: () => "evt_nestjs_error_001",
@@ -239,6 +269,9 @@ autoApp.useGlobalInterceptors(new LogBrewInterceptor({
   },
   now: () => "2026-06-02T10:00:06Z",
   nowMs: () => 100,
+  onCaptureError(error) {
+    autoCaptureErrors.push(error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+  },
   requestEvent(request, response, { durationMs, trace }) {
     return createRequestEvent(request, response, {
       durationMs,
@@ -247,8 +280,6 @@ autoApp.useGlobalInterceptors(new LogBrewInterceptor({
       trace
     });
   },
-  sdkName: "nestjs-auto-smoke",
-  sdkVersion: "0.1.1",
   spanIdFactory(request) {
     return request.url?.startsWith("/fail") ? errorSpanId : autoSpanId;
   },
@@ -265,14 +296,20 @@ const autoResponse = await fetch(`${autoUrl}/auto?token=secret`, {
   }
 });
 await autoResponse.json();
-await waitFor(() => autoTransport.sentBodies.length === 1);
+await waitFor(
+  () => autoTransport.sentBodies.length === 1,
+  () => `auto request capture timed out; errors=${JSON.stringify(autoCaptureErrors)}`
+);
 const failResponse = await fetch(`${autoUrl}/fail?token=secret`, {
   headers: {
     traceparent: autoTraceparent
   }
 });
 await failResponse.json();
-await waitFor(() => errorTransport.sentBodies.length === 1);
+await waitFor(
+  () => errorTransport.sentBodies.length === 1,
+  () => `error request capture timed out; errors=${JSON.stringify(autoCaptureErrors)}`
+);
 await autoApp.close();
 
 const autoPayload = JSON.parse(autoTransport.lastBody() ?? "");
@@ -294,13 +331,48 @@ if (!correlatedLogEvent || correlatedLogEvent.attributes.metadata.traceId !== "4
   throw new Error(`app log should carry request trace metadata: ${autoTransport.lastBody()}`);
 }
 const errorPayload = JSON.parse(errorTransport.lastBody() ?? "");
-if (errorPayload.events[0].type !== "issue" || errorPayload.events[0].id !== "evt_nestjs_error_001") {
+const loggerEvents = [...autoPayload.events, ...errorPayload.events];
+const infoLog = loggerEvents.find((event) => event.id === "evt_nestjs_logger_info_checkoutcontroller");
+const warnLog = loggerEvents.find((event) => event.id === "evt_nestjs_logger_warning_checkoutcontroller");
+const errorIssue = loggerEvents.find((event) => event.id === "evt_nestjs_logger_error_checkoutcontroller");
+if (!infoLog || infoLog.type !== "log" || infoLog.attributes.level !== "info") {
+  throw new Error(`missing info logger event: ${JSON.stringify(loggerEvents)}`);
+}
+if (!warnLog || warnLog.type !== "log" || warnLog.attributes.level !== "warning") {
+  throw new Error(`missing warning logger event: ${JSON.stringify(loggerEvents)}`);
+}
+if (!errorIssue || errorIssue.type !== "issue" || errorIssue.attributes.level !== "error") {
+  throw new Error(`missing error logger issue: ${JSON.stringify(loggerEvents)}`);
+}
+if (infoLog.attributes.metadata.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736" || infoLog.attributes.metadata.spanId !== autoSpanId) {
+  throw new Error(`logger log should carry active trace metadata: ${JSON.stringify(infoLog)}`);
+}
+if (errorIssue.attributes.metadata.spanId !== errorSpanId) {
+  throw new Error(`logger error should carry failing request trace: ${JSON.stringify(errorIssue)}`);
+}
+if (errorIssue.attributes.metadata.stack || JSON.stringify(loggerEvents).includes("STACK_SENTINEL")) {
+  throw new Error(`logger payload should omit stack text: ${JSON.stringify(loggerEvents)}`);
+}
+const loggerPayloadText = JSON.stringify(loggerEvents);
+const queryLeakNeedle = ["tok", "en=sec", "ret"].join("");
+if (loggerPayloadText.includes(queryLeakNeedle) || loggerPayloadText.includes("traceparent")) {
+  throw new Error(`logger payload leaked request/query/header detail: ${loggerPayloadText}`);
+}
+if (
+  !forwardedLoggerCalls.includes("log:checkout route reached:CheckoutController") ||
+  !forwardedLoggerCalls.includes("warn:retry budget low:CheckoutController") ||
+  !forwardedLoggerCalls.includes("error:route failed:STACK_SENTINEL:CheckoutController")
+) {
+  throw new Error(`base logger forwarding changed: ${JSON.stringify(forwardedLoggerCalls)}`);
+}
+const requestErrorEvent = errorPayload.events.find((event: { id?: string }) => event.id === "evt_nestjs_error_001");
+if (!requestErrorEvent || requestErrorEvent.type !== "issue") {
   throw new Error(`unexpected error payload: ${errorTransport.lastBody()}`);
 }
-if (errorPayload.events[0].attributes.metadata.path !== "/fail") {
+if (requestErrorEvent.attributes.metadata.path !== "/fail") {
   throw new Error(`error capture should omit query text: ${errorTransport.lastBody()}`);
 }
-if (errorPayload.events[0].attributes.metadata.spanId !== errorSpanId) {
+if (requestErrorEvent.attributes.metadata.spanId !== errorSpanId) {
   throw new Error(`error capture should carry request trace metadata: ${errorTransport.lastBody()}`);
 }
 const errorPreview = createErrorEvent(new Error("manual failure"), { method: "POST", originalUrl: "/manual" } as Request, {
@@ -481,9 +553,10 @@ console.error(JSON.stringify({
   attempts: requestTransport.sentBodies.length,
   autoCaptured: autoRequestEvent.attributes.name,
   activeTrace: activeTraceFromAuto?.spanId,
-  errorCaptured: errorPayload.events[0].attributes.title,
+  errorCaptured: requestErrorEvent.attributes.title,
   errorStatus: failResponse.status,
-  events: 7,
+  events: 10,
+  loggerCaptured: errorIssue.attributes.title,
   metricCaptured: metricEvent.attributes.name,
   metricRoute: metricEvent.attributes.metadata.routeTemplate,
   traceCaptured: traceEvent.attributes.name,
@@ -524,8 +597,8 @@ function addFullBatch(client: ReturnType<typeof createLogBrewNestClient>): void 
   });
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+async function waitFor(predicate: () => boolean, message: () => string = () => "timed out waiting for NestJS capture"): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     if (predicate()) {
       return;
     }
@@ -533,7 +606,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
       setTimeout(resolve, 10);
     });
   }
-  throw new Error("timed out waiting for NestJS capture");
+  throw new Error(message());
 }
 EOF
 
@@ -544,6 +617,7 @@ import { NestFactory } from "@nestjs/core";
 import type { Request } from "express";
 import { RecordingTransport, type LogAttributes } from "@logbrew/sdk";
 import {
+  createLogBrewNestLogger,
   createLogBrewNestClient,
   createRequestMetricEvent,
   createRequestEvent,
@@ -551,6 +625,7 @@ import {
   LogBrewInterceptor,
   type LogBrewRequestMetricEvent,
   type LogBrewRequestEvent,
+  type LogBrewNestLogger,
   type LogBrewTraceContext
 } from "@logbrew/nestjs";
 
@@ -559,6 +634,12 @@ const client = createLogBrewNestClient({
   sdkName: "typed-nestjs-smoke",
   sdkVersion: "0.1.1"
 });
+const logger: LogBrewNestLogger = createLogBrewNestLogger({
+  client,
+  baseLogger: console,
+  transport: RecordingTransport.alwaysAccept()
+});
+logger.log("typed log", "TypedController");
 
 @Controller()
 class TypedController {

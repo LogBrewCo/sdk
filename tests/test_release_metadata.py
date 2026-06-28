@@ -81,6 +81,7 @@ jobs:
           missing_npm_packages=()
           echo "npm trusted publishing requires existing package pages"
           echo "Use allow_initial_npm_publish only for one-time authenticated package creation"
+          echo "allow_initial_npm_publish=true requires the release environment npm publish value"
           package_dirs=(
 """
         + package_dir_lines
@@ -337,6 +338,22 @@ jobs:
             check_release_metadata.validate_release_workflows(root, failures)
 
         self.assertTrue(any("npm first-publish guard" in failure for failure in failures))
+
+    def test_publish_packages_workflow_requires_npm_initial_publish_value_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
+            workflow = minimal_publish_packages_workflow(list(check_release_metadata.JS_PACKAGES))
+            workflow = workflow.replace(
+                'echo "allow_initial_npm_publish=true requires the release environment npm publish value"',
+                'echo "missing explicit initial publish value failure"',
+            )
+            (workflow_dir / "publish-packages.yml").write_text(workflow, encoding="utf-8")
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("npm first-publish initial value failure" in failure for failure in failures))
 
     def test_publish_release_workflow_requires_scoped_release_skip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

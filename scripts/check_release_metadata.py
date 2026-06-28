@@ -858,6 +858,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "npm initial publish opt-in": "allow_initial_npm_publish:",
             "npm first-publish guard": "missing_npm_packages",
             "npm first-publish token seam": "NPM_TOKEN",
+            "npm first-publish initial value failure": (
+                "allow_initial_npm_publish=true requires the release environment npm publish value"
+            ),
             "npm first-publish trusted publishing warning": (
                 "npm trusted publishing requires existing package pages"
             ),
