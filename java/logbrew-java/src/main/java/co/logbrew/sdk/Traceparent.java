@@ -1,6 +1,8 @@
 package co.logbrew.sdk;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -90,6 +92,7 @@ public final class Traceparent {
         private final String status;
         private Double durationMs;
         private Map<String, ?> metadata;
+        private List<SpanEventSummary> events;
 
         private SpanInput(String name, String spanId, String status) {
             this.name = name;
@@ -117,6 +120,40 @@ public final class Traceparent {
          */
         public SpanInput metadata(Map<String, ?> metadata) {
             this.metadata = Validation.copyMetadata(metadata);
+            return this;
+        }
+
+        /**
+         * Adds one optional privacy-bounded span event summary.
+         */
+        public SpanInput event(SpanEventSummary event) {
+            if (event == null) {
+                throw new SdkException("validation_error", "span event summary must be provided");
+            }
+            if (events == null) {
+                events = new ArrayList<>();
+            }
+            events.add(event);
+            SpanEventSummary.requireEventLimit(events.size());
+            return this;
+        }
+
+        /**
+         * Sets optional privacy-bounded span event summaries.
+         */
+        public SpanInput events(Iterable<SpanEventSummary> summaries) {
+            if (summaries == null) {
+                throw new SdkException("validation_error", "span events must be provided");
+            }
+            List<SpanEventSummary> copied = new ArrayList<>();
+            for (SpanEventSummary summary : summaries) {
+                if (summary == null) {
+                    throw new SdkException("validation_error", "span event summary must be provided");
+                }
+                copied.add(summary);
+                SpanEventSummary.requireEventLimit(copied.size());
+            }
+            this.events = copied;
             return this;
         }
     }
@@ -201,6 +238,9 @@ public final class Traceparent {
         }
         if (input.metadata != null) {
             attributes.metadata(input.metadata);
+        }
+        if (input.events != null) {
+            attributes.events(input.events);
         }
         return attributes;
     }

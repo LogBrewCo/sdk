@@ -1,6 +1,8 @@
 package co.logbrew.sdk;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -14,6 +16,7 @@ public final class SpanAttributes {
     private String parentSpanId;
     private Double durationMs;
     private Map<String, ?> metadata;
+    private List<SpanEventSummary> events;
 
     private SpanAttributes(String name, String traceId, String spanId, String status) {
         this.name = name;
@@ -53,6 +56,40 @@ public final class SpanAttributes {
         return this;
     }
 
+    /**
+     * Adds one optional privacy-bounded span event summary.
+     */
+    public SpanAttributes event(SpanEventSummary event) {
+        if (event == null) {
+            throw new SdkException("validation_error", "span event summary must be provided");
+        }
+        if (events == null) {
+            events = new ArrayList<>();
+        }
+        events.add(event);
+        SpanEventSummary.requireEventLimit(events.size());
+        return this;
+    }
+
+    /**
+     * Sets optional privacy-bounded span event summaries.
+     */
+    public SpanAttributes events(Iterable<SpanEventSummary> summaries) {
+        if (summaries == null) {
+            throw new SdkException("validation_error", "span events must be provided");
+        }
+        List<SpanEventSummary> copied = new ArrayList<>();
+        for (SpanEventSummary summary : summaries) {
+            if (summary == null) {
+                throw new SdkException("validation_error", "span event summary must be provided");
+            }
+            copied.add(summary);
+            SpanEventSummary.requireEventLimit(copied.size());
+        }
+        this.events = copied;
+        return this;
+    }
+
     Map<String, Object> toMap() {
         Validation.requireNonEmpty("span name", name);
         Validation.requireNonEmpty("span traceId", traceId);
@@ -72,6 +109,13 @@ public final class SpanAttributes {
             value.put("durationMs", durationMs);
         }
         Validation.putOptionalMetadata(value, metadata);
+        if (events != null && !events.isEmpty()) {
+            List<Map<String, Object>> mappedEvents = new ArrayList<>();
+            for (SpanEventSummary event : events) {
+                mappedEvents.add(event.toMap());
+            }
+            value.put("events", mappedEvents);
+        }
         return value;
     }
 }

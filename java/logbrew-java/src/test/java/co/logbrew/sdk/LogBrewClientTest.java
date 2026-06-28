@@ -14,12 +14,12 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Optional;
 import java.util.Collections;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
@@ -334,6 +334,7 @@ public final class LogBrewClientTest {
                 traceparent,
                 Traceparent.SpanInput.create("POST /checkout/:cart_id", childSpanId, "ok")
                     .durationMs(8.5)
+                    .event(SpanEventSummary.create("handler.done").metadata(Map.of("stage", "handler")))
                     .metadata(Map.of("routeTemplate", "/checkout/:cart_id", "sampled", Boolean.TRUE))
             )
         );
@@ -344,6 +345,8 @@ public final class LogBrewClientTest {
         assertContains(payload, "\"spanId\": \"b7ad6b7169203331\"");
         assertContains(payload, "\"durationMs\": 8.5");
         assertContains(payload, "\"sampled\": true");
+        assertContains(payload, "\"name\": \"handler.done\"");
+        assertContains(payload, "\"stage\": \"handler\"");
         testsRun++;
     }
 

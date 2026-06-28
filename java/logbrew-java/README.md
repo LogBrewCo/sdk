@@ -209,6 +209,7 @@ Use `LogBrewOperationTracing` around app-owned database, cache, or queue calls w
 
 ```java
 import co.logbrew.sdk.LogBrewOperationTracing;
+import co.logbrew.sdk.SpanEventSummary;
 import java.util.Map;
 
 String orderId = LogBrewOperationTracing.databaseOperation(
@@ -221,11 +222,12 @@ String orderId = LogBrewOperationTracing.databaseOperation(
         .databaseName("orders")
         .statementTemplate("SELECT * FROM orders WHERE id = ?")
         .rowCount(1)
+        .spanEvent(SpanEventSummary.create("db.rows").metadata(Map.of("rowCount", 1)))
         .metadata(Map.of("service", "checkout"))
 );
 ```
 
-The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Metadata is primitive-only and intentionally drops SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, headers, cookies, and auth-like fields. These helpers do not import or patch JDBC, Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
+The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, headers, cookies, and auth-like fields. These helpers do not import or patch JDBC, Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
 
 ## Support Ticket Drafts
 
@@ -381,7 +383,7 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `previewJson()` returns the queued batch as pretty JSON.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
-- `LogBrewOperationTracing` creates app-owned database, cache, and queue spans without adding driver dependencies or automatic client patching.
+- `LogBrewOperationTracing` creates app-owned database, cache, and queue spans with bounded `SpanEventSummary` markers, without adding driver dependencies or automatic client patching.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
 - `isClosed()` returns whether `shutdown(transport)` has closed the client.

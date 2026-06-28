@@ -49,6 +49,7 @@ grep -q '^co/logbrew/sdk/Traceparent\$SpanInput.class$' "$tmp_dir/binary-jar-con
 grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace\$Scope.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/SpanEventSummary.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$DatabaseOperation.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -73,6 +74,7 @@ grep -q '^src/main/java/co/logbrew/sdk/ProductTimeline.java$' "$tmp_dir/source-j
 grep -q '^src/main/java/co/logbrew/sdk/Traceparent.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewTraceContext.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewTrace.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/SpanEventSummary.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewOperationTracing.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/SupportTicketDraft.java$' "$tmp_dir/source-jar-contents.txt"
@@ -194,6 +196,7 @@ import co.logbrew.sdk.RecordingTransport;
 import co.logbrew.sdk.ReleaseAttributes;
 import co.logbrew.sdk.SdkException;
 import co.logbrew.sdk.SpanAttributes;
+import co.logbrew.sdk.SpanEventSummary;
 import co.logbrew.sdk.SupportTicketDraft;
 import co.logbrew.sdk.TransportException;
 import co.logbrew.sdk.TransportResponse;
@@ -331,6 +334,9 @@ public final class Main {
                 .rowCount(1)
                 .eventIdPrefix("java_db_smoke")
                 .spanId("b7ad6b7169203331")
+                .spanEvent(SpanEventSummary.create("db.rows")
+                    .timestamp("2026-06-02T10:00:00.012Z")
+                    .metadata(Map.of("rowCount", 1, "query", "SELECT private", "service", "checkout")))
                 .metadata(Map.of("service", "checkout", "query", "SELECT private", "host", "db.internal"))
                 .nowSequence(Instant.parse("2026-06-02T10:00:00Z"), Instant.parse("2026-06-02T10:00:00.025Z"))
         );
@@ -365,17 +371,49 @@ public final class Main {
                 .metadata(Map.of("component", "billing", "messageBody", "private body"))
                 .nowSequence(Instant.parse("2026-06-02T10:00:02Z"), Instant.parse("2026-06-02T10:00:02.010Z"))
         );
+        try {
+            LogBrewOperationTracing.queueOperation(
+                dependencies,
+                "publish failed invoice",
+                () -> {
+                    throw new QueueFailure("private failure message body");
+                },
+                LogBrewOperationTracing.QueueOperation.create()
+                    .system("kafka")
+                    .operationKind("publish")
+                    .queueName("billing-events")
+                    .taskName("invoice.failed")
+                    .messageCount(1)
+                    .eventIdPrefix("java_queue_error_smoke")
+                    .spanId("b7ad6b7169203334")
+                    .spanEvent(SpanEventSummary.create("queue.enqueued")
+                        .metadata(Map.of("component", "billing", "messageBody", "private body")))
+                    .nowSequence(Instant.parse("2026-06-02T10:00:03Z"), Instant.parse("2026-06-02T10:00:03.010Z"))
+            );
+            throw new AssertionError("expected queue failure");
+        } catch (QueueFailure expected) {
+            // Expected path proves failing operations still emit sanitized trace events.
+        }
         String dependencyPayload = dependencies.previewJson();
-        require(dependencies.pendingEvents() == 3, "dependency helpers queue three spans");
+        require(dependencies.pendingEvents() == 4, "dependency helpers queue four spans");
         require(dependencyPayload.contains("\"source\": \"database.operation\""), "database span source");
         require(dependencyPayload.contains("\"dbSystem\": \"postgresql\""), "database span system");
+        require(dependencyPayload.contains("\"events\": ["), "dependency spans include bounded events");
+        require(dependencyPayload.contains("\"name\": \"db.rows\""), "database span event name");
+        require(dependencyPayload.contains("\"timestamp\": \"2026-06-02T10:00:00.012Z\""), "database span event timestamp");
+        require(dependencyPayload.contains("\"name\": \"queue.enqueued\""), "queue span event name");
+        require(dependencyPayload.contains("\"name\": \"exception\""), "queue failure exception event");
+        require(dependencyPayload.contains("\"exceptionType\": \"QueueFailure\""), "queue failure exception type");
+        require(dependencyPayload.contains("\"exceptionEscaped\": true"), "queue failure exception escaped");
         require(dependencyPayload.contains("\"source\": \"cache.operation\""), "cache span source");
         require(dependencyPayload.contains("\"cacheHit\": true"), "cache span hit");
         require(dependencyPayload.contains("\"source\": \"queue.operation\""), "queue span source");
         require(dependencyPayload.contains("\"queueName\": \"billing-events\""), "queue span name");
         require(!dependencyPayload.contains("db.internal"), "dependency metadata drops host");
         require(!dependencyPayload.contains("cart:private"), "dependency metadata drops cache key");
+        require(!dependencyPayload.contains("SELECT private"), "dependency span events drop raw queries");
         require(!dependencyPayload.contains("private body"), "dependency metadata drops message body");
+        require(!dependencyPayload.contains("private failure message body"), "dependency exception event drops messages");
 
         expect("validation_error", () -> client.log(
             "evt_log_bad",
@@ -597,6 +635,14 @@ public final class Main {
     private static void require(boolean condition, String label) {
         if (!condition) {
             throw new AssertionError(label);
+        }
+    }
+
+    private static final class QueueFailure extends Exception {
+        private static final long serialVersionUID = 1L;
+
+        private QueueFailure(String message) {
+            super(message);
         }
     }
 

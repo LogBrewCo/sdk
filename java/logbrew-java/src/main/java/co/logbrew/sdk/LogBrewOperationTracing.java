@@ -2,7 +2,9 @@ package co.logbrew.sdk;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -150,6 +152,7 @@ public final class LogBrewOperationTracing {
                 source,
                 trace,
                 metadata,
+                spanEventsWithException(config.spanEvents, operationError),
                 operationError,
                 Duration.between(startedAt, finishedAt),
                 finishedAt,
@@ -180,6 +183,7 @@ public final class LogBrewOperationTracing {
         String source,
         LogBrewTraceContext trace,
         Map<String, Object> baseMetadata,
+        List<SpanEventSummary> spanEvents,
         Exception operationError,
         Duration duration,
         Instant finishedAt,
@@ -195,6 +199,9 @@ public final class LogBrewOperationTracing {
             .create(spanName, trace.traceId(), trace.spanId(), operationError == null ? "ok" : "error")
             .durationMs(duration.toNanos() / 1_000_000.0)
             .metadata(metadata);
+        if (!spanEvents.isEmpty()) {
+            attributes.events(spanEvents);
+        }
         if (trace.parentSpanId() != null) {
             attributes.parentSpanId(trace.parentSpanId());
         }
@@ -243,6 +250,25 @@ public final class LogBrewOperationTracing {
         addString(metadata, "taskName", config.taskName);
         addNonNegativeInt(metadata, "messageCount", config.messageCount);
         return metadata;
+    }
+
+    private static List<SpanEventSummary> spanEventsWithException(
+        List<SpanEventSummary> configuredEvents,
+        Exception operationError
+    ) {
+        List<SpanEventSummary> safeEvents = new ArrayList<>();
+        if (configuredEvents != null) {
+            for (SpanEventSummary event : configuredEvents) {
+                safeEvents.add(event.filterMetadataKeys(key -> !blockedOperationMetadataKey(key)));
+            }
+        }
+        if (operationError != null && safeEvents.size() < SpanEventSummary.MAX_EVENTS) {
+            safeEvents.add(SpanEventSummary.create("exception").metadata(Map.of(
+                "exceptionType", operationError.getClass().getSimpleName(),
+                "exceptionEscaped", Boolean.TRUE
+            )));
+        }
+        return safeEvents;
     }
 
     private static Map<String, Object> safeOperationMetadata(Map<String, ?> input) {
@@ -448,6 +474,7 @@ public final class LogBrewOperationTracing {
     private abstract static class BaseOperation<T extends BaseOperation<T>> {
         private String eventIdPrefix;
         private String spanId;
+        private List<SpanEventSummary> spanEvents;
         protected Map<String, ?> metadata;
         private Consumer<SdkException> onError;
         private Supplier<Instant> now = Instant::now;
@@ -466,6 +493,34 @@ public final class LogBrewOperationTracing {
 
         public T metadata(Map<String, ?> value) {
             this.metadata = Validation.copyMetadata(value);
+            return self();
+        }
+
+        public T spanEvent(SpanEventSummary value) {
+            if (value == null) {
+                throw new SdkException("validation_error", "span event summary must be provided");
+            }
+            if (spanEvents == null) {
+                spanEvents = new ArrayList<>();
+            }
+            spanEvents.add(value);
+            SpanEventSummary.requireEventLimit(spanEvents.size());
+            return self();
+        }
+
+        public T spanEvents(Iterable<SpanEventSummary> values) {
+            if (values == null) {
+                throw new SdkException("validation_error", "span events must be provided");
+            }
+            List<SpanEventSummary> copied = new ArrayList<>();
+            for (SpanEventSummary value : values) {
+                if (value == null) {
+                    throw new SdkException("validation_error", "span event summary must be provided");
+                }
+                copied.add(value);
+                SpanEventSummary.requireEventLimit(copied.size());
+            }
+            this.spanEvents = copied;
             return self();
         }
 

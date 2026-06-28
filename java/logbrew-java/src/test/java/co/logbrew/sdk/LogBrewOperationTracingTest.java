@@ -16,6 +16,7 @@ public final class LogBrewOperationTracingTest {
 
     private void run() {
         testOperationTracingHelpersCorrelateAndSanitizeMetadata();
+        testOperationTracingHelpersAttachSpanEventsAndExceptionSummaries();
         testOperationTracingHelpersPreserveOriginalErrors();
         testOperationTracingCaptureFailureDoesNotReplaceOperationResult();
         System.out.println("java operation tracing tests ok (" + testsRun + " tests)");
@@ -87,6 +88,76 @@ public final class LogBrewOperationTracingTest {
         assertNotContains(payload, "db.internal");
         assertNotContains(payload, "params");
         assertNotContains(payload, "private");
+        testsRun++;
+    }
+
+    private void testOperationTracingHelpersAttachSpanEventsAndExceptionSummaries() {
+        LogBrewClient client = sampleClient();
+
+        try {
+            LogBrewOperationTracing.databaseOperation(
+                client,
+                "select checkout",
+                () -> "order-123",
+                LogBrewOperationTracing.DatabaseOperation.create()
+                    .system("postgresql")
+                    .eventIdPrefix("java_db_events")
+                    .spanId("b7ad6b7169203335")
+                    .spanEvent(SpanEventSummary.create("db.rows")
+                        .timestamp("2026-06-02T10:00:00.012Z")
+                        .metadata(Map.of(
+                            "rowCount", Integer.valueOf(1),
+                            "query", "SELECT private",
+                            "service", "checkout"
+                        )))
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:00Z"),
+                        Instant.parse("2026-06-02T10:00:00.025Z")
+                    )
+            );
+        } catch (Exception error) {
+            throw new AssertionError(error);
+        }
+
+        IllegalStateException original = new IllegalStateException("message body contained private order");
+        IllegalStateException error = expectException(IllegalStateException.class, () ->
+            LogBrewOperationTracing.queueOperation(
+                client,
+                "publish invoice",
+                () -> {
+                    throw original;
+                },
+                LogBrewOperationTracing.QueueOperation.create()
+                    .system("kafka")
+                    .eventIdPrefix("java_queue_events")
+                    .spanId("b7ad6b7169203336")
+                    .spanEvent(SpanEventSummary.create("queue.enqueued")
+                        .metadata(Map.of(
+                            "messageBody", "private body",
+                            "component", "billing"
+                        )))
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:01Z"),
+                        Instant.parse("2026-06-02T10:00:01.020Z")
+                    )
+            )
+        );
+        assertTrue(error == original, "queue original error identity");
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"events\": [");
+        assertContains(payload, "\"name\": \"db.rows\"");
+        assertContains(payload, "\"timestamp\": \"2026-06-02T10:00:00.012Z\"");
+        assertContains(payload, "\"rowCount\": 1");
+        assertContains(payload, "\"service\": \"checkout\"");
+        assertContains(payload, "\"name\": \"queue.enqueued\"");
+        assertContains(payload, "\"component\": \"billing\"");
+        assertContains(payload, "\"name\": \"exception\"");
+        assertContains(payload, "\"exceptionType\": \"IllegalStateException\"");
+        assertContains(payload, "\"exceptionEscaped\": true");
+        assertNotContains(payload, "SELECT private");
+        assertNotContains(payload, "private body");
+        assertNotContains(payload, "message body contained");
         testsRun++;
     }
 
