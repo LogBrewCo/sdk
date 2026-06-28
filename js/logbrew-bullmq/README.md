@@ -6,6 +6,10 @@ Use this package when your Node.js service already uses BullMQ and you want prod
 
 ## Install
 
+This package is source-only until its first npm release. The npm and pnpm
+commands below require the package to be available on npm; use a local checkout
+when evaluating it before release.
+
 ```bash
 npm install @logbrew/sdk @logbrew/node @logbrew/bullmq bullmq
 pnpm add @logbrew/sdk @logbrew/node @logbrew/bullmq bullmq

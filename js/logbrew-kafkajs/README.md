@@ -2,6 +2,10 @@
 
 Explicit KafkaJS tracing helpers for the public LogBrew JavaScript SDK.
 
+This package is source-only until its first npm release. The npm and pnpm
+commands below require the package to be available on npm; use a local checkout
+when evaluating it before release.
+
 ```bash
 npm install @logbrew/sdk @logbrew/node @logbrew/kafkajs kafkajs
 pnpm add @logbrew/sdk @logbrew/node @logbrew/kafkajs kafkajs

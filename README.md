@@ -30,6 +30,11 @@ Install only the package your application needs. The package names below are reg
 - Apple app setup should start from the Swift/SwiftPM path. Objective-C remains available as an advanced source/header variant for mixed or Objective-C-only apps, not a separate first-step platform choice.
 - Product setup pickers should show user-facing runtime/platform families instead of helper package names; see the [SDK setup picker guidance](docs/sdk-setup-picker-guidance.md).
 
+Availability note: the BullMQ, KafkaJS, RabbitMQ/amqplib, and Amazon SQS
+package sources are included here and will be installable from npm after their
+first release. Until their npm package pages exist, use a local checkout when
+evaluating those helpers.
+
 | Ecosystem | Package | Use it for |
 | --- | --- | --- |
 | JavaScript | [`@logbrew/sdk`](js/logbrew-js) | Core event client, transports, trace helpers, console/Pino/Winston logger adapters |

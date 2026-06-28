@@ -2,6 +2,10 @@
 
 Amazon SQS tracing helpers for Node apps that use `@aws-sdk/client-sqs`.
 
+This package is source-only until its first npm release. The npm and pnpm
+commands below require the package to be available on npm; use a local checkout
+when evaluating it before release.
+
 ```sh
 npm install @logbrew/sdk @logbrew/node @logbrew/aws-sqs @aws-sdk/client-sqs
 pnpm add @logbrew/sdk @logbrew/node @logbrew/aws-sqs @aws-sdk/client-sqs
