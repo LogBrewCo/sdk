@@ -1,6 +1,6 @@
 import { Kafka } from "kafkajs";
 import { LogBrewClient } from "@logbrew/sdk";
-import { kafkaJsProducerSendWithLogBrewSpan, withLogBrewKafkaJsEachMessage } from "@logbrew/kafkajs";
+import { instrumentLogBrewKafkaJsConsumer, instrumentLogBrewKafkaJsProducer } from "@logbrew/kafkajs";
 
 const client = LogBrewClient.create({
   apiKey: process.env.LOGBREW_SERVER_API_KEY ?? "LOGBREW_SERVER_API_KEY",
@@ -17,16 +17,22 @@ const kafka = new Kafka({
 const producer = kafka.producer();
 const consumer = kafka.consumer({ groupId: "checkout-worker" });
 
-await kafkaJsProducerSendWithLogBrewSpan(producer, {
+const producerInstrumentation = instrumentLogBrewKafkaJsProducer(producer, { client });
+const consumerInstrumentation = instrumentLogBrewKafkaJsConsumer(consumer, { client });
+
+await producer.send({
   topic: "checkout.events",
   messages: [{ value: JSON.stringify({ event: "checkout.started" }) }]
-}, { client });
+});
 
 await consumer.run({
-  eachMessage: withLogBrewKafkaJsEachMessage(async ({ message }) => {
+  eachMessage: async ({ message }) => {
     await handleCheckoutMessage(message);
-  }, { client })
+  }
 });
+
+producerInstrumentation.uninstall();
+consumerInstrumentation.uninstall();
 
 async function handleCheckoutMessage(message) {
   void message;

@@ -1,4 +1,5 @@
 import type {
+  Consumer,
   EachBatchPayload,
   EachMessagePayload,
   Producer,
@@ -34,6 +35,19 @@ export type LogBrewKafkaJsBatchProcessOptions<Result = unknown> =
     client: LogBrewClient;
   };
 
+export type LogBrewKafkaJsInstrumentationOptions<Result = unknown> =
+  Omit<
+    QueueBatchOperationWithLogBrewSpanOptions<Result>,
+    "operation" | "operationKind" | "queueName" | "system" | "traceparent" | "messageCount" | "messages" | "linkMetadata"
+  > & {
+    topicName?: string;
+    client: LogBrewClient;
+  };
+
+export type LogBrewKafkaJsInstrumentation = {
+  uninstall(): void;
+};
+
 export declare function kafkaJsProducerSendWithLogBrewSpan(
   producer: Pick<Producer, "send">,
   record: ProducerRecord,
@@ -55,6 +69,16 @@ export declare function withLogBrewKafkaJsEachBatch<Result = void>(
   eachBatch: (payload: EachBatchPayload) => Result | Promise<Result>,
   options: LogBrewKafkaJsBatchProcessOptions<Result>
 ): (payload: EachBatchPayload) => Promise<Awaited<Result>>;
+
+export declare function instrumentLogBrewKafkaJsProducer(
+  producer: Partial<Pick<Producer, "send" | "sendBatch">> & object,
+  options: LogBrewKafkaJsSendOptions
+): LogBrewKafkaJsInstrumentation;
+
+export declare function instrumentLogBrewKafkaJsConsumer(
+  consumer: Pick<Consumer, "run">,
+  options: LogBrewKafkaJsInstrumentationOptions
+): LogBrewKafkaJsInstrumentation;
 
 export declare function createLogBrewKafkaJsProducerRecord(
   record?: Partial<ProducerRecord>,
@@ -78,6 +102,8 @@ declare const api: {
   createLogBrewKafkaJsProducerBatch: typeof createLogBrewKafkaJsProducerBatch;
   createLogBrewKafkaJsProducerRecord: typeof createLogBrewKafkaJsProducerRecord;
   extractLogBrewKafkaJsTraceparent: typeof extractLogBrewKafkaJsTraceparent;
+  instrumentLogBrewKafkaJsConsumer: typeof instrumentLogBrewKafkaJsConsumer;
+  instrumentLogBrewKafkaJsProducer: typeof instrumentLogBrewKafkaJsProducer;
   kafkaJsProducerSendBatchWithLogBrewSpan: typeof kafkaJsProducerSendBatchWithLogBrewSpan;
   kafkaJsProducerSendWithLogBrewSpan: typeof kafkaJsProducerSendWithLogBrewSpan;
   withLogBrewKafkaJsEachBatch: typeof withLogBrewKafkaJsEachBatch;

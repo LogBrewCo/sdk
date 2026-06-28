@@ -51,6 +51,8 @@ grep -q 'npm install @logbrew/sdk @logbrew/node @logbrew/kafkajs kafkajs' "$tmp_
 grep -q 'pnpm add @logbrew/sdk @logbrew/node @logbrew/kafkajs kafkajs' "$tmp_dir/kafkajs-readme.md"
 grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/kafkajs-readme.md"
 grep -q 'project-scoped server ingest key' "$tmp_dir/kafkajs-readme.md"
+grep -q 'instrumentLogBrewKafkaJsProducer' "$tmp_dir/kafkajs-readme.md"
+grep -q 'instrumentLogBrewKafkaJsConsumer' "$tmp_dir/kafkajs-readme.md"
 grep -q 'withLogBrewKafkaJsEachMessage' "$tmp_dir/kafkajs-readme.md"
 grep -q 'withLogBrewKafkaJsEachBatch' "$tmp_dir/kafkajs-readme.md"
 
@@ -109,6 +111,8 @@ import {
   createLogBrewKafkaJsProducerBatch,
   createLogBrewKafkaJsProducerRecord,
   extractLogBrewKafkaJsTraceparent,
+  instrumentLogBrewKafkaJsConsumer,
+  instrumentLogBrewKafkaJsProducer,
   kafkaJsProducerSendBatchWithLogBrewSpan,
   kafkaJsProducerSendWithLogBrewSpan,
   withLogBrewKafkaJsEachBatch,
@@ -130,6 +134,12 @@ const sendResult = kafkaJsProducerSendWithLogBrewSpan(producer, record, { client
 const batchResult = kafkaJsProducerSendBatchWithLogBrewSpan(producer, batch, { client });
 const wrappedMessage = withLogBrewKafkaJsEachMessage(async (payload: EachMessagePayload) => payload.message.offset, { client });
 const wrappedBatch = withLogBrewKafkaJsEachBatch(async (payload: EachBatchPayload) => payload.batch.topic, { client });
+const instrumentedProducer = instrumentLogBrewKafkaJsProducer(producer, { client });
+const instrumentedConsumer = instrumentLogBrewKafkaJsConsumer({
+  run: async (config) => {
+    await config?.eachMessage?.(messagePayload);
+  }
+}, { client });
 const nextRecord = createLogBrewKafkaJsProducerRecord(record, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
 const nextBatch = createLogBrewKafkaJsProducerBatch(batch, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
 const nextMessage = createLogBrewKafkaJsMessage({ value: "example" }, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
@@ -139,6 +149,8 @@ void sendResult;
 void batchResult;
 void wrappedMessage(messagePayload);
 void wrappedBatch(batchPayload);
+void instrumentedProducer.uninstall();
+void instrumentedConsumer.uninstall();
 void nextRecord;
 void nextBatch;
 void traceparent;
@@ -155,6 +167,12 @@ if (typeof logbrewKafkaJs.kafkaJsProducerSendWithLogBrewSpan !== "function") {
 if (typeof logbrewKafkaJs.default.withLogBrewKafkaJsEachBatch !== "function") {
   throw new Error("missing CommonJS default export");
 }
+if (typeof logbrewKafkaJs.instrumentLogBrewKafkaJsProducer !== "function") {
+  throw new Error("missing CommonJS producer instrumentation export");
+}
+if (typeof logbrewKafkaJs.default.instrumentLogBrewKafkaJsConsumer !== "function") {
+  throw new Error("missing CommonJS default consumer instrumentation export");
+}
 EOF
 
 node cjs-smoke.cjs
@@ -167,6 +185,8 @@ import { LogBrewClient } from "@logbrew/sdk";
 import { createNodeFetchTransport } from "@logbrew/node";
 import {
   extractLogBrewKafkaJsTraceparent,
+  instrumentLogBrewKafkaJsConsumer,
+  instrumentLogBrewKafkaJsProducer,
   kafkaJsProducerSendBatchWithLogBrewSpan,
   kafkaJsProducerSendWithLogBrewSpan,
   withLogBrewKafkaJsEachBatch,
@@ -318,6 +338,131 @@ const batchProcessed = await withLogBrewKafkaJsEachBatch(async (payload) => {
 });
 assertEqual(batchProcessed, "batch-processed", "eachBatch result");
 
+const instrumentedRecords = [];
+const producerWithThis = {
+  marker: "producer-this",
+  async send(record, sendOptions) {
+    assertEqual(this.marker, "producer-this", "instrumented producer this");
+    instrumentedRecords.push({ record, sendOptions });
+    return [{ topicName: record.topic, partition: 0, baseOffset: "31" }];
+  },
+  async sendBatch(batch, sendOptions) {
+    assertEqual(this.marker, "producer-this", "instrumented producer batch this");
+    instrumentedRecords.push({ batch, sendOptions });
+    return batch.topicMessages.map((topicMessage, index) => ({
+      topicName: topicMessage.topic,
+      partition: index,
+      baseOffset: String(40 + index)
+    }));
+  }
+};
+const producerInstrumentation = instrumentLogBrewKafkaJsProducer(producerWithThis, {
+  client,
+  id: "evt_kafkajs_instrumented_send_001",
+  now: () => "2026-06-25T12:00:06Z",
+  nowMs: () => 120,
+  spanIdFactory: () => "bbbbbbbbbbbbbbbb",
+  traceIdFactory: () => "cccccccccccccccccccccccccccccccc"
+});
+let duplicateProducerRejected = false;
+try {
+  instrumentLogBrewKafkaJsProducer(producerWithThis, { client });
+} catch (error) {
+  duplicateProducerRejected = String(error?.message ?? "").includes("already instrumented");
+}
+assertEqual(duplicateProducerRejected, true, "duplicate producer instrumentation rejected");
+const instrumentedInput = {
+  topic: "instrumented.events",
+  messages: [{ value: "INSTRUMENTED_VALUE_SENTINEL", headers: { private: "PRIVATE_HEADER_SENTINEL" } }]
+};
+await producerWithThis.send(instrumentedInput, { acks: 1 });
+assertEqual(instrumentedInput.messages[0].headers.traceparent, undefined, "instrumented producer clone boundary");
+assertEqual(instrumentedRecords[0].sendOptions.acks, 1, "instrumented producer options preserved");
+const instrumentedTraceparent = instrumentedRecords[0].record.messages[0].headers.traceparent;
+assertEqual(instrumentedTraceparent, "00-cccccccccccccccccccccccccccccccc-bbbbbbbbbbbbbbbb-01", "instrumented producer traceparent");
+producerInstrumentation.uninstall();
+const pendingAfterProducerUninstall = client.pendingEvents();
+await producerWithThis.send({
+  topic: "instrumented.events",
+  messages: [{ value: "AFTER_UNINSTALL_VALUE_SENTINEL" }]
+});
+assertEqual(client.pendingEvents(), pendingAfterProducerUninstall, "producer uninstall stops tracing original send");
+
+const consumerRunCalls = [];
+const consumerWithThis = {
+  marker: "consumer-this",
+  async run(config, extraArg) {
+    assertEqual(this.marker, "consumer-this", "instrumented consumer this");
+    consumerRunCalls.push({ config, extraArg });
+    return config.eachMessage({
+      topic: "instrumented.events",
+      partition: 2,
+      message: {
+        headers: { traceparent: Buffer.from(instrumentedTraceparent) },
+        value: "INSTRUMENTED_CONSUMER_VALUE_SENTINEL"
+      }
+    });
+  }
+};
+const runConfig = {
+  autoCommit: false,
+  eachMessage: async () => "instrumented-message"
+};
+const consumerInstrumentation = instrumentLogBrewKafkaJsConsumer(consumerWithThis, {
+  client,
+  id: "evt_kafkajs_instrumented_each_message_001",
+  now: () => "2026-06-25T12:00:07Z",
+  nowMs: () => 140,
+  spanIdFactory: () => "dddddddddddddddd"
+});
+let duplicateConsumerRejected = false;
+try {
+  instrumentLogBrewKafkaJsConsumer(consumerWithThis, { client });
+} catch (error) {
+  duplicateConsumerRejected = String(error?.message ?? "").includes("already instrumented");
+}
+assertEqual(duplicateConsumerRejected, true, "duplicate consumer instrumentation rejected");
+const messageResult = await consumerWithThis.run(runConfig, "EXTRA_ARG_SENTINEL");
+assertEqual(messageResult, "instrumented-message", "instrumented consumer result");
+assertEqual(consumerRunCalls[0].extraArg, "EXTRA_ARG_SENTINEL", "consumer extra args preserved");
+assertEqual(consumerRunCalls[0].config === runConfig, false, "consumer run config cloned");
+assertEqual(runConfig.eachMessage === consumerRunCalls[0].config.eachMessage, false, "consumer callback wrapped on clone");
+consumerInstrumentation.uninstall();
+const pendingAfterConsumerUninstall = client.pendingEvents();
+await consumerWithThis.run(runConfig, "AFTER_UNINSTALL_EXTRA_SENTINEL");
+assertEqual(client.pendingEvents(), pendingAfterConsumerUninstall, "consumer uninstall stops tracing original run");
+
+const batchConsumerWithThis = {
+  marker: "batch-consumer-this",
+  async run(config) {
+    assertEqual(this.marker, "batch-consumer-this", "instrumented batch consumer this");
+    return config.eachBatch({
+      batch: {
+        topic: "instrumented.events",
+        partition: 3,
+        messages: [
+          instrumentedRecords[0].record.messages[0],
+          { headers: { traceparent: "bad-traceparent" }, value: "INSTRUMENTED_BATCH_VALUE_SENTINEL" }
+        ]
+      }
+    });
+  }
+};
+const batchRunConfig = {
+  eachBatch: async () => "instrumented-batch"
+};
+const batchConsumerInstrumentation = instrumentLogBrewKafkaJsConsumer(batchConsumerWithThis, {
+  client,
+  id: "evt_kafkajs_instrumented_each_batch_001",
+  now: () => "2026-06-25T12:00:08Z",
+  nowMs: () => 160,
+  spanIdFactory: () => "eeeeeeeeeeeeeeee",
+  traceIdFactory: () => "ffffffffffffffffffffffffffffffff"
+});
+const batchConsumerResult = await batchConsumerWithThis.run(batchRunConfig);
+assertEqual(batchConsumerResult, "instrumented-batch", "instrumented batch consumer result");
+batchConsumerInstrumentation.uninstall();
+
 const preview = JSON.parse(client.previewJson());
 const events = preview.events;
 const sendSpan = findEvent(events, "evt_kafkajs_send_001");
@@ -326,6 +471,9 @@ const malformedSpan = findEvent(events, "evt_kafkajs_malformed_001");
 const errorSpan = findEvent(events, "evt_kafkajs_each_message_error_001");
 const sendBatchSpan = findEvent(events, "evt_kafkajs_send_batch_001");
 const eachBatchSpan = findEvent(events, "evt_kafkajs_each_batch_001");
+const instrumentedSendSpan = findEvent(events, "evt_kafkajs_instrumented_send_001");
+const instrumentedEachMessageSpan = findEvent(events, "evt_kafkajs_instrumented_each_message_001");
+const instrumentedEachBatchSpan = findEvent(events, "evt_kafkajs_instrumented_each_batch_001");
 
 assertEqual(sendSpan.attributes.metadata["messaging.system"], "kafka", "send messaging system");
 assertEqual(sendSpan.attributes.metadata["messaging.destination.name"], "checkout.events", "send destination");
@@ -338,6 +486,11 @@ assertEqual(errorSpan.attributes.metadata.errorType, "TypeError", "error type");
 assertEqual(sendBatchSpan.attributes.metadata["messaging.batch.message_count"], 3, "sendBatch count");
 assertEqual(eachBatchSpan.attributes.metadata["messaging.batch.message_count"], 3, "eachBatch count");
 assertEqual(eachBatchSpan.attributes.links.length, 2, "batch span links skip malformed");
+assertEqual(instrumentedSendSpan.attributes.metadata["messaging.destination.name"], "instrumented.events", "instrumented send destination");
+assertEqual(instrumentedEachMessageSpan.attributes.traceId, "cccccccccccccccccccccccccccccccc", "instrumented consumer trace id");
+assertEqual(instrumentedEachMessageSpan.attributes.parentSpanId, "bbbbbbbbbbbbbbbb", "instrumented consumer parent span");
+assertEqual(instrumentedEachBatchSpan.attributes.metadata["messaging.batch.message_count"], 2, "instrumented batch count");
+assertEqual(instrumentedEachBatchSpan.attributes.links.length, 1, "instrumented batch links skip malformed");
 
 const serialized = JSON.stringify(preview);
 for (const forbidden of [
@@ -347,7 +500,15 @@ for (const forbidden of [
   "existing",
   "keep-me",
   "custom",
-  producerTraceparent
+  producerTraceparent,
+  instrumentedTraceparent,
+  "INSTRUMENTED_VALUE_SENTINEL",
+  "PRIVATE_HEADER_SENTINEL",
+  "AFTER_UNINSTALL_VALUE_SENTINEL",
+  "INSTRUMENTED_CONSUMER_VALUE_SENTINEL",
+  "INSTRUMENTED_BATCH_VALUE_SENTINEL",
+  "EXTRA_ARG_SENTINEL",
+  "AFTER_UNINSTALL_EXTRA_SENTINEL"
 ]) {
   if (serialized.includes(forbidden)) {
     throw new Error(`preview leaked forbidden KafkaJS detail: ${forbidden}`);

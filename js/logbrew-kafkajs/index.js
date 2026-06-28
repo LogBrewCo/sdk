@@ -8,6 +8,8 @@ import {
 const DEFAULT_SYSTEM = "kafka";
 const DEFAULT_TOPIC = "kafka";
 const TRACEPARENT_HEADER = "traceparent";
+const PRODUCER_INSTRUMENTATION = Symbol("logbrew.kafkajs.producer.instrumentation");
+const CONSUMER_INSTRUMENTATION = Symbol("logbrew.kafkajs.consumer.instrumentation");
 
 export async function kafkaJsProducerSendWithLogBrewSpan(producer, record, options = {}) {
   if (!producer || typeof producer.send !== "function") {
@@ -81,6 +83,73 @@ export function withLogBrewKafkaJsEachBatch(eachBatch, options = {}) {
   };
 }
 
+export function instrumentLogBrewKafkaJsProducer(producer, options = {}) {
+  if (!producer || (typeof producer.send !== "function" && typeof producer.sendBatch !== "function")) {
+    throw new SdkError("configuration_error", "instrumentLogBrewKafkaJsProducer requires an owned KafkaJS producer");
+  }
+
+  const state = createInstrumentationState(producer, PRODUCER_INSTRUMENTATION, "KafkaJS producer");
+
+  if (typeof producer.send === "function") {
+    state.undo.push(installMethod(producer, "send", (originalSend, receiver, [record, ...args]) => {
+      const topic = normalizeLabel(record?.topic, options.topicName ?? DEFAULT_TOPIC);
+      const messages = Array.isArray(record?.messages) ? record.messages : [];
+      return queueBatchOperationWithLogBrewSpan("send", {
+        ...options,
+        messageCount: messages.length,
+        operation: () => originalSend.apply(receiver, [createLogBrewKafkaJsProducerRecord(record), ...args]),
+        operationKind: "publish",
+        queueName: topic,
+        system: DEFAULT_SYSTEM
+      });
+    }));
+  }
+
+  if (typeof producer.sendBatch === "function") {
+    state.undo.push(installMethod(producer, "sendBatch", (originalSendBatch, receiver, [batch, ...args]) => {
+      const topicMessages = Array.isArray(batch?.topicMessages) ? batch.topicMessages : [];
+      return queueBatchOperationWithLogBrewSpan("sendBatch", {
+        ...options,
+        messageCount: countTopicMessages(topicMessages),
+        operation: () => originalSendBatch.apply(receiver, [createLogBrewKafkaJsProducerBatch(batch), ...args]),
+        operationKind: "publish",
+        queueName: resolveBatchTopicName(topicMessages, options.topicName),
+        system: DEFAULT_SYSTEM
+      });
+    }));
+  }
+
+  return state.handle;
+}
+
+export function instrumentLogBrewKafkaJsConsumer(consumer, options = {}) {
+  if (!consumer || typeof consumer.run !== "function") {
+    throw new SdkError("configuration_error", "instrumentLogBrewKafkaJsConsumer requires an owned KafkaJS consumer");
+  }
+
+  const state = createInstrumentationState(consumer, CONSUMER_INSTRUMENTATION, "KafkaJS consumer");
+  state.undo.push(installMethod(consumer, "run", (originalRun, receiver, [config, ...args]) => {
+    if (!config || typeof config !== "object") {
+      return originalRun.apply(receiver, [config, ...args]);
+    }
+
+    const nextConfig = { ...config };
+    let wrapped = false;
+    if (typeof config.eachMessage === "function") {
+      nextConfig.eachMessage = withLogBrewKafkaJsEachMessage(config.eachMessage, options);
+      wrapped = true;
+    }
+    if (typeof config.eachBatch === "function") {
+      nextConfig.eachBatch = withLogBrewKafkaJsEachBatch(config.eachBatch, options);
+      wrapped = true;
+    }
+
+    return originalRun.apply(receiver, [wrapped ? nextConfig : config, ...args]);
+  }));
+
+  return state.handle;
+}
+
 export function createLogBrewKafkaJsProducerRecord(record = {}, traceparent = undefined) {
   const source = cloneObject(record);
   if (!Array.isArray(source.messages)) {
@@ -131,6 +200,45 @@ export function createLogBrewKafkaJsMessage(message = {}, traceparent = undefine
 
 export function extractLogBrewKafkaJsTraceparent(message) {
   return normalizeTraceparent(readHeaderValue(message?.headers, TRACEPARENT_HEADER));
+}
+
+function createInstrumentationState(target, key, label) {
+  if (target[key]) {
+    throw new SdkError("configuration_error", `${label} is already instrumented by LogBrew`);
+  }
+  const state = {
+    undo: [],
+    handle: {
+      uninstall() {
+        while (state.undo.length > 0) {
+          state.undo.pop()();
+        }
+        delete target[key];
+      }
+    }
+  };
+  Object.defineProperty(target, key, {
+    configurable: true,
+    value: state.handle
+  });
+  return state;
+}
+
+function installMethod(target, methodName, callWrapped) {
+  const original = target[methodName];
+  const hadOwnProperty = Object.prototype.hasOwnProperty.call(target, methodName);
+  target[methodName] = {
+    logBrewKafkaJsInstrumentedMethod(...args) {
+      return callWrapped(original, this, args);
+    }
+  }.logBrewKafkaJsInstrumentedMethod;
+  return () => {
+    if (hadOwnProperty) {
+      target[methodName] = original;
+      return;
+    }
+    delete target[methodName];
+  };
 }
 
 function countTopicMessages(topicMessages) {
@@ -208,6 +316,8 @@ export default {
   createLogBrewKafkaJsProducerBatch,
   createLogBrewKafkaJsProducerRecord,
   extractLogBrewKafkaJsTraceparent,
+  instrumentLogBrewKafkaJsConsumer,
+  instrumentLogBrewKafkaJsProducer,
   kafkaJsProducerSendBatchWithLogBrewSpan,
   kafkaJsProducerSendWithLogBrewSpan,
   withLogBrewKafkaJsEachBatch,
