@@ -59,6 +59,15 @@ class RqOperationSpanTests(unittest.TestCase):
                     "jobArgs": "raw args",
                     "headers": "raw headers",
                 },
+                span_events=[
+                    {
+                        "name": "rq.job.started",
+                        "metadata": {
+                            "worker": "worker-a",
+                            "jobArgs": "raw args",
+                        },
+                    }
+                ],
                 span_id_factory=lambda: "b7ad6b7169203365",
                 clock=lambda: next(clock_values),
             )
@@ -86,6 +95,10 @@ class RqOperationSpanTests(unittest.TestCase):
         self.assertEqual(metadata["messageCount"], 1)
         self.assertEqual(metadata["service"], "checkout-worker")
         self.assertTrue(metadata["sampled"])
+        self.assertEqual(
+            event["attributes"]["events"],
+            [{"name": "rq.job.started", "metadata": {"worker": "worker-a"}}],
+        )
         serialized = client.preview_json()
         self.assertNotIn("raw-order-id", serialized)
         self.assertNotIn("raw job body", serialized)

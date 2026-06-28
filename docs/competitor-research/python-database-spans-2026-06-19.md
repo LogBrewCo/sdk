@@ -53,4 +53,4 @@ These were focused behavior checks, not full upstream test suites.
 
 - Python still lacks optional SQLAlchemy/DB-API integration packages for teams that want automatic coverage.
 - Cache and queue spans are still thinner than Sentry/Datadog/OpenTelemetry.
-- LogBrew still avoids baggage, tracestate, rich span event arrays, DB semantic conventions beyond the current safe metadata subset, and automatic query/fetch spans.
+- LogBrew now supports bounded span event summaries and type-only exception events for explicit DB spans, but still avoids baggage, tracestate, full OpenTelemetry event arrays/links, DB semantic conventions beyond the current safe metadata subset, and automatic query/fetch spans.

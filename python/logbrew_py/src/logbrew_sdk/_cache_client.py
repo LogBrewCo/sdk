@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, TypeAlias, TypeVar
@@ -46,6 +46,7 @@ def cache_operation_with_logbrew_span(
     item_size_bytes: int | None = None,
     item_count: int | None = None,
     metadata: Mapping[str, Any] | None = None,
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None = None,
     span_id_factory: Callable[[], str] | None = None,
     clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
@@ -66,6 +67,7 @@ def cache_operation_with_logbrew_span(
             item_size_bytes=item_size_bytes,
             item_count=item_count,
             metadata=metadata,
+            span_events=span_events,
             span_id_factory=span_id_factory,
             clock=clock,
             on_capture_error=on_capture_error,
@@ -88,6 +90,7 @@ async def async_cache_operation_with_logbrew_span(
     item_size_bytes: int | None = None,
     item_count: int | None = None,
     metadata: Mapping[str, Any] | None = None,
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None = None,
     span_id_factory: Callable[[], str] | None = None,
     clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
@@ -107,6 +110,7 @@ async def async_cache_operation_with_logbrew_span(
         item_size_bytes=item_size_bytes,
         item_count=item_count,
         metadata=metadata,
+        span_events=span_events,
         span_id_factory=span_id_factory,
         clock=clock,
         on_capture_error=on_capture_error,
@@ -134,6 +138,7 @@ class _CacheSpanRequest:
     item_size_bytes: int | None
     item_count: int | None
     metadata: Mapping[str, Any] | None
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None
     clock: _instrumentation.Clock
     on_capture_error: Callable[[Exception], None] | None
     start: float
@@ -158,6 +163,11 @@ class _CacheSpanRequest:
                 sampled=self.trace.sampled,
                 error=error,
             ),
+            events=_instrumentation.span_events_with_exception(
+                self.span_events,
+                error,
+                _CACHE_METADATA_DENYLIST,
+            ),
             on_capture_error=self.on_capture_error,
         )
 
@@ -175,6 +185,7 @@ def _cache_span_request(
     item_size_bytes: int | None,
     item_count: int | None,
     metadata: Mapping[str, Any] | None,
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None,
     span_id_factory: Callable[[], str] | None,
     clock: _instrumentation.Clock | None,
     on_capture_error: Callable[[Exception], None] | None,
@@ -193,6 +204,7 @@ def _cache_span_request(
         item_size_bytes=_instrumentation.normalize_non_negative_int("item_size_bytes", item_size_bytes),
         item_count=_instrumentation.normalize_non_negative_int("item_count", item_count),
         metadata=metadata,
+        span_events=span_events,
         clock=read_clock,
         on_capture_error=on_capture_error,
         start=read_clock(),

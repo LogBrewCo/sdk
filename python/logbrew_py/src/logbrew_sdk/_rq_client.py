@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from typing import Any, TypeVar
 
@@ -26,6 +26,7 @@ def rq_operation_with_logbrew_span(
     queue_name: str | None = None,
     task_name: str | None = None,
     metadata: Mapping[str, Any] | None = None,
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None = None,
     span_id_factory: Callable[[], str] | None = None,
     clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
@@ -56,6 +57,7 @@ def rq_operation_with_logbrew_span(
         task_name=normalized_task_name,
         message_count=1,
         metadata=metadata,
+        span_events=span_events,
         span_id_factory=span_id_factory,
         clock=clock,
         on_capture_error=on_capture_error,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from time import perf_counter
@@ -20,6 +20,19 @@ Operation: TypeAlias = Callable[[], T]
 AsyncOperation: TypeAlias = Callable[[], Awaitable[T]]
 RowCountReader: TypeAlias = Callable[[T], int | None]
 
+_DB_SPAN_EVENT_METADATA_DENYLIST = (
+    "arg",
+    "bind",
+    "cookie",
+    "header",
+    "param",
+    "payload",
+    "query",
+    "secret",
+    "statement",
+    "value",
+)
+
 
 def database_operation_with_logbrew_span(
     operation_name: str,
@@ -35,6 +48,7 @@ def database_operation_with_logbrew_span(
     row_count: int | None = None,
     row_count_from_result: RowCountReader[T] | None = None,
     metadata: Mapping[str, Any] | None = None,
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None = None,
     span_id_factory: Callable[[], str] | None = None,
     clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
@@ -55,6 +69,7 @@ def database_operation_with_logbrew_span(
             row_count=row_count,
             row_count_from_result=row_count_from_result,
             metadata=metadata,
+            span_events=span_events,
             span_id_factory=span_id_factory,
             clock=clock,
             on_capture_error=on_capture_error,
@@ -77,6 +92,7 @@ async def async_database_operation_with_logbrew_span(
     row_count: int | None = None,
     row_count_from_result: RowCountReader[T] | None = None,
     metadata: Mapping[str, Any] | None = None,
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None = None,
     span_id_factory: Callable[[], str] | None = None,
     clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
@@ -96,6 +112,7 @@ async def async_database_operation_with_logbrew_span(
         row_count=row_count,
         row_count_from_result=row_count_from_result,
         metadata=metadata,
+        span_events=span_events,
         span_id_factory=span_id_factory,
         clock=clock,
         on_capture_error=on_capture_error,
@@ -123,6 +140,7 @@ class _DatabaseSpanRequest:
     row_count: int | None
     row_count_from_result: RowCountReader[Any] | None
     metadata: Mapping[str, Any] | None
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None
     clock: _instrumentation.Clock
     on_capture_error: Callable[[Exception], None] | None
     start: float
@@ -149,6 +167,11 @@ class _DatabaseSpanRequest:
                 sampled=self.trace.sampled,
                 error=error,
             ),
+            events=_instrumentation.span_events_with_exception(
+                self.span_events,
+                error,
+                _DB_SPAN_EVENT_METADATA_DENYLIST,
+            ),
             on_capture_error=self.on_capture_error,
         )
 
@@ -166,6 +189,7 @@ def _db_span_request(
     row_count: int | None,
     row_count_from_result: RowCountReader[Any] | None,
     metadata: Mapping[str, Any] | None,
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None,
     span_id_factory: Callable[[], str] | None,
     clock: _instrumentation.Clock | None,
     on_capture_error: Callable[[Exception], None] | None,
@@ -186,6 +210,7 @@ def _db_span_request(
         row_count=_normalize_row_count(row_count),
         row_count_from_result=row_count_from_result,
         metadata=metadata,
+        span_events=span_events,
         clock=read_clock,
         on_capture_error=on_capture_error,
         start=read_clock(),

@@ -54,6 +54,15 @@ class CacheOperationSpanTests(unittest.TestCase):
                 span_id_factory=lambda: "b7ad6b7169203351",
                 clock=lambda: next(clock_values),
                 metadata={"service": "checkout", "cacheKey": "private:user:42"},
+                span_events=[
+                    {
+                        "name": "cache.lookup",
+                        "metadata": {
+                            "cacheTier": "primary",
+                            "rawKey": "private:user:42",
+                        },
+                    }
+                ],
             )
 
         self.assertEqual(result, b"cached-profile")
@@ -78,9 +87,14 @@ class CacheOperationSpanTests(unittest.TestCase):
         self.assertEqual(metadata["itemSizeBytes"], 14)
         self.assertEqual(metadata["itemCount"], 1)
         self.assertEqual(metadata["service"], "checkout")
+        self.assertEqual(
+            event["attributes"]["events"],
+            [{"name": "cache.lookup", "metadata": {"cacheTier": "primary"}}],
+        )
         serialized = client.preview_json()
         self.assertNotIn("private:user:42", serialized)
         self.assertNotIn("cacheKey", serialized)
+        self.assertNotIn("rawKey", serialized)
 
     def test_cache_operation_with_logbrew_span_preserves_errors_and_capture_failures(self) -> None:
         client = sample_client()
@@ -108,7 +122,20 @@ class CacheOperationSpanTests(unittest.TestCase):
         self.assertEqual(event["attributes"]["status"], "error")
         self.assertEqual(event["attributes"]["metadata"]["source"], "cache")
         self.assertEqual(event["attributes"]["metadata"]["errorType"], "StubCacheError")
+        self.assertEqual(
+            event["attributes"]["events"],
+            [
+                {
+                    "name": "exception",
+                    "metadata": {
+                        "exceptionEscaped": True,
+                        "exceptionType": "StubCacheError",
+                    },
+                }
+            ],
+        )
         self.assertNotIn("private:user:42", client.preview_json())
+        self.assertNotIn("redis private", client.preview_json())
 
         closed_client = sample_client()
         closed_client.closed = True

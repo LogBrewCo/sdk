@@ -51,4 +51,4 @@ These were focused behavior checks, not full upstream test suites.
 
 - Python still lacks optional Redis/Django cache/Flask cache/memcached integration packages for teams that want automatic coverage.
 - Queue spans are still thinner than Sentry/Datadog/OpenTelemetry.
-- LogBrew still avoids baggage, tracestate, rich span event arrays, cache command parsing, pipeline spans, network peer fields, and automatic cache-client patching.
+- LogBrew now supports bounded span event summaries and type-only exception events for explicit cache spans, but still avoids baggage, tracestate, full OpenTelemetry event arrays/links, cache command parsing, pipeline spans, network peer fields, and automatic cache-client patching.

@@ -14,6 +14,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
+from logbrew_sdk._span_events import SpanAttributes, SpanEventSummary, validate_span_events
 from logbrew_sdk._support_ticket import (
     SupportDiagnosticsValue,
     SupportTicketCategory,
@@ -60,17 +61,6 @@ class LogAttributes(TypedDict, total=False):
     message: str
     level: str
     logger: str
-    metadata: Metadata
-
-
-class SpanAttributes(TypedDict, total=False):
-    """Public span event attributes."""
-    name: str
-    traceId: str
-    spanId: str
-    parentSpanId: str
-    status: str
-    durationMs: float
     metadata: Metadata
 
 
@@ -865,6 +855,19 @@ def validate_span(attributes: SpanAttributes) -> dict[str, Any]:
             "status": attributes["status"],
             **({"parentSpanId": parent_span_id} if parent_span_id is not None else {}),
             **({"durationMs": duration_ms} if duration_ms is not None else {}),
+            **(
+                {"events": span_events}
+                if (
+                    span_events := validate_span_events(
+                        attributes.get("events"),
+                        error_factory=SdkError,
+                        require_non_empty=require_non_empty,
+                        require_timestamp=require_timestamp,
+                        compact_metadata=compact_metadata,
+                    )
+                )
+                else {}
+            ),
         },
         attributes.get("metadata"),
     )
@@ -955,6 +958,7 @@ __all__ = [
     "ReleaseAttributes",
     "SdkError",
     "SpanAttributes",
+    "SpanEventSummary",
     "SupportDiagnosticsValue",
     "SupportTicketCategory",
     "SupportTicketDraft",

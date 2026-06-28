@@ -56,6 +56,15 @@ class DatabaseOperationSpanTests(unittest.TestCase):
                 span_id_factory=lambda: "b7ad6b7169203341",
                 clock=lambda: next(clock_values),
                 metadata={"service": "checkout", "params": {"email": "private@example.test"}},
+                span_events=[
+                    {
+                        "name": "db.cursor.ready",
+                        "metadata": {
+                            "poolSlot": 2,
+                            "queryParams": {"email": "private@example.test"},
+                        },
+                    }
+                ],
             )
 
         self.assertEqual(result.rowcount, 3)
@@ -79,9 +88,14 @@ class DatabaseOperationSpanTests(unittest.TestCase):
         self.assertEqual(metadata["statementTemplate"], "SELECT * FROM checkout_order WHERE email = ?")
         self.assertEqual(metadata["rowCount"], 3)
         self.assertEqual(metadata["service"], "checkout")
+        self.assertEqual(
+            event["attributes"]["events"],
+            [{"name": "db.cursor.ready", "metadata": {"poolSlot": 2}}],
+        )
         serialized = client.preview_json()
         self.assertNotIn("private@example.test", serialized)
         self.assertNotIn("params", serialized)
+        self.assertNotIn("queryParams", serialized)
 
     def test_database_operation_with_logbrew_span_preserves_errors_and_capture_failures(self) -> None:
         client = sample_client()
@@ -109,7 +123,20 @@ class DatabaseOperationSpanTests(unittest.TestCase):
         self.assertEqual(event["attributes"]["status"], "error")
         self.assertEqual(event["attributes"]["metadata"]["source"], "database")
         self.assertEqual(event["attributes"]["metadata"]["errorType"], "StubDatabaseError")
+        self.assertEqual(
+            event["attributes"]["events"],
+            [
+                {
+                    "name": "exception",
+                    "metadata": {
+                        "exceptionEscaped": True,
+                        "exceptionType": "StubDatabaseError",
+                    },
+                }
+            ],
+        )
         self.assertNotIn("private@example.test", client.preview_json())
+        self.assertNotIn("duplicate key", client.preview_json())
 
         closed_client = sample_client()
         closed_client.closed = True

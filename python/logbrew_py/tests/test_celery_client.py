@@ -65,6 +65,15 @@ class CeleryOperationSpanTests(unittest.TestCase):
                     "headers": "raw headers",
                     "kwargs": "raw kwargs",
                 },
+                span_events=[
+                    {
+                        "name": "celery.task.published",
+                        "metadata": {
+                            "worker": "worker-a",
+                            "kwargs": "raw kwargs",
+                        },
+                    }
+                ],
                 span_id_factory=lambda: "b7ad6b7169203371",
                 clock=lambda: next(clock_values),
             )
@@ -92,6 +101,10 @@ class CeleryOperationSpanTests(unittest.TestCase):
         self.assertEqual(metadata["messageCount"], 1)
         self.assertEqual(metadata["service"], "checkout-worker")
         self.assertTrue(metadata["sampled"])
+        self.assertEqual(
+            event["attributes"]["events"],
+            [{"name": "celery.task.published", "metadata": {"worker": "worker-a"}}],
+        )
         serialized = client.preview_json()
         self.assertNotIn("raw-order-id", serialized)
         self.assertNotIn("raw job body", serialized)

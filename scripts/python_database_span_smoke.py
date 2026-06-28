@@ -61,6 +61,15 @@ with use_logbrew_trace(parent_trace):
         span_id_factory=lambda: "b7ad6b7169203341",
         clock=iter([70.0, 70.019]).__next__,
         metadata={"service": "checkout", "params": {"email": "private@example.test"}},
+        span_events=[
+            {
+                "name": "db.cursor.ready",
+                "metadata": {
+                    "poolSlot": 2,
+                    "queryParams": {"email": "private@example.test"},
+                },
+            }
+        ],
     )
 
 with use_logbrew_trace(parent_trace):
@@ -114,7 +123,7 @@ database_operation_with_logbrew_span(
 )
 
 serialized = client.preview_json()
-for forbidden in ("private@example.test", '"params"', '"parameters"', "duplicate private"):
+for forbidden in ("private@example.test", '"params"', '"parameters"', '"queryParams"', "duplicate private"):
     if forbidden in serialized:
         raise SystemExit(f"database span leaked private data: {forbidden}")
 
@@ -122,6 +131,21 @@ payload = json.loads(serialized)
 sync_metadata = payload["events"][0]["attributes"]["metadata"]
 async_metadata = payload["events"][1]["attributes"]["metadata"]
 error_metadata = payload["events"][2]["attributes"]["metadata"]
+sync_events = payload["events"][0]["attributes"]["events"]
+error_events = payload["events"][2]["attributes"]["events"]
+
+if sync_events != [{"name": "db.cursor.ready", "metadata": {"poolSlot": 2}}]:
+    raise SystemExit(f"database span event summary mismatch: {sync_events}")
+if error_events != [
+    {
+        "name": "exception",
+        "metadata": {
+            "exceptionEscaped": True,
+            "exceptionType": "StubDatabaseError",
+        },
+    }
+]:
+    raise SystemExit(f"database exception event summary mismatch: {error_events}")
 
 print(
     json.dumps(
@@ -137,6 +161,7 @@ print(
             "events": len(payload["events"]),
             "ok": True,
             "rowCount": sync_metadata["rowCount"],
+            "spanEvents": len(sync_events),
             "syncRows": result.rowcount,
         },
         sort_keys=True,

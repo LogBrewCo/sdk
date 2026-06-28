@@ -57,6 +57,15 @@ with use_logbrew_trace(parent_trace):
         span_id_factory=lambda: "b7ad6b7169203351",
         clock=iter([200.0, 200.009]).__next__,
         metadata={"service": "checkout", "cacheKey": "private:user:42"},
+        span_events=[
+            {
+                "name": "cache.lookup",
+                "metadata": {
+                    "cacheTier": "primary",
+                    "rawKey": "private:user:42",
+                },
+            }
+        ],
     )
 
 with use_logbrew_trace(parent_trace):
@@ -111,7 +120,7 @@ cache_operation_with_logbrew_span(
 )
 
 serialized = client.preview_json()
-for forbidden in ("private:user:42", '"cacheKey"', '"keys"', "unavailable"):
+for forbidden in ("private:user:42", '"cacheKey"', '"keys"', '"rawKey"', "unavailable"):
     if forbidden in serialized:
         raise SystemExit(f"cache span leaked private data: {forbidden}")
 
@@ -119,6 +128,21 @@ payload = json.loads(serialized)
 sync_metadata = payload["events"][0]["attributes"]["metadata"]
 async_metadata = payload["events"][1]["attributes"]["metadata"]
 error_metadata = payload["events"][2]["attributes"]["metadata"]
+sync_events = payload["events"][0]["attributes"]["events"]
+error_events = payload["events"][2]["attributes"]["events"]
+
+if sync_events != [{"name": "cache.lookup", "metadata": {"cacheTier": "primary"}}]:
+    raise SystemExit(f"cache span event summary mismatch: {sync_events}")
+if error_events != [
+    {
+        "name": "exception",
+        "metadata": {
+            "exceptionEscaped": True,
+            "exceptionType": "StubCacheError",
+        },
+    }
+]:
+    raise SystemExit(f"cache exception event summary mismatch: {error_events}")
 
 print(
     json.dumps(
@@ -136,6 +160,7 @@ print(
             "itemCount": sync_metadata["itemCount"],
             "itemSizeBytes": sync_metadata["itemSizeBytes"],
             "ok": True,
+            "spanEvents": len(sync_events),
             "syncBytes": len(value),
         },
         sort_keys=True,

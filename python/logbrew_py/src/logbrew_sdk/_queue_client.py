@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, TypeAlias, TypeVar
@@ -49,6 +49,7 @@ def queue_operation_with_logbrew_span(
     message_count: int | None = None,
     attempt: int | None = None,
     metadata: Mapping[str, Any] | None = None,
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None = None,
     span_id_factory: Callable[[], str] | None = None,
     clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
@@ -70,6 +71,7 @@ def queue_operation_with_logbrew_span(
             message_count=message_count,
             attempt=attempt,
             metadata=metadata,
+            span_events=span_events,
             span_id_factory=span_id_factory,
             clock=clock,
             on_capture_error=on_capture_error,
@@ -93,6 +95,7 @@ async def async_queue_operation_with_logbrew_span(
     message_count: int | None = None,
     attempt: int | None = None,
     metadata: Mapping[str, Any] | None = None,
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None = None,
     span_id_factory: Callable[[], str] | None = None,
     clock: _instrumentation.Clock | None = None,
     on_capture_error: Callable[[Exception], None] | None = None,
@@ -113,6 +116,7 @@ async def async_queue_operation_with_logbrew_span(
         message_count=message_count,
         attempt=attempt,
         metadata=metadata,
+        span_events=span_events,
         span_id_factory=span_id_factory,
         clock=clock,
         on_capture_error=on_capture_error,
@@ -141,6 +145,7 @@ class _QueueSpanRequest:
     message_count: int | None
     attempt: int | None
     metadata: Mapping[str, Any] | None
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None
     clock: _instrumentation.Clock
     on_capture_error: Callable[[Exception], None] | None
     start: float
@@ -166,6 +171,11 @@ class _QueueSpanRequest:
                 sampled=self.trace.sampled,
                 error=error,
             ),
+            events=_instrumentation.span_events_with_exception(
+                self.span_events,
+                error,
+                _QUEUE_METADATA_DENYLIST,
+            ),
             on_capture_error=self.on_capture_error,
         )
 
@@ -184,6 +194,7 @@ def _queue_span_request(
     message_count: int | None,
     attempt: int | None,
     metadata: Mapping[str, Any] | None,
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None,
     span_id_factory: Callable[[], str] | None,
     clock: _instrumentation.Clock | None,
     on_capture_error: Callable[[Exception], None] | None,
@@ -203,6 +214,7 @@ def _queue_span_request(
         message_count=_instrumentation.normalize_non_negative_int("message_count", message_count),
         attempt=_instrumentation.normalize_non_negative_int("attempt", attempt),
         metadata=metadata,
+        span_events=span_events,
         clock=read_clock,
         on_capture_error=on_capture_error,
         start=read_clock(),

@@ -4,6 +4,7 @@ import json
 import logging
 import unittest
 from email.message import Message
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
@@ -168,6 +169,81 @@ class LogBrewSdkTests(unittest.TestCase):
                     "spanId": "span_001",
                     "status": "ok",
                     "durationMs": -1,
+                },
+            )
+
+    def test_span_events_are_privacy_bounded_and_capped(self) -> None:
+        client = sample_client()
+        attributes: Any = {
+            "name": "POST /checkout",
+            "traceId": "trace_001",
+            "spanId": "span_001",
+            "status": "ok",
+            "durationMs": 42.5,
+            "events": [
+                {
+                    "name": "db.query.started",
+                    "timestamp": "2026-06-02T10:00:04.010Z",
+                    "metadata": {
+                        "rowCount": 3,
+                        "statementParams": {"email": "private@example.test"},
+                    },
+                },
+                *[
+                    {"name": f"milestone.{index}", "metadata": {"index": index}}
+                    for index in range(10)
+                ],
+            ],
+        }
+
+        client.span(
+            "evt_span_events_001",
+            "2026-06-02T10:00:04Z",
+            attributes,
+        )
+
+        event = json.loads(client.preview_json())["events"][0]
+        span_events = event["attributes"]["events"]
+        self.assertEqual(len(span_events), 8)
+        self.assertEqual(
+            span_events[0],
+            {
+                "name": "db.query.started",
+                "timestamp": "2026-06-02T10:00:04.010Z",
+                "metadata": {"rowCount": 3},
+            },
+        )
+        self.assertEqual(span_events[-1]["name"], "milestone.6")
+        serialized = client.preview_json()
+        self.assertNotIn("private@example.test", serialized)
+        self.assertNotIn("statementParams", serialized)
+
+    def test_span_events_reject_invalid_shape(self) -> None:
+        client = sample_client()
+
+        with self.assertRaisesRegex(SdkError, "span event name must be non-empty"):
+            client.span(
+                "evt_span_events_invalid",
+                "2026-06-02T10:00:04Z",
+                {
+                    "name": "POST /checkout",
+                    "traceId": "trace_001",
+                    "spanId": "span_001",
+                    "status": "ok",
+                    "events": [{"name": ""}],
+                },
+            )
+
+        with self.assertRaisesRegex(SdkError, "timestamp must include a timezone offset"):
+            client.span(
+                "evt_span_events_invalid_timestamp",
+                "2026-06-02T10:00:04Z",
+                {
+                    "name": "POST /checkout",
+                    "traceId": "trace_001",
+                    "spanId": "span_001",
+                    "status": "ok",
+                    "events": [{"name": "db.query", "timestamp": "2026-06-02T10:00:04"}],
                 },
             )
 

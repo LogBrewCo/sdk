@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any, TypeAlias
@@ -13,10 +13,12 @@ from logbrew_sdk._trace_context import LogBrewTraceContext
 
 MetadataValue: TypeAlias = str | int | float | bool | None
 Metadata: TypeAlias = dict[str, MetadataValue]
+SpanEventSummary: TypeAlias = Mapping[str, Any]
 Clock: TypeAlias = Callable[[], float]
 
 HEX16 = re.compile(r"^[0-9a-fA-F]{16}$")
 ZERO_SPAN_ID = "0000000000000000"
+SPAN_EVENT_LIMIT = 8
 
 
 def child_trace(
@@ -61,6 +63,46 @@ def compact_metadata_without_keys(
     }
 
 
+def compact_span_events(
+    span_events: Sequence[SpanEventSummary] | None,
+    private_key_parts: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    if span_events is None:
+        return []
+
+    safe_events: list[dict[str, Any]] = []
+    for event in span_events[:SPAN_EVENT_LIMIT]:
+        metadata = compact_metadata_without_keys(event.get("metadata"), private_key_parts)
+        safe_events.append(
+            {
+                "name": event.get("name"),
+                **({"timestamp": event.get("timestamp")} if event.get("timestamp") is not None else {}),
+                **({"metadata": metadata} if metadata else {}),
+            }
+        )
+    return safe_events
+
+
+def span_events_with_exception(
+    span_events: Sequence[SpanEventSummary] | None,
+    error: Exception | None,
+    private_key_parts: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    safe_events = compact_span_events(span_events, private_key_parts)
+    if error is None:
+        return safe_events
+    return [
+        *safe_events[: SPAN_EVENT_LIMIT - 1],
+        {
+            "name": "exception",
+            "metadata": {
+                "exceptionEscaped": True,
+                "exceptionType": type(error).__name__,
+            },
+        },
+    ]
+
+
 def duration_ms(start: float, clock: Clock) -> float:
     return round(max((clock() - start) * 1000, 0), 3)
 
@@ -79,8 +121,10 @@ def capture_client_span(
     status: str,
     duration_ms: float,
     metadata: Metadata,
-    on_capture_error: Callable[[Exception], None] | None,
+    events: Sequence[SpanEventSummary] | None = None,
+    on_capture_error: Callable[[Exception], None] | None = None,
 ) -> None:
+    span_events = list(events or [])
     try:
         client.span(
             event_id,
@@ -93,6 +137,7 @@ def capture_client_span(
                 "status": status,
                 "durationMs": duration_ms,
                 "metadata": metadata,
+                **({"events": span_events} if span_events else {}),
             },
         )
     except Exception as capture_error:

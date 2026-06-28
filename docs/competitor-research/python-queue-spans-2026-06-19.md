@@ -148,3 +148,16 @@ Verifier evidence:
 Remaining gap after this follow-up:
 
 - LogBrew is now better for privacy-bounded explicit Celery and RQ adoption, but Sentry, Datadog, and OpenTelemetry remain ahead for teams that want hidden signal/patch-based queue instrumentation and propagation through broker metadata. That should stay out of `logbrew-sdk`; a future opt-in `logbrew-celery` package would need separate dependency, patching, privacy, and uninstall proof.
+
+## Span Event Summary Follow-Up
+
+Fresh source refresh on 2026-06-29 is recorded in `docs/competitor-research/python-span-events-2026-06-29.md`.
+
+- Added bounded `span_events` support to generic queue, RQ, and Celery helpers.
+- Failed queue operations now add one automatic type-only `exception` span event with `exceptionType` and `exceptionEscaped=true`.
+- Message-like span-event metadata keys are filtered before capture, so payloads, headers, args, kwargs, broker URLs, and exception messages remain absent.
+- `PYTHONPATH=python/logbrew_py/src python3 scripts/python_queue_span_smoke.py` now proves queue/RQ/Celery span events plus exception event summaries.
+
+Remaining gap after this follow-up:
+
+- LogBrew now has safe queue event summaries, but still avoids full OpenTelemetry event arrays/links, baggage/tracestate, hidden queue lifecycle hooks, and broker metadata propagation.

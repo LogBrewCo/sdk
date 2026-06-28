@@ -60,6 +60,15 @@ class QueueOperationSpanTests(unittest.TestCase):
                     "headers": "trace headers",
                     "jobArgs": "task inputs",
                 },
+                span_events=[
+                    {
+                        "name": "queue.publish.confirmed",
+                        "metadata": {
+                            "brokerPartition": 4,
+                            "messagePayload": "raw job payload",
+                        },
+                    }
+                ],
             )
 
         self.assertEqual(result, "queued")
@@ -86,6 +95,10 @@ class QueueOperationSpanTests(unittest.TestCase):
         self.assertEqual(metadata["attempt"], 2)
         self.assertEqual(metadata["service"], "checkout")
         self.assertTrue(metadata["sampled"])
+        self.assertEqual(
+            event["attributes"]["events"],
+            [{"name": "queue.publish.confirmed", "metadata": {"brokerPartition": 4}}],
+        )
         serialized = client.preview_json()
         self.assertNotIn("raw job payload", serialized)
         self.assertNotIn("trace headers", serialized)
@@ -93,6 +106,7 @@ class QueueOperationSpanTests(unittest.TestCase):
         self.assertNotIn("messageBody", serialized)
         self.assertNotIn("headers", serialized)
         self.assertNotIn("jobArgs", serialized)
+        self.assertNotIn("messagePayload", serialized)
 
     def test_queue_operation_with_logbrew_span_preserves_errors_and_capture_failures(self) -> None:
         client = sample_client()
@@ -122,7 +136,20 @@ class QueueOperationSpanTests(unittest.TestCase):
         self.assertEqual(event["attributes"]["status"], "error")
         self.assertEqual(event["attributes"]["metadata"]["source"], "queue")
         self.assertEqual(event["attributes"]["metadata"]["errorType"], "StubQueueError")
+        self.assertEqual(
+            event["attributes"]["events"],
+            [
+                {
+                    "name": "exception",
+                    "metadata": {
+                        "exceptionEscaped": True,
+                        "exceptionType": "StubQueueError",
+                    },
+                }
+            ],
+        )
         self.assertNotIn("raw job payload", client.preview_json())
+        self.assertNotIn("broker refused", client.preview_json())
 
         closed_client = sample_client()
         closed_client.closed = True

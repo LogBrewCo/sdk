@@ -85,6 +85,15 @@ with use_logbrew_trace(parent_trace):
             "headers": "trace headers",
             "jobArgs": "task inputs",
         },
+        span_events=[
+            {
+                "name": "queue.publish.confirmed",
+                "metadata": {
+                    "brokerPartition": 4,
+                    "messagePayload": "raw job payload",
+                },
+            }
+        ],
     )
 
 with use_logbrew_trace(parent_trace):
@@ -134,6 +143,12 @@ with use_logbrew_trace(parent_trace):
         span_id_factory=lambda: "b7ad6b7169203365",
         clock=iter([340.0, 340.006]).__next__,
         metadata={"service": "checkout", "jobArgs": "raw rq args"},
+        span_events=[
+            {
+                "name": "rq.job.started",
+                "metadata": {"worker": "worker-a", "jobArgs": "raw rq args"},
+            }
+        ],
     )
 
 with use_logbrew_trace(parent_trace):
@@ -147,6 +162,12 @@ with use_logbrew_trace(parent_trace):
         span_id_factory=lambda: "b7ad6b7169203371",
         clock=iter([350.0, 350.008]).__next__,
         metadata={"service": "checkout", "headers": "raw celery headers"},
+        span_events=[
+            {
+                "name": "celery.task.published",
+                "metadata": {"worker": "worker-a", "headers": "raw celery headers"},
+            }
+        ],
     )
 
 closed_client = LogBrewClient.create(
@@ -172,6 +193,7 @@ serialized = client.preview_json()
 for forbidden in (
     "raw job payload",
     '"messageBody"',
+    '"messagePayload"',
     "trace headers",
     '"headers"',
     "task inputs",
@@ -196,6 +218,27 @@ process_metadata = payload["events"][1]["attributes"]["metadata"]
 error_metadata = payload["events"][2]["attributes"]["metadata"]
 rq_metadata = payload["events"][3]["attributes"]["metadata"]
 celery_metadata = payload["events"][4]["attributes"]["metadata"]
+publish_events = payload["events"][0]["attributes"]["events"]
+error_events = payload["events"][2]["attributes"]["events"]
+rq_events = payload["events"][3]["attributes"]["events"]
+celery_events = payload["events"][4]["attributes"]["events"]
+
+if publish_events != [{"name": "queue.publish.confirmed", "metadata": {"brokerPartition": 4}}]:
+    raise SystemExit(f"queue publish event summary mismatch: {publish_events}")
+if error_events != [
+    {
+        "name": "exception",
+        "metadata": {
+            "exceptionEscaped": True,
+            "exceptionType": "StubQueueError",
+        },
+    }
+]:
+    raise SystemExit(f"queue exception event summary mismatch: {error_events}")
+if rq_events != [{"name": "rq.job.started", "metadata": {"worker": "worker-a"}}]:
+    raise SystemExit(f"rq event summary mismatch: {rq_events}")
+if celery_events != [{"name": "celery.task.published", "metadata": {"worker": "worker-a"}}]:
+    raise SystemExit(f"celery event summary mismatch: {celery_events}")
 
 print(
     json.dumps(
@@ -215,10 +258,12 @@ print(
             "publishResult": publish_result,
             "queueName": publish_metadata["queueName"],
             "rqOperation": rq_metadata["queueOperation"],
+            "rqSpanEvents": len(rq_events),
             "rqQueueName": rq_metadata["queueName"],
             "rqResult": rq_result,
             "rqTaskName": rq_metadata["taskName"],
             "queueSystem": publish_metadata["queueSystem"],
+            "spanEvents": len(publish_events),
             "syncOperationKind": publish_metadata["queueOperationKind"],
             "taskName": process_metadata["taskName"],
         },

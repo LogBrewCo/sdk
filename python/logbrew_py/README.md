@@ -287,6 +287,8 @@ with use_logbrew_trace(trace):
 
 `parse_traceparent()` validates W3C shape, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `create_logbrew_trace_context()` creates the request-local `LogBrewTraceContext` used to correlate request spans, app-owned logs, issues, actions, metrics, and outgoing milestones with one safe set of IDs. `use_logbrew_trace()` makes that context available through `trace_metadata()` and `get_active_logbrew_trace()` during framework handler work, including async work that keeps Python `contextvars`. `create_traceparent_headers()` returns an explicit outbound carrier with only `traceparent` for app-owned HTTP clients. FastAPI and Django integrations use these helpers automatically for valid inbound `traceparent` headers and start a fresh W3C-shaped local trace when the header is missing or malformed. The helpers do not patch HTTP clients or capture request payloads, headers, cookies, query strings, or the raw `traceparent` value.
 
+Span payloads may include up to eight privacy-bounded event summaries through `events` or helper-level `span_events`. Each summary has a required `name`, optional timezone-aware `timestamp`, and primitive-only `metadata`. LogBrew drops nested objects and helper deny-listed key names so milestones can improve trace timelines without sending payloads, headers, query parameters, cache keys, queue messages, exception messages, or stack traces. Dependency helpers add one automatic type-only `exception` event when the wrapped operation fails.
+
 ## Outbound HTTP Client Spans
 
 Use `urlopen_with_logbrew_span()` when you want one dependency-free outbound HTTP client span around an app-owned `urllib.request` call:
@@ -417,10 +419,13 @@ result = database_operation_with_logbrew_span(
     statement_template="SELECT * FROM checkout_order WHERE id = ?",
     row_count_from_result=lambda rows: rows.rowcount,
     metadata={"service": "checkout-api"},
+    span_events=[
+        {"name": "db.cursor.ready", "metadata": {"poolSlot": 2}},
+    ],
 )
 ```
 
-The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the DB system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the database result. Metadata is intentionally bounded to primitive caller metadata, `dbSystem`, `dbOperation`, optional `dbName`, optional `statementTemplate`, optional non-negative `rowCount`, sampled state, and exception type. It does not monkeypatch SQLAlchemy or DB-API drivers, does not open support tickets, and does not capture SQL parameters, result rows, connection strings, network addresses, sensitive configuration values, payloads, baggage, tracestate, stack traces, or exception messages.
+The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the DB system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the database result. Metadata is intentionally bounded to primitive caller metadata, `dbSystem`, `dbOperation`, optional `dbName`, optional `statementTemplate`, optional non-negative `rowCount`, sampled state, optional bounded span events, and exception type. It does not monkeypatch SQLAlchemy or DB-API drivers, does not open support tickets, and does not capture SQL parameters, result rows, connection strings, network addresses, sensitive configuration values, payloads, baggage, tracestate, stack traces, or exception messages.
 
 ## Cache Operation Spans
 
@@ -446,10 +451,13 @@ profile = cache_operation_with_logbrew_span(
     cache_hit=True,
     item_count=1,
     metadata={"service": "checkout-api"},
+    span_events=[
+        {"name": "cache.lookup", "metadata": {"cacheTier": "primary"}},
+    ],
 )
 ```
 
-The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the cache system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the cache result. Metadata is intentionally bounded to primitive caller metadata, `cacheSystem`, `cacheOperation`, optional `cacheName`, optional hit state, optional non-negative item size/count, sampled state, and exception type. It drops key-like metadata fields and does not monkeypatch cache clients, open support tickets, capture cache keys, values, commands, payloads, headers, cookies, network addresses, baggage, tracestate, stack traces, or exception messages.
+The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the cache system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the cache result. Metadata is intentionally bounded to primitive caller metadata, `cacheSystem`, `cacheOperation`, optional `cacheName`, optional hit state, optional non-negative item size/count, sampled state, optional bounded span events, and exception type. It drops key-like metadata fields and does not monkeypatch cache clients, open support tickets, capture cache keys, values, commands, payloads, headers, cookies, network addresses, baggage, tracestate, stack traces, or exception messages.
 
 ## Queue Operation Spans
 
@@ -476,10 +484,13 @@ queued = queue_operation_with_logbrew_span(
     task_name="checkout.email",
     message_count=1,
     metadata={"service": "checkout-worker"},
+    span_events=[
+        {"name": "queue.publish.confirmed", "metadata": {"brokerPartition": 4}},
+    ],
 )
 ```
 
-The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the queue system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the queue result. Metadata is intentionally bounded to primitive caller metadata, `queueSystem`, `queueOperation`, optional operation kind, optional queue/task names, optional non-negative message count/attempt, sampled state, and exception type. It drops message-like metadata fields and does not monkeypatch queue frameworks, write broker metadata, open support tickets, capture job arguments, message bodies, headers, cookies, broker URLs, baggage, tracestate, stack traces, or exception messages.
+The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the queue system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the queue result. Metadata is intentionally bounded to primitive caller metadata, `queueSystem`, `queueOperation`, optional operation kind, optional queue/task names, optional non-negative message count/attempt, sampled state, optional bounded span events, and exception type. It drops message-like metadata fields and does not monkeypatch queue frameworks, write broker metadata, open support tickets, capture job arguments, message bodies, headers, cookies, broker URLs, baggage, tracestate, stack traces, or exception messages.
 
 For RQ jobs, use `rq_operation_with_logbrew_span()` when you want LogBrew to derive safe `func_name` and `origin` metadata from an app-owned job object without installing RQ as a LogBrew dependency or patching `Queue`/`Worker` globally:
 
@@ -504,7 +515,7 @@ queued = rq_operation_with_logbrew_span(
 )
 ```
 
-The RQ helper records one `rq` queue span using explicit caller control. It reads only string-like `job.func_name` and `job.origin` by default, lets you override queue/task names, and still avoids job args, kwargs, descriptions, broker metadata writes, global worker patching, baggage, and tracestate.
+The RQ helper records one `rq` queue span using explicit caller control. It reads only string-like `job.func_name` and `job.origin` by default, lets you override queue/task names, accepts the same bounded `span_events` option as the generic queue helper, and still avoids job args, kwargs, descriptions, broker metadata writes, global worker patching, baggage, and tracestate.
 
 For Celery tasks, use `celery_operation_with_logbrew_span()` when you want safe task and queue metadata without registering Celery signals, mutating task headers, or patching `apply_async`:
 
@@ -529,7 +540,7 @@ queued = celery_operation_with_logbrew_span(
 )
 ```
 
-The Celery helper reads only string-like `task.name` and an optional routing key from `task.request.delivery_info`, lets you override queue/task names, and still avoids task args, kwargs, request headers, broker URLs, signal registration, header mutation, baggage, and tracestate.
+The Celery helper reads only string-like `task.name` and an optional routing key from `task.request.delivery_info`, lets you override queue/task names, accepts the same bounded `span_events` option as the generic queue helper, and still avoids task args, kwargs, request headers, broker URLs, signal registration, header mutation, baggage, and tracestate.
 
 ## Agent-Readable Timelines
 
