@@ -249,6 +249,15 @@ namespace LogBrew
                 attributes.WithParentSpanId(trace.ParentSpanId);
             }
 
+            if (operationError != null)
+            {
+                attributes.WithEvent(SpanEventSummary.Create("exception").WithMetadata(new Dictionary<string, object?>
+                {
+                    ["exceptionType"] = operationError.GetType().FullName,
+                    ["exceptionEscaped"] = true
+                }));
+            }
+
             try
             {
                 client.Span(

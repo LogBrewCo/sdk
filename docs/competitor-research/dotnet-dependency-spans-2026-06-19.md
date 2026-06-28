@@ -38,3 +38,28 @@
 ## Honest Gap
 
 LogBrew is now lighter, safer by default, and easier to verify from installed artifacts than broad automatic instrumentation in the core package. Sentry, Datadog, and OpenTelemetry remain stronger for automatic EF/SqlClient/Redis/Kafka coverage, richer semantic conventions, span events/exceptions/links, baggage/tracestate, and client-specific timing. The next .NET step should be opt-in integration packages or helpers for the highest-demand concrete clients, not hidden patching in core.
+
+## 2026-06-28 Span Event Follow-Up
+
+### Source Context Reused
+
+- Sentry .NET and Datadog .NET sources above showed mature exception/span enrichment in their automatic dependency paths.
+- OpenTelemetry .NET's Activity model exposes event-style span annotations through `ActivityEvent`, and OTel instrumentation commonly records exception facts as span events.
+
+### LogBrew Change
+
+- Added public `SpanEventSummary` support to .NET `SpanAttributes`, capped at eight event summaries per span with non-empty names, optional ISO-8601 timestamps, and primitive-only metadata.
+- `LogBrewOperationTracing` now attaches one `exception` event summary to failed database/cache/queue spans with only `exceptionType` and `exceptionEscaped`.
+- The dependency-span installed example now includes a caught failing database operation; the verifier proves the exception event exists while the exception message, query text, connection details, cache keys, and message payload text stay out of the emitted JSON.
+- Bumped the core NuGet package metadata to `LogBrew` `0.1.3` for the next scoped .NET release; `LogBrew.AspNetCore` remains unchanged.
+
+### Verification
+
+- TDD red: `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release` failed on the missing exception span event.
+- TDD red installed proof: `bash scripts/check_dotnet_package.sh` failed with `summary event count mismatch` after the verifier expected the new failing dependency span.
+- Green proof: `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release` passed with 60 tests.
+- Green installed proof: `bash scripts/check_dotnet_package.sh` passed with 60 core tests, 4 ASP.NET Core tests, NuGet pack proof, README/example checks, and dependency-span payload validation.
+
+### Still Not Copied
+
+LogBrew still does not add EF/SqlClient/Redis/Kafka dependencies, profiler hooks, automatic instrumentation, OTel processors/exporters, baggage, tracestate, span links, full exception messages, stack traces, raw SQL, connection strings, broker details, message payloads, request/response bodies, headers, or support-ticket behavior in the core .NET package.

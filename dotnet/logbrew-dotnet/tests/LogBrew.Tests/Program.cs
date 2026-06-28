@@ -115,6 +115,39 @@ ExpectSdkError("validation_error", "span durationMs must be non-negative", () =>
     SampleClient().Span("evt_span_001", "2026-06-02T10:00:04Z", SpanAttributes.Create("GET /health", "trace_001", "span_001", "ok").WithDurationMs(-1)));
 tests++;
 
+var spanEventClient = SampleClient();
+spanEventClient.Span(
+    "evt_span_event_summary",
+    "2026-06-02T10:00:04Z",
+    SpanAttributes.Create("GET /health", "trace_001", "span_001", "ok")
+        .WithEvent(SpanEventSummary.Create("retry")
+            .WithTimestamp("2026-06-02T10:00:04Z")
+            .WithMetadata(new Dictionary<string, object?> { ["attempt"] = 2, ["retryable"] = true })));
+var spanEventPreview = spanEventClient.PreviewJson();
+AssertTrue(spanEventPreview.Contains("\"events\"", StringComparison.Ordinal), "expected span events array");
+AssertTrue(spanEventPreview.Contains("\"name\": \"retry\"", StringComparison.Ordinal), "expected span event name");
+AssertTrue(spanEventPreview.Contains("\"attempt\": 2", StringComparison.Ordinal), "expected span event metadata");
+AssertTrue(spanEventPreview.Contains("\"retryable\": true", StringComparison.Ordinal), "expected span event bool metadata");
+ExpectSdkError("validation_error", "span event summaries must contain at most 8 entries", () =>
+{
+    var summaries = new List<SpanEventSummary>();
+    for (var index = 0; index < 9; index++)
+    {
+        summaries.Add(SpanEventSummary.Create("event_" + index.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    SpanAttributes.Create("GET /health", "trace_001", "span_001", "ok").WithEvents(summaries);
+});
+ExpectSdkError("validation_error", "span event metadata value for nested must be a string", () =>
+    SpanEventSummary.Create("retry").WithMetadata(new Dictionary<string, object?> { ["nested"] = new object() }));
+ExpectSdkError("validation_error", "timestamp must include a timezone offset", () =>
+    SampleClient().Span(
+        "evt_span_bad_event_timestamp",
+        "2026-06-02T10:00:04Z",
+        SpanAttributes.Create("GET /health", "trace_001", "span_001", "ok")
+            .WithEvent(SpanEventSummary.Create("retry").WithTimestamp("2026-06-02T10:00:04"))));
+tests++;
+
 var incomingTraceparent = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01";
 var traceContext = Traceparent.Parse(incomingTraceparent);
 AssertTrue(traceContext.Version == "00", "expected traceparent version");

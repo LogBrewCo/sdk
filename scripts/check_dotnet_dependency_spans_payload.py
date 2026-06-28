@@ -41,6 +41,27 @@ def assert_span(event, source):
     require(meta.get("sampled") is True, f"{source} sampled flag missing")
 
 
+def assert_error_span(event, source):
+    attrs = event.get("attributes", {})
+    meta = metadata(event)
+    require(attrs.get("traceId") == TRACE_ID, f"{source} trace id mismatch")
+    require(HEX_16.match(attrs.get("spanId", "")), f"{source} span id invalid")
+    require(attrs.get("parentSpanId") == PARENT_SPAN_ID, f"{source} parent span mismatch")
+    require(attrs.get("status") == "error", f"{source} error status mismatch")
+    require(meta.get("source") == source, f"{source} metadata source mismatch")
+    require(meta.get("feature") == "checkout", f"{source} feature metadata missing")
+    require(meta.get("errorType") == "System.InvalidOperationException", f"{source} error type mismatch")
+    span_events = attrs.get("events", [])
+    require(isinstance(span_events, list), f"{source} span events must be a list")
+    require(len(span_events) == 1, f"{source} expected one exception span event")
+    exception_event = span_events[0]
+    require(exception_event.get("name") == "exception", f"{source} exception event name mismatch")
+    exception_meta = exception_event.get("metadata", {})
+    require(isinstance(exception_meta, dict), f"{source} exception event metadata must be an object")
+    require(exception_meta.get("exceptionType") == "System.InvalidOperationException", f"{source} exception event type mismatch")
+    require(exception_meta.get("exceptionEscaped") is True, f"{source} exception escaped flag mismatch")
+
+
 def main():
     if len(sys.argv) != 3:
         raise SystemExit("usage: check_dotnet_dependency_spans_payload.py stdout.json stderr.json")
@@ -51,14 +72,15 @@ def main():
     events = payload.get("events", [])
 
     require(summary.get("ok") is True, "summary ok flag missing")
-    require(summary.get("events") == 3, "summary event count mismatch")
+    require(summary.get("events") == 4, "summary event count mismatch")
     require(summary.get("status") == 202, "summary status mismatch")
     require(summary.get("attempts") == 1, "summary attempts mismatch")
-    require(len(events) == 3, f"expected 3 events, got {len(events)}")
+    require(len(events) == 4, f"expected 4 events, got {len(events)}")
 
     for blocked in (
         "cart:sample",
         "sample payload",
+        "database failed with sample payload details",
         "Server=example",
         "id = 'sample'",
         "query",
@@ -71,6 +93,7 @@ def main():
     db = event_by_name(events, "database:orders.select")
     cache = event_by_name(events, "cache:cart.get")
     queue = event_by_name(events, "queue:invoice.publish")
+    failing_db = event_by_name(events, "database:orders.fail")
 
     assert_span(db, "database.operation")
     db_meta = metadata(db)
@@ -98,6 +121,8 @@ def main():
     require(queue_meta.get("queueName") == "invoices", "queue name mismatch")
     require(queue_meta.get("taskName") == "invoice.created", "queue task name mismatch")
     require(queue_meta.get("messageCount") == 1, "queue message count mismatch")
+
+    assert_error_span(failing_db, "database.operation")
 
 
 if __name__ == "__main__":

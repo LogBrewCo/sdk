@@ -170,6 +170,10 @@ internal static class OperationTracingTests
         var payload = client.PreviewJson();
         Require(payload.Contains("\"status\": \"error\"", StringComparison.Ordinal), "expected error span");
         Require(payload.Contains("\"errorType\": \"System.InvalidOperationException\"", StringComparison.Ordinal), "expected error type only");
+        Require(payload.Contains("\"events\"", StringComparison.Ordinal), "expected error span event summary");
+        Require(payload.Contains("\"name\": \"exception\"", StringComparison.Ordinal), "expected exception span event");
+        Require(payload.Contains("\"exceptionType\": \"System.InvalidOperationException\"", StringComparison.Ordinal), "expected exception event type only");
+        Require(payload.Contains("\"exceptionEscaped\": true", StringComparison.Ordinal), "expected escaped exception event");
         Require(!payload.Contains("sensitive details", StringComparison.Ordinal), "expected error message to be omitted");
     }
 

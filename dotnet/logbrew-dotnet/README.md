@@ -395,9 +395,26 @@ var orderId = LogBrewOperationTracing.DatabaseOperation(
         .WithMetadata(new Dictionary<string, object?> { ["routeTemplate"] = "/orders/:id" }));
 ```
 
-Sync and async helpers are available for database, cache, and queue operations. They create one child span under `LogBrewTrace.Current` when a trace is active, keep that child trace active while the callback runs, preserve the callback result or original exception, and report SDK capture failures through optional `OnError(...)` callbacks without interrupting app work. Metadata is primitive-only, and the helpers drop unsafe dependency details such as raw statements, connection details, cache identifiers, message contents, broker details, request metadata, and unsafe values. For broad automatic JDBC/EF/Redis/Kafka-style coverage, use a future explicit integration package rather than relying on hidden behavior in this core package.
+Sync and async helpers are available for database, cache, and queue operations. They create one child span under `LogBrewTrace.Current` when a trace is active, keep that child trace active while the callback runs, preserve the callback result or original exception, and report SDK capture failures through optional `OnError(...)` callbacks without interrupting app work. Failed dependency operations also attach one bounded span event named `exception` with type-only metadata (`exceptionType` and `exceptionEscaped`) so issues can be filtered without sending exception messages or stack traces.
 
-The packaged `examples/DependencySpansTelemetry.cs` file shows database, cache, and queue spans running from a small console app, with trace correlation and dependency metadata redaction.
+You can add your own primitive-only span event summaries to any span with `SpanEventSummary`:
+
+```csharp
+client.Span(
+    "evt_span_checkout_dependency",
+    "2026-06-02T10:00:06Z",
+    SpanAttributes.Create("database:orders.select", "4bf92f3577b34da6a3ce929d0e0e4736", "b7ad6b7169203333", "ok")
+        .WithParentSpanId("00f067aa0ba902b7")
+        .WithEvent(SpanEventSummary.Create("retry").WithMetadata(new Dictionary<string, object?>
+        {
+            ["attempt"] = 2,
+            ["retryable"] = true
+        })));
+```
+
+Span event summaries are capped at eight entries per span and accept only string, number, boolean, or null metadata. Metadata is primitive-only, and the dependency helpers drop unsafe dependency details such as raw statements, connection details, cache identifiers, message contents, broker details, request metadata, and unsafe values. For broad automatic JDBC/EF/Redis/Kafka-style coverage, use a future explicit integration package rather than relying on hidden behavior in this core package.
+
+The packaged `examples/DependencySpansTelemetry.cs` file shows database, cache, and queue spans running from a small console app, with trace correlation, type-only dependency exception events, and dependency metadata redaction.
 
 ## Support Ticket Diagnostics Drafts
 

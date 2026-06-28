@@ -1,0 +1,211 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+
+namespace LogBrew
+{
+    public sealed class SpanAttributes
+    {
+        private List<SpanEventSummary>? events;
+
+        private SpanAttributes(string name, string traceId, string spanId, string status)
+        {
+            Name = name;
+            TraceId = traceId;
+            SpanId = spanId;
+            Status = status;
+        }
+
+        public string Name { get; }
+
+        public string TraceId { get; }
+
+        public string SpanId { get; }
+
+        public string Status { get; }
+
+        public string? ParentSpanId { get; private set; }
+
+        public double? DurationMs { get; private set; }
+
+        public IDictionary<string, object?>? Metadata { get; private set; }
+
+        public IReadOnlyList<SpanEventSummary>? Events
+        {
+            get { return events?.AsReadOnly(); }
+        }
+
+        public static SpanAttributes Create(string name, string traceId, string spanId, string status)
+        {
+            return new SpanAttributes(name, traceId, spanId, status);
+        }
+
+        public SpanAttributes WithParentSpanId(string parentSpanId)
+        {
+            ParentSpanId = parentSpanId;
+            return this;
+        }
+
+        public SpanAttributes WithDurationMs(double durationMs)
+        {
+            DurationMs = durationMs;
+            return this;
+        }
+
+        public SpanAttributes WithMetadata(IDictionary<string, object?> metadata)
+        {
+            Metadata = metadata;
+            return this;
+        }
+
+        public SpanAttributes WithEvents(IEnumerable<SpanEventSummary> summaries)
+        {
+            if (summaries == null)
+            {
+                throw new ArgumentNullException(nameof(summaries));
+            }
+
+            var copied = new List<SpanEventSummary>();
+            foreach (var summary in summaries)
+            {
+                if (summary == null)
+                {
+                    throw new SdkException("validation_error", "span event summary must be provided");
+                }
+
+                copied.Add(summary);
+                if (copied.Count > SpanEventSummary.MaxEvents)
+                {
+                    throw new SdkException("validation_error", "span event summaries must contain at most " + SpanEventSummary.MaxEvents.ToString(CultureInfo.InvariantCulture) + " entries");
+                }
+            }
+
+            events = copied;
+            return this;
+        }
+
+        public SpanAttributes WithEvent(SpanEventSummary summary)
+        {
+            if (summary == null)
+            {
+                throw new ArgumentNullException(nameof(summary));
+            }
+
+            var copied = events == null ? new List<SpanEventSummary>() : new List<SpanEventSummary>(events);
+            copied.Add(summary);
+            if (copied.Count > SpanEventSummary.MaxEvents)
+            {
+                throw new SdkException("validation_error", "span event summaries must contain at most " + SpanEventSummary.MaxEvents.ToString(CultureInfo.InvariantCulture) + " entries");
+            }
+
+            events = copied;
+            return this;
+        }
+
+        internal OrderedJsonObject ToJsonObject()
+        {
+            Validation.RequireNonEmpty("span name", Name);
+            Validation.RequireNonEmpty("span traceId", TraceId);
+            Validation.RequireNonEmpty("span spanId", SpanId);
+            Validation.RequireAllowedValue("span status", Status, LogBrewClient.SpanStatuses);
+            if (ParentSpanId != null)
+            {
+                Validation.RequireNonEmpty("span parentSpanId", ParentSpanId);
+            }
+
+            if (DurationMs.HasValue && (DurationMs.Value < 0 || double.IsNaN(DurationMs.Value) || double.IsInfinity(DurationMs.Value)))
+            {
+                throw new SdkException("validation_error", "span durationMs must be non-negative");
+            }
+
+            var payload = new OrderedJsonObject()
+                .Add("name", Name)
+                .Add("traceId", TraceId)
+                .Add("spanId", SpanId);
+            payload.AddIfNotNull("parentSpanId", ParentSpanId);
+            payload.Add("status", Status);
+            if (DurationMs.HasValue)
+            {
+                payload.Add("durationMs", DurationMs.Value);
+            }
+
+            payload.AddMetadata(Metadata);
+            if (events != null && events.Count > 0)
+            {
+                payload.Add("events", events.Select(summary => summary.ToJsonObject()).ToList());
+            }
+
+            return payload;
+        }
+    }
+
+    public sealed class SpanEventSummary
+    {
+        internal const int MaxEvents = 8;
+
+        private SpanEventSummary(string name)
+        {
+            Name = name;
+        }
+
+        public string Name { get; }
+
+        public string? Timestamp { get; private set; }
+
+        public IDictionary<string, object?>? Metadata { get; private set; }
+
+        public static SpanEventSummary Create(string name)
+        {
+            return new SpanEventSummary(name);
+        }
+
+        public SpanEventSummary WithTimestamp(string timestamp)
+        {
+            Timestamp = timestamp;
+            return this;
+        }
+
+        public SpanEventSummary WithMetadata(IDictionary<string, object?> metadata)
+        {
+            Metadata = CopyMetadata(metadata);
+            return this;
+        }
+
+        internal OrderedJsonObject ToJsonObject()
+        {
+            Validation.RequireNonEmpty("span event name", Name);
+            if (Timestamp != null)
+            {
+                Validation.RequireTimestamp(Timestamp);
+            }
+
+            var payload = new OrderedJsonObject().Add("name", Name);
+            payload.AddIfNotNull("timestamp", Timestamp);
+            payload.AddMetadata(Metadata);
+            return payload;
+        }
+
+        private static Dictionary<string, object?> CopyMetadata(IDictionary<string, object?> metadata)
+        {
+            if (metadata == null)
+            {
+                throw new ArgumentNullException(nameof(metadata));
+            }
+
+            var copied = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var item in metadata)
+            {
+                Validation.RequireNonEmpty("span event metadata key", item.Key);
+                if (!Validation.IsMetadataValue(item.Value))
+                {
+                    throw new SdkException("validation_error", "span event metadata value for " + item.Key + " must be a string, number, boolean, or null");
+                }
+
+                copied[item.Key] = item.Value;
+            }
+
+            return copied;
+        }
+    }
+}

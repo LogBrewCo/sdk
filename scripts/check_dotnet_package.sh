@@ -116,6 +116,8 @@ for needle in (
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",
     "LogBrewOperationTracing",
+    "SpanEventSummary",
+    "exceptionEscaped",
     "LogBrewServerRequestTelemetry",
     "AspNetCoreRequestTelemetry.cs",
     "dotnet add package LogBrew.AspNetCore",

@@ -56,6 +56,28 @@ public static class Program
                         ["cache-key"] = "cart:sample"
                     }));
 
+            try
+            {
+                LogBrewOperationTracing.DatabaseOperation<int>(
+                    client,
+                    "orders.fail",
+                    () => throw new InvalidOperationException("database failed with sample payload details"),
+                    LogBrewOperationTracing.DatabaseOperationOptions.Create()
+                        .WithEventIdPrefix("dotnet_dependency")
+                        .WithSystem("sqlserver")
+                        .WithOperationKind("select")
+                        .WithDatabaseName("checkout")
+                        .WithMetadata(new Dictionary<string, object?>
+                        {
+                            ["feature"] = "checkout",
+                            ["query"] = "SELECT * FROM orders WHERE id = 'sample'"
+                        }));
+            }
+            catch (InvalidOperationException)
+            {
+                // The SDK preserves the original exception while capturing type-only span diagnostics.
+            }
+
             var queued = LogBrewOperationTracing.QueueOperation(
                 client,
                 "invoice.publish",
