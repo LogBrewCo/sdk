@@ -65,6 +65,16 @@ For a changed JS integration release, manual `target=npm` dispatch can restrict 
 gh workflow run publish-packages.yml -R LogBrewCo/sdk -f ref=v0.1.1 -f target=npm -f dry_run=true -f include_unity_npm=false -f npm_packages=@logbrew/nestjs
 ```
 
+Brand-new npm package names need a package page before repeat trusted-publisher
+updates can work. npm's `npm trust` command requires the package to already
+exist, so the first public publish for a new name must use an authenticated
+package-creation path. Prefer a one-time `target=npm` run with
+`allow_initial_npm_publish=true` only after adding a narrowly scoped `NPM_TOKEN`
+to the `release` environment, then configure the package's trusted publisher and
+return `allow_initial_npm_publish` to `false` for future OIDC publishes. The
+workflow rejects `dry_run=false` when a selected package page is missing and
+this explicit first-publish path is not enabled.
+
 ## PyPI
 
 Create GitHub trusted publishers for these PyPI projects:

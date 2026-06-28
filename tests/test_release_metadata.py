@@ -60,11 +60,27 @@ def minimal_publish_packages_workflow(package_dirs: list[str]) -> str:
     return (
         """
 name: Publish Packages
+on:
+  workflow_dispatch:
+    inputs:
+      allow_initial_npm_publish:
+        description: "Allow authenticated first publish for new npm package pages"
+        required: true
+        type: boolean
+        default: false
 jobs:
   npm:
+    env:
+      ALLOW_INITIAL_NPM_PUBLISH: ${{ inputs.allow_initial_npm_publish }}
     steps:
       - name: Publish npm packages
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          npm --version
+          missing_npm_packages=()
+          echo "npm trusted publishing requires existing package pages"
+          echo "Use allow_initial_npm_publish only for one-time authenticated package creation"
           package_dirs=(
 """
         + package_dir_lines
@@ -245,6 +261,82 @@ release tag's commit historical tags check_repo_wide_release_versions.py
             check_release_metadata.validate_release_workflows(root, failures)
 
         self.assertTrue(any("trusted publisher npm package @logbrew/bullmq" in failure for failure in failures))
+
+    def test_publish_packages_workflow_requires_npm_first_publish_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
+            (workflow_dir / "publish-packages.yml").write_text(
+                """
+name: Publish Packages
+jobs:
+  npm:
+    steps:
+      - name: Publish npm packages
+        run: |
+          package_dirs=(
+            js/logbrew-js
+            js/logbrew-browser
+            js/logbrew-node
+            js/logbrew-bullmq
+            js/logbrew-kafkajs
+            js/logbrew-amqplib
+            js/logbrew-aws-sqs
+            js/logbrew-express
+            js/logbrew-fastify
+            js/logbrew-nestjs
+            js/logbrew-angular
+            js/logbrew-vue
+            js/logbrew-svelte
+            js/logbrew-react
+            js/logbrew-react-native
+            js/logbrew-next
+          )
+  nuget:
+    steps:
+      - name: Read NuGet package version
+        id: nuget-version
+        run: |
+          echo "core_version=0.1.2" >> "$GITHUB_OUTPUT"
+          echo "aspnetcore_version=0.1.0" >> "$GITHUB_OUTPUT"
+      - name: Validate NuGet metadata
+        run: |
+          python3 scripts/check_release_metadata.py \\
+            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
+            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"
+      - name: Publish NuGet package
+        run: dotnet nuget push --skip-duplicate
+      - name: Verify public NuGet package
+        run: |
+          python3 scripts/check_registry_publication.py --target nuget \\
+            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
+            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"
+  verify:
+    name: Public registry verification
+    if: ${{ inputs.target == 'verify' }}
+    steps:
+      - name: Verify public registry packages
+        run: |
+          VERIFY_VERSION=0.1.0
+          VERIFY_NPM_VERSIONS=""
+          VERIFY_PYPI_VERSIONS=""
+          VERIFY_NUGET_VERSIONS=""
+          verify_args=(--target all)
+          append_version_overrides() { :; }
+          verify_args+=(--version "$VERIFY_VERSION")
+          append_version_overrides --npm-version "$VERIFY_NPM_VERSIONS"
+          append_version_overrides --pypi-version "$VERIFY_PYPI_VERSIONS"
+          append_version_overrides --nuget-version "$VERIFY_NUGET_VERSIONS"
+          python3 scripts/check_registry_publication.py "${verify_args[@]}"
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("npm first-publish guard" in failure for failure in failures))
 
     def test_publish_release_workflow_requires_scoped_release_skip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

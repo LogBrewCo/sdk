@@ -855,6 +855,12 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "verify target NuGet version override": (
                 'append_version_overrides --nuget-version "$VERIFY_NUGET_VERSIONS"'
             ),
+            "npm initial publish opt-in": "allow_initial_npm_publish:",
+            "npm first-publish guard": "missing_npm_packages",
+            "npm first-publish token seam": "NPM_TOKEN",
+            "npm first-publish trusted publishing warning": (
+                "npm trusted publishing requires existing package pages"
+            ),
         }
         for description, needle in required_publish_needles.items():
             require(needle in publish_packages_text, failures, f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}")

@@ -37,6 +37,11 @@ on:
         required: false
         type: string
         default: ""
+      allow_initial_npm_publish:
+        description: "Allow one-time authenticated first publish for npm package names whose package pages do not exist yet"
+        required: true
+        type: boolean
+        default: false
       include_pypi_extras:
         description: "Publish FastAPI/Django PyPI packages after their publishers are configured"
         required: true
@@ -103,6 +108,7 @@ jobs:
       DRY_RUN: ${{ inputs.dry_run }}
       INCLUDE_UNITY_NPM: ${{ inputs.include_unity_npm }}
       NPM_PACKAGES: ${{ inputs.npm_packages }}
+      ALLOW_INITIAL_NPM_PUBLISH: ${{ inputs.allow_initial_npm_publish }}
     steps:
       - name: Check out release ref
         uses: actions/checkout@v6
@@ -120,6 +126,8 @@ jobs:
       - name: Publish npm packages
         id: npm-packages
         shell: bash
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -Eeuo pipefail
 
@@ -206,6 +214,58 @@ jobs:
           done
 
           python3 scripts/check_release_metadata.py "${metadata_args[@]}"
+
+          npm_version="$(npm --version)"
+          node_version="$(node --version)"
+          echo "npm ${npm_version} on ${node_version}"
+          node -e '
+            const version = process.argv[1].split(/[.-]/).map(Number);
+            const minimum = [11, 5, 1];
+            for (let index = 0; index < minimum.length; index += 1) {
+              const actual = version[index] || 0;
+              if (actual > minimum[index]) process.exit(0);
+              if (actual < minimum[index]) {
+                console.error(`npm trusted publishing requires npm >= ${minimum.join(".")}; found ${process.argv[1]}`);
+                process.exit(1);
+              }
+            }
+          ' "$npm_version"
+
+          missing_npm_packages=()
+          if [[ "$DRY_RUN" != "true" ]]; then
+            for package_name in "${selected_package_names[@]}"; do
+              if [[ "$package_name" == "co.logbrew.unity" ]]; then
+                continue
+              fi
+              if ! npm view "$package_name" version --registry "https://registry.npmjs.org" >/dev/null 2>&1; then
+                missing_npm_packages+=("$package_name")
+              fi
+            done
+          fi
+
+          npm_userconfig="$(mktemp)"
+          trap 'rm -f "$npm_userconfig"' EXIT
+          printf 'registry=https://registry.npmjs.org/\n' > "$npm_userconfig"
+          export NPM_CONFIG_USERCONFIG="$npm_userconfig"
+          unset NODE_AUTH_TOKEN
+
+          if [[ "${#missing_npm_packages[@]}" -gt 0 ]]; then
+            printf 'Missing npm package pages before publish:\n' >&2
+            printf -- '- %s\n' "${missing_npm_packages[@]}" >&2
+            if [[ "$ALLOW_INITIAL_NPM_PUBLISH" != "true" ]]; then
+              echo "npm trusted publishing requires existing package pages for these names." >&2
+              echo "Run a one-time authenticated first publish, or rerun with allow_initial_npm_publish=true after adding the release environment npm publish value, then configure trusted publishers for repeat OIDC publishes." >&2
+              exit 1
+            fi
+            if [[ -z "${NPM_TOKEN:-}" ]]; then
+              echo "allow_initial_npm_publish=true requires release environment secret NPM_TOKEN for one-time authenticated package creation." >&2
+              exit 1
+            fi
+            printf '//registry.npmjs.org/:_authToken=%s\nregistry=https://registry.npmjs.org/\n' "$NPM_TOKEN" > "$npm_userconfig"
+          elif [[ "$ALLOW_INITIAL_NPM_PUBLISH" == "true" ]]; then
+            echo "allow_initial_npm_publish=true is only for brand-new npm package pages; all selected packages already exist." >&2
+            exit 1
+          fi
 
           for package_dir in "${package_dirs[@]}"; do
             package_name="$(node -p "require('./${package_dir}/package.json').name")"
