@@ -42,6 +42,8 @@ PY
 main_sources="$tmp_dir/main-sources.txt"
 classes_dir="$tmp_dir/classes"
 java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
+java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps")"
+java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath"
 spotbugs_tgz="$tmp_dir/spotbugs-$spotbugs_version.tgz"
 spotbugs_sha256="$tmp_dir/spotbugs-$spotbugs_version.tgz.sha256"
 spotbugs_report="$tmp_dir/spotbugs.xml"
@@ -61,12 +63,12 @@ if [[ "$spotbugs_report_version" != "$spotbugs_version" ]]; then
   exit 1
 fi
 
-javac -Xlint:all -Werror --release 11 -cp "$java_logback_classpath" -d "$classes_dir" @"$main_sources"
+javac -Xlint:all -Werror --release 11 -cp "$java_optional_classpath" -d "$classes_dir" @"$main_sources"
 "$spotbugs_bin" \
   -textui \
   -effort:max \
   -low \
-  -auxclasspath "$java_logback_classpath" \
+  -auxclasspath "$java_optional_classpath" \
   -xml:withMessages \
   -output "$spotbugs_report" \
   "$classes_dir"

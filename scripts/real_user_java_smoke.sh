@@ -21,7 +21,9 @@ find "$package_dir/examples" -name '*.java' | sort > "$example_sources"
 
 mkdir -p "$tmp_dir/classes" "$tmp_dir/jar-stage" "$tmp_dir/source-stage" "$tmp_dir/example-classes"
 java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
-javac -Xlint:all -Werror --release 11 -cp "$java_logback_classpath" -d "$tmp_dir/classes" @"$main_sources"
+java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps")"
+java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath"
+javac -Xlint:all -Werror --release 11 -cp "$java_optional_classpath" -d "$tmp_dir/classes" @"$main_sources"
 
 mkdir -p "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk"
 cp "$package_dir/pom.xml" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk/pom.xml"
@@ -49,6 +51,7 @@ grep -q '^co/logbrew/sdk/Traceparent\$SpanInput.class$' "$tmp_dir/binary-jar-con
 grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace\$Scope.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SpanEventSummary.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -74,6 +77,7 @@ grep -q '^src/main/java/co/logbrew/sdk/ProductTimeline.java$' "$tmp_dir/source-j
 grep -q '^src/main/java/co/logbrew/sdk/Traceparent.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewTraceContext.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewTrace.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/LogBrewOpenTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/SpanEventSummary.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewOperationTracing.java$' "$tmp_dir/source-jar-contents.txt"
@@ -94,6 +98,7 @@ grep -q 'HttpTransport' "$package_dir/README.md"
 grep -q 'MetricAttributes' "$package_dir/README.md"
 grep -q 'ProductTimeline' "$package_dir/README.md"
 grep -q 'Traceparent' "$package_dir/README.md"
+grep -q 'LogBrewOpenTelemetry' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
 grep -q 'SupportTicketDraft' "$package_dir/README.md"
 grep -q 'first useful LogBrew payload' "$package_dir/README.md"
@@ -116,36 +121,40 @@ grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_d
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/extracted-examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/extracted-examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/extracted-examples-help.txt"
-(cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_logback_classpath" run-readme-example) > "$tmp_dir/extracted-readme.stdout.json" 2> "$tmp_dir/extracted-readme.stderr.json"
+(cd "$extract_dir/examples" && make run-readme-example) > "$tmp_dir/extracted-readme-default.stdout.json" 2> "$tmp_dir/extracted-readme-default.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-readme-default.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/extracted-readme-default.stdout.json" >/dev/null
+grep -q '"ok":true' "$tmp_dir/extracted-readme-default.stderr.json"
+(cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_optional_classpath" run-readme-example) > "$tmp_dir/extracted-readme.stdout.json" 2> "$tmp_dir/extracted-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/extracted-readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/extracted-readme.stderr.json"
-(cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_logback_classpath" run) > "$tmp_dir/extracted-smoke-alias.stdout.json" 2> "$tmp_dir/extracted-smoke-alias.stderr.json"
+(cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_optional_classpath" run) > "$tmp_dir/extracted-smoke-alias.stdout.json" 2> "$tmp_dir/extracted-smoke-alias.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-smoke-alias.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/extracted-smoke-alias.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/extracted-smoke-alias.stderr.json"
 grep -q '"supportDraftRedacted":true' "$tmp_dir/extracted-smoke-alias.stderr.json"
-(cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_logback_classpath" run-first-useful-telemetry) > "$tmp_dir/extracted-first-useful.stdout.json" 2> "$tmp_dir/extracted-first-useful.stderr.json"
+(cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_optional_classpath" run-first-useful-telemetry) > "$tmp_dir/extracted-first-useful.stdout.json" 2> "$tmp_dir/extracted-first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/extracted-first-useful.stdout.json" "$tmp_dir/extracted-first-useful.stderr.json" >/dev/null
-(cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_logback_classpath" run-http-trace-correlation) > "$tmp_dir/extracted-http-trace.stdout.json" 2> "$tmp_dir/extracted-http-trace.stderr.json"
+(cd "$extract_dir/examples" && make LOGBREW_JAVA_EXTRA_CP="$java_optional_classpath" run-http-trace-correlation) > "$tmp_dir/extracted-http-trace.stdout.json" 2> "$tmp_dir/extracted-http-trace.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_http_trace_payload.py" "$tmp_dir/extracted-http-trace.stdout.json" "$tmp_dir/extracted-http-trace.stderr.json" >/dev/null
 
-javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_logback_classpath" -d "$tmp_dir/example-classes" @"$example_sources"
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" ReadmeExample > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
+javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$tmp_dir/example-classes" @"$example_sources"
+java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_optional_classpath" ReadmeExample > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-readme.stderr.json"
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" RealUserSmoke > "$tmp_dir/packaged-smoke.stdout.json" 2> "$tmp_dir/packaged-smoke.stderr.json"
+java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_optional_classpath" RealUserSmoke > "$tmp_dir/packaged-smoke.stdout.json" 2> "$tmp_dir/packaged-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/packaged-smoke.stderr.json"
 grep -q '"supportDraftRedacted":true' "$tmp_dir/packaged-smoke.stderr.json"
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" FirstUsefulTelemetry > "$tmp_dir/packaged-first-useful.stdout.json" 2> "$tmp_dir/packaged-first-useful.stderr.json"
+java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_optional_classpath" FirstUsefulTelemetry > "$tmp_dir/packaged-first-useful.stdout.json" 2> "$tmp_dir/packaged-first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json" >/dev/null
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" HttpTraceCorrelation > "$tmp_dir/packaged-http-trace.stdout.json" 2> "$tmp_dir/packaged-http-trace.stderr.json"
+java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_optional_classpath" HttpTraceCorrelation > "$tmp_dir/packaged-http-trace.stdout.json" 2> "$tmp_dir/packaged-http-trace.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_http_trace_payload.py" "$tmp_dir/packaged-http-trace.stdout.json" "$tmp_dir/packaged-http-trace.stderr.json" >/dev/null
 
@@ -165,8 +174,8 @@ public final class LifecycleApp {
     }
 }
 JAVA
-javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar:$java_logback_classpath" -d "$lifecycle_app/classes" "$lifecycle_app/src/LifecycleApp.java"
-java -cp "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar:$lifecycle_app/classes:$java_logback_classpath" LifecycleApp > "$tmp_dir/lifecycle.out"
+javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$lifecycle_app/classes" "$lifecycle_app/src/LifecycleApp.java"
+java -cp "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar:$lifecycle_app/classes:$java_optional_classpath" LifecycleApp > "$tmp_dir/lifecycle.out"
 grep -qx '0' "$tmp_dir/lifecycle.out"
 rm "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar"
 if javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar" -d "$lifecycle_app/classes-missing" "$lifecycle_app/src/LifecycleApp.java" 2> "$tmp_dir/lifecycle-missing.err"; then
@@ -175,7 +184,7 @@ if javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-0.1
 fi
 test -s "$tmp_dir/lifecycle-missing.err"
 cp "$tmp_dir/logbrew-sdk-0.1.0.jar" "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar"
-javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar:$java_logback_classpath" -d "$lifecycle_app/classes-readded" "$lifecycle_app/src/LifecycleApp.java"
+javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$lifecycle_app/classes-readded" "$lifecycle_app/src/LifecycleApp.java"
 
 smoke_app="$tmp_dir/smoke-app"
 mkdir -p "$smoke_app/lib" "$smoke_app/src" "$smoke_app/classes"
@@ -189,7 +198,9 @@ import co.logbrew.sdk.LogAttributes;
 import co.logbrew.sdk.LogBrewClient;
 import co.logbrew.sdk.LogBrewJulHandler;
 import co.logbrew.sdk.LogBrewLogbackAppender;
+import co.logbrew.sdk.LogBrewOpenTelemetry;
 import co.logbrew.sdk.LogBrewOperationTracing;
+import co.logbrew.sdk.LogBrewTraceContext;
 import co.logbrew.sdk.MetricAttributes;
 import co.logbrew.sdk.ProductTimeline;
 import co.logbrew.sdk.RecordingTransport;
@@ -202,6 +213,12 @@ import co.logbrew.sdk.TransportException;
 import co.logbrew.sdk.TransportResponse;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanContext;
+import io.opentelemetry.api.trace.TraceFlags;
+import io.opentelemetry.api.trace.TraceState;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -210,6 +227,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Handler;
@@ -415,6 +433,50 @@ public final class Main {
         require(!dependencyPayload.contains("private body"), "dependency metadata drops message body");
         require(!dependencyPayload.contains("private failure message body"), "dependency exception event drops messages");
 
+        LogBrewClient otel = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
+        SpanContext otelSpanContext = SpanContext.create(
+            "4bf92f3577b34da6a3ce929d0e0e4736",
+            "00f067aa0ba902b7",
+            TraceFlags.getSampled(),
+            TraceState.builder().put("vendor", "private").build()
+        );
+        Context otelContext = Context.root().with(Span.wrap(otelSpanContext));
+        Optional<LogBrewTraceContext> copied = LogBrewOpenTelemetry.traceContextFromContext(
+            otelContext,
+            "b7ad6b7169203331"
+        );
+        require(copied.isPresent(), "otel explicit context copies");
+        require("00f067aa0ba902b7".equals(copied.get().parentSpanId()), "otel parent span id copied");
+        require(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01".equals(copied.get().traceparent()),
+            "otel outgoing traceparent"
+        );
+        try (Scope scope = otelContext.makeCurrent()) {
+            require(scope != null, "otel scope created");
+            LogBrewTraceContext active = LogBrewOpenTelemetry.traceContextFromCurrentSpan(
+                "1111111111111111"
+            ).orElseThrow();
+            otel.span(
+                "evt_otel_child_span",
+                "2026-06-02T10:00:04Z",
+                SpanAttributes.create("otel child operation", active.traceId(), active.spanId(), "ok")
+                    .parentSpanId(active.parentSpanId())
+                    .metadata(active.metadata())
+            );
+        }
+        require(
+            LogBrewOpenTelemetry.traceContextFromSpanContext(SpanContext.getInvalid(), "2222222222222222").isEmpty(),
+            "invalid otel context ignored"
+        );
+        String otelPayload = otel.previewJson();
+        require(otel.pendingEvents() == 1, "otel helper queues one correlated span");
+        require(otelPayload.contains("\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\""), "otel trace id");
+        require(otelPayload.contains("\"spanId\": \"1111111111111111\""), "otel child span id");
+        require(otelPayload.contains("\"parentSpanId\": \"00f067aa0ba902b7\""), "otel parent span id");
+        require(otelPayload.contains("\"traceSampled\": true"), "otel sampled metadata");
+        require(!otelPayload.contains("tracestate"), "otel helper omits tracestate");
+        require(!otelPayload.contains("vendor"), "otel helper omits tracestate values");
+
         expect("validation_error", () -> client.log(
             "evt_log_bad",
             "2026-06-02T10:00:03",
@@ -539,7 +601,7 @@ public final class Main {
 
         runHttpTransportSmoke();
 
-        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
+        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"otelEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
     }
 
     private static void runHttpTransportSmoke() {
@@ -684,8 +746,8 @@ public final class Main {
     }
 }
 JAVA
-javac -Xlint:all -Werror --release 11 -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar:$java_logback_classpath" -d "$smoke_app/classes" "$smoke_app/src/Main.java"
-java -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar:$smoke_app/classes:$java_logback_classpath" Main > "$tmp_dir/smoke-app.stdout.json" 2> "$tmp_dir/smoke-app.stderr.json"
+javac -Xlint:all -Werror --release 11 -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$smoke_app/classes" "$smoke_app/src/Main.java"
+java -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar:$smoke_app/classes:$java_optional_classpath" Main > "$tmp_dir/smoke-app.stdout.json" 2> "$tmp_dir/smoke-app.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
@@ -694,10 +756,12 @@ grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"logbackEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"timelineEvents":2' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"otelEvents":1' "$tmp_dir/smoke-app.stderr.json"
 
-jdeps --multi-release 11 --class-path "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_logback_classpath" "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jdeps.txt"
+jdeps --multi-release 11 --class-path "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_optional_classpath" "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jdeps.txt"
 grep -q 'java.base' "$tmp_dir/jdeps.txt"
 grep -q 'java.net.http' "$tmp_dir/jdeps.txt"
 grep -q 'logback-classic' "$tmp_dir/jdeps.txt"
+grep -q 'opentelemetry-api' "$tmp_dir/jdeps.txt"
 
 echo "java real-user smoke passed"

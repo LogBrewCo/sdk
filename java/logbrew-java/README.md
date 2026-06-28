@@ -30,6 +30,26 @@ If you attach the optional Logback appender, also include Logback in your app:
 </dependency>
 ```
 
+If you copy live OpenTelemetry span context with `LogBrewOpenTelemetry`, include the OpenTelemetry API jars your app already uses:
+
+```xml
+<dependency>
+  <groupId>io.opentelemetry</groupId>
+  <artifactId>opentelemetry-api</artifactId>
+  <version>1.63.0</version>
+</dependency>
+<dependency>
+  <groupId>io.opentelemetry</groupId>
+  <artifactId>opentelemetry-context</artifactId>
+  <version>1.63.0</version>
+</dependency>
+<dependency>
+  <groupId>io.opentelemetry</groupId>
+  <artifactId>opentelemetry-common</artifactId>
+  <version>1.63.0</version>
+</dependency>
+```
+
 ## Usage
 
 ```java
@@ -156,6 +176,42 @@ Map<String, String> headers = Traceparent.createHeaders(
 ```
 
 `Traceparent.parse(...)` validates the W3C shape, rejects forbidden version `ff`, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `Traceparent.spanAttributesFromTraceparent(...)` creates child span attributes with the incoming trace ID and parent span ID while preserving only primitive metadata. `Traceparent.createHeaders(...)` returns an explicit outbound carrier with only `traceparent`.
+
+## OpenTelemetry Context
+
+Use `LogBrewOpenTelemetry` when a Java app already has OpenTelemetry API context active and you want LogBrew logs, issues, spans, and metrics to correlate under that same trace:
+
+```java
+import co.logbrew.sdk.LogBrewOpenTelemetry;
+import co.logbrew.sdk.LogBrewTraceContext;
+import co.logbrew.sdk.SpanAttributes;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Context;
+import java.util.Map;
+import java.util.Optional;
+
+Optional<LogBrewTraceContext> maybeTrace =
+    LogBrewOpenTelemetry.traceContextFromCurrentSpan("b7ad6b7169203331");
+
+maybeTrace.ifPresent(trace -> client.span(
+    "evt_span_otel_child",
+    "2026-06-02T10:00:04Z",
+    SpanAttributes.create("otel child operation", trace.traceId(), trace.spanId(), "ok")
+        .parentSpanId(trace.parentSpanId())
+        .metadata(trace.metadata())
+));
+
+Map<String, String> downstreamHeaders = maybeTrace
+    .map(LogBrewTraceContext::headers)
+    .orElseGet(Map::of);
+
+Optional<LogBrewTraceContext> fromExplicitContext =
+    LogBrewOpenTelemetry.traceContextFromContext(Context.current());
+Optional<LogBrewTraceContext> fromSpan =
+    LogBrewOpenTelemetry.traceContextFromSpan(Span.current());
+```
+
+The helper returns `Optional.empty()` when no valid OpenTelemetry span is active. It copies only the valid trace ID, parent span ID, and sampled trace flags into a new LogBrew child context. It does not install an OpenTelemetry SDK, create exporters or processors, read attributes, copy baggage/tracestate, patch HTTP clients, or capture payloads, headers, SQL, URLs, exception messages, or stack traces.
 
 ## Request Trace Correlation
 
@@ -383,6 +439,7 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `previewJson()` returns the queued batch as pretty JSON.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
+- `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when OpenTelemetry API jars are already present.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans with bounded `SpanEventSummary` markers, without adding driver dependencies or automatic client patching.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.

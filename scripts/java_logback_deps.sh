@@ -16,6 +16,27 @@ fetch_java_logback_deps() {
     "$deps_dir/logback-classic-$logback_version.jar"
 }
 
+fetch_java_opentelemetry_deps() {
+  local deps_dir="$1"
+  local opentelemetry_version="${LOGBREW_OPENTELEMETRY_VERSION:-1.63.0}"
+
+  mkdir -p "$deps_dir"
+  fetch_maven_jar \
+    "io/opentelemetry/opentelemetry-api/$opentelemetry_version/opentelemetry-api-$opentelemetry_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "io/opentelemetry/opentelemetry-context/$opentelemetry_version/opentelemetry-context-$opentelemetry_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "io/opentelemetry/opentelemetry-common/$opentelemetry_version/opentelemetry-common-$opentelemetry_version" \
+    "$deps_dir"
+
+  printf '%s:%s:%s\n' \
+    "$deps_dir/opentelemetry-api-$opentelemetry_version.jar" \
+    "$deps_dir/opentelemetry-context-$opentelemetry_version.jar" \
+    "$deps_dir/opentelemetry-common-$opentelemetry_version.jar"
+}
+
 fetch_maven_jar() {
   local artifact_path="$1"
   local deps_dir="$2"

@@ -41,5 +41,5 @@ Improve Java trace detail where LogBrew was weaker than Sentry, Datadog, and Ope
 
 ## Remaining Gaps
 
-- Java still lacks automatic Spring/Servlet/JDBC/cache/messaging integrations, OpenTelemetry context ingestion, span links, baggage/tracestate, richer semantic conventions, and automatic outbound/client instrumentation.
+- Java still lacks automatic Spring/Servlet/JDBC/cache/messaging integrations, span links, baggage/tracestate, richer semantic conventions, full OTel processor/exporter interop, and automatic outbound/client instrumentation.
 - Next high-impact Java work should add optional framework-owned integrations only when installed-artifact and privacy evidence show the extra coupling is worth it.

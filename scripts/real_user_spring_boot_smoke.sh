@@ -25,8 +25,10 @@ find "$package_dir/src/main/java" -name '*.java' | sort > "$main_sources"
 
 mkdir -p "$tmp_dir/classes" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk"
 java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
+java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps")"
+java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath"
 
-javac -Xlint:all -Werror --release 11 -cp "$java_logback_classpath" -d "$tmp_dir/classes" @"$main_sources"
+javac -Xlint:all -Werror --release 11 -cp "$java_optional_classpath" -d "$tmp_dir/classes" @"$main_sources"
 cp "$package_dir/pom.xml" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk/pom.xml"
 cp "$package_dir/README.md" "$tmp_dir/jar-stage/README.md"
 cp -R "$tmp_dir/classes/co" "$tmp_dir/jar-stage/co"
