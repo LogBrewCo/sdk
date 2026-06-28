@@ -11,12 +11,21 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "scripts" / "check_registry_publication.py"
-SPEC = importlib.util.spec_from_file_location("check_registry_publication", MODULE_PATH)
-assert SPEC is not None
-check_registry_publication = importlib.util.module_from_spec(SPEC)
-assert SPEC.loader is not None
-sys.modules["check_registry_publication"] = check_registry_publication
-SPEC.loader.exec_module(check_registry_publication)
+RELEASE_METADATA_PATH = ROOT / "scripts" / "check_release_metadata.py"
+
+
+def load_module(module_name: str, path: Path) -> Any:
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+check_release_metadata = load_module("check_release_metadata", RELEASE_METADATA_PATH)
+check_registry_publication = load_module("check_registry_publication", MODULE_PATH)
 
 
 class RegistryPublicationTests(unittest.TestCase):
@@ -74,6 +83,10 @@ class RegistryPublicationTests(unittest.TestCase):
         labels = {check.label for check in check_registry_publication.checks_for(args)}
 
         self.assertIn("@logbrew/sdk", labels)
+        self.assertIn("@logbrew/bullmq", labels)
+        self.assertIn("@logbrew/kafkajs", labels)
+        self.assertIn("@logbrew/amqplib", labels)
+        self.assertIn("@logbrew/aws-sqs", labels)
         self.assertIn("logbrew-sdk", labels)
         self.assertIn("LogBrew", labels)
         self.assertNotIn("logbrew-fastapi", labels)
@@ -81,6 +94,12 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertNotIn("logbrew/sdk", labels)
         self.assertNotIn("co.logbrew:logbrew-sdk", labels)
         self.assertNotIn("co.logbrew.unity", labels)
+
+    def test_default_npm_packages_match_release_metadata(self) -> None:
+        self.assertEqual(
+            set(check_release_metadata.JS_PACKAGES.values()),
+            set(check_registry_publication.NPM_PACKAGES),
+        )
 
     def test_include_flags_add_guarded_registries(self) -> None:
         args = argparse.Namespace(

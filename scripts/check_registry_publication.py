@@ -18,26 +18,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-try:
-    from check_release_metadata import PUBLIC_VERSION
-except ImportError:
-    PUBLIC_VERSION = "0.1.0"
+from check_release_metadata import JS_PACKAGES, PUBLIC_VERSION
 
 
-NPM_PACKAGES = (
-    "@logbrew/sdk",
-    "@logbrew/browser",
-    "@logbrew/node",
-    "@logbrew/express",
-    "@logbrew/fastify",
-    "@logbrew/nestjs",
-    "@logbrew/angular",
-    "@logbrew/vue",
-    "@logbrew/svelte",
-    "@logbrew/react",
-    "@logbrew/react-native",
-    "@logbrew/next",
-)
+NPM_PACKAGES = tuple(sorted(JS_PACKAGES.values()))
 NPM_VERSION_PACKAGES = NPM_PACKAGES + ("co.logbrew.unity",)
 PYPI_PACKAGES = ("logbrew-sdk",)
 PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-django")
