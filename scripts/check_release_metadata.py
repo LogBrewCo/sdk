@@ -876,6 +876,13 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             failures,
             f"{relative_path}: missing release workflow safety warning",
         )
+        if relative_path == ".github/publishing/trusted-publishers.md":
+            for package_name in JS_PACKAGES.values():
+                require(
+                    package_name in docs,
+                    failures,
+                    f"{relative_path}: missing trusted publisher npm package {package_name}",
+                )
 
 
 def validate(

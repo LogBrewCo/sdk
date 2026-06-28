@@ -55,6 +55,62 @@ def write_release_workflow_fixture(root: Path) -> Path:
     return workflow_dir
 
 
+def minimal_publish_packages_workflow(package_dirs: list[str]) -> str:
+    package_dir_lines = "\n".join(f"            {package_dir}" for package_dir in package_dirs)
+    return (
+        """
+name: Publish Packages
+jobs:
+  npm:
+    steps:
+      - name: Publish npm packages
+        run: |
+          package_dirs=(
+"""
+        + package_dir_lines
+        + """
+          )
+  nuget:
+    steps:
+      - name: Read NuGet package version
+        id: nuget-version
+        run: |
+          echo "core_version=0.1.2" >> "$GITHUB_OUTPUT"
+          echo "aspnetcore_version=0.1.0" >> "$GITHUB_OUTPUT"
+      - name: Validate NuGet metadata
+        run: |
+          python3 scripts/check_release_metadata.py \\
+            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
+            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"
+      - name: Publish NuGet package
+        run: dotnet nuget push --skip-duplicate
+      - name: Verify public NuGet package
+        run: |
+          python3 scripts/check_registry_publication.py --target nuget \\
+            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
+            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"
+  verify:
+    name: Public registry verification
+    if: ${{ inputs.target == 'verify' }}
+    steps:
+      - name: Verify public registry packages
+        run: |
+          VERIFY_VERSION=0.1.0
+          VERIFY_NPM_VERSIONS=""
+          VERIFY_PYPI_VERSIONS=""
+          VERIFY_NUGET_VERSIONS=""
+          verify_args=(--target all)
+          append_version_overrides() { :; }
+          verify_args+=(--version "$VERIFY_VERSION")
+          append_version_overrides --npm-version "$VERIFY_NPM_VERSIONS"
+          append_version_overrides --pypi-version "$VERIFY_PYPI_VERSIONS"
+          append_version_overrides --nuget-version "$VERIFY_NUGET_VERSIONS"
+          python3 scripts/check_registry_publication.py "${verify_args[@]}"
+""".strip()
+        + "\n"
+    )
+
+
 class ReleaseMetadataTests(unittest.TestCase):
     def test_repo_release_metadata_passes(self) -> None:
         self.assertEqual(check_release_metadata.validate(ROOT), [])
@@ -154,52 +210,32 @@ jobs:
             root = Path(tmp)
             workflow_dir = write_release_workflow_fixture(root)
             (workflow_dir / "publish-packages.yml").write_text(
+                minimal_publish_packages_workflow(["js/logbrew-js"]),
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("npm package dir js/logbrew-bullmq" in failure for failure in failures))
+
+    def test_trusted_publisher_docs_list_every_npm_package(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
+            (workflow_dir / "publish-packages.yml").write_text(
+                minimal_publish_packages_workflow(list(check_release_metadata.JS_PACKAGES)),
+                encoding="utf-8",
+            )
+            (root / ".github" / "publishing" / "trusted-publishers.md").write_text(
                 """
-name: Publish Packages
-jobs:
-  npm:
-    steps:
-      - name: Publish npm packages
-        run: |
-          package_dirs=(
-            js/logbrew-js
-          )
-  nuget:
-    steps:
-      - name: Read NuGet package version
-        id: nuget-version
-        run: |
-          echo "core_version=0.1.2" >> "$GITHUB_OUTPUT"
-          echo "aspnetcore_version=0.1.0" >> "$GITHUB_OUTPUT"
-      - name: Validate NuGet metadata
-        run: |
-          python3 scripts/check_release_metadata.py \\
-            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
-            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"
-      - name: Publish NuGet package
-        run: dotnet nuget push --skip-duplicate
-      - name: Verify public NuGet package
-        run: |
-          python3 scripts/check_registry_publication.py --target nuget \\
-            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
-            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"
-  verify:
-    name: Public registry verification
-    if: ${{ inputs.target == 'verify' }}
-    steps:
-      - name: Verify public registry packages
-        run: |
-          VERIFY_VERSION=0.1.0
-          VERIFY_NPM_VERSIONS=""
-          VERIFY_PYPI_VERSIONS=""
-          VERIFY_NUGET_VERSIONS=""
-          verify_args=(--target all)
-          append_version_overrides() { :; }
-          verify_args+=(--version "$VERIFY_VERSION")
-          append_version_overrides --npm-version "$VERIFY_NPM_VERSIONS"
-          append_version_overrides --pypi-version "$VERIFY_PYPI_VERSIONS"
-          append_version_overrides --nuget-version "$VERIFY_NUGET_VERSIONS"
-          python3 scripts/check_registry_publication.py "${verify_args[@]}"
+# Trusted Publisher Setup
+
+release tag's commit historical tags check_repo_wide_release_versions.py
+
+## npm
+
+- `@logbrew/sdk`
 """.strip()
                 + "\n",
                 encoding="utf-8",
@@ -208,7 +244,7 @@ jobs:
             failures: list[str] = []
             check_release_metadata.validate_release_workflows(root, failures)
 
-        self.assertTrue(any("npm package dir js/logbrew-bullmq" in failure for failure in failures))
+        self.assertTrue(any("trusted publisher npm package @logbrew/bullmq" in failure for failure in failures))
 
     def test_publish_release_workflow_requires_scoped_release_skip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
