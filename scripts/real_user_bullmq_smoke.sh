@@ -51,6 +51,7 @@ grep -q 'npm install @logbrew/sdk @logbrew/node @logbrew/bullmq bullmq' "$tmp_di
 grep -q 'pnpm add @logbrew/sdk @logbrew/node @logbrew/bullmq bullmq' "$tmp_dir/bullmq-readme.md"
 grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/bullmq-readme.md"
 grep -q 'project-scoped server ingest key' "$tmp_dir/bullmq-readme.md"
+grep -q 'instrumentLogBrewBullMqProcessor' "$tmp_dir/bullmq-readme.md"
 grep -q 'withLogBrewBullMqProcessor' "$tmp_dir/bullmq-readme.md"
 
 app_dir="$tmp_dir/bullmq-smoke-app"
@@ -108,6 +109,7 @@ import {
   bullMqQueueAddWithLogBrewSpan,
   createLogBrewBullMqJobOptions,
   extractLogBrewBullMqTraceparent,
+  instrumentLogBrewBullMqProcessor,
   instrumentLogBrewBullMqQueue,
   withLogBrewBullMqProcessor
 } from "@logbrew/bullmq";
@@ -123,6 +125,16 @@ declare const job: Job<{ orderId: string }, string, "charge-card">;
 const addJob = bullMqQueueAddWithLogBrewSpan(queue, "charge-card", { orderId: "ord_123" }, {}, { client });
 const bulkJobs = bullMqQueueAddBulkWithLogBrewSpan(queue, [{ name: "charge-card", data: { orderId: "ord_124" } }], { client });
 const processor = withLogBrewBullMqProcessor(async (currentJob: Job<{ orderId: string }, string, "charge-card">) => currentJob.data.orderId, { client });
+class NestWorkerHostStyleProcessor {
+  calls: string[] = [];
+
+  async process(currentJob: Job<{ orderId: string }, string, "charge-card">, lock?: string, signal?: AbortSignal, extra?: string): Promise<string> {
+    this.calls.push(`${currentJob.name}:${lock ?? "none"}:${signal?.aborted ?? false}:${extra ?? "none"}`);
+    return currentJob.data.orderId;
+  }
+}
+const nestProcessor = new NestWorkerHostStyleProcessor();
+const processorMethodInstrumentation = instrumentLogBrewBullMqProcessor(nestProcessor, { client });
 const instrumentation = instrumentLogBrewBullMqQueue(queue, { client });
 const traceparent = extractLogBrewBullMqTraceparent(job);
 const options = createLogBrewBullMqJobOptions({}, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
@@ -130,7 +142,9 @@ const options = createLogBrewBullMqJobOptions({}, "00-4bf92f3577b34da6a3ce929d0e
 void addJob;
 void bulkJobs;
 void instrumentation;
+void nestProcessor;
 void processor;
+void processorMethodInstrumentation;
 void traceparent;
 void options;
 EOF
@@ -142,6 +156,9 @@ const logbrewBullMq = require("@logbrew/bullmq");
 
 if (typeof logbrewBullMq.withLogBrewBullMqProcessor !== "function") {
   throw new Error("missing CommonJS processor export");
+}
+if (typeof logbrewBullMq.instrumentLogBrewBullMqProcessor !== "function") {
+  throw new Error("missing CommonJS processor instrumentation export");
 }
 if (typeof logbrewBullMq.instrumentLogBrewBullMqQueue !== "function") {
   throw new Error("missing CommonJS queue instrumentation export");
@@ -163,6 +180,7 @@ import {
   bullMqQueueAddWithLogBrewSpan,
   createLogBrewBullMqJobOptions,
   extractLogBrewBullMqTraceparent,
+  instrumentLogBrewBullMqProcessor,
   instrumentLogBrewBullMqQueue,
   withLogBrewBullMqProcessor
 } from "@logbrew/bullmq";
@@ -219,6 +237,52 @@ const processed = await withLogBrewBullMqProcessor(async (currentJob) => {
   spanIdFactory: () => "3333333333333333"
 })(job, "worker-lock", new AbortController().signal);
 assertEqual(processed, "processed", "processor result");
+
+class NestWorkerHostStyleProcessor {
+  constructor() {
+    this.calls = [];
+  }
+
+  async process(currentJob, lock, signal, extra) {
+    this.calls.push({
+      extra,
+      lock,
+      name: currentJob.name,
+      signalAborted: signal?.aborted ?? false,
+      thisValue: this
+    });
+    return `method:${currentJob.name}:${extra}`;
+  }
+}
+const nestProcessor = new NestWorkerHostStyleProcessor();
+const originalNestProcess = nestProcessor.process;
+assertEqual(Object.prototype.hasOwnProperty.call(nestProcessor, "process"), false, "processor method starts on prototype");
+const nestProcessorInstrumentation = instrumentLogBrewBullMqProcessor(nestProcessor, {
+  client,
+  id: "evt_bullmq_processor_method_001",
+  now: () => "2026-06-25T10:00:01.500Z",
+  nowMs: () => 45,
+  spanIdFactory: () => "1212121212121212"
+});
+assertEqual(nestProcessorInstrumentation.isInstalled(), true, "processor method instrumentation installed");
+const methodResult = await nestProcessor.process(job, "nest-lock", new AbortController().signal, "extra-arg");
+assertEqual(methodResult, "method:welcome:extra-arg", "processor method result");
+assertEqual(nestProcessor.calls[0].thisValue, nestProcessor, "processor method this");
+assertEqual(nestProcessor.calls[0].lock, "nest-lock", "processor method lock");
+assertEqual(nestProcessor.calls[0].extra, "extra-arg", "processor method extra arg");
+
+try {
+  instrumentLogBrewBullMqProcessor(nestProcessor, { client });
+  throw new Error("expected duplicate BullMQ processor instrumentation to fail");
+} catch (error) {
+  assertEqual(error.code, "configuration_error", "duplicate processor instrumentation code");
+}
+
+nestProcessorInstrumentation.uninstall();
+assertEqual(nestProcessorInstrumentation.isInstalled(), false, "processor method instrumentation uninstalled");
+assertEqual(Object.prototype.hasOwnProperty.call(nestProcessor, "process"), false, "processor method back on prototype");
+assertEqual(nestProcessor.process, originalNestProcess, "prior processor method active after uninstall");
+await nestProcessor.process({ name: "after-uninstall" }, undefined, undefined, "raw");
 
 const malformedMetadataJob = {
   name: "malformed",
@@ -302,7 +366,7 @@ assertEqual(intakeRequests[1].url, "/v1/events", "path-only fake intake");
 
 const payload = JSON.parse(intakeRequests.at(-1).body);
 assertEqual(payload.sdk.name, "bullmq-smoke-app", "sdk name");
-assertEqual(payload.events.length, 5, "span event count");
+assertEqual(payload.events.length, 6, "span event count");
 const producerSpan = payload.events.find((event) => event.id === "evt_bullmq_add_001").attributes;
 assertEqual(producerSpan.name, "bullmq publish add", "producer span name");
 assertEqual(producerSpan.metadata.framework, "node:queue", "producer framework");
@@ -318,6 +382,13 @@ const consumerSpan = payload.events.find((event) => event.id === "evt_bullmq_pro
 assertEqual(consumerSpan.traceId, "22222222222222222222222222222222", "consumer trace id");
 assertEqual(consumerSpan.parentSpanId, "1111111111111111", "consumer parent span id");
 assertEqual(consumerSpan.metadata["messaging.operation.type"], "process", "consumer operation type");
+
+const processorMethodSpan = payload.events.find((event) => event.id === "evt_bullmq_processor_method_001").attributes;
+assertEqual(processorMethodSpan.traceId, "22222222222222222222222222222222", "processor method trace id");
+assertEqual(processorMethodSpan.parentSpanId, "1111111111111111", "processor method parent span id");
+assertEqual(processorMethodSpan.metadata["messaging.destination.name"], "email", "processor method destination");
+assertEqual(processorMethodSpan.metadata["messaging.operation.type"], "process", "processor method operation type");
+assertEqual(processorMethodSpan.metadata.taskName, "welcome", "processor method task name");
 
 const malformedSpan = payload.events.find((event) => event.id === "evt_bullmq_malformed_001").attributes;
 assertEqual(malformedSpan.traceId, "55555555555555555555555555555555", "malformed fallback trace id");

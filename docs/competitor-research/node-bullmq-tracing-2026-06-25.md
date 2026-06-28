@@ -16,6 +16,7 @@
 - 2026-06-28 refresh: Sentry JavaScript `getsentry/sentry-javascript@54e995da76381f18f61f39b0ceecadf5a0b06b11`; re-read `packages/nestjs/src/integrations/sentry-nest-bullmq-instrumentation.ts` (`SentryNestBullMQInstrumentation`, `_getProcessorFileInstrumentation(...)`, `_createWrapProcessor()`) and `packages/nestjs/src/integrations/helpers.ts` (`getBullMQProcessSpanOptions(...)`).
 - 2026-06-28 refresh: Datadog dd-trace-js `DataDog/dd-trace-js@27dcc31908d9a6264b1536a2118534c8bc4da0f6`; re-read `packages/datadog-plugin-bullmq/src/producer.js` (`QueueAddPlugin`, `QueueAddBulkPlugin`, `_injectIntoOpts(...)`, `setProducerCheckpoint(...)`) and `packages/datadog-plugin-bullmq/src/consumer.js` (`BullmqConsumerPlugin`, `_extractDatadog(...)`, `setConsumerCheckpoint(...)`).
 - 2026-06-28 refresh: OpenTelemetry JS contrib `open-telemetry/opentelemetry-js-contrib@eb98ccc85069304a1f0c2e6b33be1b2ca961b4be`; `git grep -i bullmq` still found no first-party BullMQ instrumentation.
+- 2026-06-28 processor-method follow-up: re-read the same Sentry NestJS BullMQ decorator wrapper and Datadog worker consumer plugin before adding LogBrew's explicit processor-object method instrumentation.
 
 ## Competitor Pattern
 
@@ -32,6 +33,7 @@ LogBrew now adds `@logbrew/bullmq` as a small explicit integration package.
 - `bullMqQueueAddWithLogBrewSpan(...)` wraps app-owned `queue.add(...)`.
 - `bullMqQueueAddBulkWithLogBrewSpan(...)` wraps app-owned `queue.addBulk(...)`.
 - `withLogBrewBullMqProcessor(...)` wraps app-owned worker processors.
+- `instrumentLogBrewBullMqProcessor(...)` optionally wraps one app-owned processor object's method, including NestJS-style `WorkerHost.process`, preserves `this` and extra method arguments, rejects duplicate LogBrew instrumentation, and supports clean `uninstall()`.
 - `createLogBrewBullMqJobOptions(...)` merges one normalized LogBrew `traceparent` into BullMQ `opts.telemetry.metadata` when metadata is valid JSON.
 - `extractLogBrewBullMqTraceparent(...)` reads only that LogBrew trace context for consumer spans.
 - `instrumentLogBrewBullMqQueue(...)` optionally wraps only an app-owned queue instance's `add()` and `addBulk()` methods, rejects duplicate LogBrew instrumentation, and supports clean `uninstall()`.
@@ -48,9 +50,11 @@ LogBrew now adds `@logbrew/bullmq` as a small explicit integration package.
 - GREEN: `python3 scripts/check_js_sources.py`, `bash scripts/check_js_lint.sh`, `bash scripts/check_js_package.sh`, and `python3 -m unittest tests.test_check_public_sdks` passed.
 - 2026-06-28 RED: `bash scripts/real_user_bullmq_smoke.sh` failed in installed TypeScript because `instrumentLogBrewBullMqQueue` was not exported.
 - 2026-06-28 GREEN: the same installed smoke passed after adding queue-instance instrumentation. It now proves TypeScript/CJS/ESM exports, app-owned `this` binding preservation, `add()` and `addBulk()` traceparent injection, duplicate-install rejection, clean uninstall, local fake-intake flush, and no instrumented job payload leakage.
+- 2026-06-28 RED: `bash scripts/real_user_bullmq_smoke.sh` failed in installed TypeScript because `instrumentLogBrewBullMqProcessor` was not exported.
+- 2026-06-28 GREEN: the same installed smoke passed after adding processor-method instrumentation. It now proves TypeScript/CJS/ESM exports, NestJS-style processor object wrapping, `this` and extra argument preservation, parent-child trace correlation from BullMQ job metadata, duplicate-install rejection, clean uninstall, local fake-intake flush, and no job payload or error-message leakage.
 
 ## Remaining Gaps
 
-- Sentry remains stronger for automatic NestJS BullMQ instrumentation.
+- Sentry remains stronger for hidden automatic NestJS BullMQ decorator instrumentation.
 - Datadog remains stronger for hidden automatic BullMQ worker and FlowProducer instrumentation, data-stream monitoring, producer filters, and deeper runtime hooks.
-- LogBrew should keep the core package explicit and instance-scoped, then consider optional framework-owned NestJS BullMQ decorators/processors after more popular rich-trace gaps are closed and source-backed evidence shows the ergonomics are worth the extra surface.
+- LogBrew is now stronger for explicit app-owned processor method wrapping with clean uninstall and bounded telemetry, but still weaker for zero-code setup. Consider optional framework-owned NestJS decorators only if real-user evidence says the ergonomics outweigh the privacy and hidden-patching cost.

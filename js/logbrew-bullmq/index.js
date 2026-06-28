@@ -8,6 +8,7 @@ import {
 const DEFAULT_SYSTEM = "bullmq";
 const DEFAULT_QUEUE_NAME = "bullmq";
 const LOGBREW_METADATA_KEY = "logbrew";
+const INSTRUMENTED_PROCESSOR_METHOD = Symbol.for("@logbrew/bullmq.instrumentedProcessorMethod");
 const INSTRUMENTED_QUEUE_ADD = Symbol.for("@logbrew/bullmq.instrumentedQueueAdd");
 
 export async function bullMqQueueAddWithLogBrewSpan(queue, name, data, jobOptions = {}, options = {}) {
@@ -50,17 +51,60 @@ export function withLogBrewBullMqProcessor(processor, options = {}) {
   }
 
   return async function logBrewBullMqProcessor(job, lock, signal) {
-    const queueName = resolveQueueName(job?.queue, options.queueName ?? job?.queueName);
-    const taskName = normalizeName(job?.name, "job");
-    return queueOperationWithLogBrewSpan("process", {
-      ...options,
-      operation: () => processor(job, lock, signal),
-      operationKind: "process",
-      queueName,
-      system: DEFAULT_SYSTEM,
-      taskName,
-      traceparent: extractLogBrewBullMqTraceparent(job)
-    });
+    return processWithLogBrewBullMqSpan(job, () => processor(job, lock, signal), options);
+  };
+}
+
+export function instrumentLogBrewBullMqProcessor(target, methodNameOrOptions = "process", maybeOptions = {}) {
+  if (!target || (typeof target !== "object" && typeof target !== "function")) {
+    throw new SdkError("configuration_error", "instrumentLogBrewBullMqProcessor requires a processor object");
+  }
+  const methodName = typeof methodNameOrOptions === "string" ? methodNameOrOptions.trim() : "process";
+  const options = typeof methodNameOrOptions === "string" ? maybeOptions : methodNameOrOptions ?? {};
+  if (!methodName) {
+    throw new SdkError("configuration_error", "instrumentLogBrewBullMqProcessor requires a method name");
+  }
+
+  const hadOwnProcessorMethod = Object.prototype.hasOwnProperty.call(target, methodName);
+  const originalProcessorDescriptor = Object.getOwnPropertyDescriptor(target, methodName);
+  const originalProcess = target[methodName];
+  if (typeof originalProcess !== "function") {
+    throw new SdkError("configuration_error", `instrumentLogBrewBullMqProcessor requires ${methodName} to be a function`);
+  }
+  if (originalProcess?.[INSTRUMENTED_PROCESSOR_METHOD] === true) {
+    throw new SdkError(
+      "configuration_error",
+      "instrumentLogBrewBullMqProcessor requires an uninstrumented processor method; uninstall the existing LogBrew instrumentation first"
+    );
+  }
+
+  let installed = true;
+  function logBrewInstrumentedBullMqProcessor(job, lock, signal, ...args) {
+    if (!installed) {
+      return originalProcess.call(target, job, lock, signal, ...args);
+    }
+    return processWithLogBrewBullMqSpan(job, () => originalProcess.call(target, job, lock, signal, ...args), options);
+  }
+
+  Object.defineProperty(logBrewInstrumentedBullMqProcessor, INSTRUMENTED_PROCESSOR_METHOD, {
+    value: true
+  });
+  target[methodName] = logBrewInstrumentedBullMqProcessor;
+
+  return {
+    isInstalled() {
+      return installed && target[methodName] === logBrewInstrumentedBullMqProcessor;
+    },
+    uninstall() {
+      installed = false;
+      if (target[methodName] === logBrewInstrumentedBullMqProcessor) {
+        if (hadOwnProcessorMethod) {
+          Object.defineProperty(target, methodName, originalProcessorDescriptor);
+        } else {
+          delete target[methodName];
+        }
+      }
+    }
   };
 }
 
@@ -163,6 +207,21 @@ function createLogBrewBullMqBulkJob(job) {
   };
 }
 
+function processWithLogBrewBullMqSpan(job, operation, options = {}) {
+  const spanOptions = options ?? {};
+  const queueName = resolveQueueName(job?.queue, spanOptions.queueName ?? job?.queueName);
+  const taskName = normalizeName(job?.name, "job");
+  return queueOperationWithLogBrewSpan("process", {
+    ...spanOptions,
+    operation,
+    operationKind: "process",
+    queueName,
+    system: DEFAULT_SYSTEM,
+    taskName,
+    traceparent: extractLogBrewBullMqTraceparent(job)
+  });
+}
+
 function mergeLogBrewTraceparentMetadata(existingMetadata, traceparent) {
   const metadata = existingMetadata === undefined || existingMetadata === ""
     ? {}
@@ -238,6 +297,7 @@ export default {
   bullMqQueueAddWithLogBrewSpan,
   createLogBrewBullMqJobOptions,
   extractLogBrewBullMqTraceparent,
+  instrumentLogBrewBullMqProcessor,
   instrumentLogBrewBullMqQueue,
   withLogBrewBullMqProcessor
 };

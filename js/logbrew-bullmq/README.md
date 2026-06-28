@@ -24,6 +24,7 @@ import { Queue, Worker } from "bullmq";
 import { createLogBrewNodeClient } from "@logbrew/node";
 import {
   bullMqQueueAddWithLogBrewSpan,
+  instrumentLogBrewBullMqProcessor,
   instrumentLogBrewBullMqQueue,
   withLogBrewBullMqProcessor
 } from "@logbrew/bullmq";
@@ -67,6 +68,31 @@ logbrewQueue.uninstall();
 `instrumentLogBrewBullMqQueue()` wraps that queue object's `add()` and `addBulk()`
 methods, preserves the original methods for `uninstall()`, and rejects duplicate
 LogBrew instrumentation on the same queue instance.
+
+For NestJS `WorkerHost` processors or other class-owned processor methods, wrap
+only the processor instance your app owns:
+
+```js
+class OrdersProcessor {
+  async process(job) {
+    await chargeCard(job.data.orderId);
+  }
+}
+
+const processor = new OrdersProcessor();
+const logbrewProcessor = instrumentLogBrewBullMqProcessor(processor, {
+  client,
+  queueName: "orders"
+});
+
+await processor.process(job);
+logbrewProcessor.uninstall();
+```
+
+`instrumentLogBrewBullMqProcessor()` preserves `this`, keeps extra processor
+arguments such as locks or abort signals, creates the same privacy-bounded
+consumer span as `withLogBrewBullMqProcessor()`, and puts the original method
+back on `uninstall()`.
 
 ## Privacy Defaults
 

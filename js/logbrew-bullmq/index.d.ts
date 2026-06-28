@@ -61,6 +61,11 @@ export type LogBrewBullMqProcessor<Result = unknown, Data = unknown, Name extend
   signal?: AbortSignal
 ) => Result | Promise<Result>;
 
+export type LogBrewBullMqProcessorMethod = (...args: any[]) => unknown;
+
+export type LogBrewBullMqProcessorMethodTarget<MethodName extends string = "process"> =
+  Record<MethodName, LogBrewBullMqProcessorMethod>;
+
 export type LogBrewBullMqInstrumentation = {
   isInstalled(): boolean;
   uninstall(): void;
@@ -97,6 +102,22 @@ export declare function withLogBrewBullMqProcessor<
   options: LogBrewBullMqSpanOptions
 ): LogBrewBullMqProcessor<Awaited<Result>, Data, Name>;
 
+export declare function instrumentLogBrewBullMqProcessor<
+  Target extends LogBrewBullMqProcessorMethodTarget<"process">
+>(
+  target: Target,
+  options: LogBrewBullMqSpanOptions
+): LogBrewBullMqInstrumentation;
+
+export declare function instrumentLogBrewBullMqProcessor<
+  MethodName extends string,
+  Target extends LogBrewBullMqProcessorMethodTarget<MethodName>
+>(
+  target: Target,
+  methodName: MethodName,
+  options: LogBrewBullMqSpanOptions
+): LogBrewBullMqInstrumentation;
+
 export declare function instrumentLogBrewBullMqQueue<
   Data = unknown,
   Result = unknown,
@@ -120,6 +141,7 @@ declare const defaultExport: {
   bullMqQueueAddWithLogBrewSpan: typeof bullMqQueueAddWithLogBrewSpan;
   createLogBrewBullMqJobOptions: typeof createLogBrewBullMqJobOptions;
   extractLogBrewBullMqTraceparent: typeof extractLogBrewBullMqTraceparent;
+  instrumentLogBrewBullMqProcessor: typeof instrumentLogBrewBullMqProcessor;
   instrumentLogBrewBullMqQueue: typeof instrumentLogBrewBullMqQueue;
   withLogBrewBullMqProcessor: typeof withLogBrewBullMqProcessor;
 };
