@@ -456,6 +456,7 @@ function captureXhrResourceSpan(xhr, context, {
   const responseStartDurationMs = context.responseStartAtMs === undefined
     ? undefined
     : elapsedMs(context.startedAtMs, () => context.responseStartAtMs);
+  const responseSizeBytes = xhrResponseSizeBytes(xhr);
   captureReactNativeResourceSpan(client, {
     appState,
     durationMs,
@@ -468,6 +469,7 @@ function captureXhrResourceSpan(xhr, context, {
     platform,
     routeTemplate: routeTemplate ?? routeTemplateFactory({ url: context.url }),
     screen,
+    responseSizeBytes,
     sessionId,
     status: status ?? undefined,
     statusCode: xhrStatusCode(xhr),
@@ -511,6 +513,14 @@ function elapsedMs(startedAtMs, nowMs) {
 
 function xhrStatusCode(xhr) {
   return typeof xhr?.status === "number" && Number.isFinite(xhr.status) ? xhr.status : undefined;
+}
+
+function xhrResponseSizeBytes(xhr) {
+  if (typeof xhr?.getResponseHeader !== "function") {
+    return undefined;
+  }
+  const contentLength = Number.parseInt(String(xhr.getResponseHeader("Content-Length") ?? ""), 10);
+  return Number.isFinite(contentLength) && contentLength >= 0 ? contentLength : undefined;
 }
 
 function errorName(error) {

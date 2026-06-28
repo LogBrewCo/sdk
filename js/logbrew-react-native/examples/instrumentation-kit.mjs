@@ -91,6 +91,13 @@ class MockXMLHttpRequest {
     this.listeners.get("readystatechange")?.();
   }
 
+  getResponseHeader(name) {
+    if (String(name).toLowerCase() === "content-length") {
+      return "2048";
+    }
+    return null;
+  }
+
   setRequestHeader(name, value) {
     this.headers[String(name).toLowerCase()] = String(value);
   }
@@ -258,6 +265,7 @@ if (
   xhrResource?.metadata.routeTemplate !== "/api/xhr" ||
   xhrResource.metadata.statusCode !== 207 ||
   xhrResource.metadata.responseStartDurationMs !== 15 ||
+  xhrResource.metadata.responseSizeBytes !== 2048 ||
   xhrResource.metadata.body !== undefined
 ) {
   throw new Error(`unexpected global XHR span: ${JSON.stringify(xhrResource)}`);

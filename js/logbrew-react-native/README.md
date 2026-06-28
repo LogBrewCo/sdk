@@ -387,7 +387,7 @@ xhr.send(JSON.stringify({ ignored: "body is not captured" }));
 instrumentation.remove();
 ```
 
-With `instrumentGlobalXMLHttpRequest: true`, LogBrew patches only `XMLHttpRequest.prototype.open` and `send`, records sanitized XHR resource spans with status and response-start timing, and puts the original methods back when it is safe to do so. It writes a single `traceparent` through the app's existing `setRequestHeader` only for configured targets. It does not capture request bodies, response bodies, arbitrary request headers, response headers, cookies, GraphQL payloads, full URLs with query/hash text, baggage, or tracestate.
+With `instrumentGlobalXMLHttpRequest: true`, LogBrew patches only `XMLHttpRequest.prototype.open` and `send`, records sanitized XHR resource spans with status, response-start timing, and response size only when `Content-Length` is available, and puts the original methods back when it is safe to do so. It writes a single `traceparent` through the app's existing `setRequestHeader` only for configured targets. It does not capture request bodies, response bodies, arbitrary request headers, arbitrary response headers, cookies, GraphQL payloads, full URLs with query/hash text, baggage, or tracestate.
 
 ## Release Artifact Preparation
 

@@ -26,6 +26,7 @@ class ConfidentialityScanTests(unittest.TestCase):
             (root / "js" / "logbrew-angular").mkdir(parents=True)
             (root / "scripts").mkdir()
             (root / "unity" / "logbrew-unity" / "Runtime").mkdir(parents=True)
+            (root / "python" / "logbrew_py" / "src" / "logbrew_sdk").mkdir(parents=True)
             angular_keyword = "Injection" + "To" + "ken"
             fake_query = "?to" + "ken=sec" + "ret"
             cleaner_name = "clean" + "up"
@@ -44,6 +45,13 @@ class ConfidentialityScanTests(unittest.TestCase):
             (root / "unity" / "logbrew-unity" / "Runtime" / "PublicTypes.cs").write_text(
                 f"using var cancellation = new {cancellation_source}();\n"
                 f"await client.SendAsync(request, cancellation{cancellation_member}).ConfigureAwait(false);\n",
+                encoding="utf-8",
+            )
+            (root / "python" / "logbrew_py" / "src" / "logbrew_sdk" / "_db_client.py").write_text(
+                "_DB_SPAN_EVENT_METADATA_DENYLIST = (\n"
+                f'    "sec{"ret"}",\n'
+                f'    "to{"ken"}",\n'
+                ")\n",
                 encoding="utf-8",
             )
 

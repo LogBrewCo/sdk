@@ -253,6 +253,13 @@ test("React Native instrumentation can opt into reversible global XHR spans", as
         this.listeners.get("readystatechange")?.();
       }
 
+      getResponseHeader(name) {
+        if (String(name).toLowerCase() === "content-length") {
+          return "1234";
+        }
+        return null;
+      }
+
       setRequestHeader(name, value) {
         this.headers[String(name).toLowerCase()] = String(value);
       }
@@ -300,10 +307,12 @@ test("React Native instrumentation can opt into reversible global XHR spans", as
     assert.equal(events[0].attributes.durationMs, 42);
     assert.equal(events[0].attributes.metadata.routeTemplate, "/api/xhr");
     assert.equal(events[0].attributes.metadata.responseStartDurationMs, 7);
+    assert.equal(events[0].attributes.metadata.responseSizeBytes, 1234);
     assert.equal(events[0].attributes.metadata.statusCode, 201);
     assert.equal(events[0].attributes.metadata.traceId, trace.traceId);
     assert.equal(events[0].attributes.metadata.nested, undefined);
     assert.equal(events[0].attributes.metadata.body, undefined);
+    assert.equal(JSON.stringify(events).includes("ignored-body"), false);
 
     instrumentation.remove();
     assert.equal(MockXMLHttpRequest.prototype.open, originalOpen);

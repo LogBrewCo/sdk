@@ -174,6 +174,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_fake_query_secret_fixture(relative_text, line):
         return True
 
+    if is_sdk_metadata_denylist_literal(relative_text, line):
+        return True
+
     if is_release_artifact_upload_verifier_reference(relative_text, line):
         return True
 
@@ -307,6 +310,35 @@ def is_fake_query_secret_fixture(relative_text: str, line: str) -> bool:
             and relative_text.endswith("/examples/real-user-smoke.mjs")
         )
     )
+
+
+def is_sdk_metadata_denylist_literal(relative_text: str, line: str) -> bool:
+    if not relative_text.startswith("python/logbrew_py/src/logbrew_sdk/"):
+        return False
+    if Path(relative_text).name not in {
+        "_cache_client.py",
+        "_celery_client.py",
+        "_db_client.py",
+        "_instrumentation.py",
+        "_queue_client.py",
+        "_rq_client.py",
+    }:
+        return False
+    return line.strip().strip(",").strip("\"'") in {
+        "arg",
+        "bind",
+        "cookie",
+        "credential",
+        "header",
+        "param",
+        "password",
+        "payload",
+        "query",
+        "secret",
+        "statement",
+        "token",
+        "value",
+    }
 
 
 def is_release_artifact_upload_verifier_reference(relative_text: str, line: str) -> bool:
