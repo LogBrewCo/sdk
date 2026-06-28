@@ -108,6 +108,7 @@ import {
   bullMqQueueAddWithLogBrewSpan,
   createLogBrewBullMqJobOptions,
   extractLogBrewBullMqTraceparent,
+  instrumentLogBrewBullMqQueue,
   withLogBrewBullMqProcessor
 } from "@logbrew/bullmq";
 
@@ -122,11 +123,13 @@ declare const job: Job<{ orderId: string }, string, "charge-card">;
 const addJob = bullMqQueueAddWithLogBrewSpan(queue, "charge-card", { orderId: "ord_123" }, {}, { client });
 const bulkJobs = bullMqQueueAddBulkWithLogBrewSpan(queue, [{ name: "charge-card", data: { orderId: "ord_124" } }], { client });
 const processor = withLogBrewBullMqProcessor(async (currentJob: Job<{ orderId: string }, string, "charge-card">) => currentJob.data.orderId, { client });
+const instrumentation = instrumentLogBrewBullMqQueue(queue, { client });
 const traceparent = extractLogBrewBullMqTraceparent(job);
 const options = createLogBrewBullMqJobOptions({}, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
 
 void addJob;
 void bulkJobs;
+void instrumentation;
 void processor;
 void traceparent;
 void options;
@@ -139,6 +142,9 @@ const logbrewBullMq = require("@logbrew/bullmq");
 
 if (typeof logbrewBullMq.withLogBrewBullMqProcessor !== "function") {
   throw new Error("missing CommonJS processor export");
+}
+if (typeof logbrewBullMq.instrumentLogBrewBullMqQueue !== "function") {
+  throw new Error("missing CommonJS queue instrumentation export");
 }
 if (typeof logbrewBullMq.default.bullMqQueueAddWithLogBrewSpan !== "function") {
   throw new Error("missing CommonJS default export");
@@ -157,6 +163,7 @@ import {
   bullMqQueueAddWithLogBrewSpan,
   createLogBrewBullMqJobOptions,
   extractLogBrewBullMqTraceparent,
+  instrumentLogBrewBullMqQueue,
   withLogBrewBullMqProcessor
 } from "@logbrew/bullmq";
 
@@ -330,9 +337,97 @@ if (JSON.stringify(payload).includes("example-bulk") || JSON.stringify(payload).
   throw new Error("job payload leaked into telemetry body");
 }
 
+const instrumentedQueueCalls = [];
+const instrumentedQueue = {
+  name: "notifications",
+  async add(name, data, opts) {
+    instrumentedQueueCalls.push({ data, name, opts, thisValue: this, type: "add" });
+    return { data, name, opts, queueName: "notifications" };
+  },
+  async addBulk(jobs) {
+    instrumentedQueueCalls.push({ jobs, thisValue: this, type: "addBulk" });
+    return jobs.map((currentJob) => ({ ...currentJob, queueName: "notifications" }));
+  }
+};
+const priorInstrumentedAdd = instrumentedQueue.add;
+const priorInstrumentedAddBulk = instrumentedQueue.addBulk;
+const instrumentation = instrumentLogBrewBullMqQueue(instrumentedQueue, {
+  client,
+  now: () => "2026-06-25T10:00:05Z",
+  nowMs: () => 90,
+  spanIdFactory: nextSpanId(["9999999999999999", "aaaaaaaaaaaaaaaa"]),
+  traceIdFactory: nextTraceId(["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "cccccccccccccccccccccccccccccccc"])
+});
+assertEqual(instrumentation.isInstalled(), true, "instrumentation installed");
+
+const instrumentedJob = await instrumentedQueue.add("receipt", { body: "instrumented-payload" }, {});
+assertEqual(instrumentedQueueCalls[0].thisValue, instrumentedQueue, "instrumented add this");
+assertEqual(
+  extractLogBrewBullMqTraceparent(instrumentedJob),
+  "00-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-9999999999999999-01",
+  "instrumented add traceparent"
+);
+
+await instrumentedQueue.addBulk([
+  { name: "receipt-bulk", data: { body: "instrumented-bulk" } }
+]);
+const instrumentedBulkCall = instrumentedQueueCalls.find((call) => call.type === "addBulk");
+if (!extractLogBrewBullMqTraceparent({ opts: instrumentedBulkCall.jobs[0].opts })) {
+  throw new Error("instrumented addBulk did not inject traceparent");
+}
+
+try {
+  instrumentLogBrewBullMqQueue(instrumentedQueue, { client });
+  throw new Error("expected duplicate BullMQ instrumentation to fail");
+} catch (error) {
+  assertEqual(error.code, "configuration_error", "duplicate instrumentation code");
+}
+
+instrumentation.uninstall();
+assertEqual(instrumentation.isInstalled(), false, "instrumentation uninstalled");
+assertEqual(instrumentedQueue.add, priorInstrumentedAdd, "prior add active after uninstall");
+assertEqual(instrumentedQueue.addBulk, priorInstrumentedAddBulk, "prior addBulk active after uninstall");
+await instrumentedQueue.add("after-uninstall", { body: "after uninstall" }, {});
+if (instrumentedQueueCalls.at(-1).opts?.telemetry?.metadata) {
+  throw new Error("BullMQ instrumentation kept modifying jobs after uninstall");
+}
+
+const restartIntakeRequests = [];
+const restartIntakeServer = http.createServer((req, res) => {
+  let body = "";
+  req.setEncoding("utf8");
+  req.on("data", (chunk) => {
+    body += chunk;
+  });
+  req.on("end", () => {
+    restartIntakeRequests.push({ body });
+    res.statusCode = 202;
+    res.end("accepted");
+  });
+});
+restartIntakeServer.listen(0, "127.0.0.1");
+await once(restartIntakeServer, "listening");
+const postInstrumentationResponse = await client.flush(createNodeFetchTransport({
+  endpoint: `http://127.0.0.1:${restartIntakeServer.address().port}/v1/events`
+}));
+await closeServer(restartIntakeServer);
+
+assertEqual(postInstrumentationResponse.statusCode, 202, "post-instrumentation flush status");
+assertEqual(postInstrumentationResponse.attempts, 1, "post-instrumentation attempts");
+assertEqual(restartIntakeRequests.length, 1, "post-instrumentation request count");
+const instrumentationPayload = JSON.parse(restartIntakeRequests.at(-1).body);
+assertEqual(instrumentationPayload.events.length, 2, "instrumented queue span count");
+const instrumentedAddSpan = instrumentationPayload.events.find((event) => event.attributes.name === "bullmq publish add").attributes;
+assertEqual(instrumentedAddSpan.metadata["messaging.destination.name"], "notifications", "instrumented queue destination");
+const instrumentedBulkSpan = instrumentationPayload.events.find((event) => event.attributes.name === "bullmq publish addBulk").attributes;
+assertEqual(instrumentedBulkSpan.metadata.messageCount, 1, "instrumented bulk count");
+if (JSON.stringify(instrumentationPayload).includes("instrumented-payload") || JSON.stringify(instrumentationPayload).includes("instrumented-bulk")) {
+  throw new Error("instrumented queue payload leaked into telemetry body");
+}
+
 console.log(JSON.stringify({
-  attempts: response.attempts,
-  events: payload.events.length,
+  attempts: response.attempts + postInstrumentationResponse.attempts,
+  events: payload.events.length + instrumentationPayload.events.length,
   ok: true,
   package: "@logbrew/bullmq"
 }));
@@ -353,6 +448,16 @@ async function closeServer(server) {
       resolve();
     });
   });
+}
+
+function nextSpanId(values) {
+  let index = 0;
+  return () => values[index++] ?? "dddddddddddddddd";
+}
+
+function nextTraceId(values) {
+  let index = 0;
+  return () => values[index++] ?? "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 }
 EOF
 

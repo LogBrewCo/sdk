@@ -13,6 +13,9 @@
 - BullMQ source: `taskforcesh/bullmq@d65a2b411e7a5dc31ce08faf6f646280f570cf5e`.
 - Read `src/classes/queue.ts`: `Queue.add(...)` and `Queue.addBulk(...)`.
 - Read `src/classes/worker.ts`: processor assignment and `callProcessJob(...)`.
+- 2026-06-28 refresh: Sentry JavaScript `getsentry/sentry-javascript@54e995da76381f18f61f39b0ceecadf5a0b06b11`; re-read `packages/nestjs/src/integrations/sentry-nest-bullmq-instrumentation.ts` (`SentryNestBullMQInstrumentation`, `_getProcessorFileInstrumentation(...)`, `_createWrapProcessor()`) and `packages/nestjs/src/integrations/helpers.ts` (`getBullMQProcessSpanOptions(...)`).
+- 2026-06-28 refresh: Datadog dd-trace-js `DataDog/dd-trace-js@27dcc31908d9a6264b1536a2118534c8bc4da0f6`; re-read `packages/datadog-plugin-bullmq/src/producer.js` (`QueueAddPlugin`, `QueueAddBulkPlugin`, `_injectIntoOpts(...)`, `setProducerCheckpoint(...)`) and `packages/datadog-plugin-bullmq/src/consumer.js` (`BullmqConsumerPlugin`, `_extractDatadog(...)`, `setConsumerCheckpoint(...)`).
+- 2026-06-28 refresh: OpenTelemetry JS contrib `open-telemetry/opentelemetry-js-contrib@eb98ccc85069304a1f0c2e6b33be1b2ca961b4be`; `git grep -i bullmq` still found no first-party BullMQ instrumentation.
 
 ## Competitor Pattern
 
@@ -31,8 +34,9 @@ LogBrew now adds `@logbrew/bullmq` as a small explicit integration package.
 - `withLogBrewBullMqProcessor(...)` wraps app-owned worker processors.
 - `createLogBrewBullMqJobOptions(...)` merges one normalized LogBrew `traceparent` into BullMQ `opts.telemetry.metadata` when metadata is valid JSON.
 - `extractLogBrewBullMqTraceparent(...)` reads only that LogBrew trace context for consumer spans.
+- `instrumentLogBrewBullMqQueue(...)` optionally wraps only an app-owned queue instance's `add()` and `addBulk()` methods, rejects duplicate LogBrew instrumentation, and supports clean `uninstall()`.
 - Malformed metadata is ignored for propagation instead of breaking queue work.
-- The package avoids hidden BullMQ/NestJS patching, Redis connection capture, job payload capture, arbitrary headers, full URLs, baggage, tracestate, and support-ticket calls.
+- The package avoids global BullMQ/NestJS patching, Redis connection capture, job payload capture, arbitrary headers, full URLs, baggage, tracestate, queue creation, Redis ownership, and support-ticket calls.
 
 ## Verification
 
@@ -42,9 +46,11 @@ LogBrew now adds `@logbrew/bullmq` as a small explicit integration package.
 - GREEN: `python3 scripts/check_release_metadata.py` passed with `@logbrew/bullmq` included in public JS package metadata.
 - GREEN: `bash scripts/real_user_bullmq_smoke.sh` passed after installing packed `@logbrew/sdk`, `@logbrew/node`, `@logbrew/bullmq`, and `bullmq@5.79.1` into a temporary app. It proves TypeScript declarations, CJS/ESM exports, producer traceparent injection, consumer parent-child trace correlation, malformed metadata fallback, type-only processor failure spans, `addBulk` message counts, local 503-to-202 retry, and no job payload or processor error message leakage.
 - GREEN: `python3 scripts/check_js_sources.py`, `bash scripts/check_js_lint.sh`, `bash scripts/check_js_package.sh`, and `python3 -m unittest tests.test_check_public_sdks` passed.
+- 2026-06-28 RED: `bash scripts/real_user_bullmq_smoke.sh` failed in installed TypeScript because `instrumentLogBrewBullMqQueue` was not exported.
+- 2026-06-28 GREEN: the same installed smoke passed after adding queue-instance instrumentation. It now proves TypeScript/CJS/ESM exports, app-owned `this` binding preservation, `add()` and `addBulk()` traceparent injection, duplicate-install rejection, clean uninstall, local fake-intake flush, and no instrumented job payload leakage.
 
 ## Remaining Gaps
 
 - Sentry remains stronger for automatic NestJS BullMQ instrumentation.
-- Datadog remains stronger for hidden automatic BullMQ instrumentation, data-stream monitoring, and deeper runtime hooks.
-- LogBrew should keep the core package explicit, then consider optional framework-owned auto wrappers for NestJS BullMQ after more popular rich-trace gaps are closed and source-backed evidence shows the ergonomics are worth the extra surface.
+- Datadog remains stronger for hidden automatic BullMQ worker and FlowProducer instrumentation, data-stream monitoring, producer filters, and deeper runtime hooks.
+- LogBrew should keep the core package explicit and instance-scoped, then consider optional framework-owned NestJS BullMQ decorators/processors after more popular rich-trace gaps are closed and source-backed evidence shows the ergonomics are worth the extra surface.

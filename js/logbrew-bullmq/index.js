@@ -8,6 +8,7 @@ import {
 const DEFAULT_SYSTEM = "bullmq";
 const DEFAULT_QUEUE_NAME = "bullmq";
 const LOGBREW_METADATA_KEY = "logbrew";
+const INSTRUMENTED_QUEUE_ADD = Symbol.for("@logbrew/bullmq.instrumentedQueueAdd");
 
 export async function bullMqQueueAddWithLogBrewSpan(queue, name, data, jobOptions = {}, options = {}) {
   if (!queue || typeof queue.add !== "function") {
@@ -60,6 +61,69 @@ export function withLogBrewBullMqProcessor(processor, options = {}) {
       taskName,
       traceparent: extractLogBrewBullMqTraceparent(job)
     });
+  };
+}
+
+export function instrumentLogBrewBullMqQueue(queue, options = {}) {
+  if (!queue || typeof queue.add !== "function") {
+    throw new SdkError("configuration_error", "instrumentLogBrewBullMqQueue requires a BullMQ queue");
+  }
+  const originalAdd = queue.add;
+  const originalAddBulk = queue.addBulk;
+  if (originalAdd?.[INSTRUMENTED_QUEUE_ADD] === true) {
+    throw new SdkError(
+      "configuration_error",
+      "instrumentLogBrewBullMqQueue requires an uninstrumented BullMQ queue; uninstall the existing LogBrew instrumentation first"
+    );
+  }
+
+  let installed = true;
+  function logBrewInstrumentedBullMqAdd(name, data, jobOptions, ...args) {
+    if (!installed) {
+      return originalAdd.call(queue, name, data, jobOptions, ...args);
+    }
+    return bullMqQueueAddWithLogBrewSpan({
+      name: queue.name,
+      add(nextName, nextData, nextJobOptions) {
+        return originalAdd.call(queue, nextName, nextData, nextJobOptions, ...args);
+      }
+    }, name, data, jobOptions, options);
+  }
+
+  Object.defineProperty(logBrewInstrumentedBullMqAdd, INSTRUMENTED_QUEUE_ADD, {
+    value: true
+  });
+  queue.add = logBrewInstrumentedBullMqAdd;
+
+  let logBrewInstrumentedBullMqAddBulk;
+  if (typeof originalAddBulk === "function") {
+    logBrewInstrumentedBullMqAddBulk = function logBrewInstrumentedBullMqAddBulk(jobs, ...args) {
+      if (!installed) {
+        return originalAddBulk.call(queue, jobs, ...args);
+      }
+      return bullMqQueueAddBulkWithLogBrewSpan({
+        name: queue.name,
+        addBulk(nextJobs) {
+          return originalAddBulk.call(queue, nextJobs, ...args);
+        }
+      }, jobs, options);
+    };
+    queue.addBulk = logBrewInstrumentedBullMqAddBulk;
+  }
+
+  return {
+    isInstalled() {
+      return installed && queue.add === logBrewInstrumentedBullMqAdd;
+    },
+    uninstall() {
+      installed = false;
+      if (queue.add === logBrewInstrumentedBullMqAdd) {
+        queue.add = originalAdd;
+      }
+      if (logBrewInstrumentedBullMqAddBulk && queue.addBulk === logBrewInstrumentedBullMqAddBulk) {
+        queue.addBulk = originalAddBulk;
+      }
+    }
   };
 }
 
@@ -174,5 +238,6 @@ export default {
   bullMqQueueAddWithLogBrewSpan,
   createLogBrewBullMqJobOptions,
   extractLogBrewBullMqTraceparent,
+  instrumentLogBrewBullMqQueue,
   withLogBrewBullMqProcessor
 };
