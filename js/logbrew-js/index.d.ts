@@ -18,6 +18,14 @@ export type TraceparentContext = {
   sampled: boolean;
 };
 
+/** Minimal active trace shape accepted by logger adapters for correlation metadata. */
+export type LogCorrelationTraceContext = {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  sampled?: boolean;
+};
+
 /** Inputs for creating a W3C traceparent value from known trace/span ids. */
 export type TraceparentInput = {
   traceId: string;
@@ -129,6 +137,7 @@ export type PinoDestinationConfig = {
   client: LogBrewClient;
   logger?: string;
   metadata?: Metadata;
+  traceProvider?: () => LogCorrelationTraceContext | null | undefined;
   transport?: Transport;
   flushOnWrite?: boolean;
   includeErrorStack?: boolean;
@@ -160,6 +169,7 @@ export type WinstonTransportConfig = {
   client: LogBrewClient;
   logger?: string;
   metadata?: Metadata;
+  traceProvider?: () => LogCorrelationTraceContext | null | undefined;
   transport?: Transport;
   flushOnWrite?: boolean;
   includeErrorStack?: boolean;
@@ -500,6 +510,7 @@ export declare function logAttributesFromPinoRecord(
   options?: {
     logger?: string;
     metadata?: Metadata;
+    trace?: LogCorrelationTraceContext | null;
     includeErrorStack?: boolean;
   }
 ): LogAttributes;
@@ -513,6 +524,7 @@ export declare function logAttributesFromWinstonInfo(
   options?: {
     logger?: string;
     metadata?: Metadata;
+    trace?: LogCorrelationTraceContext | null;
     includeErrorStack?: boolean;
   }
 ): LogAttributes;

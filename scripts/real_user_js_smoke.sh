@@ -1669,6 +1669,7 @@ import {
   type EnvironmentAttributes,
   type EventFilter,
   type IssueAttributes,
+  type LogCorrelationTraceContext,
   type LogAttributes,
   type MetricAttributes,
   type NetworkMilestoneInput,
@@ -1772,6 +1773,12 @@ const metric: MetricAttributes = {
   metadata: { service: "checkout" }
 };
 const eventFilter: EventFilter = (event) => event.type !== "log" || event.attributes.level !== "info";
+const loggerTrace: LogCorrelationTraceContext = {
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  spanId: "b7ad6b7169203331",
+  parentSpanId: "00f067aa0ba902b7",
+  sampled: true
+};
 
 async function main() {
   const client = LogBrewClient.create({
@@ -1849,6 +1856,7 @@ async function main() {
   const pinoConfig: PinoDestinationConfig = {
     client,
     logger: "pino",
+    traceProvider: () => loggerTrace,
     timestamp: () => "2026-06-02T10:00:06Z"
   };
   const pinoDestination: PinoDestinationHandle = createLogBrewPinoDestination(pinoConfig);
@@ -1861,6 +1869,7 @@ async function main() {
   const winstonConfig: WinstonTransportConfig = {
     client,
     logger: "winston",
+    traceProvider: () => loggerTrace,
     timestamp: () => "2026-06-02T10:00:06Z"
   };
   const winstonTransport: WinstonTransportHandle = createLogBrewWinstonTransport(winstonConfig);
@@ -1969,7 +1978,11 @@ const pinoRecord: sdk.PinoLogRecord = {
 };
 const pinoDestination: sdk.PinoDestinationHandle = sdk.createLogBrewPinoDestination({
   client,
-  logger: "pino"
+  logger: "pino",
+  traceProvider: (): sdk.LogCorrelationTraceContext => ({
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331"
+  })
 });
 pinoDestination.write(JSON.stringify(pinoRecord));
 const winstonInfo: sdk.WinstonLogInfo = {
@@ -1978,7 +1991,11 @@ const winstonInfo: sdk.WinstonLogInfo = {
 };
 const winstonTransport: sdk.WinstonTransportHandle = sdk.createLogBrewWinstonTransport({
   client,
-  logger: "winston"
+  logger: "winston",
+  traceProvider: (): sdk.LogCorrelationTraceContext => ({
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203332"
+  })
 });
 winstonTransport.write(winstonInfo);
 void client.flush(transport);
@@ -2175,12 +2192,19 @@ test("installed Pino destination captures real Pino records", async () => {
   });
   const transport = RecordingTransport.alwaysAccept();
   const errors = [];
+  const trace = {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    parentSpanId: "00f067aa0ba902b7",
+    sampled: true
+  };
   const destination = createLogBrewPinoDestination({
     client,
     eventIdPrefix: "installed_pino",
     logger: "pino",
     metadata: { service: "checkout" },
     transport,
+    traceProvider: () => trace,
     onError(error) {
       errors.push(error);
     }
@@ -2222,6 +2246,10 @@ test("installed Pino destination captures real Pino records", async () => {
   assert.equal(body.events[0].attributes.message, "checkout slow");
   assert.equal(body.events[0].attributes.logger, "pino");
   assert.equal(body.events[0].attributes.metadata.service, "checkout");
+  assert.equal(body.events[0].attributes.metadata.traceId, trace.traceId);
+  assert.equal(body.events[0].attributes.metadata.spanId, trace.spanId);
+  assert.equal(body.events[0].attributes.metadata.parentSpanId, trace.parentSpanId);
+  assert.equal(body.events[0].attributes.metadata.sampled, true);
   assert.equal(body.events[0].attributes.metadata["context.orderId"], 42);
   assert.equal(body.events[0].attributes.metadata["context.pid"], undefined);
   assert.equal(body.events[1].attributes.metadata.errorName, "Error");
@@ -2237,12 +2265,19 @@ test("installed Winston transport captures real Winston records", async () => {
   });
   const transport = RecordingTransport.alwaysAccept();
   const errors = [];
+  const trace = {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203332",
+    parentSpanId: "00f067aa0ba902b7",
+    sampled: true
+  };
   const logbrewTransport = createLogBrewWinstonTransport({
     client,
     eventIdPrefix: "installed_winston",
     logger: "winston",
     metadata: { service: "checkout" },
     transport,
+    traceProvider: () => trace,
     onError(error) {
       errors.push(error);
     }
@@ -2288,6 +2323,10 @@ test("installed Winston transport captures real Winston records", async () => {
   assert.equal(body.events[0].attributes.message, "checkout slow");
   assert.equal(body.events[0].attributes.logger, "winston");
   assert.equal(body.events[0].attributes.metadata.service, "checkout");
+  assert.equal(body.events[0].attributes.metadata.traceId, trace.traceId);
+  assert.equal(body.events[0].attributes.metadata.spanId, trace.spanId);
+  assert.equal(body.events[0].attributes.metadata.parentSpanId, trace.parentSpanId);
+  assert.equal(body.events[0].attributes.metadata.sampled, true);
   assert.equal(body.events[0].attributes.metadata["context.orderId"], 42);
   assert.equal(body.events[1].attributes.message, "payment failed");
   assert.equal(body.events[1].attributes.metadata.errorName, "Error");

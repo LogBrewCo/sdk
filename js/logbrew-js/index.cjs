@@ -576,6 +576,7 @@ function createLogBrewPinoDestination(config) {
     : () => new Date().toISOString();
   const eventIdPrefix = config.eventIdPrefix ?? "pino";
   const onError = typeof config.onError === "function" ? config.onError : () => {};
+  const traceProvider = typeof config.traceProvider === "function" ? config.traceProvider : null;
   const state = {
     captured: 0,
     pendingFlush: Promise.resolve(null)
@@ -594,7 +595,8 @@ function createLogBrewPinoDestination(config) {
             logAttributesFromPinoRecord(record, {
               includeErrorStack,
               logger,
-              metadata
+              metadata,
+              trace: traceFromProvider(traceProvider, onError)
             })
           );
           if (flushOnWrite && transport) {
@@ -633,7 +635,8 @@ function logAttributesFromPinoRecord(record, options = {}) {
   const metadata = {
     ...compactMetadata(options.metadata),
     pinoLevel: pinoLevelLabel(record.level),
-    ...pinoContextMetadata(record)
+    ...pinoContextMetadata(record),
+    ...traceMetadataFromLogContext(options.trace)
   };
   if (typeof record.level === "number" && Number.isFinite(record.level)) {
     metadata.pinoLevelNumber = record.level;
@@ -668,6 +671,7 @@ function createLogBrewWinstonTransport(config) {
     : () => new Date().toISOString();
   const eventIdPrefix = config.eventIdPrefix ?? "winston";
   const onError = typeof config.onError === "function" ? config.onError : () => {};
+  const traceProvider = typeof config.traceProvider === "function" ? config.traceProvider : null;
   const state = {
     captured: 0,
     pendingFlush: Promise.resolve(null)
@@ -689,6 +693,7 @@ function createLogBrewWinstonTransport(config) {
           onError,
           state,
           timestamp,
+          traceProvider,
           transport
         });
       } catch (error) {
@@ -744,7 +749,8 @@ function captureWinstonInfo(config) {
     logAttributesFromWinstonInfo(config.info, {
       includeErrorStack: config.includeErrorStack,
       logger: config.logger,
-      metadata: config.metadata
+      metadata: config.metadata,
+      trace: traceFromProvider(config.traceProvider, config.onError)
     })
   );
   if (config.flushOnWrite && config.transport) {
@@ -764,7 +770,8 @@ function logAttributesFromWinstonInfo(info, options = {}) {
   const metadata = {
     ...compactMetadata(options.metadata),
     winstonLevel: winstonLevelLabel(info.level),
-    ...winstonContextMetadata(info)
+    ...winstonContextMetadata(info),
+    ...traceMetadataFromLogContext(options.trace)
   };
   addWinstonErrorMetadata(metadata, info, options.includeErrorStack === true);
 
@@ -1021,6 +1028,67 @@ function addPinoErrorMetadata(metadata, error, includeErrorStack) {
   if (typeof error === "string" && error.trim() !== "") {
     metadata.errorMessage = error;
   }
+}
+
+function traceFromProvider(provider, onError) {
+  if (!provider) {
+    return undefined;
+  }
+  try {
+    return provider();
+  } catch (error) {
+    onError(error);
+    return undefined;
+  }
+}
+
+function traceMetadataFromLogContext(trace) {
+  const normalized = normalizeLogTraceContext(trace);
+  if (!normalized) {
+    return {};
+  }
+  return {
+    traceId: normalized.traceId,
+    spanId: normalized.spanId,
+    ...(normalized.parentSpanId !== undefined ? { parentSpanId: normalized.parentSpanId } : {}),
+    ...(normalized.sampled !== undefined ? { sampled: normalized.sampled } : {})
+  };
+}
+
+function normalizeLogTraceContext(trace) {
+  if (!trace || Array.isArray(trace) || typeof trace !== "object") {
+    return undefined;
+  }
+  const traceId = normalizeTraceId(trace.traceId);
+  const spanId = normalizeSpanId(trace.spanId);
+  if (!traceId || !spanId) {
+    return undefined;
+  }
+  const parentSpanId = normalizeSpanId(trace.parentSpanId);
+  return {
+    traceId,
+    spanId,
+    ...(parentSpanId !== undefined ? { parentSpanId } : {}),
+    ...(typeof trace.sampled === "boolean" ? { sampled: trace.sampled } : {})
+  };
+}
+
+function normalizeTraceId(traceId) {
+  try {
+    requireTraceId(traceId);
+  } catch {
+    return undefined;
+  }
+  return traceId.toLowerCase();
+}
+
+function normalizeSpanId(spanId) {
+  try {
+    requireSpanId("trace spanId", spanId);
+  } catch {
+    return undefined;
+  }
+  return spanId.toLowerCase();
 }
 
 function requireNonEmpty(label, value) {

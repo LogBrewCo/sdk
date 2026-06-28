@@ -91,3 +91,27 @@ Evidence:
 - Green proof: `npm test --prefix js/logbrew-js`, `python3 -m unittest tests.test_validate_fixtures`, `npm test --prefix js/logbrew-node`, and `NPM_CONFIG_CACHE=/private/tmp/logbrew-node-npm-cache bash scripts/real_user_node_smoke.sh` passed with Node `v22.18.0`.
 
 Remaining Node rich-trace gaps: Sentry/Datadog/OpenTelemetry remain stronger for automatic driver/framework instrumentation, automatic or SDK-generated links, baggage/tracestate, full OTel exporter/processor interop, richer semantic conventions, phase timing, response-size heuristics, and optional deep auto-instrumentation packages.
+
+## 2026-06-28 Pino/Winston Trace Correlation Follow-Up
+
+Refreshed source reads:
+
+- Sentry JavaScript `getsentry/sentry-javascript@54e995da76381f18f61f39b0ceecadf5a0b06b11`: `packages/node-core/src/integrations/pino.ts` (`pinoIntegration`, `trackLogger`, `untrackLogger`, diagnostics-channel capture), `packages/node-core/src/integrations/winston.ts` (`createSentryWinstonTransport`), and node integration-test subjects for Pino/Winston logger capture.
+- OpenTelemetry JS contrib `open-telemetry/opentelemetry-js-contrib@eb98ccc85069304a1f0c2e6b33be1b2ca961b4be`: `packages/instrumentation-pino/src/instrumentation.ts` (`_getMixinFunction`, `_callHook`) and `packages/instrumentation-winston/src/instrumentation.ts` (`_handleLogCorrelation`, `_getPatchedWrite`, `_getPatchedLog`).
+- Datadog dd-trace-js `DataDog/dd-trace-js@27dcc31908d9a6264b1536a2118534c8bc4da0f6`: `packages/datadog-plugin-pino/src/index.js`, `packages/datadog-plugin-winston/src/index.js`, `packages/dd-trace/src/plugins/log_injection.js`, and plugin tests around active-span `trace_id`/`span_id` injection.
+
+Competitor pattern: Sentry treats Pino/Winston as first-class log integrations; OpenTelemetry and Datadog inject active trace/span fields into common logger records only when a valid active context exists, and avoid propagating hook failures into app logging. This is stronger for drop-in correlation, but it depends on automatic module patching, diagnostics channels, global tracer context, or proxy mutation paths.
+
+LogBrew now ships the lighter opt-in subset in `@logbrew/sdk`:
+
+- `createLogBrewPinoDestination(...)` and `createLogBrewWinstonTransport(...)` accept `traceProvider`, intended to be wired to `getActiveLogBrewTrace` from `@logbrew/node` or framework helpers.
+- The provider is called per log record; valid W3C-shaped `traceId` and `spanId` are copied into log metadata with optional `parentSpanId` and `sampled`.
+- Invalid, absent, or throwing providers do not break application logging; provider errors go through the existing adapter `onError` path.
+- The adapters still avoid global logger patching, raw `traceparent`, baggage, tracestate, request/header/body/query capture, arbitrary active-context serialization, and stack text unless already explicitly enabled.
+
+Evidence:
+
+- TDD red: `npm test --prefix js/logbrew-js` failed because Pino/Winston log helpers preserved caller metadata but did not add active trace metadata.
+- Green proof: `npm test --prefix js/logbrew-js`, `python3 scripts/check_js_sources.py js/logbrew-js`, `bash scripts/check_js_lint.sh`, `bash scripts/check_js_package.sh`, and `NPM_CONFIG_CACHE=/private/tmp/logbrew-js-npm-cache PNPM_STORE_DIR=/private/tmp/logbrew-js-pnpm-store bash scripts/real_user_js_smoke.sh` passed.
+
+Remaining logger gap: Sentry/Datadog/OpenTelemetry are still stronger for hidden automatic logger patching, log shipping, custom logger version matrices, and existing OpenTelemetry context-manager interop. LogBrew's current advantage is a small app-owned adapter path that gives real Pino/Winston users trace-linked logs without mutating logger globals or broadening privacy capture.

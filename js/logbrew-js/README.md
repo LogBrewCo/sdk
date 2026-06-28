@@ -385,6 +385,8 @@ await destination.flush();
 
 The Pino adapter reads JSON log lines, maps Pino `trace`/`debug` to LogBrew `info`, `warn` to `warning`, `error` to `error`, and `fatal` to `critical`, captures primitive Pino fields as `context.*`, captures serialized error name/message, skips noisy runtime defaults, and omits stack text unless `includeErrorStack: true` is set. It does not patch Pino or replace application logger ownership.
 
+When the app also uses a LogBrew Node or framework request helper, pass `traceProvider: getActiveLogBrewTrace` from `@logbrew/node` to add the current active `traceId`, `spanId`, optional `parentSpanId`, and `sampled` flag to each captured log. The provider is called per record, invalid or missing contexts are ignored, and no raw propagation headers, request data, payloads, or stack traces are captured.
+
 ## Winston Transport
 
 If a Node app already uses Winston, add the dependency-free LogBrew transport to the app-owned logger:
@@ -418,5 +420,7 @@ await logbrewTransport.flush();
 ```
 
 The Winston adapter receives Winston `info` objects, maps `debug`/`silly` to LogBrew `info`, `warn` to `warning`, `error` to `error`, `fatal`/`critical` to `critical`, and other common Winston levels to `info`. It captures primitive info fields as `context.*`, captures nested `err`/`error` objects or formatted error stack name/message, omits stack text unless `includeErrorStack: true` is set, and exposes `onError` for capture failures. It does not mutate Winston globals or replace the app's logger.
+
+Use the same `traceProvider: getActiveLogBrewTrace` option with LogBrew Node/framework helpers when you want Winston logs to carry the active request trace. The adapter only copies normalized W3C-shaped IDs and sampled state; it does not patch Winston globally or serialize arbitrary active context.
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush` or `shutdown` to send queued events through a transport, and use `previewJson()` when you want a stable local JSON preview before sending anything.

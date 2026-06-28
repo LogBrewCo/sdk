@@ -30,6 +30,12 @@ import {
 
 const SUPPORTED_EVENT_TYPES = ["release", "environment", "issue", "log", "span", "action"];
 const EXPECTED_EVENT_COUNT = SUPPORTED_EVENT_TYPES.length;
+const LOGGER_TRACE = {
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  spanId: "b7ad6b7169203331",
+  parentSpanId: "00f067aa0ba902b7",
+  sampled: true
+};
 
 function assertEventTypes(payload) {
   assert.deepEqual(payload.events.map((event) => event.type), SUPPORTED_EVENT_TYPES);
@@ -949,6 +955,30 @@ test("Pino record helper maps safe log attributes", () => {
   });
 });
 
+test("Pino record helper adds explicit trace correlation metadata", () => {
+  const attributes = logAttributesFromPinoRecord({
+    level: 30,
+    msg: "checkout trace",
+    orderId: 42
+  }, {
+    logger: "pino",
+    metadata: {
+      service: "checkout",
+      traceId: "caller-supplied"
+    },
+    trace: LOGGER_TRACE
+  });
+
+  assert.equal(attributes.level, "info");
+  assert.equal(attributes.logger, "pino");
+  assert.equal(attributes.metadata.service, "checkout");
+  assert.equal(attributes.metadata.traceId, LOGGER_TRACE.traceId);
+  assert.equal(attributes.metadata.spanId, LOGGER_TRACE.spanId);
+  assert.equal(attributes.metadata.parentSpanId, LOGGER_TRACE.parentSpanId);
+  assert.equal(attributes.metadata.sampled, true);
+  assert.equal(attributes.metadata["context.orderId"], 42);
+});
+
 test("Pino destination queues records and flushes safely", async () => {
   const client = sampleClient();
   const transport = RecordingTransport.alwaysAccept();
@@ -1038,6 +1068,30 @@ test("Winston info helper maps safe log attributes", () => {
   assert.equal(plainErrorAttributes.metadata.errorName, "Error");
   assert.equal(plainErrorAttributes.metadata.errorMessage, "payment failed");
   assert.equal(plainErrorAttributes.metadata.errorStack, undefined);
+});
+
+test("Winston info helper adds explicit trace correlation metadata", () => {
+  const attributes = logAttributesFromWinstonInfo({
+    level: "info",
+    message: "checkout trace",
+    orderId: 42
+  }, {
+    logger: "winston",
+    metadata: {
+      service: "checkout",
+      traceId: "caller-supplied"
+    },
+    trace: LOGGER_TRACE
+  });
+
+  assert.equal(attributes.level, "info");
+  assert.equal(attributes.logger, "winston");
+  assert.equal(attributes.metadata.service, "checkout");
+  assert.equal(attributes.metadata.traceId, LOGGER_TRACE.traceId);
+  assert.equal(attributes.metadata.spanId, LOGGER_TRACE.spanId);
+  assert.equal(attributes.metadata.parentSpanId, LOGGER_TRACE.parentSpanId);
+  assert.equal(attributes.metadata.sampled, true);
+  assert.equal(attributes.metadata["context.orderId"], 42);
 });
 
 test("Winston transport queues info objects and flushes safely", async () => {
