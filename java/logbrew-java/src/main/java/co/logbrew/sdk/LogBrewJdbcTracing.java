@@ -117,8 +117,19 @@ public final class LogBrewJdbcTracing {
             if (wrapperResult != Unhandled.INSTANCE) {
                 return wrapperResult;
             }
-            if ("getConnection".equals(method.getName())) {
-                Connection connection = (Connection) invokeDelegate(delegate, method, safeArgs);
+            String methodName = method.getName();
+            if ("getConnection".equals(methodName)) {
+                Connection connection = config.traceConnectionAcquisition
+                    ? (Connection) traceJdbcCall(
+                        client,
+                        config,
+                        "CONNECT",
+                        methodName,
+                        "dataSource",
+                        "connection",
+                        () -> invokeDelegate(delegate, method, safeArgs)
+                    )
+                    : (Connection) invokeDelegate(delegate, method, safeArgs);
                 return connection == null ? null : instrumentConnection(connection, client, config);
             }
             return invokeDelegate(delegate, method, safeArgs);
@@ -341,7 +352,7 @@ public final class LogBrewJdbcTracing {
         Instant finishedAt
     ) {
         Map<String, Object> metadata = config.jdbcMetadata(jdbcMethod, statementType);
-        metadata.put("source", "transaction".equals(operationKind) ? "jdbc.transaction" : "jdbc.statement");
+        metadata.put("source", sourceForOperationKind(operationKind));
         metadata.put("sampled", Boolean.valueOf(trace.sampled()));
         addString(metadata, "dbSystem", config.system == null || config.system.trim().isEmpty() ? "jdbc" : config.system);
         addString(metadata, "dbOperation", operationName);
@@ -388,6 +399,16 @@ public final class LogBrewJdbcTracing {
             || returnType == long[].class
             || returnType == ResultSet.class
             || returnType == void.class;
+    }
+
+    private static String sourceForOperationKind(String operationKind) {
+        if ("transaction".equals(operationKind)) {
+            return "jdbc.transaction";
+        }
+        if ("connection".equals(operationKind)) {
+            return "jdbc.connection";
+        }
+        return "jdbc.statement";
     }
 
     private static Object invokeDelegate(Object delegate, Method method, Object[] args) throws SQLException {
@@ -666,13 +687,14 @@ public final class LogBrewJdbcTracing {
     }
 
     /**
-     * Configuration for one app-owned JDBC connection wrapper.
+     * Configuration for one app-owned JDBC connection or data-source wrapper.
      */
     public static final class ConnectionConfig {
         private String system;
         private String databaseName;
         private String eventIdPrefix;
         private boolean traceTransactions;
+        private boolean traceConnectionAcquisition;
         private Map<String, ?> metadata;
         private Consumer<SdkException> onError;
         private Supplier<Instant> now = Instant::now;
@@ -702,6 +724,14 @@ public final class LogBrewJdbcTracing {
 
         public ConnectionConfig traceTransactions(boolean value) {
             this.traceTransactions = value;
+            return this;
+        }
+
+        /**
+         * Enables one sanitized span around DataSource getConnection calls.
+         */
+        public ConnectionConfig traceConnectionAcquisition(boolean value) {
+            this.traceConnectionAcquisition = value;
             return this;
         }
 

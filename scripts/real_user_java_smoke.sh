@@ -32,13 +32,11 @@ if [ -d "$package_dir/src/main/resources" ]; then
   cp -R "$package_dir/src/main/resources/." "$tmp_dir/jar-stage/"
 fi
 jar --create --file "$tmp_dir/logbrew-sdk-0.1.0.jar" -C "$tmp_dir/jar-stage" .
-
 cp "$package_dir/pom.xml" "$tmp_dir/source-stage/pom.xml"
 cp "$package_dir/README.md" "$tmp_dir/source-stage/README.md"
 cp -R "$package_dir/src" "$tmp_dir/source-stage/src"
 cp -R "$package_dir/examples" "$tmp_dir/source-stage/examples"
 jar --create --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" -C "$tmp_dir/source-stage" .
-
 jar --list --file "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDrop.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -128,7 +126,6 @@ grep -q 'LogBrewLogbackAppender' "$package_dir/README.md"
 grep -q 'java.util.logging' "$package_dir/README.md"
 grep -q 'Logback' "$package_dir/README.md"
 grep -q 'copyable snippets' "$package_dir/README.md"
-
 extract_dir="$tmp_dir/source-extract"
 mkdir -p "$extract_dir"
 (cd "$extract_dir" && jar --extract --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar")
@@ -519,10 +516,11 @@ public final class Main {
                 .system("postgresql")
                 .databaseName("orders")
                 .eventIdPrefix("java_jdbc_datasource_smoke")
-                .spanIds("b7ad6b7169203405")
+                .traceConnectionAcquisition(true)
+                .spanIds("b7ad6b7169203405", "b7ad6b7169203406")
                 .nowSequence(
-                    Instant.parse("2026-06-02T10:00:09Z"),
-                    Instant.parse("2026-06-02T10:00:09.006Z")
+                    Instant.parse("2026-06-02T10:00:09Z"), Instant.parse("2026-06-02T10:00:09.004Z"),
+                    Instant.parse("2026-06-02T10:00:09.005Z"), Instant.parse("2026-06-02T10:00:09.011Z")
                 )
                 .metadata(Map.of(
                     "service", "checkout",
@@ -538,10 +536,12 @@ public final class Main {
         require("private_user".equals(jdbc.dataSourceUsername), "JDBC data source passes username");
         require("private_second_arg".equals(jdbc.dataSourceSecondArgument), "JDBC data source passes second argument");
         String jdbcPayload = jdbcClient.previewJson();
-        require(jdbcClient.pendingEvents() == 5, "JDBC helper queues five spans");
-        require(jdbcPayload.contains("\"id\": \"java_jdbc_datasource_smoke_span_b7ad6b7169203405\""), "JDBC data source span id");
+        require(jdbcClient.pendingEvents() == 6, "JDBC helper queues six spans");
+        require(jdbcPayload.contains("\"id\": \"java_jdbc_datasource_smoke_span_b7ad6b7169203405\""), "JDBC data source acquire span id");
+        require(jdbcPayload.contains("\"source\": \"jdbc.connection\""), "JDBC acquisition source");
         require(jdbcPayload.contains("\"source\": \"jdbc.statement\""), "JDBC span source");
         require(jdbcPayload.contains("\"framework\": \"jdbc\""), "JDBC framework metadata");
+        require(jdbcPayload.contains("\"dbOperation\": \"CONNECT\""), "JDBC connect operation");
         require(jdbcPayload.contains("\"dbOperation\": \"SELECT\""), "JDBC select operation");
         require(jdbcPayload.contains("\"dbOperation\": \"UPDATE\""), "JDBC update operation");
         require(jdbcPayload.contains("\"rowCount\": 2"), "JDBC update row count");
@@ -725,7 +725,7 @@ public final class Main {
 
         runHttpTransportSmoke();
 
-        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"jdbcEvents\":5,\"otelEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
+        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"jdbcEvents\":6,\"otelEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
     }
 
     private static void runHttpTransportSmoke() {
@@ -987,7 +987,7 @@ grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"logbackEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"timelineEvents":2' "$tmp_dir/smoke-app.stderr.json"
-grep -q '"jdbcEvents":5' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"jdbcEvents":6' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"otelEvents":1' "$tmp_dir/smoke-app.stderr.json"
 
 jdeps --multi-release 11 --class-path "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_optional_classpath" "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jdeps.txt"

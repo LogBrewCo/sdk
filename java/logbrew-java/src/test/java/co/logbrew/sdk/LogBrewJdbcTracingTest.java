@@ -34,6 +34,8 @@ public final class LogBrewJdbcTracingTest {
         testLeadingSqlCommentsDoNotBecomeOperationNames();
         testDataSourceReturnsTracedConnections();
         testDataSourceTwoArgumentConnectionDoesNotCaptureArguments();
+        testDataSourceConnectionAcquisitionSpanIsOptIn();
+        testDataSourceConnectionAcquisitionErrorsAreTypeOnly();
         System.out.println("java jdbc tracing tests ok (" + testsRun + " tests)");
     }
 
@@ -262,6 +264,7 @@ public final class LogBrewJdbcTracingTest {
 
         assertTrue(resultSet == jdbc.resultSet, "data source preserves result set");
         assertEquals(1, jdbc.dataSourceConnections, "data source delegate connection count");
+        assertEquals(1, client.pendingEvents(), "data source defaults to statement span only");
         String payload = client.previewJson();
         assertContains(payload, "\"id\": \"java_jdbc_datasource_span_b7ad6b7169203407\"");
         assertContains(payload, "\"name\": \"jdbc:SELECT\"");
@@ -301,6 +304,90 @@ public final class LogBrewJdbcTracingTest {
         assertNotContains(payload, "private_user");
         assertNotContains(payload, "private_second_arg");
         assertNotContains(payload, "UPDATE orders SET");
+        testsRun++;
+    }
+
+    private void testDataSourceConnectionAcquisitionSpanIsOptIn() throws Exception {
+        LogBrewClient client = sampleClient();
+        RecordingJdbc jdbc = new RecordingJdbc();
+        DataSource dataSource = LogBrewJdbcTracing.instrumentDataSource(
+            fakeDataSource(jdbc),
+            client,
+            baseConfig()
+                .eventIdPrefix("java_jdbc_acquire")
+                .traceConnectionAcquisition(true)
+                .spanIds("b7ad6b7169203409", "b7ad6b7169203410")
+                .nowSequence(
+                    Instant.parse("2026-06-29T10:00:09Z"),
+                    Instant.parse("2026-06-29T10:00:09.003Z"),
+                    Instant.parse("2026-06-29T10:00:10Z"),
+                    Instant.parse("2026-06-29T10:00:10.011Z")
+                )
+        );
+        LogBrewTraceContext parent = parentTrace();
+
+        ResultSet resultSet;
+        LogBrewTrace.Scope scope = LogBrewTrace.activate(parent);
+        try {
+            resultSet = dataSource
+                .getConnection()
+                .createStatement()
+                .executeQuery("SELECT * FROM orders WHERE card_number = '4111111111111111'");
+        } finally {
+            scope.close();
+        }
+
+        assertTrue(resultSet == jdbc.resultSet, "acquisition tracing preserves result set");
+        assertEquals(parent.traceId(), jdbc.dataSourceActiveTrace.traceId(), "acquisition active trace id");
+        assertEquals(parent.spanId(), jdbc.dataSourceActiveTrace.parentSpanId(), "acquisition parent span id");
+        assertEquals(2, client.pendingEvents(), "acquisition tracing queues connection and statement spans");
+        String payload = client.previewJson();
+        assertContains(payload, "\"id\": \"java_jdbc_acquire_span_b7ad6b7169203409\"");
+        assertContains(payload, "\"id\": \"java_jdbc_acquire_span_b7ad6b7169203410\"");
+        assertContains(payload, "\"name\": \"jdbc:CONNECT\"");
+        assertContains(payload, "\"durationMs\": 3.0");
+        assertContains(payload, "\"source\": \"jdbc.connection\"");
+        assertContains(payload, "\"dbOperation\": \"CONNECT\"");
+        assertContains(payload, "\"dbOperationKind\": \"connection\"");
+        assertContains(payload, "\"jdbcMethod\": \"getConnection\"");
+        assertContains(payload, "\"jdbcTarget\": \"dataSource\"");
+        assertContains(payload, "\"name\": \"jdbc:SELECT\"");
+        assertNotContains(payload, "4111111111111111");
+        assertNotContains(payload, "SELECT * FROM");
+        testsRun++;
+    }
+
+    private void testDataSourceConnectionAcquisitionErrorsAreTypeOnly() throws Exception {
+        LogBrewClient client = sampleClient();
+        RecordingJdbc jdbc = new RecordingJdbc();
+        SQLException original = new SQLException("private pool endpoint and login details");
+        jdbc.dataSourceFailure = original;
+        DataSource dataSource = LogBrewJdbcTracing.instrumentDataSource(
+            fakeDataSource(jdbc),
+            client,
+            baseConfig()
+                .eventIdPrefix("java_jdbc_acquire_error")
+                .traceConnectionAcquisition(true)
+                .spanIds("b7ad6b7169203411")
+                .nowSequence(
+                    Instant.parse("2026-06-29T10:00:11Z"),
+                    Instant.parse("2026-06-29T10:00:11.004Z")
+                )
+        );
+
+        SQLException thrown = expectException(SQLException.class, dataSource::getConnection);
+
+        assertTrue(thrown == original, "same data source exception object is rethrown");
+        assertEquals(1, client.pendingEvents(), "failed acquisition queues one span");
+        String payload = client.previewJson();
+        assertContains(payload, "\"id\": \"java_jdbc_acquire_error_span_b7ad6b7169203411\"");
+        assertContains(payload, "\"name\": \"jdbc:CONNECT\"");
+        assertContains(payload, "\"status\": \"error\"");
+        assertContains(payload, "\"source\": \"jdbc.connection\"");
+        assertContains(payload, "\"errorType\": \"SQLException\"");
+        assertContains(payload, "\"exceptionType\": \"SQLException\"");
+        assertNotContains(payload, "private pool");
+        assertNotContains(payload, "login details");
         testsRun++;
     }
 
@@ -344,6 +431,10 @@ public final class LogBrewJdbcTracingTest {
             String name = method.getName();
             if ("getConnection".equals(name)) {
                 jdbc.dataSourceConnections++;
+                jdbc.dataSourceActiveTrace = LogBrewTrace.current().orElse(null);
+                if (jdbc.dataSourceFailure != null) {
+                    throw jdbc.dataSourceFailure;
+                }
                 if (args != null && args.length == 2) {
                     jdbc.dataSourceUsername = (String) args[0];
                     jdbc.dataSourceSecondArgument = (String) args[1];
@@ -500,5 +591,7 @@ public final class LogBrewJdbcTracingTest {
         private int dataSourceConnections;
         private String dataSourceUsername;
         private String dataSourceSecondArgument;
+        private SQLException dataSourceFailure;
+        private LogBrewTraceContext dataSourceActiveTrace;
     }
 }

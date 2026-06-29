@@ -352,6 +352,7 @@ DataSource tracedDataSource = LogBrewJdbcTracing.instrumentDataSource(
     LogBrewJdbcTracing.ConnectionConfig.create()
         .system("postgresql")
         .databaseName("orders")
+        .traceConnectionAcquisition(true)
         .metadata(Map.of("service", "checkout-api"))
 );
 
@@ -376,7 +377,7 @@ try (PreparedStatement statement = tracedConnection.prepareStatement(
 }
 ```
 
-The wrappers use only JDK JDBC interfaces and return the original JDBC results or exceptions. `instrumentDataSource(...)` delegates normal data-source behavior and wraps only connections returned by no-argument or two-argument `getConnection`. `instrumentConnection(...)` wraps `createStatement`, `prepareStatement`, and `prepareCall` results, emits one `jdbc:<VERB>` child span around `execute*` calls, records update counts when JDBC returns them, and can trace `commit()`/`rollback()` when `traceTransactions(true)` is set. LogBrew derives only the SQL verb locally, such as `SELECT` or `UPDATE`, after skipping leading SQL comments and quoted literals; it does not capture SQL text, bind values, result rows, connection URLs, driver metadata, network addresses, JDBC login argument values, arbitrary JDBC properties, baggage, tracestate, exception messages, or stack traces. It does not install a Java agent, register a driver, patch `DriverManager`, mutate SQL comments, or affect other data sources/connections.
+The wrappers use only JDK JDBC interfaces and return the original JDBC results or exceptions. `instrumentDataSource(...)` delegates normal data-source behavior and wraps only connections returned by no-argument or two-argument `getConnection`. It stays statement-only by default; enable `traceConnectionAcquisition(true)` when you want one `jdbc:CONNECT` span for DataSource acquisition or pool-wait time. `instrumentConnection(...)` wraps `createStatement`, `prepareStatement`, and `prepareCall` results, emits one `jdbc:<VERB>` child span around `execute*` calls, records update counts when JDBC returns them, and can trace `commit()`/`rollback()` when `traceTransactions(true)` is set. LogBrew derives only the SQL verb locally, such as `SELECT` or `UPDATE`, after skipping leading SQL comments and quoted literals; it does not capture SQL text, bind values, result rows, connection URLs, driver metadata, network addresses, JDBC login argument values, arbitrary JDBC properties, baggage, tracestate, exception messages, or stack traces. It does not install a Java agent, register a driver, patch `DriverManager`, mutate SQL comments, or affect other data sources/connections.
 
 ## Support Ticket Drafts
 
