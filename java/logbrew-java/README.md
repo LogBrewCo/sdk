@@ -312,7 +312,7 @@ The filter reads only the incoming `traceparent` header, makes the request trace
 
 ## Dependency Spans
 
-Use `LogBrewOperationTracing` around app-owned database, cache, or queue calls when you want request-to-dependency timing without a Java agent, JDBC proxy, Redis/Kafka client dependency, or global patching:
+Use `LogBrewOperationTracing` around app-owned database, cache, or queue calls when you want request-to-dependency timing without a Java agent, driver dependency, Redis/Kafka client dependency, or global patching:
 
 ```java
 import co.logbrew.sdk.LogBrewOperationTracing;
@@ -334,7 +334,37 @@ String orderId = LogBrewOperationTracing.databaseOperation(
 );
 ```
 
-The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, headers, cookies, and auth-like fields. These helpers do not import or patch JDBC, Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
+The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, headers, cookies, and auth-like fields. These helpers do not import or patch Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
+
+For JDBC apps that already own a `java.sql.Connection`, use `LogBrewJdbcTracing` when you want spans for statements created through that one connection:
+
+```java
+import co.logbrew.sdk.LogBrewJdbcTracing;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.Map;
+
+Connection tracedConnection = LogBrewJdbcTracing.instrumentConnection(
+    connection,
+    client,
+    LogBrewJdbcTracing.ConnectionConfig.create()
+        .system("postgresql")
+        .databaseName("orders")
+        .metadata(Map.of("service", "checkout-api"))
+);
+
+try (PreparedStatement statement = tracedConnection.prepareStatement(
+    "SELECT * FROM orders WHERE id = ?"
+)) {
+    statement.setString(1, orderId);
+    try (ResultSet result = statement.executeQuery()) {
+        // Use result normally.
+    }
+}
+```
+
+The wrapper uses only JDK JDBC interfaces and returns the original JDBC results or exceptions. It wraps `createStatement`, `prepareStatement`, and `prepareCall` results, emits one `jdbc:<VERB>` child span around `execute*` calls, records update counts when JDBC returns them, and can trace `commit()`/`rollback()` when `traceTransactions(true)` is set. It derives only the SQL verb locally, such as `SELECT` or `UPDATE`, after skipping leading SQL comments and quoted literals; it does not capture SQL text, bind values, result rows, connection URLs, driver metadata, network addresses, usernames, arbitrary JDBC properties, baggage, tracestate, exception messages, or stack traces. It does not install a Java agent, register a driver, patch `DriverManager`, mutate SQL comments, or affect other connections.
 
 ## Support Ticket Drafts
 

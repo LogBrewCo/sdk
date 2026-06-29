@@ -67,6 +67,8 @@ grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/binary-jar-co
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$DatabaseOperation.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$CacheOperation.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$QueueOperation.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewJdbcTracing.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewJdbcTracing\$ConnectionConfig.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SupportTicketDraft.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SupportTicketDraft\$Input.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewJulHandler.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -93,6 +95,7 @@ grep -q '^src/main/java/co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewServletFilter.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewOperationTracing.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/SupportTicketDraft.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewJulHandler.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewLogbackAppender.java$' "$tmp_dir/source-jar-contents.txt"
@@ -113,6 +116,7 @@ grep -q 'ProductTimeline' "$package_dir/README.md"
 grep -q 'Traceparent' "$package_dir/README.md"
 grep -q 'LogBrewOpenTelemetry' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
+grep -q 'LogBrewJdbcTracing' "$package_dir/README.md"
 grep -q 'LogBrewServletFilter' "$package_dir/README.md"
 grep -q 'LogBrewSpringBootAutoConfiguration' "$package_dir/README.md"
 grep -q 'SupportTicketDraft' "$package_dir/README.md"
@@ -215,6 +219,7 @@ import co.logbrew.sdk.LogAttributes;
 import co.logbrew.sdk.LogBrewClient;
 import co.logbrew.sdk.LogBrewJulHandler;
 import co.logbrew.sdk.LogBrewLogbackAppender;
+import co.logbrew.sdk.LogBrewJdbcTracing;
 import co.logbrew.sdk.LogBrewOpenTelemetry;
 import co.logbrew.sdk.LogBrewOperationTracing;
 import co.logbrew.sdk.LogBrewTraceContext;
@@ -230,6 +235,9 @@ import co.logbrew.sdk.TransportException;
 import co.logbrew.sdk.TransportResponse;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
 import io.opentelemetry.api.trace.TraceFlags;
@@ -245,6 +253,11 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Handler;
@@ -450,6 +463,74 @@ public final class Main {
         require(!dependencyPayload.contains("private body"), "dependency metadata drops message body");
         require(!dependencyPayload.contains("private failure message body"), "dependency exception event drops messages");
 
+        LogBrewClient jdbcClient = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
+        RecordingJdbc jdbc = new RecordingJdbc();
+        Connection tracedConnection = LogBrewJdbcTracing.instrumentConnection(
+            fakeConnection(jdbc),
+            jdbcClient,
+            LogBrewJdbcTracing.ConnectionConfig.create()
+                .system("postgresql")
+                .databaseName("orders")
+                .eventIdPrefix("java_jdbc_smoke")
+                .spanIds(
+                    "b7ad6b7169203401",
+                    "b7ad6b7169203402",
+                    "b7ad6b7169203403",
+                    "b7ad6b7169203404"
+                )
+                .nowSequence(
+                    Instant.parse("2026-06-02T10:00:05Z"),
+                    Instant.parse("2026-06-02T10:00:05.011Z"),
+                    Instant.parse("2026-06-02T10:00:06Z"),
+                    Instant.parse("2026-06-02T10:00:06.015Z"),
+                    Instant.parse("2026-06-02T10:00:07Z"),
+                    Instant.parse("2026-06-02T10:00:07.003Z"),
+                    Instant.parse("2026-06-02T10:00:08Z"),
+                    Instant.parse("2026-06-02T10:00:08.004Z")
+                )
+                .metadata(Map.of(
+                    "service", "checkout",
+                    "sql", "SELECT private",
+                    "connectionString", "jdbc:postgresql://private.example/orders"
+                ))
+        );
+        ResultSet resultSet = tracedConnection
+            .createStatement()
+            .executeQuery("SELECT * FROM orders WHERE card_number = '4111111111111111'");
+        require(resultSet == jdbc.resultSet, "JDBC statement preserves result set");
+        PreparedStatement prepared = tracedConnection.prepareStatement(
+            "UPDATE orders SET status = 'private' WHERE id = ?"
+        );
+        require(prepared.executeUpdate() == 2, "JDBC prepared update row count");
+        SQLException originalSqlError = new SQLException("private SQL and bind values failed");
+        jdbc.failure = originalSqlError;
+        try {
+            tracedConnection.createStatement().execute("DELETE FROM orders WHERE session_marker = 'private'");
+            throw new AssertionError("expected JDBC failure");
+        } catch (SQLException expected) {
+            require(expected == originalSqlError, "JDBC helper preserves original SQLException");
+        }
+        jdbc.failure = null;
+        tracedConnection
+            .createStatement()
+            .executeQuery("/* CommentMarker private */ SELECT * FROM orders");
+        String jdbcPayload = jdbcClient.previewJson();
+        require(jdbcClient.pendingEvents() == 4, "JDBC helper queues four spans");
+        require(jdbcPayload.contains("\"source\": \"jdbc.statement\""), "JDBC span source");
+        require(jdbcPayload.contains("\"framework\": \"jdbc\""), "JDBC framework metadata");
+        require(jdbcPayload.contains("\"dbOperation\": \"SELECT\""), "JDBC select operation");
+        require(jdbcPayload.contains("\"dbOperation\": \"UPDATE\""), "JDBC update operation");
+        require(jdbcPayload.contains("\"rowCount\": 2"), "JDBC update row count");
+        require(jdbcPayload.contains("\"exceptionType\": \"SQLException\""), "JDBC exception type");
+        require(!jdbcPayload.contains("CommentMarker"), "JDBC omits leading SQL comment text");
+        require(!jdbcPayload.contains("COMMENTMARKER"), "JDBC omits leading SQL comment operation");
+        require(!jdbcPayload.contains("4111111111111111"), "JDBC omits SQL literal");
+        require(!jdbcPayload.contains("SELECT * FROM"), "JDBC omits raw select SQL");
+        require(!jdbcPayload.contains("UPDATE orders SET"), "JDBC omits raw update SQL");
+        require(!jdbcPayload.contains("DELETE FROM"), "JDBC omits raw error SQL");
+        require(!jdbcPayload.contains("private SQL"), "JDBC omits exception message");
+        require(!jdbcPayload.contains("private.example"), "JDBC omits connection URL");
+
         LogBrewClient otel = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
         SpanContext otelSpanContext = SpanContext.create(
             "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -618,7 +699,7 @@ public final class Main {
 
         runHttpTransportSmoke();
 
-        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"otelEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
+        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"jdbcEvents\":4,\"otelEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
     }
 
     private static void runHttpTransportSmoke() {
@@ -717,6 +798,98 @@ public final class Main {
         }
     }
 
+    private static Connection fakeConnection(RecordingJdbc jdbc) {
+        return proxy(Connection.class, (proxy, method, args) -> {
+            if ("createStatement".equals(method.getName())) {
+                return fakeStatement(jdbc, Statement.class);
+            }
+            if ("prepareStatement".equals(method.getName())) {
+                return fakeStatement(jdbc, PreparedStatement.class);
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static <T> T fakeStatement(RecordingJdbc jdbc, Class<?> interfaceType) {
+        return proxy(interfaceType, (proxy, method, args) -> {
+            if (method.getName().startsWith("execute")) {
+                if (jdbc.failure != null) {
+                    throw jdbc.failure;
+                }
+                if (method.getReturnType() == ResultSet.class) {
+                    return jdbc.resultSet;
+                }
+                if (method.getReturnType() == int.class) {
+                    return Integer.valueOf(2);
+                }
+                if (method.getReturnType() == boolean.class) {
+                    return Boolean.TRUE;
+                }
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static ResultSet fakeResultSet() {
+        return proxy(ResultSet.class, (proxy, method, args) -> defaultValue(method.getReturnType()));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T proxy(Class<?> interfaceType, InvocationHandler handler) {
+        return (T) Proxy.newProxyInstance(
+            interfaceType.getClassLoader(),
+            new Class<?>[] {interfaceType},
+            (proxy, method, args) -> {
+                if ("toString".equals(method.getName()) && method.getParameterCount() == 0) {
+                    return interfaceType.getSimpleName() + "Proxy";
+                }
+                if ("hashCode".equals(method.getName()) && method.getParameterCount() == 0) {
+                    return Integer.valueOf(System.identityHashCode(proxy));
+                }
+                if ("equals".equals(method.getName()) && method.getParameterCount() == 1) {
+                    return Boolean.valueOf(proxy == args[0]);
+                }
+                return handler.invoke(proxy, method, args == null ? new Object[0] : args);
+            }
+        );
+    }
+
+    private static Object defaultValue(Class<?> type) {
+        if (type == void.class) {
+            return null;
+        }
+        if (type == boolean.class) {
+            return Boolean.FALSE;
+        }
+        if (type == int.class) {
+            return Integer.valueOf(0);
+        }
+        if (type == long.class) {
+            return Long.valueOf(0L);
+        }
+        if (type == double.class) {
+            return Double.valueOf(0.0);
+        }
+        if (type == float.class) {
+            return Float.valueOf(0.0f);
+        }
+        if (type == short.class) {
+            return Short.valueOf((short) 0);
+        }
+        if (type == byte.class) {
+            return Byte.valueOf((byte) 0);
+        }
+        if (type == char.class) {
+            return Character.valueOf('\0');
+        }
+        return null;
+    }
+
+    private static final class RecordingJdbc {
+        private final ResultSet resultSet = fakeResultSet();
+        private SQLException failure;
+    }
+
     private static final class QueueFailure extends Exception {
         private static final long serialVersionUID = 1L;
 
@@ -773,6 +946,7 @@ grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"logbackEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"timelineEvents":2' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"jdbcEvents":4' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"otelEvents":1' "$tmp_dir/smoke-app.stderr.json"
 
 jdeps --multi-release 11 --class-path "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_optional_classpath" "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jdeps.txt"

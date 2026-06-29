@@ -177,6 +177,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_sdk_metadata_denylist_literal(relative_text, line):
         return True
 
+    if is_java_jdbc_metadata_denylist_literal(relative_text, line):
+        return True
+
     if is_release_artifact_upload_verifier_reference(relative_text, line):
         return True
 
@@ -347,6 +350,34 @@ def is_sdk_metadata_denylist_literal(relative_text: str, line: str) -> bool:
         "token",
         "url",
         "user",
+        "value",
+    }
+
+
+def is_java_jdbc_metadata_denylist_literal(relative_text: str, line: str) -> bool:
+    if relative_text != "java/logbrew-java/src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java":
+        return False
+    return line.strip().strip(",").strip("\"'") in {
+        "auth",
+        "authorization",
+        "connectionstring",
+        "cookie",
+        "cookies",
+        "header",
+        "headers",
+        "host",
+        "hostname",
+        "key",
+        "param",
+        "params",
+        "password",
+        "query",
+        "secret",
+        "sql",
+        "statement",
+        "token",
+        "url",
+        "username",
         "value",
     }
 
