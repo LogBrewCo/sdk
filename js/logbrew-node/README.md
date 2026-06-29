@@ -216,6 +216,34 @@ const orders = await databaseOperationWithLogBrewSpan("orders.select_by_id", {
 
 The helper returns or rethrows exactly what your `operation` does, records one child span, and keeps the active trace available inside asynchronous work started by the operation. Metadata records the DB system, operation name, operation kind, optional database name, optional safe statement template, row count, duration, sampled flag, W3C trace IDs, and portable DB semantic metadata (`db.system.name`, `db.operation.name`, `db.namespace`). Optional `events` record up to eight explicit low-cardinality span milestones with primitive metadata; optional `links` record up to eight related trace/span IDs with primitive metadata for fan-out, batch, retry, or queue relationships; failed operations add a type-only `exception` event. It does not monkey-patch drivers, capture raw SQL, serialize parameters, record connection strings, store auth values, collect result rows, include database error messages/stacks, infer baggage/tracestate, or store raw propagation headers.
 
+### `pg` Query Spans
+
+Use `instrumentLogBrewPgClient()` when your app already uses `pg` and wants query spans without global patching. Pass the app-owned `Client` or `Pool`, keep `pg` as your own dependency, and uninstall when the wrapped instance should return to its original behavior:
+
+```js
+import { createLogBrewNodeClient, instrumentLogBrewPgClient } from "@logbrew/node";
+import pg from "pg";
+
+const client = createLogBrewNodeClient({ sdkName: "checkout-api", sdkVersion: "1.4.0" });
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+
+const pgInstrumentation = instrumentLogBrewPgClient(pool, {
+  client,
+  databaseName: "checkout",
+  metadata: { feature: "checkout" }
+});
+
+const result = await pool.query({
+  name: "orders.select_by_id",
+  text: "SELECT * FROM orders WHERE id = $1",
+  values: [orderId]
+});
+
+pgInstrumentation.uninstall();
+```
+
+The wrapper records one child span per `query()` call, preserves Promise and callback query results, rethrows driver errors, and uses the active LogBrew request trace when one exists. Metadata includes `framework: "node:pg"`, `db.system.name: "postgresql"`, operation kind, safe prepared-statement name when present, optional database name, row count, duration, sampled flag, and W3C trace IDs. Failed queries add a type-only `exception` event. It does not patch the `pg` module globally, capture raw SQL, serialize parameters, record result rows, store connection strings, read connection endpoint/user/passphrase fields, inject SQL comments, infer baggage/tracestate, or store raw propagation headers.
+
 ## Cache Operation Spans
 
 Use `cacheOperationWithLogBrewSpan()` around important app-owned cache calls when you want cache timing and hit/miss correlation without installing Redis or memcached instrumentation:

@@ -21,6 +21,8 @@
   "files": [
     "index.cjs",
     "index.js",
+    "pg.cjs",
+    "pg.js",
     "trace-context.cjs",
     "trace-context.js",
     "index.d.ts",
@@ -51,6 +53,6 @@
     "@logbrew/sdk": "^0.1.3"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check trace-context.js && node --check trace-context.cjs && node --check examples/index.mjs && node --check examples/first-useful-telemetry.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check pg.js && node --check pg.cjs && node --check trace-context.js && node --check trace-context.cjs && node --check examples/index.mjs && node --check examples/first-useful-telemetry.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
   }
 }

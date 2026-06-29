@@ -181,6 +181,37 @@ export type DatabaseOperationWithLogBrewSpanOptions<Result = unknown> = {
   ) => void | Promise<void>;
 };
 
+export type LogBrewPgQueryable = {
+  query: (...args: unknown[]) => unknown;
+};
+
+export type LogBrewPgInstrumentation = {
+  isInstalled(): boolean;
+  uninstall(): void;
+};
+
+export type LogBrewPgClientInstrumentationOptions = {
+  client: LogBrewClient;
+  databaseName?: string;
+  operationKind?: string;
+  operationName?: string;
+  trace?: LogBrewTraceContext;
+  id?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  now?: () => string;
+  nowMs?: () => number;
+  spanIdFactory?: () => string;
+  traceIdFactory?: () => string;
+  onCaptureError?: (
+    error: unknown,
+    context: {
+      client: LogBrewClient;
+      error?: unknown;
+      trace: LogBrewTraceContext;
+    }
+  ) => void | Promise<void>;
+};
+
 export type CacheOperationWithLogBrewSpanOptions<Result = unknown> = {
   client: LogBrewClient;
   operation: () => Result | Promise<Result>;
@@ -283,6 +314,11 @@ export declare function databaseOperationWithLogBrewSpan<Result>(
   options: DatabaseOperationWithLogBrewSpanOptions<Result>
 ): Promise<Awaited<Result>>;
 
+export declare function instrumentLogBrewPgClient(
+  pgClient: LogBrewPgQueryable,
+  options: LogBrewPgClientInstrumentationOptions
+): LogBrewPgInstrumentation;
+
 export declare function cacheOperationWithLogBrewSpan<Result>(
   operationName: string,
   options: CacheOperationWithLogBrewSpanOptions<Result>
@@ -347,6 +383,7 @@ declare const defaultExport: {
   databaseOperationWithLogBrewSpan: typeof databaseOperationWithLogBrewSpan;
   fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
+  instrumentLogBrewPgClient: typeof instrumentLogBrewPgClient;
   queueBatchOperationWithLogBrewSpan: typeof queueBatchOperationWithLogBrewSpan;
   queueOperationWithLogBrewSpan: typeof queueOperationWithLogBrewSpan;
   withLogBrewHttpHandler: typeof withLogBrewHttpHandler;

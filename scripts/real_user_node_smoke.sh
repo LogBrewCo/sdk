@@ -38,6 +38,8 @@ tar -tzf "$node_tgz" > "$tmp_dir/node-tarball.txt"
 grep -q '^package/README.md$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/pg.js$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/pg.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/examples/first-useful-telemetry.mjs$' "$tmp_dir/node-tarball.txt"
@@ -56,6 +58,7 @@ grep -q 'queueOperationWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'createNodeFetchTransport' "$tmp_dir/node-readme.md"
 grep -q 'databaseOperationWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'fetchWithLogBrewSpan' "$tmp_dir/node-readme.md"
+grep -q 'instrumentLogBrewPgClient' "$tmp_dir/node-readme.md"
 grep -q 'withLogBrewHttpHandler' "$tmp_dir/node-readme.md"
 grep -q 'node:http' "$tmp_dir/node-readme.md"
 grep -q 'traceparent' "$tmp_dir/node-readme.md"
@@ -70,6 +73,8 @@ npm install \
   --save-exact \
   "$core_tgz" \
   "$node_tgz" \
+  "pg" \
+  "pg-mem" \
   "typescript" \
   "@types/node" \
   >/dev/null
@@ -112,9 +117,11 @@ import {
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
+  instrumentLogBrewPgClient,
   queueOperationWithLogBrewSpan,
   withLogBrewHttpHandler
 } from "@logbrew/node";
+import { newDb } from "pg-mem";
 
 const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 const requestTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
@@ -431,6 +438,119 @@ if (
   databasePayloadJson.includes("db.statement")
 ) {
   throw new Error(`database span leaked query details or unsafe metadata: ${databaseClient.previewJson()}`);
+}
+
+const pgClient = createLogBrewNodeClient({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "node-pg-instrumentation-smoke",
+  sdkVersion: "0.1.0"
+});
+const pgDb = newDb();
+pgDb.public.none("create table orders(id integer primary key, name text); insert into orders values (42, 'Ada');");
+const pgAdapter = pgDb.adapters.createPg();
+const pgPool = new pgAdapter.Pool();
+const pgClock = [400, 417, 420, 441, 450, 456];
+const pgSpanIds = ["a7ad6b7169203331", "a7ad6b7169203332", "a7ad6b7169203333"];
+const pgInstrumentation = instrumentLogBrewPgClient(pgPool, {
+  client: pgClient,
+  databaseName: "checkout",
+  metadata: {
+    connectionString: "postgres://user:pass@localhost:5432/checkout",
+    safeFeature: "checkout"
+  },
+  now: () => "2026-06-02T10:00:15Z",
+  nowMs: () => pgClock.shift() ?? 441,
+  spanIdFactory: () => pgSpanIds.shift() ?? "a7ad6b7169203333",
+  trace: operationTrace
+});
+if (!pgInstrumentation.isInstalled()) {
+  throw new Error("expected pg instrumentation to report installed");
+}
+const pgResult = await pgPool.query({
+  name: "orders.select_by_id",
+  text: "select * from orders where id=$1",
+  values: [42]
+});
+if (pgResult.rowCount !== 1 || pgResult.rows[0]?.name !== "Ada") {
+  throw new Error(`pg instrumentation changed query result: ${JSON.stringify(pgResult)}`);
+}
+let pgErrorRethrown = false;
+await pgPool.query("select * from missing_table where email=$1", ["user@example.com"]).catch((error) => {
+  pgErrorRethrown = error instanceof Error;
+});
+if (!pgErrorRethrown) {
+  throw new Error("pg instrumentation should rethrow query errors");
+}
+const pgCallbackResult = await new Promise((resolve, reject) => {
+  pgPool.query({
+    name: "orders.callback_select",
+    text: "select * from orders where id=$1",
+    values: [42]
+  }, (error, result) => {
+    if (error) {
+      reject(error);
+      return;
+    }
+    resolve(result);
+  });
+});
+if (pgCallbackResult.rowCount !== 1 || pgCallbackResult.rows[0]?.name !== "Ada") {
+  throw new Error(`pg instrumentation changed callback query result: ${JSON.stringify(pgCallbackResult)}`);
+}
+pgInstrumentation.uninstall();
+if (pgInstrumentation.isInstalled()) {
+  throw new Error("expected pg instrumentation to report uninstalled");
+}
+await pgPool.end();
+const pgPayload = JSON.parse(pgClient.previewJson());
+const pgSpanEvent = pgPayload.events.find((event) => event.id === "evt_node_pg_select_orders_select_by_id");
+const pgCallbackSpanEvent = pgPayload.events.find((event) => event.id === "evt_node_pg_select_orders_callback_select");
+const pgErrorSpanEvent = pgPayload.events.find((event) => event.id === "evt_node_pg_query_error");
+if (!pgSpanEvent || pgSpanEvent.type !== "span") {
+  throw new Error(`missing pg query span payload: ${pgClient.previewJson()}`);
+}
+if (pgSpanEvent.attributes.name !== "postgresql SELECT orders.select_by_id") {
+  throw new Error(`unexpected pg query span name: ${pgClient.previewJson()}`);
+}
+if (
+  pgSpanEvent.attributes.traceId !== operationTrace.traceId ||
+  pgSpanEvent.attributes.parentSpanId !== operationTrace.spanId ||
+  pgSpanEvent.attributes.spanId !== "a7ad6b7169203331"
+) {
+  throw new Error(`pg query span did not correlate with active trace: ${pgClient.previewJson()}`);
+}
+assertMetadata(pgSpanEvent.attributes.metadata, {
+  "db.namespace": "checkout",
+  "db.operation.name": "SELECT",
+  "db.system.name": "postgresql",
+  dbName: "checkout",
+  dbOperation: "orders.select_by_id",
+  dbOperationKind: "SELECT",
+  dbSystem: "postgresql",
+  framework: "node:pg",
+  rowCount: 1,
+  safeFeature: "checkout"
+}, "pg query span missing useful metadata", pgClient.previewJson());
+if (!pgErrorSpanEvent || pgErrorSpanEvent.attributes.status !== "error") {
+  throw new Error(`missing pg error span payload: ${pgClient.previewJson()}`);
+}
+if (!pgCallbackSpanEvent || pgCallbackSpanEvent.attributes.spanId !== "a7ad6b7169203333") {
+  throw new Error(`missing pg callback span payload: ${pgClient.previewJson()}`);
+}
+if (!pgErrorSpanEvent.attributes.metadata.errorType) {
+  throw new Error(`pg error span should include error type only: ${pgClient.previewJson()}`);
+}
+assertJsonEqual(pgErrorSpanEvent.attributes.events, exceptionEvents(pgErrorSpanEvent.attributes.metadata.errorType), "pg error span should include a bounded exception span event", pgClient.previewJson());
+const pgPayloadJson = JSON.stringify(pgPayload);
+if (
+  pgPayloadJson.includes("user@example.com") ||
+  pgPayloadJson.includes("missing_table") ||
+  pgPayloadJson.includes("select *") ||
+  pgPayloadJson.includes("connectionString") ||
+  pgPayloadJson.includes("localhost") ||
+  pgPayloadJson.includes("pass@")
+) {
+  throw new Error(`pg instrumentation leaked query or connection details: ${pgClient.previewJson()}`);
 }
 
 const cacheClient = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY", sdkName: "node-cache-span-smoke", sdkVersion: "0.1.0" });
@@ -833,8 +953,11 @@ import {
   createLogBrewNodeClient,
   databaseOperationWithLogBrewSpan,
   getActiveLogBrewTrace,
+  instrumentLogBrewPgClient,
   queueOperationWithLogBrewSpan,
   type LogBrewNodeContext,
+  type LogBrewPgInstrumentation,
+  type LogBrewPgQueryable,
   type LogBrewTraceContext,
   withLogBrewHttpHandler
 } from "@logbrew/node";
@@ -870,6 +993,16 @@ const databaseResult = await databaseOperationWithLogBrewSpan("orders.select_by_
   trace
 });
 databaseResult[0]?.id.toFixed();
+const typedPgClient: LogBrewPgQueryable = {
+  query: async () => ({ rowCount: 1 })
+};
+const typedPgInstrumentation: LogBrewPgInstrumentation = instrumentLogBrewPgClient(typedPgClient, {
+  client,
+  databaseName: "checkout",
+  metadata: { feature: "checkout" },
+  trace
+});
+typedPgInstrumentation.uninstall();
 const cacheResult = await cacheOperationWithLogBrewSpan("profile.get", {
   client,
   hit: true,
@@ -941,6 +1074,7 @@ npx tsc --project tsconfig.json
 
 node -e 'const node = require("@logbrew/node"); if (typeof node.withLogBrewHttpHandler !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.createNodeFetchTransport !== "function") process.exit(1)'
+node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewPgClient !== "function") process.exit(1)'
 
 node node_modules/@logbrew/node/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry' "$tmp_dir/launcher-help.txt"
