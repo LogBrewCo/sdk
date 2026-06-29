@@ -83,3 +83,32 @@ The helper stays intentionally smaller than the competitor defaults: no `redis` 
 ### Remaining Gaps
 
 LogBrew remains weaker than Sentry, Datadog, and OpenTelemetry for automatic Redis class instrumentation, pipeline spans, cluster coverage, Django/Flask cache hooks, memcached client wrapping, command filtering/obfuscation modes, connection metrics, broader semantic conventions, baggage/tracestate, and full OTel processor/exporter interop. The next safe step would be an optional framework-owned Redis/Django cache package only if installed-artifact proof and privacy defaults remain as clear as the one-client helper.
+
+## 2026-06-29 Redis Pipeline Refresh
+
+Source refresh:
+
+- Sentry Python SDK: `https://github.com/getsentry/sentry-python.git` at `707464306ca78d4928e4668ba4d383948f7eb7fb`; read `sentry_sdk/integrations/redis/_sync_common.py` `patch_redis_pipeline(...)`, `sentry_sdk/integrations/redis/_async_common.py` `patch_redis_async_pipeline(...)`, `sentry_sdk/integrations/redis/utils.py` `_set_pipeline_data(...)`, and `sentry_sdk/integrations/redis/redis.py` `_patch_redis(...)`. Sentry patches Redis pipeline classes, starts `redis.pipeline.execute`, and records transaction/cluster booleans plus a capped safe command summary.
+- OpenTelemetry Python Contrib: `https://github.com/open-telemetry/opentelemetry-python-contrib.git` at `ec27300a9433f5985cd7467ee840037e12602a70`; read `opentelemetry-instrumentation-redis` `_traced_execute_pipeline_factory(...)`, `_async_traced_execute_pipeline_factory(...)`, and `util.py` `_build_span_meta_data_for_pipeline(...)`. OTel wraps sync and async pipeline execute paths, derives span names/resources from the command stack, and records `db.redis.pipeline_length`.
+- Datadog dd-trace-py: `https://github.com/DataDog/dd-trace-py.git` at `6091865277beba3afd0275954950456b79151d90`; read `ddtrace/contrib/internal/redis/patch.py` `instrumented_execute_pipeline(...)`, `ddtrace/contrib/internal/redis/asyncio_patch.py` `instrumented_async_execute_pipeline(...)`, and `ddtrace/contrib/internal/redis_utils.py` `_instrument_redis_execute_pipeline(...)`. Datadog wraps Redis pipeline classes and emits a `redis.execute_pipeline` span from a joined command summary.
+
+Design pattern and tradeoff:
+
+- Competitors treat Redis pipelines as one span around `execute()` rather than one span per queued command. They get useful batch timing and command counts, but rely on class patching and command-stack internals.
+- The safer LogBrew shape is opt-in instance-owned pipeline wrapping: only pipelines returned by the caller's instrumented client are wrapped, and only primitive operation labels are recorded.
+
+LogBrew update:
+
+- Added `trace_pipelines=True` to `instrument_redis_client_with_logbrew_spans(...)`.
+- When enabled, LogBrew wraps the app-owned client's `pipeline()` method, instruments each returned pipeline object's `execute()` method once, and emits one `redis PIPELINE` child span.
+- Pipeline spans include `framework=redis-py`, `cacheOperation=PIPELINE`, `cacheOperationKind=command`, optional caller `cacheName`, `pipelineLength`, and capped comma-separated operation names such as `GET,SET`.
+- They avoid global Redis class/module patching, cluster internals, pipeline keys, values, command arguments, pipeline execute arguments, response payloads, connection URLs, hosts, ports, usernames, baggage, tracestate, stacks, and exception messages.
+
+Verification:
+
+- Focused tests prove `trace_pipelines=True` preserves app-owned `pipeline()` arguments, activates a child trace during pipeline `execute()`, captures one sanitized pipeline span, keeps command keys/values and execute kwargs out of payloads, and `uninstall()` stops future pipeline spans.
+- `scripts/python_redis_span_smoke.py` now proves a real installed-artifact app shape with `redis>=5,<7`, sync command spans, opt-in sync pipeline spans, async command spans, error spans, capture-failure isolation, duplicate instrumentation reuse, and local privacy checks.
+
+Remaining gap after this refresh:
+
+- LogBrew now covers app-owned Redis command and opt-in pipeline execution spans. Sentry, Datadog, and OpenTelemetry still win for automatic Redis class instrumentation, cluster pipeline coverage, Django/Flask cache hooks, memcached wrapping, command filtering/obfuscation modes, connection metrics, broader semantic conventions, baggage/tracestate, and full OTel processor/exporter interop.

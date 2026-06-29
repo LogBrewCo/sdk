@@ -84,12 +84,14 @@ _DELETE_COMMANDS = {
     "DELETE",
     "UNLINK",
 }
+_PIPELINE_COMMAND_LIMIT = 8
 
 
 def instrument_redis_client_with_logbrew_spans(
     redis_client: Any,
     *,
     client: Any,
+    trace_pipelines: bool = False,
     event_id_factory: Callable[[], str] | None = None,
     timestamp: str | None = None,
     trace: LogBrewTraceContext | None = None,
@@ -112,6 +114,7 @@ def instrument_redis_client_with_logbrew_spans(
     instrumentation = LogBrewRedisInstrumentation(
         redis_client=redis_client,
         execute_command=execute_command,
+        pipeline=getattr(redis_client, "pipeline", None) if trace_pipelines else None,
         client=client,
         event_id_factory=event_id_factory or _default_redis_event_id,
         timestamp=timestamp,
@@ -135,6 +138,7 @@ class LogBrewRedisInstrumentation:
         *,
         redis_client: Any,
         execute_command: Callable[..., Any],
+        pipeline: Callable[..., Any] | None,
         client: Any,
         event_id_factory: Callable[[], str],
         timestamp: str | None,
@@ -147,6 +151,7 @@ class LogBrewRedisInstrumentation:
     ) -> None:
         self.redis_client = redis_client
         self._execute_command = execute_command
+        self._pipeline = pipeline
         self._client = client
         self._event_id_factory = event_id_factory
         self._timestamp = timestamp
@@ -165,20 +170,25 @@ class LogBrewRedisInstrumentation:
         return self._installed
 
     def install(self) -> None:
-        """Wrap the app-owned Redis client's execute_command method."""
+        """Wrap the app-owned Redis client's command methods."""
 
         if self._installed:
             return
         self.redis_client.execute_command = self._wrap_execute_command()
+        if callable(self._pipeline):
+            self.redis_client.pipeline = self._wrap_pipeline()
         self._installed = True
 
     def uninstall(self) -> None:
-        """Put the original execute_command method back on the client."""
+        """Put the original Redis client methods back on the client."""
 
         if not self._installed:
             return
         with suppress(Exception):
             self.redis_client.execute_command = self._execute_command
+        if callable(self._pipeline):
+            with suppress(Exception):
+                self.redis_client.pipeline = self._pipeline
         self._installed = False
         _forget_instrumentation(self.redis_client, self)
 
@@ -187,6 +197,14 @@ class LogBrewRedisInstrumentation:
             return self._execute_with_logbrew_span(args, kwargs)
 
         return execute_command_with_logbrew_span
+
+    def _wrap_pipeline(self) -> Callable[..., Any]:
+        def pipeline_with_logbrew_span(*args: Any, **kwargs: Any) -> Any:
+            pipeline = self._pipeline(*args, **kwargs) if self._pipeline is not None else None
+            self._instrument_pipeline(pipeline)
+            return pipeline
+
+        return pipeline_with_logbrew_span
 
     def _execute_with_logbrew_span(self, args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
         operation = _redis_operation(args)
@@ -227,6 +245,67 @@ class LogBrewRedisInstrumentation:
                 request.capture("error", error=error)
                 raise
         _set_result_metadata(request, operation, resolved)
+        request.capture("ok")
+        return resolved
+
+    def _instrument_pipeline(self, pipeline: Any) -> None:
+        execute = getattr(pipeline, "execute", None)
+        if not callable(execute) or getattr(pipeline, "_logbrew_redis_pipeline_wrapped", False):
+            return
+
+        def execute_pipeline_with_logbrew_span(*args: Any, **kwargs: Any) -> Any:
+            return self._execute_pipeline_with_logbrew_span(pipeline, execute, args, kwargs)
+
+        with suppress(Exception):
+            pipeline.execute = execute_pipeline_with_logbrew_span
+            pipeline._logbrew_redis_pipeline_wrapped = True
+
+    def _execute_pipeline_with_logbrew_span(
+        self,
+        pipeline: Any,
+        execute: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> Any:
+        if not self._installed:
+            return execute(*args, **kwargs)
+
+        pipeline_metadata = _pipeline_metadata(pipeline)
+        request = _cache_span_request(
+            operation_name="PIPELINE",
+            system="redis",
+            client=self._client,
+            event_id=self._event_id_factory(),
+            timestamp=self._timestamp,
+            trace=self._trace,
+            cache_name=self._cache_name,
+            cache_hit=None,
+            item_size_bytes=None,
+            item_count=None,
+            metadata={**self._metadata, "cacheOperationKind": "command", **pipeline_metadata},
+            span_events=None,
+            span_id_factory=self._span_id_factory,
+            clock=self._clock,
+            on_capture_error=self._on_capture_error,
+        )
+        try:
+            with use_logbrew_trace(request.trace):
+                result = execute(*args, **kwargs)
+        except Exception as error:
+            request.capture("error", error=error)
+            raise
+        if inspect.isawaitable(result):
+            return self._await_pipeline_result(request, result)
+        request.capture("ok")
+        return result
+
+    async def _await_pipeline_result(self, request: Any, result: Awaitable[T]) -> T:
+        with use_logbrew_trace(request.trace):
+            try:
+                resolved = await result
+            except Exception as error:
+                request.capture("error", error=error)
+                raise
         request.capture("ok")
         return resolved
 
@@ -307,6 +386,34 @@ def _read_item_size_bytes(result: Any) -> int | None:
     if isinstance(result, str):
         return len(result.encode("utf-8"))
     return None
+
+
+def _pipeline_metadata(pipeline: Any) -> _instrumentation.Metadata:
+    commands = _pipeline_commands(pipeline)
+    metadata: _instrumentation.Metadata = {"pipelineLength": len(commands)}
+    if commands:
+        metadata["pipelineOperations"] = ",".join(commands[:_PIPELINE_COMMAND_LIMIT])
+    return metadata
+
+
+def _pipeline_commands(pipeline: Any) -> list[str]:
+    command_stack = getattr(pipeline, "command_stack", None)
+    if command_stack is None:
+        command_stack = getattr(pipeline, "_command_stack", None)
+    if not isinstance(command_stack, list | tuple):
+        return []
+    return [_redis_operation(_pipeline_command_args(command)) for command in command_stack]
+
+
+def _pipeline_command_args(command: Any) -> tuple[Any, ...]:
+    command_args = getattr(command, "args", None)
+    if isinstance(command_args, tuple | list):
+        return tuple(command_args)
+    if isinstance(command, tuple | list):
+        if command and isinstance(command[0], tuple | list):
+            return tuple(command[0])
+        return tuple(command)
+    return ()
 
 
 def _redis_metadata(metadata: Mapping[str, Any] | None) -> _instrumentation.Metadata:

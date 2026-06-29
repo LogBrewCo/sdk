@@ -544,14 +544,16 @@ instrumentation = instrument_redis_client_with_logbrew_spans(
     redis_client,
     client=client,
     cache_name="profiles",
+    trace_pipelines=True,  # opt in when Redis pipeline execute timing matters
     metadata={"service": "checkout-api"},
 )
 
 profile = redis_client.get(profile_cache_key)
+pipeline_results = redis_client.pipeline().get(profile_cache_key).set(profile_cache_key, "fresh").execute()
 instrumentation.uninstall()
 ```
 
-The helper does not add `redis` as a LogBrew dependency and does not patch Redis classes globally. It wraps only the client instance you pass, returns the existing instrumentation on duplicate calls, activates a child trace during sync or async `execute_command` work, derives command name, read/write/delete kind, cache hit, result count, and byte size when safely knowable from the result, and reinstates the original method with `uninstall()`. It does not capture Redis keys, values, command arguments, connection URLs, network endpoints, ports, usernames, arbitrary command text, response payloads, baggage, tracestate, stack traces, or exception messages.
+The helper does not add `redis` as a LogBrew dependency and does not patch Redis classes globally. It wraps only the client instance you pass, returns the existing instrumentation on duplicate calls, activates a child trace during sync or async `execute_command` work, derives command name, read/write/delete kind, cache hit, result count, and byte size when safely knowable from the result, and reinstates the original method with `uninstall()`. With `trace_pipelines=True`, it also wraps pipelines returned by that client instance and records one sanitized `redis PIPELINE` span around `execute()`, including only pipeline length and capped operation names such as `GET,SET`. It does not capture Redis keys, values, command arguments, pipeline arguments, connection URLs, network endpoints, ports, usernames, arbitrary command text, response payloads, baggage, tracestate, stack traces, or exception messages.
 
 ## Queue Operation Spans
 

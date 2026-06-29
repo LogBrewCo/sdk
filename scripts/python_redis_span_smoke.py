@@ -21,8 +21,33 @@ class LocalRedis(redis.Redis):
         super().__init__(host="127.0.0.1", port=0, db=0)
         self.result = result
         self.active_span: str | None = None
+        self.pipeline_instance: LocalRedisPipeline | None = None
 
     def execute_command(self, *args: Any, **kwargs: Any) -> Any:
+        active = get_active_logbrew_trace()
+        self.active_span = active.span_id if active is not None else None
+        return self.result
+
+    def pipeline(self, *args: Any, **kwargs: Any) -> "LocalRedisPipeline":
+        self.pipeline_instance = LocalRedisPipeline([b"cached-profile", True])
+        return self.pipeline_instance
+
+
+class LocalRedisPipeline:
+    def __init__(self, result: Any) -> None:
+        self.result = result
+        self.active_span: str | None = None
+        self.command_stack: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def get(self, key: str) -> "LocalRedisPipeline":
+        self.command_stack.append((("GET", key), {}))
+        return self
+
+    def set(self, key: str, value: str) -> "LocalRedisPipeline":
+        self.command_stack.append((("SET", key, value), {}))
+        return self
+
+    def execute(self) -> Any:
         active = get_active_logbrew_trace()
         self.active_span = active.span_id if active is not None else None
         return self.result
@@ -66,6 +91,7 @@ parent_trace = LogBrewTraceContext(
 event_ids = iter(
     [
         "evt_python_redis_get",
+        "evt_python_redis_pipeline",
         "evt_python_redis_mget",
         "evt_python_redis_error",
     ]
@@ -73,11 +99,12 @@ event_ids = iter(
 span_ids = iter(
     [
         "b7ad6b7169203381",
+        "b7ad6b7169203385",
         "b7ad6b7169203382",
         "b7ad6b7169203383",
     ]
 )
-clock_values = iter([300.0, 300.011, 310.0, 310.013, 320.0, 320.004])
+clock_values = iter([300.0, 300.011, 305.0, 305.017, 310.0, 310.013, 320.0, 320.004])
 
 sync_redis = LocalRedis(b"cached-profile")
 async_redis_client = LocalAsyncRedis([b"one", None, b"", b"three"])
@@ -91,6 +118,7 @@ with use_logbrew_trace(parent_trace):
         event_id_factory=lambda: next(event_ids),
         timestamp="2026-06-29T12:00:00Z",
         cache_name="profiles",
+        trace_pipelines=True,
         span_id_factory=lambda: next(span_ids),
         clock=lambda: next(clock_values),
         metadata={
@@ -103,6 +131,9 @@ with use_logbrew_trace(parent_trace):
     captured["syncResult"] = sync_redis.get("sensitive:user:42")
     captured["syncActiveSpan"] = sync_redis.active_span
     captured["duplicateSame"] = duplicate is instrumentation
+    pipeline = sync_redis.pipeline(transaction=True)
+    captured["pipelineResult"] = pipeline.get("sensitive:user:42").set("sensitive:user:42", "sensitive-profile").execute()
+    captured["pipelineActiveSpan"] = pipeline.active_span
 
     async def run_async_redis() -> None:
         instrument_redis_client_with_logbrew_spans(
@@ -177,8 +208,8 @@ print(
     json.dumps(
         {
             "asyncActiveSpan": captured["asyncActiveSpan"],
-            "asyncCacheHit": metadata[1]["cacheHit"],
-            "asyncItemCount": metadata[1]["itemCount"],
+            "asyncCacheHit": metadata[2]["cacheHit"],
+            "asyncItemCount": metadata[2]["itemCount"],
             "cacheHit": metadata[0]["cacheHit"],
             "captureErrors": len(capture_errors),
             "cacheOperationKind": metadata[0]["cacheOperationKind"],
@@ -192,6 +223,10 @@ print(
             "ok": True,
             "operations": [item["cacheOperation"] for item in metadata],
             "parentSpanAfterRedis": captured["parentSpanAfterRedis"],
+            "pipelineActiveSpan": captured["pipelineActiveSpan"],
+            "pipelineLength": metadata[1]["pipelineLength"],
+            "pipelineOperations": metadata[1]["pipelineOperations"],
+            "pipelineResultCount": len(captured["pipelineResult"]),
             "syncActiveSpan": captured["syncActiveSpan"],
             "syncResult": captured["syncResult"].decode("utf-8"),
         },
