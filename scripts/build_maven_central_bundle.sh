@@ -117,6 +117,7 @@ build_java_artifacts() {
   local logback_classpath
   local opentelemetry_classpath
   local servlet_classpath
+  local spring_boot_classpath
   local optional_classpath
 
   find "$package_dir/src/main/java" -name '*.java' | sort > "$main_sources"
@@ -124,16 +125,23 @@ build_java_artifacts() {
   logback_classpath="$(fetch_java_logback_deps "$build_dir/java-logback-deps")"
   opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$build_dir/java-opentelemetry-deps")"
   servlet_classpath="$(fetch_java_servlet_deps "$build_dir/java-servlet-deps")"
-  optional_classpath="$logback_classpath:$opentelemetry_classpath:$servlet_classpath"
+  spring_boot_classpath="$(fetch_java_spring_boot_deps "$build_dir/java-spring-boot-deps")"
+  optional_classpath="$logback_classpath:$opentelemetry_classpath:$servlet_classpath:$spring_boot_classpath"
 
   javac -Xlint:all -Werror --release 11 -cp "$optional_classpath" -d "$classes_dir" @"$main_sources"
   javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$optional_classpath" -d "$javadoc_dir" @"$main_sources"
 
   jar --create --file "$build_dir/$artifact-$version-sources.jar" -C "$package_dir/src/main/java" .
+  if [[ -d "$package_dir/src/main/resources" ]]; then
+    jar --update --file "$build_dir/$artifact-$version-sources.jar" -C "$package_dir/src/main/resources" .
+  fi
   jar --create --file "$build_dir/$artifact-$version-javadoc.jar" -C "$javadoc_dir" .
   cp "$package_dir/pom.xml" "$jar_stage/META-INF/maven/co.logbrew/$artifact/pom.xml"
   cp "$package_dir/README.md" "$jar_stage/README.md"
   cp -R "$classes_dir/co" "$jar_stage/co"
+  if [[ -d "$package_dir/src/main/resources" ]]; then
+    cp -R "$package_dir/src/main/resources/." "$jar_stage/"
+  fi
   jar --create --file "$build_dir/$artifact-$version.jar" -C "$jar_stage" .
 }
 

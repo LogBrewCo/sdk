@@ -23,24 +23,27 @@ Improve Java rich tracing where LogBrew was weaker than Sentry, Datadog, and Ope
 
 - Added `LogBrewServletFilter`, an app-owned Jakarta Servlet `Filter` with no Spring dependency and no Java agent.
 - The filter reads only W3C `traceparent`, activates a `LogBrewTraceContext` during the downstream filter chain, then records one request span and one `http.server.duration` metric.
+- Added `LogBrewSpringBootAutoConfiguration`, which registers that filter only when Spring Boot, Jakarta Servlet, and an application-provided `LogBrewClient` bean are present.
 - Route naming prefers an app-owned `co.logbrew.routeTemplate` request attribute, then Spring MVC's `org.springframework.web.servlet.HandlerMapping.bestMatchingPattern`, then lower-quality servlet/request fallbacks.
 - The filter rethrows the original app exception, closes active trace scope, and swallows telemetry finish failures so logging/telemetry cannot change request behavior.
-- The public README shows app-owned Spring `FilterRegistrationBean` setup and states the privacy boundary.
+- The public README now shows the lower-friction Spring Boot bean setup first, then the manual `FilterRegistrationBean` path for non-Boot or custom servlet apps. The auto-configuration backs off when the app provides a `LogBrewServletFilter` bean or the named registration bean, and the README states the privacy boundary plus the `logbrew.servlet.enabled`, `logbrew.servlet.event-id-prefix`, and `logbrew.servlet.order` controls.
 
 ## Tradeoffs
 
-- Better for explicit production safety: no hidden bytecode weaving, no global HTTP patching, no body/header/cookie/query/full-URL capture, no baggage/tracestate capture, and no exporter/processor ownership.
+- Better for explicit production safety: no hidden bytecode weaving, no global HTTP patching, no client creation from properties, no body/header/cookie/query/full-URL capture, no baggage/tracestate capture, and no exporter/processor ownership.
 - Better for first useful installed-package proof: the Spring Boot smoke packs the local Maven artifact, installs it into a temporary app, sends a real HTTP request, verifies correlated Logback logs, request span, duration metric, W3C parent span, route template, retry-safe flushing, and privacy omissions.
-- Worse than Sentry, Datadog, and OpenTelemetry for automatic Spring Boot starter registration, async servlet completion tracking, `javax.servlet` compatibility, automatic outbound/JDBC/cache/messaging spans, full semantic conventions, baggage/tracestate, and agent-managed context propagation.
+- Still more conservative than Sentry, Datadog, and OpenTelemetry: LogBrew now auto-registers inside Spring Boot when an app-owned client bean exists, but it does not provide a dedicated starter that creates clients from properties, async servlet completion tracking, `javax.servlet` compatibility, automatic outbound/JDBC/cache/messaging spans, full semantic conventions, baggage/tracestate, or agent-managed context propagation.
 
 ## Verification
 
 - Red test first: `bash scripts/check_java_package.sh` failed because `LogBrewServletFilter` did not exist.
+- Follow-up red test: `bash scripts/real_user_spring_boot_smoke.sh` failed after removing the manual `FilterRegistrationBean`, proving the installed Spring Boot app had no automatic request span.
 - Green package gate: `bash scripts/check_java_package.sh` passed Java package tests, trace correlation tests, servlet filter tests, span event summary tests, OTel context tests, operation tracing tests, support-ticket draft tests, Maven metadata checks, javadocs, source jar checks, binary jar checks, and packaged examples.
-- Installed-artifact Spring smoke: `bash scripts/real_user_spring_boot_smoke.sh` passed with `spring-boot@4.0.6`. The smoke proved packed local SDK installation, Jakarta Servlet/Spring Web runtime dependencies, Logback request log correlation, route-template request span, duration metric, incoming W3C parent span continuation, no raw request path/query/propagation header, and bounded diagnostics for app-run failures.
+- Installed-artifact Spring smoke: `bash scripts/real_user_spring_boot_smoke.sh` passed with `spring-boot@4.0.6`. The smoke proved packed local SDK installation, Jakarta Servlet/Spring Web runtime dependencies, app-owned `LogBrewClient` bean auto-registration, Logback request log correlation, route-template request span, duration metric, incoming W3C parent span continuation, no raw request path/query/propagation header, and bounded diagnostics for app-run failures.
+- Additional local gates: `bash scripts/check_java_static.sh`, `bash scripts/real_user_java_smoke.sh`, `bash scripts/real_user_java_high_load_smoke.sh`, `bash scripts/check_shell_static.sh`, `bash scripts/build_maven_central_bundle.sh --output <temp>/maven-central-bundle.zip`, and `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_generated_artifacts.py` passed.
 
 ## Remaining Gaps
 
 - Add async servlet completion tracking only if real-user proof shows the current synchronous filter misses important spans.
-- Decide whether an optional Spring Boot starter is worth the coupling, or keep the app-owned filter as the safer default.
+- Decide whether a dedicated Spring Boot starter or property-driven client setup is worth the extra coupling; current behavior intentionally requires an app-owned client bean to avoid ingest-config ambiguity.
 - Java still needs source-backed automatic JDBC/cache/messaging/outbound HTTP integrations, deeper semantic conventions, baggage/tracestate decisions, and richer trace visual context before it can beat Sentry/Datadog on the full rich-trace experience.

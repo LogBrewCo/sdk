@@ -52,12 +52,16 @@ mkdir -p "$tmp_dir/classes" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbre
 java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
 java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps")"
 java_servlet_classpath="$(fetch_java_servlet_deps "$tmp_dir/java-servlet-deps")"
-java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath"
+java_spring_boot_classpath="$(fetch_java_spring_boot_deps "$tmp_dir/java-spring-boot-deps")"
+java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath"
 
 javac -Xlint:all -Werror --release 11 -cp "$java_optional_classpath" -d "$tmp_dir/classes" @"$main_sources"
 cp "$package_dir/pom.xml" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk/pom.xml"
 cp "$package_dir/README.md" "$tmp_dir/jar-stage/README.md"
 cp -R "$tmp_dir/classes/co" "$tmp_dir/jar-stage/co"
+if [ -d "$package_dir/src/main/resources" ]; then
+  cp -R "$package_dir/src/main/resources/." "$tmp_dir/jar-stage/"
+fi
 jar --create --file "$tmp_dir/logbrew-sdk-0.1.0.jar" -C "$tmp_dir/jar-stage" .
 
 maven_dir="$tmp_dir/maven/co/logbrew/logbrew-sdk/0.1.0"
@@ -109,7 +113,6 @@ package app;
 import ch.qos.logback.classic.LoggerContext;
 import co.logbrew.sdk.LogBrewClient;
 import co.logbrew.sdk.LogBrewLogbackAppender;
-import co.logbrew.sdk.LogBrewServletFilter;
 import co.logbrew.sdk.RecordingTransport;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -124,7 +127,6 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootVersion;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
@@ -220,15 +222,8 @@ public class Main implements CommandLineRunner {
     }
 
     @Bean
-    FilterRegistrationBean<LogBrewServletFilter> logbrewServletFilter() {
-        LogBrewServletFilter filter = new LogBrewServletFilter(
-            CLIENT,
-            "spring_boot_request",
-            Map.of("springApplicationName", "checkout-service")
-        );
-        FilterRegistrationBean<LogBrewServletFilter> registration = new FilterRegistrationBean<>(filter);
-        registration.setOrder(1);
-        return registration;
+    LogBrewClient logBrewClient() {
+        return CLIENT;
     }
 
     private void exerciseRequest() throws Exception {

@@ -6,7 +6,7 @@
 
 Public Java SDK for building, validating, previewing, and flushing LogBrew event batches.
 
-The core client, `HttpTransport`, request trace helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, and Jakarta Servlet helpers integrate with app-owned dependencies when those libraries are already present.
+The core client, `HttpTransport`, request trace helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, and Spring Boot helpers integrate with app-owned dependencies when those libraries are already present.
 
 ## Install
 
@@ -50,7 +50,7 @@ If you copy live OpenTelemetry span context with `LogBrewOpenTelemetry`, include
 </dependency>
 ```
 
-If you register `LogBrewServletFilter` in a Jakarta Servlet or Spring Boot 3+ app, include the Servlet API already used by your runtime:
+If you manually register `LogBrewServletFilter` in a Jakarta Servlet app, include the Servlet API already used by your runtime. Spring Boot servlet apps usually already get this from `spring-boot-starter-web`; they can use `LogBrewSpringBootAutoConfiguration` by exposing an app-owned `LogBrewClient` bean.
 
 ```xml
 <dependency>
@@ -72,7 +72,7 @@ import co.logbrew.sdk.TransportResponse;
 
 public final class App {
     public static void main(String[] args) {
-        LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "my-java-app", "1.0.0");
+        LogBrewClient client = LogBrewClient.create("LOGBREW_INGEST_KEY", "my-java-app", "1.0.0");
         client.release(
             "evt_release_001",
             "2026-06-02T10:00:00Z",
@@ -272,7 +272,21 @@ Map<String, String> outgoingHeaders = request.outgoingHeaders();
 
 ## Jakarta Servlet and Spring Requests
 
-Register `LogBrewServletFilter` when a Jakarta Servlet or Spring Boot 3+ service should turn each incoming request into the active LogBrew trace scope:
+Spring Boot 3+/4+ apps only need to expose the `LogBrewClient` they already own. When Spring Boot, Jakarta Servlet, and that client bean are present, `LogBrewSpringBootAutoConfiguration` registers the servlet filter automatically:
+
+```java
+import co.logbrew.sdk.LogBrewClient;
+import org.springframework.context.annotation.Bean;
+
+@Bean
+LogBrewClient logBrewClient() {
+    return LogBrewClient.create("LOGBREW_INGEST_KEY", "checkout-api", "1.0.0");
+}
+```
+
+The auto-configuration does not create clients from properties, load ingest config, patch servlet containers, or capture request bodies, arbitrary headers, cookies, query strings, full URLs, baggage, or tracestate. Set `logbrew.servlet.enabled=false` to disable registration, `logbrew.servlet.event-id-prefix` to change event IDs, and `logbrew.servlet.order` to tune filter order.
+
+For non-Boot Jakarta Servlet apps, register `LogBrewServletFilter` yourself. For Boot apps that want a fully custom registration, set `logbrew.servlet.enabled=false` before registering your own filter:
 
 ```java
 import co.logbrew.sdk.LogBrewClient;
@@ -362,7 +376,7 @@ import co.logbrew.sdk.TransportResponse;
 import java.time.Duration;
 import java.util.Map;
 
-LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "checkout-api", "1.0.0");
+LogBrewClient client = LogBrewClient.create("LOGBREW_INGEST_KEY", "checkout-api", "1.0.0");
 client.log(
     "evt_log_001",
     "2026-06-02T10:00:03Z",
@@ -391,7 +405,7 @@ import co.logbrew.sdk.LogBrewJulHandler;
 import co.logbrew.sdk.RecordingTransport;
 import java.util.logging.Logger;
 
-LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "checkout-api", "1.0.0");
+LogBrewClient client = LogBrewClient.create("LOGBREW_INGEST_KEY", "checkout-api", "1.0.0");
 RecordingTransport transport = RecordingTransport.alwaysAccept();
 LogBrewJulHandler handler = new LogBrewJulHandler(client, transport);
 
@@ -415,7 +429,7 @@ import co.logbrew.sdk.RecordingTransport;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
-LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "checkout-api", "1.0.0");
+LogBrewClient client = LogBrewClient.create("LOGBREW_INGEST_KEY", "checkout-api", "1.0.0");
 RecordingTransport transport = RecordingTransport.alwaysAccept();
 LogBrewLogbackAppender appender = new LogBrewLogbackAppender(client, transport, false);
 appender.setName("LOGBREW");
@@ -436,7 +450,7 @@ The appender maps SLF4J/Logback levels into canonical LogBrew severities, captur
 
 ## Spring Boot
 
-Spring Boot starters use Logback by default, so a Boot app can use the same optional appender without adding a LogBrew-specific Spring dependency. Attach the appender from code you own, usually after your `LogBrewClient` and transport are configured:
+Spring Boot starters use Logback by default, so a Boot app can use the same optional appender alongside the automatic servlet filter. Define your `LogBrewClient` bean once for `LogBrewSpringBootAutoConfiguration`, then attach the appender from code you own, usually after your client and transport are configured:
 
 ```java
 import co.logbrew.sdk.LogBrewClient;
@@ -447,7 +461,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.core.env.Environment;
 
-LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "checkout-api", "1.0.0");
+LogBrewClient client = LogBrewClient.create("LOGBREW_INGEST_KEY", "checkout-api", "1.0.0");
 RecordingTransport transport = RecordingTransport.alwaysAccept();
 
 LogBrewLogbackAppender appender = new LogBrewLogbackAppender(client, transport, false);
@@ -479,6 +493,7 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
 - `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when OpenTelemetry API jars are already present.
 - `LogBrewServletFilter` activates request-local trace context for Jakarta Servlet/Spring Boot handlers and emits one request span plus one duration metric without hidden Java-agent instrumentation.
+- `LogBrewSpringBootAutoConfiguration` registers that filter only when Spring Boot, Jakarta Servlet, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans with bounded `SpanEventSummary` markers, without adding driver dependencies or automatic client patching.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
@@ -488,5 +503,5 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `LogBrewJulHandler` queues standard `java.util.logging` records without mutating global logging configuration.
 - `LogBrewLogbackAppender` queues app-owned SLF4J/Logback records, including MDC and fluent key/value metadata, without changing global logger setup.
 - `ProductTimeline` queues app-owned product and network action timelines without automatic visual replay, HTTP client patching, payload capture, or header capture.
-- Spring Boot apps can attach `LogBrewLogbackAppender` and register `LogBrewServletFilter` from app-owned configuration without adding a required Spring runtime dependency to the SDK.
+- Spring Boot apps can attach `LogBrewLogbackAppender` from app-owned configuration while request tracing auto-registers from the same app-owned client bean.
 - `SdkException` exposes a stable `code()` and `detailMessage()` for user-facing failure handling.

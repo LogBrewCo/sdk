@@ -26,7 +26,8 @@ mkdir -p "$tmp_dir/classes" "$tmp_dir/test-classes" "$tmp_dir/example-classes" "
 java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
 java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps")"
 java_servlet_classpath="$(fetch_java_servlet_deps "$tmp_dir/java-servlet-deps")"
-java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath"
+java_spring_boot_classpath="$(fetch_java_spring_boot_deps "$tmp_dir/java-spring-boot-deps")"
+java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath"
 
 javac -Xlint:all -Werror --release 11 -cp "$java_optional_classpath" -d "$tmp_dir/classes" @"$main_sources"
 javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/classes:$java_optional_classpath" -d "$tmp_dir/test-classes" @"$test_sources"
@@ -56,6 +57,7 @@ test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewOpenTelemetry.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/SpanEventSummary.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewHttpRequestTelemetry.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewServletFilter.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewOperationTracing.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/SupportTicketDraft.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewJulHandler.html"
@@ -64,6 +66,9 @@ test -f "$tmp_dir/javadoc/co/logbrew/sdk/RecordingTransport.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/SdkException.html"
 
 jar --create --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" -C "$package_dir/src/main/java" .
+if [ -d "$package_dir/src/main/resources" ]; then
+  jar --update --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" -C "$package_dir/src/main/resources" .
+fi
 jar --list --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/sources-jar-contents.txt"
@@ -76,9 +81,11 @@ grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.java$' "$tmp_dir/sources-jar-conte
 grep -q '^co/logbrew/sdk/SpanEventSummary.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewServletFilter.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SupportTicketDraft.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/package-info.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports$' "$tmp_dir/sources-jar-contents.txt"
 
 jar --create --file "$tmp_dir/logbrew-sdk-0.1.0-javadoc.jar" -C "$tmp_dir/javadoc" .
 jar --list --file "$tmp_dir/logbrew-sdk-0.1.0-javadoc.jar" > "$tmp_dir/javadoc-jar-contents.txt"
@@ -94,6 +101,7 @@ grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.html$' "$tmp_dir/javadoc-jar-conte
 grep -q '^co/logbrew/sdk/SpanEventSummary.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewServletFilter.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SupportTicketDraft.html$' "$tmp_dir/javadoc-jar-contents.txt"
 
@@ -101,6 +109,9 @@ mkdir -p "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk"
 cp "$package_dir/pom.xml" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk/pom.xml"
 cp "$package_dir/README.md" "$tmp_dir/jar-stage/README.md"
 cp -R "$tmp_dir/classes/co" "$tmp_dir/jar-stage/co"
+if [ -d "$package_dir/src/main/resources" ]; then
+  cp -R "$package_dir/src/main/resources/." "$tmp_dir/jar-stage/"
+fi
 jar --create --file "$tmp_dir/logbrew-sdk-0.1.0.jar" -C "$tmp_dir/jar-stage" .
 jar --list --file "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/jar-contents.txt"
@@ -122,6 +133,7 @@ grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/jar-contents.txt
 grep -q '^co/logbrew/sdk/SpanEventSummary.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewServletFilter.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$DatabaseOperation.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$CacheOperation.class$' "$tmp_dir/jar-contents.txt"
@@ -133,6 +145,7 @@ grep -q '^co/logbrew/sdk/LogBrewLogbackAppender.class$' "$tmp_dir/jar-contents.t
 grep -q '^co/logbrew/sdk/RecordingTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/SdkException.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^META-INF/maven/co.logbrew/logbrew-sdk/pom.xml$' "$tmp_dir/jar-contents.txt"
+grep -q '^META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports$' "$tmp_dir/jar-contents.txt"
 grep -q '^README.md$' "$tmp_dir/jar-contents.txt"
 grep -q 'MetricAttributes' "$package_dir/README.md"
 grep -q 'ProductTimeline' "$package_dir/README.md"
@@ -141,6 +154,7 @@ grep -q 'LogBrewTraceContext' "$package_dir/README.md"
 grep -q 'LogBrewOpenTelemetry' "$package_dir/README.md"
 grep -q 'LogBrewHttpRequestTelemetry' "$package_dir/README.md"
 grep -q 'LogBrewServletFilter' "$package_dir/README.md"
+grep -q 'LogBrewSpringBootAutoConfiguration' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
 grep -q 'SupportTicketDraft' "$package_dir/README.md"
 grep -q 'droppedEvents()' "$package_dir/README.md"

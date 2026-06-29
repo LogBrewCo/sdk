@@ -49,6 +49,36 @@ fetch_java_servlet_deps() {
   printf '%s\n' "$deps_dir/jakarta.servlet-api-$servlet_version.jar"
 }
 
+fetch_java_spring_boot_deps() {
+  local deps_dir="$1"
+  local spring_boot_version="${LOGBREW_SPRING_BOOT_VERSION:-4.0.6}"
+  local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.7}"
+
+  mkdir -p "$deps_dir"
+  fetch_maven_jar \
+    "org/springframework/boot/spring-boot/$spring_boot_version/spring-boot-$spring_boot_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "org/springframework/boot/spring-boot-autoconfigure/$spring_boot_version/spring-boot-autoconfigure-$spring_boot_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "org/springframework/spring-core/$spring_framework_version/spring-core-$spring_framework_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "org/springframework/spring-context/$spring_framework_version/spring-context-$spring_framework_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "org/springframework/spring-beans/$spring_framework_version/spring-beans-$spring_framework_version" \
+    "$deps_dir"
+
+  printf '%s:%s:%s:%s:%s\n' \
+    "$deps_dir/spring-boot-$spring_boot_version.jar" \
+    "$deps_dir/spring-boot-autoconfigure-$spring_boot_version.jar" \
+    "$deps_dir/spring-core-$spring_framework_version.jar" \
+    "$deps_dir/spring-context-$spring_framework_version.jar" \
+    "$deps_dir/spring-beans-$spring_framework_version.jar"
+}
+
 fetch_maven_jar() {
   local artifact_path="$1"
   local deps_dir="$2"
