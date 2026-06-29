@@ -71,6 +71,7 @@ STEP_LABELS=(
   "C real-user smoke"
   "C++ real-user smoke"
   "Java real-user smoke"
+  "Java high-load installed-artifact smoke"
   "Spring Boot real-user smoke"
   ".NET real-user smoke"
   "Unity real-user smoke"
@@ -584,6 +585,10 @@ mark_step_complete
 
 begin_next_step "Java real-user smoke"
 run_shell_step "bash scripts/real_user_java_smoke.sh"
+mark_step_complete
+
+begin_next_step "Java high-load installed-artifact smoke"
+run_shell_step "bash scripts/real_user_java_high_load_smoke.sh"
 mark_step_complete
 
 begin_next_step "Spring Boot real-user smoke"

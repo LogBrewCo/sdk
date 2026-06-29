@@ -59,5 +59,11 @@
       <version>1.63.0</version>
       <optional>true</optional>
     </dependency>
+    <dependency>
+      <groupId>jakarta.servlet</groupId>
+      <artifactId>jakarta.servlet-api</artifactId>
+      <version>6.1.0</version>
+      <optional>true</optional>
+    </dependency>
   </dependencies>
 </project>

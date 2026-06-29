@@ -59,6 +59,19 @@ public final class LogBrewHttpRequestTelemetry {
     }
 
     /**
+     * Starts request telemetry by continuing an incoming W3C traceparent with base metadata.
+     */
+    public static LogBrewHttpRequestTelemetry start(
+        LogBrewClient client,
+        String method,
+        String routeTemplate,
+        String traceparent,
+        Map<String, ?> metadata
+    ) {
+        return start(client, method, routeTemplate, traceContextFromIncomingHeader(traceparent), metadata);
+    }
+
+    /**
      * Starts request telemetry from an explicit LogBrew trace context.
      */
     public static LogBrewHttpRequestTelemetry start(

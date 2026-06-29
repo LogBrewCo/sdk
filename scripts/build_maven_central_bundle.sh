@@ -116,13 +116,15 @@ build_java_artifacts() {
   local jar_stage="$build_dir/java-jar-stage"
   local logback_classpath
   local opentelemetry_classpath
+  local servlet_classpath
   local optional_classpath
 
   find "$package_dir/src/main/java" -name '*.java' | sort > "$main_sources"
   mkdir -p "$classes_dir" "$javadoc_dir" "$jar_stage/META-INF/maven/co.logbrew/$artifact"
   logback_classpath="$(fetch_java_logback_deps "$build_dir/java-logback-deps")"
   opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$build_dir/java-opentelemetry-deps")"
-  optional_classpath="$logback_classpath:$opentelemetry_classpath"
+  servlet_classpath="$(fetch_java_servlet_deps "$build_dir/java-servlet-deps")"
+  optional_classpath="$logback_classpath:$opentelemetry_classpath:$servlet_classpath"
 
   javac -Xlint:all -Werror --release 11 -cp "$optional_classpath" -d "$classes_dir" @"$main_sources"
   javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$optional_classpath" -d "$javadoc_dir" @"$main_sources"

@@ -14,8 +14,10 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -46,6 +48,8 @@ public final class LogBrewClientTest {
         testInvalidTimestampFailsValidation();
         testInvalidIssueLevelFailsValidation();
         testSeverityAliasesNormalizeBeforePreview();
+        testBoundedQueueDropsOverflowAndReportsCallback();
+        testDropCallbackFailureDoesNotInterruptCapture();
         testNegativeSpanDurationFailsValidation();
         testMetricEventValidatesExplicitContract();
         testMetricRejectsNonFiniteValue();
@@ -143,6 +147,60 @@ public final class LogBrewClientTest {
         assertContains(payload, "\"level\": \"critical\"");
         assertContains(payload, "\"level\": \"info\"");
         assertContains(payload, "\"level\": \"warning\"");
+        testsRun++;
+    }
+
+    private void testBoundedQueueDropsOverflowAndReportsCallback() {
+        List<LogBrewClient.EventDrop> drops = new ArrayList<>();
+        LogBrewClient client = LogBrewClient.create(
+            "LOGBREW_API_KEY",
+            "logbrew-java",
+            "0.1.0",
+            2,
+            3,
+            drops::add
+        );
+
+        for (int index = 0; index < 5; index++) {
+            client.log(
+                "evt_java_bounded_" + index,
+                "2026-06-02T10:00:0" + index + "Z",
+                LogAttributes.create("bounded log " + index, "info")
+            );
+        }
+
+        assertEquals(3, client.pendingEvents(), "bounded pending events");
+        assertEquals(2, client.droppedEvents(), "bounded dropped events");
+        assertEquals(2, drops.size(), "drop callback count");
+        assertEquals("evt_java_bounded_3", drops.get(0).eventId(), "first dropped event id");
+        assertEquals("log", drops.get(0).eventType(), "first dropped event type");
+        assertEquals("queue_overflow", drops.get(0).reason(), "first dropped event reason");
+        String payload = client.previewJson();
+        assertContains(payload, "evt_java_bounded_0");
+        assertContains(payload, "evt_java_bounded_2");
+        assertNotContains(payload, "evt_java_bounded_3");
+        assertNotContains(payload, "evt_java_bounded_4");
+        testsRun++;
+    }
+
+    private void testDropCallbackFailureDoesNotInterruptCapture() {
+        LogBrewClient client = LogBrewClient.create(
+            "LOGBREW_API_KEY",
+            "logbrew-java",
+            "0.1.0",
+            2,
+            1,
+            drop -> {
+                throw new IllegalStateException("drop callback failed");
+            }
+        );
+
+        client.log("evt_java_advisory_001", "2026-06-02T10:00:01Z", LogAttributes.create("kept", "info"));
+        client.log("evt_java_advisory_002", "2026-06-02T10:00:02Z", LogAttributes.create("dropped", "info"));
+
+        assertEquals(1, client.pendingEvents(), "advisory pending events");
+        assertEquals(1, client.droppedEvents(), "advisory dropped events");
+        assertContains(client.previewJson(), "evt_java_advisory_001");
         testsRun++;
     }
 

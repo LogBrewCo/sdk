@@ -4,7 +4,7 @@ LOGBREW_JAVA_EXTRA_CP ?=
 EXAMPLE_CP = build/classes$(if $(LOGBREW_JAVA_EXTRA_CP),:$(LOGBREW_JAVA_EXTRA_CP))
 SDK_SOURCES_CMD = find src/main/java -name '*.java'
 ifeq ($(strip $(LOGBREW_JAVA_EXTRA_CP)),)
-SDK_SOURCES_CMD = find src/main/java -name '*.java' ! -name 'LogBrewLogbackAppender.java' ! -name 'LogBrewOpenTelemetry.java'
+SDK_SOURCES_CMD = find src/main/java -name '*.java' ! -name 'LogBrewLogbackAppender.java' ! -name 'LogBrewOpenTelemetry.java' ! -name 'LogBrewServletFilter.java'
 endif
 
 help:

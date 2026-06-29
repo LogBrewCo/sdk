@@ -6,7 +6,7 @@
 
 Public Java SDK for building, validating, previewing, and flushing LogBrew event batches.
 
-The core client, `HttpTransport`, request trace helpers, and `java.util.logging` handler use only the JDK at runtime. The optional Logback appender integrates with app-owned SLF4J/Logback setups when those libraries are already present.
+The core client, `HttpTransport`, request trace helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, and Jakarta Servlet helpers integrate with app-owned dependencies when those libraries are already present.
 
 ## Install
 
@@ -47,6 +47,17 @@ If you copy live OpenTelemetry span context with `LogBrewOpenTelemetry`, include
   <groupId>io.opentelemetry</groupId>
   <artifactId>opentelemetry-common</artifactId>
   <version>1.63.0</version>
+</dependency>
+```
+
+If you register `LogBrewServletFilter` in a Jakarta Servlet or Spring Boot 3+ app, include the Servlet API already used by your runtime:
+
+```xml
+<dependency>
+  <groupId>jakarta.servlet</groupId>
+  <artifactId>jakarta.servlet-api</artifactId>
+  <version>6.1.0</version>
+  <scope>provided</scope>
 </dependency>
 ```
 
@@ -259,6 +270,32 @@ Map<String, String> outgoingHeaders = request.outgoingHeaders();
 
 `LogBrewTrace.activate(...)` reinstates the previous active trace when closed. Use `LogBrewTrace.wrapCurrent(...)` when handing work to another thread or executor; plain Java threads do not inherit request trace state automatically. The request helper falls back to a local root trace when incoming propagation is missing or malformed, while `Traceparent.parse(...)` stays strict for explicit validation paths. `LogBrewJulHandler` and `LogBrewLogbackAppender` attach active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata automatically, while preserving app-owned logger handlers and primitive metadata.
 
+## Jakarta Servlet and Spring Requests
+
+Register `LogBrewServletFilter` when a Jakarta Servlet or Spring Boot 3+ service should turn each incoming request into the active LogBrew trace scope:
+
+```java
+import co.logbrew.sdk.LogBrewClient;
+import co.logbrew.sdk.LogBrewServletFilter;
+import java.util.Map;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
+
+@Bean
+FilterRegistrationBean<LogBrewServletFilter> logbrewServletFilter(LogBrewClient client) {
+    LogBrewServletFilter filter = new LogBrewServletFilter(
+        client,
+        "checkout_request",
+        Map.of("service", "checkout-api")
+    );
+    FilterRegistrationBean<LogBrewServletFilter> registration = new FilterRegistrationBean<>(filter);
+    registration.setOrder(1);
+    return registration;
+}
+```
+
+The filter reads only the incoming `traceparent` header, makes the request trace active while your handler/logger code runs, and emits one span plus one `http.server.duration` metric after the chain completes. Route naming prefers `LogBrewServletFilter.ROUTE_TEMPLATE_ATTRIBUTE`, then Spring's best-matching route attribute, then servlet path/request URI fallback. It rethrows the original handler error, records a 500 status for unhandled failures when possible, strips query strings through the request helper, and never captures bodies, arbitrary headers, cookies, full URLs, baggage, tracestate, exception messages, or stack traces.
+
 ## Dependency Spans
 
 Use `LogBrewOperationTracing` around app-owned database, cache, or queue calls when you want request-to-dependency timing without a Java agent, JDBC proxy, Redis/Kafka client dependency, or global patching:
@@ -437,9 +474,11 @@ The `examples` directory contains copyable snippets for creating a client, produ
 ## Behavior
 
 - `previewJson()` returns the queued batch as pretty JSON.
+- `LogBrewClient` keeps a bounded in-memory queue of 1,000 events by default; use `LogBrewClient.create(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, drop -> ...)` to tune the cap and receive redacted advisory drop summaries. When the queue is full, the newest event is dropped, `droppedEvents()` increments, and drop-callback failures do not interrupt application logging.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
 - `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when OpenTelemetry API jars are already present.
+- `LogBrewServletFilter` activates request-local trace context for Jakarta Servlet/Spring Boot handlers and emits one request span plus one duration metric without hidden Java-agent instrumentation.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans with bounded `SpanEventSummary` markers, without adding driver dependencies or automatic client patching.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
@@ -449,5 +488,5 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `LogBrewJulHandler` queues standard `java.util.logging` records without mutating global logging configuration.
 - `LogBrewLogbackAppender` queues app-owned SLF4J/Logback records, including MDC and fluent key/value metadata, without changing global logger setup.
 - `ProductTimeline` queues app-owned product and network action timelines without automatic visual replay, HTTP client patching, payload capture, or header capture.
-- Spring Boot apps can attach `LogBrewLogbackAppender` to app-owned Logback loggers without adding a required Spring runtime dependency to the SDK.
+- Spring Boot apps can attach `LogBrewLogbackAppender` and register `LogBrewServletFilter` from app-owned configuration without adding a required Spring runtime dependency to the SDK.
 - `SdkException` exposes a stable `code()` and `detailMessage()` for user-facing failure handling.
