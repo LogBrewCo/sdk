@@ -322,6 +322,7 @@ def is_sdk_metadata_denylist_literal(relative_text: str, line: str) -> bool:
         "_instrumentation.py",
         "_queue_client.py",
         "_rq_client.py",
+        "_sqlalchemy_client.py",
     }:
         return False
     return line.strip().strip(",").strip("\"'") in {

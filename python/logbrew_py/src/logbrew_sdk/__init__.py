@@ -929,6 +929,10 @@ from logbrew_sdk._db_client import (  # noqa: E402
     async_database_operation_with_logbrew_span,
     database_operation_with_logbrew_span,
 )
+from logbrew_sdk._sqlalchemy_client import (  # noqa: E402
+    LogBrewSqlAlchemyInstrumentation,
+    instrument_sqlalchemy_engine_with_logbrew_spans,
+)
 from logbrew_sdk._cache_client import (  # noqa: E402
     async_cache_operation_with_logbrew_span,
     cache_operation_with_logbrew_span,
@@ -950,6 +954,7 @@ __all__ = [
     "LogAttributes",
     "LogBrewClient",
     "LogBrewLoggingHandler",
+    "LogBrewSqlAlchemyInstrumentation",
     "LogBrewTraceContext",
     "Metadata",
     "MetadataValue",
@@ -982,6 +987,7 @@ __all__ = [
     "database_operation_with_logbrew_span",
     "get_active_logbrew_trace",
     "httpx_request_with_logbrew_span",
+    "instrument_sqlalchemy_engine_with_logbrew_spans",
     "log_attributes_from_record",
     "parse_traceparent",
     "queue_operation_with_logbrew_span",

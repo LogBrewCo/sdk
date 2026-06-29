@@ -349,6 +349,23 @@ run_database_span_smoke() {
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_sqlalchemy_span_smoke() {
+    local output_prefix="$1"
+
+    python -m pip install "SQLAlchemy>=2,<3" >/dev/null
+    python "$repo_root/scripts/python_sqlalchemy_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"dbSystem": "sqlite"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"dbName": "checkout"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"framework": "sqlalchemy"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"duplicateSame": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"parentSpanAfterQueries": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"queryRows": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"errorStatus": "error"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"SELECT"' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_cache_span_smoke() {
     local output_prefix="$1"
 
@@ -435,6 +452,7 @@ run_reinstall_from_freeze() {
     run_requests_span_smoke "$output_prefix-freeze-requests-span"
     run_httpx_span_smoke "$output_prefix-freeze-httpx-span"
     run_database_span_smoke "$output_prefix-freeze-database-span"
+    run_sqlalchemy_span_smoke "$output_prefix-freeze-sqlalchemy-span"
     run_cache_span_smoke "$output_prefix-freeze-cache-span"
     run_queue_span_smoke "$output_prefix-freeze-queue-span"
 
@@ -487,6 +505,7 @@ run_reinstall_from_direct_requirement() {
     run_requests_span_smoke "$output_prefix-direct-requests-span"
     run_httpx_span_smoke "$output_prefix-direct-httpx-span"
     run_database_span_smoke "$output_prefix-direct-database-span"
+    run_sqlalchemy_span_smoke "$output_prefix-direct-sqlalchemy-span"
     run_cache_span_smoke "$output_prefix-direct-cache-span"
     run_queue_span_smoke "$output_prefix-direct-queue-span"
 
@@ -575,6 +594,7 @@ for needle in (
     "celery_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "rq_operation_with_logbrew_span",
@@ -2005,6 +2025,7 @@ required = {
     "logbrew_sdk/_instrumentation.py",
     "logbrew_sdk/_queue_client.py",
     "logbrew_sdk/_rq_client.py",
+    "logbrew_sdk/_sqlalchemy_client.py",
     "logbrew_sdk/_support_ticket.py",
     "logbrew_sdk/_trace_context.py",
     "logbrew_sdk/py.typed",
@@ -2035,6 +2056,7 @@ for needle in (
     "celery_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "rq_operation_with_logbrew_span",
@@ -2348,6 +2370,7 @@ run_urlopen_span_smoke "wheel-urlopen-span"
 run_requests_span_smoke "wheel-requests-span"
 run_httpx_span_smoke "wheel-httpx-span"
 run_database_span_smoke "wheel-database-span"
+run_sqlalchemy_span_smoke "wheel-sqlalchemy-span"
 run_cache_span_smoke "wheel-cache-span"
 run_queue_span_smoke "wheel-queue-span"
 
@@ -2382,6 +2405,7 @@ run_urlopen_span_smoke "wheel-reinstall-urlopen-span"
 run_requests_span_smoke "wheel-reinstall-requests-span"
 run_httpx_span_smoke "wheel-reinstall-httpx-span"
 run_database_span_smoke "wheel-reinstall-database-span"
+run_sqlalchemy_span_smoke "wheel-reinstall-sqlalchemy-span"
 run_cache_span_smoke "wheel-reinstall-cache-span"
 run_queue_span_smoke "wheel-reinstall-queue-span"
 
@@ -2426,6 +2450,7 @@ run_urlopen_span_smoke "sdist-urlopen-span"
 run_requests_span_smoke "sdist-requests-span"
 run_httpx_span_smoke "sdist-httpx-span"
 run_database_span_smoke "sdist-database-span"
+run_sqlalchemy_span_smoke "sdist-sqlalchemy-span"
 run_cache_span_smoke "sdist-cache-span"
 run_queue_span_smoke "sdist-queue-span"
 
@@ -2460,6 +2485,7 @@ run_urlopen_span_smoke "sdist-reinstall-urlopen-span"
 run_requests_span_smoke "sdist-reinstall-requests-span"
 run_httpx_span_smoke "sdist-reinstall-httpx-span"
 run_database_span_smoke "sdist-reinstall-database-span"
+run_sqlalchemy_span_smoke "sdist-reinstall-sqlalchemy-span"
 run_cache_span_smoke "sdist-reinstall-cache-span"
 run_queue_span_smoke "sdist-reinstall-queue-span"
 

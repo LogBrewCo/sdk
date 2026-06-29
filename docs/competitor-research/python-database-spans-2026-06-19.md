@@ -54,3 +54,26 @@ These were focused behavior checks, not full upstream test suites.
 - Python still lacks optional SQLAlchemy/DB-API integration packages for teams that want automatic coverage.
 - Cache and queue spans are still thinner than Sentry/Datadog/OpenTelemetry.
 - LogBrew now supports bounded span event summaries and type-only exception events for explicit DB spans, but still avoids baggage, tracestate, full OpenTelemetry event arrays/links, DB semantic conventions beyond the current safe metadata subset, and automatic query/fetch spans.
+
+## 2026-06-29 SQLAlchemy Engine Refresh
+
+Source refresh:
+
+- Sentry Python SDK: `https://github.com/getsentry/sentry-python.git` at `9c836062fc6f7244aae5046ce66814f0469c9891`; read `sentry_sdk/integrations/sqlalchemy.py`, especially `SqlalchemyIntegration.setup_once(...)`, `_before_cursor_execute(...)`, `_after_cursor_execute(...)`, `_handle_error(...)`, `_get_db_system(...)`, and `_set_db_data(...)`.
+- OpenTelemetry Python Contrib: `https://github.com/open-telemetry/opentelemetry-python-contrib.git` at `ec27300a9433f5985cd7467ee840037e12602a70`; read `instrumentation/opentelemetry-instrumentation-sqlalchemy/src/opentelemetry/instrumentation/sqlalchemy/__init__.py` and `engine.py`, especially `SQLAlchemyInstrumentor._instrument(...)`, `_wrap_create_engine(...)`, `_wrap_create_async_engine(...)`, `_wrap_connect(...)`, and `EngineTracer.__init__(...)`.
+- Datadog dd-trace-py: `https://github.com/DataDog/dd-trace-py.git` at `8f36ac8332c5eb789f20241e547c486f51ade9be`; read `ddtrace/contrib/internal/sqlalchemy/patch.py` and `engine.py`, especially `patch(...)`, `unpatch(...)`, `_wrap_create_engine(...)`, `trace_engine(...)`, `EngineTracer.attach(...)`, `_before_cur_exec(...)`, `_after_cur_exec(...)`, `_handle_db_error(...)`, `_set_tags_from_url(...)`, and `_set_tags_from_cursor(...)`.
+
+Observed pattern:
+
+- Sentry, Datadog, and OpenTelemetry all use SQLAlchemy event hooks around cursor execution and error handling; Datadog and OpenTelemetry also support broader global wrapping/patching of engine creation.
+- Competitors are stronger for automatic coverage and richer DB semantic fields. They also accept heavier runtime behavior: global integration/patching, more dependencies, richer DB connection metadata, or agent/exporter assumptions.
+
+LogBrew update:
+
+- Added `instrument_sqlalchemy_engine_with_logbrew_spans(engine, ...)` as an optional, app-owned SQLAlchemy engine helper in the core Python SDK.
+- The helper imports SQLAlchemy only when called, attaches listeners to exactly the passed engine, returns the existing instrumentation on duplicate calls, activates a child trace between `before_cursor_execute` and completion/error, emits one sanitized DB span, and removes listeners through `uninstall()`.
+- Captured metadata stays intentionally smaller than competitors: primitive caller metadata with sensitive-key filtering, `framework=sqlalchemy`, `dbSystem`, `dbOperation`, optional caller-supplied `dbName`, optional non-negative `rowCount`, sampled state, and type-only exceptions. It does not capture SQL text, SQL parameters, connection URLs, hosts, usernames, result rows, baggage, tracestate, stack traces, or exception messages.
+
+Remaining gap after this refresh:
+
+- LogBrew is now more practical for real SQLAlchemy users without adding a dependency or patching globals, but Sentry/Datadog/OpenTelemetry still win for drop-in global instrumentation, DB-API coverage, metrics, query comments, semantic-convention breadth, baggage/tracestate, and fetch/connect pool spans.

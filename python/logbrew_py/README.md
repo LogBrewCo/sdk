@@ -427,6 +427,37 @@ result = database_operation_with_logbrew_span(
 
 The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the DB system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the database result. Metadata is intentionally bounded to primitive caller metadata, `dbSystem`, `dbOperation`, optional `dbName`, optional `statementTemplate`, optional non-negative `rowCount`, sampled state, optional bounded span events, and exception type. It does not monkeypatch SQLAlchemy or DB-API drivers, does not open support tickets, and does not capture SQL parameters, result rows, connection strings, network addresses, sensitive configuration values, payloads, baggage, tracestate, stack traces, or exception messages.
 
+### SQLAlchemy Engine Spans
+
+Use `instrument_sqlalchemy_engine_with_logbrew_spans()` when your app already uses SQLAlchemy and you want one safe span per cursor execution from a caller-owned engine:
+
+```python
+from sqlalchemy import create_engine, text
+
+from logbrew_sdk import LogBrewClient, instrument_sqlalchemy_engine_with_logbrew_spans
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+engine = create_engine("sqlite:///:memory:")
+
+instrumentation = instrument_sqlalchemy_engine_with_logbrew_spans(
+    engine,
+    client=client,
+    db_name="checkout",
+    metadata={"service": "checkout-api"},
+)
+
+with engine.begin() as connection:
+    connection.execute(text("SELECT 1"))
+
+instrumentation.uninstall()
+```
+
+The helper imports SQLAlchemy only when you opt in, attaches listeners only to the engine you pass, returns the existing instrumentation on duplicate calls, activates a child trace while SQLAlchemy executes the statement, and removes listeners with `uninstall()`. For async SQLAlchemy engines, pass the owned `async_engine.sync_engine`. Captured metadata is bounded to primitive caller metadata, `framework=sqlalchemy`, `dbSystem`, `dbOperation`, optional `dbName`, optional non-negative `rowCount`, sampled state, and exception type. It does not patch global SQLAlchemy factories, wrap sessions, capture raw SQL, SQL parameters, connection URLs, hosts, usernames, result rows, baggage, tracestate, stack traces, or exception messages.
+
 ## Cache Operation Spans
 
 Use `cache_operation_with_logbrew_span()` for sync cache calls and `async_cache_operation_with_logbrew_span()` for async calls when you want one app-owned cache span without installing or patching Redis, memcached, Django cache, or Flask cache clients:
