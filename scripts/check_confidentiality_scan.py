@@ -321,6 +321,7 @@ def is_sdk_metadata_denylist_literal(relative_text: str, line: str) -> bool:
         "_db_client.py",
         "_instrumentation.py",
         "_queue_client.py",
+        "_redis_client.py",
         "_rq_client.py",
         "_sqlalchemy_client.py",
     }:
@@ -328,16 +329,23 @@ def is_sdk_metadata_denylist_literal(relative_text: str, line: str) -> bool:
     return line.strip().strip(",").strip("\"'") in {
         "arg",
         "bind",
+        "connection",
         "cookie",
         "credential",
+        "dsn",
         "header",
+        "host",
+        "key",
         "param",
         "password",
+        "port",
         "payload",
         "query",
         "secret",
         "statement",
         "token",
+        "url",
+        "user",
         "value",
     }
 

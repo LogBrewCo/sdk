@@ -925,18 +925,10 @@ from logbrew_sdk._http_client import (  # noqa: E402, I001
     requests_request_with_logbrew_span,
     urlopen_with_logbrew_span,
 )
-from logbrew_sdk._db_client import (  # noqa: E402
-    async_database_operation_with_logbrew_span,
-    database_operation_with_logbrew_span,
-)
-from logbrew_sdk._sqlalchemy_client import (  # noqa: E402
-    LogBrewSqlAlchemyInstrumentation,
-    instrument_sqlalchemy_engine_with_logbrew_spans,
-)
-from logbrew_sdk._cache_client import (  # noqa: E402
-    async_cache_operation_with_logbrew_span,
-    cache_operation_with_logbrew_span,
-)
+from logbrew_sdk._db_client import async_database_operation_with_logbrew_span, database_operation_with_logbrew_span  # noqa: E402
+from logbrew_sdk._sqlalchemy_client import LogBrewSqlAlchemyInstrumentation, instrument_sqlalchemy_engine_with_logbrew_spans  # noqa: E402, E501
+from logbrew_sdk._cache_client import async_cache_operation_with_logbrew_span, cache_operation_with_logbrew_span  # noqa: E402
+from logbrew_sdk._redis_client import LogBrewRedisInstrumentation, instrument_redis_client_with_logbrew_spans  # noqa: E402
 from logbrew_sdk._celery_client import celery_operation_with_logbrew_span  # noqa: E402
 from logbrew_sdk._queue_client import (  # noqa: E402
     async_queue_operation_with_logbrew_span,
@@ -954,6 +946,7 @@ __all__ = [
     "LogAttributes",
     "LogBrewClient",
     "LogBrewLoggingHandler",
+    "LogBrewRedisInstrumentation",
     "LogBrewSqlAlchemyInstrumentation",
     "LogBrewTraceContext",
     "Metadata",
@@ -987,6 +980,7 @@ __all__ = [
     "database_operation_with_logbrew_span",
     "get_active_logbrew_trace",
     "httpx_request_with_logbrew_span",
+    "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "log_attributes_from_record",
     "parse_traceparent",

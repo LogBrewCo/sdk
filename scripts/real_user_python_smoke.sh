@@ -384,6 +384,27 @@ run_cache_span_smoke() {
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_redis_span_smoke() {
+    local output_prefix="$1"
+
+    python -m pip install "redis>=5,<7" >/dev/null
+    python "$repo_root/scripts/python_redis_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"framework": "redis-py"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"duplicateSame": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"parentSpanAfterRedis": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"syncActiveSpan": "b7ad6b7169203381"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncActiveSpan": "b7ad6b7169203382"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"cacheOperationKind": "read"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"cacheHit": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncCacheHit": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"itemCount": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncItemCount": 2' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"errorStatus": "error"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"errorType": "StubRedisError"' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_queue_span_smoke() {
     local output_prefix="$1"
 
@@ -454,6 +475,7 @@ run_reinstall_from_freeze() {
     run_database_span_smoke "$output_prefix-freeze-database-span"
     run_sqlalchemy_span_smoke "$output_prefix-freeze-sqlalchemy-span"
     run_cache_span_smoke "$output_prefix-freeze-cache-span"
+    run_redis_span_smoke "$output_prefix-freeze-redis-span"
     run_queue_span_smoke "$output_prefix-freeze-queue-span"
 
     deactivate
@@ -507,6 +529,7 @@ run_reinstall_from_direct_requirement() {
     run_database_span_smoke "$output_prefix-direct-database-span"
     run_sqlalchemy_span_smoke "$output_prefix-direct-sqlalchemy-span"
     run_cache_span_smoke "$output_prefix-direct-cache-span"
+    run_redis_span_smoke "$output_prefix-direct-redis-span"
     run_queue_span_smoke "$output_prefix-direct-queue-span"
 
     deactivate
@@ -558,7 +581,9 @@ with zipfile.ZipFile(wheel_path) as archive:
         "logbrew_sdk/_http_client.py",
         "logbrew_sdk/_instrumentation.py",
         "logbrew_sdk/_queue_client.py",
+        "logbrew_sdk/_redis_client.py",
         "logbrew_sdk/_rq_client.py",
+        "logbrew_sdk/_sqlalchemy_client.py",
         "logbrew_sdk/_support_ticket.py",
         "logbrew_sdk/__init__.py",
         "logbrew_sdk/_timeline.py",
@@ -594,6 +619,7 @@ for needle in (
     "celery_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
@@ -636,7 +662,9 @@ with tarfile.open(sdist_path, "r:gz") as archive:
         f"{sdist_root}/src/logbrew_sdk/_http_client.py",
         f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
         f"{sdist_root}/src/logbrew_sdk/_queue_client.py",
+        f"{sdist_root}/src/logbrew_sdk/_redis_client.py",
         f"{sdist_root}/src/logbrew_sdk/_rq_client.py",
+        f"{sdist_root}/src/logbrew_sdk/_sqlalchemy_client.py",
         f"{sdist_root}/src/logbrew_sdk/_support_ticket.py",
         f"{sdist_root}/src/logbrew_sdk/_timeline.py",
         f"{sdist_root}/src/logbrew_sdk/_trace_context.py",
@@ -678,6 +706,8 @@ for needle in (
     "celery_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_redis_client_with_logbrew_spans",
+    "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "rq_operation_with_logbrew_span",
@@ -961,6 +991,7 @@ from logbrew_sdk import (
     LogAttributes,
     LogBrewClient,
     LogBrewLoggingHandler,
+    LogBrewRedisInstrumentation,
     MetricAttributes,
     RecordingTransport,
     ReleaseAttributes,
@@ -980,6 +1011,7 @@ from logbrew_sdk import (
     create_traceparent,
     database_operation_with_logbrew_span,
     httpx_request_with_logbrew_span,
+    instrument_redis_client_with_logbrew_spans,
     parse_traceparent,
     queue_operation_with_logbrew_span,
     requests_request_with_logbrew_span,
@@ -1232,6 +1264,25 @@ async def run_async_cache_typecheck() -> None:
 
 
 asyncio.run(run_async_cache_typecheck())
+
+
+class TypecheckRedisClient:
+    def execute_command(self, *_args: object, **_kwargs: object) -> bytes:
+        return b"ok"
+
+
+redis_client = TypecheckRedisClient()
+redis_instrumentation: LogBrewRedisInstrumentation = instrument_redis_client_with_logbrew_spans(
+    redis_client,
+    client=client,
+    event_id_factory=lambda: "evt_redis_typecheck",
+    timestamp="2026-06-02T10:00:13Z",
+    cache_name="health",
+    span_id_factory=lambda: "b7ad6b7169203341",
+)
+if redis_client.execute_command("GET", "private:user:42") != b"ok":
+    raise RuntimeError("unexpected redis result")
+redis_instrumentation.uninstall()
 
 queue_result = queue_operation_with_logbrew_span(
     "publish health",
@@ -2024,6 +2075,7 @@ required = {
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
     "logbrew_sdk/_queue_client.py",
+    "logbrew_sdk/_redis_client.py",
     "logbrew_sdk/_rq_client.py",
     "logbrew_sdk/_sqlalchemy_client.py",
     "logbrew_sdk/_support_ticket.py",
@@ -2056,6 +2108,7 @@ for needle in (
     "celery_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
@@ -2372,6 +2425,7 @@ run_httpx_span_smoke "wheel-httpx-span"
 run_database_span_smoke "wheel-database-span"
 run_sqlalchemy_span_smoke "wheel-sqlalchemy-span"
 run_cache_span_smoke "wheel-cache-span"
+run_redis_span_smoke "wheel-redis-span"
 run_queue_span_smoke "wheel-queue-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
@@ -2407,6 +2461,7 @@ run_httpx_span_smoke "wheel-reinstall-httpx-span"
 run_database_span_smoke "wheel-reinstall-database-span"
 run_sqlalchemy_span_smoke "wheel-reinstall-sqlalchemy-span"
 run_cache_span_smoke "wheel-reinstall-cache-span"
+run_redis_span_smoke "wheel-reinstall-redis-span"
 run_queue_span_smoke "wheel-reinstall-queue-span"
 
 deactivate
@@ -2452,6 +2507,7 @@ run_httpx_span_smoke "sdist-httpx-span"
 run_database_span_smoke "sdist-database-span"
 run_sqlalchemy_span_smoke "sdist-sqlalchemy-span"
 run_cache_span_smoke "sdist-cache-span"
+run_redis_span_smoke "sdist-redis-span"
 run_queue_span_smoke "sdist-queue-span"
 
 python -m pip uninstall -y logbrew-sdk >/dev/null
@@ -2487,6 +2543,7 @@ run_httpx_span_smoke "sdist-reinstall-httpx-span"
 run_database_span_smoke "sdist-reinstall-database-span"
 run_sqlalchemy_span_smoke "sdist-reinstall-sqlalchemy-span"
 run_cache_span_smoke "sdist-reinstall-cache-span"
+run_redis_span_smoke "sdist-reinstall-redis-span"
 run_queue_span_smoke "sdist-reinstall-queue-span"
 
 cat > "$tmp_dir/unauth.py" <<'EOF'

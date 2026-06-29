@@ -490,6 +490,35 @@ profile = cache_operation_with_logbrew_span(
 
 The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the cache system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the cache result. Metadata is intentionally bounded to primitive caller metadata, `cacheSystem`, `cacheOperation`, optional `cacheName`, optional hit state, optional non-negative item size/count, sampled state, optional bounded span events, and exception type. It drops key-like metadata fields and does not monkeypatch cache clients, open support tickets, capture cache keys, values, commands, payloads, headers, cookies, network addresses, baggage, tracestate, stack traces, or exception messages.
 
+### Redis Client Spans
+
+Use `instrument_redis_client_with_logbrew_spans()` when your app already owns a `redis-py` style client and you want safe spans for calls that go through that one client's `execute_command` method:
+
+```python
+import redis
+
+from logbrew_sdk import LogBrewClient, instrument_redis_client_with_logbrew_spans
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+redis_client = redis.Redis.from_url("redis://localhost:6379/0")
+
+instrumentation = instrument_redis_client_with_logbrew_spans(
+    redis_client,
+    client=client,
+    cache_name="profiles",
+    metadata={"service": "checkout-api"},
+)
+
+profile = redis_client.get(profile_cache_key)
+instrumentation.uninstall()
+```
+
+The helper does not add `redis` as a LogBrew dependency and does not patch Redis classes globally. It wraps only the client instance you pass, returns the existing instrumentation on duplicate calls, activates a child trace during sync or async `execute_command` work, derives command name, read/write/delete kind, cache hit, result count, and byte size when safely knowable from the result, and reinstates the original method with `uninstall()`. It does not capture Redis keys, values, command arguments, connection URLs, network endpoints, ports, usernames, arbitrary command text, response payloads, baggage, tracestate, stack traces, or exception messages.
+
 ## Queue Operation Spans
 
 Use `queue_operation_with_logbrew_span()` for sync queue calls and `async_queue_operation_with_logbrew_span()` for async calls when you want one app-owned publish/process span without installing or patching Celery, RQ, Dramatiq, or broker clients:

@@ -52,3 +52,34 @@ These were focused behavior checks, not full upstream test suites.
 - Python still lacks optional Redis/Django cache/Flask cache/memcached integration packages for teams that want automatic coverage.
 - Queue spans are still thinner than Sentry/Datadog/OpenTelemetry.
 - LogBrew now supports bounded span event summaries and type-only exception events for explicit cache spans, but still avoids baggage, tracestate, full OpenTelemetry event arrays/links, cache command parsing, pipeline spans, network peer fields, and automatic cache-client patching.
+
+## 2026-06-29 Redis Client Refresh
+
+### Fresh Sources Read
+
+- Sentry Python SDK: `https://github.com/getsentry/sentry-python.git` at `a661615a40fa26450e4b4f50cec760733cc858d8`.
+- Sentry files/functions: `sentry_sdk/integrations/redis/__init__.py` `RedisIntegration.setup_once`, `sentry_sdk/integrations/redis/_sync_common.py` `patch_redis_client`, `patch_redis_pipeline`, `sentry_sdk/integrations/redis/_async_common.py` `patch_redis_async_client`, `patch_redis_async_pipeline`, `sentry_sdk/integrations/redis/redis.py` `_patch_redis`, `sentry_sdk/integrations/redis/modules/caches.py` `_compile_cache_span_properties`, `_set_cache_data`, `sentry_sdk/integrations/redis/modules/queries.py` `_compile_db_span_properties`, `_set_db_data`, and `sentry_sdk/integrations/redis/utils.py` `_get_safe_command`, `_set_client_data`, `_set_pipeline_data`.
+- OpenTelemetry Python Contrib: `https://github.com/open-telemetry/opentelemetry-python-contrib.git` at `ec27300a9433f5985cd7467ee840037e12602a70`.
+- OpenTelemetry files/functions: `instrumentation/opentelemetry-instrumentation-redis/src/opentelemetry/instrumentation/redis/__init__.py` `_traced_execute_factory`, `_traced_execute_pipeline_factory`, `_async_traced_execute_factory`, `_async_traced_execute_pipeline_factory`, `_instrument`, and `instrument_client`; `util.py` `_format_command_args`, `_set_connection_attributes`, `_build_span_name`, `_build_span_meta_data_for_pipeline`; `README.rst`.
+- Datadog dd-trace-py: `https://github.com/DataDog/dd-trace-py.git` at `8f36ac8332c5eb789f20241e547c486f51ade9be`.
+- Datadog files/functions: `ddtrace/contrib/internal/redis/patch.py` `patch`, `unpatch`, `instrumented_execute_command`, `instrumented_execute_pipeline`, `_run_redis_command`; `ddtrace/contrib/internal/redis/asyncio_patch.py` `instrumented_async_execute_command`, `instrumented_async_execute_pipeline`; `ddtrace/contrib/internal/redis_utils.py` `determine_row_count`, `_instrument_redis_cmd`, `_instrument_redis_execute_pipeline`, `_run_redis_command_async`; `ddtrace/ext/redis.py`.
+
+### Updated Pattern
+
+Sentry, OpenTelemetry, and Datadog all treat Redis as a first-class trace source. Their strongest user-facing advantage is breadth: class-level sync and async Redis wrapping, pipeline spans, cluster support, command span names, connection attributes, hooks, row counts, and cache-hit or item-size metadata. The tradeoff is heavier runtime coupling to Redis client internals and a larger privacy surface because command text, keys, connection details, or response-derived data can appear unless sanitized or configured carefully.
+
+### LogBrew Follow-Up
+
+LogBrew now adds `instrument_redis_client_with_logbrew_spans(...)` for one caller-owned Redis-like client. It wraps only that instance's `execute_command`, returns the existing instrumentation on duplicate calls, supports sync and async results, activates a child trace during command execution, records command name plus read/write/delete kind, derives cache hit/count/byte-size only from safe result shapes, preserves original result/error behavior, and reinstates the original method with `uninstall()`.
+
+The helper stays intentionally smaller than the competitor defaults: no `redis` dependency in `logbrew-sdk`, no global class patching, no pipeline or cluster internals, no command arguments, no keys or values, no connection URL/host/port/user capture, no arbitrary command text, no response payloads, no baggage/tracestate, no stack traces, and no exception messages.
+
+### Verification
+
+- RED: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python/logbrew_py/tests/test_redis_client.py` failed because `instrument_redis_client_with_logbrew_spans` was not exported.
+- GREEN focused tests: the same command runs four Redis instrumentation tests covering sync and async clients, duplicate install, uninstall, hit/count/size metadata, type-only error spans, capture-failure isolation, and private key/value redaction.
+- Installed-artifact proof is wired into `scripts/real_user_python_smoke.sh` through `scripts/python_redis_span_smoke.py`. The smoke installs real `redis>=5,<7`, uses local subclassed sync and async Redis clients, exercises `get`, `mget`, and failing `set` paths without a live Redis server, and runs across wheel, reinstall, freeze/direct reinstall, sdist, and sdist reinstall paths.
+
+### Remaining Gaps
+
+LogBrew remains weaker than Sentry, Datadog, and OpenTelemetry for automatic Redis class instrumentation, pipeline spans, cluster coverage, Django/Flask cache hooks, memcached client wrapping, command filtering/obfuscation modes, connection metrics, broader semantic conventions, baggage/tracestate, and full OTel processor/exporter interop. The next safe step would be an optional framework-owned Redis/Django cache package only if installed-artifact proof and privacy defaults remain as clear as the one-client helper.
