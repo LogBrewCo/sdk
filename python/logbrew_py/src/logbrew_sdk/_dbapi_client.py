@@ -50,9 +50,7 @@ def instrument_dbapi_connection_with_logbrew_spans(
 
     if isinstance(connection, LogBrewDbapiConnection):
         return connection
-    cursor = getattr(connection, "cursor", None)
-    if not callable(cursor):
-        raise TypeError("connection must expose a callable cursor method")
+    _require_dbapi_connection(connection)
     return LogBrewDbapiConnection(
         connection=connection,
         client=client,
@@ -66,6 +64,71 @@ def instrument_dbapi_connection_with_logbrew_spans(
         span_events=span_events,
         span_id_factory=span_id_factory,
         clock=clock or perf_counter,
+        on_capture_error=on_capture_error,
+    )
+
+
+def connect_dbapi_connection_with_logbrew_spans(
+    connect: Callable[..., Any],
+    *,
+    client: Any,
+    system: str,
+    connect_args: Sequence[Any] = (),
+    connect_kwargs: Mapping[str, Any] | None = None,
+    trace_fetch_methods: bool = False,
+    event_id_factory: Callable[[], str] | None = None,
+    timestamp: str | None = None,
+    trace: LogBrewTraceContext | None = None,
+    db_name: str | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    span_events: Sequence[_instrumentation.SpanEventSummary] | None = None,
+    span_id_factory: Callable[[], str] | None = None,
+    clock: _instrumentation.Clock | None = None,
+    on_capture_error: Callable[[Exception], None] | None = None,
+) -> LogBrewDbapiConnection:
+    """Trace a caller-owned DB-API connect callable and return a tracing wrapper."""
+
+    if not callable(connect):
+        raise TypeError("connect must be callable")
+    event_ids = event_id_factory or _default_dbapi_event_id
+    read_clock = clock or perf_counter
+    safe_metadata = _dbapi_metadata(metadata)
+    args = tuple(connect_args)
+    kwargs = dict(connect_kwargs or {})
+
+    def connect_operation() -> Any:
+        connection = connect(*args, **kwargs)
+        _require_dbapi_connection(connection)
+        return connection
+
+    connection = database_operation_with_logbrew_span(
+        "CONNECT",
+        client=client,
+        event_id=event_ids(),
+        operation=connect_operation,
+        system=system,
+        timestamp=timestamp,
+        trace=trace,
+        db_name=db_name,
+        metadata={**safe_metadata, "framework": "dbapi", "dbMethod": "connect"},
+        span_events=span_events,
+        span_id_factory=span_id_factory,
+        clock=read_clock,
+        on_capture_error=on_capture_error,
+    )
+    return instrument_dbapi_connection_with_logbrew_spans(
+        connection,
+        client=client,
+        system=system,
+        trace_fetch_methods=trace_fetch_methods,
+        event_id_factory=event_ids,
+        timestamp=timestamp,
+        trace=trace,
+        db_name=db_name,
+        metadata=safe_metadata,
+        span_events=span_events,
+        span_id_factory=span_id_factory,
+        clock=read_clock,
         on_capture_error=on_capture_error,
     )
 
@@ -322,6 +385,12 @@ def _dbapi_label(value: Any) -> str | None:
         return None
     normalized = " ".join(value.split())
     return normalized.upper() if normalized else None
+
+
+def _require_dbapi_connection(connection: Any) -> None:
+    cursor = getattr(connection, "cursor", None)
+    if not callable(cursor):
+        raise TypeError("connection must expose a callable cursor method")
 
 
 def _cursor_row_count(cursor: Any) -> int | None:

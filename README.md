@@ -113,14 +113,17 @@ client.log("evt_log_001", "2026-06-02T10:00:03Z", {
 client.flush(RecordingTransport.always_accept())
 ```
 
-Python DB-API spans are explicit and app-owned. Wrap the connection you already
-created, then keep using normal cursor methods:
+Python DB-API spans are explicit and app-owned. Trace the connect callable your
+app already controls, then keep using normal cursor methods:
 
 ```python
-from logbrew_sdk import instrument_dbapi_connection_with_logbrew_spans
+import sqlite3
 
-connection = instrument_dbapi_connection_with_logbrew_spans(
-    sqlite_connection,
+from logbrew_sdk import connect_dbapi_connection_with_logbrew_spans
+
+connection = connect_dbapi_connection_with_logbrew_spans(
+    sqlite3.connect,
+    connect_args=("checkout.db",),
     client=client,
     system="sqlite",
     db_name="checkout",

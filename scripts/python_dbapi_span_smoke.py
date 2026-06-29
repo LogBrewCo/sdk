@@ -6,7 +6,7 @@ import sqlite3
 from logbrew_sdk import (
     LogBrewClient,
     LogBrewTraceContext,
-    instrument_dbapi_connection_with_logbrew_spans,
+    connect_dbapi_connection_with_logbrew_spans,
     use_logbrew_trace,
 )
 
@@ -21,16 +21,9 @@ parent_trace = LogBrewTraceContext(
     span_id="00f067aa0ba902b7",
     sampled=True,
 )
-raw_connection = sqlite3.connect(":memory:")
-raw_connection.execute("CREATE TABLE checkout_order (id INTEGER PRIMARY KEY, email TEXT, status TEXT)")
-raw_connection.execute(
-    "INSERT INTO checkout_order (email, status) VALUES (?, ?)",
-    ("sensitive@example.test", "pending"),
-)
-raw_connection.commit()
-
 event_ids = iter(
     [
+        "evt_python_dbapi_connect",
         "evt_python_dbapi_update",
         "evt_python_dbapi_commit",
         "evt_python_dbapi_select",
@@ -41,6 +34,7 @@ event_ids = iter(
 )
 span_ids = iter(
     [
+        "b7ad6b7169203390",
         "b7ad6b7169203391",
         "b7ad6b7169203392",
         "b7ad6b7169203393",
@@ -49,24 +43,34 @@ span_ids = iter(
         "b7ad6b7169203396",
     ]
 )
-clock_values = iter([10.0, 10.005, 20.0, 20.003, 30.0, 30.004, 40.0, 40.002, 50.0, 50.002, 60.0, 60.002])
+clock_values = iter([5.0, 5.004, 10.0, 10.005, 20.0, 20.003, 30.0, 30.004, 40.0, 40.002, 50.0, 50.002, 60.0, 60.002])
 
-connection = instrument_dbapi_connection_with_logbrew_spans(
-    raw_connection,
-    client=client,
-    system="sqlite",
-    db_name="checkout",
-    event_id_factory=lambda: next(event_ids),
-    timestamp="2026-06-29T20:00:00Z",
-    span_id_factory=lambda: next(span_ids),
-    clock=lambda: next(clock_values),
-    trace_fetch_methods=True,
-    metadata={
-        "service": "checkout",
-        "statement": "SELECT * FROM checkout_order WHERE email = ?",
-        "parameters": "sensitive@example.test",
-    },
+with use_logbrew_trace(parent_trace):
+    connection = connect_dbapi_connection_with_logbrew_spans(
+        sqlite3.connect,
+        connect_args=(":memory:",),
+        client=client,
+        system="sqlite",
+        db_name="checkout",
+        event_id_factory=lambda: next(event_ids),
+        timestamp="2026-06-29T20:00:00Z",
+        span_id_factory=lambda: next(span_ids),
+        clock=lambda: next(clock_values),
+        trace_fetch_methods=True,
+        metadata={
+            "service": "checkout",
+            "statement": "SELECT * FROM checkout_order WHERE email = ?",
+            "parameters": "sensitive@example.test",
+        },
+    )
+
+raw_connection = connection.raw_connection
+raw_connection.execute("CREATE TABLE checkout_order (id INTEGER PRIMARY KEY, email TEXT, status TEXT)")
+raw_connection.execute(
+    "INSERT INTO checkout_order (email, status) VALUES (?, ?)",
+    ("sensitive@example.test", "pending"),
 )
+raw_connection.commit()
 
 with use_logbrew_trace(parent_trace):
     update_cursor = connection.cursor()
@@ -114,15 +118,17 @@ for forbidden in (
         raise SystemExit(f"DB-API span leaked private data: {forbidden}")
 
 payload = json.loads(serialized)
-if len(payload["events"]) != 6:
-    raise SystemExit(f"expected six DB-API spans, got {len(payload['events'])}")
+if len(payload["events"]) != 7:
+    raise SystemExit(f"expected seven DB-API spans, got {len(payload['events'])}")
 
-update_attributes = payload["events"][0]["attributes"]
-commit_attributes = payload["events"][1]["attributes"]
-select_attributes = payload["events"][2]["attributes"]
-fetch_attributes = payload["events"][3]["attributes"]
-rollback_attributes = payload["events"][4]["attributes"]
-error_attributes = payload["events"][5]["attributes"]
+connect_attributes = payload["events"][0]["attributes"]
+update_attributes = payload["events"][1]["attributes"]
+commit_attributes = payload["events"][2]["attributes"]
+select_attributes = payload["events"][3]["attributes"]
+fetch_attributes = payload["events"][4]["attributes"]
+rollback_attributes = payload["events"][5]["attributes"]
+error_attributes = payload["events"][6]["attributes"]
+connect_metadata = connect_attributes["metadata"]
 update_metadata = update_attributes["metadata"]
 commit_metadata = commit_attributes["metadata"]
 select_metadata = select_attributes["metadata"]
@@ -130,6 +136,8 @@ fetch_metadata = fetch_attributes["metadata"]
 rollback_metadata = rollback_attributes["metadata"]
 error_metadata = error_attributes["metadata"]
 
+if connect_attributes["name"] != "sqlite CONNECT":
+    raise SystemExit(f"unexpected DB-API connect span name: {connect_attributes['name']!r}")
 if update_attributes["name"] != "sqlite UPDATE":
     raise SystemExit(f"unexpected DB-API update span name: {update_attributes['name']!r}")
 if commit_attributes["name"] != "sqlite COMMIT":
@@ -151,6 +159,7 @@ print(
     json.dumps(
         {
             "commitMethod": commit_metadata["dbMethod"],
+            "connectMethod": connect_metadata["dbMethod"],
             "dbMethod": update_metadata["dbMethod"],
             "dbSystem": update_metadata["dbSystem"],
             "errorStatus": error_attributes["status"],

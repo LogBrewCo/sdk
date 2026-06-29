@@ -918,7 +918,6 @@ create_support_ticket_draft = build_create_support_ticket_draft(
     require_trace_id=require_trace_id,
 )
 
-
 from logbrew_sdk._http_client import (  # noqa: E402, I001
     async_httpx_request_with_logbrew_span,
     httpx_request_with_logbrew_span,
@@ -926,7 +925,7 @@ from logbrew_sdk._http_client import (  # noqa: E402, I001
     urlopen_with_logbrew_span,
 )
 from logbrew_sdk._db_client import async_database_operation_with_logbrew_span, database_operation_with_logbrew_span  # noqa: E402
-from logbrew_sdk._dbapi_client import LogBrewDbapiConnection, LogBrewDbapiCursor, instrument_dbapi_connection_with_logbrew_spans  # noqa: E402, E501
+from logbrew_sdk._dbapi_client import LogBrewDbapiConnection, LogBrewDbapiCursor, connect_dbapi_connection_with_logbrew_spans, instrument_dbapi_connection_with_logbrew_spans  # noqa: E402, E501
 from logbrew_sdk._sqlalchemy_client import LogBrewSqlAlchemyInstrumentation, instrument_sqlalchemy_engine_with_logbrew_spans  # noqa: E402, E501
 from logbrew_sdk._cache_client import async_cache_operation_with_logbrew_span, cache_operation_with_logbrew_span  # noqa: E402
 from logbrew_sdk._redis_client import LogBrewRedisInstrumentation, instrument_redis_client_with_logbrew_spans  # noqa: E402
@@ -974,6 +973,7 @@ __all__ = [
     "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
     "celery_operation_with_logbrew_span",
+    "connect_dbapi_connection_with_logbrew_spans",
     "create_logbrew_trace_context",
     "create_network_milestone_attributes",
     "create_product_action_attributes",

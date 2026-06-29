@@ -429,22 +429,22 @@ The helper activates a child `LogBrewTraceContext` while your callable runs, que
 
 ### DB-API Connection Spans
 
-Use `instrument_dbapi_connection_with_logbrew_spans()` when your app already owns a Python DB-API connection and you want one sanitized span around each cursor execution:
+Use `connect_dbapi_connection_with_logbrew_spans()` when your app controls a Python DB-API connect callable and you want one sanitized connect span plus cursor execution spans. If your app already has an open connection, use `instrument_dbapi_connection_with_logbrew_spans()` to wrap only that connection:
 
 ```python
 import sqlite3
 
-from logbrew_sdk import LogBrewClient, instrument_dbapi_connection_with_logbrew_spans
+from logbrew_sdk import LogBrewClient, connect_dbapi_connection_with_logbrew_spans
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
     sdk_name="checkout-api",
     sdk_version="1.0.0",
 )
-connection = sqlite3.connect(":memory:")
 
-db = instrument_dbapi_connection_with_logbrew_spans(
-    connection,
+db = connect_dbapi_connection_with_logbrew_spans(
+    sqlite3.connect,
+    connect_args=(":memory:",),
     client=client,
     system="sqlite",
     db_name="checkout",
@@ -459,7 +459,7 @@ rows = cursor.fetchall()
 raw_connection = db.uninstall()
 ```
 
-The wrapper keeps connection ownership with your app, wraps cursors returned by `cursor()`, and supports `execute(...)`, `executemany(...)`, `callproc(...)`, transaction `commit()` and `rollback()`, plus common connection shortcut `execute(...)` and `executemany(...)` calls. Fetch spans for `fetchone()`, `fetchmany(...)`, and `fetchall()` are opt-in through `trace_fetch_methods=True` because high-volume row-reading loops can be noisy. The wrapper derives only the SQL verb, fetch, transaction, or procedure label, records `framework=dbapi`, `dbMethod`, optional caller `dbName`, optional non-negative row count, active child trace IDs, sampled state, and type-only errors. It does not patch DB-API modules, driver classes, or connect functions, and does not capture SQL text, bind values, result rows, connection URLs, network addresses, user names, baggage, tracestate, stack traces, or exception messages. Call `uninstall()` to stop future spans and get the original connection back.
+The helper traces the caller-supplied connect callable, then keeps connection ownership with your app, wraps cursors returned by `cursor()`, and supports `execute(...)`, `executemany(...)`, `callproc(...)`, transaction `commit()` and `rollback()`, plus common connection shortcut `execute(...)` and `executemany(...)` calls. Fetch spans for `fetchone()`, `fetchmany(...)`, and `fetchall()` are opt-in through `trace_fetch_methods=True` because high-volume row-reading loops can be noisy. The wrapper derives only the connect, SQL verb, fetch, transaction, or procedure label, records `framework=dbapi`, `dbMethod`, optional caller `dbName`, optional non-negative row count, active child trace IDs, sampled state, and type-only errors. It does not patch DB-API modules, driver classes, or connect functions, and does not capture connect arguments, SQL text, bind values, result rows, connection URLs, network addresses, user names, baggage, tracestate, stack traces, or exception messages. Call `uninstall()` to stop future spans and get the original connection back.
 
 ### SQLAlchemy Engine Spans
 

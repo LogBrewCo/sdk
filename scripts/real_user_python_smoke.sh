@@ -354,10 +354,11 @@ run_dbapi_span_smoke() {
 
     python "$repo_root/scripts/python_dbapi_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 6' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 7' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"framework": "dbapi"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"dbSystem": "sqlite"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"dbMethod": "execute"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"connectMethod": "connect"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"commitMethod": "commit"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"fetchMethod": "fetchall"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"fetchRows": 1' "$tmp_dir/$output_prefix.stdout.json"
@@ -641,6 +642,7 @@ for needle in (
     "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
     "celery_operation_with_logbrew_span",
+    "connect_dbapi_connection_with_logbrew_spans",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "instrument_dbapi_connection_with_logbrew_spans",
@@ -730,6 +732,7 @@ for needle in (
     "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
     "celery_operation_with_logbrew_span",
+    "connect_dbapi_connection_with_logbrew_spans",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "instrument_dbapi_connection_with_logbrew_spans",
@@ -1038,6 +1041,7 @@ from logbrew_sdk import (
     create_product_action_attributes,
     create_support_ticket_draft,
     create_traceparent,
+    connect_dbapi_connection_with_logbrew_spans,
     database_operation_with_logbrew_span,
     httpx_request_with_logbrew_span,
     instrument_dbapi_connection_with_logbrew_spans,
@@ -1275,6 +1279,17 @@ class TypecheckDbapiConnection:
 
 
 dbapi_connection = TypecheckDbapiConnection()
+dbapi_connected: LogBrewDbapiConnection = connect_dbapi_connection_with_logbrew_spans(
+    lambda: TypecheckDbapiConnection(),
+    client=client,
+    system="sqlite",
+    event_id_factory=lambda: "evt_dbapi_connect_typecheck",
+    timestamp="2026-06-02T10:00:10Z",
+    db_name="health",
+    span_id_factory=lambda: "b7ad6b7169203340",
+)
+if dbapi_connected.uninstall().__class__ is not TypecheckDbapiConnection:
+    raise RuntimeError("unexpected DB-API connect helper result")
 dbapi_instrumentation: LogBrewDbapiConnection = instrument_dbapi_connection_with_logbrew_spans(
     dbapi_connection,
     client=client,
@@ -2170,6 +2185,7 @@ for needle in (
     "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
     "celery_operation_with_logbrew_span",
+    "connect_dbapi_connection_with_logbrew_spans",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "instrument_dbapi_connection_with_logbrew_spans",

@@ -9,6 +9,7 @@ from logbrew_sdk import (
     LogBrewDbapiConnection,
     LogBrewTraceContext,
     async_database_operation_with_logbrew_span,
+    connect_dbapi_connection_with_logbrew_spans,
     database_operation_with_logbrew_span,
     get_active_logbrew_trace,
     instrument_dbapi_connection_with_logbrew_spans,
@@ -570,3 +571,73 @@ class DatabaseOperationSpanTests(unittest.TestCase):
         self.assertNotIn("private@example.test", serialized)
         self.assertNotIn("hidden@example.test", serialized)
         self.assertNotIn("rowValue", serialized)
+
+    def test_dbapi_connect_helper_traces_connect_and_returns_instrumented_connection(self) -> None:
+        client = sample_client()
+        connection = StubDbapiConnection()
+        connect_active_trace: LogBrewTraceContext | None = None
+        connect_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+        parent_trace = LogBrewTraceContext(
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="00f067aa0ba902b7",
+            sampled=True,
+        )
+        event_ids = iter(["evt_python_dbapi_connect", "evt_python_dbapi_fetchone"])
+        span_ids = iter(["b7ad6b7169203399", "b7ad6b7169203400"])
+        clock_values = iter([300.0, 300.007, 310.0, 310.009])
+
+        def connect(*args: object, **kwargs: object) -> StubDbapiConnection:
+            nonlocal connect_active_trace
+            connect_calls.append((args, kwargs))
+            connect_active_trace = get_active_logbrew_trace()
+            return connection
+
+        with use_logbrew_trace(parent_trace):
+            wrapped = connect_dbapi_connection_with_logbrew_spans(
+                connect,
+                connect_args=("private-checkout.db",),
+                connect_kwargs={"auth_value": "private-auth-material"},
+                client=client,
+                system="sqlite",
+                db_name="checkout",
+                trace_fetch_methods=True,
+                event_id_factory=lambda: next(event_ids),
+                timestamp="2026-06-29T20:00:04Z",
+                span_id_factory=lambda: next(span_ids),
+                clock=lambda: next(clock_values),
+                metadata={
+                    "service": "checkout",
+                    "dsn": "sqlite:///private-checkout.db",
+                    "arg": "private-auth-material",
+                },
+            )
+            row = wrapped.cursor().fetchone()
+
+        self.assertIsInstance(wrapped, LogBrewDbapiConnection)
+        self.assertEqual(row, ("order-1", "sensitive@example.test"))
+        self.assertEqual(connect_calls, [(("private-checkout.db",), {"auth_value": "private-auth-material"})])
+        self.assertEqual(
+            connect_active_trace,
+            LogBrewTraceContext(
+                trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+                span_id="b7ad6b7169203399",
+                parent_span_id="00f067aa0ba902b7",
+                sampled=True,
+            ),
+        )
+        payload = json.loads(client.preview_json())
+        connect_event = payload["events"][0]["attributes"]
+        fetch_event = payload["events"][1]["attributes"]
+        self.assertEqual(connect_event["name"], "sqlite CONNECT")
+        self.assertEqual(connect_event["durationMs"], 7.0)
+        self.assertEqual(connect_event["metadata"]["framework"], "dbapi")
+        self.assertEqual(connect_event["metadata"]["dbMethod"], "connect")
+        self.assertEqual(connect_event["metadata"]["dbOperation"], "CONNECT")
+        self.assertEqual(connect_event["metadata"]["dbName"], "checkout")
+        self.assertEqual(fetch_event["name"], "sqlite FETCHONE")
+        self.assertEqual(fetch_event["metadata"]["rowCount"], 1)
+        serialized = client.preview_json()
+        self.assertNotIn("private-checkout.db", serialized)
+        self.assertNotIn("sqlite:///private-checkout.db", serialized)
+        self.assertNotIn("auth_value", serialized)
+        self.assertNotIn("private-auth-material", serialized)

@@ -159,3 +159,31 @@ Verification:
 Remaining gap after this refresh:
 
 - LogBrew now covers explicit execute, transaction, and opt-in fetch spans for caller-owned DB-API connections without hidden patching. Sentry, Datadog, and OpenTelemetry still win for automatic multi-driver patching, connect spans, DB metrics, statement-comment injection, richer semantic conventions, baggage/tracestate, and broad integration-owned coverage.
+
+## 2026-06-29 DB-API Connect Refresh
+
+Source refresh:
+
+- Sentry Python SDK: `https://github.com/getsentry/sentry-python.git` at `707464306ca78d4928e4668ba4d383948f7eb7fb`; read `sentry_sdk/integrations/django/__init__.py` (`install_sql_hook(...)`, wrapped `BaseDatabaseWrapper.connect`), `sentry_sdk/integrations/aiomysql.py` (`_wrap_connect(...)`, `_get_connect_data(...)`), and `sentry_sdk/integrations/asyncpg.py` (`_wrap_connect_addr(...)`). Sentry records explicit `connect` spans in framework or driver integrations and may attach database/user/server metadata from integration-owned connection objects.
+- OpenTelemetry Python Contrib: `https://github.com/open-telemetry/opentelemetry-python-contrib.git` at `ec27300a9433f5985cd7467ee840037e12602a70`; read `opentelemetry-instrumentation-dbapi` `trace_integration(...)`, `wrap_connect(...)`, `instrument_connection(...)`, `DatabaseApiIntegration.wrapped_connection(...)`, and `TracedConnectionProxy`. OTel wraps a module-level connect callable and returns an instrumented connection proxy with optional semantic attributes, SQL comments, and metrics.
+- Datadog dd-trace-py: `https://github.com/DataDog/dd-trace-py.git` at `6091865277beba3afd0275954950456b79151d90`; read `ddtrace/contrib/dbapi.py` `TracedConnection`, `cursor(...)`, `commit(...)`, `rollback(...)`, and `_trace_method(...)`. The generic DB-API wrapper traces after a connection exists, while driver-specific integrations can own connect patching elsewhere.
+
+Design pattern and tradeoff:
+
+- Competitors win on automatic connect interception, but that requires framework/driver ownership, module patching, and richer connection metadata. The safer LogBrew core path is an explicit helper around an app-provided connect callable.
+- Connect arguments often contain sensitive app configuration values, so LogBrew should trace timing and type-only failures without serializing connect args or kwargs.
+
+LogBrew update:
+
+- Added `connect_dbapi_connection_with_logbrew_spans(...)`.
+- Apps pass a DB-API connect callable plus optional `connect_args` and `connect_kwargs`; LogBrew emits one sanitized `CONNECT` child span, validates the returned DB-API connection, and returns the same `LogBrewDbapiConnection` wrapper used for execute, transaction, and opt-in fetch spans.
+- Connect spans use `framework=dbapi`, `dbMethod=connect`, `dbOperation=CONNECT`, optional caller `dbName`, primitive caller metadata after DB-API deny-list filtering, active trace correlation, capture-failure isolation, and type-only errors. They avoid connect args, connect kwargs, DSNs, local paths, SQL text, bind values, result rows, connection URLs, network addresses, user names, baggage, tracestate, stacks, and exception messages.
+
+Verification:
+
+- Focused tests prove the helper activates a child trace during the connect callable, preserves connect args/kwargs for the driver, emits a sanitized connect span, returns an instrumented DB-API connection, carries `trace_fetch_methods=True` into returned cursors, and does not serialize private-looking connect arguments or metadata.
+- `scripts/python_dbapi_span_smoke.py` now proves a real stdlib `sqlite3` app flow with connect, update, commit, select, fetchall, rollback, and error spans from installed artifacts.
+
+Remaining gap after this refresh:
+
+- LogBrew now covers explicit connect, execute, transaction, and opt-in fetch spans for caller-owned DB-API flows. Sentry, Datadog, and OpenTelemetry still win for automatic multi-driver/framework patching, DB metrics, SQL comment/obfuscation modes, richer semantic conventions, baggage/tracestate, OTel processor/exporter interop, and integration-owned coverage.
