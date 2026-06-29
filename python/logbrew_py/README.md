@@ -524,6 +524,35 @@ profile = cache_operation_with_logbrew_span(
 
 The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the cache system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the cache result. Metadata is intentionally bounded to primitive caller metadata, `cacheSystem`, `cacheOperation`, optional `cacheName`, optional hit state, optional non-negative item size/count, sampled state, optional bounded span events, and exception type. It drops key-like metadata fields and does not monkeypatch cache clients, open support tickets, capture cache keys, values, commands, payloads, headers, cookies, network addresses, baggage, tracestate, stack traces, or exception messages.
 
+### Django Cache Spans
+
+Use `instrument_django_cache_with_logbrew_spans()` when your app already owns a Django cache object and you want one span per supported cache method on that object:
+
+```python
+from django.core.cache import cache
+
+from logbrew_sdk import LogBrewClient, instrument_django_cache_with_logbrew_spans
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+
+instrumentation = instrument_django_cache_with_logbrew_spans(
+    cache,
+    client=client,
+    cache_name="profiles",
+    metadata={"service": "checkout-api"},
+)
+
+cache.set(profile_cache_key, profile, timeout=60)
+profile = cache.get(profile_cache_key)
+instrumentation.uninstall()
+```
+
+The helper returns a `LogBrewDjangoCacheInstrumentation` handle, does not add Django as a LogBrew dependency, and does not patch Django globally. It wraps only the cache object you pass, returns the existing instrumentation on duplicate calls, activates a child trace around supported `get`, `get_many`, `set`, `set_many`, `add`, `delete`, `delete_many`, and `clear` calls, derives hit state and item count/size when safely knowable, and puts the original methods back with `uninstall()`. It does not read Django settings, capture cache keys, values, timeout/version arguments, backend locations, hosts, ports, arbitrary command text, response payloads, baggage, tracestate, stack traces, or exception messages.
+
 ### Redis Client Spans
 
 Use `instrument_redis_client_with_logbrew_spans()` when your app already owns a `redis-py` style client and you want safe spans for calls that go through that one client's `execute_command` method:

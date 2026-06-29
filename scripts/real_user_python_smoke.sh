@@ -406,6 +406,26 @@ run_cache_span_smoke() {
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_django_cache_span_smoke() {
+    local output_prefix="$1"
+
+    python -m pip install "Django>=5,<7" >/dev/null
+    python "$repo_root/scripts/python_django_cache_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"framework": "django-cache"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"duplicateSame": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"operations": \["SET", "GET", "GET_MANY"\]' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"cacheName": "profiles"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"getHit": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"getItemSizeBytes": 17' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"manyHit": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"manyItemCount": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"parentSpanAfterCache": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"setKind": "write"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"uninstallStoppedTracing": true' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_redis_span_smoke() {
     local output_prefix="$1"
 
@@ -502,6 +522,7 @@ run_reinstall_from_freeze() {
     run_dbapi_span_smoke "$output_prefix-freeze-dbapi-span"
     run_sqlalchemy_span_smoke "$output_prefix-freeze-sqlalchemy-span"
     run_cache_span_smoke "$output_prefix-freeze-cache-span"
+    run_django_cache_span_smoke "$output_prefix-freeze-django-cache-span"
     run_redis_span_smoke "$output_prefix-freeze-redis-span"
     run_queue_span_smoke "$output_prefix-freeze-queue-span"
 
@@ -557,6 +578,7 @@ run_reinstall_from_direct_requirement() {
     run_dbapi_span_smoke "$output_prefix-direct-dbapi-span"
     run_sqlalchemy_span_smoke "$output_prefix-direct-sqlalchemy-span"
     run_cache_span_smoke "$output_prefix-direct-cache-span"
+    run_django_cache_span_smoke "$output_prefix-direct-django-cache-span"
     run_redis_span_smoke "$output_prefix-direct-redis-span"
     run_queue_span_smoke "$output_prefix-direct-queue-span"
 
@@ -607,6 +629,7 @@ with zipfile.ZipFile(wheel_path) as archive:
         "logbrew_sdk/_celery_client.py",
         "logbrew_sdk/_dbapi_client.py",
         "logbrew_sdk/_db_client.py",
+        "logbrew_sdk/_django_cache_client.py",
         "logbrew_sdk/_http_client.py",
         "logbrew_sdk/_instrumentation.py",
         "logbrew_sdk/_queue_client.py",
@@ -650,6 +673,8 @@ for needle in (
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "instrument_dbapi_connection_with_logbrew_spans",
+    "instrument_django_cache_with_logbrew_spans",
+    "LogBrewDjangoCacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
@@ -691,6 +716,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
         f"{sdist_root}/src/logbrew_sdk/_celery_client.py",
         f"{sdist_root}/src/logbrew_sdk/_dbapi_client.py",
         f"{sdist_root}/src/logbrew_sdk/_db_client.py",
+        f"{sdist_root}/src/logbrew_sdk/_django_cache_client.py",
         f"{sdist_root}/src/logbrew_sdk/_http_client.py",
         f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
         f"{sdist_root}/src/logbrew_sdk/_queue_client.py",
@@ -740,6 +766,8 @@ for needle in (
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "instrument_dbapi_connection_with_logbrew_spans",
+    "instrument_django_cache_with_logbrew_spans",
+    "LogBrewDjangoCacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
@@ -2155,6 +2183,7 @@ required = {
     "logbrew_sdk/_celery_client.py",
     "logbrew_sdk/_dbapi_client.py",
     "logbrew_sdk/_db_client.py",
+    "logbrew_sdk/_django_cache_client.py",
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
     "logbrew_sdk/_queue_client.py",
@@ -2193,6 +2222,8 @@ for needle in (
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "instrument_dbapi_connection_with_logbrew_spans",
+    "instrument_django_cache_with_logbrew_spans",
+    "LogBrewDjangoCacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
@@ -2511,6 +2542,7 @@ run_database_span_smoke "wheel-database-span"
 run_dbapi_span_smoke "wheel-dbapi-span"
 run_sqlalchemy_span_smoke "wheel-sqlalchemy-span"
 run_cache_span_smoke "wheel-cache-span"
+run_django_cache_span_smoke "wheel-django-cache-span"
 run_redis_span_smoke "wheel-redis-span"
 run_queue_span_smoke "wheel-queue-span"
 
@@ -2548,6 +2580,7 @@ run_database_span_smoke "wheel-reinstall-database-span"
 run_dbapi_span_smoke "wheel-reinstall-dbapi-span"
 run_sqlalchemy_span_smoke "wheel-reinstall-sqlalchemy-span"
 run_cache_span_smoke "wheel-reinstall-cache-span"
+run_django_cache_span_smoke "wheel-reinstall-django-cache-span"
 run_redis_span_smoke "wheel-reinstall-redis-span"
 run_queue_span_smoke "wheel-reinstall-queue-span"
 
@@ -2595,6 +2628,7 @@ run_database_span_smoke "sdist-database-span"
 run_dbapi_span_smoke "sdist-dbapi-span"
 run_sqlalchemy_span_smoke "sdist-sqlalchemy-span"
 run_cache_span_smoke "sdist-cache-span"
+run_django_cache_span_smoke "sdist-django-cache-span"
 run_redis_span_smoke "sdist-redis-span"
 run_queue_span_smoke "sdist-queue-span"
 
@@ -2632,6 +2666,7 @@ run_database_span_smoke "sdist-reinstall-database-span"
 run_dbapi_span_smoke "sdist-reinstall-dbapi-span"
 run_sqlalchemy_span_smoke "sdist-reinstall-sqlalchemy-span"
 run_cache_span_smoke "sdist-reinstall-cache-span"
+run_django_cache_span_smoke "sdist-reinstall-django-cache-span"
 run_redis_span_smoke "sdist-reinstall-redis-span"
 run_queue_span_smoke "sdist-reinstall-queue-span"
 

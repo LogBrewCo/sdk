@@ -928,6 +928,7 @@ from logbrew_sdk._db_client import async_database_operation_with_logbrew_span, d
 from logbrew_sdk._dbapi_client import LogBrewDbapiConnection, LogBrewDbapiCursor, connect_dbapi_connection_with_logbrew_spans, instrument_dbapi_connection_with_logbrew_spans  # noqa: E402, E501
 from logbrew_sdk._sqlalchemy_client import LogBrewSqlAlchemyInstrumentation, instrument_sqlalchemy_engine_with_logbrew_spans  # noqa: E402, E501
 from logbrew_sdk._cache_client import async_cache_operation_with_logbrew_span, cache_operation_with_logbrew_span  # noqa: E402
+from logbrew_sdk._django_cache_client import LogBrewDjangoCacheInstrumentation, instrument_django_cache_with_logbrew_spans  # noqa: E402, E501
 from logbrew_sdk._redis_client import LogBrewRedisInstrumentation, instrument_redis_client_with_logbrew_spans  # noqa: E402
 from logbrew_sdk._celery_client import celery_operation_with_logbrew_span  # noqa: E402
 from logbrew_sdk._queue_client import (  # noqa: E402
@@ -947,6 +948,7 @@ __all__ = [
     "LogBrewClient",
     "LogBrewDbapiConnection",
     "LogBrewDbapiCursor",
+    "LogBrewDjangoCacheInstrumentation",
     "LogBrewLoggingHandler",
     "LogBrewRedisInstrumentation",
     "LogBrewSqlAlchemyInstrumentation",
@@ -984,6 +986,7 @@ __all__ = [
     "get_active_logbrew_trace",
     "httpx_request_with_logbrew_span",
     "instrument_dbapi_connection_with_logbrew_spans",
+    "instrument_django_cache_with_logbrew_spans",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "log_attributes_from_record",

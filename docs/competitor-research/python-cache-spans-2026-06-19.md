@@ -112,3 +112,34 @@ Verification:
 Remaining gap after this refresh:
 
 - LogBrew now covers app-owned Redis command and opt-in pipeline execution spans. Sentry, Datadog, and OpenTelemetry still win for automatic Redis class instrumentation, cluster pipeline coverage, Django/Flask cache hooks, memcached wrapping, command filtering/obfuscation modes, connection metrics, broader semantic conventions, baggage/tracestate, and full OTel processor/exporter interop.
+
+## 2026-06-29 Django Cache Refresh
+
+Source refresh:
+
+- Sentry Python SDK: `https://github.com/getsentry/sentry-python.git` at `707464306ca78d4928e4668ba4d383948f7eb7fb`; read `sentry_sdk/integrations/django/caching.py` `METHODS_TO_INSTRUMENT`, `_patch_cache_method(...)`, `_patch_cache(...)`, `_get_address_port(...)`, `should_enable_cache_spans()`, and `patch_caching()`. Sentry patches Django `CacheHandler` creation/access and then wraps `set`, `set_many`, `get`, and `get_many`, deriving hit state, item size, cache key, and sanitized peer address/port.
+- Datadog dd-trace-py: `https://github.com/DataDog/dd-trace-py.git` at `93e7e6d6ccf5e101f70c1ab8d1fef1b150573f2a`; read `ddtrace/contrib/internal/flask_cache/patch.py` `get_traced_cache(...)` and `TracedCache.get/set/add/delete/delete_many/clear/get_many/set_many(...)`, plus `ddtrace/contrib/internal/pymemcache/patch.py` `patch(...)`/`unpatch(...)` and `client.py` `WrappedClient`, `WrappedHashClient`, `_trace(...)`, `_get_query_string(...)`, `_get_address_tags(...)`. Datadog wraps Flask cache classes and pymemcache classes, records cache backend, contact points, command keys when enabled, and row counts.
+- OpenTelemetry Python Contrib: `https://github.com/open-telemetry/opentelemetry-python-contrib.git` at `ec27300a9433f5985cd7467ee840037e12602a70`; read `instrumentation/opentelemetry-instrumentation-pymemcache/src/opentelemetry/instrumentation/pymemcache/__init__.py` `COMMANDS`, `_wrap_cmd(...)`, `_get_query_string(...)`, `_get_address_attributes(...)`, and `PymemcacheInstrumentor._instrument(...)`/`_uninstrument(...)`. OTel globally wraps pymemcache client methods, names spans from cache commands, and records DB statement plus peer attributes.
+
+Design pattern and tradeoff:
+
+- Competitors win on drop-in cache breadth: Django/Flask cache hooks, pymemcache wrapping, backend/peer details, key/resource labels, and row counts. The tradeoff is global patching, framework/client dependency coupling, and a wider privacy surface around keys, backend locations, command text, or connection details.
+- The safer LogBrew shape is one app-owned Django-style cache object wrapper: no Django import at default install time, no `CacheHandler` or class patching, no settings reads, no backend location capture, and no cache key/value serialization.
+
+LogBrew update:
+
+- Added `instrument_django_cache_with_logbrew_spans(...)` and `LogBrewDjangoCacheInstrumentation`.
+- Apps pass an owned Django cache object such as `django.core.cache.cache` or `caches["default"]`; LogBrew wraps only supported methods on that object and puts the original methods back with `uninstall()`.
+- Supported methods are `get`, `get_many`, `set`, `set_many`, `add`, `delete`, `delete_many`, and `clear`.
+- Spans include `framework=django-cache`, `cacheSystem=django-cache`, `cacheOperation`, `cacheOperationKind`, optional caller `cacheName`, hit state for reads, item counts/sizes where safely knowable, sampled state, and type-only errors.
+- The helper avoids default Django dependency, global Django patching, settings access, cache keys, values, timeout/version kwargs, backend locations, hosts, ports, arbitrary command text, response payloads, baggage, tracestate, stacks, and exception messages.
+
+Verification:
+
+- RED: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python/logbrew_py/tests/test_django_cache_client.py` failed because `instrument_django_cache_with_logbrew_spans` was not exported.
+- GREEN focused tests prove app-owned cache method args/results are preserved, child trace context is active during calls, duplicate install returns the existing instrumentation, `uninstall()` stops future spans, type-only errors are queued, capture failures do not interrupt cache calls, and private keys/values/backend locations/timeout/version kwargs stay out of payloads.
+- Installed-artifact proof is wired into `scripts/real_user_python_smoke.sh` through `scripts/python_django_cache_span_smoke.py`, which installs real Django, configures a local in-memory cache, exercises `set`, `get`, and `get_many`, and proves no private key/value/backend leakage.
+
+Remaining gap after this refresh:
+
+- LogBrew now covers app-owned Django cache objects plus app-owned Redis commands and pipeline execution. Sentry, Datadog, and OpenTelemetry still win for hidden automatic Django/Flask/pymemcache patching, Redis cluster spans, command filtering/obfuscation modes, connection metrics, broader semantic conventions, baggage/tracestate, and full OTel processor/exporter interop.
