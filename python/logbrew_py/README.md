@@ -427,6 +427,39 @@ result = database_operation_with_logbrew_span(
 
 The helper activates a child `LogBrewTraceContext` while your callable runs, queues one span named from the DB system and operation, preserves the original result or exception, and reports telemetry capture failures through `on_capture_error` without replacing the database result. Metadata is intentionally bounded to primitive caller metadata, `dbSystem`, `dbOperation`, optional `dbName`, optional `statementTemplate`, optional non-negative `rowCount`, sampled state, optional bounded span events, and exception type. It does not monkeypatch SQLAlchemy or DB-API drivers, does not open support tickets, and does not capture SQL parameters, result rows, connection strings, network addresses, sensitive configuration values, payloads, baggage, tracestate, stack traces, or exception messages.
 
+### DB-API Connection Spans
+
+Use `instrument_dbapi_connection_with_logbrew_spans()` when your app already owns a Python DB-API connection and you want one sanitized span around each cursor execution:
+
+```python
+import sqlite3
+
+from logbrew_sdk import LogBrewClient, instrument_dbapi_connection_with_logbrew_spans
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+connection = sqlite3.connect(":memory:")
+
+db = instrument_dbapi_connection_with_logbrew_spans(
+    connection,
+    client=client,
+    system="sqlite",
+    db_name="checkout",
+    metadata={"service": "checkout-api"},
+)
+
+cursor = db.cursor()
+cursor.execute("SELECT id FROM checkout_order WHERE id = ?", (order_id,))
+rows = cursor.fetchall()
+
+raw_connection = db.uninstall()
+```
+
+The wrapper keeps connection ownership with your app, wraps cursors returned by `cursor()`, and supports `execute(...)`, `executemany(...)`, `callproc(...)`, plus common connection shortcut `execute(...)` and `executemany(...)` calls. It derives only the SQL verb or procedure label, records `framework=dbapi`, `dbMethod`, optional caller `dbName`, optional non-negative row count, active child trace IDs, sampled state, and type-only errors. It does not patch DB-API modules, driver classes, or connect functions, and does not capture SQL text, bind values, result rows, connection URLs, network addresses, user names, baggage, tracestate, stack traces, or exception messages. Call `uninstall()` to stop future spans and get the original connection back.
+
 ### SQLAlchemy Engine Spans
 
 Use `instrument_sqlalchemy_engine_with_logbrew_spans()` when your app already uses SQLAlchemy and you want one safe span per cursor execution from a caller-owned engine:

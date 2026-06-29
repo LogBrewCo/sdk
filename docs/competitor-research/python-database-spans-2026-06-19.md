@@ -77,3 +77,34 @@ LogBrew update:
 Remaining gap after this refresh:
 
 - LogBrew is now more practical for real SQLAlchemy users without adding a dependency or patching globals, but Sentry/Datadog/OpenTelemetry still win for drop-in global instrumentation, DB-API coverage, metrics, query comments, semantic-convention breadth, baggage/tracestate, and fetch/connect pool spans.
+
+## 2026-06-29 DB-API Connection Refresh
+
+Source refresh:
+
+- Sentry Python SDK: `https://github.com/getsentry/sentry-python.git` at `a661615a40fa26450e4b4f50cec760733cc858d8`; read `sentry_sdk/tracing_utils.py` (`record_sql_queries(...)`, `_format_sql(...)`), `sentry_sdk/integrations/sqlalchemy.py` (`SqlalchemyIntegration.setup_once(...)`, `_before_cursor_execute(...)`, `_after_cursor_execute(...)`, `_handle_error(...)`, `_set_db_data(...)`), and `sentry_sdk/integrations/aiomysql.py` (`AioMySQLIntegration.setup_once(...)`, `_wrap_connect(...)`, `_wrap_execute(...)`, `_wrap_executemany(...)`).
+- OpenTelemetry Python Contrib: `https://github.com/open-telemetry/opentelemetry-python-contrib.git` at `ec27300a9433f5985cd7467ee840037e12602a70`; read `instrumentation/opentelemetry-instrumentation-dbapi/src/opentelemetry/instrumentation/dbapi/__init__.py`, especially `trace_integration(...)`, `wrap_connect(...)`, `instrument_connection(...)`, `uninstrument_connection(...)`, `DatabaseApiIntegration`, `TracedConnectionProxy.cursor(...)`, `CursorTracer.traced_execution(...)`, `CursorTracer.traced_execution_async(...)`, `get_operation_name(...)`, and `get_statement(...)`.
+- Datadog dd-trace-py: `https://github.com/DataDog/dd-trace-py.git` at `8f36ac8332c5eb789f20241e547c486f51ade9be`; read `ddtrace/contrib/dbapi.py` (`TracedCursor`, `_trace_method(...)`, `execute(...)`, `executemany(...)`, `callproc(...)`, `FetchTracedCursor`, `TracedConnection.cursor(...)`, `commit(...)`, `rollback(...)`, `_get_vendor(...)`), `ddtrace/contrib/internal/sqlite3/patch.py` (`patch(...)`, `traced_connect(...)`, `TracedSQLiteCursor`, `TracedSQLite.execute(...)`), `ddtrace/contrib/internal/psycopg/connection.py` (`Psycopg3TracedConnection.execute(...)`, `Psycopg2TracedConnection`, `patch_conn(...)`, `patched_connect_factory(...)`), and `ddtrace/contrib/internal/psycopg/cursor.py` (`Psycopg3TracedCursor` and fetch variants).
+
+Observed pattern:
+
+- Sentry is strongest for polished framework-owned integration paths and can record query text/parameters when configured, but it relies on integration hooks or driver-specific wrappers rather than a tiny explicit DB-API wrapper in core.
+- OpenTelemetry has the most standards-shaped DB-API design: module `connect` patching, direct connection instrumentation, cursor execute/executemany/callproc wrapping, SQL comment support, optional statement capture, connection attributes, metrics, and async execution paths.
+- Datadog has broad DB-API coverage with wrapt proxies, driver-specific patches, row counts, optional fetch tracing, commit/rollback spans, and connection tags. It is stronger for automatic breadth, but heavier and more instrumentation-owned.
+
+LogBrew update:
+
+- Added `instrument_dbapi_connection_with_logbrew_spans(connection, ...)` plus `LogBrewDbapiConnection` and `LogBrewDbapiCursor` to the Python SDK.
+- The helper wraps exactly one caller-owned DB-API connection, returns the same wrapper on duplicate calls, wraps cursors returned from `cursor()`, and supports cursor `execute`, `executemany`, `callproc`, plus common connection shortcut `execute` and `executemany`.
+- LogBrew creates a child trace around each call, derives only the SQL verb or procedure label, records `framework=dbapi`, `dbMethod`, optional caller `dbName`, optional non-negative row count, sampled state, and type-only exceptions.
+- It avoids competitor-heavy behavior in core: no module/class/connect patching, no driver dependency, no SQL text, no bind values, no result rows, no connection URLs, no network addresses, no user names, no baggage, no tracestate, no stack traces, and no exception messages. `uninstall()` disables future spans and returns the original connection.
+
+Verification:
+
+- Focused unit tests cover trace activation, duplicate wrapper reuse, cursor chaining preservation, row count capture, uninstall behavior, type-only errors, capture-failure isolation, and no SQL/bind/private-value leakage.
+- `scripts/python_dbapi_span_smoke.py` uses real stdlib `sqlite3` against a local in-memory app flow and validates update/select/error spans plus uninstall behavior without external services.
+- `scripts/real_user_python_smoke.sh` now checks `_dbapi_client.py` in wheel, sdist, and installed package metadata and runs the DB-API smoke through wheel install, wheel reinstall, freeze reinstall, direct requirement reinstall, sdist install, and sdist reinstall.
+
+Remaining gap after this refresh:
+
+- LogBrew is now more useful than the prior explicit-only helper for real DB-API users who want safe spans without hidden patching. Sentry, Datadog, and OpenTelemetry still win for automatic multi-driver DB-API patching, richer semantic conventions, statement-comment injection, fetch/connect/commit/rollback spans, metrics, baggage/tracestate, and broad integration-owned coverage.

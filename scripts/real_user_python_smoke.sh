@@ -349,6 +349,23 @@ run_database_span_smoke() {
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_dbapi_span_smoke() {
+    local output_prefix="$1"
+
+    python "$repo_root/scripts/python_dbapi_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"framework": "dbapi"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"dbSystem": "sqlite"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"dbMethod": "execute"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"selectMethod": "execute"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"updateRowCount": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"selectRows": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"errorStatus": "error"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"errorType": "OperationalError"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"parentSpanAfterDbapi": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_sqlalchemy_span_smoke() {
     local output_prefix="$1"
 
@@ -473,6 +490,7 @@ run_reinstall_from_freeze() {
     run_requests_span_smoke "$output_prefix-freeze-requests-span"
     run_httpx_span_smoke "$output_prefix-freeze-httpx-span"
     run_database_span_smoke "$output_prefix-freeze-database-span"
+    run_dbapi_span_smoke "$output_prefix-freeze-dbapi-span"
     run_sqlalchemy_span_smoke "$output_prefix-freeze-sqlalchemy-span"
     run_cache_span_smoke "$output_prefix-freeze-cache-span"
     run_redis_span_smoke "$output_prefix-freeze-redis-span"
@@ -527,6 +545,7 @@ run_reinstall_from_direct_requirement() {
     run_requests_span_smoke "$output_prefix-direct-requests-span"
     run_httpx_span_smoke "$output_prefix-direct-httpx-span"
     run_database_span_smoke "$output_prefix-direct-database-span"
+    run_dbapi_span_smoke "$output_prefix-direct-dbapi-span"
     run_sqlalchemy_span_smoke "$output_prefix-direct-sqlalchemy-span"
     run_cache_span_smoke "$output_prefix-direct-cache-span"
     run_redis_span_smoke "$output_prefix-direct-redis-span"
@@ -577,6 +596,7 @@ with zipfile.ZipFile(wheel_path) as archive:
     required = {
         "logbrew_sdk/_cache_client.py",
         "logbrew_sdk/_celery_client.py",
+        "logbrew_sdk/_dbapi_client.py",
         "logbrew_sdk/_db_client.py",
         "logbrew_sdk/_http_client.py",
         "logbrew_sdk/_instrumentation.py",
@@ -619,6 +639,7 @@ for needle in (
     "celery_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
@@ -658,6 +679,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
         f"{sdist_root}/pyproject.toml",
         f"{sdist_root}/src/logbrew_sdk/_cache_client.py",
         f"{sdist_root}/src/logbrew_sdk/_celery_client.py",
+        f"{sdist_root}/src/logbrew_sdk/_dbapi_client.py",
         f"{sdist_root}/src/logbrew_sdk/_db_client.py",
         f"{sdist_root}/src/logbrew_sdk/_http_client.py",
         f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
@@ -706,6 +728,7 @@ for needle in (
     "celery_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
@@ -990,6 +1013,8 @@ from logbrew_sdk import (
     IssueAttributes,
     LogAttributes,
     LogBrewClient,
+    LogBrewDbapiConnection,
+    LogBrewDbapiCursor,
     LogBrewLoggingHandler,
     LogBrewRedisInstrumentation,
     MetricAttributes,
@@ -1011,6 +1036,7 @@ from logbrew_sdk import (
     create_traceparent,
     database_operation_with_logbrew_span,
     httpx_request_with_logbrew_span,
+    instrument_dbapi_connection_with_logbrew_spans,
     instrument_redis_client_with_logbrew_spans,
     parse_traceparent,
     queue_operation_with_logbrew_span,
@@ -1226,6 +1252,39 @@ async def run_async_database_typecheck() -> None:
 
 
 asyncio.run(run_async_database_typecheck())
+
+
+class TypecheckDbapiCursor:
+    rowcount = -1
+
+    def execute(self, _operation: object, _parameters: object | None = None) -> object:
+        self.rowcount = 1
+        return self
+
+
+class TypecheckDbapiConnection:
+    def __init__(self) -> None:
+        self.cursor_instance = TypecheckDbapiCursor()
+
+    def cursor(self) -> TypecheckDbapiCursor:
+        return self.cursor_instance
+
+
+dbapi_connection = TypecheckDbapiConnection()
+dbapi_instrumentation: LogBrewDbapiConnection = instrument_dbapi_connection_with_logbrew_spans(
+    dbapi_connection,
+    client=client,
+    system="sqlite",
+    event_id_factory=lambda: "evt_dbapi_typecheck",
+    timestamp="2026-06-02T10:00:11Z",
+    db_name="health",
+    span_id_factory=lambda: "b7ad6b7169203342",
+)
+dbapi_cursor: LogBrewDbapiCursor = dbapi_instrumentation.cursor()
+if dbapi_cursor.execute("SELECT * FROM health WHERE email = ?", ("private@example.test",)) is not dbapi_cursor:
+    raise RuntimeError("unexpected DB-API cursor result")
+if dbapi_instrumentation.uninstall() is not dbapi_connection:
+    raise RuntimeError("unexpected DB-API uninstall result")
 
 cache_result = cache_operation_with_logbrew_span(
     "GET health",
@@ -2071,6 +2130,7 @@ package_files = {str(path) for path in files("logbrew-sdk") or []}
 required = {
     "logbrew_sdk/_cache_client.py",
     "logbrew_sdk/_celery_client.py",
+    "logbrew_sdk/_dbapi_client.py",
     "logbrew_sdk/_db_client.py",
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
@@ -2108,6 +2168,7 @@ for needle in (
     "celery_operation_with_logbrew_span",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
@@ -2423,6 +2484,7 @@ run_urlopen_span_smoke "wheel-urlopen-span"
 run_requests_span_smoke "wheel-requests-span"
 run_httpx_span_smoke "wheel-httpx-span"
 run_database_span_smoke "wheel-database-span"
+run_dbapi_span_smoke "wheel-dbapi-span"
 run_sqlalchemy_span_smoke "wheel-sqlalchemy-span"
 run_cache_span_smoke "wheel-cache-span"
 run_redis_span_smoke "wheel-redis-span"
@@ -2459,6 +2521,7 @@ run_urlopen_span_smoke "wheel-reinstall-urlopen-span"
 run_requests_span_smoke "wheel-reinstall-requests-span"
 run_httpx_span_smoke "wheel-reinstall-httpx-span"
 run_database_span_smoke "wheel-reinstall-database-span"
+run_dbapi_span_smoke "wheel-reinstall-dbapi-span"
 run_sqlalchemy_span_smoke "wheel-reinstall-sqlalchemy-span"
 run_cache_span_smoke "wheel-reinstall-cache-span"
 run_redis_span_smoke "wheel-reinstall-redis-span"
@@ -2505,6 +2568,7 @@ run_urlopen_span_smoke "sdist-urlopen-span"
 run_requests_span_smoke "sdist-requests-span"
 run_httpx_span_smoke "sdist-httpx-span"
 run_database_span_smoke "sdist-database-span"
+run_dbapi_span_smoke "sdist-dbapi-span"
 run_sqlalchemy_span_smoke "sdist-sqlalchemy-span"
 run_cache_span_smoke "sdist-cache-span"
 run_redis_span_smoke "sdist-redis-span"
@@ -2541,6 +2605,7 @@ run_urlopen_span_smoke "sdist-reinstall-urlopen-span"
 run_requests_span_smoke "sdist-reinstall-requests-span"
 run_httpx_span_smoke "sdist-reinstall-httpx-span"
 run_database_span_smoke "sdist-reinstall-database-span"
+run_dbapi_span_smoke "sdist-reinstall-dbapi-span"
 run_sqlalchemy_span_smoke "sdist-reinstall-sqlalchemy-span"
 run_cache_span_smoke "sdist-reinstall-cache-span"
 run_redis_span_smoke "sdist-reinstall-redis-span"

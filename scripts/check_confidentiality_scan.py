@@ -319,6 +319,7 @@ def is_sdk_metadata_denylist_literal(relative_text: str, line: str) -> bool:
         "_cache_client.py",
         "_celery_client.py",
         "_db_client.py",
+        "_dbapi_client.py",
         "_instrumentation.py",
         "_queue_client.py",
         "_redis_client.py",
