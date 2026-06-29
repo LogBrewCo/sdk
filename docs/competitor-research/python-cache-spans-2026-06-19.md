@@ -169,8 +169,8 @@ LogBrew update:
 Verification:
 
 - RED: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python/logbrew_py/tests/test_pymemcache_client.py` failed because `instrument_pymemcache_client_with_logbrew_spans` was not exported.
-- GREEN focused tests prove app-owned method args/results are preserved, child trace context is active during calls, duplicate install returns the existing instrumentation, positional `get(key, default)` misses stay misses, nested batch calls do not double trace, `uninstall()` stops future spans, type-only errors are queued, capture failures do not interrupt cache calls, and private keys/values/connection details/expire kwargs stay out of payloads.
-- Installed-artifact proof is wired into `scripts/real_user_python_smoke.sh` through `scripts/python_pymemcache_span_smoke.py`, which installs real `pymemcache>=4,<5`, uses a local no-network subclass, exercises `get`, `get_many`, and `set`, and checks payload privacy plus trace correlation across wheel, reinstall, freeze/direct reinstall, sdist, and sdist reinstall paths.
+- GREEN focused tests prove app-owned method args/results are preserved, child trace context is active during calls, duplicate install returns the existing instrumentation, positional `get(key, default)` and `gets(key, default, cas_default)` misses stay misses, nested batch calls do not double trace, `uninstall()` stops future spans, type-only errors are queued, capture failures do not interrupt cache calls, and private keys/values/connection details/expire kwargs stay out of payloads.
+- Installed-artifact proof is wired into `scripts/real_user_python_smoke.sh` through `scripts/python_pymemcache_span_smoke.py`, which installs real `pymemcache>=4,<5`, uses a local no-network subclass, exercises `get`, `gets`, `get_many`, and `set`, and checks payload privacy plus trace correlation across wheel, reinstall, freeze/direct reinstall, sdist, and sdist reinstall paths.
 
 Remaining gap after this refresh:
 

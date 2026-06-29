@@ -24,6 +24,11 @@ class LocalPymemcache(PymemcacheClient):
         self.active_span = active.span_id if active is not None else None
         return b"cached-profile"
 
+    def gets(self, *args: Any, **kwargs: Any) -> tuple[Any, Any]:
+        active = get_active_logbrew_trace()
+        self.active_span = active.span_id if active is not None else None
+        return (kwargs.get("default"), kwargs.get("cas_default"))
+
     def get_many(self, *args: Any, **kwargs: Any) -> dict[bytes, bytes]:
         active = get_active_logbrew_trace()
         self.active_span = active.span_id if active is not None else None
@@ -48,12 +53,13 @@ parent_trace = LogBrewTraceContext(
 event_ids = iter(
     [
         "evt_python_pymemcache_get",
+        "evt_python_pymemcache_gets",
         "evt_python_pymemcache_get_many",
         "evt_python_pymemcache_set",
     ]
 )
-span_ids = iter(["b7ad6b7169203401", "b7ad6b7169203402", "b7ad6b7169203403"])
-clock_values = iter([530.0, 530.006, 531.0, 531.009, 532.0, 532.004])
+span_ids = iter(["b7ad6b7169203401", "b7ad6b7169203402", "b7ad6b7169203403", "b7ad6b7169203404"])
+clock_values = iter([530.0, 530.006, 531.0, 531.003, 532.0, 532.009, 533.0, 533.004])
 pymemcache_client = LocalPymemcache()
 captured: dict[str, Any] = {}
 
@@ -75,6 +81,12 @@ with use_logbrew_trace(parent_trace):
     duplicate = instrument_pymemcache_client_with_logbrew_spans(pymemcache_client, client=client)
     captured["getResult"] = pymemcache_client.get(b"private:user:42", default=None)
     captured["getActiveSpan"] = pymemcache_client.active_span
+    captured["getsResult"] = pymemcache_client.gets(
+        b"private:user:42",
+        default=b"fallback-profile",
+        cas_default=b"fallback-cas",
+    )
+    captured["getsActiveSpan"] = pymemcache_client.active_span
     captured["manyResult"] = pymemcache_client.get_many([b"private:user:42", b"private:user:99"])
     captured["manyActiveSpan"] = pymemcache_client.active_span
     captured["setResult"] = pymemcache_client.set(b"private:user:42", b"sensitive-profile", expire=60, noreply=False)
@@ -90,6 +102,8 @@ for forbidden in (
     "private:user:42",
     "private:user:99",
     "sensitive-profile",
+    "fallback-profile",
+    "fallback-cas",
     "cacheKey",
     "cache.example.invalid",
     '"expire": 60',
@@ -113,16 +127,20 @@ print(
             "getActiveSpan": captured["getActiveSpan"],
             "getHit": metadata[0]["cacheHit"],
             "getItemSizeBytes": metadata[0]["itemSizeBytes"],
+            "getsActiveSpan": captured["getsActiveSpan"],
+            "getsHit": metadata[1]["cacheHit"],
             "manyActiveSpan": captured["manyActiveSpan"],
-            "manyHit": metadata[1]["cacheHit"],
-            "manyItemCount": metadata[1]["itemCount"],
+            "manyHit": metadata[2]["cacheHit"],
+            "manyItemCount": metadata[2]["itemCount"],
             "ok": True,
             "operations": [item["cacheOperation"] for item in metadata],
             "parentSpanAfterCache": captured["parentSpanAfterCache"],
             "setActiveSpan": captured["setActiveSpan"],
-            "setKind": metadata[2]["cacheOperationKind"],
-            "syncValuePresent": captured["getResult"] is not None and bool(captured["manyResult"]),
-            "uninstallStoppedTracing": len(events) == 3,
+            "setKind": metadata[3]["cacheOperationKind"],
+            "syncValuePresent": captured["getResult"] is not None
+            and bool(captured["manyResult"])
+            and captured["getsResult"] == (b"fallback-profile", b"fallback-cas"),
+            "uninstallStoppedTracing": len(events) == 4,
         },
         sort_keys=True,
     )
