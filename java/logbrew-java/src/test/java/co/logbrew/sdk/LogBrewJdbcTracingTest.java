@@ -13,6 +13,7 @@ import java.util.ArrayDeque;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.sql.DataSource;
 
 /**
  * Dependency-free test runner for app-owned JDBC tracing.
@@ -31,6 +32,8 @@ public final class LogBrewJdbcTracingTest {
         testCommitAndRollbackAreTracedWhenEnabled();
         testInvalidConfiguredSpanIdsDoNotBreakJdbcCalls();
         testLeadingSqlCommentsDoNotBecomeOperationNames();
+        testDataSourceReturnsTracedConnections();
+        testDataSourceTwoArgumentConnectionDoesNotCaptureArguments();
         System.out.println("java jdbc tracing tests ok (" + testsRun + " tests)");
     }
 
@@ -238,6 +241,69 @@ public final class LogBrewJdbcTracingTest {
         testsRun++;
     }
 
+    private void testDataSourceReturnsTracedConnections() throws Exception {
+        LogBrewClient client = sampleClient();
+        RecordingJdbc jdbc = new RecordingJdbc();
+        DataSource dataSource = LogBrewJdbcTracing.instrumentDataSource(
+            fakeDataSource(jdbc),
+            client,
+            baseConfig()
+                .eventIdPrefix("java_jdbc_datasource")
+                .spanIds("b7ad6b7169203407")
+                .nowSequence(
+                    Instant.parse("2026-06-29T10:00:07Z"),
+                    Instant.parse("2026-06-29T10:00:07.009Z")
+                )
+        );
+
+        ResultSet resultSet = dataSource.getConnection()
+            .createStatement()
+            .executeQuery("SELECT * FROM orders WHERE card_number = '4111111111111111'");
+
+        assertTrue(resultSet == jdbc.resultSet, "data source preserves result set");
+        assertEquals(1, jdbc.dataSourceConnections, "data source delegate connection count");
+        String payload = client.previewJson();
+        assertContains(payload, "\"id\": \"java_jdbc_datasource_span_b7ad6b7169203407\"");
+        assertContains(payload, "\"name\": \"jdbc:SELECT\"");
+        assertContains(payload, "\"source\": \"jdbc.statement\"");
+        assertContains(payload, "\"jdbcTarget\": \"statement\"");
+        assertNotContains(payload, "4111111111111111");
+        assertNotContains(payload, "SELECT * FROM");
+        testsRun++;
+    }
+
+    private void testDataSourceTwoArgumentConnectionDoesNotCaptureArguments() throws Exception {
+        LogBrewClient client = sampleClient();
+        RecordingJdbc jdbc = new RecordingJdbc();
+        DataSource dataSource = LogBrewJdbcTracing.instrumentDataSource(
+            fakeDataSource(jdbc),
+            client,
+            baseConfig()
+                .eventIdPrefix("java_jdbc_datasource_two_arg")
+                .spanIds("b7ad6b7169203408")
+                .nowSequence(
+                    Instant.parse("2026-06-29T10:00:08Z"),
+                    Instant.parse("2026-06-29T10:00:08.012Z")
+                )
+        );
+
+        int rowCount = dataSource
+            .getConnection("private_user", "private_second_arg")
+            .prepareStatement("UPDATE orders SET owner = 'private_user' WHERE id = ?")
+            .executeUpdate();
+
+        assertEquals(2, rowCount, "data source two-argument connection row count");
+        assertEquals("private_user", jdbc.dataSourceUsername, "delegate receives username");
+        assertEquals("private_second_arg", jdbc.dataSourceSecondArgument, "delegate receives second argument");
+        String payload = client.previewJson();
+        assertContains(payload, "\"name\": \"jdbc:UPDATE\"");
+        assertContains(payload, "\"rowCount\": 2");
+        assertNotContains(payload, "private_user");
+        assertNotContains(payload, "private_second_arg");
+        assertNotContains(payload, "UPDATE orders SET");
+        testsRun++;
+    }
+
     private static LogBrewJdbcTracing.ConnectionConfig baseConfig() {
         return LogBrewJdbcTracing.ConnectionConfig.create()
             .system("postgresql")
@@ -268,6 +334,21 @@ public final class LogBrewJdbcTracingTest {
                 jdbc.activeTrace.set(LogBrewTrace.current().orElse(null));
                 jdbc.rollbacks++;
                 return null;
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static DataSource fakeDataSource(RecordingJdbc jdbc) {
+        return proxy(DataSource.class, (proxy, method, args) -> {
+            String name = method.getName();
+            if ("getConnection".equals(name)) {
+                jdbc.dataSourceConnections++;
+                if (args != null && args.length == 2) {
+                    jdbc.dataSourceUsername = (String) args[0];
+                    jdbc.dataSourceSecondArgument = (String) args[1];
+                }
+                return fakeConnection(jdbc);
             }
             return defaultValue(method.getReturnType());
         });
@@ -416,5 +497,8 @@ public final class LogBrewJdbcTracingTest {
         private SQLException failure;
         private int commits;
         private int rollbacks;
+        private int dataSourceConnections;
+        private String dataSourceUsername;
+        private String dataSourceSecondArgument;
     }
 }

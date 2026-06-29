@@ -4,7 +4,6 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_dir="$repo_root/java/logbrew-java"
 tmp_dir="$(mktemp -d)"
-
 # shellcheck source=scripts/java_logback_deps.sh
 source "$repo_root/scripts/java_logback_deps.sh"
 
@@ -13,12 +12,10 @@ remove_tmp_dir() {
 }
 
 trap remove_tmp_dir EXIT
-
 main_sources="$tmp_dir/main-sources.txt"
 example_sources="$tmp_dir/example-sources.txt"
 find "$package_dir/src/main/java" -name '*.java' | sort > "$main_sources"
 find "$package_dir/examples" -name '*.java' | sort > "$example_sources"
-
 mkdir -p "$tmp_dir/classes" "$tmp_dir/jar-stage" "$tmp_dir/source-stage" "$tmp_dir/example-classes"
 java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
 java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps")"
@@ -258,6 +255,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import javax.sql.DataSource;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Handler;
@@ -514,8 +512,34 @@ public final class Main {
         tracedConnection
             .createStatement()
             .executeQuery("/* CommentMarker private */ SELECT * FROM orders");
+        DataSource tracedDataSource = LogBrewJdbcTracing.instrumentDataSource(
+            fakeDataSource(jdbc),
+            jdbcClient,
+            LogBrewJdbcTracing.ConnectionConfig.create()
+                .system("postgresql")
+                .databaseName("orders")
+                .eventIdPrefix("java_jdbc_datasource_smoke")
+                .spanIds("b7ad6b7169203405")
+                .nowSequence(
+                    Instant.parse("2026-06-02T10:00:09Z"),
+                    Instant.parse("2026-06-02T10:00:09.006Z")
+                )
+                .metadata(Map.of(
+                    "service", "checkout",
+                    "username", "private_user",
+                    "authSecondArgument", "private_second_arg"
+                ))
+        );
+        int dataSourceRowCount = tracedDataSource
+            .getConnection("private_user", "private_second_arg")
+            .prepareStatement("UPDATE orders SET owner = 'private_user' WHERE id = ?")
+            .executeUpdate();
+        require(dataSourceRowCount == 2, "JDBC data source prepared update row count");
+        require("private_user".equals(jdbc.dataSourceUsername), "JDBC data source passes username");
+        require("private_second_arg".equals(jdbc.dataSourceSecondArgument), "JDBC data source passes second argument");
         String jdbcPayload = jdbcClient.previewJson();
-        require(jdbcClient.pendingEvents() == 4, "JDBC helper queues four spans");
+        require(jdbcClient.pendingEvents() == 5, "JDBC helper queues five spans");
+        require(jdbcPayload.contains("\"id\": \"java_jdbc_datasource_smoke_span_b7ad6b7169203405\""), "JDBC data source span id");
         require(jdbcPayload.contains("\"source\": \"jdbc.statement\""), "JDBC span source");
         require(jdbcPayload.contains("\"framework\": \"jdbc\""), "JDBC framework metadata");
         require(jdbcPayload.contains("\"dbOperation\": \"SELECT\""), "JDBC select operation");
@@ -530,6 +554,8 @@ public final class Main {
         require(!jdbcPayload.contains("DELETE FROM"), "JDBC omits raw error SQL");
         require(!jdbcPayload.contains("private SQL"), "JDBC omits exception message");
         require(!jdbcPayload.contains("private.example"), "JDBC omits connection URL");
+        require(!jdbcPayload.contains("private_user"), "JDBC data source omits username");
+        require(!jdbcPayload.contains("private_second_arg"), "JDBC data source omits second argument");
 
         LogBrewClient otel = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
         SpanContext otelSpanContext = SpanContext.create(
@@ -699,7 +725,7 @@ public final class Main {
 
         runHttpTransportSmoke();
 
-        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"jdbcEvents\":4,\"otelEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
+        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"jdbcEvents\":5,\"otelEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
     }
 
     private static void runHttpTransportSmoke() {
@@ -810,6 +836,19 @@ public final class Main {
         });
     }
 
+    private static DataSource fakeDataSource(RecordingJdbc jdbc) {
+        return proxy(DataSource.class, (proxy, method, args) -> {
+            if ("getConnection".equals(method.getName())) {
+                if (args != null && args.length == 2) {
+                    jdbc.dataSourceUsername = (String) args[0];
+                    jdbc.dataSourceSecondArgument = (String) args[1];
+                }
+                return fakeConnection(jdbc);
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
     private static <T> T fakeStatement(RecordingJdbc jdbc, Class<?> interfaceType) {
         return proxy(interfaceType, (proxy, method, args) -> {
             if (method.getName().startsWith("execute")) {
@@ -888,6 +927,8 @@ public final class Main {
     private static final class RecordingJdbc {
         private final ResultSet resultSet = fakeResultSet();
         private SQLException failure;
+        private String dataSourceUsername;
+        private String dataSourceSecondArgument;
     }
 
     private static final class QueueFailure extends Exception {
@@ -946,7 +987,7 @@ grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"logbackEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"timelineEvents":2' "$tmp_dir/smoke-app.stderr.json"
-grep -q '"jdbcEvents":4' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"jdbcEvents":5' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"otelEvents":1' "$tmp_dir/smoke-app.stderr.json"
 
 jdeps --multi-release 11 --class-path "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_optional_classpath" "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jdeps.txt"

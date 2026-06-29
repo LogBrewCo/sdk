@@ -21,6 +21,7 @@ import java.util.Objects;
 import java.util.Queue;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import javax.sql.DataSource;
 
 /**
  * App-owned JDBC connection tracing without a Java agent or global driver patching.
@@ -74,6 +75,54 @@ public final class LogBrewJdbcTracing {
             new Class<?>[] {Connection.class},
             new ConnectionHandler(connection, client, safeConfig)
         ));
+    }
+
+    /**
+     * Wraps one caller-owned JDBC data source so returned connections emit safe DB spans.
+     */
+    public static DataSource instrumentDataSource(
+        DataSource dataSource,
+        LogBrewClient client,
+        ConnectionConfig config
+    ) {
+        Objects.requireNonNull(dataSource, "dataSource");
+        Objects.requireNonNull(client, "client");
+        ConnectionConfig safeConfig = config == null ? ConnectionConfig.create() : config;
+        return DataSource.class.cast(Proxy.newProxyInstance(
+            DataSource.class.getClassLoader(),
+            new Class<?>[] {DataSource.class},
+            new DataSourceHandler(dataSource, client, safeConfig)
+        ));
+    }
+
+    private static final class DataSourceHandler implements InvocationHandler {
+        private final DataSource delegate;
+        private final LogBrewClient client;
+        private final ConnectionConfig config;
+
+        private DataSourceHandler(DataSource delegate, LogBrewClient client, ConnectionConfig config) {
+            this.delegate = delegate;
+            this.client = client;
+            this.config = config;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws SQLException {
+            Object[] safeArgs = args == null ? new Object[0] : args;
+            Object objectResult = handleObjectMethod(proxy, method, safeArgs);
+            if (objectResult != Unhandled.INSTANCE) {
+                return objectResult;
+            }
+            Object wrapperResult = handleWrapperMethod(proxy, delegate, method, safeArgs);
+            if (wrapperResult != Unhandled.INSTANCE) {
+                return wrapperResult;
+            }
+            if ("getConnection".equals(method.getName())) {
+                Connection connection = (Connection) invokeDelegate(delegate, method, safeArgs);
+                return connection == null ? null : instrumentConnection(connection, client, config);
+            }
+            return invokeDelegate(delegate, method, safeArgs);
+        }
     }
 
     private static final class ConnectionHandler implements InvocationHandler {

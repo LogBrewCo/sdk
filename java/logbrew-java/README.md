@@ -336,7 +336,7 @@ String orderId = LogBrewOperationTracing.databaseOperation(
 
 The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, headers, cookies, and auth-like fields. These helpers do not import or patch Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
 
-For JDBC apps that already own a `java.sql.Connection`, use `LogBrewJdbcTracing` when you want spans for statements created through that one connection:
+For JDBC apps that already own a `java.sql.Connection` or `javax.sql.DataSource`, use `LogBrewJdbcTracing` when you want spans for statements created through those app-owned objects:
 
 ```java
 import co.logbrew.sdk.LogBrewJdbcTracing;
@@ -344,6 +344,18 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.Map;
+import javax.sql.DataSource;
+
+DataSource tracedDataSource = LogBrewJdbcTracing.instrumentDataSource(
+    dataSource,
+    client,
+    LogBrewJdbcTracing.ConnectionConfig.create()
+        .system("postgresql")
+        .databaseName("orders")
+        .metadata(Map.of("service", "checkout-api"))
+);
+
+Connection tracedConnectionFromPool = tracedDataSource.getConnection();
 
 Connection tracedConnection = LogBrewJdbcTracing.instrumentConnection(
     connection,
@@ -364,7 +376,7 @@ try (PreparedStatement statement = tracedConnection.prepareStatement(
 }
 ```
 
-The wrapper uses only JDK JDBC interfaces and returns the original JDBC results or exceptions. It wraps `createStatement`, `prepareStatement`, and `prepareCall` results, emits one `jdbc:<VERB>` child span around `execute*` calls, records update counts when JDBC returns them, and can trace `commit()`/`rollback()` when `traceTransactions(true)` is set. It derives only the SQL verb locally, such as `SELECT` or `UPDATE`, after skipping leading SQL comments and quoted literals; it does not capture SQL text, bind values, result rows, connection URLs, driver metadata, network addresses, usernames, arbitrary JDBC properties, baggage, tracestate, exception messages, or stack traces. It does not install a Java agent, register a driver, patch `DriverManager`, mutate SQL comments, or affect other connections.
+The wrappers use only JDK JDBC interfaces and return the original JDBC results or exceptions. `instrumentDataSource(...)` delegates normal data-source behavior and wraps only connections returned by no-argument or two-argument `getConnection`. `instrumentConnection(...)` wraps `createStatement`, `prepareStatement`, and `prepareCall` results, emits one `jdbc:<VERB>` child span around `execute*` calls, records update counts when JDBC returns them, and can trace `commit()`/`rollback()` when `traceTransactions(true)` is set. LogBrew derives only the SQL verb locally, such as `SELECT` or `UPDATE`, after skipping leading SQL comments and quoted literals; it does not capture SQL text, bind values, result rows, connection URLs, driver metadata, network addresses, JDBC login argument values, arbitrary JDBC properties, baggage, tracestate, exception messages, or stack traces. It does not install a Java agent, register a driver, patch `DriverManager`, mutate SQL comments, or affect other data sources/connections.
 
 ## Support Ticket Drafts
 
