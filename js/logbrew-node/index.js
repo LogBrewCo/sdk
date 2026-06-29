@@ -15,6 +15,7 @@ import {
   normalizeTraceId,
   resolveOperationTrace
 } from "./trace-context.js";
+import { instrumentLogBrewMongoCollection as instrumentMongoCollection } from "./mongo.js";
 import { instrumentLogBrewPgClient as instrumentPgClient } from "./pg.js";
 import { instrumentLogBrewRedisClient as instrumentRedisClient } from "./redis.js";
 
@@ -147,6 +148,14 @@ export function instrumentLogBrewPgClient(pgClient, options = {}) {
 
 export function instrumentLogBrewRedisClient(redisClient, options = {}) {
   return instrumentRedisClient(redisClient, {
+    ...options,
+    activeTraceProvider: getActiveLogBrewTrace,
+    runWithTrace: (trace, callback) => activeTraceContext.run(trace, callback)
+  });
+}
+
+export function instrumentLogBrewMongoCollection(mongoCollection, options = {}) {
+  return instrumentMongoCollection(mongoCollection, {
     ...options,
     activeTraceProvider: getActiveLogBrewTrace,
     runWithTrace: (trace, callback) => activeTraceContext.run(trace, callback)
@@ -1008,6 +1017,7 @@ export default {
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
+  instrumentLogBrewMongoCollection,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,
   queueBatchOperationWithLogBrewSpan,

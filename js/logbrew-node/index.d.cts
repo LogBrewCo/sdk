@@ -253,6 +253,67 @@ export type LogBrewRedisClientInstrumentationOptions = {
   ) => void | Promise<void>;
 };
 
+export type LogBrewMongoCursor = {
+  forEach?: (...args: unknown[]) => unknown;
+  hasNext?: (...args: unknown[]) => unknown;
+  next?: (...args: unknown[]) => unknown;
+  toArray?: (...args: unknown[]) => unknown;
+  tryNext?: (...args: unknown[]) => unknown;
+  [key: string]: unknown;
+};
+
+export type LogBrewMongoCollection = {
+  collectionName?: string;
+  dbName?: string;
+  namespace?: string | {
+    db?: string;
+    collection?: string;
+  };
+  aggregate?: (...args: unknown[]) => LogBrewMongoCursor | unknown;
+  bulkWrite?: (...args: unknown[]) => unknown;
+  count?: (...args: unknown[]) => unknown;
+  countDocuments?: (...args: unknown[]) => unknown;
+  deleteMany?: (...args: unknown[]) => unknown;
+  deleteOne?: (...args: unknown[]) => unknown;
+  distinct?: (...args: unknown[]) => unknown;
+  estimatedDocumentCount?: (...args: unknown[]) => unknown;
+  find?: (...args: unknown[]) => LogBrewMongoCursor | unknown;
+  findOne?: (...args: unknown[]) => unknown;
+  insertMany?: (...args: unknown[]) => unknown;
+  insertOne?: (...args: unknown[]) => unknown;
+  replaceOne?: (...args: unknown[]) => unknown;
+  updateMany?: (...args: unknown[]) => unknown;
+  updateOne?: (...args: unknown[]) => unknown;
+  [key: string]: unknown;
+};
+
+export type LogBrewMongoCollectionInstrumentation = {
+  isInstalled(): boolean;
+  uninstall(): void;
+};
+
+export type LogBrewMongoCollectionInstrumentationOptions = {
+  client: LogBrewClient;
+  databaseName?: string;
+  collectionName?: string;
+  operationKind?: string;
+  trace?: LogBrewTraceContext;
+  id?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  now?: () => string;
+  nowMs?: () => number;
+  spanIdFactory?: () => string;
+  traceIdFactory?: () => string;
+  onCaptureError?: (
+    error: unknown,
+    context: {
+      client: LogBrewClient;
+      error?: unknown;
+      trace: LogBrewTraceContext;
+    }
+  ) => void | Promise<void>;
+};
+
 export type CacheOperationWithLogBrewSpanOptions<Result = unknown> = {
   client: LogBrewClient;
   operation: () => Result | Promise<Result>;
@@ -365,6 +426,11 @@ export declare function instrumentLogBrewRedisClient(
   options: LogBrewRedisClientInstrumentationOptions
 ): LogBrewRedisClientInstrumentation;
 
+export declare function instrumentLogBrewMongoCollection(
+  mongoCollection: LogBrewMongoCollection,
+  options: LogBrewMongoCollectionInstrumentationOptions
+): LogBrewMongoCollectionInstrumentation;
+
 export declare function cacheOperationWithLogBrewSpan<Result>(
   operationName: string,
   options: CacheOperationWithLogBrewSpanOptions<Result>
@@ -429,6 +495,7 @@ declare const defaultExport: {
   databaseOperationWithLogBrewSpan: typeof databaseOperationWithLogBrewSpan;
   fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
+  instrumentLogBrewMongoCollection: typeof instrumentLogBrewMongoCollection;
   instrumentLogBrewPgClient: typeof instrumentLogBrewPgClient;
   instrumentLogBrewRedisClient: typeof instrumentLogBrewRedisClient;
   queueBatchOperationWithLogBrewSpan: typeof queueBatchOperationWithLogBrewSpan;

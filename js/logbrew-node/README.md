@@ -244,6 +244,30 @@ pgInstrumentation.uninstall();
 
 The wrapper records one child span per `query()` call, preserves Promise and callback query results, rethrows driver errors, and uses the active LogBrew request trace when one exists. Metadata includes `framework: "node:pg"`, `db.system.name: "postgresql"`, operation kind, safe prepared-statement name when present, optional database name, row count, duration, sampled flag, and W3C trace IDs. Failed queries add a type-only `exception` event. It does not patch the `pg` module globally, capture raw SQL, serialize parameters, record result rows, store connection strings, read connection endpoint/user/passphrase fields, inject SQL comments, infer baggage/tracestate, or store raw propagation headers.
 
+### MongoDB Collection Spans
+
+Use `instrumentLogBrewMongoCollection()` when your app already uses the MongoDB driver and wants collection or cursor spans without global driver patching. Pass the app-owned collection, keep `mongodb` as your own dependency, and uninstall when the wrapped collection should return to its original behavior:
+
+```js
+import { createLogBrewNodeClient, instrumentLogBrewMongoCollection } from "@logbrew/node";
+
+const client = createLogBrewNodeClient({ sdkName: "checkout-api", sdkVersion: "1.4.0" });
+const orders = mongo.db("checkout").collection("orders");
+
+const mongoInstrumentation = instrumentLogBrewMongoCollection(orders, {
+  client,
+  databaseName: "checkout",
+  metadata: { feature: "checkout" }
+});
+
+const order = await orders.findOne({ id: orderId });
+const recentOrders = await orders.find({ status: "open" }).toArray();
+
+mongoInstrumentation.uninstall();
+```
+
+The wrapper records one child span per supported collection operation and per wrapped cursor materialization method such as `toArray()` or `next()`. It preserves operation and cursor results, rethrows MongoDB driver errors, and uses the active LogBrew request trace when one exists. Metadata includes `framework: "node:mongodb"`, `db.system.name: "mongodb"`, operation kind, optional database and collection names, duration, sampled flag, and W3C trace IDs. Failed operations add a type-only `exception` event. It does not patch MongoDB modules globally, capture filters, serialize documents, store update specs, record aggregation pipelines, include connection strings or endpoint details, infer baggage/tracestate, or store raw propagation headers.
+
 ### Redis Command Spans
 
 Use `instrumentLogBrewRedisClient()` when your app already uses `redis` or `ioredis` and wants command spans without global module patching. Pass the app-owned client, keep the Redis package as your own dependency, and uninstall when the wrapped instance should return to its original behavior:

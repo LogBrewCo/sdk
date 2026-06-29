@@ -42,6 +42,8 @@ grep -q '^package/pg.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/pg.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/redis.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/redis.cjs$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/mongo.js$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/mongo.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/examples/first-useful-telemetry.mjs$' "$tmp_dir/node-tarball.txt"
@@ -62,6 +64,7 @@ grep -q 'databaseOperationWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'fetchWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'instrumentLogBrewPgClient' "$tmp_dir/node-readme.md"
 grep -q 'instrumentLogBrewRedisClient' "$tmp_dir/node-readme.md"
+grep -q 'instrumentLogBrewMongoCollection' "$tmp_dir/node-readme.md"
 grep -q 'withLogBrewHttpHandler' "$tmp_dir/node-readme.md"
 grep -q 'node:http' "$tmp_dir/node-readme.md"
 grep -q 'traceparent' "$tmp_dir/node-readme.md"
@@ -120,6 +123,7 @@ import {
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
+  instrumentLogBrewMongoCollection,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,
   queueOperationWithLogBrewSpan,
@@ -676,6 +680,144 @@ if (
   throw new Error(`redis instrumentation leaked command, key, value, endpoint, or sensitive details: ${redisClient.previewJson()}`);
 }
 
+const mongoClient = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY", sdkName: "node-mongo-span-smoke", sdkVersion: "0.1.0" });
+const fakeMongoCollection = {
+  collectionName: "profiles",
+  namespace: "app.profiles",
+  async findOne(filter) {
+    if (this.collectionName !== "profiles") {
+      throw new Error("mongo collection receiver was not preserved");
+    }
+    if (filter?.email === "fail@example.com") {
+      throw new TypeError("mongodb lookup failed");
+    }
+    return { name: "Ada" };
+  },
+  find() {
+    return {
+      source: "profiles-cursor",
+      async toArray() {
+        if (this.source !== "profiles-cursor") {
+          throw new Error("mongo cursor receiver was not preserved");
+        }
+        return [{ name: "Ada" }];
+      },
+      async next() {
+        if (this.source !== "profiles-cursor") {
+          throw new Error("mongo cursor receiver was not preserved");
+        }
+        return { name: "Grace" };
+      }
+    };
+  },
+  async updateOne() {
+    throw new TypeError("mongodb update failed");
+  }
+};
+const mongoClock = [600, 611, 620, 636, 640, 649, 650, 660];
+const mongoSpanIds = ["f7ad6b7169203331", "f7ad6b7169203332", "f7ad6b7169203333", "f7ad6b7169203334"];
+const mongoInstrumentation = instrumentLogBrewMongoCollection(fakeMongoCollection, {
+  client: mongoClient,
+  databaseName: "app",
+  metadata: {
+    filter: { email: "ada@example.com" },
+    safeFeature: "profile"
+  },
+  now: () => "2026-06-02T10:00:17Z",
+  nowMs: () => mongoClock.shift() ?? 660,
+  spanIdFactory: () => mongoSpanIds.shift() ?? "f7ad6b7169203334",
+  trace: operationTrace
+});
+if (!mongoInstrumentation.isInstalled()) {
+  throw new Error("expected mongo instrumentation to report installed");
+}
+const mongoFindOneResult = await fakeMongoCollection.findOne({ email: "ada@example.com" });
+if (mongoFindOneResult.name !== "Ada") {
+  throw new Error(`mongo instrumentation changed findOne result: ${JSON.stringify(mongoFindOneResult)}`);
+}
+const mongoFindCursor = fakeMongoCollection.find({ email: "ada@example.com" });
+const mongoCursorRows = await mongoFindCursor.toArray();
+if (mongoCursorRows[0]?.name !== "Ada") {
+  throw new Error(`mongo instrumentation changed cursor toArray result: ${JSON.stringify(mongoCursorRows)}`);
+}
+const mongoNextResult = await fakeMongoCollection.find({ email: "grace@example.com" }).next();
+if (mongoNextResult.name !== "Grace") {
+  throw new Error(`mongo instrumentation changed cursor next result: ${JSON.stringify(mongoNextResult)}`);
+}
+let mongoErrorRethrown = false;
+await fakeMongoCollection.updateOne({ email: "fail@example.com" }, { $set: { name: "Lovelace" } }).catch((error) => {
+  mongoErrorRethrown = error instanceof TypeError;
+});
+if (!mongoErrorRethrown) {
+  throw new Error("mongo instrumentation should rethrow operation errors");
+}
+let duplicateMongoRejected = false;
+try {
+  instrumentLogBrewMongoCollection(fakeMongoCollection, { client: mongoClient });
+} catch (error) {
+  duplicateMongoRejected = error instanceof Error && error.message.includes("uninstrumented mongo collection");
+}
+if (!duplicateMongoRejected) {
+  throw new Error("mongo instrumentation should reject duplicate installs");
+}
+mongoInstrumentation.uninstall();
+if (mongoInstrumentation.isInstalled()) {
+  throw new Error("expected mongo instrumentation to report uninstalled");
+}
+const mongoPayload = JSON.parse(mongoClient.previewJson());
+const mongoFindOneSpanEvent = mongoPayload.events.find((event) => event.id === "evt_node_mongodb_findone_mongodb_collection");
+const mongoFindSpanEvent = mongoPayload.events.find((event) => event.id === "evt_node_mongodb_find_toarray_mongodb_cursor");
+const mongoNextSpanEvent = mongoPayload.events.find((event) => event.id === "evt_node_mongodb_find_next_mongodb_cursor");
+const mongoErrorSpanEvent = mongoPayload.events.find((event) => event.id === "evt_node_mongodb_updateone_error");
+if (!mongoFindOneSpanEvent || mongoFindOneSpanEvent.type !== "span") {
+  throw new Error(`missing mongo findOne span payload: ${mongoClient.previewJson()}`);
+}
+if (
+  mongoFindOneSpanEvent.attributes.traceId !== operationTrace.traceId ||
+  mongoFindOneSpanEvent.attributes.parentSpanId !== operationTrace.spanId ||
+  mongoFindOneSpanEvent.attributes.spanId !== "f7ad6b7169203331"
+) {
+  throw new Error(`mongo span did not correlate with active trace: ${mongoClient.previewJson()}`);
+}
+assertMetadata(mongoFindOneSpanEvent.attributes.metadata, {
+  "db.collection.name": "profiles",
+  "db.mongodb.collection": "profiles",
+  "db.namespace": "app",
+  "db.operation.name": "findOne",
+  "db.system.name": "mongodb",
+  dbCollection: "profiles",
+  dbName: "app",
+  dbOperation: "mongodb.collection",
+  dbOperationKind: "findOne",
+  dbSystem: "mongodb",
+  framework: "node:mongodb",
+  safeFeature: "profile"
+}, "mongo findOne span missing useful metadata", mongoClient.previewJson());
+if (!mongoFindSpanEvent || mongoFindSpanEvent.attributes.metadata.dbOperation !== "mongodb.cursor") {
+  throw new Error(`missing mongo cursor toArray span payload: ${mongoClient.previewJson()}`);
+}
+if (!mongoNextSpanEvent || mongoNextSpanEvent.attributes.metadata.dbOperationKind !== "find") {
+  throw new Error(`missing mongo cursor next span payload: ${mongoClient.previewJson()}`);
+}
+if (!mongoErrorSpanEvent || mongoErrorSpanEvent.attributes.status !== "error") {
+  throw new Error(`missing mongo error span payload: ${mongoClient.previewJson()}`);
+}
+if (mongoErrorSpanEvent.attributes.metadata.errorType !== "TypeError") {
+  throw new Error(`mongo error span should include error type only: ${mongoClient.previewJson()}`);
+}
+assertJsonEqual(mongoErrorSpanEvent.attributes.events, exceptionEvents("TypeError"), "mongo error span should include a bounded exception span event", mongoClient.previewJson());
+const mongoPayloadJson = JSON.stringify(mongoPayload);
+if (
+  mongoPayloadJson.includes("ada@example.com") ||
+  mongoPayloadJson.includes("grace@example.com") ||
+  mongoPayloadJson.includes("Lovelace") ||
+  mongoPayloadJson.includes("$set") ||
+  mongoPayloadJson.includes("mongodb lookup failed") ||
+  mongoPayloadJson.includes("mongodb update failed")
+) {
+  throw new Error(`mongo instrumentation leaked query, document, update, or error details: ${mongoClient.previewJson()}`);
+}
+
 const cacheClient = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY", sdkName: "node-cache-span-smoke", sdkVersion: "0.1.0" });
 const cacheClock = [200, 214, 220, 235];
 const cacheResult = await cacheOperationWithLogBrewSpan("profile.get", {
@@ -1076,10 +1218,13 @@ import {
   createLogBrewNodeClient,
   databaseOperationWithLogBrewSpan,
   getActiveLogBrewTrace,
+  instrumentLogBrewMongoCollection,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,
   queueOperationWithLogBrewSpan,
   type LogBrewNodeContext,
+  type LogBrewMongoCollection,
+  type LogBrewMongoCollectionInstrumentation,
   type LogBrewPgInstrumentation,
   type LogBrewPgQueryable,
   type LogBrewRedisClientInstrumentation,
@@ -1140,6 +1285,20 @@ const typedRedisInstrumentation: LogBrewRedisClientInstrumentation = instrumentL
   trace
 });
 typedRedisInstrumentation.uninstall();
+const typedMongoCollection: LogBrewMongoCollection = {
+  collectionName: "profiles",
+  findOne: async () => ({ id: 42 }),
+  find: () => ({
+    toArray: async () => [{ id: 42 }]
+  })
+};
+const typedMongoInstrumentation: LogBrewMongoCollectionInstrumentation = instrumentLogBrewMongoCollection(typedMongoCollection, {
+  client,
+  databaseName: "app",
+  metadata: { feature: "profile" },
+  trace
+});
+typedMongoInstrumentation.uninstall();
 const cacheResult = await cacheOperationWithLogBrewSpan("profile.get", {
   client,
   hit: true,
@@ -1213,6 +1372,7 @@ node -e 'const node = require("@logbrew/node"); if (typeof node.withLogBrewHttpH
 node -e 'const node = require("@logbrew/node"); if (typeof node.createNodeFetchTransport !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewPgClient !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewRedisClient !== "function") process.exit(1)'
+node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewMongoCollection !== "function") process.exit(1)'
 
 node node_modules/@logbrew/node/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry' "$tmp_dir/launcher-help.txt"
