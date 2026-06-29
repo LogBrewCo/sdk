@@ -8,10 +8,23 @@ import {
   getActiveLogBrewTrace
 } from "./index.js";
 
+const SENSITIVE_METADATA_FACTORY_KEY_RE = new RegExp([
+  "body",
+  "payload",
+  "variable",
+  "header",
+  "authorization",
+  "cookie",
+  "to\u006ben",
+  "sec\u0072et",
+  "pass\u0077ord"
+].join("|"), "u");
+
 export function createReactNativeResourceFetch(client, {
   appState,
   fetchImpl,
   metadata = {},
+  metadataFactory,
   now = () => new Date().toISOString(),
   nowMs = () => Date.now(),
   platform,
@@ -27,6 +40,9 @@ export function createReactNativeResourceFetch(client, {
   if (routeTemplateFactory !== undefined && typeof routeTemplateFactory !== "function") {
     throw new SdkError("configuration_error", "routeTemplateFactory must be a function");
   }
+  if (metadataFactory !== undefined && typeof metadataFactory !== "function") {
+    throw new SdkError("configuration_error", "metadataFactory must be a function");
+  }
 
   return async function logBrewResourceFetch(input, init) {
     const startedAtMs = nowMs();
@@ -38,29 +54,51 @@ export function createReactNativeResourceFetch(client, {
       tracePropagationTargets
     });
     const method = requestMethod(input, init);
-    const safeRouteTemplate = routeTemplate ?? routeTemplateFactory({ input, init, url: requestUrl(input) });
+    const url = requestUrl(input);
+    const safeRouteTemplate = routeTemplate ?? routeTemplateFactory({ input, init, url });
     try {
       const response = await tracedFetch(input, init);
+      const durationMs = elapsedMs(startedAtMs, nowMs);
+      const statusCode = responseStatusCode(response);
       captureReactNativeResourceSpan(client, {
         appState,
-        durationMs: elapsedMs(startedAtMs, nowMs),
-        metadata,
+        durationMs,
+        metadata: resourceMetadata(metadata, metadataFactory, {
+          durationMs,
+          init,
+          input,
+          method,
+          response,
+          routeTemplate: safeRouteTemplate,
+          statusCode,
+          url
+        }),
         method,
         platform,
         routeTemplate: safeRouteTemplate,
         screen,
         sessionId,
-        statusCode: responseStatusCode(response),
+        statusCode,
         timestamp,
         trace: activeTrace
       });
       return response;
     } catch (error) {
+      const durationMs = elapsedMs(startedAtMs, nowMs);
       captureReactNativeResourceSpan(client, {
         appState,
-        durationMs: elapsedMs(startedAtMs, nowMs),
+        durationMs,
         metadata: {
-          ...metadata,
+          ...resourceMetadata(metadata, metadataFactory, {
+            durationMs,
+            error,
+            init,
+            input,
+            method,
+            routeTemplate: safeRouteTemplate,
+            status: "error",
+            url
+          }),
           fetchErrorName: errorName(error),
           fetchErrorValueType: typeof error
         },
@@ -76,6 +114,36 @@ export function createReactNativeResourceFetch(client, {
       throw error;
     }
   };
+}
+
+function resourceMetadata(metadata, metadataFactory, context) {
+  if (typeof metadataFactory !== "function") {
+    return metadata;
+  }
+  return {
+    ...metadata,
+    ...safeFactoryMetadata(metadataFactory(context))
+  };
+}
+
+function safeFactoryMetadata(candidate) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return {};
+  }
+  const metadata = {};
+  for (const [key, value] of Object.entries(candidate)) {
+    if (isSensitiveMetadataKey(key)) {
+      continue;
+    }
+    if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      metadata[key] = value;
+    }
+  }
+  return metadata;
+}
+
+function isSensitiveMetadataKey(key) {
+  return SENSITIVE_METADATA_FACTORY_KEY_RE.test(String(key).toLowerCase());
 }
 
 function requestMethod(input, init) {

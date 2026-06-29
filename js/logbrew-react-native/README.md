@@ -283,16 +283,25 @@ const resourceFetch = createReactNativeResourceFetch(client, {
   platform: Platform,
   appState: AppState,
   screen: "Checkout",
+  metadataFactory({ routeTemplate }) {
+    if (routeTemplate === "/graphql") {
+      return {
+        graphqlOperationName: "CheckoutSubmit",
+        graphqlOperationType: "mutation"
+      };
+    }
+    return undefined;
+  },
   tracePropagationTargets: ["https://api.example.com/"]
 });
 
-await resourceFetch("https://api.example.com/checkout?email=hidden", {
+await resourceFetch("https://api.example.com/graphql?email=hidden", {
   method: "POST",
   headers: { accept: "application/json" }
 });
 ```
 
-`createReactNativeResourceFetch()` wraps the fetch function your app supplies, or the runtime `fetch` when available. It records status, method, duration, sanitized route template, screen, session, primitive metadata, and trace correlation. It does not patch global `fetch` or XHR, inspect request or response bodies, capture arbitrary headers, or attach `traceparent` outside `tracePropagationTargets`. Pass `trace` explicitly after `await` boundaries or build the wrapper from provider/hook state so async resource spans stay correlated.
+`createReactNativeResourceFetch()` wraps the fetch function your app supplies, or the runtime `fetch` when available. It records status, method, duration, sanitized route template, screen, session, primitive metadata, and trace correlation. `metadataFactory` is called after each fetch completes or fails so apps can add low-cardinality request metadata such as `graphqlOperationName` or `graphqlOperationType` without LogBrew parsing GraphQL payloads. Metadata returned from the factory keeps only primitive values and drops sensitive request fields. It does not patch global `fetch` or XHR, inspect request or response bodies, capture arbitrary headers, or attach `traceparent` outside `tracePropagationTargets`. Pass `trace` explicitly after `await` boundaries or build the wrapper from provider/hook state so async resource spans stay correlated.
 
 ## Native Bridge Scope Sync
 

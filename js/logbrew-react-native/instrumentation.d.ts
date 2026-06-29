@@ -21,6 +21,7 @@ export type ReactNativeInstrumentationOptions<TInput = unknown, TInit = unknown,
   instrumentGlobalXMLHttpRequest?: boolean;
   logger?: string;
   metadata?: Metadata;
+  metadataFactory?: ReactNativeResourceFetchOptions<TInput, TInit, TResponse>["metadataFactory"];
   nativeBridge?: LogBrewNativeBridgeLike;
   navigation?: ReactNavigationContainerLike;
   navigationContainer?: ReactNavigationContainerLike;

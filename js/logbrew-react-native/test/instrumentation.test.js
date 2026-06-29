@@ -147,6 +147,60 @@ test("React Native global fetch teardown does not clobber later wrappers", () =>
   });
 });
 
+test("React Native resource fetch accepts per-request primitive metadata from a factory", async () => {
+  await withInstalledPackage(async ({
+    createLogBrewReactNativeClient,
+    createLogBrewReactNativeInstrumentation,
+    createReactNativeTraceContext
+  }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+    const trace = makeTrace(createReactNativeTraceContext);
+    const factoryCalls = [];
+    const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+      fetchImpl: async (input, init = {}) => ({ status: 200, input, init }),
+      metadata: { flow: "checkout" },
+      metadataFactory(context) {
+        factoryCalls.push(context);
+        return {
+          graphqlOperationName: "CheckoutSubmit",
+          graphqlOperationType: "mutation",
+          nested: { dropped: true },
+          requestBody: context.init?.body
+        };
+      },
+      now: () => "2026-06-29T07:40:00Z",
+      nowMs: (() => {
+        const values = [1000, 1024];
+        return () => values.shift();
+      })(),
+      routeTemplateFactory: () => "/graphql",
+      trace,
+      tracePropagationTargets: ["https://api.example.test/"]
+    });
+
+    await instrumentation.resourceFetch("https://api.example.test/graphql?private=hidden", {
+      body: JSON.stringify({ operationName: "CheckoutSubmit", variables: { email: "hidden@example.test" } }),
+      method: "POST"
+    });
+
+    assert.equal(factoryCalls.length, 1);
+    assert.equal(factoryCalls[0].method, "POST");
+    assert.equal(factoryCalls[0].routeTemplate, "/graphql");
+    assert.equal(factoryCalls[0].statusCode, 200);
+    assert.equal(factoryCalls[0].durationMs, 24);
+
+    const events = JSON.parse(client.previewJson()).events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0].attributes.name, "POST /graphql");
+    assert.equal(events[0].attributes.metadata.flow, "checkout");
+    assert.equal(events[0].attributes.metadata.graphqlOperationName, "CheckoutSubmit");
+    assert.equal(events[0].attributes.metadata.graphqlOperationType, "mutation");
+    assert.equal(events[0].attributes.metadata.requestBody, undefined);
+    assert.equal(events[0].attributes.metadata.nested, undefined);
+    assert.equal(JSON.stringify(events).includes("hidden@example.test"), false);
+  });
+});
+
 test("React Native global fetch setup failure tears down earlier instrumentation", () => {
   return withInstalledPackage(async ({
     createLogBrewReactNativeClient,

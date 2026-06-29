@@ -38,6 +38,17 @@ const resourceFetch = createReactNativeResourceFetch(client, {
     return { status: 202 };
   },
   metadata: { flow: "checkout", nested: { dropped: true } },
+  metadataFactory({ routeTemplate }) {
+    if (routeTemplate === "/api/checkout") {
+      return {
+        graphqlOperationName: "CheckoutSubmit",
+        graphqlOperationType: "mutation",
+        graphqlVariables: { dropped: true },
+        requestBody: "dropped"
+      };
+    }
+    return undefined;
+  },
   now: () => timestamps.shift(),
   nowMs: () => times.shift(),
   platform,
@@ -78,6 +89,10 @@ if (
   success.status !== "ok" ||
   success.durationMs !== 167 ||
   success.metadata.routeTemplate !== "/api/checkout" ||
+  success.metadata.graphqlOperationName !== "CheckoutSubmit" ||
+  success.metadata.graphqlOperationType !== "mutation" ||
+  success.metadata.graphqlVariables !== undefined ||
+  success.metadata.requestBody !== undefined ||
   success.metadata.traceId !== trace.traceId ||
   success.metadata.nested !== undefined
 ) {
