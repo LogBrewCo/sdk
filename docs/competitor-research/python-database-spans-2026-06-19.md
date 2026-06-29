@@ -108,3 +108,26 @@ Verification:
 Remaining gap after this refresh:
 
 - LogBrew is now more useful than the prior explicit-only helper for real DB-API users who want safe spans without hidden patching. Sentry, Datadog, and OpenTelemetry still win for automatic multi-driver DB-API patching, richer semantic conventions, statement-comment injection, fetch/connect/commit/rollback spans, metrics, baggage/tracestate, and broad integration-owned coverage.
+
+## 2026-06-29 DB-API Transaction Refresh
+
+Source refresh:
+
+- Sentry Python SDK: `https://github.com/getsentry/sentry-python.git` at `707464306ca78d4928e4668ba4d383948f7eb7fb`; read `sentry_sdk/integrations/django/__init__.py`, especially `install_sql_hook(...)`, `BaseDatabaseWrapper._commit` wrapping, `BaseDatabaseWrapper._rollback` wrapping, and `_set_db_data(...)`. Sentry traces Django `connect`, `commit`, and `rollback` as DB spans when `db_transaction_spans` is enabled.
+- Datadog dd-trace-py: `https://github.com/DataDog/dd-trace-py.git` at `6091865277beba3afd0275954950456b79151d90`; read `ddtrace/contrib/dbapi.py`, especially `TracedConnection`, `_trace_method(...)`, `cursor(...)`, `commit(...)`, and `rollback(...)`. Datadog traces DB-API connection transaction calls directly.
+- OpenTelemetry Python Contrib: `https://github.com/open-telemetry/opentelemetry-python-contrib.git` at `ec27300a9433f5985cd7467ee840037e12602a70`; read `instrumentation/opentelemetry-instrumentation-dbapi/src/opentelemetry/instrumentation/dbapi/__init__.py`, especially `TracedConnectionProxy.cursor(...)`, `__enter__(...)`, and `__exit__(...)`. The generic DB-API proxy focuses on cursor execution rather than explicit transaction method spans.
+
+LogBrew update:
+
+- `LogBrewDbapiConnection` now traces app-owned `commit()` and `rollback()` calls in addition to cursor execution.
+- Transaction spans use the same child-trace and privacy boundary as DB-API execute spans: `framework=dbapi`, `dbMethod=commit|rollback`, `dbOperation=COMMIT|ROLLBACK`, optional caller `dbName`, sampled state, and type-only errors.
+- The wrapper still preserves the original return value or exception, disables future transaction spans after `uninstall()`, and avoids SQL text, bind values, result rows, connection details, baggage, tracestate, stacks, and exception messages.
+
+Verification:
+
+- Focused tests now prove `commit()` and `rollback()` run under LogBrew child traces, emit sanitized transaction spans, drop connection URL metadata, preserve original behavior, and stop emitting after `uninstall()`.
+- `scripts/python_dbapi_span_smoke.py` now proves real stdlib `sqlite3` update, commit, select, rollback, and error spans from installed artifacts.
+
+Remaining gap after this refresh:
+
+- LogBrew now covers the safest high-value DB-API transaction path without hidden patching. Sentry, Datadog, and OpenTelemetry still win for automatic multi-driver patching, connect/fetch spans, DB metrics, statement-comment injection, richer semantic conventions, baggage/tracestate, and broad integration-owned coverage.

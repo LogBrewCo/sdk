@@ -48,10 +48,22 @@ class StubDbapiConnection:
     def __init__(self) -> None:
         self.cursor_instance = StubDbapiCursor()
         self.cursor_calls = 0
+        self.commit_calls = 0
+        self.rollback_calls = 0
+        self.commit_active_trace: LogBrewTraceContext | None = None
+        self.rollback_active_trace: LogBrewTraceContext | None = None
 
     def cursor(self) -> StubDbapiCursor:
         self.cursor_calls += 1
         return self.cursor_instance
+
+    def commit(self) -> None:
+        self.commit_calls += 1
+        self.commit_active_trace = get_active_logbrew_trace()
+
+    def rollback(self) -> None:
+        self.rollback_calls += 1
+        self.rollback_active_trace = get_active_logbrew_trace()
 
 
 class DatabaseOperationSpanTests(unittest.TestCase):
@@ -383,3 +395,79 @@ class DatabaseOperationSpanTests(unittest.TestCase):
         self.assertIs(ok_cursor.execute("SELECT 1"), ok_cursor)
         self.assertEqual(len(capture_errors), 1)
         self.assertIn("client is already shut down", capture_errors[0])
+
+    def test_dbapi_connection_wrapper_traces_commit_and_rollback(self) -> None:
+        client = sample_client()
+        connection = StubDbapiConnection()
+        parent_trace = LogBrewTraceContext(
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="00f067aa0ba902b7",
+            sampled=True,
+        )
+        event_ids = iter(["evt_python_dbapi_commit", "evt_python_dbapi_rollback"])
+        span_ids = iter(["b7ad6b7169203394", "b7ad6b7169203395"])
+        clock_values = iter([240.0, 240.004, 250.0, 250.006])
+
+        wrapped = instrument_dbapi_connection_with_logbrew_spans(
+            connection,
+            client=client,
+            system="sqlite",
+            db_name="checkout",
+            event_id_factory=lambda: next(event_ids),
+            timestamp="2026-06-29T20:00:02Z",
+            span_id_factory=lambda: next(span_ids),
+            clock=lambda: next(clock_values),
+            metadata={"service": "checkout", "connectionUrl": "sqlite:///private.db"},
+        )
+
+        with use_logbrew_trace(parent_trace):
+            commit_result = wrapped.commit()
+            rollback_result = wrapped.rollback()
+
+        self.assertIsNone(commit_result)
+        self.assertIsNone(rollback_result)
+        self.assertEqual(connection.commit_calls, 1)
+        self.assertEqual(connection.rollback_calls, 1)
+        self.assertEqual(
+            connection.commit_active_trace,
+            LogBrewTraceContext(
+                trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+                span_id="b7ad6b7169203394",
+                parent_span_id="00f067aa0ba902b7",
+                sampled=True,
+            ),
+        )
+        self.assertEqual(
+            connection.rollback_active_trace,
+            LogBrewTraceContext(
+                trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+                span_id="b7ad6b7169203395",
+                parent_span_id="00f067aa0ba902b7",
+                sampled=True,
+            ),
+        )
+        payload = json.loads(client.preview_json())
+        self.assertEqual(
+            [event["id"] for event in payload["events"]],
+            ["evt_python_dbapi_commit", "evt_python_dbapi_rollback"],
+        )
+        commit_attributes = payload["events"][0]["attributes"]
+        rollback_attributes = payload["events"][1]["attributes"]
+        self.assertEqual(commit_attributes["name"], "sqlite COMMIT")
+        self.assertEqual(commit_attributes["durationMs"], 4.0)
+        self.assertEqual(commit_attributes["metadata"]["dbOperation"], "COMMIT")
+        self.assertEqual(commit_attributes["metadata"]["dbMethod"], "commit")
+        self.assertEqual(commit_attributes["metadata"]["framework"], "dbapi")
+        self.assertEqual(commit_attributes["metadata"]["dbName"], "checkout")
+        self.assertEqual(rollback_attributes["name"], "sqlite ROLLBACK")
+        self.assertEqual(rollback_attributes["durationMs"], 6.0)
+        self.assertEqual(rollback_attributes["metadata"]["dbOperation"], "ROLLBACK")
+        self.assertEqual(rollback_attributes["metadata"]["dbMethod"], "rollback")
+        serialized = client.preview_json()
+        self.assertNotIn("sqlite:///private.db", serialized)
+        self.assertNotIn("connectionUrl", serialized)
+
+        wrapped.uninstall()
+        with use_logbrew_trace(parent_trace):
+            wrapped.commit()
+        self.assertEqual(len(json.loads(client.preview_json())["events"]), 2)

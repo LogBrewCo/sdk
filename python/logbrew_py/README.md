@@ -458,7 +458,7 @@ rows = cursor.fetchall()
 raw_connection = db.uninstall()
 ```
 
-The wrapper keeps connection ownership with your app, wraps cursors returned by `cursor()`, and supports `execute(...)`, `executemany(...)`, `callproc(...)`, plus common connection shortcut `execute(...)` and `executemany(...)` calls. It derives only the SQL verb or procedure label, records `framework=dbapi`, `dbMethod`, optional caller `dbName`, optional non-negative row count, active child trace IDs, sampled state, and type-only errors. It does not patch DB-API modules, driver classes, or connect functions, and does not capture SQL text, bind values, result rows, connection URLs, network addresses, user names, baggage, tracestate, stack traces, or exception messages. Call `uninstall()` to stop future spans and get the original connection back.
+The wrapper keeps connection ownership with your app, wraps cursors returned by `cursor()`, and supports `execute(...)`, `executemany(...)`, `callproc(...)`, transaction `commit()` and `rollback()`, plus common connection shortcut `execute(...)` and `executemany(...)` calls. It derives only the SQL verb, transaction, or procedure label, records `framework=dbapi`, `dbMethod`, optional caller `dbName`, optional non-negative row count, active child trace IDs, sampled state, and type-only errors. It does not patch DB-API modules, driver classes, or connect functions, and does not capture SQL text, bind values, result rows, connection URLs, network addresses, user names, baggage, tracestate, stack traces, or exception messages. Call `uninstall()` to stop future spans and get the original connection back.
 
 ### SQLAlchemy Engine Spans
 

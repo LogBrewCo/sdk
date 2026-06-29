@@ -133,6 +133,16 @@ class LogBrewDbapiConnection:
         cursor = self.cursor()
         return cursor.executemany(*args, **kwargs)
 
+    def commit(self, *args: Any, **kwargs: Any) -> Any:
+        if not self._installed:
+            return self._connection.commit(*args, **kwargs)
+        return self._trace_connection_method("commit", "COMMIT", self._connection.commit, args, kwargs)
+
+    def rollback(self, *args: Any, **kwargs: Any) -> Any:
+        if not self._installed:
+            return self._connection.rollback(*args, **kwargs)
+        return self._trace_connection_method("rollback", "ROLLBACK", self._connection.rollback, args, kwargs)
+
     def __enter__(self) -> Any:
         entered = self._connection.__enter__()
         if entered is self._connection:
@@ -166,6 +176,30 @@ class LogBrewDbapiConnection:
             trace=self._trace,
             db_name=self._db_name,
             row_count_from_result=lambda _result: _cursor_row_count(cursor),
+            metadata={**self._metadata, "framework": "dbapi", "dbMethod": method_name},
+            span_events=self._span_events,
+            span_id_factory=self._span_id_factory,
+            clock=self._clock,
+            on_capture_error=self._on_capture_error,
+        )
+
+    def _trace_connection_method(
+        self,
+        method_name: str,
+        operation_name: str,
+        method: Callable[..., T],
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> T:
+        return database_operation_with_logbrew_span(
+            operation_name,
+            client=self._client,
+            event_id=self._event_id_factory(),
+            operation=lambda: method(*args, **kwargs),
+            system=self._system,
+            timestamp=self._timestamp,
+            trace=self._trace,
+            db_name=self._db_name,
             metadata={**self._metadata, "framework": "dbapi", "dbMethod": method_name},
             span_events=self._span_events,
             span_id_factory=self._span_id_factory,
