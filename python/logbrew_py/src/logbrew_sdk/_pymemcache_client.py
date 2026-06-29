@@ -327,8 +327,8 @@ def _gets_value(result: Any) -> Any:
 def _gets_returned_default(args: tuple[Any, ...], kwargs: Mapping[str, Any], result: Any) -> bool:
     defaults = (_gets_default(args, kwargs), _gets_cas_default(args, kwargs))
     if isinstance(result, tuple):
-        return result == defaults
-    return result == defaults[0]
+        return bool(result == defaults)
+    return bool(result == defaults[0])
 
 
 def _gets_default(args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
