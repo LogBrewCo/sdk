@@ -113,6 +113,33 @@ client.log("evt_log_001", "2026-06-02T10:00:03Z", {
 client.flush(RecordingTransport.always_accept())
 ```
 
+Python DB-API spans are explicit and app-owned. Wrap the connection you already
+created, then keep using normal cursor methods:
+
+```python
+from logbrew_sdk import instrument_dbapi_connection_with_logbrew_spans
+
+connection = instrument_dbapi_connection_with_logbrew_spans(
+    sqlite_connection,
+    client=client,
+    system="sqlite",
+    db_name="checkout",
+    trace_fetch_methods=True,  # opt in only when fetch timing is worth the extra spans
+)
+
+cursor = connection.execute(
+    "SELECT id, status FROM checkout_order WHERE id = ?",
+    (order_id,),
+)
+rows = cursor.fetchall()
+connection.commit()
+```
+
+The wrapper records operation labels such as `SELECT`, `FETCHALL`, and `COMMIT`,
+duration, row counts when the driver exposes them, trace/span correlation, and
+type-only failures. It does not capture SQL values, bind parameters, result
+rows, connection strings, baggage, tracestate, stacks, or exception messages.
+
 PHP:
 
 ```bash

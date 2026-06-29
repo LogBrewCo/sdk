@@ -35,6 +35,7 @@ def instrument_dbapi_connection_with_logbrew_spans(
     *,
     client: Any,
     system: str,
+    trace_fetch_methods: bool = False,
     event_id_factory: Callable[[], str] | None = None,
     timestamp: str | None = None,
     trace: LogBrewTraceContext | None = None,
@@ -56,6 +57,7 @@ def instrument_dbapi_connection_with_logbrew_spans(
         connection=connection,
         client=client,
         system=system,
+        trace_fetch_methods=trace_fetch_methods,
         event_id_factory=event_id_factory or _default_dbapi_event_id,
         timestamp=timestamp,
         trace=trace,
@@ -77,6 +79,7 @@ class LogBrewDbapiConnection:
         connection: Any,
         client: Any,
         system: str,
+        trace_fetch_methods: bool,
         event_id_factory: Callable[[], str],
         timestamp: str | None,
         trace: LogBrewTraceContext | None,
@@ -90,6 +93,7 @@ class LogBrewDbapiConnection:
         self._connection = connection
         self._client = client
         self._system = _instrumentation.required_label("system", system)
+        self._trace_fetch_methods = trace_fetch_methods
         self._event_id_factory = event_id_factory
         self._timestamp = timestamp
         self._trace = trace
@@ -165,22 +169,13 @@ class LogBrewDbapiConnection:
         args: tuple[Any, ...],
         kwargs: Mapping[str, Any],
     ) -> T:
-        operation_name = _dbapi_operation_name(method_name, args, kwargs)
-        return database_operation_with_logbrew_span(
-            operation_name,
-            client=self._client,
-            event_id=self._event_id_factory(),
-            operation=lambda: method(*args, **kwargs),
-            system=self._system,
-            timestamp=self._timestamp,
-            trace=self._trace,
-            db_name=self._db_name,
+        return self._trace_method(
+            method_name=method_name,
+            operation_name=_dbapi_operation_name(method_name, args, kwargs),
+            method=method,
+            args=args,
+            kwargs=kwargs,
             row_count_from_result=lambda _result: _cursor_row_count(cursor),
-            metadata={**self._metadata, "framework": "dbapi", "dbMethod": method_name},
-            span_events=self._span_events,
-            span_id_factory=self._span_id_factory,
-            clock=self._clock,
-            on_capture_error=self._on_capture_error,
         )
 
     def _trace_connection_method(
@@ -191,6 +186,42 @@ class LogBrewDbapiConnection:
         args: tuple[Any, ...],
         kwargs: Mapping[str, Any],
     ) -> T:
+        return self._trace_method(
+            method_name=method_name,
+            operation_name=operation_name,
+            method=method,
+            args=args,
+            kwargs=kwargs,
+        )
+
+    def _trace_fetch_method(
+        self,
+        method_name: str,
+        method: Callable[..., T],
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> T:
+        if not self._installed or not self._trace_fetch_methods:
+            return method(*args, **kwargs)
+        return self._trace_method(
+            method_name=method_name,
+            operation_name=method_name.upper(),
+            method=method,
+            args=args,
+            kwargs=kwargs,
+            row_count_from_result=lambda result: _fetch_row_count(method_name, result),
+        )
+
+    def _trace_method(
+        self,
+        *,
+        method_name: str,
+        operation_name: str,
+        method: Callable[..., T],
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+        row_count_from_result: Callable[[T], int | None] | None = None,
+    ) -> T:
         return database_operation_with_logbrew_span(
             operation_name,
             client=self._client,
@@ -200,6 +231,7 @@ class LogBrewDbapiConnection:
             timestamp=self._timestamp,
             trace=self._trace,
             db_name=self._db_name,
+            row_count_from_result=row_count_from_result,
             metadata={**self._metadata, "framework": "dbapi", "dbMethod": method_name},
             span_events=self._span_events,
             span_id_factory=self._span_id_factory,
@@ -229,6 +261,15 @@ class LogBrewDbapiCursor:
 
     def callproc(self, *args: Any, **kwargs: Any) -> Any:
         return self._trace_cursor_method("callproc", self._cursor.callproc, args, kwargs)
+
+    def fetchone(self, *args: Any, **kwargs: Any) -> Any:
+        return self._instrumentation._trace_fetch_method("fetchone", self._cursor.fetchone, args, kwargs)
+
+    def fetchmany(self, *args: Any, **kwargs: Any) -> Any:
+        return self._instrumentation._trace_fetch_method("fetchmany", self._cursor.fetchmany, args, kwargs)
+
+    def fetchall(self, *args: Any, **kwargs: Any) -> Any:
+        return self._instrumentation._trace_fetch_method("fetchall", self._cursor.fetchall, args, kwargs)
 
     def __enter__(self) -> Any:
         entered = self._cursor.__enter__()
@@ -285,6 +326,18 @@ def _dbapi_label(value: Any) -> str | None:
 
 def _cursor_row_count(cursor: Any) -> int | None:
     row_count = getattr(cursor, "rowcount", None)
+    return row_count if isinstance(row_count, int) and row_count >= 0 else None
+
+
+def _fetch_row_count(method_name: str, result: Any) -> int | None:
+    if method_name == "fetchone":
+        return 0 if result is None else 1
+    if isinstance(result, str | bytes | bytearray):
+        return None
+    try:
+        row_count = len(result)
+    except TypeError:
+        return None
     return row_count if isinstance(row_count, int) and row_count >= 0 else None
 
 

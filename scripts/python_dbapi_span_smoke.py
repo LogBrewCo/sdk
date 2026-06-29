@@ -34,6 +34,7 @@ event_ids = iter(
         "evt_python_dbapi_update",
         "evt_python_dbapi_commit",
         "evt_python_dbapi_select",
+        "evt_python_dbapi_fetchall",
         "evt_python_dbapi_rollback",
         "evt_python_dbapi_error",
     ]
@@ -45,9 +46,10 @@ span_ids = iter(
         "b7ad6b7169203393",
         "b7ad6b7169203394",
         "b7ad6b7169203395",
+        "b7ad6b7169203396",
     ]
 )
-clock_values = iter([10.0, 10.005, 20.0, 20.003, 30.0, 30.004, 40.0, 40.002, 50.0, 50.002])
+clock_values = iter([10.0, 10.005, 20.0, 20.003, 30.0, 30.004, 40.0, 40.002, 50.0, 50.002, 60.0, 60.002])
 
 connection = instrument_dbapi_connection_with_logbrew_spans(
     raw_connection,
@@ -58,6 +60,7 @@ connection = instrument_dbapi_connection_with_logbrew_spans(
     timestamp="2026-06-29T20:00:00Z",
     span_id_factory=lambda: next(span_ids),
     clock=lambda: next(clock_values),
+    trace_fetch_methods=True,
     metadata={
         "service": "checkout",
         "statement": "SELECT * FROM checkout_order WHERE email = ?",
@@ -111,17 +114,19 @@ for forbidden in (
         raise SystemExit(f"DB-API span leaked private data: {forbidden}")
 
 payload = json.loads(serialized)
-if len(payload["events"]) != 5:
-    raise SystemExit(f"expected five DB-API spans, got {len(payload['events'])}")
+if len(payload["events"]) != 6:
+    raise SystemExit(f"expected six DB-API spans, got {len(payload['events'])}")
 
 update_attributes = payload["events"][0]["attributes"]
 commit_attributes = payload["events"][1]["attributes"]
 select_attributes = payload["events"][2]["attributes"]
-rollback_attributes = payload["events"][3]["attributes"]
-error_attributes = payload["events"][4]["attributes"]
+fetch_attributes = payload["events"][3]["attributes"]
+rollback_attributes = payload["events"][4]["attributes"]
+error_attributes = payload["events"][5]["attributes"]
 update_metadata = update_attributes["metadata"]
 commit_metadata = commit_attributes["metadata"]
 select_metadata = select_attributes["metadata"]
+fetch_metadata = fetch_attributes["metadata"]
 rollback_metadata = rollback_attributes["metadata"]
 error_metadata = error_attributes["metadata"]
 
@@ -131,6 +136,8 @@ if commit_attributes["name"] != "sqlite COMMIT":
     raise SystemExit(f"unexpected DB-API commit span name: {commit_attributes['name']!r}")
 if select_attributes["name"] != "sqlite SELECT":
     raise SystemExit(f"unexpected DB-API select span name: {select_attributes['name']!r}")
+if fetch_attributes["name"] != "sqlite FETCHALL":
+    raise SystemExit(f"unexpected DB-API fetch span name: {fetch_attributes['name']!r}")
 if rollback_attributes["name"] != "sqlite ROLLBACK":
     raise SystemExit(f"unexpected DB-API rollback span name: {rollback_attributes['name']!r}")
 if error_attributes["name"] != "sqlite SELECT":
@@ -148,6 +155,8 @@ print(
             "dbSystem": update_metadata["dbSystem"],
             "errorStatus": error_attributes["status"],
             "errorType": error_metadata["errorType"],
+            "fetchMethod": fetch_metadata["dbMethod"],
+            "fetchRows": fetch_metadata["rowCount"],
             "events": len(payload["events"]),
             "framework": update_metadata["framework"],
             "ok": True,

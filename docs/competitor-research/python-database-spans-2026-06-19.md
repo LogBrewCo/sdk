@@ -131,3 +131,31 @@ Verification:
 Remaining gap after this refresh:
 
 - LogBrew now covers the safest high-value DB-API transaction path without hidden patching. Sentry, Datadog, and OpenTelemetry still win for automatic multi-driver patching, connect/fetch spans, DB metrics, statement-comment injection, richer semantic conventions, baggage/tracestate, and broad integration-owned coverage.
+
+## 2026-06-29 DB-API Fetch Refresh
+
+Source refresh:
+
+- Datadog dd-trace-py: `https://github.com/DataDog/dd-trace-py.git` at `6091865277beba3afd0275954950456b79151d90`; read `ddtrace/contrib/dbapi.py`, especially `FetchTracedCursor`, `fetchone(...)`, `fetchall(...)`, `fetchmany(...)`, and `TracedConnection.__init__(...)`. Datadog makes fetch spans opt-in through `trace_fetch_methods` because fetch calls can be noisy in high-row loops.
+- OpenTelemetry Python Contrib: `https://github.com/open-telemetry/opentelemetry-python-contrib.git` at `ec27300a9433f5985cd7467ee840037e12602a70`; read `instrumentation/opentelemetry-instrumentation-dbapi/src/opentelemetry/instrumentation/dbapi/__init__.py`, especially `CursorTracer.traced_execution(...)` and `TracedCursorProxy`. Generic DB-API wrapping covers execute/executemany/callproc but not fetch methods.
+- Sentry Python SDK: `https://github.com/getsentry/sentry-python.git` at `707464306ca78d4928e4668ba4d383948f7eb7fb`; searched `sentry_sdk` source for `fetchone`, `fetchmany`, and `fetchall`. The public Python SDK source does not expose a generic DB-API fetch wrapper in the searched paths; database coverage is framework or driver integration oriented.
+
+Design pattern and tradeoff:
+
+- Datadog's opt-in fetch tracing is the safest competitor pattern to copy conceptually because fetch methods can produce a span per tight row-read loop. Default-on fetch tracing would improve detail but hurt cost, noise, and first-event clarity.
+- OpenTelemetry and Sentry are still stronger for automatic framework/driver instrumentation, but their generic public paths do not provide the same small explicit DB-API fetch knob in core.
+
+LogBrew update:
+
+- Added `trace_fetch_methods=True` as an opt-in to `instrument_dbapi_connection_with_logbrew_spans(...)`.
+- When enabled, `LogBrewDbapiCursor` traces `fetchone()`, `fetchmany(...)`, and `fetchall()` as child spans with `framework=dbapi`, `dbMethod`, `dbOperation=FETCHONE|FETCHMANY|FETCHALL`, optional caller `dbName`, and row counts only when they are safely derivable from the returned object.
+- Fetch tracing is default-off to avoid high-volume span noise. The wrapper preserves returned rows and exceptions, avoids row values, SQL text, bind parameters, connection strings, baggage, tracestate, stacks, and exception messages, and continues to stop emitting after `uninstall()`.
+
+Verification:
+
+- Focused tests prove fetch tracing is quiet by default, opt-in fetch spans run under child traces, row counts are metadata-only, row values are not serialized, and DB return values are preserved.
+- `scripts/python_dbapi_span_smoke.py` now proves a real stdlib `sqlite3` app flow with update, commit, select, fetchall, rollback, and error spans from installed artifacts.
+
+Remaining gap after this refresh:
+
+- LogBrew now covers explicit execute, transaction, and opt-in fetch spans for caller-owned DB-API connections without hidden patching. Sentry, Datadog, and OpenTelemetry still win for automatic multi-driver patching, connect spans, DB metrics, statement-comment injection, richer semantic conventions, baggage/tracestate, and broad integration-owned coverage.

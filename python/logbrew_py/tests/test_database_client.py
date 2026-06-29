@@ -30,6 +30,9 @@ class StubDbapiCursor:
         self.calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
         self.rowcount = -1
         self.active_trace: LogBrewTraceContext | None = None
+        self.fetchone_active_trace: LogBrewTraceContext | None = None
+        self.fetchmany_active_trace: LogBrewTraceContext | None = None
+        self.fetchall_active_trace: LogBrewTraceContext | None = None
 
     def execute(self, operation: object, parameters: object | None = None) -> object:
         self.calls.append(("execute", (operation, parameters), {}))
@@ -42,6 +45,29 @@ class StubDbapiCursor:
         self.active_trace = get_active_logbrew_trace()
         self.rowcount = 3
         return self
+
+    def fetchone(self) -> tuple[str, str]:
+        self.calls.append(("fetchone", (), {}))
+        self.fetchone_active_trace = get_active_logbrew_trace()
+        return ("order-1", "sensitive@example.test")
+
+    def fetchmany(self, size: int | None = None) -> list[tuple[str, str]]:
+        self.calls.append(("fetchmany", (size,), {}))
+        self.fetchmany_active_trace = get_active_logbrew_trace()
+        rows = [
+            ("order-1", "sensitive@example.test"),
+            ("order-2", "private@example.test"),
+        ]
+        return rows[:size] if size is not None else rows
+
+    def fetchall(self) -> list[tuple[str, str]]:
+        self.calls.append(("fetchall", (), {}))
+        self.fetchall_active_trace = get_active_logbrew_trace()
+        return [
+            ("order-1", "sensitive@example.test"),
+            ("order-2", "private@example.test"),
+            ("order-3", "hidden@example.test"),
+        ]
 
 
 class StubDbapiConnection:
@@ -471,3 +497,76 @@ class DatabaseOperationSpanTests(unittest.TestCase):
         with use_logbrew_trace(parent_trace):
             wrapped.commit()
         self.assertEqual(len(json.loads(client.preview_json())["events"]), 2)
+
+    def test_dbapi_connection_wrapper_fetch_spans_are_opt_in_and_privacy_bounded(self) -> None:
+        client = sample_client()
+        connection = StubDbapiConnection()
+        parent_trace = LogBrewTraceContext(
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="00f067aa0ba902b7",
+            sampled=True,
+        )
+        quiet_wrapped = instrument_dbapi_connection_with_logbrew_spans(
+            connection,
+            client=client,
+            system="sqlite",
+        )
+
+        with use_logbrew_trace(parent_trace):
+            quiet_rows = quiet_wrapped.cursor().fetchall()
+
+        self.assertEqual(len(quiet_rows), 3)
+        self.assertEqual(connection.cursor_instance.fetchall_active_trace, parent_trace)
+        self.assertEqual(json.loads(client.preview_json())["events"], [])
+
+        event_ids = iter(["evt_python_dbapi_fetchone", "evt_python_dbapi_fetchmany", "evt_python_dbapi_fetchall"])
+        span_ids = iter(["b7ad6b7169203396", "b7ad6b7169203397", "b7ad6b7169203398"])
+        clock_values = iter([260.0, 260.002, 270.0, 270.004, 280.0, 280.006])
+        traced_wrapped = instrument_dbapi_connection_with_logbrew_spans(
+            StubDbapiConnection(),
+            client=client,
+            system="postgresql",
+            db_name="checkout",
+            event_id_factory=lambda: next(event_ids),
+            timestamp="2026-06-29T20:00:03Z",
+            span_id_factory=lambda: next(span_ids),
+            clock=lambda: next(clock_values),
+            trace_fetch_methods=True,
+            metadata={"service": "checkout", "rowValue": "sensitive@example.test"},
+        )
+        cursor = traced_wrapped.cursor()
+
+        with use_logbrew_trace(parent_trace):
+            one_row = cursor.fetchone()
+            many_rows = cursor.fetchmany(2)
+            all_rows = cursor.fetchall()
+
+        self.assertEqual(one_row, ("order-1", "sensitive@example.test"))
+        self.assertEqual(len(many_rows), 2)
+        self.assertEqual(len(all_rows), 3)
+        payload = json.loads(client.preview_json())
+        events = payload["events"]
+        self.assertEqual(
+            [event["id"] for event in events],
+            ["evt_python_dbapi_fetchone", "evt_python_dbapi_fetchmany", "evt_python_dbapi_fetchall"],
+        )
+        self.assertEqual(
+            [event["attributes"]["name"] for event in events],
+            ["postgresql FETCHONE", "postgresql FETCHMANY", "postgresql FETCHALL"],
+        )
+        self.assertEqual([event["attributes"]["durationMs"] for event in events], [2.0, 4.0, 6.0])
+        for event, method, count in zip(events, ("fetchone", "fetchmany", "fetchall"), (1, 2, 3), strict=True):
+            metadata = event["attributes"]["metadata"]
+            self.assertEqual(metadata["source"], "database")
+            self.assertEqual(metadata["framework"], "dbapi")
+            self.assertEqual(metadata["dbMethod"], method)
+            self.assertEqual(metadata["dbOperation"], method.upper())
+            self.assertEqual(metadata["dbName"], "checkout")
+            self.assertEqual(metadata["rowCount"], count)
+            self.assertEqual(metadata["service"], "checkout")
+        self.assertEqual(events[0]["attributes"]["parentSpanId"], "00f067aa0ba902b7")
+        serialized = client.preview_json()
+        self.assertNotIn("sensitive@example.test", serialized)
+        self.assertNotIn("private@example.test", serialized)
+        self.assertNotIn("hidden@example.test", serialized)
+        self.assertNotIn("rowValue", serialized)
