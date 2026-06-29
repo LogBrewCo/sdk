@@ -143,3 +143,35 @@ Verification:
 Remaining gap after this refresh:
 
 - LogBrew now covers app-owned Django cache objects plus app-owned Redis commands and pipeline execution. Sentry, Datadog, and OpenTelemetry still win for hidden automatic Django/Flask/pymemcache patching, Redis cluster spans, command filtering/obfuscation modes, connection metrics, broader semantic conventions, baggage/tracestate, and full OTel processor/exporter interop.
+
+## 2026-06-29 Pymemcache Refresh
+
+Source refresh:
+
+- Sentry Python SDK: `https://github.com/getsentry/sentry-python.git` at `707464306ca78d4928e4668ba4d383948f7eb7fb`; searched `sentry_sdk` for `pymemcache`, `memcache`, `flask_cache`, and `cache`, then read `sentry_sdk/integrations/django/caching.py` `METHODS_TO_INSTRUMENT`, `_patch_cache_method(...)`, `_patch_cache(...)`, `_get_address_port(...)`, `should_enable_cache_spans()`, and `patch_caching()`. Sentry covers Django cache spans and Redis cache behavior, but no first-class pymemcache integration was found in the current Python SDK tree.
+- Datadog dd-trace-py: `https://github.com/DataDog/dd-trace-py.git` at `d7dea02e7de2aadac569fde01e12569fe1f06fa6`; read `ddtrace/contrib/internal/pymemcache/patch.py` `patch(...)`, `unpatch(...)`, `get_version()`, `_supported_versions`, and `ddtrace/contrib/internal/pymemcache/client.py` `WrappedClient`, `WrappedHashClient`, `_get_address_tags(...)`, `_get_query_string(...)`, `_trace(...)`, and method wrappers for `set`, `set_many`, `set_multi`, `add`, `replace`, `append`, `prepend`, `cas`, `get`, `get_many`, `get_multi`, `gets`, `gets_many`, `delete`, `delete_many`, `incr`, `decr`, `touch`, `stats`, `version`, `flush_all`, and `quit`. Datadog patches pymemcache classes globally and records service/component/system/span-kind metadata, optional command text/keys, peer tags, and row counts for reads.
+- OpenTelemetry Python Contrib: `https://github.com/open-telemetry/opentelemetry-python-contrib.git` at `ec27300a9433f5985cd7467ee840037e12602a70`; read `instrumentation/opentelemetry-instrumentation-pymemcache/src/opentelemetry/instrumentation/pymemcache/__init__.py` `COMMANDS`, `_set_connection_attributes(...)`, `_with_tracer_wrapper(...)`, `_wrap_cmd(...)`, `_get_query_string(...)`, `_get_address_attributes(...)`, and `PymemcacheInstrumentor._instrument(...)`/`_uninstrument(...)`. OTel wraps `pymemcache.client.base.Client` methods globally and records `db.system=memcached`, peer attributes, and command text.
+
+Design pattern and tradeoff:
+
+- Datadog and OpenTelemetry are stronger for drop-in memcached breadth because one integration can cover many pymemcache calls without per-object app code. The tradeoff is global/client-class patching, deeper coupling to pymemcache internals, and a larger privacy surface around command text, keys, and network peer fields.
+- Sentry's current Python source does not appear to ship a dedicated pymemcache integration, but its Django cache integration shows the same broad auto-patching pattern for framework caches.
+- The safer LogBrew shape is one app-owned pymemcache-style client wrapper: no default `pymemcache` dependency, no class/module patching, no network peer capture, and no cache key/value/argument serialization.
+
+LogBrew update:
+
+- Added `instrument_pymemcache_client_with_logbrew_spans(...)` and `LogBrewPymemcacheInstrumentation`.
+- Apps provide one owned pymemcache-style client; LogBrew wraps supported methods on that object only and puts the original methods back with `uninstall()`.
+- Supported methods are `set`, `set_many`, `set_multi`, `add`, `replace`, `append`, `prepend`, `cas`, `get`, `get_many`, `get_multi`, `gets`, `gets_many`, `delete`, `delete_many`, `incr`, `decr`, `touch`, `stats`, `version`, `flush_all`, and `quit`.
+- Spans include `framework=pymemcache`, `cacheSystem=memcached`, `cacheOperation`, `cacheOperationKind`, optional caller `cacheName`, hit state for reads, item counts/sizes where safely knowable, sampled state, and type-only errors.
+- The helper avoids default pymemcache dependency, global pymemcache patching, cache keys, values, expiration/noreply arguments, backend locations, hosts, ports, arbitrary command text, response payloads, baggage, tracestate, stacks, and exception messages.
+
+Verification:
+
+- RED: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python/logbrew_py/tests/test_pymemcache_client.py` failed because `instrument_pymemcache_client_with_logbrew_spans` was not exported.
+- GREEN focused tests prove app-owned method args/results are preserved, child trace context is active during calls, duplicate install returns the existing instrumentation, positional `get(key, default)` misses stay misses, nested batch calls do not double trace, `uninstall()` stops future spans, type-only errors are queued, capture failures do not interrupt cache calls, and private keys/values/connection details/expire kwargs stay out of payloads.
+- Installed-artifact proof is wired into `scripts/real_user_python_smoke.sh` through `scripts/python_pymemcache_span_smoke.py`, which installs real `pymemcache>=4,<5`, uses a local no-network subclass, exercises `get`, `get_many`, and `set`, and checks payload privacy plus trace correlation across wheel, reinstall, freeze/direct reinstall, sdist, and sdist reinstall paths.
+
+Remaining gap after this refresh:
+
+- LogBrew now covers app-owned pymemcache clients, app-owned Django cache objects, app-owned Redis commands, and opt-in Redis pipeline execution. Datadog and OpenTelemetry still win for hidden automatic pymemcache class instrumentation, peer metadata, command filtering/obfuscation modes, richer semantic conventions, baggage/tracestate, and full OTel processor/exporter interop. Sentry still wins for broader automatic Django cache coverage but does not appear to beat LogBrew on dedicated pymemcache coverage from the current Python SDK source.

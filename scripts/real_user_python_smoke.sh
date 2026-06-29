@@ -426,6 +426,29 @@ run_django_cache_span_smoke() {
     grep -q '"uninstallStoppedTracing": true' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_pymemcache_span_smoke() {
+    local output_prefix="$1"
+
+    python -m pip install "pymemcache>=4,<5" >/dev/null
+    python "$repo_root/scripts/python_pymemcache_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"framework": "pymemcache"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"duplicateSame": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"operations": \["GET", "GET_MANY", "SET"\]' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"cacheName": "profiles"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"getActiveSpan": "b7ad6b7169203401"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"getHit": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"getItemSizeBytes": 14' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"manyActiveSpan": "b7ad6b7169203402"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"manyHit": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"manyItemCount": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"parentSpanAfterCache": "00f067aa0ba902b7"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"setActiveSpan": "b7ad6b7169203403"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"setKind": "write"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"uninstallStoppedTracing": true' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_redis_span_smoke() {
     local output_prefix="$1"
 
@@ -523,6 +546,7 @@ run_reinstall_from_freeze() {
     run_sqlalchemy_span_smoke "$output_prefix-freeze-sqlalchemy-span"
     run_cache_span_smoke "$output_prefix-freeze-cache-span"
     run_django_cache_span_smoke "$output_prefix-freeze-django-cache-span"
+    run_pymemcache_span_smoke "$output_prefix-freeze-pymemcache-span"
     run_redis_span_smoke "$output_prefix-freeze-redis-span"
     run_queue_span_smoke "$output_prefix-freeze-queue-span"
 
@@ -579,6 +603,7 @@ run_reinstall_from_direct_requirement() {
     run_sqlalchemy_span_smoke "$output_prefix-direct-sqlalchemy-span"
     run_cache_span_smoke "$output_prefix-direct-cache-span"
     run_django_cache_span_smoke "$output_prefix-direct-django-cache-span"
+    run_pymemcache_span_smoke "$output_prefix-direct-pymemcache-span"
     run_redis_span_smoke "$output_prefix-direct-redis-span"
     run_queue_span_smoke "$output_prefix-direct-queue-span"
 
@@ -632,6 +657,7 @@ with zipfile.ZipFile(wheel_path) as archive:
         "logbrew_sdk/_django_cache_client.py",
         "logbrew_sdk/_http_client.py",
         "logbrew_sdk/_instrumentation.py",
+        "logbrew_sdk/_pymemcache_client.py",
         "logbrew_sdk/_queue_client.py",
         "logbrew_sdk/_redis_client.py",
         "logbrew_sdk/_rq_client.py",
@@ -675,6 +701,8 @@ for needle in (
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
     "LogBrewDjangoCacheInstrumentation",
+    "instrument_pymemcache_client_with_logbrew_spans",
+    "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
@@ -719,6 +747,7 @@ with tarfile.open(sdist_path, "r:gz") as archive:
         f"{sdist_root}/src/logbrew_sdk/_django_cache_client.py",
         f"{sdist_root}/src/logbrew_sdk/_http_client.py",
         f"{sdist_root}/src/logbrew_sdk/_instrumentation.py",
+        f"{sdist_root}/src/logbrew_sdk/_pymemcache_client.py",
         f"{sdist_root}/src/logbrew_sdk/_queue_client.py",
         f"{sdist_root}/src/logbrew_sdk/_redis_client.py",
         f"{sdist_root}/src/logbrew_sdk/_rq_client.py",
@@ -768,6 +797,8 @@ for needle in (
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
     "LogBrewDjangoCacheInstrumentation",
+    "instrument_pymemcache_client_with_logbrew_spans",
+    "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
@@ -1055,6 +1086,7 @@ from logbrew_sdk import (
     LogBrewDbapiConnection,
     LogBrewDbapiCursor,
     LogBrewLoggingHandler,
+    LogBrewPymemcacheInstrumentation,
     LogBrewRedisInstrumentation,
     MetricAttributes,
     RecordingTransport,
@@ -1077,6 +1109,7 @@ from logbrew_sdk import (
     database_operation_with_logbrew_span,
     httpx_request_with_logbrew_span,
     instrument_dbapi_connection_with_logbrew_spans,
+    instrument_pymemcache_client_with_logbrew_spans,
     instrument_redis_client_with_logbrew_spans,
     parse_traceparent,
     queue_operation_with_logbrew_span,
@@ -1393,6 +1426,25 @@ redis_instrumentation: LogBrewRedisInstrumentation = instrument_redis_client_wit
 if redis_client.execute_command("GET", "private:user:42") != b"ok":
     raise RuntimeError("unexpected redis result")
 redis_instrumentation.uninstall()
+
+
+class TypecheckPymemcacheClient:
+    def get(self, *_args: object, **_kwargs: object) -> bytes:
+        return b"ok"
+
+
+pymemcache_client = TypecheckPymemcacheClient()
+pymemcache_instrumentation: LogBrewPymemcacheInstrumentation = instrument_pymemcache_client_with_logbrew_spans(
+    pymemcache_client,
+    client=client,
+    event_id_factory=lambda: "evt_pymemcache_typecheck",
+    timestamp="2026-06-02T10:00:13Z",
+    cache_name="health",
+    span_id_factory=lambda: "b7ad6b7169203342",
+)
+if pymemcache_client.get(b"private:user:42") != b"ok":
+    raise RuntimeError("unexpected pymemcache result")
+pymemcache_instrumentation.uninstall()
 
 queue_result = queue_operation_with_logbrew_span(
     "publish health",
@@ -2186,6 +2238,7 @@ required = {
     "logbrew_sdk/_django_cache_client.py",
     "logbrew_sdk/_http_client.py",
     "logbrew_sdk/_instrumentation.py",
+    "logbrew_sdk/_pymemcache_client.py",
     "logbrew_sdk/_queue_client.py",
     "logbrew_sdk/_redis_client.py",
     "logbrew_sdk/_rq_client.py",
@@ -2224,6 +2277,8 @@ for needle in (
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
     "LogBrewDjangoCacheInstrumentation",
+    "instrument_pymemcache_client_with_logbrew_spans",
+    "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "queue_operation_with_logbrew_span",
@@ -2543,6 +2598,7 @@ run_dbapi_span_smoke "wheel-dbapi-span"
 run_sqlalchemy_span_smoke "wheel-sqlalchemy-span"
 run_cache_span_smoke "wheel-cache-span"
 run_django_cache_span_smoke "wheel-django-cache-span"
+run_pymemcache_span_smoke "wheel-pymemcache-span"
 run_redis_span_smoke "wheel-redis-span"
 run_queue_span_smoke "wheel-queue-span"
 
@@ -2581,6 +2637,7 @@ run_dbapi_span_smoke "wheel-reinstall-dbapi-span"
 run_sqlalchemy_span_smoke "wheel-reinstall-sqlalchemy-span"
 run_cache_span_smoke "wheel-reinstall-cache-span"
 run_django_cache_span_smoke "wheel-reinstall-django-cache-span"
+run_pymemcache_span_smoke "wheel-reinstall-pymemcache-span"
 run_redis_span_smoke "wheel-reinstall-redis-span"
 run_queue_span_smoke "wheel-reinstall-queue-span"
 
@@ -2629,6 +2686,7 @@ run_dbapi_span_smoke "sdist-dbapi-span"
 run_sqlalchemy_span_smoke "sdist-sqlalchemy-span"
 run_cache_span_smoke "sdist-cache-span"
 run_django_cache_span_smoke "sdist-django-cache-span"
+run_pymemcache_span_smoke "sdist-pymemcache-span"
 run_redis_span_smoke "sdist-redis-span"
 run_queue_span_smoke "sdist-queue-span"
 
@@ -2667,6 +2725,7 @@ run_dbapi_span_smoke "sdist-reinstall-dbapi-span"
 run_sqlalchemy_span_smoke "sdist-reinstall-sqlalchemy-span"
 run_cache_span_smoke "sdist-reinstall-cache-span"
 run_django_cache_span_smoke "sdist-reinstall-django-cache-span"
+run_pymemcache_span_smoke "sdist-reinstall-pymemcache-span"
 run_redis_span_smoke "sdist-reinstall-redis-span"
 run_queue_span_smoke "sdist-reinstall-queue-span"
 

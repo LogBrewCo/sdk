@@ -553,6 +553,36 @@ instrumentation.uninstall()
 
 The helper returns a `LogBrewDjangoCacheInstrumentation` handle, does not add Django as a LogBrew dependency, and does not patch Django globally. It wraps only the cache object you pass, returns the existing instrumentation on duplicate calls, activates a child trace around supported `get`, `get_many`, `set`, `set_many`, `add`, `delete`, `delete_many`, and `clear` calls, derives hit state and item count/size when safely knowable, and puts the original methods back with `uninstall()`. It does not read Django settings, capture cache keys, values, timeout/version arguments, backend locations, hosts, ports, arbitrary command text, response payloads, baggage, tracestate, stack traces, or exception messages.
 
+### Pymemcache Client Spans
+
+Use `instrument_pymemcache_client_with_logbrew_spans()` when your app already owns a `pymemcache` style client and you want safe spans for calls made through that one object:
+
+```python
+from pymemcache.client.base import Client
+
+from logbrew_sdk import LogBrewClient, instrument_pymemcache_client_with_logbrew_spans
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+cache_client = Client(("localhost", 11211))
+
+instrumentation = instrument_pymemcache_client_with_logbrew_spans(
+    cache_client,
+    client=client,
+    cache_name="profiles",
+    metadata={"service": "checkout-api"},
+)
+
+profile = cache_client.get(profile_cache_key, default=None)
+cache_client.set(profile_cache_key, profile, expire=60)
+instrumentation.uninstall()
+```
+
+The helper returns a `LogBrewPymemcacheInstrumentation` handle, does not add `pymemcache` as a LogBrew dependency, and does not patch pymemcache classes globally. It wraps only the client object you pass, returns the existing instrumentation on duplicate calls, activates a child trace around supported `get`, `get_many`, `get_multi`, `gets`, `gets_many`, `set`, `set_many`, `set_multi`, `add`, `replace`, `append`, `prepend`, `cas`, `delete`, `delete_many`, `incr`, `decr`, `touch`, `stats`, `version`, `flush_all`, and `quit` calls, derives hit state and item count/size when safely knowable, and puts the original methods back with `uninstall()`. It does not capture cache keys, values, expiration or noreply arguments, backend locations, hosts, ports, arbitrary command text, response payloads, baggage, tracestate, stack traces, or exception messages.
+
 ### Redis Client Spans
 
 Use `instrument_redis_client_with_logbrew_spans()` when your app already owns a `redis-py` style client and you want safe spans for calls that go through that one client's `execute_command` method:
