@@ -18,6 +18,7 @@ const {
   resolveOperationTrace
 } = require("./trace-context.cjs");
 const { instrumentLogBrewPgClient: instrumentPgClient } = require("./pg.cjs");
+const { instrumentLogBrewRedisClient: instrumentRedisClient } = require("./redis.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-node";
 const DEFAULT_SDK_VERSION = "0.1.0";
@@ -140,6 +141,14 @@ function createLogBrewQueueTraceLinks(carriers, metadata) {
 
 function instrumentLogBrewPgClient(pgClient, options = {}) {
   return instrumentPgClient(pgClient, {
+    ...options,
+    activeTraceProvider: getActiveLogBrewTrace,
+    runWithTrace: (trace, callback) => activeTraceContext.run(trace, callback)
+  });
+}
+
+function instrumentLogBrewRedisClient(redisClient, options = {}) {
+  return instrumentRedisClient(redisClient, {
     ...options,
     activeTraceProvider: getActiveLogBrewTrace,
     runWithTrace: (trace, callback) => activeTraceContext.run(trace, callback)
@@ -999,6 +1008,7 @@ const exported = {
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
   instrumentLogBrewPgClient,
+  instrumentLogBrewRedisClient,
   queueBatchOperationWithLogBrewSpan,
   queueOperationWithLogBrewSpan,
   withLogBrewHttpHandler

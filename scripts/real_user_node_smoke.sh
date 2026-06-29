@@ -40,6 +40,8 @@ grep -q '^package/index.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/pg.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/pg.cjs$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/redis.js$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/redis.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/examples/first-useful-telemetry.mjs$' "$tmp_dir/node-tarball.txt"
@@ -59,6 +61,7 @@ grep -q 'createNodeFetchTransport' "$tmp_dir/node-readme.md"
 grep -q 'databaseOperationWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'fetchWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'instrumentLogBrewPgClient' "$tmp_dir/node-readme.md"
+grep -q 'instrumentLogBrewRedisClient' "$tmp_dir/node-readme.md"
 grep -q 'withLogBrewHttpHandler' "$tmp_dir/node-readme.md"
 grep -q 'node:http' "$tmp_dir/node-readme.md"
 grep -q 'traceparent' "$tmp_dir/node-readme.md"
@@ -118,6 +121,7 @@ import {
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
   instrumentLogBrewPgClient,
+  instrumentLogBrewRedisClient,
   queueOperationWithLogBrewSpan,
   withLogBrewHttpHandler
 } from "@logbrew/node";
@@ -553,6 +557,125 @@ if (
   throw new Error(`pg instrumentation leaked query or connection details: ${pgClient.previewJson()}`);
 }
 
+const redisClient = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY", sdkName: "node-redis-span-smoke", sdkVersion: "0.1.0" });
+const fakeRedisClient = {
+  connected: false,
+  async connect() {
+    this.connected = true;
+    return "connected";
+  },
+  async sendCommand(command) {
+    const name = Array.isArray(command) ? command[0] : command?.name;
+    if (String(name).toUpperCase() === "FAIL") {
+      throw new RangeError("redis command failed");
+    }
+    if (String(name).toUpperCase() === "GET") {
+      return "Ada";
+    }
+    return "OK";
+  }
+};
+const redisClock = [500, 509, 510, 522, 530, 536, 540, 547];
+const redisSpanIds = ["d7ad6b7169203331", "d7ad6b7169203332", "d7ad6b7169203333", "d7ad6b7169203334"];
+const redisInstrumentation = instrumentLogBrewRedisClient(fakeRedisClient, {
+  cacheName: "profiles",
+  client: redisClient,
+  metadata: {
+    url: "redis://example.invalid:6379/0",
+    safeFeature: "profile"
+  },
+  now: () => "2026-06-02T10:00:16Z",
+  nowMs: () => redisClock.shift() ?? 547,
+  spanIdFactory: () => redisSpanIds.shift() ?? "d7ad6b7169203334",
+  trace: operationTrace
+});
+if (!redisInstrumentation.isInstalled()) {
+  throw new Error("expected redis instrumentation to report installed");
+}
+const redisConnectResult = await fakeRedisClient.connect();
+if (redisConnectResult !== "connected" || fakeRedisClient.connected !== true) {
+  throw new Error(`redis instrumentation changed connect result: ${redisConnectResult}`);
+}
+const redisGetResult = await fakeRedisClient.sendCommand(["GET", "profile:42"]);
+if (redisGetResult !== "Ada") {
+  throw new Error(`redis instrumentation changed GET result: ${redisGetResult}`);
+}
+const redisSetResult = await fakeRedisClient.sendCommand({ name: "SET", args: ["profile:private", "Ada"] });
+if (redisSetResult !== "OK") {
+  throw new Error(`redis instrumentation changed ioredis-style SET result: ${redisSetResult}`);
+}
+let redisErrorRethrown = false;
+await fakeRedisClient.sendCommand(["FAIL", "fixture-private-value"]).catch((error) => {
+  redisErrorRethrown = error instanceof RangeError;
+});
+if (!redisErrorRethrown) {
+  throw new Error("redis instrumentation should rethrow command errors");
+}
+let duplicateRedisRejected = false;
+try {
+  instrumentLogBrewRedisClient(fakeRedisClient, { client: redisClient });
+} catch (error) {
+  duplicateRedisRejected = error instanceof Error && error.message.includes("uninstrumented redis client");
+}
+if (!duplicateRedisRejected) {
+  throw new Error("redis instrumentation should reject duplicate installs");
+}
+redisInstrumentation.uninstall();
+if (redisInstrumentation.isInstalled()) {
+  throw new Error("expected redis instrumentation to report uninstalled");
+}
+const redisPayload = JSON.parse(redisClient.previewJson());
+const redisConnectSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_connect");
+const redisGetSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_get_redis_command");
+const redisSetSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_set_redis_command");
+const redisErrorSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_fail_error");
+if (!redisConnectSpanEvent || redisConnectSpanEvent.attributes.name !== "redis CONNECT redis.connect") {
+  throw new Error(`missing redis connect span payload: ${redisClient.previewJson()}`);
+}
+if (!redisGetSpanEvent || redisGetSpanEvent.type !== "span") {
+  throw new Error(`missing redis GET span payload: ${redisClient.previewJson()}`);
+}
+if (
+  redisGetSpanEvent.attributes.traceId !== operationTrace.traceId ||
+  redisGetSpanEvent.attributes.parentSpanId !== operationTrace.spanId ||
+  redisGetSpanEvent.attributes.spanId !== "d7ad6b7169203332"
+) {
+  throw new Error(`redis span did not correlate with active trace: ${redisClient.previewJson()}`);
+}
+assertMetadata(redisGetSpanEvent.attributes.metadata, {
+  "db.namespace": "profiles",
+  "db.operation.name": "GET",
+  "db.system.name": "redis",
+  cacheHit: true,
+  dbName: "profiles",
+  dbOperation: "redis.command",
+  dbOperationKind: "GET",
+  dbSystem: "redis",
+  framework: "node:redis",
+  safeFeature: "profile"
+}, "redis GET span missing useful metadata", redisClient.previewJson());
+if (!redisSetSpanEvent || redisSetSpanEvent.attributes.metadata.dbOperationKind !== "SET") {
+  throw new Error(`missing redis SET span payload: ${redisClient.previewJson()}`);
+}
+if (!redisErrorSpanEvent || redisErrorSpanEvent.attributes.status !== "error") {
+  throw new Error(`missing redis error span payload: ${redisClient.previewJson()}`);
+}
+if (redisErrorSpanEvent.attributes.metadata.errorType !== "RangeError") {
+  throw new Error(`redis error span should include error type only: ${redisClient.previewJson()}`);
+}
+assertJsonEqual(redisErrorSpanEvent.attributes.events, exceptionEvents("RangeError"), "redis error span should include a bounded exception span event", redisClient.previewJson());
+const redisPayloadJson = JSON.stringify(redisPayload);
+if (
+  redisPayloadJson.includes("profile:42") ||
+  redisPayloadJson.includes("profile:private") ||
+  redisPayloadJson.includes("Ada") ||
+  redisPayloadJson.includes("example.invalid") ||
+  redisPayloadJson.includes("fixture-private-value") ||
+  redisPayloadJson.includes("FAIL fixture-private-value")
+) {
+  throw new Error(`redis instrumentation leaked command, key, value, endpoint, or sensitive details: ${redisClient.previewJson()}`);
+}
+
 const cacheClient = createLogBrewNodeClient({ serverApiKey: "LOGBREW_SERVER_API_KEY", sdkName: "node-cache-span-smoke", sdkVersion: "0.1.0" });
 const cacheClock = [200, 214, 220, 235];
 const cacheResult = await cacheOperationWithLogBrewSpan("profile.get", {
@@ -954,10 +1077,13 @@ import {
   databaseOperationWithLogBrewSpan,
   getActiveLogBrewTrace,
   instrumentLogBrewPgClient,
+  instrumentLogBrewRedisClient,
   queueOperationWithLogBrewSpan,
   type LogBrewNodeContext,
   type LogBrewPgInstrumentation,
   type LogBrewPgQueryable,
+  type LogBrewRedisClientInstrumentation,
+  type LogBrewRedisCommandClient,
   type LogBrewTraceContext,
   withLogBrewHttpHandler
 } from "@logbrew/node";
@@ -1003,6 +1129,17 @@ const typedPgInstrumentation: LogBrewPgInstrumentation = instrumentLogBrewPgClie
   trace
 });
 typedPgInstrumentation.uninstall();
+const typedRedisClient: LogBrewRedisCommandClient = {
+  sendCommand: async () => "OK",
+  connect: async () => undefined
+};
+const typedRedisInstrumentation: LogBrewRedisClientInstrumentation = instrumentLogBrewRedisClient(typedRedisClient, {
+  cacheName: "profiles",
+  client,
+  metadata: { feature: "profile" },
+  trace
+});
+typedRedisInstrumentation.uninstall();
 const cacheResult = await cacheOperationWithLogBrewSpan("profile.get", {
   client,
   hit: true,
@@ -1075,6 +1212,7 @@ npx tsc --project tsconfig.json
 node -e 'const node = require("@logbrew/node"); if (typeof node.withLogBrewHttpHandler !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.createNodeFetchTransport !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewPgClient !== "function") process.exit(1)'
+node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewRedisClient !== "function") process.exit(1)'
 
 node node_modules/@logbrew/node/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry' "$tmp_dir/launcher-help.txt"

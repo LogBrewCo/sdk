@@ -244,6 +244,31 @@ pgInstrumentation.uninstall();
 
 The wrapper records one child span per `query()` call, preserves Promise and callback query results, rethrows driver errors, and uses the active LogBrew request trace when one exists. Metadata includes `framework: "node:pg"`, `db.system.name: "postgresql"`, operation kind, safe prepared-statement name when present, optional database name, row count, duration, sampled flag, and W3C trace IDs. Failed queries add a type-only `exception` event. It does not patch the `pg` module globally, capture raw SQL, serialize parameters, record result rows, store connection strings, read connection endpoint/user/passphrase fields, inject SQL comments, infer baggage/tracestate, or store raw propagation headers.
 
+### Redis Command Spans
+
+Use `instrumentLogBrewRedisClient()` when your app already uses `redis` or `ioredis` and wants command spans without global module patching. Pass the app-owned client, keep the Redis package as your own dependency, and uninstall when the wrapped instance should return to its original behavior:
+
+```js
+import { createLogBrewNodeClient, instrumentLogBrewRedisClient } from "@logbrew/node";
+import { createClient } from "redis";
+
+const client = createLogBrewNodeClient({ sdkName: "checkout-api", sdkVersion: "1.4.0" });
+const redis = createClient({ url: process.env.REDIS_URL });
+
+const redisInstrumentation = instrumentLogBrewRedisClient(redis, {
+  client,
+  cacheName: "profiles",
+  metadata: { feature: "profile-cache" }
+});
+
+await redis.connect();
+const profile = await redis.sendCommand(["GET", profileKey]);
+
+redisInstrumentation.uninstall();
+```
+
+The wrapper records one child span per `sendCommand()` call and one optional `connect()` span when the client exposes `connect()`. It preserves command results, rethrows Redis driver errors, supports node-redis array commands and ioredis-style `{ name, args }` command objects, and uses the active LogBrew request trace when one exists. Metadata includes `framework: "node:redis"`, `db.system.name: "redis"`, operation kind, optional cache name, cache-hit boolean for read commands when the result is available, duration, sampled flag, and W3C trace IDs. Failed commands add a type-only `exception` event. It does not patch Redis modules globally, capture command arguments, serialize keys or values, record host/port/URLs/connection strings, store connection access values, infer baggage/tracestate, or store raw propagation headers.
+
 ## Cache Operation Spans
 
 Use `cacheOperationWithLogBrewSpan()` around important app-owned cache calls when you want cache timing and hit/miss correlation without installing Redis or memcached instrumentation:

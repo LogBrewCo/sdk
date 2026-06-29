@@ -212,6 +212,47 @@ export type LogBrewPgClientInstrumentationOptions = {
   ) => void | Promise<void>;
 };
 
+export type LogBrewRedisCommand =
+  | string
+  | Array<string | number | Buffer>
+  | {
+      name?: string;
+      args?: unknown[];
+      [key: string]: unknown;
+    };
+
+export type LogBrewRedisCommandClient = {
+  sendCommand: (command: LogBrewRedisCommand, ...args: unknown[]) => unknown;
+  connect?: (...args: unknown[]) => unknown;
+};
+
+export type LogBrewRedisClientInstrumentation = {
+  isInstalled(): boolean;
+  uninstall(): void;
+};
+
+export type LogBrewRedisClientInstrumentationOptions = {
+  client: LogBrewClient;
+  cacheName?: string;
+  operationKind?: string;
+  operationName?: string;
+  trace?: LogBrewTraceContext;
+  id?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  now?: () => string;
+  nowMs?: () => number;
+  spanIdFactory?: () => string;
+  traceIdFactory?: () => string;
+  onCaptureError?: (
+    error: unknown,
+    context: {
+      client: LogBrewClient;
+      error?: unknown;
+      trace: LogBrewTraceContext;
+    }
+  ) => void | Promise<void>;
+};
+
 export type CacheOperationWithLogBrewSpanOptions<Result = unknown> = {
   client: LogBrewClient;
   operation: () => Result | Promise<Result>;
@@ -319,6 +360,11 @@ export declare function instrumentLogBrewPgClient(
   options: LogBrewPgClientInstrumentationOptions
 ): LogBrewPgInstrumentation;
 
+export declare function instrumentLogBrewRedisClient(
+  redisClient: LogBrewRedisCommandClient,
+  options: LogBrewRedisClientInstrumentationOptions
+): LogBrewRedisClientInstrumentation;
+
 export declare function cacheOperationWithLogBrewSpan<Result>(
   operationName: string,
   options: CacheOperationWithLogBrewSpanOptions<Result>
@@ -384,6 +430,7 @@ declare const defaultExport: {
   fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   instrumentLogBrewPgClient: typeof instrumentLogBrewPgClient;
+  instrumentLogBrewRedisClient: typeof instrumentLogBrewRedisClient;
   queueBatchOperationWithLogBrewSpan: typeof queueBatchOperationWithLogBrewSpan;
   queueOperationWithLogBrewSpan: typeof queueOperationWithLogBrewSpan;
   withLogBrewHttpHandler: typeof withLogBrewHttpHandler;
