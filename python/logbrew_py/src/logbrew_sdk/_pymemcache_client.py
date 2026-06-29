@@ -297,8 +297,8 @@ def _apply_result_metadata(
         if request.cache_hit:
             request.item_size_bytes = _item_size_bytes(result)
     elif method_name == "gets":
+        request.cache_hit = not _gets_returned_default(args, kwargs, result)
         value = _gets_value(result)
-        request.cache_hit = value is not None
         if request.cache_hit:
             request.item_size_bytes = _item_size_bytes(value)
     elif method_name in {"get_many", "get_multi", "gets_many"}:
@@ -322,6 +322,25 @@ def _gets_value(result: Any) -> Any:
     if isinstance(result, tuple) and result:
         return result[0]
     return result
+
+
+def _gets_returned_default(args: tuple[Any, ...], kwargs: Mapping[str, Any], result: Any) -> bool:
+    defaults = (_gets_default(args, kwargs), _gets_cas_default(args, kwargs))
+    if isinstance(result, tuple):
+        return result == defaults
+    return result == defaults[0]
+
+
+def _gets_default(args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
+    if len(args) > 1:
+        return args[1]
+    return kwargs.get("default")
+
+
+def _gets_cas_default(args: tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
+    if len(args) > 2:
+        return args[2]
+    return kwargs.get("cas_default")
 
 
 def _result_item_count(result: Any) -> int:

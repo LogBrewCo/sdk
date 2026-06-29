@@ -200,21 +200,43 @@ class PymemcacheInstrumentationTests(unittest.TestCase):
             def get(self, key: bytes, default: bytes | None = None) -> bytes | None:
                 return default
 
+            def gets(
+                self,
+                key: bytes,
+                default: bytes | None = None,
+                cas_default: bytes | None = None,
+            ) -> tuple[bytes | None, bytes | None]:
+                return (default, cas_default)
+
         cache = MissingPymemcacheClient()
+        event_ids = iter(["evt_python_pymemcache_get_miss", "evt_python_pymemcache_gets_miss"])
+        span_ids = iter(["b7ad6b7169203405", "b7ad6b7169203406"])
+        clock_values = iter([715.0, 715.002, 716.0, 716.003])
         instrument_pymemcache_client_with_logbrew_spans(
             cache,
             client=logbrew_client,
-            event_id_factory=lambda: "evt_python_pymemcache_miss",
-            span_id_factory=lambda: "b7ad6b7169203405",
-            clock=iter([715.0, 715.002]).__next__,
+            event_id_factory=lambda: next(event_ids),
+            span_id_factory=lambda: next(span_ids),
+            clock=lambda: next(clock_values),
         )
 
         self.assertEqual(cache.get(b"private:user:42", b"fallback-profile"), b"fallback-profile")
+        self.assertEqual(
+            cache.gets(b"private:user:42", b"fallback-profile", b"fallback-cas"),
+            (b"fallback-profile", b"fallback-cas"),
+        )
 
         payload = json.loads(logbrew_client.preview_json())
-        metadata = payload["events"][0]["attributes"]["metadata"]
-        self.assertFalse(metadata["cacheHit"])
-        self.assertNotIn("itemSizeBytes", metadata)
+        get_metadata = payload["events"][0]["attributes"]["metadata"]
+        gets_metadata = payload["events"][1]["attributes"]["metadata"]
+        self.assertFalse(get_metadata["cacheHit"])
+        self.assertNotIn("itemSizeBytes", get_metadata)
+        self.assertEqual(gets_metadata["cacheOperation"], "GETS")
+        self.assertFalse(gets_metadata["cacheHit"])
+        self.assertNotIn("itemSizeBytes", gets_metadata)
+        serialized = logbrew_client.preview_json()
+        self.assertNotIn("fallback-profile", serialized)
+        self.assertNotIn("fallback-cas", serialized)
 
     def test_pymemcache_instrumentation_preserves_errors_and_capture_failures(self) -> None:
         logbrew_client = sample_client()
