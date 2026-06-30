@@ -26,6 +26,7 @@ export function createLogBrewReactNativeInstrumentation(client, {
   instrumentGlobalFetch = false,
   instrumentGlobalXMLHttpRequest = false,
   logger,
+  measureXhrResponseBodySize = false,
   metadata = {},
   metadataFactory,
   nativeBridge,
@@ -131,6 +132,7 @@ export function createLogBrewReactNativeInstrumentation(client, {
     globalXMLHttpRequest = instrumentGlobalXMLHttpRequest ? installGlobalXMLHttpRequestInstrumentation(client, {
       appState,
       globalObject,
+      measureXhrResponseBodySize,
       metadata,
       metadataFactory,
       now,
@@ -302,6 +304,7 @@ function installGlobalFetchInstrumentation(client, {
 function installGlobalXMLHttpRequestInstrumentation(client, {
   appState,
   globalObject,
+  measureXhrResponseBodySize,
   metadata,
   metadataFactory,
   now,
@@ -356,6 +359,7 @@ function installGlobalXMLHttpRequestInstrumentation(client, {
       client,
       doneState,
       headersReceivedState,
+      measureXhrResponseBodySize,
       metadata,
       metadataFactory,
       nowMs,
@@ -447,6 +451,7 @@ function installXhrReadyStateTracker(xhr, context, options) {
 function captureXhrResourceSpan(xhr, context, {
   appState,
   client,
+  measureXhrResponseBodySize,
   metadata,
   metadataFactory,
   nowMs,
@@ -466,7 +471,7 @@ function captureXhrResourceSpan(xhr, context, {
   const responseStartDurationMs = context.responseStartAtMs === undefined
     ? undefined
     : elapsedMs(context.startedAtMs, () => context.responseStartAtMs);
-  const responseSizeBytes = xhrResponseSizeBytes(xhr);
+  const responseSizeBytes = xhrResponseSizeBytes(xhr, { measureXhrResponseBodySize });
   const safeRouteTemplate = routeTemplate ?? routeTemplateFactory({ url: context.url });
   const statusCode = xhrStatusCode(xhr);
   captureReactNativeResourceSpan(client, {
@@ -546,12 +551,72 @@ function xhrStatusCode(xhr) {
   return typeof xhr?.status === "number" && Number.isFinite(xhr.status) ? xhr.status : undefined;
 }
 
-function xhrResponseSizeBytes(xhr) {
+function xhrResponseSizeBytes(xhr, { measureXhrResponseBodySize = false } = {}) {
   if (typeof xhr?.getResponseHeader !== "function") {
-    return undefined;
+    return measureXhrResponseBodySize ? xhrResponseBodySizeBytes(xhr) : undefined;
   }
   const contentLength = Number.parseInt(String(xhr.getResponseHeader("Content-Length") ?? ""), 10);
-  return Number.isFinite(contentLength) && contentLength >= 0 ? contentLength : undefined;
+  if (Number.isFinite(contentLength) && contentLength >= 0) {
+    return contentLength;
+  }
+  return measureXhrResponseBodySize ? xhrResponseBodySizeBytes(xhr) : undefined;
+}
+
+function xhrResponseBodySizeBytes(xhr) {
+  const responseType = readXhrResponseValue(xhr, "responseType");
+  if (responseType === undefined || responseType === "" || responseType === "text") {
+    const responseText = readXhrResponseValue(xhr, "responseText");
+    if (typeof responseText === "string" || responseText instanceof String) {
+      return utf8ByteLength(responseText.toString());
+    }
+  }
+  const response = readXhrResponseValue(xhr, "response");
+  if (typeof response === "string" || response instanceof String) {
+    return utf8ByteLength(response.toString());
+  }
+  if (typeof ArrayBuffer === "function") {
+    if (response instanceof ArrayBuffer) {
+      return response.byteLength;
+    }
+    if (typeof ArrayBuffer.isView === "function" && ArrayBuffer.isView(response)) {
+      return response.byteLength;
+    }
+  }
+  if (typeof response?.size === "number" && Number.isFinite(response.size) && response.size >= 0) {
+    return response.size;
+  }
+  return undefined;
+}
+
+function readXhrResponseValue(xhr, property) {
+  try {
+    return xhr?.[property];
+  } catch {
+    return undefined;
+  }
+}
+
+function utf8ByteLength(value) {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
 }
 
 function errorName(error) {

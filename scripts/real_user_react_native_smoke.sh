@@ -585,6 +585,7 @@ class MockXMLHttpRequest {
     xhrRequests.push({ body, headers: { ...this.headers }, method: this.method, url: this.url });
     this.readyState = MockXMLHttpRequest.HEADERS_RECEIVED;
     this.listeners.get("readystatechange")?.();
+    this.responseText = "ok \u2713";
     this.status = 200;
     this.readyState = MockXMLHttpRequest.DONE;
     this.listeners.get("readystatechange")?.();
@@ -602,6 +603,7 @@ const xhrGlobalObject = { XMLHttpRequest: MockXMLHttpRequest };
 const xhrInstrumentation = createLogBrewReactNativeInstrumentation(xhrClient, {
   globalObject: xhrGlobalObject,
   instrumentGlobalXMLHttpRequest: true,
+  measureXhrResponseBodySize: true,
   metadata: { flow: "checkout" },
   metadataFactory: createReactNativeGraphQLMetadataFactory(),
   now: () => "2026-06-02T10:00:14Z",
@@ -633,6 +635,7 @@ if (
   xhrSpan.durationMs !== 38 ||
   xhrSpan.metadata.routeTemplate !== "/graphql" ||
   xhrSpan.metadata.responseStartDurationMs !== 12 ||
+  xhrSpan.metadata.responseSizeBytes !== 6 ||
   xhrSpan.metadata.graphqlOperationName !== "CheckoutSubmit" ||
   xhrSpan.metadata.graphqlOperationType !== "mutation" ||
   xhrSpan.metadata.traceId !== providerTrace.traceId
@@ -986,6 +989,7 @@ const instrumentation: ReactNativeInstrumentation<string, { method?: string }, {
   globalObject,
   instrumentGlobalFetch: true,
   instrumentGlobalXMLHttpRequest: true,
+  measureXhrResponseBodySize: true,
   nativeBridge: bridge,
   platform,
   screen: "Checkout",

@@ -526,3 +526,150 @@ test("React Native XHR GraphQL metadata factory extracts operation data without 
     instrumentation.remove();
   });
 });
+
+test("React Native XHR response body size measurement is explicit and does not retain bodies", async () => {
+  await withInstalledPackage(async ({
+    createLogBrewReactNativeClient,
+    createLogBrewReactNativeInstrumentation,
+    createReactNativeTraceContext
+  }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+    const trace = makeTrace(createReactNativeTraceContext);
+
+    class MockXMLHttpRequest {
+      static HEADERS_RECEIVED = 2;
+      static DONE = 4;
+
+      constructor() {
+        this.headers = {};
+        this.listeners = new Map();
+        this.readyState = 0;
+        this.responseText = "";
+        this.status = 0;
+      }
+
+      addEventListener(name, listener) {
+        this.listeners.set(name, listener);
+      }
+
+      open(method, url) {
+        this.method = method;
+        this.url = url;
+      }
+
+      send() {
+        this.readyState = MockXMLHttpRequest.HEADERS_RECEIVED;
+        this.listeners.get("readystatechange")?.();
+        this.responseText = "ok \u2713";
+        this.status = 200;
+        this.readyState = MockXMLHttpRequest.DONE;
+        this.listeners.get("readystatechange")?.();
+      }
+
+      getResponseHeader() {
+        return null;
+      }
+
+      setRequestHeader(name, value) {
+        this.headers[String(name).toLowerCase()] = String(value);
+      }
+    }
+
+    const globalObject = { XMLHttpRequest: MockXMLHttpRequest };
+    const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+      globalObject,
+      instrumentGlobalXMLHttpRequest: true,
+      measureXhrResponseBodySize: true,
+      now: () => "2026-06-30T06:40:00Z",
+      nowMs: (() => {
+        const values = [2000, 2009, 2036];
+        return () => values.shift();
+      })(),
+      trace,
+      tracePropagationTargets: ["https://api.example.test/"]
+    });
+
+    const xhr = new globalObject.XMLHttpRequest();
+    xhr.open("GET", "https://api.example.test/api/measured?private=hidden");
+    xhr.send();
+
+    const events = JSON.parse(client.previewJson()).events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0].attributes.name, "GET /api/measured");
+    assert.equal(events[0].attributes.durationMs, 36);
+    assert.equal(events[0].attributes.metadata.responseStartDurationMs, 9);
+    assert.equal(events[0].attributes.metadata.responseSizeBytes, 6);
+    assert.equal(JSON.stringify(events).includes("ok \u2713"), false);
+
+    instrumentation.remove();
+  });
+});
+
+test("React Native XHR response body size measurement handles binary response objects", async () => {
+  await withInstalledPackage(async ({
+    createLogBrewReactNativeClient,
+    createLogBrewReactNativeInstrumentation
+  }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+
+    class MockXMLHttpRequest {
+      static HEADERS_RECEIVED = 2;
+      static DONE = 4;
+
+      constructor() {
+        this.listeners = new Map();
+        this.readyState = 0;
+        this.response = undefined;
+        this.responseText = "";
+        this.responseType = "arraybuffer";
+        this.status = 0;
+      }
+
+      addEventListener(name, listener) {
+        this.listeners.set(name, listener);
+      }
+
+      open(method, url) {
+        this.method = method;
+        this.url = url;
+      }
+
+      send() {
+        this.readyState = MockXMLHttpRequest.HEADERS_RECEIVED;
+        this.listeners.get("readystatechange")?.();
+        this.response = new Uint8Array([1, 2, 3, 4]).buffer;
+        this.status = 200;
+        this.readyState = MockXMLHttpRequest.DONE;
+        this.listeners.get("readystatechange")?.();
+      }
+
+      getResponseHeader() {
+        return null;
+      }
+
+      setRequestHeader() {}
+    }
+
+    const globalObject = { XMLHttpRequest: MockXMLHttpRequest };
+    const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+      globalObject,
+      instrumentGlobalXMLHttpRequest: true,
+      measureXhrResponseBodySize: true,
+      now: () => "2026-06-30T06:42:00Z",
+      nowMs: (() => {
+        const values = [3000, 3004, 3010];
+        return () => values.shift();
+      })()
+    });
+
+    const xhr = new globalObject.XMLHttpRequest();
+    xhr.open("GET", "https://api.example.test/assets/binary");
+    xhr.send();
+
+    const events = JSON.parse(client.previewJson()).events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0].attributes.metadata.responseSizeBytes, 4);
+
+    instrumentation.remove();
+  });
+});

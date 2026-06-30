@@ -20,6 +20,7 @@ export type ReactNativeInstrumentationOptions<TInput = unknown, TInit = unknown,
   instrumentGlobalFetch?: boolean;
   instrumentGlobalXMLHttpRequest?: boolean;
   logger?: string;
+  measureXhrResponseBodySize?: boolean;
   metadata?: Metadata;
   metadataFactory?: ReactNativeResourceFetchOptions<TInput, TInit, TResponse>["metadataFactory"];
   nativeBridge?: LogBrewNativeBridgeLike;
