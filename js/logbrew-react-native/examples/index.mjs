@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const commands = new Map([
+  ["apollo-link-spans", new URL("./apollo-link-spans.mjs", import.meta.url)],
   ["instrumentation-kit", new URL("./instrumentation-kit.mjs", import.meta.url)],
   ["lifecycle-spans", new URL("./lifecycle-spans.mjs", import.meta.url)],
   ["native-bridge-scope", new URL("./native-bridge-scope.mjs", import.meta.url)],
@@ -27,6 +28,7 @@ if (command === "--help" || command === "-h") {
 
 function printHelp() {
   console.log("LogBrew React Native examples");
+  console.log("node node_modules/@logbrew/react-native/examples/index.mjs apollo-link-spans");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs instrumentation-kit");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs native-bridge-scope");
@@ -38,6 +40,7 @@ function printHelp() {
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs trace-correlation");
   console.log("node node_modules/@logbrew/react-native/examples/index.mjs");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run list");
+  console.log("npm --prefix node_modules/@logbrew/react-native/examples run apollo-link-spans");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run instrumentation-kit");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run lifecycle-spans");
   console.log("npm --prefix node_modules/@logbrew/react-native/examples run native-bridge-scope");
@@ -49,6 +52,7 @@ function printHelp() {
 }
 
 function printList() {
+  console.log("apollo-link-spans -> node node_modules/@logbrew/react-native/examples/index.mjs apollo-link-spans");
   console.log("instrumentation-kit -> node node_modules/@logbrew/react-native/examples/index.mjs instrumentation-kit");
   console.log("lifecycle-spans -> node node_modules/@logbrew/react-native/examples/index.mjs lifecycle-spans");
   console.log("native-bridge-scope -> node node_modules/@logbrew/react-native/examples/index.mjs native-bridge-scope");

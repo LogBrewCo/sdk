@@ -53,6 +53,17 @@
       },
       "default": "./native-bridge.js"
     },
+    "./apollo": {
+      "import": {
+        "types": "./apollo.d.ts",
+        "default": "./apollo.js"
+      },
+      "require": {
+        "types": "./apollo.d.cts",
+        "default": "./apollo.cjs"
+      },
+      "default": "./apollo.js"
+    },
     "./resource-fetch": {
       "import": {
         "types": "./resource-fetch.d.ts",
@@ -82,6 +93,10 @@
     "index.native.js",
     "index.d.ts",
     "index.d.cts",
+    "apollo.cjs",
+    "apollo.js",
+    "apollo.d.ts",
+    "apollo.d.cts",
     "instrumentation.cjs",
     "instrumentation.js",
     "instrumentation.d.ts",
@@ -131,6 +146,6 @@
     "react-native": ">=0.72"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check instrumentation.js && node --check instrumentation.cjs && node --check lifecycle.js && node --check lifecycle.cjs && node --check metadata.js && node --check metadata.cjs && node --check native-bridge.js && node --check native-bridge.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check examples/index.mjs && node --check examples/instrumentation-kit.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/native-bridge-scope.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs && node --test"
+    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check apollo.js && node --check apollo.cjs && node --check instrumentation.js && node --check instrumentation.cjs && node --check lifecycle.js && node --check lifecycle.cjs && node --check metadata.js && node --check metadata.cjs && node --check native-bridge.js && node --check native-bridge.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check examples/index.mjs && node --check examples/apollo-link-spans.mjs && node --check examples/instrumentation-kit.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/native-bridge-scope.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs && node --test"
   }
 }

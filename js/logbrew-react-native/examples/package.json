@@ -2,6 +2,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "apollo-link-spans": "node ./index.mjs apollo-link-spans",
     "help": "node ./index.mjs --help",
     "instrumentation-kit": "node ./index.mjs instrumentation-kit",
     "lifecycle-spans": "node ./index.mjs lifecycle-spans",
