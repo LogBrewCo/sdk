@@ -481,13 +481,16 @@ run_queue_span_smoke() {
 
     python "$repo_root/scripts/python_queue_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 5' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 6' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"activeSpan": "b7ad6b7169203361"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"asyncActiveSpan": "b7ad6b7169203362"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"celeryOperation": "publish checkout.send_receipt"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"celeryProcessParentSpan": "b7ad6b7169203371"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"celeryProcessResult": "celery processed"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"celeryQueueName": "receipts"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"celeryResult": "celery published"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"celeryTaskName": "checkout.send_receipt"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"celeryTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203371-01"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"queueSystem": "celery"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"syncOperationKind": "publish"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"queueName": "email"' "$tmp_dir/$output_prefix.stdout.json"
@@ -698,6 +701,7 @@ for needle in (
     "cache_operation_with_logbrew_span",
     "celery_operation_with_logbrew_span",
     "connect_dbapi_connection_with_logbrew_spans",
+    "create_celery_trace_headers",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "instrument_dbapi_connection_with_logbrew_spans",
@@ -707,6 +711,7 @@ for needle in (
     "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
+    "logbrew_trace_context_from_celery_headers",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "rq_operation_with_logbrew_span",
@@ -794,6 +799,7 @@ for needle in (
     "cache_operation_with_logbrew_span",
     "celery_operation_with_logbrew_span",
     "connect_dbapi_connection_with_logbrew_spans",
+    "create_celery_trace_headers",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "instrument_dbapi_connection_with_logbrew_spans",
@@ -803,6 +809,7 @@ for needle in (
     "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
+    "logbrew_trace_context_from_celery_headers",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "rq_operation_with_logbrew_span",
@@ -1085,6 +1092,7 @@ from logbrew_sdk import (
     IssueAttributes,
     LogAttributes,
     LogBrewClient,
+    LogBrewTraceContext,
     LogBrewDbapiConnection,
     LogBrewDbapiCursor,
     LogBrewLoggingHandler,
@@ -1103,9 +1111,11 @@ from logbrew_sdk import (
     async_httpx_request_with_logbrew_span,
     async_queue_operation_with_logbrew_span,
     cache_operation_with_logbrew_span,
+    celery_operation_with_logbrew_span,
     create_network_milestone_attributes,
     create_product_action_attributes,
     create_support_ticket_draft,
+    create_celery_trace_headers,
     create_traceparent,
     connect_dbapi_connection_with_logbrew_spans,
     database_operation_with_logbrew_span,
@@ -1113,6 +1123,7 @@ from logbrew_sdk import (
     instrument_dbapi_connection_with_logbrew_spans,
     instrument_pymemcache_client_with_logbrew_spans,
     instrument_redis_client_with_logbrew_spans,
+    logbrew_trace_context_from_celery_headers,
     parse_traceparent,
     queue_operation_with_logbrew_span,
     requests_request_with_logbrew_span,
@@ -1463,6 +1474,37 @@ queue_result = queue_operation_with_logbrew_span(
 )
 if queue_result != "queued":
     raise RuntimeError("unexpected queue result")
+
+celery_headers = create_celery_trace_headers(LogBrewTraceContext(
+    trace_id=trace_context.trace_id,
+    span_id="b7ad6b7169203339",
+    sampled=True,
+))
+celery_parent_trace = logbrew_trace_context_from_celery_headers(celery_headers)
+if celery_parent_trace is None:
+    raise RuntimeError("expected Celery parent trace")
+celery_task = type(
+    "TypecheckCeleryTask",
+    (),
+    {
+        "name": "health.check",
+        "request": {
+            "headers": celery_headers,
+            "delivery_info": {"routing_key": "health"},
+        },
+    },
+)()
+celery_result = celery_operation_with_logbrew_span(
+    client=client,
+    event_id="evt_celery_typecheck",
+    timestamp="2026-06-02T10:00:14Z",
+    task=celery_task,
+    operation=lambda: "celery processed",
+    operation_kind="process",
+    span_id_factory=lambda: "b7ad6b7169203343",
+)
+if celery_result != "celery processed":
+    raise RuntimeError("unexpected Celery result")
 
 
 async def async_queue_operation() -> str:
@@ -2274,6 +2316,7 @@ for needle in (
     "cache_operation_with_logbrew_span",
     "celery_operation_with_logbrew_span",
     "connect_dbapi_connection_with_logbrew_spans",
+    "create_celery_trace_headers",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
     "instrument_dbapi_connection_with_logbrew_spans",
@@ -2283,6 +2326,7 @@ for needle in (
     "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
+    "logbrew_trace_context_from_celery_headers",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
     "rq_operation_with_logbrew_span",

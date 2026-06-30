@@ -161,3 +161,46 @@ Fresh source refresh on 2026-06-29 is recorded in `docs/competitor-research/pyth
 Remaining gap after this follow-up:
 
 - LogBrew now has safe queue event summaries, but still avoids full OpenTelemetry event arrays/links, baggage/tracestate, hidden queue lifecycle hooks, and broker metadata propagation.
+
+## Celery Traceparent Propagation Follow-Up - 2026-06-30
+
+Fresh source refresh:
+
+- Sentry Python `getsentry/sentry-python@707464306ca78d4928e4668ba4d383948f7eb7fb`
+- `sentry_sdk/integrations/celery/__init__.py`: `_update_celery_task_headers`, `_wrap_task_run`, `_wrap_tracer`, `_patch_task_apply_async`, `_patch_celery_send_task`, `_patch_producer_publish`.
+- `sentry_sdk/integrations/rq.py`: `sentry_patched_enqueue_job`, `sentry_patched_perform_job`.
+- Datadog dd-trace-py `DataDog/dd-trace-py@732ba08e2dde4be1d8f3984a9baa80395e374ab2`
+- `ddtrace/contrib/internal/celery/signals.py`: `trace_prerun`, `trace_before_publish`, `_inject_distributed_headers`, `trace_after_publish`, `trace_failure`, `trace_retry`.
+- `ddtrace/contrib/internal/celery/utils.py`: `attach_span_context`, `retrieve_span_context`.
+- `ddtrace/contrib/internal/rq/patch.py`: `traced_queue_enqueue_job`, `traced_perform_job`.
+- OpenTelemetry Python Contrib `open-telemetry/opentelemetry-python-contrib@ec27300a9433f5985cd7467ee840037e12602a70`
+- `instrumentation/opentelemetry-instrumentation-celery/src/opentelemetry/instrumentation/celery/__init__.py`: `CeleryInstrumentor._instrument`, `_trace_prerun`, `_trace_postrun`, `_trace_before_publish`, `_trace_after_publish`, `_trace_failure`, `_trace_retry`.
+- `instrumentation/opentelemetry-instrumentation-celery/src/opentelemetry/instrumentation/celery/utils.py`: `attach_context`, `detach_context`, `retrieve_context`, `retrieve_task_id_from_message`.
+- `instrumentation/opentelemetry-instrumentation-celery/tests/test_tasks.py`: producer/consumer parent-span assertions for Celery task execution.
+
+Pattern update:
+
+- Competitors connect producer and consumer work by propagating trace context through Celery headers or RQ job metadata, then creating producer/consumer spans around lifecycle hooks.
+- Sentry writes Sentry trace and baggage data into Celery headers and nested `headers` for Celery compatibility, and continues trace state in the worker wrapper.
+- Datadog uses Celery signals, injects distributed headers into nested Celery headers, stores temporary span state against task IDs, and activates distributed headers on prerun.
+- OpenTelemetry uses Celery signals, extracts context from task request headers, stores span context per task ID, and tests producer-to-consumer parentage.
+- The tradeoff remains broad hidden patching, framework lifecycle coupling, baggage/tracestate propagation, and optional exposure of task/broker metadata.
+
+LogBrew follow-up:
+
+- Added `create_celery_trace_headers(...)` for explicit app-owned producers. It returns only one W3C `traceparent` key from the active or supplied `LogBrewTraceContext`, or a fresh local trace when none is active.
+- Added `logbrew_trace_context_from_celery_headers(...)` for explicit worker-side parent extraction. It accepts top-level or nested Celery `traceparent`, validates W3C shape with all-zero rejection, skips malformed candidates non-fatally, and returns `None` when no valid carrier remains.
+- `celery_operation_with_logbrew_span(...)` now uses a valid `task.request.headers.traceparent` as the parent when `trace` is not supplied, so process spans can become children of app-owned publish spans.
+- The helper still avoids importing Celery, registering signals, patching `apply_async`, mutating caller headers, writing broker metadata, capturing task IDs, args, kwargs, arbitrary request headers, broker URLs, baggage, tracestate, exception messages, or stack traces.
+
+Verifier evidence:
+
+- RED: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python/logbrew_py/tests/test_celery_client.py` failed because `create_celery_trace_headers` was not exported.
+- GREEN: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python/logbrew_py/tests/test_celery_client.py` ran 6 tests.
+- GREEN: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python/logbrew_py/tests/test_celery_client.py python/logbrew_py/tests/test_rq_client.py python/logbrew_py/tests/test_queue_client.py` ran 11 tests.
+- GREEN: `PYTHONPATH=python/logbrew_py/src python3 scripts/python_queue_span_smoke.py` proved six queue events, Celery publish-to-process parentage, RQ metadata, and no queue payload/header/broker leakage.
+- GREEN: `bash scripts/real_user_python_celery_smoke.sh` installed `logbrew-sdk` from the local package path plus real `celery@5.6.3` into a temporary venv, ran an eager Celery task, proved the process span parent was the publish span, flushed through `RecordingTransport`, and rejected task argument/header/broker leakage.
+
+Remaining gap after this follow-up:
+
+- LogBrew is stronger for explicit privacy-bounded Celery trace continuation, but Sentry, Datadog, and OpenTelemetry remain ahead for automatic signal/patch-based Celery lifecycle coverage, retry/span-state handling, producer/consumer metrics, baggage/tracestate, task ID correlation, and framework-owned auto-instrumentation. Keep automatic Celery out of core unless a separate opt-in package can prove dependency, patching, uninstall, privacy, and installed-worker behavior.

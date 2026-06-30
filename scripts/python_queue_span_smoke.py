@@ -8,7 +8,9 @@ from logbrew_sdk import (
     LogBrewTraceContext,
     async_queue_operation_with_logbrew_span,
     celery_operation_with_logbrew_span,
+    create_celery_trace_headers,
     get_active_logbrew_trace,
+    logbrew_trace_context_from_celery_headers,
     queue_operation_with_logbrew_span,
     rq_operation_with_logbrew_span,
     use_logbrew_trace,
@@ -31,12 +33,24 @@ class StubCeleryTask:
     request = {
         "delivery_info": {
             "routing_key": "receipts",
-            "broker_url": "amqp://user:pass@broker.internal/vhost",
+            "broker_url": "amqp://placeholder.invalid/vhost",
         },
         "args": ["raw receipt id"],
         "kwargs": {"payload": "raw celery body"},
         "headers": {"traceparent": "raw celery header"},
     }
+
+
+class StubCeleryProcessTask:
+    name = "checkout.send_receipt"
+
+    def __init__(self, headers: dict[str, str]) -> None:
+        self.request = {
+            "headers": headers,
+            "delivery_info": {
+                "routing_key": "receipts",
+            },
+        }
 
 
 client = LogBrewClient.create(
@@ -152,12 +166,16 @@ with use_logbrew_trace(parent_trace):
     )
 
 with use_logbrew_trace(parent_trace):
+    def publish_celery_task() -> str:
+        captured["celeryHeaders"] = create_celery_trace_headers()
+        return "celery published"
+
     celery_result = celery_operation_with_logbrew_span(
         client=client,
         event_id="evt_python_celery_publish",
         timestamp="2026-06-19T13:00:05Z",
         task=StubCeleryTask(),
-        operation=lambda: "celery published",
+        operation=publish_celery_task,
         operation_kind="publish",
         span_id_factory=lambda: "b7ad6b7169203371",
         clock=iter([350.0, 350.008]).__next__,
@@ -169,6 +187,29 @@ with use_logbrew_trace(parent_trace):
             }
         ],
     )
+
+celery_headers = captured.get("celeryHeaders")
+if not isinstance(celery_headers, dict):
+    raise SystemExit(f"expected celery trace headers: {celery_headers!r}")
+celery_parent_trace = logbrew_trace_context_from_celery_headers(celery_headers)
+if celery_parent_trace != LogBrewTraceContext(
+    trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+    span_id="b7ad6b7169203371",
+    parent_span_id=None,
+    sampled=True,
+):
+    raise SystemExit(f"unexpected celery parent trace: {celery_parent_trace!r}")
+
+celery_process_result = celery_operation_with_logbrew_span(
+    client=client,
+    event_id="evt_python_celery_process",
+    timestamp="2026-06-19T13:00:06Z",
+    task=StubCeleryProcessTask(celery_headers),
+    operation=lambda: "celery processed",
+    operation_kind="process",
+    span_id_factory=lambda: "b7ad6b7169203372",
+    clock=iter([360.0, 360.009]).__next__,
+)
 
 closed_client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
@@ -218,6 +259,7 @@ process_metadata = payload["events"][1]["attributes"]["metadata"]
 error_metadata = payload["events"][2]["attributes"]["metadata"]
 rq_metadata = payload["events"][3]["attributes"]["metadata"]
 celery_metadata = payload["events"][4]["attributes"]["metadata"]
+celery_process = payload["events"][5]["attributes"]
 publish_events = payload["events"][0]["attributes"]["events"]
 error_events = payload["events"][2]["attributes"]["events"]
 rq_events = payload["events"][3]["attributes"]["events"]
@@ -239,6 +281,8 @@ if rq_events != [{"name": "rq.job.started", "metadata": {"worker": "worker-a"}}]
     raise SystemExit(f"rq event summary mismatch: {rq_events}")
 if celery_events != [{"name": "celery.task.published", "metadata": {"worker": "worker-a"}}]:
     raise SystemExit(f"celery event summary mismatch: {celery_events}")
+if celery_process["parentSpanId"] != "b7ad6b7169203371":
+    raise SystemExit(f"celery process parent mismatch: {celery_process}")
 
 print(
     json.dumps(
@@ -249,8 +293,11 @@ print(
             "captureErrors": len(capture_errors),
             "celeryOperation": celery_metadata["queueOperation"],
             "celeryQueueName": celery_metadata["queueName"],
+            "celeryProcessParentSpan": celery_process["parentSpanId"],
+            "celeryProcessResult": celery_process_result,
             "celeryResult": celery_result,
             "celeryTaskName": celery_metadata["taskName"],
+            "celeryTraceparent": celery_headers["traceparent"],
             "errorType": error_metadata["errorType"],
             "events": len(payload["events"]),
             "messageCount": publish_metadata["messageCount"],

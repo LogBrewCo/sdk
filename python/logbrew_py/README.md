@@ -672,10 +672,14 @@ queued = rq_operation_with_logbrew_span(
 
 The RQ helper records one `rq` queue span using explicit caller control. It reads only string-like `job.func_name` and `job.origin` by default, lets you override queue/task names, accepts the same bounded `span_events` option as the generic queue helper, and still avoids job args, kwargs, descriptions, broker metadata writes, global worker patching, baggage, and tracestate.
 
-For Celery tasks, use `celery_operation_with_logbrew_span()` when you want safe task and queue metadata without registering Celery signals, mutating task headers, or patching `apply_async`:
+For Celery tasks, use `celery_operation_with_logbrew_span()` when you want safe task and queue metadata without registering Celery signals or patching `apply_async`. To connect producer and worker spans, create an explicit W3C carrier with `create_celery_trace_headers()` and pass it to your own `apply_async(...)` call:
 
 ```python
-from logbrew_sdk import LogBrewClient, celery_operation_with_logbrew_span
+from logbrew_sdk import (
+    LogBrewClient,
+    celery_operation_with_logbrew_span,
+    create_celery_trace_headers,
+)
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
@@ -688,14 +692,19 @@ queued = celery_operation_with_logbrew_span(
     event_id="evt_checkout_receipt_celery_publish",
     timestamp="2026-06-19T15:00:00Z",
     task=send_receipt_task,
-    operation=lambda: send_receipt_task.apply_async(args=[order_id]),
+    operation=lambda: send_receipt_task.apply_async(
+        args=[order_id],
+        headers=create_celery_trace_headers(),
+    ),
     operation_kind="publish",
     queue_name="receipts",
     metadata={"service": "checkout-worker"},
 )
 ```
 
-The Celery helper reads only string-like `task.name` and an optional routing key from `task.request.delivery_info`, lets you override queue/task names, accepts the same bounded `span_events` option as the generic queue helper, and still avoids task args, kwargs, request headers, broker URLs, signal registration, header mutation, baggage, and tracestate.
+On the worker side, pass the task object as usual. If `task.request.headers` contains a valid `traceparent`, the helper uses it as the upstream parent for the processing span. You can also extract the parent yourself with `logbrew_trace_context_from_celery_headers(task.request.headers)` and pass it as `trace=...` when you need explicit control.
+
+The Celery helper reads only string-like `task.name`, an optional routing key from `task.request.delivery_info`, and a valid W3C `traceparent` from app-owned task headers. `create_celery_trace_headers()` writes only one `traceparent` key; it does not write baggage, tracestate, arbitrary headers, task args, kwargs, broker URLs, or payload data. The helper still avoids signal registration, global patching, hidden header mutation, task IDs, request-header capture, exception messages, and stack traces.
 
 ## Agent-Readable Timelines
 

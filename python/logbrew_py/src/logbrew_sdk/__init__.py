@@ -931,7 +931,11 @@ from logbrew_sdk._cache_client import async_cache_operation_with_logbrew_span, c
 from logbrew_sdk._django_cache_client import LogBrewDjangoCacheInstrumentation, instrument_django_cache_with_logbrew_spans  # noqa: E402, E501
 from logbrew_sdk._pymemcache_client import LogBrewPymemcacheInstrumentation, instrument_pymemcache_client_with_logbrew_spans  # noqa: E402, E501
 from logbrew_sdk._redis_client import LogBrewRedisInstrumentation, instrument_redis_client_with_logbrew_spans  # noqa: E402
-from logbrew_sdk._celery_client import celery_operation_with_logbrew_span  # noqa: E402
+from logbrew_sdk._celery_client import (  # noqa: E402
+    celery_operation_with_logbrew_span,
+    create_celery_trace_headers,
+    logbrew_trace_context_from_celery_headers,
+)
 from logbrew_sdk._queue_client import (  # noqa: E402
     async_queue_operation_with_logbrew_span,
     queue_operation_with_logbrew_span,
@@ -978,6 +982,7 @@ __all__ = [
     "cache_operation_with_logbrew_span",
     "celery_operation_with_logbrew_span",
     "connect_dbapi_connection_with_logbrew_spans",
+    "create_celery_trace_headers",
     "create_logbrew_trace_context",
     "create_network_milestone_attributes",
     "create_product_action_attributes",
@@ -993,6 +998,7 @@ __all__ = [
     "instrument_redis_client_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "log_attributes_from_record",
+    "logbrew_trace_context_from_celery_headers",
     "parse_traceparent",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",
