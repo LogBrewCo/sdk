@@ -395,6 +395,38 @@ client.span(
 
 The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Queue helpers normalize outgoing `traceparent` values, treat malformed incoming/linked propagation as non-fatal diagnostics via `onError(...)`, compute primitive `timeInQueueMs` from `enqueuedAt(...)` or accept an explicit broker latency through `timeInQueueMs(...)`, and cap span links at eight. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events and links are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, raw enqueue timestamps, arbitrary headers, cookies, and auth-like fields. These helpers do not import or patch Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
 
+For Kafka producer code that already owns an `org.apache.kafka.clients.producer.Producer`, wrap it explicitly:
+
+```java
+import co.logbrew.sdk.LogBrewSpringKafkaTracing;
+import java.util.Map;
+import org.apache.kafka.clients.producer.Producer;
+
+Producer<String, String> tracedProducer = LogBrewSpringKafkaTracing.producer(
+    client,
+    producer,
+    LogBrewSpringKafkaTracing.ProducerConfig.<String, String>create()
+        .eventIdPrefix("spring_kafka_produce")
+        .metadata(Map.of("service", "checkout-api"))
+);
+```
+
+For Spring Kafka producer factories, add the opt-in post-processor to your app-owned factory:
+
+```java
+import co.logbrew.sdk.LogBrewSpringKafkaTracing;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+
+producerFactory.addPostProcessor(
+    LogBrewSpringKafkaTracing.producerPostProcessor(
+        client,
+        LogBrewSpringKafkaTracing.ProducerConfig.<String, String>create()
+    )
+);
+```
+
+The producer wrapper and post-processor replace only one W3C `traceparent`, keep a child trace active while the send and callback run, return the app-owned `Future` or a failed future for immediate send failure, and emit one `spring.kafka.produce:<topic>` span from the send callback or immediate failure. They preserve the original record by cloning headers before injection and do not capture keys, values, arbitrary headers, broker addresses, baggage, tracestate, exception messages, or stack traces.
+
 For Spring Kafka producer code that already owns a `KafkaOperations`/`KafkaTemplate`, use `producerSend(...)` around the app-owned `ProducerRecord`:
 
 ```java
@@ -415,7 +447,7 @@ LogBrewSpringKafkaTracing.producerSend(
 );
 ```
 
-The producer helper clones record headers, replaces only one W3C `traceparent`, keeps a child trace active while Spring Kafka accepts the send, and emits one `spring.kafka.produce:<topic>` span when the returned future completes. It preserves the original record, returns the app-owned or failed future, reports send failures with exception type only, and does not capture keys, values, arbitrary headers, broker addresses, baggage, tracestate, exception messages, or stack traces.
+The `KafkaOperations` helper clones record headers, replaces only one W3C `traceparent`, keeps a child trace active while Spring Kafka accepts the send, and emits one `spring.kafka.produce:<topic>` span when the returned future completes. It preserves the original record, returns the app-owned or failed future, reports send failures with exception type only, and does not capture keys, values, arbitrary headers, broker addresses, baggage, tracestate, exception messages, or stack traces.
 
 For Spring Kafka apps that already own a listener container factory, register `LogBrewSpringKafkaTracing` as an app-owned `RecordInterceptor`:
 

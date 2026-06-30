@@ -3,19 +3,33 @@ package co.logbrew.sdk;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import java.util.function.Supplier;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.clients.producer.Callback;
+import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.Metric;
+import org.apache.kafka.common.MetricName;
+import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeaders;
+import org.apache.kafka.common.metrics.KafkaMetric;
 import org.springframework.kafka.core.KafkaOperations;
+import org.springframework.kafka.core.ProducerPostProcessor;
 import org.springframework.kafka.listener.RecordInterceptor;
 import org.springframework.kafka.support.SendResult;
 
@@ -23,11 +37,13 @@ import org.springframework.kafka.support.SendResult;
  * Spring Kafka helpers for app-owned consumer and producer record tracing.
  *
  * <p>Apps register the returned {@link RecordInterceptor} with their own listener
- * container factory or call {@link #producerSend(LogBrewClient, KafkaOperations, ProducerRecord)}
- * for app-owned sends. LogBrew continues or injects one W3C {@code traceparent},
- * keeps the child trace active while app code runs, and emits one sanitized queue
- * span when Spring Kafka reports success or failure. It does not capture record
- * keys, values, offsets, arbitrary headers, broker details, baggage, or tracestate.</p>
+ * container factory, wrap app-owned Kafka {@link Producer} instances, add the returned
+ * {@link ProducerPostProcessor} to their own producer factory, or call
+ * {@link #producerSend(LogBrewClient, KafkaOperations, ProducerRecord)} for app-owned sends.
+ * LogBrew continues or injects one W3C {@code traceparent}, keeps the child trace active
+ * while app code runs, and emits one sanitized queue span when Spring Kafka reports success
+ * or failure. It does not capture record keys, values, offsets, arbitrary headers, broker
+ * details, baggage, or tracestate.</p>
  */
 public final class LogBrewSpringKafkaTracing {
     private static final String TRACEPARENT_HEADER = "traceparent";
@@ -102,6 +118,46 @@ public final class LogBrewSpringKafkaTracing {
             captureProducerSpan(client, safeConfig, record, trace, startedAt, safeConfig.currentInstant(), error)
         );
         return future;
+    }
+
+    /**
+     * Wraps an app-owned Kafka producer with default safe Spring Kafka tracing settings.
+     */
+    public static <K, V> Producer<K, V> producer(LogBrewClient client, Producer<K, V> producer) {
+        return producer(client, producer, ProducerConfig.<K, V>create());
+    }
+
+    /**
+     * Wraps an app-owned Kafka producer with app-owned Spring Kafka tracing settings.
+     */
+    public static <K, V> Producer<K, V> producer(
+        LogBrewClient client,
+        Producer<K, V> producer,
+        ProducerConfig<K, V> config
+    ) {
+        Objects.requireNonNull(client, "client");
+        Producer<K, V> delegate = Objects.requireNonNull(producer, "producer");
+        ProducerConfig<K, V> safeConfig = config == null ? ProducerConfig.<K, V>create() : config;
+        return new LogBrewProducer<>(client, delegate, safeConfig);
+    }
+
+    /**
+     * Creates a Spring Kafka producer post-processor with default safe tracing settings.
+     */
+    public static <K, V> ProducerPostProcessor<K, V> producerPostProcessor(LogBrewClient client) {
+        return producerPostProcessor(client, ProducerConfig.<K, V>create());
+    }
+
+    /**
+     * Creates a Spring Kafka producer post-processor with app-owned tracing settings.
+     */
+    public static <K, V> ProducerPostProcessor<K, V> producerPostProcessor(
+        LogBrewClient client,
+        ProducerConfig<K, V> config
+    ) {
+        Objects.requireNonNull(client, "client");
+        ProducerConfig<K, V> safeConfig = config == null ? ProducerConfig.<K, V>create() : config;
+        return delegate -> producer(client, delegate, safeConfig);
     }
 
     private static <T> CompletableFuture<T> failedFuture(Throwable error) {
@@ -408,6 +464,130 @@ public final class LogBrewSpringKafkaTracing {
             onError.accept(error);
         } catch (RuntimeException ignored) {
             // Diagnostics callbacks are advisory and must not affect app-owned Kafka operations.
+        }
+    }
+
+    private static final class LogBrewProducer<K, V> implements Producer<K, V> {
+        private final LogBrewClient client;
+        private final Producer<K, V> delegate;
+        private final ProducerConfig<K, V> config;
+
+        private LogBrewProducer(LogBrewClient client, Producer<K, V> delegate, ProducerConfig<K, V> config) {
+            this.client = client;
+            this.delegate = delegate;
+            this.config = config;
+        }
+
+        @Override
+        public void initTransactions() {
+            delegate.initTransactions();
+        }
+
+        @Override
+        public void beginTransaction() {
+            delegate.beginTransaction();
+        }
+
+        @Override
+        public void sendOffsetsToTransaction(
+            Map<TopicPartition, OffsetAndMetadata> offsets,
+            ConsumerGroupMetadata groupMetadata
+        ) {
+            delegate.sendOffsetsToTransaction(offsets, groupMetadata);
+        }
+
+        @Override
+        public void commitTransaction() {
+            delegate.commitTransaction();
+        }
+
+        @Override
+        public void abortTransaction() {
+            delegate.abortTransaction();
+        }
+
+        @Override
+        public void registerMetricForSubscription(KafkaMetric metric) {
+            delegate.registerMetricForSubscription(metric);
+        }
+
+        @Override
+        public void unregisterMetricFromSubscription(KafkaMetric metric) {
+            delegate.unregisterMetricFromSubscription(metric);
+        }
+
+        @Override
+        public Future<RecordMetadata> send(ProducerRecord<K, V> record) {
+            return send(record, null);
+        }
+
+        @Override
+        public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
+            Objects.requireNonNull(record, "record");
+            Instant startedAt = config.currentInstant();
+            LogBrewTraceContext trace = producerTrace(config);
+            ProducerRecord<K, V> tracedRecord = recordWithTraceparent(record, trace.traceparent());
+            Callback tracedCallback = tracedCallback(record, trace, startedAt, callback);
+            LogBrewTrace.Scope scope = LogBrewTrace.activate(trace);
+            try {
+                return delegate.send(tracedRecord, tracedCallback);
+            } finally {
+                scope.close();
+            }
+        }
+
+        @Override
+        public void flush() {
+            delegate.flush();
+        }
+
+        @Override
+        public List<PartitionInfo> partitionsFor(String topic) {
+            return delegate.partitionsFor(topic);
+        }
+
+        @Override
+        public Map<MetricName, ? extends Metric> metrics() {
+            return delegate.metrics();
+        }
+
+        @Override
+        public Uuid clientInstanceId(Duration timeout) {
+            return delegate.clientInstanceId(timeout);
+        }
+
+        @Override
+        public void close() {
+            delegate.close();
+        }
+
+        @Override
+        public void close(Duration timeout) {
+            delegate.close(timeout);
+        }
+
+        @Override
+        public String toString() {
+            return "LogBrewSpringKafkaProducer[delegate=" + delegate + "]";
+        }
+
+        private Callback tracedCallback(
+            ProducerRecord<K, V> record,
+            LogBrewTraceContext trace,
+            Instant startedAt,
+            Callback callback
+        ) {
+            return (metadata, exception) -> {
+                LogBrewTrace.Scope scope = LogBrewTrace.activate(trace);
+                try {
+                    if (callback != null) {
+                        callback.onCompletion(metadata, exception);
+                    }
+                } finally {
+                    scope.close();
+                    captureProducerSpan(client, config, record, trace, startedAt, config.currentInstant(), exception);
+                }
+            };
         }
     }
 

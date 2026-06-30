@@ -114,7 +114,7 @@ grep -q 'LogBrewOpenTelemetry' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
 grep -q 'LogBrewJdbcTracing' "$package_dir/README.md"
 grep -q 'LogBrewServletFilter' "$package_dir/README.md"
-printf '%s\n' 'LogBrewSpringBootAutoConfiguration' 'LogBrewSpringBootCacheAutoConfiguration' 'LogBrewSpringCacheTracing' 'LogBrewSpringBootJdbcAutoConfiguration' 'LogBrewSpringKafkaTracing' 'producerSend' 'ProducerConfig' | while IFS= read -r expected; do grep -Fq "$expected" "$package_dir/README.md"; done
+printf '%s\n' 'LogBrewSpringBootAutoConfiguration' 'LogBrewSpringBootCacheAutoConfiguration' 'LogBrewSpringCacheTracing' 'LogBrewSpringBootJdbcAutoConfiguration' 'LogBrewSpringKafkaTracing' 'producerPostProcessor' 'producerSend' 'ProducerConfig' | while IFS= read -r expected; do grep -Fq "$expected" "$package_dir/README.md"; done
 grep -q 'SupportTicketDraft' "$package_dir/README.md"
 grep -q 'droppedEvents()' "$package_dir/README.md"
 grep -q 'maxQueueSize' "$package_dir/README.md"

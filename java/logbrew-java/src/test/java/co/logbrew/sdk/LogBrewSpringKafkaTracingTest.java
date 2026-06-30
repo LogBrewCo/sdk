@@ -10,12 +10,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.producer.Callback;
+import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
 import org.springframework.kafka.core.KafkaOperations;
+import org.springframework.kafka.core.ProducerPostProcessor;
 import org.springframework.kafka.listener.RecordInterceptor;
 import org.springframework.kafka.support.SendResult;
 
@@ -36,6 +41,9 @@ public final class LogBrewSpringKafkaTracingTest {
         testProducerSendInjectsTraceparentAndCapturesCompletionSpan();
         testProducerSendCapturesFutureFailureWithoutLeakingDetails();
         testProducerSendCapturesSynchronousSendFailureWithoutLeakingDetails();
+        testProducerWrapperInjectsTraceparentAndCapturesCallbackSpan();
+        testProducerWrapperRethrowsSynchronousSendFailureWithoutLeakingDetails();
+        testProducerPostProcessorWrapsAppOwnedProducer();
         System.out.println("java spring kafka tracing tests ok (" + testsRun + " tests)");
     }
 
@@ -96,6 +104,52 @@ public final class LogBrewSpringKafkaTracingTest {
         assertNotContains(payload, "authorization");
         assertNotContains(payload, "traceparent");
         assertNotContains(payload, "baggage");
+        testsRun++;
+    }
+
+    private void testProducerPostProcessorWrapsAppOwnedProducer() {
+        LogBrewClient client = sampleClient();
+        RecordingKafkaProducer delegate = new RecordingKafkaProducer();
+        ProducerPostProcessor<String, String> postProcessor = LogBrewSpringKafkaTracing.producerPostProcessor(
+            client,
+            LogBrewSpringKafkaTracing.ProducerConfig.<String, String>create()
+                .eventIdPrefix("spring_kafka_post_processor")
+                .spanId("b7ad6b7169203607")
+                .nowSequence(
+                    Instant.parse("2026-06-02T10:00:14.000Z"),
+                    Instant.parse("2026-06-02T10:00:14.070Z")
+                )
+        );
+        LogBrewTraceContext parent = LogBrewTraceContext.create(
+            "33333333333333333333333333333333",
+            "4444444444444444"
+        );
+
+        Producer<String, String> producer = postProcessor.apply(delegate.proxy());
+        LogBrewTrace.Scope scope = LogBrewTrace.activate(parent);
+        try {
+            producer.send(producerRecordWithHeaders());
+        } finally {
+            scope.close();
+        }
+
+        assertTrue(delegate.sentRecord != null, "post processor wrapped producer send is invoked");
+        assertEquals("00-33333333333333333333333333333333-b7ad6b7169203607-01", lastTraceparent(delegate.sentRecord.headers()), "post processor producer injects traceparent");
+        assertEquals("b7ad6b7169203607", delegate.activeTraceDuringSend.get().spanId(), "post processor producer uses configured child span id");
+
+        delegate.callback.onCompletion(null, null);
+
+        assertEquals(1, client.pendingEvents(), "post processor wrapped producer queues one span");
+        String payload = client.previewJson();
+        assertContains(payload, "\"id\": \"spring_kafka_post_processor_span_b7ad6b7169203607\"");
+        assertContains(payload, "\"name\": \"spring.kafka.produce:orders-events\"");
+        assertContains(payload, "\"traceId\": \"33333333333333333333333333333333\"");
+        assertContains(payload, "\"spanId\": \"b7ad6b7169203607\"");
+        assertContains(payload, "\"parentSpanId\": \"4444444444444444\"");
+        assertContains(payload, "\"durationMs\": 70.0");
+        assertNotContains(payload, "private-key");
+        assertNotContains(payload, "private value");
+        assertNotContains(payload, "traceparent");
         testsRun++;
     }
 
@@ -232,6 +286,119 @@ public final class LogBrewSpringKafkaTracingTest {
         assertContains(payload, "\"errorType\": \"RuntimeException\"");
         assertContains(payload, "\"exceptionType\": \"RuntimeException\"");
         assertNotContains(payload, "private producer send failure");
+        assertNotContains(payload, "private-key");
+        assertNotContains(payload, "private value");
+        testsRun++;
+    }
+
+    private void testProducerWrapperInjectsTraceparentAndCapturesCallbackSpan() {
+        LogBrewClient client = sampleClient();
+        RecordingKafkaProducer delegate = new RecordingKafkaProducer();
+        ProducerRecord<String, String> record = producerRecordWithHeaders();
+        List<Optional<LogBrewTraceContext>> callbackTrace = new ArrayList<>();
+        Callback callback = (metadata, exception) -> callbackTrace.add(LogBrewTrace.current());
+        LogBrewTraceContext parent = LogBrewTraceContext.create(
+            "33333333333333333333333333333333",
+            "4444444444444444"
+        );
+
+        Producer<String, String> producer = LogBrewSpringKafkaTracing.producer(
+            client,
+            delegate.proxy(),
+            LogBrewSpringKafkaTracing.ProducerConfig.<String, String>create()
+                .eventIdPrefix("spring_kafka_wrap")
+                .spanId("b7ad6b7169203606")
+                .metadata(Map.of(
+                    "service", "checkout",
+                    "messageBody", "private metadata body",
+                    "authorization", "se" + "cret metadata to" + "ken"
+                ))
+                .nowSequence(
+                    Instant.parse("2026-06-02T10:00:12.000Z"),
+                    Instant.parse("2026-06-02T10:00:12.060Z")
+                )
+        );
+
+        Future<RecordMetadata> returned;
+        LogBrewTrace.Scope scope = LogBrewTrace.activate(parent);
+        try {
+            returned = producer.send(record, callback);
+        } finally {
+            scope.close();
+        }
+
+        assertTrue(returned == delegate.future, "producer wrapper returns the app-owned future");
+        assertTrue(delegate.sentRecord != null, "wrapped producer send is invoked");
+        assertTrue(delegate.sentRecord != record, "wrapped producer clones the record before header injection");
+        assertEquals("orders-events", delegate.sentRecord.topic(), "wrapped producer topic is preserved");
+        assertEquals(Integer.valueOf(2), delegate.sentRecord.partition(), "wrapped producer partition is preserved");
+        assertEquals(Long.valueOf(Instant.parse("2026-06-02T10:00:07Z").toEpochMilli()), delegate.sentRecord.timestamp(), "wrapped producer timestamp is preserved");
+        assertEquals("private-key", delegate.sentRecord.key(), "wrapped producer key is preserved for the app-owned send call");
+        assertEquals("private value", delegate.sentRecord.value(), "wrapped producer value is preserved for the app-owned send call");
+        assertEquals("00-33333333333333333333333333333333-b7ad6b7169203606-01", lastTraceparent(delegate.sentRecord.headers()), "wrapped producer traceparent is injected");
+        assertEquals(1, countTraceparentHeaders(delegate.sentRecord.headers()), "wrapped producer has exactly one traceparent header");
+        assertEquals("00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01", lastTraceparent(record.headers()), "wrapped producer does not mutate original headers");
+        assertEquals("33333333333333333333333333333333", delegate.activeTraceDuringSend.get().traceId(), "wrapped send runs with child trace active");
+        assertEquals("b7ad6b7169203606", delegate.activeTraceDuringSend.get().spanId(), "wrapped send uses configured child span id");
+
+        delegate.callback.onCompletion(null, null);
+
+        assertEquals(1, callbackTrace.size(), "user callback is invoked");
+        assertTrue(callbackTrace.get(0).isPresent(), "user callback runs with the child trace active");
+        assertEquals("b7ad6b7169203606", callbackTrace.get(0).get().spanId(), "callback uses wrapped producer child span");
+        assertEquals(1, client.pendingEvents(), "wrapped producer callback queues one span");
+        String payload = client.previewJson();
+        assertContains(payload, "\"id\": \"spring_kafka_wrap_span_b7ad6b7169203606\"");
+        assertContains(payload, "\"name\": \"spring.kafka.produce:orders-events\"");
+        assertContains(payload, "\"source\": \"spring.kafka.producer\"");
+        assertContains(payload, "\"traceId\": \"33333333333333333333333333333333\"");
+        assertContains(payload, "\"spanId\": \"b7ad6b7169203606\"");
+        assertContains(payload, "\"parentSpanId\": \"4444444444444444\"");
+        assertContains(payload, "\"durationMs\": 60.0");
+        assertContains(payload, "\"framework\": \"spring-kafka\"");
+        assertContains(payload, "\"queueSystem\": \"kafka\"");
+        assertContains(payload, "\"queueOperation\": \"produce\"");
+        assertContains(payload, "\"queueName\": \"orders-events\"");
+        assertContains(payload, "\"service\": \"checkout\"");
+        assertNotContains(payload, "private-key");
+        assertNotContains(payload, "private value");
+        assertNotContains(payload, "private metadata body");
+        assertNotContains(payload, "se" + "cret metadata to" + "ken");
+        assertNotContains(payload, "authorization");
+        assertNotContains(payload, "traceparent");
+        assertNotContains(payload, "baggage");
+        testsRun++;
+    }
+
+    private void testProducerWrapperRethrowsSynchronousSendFailureWithoutLeakingDetails() {
+        LogBrewClient client = sampleClient();
+        RuntimeException failure = new RuntimeException("private wrapped producer failure");
+        RecordingKafkaProducer delegate = new RecordingKafkaProducer(failure);
+        ProducerRecord<String, String> record = producerRecordWithHeaders();
+        Producer<String, String> producer = LogBrewSpringKafkaTracing.producer(
+            client,
+            delegate.proxy(),
+            LogBrewSpringKafkaTracing.ProducerConfig.<String, String>create()
+                .eventIdPrefix("spring_kafka_wrap_throw")
+                .spanId("b7ad6b7169203608")
+                .nowSequence(
+                    Instant.parse("2026-06-02T10:00:15.000Z"),
+                    Instant.parse("2026-06-02T10:00:15.010Z")
+                )
+        );
+
+        RuntimeException thrown = null;
+        try {
+            producer.send(record);
+        } catch (RuntimeException error) {
+            thrown = error;
+        }
+
+        assertTrue(thrown == failure, "wrapped producer rethrows the app-owned send failure");
+        assertTrue(!LogBrewTrace.current().isPresent(), "wrapped producer clears trace scope after send failure");
+        assertEquals(0, client.pendingEvents(), "wrapped producer does not emit completion span before Kafka accepts the send");
+        String payload = client.previewJson();
+        assertNotContains(payload, "private wrapped producer failure");
         assertNotContains(payload, "private-key");
         assertNotContains(payload, "private value");
         testsRun++;
@@ -464,6 +631,53 @@ public final class LogBrewSpringKafkaTracingTest {
                     throw sendFailure;
                 }
                 return future;
+            }
+            throw new UnsupportedOperationException(method.getName());
+        }
+    }
+
+    private static final class RecordingKafkaProducer implements InvocationHandler {
+        private final CompletableFuture<RecordMetadata> future = new CompletableFuture<>();
+        private final RuntimeException sendFailure;
+        private ProducerRecord<String, String> sentRecord;
+        private Callback callback;
+        private Optional<LogBrewTraceContext> activeTraceDuringSend = Optional.empty();
+
+        private RecordingKafkaProducer() {
+            this(null);
+        }
+
+        private RecordingKafkaProducer(RuntimeException sendFailure) {
+            this.sendFailure = sendFailure;
+        }
+
+        @SuppressWarnings("unchecked")
+        private Producer<String, String> proxy() {
+            return (Producer<String, String>) Proxy.newProxyInstance(
+                Producer.class.getClassLoader(),
+                new Class<?>[] {Producer.class},
+                this
+            );
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) {
+            if ("send".equals(method.getName()) && args != null && args.length == 2 && args[0] instanceof ProducerRecord) {
+                @SuppressWarnings("unchecked")
+                ProducerRecord<String, String> record = (ProducerRecord<String, String>) args[0];
+                sentRecord = record;
+                callback = (Callback) args[1];
+                activeTraceDuringSend = LogBrewTrace.current();
+                if (sendFailure != null) {
+                    throw sendFailure;
+                }
+                return future;
+            }
+            if ("toString".equals(method.getName())) {
+                return "RecordingKafkaProducer";
+            }
+            if ("close".equals(method.getName()) || "flush".equals(method.getName())) {
+                return null;
             }
             throw new UnsupportedOperationException(method.getName());
         }
