@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -71,7 +72,9 @@ public final class LogBrewOperationTracing {
             "database",
             "database.operation",
             safeConfig.resolvedEventIdPrefix("java_database"),
-            databaseMetadata(operationName, safeConfig)
+            databaseMetadata(operationName, safeConfig),
+            childTrace(safeConfig.spanId),
+            null
         );
     }
 
@@ -93,7 +96,9 @@ public final class LogBrewOperationTracing {
             "cache",
             "cache.operation",
             safeConfig.resolvedEventIdPrefix("java_cache"),
-            cacheMetadata(operationName, safeConfig)
+            cacheMetadata(operationName, safeConfig),
+            childTrace(safeConfig.spanId),
+            null
         );
     }
 
@@ -107,6 +112,8 @@ public final class LogBrewOperationTracing {
         QueueOperation config
     ) throws Exception {
         QueueOperation safeConfig = config == null ? QueueOperation.create() : config;
+        LogBrewTraceContext trace = queueTrace(safeConfig);
+        injectQueueTraceparent(safeConfig, trace);
         return operationSpan(
             client,
             operationName,
@@ -115,7 +122,9 @@ public final class LogBrewOperationTracing {
             "queue",
             "queue.operation",
             safeConfig.resolvedEventIdPrefix("java_queue"),
-            queueMetadata(operationName, safeConfig)
+            queueMetadata(operationName, safeConfig),
+            trace,
+            queueSpanLinks(safeConfig)
         );
     }
 
@@ -127,13 +136,14 @@ public final class LogBrewOperationTracing {
         String spanNamePrefix,
         String source,
         String eventIdPrefix,
-        Map<String, Object> metadata
+        Map<String, Object> metadata,
+        LogBrewTraceContext trace,
+        List<SpanLinkSummary> links
     ) throws Exception {
         Objects.requireNonNull(client, "client");
         Objects.requireNonNull(operation, "operation");
         Validation.requireNonEmpty("operation name", operationName);
 
-        LogBrewTraceContext trace = childTrace(config.spanId);
         Instant startedAt = config.now();
         Exception operationError = null;
         LogBrewTrace.Scope scope = LogBrewTrace.activate(trace);
@@ -153,6 +163,7 @@ public final class LogBrewOperationTracing {
                 trace,
                 metadata,
                 spanEventsWithException(config.spanEvents, operationError),
+                links,
                 operationError,
                 Duration.between(startedAt, finishedAt),
                 finishedAt,
@@ -162,9 +173,7 @@ public final class LogBrewOperationTracing {
     }
 
     private static LogBrewTraceContext childTrace(String configuredSpanId) {
-        String spanId = configuredSpanId == null || configuredSpanId.trim().isEmpty()
-            ? LogBrewTraceContext.generate().spanId()
-            : configuredSpanId.trim().toLowerCase(Locale.ROOT);
+        String spanId = childSpanId(configuredSpanId);
         return LogBrewTrace.current()
             .map(parent -> LogBrewTraceContext.create(parent.traceId(), spanId, parent.spanId(), parent.traceFlags()))
             .orElseGet(() -> {
@@ -176,6 +185,67 @@ public final class LogBrewOperationTracing {
             });
     }
 
+    private static String childSpanId(String configuredSpanId) {
+        return configuredSpanId == null || configuredSpanId.trim().isEmpty()
+            ? LogBrewTraceContext.generate().spanId()
+            : configuredSpanId.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static LogBrewTraceContext queueTrace(QueueOperation config) {
+        if (config.incomingTraceparent != null && !config.incomingTraceparent.trim().isEmpty()) {
+            try {
+                return LogBrewTraceContext.fromTraceparent(
+                    config.incomingTraceparent,
+                    childSpanId(config.spanId)
+                );
+            } catch (SdkException error) {
+                reportCaptureError(config.onError, error);
+            }
+        }
+        return childTrace(config.spanId);
+    }
+
+    private static void injectQueueTraceparent(QueueOperation config, LogBrewTraceContext trace) {
+        if (config.traceparentHeaderSetter == null) {
+            return;
+        }
+        try {
+            config.traceparentHeaderSetter.accept("traceparent", trace.traceparent());
+        } catch (RuntimeException error) {
+            reportCaptureError(
+                config.onError,
+                new SdkException("traceparent_injection_failed", "traceparent header setter failed")
+            );
+        }
+    }
+
+    private static List<SpanLinkSummary> queueSpanLinks(QueueOperation config) {
+        if (config.linkedTraceparents == null || config.linkedTraceparents.isEmpty()) {
+            return null;
+        }
+        List<SpanLinkSummary> links = new ArrayList<>();
+        for (QueueTraceparentLink link : config.linkedTraceparents) {
+            if (links.size() >= SpanLinkSummary.MAX_LINKS) {
+                reportCaptureError(
+                    config.onError,
+                    new SdkException(
+                        "validation_error",
+                        "span links must contain at most " + SpanLinkSummary.MAX_LINKS + " entries"
+                    )
+                );
+                break;
+            }
+            try {
+                links.add(SpanLinkSummary
+                    .fromTraceparent(link.traceparent)
+                    .metadata(safeOperationMetadata(link.metadata)));
+            } catch (SdkException error) {
+                reportCaptureError(config.onError, error);
+            }
+        }
+        return links;
+    }
+
     private static void captureSpan(
         LogBrewClient client,
         String eventIdPrefix,
@@ -184,6 +254,7 @@ public final class LogBrewOperationTracing {
         LogBrewTraceContext trace,
         Map<String, Object> baseMetadata,
         List<SpanEventSummary> spanEvents,
+        List<SpanLinkSummary> spanLinks,
         Exception operationError,
         Duration duration,
         Instant finishedAt,
@@ -201,6 +272,9 @@ public final class LogBrewOperationTracing {
             .metadata(metadata);
         if (!spanEvents.isEmpty()) {
             attributes.events(spanEvents);
+        }
+        if (spanLinks != null && !spanLinks.isEmpty()) {
+            attributes.links(spanLinks);
         }
         if (trace.parentSpanId() != null) {
             attributes.parentSpanId(trace.parentSpanId());
@@ -432,6 +506,9 @@ public final class LogBrewOperationTracing {
         private String queueName;
         private String taskName;
         private Integer messageCount;
+        private String incomingTraceparent;
+        private BiConsumer<String, String> traceparentHeaderSetter;
+        private List<QueueTraceparentLink> linkedTraceparents;
 
         private QueueOperation() {
         }
@@ -465,18 +542,50 @@ public final class LogBrewOperationTracing {
             return this;
         }
 
+        public QueueOperation incomingTraceparent(String value) {
+            this.incomingTraceparent = value;
+            return this;
+        }
+
+        public QueueOperation traceparentHeaderSetter(BiConsumer<String, String> value) {
+            this.traceparentHeaderSetter = Objects.requireNonNull(value, "traceparentHeaderSetter");
+            return this;
+        }
+
+        public QueueOperation linkedMessageTraceparent(String value) {
+            return linkedMessageTraceparent(value, null);
+        }
+
+        public QueueOperation linkedMessageTraceparent(String value, Map<String, ?> metadata) {
+            if (linkedTraceparents == null) {
+                linkedTraceparents = new ArrayList<>();
+            }
+            linkedTraceparents.add(new QueueTraceparentLink(value, metadata));
+            return this;
+        }
+
         @Override
         QueueOperation self() {
             return this;
         }
     }
 
+    private static final class QueueTraceparentLink {
+        private final String traceparent;
+        private final Map<String, ?> metadata;
+
+        QueueTraceparentLink(String traceparent, Map<String, ?> metadata) {
+            this.traceparent = traceparent;
+            this.metadata = Validation.copyMetadata(metadata);
+        }
+    }
+
     private abstract static class BaseOperation<T extends BaseOperation<T>> {
         private String eventIdPrefix;
-        private String spanId;
+        protected String spanId;
         private List<SpanEventSummary> spanEvents;
         protected Map<String, ?> metadata;
-        private Consumer<SdkException> onError;
+        protected Consumer<SdkException> onError;
         private Supplier<Instant> now = Instant::now;
 
         abstract T self();

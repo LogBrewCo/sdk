@@ -316,7 +316,9 @@ Use `LogBrewOperationTracing` around app-owned database, cache, or queue calls w
 
 ```java
 import co.logbrew.sdk.LogBrewOperationTracing;
+import co.logbrew.sdk.SpanAttributes;
 import co.logbrew.sdk.SpanEventSummary;
+import co.logbrew.sdk.SpanLinkSummary;
 import java.util.Map;
 
 String orderId = LogBrewOperationTracing.databaseOperation(
@@ -334,7 +336,52 @@ String orderId = LogBrewOperationTracing.databaseOperation(
 );
 ```
 
-The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, headers, cookies, and auth-like fields. These helpers do not import or patch Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
+For app-owned queue clients, pass a setter that writes exactly one W3C `traceparent` to the outgoing carrier, continue one incoming `traceparent` while processing, and add bounded links for batch receive/process spans:
+
+```java
+Map<String, String> messageHeaders = new java.util.LinkedHashMap<>();
+
+LogBrewOperationTracing.queueOperation(
+    client,
+    "publish invoice",
+    () -> {
+        kafkaProducer.send(record);
+        return null;
+    },
+    LogBrewOperationTracing.QueueOperation.create()
+        .system("kafka")
+        .operationKind("publish")
+        .queueName("billing-events")
+        .traceparentHeaderSetter(messageHeaders::put)
+);
+
+LogBrewOperationTracing.queueOperation(
+    client,
+    "process invoices",
+    () -> {
+        processBatch();
+        return null;
+    },
+    LogBrewOperationTracing.QueueOperation.create()
+        .system("kafka")
+        .operationKind("process")
+        .incomingTraceparent(messageHeaders.get("traceparent"))
+        .linkedMessageTraceparent(
+            "00-33333333333333333333333333333333-4444444444444444-00",
+            Map.of("partition", 2)
+        )
+        .linkedMessageTraceparent("00-55555555555555555555555555555555-6666666666666666-01")
+);
+
+client.span(
+    "evt_span_queue_summary",
+    "2026-06-02T10:00:04Z",
+    SpanAttributes.create("manual queue summary", "77777777777777777777777777777777", "8888888888888888", "ok")
+        .link(SpanLinkSummary.fromTraceparent("00-99999999999999999999999999999999-aaaaaaaaaaaaaaaa-01"))
+);
+```
+
+The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Queue helpers normalize outgoing `traceparent` values, treat malformed incoming/linked propagation as non-fatal diagnostics via `onError(...)`, and cap span links at eight. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events and links are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, arbitrary headers, cookies, and auth-like fields. These helpers do not import or patch Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
 
 For Spring Cache apps that already own a `CacheManager` or `Cache`, use `LogBrewSpringCacheTracing` when you want cache hit/write/delete spans under an active request or task trace:
 

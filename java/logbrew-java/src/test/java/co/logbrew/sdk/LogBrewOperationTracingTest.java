@@ -1,6 +1,8 @@
 package co.logbrew.sdk;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -17,6 +19,9 @@ public final class LogBrewOperationTracingTest {
     private void run() {
         testOperationTracingHelpersCorrelateAndSanitizeMetadata();
         testOperationTracingHelpersAttachSpanEventsAndExceptionSummaries();
+        testQueueOperationInjectsTraceparentAndKeepsActiveChildTrace();
+        testQueueOperationContinuesIncomingTraceparentAndAddsLinks();
+        testQueueOperationTreatsMalformedPropagationAsNonFatal();
         testOperationTracingHelpersPreserveOriginalErrors();
         testOperationTracingCaptureFailureDoesNotReplaceOperationResult();
         System.out.println("java operation tracing tests ok (" + testsRun + " tests)");
@@ -158,6 +163,165 @@ public final class LogBrewOperationTracingTest {
         assertNotContains(payload, "SELECT private");
         assertNotContains(payload, "private body");
         assertNotContains(payload, "message body contained");
+        testsRun++;
+    }
+
+    private void testQueueOperationInjectsTraceparentAndKeepsActiveChildTrace() {
+        LogBrewClient client = sampleClient();
+        LogBrewTraceContext parent = LogBrewTraceContext.fromTraceparent(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+            "a7ad6b7169203330"
+        );
+        AtomicReference<String> injectedName = new AtomicReference<>();
+        AtomicReference<String> injectedValue = new AtomicReference<>();
+        AtomicReference<LogBrewTraceContext> active = new AtomicReference<>();
+
+        LogBrewTrace.Scope scope = LogBrewTrace.activate(parent);
+        try {
+            String result = LogBrewOperationTracing.queueOperation(
+                client,
+                "publish invoice",
+                () -> {
+                    active.set(LogBrewTrace.current().orElseThrow());
+                    return "sent";
+                },
+                LogBrewOperationTracing.QueueOperation.create()
+                    .system("kafka")
+                    .operationKind("publish")
+                    .queueName("billing-events")
+                    .eventIdPrefix("java_queue_header")
+                    .spanId("b7ad6b7169203337")
+                    .traceparentHeaderSetter((name, value) -> {
+                        injectedName.set(name);
+                        injectedValue.set(value);
+                    })
+                    .metadata(Map.of(
+                        "component", "billing",
+                        "headers", "private",
+                        "messageBody", "private body"
+                    ))
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:02Z"),
+                        Instant.parse("2026-06-02T10:00:02.030Z")
+                    )
+            );
+            assertEquals("sent", result, "queue publish result");
+        } catch (Exception error) {
+            throw new AssertionError(error);
+        } finally {
+            scope.close();
+        }
+
+        assertEquals("traceparent", injectedName.get(), "traceparent header name");
+        assertEquals(active.get().traceparent(), injectedValue.get(), "traceparent header value");
+        assertEquals(parent.traceId(), active.get().traceId(), "queue child trace id");
+        assertEquals(parent.spanId(), active.get().parentSpanId(), "queue child parent span");
+        assertEquals("b7ad6b7169203337", active.get().spanId(), "queue child span");
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"id\": \"java_queue_header_span_b7ad6b7169203337\"");
+        assertContains(payload, "\"name\": \"queue:publish invoice\"");
+        assertContains(payload, "\"queueSystem\": \"kafka\"");
+        assertContains(payload, "\"queueOperationKind\": \"publish\"");
+        assertContains(payload, "\"queueName\": \"billing-events\"");
+        assertContains(payload, "\"component\": \"billing\"");
+        assertNotContains(payload, "private body");
+        assertNotContains(payload, "headers");
+        assertNotContains(payload, "traceparent");
+        testsRun++;
+    }
+
+    private void testQueueOperationContinuesIncomingTraceparentAndAddsLinks() {
+        LogBrewClient client = sampleClient();
+        AtomicReference<LogBrewTraceContext> active = new AtomicReference<>();
+
+        try {
+            LogBrewOperationTracing.queueOperation(
+                client,
+                "process invoices",
+                () -> {
+                    active.set(LogBrewTrace.current().orElseThrow());
+                    return null;
+                },
+                LogBrewOperationTracing.QueueOperation.create()
+                    .system("kafka")
+                    .operationKind("process")
+                    .queueName("billing-events")
+                    .messageCount(2)
+                    .eventIdPrefix("java_queue_process")
+                    .spanId("b7ad6b7169203338")
+                    .incomingTraceparent("00-11111111111111111111111111111111-2222222222222222-01")
+                    .linkedMessageTraceparent(
+                        "00-33333333333333333333333333333333-4444444444444444-00",
+                        Map.of("partition", Integer.valueOf(2), "messageBody", "private")
+                    )
+                    .linkedMessageTraceparent(
+                        "00-55555555555555555555555555555555-6666666666666666-01"
+                    )
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:03Z"),
+                        Instant.parse("2026-06-02T10:00:03.040Z")
+                    )
+            );
+        } catch (Exception error) {
+            throw new AssertionError(error);
+        }
+
+        assertEquals("11111111111111111111111111111111", active.get().traceId(), "incoming trace id");
+        assertEquals("2222222222222222", active.get().parentSpanId(), "incoming parent span");
+        assertEquals("b7ad6b7169203338", active.get().spanId(), "incoming child span");
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"links\": [");
+        assertContains(payload, "\"traceId\": \"33333333333333333333333333333333\"");
+        assertContains(payload, "\"spanId\": \"4444444444444444\"");
+        assertContains(payload, "\"sampled\": false");
+        assertContains(payload, "\"partition\": 2");
+        assertContains(payload, "\"traceId\": \"55555555555555555555555555555555\"");
+        assertContains(payload, "\"spanId\": \"6666666666666666\"");
+        assertContains(payload, "\"sampled\": true");
+        assertContains(payload, "\"messageCount\": 2");
+        assertNotContains(payload, "private");
+        assertNotContains(payload, "traceFlags");
+        testsRun++;
+    }
+
+    private void testQueueOperationTreatsMalformedPropagationAsNonFatal() {
+        LogBrewClient client = sampleClient();
+        List<String> errorCodes = new ArrayList<>();
+
+        try {
+            String result = LogBrewOperationTracing.queueOperation(
+                client,
+                "process malformed",
+                () -> "processed",
+                LogBrewOperationTracing.QueueOperation.create()
+                    .eventIdPrefix("java_queue_malformed")
+                    .spanId("b7ad6b7169203339")
+                    .incomingTraceparent("not-a-traceparent")
+                    .linkedMessageTraceparent("also-not-a-traceparent")
+                    .traceparentHeaderSetter((name, value) -> {
+                        throw new IllegalStateException("headers are read-only");
+                    })
+                    .onError(error -> errorCodes.add(error.code()))
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:04Z"),
+                        Instant.parse("2026-06-02T10:00:04.010Z")
+                    )
+            );
+            assertEquals("processed", result, "malformed queue result");
+        } catch (Exception error) {
+            throw new AssertionError(error);
+        }
+
+        assertTrue(errorCodes.contains("validation_error"), "invalid propagation reported");
+        assertTrue(errorCodes.contains("traceparent_injection_failed"), "setter failure reported");
+        String payload = client.previewJson();
+        assertContains(payload, "\"id\": \"java_queue_malformed_span_b7ad6b7169203339\"");
+        assertContains(payload, "\"traceId\":");
+        assertNotContains(payload, "headers are read-only");
+        assertNotContains(payload, "not-a-traceparent");
+        assertNotContains(payload, "also-not-a-traceparent");
         testsRun++;
     }
 

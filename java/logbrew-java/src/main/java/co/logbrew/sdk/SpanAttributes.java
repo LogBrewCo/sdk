@@ -17,6 +17,7 @@ public final class SpanAttributes {
     private Double durationMs;
     private Map<String, ?> metadata;
     private List<SpanEventSummary> events;
+    private List<SpanLinkSummary> links;
 
     private SpanAttributes(String name, String traceId, String spanId, String status) {
         this.name = name;
@@ -90,6 +91,40 @@ public final class SpanAttributes {
         return this;
     }
 
+    /**
+     * Adds one optional privacy-bounded span link summary.
+     */
+    public SpanAttributes link(SpanLinkSummary link) {
+        if (link == null) {
+            throw new SdkException("validation_error", "span link summary must be provided");
+        }
+        if (links == null) {
+            links = new ArrayList<>();
+        }
+        links.add(link);
+        SpanLinkSummary.requireLinkLimit(links.size());
+        return this;
+    }
+
+    /**
+     * Sets optional privacy-bounded span link summaries.
+     */
+    public SpanAttributes links(Iterable<SpanLinkSummary> summaries) {
+        if (summaries == null) {
+            throw new SdkException("validation_error", "span links must be provided");
+        }
+        List<SpanLinkSummary> copied = new ArrayList<>();
+        for (SpanLinkSummary summary : summaries) {
+            if (summary == null) {
+                throw new SdkException("validation_error", "span link summary must be provided");
+            }
+            copied.add(summary);
+            SpanLinkSummary.requireLinkLimit(copied.size());
+        }
+        this.links = copied;
+        return this;
+    }
+
     Map<String, Object> toMap() {
         Validation.requireNonEmpty("span name", name);
         Validation.requireNonEmpty("span traceId", traceId);
@@ -115,6 +150,13 @@ public final class SpanAttributes {
                 mappedEvents.add(event.toMap());
             }
             value.put("events", mappedEvents);
+        }
+        if (links != null && !links.isEmpty()) {
+            List<Map<String, Object>> mappedLinks = new ArrayList<>();
+            for (SpanLinkSummary link : links) {
+                mappedLinks.add(link.toMap());
+            }
+            value.put("links", mappedLinks);
         }
         return value;
     }

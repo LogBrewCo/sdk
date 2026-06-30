@@ -399,20 +399,51 @@ public final class Main {
                 .metadata(Map.of("service", "checkout", "cacheKey", "cart:private"))
                 .nowSequence(Instant.parse("2026-06-02T10:00:01Z"), Instant.parse("2026-06-02T10:00:01.005Z"))
         );
+        LogBrewTrace.Scope dependencyScope = LogBrewTrace.activate(LogBrewTraceContext.fromTraceparent(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+            "a7ad6b7169203330"
+        ));
+        try {
+            LogBrewOperationTracing.queueOperation(
+                dependencies,
+                "publish invoice",
+                () -> "delivered",
+                LogBrewOperationTracing.QueueOperation.create()
+                    .system("kafka")
+                    .operationKind("publish")
+                    .queueName("billing-events")
+                    .taskName("invoice.created")
+                    .messageCount(1)
+                    .eventIdPrefix("java_queue_smoke")
+                    .spanId("b7ad6b7169203333")
+                    .traceparentHeaderSetter((name, value) -> {
+                        require("traceparent".equals(name), "queue traceparent header name");
+                        require(value.equals("00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203333-01"), "queue traceparent header value");
+                    })
+                    .metadata(Map.of("component", "billing", "messageBody", "private body"))
+                    .nowSequence(Instant.parse("2026-06-02T10:00:02Z"), Instant.parse("2026-06-02T10:00:02.010Z"))
+            );
+        } finally {
+            dependencyScope.close();
+        }
         LogBrewOperationTracing.queueOperation(
             dependencies,
-            "publish invoice",
-            () -> "delivered",
+            "process invoices",
+            () -> "processed",
             LogBrewOperationTracing.QueueOperation.create()
                 .system("kafka")
-                .operationKind("publish")
+                .operationKind("process")
                 .queueName("billing-events")
-                .taskName("invoice.created")
-                .messageCount(1)
-                .eventIdPrefix("java_queue_smoke")
-                .spanId("b7ad6b7169203333")
-                .metadata(Map.of("component", "billing", "messageBody", "private body"))
-                .nowSequence(Instant.parse("2026-06-02T10:00:02Z"), Instant.parse("2026-06-02T10:00:02.010Z"))
+                .messageCount(2)
+                .eventIdPrefix("java_queue_process_smoke")
+                .spanId("b7ad6b7169203335")
+                .incomingTraceparent("00-11111111111111111111111111111111-2222222222222222-01")
+                .linkedMessageTraceparent(
+                    "00-33333333333333333333333333333333-4444444444444444-00",
+                    Map.of("partition", Integer.valueOf(2), "messageBody", "private")
+                )
+                .linkedMessageTraceparent("00-55555555555555555555555555555555-6666666666666666-01")
+                .nowSequence(Instant.parse("2026-06-02T10:00:02.020Z"), Instant.parse("2026-06-02T10:00:02.040Z"))
         );
         try {
             LogBrewOperationTracing.queueOperation(
@@ -429,6 +460,8 @@ public final class Main {
                     .messageCount(1)
                     .eventIdPrefix("java_queue_error_smoke")
                     .spanId("b7ad6b7169203334")
+                    .incomingTraceparent("not-a-traceparent")
+                    .linkedMessageTraceparent("also-not-a-traceparent")
                     .spanEvent(SpanEventSummary.create("queue.enqueued")
                         .metadata(Map.of("component", "billing", "messageBody", "private body")))
                     .nowSequence(Instant.parse("2026-06-02T10:00:03Z"), Instant.parse("2026-06-02T10:00:03.010Z"))
@@ -437,8 +470,21 @@ public final class Main {
         } catch (QueueFailure expected) {
             // Expected path proves failing operations still emit sanitized trace events.
         }
+        dependencies.span(
+            "evt_span_manual_link",
+            "2026-06-02T10:00:03.020Z",
+            SpanAttributes.create(
+                    "manual linked queue summary",
+                    "77777777777777777777777777777777",
+                    "8888888888888888",
+                    "ok"
+                )
+                .link(SpanLinkSummary.fromTraceparent(
+                    "00-99999999999999999999999999999999-aaaaaaaaaaaaaaaa-01"
+                ).metadata(Map.of("component", "billing", "messageBody", "private")))
+        );
         String dependencyPayload = dependencies.previewJson();
-        require(dependencies.pendingEvents() == 4, "dependency helpers queue four spans");
+        require(dependencies.pendingEvents() == 6, "dependency helpers queue six spans");
         require(dependencyPayload.contains("\"source\": \"database.operation\""), "database span source");
         require(dependencyPayload.contains("\"dbSystem\": \"postgresql\""), "database span system");
         require(dependencyPayload.contains("\"events\": ["), "dependency spans include bounded events");
@@ -452,11 +498,21 @@ public final class Main {
         require(dependencyPayload.contains("\"cacheHit\": true"), "cache span hit");
         require(dependencyPayload.contains("\"source\": \"queue.operation\""), "queue span source");
         require(dependencyPayload.contains("\"queueName\": \"billing-events\""), "queue span name");
+        require(dependencyPayload.contains("\"parentSpanId\": \"2222222222222222\""), "incoming queue trace parent");
+        require(dependencyPayload.contains("\"links\": ["), "queue span links");
+        require(dependencyPayload.contains("\"traceId\": \"33333333333333333333333333333333\""), "first linked trace id");
+        require(dependencyPayload.contains("\"spanId\": \"4444444444444444\""), "first linked span id");
+        require(dependencyPayload.contains("\"sampled\": false"), "first linked sampled flag");
+        require(dependencyPayload.contains("\"traceId\": \"55555555555555555555555555555555\""), "second linked trace id");
+        require(dependencyPayload.contains("\"traceId\": \"99999999999999999999999999999999\""), "manual link trace id");
         require(!dependencyPayload.contains("db.internal"), "dependency metadata drops host");
         require(!dependencyPayload.contains("cart:private"), "dependency metadata drops cache key");
         require(!dependencyPayload.contains("SELECT private"), "dependency span events drop raw queries");
         require(!dependencyPayload.contains("private body"), "dependency metadata drops message body");
         require(!dependencyPayload.contains("private failure message body"), "dependency exception event drops messages");
+        require(!dependencyPayload.contains("not-a-traceparent"), "queue span drops malformed incoming propagation");
+        require(!dependencyPayload.contains("also-not-a-traceparent"), "queue span drops malformed linked propagation");
+        require(!dependencyPayload.contains("traceFlags"), "span links omit raw trace flags");
 
         LogBrewClient jdbcClient = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
         RecordingJdbc jdbc = new RecordingJdbc();
