@@ -1,5 +1,37 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-06-30: Python Flask-Caching trace gap reduced after source reads from
+  Sentry Python `getsentry/sentry-python@291739faa48285f2634b5c0935e8f45bf365164e`
+  (`sentry_sdk/integrations/flask.py`,
+  `sentry_sdk/integrations/django/caching.py`,
+  `sentry_sdk/integrations/redis/_sync_common.py`,
+  `sentry_sdk/integrations/redis/modules/caches.py`), Datadog dd-trace-py
+  `DataDog/dd-trace-py@a819241caed620a180db9e2c6793079ba13527ec`
+  (`ddtrace/contrib/internal/flask_cache/patch.py`,
+  `ddtrace/contrib/internal/flask_cache/utils.py`), OpenTelemetry Python
+  Contrib `open-telemetry/opentelemetry-python-contrib@ec27300a9433f5985cd7467ee840037e12602a70`
+  (`opentelemetry-instrumentation-flask`, Redis, and pymemcache instrumentation
+  paths), and PostHog Python
+  `PostHog/posthog-python@e20e22937b6ffebd073931d5e359b68efd6718e5` (no
+  comparable Flask-Caching tracing found). Datadog's direct pattern is a
+  traced Flask-Caching `Cache` subclass that overrides common cache methods and
+  records hit/count/resource/backend metadata. LogBrew now adds
+  `instrument_flask_cache_with_logbrew_spans(...)` and
+  `LogBrewFlaskCacheInstrumentation`: apps pass one owned Flask-Caching style
+  cache object, LogBrew wraps only supported methods on that instance, returns
+  duplicate installs, activates child trace context, derives safe hit/count/size
+  metadata, and uninstalls cleanly. It avoids default Flask/Flask-Caching
+  dependencies, class/global patching, subclass replacement, cache keys/values,
+  key prefixes, timeout args, backend locations, hosts/ports, command text,
+  baggage/tracestate, stacks, and exception messages. Evidence: RED missing
+  export, focused unit tests passed, temp-venv smoke with real
+  `Flask-Caching>=2,<3` passed, and `scripts/real_user_python_smoke.sh` now
+  wires the helper through wheel/sdist/reinstall/freeze/direct installed
+  artifact paths. Report:
+  `docs/competitor-research/python-flask-cache-tracing-2026-06-30.md`.
+  Remaining Python Flask gaps: Flask request middleware/route-template depth,
+  optional automatic Flask-Caching integration package, richer semantic
+  conventions, baggage/tracestate, and OTel exporter interop.
 - 2026-06-30: Python high-load installed-artifact smoke CI drift fixed after
   GitHub Actions run `28438203099` failed with `No module named build` in
   `scripts/real_user_python_high_load_smoke.sh`. The smoke now follows the

@@ -575,6 +575,39 @@ instrumentation.uninstall()
 
 The helper returns a `LogBrewDjangoCacheInstrumentation` handle, does not add Django as a LogBrew dependency, and does not patch Django globally. It wraps only the cache object you pass, returns the existing instrumentation on duplicate calls, activates a child trace around supported `get`, `get_many`, `set`, `set_many`, `add`, `delete`, `delete_many`, and `clear` calls, derives hit state and item count/size when safely knowable, and puts the original methods back with `uninstall()`. It does not read Django settings, capture cache keys, values, timeout/version arguments, backend locations, hosts, ports, arbitrary command text, response payloads, baggage, tracestate, stack traces, or exception messages.
 
+### Flask-Caching Spans
+
+Use `instrument_flask_cache_with_logbrew_spans()` when your app already owns a Flask-Caching `Cache` object and you want one span per supported cache method on that object:
+
+```python
+from flask import Flask
+from flask_caching import Cache
+
+from logbrew_sdk import LogBrewClient, instrument_flask_cache_with_logbrew_spans
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+
+app = Flask(__name__)
+app.config["CACHE_TYPE"] = "SimpleCache"
+cache = Cache(app)
+instrumentation = instrument_flask_cache_with_logbrew_spans(
+    cache,
+    client=client,
+    cache_name="profiles",
+    metadata={"service": "checkout-api"},
+)
+
+cache.set(profile_cache_key, profile, timeout=60)
+profile = cache.get(profile_cache_key)
+instrumentation.uninstall()
+```
+
+The helper returns a `LogBrewFlaskCacheInstrumentation` handle, does not add Flask or Flask-Caching as LogBrew dependencies, and does not patch Flask-Caching globally. It wraps only the cache object you pass, returns the existing instrumentation on duplicate calls, activates a child trace around supported `get`, `get_many`, `set`, `set_many`, `add`, `delete`, `delete_many`, and `clear` calls, derives hit state and item count/size when safely knowable, and puts the original methods back with `uninstall()`. It does not capture cache keys, values, timeout arguments, key prefixes, backend locations, hosts, ports, arbitrary command text, response payloads, baggage, tracestate, stack traces, or exception messages.
+
 ### Pymemcache Client Spans
 
 Use `instrument_pymemcache_client_with_logbrew_spans()` when your app already owns a `pymemcache` style client and you want safe spans for calls made through that one object:
