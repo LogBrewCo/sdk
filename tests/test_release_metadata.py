@@ -541,7 +541,7 @@ jobs:
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <PackageId>LogBrew</PackageId>
-    <Version>0.1.4</Version>
+    <Version>0.1.5</Version>
     <Authors>LogBrew</Authors>
     <Company>LogBrew</Company>
     <Description>Public LogBrew .NET SDK.</Description>
@@ -659,7 +659,7 @@ jobs:
             check_release_metadata.validate_dotnet_packages(
                 root,
                 override_failures,
-                "0.1.4",
+                "0.1.5",
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,

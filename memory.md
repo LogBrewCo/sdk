@@ -1,5 +1,32 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-06-30: .NET high-load/backpressure gap reduced after source reads from
+  Sentry .NET
+  `getsentry/sentry-dotnet@951d98f789ec6794a1bbd82149d900f06fde0cfa`
+  (`BackgroundWorker`, `SentryOptions`, `ClientReportRecorder`),
+  OpenTelemetry .NET
+  `open-telemetry/opentelemetry-dotnet@2d50a2b69a93c69435e920245d9663111ff3c542`
+  (`BatchExportProcessor`, `BatchExportProcessorOptions`, `CircularBuffer`),
+  and Datadog .NET tracer
+  `DataDog/dd-trace-dotnet@a2346ba4fa5455164534a8427e510acd877f00a9`
+  (`AgentWriter`, `SpanBuffer`, `TracerSettings`). Core `LogBrew` now defaults
+  to a 1,000-event in-memory queue, accepts `maxQueueSize`, drops new events
+  on overflow to preserve already-buffered release/environment/trace context,
+  exposes `DroppedEvents()`, and supports advisory `onEventDropped`
+  `DroppedEvent(eventId,eventType,"queue_overflow",droppedEvents)` callbacks
+  whose failures do not interrupt app logging. The core NuGet version is
+  staged as `0.1.4` for the next batched release, not published in this cycle.
+  Evidence: RED missing API test, GREEN 66 .NET package tests, RED public
+  verifier-list test, and GREEN
+  `bash scripts/real_user_dotnet_high_load_smoke.sh` installed-artifact proof
+  with local NuGet install/remove/reinstall, release/environment/span/action
+  plus 1,500 `ILogger` logs, 1,000 queued events, 504 local drops, fake-intake
+  503->202 retry, flush/shutdown, and payload redaction checks. Report:
+  `docs/competitor-research/dotnet-high-load-backpressure-2026-06-30.md`.
+  Remaining .NET delivery gaps: background draining, timed batch export,
+  exported loss metrics/client reports, rate-limit adaptation, richer grouping,
+  full OpenTelemetry exporter/processor interop, baggage/tracestate, and wider
+  automatic framework instrumentation.
 - 2026-06-30: .NET EF Core command trace gap reduced after source reads from
   Sentry .NET
   `getsentry/sentry-dotnet@951d98f789ec6794a1bbd82149d900f06fde0cfa`

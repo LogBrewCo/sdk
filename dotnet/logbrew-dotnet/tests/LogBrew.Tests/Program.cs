@@ -503,6 +503,44 @@ AssertTrue(loggingResponse.StatusCode == 202, "expected logger provider flush");
 AssertTrue(loggingTransport.SentBodies.Count == 1, "expected one logger provider body");
 tests++;
 
+var boundedDrops = new List<DroppedEvent>();
+var boundedClient = LogBrewClient.Create(
+    "LOGBREW_API_KEY",
+    "logbrew-dotnet",
+    "0.1.0",
+    maxRetries: 2,
+    maxQueueSize: 2,
+    onEventDropped: boundedDrops.Add);
+boundedClient.Release("evt_dotnet_bounded_release", "2026-06-02T10:00:00Z", ReleaseAttributes.Create("1.2.3"));
+boundedClient.Environment("evt_dotnet_bounded_environment", "2026-06-02T10:00:01Z", EnvironmentAttributes.Create("production"));
+boundedClient.Log("evt_dotnet_bounded_dropped", "2026-06-02T10:00:02Z", LogAttributes.Create("queue pressure", "warning"));
+AssertTrue(boundedClient.PendingEvents() == 2, "expected bounded queue to preserve existing events");
+AssertTrue(boundedClient.DroppedEvents() == 1, "expected bounded queue to count drops");
+AssertTrue(boundedDrops.Count == 1, "expected bounded queue drop callback");
+AssertTrue(boundedDrops[0].EventId == "evt_dotnet_bounded_dropped", "expected dropped event id");
+AssertTrue(boundedDrops[0].EventType == "log", "expected dropped event type");
+AssertTrue(boundedDrops[0].Reason == "queue_overflow", "expected dropped event reason");
+AssertTrue(boundedDrops[0].DroppedEvents == 1, "expected dropped event count");
+var boundedPreview = boundedClient.PreviewJson();
+AssertTrue(boundedPreview.Contains("evt_dotnet_bounded_release", StringComparison.Ordinal), "expected release context to stay queued");
+AssertTrue(boundedPreview.Contains("evt_dotnet_bounded_environment", StringComparison.Ordinal), "expected environment context to stay queued");
+AssertTrue(!boundedPreview.Contains("evt_dotnet_bounded_dropped", StringComparison.Ordinal), "expected overflow event to be dropped");
+
+var advisoryDropClient = LogBrewClient.Create(
+    "LOGBREW_API_KEY",
+    "logbrew-dotnet",
+    "0.1.0",
+    maxRetries: 2,
+    maxQueueSize: 1,
+    onEventDropped: _ => throw new InvalidOperationException("drop callback failed"));
+advisoryDropClient.Log("evt_dotnet_advisory_1", "2026-06-02T10:00:01Z", LogAttributes.Create("kept", "info"));
+advisoryDropClient.Log("evt_dotnet_advisory_2", "2026-06-02T10:00:02Z", LogAttributes.Create("dropped", "info"));
+AssertTrue(advisoryDropClient.PendingEvents() == 1, "expected advisory drop callback failure not to interrupt capture");
+AssertTrue(advisoryDropClient.DroppedEvents() == 1, "expected advisory dropped event count");
+ExpectSdkError("validation_error", "max_queue_size must be positive", () =>
+    LogBrewClient.Create("LOGBREW_API_KEY", "logbrew-dotnet", "0.1.0", maxRetries: 2, maxQueueSize: 0));
+tests++;
+
 var heavyLoggingClient = SampleClient();
 var heavyLoggingTransport = RecordingTransport.AlwaysAccept();
 var heavyLoggingErrors = 0;
@@ -541,16 +579,16 @@ using (var factory = LoggerFactory.Create(builder =>
 }
 
 AssertTrue(heavyLoggingErrors == 0, "expected heavy logging load not to report provider errors");
-AssertTrue(heavyLoggingClient.PendingEvents() == heavyLoggingTotal, "expected all heavy logging events to be queued");
+AssertTrue(heavyLoggingClient.PendingEvents() == 1000, "expected heavy logging load to keep bounded queue");
+AssertTrue(heavyLoggingClient.DroppedEvents() == heavyLoggingTotal - 1000, "expected heavy logging load to count dropped events");
 var heavyPreview = heavyLoggingClient.PreviewJson();
-AssertTrue(heavyPreview.Contains("\"id\": \"dotnet_load_1\"", StringComparison.Ordinal), "expected first heavy logging event id");
-AssertTrue(heavyPreview.Contains("\"id\": \"dotnet_load_" + heavyLoggingTotal.ToString(CultureInfo.InvariantCulture) + "\"", StringComparison.Ordinal), "expected last heavy logging event id");
+AssertTrue(CountOccurrences(heavyPreview, "\"type\": \"log\"") == 1000, "expected heavy logging preview to include accepted log events");
 AssertTrue(!heavyPreview.Contains("exceptionStackTrace", StringComparison.Ordinal), "expected heavy logging load not to add stack traces");
 var heavyResponse = heavyLoggingClient.Flush(heavyLoggingTransport);
 AssertTrue(heavyResponse.StatusCode == 202, "expected heavy logging flush");
 AssertTrue(heavyLoggingClient.PendingEvents() == 0, "expected heavy logging flush to clear queue");
 AssertTrue(heavyLoggingTransport.LastBody != null, "expected heavy logging transport body");
-AssertTrue(CountOccurrences(heavyLoggingTransport.LastBody!, "\"type\": \"log\"") == heavyLoggingTotal, "expected heavy logging body to include every log event");
+AssertTrue(CountOccurrences(heavyLoggingTransport.LastBody!, "\"type\": \"log\"") == 1000, "expected heavy logging body to include accepted log events");
 tests++;
 
 var flushOnLogClient = SampleClient();

@@ -192,6 +192,12 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if relative_text.endswith(".cs") and is_dotnet_cancellation_token_reference(line):
         return True
 
+    if relative_text.startswith("scripts/real_user_") and is_dotnet_cancellation_token_reference(line):
+        return True
+
+    if relative_text.endswith(".cs") and is_dotnet_analyzer_pragma_reference(line, terms):
+        return True
+
     if relative_text.startswith("scripts/") and terms == {"cleanup"}:
         return True
 
@@ -745,6 +751,10 @@ def is_kotlin_coroutine_context_reference(
 
 def is_dotnet_cancellation_token_reference(line: str) -> bool:
     return "CancellationToken" in line or ".Token" in line
+
+
+def is_dotnet_analyzer_pragma_reference(line: str, terms: set[str]) -> bool:
+    return terms == {"restore"} and line.strip() == "#pragma warning restore CA1031"
 
 
 def main() -> int:

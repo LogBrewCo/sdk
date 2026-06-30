@@ -59,6 +59,25 @@ namespace LogBrew
         TransportResponse Send(string apiKey, string body);
     }
 
+    public sealed class DroppedEvent
+    {
+        internal DroppedEvent(string eventId, string eventType, string reason, int droppedEvents)
+        {
+            EventId = eventId;
+            EventType = eventType;
+            Reason = reason;
+            DroppedEvents = droppedEvents;
+        }
+
+        public string EventId { get; }
+
+        public string EventType { get; }
+
+        public string Reason { get; }
+
+        public int DroppedEvents { get; }
+    }
+
     public sealed class HttpTransportOptions
     {
         public Uri? Endpoint { get; set; }
@@ -546,6 +565,8 @@ namespace LogBrew
 
     public sealed class LogBrewClient
     {
+        private const int DefaultMaxQueueSize = 1000;
+
         internal static readonly string[] SeverityValues = { "trace", "debug", "info", "warn", "warning", "error", "fatal", "critical" };
         internal static readonly string[] SpanStatuses = { "ok", "error" };
         internal static readonly string[] ActionStatuses = { "queued", "running", "success", "failure" };
@@ -556,14 +577,19 @@ namespace LogBrew
         private readonly string apiKey;
         private readonly OrderedJsonObject sdk;
         private readonly int maxRetries;
+        private readonly int maxQueueSize;
+        private readonly Action<DroppedEvent>? onEventDropped;
         private readonly List<Event> events;
         private readonly object gate = new object();
+        private int droppedEvents;
         private bool closed;
 
-        private LogBrewClient(string apiKey, string sdkName, string sdkVersion, int maxRetries)
+        private LogBrewClient(string apiKey, string sdkName, string sdkVersion, int maxRetries, int maxQueueSize, Action<DroppedEvent>? onEventDropped)
         {
             this.apiKey = apiKey;
             this.maxRetries = maxRetries;
+            this.maxQueueSize = maxQueueSize;
+            this.onEventDropped = onEventDropped;
             events = new List<Event>();
             sdk = new OrderedJsonObject()
                 .Add("name", sdkName)
@@ -571,7 +597,13 @@ namespace LogBrew
                 .Add("version", sdkVersion);
         }
 
-        public static LogBrewClient Create(string apiKey, string sdkName, string sdkVersion, int maxRetries = 2)
+        public static LogBrewClient Create(
+            string apiKey,
+            string sdkName,
+            string sdkVersion,
+            int maxRetries = 2,
+            int maxQueueSize = DefaultMaxQueueSize,
+            Action<DroppedEvent>? onEventDropped = null)
         {
             Validation.RequireNonEmpty("api_key", apiKey);
             Validation.RequireNonEmpty("sdk_name", sdkName);
@@ -581,7 +613,12 @@ namespace LogBrew
                 throw new SdkException("validation_error", "max_retries must be non-negative");
             }
 
-            return new LogBrewClient(apiKey, sdkName, sdkVersion, maxRetries);
+            if (maxQueueSize <= 0)
+            {
+                throw new SdkException("validation_error", "max_queue_size must be positive");
+            }
+
+            return new LogBrewClient(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, onEventDropped);
         }
 
         public int PendingEvents()
@@ -589,6 +626,14 @@ namespace LogBrew
             lock (gate)
             {
                 return events.Count;
+            }
+        }
+
+        public int DroppedEvents()
+        {
+            lock (gate)
+            {
+                return droppedEvents;
             }
         }
 
@@ -674,7 +719,33 @@ namespace LogBrew
 
                 Validation.RequireNonEmpty("event id", id);
                 Validation.RequireTimestamp(timestamp);
+                if (events.Count >= maxQueueSize)
+                {
+                    droppedEvents++;
+                    ReportDroppedEvent(new DroppedEvent(id, type, "queue_overflow", droppedEvents));
+                    return;
+                }
+
                 events.Add(new Event(type, timestamp, id, attributes));
+            }
+        }
+
+        private void ReportDroppedEvent(DroppedEvent drop)
+        {
+            if (onEventDropped == null)
+            {
+                return;
+            }
+
+            try
+            {
+                onEventDropped(drop);
+            }
+#pragma warning disable CA1031
+            catch (Exception)
+#pragma warning restore CA1031
+            {
+                // Drop callbacks are advisory and must not interrupt application telemetry.
             }
         }
 

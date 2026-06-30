@@ -25,6 +25,7 @@ class ConfidentialityScanTests(unittest.TestCase):
             root = Path(tmp)
             (root / "js" / "logbrew-angular").mkdir(parents=True)
             (root / "scripts").mkdir()
+            (root / "dotnet" / "logbrew-dotnet" / "src" / "LogBrew").mkdir(parents=True)
             (root / "unity" / "logbrew-unity" / "Runtime").mkdir(parents=True)
             (root / "python" / "logbrew_py" / "src" / "logbrew_sdk").mkdir(parents=True)
             angular_keyword = "Injection" + "To" + "ken"
@@ -40,6 +41,14 @@ class ConfidentialityScanTests(unittest.TestCase):
                 f"fetch(`http://127.0.0.1:3000/fail{fake_query}`)\n"
                 f"{cleaner_name}() {{\n"
                 "}\n",
+                encoding="utf-8",
+            )
+            (root / "scripts" / "real_user_dotnet_smoke.sh").write_text(
+                f"private readonly Cancellation{cancellation_member}Source cancellation = new {cancellation_source}();\n",
+                encoding="utf-8",
+            )
+            (root / "dotnet" / "logbrew-dotnet" / "src" / "LogBrew" / "LogBrew.cs").write_text(
+                "#pragma warning " + "rest" + "ore CA1031\n",
                 encoding="utf-8",
             )
             (root / "unity" / "logbrew-unity" / "Runtime" / "PublicTypes.cs").write_text(

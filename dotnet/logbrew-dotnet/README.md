@@ -552,6 +552,33 @@ Console.Error.WriteLine(response.StatusCode);
 
 `HttpTransport` sends JSON with the SDK key in the `authorization` header, supports a custom endpoint, headers, timeout, and app-owned `HttpClient`, maps HTTP statuses through the client's retry rules, and converts request/time-out failures into retryable transport errors.
 
+## Queue Pressure and Shutdown
+
+The client keeps an in-memory queue capped at 1,000 events by default. When the queue is full, new events are dropped before they enter the queue, already-buffered release/environment/trace context is preserved, and `DroppedEvents()` reports the local drop count. This is a local backpressure signal only; do not use it to infer hosted usage, quota, or account history.
+
+```csharp
+using LogBrew;
+
+var dropped = 0;
+var client = LogBrewClient.Create(
+    "LOGBREW_API_KEY",
+    "checkout-dotnet-service",
+    "1.0.0",
+    maxQueueSize: 500,
+    onEventDropped: drop =>
+    {
+        if (drop.Reason == "queue_overflow")
+        {
+            dropped = drop.DroppedEvents;
+        }
+    });
+
+client.Log("evt_log_001", "2026-06-02T10:00:03Z", LogAttributes.Create("worker started", "info"));
+Console.Error.WriteLine(client.DroppedEvents());
+```
+
+Drop callbacks are advisory and callback failures do not interrupt application logging. `Flush(transport)` keeps queued events after auth failures, retry-budget exhaustion, or non-2xx delivery and clears them only after a 2xx response. `Shutdown(transport)` flushes with the same rules, marks the client closed, and rejects later writes with `shutdown_error`.
+
 ## Microsoft.Extensions.Logging
 
 Add LogBrew as a normal .NET logging provider when your app already uses `ILogger`:
@@ -595,6 +622,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 ## Behavior
 
 - `PreviewJson()` returns the queued batch as pretty JSON.
+- The in-memory queue is capped at 1,000 events by default; tune it with `maxQueueSize`, observe local `queue_overflow` loss with `DroppedEvents()` or `onEventDropped`, and keep usage/quota/history backend-owned.
 - `Flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `HttpTransport` sends queued batches through `System.Net.Http` with configurable endpoint, headers, timeout, and app-owned `HttpClient` support.
 - `ProductTimeline` queues app-owned product and network milestone events without visual replay, HTTP client patching, payload capture, or header capture.

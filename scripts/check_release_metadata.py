@@ -18,7 +18,7 @@ from release_metadata_dotnet import validate_dotnet_packages
 
 
 PUBLIC_VERSION = "0.1.0"
-DOTNET_VERSION = "0.1.3"
+DOTNET_VERSION = "0.1.4"
 PUBLIC_LICENSE = "MIT"
 REPO_URL = "https://github.com/LogBrewCo/sdk"
 NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"

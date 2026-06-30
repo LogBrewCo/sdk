@@ -4,28 +4,7 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_dir="$repo_root/dotnet/logbrew-dotnet"
 tmp_dir="$(mktemp -d)"
-lock_dir="${TMPDIR:-/tmp}/logbrewco-sdk-dotnet-checks.lock"
-lock_pid_file="$lock_dir/pid"
-
-acquire_lock() {
-  if mkdir "$lock_dir" 2>/dev/null; then
-    printf '%s\n' "$$" > "$lock_pid_file"
-    return 0
-  fi
-
-  local existing_pid=""
-  if [[ -f "$lock_pid_file" ]]; then
-    existing_pid="$(tr -d '[:space:]' < "$lock_pid_file")"
-  fi
-
-  if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
-    return 1
-  fi
-
-  rm -rf "$lock_dir"
-  mkdir "$lock_dir"
-  printf '%s\n' "$$" > "$lock_pid_file"
-}
+source "$repo_root/scripts/dotnet_verifier_lock.sh"
 
 clean_generated_artifacts() {
   find "$package_dir" -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
@@ -34,12 +13,12 @@ clean_generated_artifacts() {
 clean_after_run() {
   rm -rf "$tmp_dir"
   clean_generated_artifacts
-  rmdir "$lock_dir" 2>/dev/null || true
+  release_dotnet_verifier_lock
 }
 
 trap clean_after_run EXIT
 
-if ! acquire_lock; then
+if ! acquire_dotnet_verifier_lock; then
   echo "another .NET SDK verifier run is already in progress" >&2
   exit 1
 fi
