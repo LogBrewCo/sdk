@@ -395,6 +395,28 @@ client.span(
 
 The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Queue helpers normalize outgoing `traceparent` values, treat malformed incoming/linked propagation as non-fatal diagnostics via `onError(...)`, compute primitive `timeInQueueMs` from `enqueuedAt(...)` or accept an explicit broker latency through `timeInQueueMs(...)`, and cap span links at eight. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events and links are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, raw enqueue timestamps, arbitrary headers, cookies, and auth-like fields. These helpers do not import or patch Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
 
+For Spring Kafka producer code that already owns a `KafkaOperations`/`KafkaTemplate`, use `producerSend(...)` around the app-owned `ProducerRecord`:
+
+```java
+import co.logbrew.sdk.LogBrewSpringKafkaTracing;
+import java.util.Map;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.springframework.kafka.core.KafkaOperations;
+
+ProducerRecord<String, String> record = new ProducerRecord<>("orders-events", orderId, payload);
+
+LogBrewSpringKafkaTracing.producerSend(
+    client,
+    kafkaTemplate,
+    record,
+    LogBrewSpringKafkaTracing.ProducerConfig.<String, String>create()
+        .eventIdPrefix("spring_kafka_produce")
+        .metadata(Map.of("service", "checkout-api"))
+);
+```
+
+The producer helper clones record headers, replaces only one W3C `traceparent`, keeps a child trace active while Spring Kafka accepts the send, and emits one `spring.kafka.produce:<topic>` span when the returned future completes. It preserves the original record, returns the app-owned or failed future, reports send failures with exception type only, and does not capture keys, values, arbitrary headers, broker addresses, baggage, tracestate, exception messages, or stack traces.
+
 For Spring Kafka apps that already own a listener container factory, register `LogBrewSpringKafkaTracing` as an app-owned `RecordInterceptor`:
 
 ```java

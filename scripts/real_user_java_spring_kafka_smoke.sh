@@ -39,18 +39,89 @@ cat > "$spring_kafka_app/src/SpringKafkaApp.java" <<'JAVA'
 import co.logbrew.sdk.LogBrewClient;
 import co.logbrew.sdk.LogBrewSpringKafkaTracing;
 import co.logbrew.sdk.LogBrewTrace;
+import co.logbrew.sdk.LogBrewTraceContext;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
+import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.listener.RecordInterceptor;
+import org.springframework.kafka.support.SendResult;
 
 public final class SpringKafkaApp {
     public static void main(String[] args) {
         LogBrewClient client = LogBrewClient.create("LOGBREW_API_KEY", "logbrew-java", "0.1.0");
+        CompletableFuture<SendResult<String, String>> producerFuture = new CompletableFuture<>();
+        RecordingKafkaOperations operations = new RecordingKafkaOperations(producerFuture);
+        RecordHeaders producerHeaders = new RecordHeaders();
+        producerHeaders.add(
+            "traceparent",
+            "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01".getBytes(StandardCharsets.UTF_8)
+        );
+        producerHeaders.add("authorization", ("se" + "cret-to" + "ken").getBytes(StandardCharsets.UTF_8));
+        producerHeaders.add("baggage", "private value".getBytes(StandardCharsets.UTF_8));
+        ProducerRecord<String, String> producerRecord = new ProducerRecord<>(
+            "orders-events",
+            2,
+            Instant.parse("2026-06-02T10:00:01Z").toEpochMilli(),
+            "private-key",
+            "private value",
+            producerHeaders
+        );
+        LogBrewTraceContext parent = LogBrewTraceContext.create(
+            "33333333333333333333333333333333",
+            "4444444444444444"
+        );
+        LogBrewTrace.Scope producerScope = LogBrewTrace.activate(parent);
+        try {
+            CompletableFuture<SendResult<String, String>> returned = LogBrewSpringKafkaTracing.producerSend(
+                client,
+                operations.proxy(),
+                producerRecord,
+                LogBrewSpringKafkaTracing.ProducerConfig.<String, String>create()
+                    .eventIdPrefix("spring_kafka_producer_packaged")
+                    .spanId("b7ad6b7169203801")
+                    .metadata(Map.of(
+                        "service", "checkout",
+                        "messageBody", "private metadata body",
+                        "authorization", "se" + "cret metadata to" + "ken"
+                    ))
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:01.000Z"),
+                        Instant.parse("2026-06-02T10:00:01.030Z")
+                    )
+            );
+            require(returned == producerFuture, "producer helper returns app-owned future");
+        } finally {
+            producerScope.close();
+        }
+        require(operations.sentRecord != null, "producer send invoked");
+        require(operations.sentRecord != producerRecord, "producer record is cloned before trace injection");
+        require(
+            "00-33333333333333333333333333333333-b7ad6b7169203801-01".equals(lastTraceparent(operations.sentRecord.headers())),
+            "producer traceparent is injected"
+        );
+        require(countTraceparentHeaders(operations.sentRecord.headers()) == 1, "producer record has one traceparent");
+        require(
+            "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01".equals(lastTraceparent(producerRecord.headers())),
+            "original producer record is not mutated"
+        );
+        require(operations.activeTraceDuringSend.isPresent(), "producer child trace is active during send");
+        require(
+            "b7ad6b7169203801".equals(operations.activeTraceDuringSend.get().spanId()),
+            "producer child span id is active"
+        );
+        producerFuture.complete(null);
+
         RecordInterceptor<String, String> interceptor = LogBrewSpringKafkaTracing.recordInterceptor(
             client,
             LogBrewSpringKafkaTracing.ConsumerConfig.<String, String>create()
@@ -92,9 +163,14 @@ public final class SpringKafkaApp {
         require(LogBrewTrace.current().isPresent(), "trace is active during listener processing");
         interceptor.success(record, null);
         require(!LogBrewTrace.current().isPresent(), "trace scope is cleared after success");
-        require(client.pendingEvents() == 1, "one Spring Kafka span is queued");
+        require(client.pendingEvents() == 2, "two Spring Kafka spans are queued");
 
         String payload = client.previewJson();
+        requireContains(payload, "\"id\": \"spring_kafka_producer_packaged_span_b7ad6b7169203801\"");
+        requireContains(payload, "\"name\": \"spring.kafka.produce:orders-events\"");
+        requireContains(payload, "\"source\": \"spring.kafka.producer\"");
+        requireContains(payload, "\"traceId\": \"33333333333333333333333333333333\"");
+        requireContains(payload, "\"parentSpanId\": \"4444444444444444\"");
         requireContains(payload, "\"id\": \"spring_kafka_packaged_span_b7ad6b7169203800\"");
         requireContains(payload, "\"name\": \"spring.kafka.process:orders-events\"");
         requireContains(payload, "\"source\": \"spring.kafka.record\"");
@@ -111,6 +187,7 @@ public final class SpringKafkaApp {
         requireNotContains(payload, "se" + "cret metadata to" + "ken");
         requireNotContains(payload, "authorization");
         requireNotContains(payload, "baggage");
+        requireNotContains(payload, "traceparent");
         System.out.println(payload);
         System.err.println("{\"springKafkaEvents\":" + client.pendingEvents() + "}");
     }
@@ -132,12 +209,63 @@ public final class SpringKafkaApp {
             throw new AssertionError("expected not to contain " + unexpected + " in " + text);
         }
     }
+
+    private static String lastTraceparent(Iterable<Header> headers) {
+        Header found = null;
+        for (Header header : headers) {
+            if ("traceparent".equals(header.key())) {
+                found = header;
+            }
+        }
+        return found == null ? null : new String(found.value(), StandardCharsets.UTF_8);
+    }
+
+    private static int countTraceparentHeaders(Iterable<Header> headers) {
+        int count = 0;
+        for (Header header : headers) {
+            if ("traceparent".equals(header.key())) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static final class RecordingKafkaOperations implements InvocationHandler {
+        private final CompletableFuture<SendResult<String, String>> future;
+        private ProducerRecord<String, String> sentRecord;
+        private Optional<LogBrewTraceContext> activeTraceDuringSend = Optional.empty();
+
+        private RecordingKafkaOperations(CompletableFuture<SendResult<String, String>> future) {
+            this.future = future;
+        }
+
+        @SuppressWarnings("unchecked")
+        private KafkaOperations<String, String> proxy() {
+            return (KafkaOperations<String, String>) Proxy.newProxyInstance(
+                KafkaOperations.class.getClassLoader(),
+                new Class<?>[] {KafkaOperations.class},
+                this
+            );
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) {
+            if ("send".equals(method.getName()) && args != null && args.length == 1 && args[0] instanceof ProducerRecord) {
+                @SuppressWarnings("unchecked")
+                ProducerRecord<String, String> record = (ProducerRecord<String, String>) args[0];
+                sentRecord = record;
+                activeTraceDuringSend = LogBrewTrace.current();
+                return future;
+            }
+            throw new UnsupportedOperationException(method.getName());
+        }
+    }
 }
 JAVA
 
 javac -Xlint:all -Werror --release 11 -cp "$spring_kafka_app/lib/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$spring_kafka_app/classes" "$spring_kafka_app/src/SpringKafkaApp.java"
 java -cp "$spring_kafka_app/lib/logbrew-sdk-0.1.0.jar:$spring_kafka_app/classes:$java_optional_classpath" SpringKafkaApp > "$tmp_dir/spring-kafka-app.stdout.json" 2> "$tmp_dir/spring-kafka-app.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/spring-kafka-app.stdout.json" >/dev/null
-grep -q '"springKafkaEvents":1' "$tmp_dir/spring-kafka-app.stderr.json"
+grep -q '"springKafkaEvents":2' "$tmp_dir/spring-kafka-app.stderr.json"
 
 echo "java spring kafka installed-artifact smoke passed"

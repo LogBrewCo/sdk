@@ -8,18 +8,24 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
+import org.apache.kafka.common.header.internals.RecordHeaders;
+import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.listener.RecordInterceptor;
+import org.springframework.kafka.support.SendResult;
 
 /**
- * Spring Kafka helpers for app-owned consumer record tracing.
+ * Spring Kafka helpers for app-owned consumer and producer record tracing.
  *
  * <p>Apps register the returned {@link RecordInterceptor} with their own listener
- * container factory. LogBrew continues one W3C {@code traceparent}, keeps the
- * child trace active during listener processing, and emits one sanitized queue
+ * container factory or call {@link #producerSend(LogBrewClient, KafkaOperations, ProducerRecord)}
+ * for app-owned sends. LogBrew continues or injects one W3C {@code traceparent},
+ * keeps the child trace active while app code runs, and emits one sanitized queue
  * span when Spring Kafka reports success or failure. It does not capture record
  * keys, values, offsets, arbitrary headers, broker details, baggage, or tracestate.</p>
  */
@@ -48,6 +54,60 @@ public final class LogBrewSpringKafkaTracing {
             Objects.requireNonNull(client, "client"),
             config == null ? ConsumerConfig.<K, V>create() : config
         );
+    }
+
+    /**
+     * Sends one app-owned Spring Kafka producer record with a LogBrew traceparent.
+     */
+    public static <K, V> CompletableFuture<SendResult<K, V>> producerSend(
+        LogBrewClient client,
+        KafkaOperations<K, V> operations,
+        ProducerRecord<K, V> record
+    ) {
+        return producerSend(client, operations, record, ProducerConfig.<K, V>create());
+    }
+
+    /**
+     * Sends one app-owned Spring Kafka producer record with app-owned tracing settings.
+     */
+    public static <K, V> CompletableFuture<SendResult<K, V>> producerSend(
+        LogBrewClient client,
+        KafkaOperations<K, V> operations,
+        ProducerRecord<K, V> record,
+        ProducerConfig<K, V> config
+    ) {
+        Objects.requireNonNull(client, "client");
+        Objects.requireNonNull(operations, "operations");
+        Objects.requireNonNull(record, "record");
+        ProducerConfig<K, V> safeConfig = config == null ? ProducerConfig.<K, V>create() : config;
+        Instant startedAt = safeConfig.currentInstant();
+        LogBrewTraceContext trace = producerTrace(safeConfig);
+        ProducerRecord<K, V> tracedRecord = recordWithTraceparent(record, trace.traceparent());
+        CompletableFuture<SendResult<K, V>> future;
+        LogBrewTrace.Scope scope = LogBrewTrace.activate(trace);
+        try {
+            future = operations.send(tracedRecord);
+        } catch (RuntimeException error) {
+            captureProducerSpan(client, safeConfig, record, trace, startedAt, safeConfig.currentInstant(), error);
+            return failedFuture(error);
+        } finally {
+            scope.close();
+        }
+        if (future == null) {
+            SdkException error = new SdkException("validation_error", "spring kafka send future must be provided");
+            captureProducerSpan(client, safeConfig, record, trace, startedAt, safeConfig.currentInstant(), error);
+            return failedFuture(error);
+        }
+        future.whenComplete((result, error) ->
+            captureProducerSpan(client, safeConfig, record, trace, startedAt, safeConfig.currentInstant(), error)
+        );
+        return future;
+    }
+
+    private static <T> CompletableFuture<T> failedFuture(Throwable error) {
+        CompletableFuture<T> failed = new CompletableFuture<>();
+        failed.completeExceptionally(error);
+        return failed;
     }
 
     /**
@@ -147,6 +207,207 @@ public final class LogBrewSpringKafkaTracing {
                 return DEFAULT_EVENT_ID_PREFIX;
             }
             return eventIdPrefix.trim();
+        }
+    }
+
+    /**
+     * Spring Kafka producer record tracing configuration.
+     */
+    public static final class ProducerConfig<K, V> {
+        private String eventIdPrefix;
+        private String spanId;
+        private Map<String, ?> metadata;
+        private java.util.function.Consumer<SdkException> onError;
+        private Supplier<Instant> now = Instant::now;
+
+        private ProducerConfig() {
+        }
+
+        /**
+         * Creates Spring Kafka producer tracing configuration.
+         */
+        public static <K, V> ProducerConfig<K, V> create() {
+            return new ProducerConfig<>();
+        }
+
+        /**
+         * Sets the span event ID prefix.
+         */
+        public ProducerConfig<K, V> eventIdPrefix(String value) {
+            this.eventIdPrefix = value;
+            return this;
+        }
+
+        /**
+         * Sets an app-owned child span ID for deterministic tests or advanced correlation.
+         */
+        public ProducerConfig<K, V> spanId(String value) {
+            this.spanId = value;
+            return this;
+        }
+
+        /**
+         * Sets primitive metadata merged into captured Spring Kafka producer spans.
+         */
+        public ProducerConfig<K, V> metadata(Map<String, ?> value) {
+            this.metadata = Validation.copyMetadata(value);
+            return this;
+        }
+
+        /**
+         * Receives non-fatal tracing and capture diagnostics.
+         */
+        public ProducerConfig<K, V> onError(java.util.function.Consumer<SdkException> value) {
+            this.onError = value;
+            return this;
+        }
+
+        /**
+         * Sets the clock used for span timing.
+         */
+        public ProducerConfig<K, V> now(Supplier<Instant> value) {
+            this.now = Objects.requireNonNull(value, "now");
+            return this;
+        }
+
+        /**
+         * Sets two deterministic timestamps for start and finish timing.
+         */
+        public ProducerConfig<K, V> nowSequence(Instant first, Instant second) {
+            Instant[] values = {Objects.requireNonNull(first, "first"), Objects.requireNonNull(second, "second")};
+            int[] index = {0};
+            this.now = () -> values[Math.min(index[0]++, values.length - 1)];
+            return this;
+        }
+
+        private Instant currentInstant() {
+            return now.get();
+        }
+
+        private String resolvedEventIdPrefix() {
+            if (eventIdPrefix == null || eventIdPrefix.trim().isEmpty()) {
+                return DEFAULT_EVENT_ID_PREFIX + "_produce";
+            }
+            return eventIdPrefix.trim();
+        }
+    }
+
+    private static <K, V> LogBrewTraceContext producerTrace(ProducerConfig<K, V> config) {
+        String spanId = configuredSpanId(config.spanId);
+        Optional<LogBrewTraceContext> current = LogBrewTrace.current();
+        if (current.isPresent()) {
+            LogBrewTraceContext parent = current.get();
+            return LogBrewTraceContext.create(parent.traceId(), spanId, parent.spanId(), parent.traceFlags());
+        }
+        LogBrewTraceContext root = LogBrewTraceContext.generate();
+        if (config.spanId == null || config.spanId.trim().isEmpty()) {
+            return root;
+        }
+        return LogBrewTraceContext.create(root.traceId(), spanId);
+    }
+
+    private static String configuredSpanId(String spanId) {
+        if (spanId == null || spanId.trim().isEmpty()) {
+            return LogBrewTraceContext.generate().spanId();
+        }
+        return spanId.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static <K, V> ProducerRecord<K, V> recordWithTraceparent(
+        ProducerRecord<K, V> record,
+        String traceparent
+    ) {
+        RecordHeaders headers = new RecordHeaders(record.headers());
+        headers.remove(TRACEPARENT_HEADER);
+        headers.add(TRACEPARENT_HEADER, traceparent.getBytes(StandardCharsets.UTF_8));
+        return new ProducerRecord<>(
+            record.topic(),
+            record.partition(),
+            record.timestamp(),
+            record.key(),
+            record.value(),
+            headers
+        );
+    }
+
+    private static <K, V> void captureProducerSpan(
+        LogBrewClient client,
+        ProducerConfig<K, V> config,
+        ProducerRecord<K, V> record,
+        LogBrewTraceContext trace,
+        Instant startedAt,
+        Instant finishedAt,
+        Throwable error
+    ) {
+        Duration duration = Duration.between(startedAt, finishedAt);
+        double durationMs = duration.isNegative() ? 0.0 : duration.toNanos() / 1_000_000.0;
+        if (duration.isNegative()) {
+            reportError(config.onError, new SdkException("validation_error", "spring kafka duration must be non-negative"));
+        }
+        SpanAttributes attributes = SpanAttributes
+            .create(
+                "spring.kafka.produce:" + record.topic(),
+                trace.traceId(),
+                trace.spanId(),
+                error == null ? "ok" : "error"
+            )
+            .durationMs(durationMs)
+            .metadata(producerMetadata(record, trace, config, error));
+        if (trace.parentSpanId() != null) {
+            attributes.parentSpanId(trace.parentSpanId());
+        }
+        if (error != null) {
+            attributes.event(SpanEventSummary.create("exception").metadata(exceptionMetadata(error)));
+        }
+        try {
+            client.span(
+                config.resolvedEventIdPrefix() + "_span_" + trace.spanId(),
+                finishedAt.toString(),
+                attributes
+            );
+        } catch (SdkException captureError) {
+            reportError(config.onError, captureError);
+        } catch (RuntimeException captureError) {
+            reportError(config.onError, new SdkException("capture_error", "spring kafka producer span capture failed"));
+        }
+    }
+
+    private static <K, V> Map<String, Object> producerMetadata(
+        ProducerRecord<K, V> record,
+        LogBrewTraceContext trace,
+        ProducerConfig<K, V> config,
+        Throwable error
+    ) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.putAll(Validation.copySafeDependencyMetadata(config.metadata));
+        values.put("framework", "spring-kafka");
+        values.put("source", "spring.kafka.producer");
+        values.put("sampled", Boolean.valueOf(trace.sampled()));
+        values.put("queueSystem", "kafka");
+        values.put("queueOperation", "produce");
+        values.put("queueOperationKind", "produce");
+        values.put("queueName", record.topic());
+        if (error != null) {
+            values.put("errorType", error.getClass().getSimpleName());
+        }
+        return values;
+    }
+
+    private static Map<String, Object> exceptionMetadata(Throwable error) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("exceptionType", error.getClass().getSimpleName());
+        values.put("exceptionEscaped", Boolean.TRUE);
+        return values;
+    }
+
+    private static void reportError(java.util.function.Consumer<SdkException> onError, SdkException error) {
+        if (onError == null) {
+            return;
+        }
+        try {
+            onError.accept(error);
+        } catch (RuntimeException ignored) {
+            // Diagnostics callbacks are advisory and must not affect app-owned Kafka operations.
         }
     }
 
@@ -258,10 +519,7 @@ public final class LogBrewSpringKafkaTracing {
         }
 
         private String configuredSpanId() {
-            if (config.spanId == null || config.spanId.trim().isEmpty()) {
-                return LogBrewTraceContext.generate().spanId();
-            }
-            return config.spanId.trim().toLowerCase(Locale.ROOT);
+            return LogBrewSpringKafkaTracing.configuredSpanId(config.spanId);
         }
 
         private String traceparentHeader(ConsumerRecord<K, V> record) {
@@ -293,7 +551,9 @@ public final class LogBrewSpringKafkaTracing {
                 attributes.parentSpanId(active.trace.parentSpanId());
             }
             if (error != null) {
-                attributes.event(SpanEventSummary.create("exception").metadata(exceptionMetadata(error)));
+                attributes.event(SpanEventSummary.create("exception").metadata(
+                    LogBrewSpringKafkaTracing.exceptionMetadata(error)
+                ));
             }
             try {
                 client.span(
@@ -346,22 +606,8 @@ public final class LogBrewSpringKafkaTracing {
             values.put("timeInQueueMs", Double.valueOf(latency.toNanos() / 1_000_000.0));
         }
 
-        private Map<String, Object> exceptionMetadata(Throwable error) {
-            Map<String, Object> values = new LinkedHashMap<>();
-            values.put("exceptionType", error.getClass().getSimpleName());
-            values.put("exceptionEscaped", Boolean.TRUE);
-            return values;
-        }
-
         private void reportError(SdkException error) {
-            if (config.onError == null) {
-                return;
-            }
-            try {
-                config.onError.accept(error);
-            } catch (RuntimeException ignored) {
-                // Diagnostics callbacks are advisory and must not affect listener processing.
-            }
+            LogBrewSpringKafkaTracing.reportError(config.onError, error);
         }
     }
 

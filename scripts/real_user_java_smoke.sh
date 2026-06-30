@@ -58,7 +58,7 @@ grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/binary-jar-conte
 grep -q '^co/logbrew/sdk/SpanEventSummary.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewServletFilter.class$' "$tmp_dir/binary-jar-contents.txt"
-printf '%s\n' 'co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.class' 'co/logbrew/sdk/LogBrewSpringCacheTracing.class' 'co/logbrew/sdk/LogBrewSpringCacheTracing$CacheConfig.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor$SingleLogBrewClientProvider.class' 'co/logbrew/sdk/LogBrewSpringKafkaTracing.class' 'co/logbrew/sdk/LogBrewSpringKafkaTracing$ConsumerConfig.class' | while IFS= read -r expected; do grep -Fxq "$expected" "$tmp_dir/binary-jar-contents.txt"; done
+printf '%s\n' 'co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.class' 'co/logbrew/sdk/LogBrewSpringCacheTracing.class' 'co/logbrew/sdk/LogBrewSpringCacheTracing$CacheConfig.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor$SingleLogBrewClientProvider.class' 'co/logbrew/sdk/LogBrewSpringKafkaTracing.class' 'co/logbrew/sdk/LogBrewSpringKafkaTracing$ConsumerConfig.class' 'co/logbrew/sdk/LogBrewSpringKafkaTracing$ProducerConfig.class' | while IFS= read -r expected; do grep -Fxq "$expected" "$tmp_dir/binary-jar-contents.txt"; done
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$DatabaseOperation.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$CacheOperation.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -114,7 +114,7 @@ grep -q 'LogBrewOpenTelemetry' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
 grep -q 'LogBrewJdbcTracing' "$package_dir/README.md"
 grep -q 'LogBrewServletFilter' "$package_dir/README.md"
-printf '%s\n' 'LogBrewSpringBootAutoConfiguration' 'LogBrewSpringBootCacheAutoConfiguration' 'LogBrewSpringCacheTracing' 'LogBrewSpringBootJdbcAutoConfiguration' 'LogBrewSpringKafkaTracing' | while IFS= read -r expected; do grep -Fq "$expected" "$package_dir/README.md"; done
+printf '%s\n' 'LogBrewSpringBootAutoConfiguration' 'LogBrewSpringBootCacheAutoConfiguration' 'LogBrewSpringCacheTracing' 'LogBrewSpringBootJdbcAutoConfiguration' 'LogBrewSpringKafkaTracing' 'producerSend' 'ProducerConfig' | while IFS= read -r expected; do grep -Fq "$expected" "$package_dir/README.md"; done
 grep -q 'SupportTicketDraft' "$package_dir/README.md"
 grep -q 'droppedEvents()' "$package_dir/README.md"
 grep -q 'maxQueueSize' "$package_dir/README.md"
