@@ -9,6 +9,7 @@ def validate_dotnet_packages(
     failures: list[str],
     core_version: str,
     aspnetcore_version: str,
+    efcore_version: str,
     public_license: str,
     repo_url: str,
 ) -> None:
@@ -74,6 +75,33 @@ def validate_dotnet_packages(
             ("FrameworkReference Include=\"Microsoft.AspNetCore.App\"", "package must include ASP.NET Core framework reference"),
             ("ProjectReference Include=\"../LogBrew/LogBrew.csproj\"", "package must depend on the core LogBrew project"),
             ("examples/AspNetCoreMiddlewareTelemetry.cs", "package must include examples/AspNetCoreMiddlewareTelemetry.cs"),
+        ),
+    )
+    _validate_package(
+        root,
+        failures,
+        "dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj",
+        required_paths=(
+            "dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/README.md",
+            "dotnet/logbrew-dotnet/examples/EntityFrameworkCoreCommandTelemetry.cs",
+            "assets/brand/logbrew-logo-espresso-bg-128.png",
+        ),
+        expected={
+            "TargetFramework": "net10.0",
+            "PackageId": "LogBrew.EntityFrameworkCore",
+            "Version": efcore_version,
+            "Authors": "LogBrew",
+            "Company": "LogBrew",
+            "PackageLicenseExpression": public_license,
+            "PackageProjectUrl": repo_url,
+            "RepositoryUrl": repo_url,
+            "PackageReadmeFile": "README.md",
+            "PackageIcon": "logbrew-logo-espresso-bg-128.png",
+        },
+        project_needles=(
+            ("ProjectReference Include=\"../LogBrew/LogBrew.csproj\"", "package must depend on the core LogBrew project"),
+            ("PackageReference Include=\"Microsoft.EntityFrameworkCore.Relational\"", "package must depend on EF Core relational APIs"),
+            ("examples/EntityFrameworkCoreCommandTelemetry.cs", "package must include examples/EntityFrameworkCoreCommandTelemetry.cs"),
         ),
     )
 

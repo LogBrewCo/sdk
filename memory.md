@@ -1,5 +1,41 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-06-30: .NET EF Core command trace gap reduced after source reads from
+  Sentry .NET
+  `getsentry/sentry-dotnet@951d98f789ec6794a1bbd82149d900f06fde0cfa`
+  (`SentryEFCoreListener`, `EFCommandDiagnosticSourceHelper`,
+  `EFDiagnosticSourceHelper`, `SentryCommandInterceptor`), Datadog .NET
+  `DataDog/dd-trace-dotnet@f0fbab0b733ead08b8c37f7ee550ede7a7f9cd60`
+  (`DbScopeFactory`, `CommandExecuteReaderIntegration`), OpenTelemetry .NET
+  Contrib `open-telemetry/opentelemetry-dotnet-contrib@7e8040413042ee663a9ef4dd04ab52d1a17ed77b`
+  (`EntityFrameworkDiagnosticListener`,
+  `EntityFrameworkInstrumentationOptions`, `TracerProviderBuilderExtensions`,
+  `EntityFrameworkInstrumentation`), and PostHog .NET
+  `PostHog/posthog-dotnet@8fad3ff84cda2c741f397e1152e58a7b96c98124`
+  (no comparable EF Core command tracing found). LogBrew now ships optional
+  `LogBrew.EntityFrameworkCore` with
+  `LogBrewEntityFrameworkCoreCommandInterceptor` and
+  `AddLogBrewCommandTelemetry(...)`: apps opt in through owned
+  `DbContextOptionsBuilder`, base `LogBrew` gains no EF dependency, and each
+  EF command creates one sanitized `entity_framework_core.command` span with
+  active trace correlation, EF command source, execute method, command type,
+  duration, non-query row count, DB system/name, safe metadata provider/filter
+  hooks, and type-only provider failure/cancellation events. It avoids SQL text,
+  parameters, connection strings, data source/host, raw `traceparent`, result
+  rows, payloads, exception messages/stacks, baggage, tracestate, query
+  comments, and support tickets. NuGet SQLite test dependency
+  `SQLitePCLRaw.lib.e_sqlite3 2.1.11` currently has a high-severity advisory,
+  so source tests use synthetic EF Core command event data rather than
+  suppressing vulnerability checks. Evidence: focused EF Core tests passed
+  (4 tests), `bash scripts/check_dotnet_package.sh` passed (65 core tests, 4
+  ASP.NET Core tests, 4 EF Core tests), `bash scripts/real_user_dotnet_smoke.sh`
+  passed with packed local NuGet install/lifecycle proof, and
+  `python3 scripts/check_release_metadata.py` passed. Report:
+  `docs/competitor-research/dotnet-efcore-tracing-2026-06-30.md`. Remaining
+  .NET gaps: zero-code/profiler automatic coverage, richer DB semantic
+  conventions, query sanitization, DB-side propagation, Redis/Kafka automatic
+  spans, span links/events beyond summaries, baggage/tracestate, and OTel
+  exporter interop.
 - 2026-06-30: .NET ADO.NET DbCommand rich-trace gap reduced after source
   reads from Sentry .NET
   `getsentry/sentry-dotnet@951d98f789ec6794a1bbd82149d900f06fde0cfa`

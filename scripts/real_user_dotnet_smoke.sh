@@ -51,12 +51,16 @@ fi
 
 dotnet pack "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
+dotnet pack "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 package_version="$(dotnet msbuild "$package_dir/src/LogBrew/LogBrew.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 aspnetcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
+efcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 nupkg="$tmp_dir/packages/LogBrew.${package_version}.nupkg"
 aspnetcore_nupkg="$tmp_dir/packages/LogBrew.AspNetCore.${aspnetcore_package_version}.nupkg"
+efcore_nupkg="$tmp_dir/packages/LogBrew.EntityFrameworkCore.${efcore_package_version}.nupkg"
 test -f "$nupkg"
 test -f "$aspnetcore_nupkg"
+test -f "$efcore_nupkg"
 export NUGET_PACKAGES="$tmp_dir/nuget-packages"
 nuget_org_source="https://api.nuget.org/v3/index.json"
 cat > "$tmp_dir/NuGet.config" <<EOF
@@ -182,6 +186,44 @@ for needle in (
         raise SystemExit(f"missing ASP.NET Core packaged README guidance: {needle}")
 PY
 
+efcore_extract_dir="$tmp_dir/efcore-package-extract"
+mkdir -p "$efcore_extract_dir"
+python3 - "$efcore_nupkg" "$efcore_extract_dir" <<'PY'
+import sys
+import zipfile
+from pathlib import Path
+
+nupkg = Path(sys.argv[1])
+extract_dir = Path(sys.argv[2])
+with zipfile.ZipFile(nupkg) as archive:
+    archive.extractall(extract_dir)
+    names = set(archive.namelist())
+    for required in (
+        "LogBrew.EntityFrameworkCore.nuspec",
+        "lib/net10.0/LogBrew.EntityFrameworkCore.dll",
+        "README.md",
+        "examples/EntityFrameworkCoreCommandTelemetry.cs",
+    ):
+        if required not in names:
+            raise SystemExit(f"missing Entity Framework Core nupkg file: {required}")
+    readme = archive.read("README.md").decode()
+    nuspec = archive.read("LogBrew.EntityFrameworkCore.nuspec").decode()
+if 'dependency id="LogBrew"' not in nuspec:
+    raise SystemExit("missing LogBrew dependency metadata")
+if 'dependency id="Microsoft.EntityFrameworkCore.Relational"' not in nuspec:
+    raise SystemExit("missing Microsoft.EntityFrameworkCore.Relational dependency metadata")
+for needle in (
+    "dotnet add package LogBrew.EntityFrameworkCore",
+    "AddLogBrewCommandTelemetry",
+    "LogBrewEntityFrameworkCoreCommandInterceptor",
+    "WithCommandFilter",
+    "WithMetadataProvider",
+    "does not capture raw database statements",
+):
+    if needle not in readme:
+        raise SystemExit(f"missing Entity Framework Core README guidance: {needle}")
+PY
+
 run_packaged_example() {
   local source_file="$1"
   local project_name="$2"
@@ -224,6 +266,14 @@ python3 "$repo_root/scripts/check_dotnet_db_command_payload.py" "$tmp_dir/packag
 run_packaged_example HttpClientOutboundTelemetry.cs PackagedHttpClient "$tmp_dir/packaged-http-client.stdout.json" "$tmp_dir/packaged-http-client.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-http-client.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_http_client_payload.py" "$tmp_dir/packaged-http-client.stdout.json" "$tmp_dir/packaged-http-client.stderr.json" >/dev/null
+
+efcore_example_dir="$tmp_dir/efcore-example-app"
+dotnet new console --framework net10.0 --name EfCoreExampleApp --output "$efcore_example_dir" >/dev/null
+cp "$efcore_extract_dir/examples/EntityFrameworkCoreCommandTelemetry.cs" "$efcore_example_dir/Program.cs"
+dotnet add "$efcore_example_dir/EfCoreExampleApp.csproj" package LogBrew.EntityFrameworkCore --version "$efcore_package_version" >/dev/null
+dotnet run --project "$efcore_example_dir/EfCoreExampleApp.csproj" --configuration Release > "$tmp_dir/efcore-example.stdout.txt" 2> "$tmp_dir/efcore-example.stderr.json"
+test ! -s "$tmp_dir/efcore-example.stdout.txt"
+grep -q '"example":"EntityFrameworkCoreCommandTelemetry"' "$tmp_dir/efcore-example.stderr.json"
 
 aspnet_dir="$tmp_dir/aspnetcore-app"
 dotnet new web --framework net10.0 --name AspNetCoreApp --output "$aspnet_dir" >/dev/null
@@ -311,12 +361,20 @@ lifecycle_dir="$tmp_dir/lifecycle-app"
 dotnet new console --framework net10.0 --name LifecycleApp --output "$lifecycle_dir" >/dev/null
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version "$package_version" >/dev/null
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.AspNetCore --version "$aspnetcore_package_version" >/dev/null
+dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.EntityFrameworkCore --version "$efcore_package_version" >/dev/null
 dotnet list "$lifecycle_dir/LifecycleApp.csproj" package > "$tmp_dir/lifecycle-packages.txt"
 grep -q 'LogBrew' "$tmp_dir/lifecycle-packages.txt"
 grep -q 'LogBrew.AspNetCore' "$tmp_dir/lifecycle-packages.txt"
+grep -q 'LogBrew.EntityFrameworkCore' "$tmp_dir/lifecycle-packages.txt"
 dotnet list "$lifecycle_dir/LifecycleApp.csproj" package --include-transitive > "$tmp_dir/lifecycle-packages-transitive.txt"
 grep -q 'Microsoft.Extensions.Logging' "$tmp_dir/lifecycle-packages-transitive.txt"
+grep -q 'Microsoft.EntityFrameworkCore.Relational' "$tmp_dir/lifecycle-packages-transitive.txt"
 grep -q 'LogBrew' "$tmp_dir/lifecycle-packages-transitive.txt"
+dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.EntityFrameworkCore >/dev/null
+if grep -q 'PackageReference Include="LogBrew.EntityFrameworkCore"' "$lifecycle_dir/LifecycleApp.csproj"; then
+  echo "expected dotnet remove package to remove LogBrew.EntityFrameworkCore reference" >&2
+  exit 1
+fi
 dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.AspNetCore >/dev/null
 if grep -q 'PackageReference Include="LogBrew.AspNetCore"' "$lifecycle_dir/LifecycleApp.csproj"; then
   echo "expected dotnet remove package to remove LogBrew.AspNetCore reference" >&2
@@ -329,8 +387,10 @@ if grep -q 'PackageReference Include="LogBrew"' "$lifecycle_dir/LifecycleApp.csp
 fi
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version "$package_version" >/dev/null
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.AspNetCore --version "$aspnetcore_package_version" >/dev/null
+dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.EntityFrameworkCore --version "$efcore_package_version" >/dev/null
 grep -q "PackageReference Include=\"LogBrew\" Version=\"$package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
 grep -q "PackageReference Include=\"LogBrew.AspNetCore\" Version=\"$aspnetcore_package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
+grep -q "PackageReference Include=\"LogBrew.EntityFrameworkCore\" Version=\"$efcore_package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
 
 logging_dir="$tmp_dir/logging-app"
 dotnet new console --framework net10.0 --name LoggingApp --output "$logging_dir" >/dev/null

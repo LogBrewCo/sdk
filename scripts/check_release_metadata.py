@@ -44,7 +44,7 @@ JS_PACKAGES = {
     "js/logbrew-svelte": "@logbrew/svelte",
     "js/logbrew-vue": "@logbrew/vue",
 }
-NUGET_PACKAGES = {"LogBrew", "LogBrew.AspNetCore"}
+NUGET_PACKAGES = {"LogBrew", "LogBrew.AspNetCore", "LogBrew.EntityFrameworkCore"}
 
 OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
 PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
@@ -833,21 +833,22 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         required_publish_needles = {
             "NuGet package version output": "id: nuget-version",
             "NuGet ASP.NET Core version output": "aspnetcore_version=",
+            "NuGet Entity Framework Core version output": "efcore_version=",
             "NuGet exact metadata version validation": (
                 '--nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}"'
             ),
             "NuGet ASP.NET Core metadata version validation": (
                 '--nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"'
             ),
+            "NuGet Entity Framework Core metadata version validation": '--nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}"',
             "NuGet exact public version verification": (
                 '--nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}"'
             ),
             "NuGet ASP.NET Core public version verification": (
                 '--nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"'
             ),
-            "NuGet duplicate-safe publish": (
-                "--skip-duplicate"
-            ),
+            "NuGet Entity Framework Core public version verification": '--nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}"',
+            "NuGet duplicate-safe publish": "--skip-duplicate",
             "verify target exact version input": "verify_version:",
             "verify target exact version argument": 'verify_args+=(--version "$VERIFY_VERSION")',
             "verify target npm version override": 'append_version_overrides --npm-version "$VERIFY_NPM_VERSIONS"',
@@ -923,6 +924,7 @@ def validate(
         failures,
         nuget_versions.get("LogBrew", DOTNET_VERSION),
         nuget_versions.get("LogBrew.AspNetCore", PUBLIC_VERSION),
+        nuget_versions.get("LogBrew.EntityFrameworkCore", PUBLIC_VERSION),
         PUBLIC_LICENSE,
         REPO_URL,
     )

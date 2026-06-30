@@ -498,14 +498,17 @@ jobs:
             package_dir = root / "dotnet" / "logbrew-dotnet"
             project_dir = package_dir / "src" / "LogBrew"
             aspnetcore_dir = package_dir / "src" / "LogBrew.AspNetCore"
+            efcore_dir = package_dir / "src" / "LogBrew.EntityFrameworkCore"
             examples_dir = package_dir / "examples"
             assets_dir = root / "assets" / "brand"
             project_dir.mkdir(parents=True)
             aspnetcore_dir.mkdir(parents=True)
+            efcore_dir.mkdir(parents=True)
             examples_dir.mkdir(parents=True)
             assets_dir.mkdir(parents=True)
             (package_dir / "README.md").write_text("# LogBrew .NET\n", encoding="utf-8")
             (aspnetcore_dir / "README.md").write_text("# LogBrew ASP.NET Core\n", encoding="utf-8")
+            (efcore_dir / "README.md").write_text("# LogBrew Entity Framework Core\n", encoding="utf-8")
             for example in (
                 "FirstUsefulTelemetry.cs",
                 "ActivityTraceCorrelation.cs",
@@ -515,6 +518,7 @@ jobs:
                 "HttpClientOutboundTelemetry.cs",
                 "AspNetCoreRequestTelemetry.cs",
                 "AspNetCoreMiddlewareTelemetry.cs",
+                "EntityFrameworkCoreCommandTelemetry.cs",
             ):
                 (examples_dir / example).write_text("// example\n", encoding="utf-8")
             (assets_dir / "logbrew-logo-transparent-128.png").write_bytes(b"png")
@@ -575,12 +579,39 @@ jobs:
                 + "\n",
                 encoding="utf-8",
             )
+            (efcore_dir / "LogBrew.EntityFrameworkCore.csproj").write_text(
+                """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>LogBrew.EntityFrameworkCore</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>LogBrew</Authors>
+    <Company>LogBrew</Company>
+    <Description>Public LogBrew Entity Framework Core integration.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logbrew-logo-espresso-bg-128.png</PackageIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../LogBrew/LogBrew.csproj" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />
+    <None Include="../../examples/EntityFrameworkCoreCommandTelemetry.cs" Pack="true" PackagePath="examples/" />
+  </ItemGroup>
+</Project>
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
 
             default_failures: list[str] = []
             check_release_metadata.validate_dotnet_packages(
                 root,
                 default_failures,
                 check_release_metadata.DOTNET_VERSION,
+                check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_LICENSE,
                 check_release_metadata.REPO_URL,
@@ -590,6 +621,7 @@ jobs:
                 root,
                 override_failures,
                 "0.1.4",
+                check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_LICENSE,
                 check_release_metadata.REPO_URL,

@@ -46,16 +46,22 @@ fi
 
 dotnet build "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release -warnaserror >/dev/null
 dotnet build "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release -warnaserror >/dev/null
+dotnet build "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" --configuration Release -warnaserror >/dev/null
 dotnet run --project "$package_dir/tests/LogBrew.Tests/LogBrew.Tests.csproj" --configuration Release
 dotnet run --project "$package_dir/tests/LogBrew.AspNetCore.Tests/LogBrew.AspNetCore.Tests.csproj" --configuration Release
+dotnet run --project "$package_dir/tests/LogBrew.EntityFrameworkCore.Tests/LogBrew.EntityFrameworkCore.Tests.csproj" --configuration Release
 dotnet pack "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
+dotnet pack "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 package_version="$(dotnet msbuild "$package_dir/src/LogBrew/LogBrew.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 aspnetcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
+efcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 nupkg="$tmp_dir/packages/LogBrew.${package_version}.nupkg"
 aspnetcore_nupkg="$tmp_dir/packages/LogBrew.AspNetCore.${aspnetcore_package_version}.nupkg"
+efcore_nupkg="$tmp_dir/packages/LogBrew.EntityFrameworkCore.${efcore_package_version}.nupkg"
 test -f "$nupkg"
 test -f "$aspnetcore_nupkg"
+test -f "$efcore_nupkg"
 
 python3 - "$nupkg" <<'PY'
 import sys
@@ -176,6 +182,43 @@ for needle in (
         raise SystemExit(f"missing ASP.NET Core README guidance: {needle}")
 PY
 
+python3 - "$efcore_nupkg" <<'PY'
+import sys
+import zipfile
+
+nupkg = sys.argv[1]
+with zipfile.ZipFile(nupkg) as archive:
+    names = set(archive.namelist())
+    required = {
+        "lib/net10.0/LogBrew.EntityFrameworkCore.dll",
+        "README.md",
+        "logbrew-logo-espresso-bg-128.png",
+        "examples/EntityFrameworkCoreCommandTelemetry.cs",
+    }
+    missing = sorted(required - names)
+    if missing:
+        raise SystemExit(f"missing Entity Framework Core nupkg files: {missing}")
+    readme = archive.read("README.md").decode()
+    nuspec = archive.read("LogBrew.EntityFrameworkCore.nuspec").decode()
+if 'dependency id="LogBrew"' not in nuspec:
+    raise SystemExit("missing LogBrew dependency metadata")
+if 'dependency id="Microsoft.EntityFrameworkCore.Relational"' not in nuspec:
+    raise SystemExit("missing Microsoft.EntityFrameworkCore.Relational dependency metadata")
+if "<icon>logbrew-logo-espresso-bg-128.png</icon>" not in nuspec:
+    raise SystemExit("missing Entity Framework Core NuGet package icon metadata")
+for needle in (
+    "dotnet add package LogBrew.EntityFrameworkCore",
+    "AddLogBrewCommandTelemetry",
+    "LogBrewEntityFrameworkCoreCommandInterceptor",
+    "WithCommandFilter",
+    "WithMetadataProvider",
+    "does not capture raw database statements",
+    "EntityFrameworkCoreCommandTelemetry.cs",
+):
+    if needle not in readme:
+        raise SystemExit(f"missing Entity Framework Core README guidance: {needle}")
+PY
+
 run_example() {
   local source_file="$1"
   local project_name="$2"
@@ -240,6 +283,28 @@ run_example HttpClientOutboundTelemetry.cs HttpClientOutboundTelemetry "$tmp_dir
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/http-client.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_http_client_payload.py" "$tmp_dir/http-client.stdout.json" "$tmp_dir/http-client.stderr.json" >/dev/null
 
+efcore_dir="$tmp_dir/EntityFrameworkCoreCommandTelemetry"
+dotnet new console --framework net10.0 --name EntityFrameworkCoreCommandTelemetry --output "$efcore_dir" >/dev/null
+cp "$package_dir/examples/EntityFrameworkCoreCommandTelemetry.cs" "$efcore_dir/Program.cs"
+cat > "$efcore_dir/EntityFrameworkCoreCommandTelemetry.csproj" <<EOF
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$package_dir/src/LogBrew/LogBrew.csproj" />
+    <ProjectReference Include="$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+</Project>
+EOF
+dotnet run --project "$efcore_dir/EntityFrameworkCoreCommandTelemetry.csproj" --configuration Release > "$tmp_dir/efcore.stdout.txt" 2> "$tmp_dir/efcore.stderr.json"
+test ! -s "$tmp_dir/efcore.stdout.txt"
+grep -q '"example":"EntityFrameworkCoreCommandTelemetry"' "$tmp_dir/efcore.stderr.json"
+
 web_dir="$tmp_dir/AspNetCoreRequestTelemetry"
 dotnet new web --framework net10.0 --name AspNetCoreRequestTelemetry --output "$web_dir" >/dev/null
 cp "$package_dir/examples/AspNetCoreRequestTelemetry.cs" "$web_dir/Program.cs"
@@ -288,6 +353,7 @@ grep -qx 'run-activity-source-listener-telemetry -> make run-activity-source-lis
 grep -qx 'run-dependency-spans-telemetry -> make run-dependency-spans-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-db-command-telemetry -> make run-db-command-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-http-client-outbound-telemetry -> make run-http-client-outbound-telemetry' "$tmp_dir/examples-help.txt"
+grep -qx 'run-entity-framework-core-command-telemetry -> make run-entity-framework-core-command-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-request-telemetry -> make run-aspnetcore-request-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-middleware-telemetry -> make run-aspnetcore-middleware-telemetry' "$tmp_dir/examples-help.txt"
 

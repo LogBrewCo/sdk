@@ -414,6 +414,38 @@ var rows = LogBrewDbCommandTelemetry.ExecuteNonQuery(
 
 `LogBrewDbCommandTelemetry` supports sync and async `ExecuteNonQuery`, `ExecuteScalar`, and `ExecuteReader` calls. It preserves the app-owned `DbCommand`, result, reader, cancellation token, and original provider exception; keeps `LogBrewTrace.Current` active while the command runs; records row count only from `ExecuteNonQuery`; and reports SDK capture failures through optional `OnError(...)` callbacks without replacing the command result. It does not install a profiler, Entity Framework interceptor, provider-specific package, connection wrapper, SQL parser, database-side trace propagation, query comments, baggage, tracestate, or support-ticket creation. It also does not capture `CommandText`, parameters, connection strings, data source, raw result rows, exception messages, or stacks. The packaged `examples/DbCommandTelemetry.cs` file proves installed-package ADO.NET command spans and redaction with a dependency-free fake command.
 
+For EF Core apps that want command spans without wrapping every `DbCommand`, install the optional integration package:
+
+```bash
+dotnet add package LogBrew.EntityFrameworkCore
+```
+
+```csharp
+using LogBrew;
+using LogBrew.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+
+var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "1.0.0");
+
+optionsBuilder
+    .UseSqlServer(connectionString)
+    .AddLogBrewCommandTelemetry(
+        client,
+        options => options
+            .WithSystem("sqlserver")
+            .WithDatabaseName("checkout")
+            .WithOperationNamePrefix("orders")
+            .WithCommandFilter(snapshot => snapshot.CommandSource != "migrations")
+            .WithMetadataProvider(snapshot => new Dictionary<string, object?>
+            {
+                ["efCommandSource"] = snapshot.CommandSource,
+                ["efExecuteMethod"] = snapshot.ExecuteMethod,
+                ["efIsAsync"] = snapshot.IsAsync
+            }));
+```
+
+`LogBrew.EntityFrameworkCore` adds `LogBrewEntityFrameworkCoreCommandInterceptor` through `AddLogBrewCommandTelemetry(...)`. It records one sanitized `entity_framework_core.command` span per EF Core command, correlates with the active LogBrew trace, captures EF command source, execute method, command type, duration, non-query row count, and type-only provider failures or cancellations, and reports SDK capture failures through optional `OnError(...)`. It does not capture SQL text, query parameters, connection strings, data source, hostnames, raw `traceparent`, payloads, result rows, exception messages, exception stacks, baggage, tracestate, database-side query comments, or support tickets. Use `WithCommandFilter(...)` for noisy commands and `WithMetadataProvider(...)` for primitive low-cardinality context. The packaged `examples/EntityFrameworkCoreCommandTelemetry.cs` file proves package install and example compilation without adding EF dependencies to the base `LogBrew` package.
+
 Sync and async helpers are available for database, cache, and queue operations. They create one child span under `LogBrewTrace.Current` when a trace is active, keep that child trace active while the callback runs, preserve the callback result or original exception, and report SDK capture failures through optional `OnError(...)` callbacks without interrupting app work. Failed dependency operations also attach one bounded span event named `exception` with type-only metadata (`exceptionType` and `exceptionEscaped`) so issues can be filtered without sending exception messages or stack traces.
 
 You can add your own primitive-only span event summaries to any span with `SpanEventSummary`:
@@ -431,7 +463,7 @@ client.Span(
         })));
 ```
 
-Span event summaries are capped at eight entries per span and accept only string, number, boolean, or null metadata. Metadata is primitive-only, and the dependency helpers drop unsafe dependency details such as raw statements, connection details, cache identifiers, message contents, broker details, request metadata, and unsafe values. For broad automatic JDBC/EF/Redis/Kafka-style coverage, use a future explicit integration package rather than relying on hidden behavior in this core package.
+Span event summaries are capped at eight entries per span and accept only string, number, boolean, or null metadata. Metadata is primitive-only, and the dependency helpers drop unsafe dependency details such as raw statements, connection details, cache identifiers, message contents, broker details, request metadata, and unsafe values. For EF Core command spans, use the optional `LogBrew.EntityFrameworkCore` package. Other Redis/Kafka-style automatic integrations should come from explicit future integration packages rather than hidden behavior in this core package.
 
 The packaged `examples/DependencySpansTelemetry.cs` file shows database, cache, and queue spans running from a small console app, with trace correlation, type-only dependency exception events, and dependency metadata redaction.
 
@@ -544,6 +576,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 - `LogBrewHttpClientTelemetry` and `LogBrewHttpClientHandler` wrap app-owned outbound `HttpClient` sends with one child span and one normalized `traceparent`, without global client patching or payload/header capture.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans without adding driver dependencies, profilers, interceptors, or automatic client patching.
 - `LogBrewDbCommandTelemetry` creates app-owned ADO.NET `DbCommand` spans for sync/async non-query, scalar, and reader calls without capturing raw SQL, parameters, connection strings, result rows, provider exception messages, or stacks.
+- `LogBrew.EntityFrameworkCore` is an optional package for EF Core command spans through app-owned `AddLogBrewCommandTelemetry(...)`, without adding EF Core dependencies to the base `LogBrew` package.
 - `SupportTicketDraft` builds local-only support-ticket create payload drafts and redacts diagnostics without calling backend support routes.
 - `Shutdown(transport)` flushes queued events and rejects later writes.
 - `AddLogBrew(client, options)` connects existing `ILogger` calls to LogBrew without global logging side effects.
