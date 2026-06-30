@@ -45,6 +45,7 @@ grep -q '^co/logbrew/sdk/LogBrewJmsTracing\$ConsumerConfig.class$' "$tmp_dir/bin
 jar --list --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" > "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewJmsTracing.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q 'LogBrewJmsTracing' "$package_dir/README.md"
+grep -q 'receive' "$package_dir/README.md"
 grep -q 'processBatch' "$package_dir/README.md"
 grep -q 'setStringProperty' "$package_dir/README.md"
 grep -q 'getStringProperty' "$package_dir/README.md"
@@ -108,10 +109,42 @@ public final class Main {
 
         FakeMessage incoming = new FakeMessage();
         incoming.setStringProperty("traceparent", "00-11111111111111111111111111111111-2222222222222222-01");
+        LogBrewTraceContext receiveParent = LogBrewTraceContext.fromTraceparent(
+            "00-77777777777777777777777777777777-8888888888888888-01",
+            "a7ad6b7169203331"
+        );
+        AtomicReference<LogBrewTraceContext> receivedTrace = new AtomicReference<>();
+        FakeMessage receivedMessage;
+        LogBrewTrace.Scope receiveScope = LogBrewTrace.activate(receiveParent);
+        try {
+            receivedMessage = LogBrewJmsTracing.receive(
+                client,
+                () -> {
+                    receivedTrace.set(LogBrewTrace.current().orElseThrow());
+                    return incoming;
+                },
+                LogBrewJmsTracing.ConsumerConfig.create()
+                    .destinationName("billing-queue")
+                    .messageCount(1)
+                    .eventIdPrefix("java_jms_receive_installed")
+                    .spanId("b7ad6b7169203705")
+                    .metadata(Map.of("component", "billing-receiver", "messageBody", "private receive body"))
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:02.050Z"),
+                        Instant.parse("2026-06-02T10:00:02.080Z")
+                    )
+            );
+        } finally {
+            receiveScope.close();
+        }
+        require(receivedMessage == incoming, "JMS receive returns original message");
+        require(receiveParent.traceId().equals(receivedTrace.get().traceId()), "receive trace id");
+        require(receiveParent.spanId().equals(receivedTrace.get().parentSpanId()), "receive parent span id");
+
         AtomicReference<LogBrewTraceContext> processed = new AtomicReference<>();
         String processResult = LogBrewJmsTracing.process(
             client,
-            incoming,
+            receivedMessage,
             () -> {
                 processed.set(LogBrewTrace.current().orElseThrow());
                 return "processed";
@@ -197,12 +230,14 @@ public final class Main {
         require(errorCodes.contains("jms_property_read_failed"), "read diagnostic");
 
         String payload = client.previewJson();
-        require(client.pendingEvents() == 5, "JMS smoke queues five spans");
+        require(client.pendingEvents() == 6, "JMS smoke queues six spans");
         require(payload.contains("\"source\": \"queue.operation\""), "queue source");
         require(payload.contains("\"queueSystem\": \"jms\""), "JMS queue system");
         require(payload.contains("\"queueOperation\": \"jms.produce\""), "JMS produce operation");
+        require(payload.contains("\"queueOperation\": \"jms.receive\""), "JMS receive operation");
         require(payload.contains("\"queueOperation\": \"jms.process\""), "JMS process operation");
         require(payload.contains("\"queueOperation\": \"jms.process_batch\""), "JMS batch process operation");
+        require(payload.contains("\"queueOperationKind\": \"receive\""), "JMS receive operation kind");
         require(payload.contains("\"queueName\": \"billing-queue\""), "JMS destination name");
         require(payload.contains("\"messageCount\": 1"), "JMS message count");
         require(payload.contains("\"messageCount\": 4"), "JMS batch message count");
@@ -210,6 +245,7 @@ public final class Main {
         require(payload.contains("\"timeInQueueMs\": 250.5"), "JMS batch queue latency");
         require(payload.contains("\"parentSpanId\": \"2222222222222222\""), "incoming parent span");
         require(payload.contains("\"parentSpanId\": \"bbbbbbbbbbbbbbbb\""), "batch incoming parent span");
+        require(payload.contains("\"parentSpanId\": \"a7ad6b7169203331\""), "receive parent span");
         require(payload.contains("\"links\": ["), "batch span links");
         require(payload.contains("\"traceId\": \"cccccccccccccccccccccccccccccccc\""), "batch linked trace id");
         require(payload.contains("\"spanId\": \"dddddddddddddddd\""), "batch linked span id");
@@ -217,6 +253,7 @@ public final class Main {
         require(payload.contains("\"traceId\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\""), "batch second linked trace id");
         require(payload.contains("\"spanId\": \"ffffffffffffffff\""), "batch second linked span id");
         require(!payload.contains("private body"), "send message body omitted");
+        require(!payload.contains("private receive body"), "receive message body omitted");
         require(!payload.contains("private process body"), "process message body omitted");
         require(!payload.contains("private batch process body"), "batch process message body omitted");
         require(!payload.contains("private setter failure"), "setter exception message omitted");
@@ -232,7 +269,7 @@ public final class Main {
         TransportResponse response = client.flush(RecordingTransport.alwaysAccept());
         require(response.statusCode() == 202, "flush status");
         require(client.pendingEvents() == 0, "flush clears queue");
-        System.err.println("{\"ok\":true,\"events\":5,\"status\":202}");
+        System.err.println("{\"ok\":true,\"events\":6,\"status\":202}");
     }
 
     public static final class FakeMessage {
@@ -269,7 +306,7 @@ javac -Xlint:all -Werror --release 11 -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar"
 java -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar:$smoke_app/classes" Main > "$tmp_dir/java-jms.stdout.json" 2> "$tmp_dir/java-jms.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/java-jms.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/java-jms.stderr.json"
-grep -q '"events":5' "$tmp_dir/java-jms.stderr.json"
+grep -q '"events":6' "$tmp_dir/java-jms.stderr.json"
 grep -q '"status":202' "$tmp_dir/java-jms.stderr.json"
 
 echo "java jms smoke passed"

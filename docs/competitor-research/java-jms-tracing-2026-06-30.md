@@ -5,8 +5,9 @@
 Close the Java SDK's JMS messaging trace gap without adding a `javax.jms` or
 `jakarta.jms` dependency to core `co.logbrew:logbrew-sdk`. The target is explicit
 app-owned producer and consumer code: inject one outgoing W3C `traceparent`,
-continue one incoming `traceparent`, keep active trace correlation during app
-work, and record privacy-bounded queue spans from packaged artifacts.
+separate receive from process spans, continue one incoming `traceparent`, keep
+active trace correlation during app work, and record privacy-bounded queue spans
+from packaged artifacts.
 
 ## Source Evidence
 
@@ -61,6 +62,10 @@ Core Java now includes dependency-free `LogBrewJmsTracing`:
   `setStringProperty(String, String)` on the app-owned message object, writes one
   normalized W3C `traceparent`, activates the child trace while the app send
   callback runs, and records a `queue:jms.produce` span.
+- `LogBrewJmsTracing.receive(...)` wraps the app-owned blocking or polling
+  receive callback, returns the original received message/result, activates a
+  child trace during the receive call, and records a `queue:jms.receive` span
+  without reading message properties or changing how the app owns the consumer.
 - `LogBrewJmsTracing.process(...)` reflects
   `getStringProperty(String)` on the app-owned message object, continues one
   valid incoming traceparent, activates the child trace during app processing,
@@ -94,11 +99,13 @@ LogBrew is now better than PostHog Java for JMS trace correlation and safer than
 Datadog/OpenTelemetry for teams that want explicit app-owned JMS tracing without
 an agent or JMS dependency in the base SDK. The batch helper now narrows the
 message-link ergonomics gap by giving explicit batch consumers first-parent plus
-bounded linked-message correlation. LogBrew is still worse than Datadog and
-OpenTelemetry for automatic JMS breadth, receive-vs-process span separation,
-messaging semantic conventions, exported metrics, destination-specific metadata,
-baggage/tracestate, and full OTel processor/exporter interop. It is
-intentionally not trying to match hidden agent coverage in core.
+bounded linked-message correlation, and the receive helper now narrows the
+OpenTelemetry receive-vs-process separation gap for apps that prefer explicit
+instrumentation. LogBrew is still worse than Datadog and OpenTelemetry for
+automatic JMS breadth, richer messaging semantic conventions, exported metrics,
+destination-specific metadata, baggage/tracestate, and full OTel
+processor/exporter interop. It is intentionally not trying to match hidden agent
+coverage in core.
 
 ## Verification
 
@@ -108,20 +115,28 @@ intentionally not trying to match hidden agent coverage in core.
   property read/write diagnostics. A 2026-07-01 follow-up expanded this to 4
   JMS tests proving `processBatch(...)` first-parent continuation, bounded valid
   message links, malformed propagation diagnostics, computed `messageCount`, and
-  raw propagation redaction.
+  raw propagation redaction. A later 2026-07-01 follow-up expanded this to 5
+  JMS tests proving `receive(...)` result preservation, active child trace
+  scope, `jms.receive` metadata, primitive message count, and redaction of
+  received message propagation details.
 - Installed artifact: `bash scripts/real_user_java_jms_smoke.sh` passed from a
   packaged jar/source jar, compiled a temp app against the installed jar, proved
-  `LogBrewJmsTracing` class/source/README packaging, exercised send/process,
-  batch process, malformed propagation, and property-failure paths, validated
-  the emitted payload, and flushed through local fake intake.
+  `LogBrewJmsTracing` class/source/README packaging, exercised send/receive/
+  process/batch process, malformed propagation, and property-failure paths,
+  validated the emitted payload, and flushed through local fake intake.
 - Public verifier contract: `python3 -m unittest tests.test_check_public_sdks`
   passed after adding the Java JMS installed-artifact smoke step and matching
   label-order contract.
+- Follow-up receive verification also passed `bash scripts/check_java_static.sh`,
+  `bash scripts/real_user_java_smoke.sh`,
+  `bash scripts/real_user_java_queue_trace_smoke.sh`,
+  `bash scripts/real_user_java_high_load_smoke.sh`, ShellCheck 0.11.0,
+  markdown links, backend contract reports, release metadata, confidentiality
+  scan, generated-artifact hygiene, and `git diff --check`.
 
 ## Remaining Gaps
 
-Next Java messaging gaps are JMS receive-vs-process split ergonomics, richer
-messaging semantic attributes, privacy-bounded messaging metrics, optional
-Spring/JMS bean auto-registration only if privacy/runtime coupling is justified,
-baggage/tracestate only if a real interoperability need justifies it, and OTel
-exporter/processor interop.
+Next Java messaging gaps are richer messaging semantic attributes,
+privacy-bounded messaging metrics, optional Spring/JMS bean auto-registration
+only if privacy/runtime coupling is justified, baggage/tracestate only if a real
+interoperability need justifies it, and OTel exporter/processor interop.

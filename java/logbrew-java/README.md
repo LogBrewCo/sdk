@@ -413,11 +413,19 @@ LogBrewJmsTracing.send(
         .metadata(Map.of("service", "checkout-api"))
 );
 
+Object received = LogBrewJmsTracing.receive(
+    client,
+    () -> consumer.receive(500),
+    LogBrewJmsTracing.ConsumerConfig.create()
+        .destinationName("billing-queue")
+        .messageCount(1)
+);
+
 LogBrewJmsTracing.process(
     client,
-    message,
+    received,
     () -> {
-        handleMessage(message);
+        handleMessage(received);
         return null;
     },
     LogBrewJmsTracing.ConsumerConfig.create()
@@ -438,7 +446,7 @@ LogBrewJmsTracing.processBatch(
 );
 ```
 
-The JMS helper writes or reads only the `traceparent` string property, keeps the child trace active while app code runs, records `jms.produce`, `jms.process`, or `jms.process_batch` queue spans, and treats property read/write failures or malformed batch propagation as non-fatal `onError(...)` diagnostics. `processBatch(...)` uses the first valid incoming message traceparent as the parent, links later valid message traceparents up to the shared span-link cap, and records the primitive batch `messageCount`. It does not create connections, patch sessions/producers/consumers/listeners, enumerate message properties, inspect destinations, capture message IDs, message bodies, payloads, arbitrary headers, broker addresses, raw propagation strings, baggage, tracestate, exception messages, or stack traces.
+The JMS helper writes or reads only the `traceparent` string property, keeps the child trace active while app code runs, records `jms.produce`, `jms.receive`, `jms.process`, or `jms.process_batch` queue spans, and treats property read/write failures or malformed batch propagation as non-fatal `onError(...)` diagnostics. `receive(...)` wraps the app-owned blocking or polling receive call and returns the original result; call `process(...)` after a message is returned when you want to continue incoming message trace context. `processBatch(...)` uses the first valid incoming message traceparent as the parent, links later valid message traceparents up to the shared span-link cap, and records the primitive batch `messageCount`. It does not create connections, patch sessions/producers/consumers/listeners, enumerate message properties, inspect destinations, capture message IDs, message bodies, payloads, arbitrary headers, broker addresses, raw propagation strings, baggage, tracestate, exception messages, or stack traces.
 
 For Kafka producer code that already owns an `org.apache.kafka.clients.producer.Producer`, wrap it explicitly:
 
@@ -779,7 +787,7 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `LogBrewSpringBootCacheAutoConfiguration` wraps app-owned Spring `CacheManager` beans when Spring Boot, Spring Cache, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewSpringBootJdbcAutoConfiguration` wraps app-owned Spring `DataSource` beans with privacy-bounded JDBC statement spans when Spring Boot, `DataSource`, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans with bounded `SpanEventSummary` markers, without adding driver dependencies or automatic client patching.
-- `LogBrewJmsTracing` traces app-owned JMS-style `send` and `process` calls through `setStringProperty` / `getStringProperty` without adding a JMS dependency or patching broker clients.
+- `LogBrewJmsTracing` traces app-owned JMS-style `send`, `receive`, `process`, and `processBatch` calls through app-owned callbacks and `setStringProperty` / `getStringProperty` without adding a JMS dependency or patching broker clients.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
 - `isClosed()` returns whether `shutdown(transport)` has closed the client.

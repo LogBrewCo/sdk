@@ -25,6 +25,7 @@ public final class LogBrewJmsTracing {
     private static final String DEFAULT_EVENT_ID_PREFIX = "java_jms";
     private static final String JMS_SYSTEM = "jms";
     private static final String PRODUCE_OPERATION = "jms.produce";
+    private static final String RECEIVE_OPERATION = "jms.receive";
     private static final String PROCESS_OPERATION = "jms.process";
     private static final String PROCESS_BATCH_OPERATION = "jms.process_batch";
 
@@ -54,6 +55,36 @@ public final class LogBrewJmsTracing {
                 setStringProperty(message, jmsPropertyName(name), value, configuredOnError(safeConfig))
             );
         return LogBrewOperationTracing.queueOperation(client, PRODUCE_OPERATION, operation, queueConfig);
+    }
+
+    /**
+     * Receives one app-owned JMS-style message with default safe tracing settings.
+     */
+    public static <T> T receive(LogBrewClient client, Callable<T> operation) throws Exception {
+        return receive(client, operation, ConsumerConfig.create());
+    }
+
+    /**
+     * Receives one app-owned JMS-style message with app-owned tracing settings.
+     *
+     * <p>Use this around the app's blocking or polling receive call. Use
+     * {@link #process(LogBrewClient, Object, Callable, ConsumerConfig)} after a
+     * message is returned to continue incoming message trace context.</p>
+     */
+    public static <T> T receive(
+        LogBrewClient client,
+        Callable<T> operation,
+        ConsumerConfig config
+    ) throws Exception {
+        ConsumerConfig safeConfig = config == null ? ConsumerConfig.create() : config;
+        LogBrewOperationTracing.QueueOperation queueConfig = baseQueueConfig(safeConfig, "receive");
+        if (safeConfig.messageCount != null) {
+            queueConfig.messageCount(safeConfig.messageCount.intValue());
+        }
+        if (safeConfig.timeInQueueMs != null) {
+            queueConfig.timeInQueueMs(safeConfig.timeInQueueMs.doubleValue());
+        }
+        return LogBrewOperationTracing.queueOperation(client, RECEIVE_OPERATION, operation, queueConfig);
     }
 
     /**

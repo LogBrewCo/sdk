@@ -17,11 +17,12 @@
   PostHog Java
   `PostHog/posthog-java@dcf8fd85d0f1a405ae3aca02d00e24a1daa4f17e` (no comparable
   JMS trace propagation found). Core `co.logbrew:logbrew-sdk` now includes
-  dependency-free `LogBrewJmsTracing.send(...)`, `process(...)`, and
-  `processBatch(...)`: apps pass owned JMS-style message objects, LogBrew
-  reflects only `setStringProperty` or `getStringProperty`, writes/reads one
-  normalized `traceparent`, keeps child trace context active during app work,
-  records `jms.produce`/`jms.process`/`jms.process_batch` queue spans with
+  dependency-free `LogBrewJmsTracing.send(...)`, `receive(...)`,
+  `process(...)`, and `processBatch(...)`: apps pass owned JMS-style message
+  objects or receive callbacks, LogBrew reflects only `setStringProperty` or
+  `getStringProperty`, writes/reads one normalized `traceparent`, keeps child
+  trace context active during app work, records
+  `jms.produce`/`jms.receive`/`jms.process`/`jms.process_batch` queue spans with
   destination label, primitive metadata, optional `messageCount`, optional
   `timeInQueueMs`, and bounded span links for later valid batch message
   traceparents, and reports property read/write failures plus malformed batch
@@ -38,12 +39,13 @@
   `python3 -m unittest tests.test_check_public_sdks`, `bash
   scripts/check_java_static.sh`, `bash scripts/check_shell_static.sh`,
   markdown links, release metadata, confidentiality scan, generated-artifact
-  hygiene, and diff hygiene.
+  hygiene, and diff hygiene. Follow-up local RED/GREEN added `receive(...)`
+  with 5 JMS tests and installed-artifact smoke coverage for `jms.receive`.
   Report: `docs/competitor-research/java-jms-tracing-2026-06-30.md`. Remaining
-  Java messaging gaps: receive-vs-process split ergonomics, richer messaging
-  semantic attributes and metrics, optional Spring/JMS auto-registration only if
-  privacy/runtime coupling is justified, baggage/tracestate only if explicitly
-  justified, and OpenTelemetry exporter/processor interop.
+  Java messaging gaps: richer messaging semantic attributes and metrics,
+  optional Spring/JMS auto-registration only if privacy/runtime coupling is
+  justified, baggage/tracestate only if explicitly justified, and OpenTelemetry
+  exporter/processor interop.
 - 2026-06-30: Java queue/message and Spring Kafka rich-trace gaps reduced after source reads from
   Sentry Java
   `getsentry/sentry-java@307edcd968452d07d801c46362bf98f815fea808`

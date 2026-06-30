@@ -19,6 +19,7 @@ public final class LogBrewJmsTracingTest {
 
     private void run() {
         testSendInjectsTraceparentAndCapturesSanitizedSpan();
+        testReceiveCapturesSanitizedReceiveSpan();
         testProcessContinuesIncomingTraceparentAndRecordsLatency();
         testProcessBatchContinuesFirstTraceparentAndLinksRemainingMessages();
         testPropertyFailuresAreNonFatalDiagnostics();
@@ -87,6 +88,72 @@ public final class LogBrewJmsTracingTest {
         assertNotContains(payload, "jms://private");
         assertNotContains(payload, "traceparent");
         assertNotContains(payload, "baggage");
+        testsRun++;
+    }
+
+    private void testReceiveCapturesSanitizedReceiveSpan() {
+        LogBrewClient client = sampleClient();
+        LogBrewTraceContext parent = LogBrewTraceContext.create(
+            "77777777777777777777777777777777",
+            "8888888888888888"
+        );
+        FakeJmsMessage received = new FakeJmsMessage();
+        received.setStringProperty("traceparent", "00-11111111111111111111111111111111-2222222222222222-01");
+        AtomicReference<LogBrewTraceContext> active = new AtomicReference<>();
+
+        FakeJmsMessage result;
+        LogBrewTrace.Scope scope = LogBrewTrace.activate(parent);
+        try {
+            result = LogBrewJmsTracing.receive(
+                client,
+                () -> {
+                    active.set(LogBrewTrace.current().orElseThrow());
+                    return received;
+                },
+                LogBrewJmsTracing.ConsumerConfig.create()
+                    .eventIdPrefix("java_jms_receive")
+                    .spanId("b7ad6b7169203704")
+                    .destinationName("billing-queue")
+                    .messageCount(1)
+                    .metadata(Map.of(
+                        "worker", "billing-receiver",
+                        "messageBody", "private receive body",
+                        "brokerUrl", "jms://private"
+                    ))
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:08.100Z"),
+                        Instant.parse("2026-06-02T10:00:08.140Z")
+                    )
+            );
+        } catch (Exception error) {
+            throw new AssertionError(error);
+        } finally {
+            scope.close();
+        }
+
+        assertSame(received, result, "jms receive result");
+        assertEquals(parent.traceId(), active.get().traceId(), "jms receive child trace id");
+        assertEquals(parent.spanId(), active.get().parentSpanId(), "jms receive child parent span");
+        assertEquals("b7ad6b7169203704", active.get().spanId(), "jms receive child span");
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"id\": \"java_jms_receive_span_b7ad6b7169203704\"");
+        assertContains(payload, "\"name\": \"queue:jms.receive\"");
+        assertContains(payload, "\"source\": \"queue.operation\"");
+        assertContains(payload, "\"traceId\": \"77777777777777777777777777777777\"");
+        assertContains(payload, "\"spanId\": \"b7ad6b7169203704\"");
+        assertContains(payload, "\"parentSpanId\": \"8888888888888888\"");
+        assertContains(payload, "\"durationMs\": 40.0");
+        assertContains(payload, "\"queueSystem\": \"jms\"");
+        assertContains(payload, "\"queueOperation\": \"jms.receive\"");
+        assertContains(payload, "\"queueOperationKind\": \"receive\"");
+        assertContains(payload, "\"queueName\": \"billing-queue\"");
+        assertContains(payload, "\"messageCount\": 1");
+        assertContains(payload, "\"worker\": \"billing-receiver\"");
+        assertNotContains(payload, "private receive body");
+        assertNotContains(payload, "jms://private");
+        assertNotContains(payload, "11111111111111111111111111111111-2222222222222222");
+        assertNotContains(payload, "traceparent");
         testsRun++;
     }
 
@@ -320,6 +387,12 @@ public final class LogBrewJmsTracingTest {
     private static void assertEquals(String expected, String actual, String label) {
         if (!expected.equals(actual)) {
             throw new AssertionError(label + ": expected " + expected + " but got " + actual);
+        }
+    }
+
+    private static void assertSame(Object expected, Object actual, String label) {
+        if (expected != actual) {
+            throw new AssertionError(label + ": expected same object");
         }
     }
 }
