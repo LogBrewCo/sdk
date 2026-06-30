@@ -6,7 +6,7 @@
 
 Public Java SDK for building, validating, previewing, and flushing LogBrew event batches.
 
-The core client, `HttpTransport`, request trace helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, and Spring Boot helpers integrate with app-owned dependencies when those libraries are already present.
+The core client, `HttpTransport`, request trace helpers, JDBC helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, and Spring Boot helpers integrate with app-owned dependencies when those libraries are already present.
 
 ## Install
 
@@ -50,7 +50,7 @@ If you copy live OpenTelemetry span context with `LogBrewOpenTelemetry`, include
 </dependency>
 ```
 
-If you manually register `LogBrewServletFilter` in a Jakarta Servlet app, include the Servlet API already used by your runtime. Spring Boot servlet apps usually already get this from `spring-boot-starter-web`; they can use `LogBrewSpringBootAutoConfiguration` by exposing an app-owned `LogBrewClient` bean.
+If you manually register `LogBrewServletFilter` in a Jakarta Servlet app, include the Servlet API already used by your runtime. Spring Boot servlet apps usually already get this from `spring-boot-starter-web`; they can use `LogBrewSpringBootAutoConfiguration` by exposing an app-owned `LogBrewClient` bean. Spring Boot apps with a `DataSource` bean can also use `LogBrewSpringBootJdbcAutoConfiguration` from the same package path; no extra starter or ingest-property client setup is required.
 
 ```xml
 <dependency>
@@ -379,6 +379,18 @@ try (PreparedStatement statement = tracedConnection.prepareStatement(
 
 The wrappers use only JDK JDBC interfaces and return the original JDBC results or exceptions. `instrumentDataSource(...)` delegates normal data-source behavior and wraps only connections returned by no-argument or two-argument `getConnection`. It stays statement-only by default; enable `traceConnectionAcquisition(true)` when you want one `jdbc:CONNECT` span for DataSource acquisition or pool-wait time. `instrumentConnection(...)` wraps `createStatement`, `prepareStatement`, and `prepareCall` results, emits one `jdbc:<VERB>` child span around `execute*` calls, records update counts when JDBC returns them, and can trace `commit()`/`rollback()` when `traceTransactions(true)` is set. LogBrew derives only the SQL verb locally, such as `SELECT` or `UPDATE`, after skipping leading SQL comments and quoted literals; it does not capture SQL text, bind values, result rows, connection URLs, driver metadata, network addresses, JDBC login argument values, arbitrary JDBC properties, baggage, tracestate, exception messages, or stack traces. It does not install a Java agent, register a driver, patch `DriverManager`, mutate SQL comments, or affect other data sources/connections.
 
+Spring Boot JDBC apps can skip manual wrapping. When Spring Boot, `javax.sql.DataSource`, and an app-owned `LogBrewClient` bean are present, `LogBrewSpringBootJdbcAutoConfiguration` wraps initialized Spring `DataSource` beans through a bean post-processor and reuses the same `LogBrewJdbcTracing` privacy rules:
+
+```properties
+logbrew.jdbc.enabled=true
+logbrew.jdbc.db-system=postgresql
+logbrew.jdbc.db-name=orders
+logbrew.jdbc.trace-connection-acquisition=false
+logbrew.jdbc.trace-transactions=false
+```
+
+Set `logbrew.jdbc.enabled=false` to disable auto-wrapping. The auto-configuration skips scoped-target beans, already wrapped data sources, and Spring routing data sources; it does not create clients from properties, read connection metadata, record bean names, patch `DriverManager`, or capture SQL text, connection URLs, JDBC login arguments, baggage, or tracestate.
+
 ## Support Ticket Drafts
 
 Use `SupportTicketDraft` when a developer or support agent explicitly asks for a local JSON payload for the planned LogBrew support-ticket API. The helper validates the public source/category contract, normalizes W3C trace IDs, redacts diagnostics, and returns a local draft:
@@ -493,7 +505,7 @@ The appender maps SLF4J/Logback levels into canonical LogBrew severities, captur
 
 ## Spring Boot
 
-Spring Boot starters use Logback by default, so a Boot app can use the same optional appender alongside the automatic servlet filter. Define your `LogBrewClient` bean once for `LogBrewSpringBootAutoConfiguration`, then attach the appender from code you own, usually after your client and transport are configured:
+Spring Boot starters use Logback by default, so a Boot app can use the same optional appender alongside the automatic servlet filter and JDBC data-source wrapping. Define your `LogBrewClient` bean once for `LogBrewSpringBootAutoConfiguration` and `LogBrewSpringBootJdbcAutoConfiguration`, then attach the appender from code you own, usually after your client and transport are configured:
 
 ```java
 import co.logbrew.sdk.LogBrewClient;
@@ -537,6 +549,7 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when OpenTelemetry API jars are already present.
 - `LogBrewServletFilter` activates request-local trace context for Jakarta Servlet/Spring Boot handlers and emits one request span plus one duration metric without hidden Java-agent instrumentation.
 - `LogBrewSpringBootAutoConfiguration` registers that filter only when Spring Boot, Jakarta Servlet, and an app-owned `LogBrewClient` bean are present.
+- `LogBrewSpringBootJdbcAutoConfiguration` wraps app-owned Spring `DataSource` beans with privacy-bounded JDBC statement spans when Spring Boot, `DataSource`, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans with bounded `SpanEventSummary` markers, without adding driver dependencies or automatic client patching.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
@@ -546,5 +559,5 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `LogBrewJulHandler` queues standard `java.util.logging` records without mutating global logging configuration.
 - `LogBrewLogbackAppender` queues app-owned SLF4J/Logback records, including MDC and fluent key/value metadata, without changing global logger setup.
 - `ProductTimeline` queues app-owned product and network action timelines without automatic visual replay, HTTP client patching, payload capture, or header capture.
-- Spring Boot apps can attach `LogBrewLogbackAppender` from app-owned configuration while request tracing auto-registers from the same app-owned client bean.
+- Spring Boot apps can attach `LogBrewLogbackAppender` from app-owned configuration while request tracing and JDBC data-source wrapping auto-register from the same app-owned client bean.
 - `SdkException` exposes a stable `code()` and `detailMessage()` for user-facing failure handling.

@@ -70,13 +70,21 @@ fetch_java_spring_boot_deps() {
   fetch_maven_jar \
     "org/springframework/spring-beans/$spring_framework_version/spring-beans-$spring_framework_version" \
     "$deps_dir"
+  fetch_maven_jar \
+    "commons-logging/commons-logging/1.3.5/commons-logging-1.3.5" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "org/jspecify/jspecify/1.0.0/jspecify-1.0.0" \
+    "$deps_dir"
 
-  printf '%s:%s:%s:%s:%s\n' \
+  printf '%s:%s:%s:%s:%s:%s:%s\n' \
     "$deps_dir/spring-boot-$spring_boot_version.jar" \
     "$deps_dir/spring-boot-autoconfigure-$spring_boot_version.jar" \
     "$deps_dir/spring-core-$spring_framework_version.jar" \
     "$deps_dir/spring-context-$spring_framework_version.jar" \
-    "$deps_dir/spring-beans-$spring_framework_version.jar"
+    "$deps_dir/spring-beans-$spring_framework_version.jar" \
+    "$deps_dir/commons-logging-1.3.5.jar" \
+    "$deps_dir/jspecify-1.0.0.jar"
 }
 
 fetch_maven_jar() {

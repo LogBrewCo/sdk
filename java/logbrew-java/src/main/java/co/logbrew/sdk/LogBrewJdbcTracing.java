@@ -89,10 +89,17 @@ public final class LogBrewJdbcTracing {
         Objects.requireNonNull(client, "client");
         ConnectionConfig safeConfig = config == null ? ConnectionConfig.create() : config;
         return DataSource.class.cast(Proxy.newProxyInstance(
-            DataSource.class.getClassLoader(),
-            new Class<?>[] {DataSource.class},
+            LogBrewJdbcTracing.class.getClassLoader(),
+            new Class<?>[] {InstrumentedDataSource.class},
             new DataSourceHandler(dataSource, client, safeConfig)
         ));
+    }
+
+    static boolean isInstrumentedDataSource(Object value) {
+        return value instanceof InstrumentedDataSource;
+    }
+
+    private interface InstrumentedDataSource extends DataSource {
     }
 
     private static final class DataSourceHandler implements InvocationHandler {

@@ -1,1 +1,2 @@
 co.logbrew.sdk.LogBrewSpringBootAutoConfiguration
+co.logbrew.sdk.LogBrewSpringBootJdbcAutoConfiguration

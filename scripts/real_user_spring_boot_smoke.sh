@@ -114,12 +114,19 @@ import ch.qos.logback.classic.LoggerContext;
 import co.logbrew.sdk.LogBrewClient;
 import co.logbrew.sdk.LogBrewLogbackAppender;
 import co.logbrew.sdk.RecordingTransport;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import javax.sql.DataSource;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.boot.CommandLineRunner;
@@ -148,30 +155,34 @@ public class Main implements CommandLineRunner {
         this.environment = environment;
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         SpringApplication app = new SpringApplication(Main.class);
         app.setWebApplicationType(WebApplicationType.SERVLET);
-        app.setDefaultProperties(Map.of(
-            "spring.application.name", "checkout-service",
-            "spring.main.banner-mode", "off",
-            "logging.level.root", "error",
-            "server.address", "127.0.0.1",
-            "server.port", "0",
-            "server.error.include-message", "always",
-            "server.error.include-exception", "true"
-        ));
+        app.setDefaultProperties(defaultProperties());
         ConfigurableApplicationContext context = app.run(args);
+        require(
+            context.containsBean("logBrewJdbcDataSourcePostProcessor"),
+            "Spring Boot JDBC auto-configuration registers DataSource post-processor"
+        );
+        require(
+            context.getBean(DataSource.class).toString().contains("LogBrewJdbcTracing"),
+            "Spring Boot JDBC auto-configuration wraps the DataSource bean"
+        );
         context.close();
 
         String body = TRANSPORT.lastBody().orElseThrow(() -> new AssertionError("expected LogBrew batch"));
+        System.out.println(body);
         require(CLIENT.pendingEvents() == 0, "Spring Boot appender stop flush clears queue");
         require(TRANSPORT.sentBodies().size() == 1, "Spring Boot appender sends one batch");
         require(occurrences(body, "\"type\": \"log\"") == 3, "Spring Boot appender captures three logs");
-        require(occurrences(body, "\"type\": \"span\"") == 1, "Spring Boot servlet filter captures one span");
+        require(occurrences(body, "\"type\": \"span\"") == 4, "Spring Boot captures request and JDBC spans");
         require(occurrences(body, "\"type\": \"metric\"") == 1, "Spring Boot servlet filter captures one metric");
         require(body.contains("\"logger\": \"app.checkout\""), "captures app logger");
         require(body.contains("\"source\": \"logback\""), "records Logback source");
         require(body.contains("\"source\": \"jakarta-servlet\""), "records servlet source");
+        require(body.contains("\"source\": \"jdbc.connection\""), "records JDBC connection source");
+        require(body.contains("\"source\": \"jdbc.statement\""), "records JDBC statement source");
+        require(body.contains("\"source\": \"jdbc.transaction\""), "records JDBC transaction source");
         require(body.contains("\"springApplicationName\": \"checkout-service\""), "captures Spring application name");
         require(body.contains("\"mdc.traceId\": \"trace_123\""), "captures MDC trace id");
         require(body.contains("\"kv.cartId\": 42"), "captures SLF4J key value pair");
@@ -180,7 +191,12 @@ public class Main implements CommandLineRunner {
         require(body.contains("\"level\": \"error\""), "maps error level");
         require(body.contains("\"exceptionType\": \"IllegalStateException\""), "captures exception type");
         require(body.contains("\"name\": \"POST /checkout/{cartId}\""), "uses Spring route template for request span");
+        require(body.contains("\"name\": \"jdbc:CONNECT\""), "auto-configured JDBC acquisition span");
+        require(body.contains("\"name\": \"jdbc:SELECT\""), "auto-configured JDBC statement span");
+        require(body.contains("\"name\": \"jdbc:COMMIT\""), "auto-configured JDBC transaction span");
         require(body.contains("\"name\": \"http.server.duration\""), "captures request duration metric");
+        require(body.contains("\"dbSystem\": \"postgresql\""), "records configured JDBC system");
+        require(body.contains("\"dbName\": \"orders\""), "records configured JDBC database name");
         require(body.contains("\"routeTemplate\": \"/checkout/{cartId}\""), "records route template metadata");
         require(body.contains("\"routeSource\": \"spring_best_matching_pattern\""), "records Spring route source");
         require(body.contains("\"statusCode\": 202"), "captures HTTP status");
@@ -189,9 +205,13 @@ public class Main implements CommandLineRunner {
         require(!body.contains("checkout/42"), "omits raw high-cardinality request path");
         require(!body.contains("debug=hidden"), "omits query string");
         require(!body.contains("traceparent"), "omits raw propagation header");
+        require(!body.contains("synthetic_column"), "omits raw JDBC query column");
+        require(!body.contains("synthetic_value"), "omits raw JDBC query literal");
+        require(!body.contains("jdbc_user_fixture"), "omits JDBC login argument");
+        require(!body.contains("jdbc_pass_fixture"), "omits JDBC second login argument");
+        require(!body.contains("checkoutDataSource"), "omits Spring data-source bean name");
         require(!body.contains("logbackStackTrace"), "omits stack text by default");
-        System.out.println(body);
-        System.err.println("{\"ok\":true,\"springBootVersion\":\"" + SpringBootVersion.getVersion() + "\",\"events\":5}");
+        System.err.println("{\"ok\":true,\"springBootVersion\":\"" + SpringBootVersion.getVersion() + "\",\"events\":8}");
     }
 
     @Override
@@ -224,6 +244,27 @@ public class Main implements CommandLineRunner {
     @Bean
     LogBrewClient logBrewClient() {
         return CLIENT;
+    }
+
+    @Bean
+    DataSource checkoutDataSource() {
+        return fakeDataSource();
+    }
+
+    private static Map<String, Object> defaultProperties() {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("spring.application.name", "checkout-service");
+        values.put("spring.main.banner-mode", "off");
+        values.put("logging.level.root", "error");
+        values.put("server.address", "127.0.0.1");
+        values.put("server.port", "0");
+        values.put("server.error.include-message", "always");
+        values.put("server.error.include-exception", "true");
+        values.put("logbrew.jdbc.trace-connection-acquisition", "true");
+        values.put("logbrew.jdbc.trace-transactions", "true");
+        values.put("logbrew.jdbc.db-system", "postgresql");
+        values.put("logbrew.jdbc.db-name", "orders");
+        return values;
     }
 
     private void exerciseRequest() throws Exception {
@@ -277,15 +318,116 @@ public class Main implements CommandLineRunner {
 
     @RestController
     static final class CheckoutController {
+        private final DataSource dataSource;
+
+        CheckoutController(DataSource dataSource) {
+            this.dataSource = dataSource;
+        }
+
         @PostMapping("/checkout/{cartId}")
-        ResponseEntity<String> checkout(@PathVariable("cartId") String cartId) {
+        ResponseEntity<String> checkout(@PathVariable("cartId") String cartId) throws Exception {
             require(!cartId.isEmpty(), "Spring path variable is available to app code");
+            require(
+                dataSource.toString().contains("LogBrewJdbcTracing"),
+                "Spring controller receives wrapped DataSource"
+            );
+            Connection connection = dataSource.getConnection("jdbc_user_fixture", "jdbc_pass_fixture");
+            connection
+                .createStatement()
+                .executeQuery("SELECT synthetic_column FROM orders WHERE lookup_key = 'synthetic_value'");
+            connection.commit();
+            require(CLIENT.previewJson().contains("jdbc:SELECT"), "Spring controller queues JDBC spans");
             logbackLogger("app.checkout")
                 .atInfo()
                 .addKeyValue("routeVerified", Boolean.TRUE)
                 .log("spring boot checkout request");
             return ResponseEntity.accepted().body("accepted");
         }
+    }
+
+    private static DataSource fakeDataSource() {
+        return proxy(DataSource.class, (proxy, method, args) -> {
+            if ("getConnection".equals(method.getName())) {
+                return fakeConnection();
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static Connection fakeConnection() {
+        return proxy(Connection.class, (proxy, method, args) -> {
+            if ("createStatement".equals(method.getName())) {
+                return fakeStatement();
+            }
+            if ("commit".equals(method.getName())) {
+                return null;
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static Statement fakeStatement() {
+        return proxy(Statement.class, (proxy, method, args) -> {
+            if (method.getName().startsWith("execute")) {
+                return fakeResultSet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+    }
+
+    private static ResultSet fakeResultSet() {
+        return proxy(ResultSet.class, (proxy, method, args) -> defaultValue(method.getReturnType()));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T proxy(Class<?> interfaceType, InvocationHandler handler) {
+        return (T) Proxy.newProxyInstance(
+            interfaceType.getClassLoader(),
+            new Class<?>[] {interfaceType},
+            (proxy, method, args) -> {
+                if ("toString".equals(method.getName()) && method.getParameterCount() == 0) {
+                    return interfaceType.getSimpleName() + "Proxy";
+                }
+                if ("hashCode".equals(method.getName()) && method.getParameterCount() == 0) {
+                    return Integer.valueOf(System.identityHashCode(proxy));
+                }
+                if ("equals".equals(method.getName()) && method.getParameterCount() == 1) {
+                    return Boolean.valueOf(proxy == args[0]);
+                }
+                return handler.invoke(proxy, method, args == null ? new Object[0] : args);
+            }
+        );
+    }
+
+    private static Object defaultValue(Class<?> type) {
+        if (type == void.class) {
+            return null;
+        }
+        if (type == boolean.class) {
+            return Boolean.FALSE;
+        }
+        if (type == int.class) {
+            return Integer.valueOf(0);
+        }
+        if (type == long.class) {
+            return Long.valueOf(0L);
+        }
+        if (type == double.class) {
+            return Double.valueOf(0.0);
+        }
+        if (type == float.class) {
+            return Float.valueOf(0.0f);
+        }
+        if (type == short.class) {
+            return Short.valueOf((short) 0);
+        }
+        if (type == byte.class) {
+            return Byte.valueOf((byte) 0);
+        }
+        if (type == char.class) {
+            return Character.valueOf('\0');
+        }
+        return null;
     }
 }
 JAVA
@@ -317,7 +459,9 @@ grep -q '"kv.cartId": 42' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"name": "POST /checkout/{cartId}"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"routeSource": "spring_best_matching_pattern"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"parentSpanId": "00f067aa0ba902b7"' "$tmp_dir/spring-boot.stdout.json"
+grep -q '"source": "jdbc.statement"' "$tmp_dir/spring-boot.stdout.json"
+grep -q '"name": "jdbc:SELECT"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"ok":true' "$tmp_dir/spring-boot.stderr.json"
-grep -q '"events":5' "$tmp_dir/spring-boot.stderr.json"
+grep -q '"events":8' "$tmp_dir/spring-boot.stderr.json"
 
 echo "spring boot real-user smoke passed with spring-boot@$spring_boot_version"
