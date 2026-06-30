@@ -41,7 +41,7 @@ The generic implementation avoids Kafka/JMS/Rabbit/AMQP dependencies, Java agent
 
 LogBrew Java now also adds `LogBrewSpringKafkaTracing.producerSend(...)` and `recordInterceptor(...)` for apps that already use Spring Kafka:
 
-- Apps call `producerSend(...)` with their own `KafkaOperations` and `ProducerRecord`; the helper clones record headers, replaces exactly one W3C `traceparent`, sends through the app-owned operations object with the child trace active, returns the app-owned future, and emits one `spring.kafka.produce:<topic>` span when that future completes.
+- Apps call `producerSend(...)` with their own `KafkaOperations` and `ProducerRecord`; the helper clones record headers, replaces exactly one W3C `traceparent`, sends through the app-owned operations object with the child trace active, returns the app-owned future or a failed future for immediate send failure, and emits one `spring.kafka.produce:<topic>` span when that future completes or the immediate failure is observed.
 - Apps register the returned `RecordInterceptor` with their own listener container factory.
 - The consumer helper continues one incoming W3C `traceparent`, makes the child trace active while listener code runs, and emits one `spring.kafka.process:<topic>` span on `success(...)`, `failure(...)`, or Spring Kafka thread-state clear.
 - It derives primitive non-negative consumer `timeInQueueMs` from the Kafka record timestamp when available.

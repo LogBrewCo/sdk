@@ -35,8 +35,9 @@
   raw propagation metadata, receipt/message IDs, baggage, tracestate, exception
   messages/stacks, and support-ticket creation. The Spring Kafka helper injects
   one outgoing `traceparent` by cloning an app-owned `ProducerRecord` and sending
-  through app-owned `KafkaOperations`, returns the app-owned future, records one
-  sanitized `spring.kafka.produce:<topic>` span on completion, continues one
+  through app-owned `KafkaOperations`, returns the app-owned future or a failed
+  future for immediate send failure, records one sanitized
+  `spring.kafka.produce:<topic>` span on completion or immediate failure, continues one
   incoming `traceparent`, keeps child trace context active during producer send
   and listener work, emits one sanitized `spring.kafka.process:<topic>` span on
   success/failure or thread-state clear, derives primitive consumer
