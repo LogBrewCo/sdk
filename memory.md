@@ -1,5 +1,40 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-06-30: .NET ADO.NET DbCommand rich-trace gap reduced after source
+  reads from Sentry .NET
+  `getsentry/sentry-dotnet@951d98f789ec6794a1bbd82149d900f06fde0cfa`
+  (`SentryQueryPerformanceListener`, `SentryCommandInterceptor`,
+  `DbInterceptionIntegration`), Datadog .NET
+  `DataDog/dd-trace-dotnet@f0fbab0b733ead08b8c37f7ee550ede7a7f9cd60`
+  (`DbScopeFactory`, `CommandExecuteNonQueryIntegration`,
+  `CommandExecuteReaderIntegration`, `AdoNetConstants`), OpenTelemetry .NET
+  Contrib `open-telemetry/opentelemetry-dotnet-contrib@7e8040413042ee663a9ef4dd04ab52d1a17ed77b`
+  (`SqlClientDiagnosticListener`, `SqlClientTraceInstrumentationOptions`,
+  `SqlTelemetryHelper`), and PostHog .NET
+  `PostHog/posthog-dotnet@8fad3ff84cda2c741f397e1152e58a7b96c98124`
+  (no comparable generic ADO.NET span helper found). LogBrew now adds
+  dependency-free `LogBrewDbCommandTelemetry` and
+  `LogBrewDbCommandOptions`: apps pass an owned `DbCommand`, call explicit
+  sync/async `ExecuteNonQuery`, `ExecuteScalar`, or `ExecuteReader` helpers,
+  and get one `database.command:<operation>` child span with active trace
+  correlation, optional caller metadata, non-query row counts, and type-only
+  exception events while preserving results, readers, cancellation values, and
+  provider exceptions. It avoids profilers, EF interceptors, provider
+  packages, connection wrappers, SQL parsing/comments, database-side
+  propagation, raw SQL, parameters, connection strings, data source, result
+  rows, exception messages, stacks, baggage, tracestate, and support-ticket
+  creation. Evidence: focused .NET package tests (`65 tests`), package gate
+  `bash scripts/check_dotnet_package.sh`, installed NuGet proof
+  `bash scripts/real_user_dotnet_smoke.sh`, markdown links, release metadata,
+  confidentiality scan, generated-artifact hygiene, diff checks, and manual
+  structural review passed before commit `76fbca75`. Follow-up CI
+  `28444675127` exposed a release-metadata fixture drift; the package checker
+  stayed strict and the test fixture now includes the DbCommand example.
+  Report: `docs/competitor-research/dotnet-dbcommand-tracing-2026-06-30.md`.
+  Remaining .NET gaps: EF/Core interceptors, profiler-free optional
+  framework packages, automatic outbound/cache/queue spans, richer semantic
+  conventions, low-noise grouping, baggage/tracestate, and OTel/exporter
+  interop.
 - 2026-06-30: Python Flask-Caching trace gap reduced after source reads from
   Sentry Python `getsentry/sentry-python@291739faa48285f2634b5c0935e8f45bf365164e`
   (`sentry_sdk/integrations/flask.py`,
