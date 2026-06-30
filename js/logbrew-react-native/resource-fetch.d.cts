@@ -37,6 +37,14 @@ export type ReactNativeResourceFetchMetadataContext<TInput = unknown, TInit = un
   readonly url: string;
 };
 
+export type ReactNativeGraphQLMetadataFactoryOptions<TInput = unknown, TInit = unknown, TResponse = unknown> = {
+  metadataFactory?: (context: ReactNativeResourceFetchMetadataContext<TInput, TInit, TResponse>) => Metadata | undefined;
+};
+
+export declare function createReactNativeGraphQLMetadataFactory<TInput = unknown, TInit = unknown, TResponse = unknown>(
+  options?: ReactNativeGraphQLMetadataFactoryOptions<TInput, TInit, TResponse>
+): (context: ReactNativeResourceFetchMetadataContext<TInput, TInit, TResponse>) => Metadata;
+
 export declare function createReactNativeResourceFetch<TInput = unknown, TInit = unknown, TResponse = unknown>(
   client: LogBrewClient,
   options?: ReactNativeResourceFetchOptions<TInput, TInit, TResponse>

@@ -19,6 +19,10 @@ const SENSITIVE_METADATA_FACTORY_KEY_RE = new RegExp([
   "sec\u0072et",
   "pass\u0077ord"
 ].join("|"), "u");
+const MAX_GRAPHQL_BODY_CHARS = 16_384;
+const MAX_GRAPHQL_OPERATION_NAME_CHARS = 128;
+const GRAPHQL_OPERATION_NAME_RE = /^[_A-Za-z][_0-9A-Za-z]*$/u;
+const GRAPHQL_OPERATION_RE = /^(query|mutation|subscription)\b(?:\s+([_A-Za-z][_0-9A-Za-z]*))?/u;
 
 function createReactNativeResourceFetch(client, {
   appState,
@@ -116,6 +120,20 @@ function createReactNativeResourceFetch(client, {
   };
 }
 
+function createReactNativeGraphQLMetadataFactory({
+  metadataFactory
+} = {}) {
+  if (metadataFactory !== undefined && typeof metadataFactory !== "function") {
+    throw new SdkError("configuration_error", "metadataFactory must be a function");
+  }
+  return function logBrewReactNativeGraphQLMetadata(context) {
+    return {
+      ...safeFactoryMetadata(typeof metadataFactory === "function" ? metadataFactory(context) : undefined),
+      ...graphqlMetadataFromContext(context)
+    };
+  };
+}
+
 function resourceMetadata(metadata, metadataFactory, context) {
   if (typeof metadataFactory !== "function") {
     return metadata;
@@ -144,6 +162,83 @@ function safeFactoryMetadata(candidate) {
 
 function isSensitiveMetadataKey(key) {
   return SENSITIVE_METADATA_FACTORY_KEY_RE.test(String(key).toLowerCase());
+}
+
+function graphqlMetadataFromContext(context) {
+  const payload = graphqlPayloadFromBody(requestBody(context));
+  if (!payload) {
+    return {};
+  }
+  const operation = graphqlOperationDetails(payload.query);
+  const operationName = safeGraphqlOperationName(payload.operationName) ?? operation.operationName;
+  const metadata = {};
+  if (operationName) {
+    metadata.graphqlOperationName = operationName;
+  }
+  if (operation.operationType) {
+    metadata.graphqlOperationType = operation.operationType;
+  }
+  return metadata;
+}
+
+function requestBody(context) {
+  const body = context?.init?.body ?? context?.input?.body;
+  if (typeof body === "string") {
+    return body;
+  }
+  if (body instanceof String) {
+    return body.toString();
+  }
+  return undefined;
+}
+
+function graphqlPayloadFromBody(body) {
+  if (typeof body !== "string" || body.length > MAX_GRAPHQL_BODY_CHARS) {
+    return undefined;
+  }
+  try {
+    const payload = JSON.parse(body);
+    return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function graphqlOperationDetails(query) {
+  if (typeof query !== "string" || query.length > MAX_GRAPHQL_BODY_CHARS) {
+    return {};
+  }
+  const source = query.trimStart();
+  if (source.startsWith("{")) {
+    return { operationType: "query" };
+  }
+  const match = GRAPHQL_OPERATION_RE.exec(stripLeadingGraphQLComments(source));
+  if (!match) {
+    return {};
+  }
+  return {
+    operationName: safeGraphqlOperationName(match[2]),
+    operationType: match[1]
+  };
+}
+
+function stripLeadingGraphQLComments(source) {
+  return source.replace(/^(?:#[^\n\r]*(?:\r?\n|$)\s*)+/u, "").trimStart();
+}
+
+function safeGraphqlOperationName(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const name = value.trim();
+  if (
+    name.length === 0 ||
+    name.length > MAX_GRAPHQL_OPERATION_NAME_CHARS ||
+    !GRAPHQL_OPERATION_NAME_RE.test(name)
+  ) {
+    return undefined;
+  }
+  return name;
 }
 
 function requestMethod(input, init) {
@@ -199,5 +294,6 @@ function errorName(error) {
 }
 
 module.exports = {
+  createReactNativeGraphQLMetadataFactory,
   createReactNativeResourceFetch
 };

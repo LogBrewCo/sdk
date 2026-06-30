@@ -3,7 +3,10 @@ import {
   createLogBrewReactNativeClient,
   createReactNativeTraceContext
 } from "@logbrew/react-native";
-import { createReactNativeResourceFetch } from "@logbrew/react-native/resource-fetch";
+import {
+  createReactNativeGraphQLMetadataFactory,
+  createReactNativeResourceFetch
+} from "@logbrew/react-native/resource-fetch";
 
 const platform = {
   OS: "ios",
@@ -38,17 +41,7 @@ const resourceFetch = createReactNativeResourceFetch(client, {
     return { status: 202 };
   },
   metadata: { flow: "checkout", nested: { dropped: true } },
-  metadataFactory({ routeTemplate }) {
-    if (routeTemplate === "/api/checkout") {
-      return {
-        graphqlOperationName: "CheckoutSubmit",
-        graphqlOperationType: "mutation",
-        graphqlVariables: { dropped: true },
-        requestBody: "dropped"
-      };
-    }
-    return undefined;
-  },
+  metadataFactory: createReactNativeGraphQLMetadataFactory(),
   now: () => timestamps.shift(),
   nowMs: () => times.shift(),
   platform,
@@ -61,7 +54,11 @@ const resourceFetch = createReactNativeResourceFetch(client, {
 
 await resourceFetch("https://api.example.test/api/checkout?email=dev@example.test", {
   method: "POST",
-  headers: { accept: "application/json" }
+  headers: { accept: "application/json" },
+  body: JSON.stringify({
+    query: "mutation CheckoutSubmit($email: String!) { checkout(email: $email) { id } }",
+    variables: { email: "dev@example.test" }
+  })
 });
 try {
   await resourceFetch("https://cdn.example.test/api/fail?debug=hidden", {
@@ -97,6 +94,9 @@ if (
   success.metadata.nested !== undefined
 ) {
   throw new Error(`unexpected success resource span: ${JSON.stringify(success)}`);
+}
+if (JSON.stringify(events).includes("dev@example.test") || JSON.stringify(events).includes("checkout(email")) {
+  throw new Error("GraphQL resource span leaked request body content");
 }
 const failure = events[1].attributes;
 if (

@@ -276,32 +276,32 @@ captureReactNativeResourceSpan(client, {
 For app-owned fetch calls where you want the resource span and outbound `traceparent` in one place, use the explicit resource-fetch subpath:
 
 ```js
-import { createReactNativeResourceFetch } from "@logbrew/react-native/resource-fetch";
+import {
+  createReactNativeGraphQLMetadataFactory,
+  createReactNativeResourceFetch
+} from "@logbrew/react-native/resource-fetch";
 
 const resourceFetch = createReactNativeResourceFetch(client, {
   trace,
   platform: Platform,
   appState: AppState,
   screen: "Checkout",
-  metadataFactory({ routeTemplate }) {
-    if (routeTemplate === "/graphql") {
-      return {
-        graphqlOperationName: "CheckoutSubmit",
-        graphqlOperationType: "mutation"
-      };
-    }
-    return undefined;
-  },
+  metadataFactory: createReactNativeGraphQLMetadataFactory(),
   tracePropagationTargets: ["https://api.example.com/"]
 });
 
 await resourceFetch("https://api.example.com/graphql?email=hidden", {
   method: "POST",
-  headers: { accept: "application/json" }
+  headers: { accept: "application/json" },
+  body: JSON.stringify({
+    query: "mutation CheckoutSubmit($email: String!) { checkout(email: $email) { id } }",
+    variables: { email: "hidden@example.com" }
+  })
 });
 ```
 
-`createReactNativeResourceFetch()` wraps the fetch function your app supplies, or the runtime `fetch` when available. It records status, method, duration, sanitized route template, screen, session, primitive metadata, and trace correlation. `metadataFactory` is called after each fetch completes or fails so apps can add low-cardinality request metadata such as `graphqlOperationName` or `graphqlOperationType` without LogBrew parsing GraphQL payloads. Metadata returned from the factory keeps only primitive values and drops sensitive request fields. It does not patch global `fetch` or XHR, inspect request or response bodies, capture arbitrary headers, or attach `traceparent` outside `tracePropagationTargets`. Pass `trace` explicitly after `await` boundaries or build the wrapper from provider/hook state so async resource spans stay correlated.
+`createReactNativeResourceFetch()` wraps the fetch function your app supplies, or the runtime `fetch` when available. It records status, method, duration, sanitized route template, screen, session, primitive metadata, and trace correlation. `metadataFactory` is called after each fetch completes or fails so apps can add low-cardinality request metadata such as `graphqlOperationName` or `graphqlOperationType`; by default LogBrew does not parse GraphQL payloads. Metadata returned from the factory keeps only primitive values and drops sensitive request fields. It does not patch global `fetch` or XHR, inspect request or response bodies by default, capture arbitrary headers, or attach `traceparent` outside `tracePropagationTargets`. Pass `trace` explicitly after `await` boundaries or build the wrapper from provider/hook state so async resource spans stay correlated.
+`createReactNativeGraphQLMetadataFactory()` is an explicit helper for GraphQL requests your app already owns. It reads only a JSON string request body to derive `graphqlOperationName` and `graphqlOperationType`, drops variables/query text/body fields, ignores large or non-JSON bodies, and can compose an existing primitive metadata factory. Do not use it on unrelated endpoints.
 
 ## Native Bridge Scope Sync
 
@@ -378,7 +378,7 @@ await fetch("https://api.example.com/checkout", { method: "POST" });
 instrumentation.remove();
 ```
 
-With `instrumentGlobalFetch: true`, LogBrew wraps the current `globalThis.fetch`, records the same sanitized resource spans as `resourceFetch`, and puts the original function back only if LogBrew still owns the `fetch` slot. Outbound `traceparent` remains target-scoped; LogBrew still does not patch XHR, read request or response bodies, copy arbitrary headers, persist offline requests, capture full URLs with query/hash text, or inspect GraphQL payloads.
+With `instrumentGlobalFetch: true`, LogBrew wraps the current `globalThis.fetch`, records the same sanitized resource spans as `resourceFetch`, and puts the original function back only if LogBrew still owns the `fetch` slot. Outbound `traceparent` remains target-scoped; LogBrew still does not patch XHR, read request or response bodies by default, copy arbitrary headers, persist offline requests, capture full URLs with query/hash text, or inspect GraphQL payloads unless you explicitly pass the GraphQL metadata factory above.
 
 Apps with older libraries that still use `XMLHttpRequest` can opt into reversible XHR instrumentation separately:
 

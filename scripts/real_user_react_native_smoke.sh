@@ -84,6 +84,7 @@ grep -q 'getActiveLogBrewTrace' "$tmp_dir/native-readme.md"
 grep -q 'createReactNavigationSpanListener' "$tmp_dir/native-readme.md"
 grep -q 'createAppStateLifecycleSpanListener' "$tmp_dir/native-readme.md"
 grep -q 'captureReactNativeResourceSpan' "$tmp_dir/native-readme.md"
+grep -q 'createReactNativeGraphQLMetadataFactory' "$tmp_dir/native-readme.md"
 grep -q 'createReactNativeResourceFetch' "$tmp_dir/native-readme.md"
 grep -q 'createLogBrewReactNativeInstrumentation' "$tmp_dir/native-readme.md"
 grep -q 'withLogBrewNativeBridgeScope' "$tmp_dir/native-readme.md"
@@ -152,7 +153,7 @@ node -e 'const native = require("@logbrew/react-native"); if (typeof native.crea
 node -e 'const instrumentation = require("@logbrew/react-native/instrumentation"); if (typeof instrumentation.createLogBrewReactNativeInstrumentation !== "function" || typeof instrumentation.default !== "object") process.exit(1)'
 node -e 'const lifecycle = require("@logbrew/react-native/lifecycle"); if (typeof lifecycle.createAppStateLifecycleSpanListener !== "function" || typeof lifecycle.captureReactNativeLifecycleSpan !== "function" || typeof lifecycle.createReactNativeLifecycleSpanEvent !== "function") process.exit(1)'
 node -e 'const bridge = require("@logbrew/react-native/native-bridge"); if (typeof bridge.createLogBrewNativeBridgeScope !== "function" || typeof bridge.syncLogBrewNativeBridgeScope !== "function" || typeof bridge.clearLogBrewNativeBridgeScope !== "function" || typeof bridge.withLogBrewNativeBridgeScope !== "function" || typeof bridge.default !== "object") process.exit(1)'
-node -e 'const nativeResourceFetch = require("@logbrew/react-native/resource-fetch"); if (typeof nativeResourceFetch.createReactNativeResourceFetch !== "function") process.exit(1)'
+node -e 'const nativeResourceFetch = require("@logbrew/react-native/resource-fetch"); if (typeof nativeResourceFetch.createReactNativeGraphQLMetadataFactory !== "function" || typeof nativeResourceFetch.createReactNativeResourceFetch !== "function") process.exit(1)'
 
 cat > smoke.mjs <<'EOF'
 import React from "react";
@@ -185,7 +186,10 @@ import {
 import {
   createAppStateLifecycleSpanListener
 } from "@logbrew/react-native/lifecycle";
-import { createReactNativeResourceFetch } from "@logbrew/react-native/resource-fetch";
+import {
+  createReactNativeGraphQLMetadataFactory,
+  createReactNativeResourceFetch
+} from "@logbrew/react-native/resource-fetch";
 
 const platform = {
   OS: "ios",
@@ -478,6 +482,7 @@ const resourceFetch = createReactNativeResourceFetch(resourceFetchClient, {
     return { status: 202 };
   },
   metadata: { flow: "checkout", nested: { dropped: true } },
+  metadataFactory: createReactNativeGraphQLMetadataFactory(),
   now: () => resourceFetchTimestamps.shift(),
   nowMs: () => resourceFetchTimes.shift(),
   platform,
@@ -489,7 +494,11 @@ const resourceFetch = createReactNativeResourceFetch(resourceFetchClient, {
 });
 await resourceFetch("https://api.example.test/api/checkout?email=dev@example.test", {
   method: "POST",
-  headers: { accept: "application/json" }
+  headers: { accept: "application/json" },
+  body: JSON.stringify({
+    query: "mutation CheckoutSubmit($email: String!) { checkout(email: $email) { id } }",
+    variables: { email: "dev@example.test" }
+  })
 });
 try {
   await resourceFetch("https://cdn.example.test/api/fail?debug=hidden", {
@@ -517,10 +526,15 @@ if (
   resourceFetchSuccess.status !== "ok" ||
   resourceFetchSuccess.durationMs !== 167 ||
   resourceFetchSuccess.metadata.routeTemplate !== "/api/checkout" ||
+  resourceFetchSuccess.metadata.graphqlOperationName !== "CheckoutSubmit" ||
+  resourceFetchSuccess.metadata.graphqlOperationType !== "mutation" ||
   resourceFetchSuccess.metadata.traceId !== providerTrace.traceId ||
   resourceFetchSuccess.metadata.nested !== undefined
 ) {
   throw new Error(`unexpected resource fetch success span: ${JSON.stringify(resourceFetchSuccess)}`);
+}
+if (JSON.stringify(resourceFetchEvents).includes("dev@example.test") || JSON.stringify(resourceFetchEvents).includes("checkout(email")) {
+  throw new Error("GraphQL resource fetch metadata leaked request body content");
 }
 if (
   resourceFetchFailure.name !== "GET /api/fail" ||
@@ -777,7 +791,10 @@ import {
   type LogBrewNativeBridgeLike,
   type LogBrewNativeBridgeScope
 } from "@logbrew/react-native/native-bridge";
-import { createReactNativeResourceFetch } from "@logbrew/react-native/resource-fetch";
+import {
+  createReactNativeGraphQLMetadataFactory,
+  createReactNativeResourceFetch
+} from "@logbrew/react-native/resource-fetch";
 
 const platform: ReactNativePlatformLike = {
   OS: "android",
@@ -846,10 +863,14 @@ void tracedFetch("/mobile-api/ping");
 void createTraceparentFetch({ fetchImpl: async () => ({ status: 204 }), trace, tracePropagationTargets: traceTargets })("/mobile-api/trace");
 const resourceFetch = createReactNativeResourceFetch(client, {
   fetchImpl: async () => ({ status: 202 }),
+  metadataFactory: createReactNativeGraphQLMetadataFactory(),
   trace,
   tracePropagationTargets: traceTargets
 });
-void resourceFetch("/mobile-api/resource", { method: "POST" });
+void resourceFetch("/mobile-api/resource", {
+  body: JSON.stringify({ query: "query TypedSmoke { viewer { id } }" }),
+  method: "POST"
+});
 class MockXMLHttpRequest {
   open(_method: string, _url: string) {}
   send(_body?: unknown) {}

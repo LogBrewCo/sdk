@@ -34,7 +34,8 @@ async function withInstalledPackage(callback) {
 
     const native = await import(pathToFileURL(path.join(packageDir, "index.js")));
     const instrumentation = await import(pathToFileURL(path.join(packageDir, "instrumentation.js")));
-    return await callback({ ...native, ...instrumentation });
+    const resourceFetch = await import(pathToFileURL(path.join(packageDir, "resource-fetch.js")));
+    return await callback({ ...native, ...instrumentation, ...resourceFetch });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -198,6 +199,52 @@ test("React Native resource fetch accepts per-request primitive metadata from a 
     assert.equal(events[0].attributes.metadata.requestBody, undefined);
     assert.equal(events[0].attributes.metadata.nested, undefined);
     assert.equal(JSON.stringify(events).includes("hidden@example.test"), false);
+  });
+});
+
+test("React Native GraphQL metadata factory extracts bounded operation data without retaining bodies", async () => {
+  await withInstalledPackage(async ({
+    createLogBrewReactNativeClient,
+    createLogBrewReactNativeInstrumentation,
+    createReactNativeGraphQLMetadataFactory,
+    createReactNativeTraceContext
+  }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+    const trace = makeTrace(createReactNativeTraceContext);
+    const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+      fetchImpl: async (input, init = {}) => ({ status: 200, input, init }),
+      metadata: { flow: "checkout" },
+      metadataFactory: createReactNativeGraphQLMetadataFactory(),
+      now: () => "2026-06-30T04:30:00Z",
+      nowMs: (() => {
+        const values = [1000, 1037];
+        return () => values.shift();
+      })(),
+      routeTemplateFactory: () => "/graphql",
+      trace,
+      tracePropagationTargets: ["https://api.example.test/"]
+    });
+
+    await instrumentation.resourceFetch("https://api.example.test/graphql?private=hidden", {
+      body: JSON.stringify({
+        query: "mutation CheckoutSubmit($email: String!) { checkout(email: $email) { id } }",
+        variables: { email: "hidden@example.test" }
+      }),
+      method: "POST"
+    });
+
+    const events = JSON.parse(client.previewJson()).events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0].attributes.name, "POST /graphql");
+    assert.equal(events[0].attributes.durationMs, 37);
+    assert.equal(events[0].attributes.metadata.flow, "checkout");
+    assert.equal(events[0].attributes.metadata.graphqlOperationName, "CheckoutSubmit");
+    assert.equal(events[0].attributes.metadata.graphqlOperationType, "mutation");
+    assert.equal(events[0].attributes.metadata.query, undefined);
+    assert.equal(events[0].attributes.metadata.variables, undefined);
+    assert.equal(events[0].attributes.metadata.body, undefined);
+    assert.equal(JSON.stringify(events).includes("hidden@example.test"), false);
+    assert.equal(JSON.stringify(events).includes("checkout(email"), false);
   });
 });
 

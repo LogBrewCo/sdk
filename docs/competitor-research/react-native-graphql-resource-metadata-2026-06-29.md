@@ -36,11 +36,19 @@ after success/failure with method, sanitized route template, status/duration,
 input/init, response, or error context. Only primitive return values are kept,
 and sensitive request-field keys are dropped.
 
+2026-06-30 follow-up: LogBrew now also exposes
+`createReactNativeGraphQLMetadataFactory()` from
+`@logbrew/react-native/resource-fetch`. Apps opt into this helper only for
+GraphQL fetches they own. It reads a JSON string request body only to derive
+`graphqlOperationName` and `graphqlOperationType`, ignores large/non-JSON
+bodies, composes an existing primitive metadata factory, and drops variables,
+query source, body fields, headers, baggage, tracestate, payloads, and
+response data from emitted metadata.
+
 This intentionally does not copy Datadog's Apollo link or OTel's GraphQL module
-patching. It does not parse GraphQL request content, capture variable values,
-capture query source, add baggage/tracestate, or inspect arbitrary headers. Apps that already
-know their operation can add low-cardinality metadata such as
-`graphqlOperationName` and `graphqlOperationType`.
+patching. It does not install Apollo/GraphQL dependencies, patch global
+fetch/XHR by default, capture variable values, capture query source, add
+baggage/tracestate, or inspect arbitrary headers.
 
 ## Remaining Gap
 
