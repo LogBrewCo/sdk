@@ -75,11 +75,21 @@ duration, trace IDs, and type-only errors. It avoids query text, variables,
 payloads, response data, arbitrary headers, cookies, error messages, stacks,
 baggage, tracestate, global fetch/XHR patching, and exporter ownership.
 
+2026-06-30 endpoint follow-up: `createReactNativeGraphQLMetadataFactory()` now
+accepts `endpoint` as a route template, query-stripped absolute URL, `RegExp`,
+predicate, or array of those. This mirrors Sentry's endpoint-matching shape in a
+lighter app-owned helper: LogBrew can be used with broader opt-in fetch/XHR
+instrumentation while parsing GraphQL JSON bodies only for configured endpoints.
+Route templates and URL paths are matched without query/hash text. The helper
+still does not install Apollo/GraphQL dependencies, patch modules by default,
+capture query source, variables, payloads, response data, headers, cookies,
+baggage, or tracestate.
+
 ## Remaining Gap
 
 Sentry and Datadog still have broader automatic mobile GraphQL/resource
 instrumentation, and OpenTelemetry remains stronger for server-side GraphQL
 module patching. LogBrew is now more privacy-bounded and lighter for app-owned
-Apollo Client use, but still lacks endpoint-wide automatic GraphQL detection,
-native symbolication, OTel baggage/tracestate, rich GraphQL resolver spans, and
-backend-hosted release artifact symbolication.
+Apollo Client use, but still lacks hidden automatic framework/module GraphQL
+instrumentation, native symbolication, OTel baggage/tracestate, rich GraphQL
+resolver spans, and backend-hosted release artifact symbolication.

@@ -148,6 +148,131 @@ test("React Native global fetch teardown does not clobber later wrappers", () =>
   });
 });
 
+test("React Native resource fetch records response size from Content-Length without reading bodies", async () => {
+  await withInstalledPackage(async ({
+    createLogBrewReactNativeClient,
+    createReactNativeResourceFetch,
+    createReactNativeTraceContext
+  }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+    const trace = makeTrace(createReactNativeTraceContext);
+    let cloneCalled = false;
+    let originalBodyRead = false;
+    const response = {
+      status: 200,
+      headers: {
+        get(name) {
+          return String(name).toLowerCase() === "content-length" ? "2048" : null;
+        }
+      },
+      clone() {
+        cloneCalled = true;
+        throw new Error("body clone should not be used when Content-Length exists");
+      },
+      async arrayBuffer() {
+        originalBodyRead = true;
+        throw new Error("original response body must not be read");
+      }
+    };
+    const resourceFetch = createReactNativeResourceFetch(client, {
+      fetchImpl: async () => response,
+      now: () => "2026-06-30T09:15:00Z",
+      nowMs: (() => {
+        const values = [1000, 1018];
+        return () => values.shift();
+      })(),
+      routeTemplateFactory: () => "/api/catalog",
+      trace
+    });
+
+    const returned = await resourceFetch("https://api.example.test/api/catalog?private=hidden", {
+      method: "GET"
+    });
+
+    assert.equal(returned, response);
+    assert.equal(cloneCalled, false);
+    assert.equal(originalBodyRead, false);
+    const events = JSON.parse(client.previewJson()).events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0].attributes.name, "GET /api/catalog");
+    assert.equal(events[0].attributes.metadata.responseSizeBytes, 2048);
+    assert.equal(JSON.stringify(events).includes("private=hidden"), false);
+  });
+});
+
+test("React Native global fetch can opt into cloned response body sizing", async () => {
+  await withInstalledPackage(async ({
+    createLogBrewReactNativeClient,
+    createLogBrewReactNativeInstrumentation,
+    createReactNativeTraceContext
+  }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+    const trace = makeTrace(createReactNativeTraceContext);
+    let clonedBodyRead = false;
+    let originalBodyRead = false;
+    const response = {
+      status: 200,
+      headers: {
+        get() {
+          return null;
+        }
+      },
+      clone() {
+        return {
+          async arrayBuffer() {
+            clonedBodyRead = true;
+            return new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
+          }
+        };
+      },
+      async arrayBuffer() {
+        originalBodyRead = true;
+        throw new Error("original response body must not be read");
+      }
+    };
+    const globalObject = {
+      async fetch() {
+        return response;
+      }
+    };
+    const factoryContexts = [];
+    const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+      globalObject,
+      instrumentGlobalFetch: true,
+      measureFetchResponseBodySize: true,
+      metadataFactory(context) {
+        factoryContexts.push(context);
+        return { responseSizeFromFactory: context.responseSizeBytes };
+      },
+      now: () => "2026-06-30T09:16:00Z",
+      nowMs: (() => {
+        const values = [2000, 2030];
+        return () => values.shift();
+      })(),
+      routeTemplateFactory: () => "/api/mobile-feed",
+      trace
+    });
+
+    const returned = await globalObject.fetch("https://api.example.test/api/mobile-feed?private=hidden", {
+      method: "GET"
+    });
+
+    assert.equal(returned, response);
+    assert.equal(clonedBodyRead, true);
+    assert.equal(originalBodyRead, false);
+    assert.equal(factoryContexts.length, 1);
+    assert.equal(factoryContexts[0].responseSizeBytes, 6);
+    const events = JSON.parse(client.previewJson()).events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0].attributes.name, "GET /api/mobile-feed");
+    assert.equal(events[0].attributes.metadata.responseSizeBytes, 6);
+    assert.equal(events[0].attributes.metadata.responseSizeFromFactory, 6);
+    assert.equal(JSON.stringify(events).includes("private=hidden"), false);
+
+    instrumentation.remove();
+  });
+});
+
 test("React Native resource fetch accepts per-request primitive metadata from a factory", async () => {
   await withInstalledPackage(async ({
     createLogBrewReactNativeClient,
@@ -245,6 +370,87 @@ test("React Native GraphQL metadata factory extracts bounded operation data with
     assert.equal(events[0].attributes.metadata.body, undefined);
     assert.equal(JSON.stringify(events).includes("hidden@example.test"), false);
     assert.equal(JSON.stringify(events).includes("checkout(email"), false);
+  });
+});
+
+test("React Native GraphQL metadata factory only parses configured endpoints", async () => {
+  await withInstalledPackage(async ({
+    createLogBrewReactNativeClient,
+    createLogBrewReactNativeInstrumentation,
+    createReactNativeGraphQLMetadataFactory
+  }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+    const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+      fetchImpl: async (input, init = {}) => ({ status: 200, input, init }),
+      metadataFactory: createReactNativeGraphQLMetadataFactory({
+        endpoint: "/graphql"
+      }),
+      now: () => "2026-06-30T07:25:00Z",
+      nowMs: (() => {
+        const values = [1000, 1005, 1010, 1025];
+        return () => values.shift();
+      })()
+    });
+
+    await instrumentation.resourceFetch("https://api.example.test/rest?private=hidden", {
+      body: JSON.stringify({
+        query: "mutation CheckoutSubmit { checkout { id } }",
+        variables: { email: "hidden@example.test" }
+      }),
+      method: "POST"
+    });
+    await instrumentation.resourceFetch("https://api.example.test/graphql?private=hidden", {
+      body: JSON.stringify({
+        query: "mutation CheckoutSubmit { checkout { id } }",
+        variables: { email: "hidden@example.test" }
+      }),
+      method: "POST"
+    });
+
+    const events = JSON.parse(client.previewJson()).events;
+    assert.equal(events.length, 2);
+    assert.equal(events[0].attributes.name, "POST /rest");
+    assert.equal(events[0].attributes.metadata.graphqlOperationName, undefined);
+    assert.equal(events[0].attributes.metadata.graphqlOperationType, undefined);
+    assert.equal(events[1].attributes.name, "POST /graphql");
+    assert.equal(events[1].attributes.metadata.graphqlOperationName, "CheckoutSubmit");
+    assert.equal(events[1].attributes.metadata.graphqlOperationType, "mutation");
+    assert.equal(JSON.stringify(events).includes("hidden@example.test"), false);
+  });
+});
+
+test("React Native GraphQL metadata factory reuses RegExp endpoint matchers safely", async () => {
+  await withInstalledPackage(async ({
+    createLogBrewReactNativeClient,
+    createLogBrewReactNativeInstrumentation,
+    createReactNativeGraphQLMetadataFactory
+  }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+    const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+      fetchImpl: async (input, init = {}) => ({ status: 200, input, init }),
+      metadataFactory: createReactNativeGraphQLMetadataFactory({
+        endpoint: /^\/graphql$/gu
+      }),
+      now: () => "2026-06-30T07:35:00Z",
+      nowMs: (() => {
+        const values = [2000, 2005, 2010, 2015];
+        return () => values.shift();
+      })()
+    });
+
+    for (let index = 0; index < 2; index += 1) {
+      await instrumentation.resourceFetch("https://api.example.test/graphql?private=hidden", {
+        body: JSON.stringify({
+          query: "query Viewer { viewer { id } }"
+        }),
+        method: "POST"
+      });
+    }
+
+    const events = JSON.parse(client.previewJson()).events;
+    assert.equal(events.length, 2);
+    assert.equal(events[0].attributes.metadata.graphqlOperationType, "query");
+    assert.equal(events[1].attributes.metadata.graphqlOperationType, "query");
   });
 });
 

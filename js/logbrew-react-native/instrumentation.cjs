@@ -28,6 +28,7 @@ function createLogBrewReactNativeInstrumentation(client, {
   instrumentGlobalFetch = false,
   instrumentGlobalXMLHttpRequest = false,
   logger,
+  measureFetchResponseBodySize = false,
   measureXhrResponseBodySize = false,
   metadata = {},
   metadataFactory,
@@ -94,6 +95,7 @@ function createLogBrewReactNativeInstrumentation(client, {
   const resourceFetch = createReactNativeResourceFetch(client, {
     appState,
     fetchImpl,
+    measureResponseBodySize: measureFetchResponseBodySize,
     metadata,
     metadataFactory,
     now,
@@ -114,6 +116,7 @@ function createLogBrewReactNativeInstrumentation(client, {
     globalFetch = instrumentGlobalFetch ? installGlobalFetchInstrumentation(client, {
       appState,
       globalObject,
+      measureFetchResponseBodySize,
       metadata,
       metadataFactory,
       now,
@@ -238,6 +241,7 @@ function removeConfiguredInstrumentation({ nativeBridge, removers }) {
 function installGlobalFetchInstrumentation(client, {
   appState,
   globalObject,
+  measureFetchResponseBodySize,
   metadata,
   metadataFactory,
   now,
@@ -262,6 +266,7 @@ function installGlobalFetchInstrumentation(client, {
   const globalResourceFetch = createReactNativeResourceFetch(client, {
     appState,
     fetchImpl: (input, init) => originalFetch.call(globalObject, input, init),
+    measureResponseBodySize: measureFetchResponseBodySize,
     metadata,
     metadataFactory,
     now,

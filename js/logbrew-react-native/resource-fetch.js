@@ -22,6 +22,7 @@ export function createReactNativeResourceFetch(client, {
   fetchImpl,
   metadata = {},
   metadataFactory,
+  measureResponseBodySize = false,
   now = () => new Date().toISOString(),
   nowMs = () => Date.now(),
   platform,
@@ -57,6 +58,7 @@ export function createReactNativeResourceFetch(client, {
       const response = await tracedFetch(input, init);
       const durationMs = elapsedMs(startedAtMs, nowMs);
       const statusCode = responseStatusCode(response);
+      const responseSizeBytes = await responseSizeBytesFromResponse(response, { measureResponseBodySize });
       captureReactNativeResourceSpan(client, {
         appState,
         durationMs,
@@ -66,6 +68,7 @@ export function createReactNativeResourceFetch(client, {
           input,
           method,
           response,
+          responseSizeBytes,
           routeTemplate: safeRouteTemplate,
           statusCode,
           url
@@ -75,6 +78,7 @@ export function createReactNativeResourceFetch(client, {
         routeTemplate: safeRouteTemplate,
         screen,
         sessionId,
+        responseSizeBytes,
         statusCode,
         timestamp,
         trace: activeTrace
@@ -114,17 +118,100 @@ export function createReactNativeResourceFetch(client, {
 }
 
 export function createReactNativeGraphQLMetadataFactory({
+  endpoint,
   metadataFactory
 } = {}) {
+  const endpointMatchers = normalizeGraphQLEndpointMatchers(endpoint);
   if (metadataFactory !== undefined && typeof metadataFactory !== "function") {
     throw new SdkError("configuration_error", "metadataFactory must be a function");
   }
   return function logBrewReactNativeGraphQLMetadata(context) {
+    const safeMetadata = safeReactNativeMetadataFactoryResult(typeof metadataFactory === "function" ? metadataFactory(context) : undefined);
+    if (endpointMatchers.length > 0 && !matchesGraphQLEndpoint(context, endpointMatchers)) {
+      return safeMetadata;
+    }
     return {
-      ...safeReactNativeMetadataFactoryResult(typeof metadataFactory === "function" ? metadataFactory(context) : undefined),
+      ...safeMetadata,
       ...graphqlMetadataFromContext(context)
     };
   };
+}
+
+function normalizeGraphQLEndpointMatchers(endpoint) {
+  if (endpoint === undefined) {
+    return [];
+  }
+  const endpoints = Array.isArray(endpoint) ? endpoint : [endpoint];
+  return endpoints.map((candidate) => {
+    if (typeof candidate === "string" || candidate instanceof String) {
+      const value = normalizeEndpointString(candidate.toString());
+      if (value === "") {
+        throw new SdkError("configuration_error", "GraphQL endpoint strings must not be empty");
+      }
+      return value;
+    }
+    if (candidate instanceof RegExp || typeof candidate === "function") {
+      return candidate;
+    }
+    throw new SdkError("configuration_error", "GraphQL endpoint must be a string, RegExp, function, or array");
+  });
+}
+
+function matchesGraphQLEndpoint(context, endpointMatchers) {
+  const candidates = graphqlEndpointCandidates(context);
+  return endpointMatchers.some((matcher) => {
+    if (typeof matcher === "string") {
+      return candidates.includes(matcher);
+    }
+    if (matcher instanceof RegExp) {
+      return candidates.some((candidate) => endpointRegExpMatches(matcher, candidate));
+    }
+    return matcher(context) === true;
+  });
+}
+
+function endpointRegExpMatches(matcher, candidate) {
+  matcher.lastIndex = 0;
+  const matched = matcher.test(candidate);
+  matcher.lastIndex = 0;
+  return matched;
+}
+
+function graphqlEndpointCandidates(context) {
+  const candidates = new Set();
+  if (typeof context?.routeTemplate === "string" && context.routeTemplate.trim() !== "") {
+    candidates.add(context.routeTemplate);
+  }
+  for (const candidate of endpointCandidatesFromUrl(context?.url)) {
+    candidates.add(candidate);
+  }
+  return Array.from(candidates);
+}
+
+function normalizeEndpointString(endpoint) {
+  const value = endpoint.trim();
+  const candidates = endpointCandidatesFromUrl(value);
+  return candidates[candidates.length - 1] ?? value.split(/[?#]/u, 1)[0];
+}
+
+function endpointCandidatesFromUrl(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return [];
+  }
+  const URLConstructor = globalThis.URL;
+  if (typeof URLConstructor === "function") {
+    try {
+      const parsedUrl = new URLConstructor(value, "https://logbrew.local");
+      const candidates = [parsedUrl.pathname];
+      if (/^https?:\/\//iu.test(value)) {
+        candidates.push(`${parsedUrl.origin}${parsedUrl.pathname}`);
+      }
+      return candidates;
+    } catch {
+      // Fall back to query/hash stripping below for non-standard request keys.
+    }
+  }
+  return [value.split(/[?#]/u, 1)[0]];
 }
 
 function graphqlMetadataFromContext(context) {
@@ -250,6 +337,121 @@ function elapsedMs(startedAtMs, nowMs) {
 
 function responseStatusCode(response) {
   return typeof response?.status === "number" && Number.isFinite(response.status) ? response.status : undefined;
+}
+
+async function responseSizeBytesFromResponse(response, { measureResponseBodySize = false } = {}) {
+  const contentLength = responseContentLengthBytes(response);
+  if (contentLength !== undefined) {
+    return contentLength;
+  }
+  return measureResponseBodySize ? clonedResponseBodySizeBytes(response) : undefined;
+}
+
+function responseContentLengthBytes(response) {
+  const header = responseHeader(response, "Content-Length");
+  const value = Number.parseInt(String(header ?? ""), 10);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function responseHeader(response, name) {
+  if (typeof response?.headers?.get !== "function") {
+    return undefined;
+  }
+  try {
+    return response.headers.get(name) ?? response.headers.get(name.toLowerCase()) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function clonedResponseBodySizeBytes(response) {
+  if (typeof response?.clone !== "function") {
+    return undefined;
+  }
+  let clonedResponse;
+  try {
+    clonedResponse = response.clone();
+  } catch {
+    return undefined;
+  }
+  return responseBodySizeBytes(clonedResponse);
+}
+
+async function responseBodySizeBytes(response) {
+  const arrayBufferSize = await responseArrayBufferSizeBytes(response);
+  if (arrayBufferSize !== undefined) {
+    return arrayBufferSize;
+  }
+  const blobSize = await responseBlobSizeBytes(response);
+  if (blobSize !== undefined) {
+    return blobSize;
+  }
+  return responseTextSizeBytes(response);
+}
+
+async function responseArrayBufferSizeBytes(response) {
+  if (typeof response?.arrayBuffer !== "function") {
+    return undefined;
+  }
+  try {
+    return binaryByteLength(await response.arrayBuffer());
+  } catch {
+    return undefined;
+  }
+}
+
+async function responseBlobSizeBytes(response) {
+  if (typeof response?.blob !== "function") {
+    return undefined;
+  }
+  try {
+    const blob = await response.blob();
+    return typeof blob?.size === "number" && Number.isFinite(blob.size) && blob.size >= 0 ? blob.size : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function responseTextSizeBytes(response) {
+  if (typeof response?.text !== "function") {
+    return undefined;
+  }
+  try {
+    const text = await response.text();
+    return typeof text === "string" || text instanceof String ? utf8ByteLength(text.toString()) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function binaryByteLength(value) {
+  if (typeof value?.byteLength === "number" && Number.isFinite(value.byteLength) && value.byteLength >= 0) {
+    return value.byteLength;
+  }
+  return undefined;
+}
+
+function utf8ByteLength(value) {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
 }
 
 function errorName(error) {

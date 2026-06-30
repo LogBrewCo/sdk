@@ -38,7 +38,14 @@ const resourceFetch = createReactNativeResourceFetch(client, {
     if (String(input).includes("/api/fail")) {
       throw new TypeError("network request failed");
     }
-    return { status: 202 };
+    return {
+      status: 202,
+      headers: {
+        get(name) {
+          return String(name).toLowerCase() === "content-length" ? "1536" : null;
+        }
+      }
+    };
   },
   metadata: { flow: "checkout", nested: { dropped: true } },
   metadataFactory: createReactNativeGraphQLMetadataFactory(),
@@ -88,6 +95,7 @@ if (
   success.metadata.routeTemplate !== "/api/checkout" ||
   success.metadata.graphqlOperationName !== "CheckoutSubmit" ||
   success.metadata.graphqlOperationType !== "mutation" ||
+  success.metadata.responseSizeBytes !== 1536 ||
   success.metadata.graphqlVariables !== undefined ||
   success.metadata.requestBody !== undefined ||
   success.metadata.traceId !== trace.traceId ||

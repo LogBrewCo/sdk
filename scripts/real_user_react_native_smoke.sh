@@ -89,6 +89,8 @@ grep -q 'captureReactNativeResourceSpan' "$tmp_dir/native-readme.md"
 grep -q 'createReactNativeGraphQLMetadataFactory' "$tmp_dir/native-readme.md"
 grep -q 'createReactNativeResourceFetch' "$tmp_dir/native-readme.md"
 grep -q 'createLogBrewReactNativeInstrumentation' "$tmp_dir/native-readme.md"
+grep -q 'measureResponseBodySize' "$tmp_dir/native-readme.md"
+grep -q 'measureFetchResponseBodySize' "$tmp_dir/native-readme.md"
 grep -q 'withLogBrewNativeBridgeScope' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/instrumentation' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/native-bridge' "$tmp_dir/native-readme.md"
@@ -486,7 +488,14 @@ const resourceFetch = createReactNativeResourceFetch(resourceFetchClient, {
     if (String(input).includes("/api/fail")) {
       throw new TypeError("network request failed");
     }
-    return { status: 202 };
+    return {
+      status: 202,
+      headers: {
+        get(name) {
+          return String(name).toLowerCase() === "content-length" ? "1536" : null;
+        }
+      }
+    };
   },
   metadata: { flow: "checkout", nested: { dropped: true } },
   metadataFactory: createReactNativeGraphQLMetadataFactory(),
@@ -535,6 +544,7 @@ if (
   resourceFetchSuccess.metadata.routeTemplate !== "/api/checkout" ||
   resourceFetchSuccess.metadata.graphqlOperationName !== "CheckoutSubmit" ||
   resourceFetchSuccess.metadata.graphqlOperationType !== "mutation" ||
+  resourceFetchSuccess.metadata.responseSizeBytes !== 1536 ||
   resourceFetchSuccess.metadata.traceId !== providerTrace.traceId ||
   resourceFetchSuccess.metadata.nested !== undefined
 ) {
@@ -552,6 +562,82 @@ if (
 ) {
   throw new Error(`unexpected resource fetch failure span: ${JSON.stringify(resourceFetchFailure)}`);
 }
+
+const globalFetchClient = createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-native-global-fetch-size-smoke",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+let globalFetchClonedBodyRead = false;
+let globalFetchOriginalBodyRead = false;
+const globalFetchResponse = {
+  status: 200,
+  headers: {
+    get() {
+      return null;
+    }
+  },
+  clone() {
+    return {
+      async arrayBuffer() {
+        globalFetchClonedBodyRead = true;
+        return new Uint8Array([1, 2, 3, 4, 5, 6]).buffer;
+      }
+    };
+  },
+  async arrayBuffer() {
+    globalFetchOriginalBodyRead = true;
+    throw new Error("original response body should not be read");
+  }
+};
+const globalFetchObject = {
+  async fetch() {
+    return globalFetchResponse;
+  }
+};
+const globalFetchInstrumentation = createLogBrewReactNativeInstrumentation(globalFetchClient, {
+  globalObject: globalFetchObject,
+  instrumentGlobalFetch: true,
+  measureFetchResponseBodySize: true,
+  metadataFactory(context) {
+    return { responseSizeFromFactory: context.responseSizeBytes };
+  },
+  now: () => "2026-06-02T10:00:14Z",
+  nowMs: (() => {
+    const values = [3000, 3032];
+    return () => values.shift();
+  })(),
+  routeTemplateFactory: () => "/api/mobile-feed",
+  trace: providerTrace
+});
+const globalFetchReturned = await globalFetchObject.fetch("https://api.example.test/api/mobile-feed?private=hidden", {
+  method: "GET"
+});
+if (globalFetchReturned !== globalFetchResponse) {
+  throw new Error("global fetch should return the original response object");
+}
+if (!globalFetchClonedBodyRead || globalFetchOriginalBodyRead) {
+  throw new Error("global fetch response sizing should read only a cloned response body");
+}
+const globalFetchEvents = JSON.parse(globalFetchClient.previewJson()).events;
+if (globalFetchEvents.length !== 1) {
+  throw new Error(`expected one global fetch span, got ${globalFetchEvents.length}`);
+}
+const globalFetchSpan = globalFetchEvents[0].attributes;
+if (
+  globalFetchSpan.name !== "GET /api/mobile-feed" ||
+  globalFetchSpan.durationMs !== 32 ||
+  globalFetchSpan.metadata.responseSizeBytes !== 6 ||
+  globalFetchSpan.metadata.responseSizeFromFactory !== 6 ||
+  globalFetchSpan.metadata.traceId !== providerTrace.traceId
+) {
+  throw new Error(`unexpected global fetch response-size span: ${JSON.stringify(globalFetchSpan)}`);
+}
+if (JSON.stringify(globalFetchEvents).includes("private=hidden")) {
+  throw new Error("global fetch resource span leaked query text");
+}
+globalFetchInstrumentation.remove();
 
 const xhrClient = createLogBrewReactNativeClient({
   clientKey: "LOGBREW_CLIENT_KEY",
@@ -963,6 +1049,7 @@ void tracedFetch("/mobile-api/ping");
 void createTraceparentFetch({ fetchImpl: async () => ({ status: 204 }), trace, tracePropagationTargets: traceTargets })("/mobile-api/trace");
 const resourceFetch = createReactNativeResourceFetch(client, {
   fetchImpl: async () => ({ status: 202 }),
+  measureResponseBodySize: true,
   metadataFactory: createReactNativeGraphQLMetadataFactory(),
   trace,
   tracePropagationTargets: traceTargets
@@ -989,6 +1076,7 @@ const instrumentation: ReactNativeInstrumentation<string, { method?: string }, {
   globalObject,
   instrumentGlobalFetch: true,
   instrumentGlobalXMLHttpRequest: true,
+  measureFetchResponseBodySize: true,
   measureXhrResponseBodySize: true,
   nativeBridge: bridge,
   platform,

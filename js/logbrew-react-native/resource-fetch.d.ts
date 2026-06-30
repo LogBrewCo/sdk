@@ -9,6 +9,7 @@ import type {
 export type ReactNativeResourceFetchOptions<TInput = unknown, TInit = unknown, TResponse = unknown> = {
   appState?: ReactNativeAppStateLike;
   fetchImpl?: (input: TInput, init?: TInit) => Promise<TResponse> | TResponse;
+  measureResponseBodySize?: boolean;
   metadata?: Metadata;
   metadataFactory?: (context: ReactNativeResourceFetchMetadataContext<TInput, TInit, TResponse>) => Metadata | undefined;
   now?: () => string;
@@ -31,6 +32,7 @@ export type ReactNativeResourceFetchMetadataContext<TInput = unknown, TInit = un
   readonly input: TInput;
   readonly method: string;
   readonly response?: TResponse;
+  readonly responseSizeBytes?: number;
   readonly routeTemplate?: string;
   readonly status?: string;
   readonly statusCode?: number;
@@ -38,8 +40,14 @@ export type ReactNativeResourceFetchMetadataContext<TInput = unknown, TInit = un
 };
 
 export type ReactNativeGraphQLMetadataFactoryOptions<TInput = unknown, TInit = unknown, TResponse = unknown> = {
+  endpoint?: ReactNativeGraphQLEndpointMatcher<TInput, TInit, TResponse> | ReactNativeGraphQLEndpointMatcher<TInput, TInit, TResponse>[];
   metadataFactory?: (context: ReactNativeResourceFetchMetadataContext<TInput, TInit, TResponse>) => Metadata | undefined;
 };
+
+export type ReactNativeGraphQLEndpointMatcher<TInput = unknown, TInit = unknown, TResponse = unknown> =
+  | string
+  | RegExp
+  | ((context: ReactNativeResourceFetchMetadataContext<TInput, TInit, TResponse>) => boolean);
 
 export declare function createReactNativeGraphQLMetadataFactory<TInput = unknown, TInit = unknown, TResponse = unknown>(
   options?: ReactNativeGraphQLMetadataFactoryOptions<TInput, TInit, TResponse>

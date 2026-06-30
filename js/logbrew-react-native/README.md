@@ -286,7 +286,10 @@ const resourceFetch = createReactNativeResourceFetch(client, {
   platform: Platform,
   appState: AppState,
   screen: "Checkout",
-  metadataFactory: createReactNativeGraphQLMetadataFactory(),
+  measureResponseBodySize: true,
+  metadataFactory: createReactNativeGraphQLMetadataFactory({
+    endpoint: "/graphql"
+  }),
   tracePropagationTargets: ["https://api.example.com/"]
 });
 
@@ -300,8 +303,8 @@ await resourceFetch("https://api.example.com/graphql?email=hidden", {
 });
 ```
 
-`createReactNativeResourceFetch()` wraps the fetch function your app supplies, or the runtime `fetch` when available. It records status, method, duration, sanitized route template, screen, session, primitive metadata, and trace correlation. `metadataFactory` is called after each fetch completes or fails so apps can add low-cardinality request metadata such as `graphqlOperationName` or `graphqlOperationType`; by default LogBrew does not parse GraphQL payloads. Metadata returned from the factory keeps only primitive values and drops sensitive request fields. It does not patch global `fetch` or XHR, inspect request or response bodies by default, capture arbitrary headers, or attach `traceparent` outside `tracePropagationTargets`. Pass `trace` explicitly after `await` boundaries or build the wrapper from provider/hook state so async resource spans stay correlated.
-`createReactNativeGraphQLMetadataFactory()` is an explicit helper for GraphQL requests your app already owns. It reads only a JSON string request body to derive `graphqlOperationName` and `graphqlOperationType`, drops variables/query text/body fields, ignores large or non-JSON bodies, and can compose an existing primitive metadata factory. Do not use it on unrelated endpoints.
+`createReactNativeResourceFetch()` wraps the fetch function your app supplies, or the runtime `fetch` when available. It records status, method, duration, sanitized route template, screen, session, primitive metadata, response size when `Content-Length` is available, and trace correlation. `metadataFactory` is called after each fetch completes or fails so apps can add low-cardinality request metadata such as `graphqlOperationName` or `graphqlOperationType`; by default LogBrew does not parse GraphQL payloads. If you set `measureResponseBodySize: true`, LogBrew can fall back to measuring a cloned response body's byte length when the response omits `Content-Length`; it returns the original response untouched and does not store the response content. Metadata returned from the factory keeps only primitive values and drops sensitive request fields. It does not patch global `fetch` or XHR, inspect request or response bodies by default, capture arbitrary headers, or attach `traceparent` outside `tracePropagationTargets`. Pass `trace` explicitly after `await` boundaries or build the wrapper from provider/hook state so async resource spans stay correlated.
+`createReactNativeGraphQLMetadataFactory()` is an explicit helper for GraphQL requests your app already owns. Pass `endpoint` as a route template, absolute URL without query/hash, `RegExp`, predicate, or an array of those when you use it with broader fetch/XHR instrumentation; LogBrew compares route templates and query-stripped URL paths before parsing. It reads only a JSON string request body to derive `graphqlOperationName` and `graphqlOperationType`, drops variables/query text/body fields, ignores large or non-JSON bodies, and can compose an existing primitive metadata factory. Do not use it on unrelated endpoints without an endpoint matcher.
 
 If your app uses Apollo Client, use the optional Apollo subpath with the `ApolloLink` constructor your app already imports:
 
@@ -387,6 +390,7 @@ const instrumentation = createLogBrewReactNativeInstrumentation(client, {
   trace,
   screen: "Checkout",
   instrumentGlobalFetch: true,
+  measureFetchResponseBodySize: true,
   tracePropagationTargets: ["https://api.example.com/"]
 });
 
@@ -394,7 +398,7 @@ await fetch("https://api.example.com/checkout", { method: "POST" });
 instrumentation.remove();
 ```
 
-With `instrumentGlobalFetch: true`, LogBrew wraps the current `globalThis.fetch`, records the same sanitized resource spans as `resourceFetch`, and puts the original function back only if LogBrew still owns the `fetch` slot. Outbound `traceparent` remains target-scoped; LogBrew still does not patch XHR, read request or response bodies by default, copy arbitrary headers, persist offline requests, capture full URLs with query/hash text, or inspect GraphQL payloads unless you explicitly pass the GraphQL metadata factory above.
+With `instrumentGlobalFetch: true`, LogBrew wraps the current `globalThis.fetch`, records the same sanitized resource spans as `resourceFetch`, and puts the original function back only if LogBrew still owns the `fetch` slot. Response size is read from `Content-Length` by default; set `measureFetchResponseBodySize: true` only when your app accepts clone-based response body sizing for responses without that header. Outbound `traceparent` remains target-scoped; LogBrew still does not patch XHR, read original request or response bodies, copy arbitrary headers, persist offline requests, capture full URLs with query/hash text, or inspect GraphQL payloads unless you explicitly pass the GraphQL metadata factory above.
 
 Apps with older libraries that still use `XMLHttpRequest` can opt into reversible XHR instrumentation separately:
 
@@ -414,7 +418,7 @@ instrumentation.remove();
 ```
 
 With `instrumentGlobalXMLHttpRequest: true`, LogBrew patches only `XMLHttpRequest.prototype.open` and `send`, records sanitized XHR resource spans with status, response-start timing, and response size when `Content-Length` is available, and puts the original methods back when it is safe to do so. If you set `measureXhrResponseBodySize: true`, LogBrew can fall back to measuring the completed XHR response object's byte length without storing the response content. It writes a single `traceparent` through the app's existing `setRequestHeader` only for configured targets. It does not capture request bodies, response bodies, arbitrary request headers, arbitrary response headers, cookies, GraphQL payloads, full URLs with query/hash text, baggage, or tracestate.
-If you pass `metadataFactory: createReactNativeGraphQLMetadataFactory()`, XHR spans can derive the GraphQL operation name and type from JSON string request bodies your app already owns. The helper still drops variables, query text, body fields, headers, payloads, response data, baggage, and tracestate; do not enable it on unrelated endpoints.
+If you pass `metadataFactory: createReactNativeGraphQLMetadataFactory({ endpoint: "/graphql" })`, XHR spans can derive the GraphQL operation name and type from JSON string request bodies your app already owns and skip unrelated endpoints. The helper still drops variables, query text, body fields, headers, payloads, response data, baggage, and tracestate; do not enable it broadly without endpoint matching.
 
 ## Release Artifact Preparation
 
