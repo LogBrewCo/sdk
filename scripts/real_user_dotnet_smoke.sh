@@ -92,6 +92,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "examples/HttpTraceCorrelation.cs",
         "examples/ActivityTraceCorrelation.cs",
         "examples/HttpClientOutboundTelemetry.cs",
+        "examples/DbCommandTelemetry.cs",
         "examples/AspNetCoreRequestTelemetry.cs",
         "examples/Makefile",
     ):
@@ -123,6 +124,8 @@ for needle in (
     "MetadataWithCurrentTrace",
     "HttpTraceCorrelation.cs",
     "LogBrewOperationTracing",
+    "LogBrewDbCommandTelemetry",
+    "DbCommandTelemetry.cs",
     "LogBrewServerRequestTelemetry",
     "AspNetCoreRequestTelemetry.cs",
     "dotnet add package LogBrew.AspNetCore",
@@ -213,6 +216,10 @@ python3 "$repo_root/scripts/check_dotnet_http_trace_payload.py" "$tmp_dir/packag
 run_packaged_example ActivityTraceCorrelation.cs PackagedActivityTrace "$tmp_dir/packaged-activity-trace.stdout.json" "$tmp_dir/packaged-activity-trace.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-activity-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_activity_trace_payload.py" "$tmp_dir/packaged-activity-trace.stdout.json" "$tmp_dir/packaged-activity-trace.stderr.json" >/dev/null
+
+run_packaged_example DbCommandTelemetry.cs PackagedDbCommand "$tmp_dir/packaged-db-command.stdout.json" "$tmp_dir/packaged-db-command.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-db-command.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_db_command_payload.py" "$tmp_dir/packaged-db-command.stdout.json" "$tmp_dir/packaged-db-command.stderr.json" >/dev/null
 
 run_packaged_example HttpClientOutboundTelemetry.cs PackagedHttpClient "$tmp_dir/packaged-http-client.stdout.json" "$tmp_dir/packaged-http-client.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-http-client.stdout.json" >/dev/null

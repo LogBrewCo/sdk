@@ -1,4 +1,4 @@
-.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation run-activity-trace-correlation run-activity-source-listener-telemetry run-dependency-spans-telemetry run-http-client-outbound-telemetry run-aspnetcore-request-telemetry run-aspnetcore-middleware-telemetry
+.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation run-activity-trace-correlation run-activity-source-listener-telemetry run-dependency-spans-telemetry run-db-command-telemetry run-http-client-outbound-telemetry run-aspnetcore-request-telemetry run-aspnetcore-middleware-telemetry
 
 help:
 	@printf '%s\n' 'run-readme-example -> make run-readme-example'
@@ -9,6 +9,7 @@ help:
 	@printf '%s\n' 'run-activity-trace-correlation -> make run-activity-trace-correlation'
 	@printf '%s\n' 'run-activity-source-listener-telemetry -> make run-activity-source-listener-telemetry'
 	@printf '%s\n' 'run-dependency-spans-telemetry -> make run-dependency-spans-telemetry'
+	@printf '%s\n' 'run-db-command-telemetry -> make run-db-command-telemetry'
 	@printf '%s\n' 'run-http-client-outbound-telemetry -> make run-http-client-outbound-telemetry'
 	@printf '%s\n' 'run-aspnetcore-request-telemetry -> make run-aspnetcore-request-telemetry'
 	@printf '%s\n' 'run-aspnetcore-middleware-telemetry -> make run-aspnetcore-middleware-telemetry'
@@ -35,6 +36,9 @@ run-activity-source-listener-telemetry:
 
 run-dependency-spans-telemetry:
 	@tmp_dir="$$(realpath "$$(mktemp -d)")" && trap 'rm -rf "$$tmp_dir"' EXIT && dotnet new console --framework net10.0 --name DependencySpansTelemetry --output "$$tmp_dir/app" >/dev/null && cp DependencySpansTelemetry.cs "$$tmp_dir/app/Program.cs" && dotnet add "$$tmp_dir/app/DependencySpansTelemetry.csproj" reference "$$(cd .. && pwd -P)/src/LogBrew/LogBrew.csproj" >/dev/null && dotnet run --project "$$tmp_dir/app/DependencySpansTelemetry.csproj" --configuration Release
+
+run-db-command-telemetry:
+	@tmp_dir="$$(realpath "$$(mktemp -d)")" && trap 'rm -rf "$$tmp_dir"' EXIT && dotnet new console --framework net10.0 --name DbCommandTelemetry --output "$$tmp_dir/app" >/dev/null && cp DbCommandTelemetry.cs "$$tmp_dir/app/Program.cs" && dotnet add "$$tmp_dir/app/DbCommandTelemetry.csproj" reference "$$(cd .. && pwd -P)/src/LogBrew/LogBrew.csproj" >/dev/null && dotnet run --project "$$tmp_dir/app/DbCommandTelemetry.csproj" --configuration Release
 
 run-http-client-outbound-telemetry:
 	@tmp_dir="$$(realpath "$$(mktemp -d)")" && trap 'rm -rf "$$tmp_dir"' EXIT && dotnet new console --framework net10.0 --name HttpClientOutboundTelemetry --output "$$tmp_dir/app" >/dev/null && cp HttpClientOutboundTelemetry.cs "$$tmp_dir/app/Program.cs" && dotnet add "$$tmp_dir/app/HttpClientOutboundTelemetry.csproj" reference "$$(cd .. && pwd -P)/src/LogBrew/LogBrew.csproj" >/dev/null && dotnet run --project "$$tmp_dir/app/HttpClientOutboundTelemetry.csproj" --configuration Release

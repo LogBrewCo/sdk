@@ -580,6 +580,7 @@ tests++;
 
 tests += TraceCorrelationTests.Run();
 tests += OperationTracingTests.Run();
+tests += DbCommandTelemetryTests.Run();
 tests += SupportTicketDraftTests.Run();
 tests += ServerRequestTelemetryTests.Run();
 tests += HttpClientTelemetryTests.Run();

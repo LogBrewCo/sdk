@@ -395,6 +395,25 @@ var orderId = LogBrewOperationTracing.DatabaseOperation(
         .WithMetadata(new Dictionary<string, object?> { ["routeTemplate"] = "/orders/:id" }));
 ```
 
+For app-owned ADO.NET commands, use `LogBrewDbCommandTelemetry` around the provider command execution instead of writing a callback wrapper for every query:
+
+```csharp
+using System.Data.Common;
+using LogBrew;
+
+DbCommand command = CreateCommandFromYourProvider();
+var rows = LogBrewDbCommandTelemetry.ExecuteNonQuery(
+    client,
+    command,
+    LogBrewDbCommandOptions.Create()
+        .WithSystem("sqlserver")
+        .WithOperationName("orders.update")
+        .WithDatabaseName("checkout")
+        .WithMetadata(new Dictionary<string, object?> { ["routeTemplate"] = "/orders/:id" }));
+```
+
+`LogBrewDbCommandTelemetry` supports sync and async `ExecuteNonQuery`, `ExecuteScalar`, and `ExecuteReader` calls. It preserves the app-owned `DbCommand`, result, reader, cancellation token, and original provider exception; keeps `LogBrewTrace.Current` active while the command runs; records row count only from `ExecuteNonQuery`; and reports SDK capture failures through optional `OnError(...)` callbacks without replacing the command result. It does not install a profiler, Entity Framework interceptor, provider-specific package, connection wrapper, SQL parser, database-side trace propagation, query comments, baggage, tracestate, or support-ticket creation. It also does not capture `CommandText`, parameters, connection strings, data source, raw result rows, exception messages, or stacks. The packaged `examples/DbCommandTelemetry.cs` file proves installed-package ADO.NET command spans and redaction with a dependency-free fake command.
+
 Sync and async helpers are available for database, cache, and queue operations. They create one child span under `LogBrewTrace.Current` when a trace is active, keep that child trace active while the callback runs, preserve the callback result or original exception, and report SDK capture failures through optional `OnError(...)` callbacks without interrupting app work. Failed dependency operations also attach one bounded span event named `exception` with type-only metadata (`exceptionType` and `exceptionEscaped`) so issues can be filtered without sending exception messages or stack traces.
 
 You can add your own primitive-only span event summaries to any span with `SpanEventSummary`:
@@ -524,6 +543,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 - `ProductTimeline` queues app-owned product and network milestone events without visual replay, HTTP client patching, payload capture, or header capture.
 - `LogBrewHttpClientTelemetry` and `LogBrewHttpClientHandler` wrap app-owned outbound `HttpClient` sends with one child span and one normalized `traceparent`, without global client patching or payload/header capture.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans without adding driver dependencies, profilers, interceptors, or automatic client patching.
+- `LogBrewDbCommandTelemetry` creates app-owned ADO.NET `DbCommand` spans for sync/async non-query, scalar, and reader calls without capturing raw SQL, parameters, connection strings, result rows, provider exception messages, or stacks.
 - `SupportTicketDraft` builds local-only support-ticket create payload drafts and redacts diagnostics without calling backend support routes.
 - `Shutdown(transport)` flushes queued events and rejects later writes.
 - `AddLogBrew(client, options)` connects existing `ILogger` calls to LogBrew without global logging side effects.
