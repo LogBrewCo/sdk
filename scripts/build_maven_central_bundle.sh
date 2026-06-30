@@ -118,6 +118,7 @@ build_java_artifacts() {
   local opentelemetry_classpath
   local servlet_classpath
   local spring_boot_classpath
+  local spring_kafka_classpath
   local optional_classpath
 
   find "$package_dir/src/main/java" -name '*.java' | sort > "$main_sources"
@@ -126,7 +127,8 @@ build_java_artifacts() {
   opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$build_dir/java-opentelemetry-deps")"
   servlet_classpath="$(fetch_java_servlet_deps "$build_dir/java-servlet-deps")"
   spring_boot_classpath="$(fetch_java_spring_boot_deps "$build_dir/java-spring-boot-deps")"
-  optional_classpath="$logback_classpath:$opentelemetry_classpath:$servlet_classpath:$spring_boot_classpath"
+  spring_kafka_classpath="$(fetch_java_spring_kafka_deps "$build_dir/java-spring-kafka-deps")"
+  optional_classpath="$logback_classpath:$opentelemetry_classpath:$servlet_classpath:$spring_boot_classpath:$spring_kafka_classpath"
 
   javac -Xlint:all -Werror --release 11 -cp "$optional_classpath" -d "$classes_dir" @"$main_sources"
   javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$optional_classpath" -d "$javadoc_dir" @"$main_sources"

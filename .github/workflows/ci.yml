@@ -299,6 +299,10 @@ jobs:
         if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
         run: bash scripts/real_user_java_smoke.sh
 
+      - name: Run Java Spring Kafka installed-artifact smoke test
+        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        run: bash scripts/real_user_java_spring_kafka_smoke.sh
+
       - name: Run Spring Boot real-user smoke test
         if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
         run: bash scripts/real_user_spring_boot_smoke.sh

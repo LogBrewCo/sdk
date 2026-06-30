@@ -27,7 +27,8 @@ java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
 java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps")"
 java_servlet_classpath="$(fetch_java_servlet_deps "$tmp_dir/java-servlet-deps")"
 java_spring_boot_classpath="$(fetch_java_spring_boot_deps "$tmp_dir/java-spring-boot-deps")"
-java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath"
+java_spring_kafka_classpath="$(fetch_java_spring_kafka_deps "$tmp_dir/java-spring-kafka-deps")"
+java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath:$java_spring_kafka_classpath"
 
 javac -Xlint:all -Werror --release 11 -cp "$java_optional_classpath" -d "$tmp_dir/classes" @"$main_sources"
 javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/classes:$java_optional_classpath" -d "$tmp_dir/test-classes" @"$test_sources"
@@ -40,6 +41,7 @@ java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.lo
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewJdbcTracingTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewSpringCacheTracingTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewSpringBootJdbcAutoConfigurationTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewSpringKafkaTracingTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.SupportTicketDraftTest
 
 python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
@@ -65,6 +67,7 @@ test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.html
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringCacheTracing.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringKafkaTracing.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewOperationTracing.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewJdbcTracing.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/SupportTicketDraft.html"
@@ -96,6 +99,7 @@ grep -q '^co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.java$' "$tmp
 grep -q '^co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringCacheTracing.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringKafkaTracing.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewJdbcTracing.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SupportTicketDraft.java$' "$tmp_dir/sources-jar-contents.txt"
@@ -121,6 +125,7 @@ grep -q '^co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.html$' "$tmp_dir/jav
 grep -q '^co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringCacheTracing.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringKafkaTracing.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewJdbcTracing.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SupportTicketDraft.html$' "$tmp_dir/javadoc-jar-contents.txt"
@@ -162,6 +167,8 @@ grep -q '^co/logbrew/sdk/LogBrewSpringCacheTracing\$CacheConfig.class$' "$tmp_di
 grep -q '^co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor\$SingleLogBrewClientProvider.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringKafkaTracing.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringKafkaTracing\$ConsumerConfig.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$DatabaseOperation.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$CacheOperation.class$' "$tmp_dir/jar-contents.txt"
@@ -188,6 +195,7 @@ grep -q 'LogBrewSpringBootAutoConfiguration' "$package_dir/README.md"
 grep -q 'LogBrewSpringBootCacheAutoConfiguration' "$package_dir/README.md"
 grep -q 'LogBrewSpringBootJdbcAutoConfiguration' "$package_dir/README.md"
 grep -q 'LogBrewSpringCacheTracing' "$package_dir/README.md"
+grep -q 'LogBrewSpringKafkaTracing' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
 grep -q 'SpanLinkSummary' "$package_dir/README.md"
 grep -q 'traceparentHeaderSetter' "$package_dir/README.md"

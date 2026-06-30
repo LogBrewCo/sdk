@@ -1,15 +1,15 @@
 # LogBrew SDK Readiness Memory
 
-- 2026-06-30: Java queue/message rich-trace gap reduced after source reads from
+- 2026-06-30: Java queue/message and Spring Kafka rich-trace gaps reduced after source reads from
   Sentry Java
   `getsentry/sentry-java@307edcd968452d07d801c46362bf98f815fea808`
   (`SentryKafkaProducer`, `SentryKafkaConsumerTracing`, enqueued-time header,
   `SentryKafkaProducerBeanPostProcessor`, `SentryKafkaRecordInterceptor`,
   `SentryAutoConfiguration` Kafka queue configuration), Datadog Java tracer
-  `DataDog/dd-trace-java@04ea23af81f738f81dc0f75ecbd99e83f9ab1d6a`
+  `DataDog/dd-trace-java@dd95ecc5f440436eda34ff94169cec85900abadd`
   (Kafka `TextMapInjectAdapter`/`TextMapExtractAdapter`, JMS
-  `MessageInjectAdapter`/`MessageExtractAdapter`, JMS producer/consumer
-  instrumentation), OpenTelemetry Java Instrumentation
+  `MessageInjectAdapter`/`MessageExtractAdapter`, `TracingIterator`,
+  JMS producer/consumer instrumentation), OpenTelemetry Java Instrumentation
   `open-telemetry/opentelemetry-java-instrumentation@3118b49eade43b82bac593a980cb83db1ee540b1`
   (`KafkaInstrumenterFactory`, `KafkaPropagation`, `KafkaHeadersSetter`, Kafka
   batch span-link extractor, JMS instrumenter and message property
@@ -20,7 +20,8 @@
   `SpanAttributes.link(s)`, and app-owned `QueueOperation` helpers for
   `traceparentHeaderSetter(...)`, `incomingTraceparent(...)`,
   `linkedMessageTraceparent(...)`, `enqueuedAt(...)`, and
-  `timeInQueueMs(...)`. Queue helpers inject one normalized W3C
+  `timeInQueueMs(...)`, plus optional `LogBrewSpringKafkaTracing.recordInterceptor(...)`
+  for app-owned Spring Kafka listener containers. Queue helpers inject one normalized W3C
   `traceparent` through a caller-owned carrier setter, continue one valid
   incoming message context, report malformed incoming/linked propagation and
   setter failures plus impossible negative queue latency non-fatally through
@@ -31,18 +32,26 @@
   Spring/Kafka auto-registration, arbitrary header capture, payloads, message
   bodies, broker URLs, raw enqueue timestamps, custom timing-header injection,
   raw propagation metadata, receipt/message IDs, baggage, tracestate, exception
-  messages/stacks, and support-ticket creation. Evidence:
+  messages/stacks, and support-ticket creation. The Spring Kafka helper continues
+  one incoming `traceparent`, keeps the child trace active during listener work,
+  emits one sanitized `spring.kafka.process:<topic>` span on success/failure or
+  thread-state clear, derives primitive `timeInQueueMs` from record timestamp,
+  filters configured metadata with the shared dependency privacy blocklist, and
+  avoids keys, values, offsets, arbitrary headers, broker addresses, consumer
+  groups, baggage, tracestate, exception messages, and stacks. Evidence:
   `bash scripts/check_java_package.sh`, `bash scripts/real_user_java_smoke.sh`,
+  `bash scripts/real_user_java_spring_kafka_smoke.sh`,
   `bash scripts/real_user_java_queue_trace_smoke.sh`,
+  `bash scripts/real_user_spring_boot_smoke.sh` (`spring-boot@4.0.6`),
   `bash scripts/real_user_java_high_load_smoke.sh`, Java SpotBugs,
-  ShellCheck, fixture validation, release metadata, markdown links, generated
+  ShellCheck, Maven Central bundle dry-run to `/tmp`, fixture validation,
+  release metadata, markdown links, backend contract reports, generated
   artifact hygiene, diff hygiene, and confidentiality scan. Report:
   `docs/competitor-research/java-queue-propagation-2026-06-30.md`. Remaining
-  Java messaging gaps: optional Kafka/Spring Kafka/JMS packages, batch
-  receive/process convenience helpers, automatic privacy-bounded
-  time-in-queue extraction in those integrations, richer messaging semantic
-  attributes/metrics, baggage/tracestate only if explicitly justified, and
-  OpenTelemetry exporter/processor interop.
+  Java messaging gaps: producer-side Kafka/Spring Kafka wrapping or
+  post-processing, JMS package coverage, batch receive/process convenience
+  helpers, richer messaging semantic attributes/metrics, baggage/tracestate
+  only if explicitly justified, and OpenTelemetry exporter/processor interop.
 - 2026-06-30: .NET queue/message rich-trace gap reduced after source reads
   from Sentry .NET `getsentry/sentry-dotnet@951d98f789ec6794a1bbd82149d900f06fde0cfa`
   (no first-party Kafka/RabbitMQ/MassTransit queue instrumentation found;

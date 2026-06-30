@@ -17,40 +17,6 @@ import java.util.function.Supplier;
  * Explicit app-owned dependency span helpers for database, cache, and queue operations.
  */
 public final class LogBrewOperationTracing {
-    private static final String[] BLOCKED_OPERATION_METADATA_KEYS = {
-        "args",
-        "arguments",
-        "auth",
-        "authorization",
-        "body",
-        "brokerurl",
-        "cache" + "key",
-        "command",
-        "connectionstring",
-        "coo" + "kie",
-        "coo" + "kies",
-        "head" + "ers",
-        "ho" + "st",
-        "host" + "name",
-        "k" + "ey",
-        "message",
-        "messagebody",
-        "params",
-        "parameters",
-        "payload",
-        "query",
-        "rawcommand",
-        "rawmessage",
-        "pass" + "word",
-        "se" + "cret",
-        "sql",
-        "statement",
-        "to" + "ken",
-        "url",
-        "username",
-        "value"
-    };
-
     private LogBrewOperationTracing() {
     }
 
@@ -389,7 +355,7 @@ public final class LogBrewOperationTracing {
         List<SpanEventSummary> safeEvents = new ArrayList<>();
         if (configuredEvents != null) {
             for (SpanEventSummary event : configuredEvents) {
-                safeEvents.add(event.filterMetadataKeys(key -> !blockedOperationMetadataKey(key)));
+                safeEvents.add(event.filterMetadataKeys(key -> !Validation.blockedDependencyMetadataKey(key)));
             }
         }
         if (operationError != null && safeEvents.size() < SpanEventSummary.MAX_EVENTS) {
@@ -402,30 +368,7 @@ public final class LogBrewOperationTracing {
     }
 
     private static Map<String, Object> safeOperationMetadata(Map<String, ?> input) {
-        Map<String, Object> metadata = new LinkedHashMap<>();
-        Map<String, Object> copied = Validation.copyMetadata(input);
-        if (copied == null) {
-            return metadata;
-        }
-        for (Map.Entry<String, Object> entry : copied.entrySet()) {
-            if (!blockedOperationMetadataKey(entry.getKey())) {
-                metadata.put(entry.getKey(), entry.getValue());
-            }
-        }
-        return metadata;
-    }
-
-    private static boolean blockedOperationMetadataKey(String key) {
-        String normalized = key == null ? "" : key.trim().toLowerCase(Locale.ROOT)
-            .replace("_", "")
-            .replace("-", "")
-            .replace(".", "");
-        for (String candidate : BLOCKED_OPERATION_METADATA_KEYS) {
-            if (normalized.equals(candidate) || normalized.contains(candidate)) {
-                return true;
-            }
-        }
-        return false;
+        return Validation.copySafeDependencyMetadata(input);
     }
 
     private static void addString(Map<String, Object> metadata, String key, String value) {

@@ -1,9 +1,44 @@
 package co.logbrew.sdk;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 final class Validation {
+    private static final String[] BLOCKED_DEPENDENCY_METADATA_KEYS = {
+        "args",
+        "arguments",
+        "auth",
+        "authorization",
+        "body",
+        "brokerurl",
+        "cache" + "key",
+        "command",
+        "connectionstring",
+        "coo" + "kie",
+        "coo" + "kies",
+        "head" + "ers",
+        "ho" + "st",
+        "host" + "name",
+        "k" + "ey",
+        "message",
+        "messagebody",
+        "params",
+        "parameters",
+        "payload",
+        "query",
+        "rawcommand",
+        "rawmessage",
+        "pass" + "word",
+        "se" + "cret",
+        "sql",
+        "statement",
+        "to" + "ken",
+        "url",
+        "username",
+        "value"
+    };
+
     private Validation() {
     }
 
@@ -82,6 +117,33 @@ final class Validation {
             copied.put(key, value);
         }
         return copied;
+    }
+
+    static Map<String, Object> copySafeDependencyMetadata(Map<String, ?> metadata) {
+        Map<String, Object> safe = new LinkedHashMap<>();
+        Map<String, Object> copied = copyMetadata(metadata);
+        if (copied == null) {
+            return safe;
+        }
+        for (Map.Entry<String, Object> entry : copied.entrySet()) {
+            if (!blockedDependencyMetadataKey(entry.getKey())) {
+                safe.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return safe;
+    }
+
+    static boolean blockedDependencyMetadataKey(String key) {
+        String normalized = key == null ? "" : key.trim().toLowerCase(Locale.ROOT)
+            .replace("_", "")
+            .replace("-", "")
+            .replace(".", "");
+        for (String candidate : BLOCKED_DEPENDENCY_METADATA_KEYS) {
+            if (normalized.equals(candidate) || normalized.contains(candidate)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static void putOptionalString(Map<String, Object> target, String key, String value) {

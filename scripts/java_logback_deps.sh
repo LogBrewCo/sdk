@@ -51,8 +51,8 @@ fetch_java_servlet_deps() {
 
 fetch_java_spring_boot_deps() {
   local deps_dir="$1"
-  local spring_boot_version="${LOGBREW_SPRING_BOOT_VERSION:-4.0.6}"
-  local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.7}"
+  local spring_boot_version="${LOGBREW_SPRING_BOOT_VERSION:-4.1.0}"
+  local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.8}"
 
   mkdir -p "$deps_dir"
   fetch_maven_jar \
@@ -85,6 +85,33 @@ fetch_java_spring_boot_deps() {
     "$deps_dir/spring-beans-$spring_framework_version.jar" \
     "$deps_dir/commons-logging-1.3.5.jar" \
     "$deps_dir/jspecify-1.0.0.jar"
+}
+
+fetch_java_spring_kafka_deps() {
+  local deps_dir="$1"
+  local spring_kafka_version="${LOGBREW_SPRING_KAFKA_VERSION:-4.1.0}"
+  local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.8}"
+  local kafka_clients_version="${LOGBREW_KAFKA_CLIENTS_VERSION:-4.2.1}"
+
+  mkdir -p "$deps_dir"
+  fetch_maven_jar \
+    "org/springframework/kafka/spring-kafka/$spring_kafka_version/spring-kafka-$spring_kafka_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "org/apache/kafka/kafka-clients/$kafka_clients_version/kafka-clients-$kafka_clients_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "org/springframework/spring-messaging/$spring_framework_version/spring-messaging-$spring_framework_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "org/springframework/spring-tx/$spring_framework_version/spring-tx-$spring_framework_version" \
+    "$deps_dir"
+
+  printf '%s:%s:%s:%s\n' \
+    "$deps_dir/spring-kafka-$spring_kafka_version.jar" \
+    "$deps_dir/kafka-clients-$kafka_clients_version.jar" \
+    "$deps_dir/spring-messaging-$spring_framework_version.jar" \
+    "$deps_dir/spring-tx-$spring_framework_version.jar"
 }
 
 fetch_maven_jar() {

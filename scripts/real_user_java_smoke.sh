@@ -21,7 +21,8 @@ java_logback_classpath="$(fetch_java_logback_deps "$tmp_dir/java-logback-deps")"
 java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-opentelemetry-deps")"
 java_servlet_classpath="$(fetch_java_servlet_deps "$tmp_dir/java-servlet-deps")"
 java_spring_boot_classpath="$(fetch_java_spring_boot_deps "$tmp_dir/java-spring-boot-deps")"
-java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath"
+java_spring_kafka_classpath="$(fetch_java_spring_kafka_deps "$tmp_dir/java-spring-kafka-deps")"
+java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath:$java_spring_kafka_classpath"
 javac -Xlint:all -Werror --release 11 -cp "$java_optional_classpath" -d "$tmp_dir/classes" @"$main_sources"
 
 mkdir -p "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-sdk"
@@ -57,7 +58,7 @@ grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/binary-jar-conte
 grep -q '^co/logbrew/sdk/SpanEventSummary.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewServletFilter.class$' "$tmp_dir/binary-jar-contents.txt"
-printf '%s\n' 'co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.class' 'co/logbrew/sdk/LogBrewSpringCacheTracing.class' 'co/logbrew/sdk/LogBrewSpringCacheTracing$CacheConfig.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor$SingleLogBrewClientProvider.class' | while IFS= read -r expected; do grep -Fxq "$expected" "$tmp_dir/binary-jar-contents.txt"; done
+printf '%s\n' 'co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.class' 'co/logbrew/sdk/LogBrewSpringCacheTracing.class' 'co/logbrew/sdk/LogBrewSpringCacheTracing$CacheConfig.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor$SingleLogBrewClientProvider.class' 'co/logbrew/sdk/LogBrewSpringKafkaTracing.class' 'co/logbrew/sdk/LogBrewSpringKafkaTracing$ConsumerConfig.class' | while IFS= read -r expected; do grep -Fxq "$expected" "$tmp_dir/binary-jar-contents.txt"; done
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$DatabaseOperation.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$CacheOperation.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -88,7 +89,7 @@ grep -q '^src/main/java/co/logbrew/sdk/LogBrewOpenTelemetry.java$' "$tmp_dir/sou
 grep -q '^src/main/java/co/logbrew/sdk/SpanEventSummary.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewServletFilter.java$' "$tmp_dir/source-jar-contents.txt"
-printf '%s\n' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringCacheTracing.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.java' | while IFS= read -r expected; do grep -Fxq "$expected" "$tmp_dir/source-jar-contents.txt"; done
+printf '%s\n' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringCacheTracing.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringKafkaTracing.java' | while IFS= read -r expected; do grep -Fxq "$expected" "$tmp_dir/source-jar-contents.txt"; done
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewOperationTracing.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/SupportTicketDraft.java$' "$tmp_dir/source-jar-contents.txt"
@@ -113,7 +114,7 @@ grep -q 'LogBrewOpenTelemetry' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
 grep -q 'LogBrewJdbcTracing' "$package_dir/README.md"
 grep -q 'LogBrewServletFilter' "$package_dir/README.md"
-printf '%s\n' 'LogBrewSpringBootAutoConfiguration' 'LogBrewSpringBootCacheAutoConfiguration' 'LogBrewSpringCacheTracing' 'LogBrewSpringBootJdbcAutoConfiguration' | while IFS= read -r expected; do grep -Fq "$expected" "$package_dir/README.md"; done
+printf '%s\n' 'LogBrewSpringBootAutoConfiguration' 'LogBrewSpringBootCacheAutoConfiguration' 'LogBrewSpringCacheTracing' 'LogBrewSpringBootJdbcAutoConfiguration' 'LogBrewSpringKafkaTracing' | while IFS= read -r expected; do grep -Fq "$expected" "$package_dir/README.md"; done
 grep -q 'SupportTicketDraft' "$package_dir/README.md"
 grep -q 'droppedEvents()' "$package_dir/README.md"
 grep -q 'maxQueueSize' "$package_dir/README.md"
@@ -991,9 +992,8 @@ grep -q '"jdbcEvents":6' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"otelEvents":1' "$tmp_dir/smoke-app.stderr.json"
 
 jdeps --multi-release 11 --class-path "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_optional_classpath" "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jdeps.txt"
-grep -q 'java.base' "$tmp_dir/jdeps.txt"
-grep -q 'java.net.http' "$tmp_dir/jdeps.txt"
-grep -q 'logback-classic' "$tmp_dir/jdeps.txt"
-grep -q 'opentelemetry-api' "$tmp_dir/jdeps.txt"
+for expected_jdeps in java.base java.net.http logback-classic opentelemetry-api spring-kafka kafka-clients; do
+  grep -q "$expected_jdeps" "$tmp_dir/jdeps.txt"
+done
 
 echo "java real-user smoke passed"

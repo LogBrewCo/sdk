@@ -6,7 +6,7 @@
 
 Public Java SDK for building, validating, previewing, and flushing LogBrew event batches.
 
-The core client, `HttpTransport`, request trace helpers, JDBC helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, and Spring Boot helpers integrate with app-owned dependencies when those libraries are already present.
+The core client, `HttpTransport`, request trace helpers, JDBC helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, Spring Boot, Spring Cache, Spring Kafka, and JDBC auto-configuration helpers integrate with app-owned dependencies when those libraries are already present.
 
 ## Install
 
@@ -58,6 +58,16 @@ If you manually register `LogBrewServletFilter` in a Jakarta Servlet app, includ
   <artifactId>jakarta.servlet-api</artifactId>
   <version>6.1.0</version>
   <scope>provided</scope>
+</dependency>
+```
+
+If you register `LogBrewSpringKafkaTracing` in a Spring Kafka listener container, include the Spring Kafka and Kafka client jars your app already uses:
+
+```xml
+<dependency>
+  <groupId>org.springframework.kafka</groupId>
+  <artifactId>spring-kafka</artifactId>
+  <version>4.1.0</version>
 </dependency>
 ```
 
@@ -384,6 +394,41 @@ client.span(
 ```
 
 The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Queue helpers normalize outgoing `traceparent` values, treat malformed incoming/linked propagation as non-fatal diagnostics via `onError(...)`, compute primitive `timeInQueueMs` from `enqueuedAt(...)` or accept an explicit broker latency through `timeInQueueMs(...)`, and cap span links at eight. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events and links are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, raw enqueue timestamps, arbitrary headers, cookies, and auth-like fields. These helpers do not import or patch Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
+
+For Spring Kafka apps that already own a listener container factory, register `LogBrewSpringKafkaTracing` as an app-owned `RecordInterceptor`:
+
+```java
+import co.logbrew.sdk.LogBrewSpringKafkaTracing;
+import java.util.Map;
+import org.springframework.context.annotation.Bean;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.kafka.listener.RecordInterceptor;
+
+@Bean
+RecordInterceptor<String, String> logbrewKafkaRecordInterceptor(LogBrewClient client) {
+    return LogBrewSpringKafkaTracing.recordInterceptor(
+        client,
+        LogBrewSpringKafkaTracing.ConsumerConfig.<String, String>create()
+            .eventIdPrefix("spring_kafka")
+            .metadata(Map.of("service", "checkout-worker"))
+    );
+}
+
+@Bean
+ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory(
+    ConsumerFactory<String, String> consumerFactory,
+    RecordInterceptor<String, String> logbrewKafkaRecordInterceptor
+) {
+    ConcurrentKafkaListenerContainerFactory<String, String> factory =
+        new ConcurrentKafkaListenerContainerFactory<>();
+    factory.setConsumerFactory(consumerFactory);
+    factory.setRecordInterceptor(logbrewKafkaRecordInterceptor);
+    return factory;
+}
+```
+
+The interceptor continues one incoming W3C `traceparent`, keeps the child trace active while listener code and LogBrew-aware loggers run, and emits one `spring.kafka.process:<topic>` span on success or failure. It records primitive framework, topic, sampled-state, duration, and non-negative `timeInQueueMs` from the Kafka record timestamp when available. It treats malformed propagation as a non-fatal diagnostic through `onError(...)`, preserves app-owned delegates, and clears active trace state during Spring Kafka lifecycle cleanup. It does not capture record keys, values, offsets, arbitrary headers, broker addresses, consumer group IDs, baggage, tracestate, exception messages, or stack traces.
 
 For Spring Cache apps that already own a `CacheManager` or `Cache`, use `LogBrewSpringCacheTracing` when you want cache hit/write/delete spans under an active request or task trace:
 
