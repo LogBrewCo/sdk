@@ -6,7 +6,7 @@
 
 Public Java SDK for building, validating, previewing, and flushing LogBrew event batches.
 
-The core client, `HttpTransport`, request trace helpers, JDBC helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, Spring Boot, Spring Cache, Spring Kafka, and JDBC auto-configuration helpers integrate with app-owned dependencies when those libraries are already present.
+The core client, `HttpTransport`, request trace helpers, JDBC helpers, JMS-style message helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, Spring Boot, Spring Cache, Spring Kafka, and JDBC auto-configuration helpers integrate with app-owned dependencies when those libraries are already present.
 
 ## Install
 
@@ -393,7 +393,40 @@ client.span(
 );
 ```
 
-The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Queue helpers normalize outgoing `traceparent` values, treat malformed incoming/linked propagation as non-fatal diagnostics via `onError(...)`, compute primitive `timeInQueueMs` from `enqueuedAt(...)` or accept an explicit broker latency through `timeInQueueMs(...)`, and cap span links at eight. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events and links are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, raw enqueue timestamps, arbitrary headers, cookies, and auth-like fields. These helpers do not import or patch Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
+The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Queue helpers normalize outgoing `traceparent` values, treat malformed incoming/linked propagation as non-fatal diagnostics via `onError(...)`, compute primitive `timeInQueueMs` from `enqueuedAt(...)` or accept an explicit broker latency through `timeInQueueMs(...)`, and cap span links at eight. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events and links are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, raw enqueue timestamps, arbitrary headers, cookies, and auth-like fields. These helpers do not import or patch Redis, Kafka, JMS, AMQP, or framework clients; automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
+
+For app-owned JMS or Jakarta Messaging code, use `LogBrewJmsTracing` around the message object you are already sending or processing. The helper uses reflection for `setStringProperty(String, String)` and `getStringProperty(String)`, so the base SDK does not add a `javax.jms` or `jakarta.jms` dependency:
+
+```java
+import co.logbrew.sdk.LogBrewJmsTracing;
+import java.util.Map;
+
+LogBrewJmsTracing.send(
+    client,
+    message,
+    () -> {
+        producer.send(message);
+        return null;
+    },
+    LogBrewJmsTracing.ProducerConfig.create()
+        .destinationName("billing-queue")
+        .metadata(Map.of("service", "checkout-api"))
+);
+
+LogBrewJmsTracing.process(
+    client,
+    message,
+    () -> {
+        handleMessage(message);
+        return null;
+    },
+    LogBrewJmsTracing.ConsumerConfig.create()
+        .destinationName("billing-queue")
+        .timeInQueueMs(125.5)
+);
+```
+
+The JMS helper writes or reads only the `traceparent` string property, keeps the child trace active while app code runs, records `jms.produce` or `jms.process` queue spans, and treats property read/write failures as non-fatal `onError(...)` diagnostics. It does not create connections, patch sessions/producers/consumers/listeners, enumerate message properties, inspect destinations, capture message IDs, message bodies, payloads, arbitrary headers, broker addresses, baggage, tracestate, exception messages, or stack traces.
 
 For Kafka producer code that already owns an `org.apache.kafka.clients.producer.Producer`, wrap it explicitly:
 
@@ -734,6 +767,7 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `LogBrewSpringBootCacheAutoConfiguration` wraps app-owned Spring `CacheManager` beans when Spring Boot, Spring Cache, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewSpringBootJdbcAutoConfiguration` wraps app-owned Spring `DataSource` beans with privacy-bounded JDBC statement spans when Spring Boot, `DataSource`, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans with bounded `SpanEventSummary` markers, without adding driver dependencies or automatic client patching.
+- `LogBrewJmsTracing` traces app-owned JMS-style `send` and `process` calls through `setStringProperty` / `getStringProperty` without adding a JMS dependency or patching broker clients.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
 - `shutdown(transport)` flushes queued events and rejects later writes.
 - `isClosed()` returns whether `shutdown(transport)` has closed the client.

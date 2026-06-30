@@ -1,5 +1,42 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-01: Java JMS trace correlation is now packaged and verified after
+  source reads from Datadog Java tracer
+  `DataDog/dd-trace-java@015a24fa8a0d526b1a71a5418564b47df1f98ece`
+  (`MessageInjectAdapter.set`/`injectTimeInQueue`,
+  `MessageExtractAdapter.forEachKey`/`extractTimeInQueueStart`/
+  `extractMessageBatchId`), OpenTelemetry Java Instrumentation
+  `open-telemetry/opentelemetry-java-instrumentation@3118b49eade43b82bac593a980cb83db1ee540b1`
+  (`JmsInstrumenterFactory`, `MessagePropertyGetter`, `MessagePropertySetter`),
+  Sentry Java
+  `getsentry/sentry-java@307edcd968452d07d801c46362bf98f815fea808` (Kafka/Spring
+  Kafka messaging ergonomics; no comparable first-party JMS helper found), and
+  PostHog Java
+  `PostHog/posthog-java@dcf8fd85d0f1a405ae3aca02d00e24a1daa4f17e` (no comparable
+  JMS trace propagation found). Core `co.logbrew:logbrew-sdk` now includes
+  dependency-free `LogBrewJmsTracing.send(...)` and `process(...)`: apps pass an
+  owned JMS-style message object, LogBrew reflects only `setStringProperty` or
+  `getStringProperty`, writes/reads one normalized `traceparent`, keeps child
+  trace context active during app work, records `jms.produce`/`jms.process`
+  queue spans with destination label, primitive metadata, optional
+  `messageCount`, and optional `timeInQueueMs`, and reports property
+  read/write failures as non-fatal `jms_property_*_failed` diagnostics. It
+  avoids JMS dependencies, agents, hidden Spring/JMS bean registration,
+  connection/session/producer/consumer/listener patching, arbitrary property
+  enumeration, message IDs, message bodies, payloads, broker addresses, raw
+  propagation strings, baggage, tracestate, exception messages/stacks, and
+  support-ticket creation. Evidence: RED missing API,
+  `bash scripts/check_java_package.sh`, `bash scripts/real_user_java_jms_smoke.sh`,
+  `python3 -m unittest tests.test_check_public_sdks`, `bash
+  scripts/check_java_static.sh`, `bash scripts/check_shell_static.sh`,
+  markdown links, release metadata, confidentiality scan, generated-artifact
+  hygiene, and diff hygiene.
+  Report: `docs/competitor-research/java-jms-tracing-2026-06-30.md`. Remaining
+  Java messaging gaps: batch receive/process convenience helpers,
+  receive-vs-process split ergonomics, richer messaging semantic attributes and
+  metrics, optional Spring/JMS auto-registration only if privacy/runtime coupling
+  is justified, baggage/tracestate only if explicitly justified, and
+  OpenTelemetry exporter/processor interop.
 - 2026-06-30: Java queue/message and Spring Kafka rich-trace gaps reduced after source reads from
   Sentry Java
   `getsentry/sentry-java@307edcd968452d07d801c46362bf98f815fea808`
@@ -60,7 +97,7 @@
   artifact hygiene, diff hygiene, and confidentiality scan. Report:
   `docs/competitor-research/java-queue-propagation-2026-06-30.md`. Remaining
   Java messaging gaps: hidden automatic Spring bean registration only if
-  privacy/runtime coupling is justified, JMS package coverage, batch
+  privacy/runtime coupling is justified, batch
   receive/process convenience helpers, richer messaging semantic
   attributes/metrics, baggage/tracestate only if explicitly justified, and
   OpenTelemetry exporter/processor interop.

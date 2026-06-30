@@ -65,4 +65,11 @@ LogBrew is now better than PostHog Java for queue trace propagation and safer/li
 
 ## Remaining Gaps
 
-Next useful Java trace improvements are JMS helper/package coverage, batch receive/process convenience helpers, richer messaging semantic attributes, baggage/tracestate only if explicitly justified, optional Spring bean auto-registration only if privacy/runtime coupling is justified, and OpenTelemetry processor/exporter interop. Do not add automatic broker/client patching to core `logbrew-sdk`.
+Follow-up Java JMS helper coverage is now documented in
+`docs/competitor-research/java-jms-tracing-2026-06-30.md`. Next useful Java
+trace improvements are batch receive/process convenience helpers, richer
+messaging semantic attributes, privacy-bounded messaging metrics,
+baggage/tracestate only if explicitly justified, optional Spring/JMS bean
+auto-registration only if privacy/runtime coupling is justified, and
+OpenTelemetry processor/exporter interop. Do not add automatic broker/client
+patching to core `logbrew-sdk`.
