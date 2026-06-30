@@ -33,6 +33,7 @@ export type ReactNativeResourceFetchMetadataContext<TInput = unknown, TInit = un
   readonly method: string;
   readonly response?: TResponse;
   readonly responseSizeBytes?: number;
+  readonly responseStartDurationMs?: number;
   readonly routeTemplate?: string;
   readonly status?: string;
   readonly statusCode?: number;

@@ -56,23 +56,28 @@ export function createReactNativeResourceFetch(client, {
     const safeRouteTemplate = routeTemplate ?? routeTemplateFactory({ input, init, url });
     try {
       const response = await tracedFetch(input, init);
-      const durationMs = elapsedMs(startedAtMs, nowMs);
+      const responseStartDurationMs = elapsedMs(startedAtMs, nowMs);
       const statusCode = responseStatusCode(response);
       const responseSizeBytes = await responseSizeBytesFromResponse(response, { measureResponseBodySize });
+      const durationMs = elapsedMs(startedAtMs, nowMs);
       captureReactNativeResourceSpan(client, {
         appState,
         durationMs,
-        metadata: createSafeReactNativeMetadata(metadata, metadataFactory, {
-          durationMs,
-          init,
-          input,
-          method,
-          response,
-          responseSizeBytes,
-          routeTemplate: safeRouteTemplate,
-          statusCode,
-          url
-        }),
+        metadata: {
+          ...createSafeReactNativeMetadata(metadata, metadataFactory, {
+            durationMs,
+            init,
+            input,
+            method,
+            response,
+            responseSizeBytes,
+            responseStartDurationMs,
+            routeTemplate: safeRouteTemplate,
+            statusCode,
+            url
+          }),
+          responseStartDurationMs
+        },
         method,
         platform,
         routeTemplate: safeRouteTemplate,

@@ -30,7 +30,7 @@ const timestamps = [
   "2026-06-02T10:21:00Z",
   "2026-06-02T10:21:01Z"
 ];
-const times = [1000, 1167, 2000, 2031];
+const phaseTimes = [1000, 1041, 1167, 2000, 2031];
 
 const resourceFetch = createReactNativeResourceFetch(client, {
   fetchImpl: async (input, init = {}) => {
@@ -50,7 +50,7 @@ const resourceFetch = createReactNativeResourceFetch(client, {
   metadata: { flow: "checkout", nested: { dropped: true } },
   metadataFactory: createReactNativeGraphQLMetadataFactory(),
   now: () => timestamps.shift(),
-  nowMs: () => times.shift(),
+  nowMs: () => phaseTimes.shift(),
   platform,
   appState,
   screen: "Checkout",
@@ -93,6 +93,7 @@ if (
   success.status !== "ok" ||
   success.durationMs !== 167 ||
   success.metadata.routeTemplate !== "/api/checkout" ||
+  success.metadata.responseStartDurationMs !== 41 ||
   success.metadata.graphqlOperationName !== "CheckoutSubmit" ||
   success.metadata.graphqlOperationType !== "mutation" ||
   success.metadata.responseSizeBytes !== 1536 ||

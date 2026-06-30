@@ -37,6 +37,18 @@ def main() -> int:
     for resource_name in ("POST /api/checkout", "GET /api/global", "PUT /api/xhr"):
         if resource_name not in resource_names:
             raise SystemExit(f"missing resource span {resource_name}: {resource_names}")
+    resource = next((event["attributes"] for event in events if event["attributes"].get("name") == "POST /api/checkout"), None)
+    if resource is None:
+        raise SystemExit("missing explicit resource fetch span")
+    resource_metadata = resource.get("metadata", {})
+    if resource_metadata.get("responseStartDurationMs") != 135:
+        raise SystemExit(f"unexpected resource fetch response-start timing: {resource_metadata}")
+    global_fetch = next((event["attributes"] for event in events if event["attributes"].get("name") == "GET /api/global"), None)
+    if global_fetch is None:
+        raise SystemExit("missing global fetch resource span")
+    global_fetch_metadata = global_fetch.get("metadata", {})
+    if global_fetch_metadata.get("responseStartDurationMs") != 20:
+        raise SystemExit(f"unexpected global fetch response-start timing: {global_fetch_metadata}")
     xhr = next((event["attributes"] for event in events if event["attributes"].get("name") == "PUT /api/xhr"), None)
     if xhr is None:
         raise SystemExit("missing XHR resource span")

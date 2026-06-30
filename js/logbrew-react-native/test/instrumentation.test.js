@@ -78,7 +78,7 @@ test("React Native instrumentation can opt into reversible global fetch spans", 
       metadata: { flow: "checkout", nested: { dropped: true } },
       now: () => "2026-06-23T10:00:00Z",
       nowMs: (() => {
-        const values = [1000, 1042];
+        const values = [1000, 1009, 1042];
         return () => values.shift();
       })(),
       screen: "Checkout",
@@ -108,6 +108,7 @@ test("React Native instrumentation can opt into reversible global fetch spans", 
     assert.equal(events[0].attributes.name, "POST /api/checkout");
     assert.equal(events[0].attributes.durationMs, 42);
     assert.equal(events[0].attributes.metadata.routeTemplate, "/api/checkout");
+    assert.equal(events[0].attributes.metadata.responseStartDurationMs, 9);
     assert.equal(events[0].attributes.metadata.traceId, trace.traceId);
     assert.equal(events[0].attributes.metadata.nested, undefined);
 
@@ -148,6 +149,69 @@ test("React Native global fetch teardown does not clobber later wrappers", () =>
   });
 });
 
+test("React Native resource fetch records response-start timing before cloned body sizing", async () => {
+  await withInstalledPackage(async ({
+    createLogBrewReactNativeClient,
+    createReactNativeResourceFetch,
+    createReactNativeTraceContext
+  }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+    const trace = makeTrace(createReactNativeTraceContext);
+    const factoryContexts = [];
+    const response = {
+      status: 200,
+      headers: {
+        get() {
+          return null;
+        }
+      },
+      clone() {
+        return {
+          async arrayBuffer() {
+            return new Uint8Array([1, 2, 3]).buffer;
+          }
+        };
+      }
+    };
+    const resourceFetch = createReactNativeResourceFetch(client, {
+      fetchImpl: async () => response,
+      measureResponseBodySize: true,
+      metadataFactory(context) {
+        factoryContexts.push(context);
+        return {
+          responseStartFromFactory: context.responseStartDurationMs,
+          responseSizeFromFactory: context.responseSizeBytes
+        };
+      },
+      now: () => "2026-06-30T11:07:00Z",
+      nowMs: (() => {
+        const values = [1000, 1012, 1045];
+        return () => values.shift();
+      })(),
+      routeTemplateFactory: () => "/api/phase",
+      trace
+    });
+
+    const returned = await resourceFetch("https://api.example.test/api/phase?private=hidden", {
+      method: "GET"
+    });
+
+    assert.equal(returned, response);
+    assert.equal(factoryContexts.length, 1);
+    assert.equal(factoryContexts[0].responseStartDurationMs, 12);
+    assert.equal(factoryContexts[0].responseSizeBytes, 3);
+    const events = JSON.parse(client.previewJson()).events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0].attributes.name, "GET /api/phase");
+    assert.equal(events[0].attributes.durationMs, 45);
+    assert.equal(events[0].attributes.metadata.responseStartDurationMs, 12);
+    assert.equal(events[0].attributes.metadata.responseSizeBytes, 3);
+    assert.equal(events[0].attributes.metadata.responseStartFromFactory, 12);
+    assert.equal(events[0].attributes.metadata.responseSizeFromFactory, 3);
+    assert.equal(JSON.stringify(events).includes("private=hidden"), false);
+  });
+});
+
 test("React Native resource fetch records response size from Content-Length without reading bodies", async () => {
   await withInstalledPackage(async ({
     createLogBrewReactNativeClient,
@@ -178,7 +242,7 @@ test("React Native resource fetch records response size from Content-Length with
       fetchImpl: async () => response,
       now: () => "2026-06-30T09:15:00Z",
       nowMs: (() => {
-        const values = [1000, 1018];
+        const values = [1000, 1006, 1018];
         return () => values.shift();
       })(),
       routeTemplateFactory: () => "/api/catalog",
@@ -195,6 +259,7 @@ test("React Native resource fetch records response size from Content-Length with
     const events = JSON.parse(client.previewJson()).events;
     assert.equal(events.length, 1);
     assert.equal(events[0].attributes.name, "GET /api/catalog");
+    assert.equal(events[0].attributes.metadata.responseStartDurationMs, 6);
     assert.equal(events[0].attributes.metadata.responseSizeBytes, 2048);
     assert.equal(JSON.stringify(events).includes("private=hidden"), false);
   });
@@ -246,7 +311,7 @@ test("React Native global fetch can opt into cloned response body sizing", async
       },
       now: () => "2026-06-30T09:16:00Z",
       nowMs: (() => {
-        const values = [2000, 2030];
+        const values = [2000, 2008, 2030];
         return () => values.shift();
       })(),
       routeTemplateFactory: () => "/api/mobile-feed",
@@ -265,6 +330,7 @@ test("React Native global fetch can opt into cloned response body sizing", async
     const events = JSON.parse(client.previewJson()).events;
     assert.equal(events.length, 1);
     assert.equal(events[0].attributes.name, "GET /api/mobile-feed");
+    assert.equal(events[0].attributes.metadata.responseStartDurationMs, 8);
     assert.equal(events[0].attributes.metadata.responseSizeBytes, 6);
     assert.equal(events[0].attributes.metadata.responseSizeFromFactory, 6);
     assert.equal(JSON.stringify(events).includes("private=hidden"), false);
@@ -296,7 +362,7 @@ test("React Native resource fetch accepts per-request primitive metadata from a 
       },
       now: () => "2026-06-29T07:40:00Z",
       nowMs: (() => {
-        const values = [1000, 1024];
+        const values = [1000, 1011, 1024];
         return () => values.shift();
       })(),
       routeTemplateFactory: () => "/graphql",
@@ -314,10 +380,12 @@ test("React Native resource fetch accepts per-request primitive metadata from a 
     assert.equal(factoryCalls[0].routeTemplate, "/graphql");
     assert.equal(factoryCalls[0].statusCode, 200);
     assert.equal(factoryCalls[0].durationMs, 24);
+    assert.equal(factoryCalls[0].responseStartDurationMs, 11);
 
     const events = JSON.parse(client.previewJson()).events;
     assert.equal(events.length, 1);
     assert.equal(events[0].attributes.name, "POST /graphql");
+    assert.equal(events[0].attributes.metadata.responseStartDurationMs, 11);
     assert.equal(events[0].attributes.metadata.flow, "checkout");
     assert.equal(events[0].attributes.metadata.graphqlOperationName, "CheckoutSubmit");
     assert.equal(events[0].attributes.metadata.graphqlOperationType, "mutation");
@@ -342,7 +410,7 @@ test("React Native GraphQL metadata factory extracts bounded operation data with
       metadataFactory: createReactNativeGraphQLMetadataFactory(),
       now: () => "2026-06-30T04:30:00Z",
       nowMs: (() => {
-        const values = [1000, 1037];
+        const values = [1000, 1015, 1037];
         return () => values.shift();
       })(),
       routeTemplateFactory: () => "/graphql",
@@ -362,6 +430,7 @@ test("React Native GraphQL metadata factory extracts bounded operation data with
     assert.equal(events.length, 1);
     assert.equal(events[0].attributes.name, "POST /graphql");
     assert.equal(events[0].attributes.durationMs, 37);
+    assert.equal(events[0].attributes.metadata.responseStartDurationMs, 15);
     assert.equal(events[0].attributes.metadata.flow, "checkout");
     assert.equal(events[0].attributes.metadata.graphqlOperationName, "CheckoutSubmit");
     assert.equal(events[0].attributes.metadata.graphqlOperationType, "mutation");
@@ -387,7 +456,7 @@ test("React Native GraphQL metadata factory only parses configured endpoints", a
       }),
       now: () => "2026-06-30T07:25:00Z",
       nowMs: (() => {
-        const values = [1000, 1005, 1010, 1025];
+        const values = [1000, 1003, 1005, 1010, 1017, 1025];
         return () => values.shift();
       })()
     });
@@ -412,9 +481,11 @@ test("React Native GraphQL metadata factory only parses configured endpoints", a
     assert.equal(events[0].attributes.name, "POST /rest");
     assert.equal(events[0].attributes.metadata.graphqlOperationName, undefined);
     assert.equal(events[0].attributes.metadata.graphqlOperationType, undefined);
+    assert.equal(events[0].attributes.metadata.responseStartDurationMs, 3);
     assert.equal(events[1].attributes.name, "POST /graphql");
     assert.equal(events[1].attributes.metadata.graphqlOperationName, "CheckoutSubmit");
     assert.equal(events[1].attributes.metadata.graphqlOperationType, "mutation");
+    assert.equal(events[1].attributes.metadata.responseStartDurationMs, 7);
     assert.equal(JSON.stringify(events).includes("hidden@example.test"), false);
   });
 });
@@ -433,7 +504,7 @@ test("React Native GraphQL metadata factory reuses RegExp endpoint matchers safe
       }),
       now: () => "2026-06-30T07:35:00Z",
       nowMs: (() => {
-        const values = [2000, 2005, 2010, 2015];
+        const values = [2000, 2002, 2005, 2010, 2012, 2015];
         return () => values.shift();
       })()
     });
@@ -451,6 +522,8 @@ test("React Native GraphQL metadata factory reuses RegExp endpoint matchers safe
     assert.equal(events.length, 2);
     assert.equal(events[0].attributes.metadata.graphqlOperationType, "query");
     assert.equal(events[1].attributes.metadata.graphqlOperationType, "query");
+    assert.equal(events[0].attributes.metadata.responseStartDurationMs, 2);
+    assert.equal(events[1].attributes.metadata.responseStartDurationMs, 2);
   });
 });
 

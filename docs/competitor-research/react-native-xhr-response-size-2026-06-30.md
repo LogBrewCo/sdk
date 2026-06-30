@@ -63,13 +63,15 @@ server did not provide `Content-Length`. It handles text/string responses,
 `ArrayBuffer`, typed array views, and blob-like `size` values.
 
 2026-06-30 fetch follow-up: `createReactNativeResourceFetch()` and reversible
-global fetch instrumentation now record `responseSizeBytes` from `Content-Length`
-by default. Apps can set `measureResponseBodySize: true` on the explicit
-resource fetch helper, or `measureFetchResponseBodySize: true` on
+global fetch instrumentation now record response-start timing when the fetch
+promise resolves, while total duration still includes any explicit cloned-body
+sizing work. They also record `responseSizeBytes` from `Content-Length` by
+default. Apps can set `measureResponseBodySize: true` on the explicit resource
+fetch helper, or `measureFetchResponseBodySize: true` on
 `createLogBrewReactNativeInstrumentation()`, to measure a cloned fetch response
 body when the header is missing. The original response object is returned
-untouched, the metadata factory receives only the numeric `responseSizeBytes`,
-and response content is not retained.
+untouched, the metadata factory receives only numeric timing/size values, and
+response content is not retained.
 
 The default remains `false`, so existing XHR instrumentation continues to use
 headers only, while fetch still records header-provided response sizes without
@@ -89,7 +91,8 @@ full URLs, baggage, or tracestate.
 
 ## Remaining Gap
 
-Datadog and Sentry remain ahead for richer automatic network replay, response
-phase timings, and framework-specific instrumentation. LogBrew is narrower but
-safer by default: apps can opt into response-size fallback for owned fetch/XHR
-instrumentation without expanding captured content.
+Datadog and Sentry remain ahead for richer automatic network replay, deeper
+response phase timings, and framework-specific instrumentation. LogBrew is
+narrower but safer by default: apps can opt into response-size fallback and get
+fetch response-start timing for owned fetch/XHR instrumentation without
+expanding captured content.

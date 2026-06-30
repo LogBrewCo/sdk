@@ -126,7 +126,7 @@ const timestamps = [
   "2026-06-02T10:40:05Z",
   "2026-06-02T10:40:06Z"
 ];
-const times = [1000, 1125, 1300, 1380, 1600, 1775, 1900, 1945, 2100, 2115, 2160];
+const times = [1000, 1125, 1260, 1300, 1380, 1600, 1775, 1900, 1920, 1945, 2100, 2115, 2160];
 
 const instrumentation = createLogBrewReactNativeInstrumentation(client, {
   appState,
@@ -253,11 +253,21 @@ if (!sources.includes("react-native.resource") || !sources.includes("react-nativ
   throw new Error(`expected resource and instrumentation sources: ${JSON.stringify(sources)}`);
 }
 const resource = events.find((event) => event.attributes.metadata?.source === "react-native.resource")?.attributes;
-if (resource?.name !== "POST /api/checkout" || resource.metadata.routeTemplate !== "/api/checkout") {
+if (
+  resource?.name !== "POST /api/checkout" ||
+  resource.durationMs !== 175 ||
+  resource.metadata.routeTemplate !== "/api/checkout" ||
+  resource.metadata.responseStartDurationMs !== 135
+) {
   throw new Error(`unexpected resource span: ${JSON.stringify(resource)}`);
 }
 const globalResource = events.find((event) => event.attributes.name === "GET /api/global")?.attributes;
-if (globalResource?.metadata.routeTemplate !== "/api/global" || globalResource.metadata.statusCode !== 206) {
+if (
+  globalResource?.durationMs !== 45 ||
+  globalResource.metadata.routeTemplate !== "/api/global" ||
+  globalResource.metadata.responseStartDurationMs !== 20 ||
+  globalResource.metadata.statusCode !== 206
+) {
   throw new Error(`unexpected global fetch span: ${JSON.stringify(globalResource)}`);
 }
 const xhrResource = events.find((event) => event.attributes.name === "PUT /api/xhr")?.attributes;

@@ -480,7 +480,7 @@ const resourceFetchClient = createLogBrewReactNativeClient({
   maxRetries: 1
 });
 const resourceFetchRequests = [];
-const resourceFetchTimes = [1000, 1167, 2000, 2031];
+const resourceFetchTimes = [1000, 1041, 1167, 2000, 2031];
 const resourceFetchTimestamps = ["2026-06-02T10:00:12Z", "2026-06-02T10:00:13Z"];
 const resourceFetch = createReactNativeResourceFetch(resourceFetchClient, {
   fetchImpl: async (input, init = {}) => {
@@ -542,6 +542,7 @@ if (
   resourceFetchSuccess.status !== "ok" ||
   resourceFetchSuccess.durationMs !== 167 ||
   resourceFetchSuccess.metadata.routeTemplate !== "/api/checkout" ||
+  resourceFetchSuccess.metadata.responseStartDurationMs !== 41 ||
   resourceFetchSuccess.metadata.graphqlOperationName !== "CheckoutSubmit" ||
   resourceFetchSuccess.metadata.graphqlOperationType !== "mutation" ||
   resourceFetchSuccess.metadata.responseSizeBytes !== 1536 ||
@@ -601,11 +602,14 @@ const globalFetchInstrumentation = createLogBrewReactNativeInstrumentation(globa
   instrumentGlobalFetch: true,
   measureFetchResponseBodySize: true,
   metadataFactory(context) {
-    return { responseSizeFromFactory: context.responseSizeBytes };
+    return {
+      responseSizeFromFactory: context.responseSizeBytes,
+      responseStartFromFactory: context.responseStartDurationMs
+    };
   },
   now: () => "2026-06-02T10:00:14Z",
   nowMs: (() => {
-    const values = [3000, 3032];
+    const values = [3000, 3008, 3032];
     return () => values.shift();
   })(),
   routeTemplateFactory: () => "/api/mobile-feed",
@@ -628,7 +632,9 @@ const globalFetchSpan = globalFetchEvents[0].attributes;
 if (
   globalFetchSpan.name !== "GET /api/mobile-feed" ||
   globalFetchSpan.durationMs !== 32 ||
+  globalFetchSpan.metadata.responseStartDurationMs !== 8 ||
   globalFetchSpan.metadata.responseSizeBytes !== 6 ||
+  globalFetchSpan.metadata.responseStartFromFactory !== 8 ||
   globalFetchSpan.metadata.responseSizeFromFactory !== 6 ||
   globalFetchSpan.metadata.traceId !== providerTrace.traceId
 ) {
