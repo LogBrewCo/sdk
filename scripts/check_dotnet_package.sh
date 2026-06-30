@@ -47,21 +47,27 @@ fi
 dotnet build "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release -warnaserror >/dev/null
 dotnet build "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release -warnaserror >/dev/null
 dotnet build "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" --configuration Release -warnaserror >/dev/null
+dotnet build "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" --configuration Release -warnaserror >/dev/null
 dotnet run --project "$package_dir/tests/LogBrew.Tests/LogBrew.Tests.csproj" --configuration Release
 dotnet run --project "$package_dir/tests/LogBrew.AspNetCore.Tests/LogBrew.AspNetCore.Tests.csproj" --configuration Release
 dotnet run --project "$package_dir/tests/LogBrew.EntityFrameworkCore.Tests/LogBrew.EntityFrameworkCore.Tests.csproj" --configuration Release
+dotnet run --project "$package_dir/tests/LogBrew.StackExchangeRedis.Tests/LogBrew.StackExchangeRedis.Tests.csproj" --configuration Release
 dotnet pack "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
+dotnet pack "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 package_version="$(dotnet msbuild "$package_dir/src/LogBrew/LogBrew.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 aspnetcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 efcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
+redis_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 nupkg="$tmp_dir/packages/LogBrew.${package_version}.nupkg"
 aspnetcore_nupkg="$tmp_dir/packages/LogBrew.AspNetCore.${aspnetcore_package_version}.nupkg"
 efcore_nupkg="$tmp_dir/packages/LogBrew.EntityFrameworkCore.${efcore_package_version}.nupkg"
+redis_nupkg="$tmp_dir/packages/LogBrew.StackExchangeRedis.${redis_package_version}.nupkg"
 test -f "$nupkg"
 test -f "$aspnetcore_nupkg"
 test -f "$efcore_nupkg"
+test -f "$redis_nupkg"
 
 python3 - "$nupkg" <<'PY'
 import sys
@@ -114,6 +120,9 @@ for needle in (
     "DbCommandTelemetry.cs",
     "LogBrewDbCommandTelemetry",
     "LogBrewDbCommandOptions",
+    "dotnet add package LogBrew.StackExchangeRedis",
+    "TraceLogBrewCommand",
+    "StackExchangeRedisCommandTelemetry.cs",
     "LogBrewActivitySourceListener",
     "WithSourceName(\"Checkout.Service\")",
     "Calling `Start(client)` without source names is fail-closed",
@@ -147,6 +156,8 @@ for needle in (
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
 PY
+
+python3 "$repo_root/scripts/check_dotnet_stackexchange_redis_nupkg.py" "$redis_nupkg" >/dev/null
 
 python3 - "$aspnetcore_nupkg" <<'PY'
 import sys
@@ -305,6 +316,28 @@ dotnet run --project "$efcore_dir/EntityFrameworkCoreCommandTelemetry.csproj" --
 test ! -s "$tmp_dir/efcore.stdout.txt"
 grep -q '"example":"EntityFrameworkCoreCommandTelemetry"' "$tmp_dir/efcore.stderr.json"
 
+redis_dir="$tmp_dir/StackExchangeRedisCommandTelemetry"
+dotnet new console --framework net10.0 --name StackExchangeRedisCommandTelemetry --output "$redis_dir" >/dev/null
+cp "$package_dir/examples/StackExchangeRedisCommandTelemetry.cs" "$redis_dir/Program.cs"
+cat > "$redis_dir/StackExchangeRedisCommandTelemetry.csproj" <<EOF
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$package_dir/src/LogBrew/LogBrew.csproj" />
+    <ProjectReference Include="$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" />
+  </ItemGroup>
+</Project>
+EOF
+dotnet run --project "$redis_dir/StackExchangeRedisCommandTelemetry.csproj" --configuration Release > "$tmp_dir/stackexchange-redis.stdout.json" 2> "$tmp_dir/stackexchange-redis.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/stackexchange-redis.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_stackexchange_redis_payload.py" "$tmp_dir/stackexchange-redis.stdout.json" "$tmp_dir/stackexchange-redis.stderr.json" >/dev/null
+
 web_dir="$tmp_dir/AspNetCoreRequestTelemetry"
 dotnet new web --framework net10.0 --name AspNetCoreRequestTelemetry --output "$web_dir" >/dev/null
 cp "$package_dir/examples/AspNetCoreRequestTelemetry.cs" "$web_dir/Program.cs"
@@ -354,6 +387,7 @@ grep -qx 'run-dependency-spans-telemetry -> make run-dependency-spans-telemetry'
 grep -qx 'run-db-command-telemetry -> make run-db-command-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-http-client-outbound-telemetry -> make run-http-client-outbound-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-entity-framework-core-command-telemetry -> make run-entity-framework-core-command-telemetry' "$tmp_dir/examples-help.txt"
+grep -qx 'run-stackexchange-redis-command-telemetry -> make run-stackexchange-redis-command-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-request-telemetry -> make run-aspnetcore-request-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-middleware-telemetry -> make run-aspnetcore-middleware-telemetry' "$tmp_dir/examples-help.txt"
 

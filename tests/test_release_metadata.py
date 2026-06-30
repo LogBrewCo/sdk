@@ -94,18 +94,26 @@ jobs:
         run: |
           echo "core_version=0.1.2" >> "$GITHUB_OUTPUT"
           echo "aspnetcore_version=0.1.0" >> "$GITHUB_OUTPUT"
+          echo "efcore_version=0.1.0" >> "$GITHUB_OUTPUT"
+          echo "redis_version=0.1.0" >> "$GITHUB_OUTPUT"
       - name: Validate NuGet metadata
         run: |
           python3 scripts/check_release_metadata.py \\
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
-            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"
+            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
+            --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \\
+            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}"
+      - name: Pack NuGet package
+        run: dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj
       - name: Publish NuGet package
         run: dotnet nuget push --skip-duplicate
       - name: Verify public NuGet package
         run: |
           python3 scripts/check_registry_publication.py --target nuget \\
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
-            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"
+            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
+            --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \\
+            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}"
   verify:
     name: Public registry verification
     if: ${{ inputs.target == 'verify' }}
@@ -499,16 +507,19 @@ jobs:
             project_dir = package_dir / "src" / "LogBrew"
             aspnetcore_dir = package_dir / "src" / "LogBrew.AspNetCore"
             efcore_dir = package_dir / "src" / "LogBrew.EntityFrameworkCore"
+            redis_dir = package_dir / "src" / "LogBrew.StackExchangeRedis"
             examples_dir = package_dir / "examples"
             assets_dir = root / "assets" / "brand"
             project_dir.mkdir(parents=True)
             aspnetcore_dir.mkdir(parents=True)
             efcore_dir.mkdir(parents=True)
+            redis_dir.mkdir(parents=True)
             examples_dir.mkdir(parents=True)
             assets_dir.mkdir(parents=True)
             (package_dir / "README.md").write_text("# LogBrew .NET\n", encoding="utf-8")
             (aspnetcore_dir / "README.md").write_text("# LogBrew ASP.NET Core\n", encoding="utf-8")
             (efcore_dir / "README.md").write_text("# LogBrew Entity Framework Core\n", encoding="utf-8")
+            (redis_dir / "README.md").write_text("# LogBrew StackExchange.Redis\n", encoding="utf-8")
             for example in (
                 "FirstUsefulTelemetry.cs",
                 "ActivityTraceCorrelation.cs",
@@ -519,6 +530,7 @@ jobs:
                 "AspNetCoreRequestTelemetry.cs",
                 "AspNetCoreMiddlewareTelemetry.cs",
                 "EntityFrameworkCoreCommandTelemetry.cs",
+                "StackExchangeRedisCommandTelemetry.cs",
             ):
                 (examples_dir / example).write_text("// example\n", encoding="utf-8")
             (assets_dir / "logbrew-logo-transparent-128.png").write_bytes(b"png")
@@ -605,12 +617,39 @@ jobs:
                 + "\n",
                 encoding="utf-8",
             )
+            (redis_dir / "LogBrew.StackExchangeRedis.csproj").write_text(
+                """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>LogBrew.StackExchangeRedis</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>LogBrew</Authors>
+    <Company>LogBrew</Company>
+    <Description>Public LogBrew StackExchange.Redis integration.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logbrew-logo-espresso-bg-128.png</PackageIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../LogBrew/LogBrew.csproj" />
+    <PackageReference Include="StackExchange.Redis" Version="3.0.11" />
+    <None Include="../../examples/StackExchangeRedisCommandTelemetry.cs" Pack="true" PackagePath="examples/" />
+  </ItemGroup>
+</Project>
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
 
             default_failures: list[str] = []
             check_release_metadata.validate_dotnet_packages(
                 root,
                 default_failures,
                 check_release_metadata.DOTNET_VERSION,
+                check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_LICENSE,
@@ -621,6 +660,7 @@ jobs:
                 root,
                 override_failures,
                 "0.1.4",
+                check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_LICENSE,

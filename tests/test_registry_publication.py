@@ -89,6 +89,7 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertIn("@logbrew/aws-sqs", labels)
         self.assertIn("logbrew-sdk", labels)
         self.assertIn("LogBrew", labels)
+        self.assertIn("LogBrew.StackExchangeRedis", labels)
         self.assertNotIn("logbrew-fastapi", labels)
         self.assertNotIn("logbrew", labels)
         self.assertNotIn("logbrew/sdk", labels)
@@ -162,11 +163,11 @@ class RegistryPublicationTests(unittest.TestCase):
     def test_parse_nuget_package_versions(self) -> None:
         self.assertEqual(
             check_registry_publication.parse_package_versions(
-                ["LogBrew=0.1.1"],
+                ["LogBrew.StackExchangeRedis=0.1.1"],
                 allowed_packages=check_registry_publication.NUGET_PACKAGES,
                 package_family="NuGet",
             ),
-            {"LogBrew": "0.1.1"},
+            {"LogBrew.StackExchangeRedis": "0.1.1"},
         )
 
     def test_success_summary_reports_npm_version_overrides(self) -> None:

@@ -10,6 +10,7 @@ def validate_dotnet_packages(
     core_version: str,
     aspnetcore_version: str,
     efcore_version: str,
+    redis_version: str,
     public_license: str,
     repo_url: str,
 ) -> None:
@@ -102,6 +103,33 @@ def validate_dotnet_packages(
             ("ProjectReference Include=\"../LogBrew/LogBrew.csproj\"", "package must depend on the core LogBrew project"),
             ("PackageReference Include=\"Microsoft.EntityFrameworkCore.Relational\"", "package must depend on EF Core relational APIs"),
             ("examples/EntityFrameworkCoreCommandTelemetry.cs", "package must include examples/EntityFrameworkCoreCommandTelemetry.cs"),
+        ),
+    )
+    _validate_package(
+        root,
+        failures,
+        "dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj",
+        required_paths=(
+            "dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/README.md",
+            "dotnet/logbrew-dotnet/examples/StackExchangeRedisCommandTelemetry.cs",
+            "assets/brand/logbrew-logo-espresso-bg-128.png",
+        ),
+        expected={
+            "TargetFramework": "netstandard2.0",
+            "PackageId": "LogBrew.StackExchangeRedis",
+            "Version": redis_version,
+            "Authors": "LogBrew",
+            "Company": "LogBrew",
+            "PackageLicenseExpression": public_license,
+            "PackageProjectUrl": repo_url,
+            "RepositoryUrl": repo_url,
+            "PackageReadmeFile": "README.md",
+            "PackageIcon": "logbrew-logo-espresso-bg-128.png",
+        },
+        project_needles=(
+            ("ProjectReference Include=\"../LogBrew/LogBrew.csproj\"", "package must depend on the core LogBrew project"),
+            ("PackageReference Include=\"StackExchange.Redis\"", "package must depend on StackExchange.Redis APIs"),
+            ("examples/StackExchangeRedisCommandTelemetry.cs", "package must include examples/StackExchangeRedisCommandTelemetry.cs"),
         ),
     )
 

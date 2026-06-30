@@ -61,6 +61,7 @@ library your app already uses.
 | .NET | [`LogBrew`](dotnet/logbrew-dotnet) | Core .NET client, HTTP delivery, `ILogger` provider |
 | ASP.NET Core | [`LogBrew.AspNetCore`](dotnet/logbrew-dotnet/src/LogBrew.AspNetCore) | Optional ASP.NET Core request telemetry middleware |
 | Entity Framework Core | [`LogBrew.EntityFrameworkCore`](dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore) | Optional EF Core command span interceptor |
+| StackExchange.Redis | [`LogBrew.StackExchangeRedis`](dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis) | Optional Redis command spans without key/value capture |
 | PHP | [`logbrew/sdk`](php/logbrew-php) | Core PHP client, HTTP delivery, PSR-3 and Monolog/Laravel support |
 | Ruby | [`logbrew-sdk`](ruby/logbrew-ruby) | Core Ruby client, HTTP delivery, stdlib `Logger`, Rack/Rails-compatible helpers |
 | Rust | [`logbrew`](rust/logbrew) | Core Rust client and optional blocking HTTP delivery |

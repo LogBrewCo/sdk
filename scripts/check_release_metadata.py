@@ -44,7 +44,7 @@ JS_PACKAGES = {
     "js/logbrew-svelte": "@logbrew/svelte",
     "js/logbrew-vue": "@logbrew/vue",
 }
-NUGET_PACKAGES = {"LogBrew", "LogBrew.AspNetCore", "LogBrew.EntityFrameworkCore"}
+NUGET_PACKAGES = {"LogBrew", "LogBrew.AspNetCore", "LogBrew.EntityFrameworkCore", "LogBrew.StackExchangeRedis"}
 
 OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
 PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
@@ -832,22 +832,7 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
         required_publish_needles = {
             "NuGet package version output": "id: nuget-version",
-            "NuGet ASP.NET Core version output": "aspnetcore_version=",
-            "NuGet Entity Framework Core version output": "efcore_version=",
-            "NuGet exact metadata version validation": (
-                '--nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}"'
-            ),
-            "NuGet ASP.NET Core metadata version validation": (
-                '--nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"'
-            ),
-            "NuGet Entity Framework Core metadata version validation": '--nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}"',
-            "NuGet exact public version verification": (
-                '--nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}"'
-            ),
-            "NuGet ASP.NET Core public version verification": (
-                '--nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}"'
-            ),
-            "NuGet Entity Framework Core public version verification": '--nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}"',
+            "NuGet StackExchange.Redis pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj",
             "NuGet duplicate-safe publish": "--skip-duplicate",
             "verify target exact version input": "verify_version:",
             "verify target exact version argument": 'verify_args+=(--version "$VERIFY_VERSION")',
@@ -866,6 +851,17 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
                 "npm trusted publishing requires existing package pages"
             ),
         }
+        nuget_output_versions = (
+            ("exact", "LogBrew", "core_version"),
+            ("ASP.NET Core", "LogBrew.AspNetCore", "aspnetcore_version"),
+            ("Entity Framework Core", "LogBrew.EntityFrameworkCore", "efcore_version"),
+            ("StackExchange.Redis", "LogBrew.StackExchangeRedis", "redis_version"),
+        )
+        for label, package, output_name in nuget_output_versions:
+            needle = f'--nuget-version "{package}=${{{{ steps.nuget-version.outputs.{output_name} }}}}"'
+            required_publish_needles[f"NuGet {label} version output"] = f"{output_name}="
+            required_publish_needles[f"NuGet {label} metadata version validation"] = needle
+            required_publish_needles[f"NuGet {label} public version verification"] = needle
         for description, needle in required_publish_needles.items():
             require(needle in publish_packages_text, failures, f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}")
         for relative_dir in JS_PACKAGES:
@@ -925,6 +921,7 @@ def validate(
         nuget_versions.get("LogBrew", DOTNET_VERSION),
         nuget_versions.get("LogBrew.AspNetCore", PUBLIC_VERSION),
         nuget_versions.get("LogBrew.EntityFrameworkCore", PUBLIC_VERSION),
+        nuget_versions.get("LogBrew.StackExchangeRedis", PUBLIC_VERSION),
         PUBLIC_LICENSE,
         REPO_URL,
     )

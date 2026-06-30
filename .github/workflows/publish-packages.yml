@@ -559,26 +559,30 @@ jobs:
           core_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           aspnetcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           efcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
-          if [[ -z "$core_version" || -z "$aspnetcore_version" || -z "$efcore_version" ]]; then
-            echo "Could not read NuGet package version from LogBrew.csproj" >&2
+          redis_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          if [[ -z "$core_version" || -z "$aspnetcore_version" || -z "$efcore_version" || -z "$redis_version" ]]; then
+            echo "Could not read NuGet package versions from .NET package projects" >&2
             exit 1
           fi
           echo "core_version=$core_version" >> "$GITHUB_OUTPUT"
           echo "aspnetcore_version=$aspnetcore_version" >> "$GITHUB_OUTPUT"
           echo "efcore_version=$efcore_version" >> "$GITHUB_OUTPUT"
+          echo "redis_version=$redis_version" >> "$GITHUB_OUTPUT"
 
       - name: Validate NuGet release metadata
         run: |
           python3 scripts/check_release_metadata.py \
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
-            --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}"
+            --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
+            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}"
 
       - name: Pack NuGet package
         run: |
           dotnet pack dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj --configuration Release --output dist/nuget
           dotnet pack dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj --configuration Release --output dist/nuget
           dotnet pack dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj --configuration Release --output dist/nuget
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj --configuration Release --output dist/nuget
 
       - name: Authenticate to NuGet
         if: ${{ ! inputs.dry_run }}
@@ -604,6 +608,7 @@ jobs:
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
             --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
+            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
             --retries 20 --retry-delay 30
 
   packagist:
