@@ -28,11 +28,11 @@
   Spring/Kafka auto-registration, arbitrary header capture, payloads, message
   bodies, broker URLs, raw propagation metadata, receipt/message IDs, baggage,
   tracestate, exception messages/stacks, and support-ticket creation. Evidence:
-  RED missing API tests, GREEN `bash scripts/check_java_package.sh`,
-  `bash scripts/real_user_java_smoke.sh`,
-  `bash scripts/real_user_java_high_load_smoke.sh`, Java SpotBugs, ShellCheck,
-  fixture validation, release metadata, markdown links, backend reports, and
-  confidentiality scan. Report:
+  `bash scripts/check_java_package.sh`, `bash scripts/real_user_java_smoke.sh`,
+  `bash scripts/real_user_java_queue_trace_smoke.sh`,
+  `bash scripts/real_user_java_high_load_smoke.sh`, Java SpotBugs,
+  ShellCheck, fixture validation, release metadata, markdown links, generated
+  artifact hygiene, diff hygiene, and confidentiality scan. Report:
   `docs/competitor-research/java-queue-propagation-2026-06-30.md`. Remaining
   Java messaging gaps: optional Kafka/Spring Kafka/JMS packages, batch
   receive/process convenience helpers, privacy-bounded time-in-queue metadata,

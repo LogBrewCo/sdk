@@ -146,7 +146,7 @@ For PHP packages specifically, prefer a smoke path that creates a fresh Composer
 - C: `bash scripts/check_c_package.sh` and `bash scripts/real_user_c_smoke.sh`
 - C++: `bash scripts/check_cpp_package.sh` and `bash scripts/real_user_cpp_smoke.sh`
 - Objective-C: `bash scripts/check_objc_package.sh` and `bash scripts/real_user_objc_smoke.sh`
-- Java: `bash scripts/check_java_static.sh`, `bash scripts/check_java_package.sh`, `bash scripts/real_user_java_smoke.sh`, and `bash scripts/real_user_spring_boot_smoke.sh`
+- Java: `bash scripts/check_java_static.sh`, `bash scripts/check_java_package.sh`, `bash scripts/real_user_java_smoke.sh`, `bash scripts/real_user_java_queue_trace_smoke.sh`, and `bash scripts/real_user_spring_boot_smoke.sh`
 - .NET: `bash scripts/check_dotnet_package.sh` and `bash scripts/real_user_dotnet_smoke.sh`
 - Unity: `bash scripts/check_unity_package.sh` and `bash scripts/real_user_unity_smoke.sh`
 - Kotlin: `bash scripts/check_kotlin_style.sh`, `bash scripts/check_kotlin_package.sh`, and `bash scripts/real_user_kotlin_smoke.sh`

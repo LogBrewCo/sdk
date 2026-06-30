@@ -73,6 +73,7 @@ STEP_LABELS=(
   "C real-user smoke"
   "C++ real-user smoke"
   "Java real-user smoke"
+  "Java queue trace installed-artifact smoke"
   "Java high-load installed-artifact smoke"
   "Spring Boot real-user smoke"
   ".NET real-user smoke"
@@ -596,6 +597,10 @@ mark_step_complete
 
 begin_next_step "Java real-user smoke"
 run_shell_step "bash scripts/real_user_java_smoke.sh"
+mark_step_complete
+
+begin_next_step "Java queue trace installed-artifact smoke"
+run_shell_step "bash scripts/real_user_java_queue_trace_smoke.sh"
 mark_step_complete
 
 begin_next_step "Java high-load installed-artifact smoke"

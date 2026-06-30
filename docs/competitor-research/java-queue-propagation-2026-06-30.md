@@ -44,7 +44,7 @@ LogBrew is now better than PostHog Java for queue trace propagation and safer/li
 ## Verification
 
 - Focused package gate: `bash scripts/check_java_package.sh` passed with Java operation tracing tests covering outgoing traceparent injection, incoming continuation, span links, malformed propagation fallback, and package/Javadoc surface checks.
-- Installed-artifact gate: `bash scripts/real_user_java_smoke.sh` passed from a packaged jar and source jar, proving package contents, README strings, temp-app compile/run, queue traceparent injection, incoming continuation, span links, manual `SpanLinkSummary`, retry/flush/shutdown behavior, and no private message/header/propagation leakage.
+- Installed-artifact gate: `bash scripts/real_user_java_queue_trace_smoke.sh` passed from a packaged jar and source jar, proving package contents, README strings, temp-app compile/run, queue traceparent injection, incoming continuation, span links, manual `SpanLinkSummary`, flush behavior, and no private message/header/propagation leakage.
 - High-load installed-artifact gate: `bash scripts/real_user_java_high_load_smoke.sh` passed with 1,500 logs, 1,000 flushed events, 500 bounded local drops, and 5xx-to-2xx retry behavior.
 - Hygiene gates passed: Java SpotBugs static analysis, ShellCheck, payload fixture validation, release metadata, markdown links, backend contract reports, and public confidentiality scan.
 
