@@ -39,6 +39,14 @@
   --features macros`, assert the temp app does not resolve `cookie`, and keep
   optional cookies/compression app-owned. Local proof:
   `bash scripts/real_user_rust_actix_smoke.sh` passed.
+- 2026-06-30: Rust Rocket installed-artifact verifier drift fixed after GitHub
+  Actions run `28435671996` failed in `scripts/real_user_rust_rocket_smoke.sh`:
+  a fresh Rocket 0.5 temp app resolved `cookie 0.18.1` with `time 0.3.52`;
+  `cookie` still calls the old one-argument `Parsable::parse` API. Rocket
+  resolves `cookie` even without default features, so the public smoke and
+  README now add `time = "=0.3.51"` as an explicit Rocket compatibility pin,
+  assert the direct dependency and locked tree, and keep this documented as
+  an upstream Rocket/cookie/time workaround, not a LogBrew runtime dependency.
 - 2026-06-30: React Native fetch response-size trace gap reduced after source
   reads from Sentry React Native `@sentry/react-native@8.16.0`
   (`dist/js/replay/networkUtils.js`, `dist/js/replay/xhrUtils.js`) and Datadog

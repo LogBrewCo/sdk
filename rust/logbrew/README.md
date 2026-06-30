@@ -493,7 +493,13 @@ For Rocket apps, keep request telemetry in app-owned fairings. Record timing in 
 ```bash
 cargo add logbrew
 cargo add rocket
+cargo add time@=0.3.51
 ```
+
+Current Rocket 0.5 fresh installs can resolve `cookie 0.18.1` with
+`time 0.3.52`, which does not compile because `time` changed its parse
+signature. The exact `time` pin keeps Rocket's transitive cookie parser stable
+until that upstream pair is updated; it is not a LogBrew runtime dependency.
 
 The packaged `examples/rocket_request_fairing.rs` file is a runnable mini-app; the core pattern is:
 

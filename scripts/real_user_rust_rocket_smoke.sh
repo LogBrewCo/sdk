@@ -52,11 +52,13 @@ cargo new --quiet rocket-app
 cd rocket-app
 cargo add logbrew --path "$crate_dir" >/dev/null
 cargo add rocket@0.5 >/dev/null
+cargo add time@=0.3.51 >/dev/null
 assert_logbrew_path_dependency Cargo.toml rocket-app "/extracted-crate/logbrew-0.1.0"
 cp "$crate_dir/examples/rocket_request_fairing.rs" src/main.rs
 
 grep -q '^name = "logbrew"$' Cargo.lock
 grep -q '^name = "rocket"$' Cargo.lock
+grep -q '^name = "time"$' Cargo.lock
 cargo metadata --locked --format-version 1 > rocket-cargo-metadata.json
 python3 - <<'PY'
 import json
@@ -67,7 +69,7 @@ root = next((pkg for pkg in payload.get("packages", []) if pkg.get("name") == "r
 if root is None:
     raise SystemExit("expected resolved rocket-app package")
 direct = {dep.get("name"): dep for dep in root.get("dependencies", [])}
-for name in ["logbrew", "rocket"]:
+for name in ["logbrew", "rocket", "time"]:
     if name not in direct:
         raise SystemExit(f"missing rocket-app direct dependency: {name}")
 logbrew = direct["logbrew"]
@@ -77,10 +79,14 @@ if not str(logbrew.get("path", "")).endswith("/extracted-crate/logbrew-0.1.0"):
     raise SystemExit(f"unexpected logbrew path: {logbrew.get('path')}")
 if logbrew.get("features"):
     raise SystemExit(f"unexpected logbrew features: {logbrew.get('features')}")
+time = direct["time"]
+if time.get("req") != "=0.3.51":
+    raise SystemExit(f"unexpected Rocket compatibility time requirement: {time.get('req')}")
 PY
 cargo tree --locked --depth 1 --charset ascii > rocket-cargo-tree.txt
 grep -q '^rocket-app v0.1.0 (' rocket-cargo-tree.txt
 grep -q 'logbrew v0\.1\.0 .*extracted-crate/logbrew-0\.1\.0' rocket-cargo-tree.txt
 grep -q 'rocket v0\.5\.' rocket-cargo-tree.txt
+grep -q 'time v0\.3\.51' rocket-cargo-tree.txt
 cargo run --quiet --locked > rocket.stdout.json 2> rocket.stderr.json
 python3 "$repo_root/scripts/check_rust_rocket_payload.py" rocket.stdout.json rocket.stderr.json >/dev/null
