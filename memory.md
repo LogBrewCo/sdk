@@ -3,7 +3,7 @@
 - 2026-06-30: Java queue/message rich-trace gap reduced after source reads from
   Sentry Java
   `getsentry/sentry-java@307edcd968452d07d801c46362bf98f815fea808`
-  (`SentryKafkaProducer`, `SentryKafkaConsumerTracing`,
+  (`SentryKafkaProducer`, `SentryKafkaConsumerTracing`, enqueued-time header,
   `SentryKafkaProducerBeanPostProcessor`, `SentryKafkaRecordInterceptor`,
   `SentryAutoConfiguration` Kafka queue configuration), Datadog Java tracer
   `DataDog/dd-trace-java@04ea23af81f738f81dc0f75ecbd99e83f9ab1d6a`
@@ -18,16 +18,20 @@
   (`QueueManager`, `PostHog`; no comparable Java messaging trace propagation
   found). Core `co.logbrew:logbrew-sdk` now adds `SpanLinkSummary`,
   `SpanAttributes.link(s)`, and app-owned `QueueOperation` helpers for
-  `traceparentHeaderSetter(...)`, `incomingTraceparent(...)`, and
-  `linkedMessageTraceparent(...)`. Queue helpers inject one normalized W3C
+  `traceparentHeaderSetter(...)`, `incomingTraceparent(...)`,
+  `linkedMessageTraceparent(...)`, `enqueuedAt(...)`, and
+  `timeInQueueMs(...)`. Queue helpers inject one normalized W3C
   `traceparent` through a caller-owned carrier setter, continue one valid
   incoming message context, report malformed incoming/linked propagation and
-  setter failures non-fatally through `onError(...)`, cap links at eight, and
-  serialize only trace ID/span ID/sampled plus primitive metadata. They avoid
+  setter failures plus impossible negative queue latency non-fatally through
+  `onError(...)`, compute primitive `timeInQueueMs`, cap links at eight, and
+  serialize only trace ID/span ID/sampled/time-in-queue plus primitive metadata.
+  They avoid
   Kafka/JMS/Rabbit/AMQP dependencies, Java agents, hidden client patching,
   Spring/Kafka auto-registration, arbitrary header capture, payloads, message
-  bodies, broker URLs, raw propagation metadata, receipt/message IDs, baggage,
-  tracestate, exception messages/stacks, and support-ticket creation. Evidence:
+  bodies, broker URLs, raw enqueue timestamps, custom timing-header injection,
+  raw propagation metadata, receipt/message IDs, baggage, tracestate, exception
+  messages/stacks, and support-ticket creation. Evidence:
   `bash scripts/check_java_package.sh`, `bash scripts/real_user_java_smoke.sh`,
   `bash scripts/real_user_java_queue_trace_smoke.sh`,
   `bash scripts/real_user_java_high_load_smoke.sh`, Java SpotBugs,
@@ -35,9 +39,10 @@
   artifact hygiene, diff hygiene, and confidentiality scan. Report:
   `docs/competitor-research/java-queue-propagation-2026-06-30.md`. Remaining
   Java messaging gaps: optional Kafka/Spring Kafka/JMS packages, batch
-  receive/process convenience helpers, privacy-bounded time-in-queue metadata,
-  richer messaging semantic attributes/metrics, baggage/tracestate only if
-  explicitly justified, and OpenTelemetry exporter/processor interop.
+  receive/process convenience helpers, automatic privacy-bounded
+  time-in-queue extraction in those integrations, richer messaging semantic
+  attributes/metrics, baggage/tracestate only if explicitly justified, and
+  OpenTelemetry exporter/processor interop.
 - 2026-06-30: .NET queue/message rich-trace gap reduced after source reads
   from Sentry .NET `getsentry/sentry-dotnet@951d98f789ec6794a1bbd82149d900f06fde0cfa`
   (no first-party Kafka/RabbitMQ/MassTransit queue instrumentation found;

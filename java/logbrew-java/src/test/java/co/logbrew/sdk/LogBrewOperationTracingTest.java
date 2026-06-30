@@ -21,6 +21,8 @@ public final class LogBrewOperationTracingTest {
         testOperationTracingHelpersAttachSpanEventsAndExceptionSummaries();
         testQueueOperationInjectsTraceparentAndKeepsActiveChildTrace();
         testQueueOperationContinuesIncomingTraceparentAndAddsLinks();
+        testQueueOperationRecordsTimeInQueueMetadata();
+        testQueueOperationTreatsNegativeTimeInQueueAsNonFatal();
         testQueueOperationTreatsMalformedPropagationAsNonFatal();
         testOperationTracingHelpersPreserveOriginalErrors();
         testOperationTracingCaptureFailureDoesNotReplaceOperationResult();
@@ -283,6 +285,83 @@ public final class LogBrewOperationTracingTest {
         assertContains(payload, "\"messageCount\": 2");
         assertNotContains(payload, "private");
         assertNotContains(payload, "traceFlags");
+        testsRun++;
+    }
+
+    private void testQueueOperationRecordsTimeInQueueMetadata() {
+        LogBrewClient client = sampleClient();
+
+        try {
+            LogBrewOperationTracing.queueOperation(
+                client,
+                "process delayed invoice",
+                () -> "processed",
+                LogBrewOperationTracing.QueueOperation.create()
+                    .system("kafka")
+                    .operationKind("process")
+                    .eventIdPrefix("java_queue_latency")
+                    .spanId("b7ad6b7169203340")
+                    .enqueuedAt(Instant.parse("2026-06-02T10:00:00Z"))
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:02.250Z"),
+                        Instant.parse("2026-06-02T10:00:02.275Z")
+                    )
+            );
+            LogBrewOperationTracing.queueOperation(
+                client,
+                "process broker latency",
+                () -> "processed",
+                LogBrewOperationTracing.QueueOperation.create()
+                    .eventIdPrefix("java_queue_explicit_latency")
+                    .spanId("b7ad6b7169203341")
+                    .timeInQueueMs(125.5)
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:03Z"),
+                        Instant.parse("2026-06-02T10:00:03.010Z")
+                    )
+            );
+        } catch (Exception error) {
+            throw new AssertionError(error);
+        }
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"id\": \"java_queue_latency_span_b7ad6b7169203340\"");
+        assertContains(payload, "\"timeInQueueMs\": 2250.0");
+        assertContains(payload, "\"id\": \"java_queue_explicit_latency_span_b7ad6b7169203341\"");
+        assertContains(payload, "\"timeInQueueMs\": 125.5");
+        assertNotContains(payload, "2026-06-02T10:00:00Z");
+        testsRun++;
+    }
+
+    private void testQueueOperationTreatsNegativeTimeInQueueAsNonFatal() {
+        LogBrewClient client = sampleClient();
+        List<String> errorCodes = new ArrayList<>();
+
+        try {
+            String result = LogBrewOperationTracing.queueOperation(
+                client,
+                "process clock skew",
+                () -> "processed",
+                LogBrewOperationTracing.QueueOperation.create()
+                    .eventIdPrefix("java_queue_clock_skew")
+                    .spanId("b7ad6b7169203342")
+                    .enqueuedAt(Instant.parse("2026-06-02T10:00:05Z"))
+                    .onError(error -> errorCodes.add(error.code()))
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:04Z"),
+                        Instant.parse("2026-06-02T10:00:04.010Z")
+                    )
+            );
+            assertEquals("processed", result, "negative time in queue result");
+        } catch (Exception error) {
+            throw new AssertionError(error);
+        }
+
+        assertTrue(errorCodes.contains("validation_error"), "negative time in queue reported");
+        String payload = client.previewJson();
+        assertContains(payload, "\"id\": \"java_queue_clock_skew_span_b7ad6b7169203342\"");
+        assertNotContains(payload, "timeInQueueMs");
+        assertNotContains(payload, "2026-06-02T10:00:05Z");
         testsRun++;
     }
 

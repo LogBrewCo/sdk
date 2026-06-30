@@ -2,12 +2,12 @@
 
 ## Goal
 
-Close a rich-tracing gap in the Java SDK where queue spans could record timing but could not propagate W3C context to app-owned message carriers, continue incoming message context, or link batch messages. Keep the core SDK dependency-free and safer than automatic broker patching.
+Close a rich-tracing gap in the Java SDK where queue spans could record handler duration but could not propagate W3C context to app-owned message carriers, continue incoming message context, link batch messages, or show privacy-bounded time-in-queue. Keep the core SDK dependency-free and safer than automatic broker patching.
 
 ## Source Evidence
 
 - Sentry Java: `https://github.com/getsentry/sentry-java.git` at `307edcd968452d07d801c46362bf98f815fea808`.
-- Sentry files/functions read: `sentry-kafka/src/main/java/io/sentry/kafka/SentryKafkaProducer.java` (`wrap`, `instrumentedSend`, `maybeInjectHeaders`, callback span finish), `sentry-kafka/src/main/java/io/sentry/kafka/SentryKafkaConsumerTracing.java` (`withTracing`, `startTransaction`, `continueTrace`), `sentry-spring/src/main/java/io/sentry/spring/kafka/SentryKafkaProducerBeanPostProcessor.java` (`postProcessAfterInitialization`, `SentryProducerPostProcessor.apply`), `sentry-spring/src/main/java/io/sentry/spring/kafka/SentryKafkaRecordInterceptor.java` (`intercept`, `continueTrace`, `startTransaction`, `finishSpan`), and `sentry-spring-boot/src/main/java/io/sentry/spring/boot/SentryAutoConfiguration.java` (`SentryKafkaQueueConfiguration`).
+- Sentry files/functions read: `sentry-kafka/src/main/java/io/sentry/kafka/SentryKafkaProducer.java` (`wrap`, `instrumentedSend`, `maybeInjectHeaders`, `SENTRY_ENQUEUED_TIME_HEADER`, callback span finish), `sentry-kafka/src/main/java/io/sentry/kafka/SentryKafkaConsumerTracing.java` (`withTracing`, `startTransaction`, `continueTrace`), `sentry-spring/src/main/java/io/sentry/spring/kafka/SentryKafkaProducerBeanPostProcessor.java` (`postProcessAfterInitialization`, `SentryProducerPostProcessor.apply`), `sentry-spring/src/main/java/io/sentry/spring/kafka/SentryKafkaRecordInterceptor.java` (`intercept`, `continueTrace`, `startTransaction`, `finishSpan`), `sentry-spring/src/test/kotlin/io/sentry/spring/kafka/SentryKafkaRecordInterceptorTest.kt` (`sets receive latency from enqueued time in epoch seconds`), and `sentry-spring-boot/src/main/java/io/sentry/spring/boot/SentryAutoConfiguration.java` (`SentryKafkaQueueConfiguration`).
 - Datadog Java tracer: `https://github.com/DataDog/dd-trace-java.git` at `04ea23af81f738f81dc0f75ecbd99e83f9ab1d6a`.
 - Datadog files/functions read: `dd-java-agent/instrumentation/kafka/kafka-clients-0.11/src/main/java/datadog/trace/instrumentation/kafka_clients/TextMapInjectAdapter.java` (`set`, `injectTimeInQueue`), `TextMapExtractAdapter.java` (`forEachKey`, `extractTimeInQueueStart`), `dd-java-agent/instrumentation/jms/javax-jms-1.1/src/main/java/datadog/trace/instrumentation/jms/MessageInjectAdapter.java` (`set`, `injectTimeInQueue`), `MessageExtractAdapter.java` (`forEachKey`, `extractTimeInQueueStart`, `extractMessageBatchId`), `JMSMessageProducerInstrumentation.java` (`ProducerContextPropagationAdvice`), and `JMSMessageConsumerInstrumentation.java` (`ConsumerAdvice.afterReceive`).
 - OpenTelemetry Java Instrumentation: `https://github.com/open-telemetry/opentelemetry-java-instrumentation.git` at `3118b49eade43b82bac593a980cb83db1ee540b1`.
@@ -17,9 +17,9 @@ Close a rich-tracing gap in the Java SDK where queue spans could record timing b
 
 ## Patterns Observed
 
-Sentry is stronger than LogBrew's previous Java helper for Kafka because it ships first-party Kafka producer wrapping, Spring Kafka producer post-processing, Spring Kafka record interception, producer header injection, and consumer trace continuation. The tradeoff is Kafka/Spring-specific runtime coupling, Sentry-specific propagation headers plus baggage, callback lifecycle wrapping, and more automatic behavior.
+Sentry is stronger than LogBrew's previous Java helper for Kafka because it ships first-party Kafka producer wrapping, Spring Kafka producer post-processing, Spring Kafka record interception, producer header injection, enqueued-time header injection, receive-latency derivation, and consumer trace continuation. The tradeoff is Kafka/Spring-specific runtime coupling, Sentry-specific propagation/timing headers plus baggage, callback lifecycle wrapping, and more automatic behavior.
 
-OpenTelemetry is strongest for standards-based Java messaging instrumentation. It builds producer, receive, process, and batch process instrumenters, injects propagation through Kafka headers and JMS properties, and adds span links for batch processing. The tradeoff is an OpenTelemetry SDK/instrumentation stack, javaagent or library integration complexity, broader semantic-convention surface, optional header capture, and more dependency/runtime coupling.
+OpenTelemetry is strongest for standards-based Java messaging instrumentation. It builds producer, receive, process, and batch process instrumenters, injects propagation through Kafka headers and JMS properties, records messaging semantic attributes, and adds span links for batch processing. The tradeoff is an OpenTelemetry SDK/instrumentation stack, javaagent or library integration complexity, broader semantic-convention surface, optional header capture, and more dependency/runtime coupling.
 
 Datadog is strongest for automatic breadth and data-stream/time-in-queue detail across Kafka and JMS. It injects/extracts propagation through broker carriers, records time-in-queue metadata, and instruments producer/consumer methods through the agent. The tradeoff is agent patching, vendor propagation behavior, data-stream metadata, broker-specific internals, and more hidden runtime behavior.
 
@@ -32,22 +32,24 @@ LogBrew Java now adds a lighter dependency-free queue propagation layer to the e
 - `QueueOperation.traceparentHeaderSetter(...)` writes exactly one normalized W3C `traceparent` to an app-owned carrier setter before the queue callback runs.
 - `QueueOperation.incomingTraceparent(...)` continues one valid incoming message context for consumer/process spans.
 - `QueueOperation.linkedMessageTraceparent(...)` records bounded batch-message span links with primitive metadata.
+- `QueueOperation.enqueuedAt(...)` computes a primitive `timeInQueueMs` from the message enqueue timestamp to the handler start time.
+- `QueueOperation.timeInQueueMs(...)` accepts an explicit broker-provided latency when the application already has one.
 - `SpanLinkSummary` and `SpanAttributes.link(s)` provide reusable privacy-bounded span links for manual advanced spans.
-- Malformed incoming/linked propagation and setter failures are non-fatal diagnostics through `onError(...)`; the app callback result/error remains authoritative.
+- Malformed incoming/linked propagation, impossible negative time-in-queue, and setter failures are non-fatal diagnostics through `onError(...)`; the app callback result/error remains authoritative.
 
-The implementation avoids Kafka/JMS/Rabbit/AMQP dependencies, Java agents, Spring/Kafka auto-registration, broker client patching, arbitrary header capture, message bodies, payloads, broker URLs, receipt/message IDs, baggage, tracestate, raw propagation metadata, exception messages, stacks, and support-ticket creation.
+The implementation avoids Kafka/JMS/Rabbit/AMQP dependencies, Java agents, Spring/Kafka auto-registration, broker client patching, custom timing-header injection, arbitrary header capture, raw enqueue timestamps, message bodies, payloads, broker URLs, receipt/message IDs, baggage, tracestate, raw propagation metadata, exception messages, stacks, and support-ticket creation.
 
 ## Honest Comparison
 
-LogBrew is now better than PostHog Java for queue trace propagation and safer/lighter than Sentry, Datadog, and OpenTelemetry for explicit app-owned queue carriers with installed-artifact proof. It is still worse than Sentry for ready-made Kafka/Spring Kafka ergonomics, worse than OpenTelemetry for standard automatic Kafka/JMS instrumenters and batch span-link depth, and worse than Datadog for automatic broker breadth, time-in-queue/data-stream metadata, and agent-driven coverage.
+LogBrew is now better than PostHog Java for queue trace propagation and safer/lighter than Sentry, Datadog, and OpenTelemetry for explicit app-owned queue carriers with installed-artifact proof. It now covers a practical part of the time-in-queue gap without adding broker dependencies or custom timing headers. It is still worse than Sentry for ready-made Kafka/Spring Kafka ergonomics and automatic receive-latency wiring, worse than OpenTelemetry for standard automatic Kafka/JMS instrumenters and batch span-link depth, and worse than Datadog for automatic broker breadth, data-stream metadata, agent-driven coverage, and automatic time-in-queue spans.
 
 ## Verification
 
-- Focused package gate: `bash scripts/check_java_package.sh` passed with Java operation tracing tests covering outgoing traceparent injection, incoming continuation, span links, malformed propagation fallback, and package/Javadoc surface checks.
-- Installed-artifact gate: `bash scripts/real_user_java_queue_trace_smoke.sh` passed from a packaged jar and source jar, proving package contents, README strings, temp-app compile/run, queue traceparent injection, incoming continuation, span links, manual `SpanLinkSummary`, flush behavior, and no private message/header/propagation leakage.
+- Focused package gate: `bash scripts/check_java_package.sh` passed with Java operation tracing tests covering outgoing traceparent injection, incoming continuation, span links, computed/explicit time-in-queue, malformed propagation fallback, negative-latency fallback, and package/Javadoc surface checks.
+- Installed-artifact gate: `bash scripts/real_user_java_queue_trace_smoke.sh` passed from a packaged jar and source jar, proving package contents, README strings, temp-app compile/run, queue traceparent injection, incoming continuation, span links, manual `SpanLinkSummary`, computed and explicit `timeInQueueMs`, flush behavior, and no private message/header/raw timestamp/propagation leakage.
 - High-load installed-artifact gate: `bash scripts/real_user_java_high_load_smoke.sh` passed with 1,500 logs, 1,000 flushed events, 500 bounded local drops, and 5xx-to-2xx retry behavior.
 - Hygiene gates passed: Java SpotBugs static analysis, ShellCheck, payload fixture validation, release metadata, markdown links, backend contract reports, and public confidentiality scan.
 
 ## Remaining Gaps
 
-Next useful Java trace improvements are optional Kafka/Spring Kafka integration packaging, JMS helper/package coverage, batch receive/process convenience helpers, time-in-queue metadata that stays privacy-bounded, richer messaging semantic attributes, baggage/tracestate only if explicitly justified, and OpenTelemetry processor/exporter interop. Do not add automatic broker/client patching to core `logbrew-sdk`.
+Next useful Java trace improvements are optional Kafka/Spring Kafka integration packaging, JMS helper/package coverage, batch receive/process convenience helpers, automatic privacy-bounded time-in-queue extraction in those optional integrations, richer messaging semantic attributes, baggage/tracestate only if explicitly justified, and OpenTelemetry processor/exporter interop. Do not add automatic broker/client patching to core `logbrew-sdk`.

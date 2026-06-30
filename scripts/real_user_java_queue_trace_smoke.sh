@@ -129,6 +129,7 @@ public final class Main {
                 .messageCount(2)
                 .eventIdPrefix("java_queue_process_installed")
                 .spanId("b7ad6b7169203335")
+                .enqueuedAt(Instant.parse("2026-06-02T10:00:00Z"))
                 .incomingTraceparent("00-11111111111111111111111111111111-2222222222222222-01")
                 .linkedMessageTraceparent(
                     "00-33333333333333333333333333333333-4444444444444444-00",
@@ -151,6 +152,7 @@ public final class Main {
             LogBrewOperationTracing.QueueOperation.create()
                 .eventIdPrefix("java_queue_malformed_installed")
                 .spanId("b7ad6b7169203336")
+                .timeInQueueMs(125.5)
                 .incomingTraceparent("not-a-traceparent")
                 .linkedMessageTraceparent("also-not-a-traceparent")
                 .traceparentHeaderSetter((name, value) -> {
@@ -184,12 +186,15 @@ public final class Main {
         require(client.pendingEvents() == 4, "queue trace smoke queues four spans");
         require(payload.contains("\"source\": \"queue.operation\""), "queue source");
         require(payload.contains("\"parentSpanId\": \"2222222222222222\""), "incoming parent span");
+        require(payload.contains("\"timeInQueueMs\": 2020.0"), "computed queue latency");
+        require(payload.contains("\"timeInQueueMs\": 125.5"), "explicit queue latency");
         require(payload.contains("\"links\": ["), "span links serialized");
         require(payload.contains("\"traceId\": \"33333333333333333333333333333333\""), "first linked trace id");
         require(payload.contains("\"spanId\": \"4444444444444444\""), "first linked span id");
         require(payload.contains("\"sampled\": false"), "unsampled link flag");
         require(payload.contains("\"traceId\": \"55555555555555555555555555555555\""), "second linked trace id");
         require(payload.contains("\"traceId\": \"99999999999999999999999999999999\""), "manual linked trace id");
+        require(!payload.contains("2026-06-02T10:00:00Z"), "raw enqueue timestamp is omitted");
         require(!payload.contains("private body"), "message bodies are omitted");
         require(!payload.contains("not-a-traceparent"), "malformed incoming propagation is omitted");
         require(!payload.contains("also-not-a-traceparent"), "malformed linked propagation is omitted");

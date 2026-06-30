@@ -114,6 +114,7 @@ public final class LogBrewOperationTracing {
         QueueOperation safeConfig = config == null ? QueueOperation.create() : config;
         LogBrewTraceContext trace = queueTrace(safeConfig);
         injectQueueTraceparent(safeConfig, trace);
+        Instant startedAt = safeConfig.currentInstant();
         return operationSpan(
             client,
             operationName,
@@ -122,9 +123,10 @@ public final class LogBrewOperationTracing {
             "queue",
             "queue.operation",
             safeConfig.resolvedEventIdPrefix("java_queue"),
-            queueMetadata(operationName, safeConfig),
+            queueMetadata(operationName, safeConfig, startedAt),
             trace,
-            queueSpanLinks(safeConfig)
+            queueSpanLinks(safeConfig),
+            startedAt
         );
     }
 
@@ -140,11 +142,38 @@ public final class LogBrewOperationTracing {
         LogBrewTraceContext trace,
         List<SpanLinkSummary> links
     ) throws Exception {
+        return operationSpan(
+            client,
+            operationName,
+            operation,
+            config,
+            spanNamePrefix,
+            source,
+            eventIdPrefix,
+            metadata,
+            trace,
+            links,
+            config.currentInstant()
+        );
+    }
+
+    private static <T> T operationSpan(
+        LogBrewClient client,
+        String operationName,
+        Callable<T> operation,
+        BaseOperation<?> config,
+        String spanNamePrefix,
+        String source,
+        String eventIdPrefix,
+        Map<String, Object> metadata,
+        LogBrewTraceContext trace,
+        List<SpanLinkSummary> links,
+        Instant startedAt
+    ) throws Exception {
         Objects.requireNonNull(client, "client");
         Objects.requireNonNull(operation, "operation");
         Validation.requireNonEmpty("operation name", operationName);
 
-        Instant startedAt = config.now();
         Exception operationError = null;
         LogBrewTrace.Scope scope = LogBrewTrace.activate(trace);
         try {
@@ -154,7 +183,7 @@ public final class LogBrewOperationTracing {
             throw error;
         } finally {
             scope.close();
-            Instant finishedAt = config.now();
+            Instant finishedAt = config.currentInstant();
             captureSpan(
                 client,
                 eventIdPrefix,
@@ -315,7 +344,11 @@ public final class LogBrewOperationTracing {
         return metadata;
     }
 
-    private static Map<String, Object> queueMetadata(String operationName, QueueOperation config) {
+    private static Map<String, Object> queueMetadata(
+        String operationName,
+        QueueOperation config,
+        Instant startedAt
+    ) {
         Map<String, Object> metadata = safeOperationMetadata(config.metadata);
         addString(metadata, "queueSystem", config.system);
         addString(metadata, "queueOperation", operationName);
@@ -323,7 +356,30 @@ public final class LogBrewOperationTracing {
         addString(metadata, "queueName", config.queueName);
         addString(metadata, "taskName", config.taskName);
         addNonNegativeInt(metadata, "messageCount", config.messageCount);
+        addQueueTimeInQueueMs(metadata, config, startedAt);
         return metadata;
+    }
+
+    private static void addQueueTimeInQueueMs(
+        Map<String, Object> metadata,
+        QueueOperation config,
+        Instant startedAt
+    ) {
+        Double value = config.timeInQueueMs;
+        if (value == null && config.enqueuedAt != null) {
+            value = Double.valueOf(Duration.between(config.enqueuedAt, startedAt).toNanos() / 1_000_000.0);
+        }
+        if (value == null) {
+            return;
+        }
+        if (value.doubleValue() < 0.0 || value.isNaN() || value.isInfinite()) {
+            reportCaptureError(
+                config.onError,
+                new SdkException("validation_error", "queue timeInQueueMs must be non-negative")
+            );
+            return;
+        }
+        metadata.put("timeInQueueMs", value);
     }
 
     private static List<SpanEventSummary> spanEventsWithException(
@@ -509,6 +565,8 @@ public final class LogBrewOperationTracing {
         private String incomingTraceparent;
         private BiConsumer<String, String> traceparentHeaderSetter;
         private List<QueueTraceparentLink> linkedTraceparents;
+        private Instant enqueuedAt;
+        private Double timeInQueueMs;
 
         private QueueOperation() {
         }
@@ -539,6 +597,17 @@ public final class LogBrewOperationTracing {
 
         public QueueOperation messageCount(int value) {
             this.messageCount = Integer.valueOf(value);
+            return this;
+        }
+
+        public QueueOperation enqueuedAt(Instant value) {
+            this.enqueuedAt = Objects.requireNonNull(value, "enqueuedAt");
+            return this;
+        }
+
+        public QueueOperation timeInQueueMs(double value) {
+            Validation.requireFiniteNumber("queue timeInQueueMs", value);
+            this.timeInQueueMs = Double.valueOf(value);
             return this;
         }
 
@@ -650,7 +719,7 @@ public final class LogBrewOperationTracing {
             return self();
         }
 
-        private Instant now() {
+        protected Instant currentInstant() {
             return now.get();
         }
 
