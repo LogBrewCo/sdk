@@ -20,8 +20,9 @@
   `SpanAttributes.link(s)`, and app-owned `QueueOperation` helpers for
   `traceparentHeaderSetter(...)`, `incomingTraceparent(...)`,
   `linkedMessageTraceparent(...)`, `enqueuedAt(...)`, and
-  `timeInQueueMs(...)`, plus optional `LogBrewSpringKafkaTracing.producerSend(...)`
-  and `recordInterceptor(...)` for app-owned Spring Kafka producers and listener containers.
+  `timeInQueueMs(...)`, plus optional `LogBrewSpringKafkaTracing.producer(...)`,
+  `producerPostProcessor(...)`, `producerSend(...)`, and `recordInterceptor(...)`
+  for app-owned Spring Kafka producers, producer factories, and listener containers.
   Queue helpers inject one normalized W3C
   `traceparent` through a caller-owned carrier setter, continue one valid
   incoming message context, report malformed incoming/linked propagation and
@@ -33,28 +34,30 @@
   Spring/Kafka auto-registration, arbitrary header capture, payloads, message
   bodies, broker URLs, raw enqueue timestamps, custom timing-header injection,
   raw propagation metadata, receipt/message IDs, baggage, tracestate, exception
-  messages/stacks, and support-ticket creation. The Spring Kafka helper injects
-  one outgoing `traceparent` by cloning an app-owned `ProducerRecord` and sending
-  through app-owned `KafkaOperations`, returns the app-owned future or a failed
-  future for immediate send failure, records one sanitized
-  `spring.kafka.produce:<topic>` span on completion or immediate failure, continues one
-  incoming `traceparent`, keeps child trace context active during producer send
-  and listener work, emits one sanitized `spring.kafka.process:<topic>` span on
-  success/failure or thread-state clear, derives primitive consumer
-  `timeInQueueMs` from record timestamp, filters configured metadata with the
-  shared dependency privacy blocklist, and avoids keys, values, offsets,
-  arbitrary headers, broker addresses, consumer groups, baggage, tracestate,
-  exception messages, and stacks. Evidence:
+  messages/stacks, and support-ticket creation. The Spring Kafka helpers can
+  explicitly wrap a raw Kafka `Producer`, return an opt-in Spring
+  `ProducerPostProcessor`, or send through app-owned `KafkaOperations`; they clone
+  an app-owned `ProducerRecord`, inject exactly one outgoing `traceparent`, keep
+  child trace context active during sends and callbacks, return the app-owned
+  `Future`/`CompletableFuture` or a failed future for immediate send failure, and
+  record sanitized `spring.kafka.produce:<topic>` spans on immediate, callback, or
+  future completion. The consumer helper continues one incoming
+  `traceparent`, keeps child trace context active during listener work, emits one
+  sanitized `spring.kafka.process:<topic>` span on success/failure or thread-state
+  clear, derives primitive consumer `timeInQueueMs` from record timestamp, filters
+  configured metadata with the shared dependency privacy blocklist, and avoids keys,
+  values, offsets, arbitrary headers, broker addresses, consumer groups, baggage,
+  tracestate, exception messages, and stacks. Evidence:
   `bash scripts/check_java_package.sh`, `bash scripts/real_user_java_smoke.sh`,
   `bash scripts/real_user_java_spring_kafka_smoke.sh`,
   `bash scripts/real_user_java_queue_trace_smoke.sh`,
-  `bash scripts/real_user_spring_boot_smoke.sh` (`spring-boot@4.0.6`),
-  `bash scripts/real_user_java_high_load_smoke.sh`, Java SpotBugs,
+  `bash scripts/real_user_spring_boot_smoke.sh` (`spring-boot@4.1.0`),
+  `bash scripts/real_user_java_high_load_smoke.sh`, Java SpotBugs 4.9.8,
   ShellCheck, Maven Central bundle dry-run to `/tmp`, fixture validation,
   release metadata, markdown links, backend contract reports, generated
   artifact hygiene, diff hygiene, and confidentiality scan. Report:
   `docs/competitor-research/java-queue-propagation-2026-06-30.md`. Remaining
-  Java messaging gaps: automatic Spring Kafka producer post-processing only if
+  Java messaging gaps: hidden automatic Spring bean registration only if
   privacy/runtime coupling is justified, JMS package coverage, batch
   receive/process convenience helpers, richer messaging semantic
   attributes/metrics, baggage/tracestate only if explicitly justified, and
