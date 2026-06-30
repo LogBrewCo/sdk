@@ -313,7 +313,7 @@ jobs:
           if [[ "$INCLUDE_UNITY_NPM" == "true" ]]; then
             verify_args+=(--include-unity-npm)
           fi
-          python3 scripts/check_registry_publication.py "${verify_args[@]}"
+          python3 scripts/check_registry_publication.py "${verify_args[@]}" --retries 20 --retry-delay 15
 
   pypi:
     name: PyPI packages
