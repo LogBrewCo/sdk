@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -479,6 +480,28 @@ jobs:
 
         self.assertTrue(any("index.d.cts" in failure for failure in failures))
         self.assertTrue(any("exports['.'].require.types" in failure for failure in failures))
+
+    def test_amqplib_package_peer_dependency_supports_common_zero_ten_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package_dir = root / "js" / "logbrew-amqplib"
+            package_dir.mkdir(parents=True)
+            manifest = json.loads((ROOT / "js" / "logbrew-amqplib" / "package.json").read_text(encoding="utf-8"))
+            manifest["peerDependencies"]["amqplib"] = ">=1"
+            (package_dir / "package.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+            failures: list[str] = []
+            check_release_metadata.validate_js_package(
+                root,
+                "js/logbrew-amqplib",
+                "@logbrew/amqplib",
+                failures,
+            )
+
+        self.assertTrue(
+            any("peerDependencies.amqplib" in failure and ">=0.10" in failure for failure in failures),
+            failures,
+        )
 
     def test_js_package_accepts_expected_version_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

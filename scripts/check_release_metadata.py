@@ -324,6 +324,9 @@ def validate_js_package(
             require_default="./release-artifacts.cjs",
         )
 
+    if expected_name == "@logbrew/amqplib":
+        amqplib_peer = path_text_from_dict(manifest, "peerDependencies", "amqplib")
+        require_equal(failures, location, "peerDependencies.amqplib", amqplib_peer, ">=0.10")
     require_js_export_entry(
         failures,
         location,

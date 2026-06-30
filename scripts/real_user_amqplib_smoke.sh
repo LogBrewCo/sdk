@@ -69,7 +69,7 @@ npm install \
   "$core_tgz" \
   "$node_tgz" \
   "$amqplib_tgz" \
-  amqplib@2.0.1 \
+  amqplib@0.10.9 \
   typescript@6.0.3 \
   @types/node@26.0.1 \
   >/dev/null
@@ -77,7 +77,7 @@ npm install \
 grep -q '"@logbrew/sdk": "file:' package.json
 grep -q '"@logbrew/node": "file:' package.json
 grep -q '"@logbrew/amqplib": "file:' package.json
-grep -q '"amqplib": "2.0.1"' package.json
+grep -q '"amqplib": "0.10.9"' package.json
 grep -q '"@logbrew/amqplib"' package-lock.json
 grep -q '"@logbrew/node"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
@@ -86,7 +86,7 @@ npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/node@${node_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/amqplib@${amqplib_package_version}" "$tmp_dir/npm-list-depth0.txt"
-grep -q 'amqplib@2.0.1' "$tmp_dir/npm-list-depth0.txt"
+grep -q 'amqplib@0.10.9' "$tmp_dir/npm-list-depth0.txt"
 test -f node_modules/@logbrew/amqplib/index.js
 test -f node_modules/@logbrew/amqplib/index.cjs
 test -f node_modules/@logbrew/amqplib/index.d.ts
@@ -106,8 +106,12 @@ cat > tsconfig.json <<'EOF'
 EOF
 
 cat > types.ts <<'EOF'
-import type { Channel, ConsumeMessage, Options } from "amqplib";
 import { LogBrewClient } from "@logbrew/sdk";
+import type {
+  LogBrewAmqplibChannel,
+  LogBrewAmqplibMessageLike,
+  LogBrewAmqplibPublishOptionsLike
+} from "@logbrew/amqplib";
 import {
   amqplibPublishWithLogBrewSpan,
   amqplibSendToQueueWithLogBrewSpan,
@@ -121,13 +125,13 @@ const client = LogBrewClient.create({
   sdkName: "amqplib-type-smoke",
   sdkVersion: "0.1.0"
 });
-declare const channel: Pick<Channel, "publish" | "sendToQueue">;
-declare const message: ConsumeMessage;
-const publishOptions: Options.Publish = { headers: { app: "checkout" } };
+declare const channel: Pick<LogBrewAmqplibChannel, "publish" | "sendToQueue">;
+declare const message: LogBrewAmqplibMessageLike;
+const publishOptions: LogBrewAmqplibPublishOptionsLike = { headers: { app: "checkout" } };
 const content = Buffer.from("example");
 const publishResult = amqplibPublishWithLogBrewSpan(channel, "checkout", "created", content, publishOptions, { client });
 const sendResult = amqplibSendToQueueWithLogBrewSpan(channel, "checkout.created", content, publishOptions, { client });
-const wrapped = withLogBrewAmqplibConsumer(async (msg: ConsumeMessage | null) => msg?.fields.routingKey, { client, queueName: "checkout.created" });
+const wrapped = withLogBrewAmqplibConsumer(async (msg: LogBrewAmqplibMessageLike | null) => msg?.fields?.routingKey, { client, queueName: "checkout.created" });
 const nextOptions = createLogBrewAmqplibPublishOptions(publishOptions, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
 const traceparent = extractLogBrewAmqplibTraceparent(message);
 
