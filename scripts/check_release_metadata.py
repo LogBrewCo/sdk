@@ -834,6 +834,7 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "NuGet package version output": "id: nuget-version",
             "NuGet StackExchange.Redis pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj",
             "NuGet duplicate-safe publish": "--skip-duplicate",
+            "NuGet public install smoke": "bash scripts/real_user_dotnet_public_nuget_smoke.sh",
             "verify target exact version input": "verify_version:",
             "verify target exact version argument": 'verify_args+=(--version "$VERIFY_VERSION")',
             "verify target npm version override": 'append_version_overrides --npm-version "$VERIFY_NPM_VERSIONS"',

@@ -114,6 +114,13 @@ jobs:
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
             --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \\
             --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}"
+      - name: Verify public NuGet install
+        run: |
+          bash scripts/real_user_dotnet_public_nuget_smoke.sh \\
+            "${{ steps.nuget-version.outputs.core_version }}" \\
+            "${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
+            "${{ steps.nuget-version.outputs.efcore_version }}" \\
+            "${{ steps.nuget-version.outputs.redis_version }}"
   verify:
     name: Public registry verification
     if: ${{ inputs.target == 'verify' }}
@@ -197,6 +204,33 @@ jobs:
             check_release_metadata.validate_release_workflows(root, failures)
 
         self.assertTrue(any("NuGet exact metadata version validation" in failure for failure in failures))
+
+    def test_publish_packages_workflow_requires_public_nuget_install_smoke(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
+            workflow = minimal_publish_packages_workflow(list(check_release_metadata.JS_PACKAGES))
+            workflow = workflow.replace(
+                """
+      - name: Verify public NuGet install
+        run: |
+          bash scripts/real_user_dotnet_public_nuget_smoke.sh \\
+            "${{ steps.nuget-version.outputs.core_version }}" \\
+            "${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
+            "${{ steps.nuget-version.outputs.efcore_version }}" \\
+            "${{ steps.nuget-version.outputs.redis_version }}"
+""",
+                "",
+            )
+            (workflow_dir / "publish-packages.yml").write_text(
+                workflow,
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("NuGet public install smoke" in failure for failure in failures))
 
     def test_publish_packages_verify_target_requires_exact_version_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

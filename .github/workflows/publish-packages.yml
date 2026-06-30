@@ -611,6 +611,15 @@ jobs:
             --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
             --retries 20 --retry-delay 30
 
+      - name: Verify public NuGet install
+        if: ${{ ! inputs.dry_run }}
+        run: |
+          bash scripts/real_user_dotnet_public_nuget_smoke.sh \
+            "${{ steps.nuget-version.outputs.core_version }}" \
+            "${{ steps.nuget-version.outputs.aspnetcore_version }}" \
+            "${{ steps.nuget-version.outputs.efcore_version }}" \
+            "${{ steps.nuget-version.outputs.redis_version }}"
+
   packagist:
     name: Packagist package
     if: ${{ inputs.target == 'packagist' || (inputs.target == 'all' && (inputs.dry_run || inputs.include_packagist_update)) }}
