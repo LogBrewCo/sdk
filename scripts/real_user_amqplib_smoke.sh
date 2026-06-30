@@ -3,6 +3,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
+amqplib_package_version="$(node -p "require('${repo_root}/js/logbrew-amqplib/package.json').version")"
 tmp_dir="$(mktemp -d)"
 export npm_config_cache="$tmp_dir/npm-cache"
 
@@ -82,8 +84,8 @@ grep -q '"@logbrew/sdk"' package-lock.json
 npm ls @logbrew/sdk @logbrew/node @logbrew/amqplib amqplib >/dev/null
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/node@0.1.0' "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/amqplib@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/node@${node_package_version}" "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/amqplib@${amqplib_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q 'amqplib@2.0.1' "$tmp_dir/npm-list-depth0.txt"
 test -f node_modules/@logbrew/amqplib/index.js
 test -f node_modules/@logbrew/amqplib/index.cjs

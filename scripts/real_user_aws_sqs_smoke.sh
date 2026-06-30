@@ -3,6 +3,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+node_package_version="$(node -p "require('${repo_root}/js/logbrew-node/package.json').version")"
+aws_sqs_package_version="$(node -p "require('${repo_root}/js/logbrew-aws-sqs/package.json').version")"
 tmp_dir="$(mktemp -d)"
 export npm_config_cache="$tmp_dir/npm-cache"
 
@@ -91,8 +93,8 @@ grep -q '"@logbrew/sdk"' package-lock.json
 npm ls @logbrew/sdk @logbrew/node @logbrew/aws-sqs @aws-sdk/client-eventbridge @aws-sdk/client-sns @aws-sdk/client-sqs >/dev/null
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/node@0.1.0' "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/aws-sqs@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/node@${node_package_version}" "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/aws-sqs@${aws_sqs_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q '@aws-sdk/client-eventbridge@3.1075.0' "$tmp_dir/npm-list-depth0.txt"
 grep -q '@aws-sdk/client-sns@3.1075.0' "$tmp_dir/npm-list-depth0.txt"
 grep -q '@aws-sdk/client-sqs@3.1075.0' "$tmp_dir/npm-list-depth0.txt"
