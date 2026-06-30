@@ -1,5 +1,24 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-06-30: Node/queue installed-artifact verifier drift fixed after Node
+  and queue packages moved to `0.1.1` while public smokes still asserted
+  fixed `@logbrew/node@0.1.0` / queue `0.1.0` install lines. The Node,
+  JavaScript high-load, Node queue high-load, BullMQ, KafkaJS, AMQP, and AWS
+  SQS smokes now read the expected `@logbrew/*` package versions from the
+  corresponding local `package.json` files, while dependency versions such as
+  `bullmq`, `kafkajs`, `amqplib`, and AWS SDK clients remain pinned where the
+  smoke intentionally proves framework compatibility. Local proof:
+  `bash scripts/real_user_node_smoke.sh`,
+  `bash scripts/real_user_js_high_load_smoke.sh`,
+  `bash scripts/real_user_node_queue_high_load_smoke.sh`,
+  `bash scripts/real_user_bullmq_smoke.sh`,
+  `bash scripts/real_user_kafkajs_smoke.sh`,
+  `bash scripts/real_user_amqplib_smoke.sh`, and
+  `bash scripts/real_user_aws_sqs_smoke.sh` passed. Durable lesson: when a
+  smoke installs the SDK under test from local package artifacts, assert
+  LogBrew package versions from metadata rather than hard-coding a registry
+  version; keep third-party dependency assertions explicit only when they are
+  part of the real-user compatibility proof.
 - 2026-06-30: Python high-load logging/transport gap reduced after source
   reads from Sentry Python `getsentry/sentry-python@291739faa48285f2634b5c0935e8f45bf365164e`
   (`sentry_sdk/worker.py`, `transport.py`, `consts.py`), Datadog
