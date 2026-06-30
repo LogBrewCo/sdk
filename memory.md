@@ -1,5 +1,28 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-06-30: Python high-load logging/transport gap reduced after source
+  reads from Sentry Python `getsentry/sentry-python@291739faa48285f2634b5c0935e8f45bf365164e`
+  (`sentry_sdk/worker.py`, `transport.py`, `consts.py`), Datadog
+  dd-trace-py `DataDog/dd-trace-py@732ba08e2dde4be1d8f3984a9baa80395e374ab2`
+  (`ddtrace/internal/writer/writer.py`, `writer_client.py`), OpenTelemetry
+  Python `open-telemetry/opentelemetry-python@50912be81bbc715ee040c9d8eb2f70b3d662ae26`
+  (`opentelemetry-sdk/src/opentelemetry/sdk/_shared_internal/__init__.py`),
+  and PostHog Python `PostHog/posthog-python@e20e22937b6ffebd073931d5e359b68efd6718e5`
+  (`posthog/client.py`, `consumer.py`). Competitors bound queues/buffers and
+  expose loss/flush/shutdown behavior. LogBrew Python now defaults to a
+  10,000-event in-memory queue, accepts `max_queue_size`, drops new events
+  when full to preserve already-buffered release/environment/trace context, and
+  exposes `dropped_events()` alongside `pending_events()`. New installed proof
+  `bash scripts/real_user_python_high_load_smoke.sh` builds a wheel,
+  installs/uninstalls/reinstalls it in a temp venv, emits 1,500 standard
+  logging records with release/environment/action/span context, proves 1,000
+  flushed events plus 504 local drops, retries a local fake intake from 503 to
+  202, verifies shutdown, and checks the body does not contain the fake ingest
+  key, authorization marker, unsafe payload marker, or query text. Detailed
+  report: `docs/competitor-research/python-high-load-queue-2026-06-30.md`.
+  Remaining Python delivery gaps: background worker delivery, timed batch
+  export, fork-aware queue reset, queue metrics exporters, adaptive
+  rate-limit handling, and deeper automatic framework instrumentation.
 - 2026-06-30: React Native fetch response-size trace gap reduced after source
   reads from Sentry React Native `@sentry/react-native@8.16.0`
   (`dist/js/replay/networkUtils.js`, `dist/js/replay/xhrUtils.js`) and Datadog

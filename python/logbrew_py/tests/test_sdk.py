@@ -117,6 +117,65 @@ class LogBrewSdkTests(unittest.TestCase):
         assert last_body is not None
         self.assertIn('"events"', last_body)
 
+    def test_bounded_queue_preserves_existing_context_and_counts_drops(self) -> None:
+        client = LogBrewClient.create(
+            api_key="lb_test_key",
+            sdk_name="logbrew-sdk",
+            sdk_version="0.1.0",
+            max_queue_size=2,
+        )
+
+        client.release(
+            "evt_release_context",
+            "2026-06-02T10:00:00Z",
+            {"version": "1.0.0"},
+        )
+        client.environment(
+            "evt_environment_context",
+            "2026-06-02T10:00:01Z",
+            {"name": "production"},
+        )
+        client.log(
+            "evt_log_dropped",
+            "2026-06-02T10:00:02Z",
+            {"message": "queue pressure", "level": "warning"},
+        )
+
+        payload = json.loads(client.preview_json())
+        self.assertEqual(client.pending_events(), 2)
+        self.assertEqual(client.dropped_events(), 1)
+        self.assertEqual(
+            [event["id"] for event in payload["events"]],
+            ["evt_release_context", "evt_environment_context"],
+        )
+
+    def test_direct_constructor_keeps_default_queue_capacity(self) -> None:
+        client = LogBrewClient(
+            api_key="lb_test_key",
+            sdk={"name": "logbrew-sdk", "language": "python", "version": "0.1.0"},
+            max_retries=1,
+        )
+
+        self.assertEqual(client.pending_events(), 0)
+        self.assertEqual(client.dropped_events(), 0)
+
+    def test_bounded_queue_rejects_invalid_capacity(self) -> None:
+        with self.assertRaisesRegex(SdkError, "max_queue_size must be a positive integer"):
+            LogBrewClient.create(
+                api_key="lb_test_key",
+                sdk_name="logbrew-sdk",
+                sdk_version="0.1.0",
+                max_queue_size=0,
+            )
+
+        with self.assertRaisesRegex(SdkError, "max_queue_size must be a positive integer"):
+            LogBrewClient.create(
+                api_key="lb_test_key",
+                sdk_name="logbrew-sdk",
+                sdk_version="0.1.0",
+                max_queue_size=True,
+            )
+
     def test_invalid_timestamp_fails_validation(self) -> None:
         client = sample_client()
 

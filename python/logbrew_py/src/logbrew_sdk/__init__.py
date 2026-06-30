@@ -114,6 +114,7 @@ METRIC_TEMPORALITIES_BY_KIND = {
 METRIC_KINDS = set(METRIC_TEMPORALITIES_BY_KIND)
 NON_NEGATIVE_METRIC_KINDS = {"counter", "histogram"}
 DEFAULT_HTTP_ENDPOINT = "https://api.logbrew.com/v1/events"
+DEFAULT_MAX_QUEUE_SIZE = 10_000
 TRACEPARENT_PATTERN = re.compile(r"^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$")
 ZERO_TRACE_ID = "00000000000000000000000000000000"
 ZERO_SPAN_ID = "0000000000000000"
@@ -269,6 +270,7 @@ class LogBrewClient:
         sdk_name: str,
         sdk_version: str,
         max_retries: int = 2,
+        max_queue_size: int = DEFAULT_MAX_QUEUE_SIZE,
     ) -> LogBrewClient:
         """Create a client from public SDK identity, retry, and API key settings."""
         require_non_empty("api_key", api_key)
@@ -278,18 +280,38 @@ class LogBrewClient:
             api_key=api_key,
             sdk={"name": sdk_name, "language": "python", "version": sdk_version},
             max_retries=max_retries,
+            max_queue_size=max_queue_size,
         )
 
-    def __init__(self, *, api_key: str, sdk: dict[str, str], max_retries: int) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        sdk: dict[str, str],
+        max_retries: int,
+        max_queue_size: int = DEFAULT_MAX_QUEUE_SIZE,
+    ) -> None:
+        if (
+            isinstance(max_queue_size, bool)
+            or not isinstance(max_queue_size, int)
+            or max_queue_size <= 0
+        ):
+            raise SdkError("configuration_error", "max_queue_size must be a positive integer")
         self.api_key = api_key
         self.sdk = sdk
         self.max_retries = max_retries
+        self.max_queue_size = max_queue_size
         self.events: list[dict[str, Any]] = []
+        self._dropped_events = 0
         self.closed = False
 
     def pending_events(self) -> int:
         """Return the queued event count currently buffered in memory."""
         return len(self.events)
+
+    def dropped_events(self) -> int:
+        """Return the number of events dropped because the in-memory queue was full."""
+        return self._dropped_events
 
     def preview_json(self) -> str:
         """Return the queued event batch as stable, pretty-printed JSON."""
@@ -341,6 +363,9 @@ class LogBrewClient:
             raise SdkError("shutdown_error", "client is already shut down")
         require_non_empty("event id", event_id)
         require_timestamp(timestamp)
+        if len(self.events) >= self.max_queue_size:
+            self._dropped_events += 1
+            return
         self.events.append(
             {
                 "type": event_type,

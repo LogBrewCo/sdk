@@ -257,6 +257,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "Python real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_python_smoke\.sh"\n'
             r"mark_step_complete\n\n"
+            r'begin_next_step "Python high-load installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_python_high_load_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
             r'begin_next_step "Python Celery real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_python_celery_smoke\.sh"\n'
             r"mark_step_complete\n\n"

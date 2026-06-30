@@ -87,6 +87,28 @@ print(
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush()` or `shutdown()` to send queued events through a transport, and use `preview_json()` when you want a stable local JSON preview before sending anything.
 
+## Queue Pressure
+
+`LogBrewClient` keeps a bounded in-memory queue so a transport outage or burst of logs cannot grow without limit. The default capacity is `10_000` events. Pass `max_queue_size` when a service needs a smaller or larger cap:
+
+```python
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.4.0",
+    max_queue_size=1000,
+)
+```
+
+When the queue is full, new events are dropped and existing queued context is preserved. Use `pending_events()` and `dropped_events()` for local diagnostics, then call `flush()` or `shutdown()` with your transport:
+
+```python
+if client.dropped_events() > 0:
+    print({"pending": client.pending_events(), "dropped": client.dropped_events()})
+```
+
+This counter is local process state only. Usage, quota, and billing remain backend-owned and must not be inferred from queue size or drop counts.
+
 ## First Useful Telemetry
 
 For a new Python service, capture a small set of signals that explain what changed, where the service ran, what the user or job attempted, which outbound dependency mattered, how long it took, and how the request links to a distributed trace:
