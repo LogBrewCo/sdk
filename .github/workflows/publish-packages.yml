@@ -42,8 +42,8 @@ on:
         required: true
         type: boolean
         default: false
-      use_npm_token:
-        description: "Use the release environment NPM_TOKEN for a scoped existing-package npm publish when trusted publishing is not configured"
+      use_scoped_npm_fallback:
+        description: "Use the release environment npm publish value for scoped existing-package publishes when trusted publishing is not configured"
         required: true
         type: boolean
         default: false
@@ -114,7 +114,7 @@ jobs:
       INCLUDE_UNITY_NPM: ${{ inputs.include_unity_npm }}
       NPM_PACKAGES: ${{ inputs.npm_packages }}
       ALLOW_INITIAL_NPM_PUBLISH: ${{ inputs.allow_initial_npm_publish }}
-      USE_NPM_TOKEN: ${{ inputs.use_npm_token }}
+      USE_SCOPED_NPM_FALLBACK: ${{ inputs.use_scoped_npm_fallback }}
     steps:
       - name: Check out release ref
         uses: actions/checkout@v6
@@ -255,17 +255,17 @@ jobs:
           export NPM_CONFIG_USERCONFIG="$npm_userconfig"
           unset NODE_AUTH_TOKEN
 
-          if [[ "$USE_NPM_TOKEN" == "true" ]]; then
+          if [[ "$USE_SCOPED_NPM_FALLBACK" == "true" ]]; then
             if [[ "$DRY_RUN" == "true" ]]; then
-              echo "use_npm_token=true is only valid for real npm publishes." >&2
+              echo "use_scoped_npm_fallback=true is only valid for real npm publishes." >&2
               exit 1
             fi
             if [[ -z "$NPM_PACKAGES" ]]; then
-              echo "use_npm_token=true requires a scoped npm_packages selection." >&2
+              echo "use_scoped_npm_fallback=true requires a scoped npm_packages selection." >&2
               exit 1
             fi
             if [[ -z "${NPM_TOKEN:-}" ]]; then
-              echo "use_npm_token=true requires the release environment NPM_TOKEN." >&2
+              echo "use_scoped_npm_fallback=true requires the release environment npm publish value." >&2
               exit 1
             fi
             printf '//registry.npmjs.org/:_authToken=%s\nregistry=https://registry.npmjs.org/\n' "$NPM_TOKEN" > "$npm_userconfig"
