@@ -39,9 +39,11 @@
   `ProducerPostProcessor`, or send through app-owned `KafkaOperations`; they clone
   an app-owned `ProducerRecord`, inject exactly one outgoing `traceparent`, keep
   child trace context active during sends and callbacks, return the app-owned
-  `Future`/`CompletableFuture` or a failed future for immediate send failure, and
-  record sanitized `spring.kafka.produce:<topic>` spans on immediate, callback, or
-  future completion. The consumer helper continues one incoming
+  `Future`/`CompletableFuture`, propagate synchronous raw `Producer.send(...)`
+  failures, and record sanitized `spring.kafka.produce:<topic>` spans on callback
+  or future completion; the `KafkaOperations` helper returns a failed future and
+  captures a sanitized failure span when Spring Kafka rejects a send synchronously.
+  The consumer helper continues one incoming
   `traceparent`, keeps child trace context active during listener work, emits one
   sanitized `spring.kafka.process:<topic>` span on success/failure or thread-state
   clear, derives primitive consumer `timeInQueueMs` from record timestamp, filters

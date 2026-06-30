@@ -425,7 +425,7 @@ producerFactory.addPostProcessor(
 );
 ```
 
-The producer wrapper and post-processor replace only one W3C `traceparent`, keep a child trace active while the send and callback run, return the app-owned `Future` or a failed future for immediate send failure, and emit one `spring.kafka.produce:<topic>` span from the send callback or immediate failure. They preserve the original record by cloning headers before injection and do not capture keys, values, arbitrary headers, broker addresses, baggage, tracestate, exception messages, or stack traces.
+The producer wrapper and post-processor replace only one W3C `traceparent`, keep a child trace active while the send and callback run, return the app-owned `Future`, propagate synchronous `Producer.send(...)` failures, and emit one `spring.kafka.produce:<topic>` span when the send callback runs. They preserve the original record by cloning headers before injection and do not capture keys, values, arbitrary headers, broker addresses, baggage, tracestate, exception messages, or stack traces.
 
 For Spring Kafka producer code that already owns a `KafkaOperations`/`KafkaTemplate`, use `producerSend(...)` around the app-owned `ProducerRecord`:
 
@@ -447,7 +447,7 @@ LogBrewSpringKafkaTracing.producerSend(
 );
 ```
 
-The `KafkaOperations` helper clones record headers, replaces only one W3C `traceparent`, keeps a child trace active while Spring Kafka accepts the send, and emits one `spring.kafka.produce:<topic>` span when the returned future completes. It preserves the original record, returns the app-owned or failed future, reports send failures with exception type only, and does not capture keys, values, arbitrary headers, broker addresses, baggage, tracestate, exception messages, or stack traces.
+The `KafkaOperations` helper clones record headers, replaces only one W3C `traceparent`, keeps a child trace active while Spring Kafka accepts the send, and emits one `spring.kafka.produce:<topic>` span when the returned future completes or Spring Kafka rejects the send synchronously. It preserves the original record, returns the app-owned or failed future, reports send failures with exception type only, and does not capture keys, values, arbitrary headers, broker addresses, baggage, tracestate, exception messages, or stack traces.
 
 For Spring Kafka apps that already own a listener container factory, register `LogBrewSpringKafkaTracing` as an app-owned `RecordInterceptor`:
 
