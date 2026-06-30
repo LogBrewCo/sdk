@@ -1,5 +1,16 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-06-30: Python high-load installed-artifact smoke CI drift fixed after
+  GitHub Actions run `28438203099` failed with `No module named build` in
+  `scripts/real_user_python_high_load_smoke.sh`. The smoke now follows the
+  existing Python/FastAPI/Django verifier pattern: create a temporary build
+  venv, install `build` inside it, and build the wheel from that isolated tool
+  environment before installing the wheel into a separate user venv. Local
+  proof: `bash scripts/real_user_python_high_load_smoke.sh` passed with 1,500
+  logs, 1,000 flushed events, 504 drops, retry from 503 to 202, and shutdown
+  status 202. Durable lesson: Python installed-artifact smokes must own their
+  build tooling in temporary verifier environments; do not rely on runner-global
+  `python -m build` availability.
 - 2026-06-30: Node/queue installed-artifact verifier drift fixed after Node
   and queue packages moved to `0.1.1` while public smokes still asserted
   fixed `@logbrew/node@0.1.0` / queue `0.1.0` install lines. The Node,

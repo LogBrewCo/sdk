@@ -6,12 +6,16 @@ tmp_dir="$(mktemp -d)"
 export PIP_CACHE_DIR="$tmp_dir/pip-cache"
 
 cleanup() {
-  rm -rf "$tmp_dir"
+  rm -rf "$tmp_dir" \
+    "$repo_root/python/logbrew_py/build" \
+    "$repo_root/python/logbrew_py/src/logbrew_sdk.egg-info"
 }
 
 trap cleanup EXIT
 
-python3 -m build "$repo_root/python/logbrew_py" --wheel --outdir "$tmp_dir/dist" >/dev/null
+python3 -m venv "$tmp_dir/build-venv"
+"$tmp_dir/build-venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check build >/dev/null
+"$tmp_dir/build-venv/bin/python" -m build "$repo_root/python/logbrew_py" --wheel --outdir "$tmp_dir/dist" >/dev/null
 wheel_path="$(find "$tmp_dir/dist" -maxdepth 1 -name 'logbrew_sdk-*.whl' -print -quit)"
 test -f "$wheel_path"
 
