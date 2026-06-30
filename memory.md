@@ -30,6 +30,15 @@
   pins test-only `time = "=0.3.51"` so public CI does not resolve the broken
   pair while default LogBrew consumers stay unaffected. Local proof:
   `cd rust/logbrew && cargo test` passed with 25 tests plus doc-tests.
+- 2026-06-30: Rust Actix installed-artifact verifier drift fixed after GitHub
+  Actions run `28434663101` failed in `scripts/real_user_rust_actix_smoke.sh`:
+  a fresh temp app resolved `actix-web 4.14.0` with its default cookie feature,
+  selecting `cookie 0.16.2` plus `time 0.3.52`; that upstream pair no longer
+  compiles. The Actix middleware example only needs Actix macros, so the
+  public smoke and README now install `actix-web` with `--no-default-features
+  --features macros`, assert the temp app does not resolve `cookie`, and keep
+  optional cookies/compression app-owned. Local proof:
+  `bash scripts/real_user_rust_actix_smoke.sh` passed.
 - 2026-06-30: React Native fetch response-size trace gap reduced after source
   reads from Sentry React Native `@sentry/react-native@8.16.0`
   (`dist/js/replay/networkUtils.js`, `dist/js/replay/xhrUtils.js`) and Datadog

@@ -51,16 +51,30 @@ cd "$tmp_dir"
 cargo new --quiet actix-app
 cd actix-app
 cargo add logbrew --path "$crate_dir" >/dev/null
-cargo add actix-web@4 >/dev/null
+cargo add actix-web@4 --no-default-features --features macros >/dev/null
 assert_logbrew_path_dependency Cargo.toml actix-app "/extracted-crate/logbrew-0.1.0"
 cp "$crate_dir/examples/actix_request_middleware.rs" src/main.rs
 
 grep -q '^name = "logbrew"$' Cargo.lock
 grep -q '^name = "actix-web"$' Cargo.lock
+if grep -q '^name = "cookie"$' Cargo.lock; then
+	echo "Actix smoke should not resolve cookie for the request middleware example" >&2
+	exit 1
+fi
 cargo metadata --locked --format-version 1 > actix-cargo-metadata.json
 python3 - <<'PY'
 import json
+import tomllib
 from pathlib import Path
+
+manifest = tomllib.loads(Path("Cargo.toml").read_text())
+actix = manifest.get("dependencies", {}).get("actix-web")
+if not isinstance(actix, dict):
+    raise SystemExit(f"expected table dependency for actix-web, found: {actix!r}")
+if actix.get("default-features") is not False:
+    raise SystemExit("Actix middleware smoke should disable unused default features")
+if actix.get("features") != ["macros"]:
+    raise SystemExit(f"unexpected actix-web features: {actix.get('features')!r}")
 
 payload = json.loads(Path("actix-cargo-metadata.json").read_text())
 root = next((pkg for pkg in payload.get("packages", []) if pkg.get("name") == "actix-app"), None)

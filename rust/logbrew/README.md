@@ -409,8 +409,12 @@ For Actix Web apps, keep telemetry in app-owned middleware and call `HttpRequest
 
 ```bash
 cargo add logbrew
-cargo add actix-web
+cargo add actix-web --no-default-features --features macros
 ```
+
+The middleware example only needs Actix's macros. Keep optional Actix features
+such as cookies and compression app-owned and enable them explicitly only when
+your app uses them.
 
 The packaged `examples/actix_request_middleware.rs` file is a runnable mini-app; the core pattern is:
 
