@@ -40,6 +40,7 @@ ureq = { version = "3.3", optional = true }
 actix-web = "4"
 axum = "0.8"
 rocket = "0.5"
+time = "=0.3.51"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"

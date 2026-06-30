@@ -23,6 +23,13 @@
   Remaining Python delivery gaps: background worker delivery, timed batch
   export, fork-aware queue reset, queue metrics exporters, adaptive
   rate-limit handling, and deeper automatic framework instrumentation.
+- 2026-06-30: Rust CI verifier drift fixed after GitHub Actions run
+  `28434219864` failed before Python checks in `cargo test`: Rocket's dev
+  dependency chain selected `cookie 0.18.1` with `time 0.3.52`, where
+  `Parsable::parse` now requires a defaults argument. Rust `Cargo.toml` now
+  pins test-only `time = "=0.3.51"` so public CI does not resolve the broken
+  pair while default LogBrew consumers stay unaffected. Local proof:
+  `cd rust/logbrew && cargo test` passed with 25 tests plus doc-tests.
 - 2026-06-30: React Native fetch response-size trace gap reduced after source
   reads from Sentry React Native `@sentry/react-native@8.16.0`
   (`dist/js/replay/networkUtils.js`, `dist/js/replay/xhrUtils.js`) and Datadog
