@@ -421,3 +421,108 @@ test("React Native instrumentation can opt into reversible global XHR spans", as
     assert.equal(MockXMLHttpRequest.prototype.setRequestHeader, originalSetRequestHeader);
   });
 });
+
+test("React Native XHR GraphQL metadata factory extracts operation data without retaining bodies", async () => {
+  await withInstalledPackage(async ({
+    createLogBrewReactNativeClient,
+    createLogBrewReactNativeInstrumentation,
+    createReactNativeGraphQLMetadataFactory,
+    createReactNativeTraceContext
+  }) => {
+    const client = makeClient(createLogBrewReactNativeClient);
+    const trace = makeTrace(createReactNativeTraceContext);
+    const factoryCalls = [];
+
+    class MockXMLHttpRequest {
+      static HEADERS_RECEIVED = 2;
+      static DONE = 4;
+
+      constructor() {
+        this.headers = {};
+        this.listeners = new Map();
+        this.readyState = 0;
+        this.status = 0;
+      }
+
+      addEventListener(name, listener) {
+        this.listeners.set(name, listener);
+      }
+
+      open(method, url) {
+        this.method = method;
+        this.url = url;
+      }
+
+      send() {
+        this.readyState = MockXMLHttpRequest.HEADERS_RECEIVED;
+        this.listeners.get("readystatechange")?.();
+        this.status = 200;
+        this.readyState = MockXMLHttpRequest.DONE;
+        this.listeners.get("readystatechange")?.();
+      }
+
+      getResponseHeader() {
+        return null;
+      }
+
+      setRequestHeader(name, value) {
+        this.headers[String(name).toLowerCase()] = String(value);
+      }
+    }
+
+    const globalObject = { XMLHttpRequest: MockXMLHttpRequest };
+    const instrumentation = createLogBrewReactNativeInstrumentation(client, {
+      globalObject,
+      instrumentGlobalXMLHttpRequest: true,
+      metadata: { flow: "checkout" },
+      metadataFactory: createReactNativeGraphQLMetadataFactory({
+        metadataFactory(context) {
+          factoryCalls.push(context);
+          return {
+            graphqlResolver: "checkout",
+            nested: { dropped: true },
+            requestBody: context.init?.body,
+            responseHeaders: { dropped: true }
+          };
+        }
+      }),
+      now: () => "2026-06-30T05:50:00Z",
+      nowMs: (() => {
+        const values = [1000, 1012, 1033];
+        return () => values.shift();
+      })(),
+      routeTemplateFactory: () => "/graphql",
+      trace,
+      tracePropagationTargets: ["https://api.example.test/"]
+    });
+
+    const xhr = new globalObject.XMLHttpRequest();
+    xhr.open("POST", "https://api.example.test/graphql?email=hidden");
+    xhr.send(JSON.stringify({
+      query: "mutation CheckoutSubmit($email: String!) { checkout(email: $email) { id } }",
+      variables: { email: "hidden@example.test" }
+    }));
+
+    const events = JSON.parse(client.previewJson()).events;
+    assert.equal(events.length, 1);
+    assert.equal(factoryCalls.length, 1);
+    assert.equal(factoryCalls[0].method, "POST");
+    assert.equal(factoryCalls[0].routeTemplate, "/graphql");
+    assert.equal(factoryCalls[0].statusCode, 200);
+    assert.equal(events[0].attributes.name, "POST /graphql");
+    assert.equal(events[0].attributes.metadata.flow, "checkout");
+    assert.equal(events[0].attributes.metadata.graphqlResolver, "checkout");
+    assert.equal(events[0].attributes.metadata.graphqlOperationName, "CheckoutSubmit");
+    assert.equal(events[0].attributes.metadata.graphqlOperationType, "mutation");
+    assert.equal(events[0].attributes.metadata.requestBody, undefined);
+    assert.equal(events[0].attributes.metadata.responseHeaders, undefined);
+    assert.equal(events[0].attributes.metadata.nested, undefined);
+    assert.equal(events[0].attributes.metadata.query, undefined);
+    assert.equal(events[0].attributes.metadata.variables, undefined);
+    assert.equal(events[0].attributes.metadata.body, undefined);
+    assert.equal(JSON.stringify(events).includes("hidden@example.test"), false);
+    assert.equal(JSON.stringify(events).includes("checkout(email"), false);
+
+    instrumentation.remove();
+  });
+});

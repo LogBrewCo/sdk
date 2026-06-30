@@ -49,6 +49,8 @@ grep -q '^package/lifecycle.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/lifecycle.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/lifecycle.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/lifecycle.d.cts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/metadata.js$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/metadata.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/native-bridge.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/native-bridge.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/native-bridge.d.ts$' "$tmp_dir/native-tarball.txt"
@@ -145,6 +147,8 @@ node --check node_modules/@logbrew/react-native/instrumentation.js
 node --check node_modules/@logbrew/react-native/instrumentation.cjs
 node --check node_modules/@logbrew/react-native/lifecycle.js
 node --check node_modules/@logbrew/react-native/lifecycle.cjs
+node --check node_modules/@logbrew/react-native/metadata.js
+node --check node_modules/@logbrew/react-native/metadata.cjs
 node --check node_modules/@logbrew/react-native/native-bridge.js
 node --check node_modules/@logbrew/react-native/native-bridge.cjs
 node --check node_modules/@logbrew/react-native/resource-fetch.js
@@ -186,6 +190,9 @@ import {
 import {
   createAppStateLifecycleSpanListener
 } from "@logbrew/react-native/lifecycle";
+import {
+  createLogBrewReactNativeInstrumentation
+} from "@logbrew/react-native/instrumentation";
 import {
   createReactNativeGraphQLMetadataFactory,
   createReactNativeResourceFetch
@@ -544,6 +551,96 @@ if (
   resourceFetchFailure.metadata.traceId !== providerTrace.traceId
 ) {
   throw new Error(`unexpected resource fetch failure span: ${JSON.stringify(resourceFetchFailure)}`);
+}
+
+const xhrClient = createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-native-xhr-graphql-smoke",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+const xhrRequests = [];
+const xhrTimes = [2990, 3000, 3012, 3038];
+class MockXMLHttpRequest {
+  static HEADERS_RECEIVED = 2;
+  static DONE = 4;
+
+  constructor() {
+    this.headers = {};
+    this.listeners = new Map();
+    this.readyState = 0;
+    this.status = 0;
+  }
+
+  addEventListener(name, listener) {
+    this.listeners.set(name, listener);
+  }
+
+  open(method, url) {
+    this.method = method;
+    this.url = url;
+  }
+
+  send(body) {
+    xhrRequests.push({ body, headers: { ...this.headers }, method: this.method, url: this.url });
+    this.readyState = MockXMLHttpRequest.HEADERS_RECEIVED;
+    this.listeners.get("readystatechange")?.();
+    this.status = 200;
+    this.readyState = MockXMLHttpRequest.DONE;
+    this.listeners.get("readystatechange")?.();
+  }
+
+  getResponseHeader() {
+    return null;
+  }
+
+  setRequestHeader(name, value) {
+    this.headers[String(name).toLowerCase()] = String(value);
+  }
+}
+const xhrGlobalObject = { XMLHttpRequest: MockXMLHttpRequest };
+const xhrInstrumentation = createLogBrewReactNativeInstrumentation(xhrClient, {
+  globalObject: xhrGlobalObject,
+  instrumentGlobalXMLHttpRequest: true,
+  metadata: { flow: "checkout" },
+  metadataFactory: createReactNativeGraphQLMetadataFactory(),
+  now: () => "2026-06-02T10:00:14Z",
+  nowMs: () => xhrTimes.shift(),
+  platform,
+  appState,
+  routeTemplateFactory: () => "/graphql",
+  trace: providerTrace,
+  tracePropagationTargets: ["https://api.example.test/"]
+});
+const xhr = new xhrGlobalObject.XMLHttpRequest();
+xhr.open("POST", "https://api.example.test/graphql?email=dev@example.test");
+xhr.send(JSON.stringify({
+  query: "mutation CheckoutSubmit($email: String!) { checkout(email: $email) { id } }",
+  variables: { email: "dev@example.test" }
+}));
+xhrInstrumentation.remove();
+const xhrEvents = JSON.parse(xhrClient.previewJson()).events;
+if (xhrEvents.length !== 1) {
+  throw new Error(`expected one XHR GraphQL span, got ${xhrEvents.length}`);
+}
+if (xhrRequests[0].headers.traceparent !== providerTraceHeaders.traceparent) {
+  throw new Error(`XHR should propagate provider trace: ${xhrRequests[0].headers.traceparent}`);
+}
+const xhrSpan = xhrEvents[0].attributes;
+if (
+  xhrSpan.name !== "POST /graphql" ||
+  xhrSpan.status !== "ok" ||
+  xhrSpan.durationMs !== 38 ||
+  xhrSpan.metadata.routeTemplate !== "/graphql" ||
+  xhrSpan.metadata.responseStartDurationMs !== 12 ||
+  xhrSpan.metadata.graphqlOperationName !== "CheckoutSubmit" ||
+  xhrSpan.metadata.graphqlOperationType !== "mutation" ||
+  xhrSpan.metadata.traceId !== providerTrace.traceId
+) {
+  throw new Error(`unexpected XHR GraphQL span: ${JSON.stringify(xhrSpan)}`);
+}
+if (JSON.stringify(xhrEvents).includes("dev@example.test") || JSON.stringify(xhrEvents).includes("checkout(email")) {
+  throw new Error("XHR GraphQL metadata leaked request body content");
 }
 
 const timelineClient = createLogBrewReactNativeClient({

@@ -397,6 +397,7 @@ instrumentation.remove();
 ```
 
 With `instrumentGlobalXMLHttpRequest: true`, LogBrew patches only `XMLHttpRequest.prototype.open` and `send`, records sanitized XHR resource spans with status, response-start timing, and response size only when `Content-Length` is available, and puts the original methods back when it is safe to do so. It writes a single `traceparent` through the app's existing `setRequestHeader` only for configured targets. It does not capture request bodies, response bodies, arbitrary request headers, arbitrary response headers, cookies, GraphQL payloads, full URLs with query/hash text, baggage, or tracestate.
+If you pass `metadataFactory: createReactNativeGraphQLMetadataFactory()`, XHR spans can derive the GraphQL operation name and type from JSON string request bodies your app already owns. The helper still drops variables, query text, body fields, headers, payloads, response data, baggage, and tracestate; do not enable it on unrelated endpoints.
 
 ## Release Artifact Preparation
 

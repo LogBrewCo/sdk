@@ -8,6 +8,7 @@ import {
   shouldPropagateTraceparent
 } from "./index.js";
 import { createAppStateLifecycleSpanListener } from "./lifecycle.js";
+import { createSafeReactNativeMetadata } from "./metadata.js";
 import {
   clearLogBrewNativeBridgeScope,
   syncLogBrewNativeBridgeScope,
@@ -131,6 +132,7 @@ export function createLogBrewReactNativeInstrumentation(client, {
       appState,
       globalObject,
       metadata,
+      metadataFactory,
       now,
       nowMs,
       platform,
@@ -301,6 +303,7 @@ function installGlobalXMLHttpRequestInstrumentation(client, {
   appState,
   globalObject,
   metadata,
+  metadataFactory,
   now,
   nowMs,
   platform,
@@ -340,11 +343,12 @@ function installGlobalXMLHttpRequestInstrumentation(client, {
     return originalOpen.apply(this, arguments);
   }
 
-  function wrappedSend() {
+  function wrappedSend(body) {
     const context = this[contextKey];
     if (!context) {
       return originalSend.apply(this, arguments);
     }
+    context.body = xhrRequestBody(body);
     context.startedAtMs = nowMs();
     context.timestamp = now();
     installXhrReadyStateTracker(this, context, {
@@ -353,6 +357,7 @@ function installGlobalXMLHttpRequestInstrumentation(client, {
       doneState,
       headersReceivedState,
       metadata,
+      metadataFactory,
       nowMs,
       platform,
       routeTemplate,
@@ -375,6 +380,7 @@ function installGlobalXMLHttpRequestInstrumentation(client, {
           xhrErrorName: errorName(error),
           xhrErrorValueType: typeof error
         },
+        metadataFactory,
         nowMs,
         platform,
         routeTemplate,
@@ -442,6 +448,7 @@ function captureXhrResourceSpan(xhr, context, {
   appState,
   client,
   metadata,
+  metadataFactory,
   nowMs,
   platform,
   routeTemplate,
@@ -460,22 +467,33 @@ function captureXhrResourceSpan(xhr, context, {
     ? undefined
     : elapsedMs(context.startedAtMs, () => context.responseStartAtMs);
   const responseSizeBytes = xhrResponseSizeBytes(xhr);
+  const safeRouteTemplate = routeTemplate ?? routeTemplateFactory({ url: context.url });
+  const statusCode = xhrStatusCode(xhr);
   captureReactNativeResourceSpan(client, {
     appState,
     durationMs,
     metadata: {
-      ...metadata,
+      ...createSafeReactNativeMetadata(metadata, metadataFactory, {
+        durationMs,
+        init: context.body === undefined ? undefined : { body: context.body },
+        input: context.url,
+        method: context.method,
+        routeTemplate: safeRouteTemplate,
+        status: status ?? undefined,
+        statusCode,
+        url: context.url
+      }),
       responseStartDurationMs,
       transport: "xhr"
     },
     method: context.method,
     platform,
-    routeTemplate: routeTemplate ?? routeTemplateFactory({ url: context.url }),
+    routeTemplate: safeRouteTemplate,
     screen,
     responseSizeBytes,
     sessionId,
     status: status ?? undefined,
-    statusCode: xhrStatusCode(xhr),
+    statusCode,
     timestamp: context.timestamp,
     trace
   });
@@ -494,6 +512,16 @@ function xhrUrl(url) {
   } catch {
     return String(url);
   }
+}
+
+function xhrRequestBody(body) {
+  if (typeof body === "string") {
+    return body;
+  }
+  if (body instanceof String) {
+    return body.toString();
+  }
+  return undefined;
 }
 
 function defaultXhrRouteTemplateFactory({ url }) {

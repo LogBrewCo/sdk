@@ -7,18 +7,11 @@ const {
   createTraceparentFetch,
   getActiveLogBrewTrace
 } = require("./index.cjs");
+const {
+  createSafeReactNativeMetadata,
+  safeReactNativeMetadataFactoryResult
+} = require("./metadata.cjs");
 
-const SENSITIVE_METADATA_FACTORY_KEY_RE = new RegExp([
-  "body",
-  "payload",
-  "variable",
-  "header",
-  "authorization",
-  "cookie",
-  "to\u006ben",
-  "sec\u0072et",
-  "pass\u0077ord"
-].join("|"), "u");
 const MAX_GRAPHQL_BODY_CHARS = 16_384;
 const MAX_GRAPHQL_OPERATION_NAME_CHARS = 128;
 const GRAPHQL_OPERATION_NAME_RE = /^[_A-Za-z][_0-9A-Za-z]*$/u;
@@ -67,7 +60,7 @@ function createReactNativeResourceFetch(client, {
       captureReactNativeResourceSpan(client, {
         appState,
         durationMs,
-        metadata: resourceMetadata(metadata, metadataFactory, {
+        metadata: createSafeReactNativeMetadata(metadata, metadataFactory, {
           durationMs,
           init,
           input,
@@ -93,7 +86,7 @@ function createReactNativeResourceFetch(client, {
         appState,
         durationMs,
         metadata: {
-          ...resourceMetadata(metadata, metadataFactory, {
+          ...createSafeReactNativeMetadata(metadata, metadataFactory, {
             durationMs,
             error,
             init,
@@ -128,40 +121,10 @@ function createReactNativeGraphQLMetadataFactory({
   }
   return function logBrewReactNativeGraphQLMetadata(context) {
     return {
-      ...safeFactoryMetadata(typeof metadataFactory === "function" ? metadataFactory(context) : undefined),
+      ...safeReactNativeMetadataFactoryResult(typeof metadataFactory === "function" ? metadataFactory(context) : undefined),
       ...graphqlMetadataFromContext(context)
     };
   };
-}
-
-function resourceMetadata(metadata, metadataFactory, context) {
-  if (typeof metadataFactory !== "function") {
-    return metadata;
-  }
-  return {
-    ...metadata,
-    ...safeFactoryMetadata(metadataFactory(context))
-  };
-}
-
-function safeFactoryMetadata(candidate) {
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-    return {};
-  }
-  const metadata = {};
-  for (const [key, value] of Object.entries(candidate)) {
-    if (isSensitiveMetadataKey(key)) {
-      continue;
-    }
-    if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      metadata[key] = value;
-    }
-  }
-  return metadata;
-}
-
-function isSensitiveMetadataKey(key) {
-  return SENSITIVE_METADATA_FACTORY_KEY_RE.test(String(key).toLowerCase());
 }
 
 function graphqlMetadataFromContext(context) {
