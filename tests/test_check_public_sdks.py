@@ -242,6 +242,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "Java real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_java_smoke\.sh"\n'
             r"mark_step_complete\n\n"
+            r'begin_next_step "Java Spring Kafka installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_java_spring_kafka_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
             r'begin_next_step "Java queue trace installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_java_queue_trace_smoke\.sh"\n'
             r"mark_step_complete\n\n"

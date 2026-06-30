@@ -73,6 +73,7 @@ STEP_LABELS=(
   "C real-user smoke"
   "C++ real-user smoke"
   "Java real-user smoke"
+  "Java Spring Kafka installed-artifact smoke"
   "Java queue trace installed-artifact smoke"
   "Java high-load installed-artifact smoke"
   "Spring Boot real-user smoke"
