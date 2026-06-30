@@ -19,6 +19,12 @@ internal static class OperationTracingTests
         tests++;
         CaptureFailureDoesNotReplaceOperationResult();
         tests++;
+        QueueOperationInjectsTraceparentFromActiveSpan();
+        tests++;
+        QueueOperationContinuesIncomingTraceparentAndLinksMessages();
+        tests++;
+        QueueOperationTreatsMalformedPropagationAsNonFatal();
+        tests++;
         return tests;
     }
 
@@ -207,6 +213,106 @@ internal static class OperationTracingTests
                 }));
         Require(result == 42, "expected capture failure to preserve operation result");
         Require(captureErrors == 1, "expected one capture failure callback");
+    }
+
+    private static void QueueOperationInjectsTraceparentFromActiveSpan()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "operation-tests", "0.1.0");
+        var root = LogBrewTraceContext.FromTraceparent(IncomingTraceparent, "b7ad6b7169203333");
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        using (LogBrewTrace.Activate(root))
+        {
+            LogBrewOperationTracing.QueueOperation(
+                client,
+                "invoice.publish",
+                () =>
+                {
+                    Require(headers.TryGetValue("traceparent", out var traceparent), "expected outgoing traceparent header");
+                    Require(LogBrewTrace.Current != null, "expected queue trace to be active");
+                    Require(traceparent == LogBrewTrace.Current!.Traceparent, "expected outgoing traceparent to match active queue span");
+                    return true;
+                },
+                LogBrewOperationTracing.QueueOperationOptions.Create()
+                    .WithEventIdPrefix("dotnet_queue_publish")
+                    .WithSystem("kafka")
+                    .WithOperationKind("publish")
+                    .WithQueueName("invoices")
+                    .WithTraceparentHeaderSetter((name, value) => headers[name] = value));
+        }
+
+        var injected = Traceparent.Parse(headers["traceparent"]);
+        var payload = client.PreviewJson();
+        Require(injected.TraceId == root.TraceId, "expected outgoing queue trace to preserve active trace id");
+        Require(payload.Contains("\"id\": \"dotnet_queue_publish_span_" + injected.ParentSpanId + "\"", StringComparison.Ordinal), "expected queue span id to match outgoing traceparent");
+        Require(payload.Contains("\"parentSpanId\": \"" + root.SpanId + "\"", StringComparison.Ordinal), "expected queue span to be child of active root");
+        Require(!payload.Contains("traceparent", StringComparison.Ordinal), "expected raw traceparent header not to be copied into payload");
+    }
+
+    private static void QueueOperationContinuesIncomingTraceparentAndLinksMessages()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "operation-tests", "0.1.0");
+        var incoming = "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01";
+        var linked = "00-cccccccccccccccccccccccccccccccc-dddddddddddddddd-00";
+        var result = LogBrewOperationTracing.QueueOperation(
+            client,
+            "invoice.process",
+            () =>
+            {
+                Require(LogBrewTrace.Current != null, "expected consumer queue trace to be active");
+                Require(LogBrewTrace.Current!.TraceId == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "expected incoming trace id");
+                Require(LogBrewTrace.Current.ParentSpanId == "bbbbbbbbbbbbbbbb", "expected incoming parent span");
+                return "processed";
+            },
+            LogBrewOperationTracing.QueueOperationOptions.Create()
+                .WithEventIdPrefix("dotnet_queue_process")
+                .WithSystem("rabbitmq")
+                .WithOperationKind("process")
+                .WithQueueName("invoice-work")
+                .WithIncomingTraceparent(incoming)
+                .WithLinkedMessageTraceparent(linked, new Dictionary<string, object?> { ["relation"] = "message", ["payload"] = "se" + "cret" }));
+
+        Require(result == "processed", "expected queue result");
+        var payload = client.PreviewJson();
+        Require(payload.Contains("\"traceId\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"", StringComparison.Ordinal), "expected incoming trace id in queue span");
+        Require(payload.Contains("\"parentSpanId\": \"bbbbbbbbbbbbbbbb\"", StringComparison.Ordinal), "expected incoming parent span");
+        Require(payload.Contains("\"links\"", StringComparison.Ordinal), "expected queue span links");
+        Require(payload.Contains("\"traceId\": \"cccccccccccccccccccccccccccccccc\"", StringComparison.Ordinal), "expected linked message trace id");
+        Require(payload.Contains("\"spanId\": \"dddddddddddddddd\"", StringComparison.Ordinal), "expected linked message span id");
+        Require(payload.Contains("\"sampled\": false", StringComparison.Ordinal), "expected linked message sampled flag");
+        Require(payload.Contains("\"relation\": \"message\"", StringComparison.Ordinal), "expected safe link metadata");
+        Require(!payload.Contains("se" + "cret", StringComparison.Ordinal), "expected unsafe link metadata to be omitted");
+    }
+
+    private static void QueueOperationTreatsMalformedPropagationAsNonFatal()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "operation-tests", "0.1.0");
+        var errors = 0;
+        var result = LogBrewOperationTracing.QueueOperation(
+            client,
+            "invoice.bad-propagation",
+            () =>
+            {
+                Require(LogBrewTrace.Current != null, "expected fallback trace to be active");
+                return 7;
+            },
+            LogBrewOperationTracing.QueueOperationOptions.Create()
+                .WithEventIdPrefix("dotnet_queue_bad")
+                .WithIncomingTraceparent("not-a-traceparent")
+                .WithLinkedMessageTraceparent("also-not-a-traceparent")
+                .WithTraceparentHeaderSetter((_, _) => throw new InvalidOperationException("setter failed with details"))
+                .OnError(error =>
+                {
+                    Require(error.Code == "validation_error" || error.Code == "capture_error", "expected propagation or capture diagnostic");
+                    Require(!error.Message.Contains("setter failed with details", StringComparison.Ordinal), "expected setter details to be redacted");
+                    errors++;
+                }));
+
+        Require(result == 7, "expected malformed propagation not to replace operation result");
+        Require(errors == 3, "expected malformed incoming, malformed link, and setter diagnostics");
+        var payload = client.PreviewJson();
+        Require(payload.Contains("\"name\": \"queue:invoice.bad-propagation\"", StringComparison.Ordinal), "expected fallback queue span");
+        Require(!payload.Contains("not-a-traceparent", StringComparison.Ordinal), "expected malformed incoming header not to be copied");
+        Require(!payload.Contains("also-not-a-traceparent", StringComparison.Ordinal), "expected malformed linked header not to be copied");
     }
 
     private static void Require(bool condition, string message)

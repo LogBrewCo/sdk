@@ -132,6 +132,10 @@ for needle in (
     "IncludeExceptionStackTrace",
     "SupportTicketDraft",
     "This helper does not send data, open support tickets",
+    "WithTraceparentHeaderSetter",
+    "WithIncomingTraceparent",
+    "WithLinkedMessageTraceparent",
+    "SpanLinkSummary",
     "copyable snippets",
 ):
     if needle not in readme:
@@ -699,6 +703,7 @@ using (var httpTransport = new HttpTransport(new HttpTransportOptions
 
 var operationClient = NewClient();
 var rootTrace = LogBrewTraceContext.FromTraceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "b7ad6b7169203331");
+var queueHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 using (LogBrewTrace.Activate(rootTrace))
 {
     var dbResult = LogBrewOperationTracing.DatabaseOperation(
@@ -743,7 +748,13 @@ using (LogBrewTrace.Activate(rootTrace))
     LogBrewOperationTracing.QueueOperation(
         operationClient,
         "invoice.publish",
-        () => true,
+        () =>
+        {
+            Require(queueHeaders.TryGetValue("traceparent", out var traceparent), "expected queue traceparent header");
+            Require(LogBrewTrace.Current != null, "expected active queue trace");
+            Require(traceparent == LogBrewTrace.Current!.Traceparent, "expected queue header to match active span");
+            return true;
+        },
         LogBrewOperationTracing.QueueOperationOptions.Create()
             .WithEventIdPrefix("smoke_queue")
             .WithSystem("kafka")
@@ -751,11 +762,32 @@ using (LogBrewTrace.Activate(rootTrace))
             .WithQueueName("invoices")
             .WithTaskName("invoice.created")
             .WithMessageCount(2)
+            .WithTraceparentHeaderSetter((name, value) => queueHeaders[name] = value)
             .WithMetadata(new Dictionary<string, object?> { ["safeQueue"] = "yes", ["messageBody"] = "se" + "cret body" }));
 }
 
+var incomingMessageTraceparent = "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01";
+var linkedMessageTraceparent = "00-cccccccccccccccccccccccccccccccc-dddddddddddddddd-00";
+LogBrewOperationTracing.QueueOperation(
+    operationClient,
+    "invoice.process",
+    () =>
+    {
+        Require(LogBrewTrace.Current != null, "expected active consumer queue trace");
+        Require(LogBrewTrace.Current!.TraceId == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "expected incoming message trace");
+        Require(LogBrewTrace.Current.ParentSpanId == "bbbbbbbbbbbbbbbb", "expected incoming message parent span");
+        return true;
+    },
+    LogBrewOperationTracing.QueueOperationOptions.Create()
+        .WithEventIdPrefix("smoke_queue_process")
+        .WithSystem("rabbitmq")
+        .WithOperationKind("process")
+        .WithQueueName("invoice-work")
+        .WithIncomingTraceparent(incomingMessageTraceparent)
+        .WithLinkedMessageTraceparent(linkedMessageTraceparent, new Dictionary<string, object?> { ["relation"] = "message", ["payload"] = "se" + "cret payload" }));
+
 var operationPayload = operationClient.PreviewJson();
-Require(operationClient.PendingEvents() == 3, "expected dependency spans");
+Require(operationClient.PendingEvents() == 4, "expected dependency spans");
 foreach (var expected in new[]
 {
     "\"name\": \"database:orders.select\"",
@@ -771,13 +803,22 @@ foreach (var expected in new[]
     "\"source\": \"queue.operation\"",
     "\"queueSystem\": \"kafka\"",
     "\"messageCount\": 2",
-    "\"parentSpanId\": \"b7ad6b7169203331\""
+    "\"parentSpanId\": \"b7ad6b7169203331\"",
+    "\"name\": \"queue:invoice.process\"",
+    "\"queueSystem\": \"rabbitmq\"",
+    "\"traceId\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+    "\"parentSpanId\": \"bbbbbbbbbbbbbbbb\"",
+    "\"links\"",
+    "\"traceId\": \"cccccccccccccccccccccccccccccccc\"",
+    "\"spanId\": \"dddddddddddddddd\"",
+    "\"sampled\": false",
+    "\"relation\": \"message\""
 })
 {
     Require(operationPayload.Contains(expected, StringComparison.Ordinal), "missing dependency smoke payload: " + expected);
 }
 
-foreach (var blocked in new[] { "SELECT se" + "cret", "Server=private", "db.internal", "cart:se" + "cret", "se" + "cret body" })
+foreach (var blocked in new[] { "SELECT se" + "cret", "Server=private", "db.internal", "cart:se" + "cret", "se" + "cret body", "se" + "cret payload", "traceparent" })
 {
     Require(!operationPayload.Contains(blocked, StringComparison.Ordinal), "expected dependency smoke to omit " + blocked);
 }
@@ -818,6 +859,7 @@ Console.Error.WriteLine(
     + ",\"timelineEvents\":2"
     + ",\"dependencySpans\":"
     + operationClient.PendingEvents().ToString(CultureInfo.InvariantCulture)
+    + ",\"queueTraceparent\":true"
     + ",\"supportDraftRedacted\":true"
     + ",\"httpRequests\":"
     + httpRequests.ToString(CultureInfo.InvariantCulture)
@@ -971,7 +1013,8 @@ grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"timelineEvents":2' "$tmp_dir/smoke-app.stderr.json"
-grep -q '"dependencySpans":3' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"dependencySpans":4' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"queueTraceparent":true' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 
 echo "dotnet real-user smoke passed"

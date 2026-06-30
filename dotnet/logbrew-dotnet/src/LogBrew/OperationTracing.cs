@@ -100,7 +100,8 @@ namespace LogBrew
                 "queue",
                 "queue.operation",
                 safeOptions.EventIdPrefix ?? "dotnet_queue",
-                QueueMetadata(normalizedOperationName, safeOptions));
+                QueueMetadata(normalizedOperationName, safeOptions),
+                safeOptions.TraceOptions);
         }
 
         public static Task<T> QueueOperationAsync<T>(
@@ -119,7 +120,8 @@ namespace LogBrew
                 "queue",
                 "queue.operation",
                 safeOptions.EventIdPrefix ?? "dotnet_queue",
-                QueueMetadata(normalizedOperationName, safeOptions));
+                QueueMetadata(normalizedOperationName, safeOptions),
+                safeOptions.TraceOptions);
         }
 
         private static T OperationSpan<T>(
@@ -130,7 +132,8 @@ namespace LogBrew
             string spanNamePrefix,
             string source,
             string eventIdPrefix,
-            IDictionary<string, object?> metadata)
+            IDictionary<string, object?> metadata,
+            OperationTraceOptions? traceOptions = null)
         {
             if (client == null)
             {
@@ -142,11 +145,12 @@ namespace LogBrew
                 throw new ArgumentNullException(nameof(operation));
             }
 
-            var trace = CreateChildTrace();
+            var trace = CreateChildTrace(traceOptions?.IncomingTraceparent, options.OnError);
             var startedAt = Stopwatch.GetTimestamp();
             Exception? operationError = null;
             using (LogBrewTrace.Activate(trace))
             {
+                InjectTraceparent(traceOptions?.TraceparentHeaderSetter, trace, options.OnError);
                 try
                 {
                     return operation();
@@ -158,7 +162,7 @@ namespace LogBrew
                 }
                 finally
                 {
-                    CaptureSpan(client, eventIdPrefix, spanNamePrefix, operationName, source, trace, metadata, operationError, startedAt, options.OnError);
+                    CaptureSpan(client, eventIdPrefix, spanNamePrefix, operationName, source, trace, metadata, operationError, startedAt, options.OnError, traceOptions?.LinkedMessageTraceparents);
                 }
             }
         }
@@ -171,7 +175,8 @@ namespace LogBrew
             string spanNamePrefix,
             string source,
             string eventIdPrefix,
-            IDictionary<string, object?> metadata)
+            IDictionary<string, object?> metadata,
+            OperationTraceOptions? traceOptions = null)
         {
             if (client == null)
             {
@@ -183,11 +188,12 @@ namespace LogBrew
                 throw new ArgumentNullException(nameof(operation));
             }
 
-            var trace = CreateChildTrace();
+            var trace = CreateChildTrace(traceOptions?.IncomingTraceparent, options.OnError);
             var startedAt = Stopwatch.GetTimestamp();
             Exception? operationError = null;
             using (LogBrewTrace.Activate(trace))
             {
+                InjectTraceparent(traceOptions?.TraceparentHeaderSetter, trace, options.OnError);
                 try
                 {
                     return await operation().ConfigureAwait(false);
@@ -199,15 +205,44 @@ namespace LogBrew
                 }
                 finally
                 {
-                    CaptureSpan(client, eventIdPrefix, spanNamePrefix, operationName, source, trace, metadata, operationError, startedAt, options.OnError);
+                    CaptureSpan(client, eventIdPrefix, spanNamePrefix, operationName, source, trace, metadata, operationError, startedAt, options.OnError, traceOptions?.LinkedMessageTraceparents);
                 }
             }
         }
 
-        private static LogBrewTraceContext CreateChildTrace()
+        private static LogBrewTraceContext CreateChildTrace(string? incomingTraceparent, Action<SdkException>? onError)
         {
+            if (!string.IsNullOrWhiteSpace(incomingTraceparent))
+            {
+                try
+                {
+                    return LogBrewTraceContext.FromTraceparent(incomingTraceparent!);
+                }
+                catch (SdkException error)
+                {
+                    ReportCaptureError(onError, error);
+                }
+            }
+
             var current = LogBrewTrace.Current;
             return current == null ? LogBrewTraceContext.CreateRoot() : LogBrewTraceContext.CreateChild(current);
+        }
+
+        private static void InjectTraceparent(Action<string, string>? setter, LogBrewTraceContext trace, Action<SdkException>? onError)
+        {
+            if (setter == null)
+            {
+                return;
+            }
+
+            try
+            {
+                setter("traceparent", trace.Traceparent);
+            }
+            catch
+            {
+                ReportCaptureError(onError, new SdkException("capture_error", "queue traceparent header setter failed"));
+            }
         }
 
         private static string NormalizeOperationName(string operationName)
@@ -226,7 +261,8 @@ namespace LogBrew
             IDictionary<string, object?> baseMetadata,
             Exception? operationError,
             long startedAt,
-            Action<SdkException>? onError)
+            Action<SdkException>? onError,
+            IReadOnlyList<LinkedTraceparent>? linkedTraceparents = null)
         {
             var finishedAt = DateTimeOffset.UtcNow;
             var metadata = new Dictionary<string, object?>(baseMetadata, StringComparer.Ordinal);
@@ -249,6 +285,8 @@ namespace LogBrew
                 attributes.WithParentSpanId(trace.ParentSpanId);
             }
 
+            AddLinkedTraceparents(attributes, linkedTraceparents, onError);
+
             if (operationError != null)
             {
                 attributes.WithEvent(SpanEventSummary.Create("exception").WithMetadata(new Dictionary<string, object?>
@@ -268,6 +306,40 @@ namespace LogBrew
             catch (SdkException error)
             {
                 ReportCaptureError(onError, error);
+            }
+        }
+
+        private static void AddLinkedTraceparents(SpanAttributes attributes, IReadOnlyList<LinkedTraceparent>? linkedTraceparents, Action<SdkException>? onError)
+        {
+            if (linkedTraceparents == null || linkedTraceparents.Count == 0)
+            {
+                return;
+            }
+
+            var added = 0;
+            foreach (var linkedTraceparent in linkedTraceparents)
+            {
+                if (added >= SpanLinkSummary.MaxLinks)
+                {
+                    ReportCaptureError(onError, new SdkException("validation_error", "queue linked message traceparents kept at most " + SpanLinkSummary.MaxLinks.ToString(CultureInfo.InvariantCulture) + " entries"));
+                    return;
+                }
+
+                try
+                {
+                    var summary = SpanLinkSummary.FromTraceparent(linkedTraceparent.Traceparent);
+                    if (linkedTraceparent.Metadata != null)
+                    {
+                        summary.WithSafeMetadata(linkedTraceparent.Metadata);
+                    }
+
+                    attributes.WithLink(summary);
+                    added++;
+                }
+                catch (SdkException error)
+                {
+                    ReportCaptureError(onError, error);
+                }
             }
         }
 
@@ -518,6 +590,8 @@ namespace LogBrew
         {
             internal CommonOptions Common { get; } = new CommonOptions();
 
+            internal OperationTraceOptions TraceOptions { get; } = new OperationTraceOptions();
+
             public string? EventIdPrefix
             {
                 get { return Common.EventIdPrefix; }
@@ -553,6 +627,29 @@ namespace LogBrew
             public QueueOperationOptions OnError(Action<SdkException> value)
             {
                 Common.OnError = value;
+                return this;
+            }
+
+            public QueueOperationOptions WithIncomingTraceparent(string? value)
+            {
+                TraceOptions.IncomingTraceparent = value;
+                return this;
+            }
+
+            public QueueOperationOptions WithTraceparentHeaderSetter(Action<string, string> value)
+            {
+                TraceOptions.TraceparentHeaderSetter = value ?? throw new ArgumentNullException(nameof(value));
+                return this;
+            }
+
+            public QueueOperationOptions WithLinkedMessageTraceparent(string value)
+            {
+                return WithLinkedMessageTraceparent(value, null);
+            }
+
+            public QueueOperationOptions WithLinkedMessageTraceparent(string value, IDictionary<string, object?>? metadata)
+            {
+                TraceOptions.AddLinkedMessageTraceparent(value, metadata);
                 return this;
             }
 
@@ -594,6 +691,40 @@ namespace LogBrew
             internal IDictionary<string, object?>? Metadata { get; set; }
 
             internal Action<SdkException>? OnError { get; set; }
+        }
+
+        internal sealed class OperationTraceOptions
+        {
+            private List<LinkedTraceparent>? linkedMessageTraceparents;
+
+            internal string? IncomingTraceparent { get; set; }
+
+            internal Action<string, string>? TraceparentHeaderSetter { get; set; }
+
+            internal IReadOnlyList<LinkedTraceparent>? LinkedMessageTraceparents
+            {
+                get { return linkedMessageTraceparents?.AsReadOnly(); }
+            }
+
+            internal void AddLinkedMessageTraceparent(string value, IDictionary<string, object?>? metadata)
+            {
+                Validation.RequireNonEmpty("linked message traceparent", value);
+                linkedMessageTraceparents ??= new List<LinkedTraceparent>();
+                linkedMessageTraceparents.Add(new LinkedTraceparent(value, metadata == null ? null : TelemetryMetadata.CopySafeDependencyMetadata(metadata)));
+            }
+        }
+
+        internal sealed class LinkedTraceparent
+        {
+            internal LinkedTraceparent(string traceparent, IDictionary<string, object?>? metadata)
+            {
+                Traceparent = traceparent;
+                Metadata = metadata;
+            }
+
+            internal string Traceparent { get; }
+
+            internal IDictionary<string, object?>? Metadata { get; }
         }
     }
 }

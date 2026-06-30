@@ -128,6 +128,19 @@ AssertTrue(spanEventPreview.Contains("\"events\"", StringComparison.Ordinal), "e
 AssertTrue(spanEventPreview.Contains("\"name\": \"retry\"", StringComparison.Ordinal), "expected span event name");
 AssertTrue(spanEventPreview.Contains("\"attempt\": 2", StringComparison.Ordinal), "expected span event metadata");
 AssertTrue(spanEventPreview.Contains("\"retryable\": true", StringComparison.Ordinal), "expected span event bool metadata");
+var spanLinkClient = SampleClient();
+spanLinkClient.Span(
+    "evt_span_link_summary",
+    "2026-06-02T10:00:04Z",
+    SpanAttributes.Create("queue process", "trace_001", "span_001", "ok")
+        .WithLink(SpanLinkSummary.FromTraceparent("00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-00")
+            .WithMetadata(new Dictionary<string, object?> { ["relation"] = "message", ["attempt"] = 1 })));
+var spanLinkPreview = spanLinkClient.PreviewJson();
+AssertTrue(spanLinkPreview.Contains("\"links\"", StringComparison.Ordinal), "expected span links array");
+AssertTrue(spanLinkPreview.Contains("\"traceId\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"", StringComparison.Ordinal), "expected linked trace id");
+AssertTrue(spanLinkPreview.Contains("\"spanId\": \"bbbbbbbbbbbbbbbb\"", StringComparison.Ordinal), "expected linked span id");
+AssertTrue(spanLinkPreview.Contains("\"sampled\": false", StringComparison.Ordinal), "expected linked sampled flag");
+AssertTrue(spanLinkPreview.Contains("\"relation\": \"message\"", StringComparison.Ordinal), "expected linked metadata");
 ExpectSdkError("validation_error", "span event summaries must contain at most 8 entries", () =>
 {
     var summaries = new List<SpanEventSummary>();
@@ -140,6 +153,19 @@ ExpectSdkError("validation_error", "span event summaries must contain at most 8 
 });
 ExpectSdkError("validation_error", "span event metadata value for nested must be a string", () =>
     SpanEventSummary.Create("retry").WithMetadata(new Dictionary<string, object?> { ["nested"] = new object() }));
+ExpectSdkError("validation_error", "span link summaries must contain at most 8 entries", () =>
+{
+    var summaries = new List<SpanLinkSummary>();
+    for (var index = 0; index < 9; index++)
+    {
+        summaries.Add(SpanLinkSummary.FromTraceparent("00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-" + (index + 1).ToString("x16", CultureInfo.InvariantCulture) + "-01"));
+    }
+
+    SpanAttributes.Create("queue process", "trace_001", "span_001", "ok").WithLinks(summaries);
+});
+ExpectSdkError("validation_error", "span link metadata value for nested must be a string", () =>
+    SpanLinkSummary.FromTraceparent("00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01")
+        .WithMetadata(new Dictionary<string, object?> { ["nested"] = new object() }));
 ExpectSdkError("validation_error", "timestamp must include a timezone offset", () =>
     SampleClient().Span(
         "evt_span_bad_event_timestamp",

@@ -395,6 +395,39 @@ var orderId = LogBrewOperationTracing.DatabaseOperation(
         .WithMetadata(new Dictionary<string, object?> { ["routeTemplate"] = "/orders/:id" }));
 ```
 
+For app-owned queues, keep the broker SDK in your code and let LogBrew write or read only W3C `traceparent` values:
+
+```csharp
+var messageHeaders = new Dictionary<string, string>();
+
+LogBrewOperationTracing.QueueOperation(
+    client,
+    "invoice.publish",
+    () =>
+    {
+        // Set messageHeaders["traceparent"] on your Kafka/RabbitMQ/SQS message here.
+        return true;
+    },
+    LogBrewOperationTracing.QueueOperationOptions.Create()
+        .WithSystem("kafka")
+        .WithOperationKind("publish")
+        .WithQueueName("invoices")
+        .WithTraceparentHeaderSetter((name, value) => messageHeaders[name] = value));
+
+LogBrewOperationTracing.QueueOperation(
+    client,
+    "invoice.process",
+    () => true,
+    LogBrewOperationTracing.QueueOperationOptions.Create()
+        .WithSystem("rabbitmq")
+        .WithOperationKind("process")
+        .WithQueueName("invoice-work")
+        .WithIncomingTraceparent(messageHeaders.TryGetValue("traceparent", out var traceparent) ? traceparent : null)
+        .WithLinkedMessageTraceparent("00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"));
+```
+
+`WithTraceparentHeaderSetter(...)` is called once after LogBrew creates the queue span and before your callback runs, so the outgoing message can carry the same child span context that LogBrew records. `WithIncomingTraceparent(...)` continues one valid incoming message context; malformed values are reported through `OnError(...)` and fall back to the active trace or a new root without interrupting the queue operation. `WithLinkedMessageTraceparent(...)` adds bounded span links for consumed or batched messages without storing raw propagation headers.
+
 For app-owned ADO.NET commands, use `LogBrewDbCommandTelemetry` around the provider command execution instead of writing a callback wrapper for every query:
 
 ```csharp
@@ -471,7 +504,7 @@ var value = redis.TraceLogBrewCommand(
 
 `LogBrew.StackExchangeRedis` adds `TraceLogBrewCommand(...)` and `TraceLogBrewCommandAsync(...)` around app-owned Redis calls. The helper creates one sanitized `stackexchange_redis.command:<COMMAND>` child span, keeps `LogBrewTrace.Current` active while the Redis call runs, preserves the original result or exception, infers coarse hit/count/size metadata where safe, and reports SDK capture failures through optional `OnError(...)`. It does not capture Redis keys, values, command arguments, raw command text, connection strings, endpoints, server names, arbitrary headers, payloads, exception messages, stacks, baggage, tracestate, profiler sessions, global patches, or support tickets. The packaged `examples/StackExchangeRedisCommandTelemetry.cs` file proves installed-package Redis command spans and redaction without requiring a live Redis server.
 
-Sync and async helpers are available for database, cache, and queue operations. They create one child span under `LogBrewTrace.Current` when a trace is active, keep that child trace active while the callback runs, preserve the callback result or original exception, and report SDK capture failures through optional `OnError(...)` callbacks without interrupting app work. Failed dependency operations also attach one bounded span event named `exception` with type-only metadata (`exceptionType` and `exceptionEscaped`) so issues can be filtered without sending exception messages or stack traces.
+Sync and async helpers are available for database, cache, and queue operations. They create one child span under `LogBrewTrace.Current` when a trace is active, keep that child trace active while the callback runs, preserve the callback result or original exception, and report SDK capture failures through optional `OnError(...)` callbacks without interrupting app work. Queue helpers can inject one normalized `traceparent`, continue one valid incoming `traceparent`, and add bounded linked message contexts. Failed dependency operations also attach one bounded span event named `exception` with type-only metadata (`exceptionType` and `exceptionEscaped`) so issues can be filtered without sending exception messages or stack traces.
 
 You can add your own primitive-only span event summaries to any span with `SpanEventSummary`:
 
@@ -490,7 +523,18 @@ client.Span(
 
 Span event summaries are capped at eight entries per span and accept only string, number, boolean, or null metadata. Metadata is primitive-only, and the dependency helpers drop unsafe dependency details such as raw statements, connection details, cache identifiers, message contents, broker details, request metadata, and unsafe values. For EF Core command spans, use the optional `LogBrew.EntityFrameworkCore` package. For Redis command spans, use the optional `LogBrew.StackExchangeRedis` package. Other Kafka-style automatic integrations should come from explicit future integration packages rather than hidden behavior in this core package.
 
-The packaged `examples/DependencySpansTelemetry.cs` file shows database, cache, and queue spans running from a small console app, with trace correlation, type-only dependency exception events, and dependency metadata redaction.
+Use `SpanLinkSummary` for explicit async/batch links on any span:
+
+```csharp
+client.Span(
+    "evt_span_invoice_batch",
+    "2026-06-02T10:00:06Z",
+    SpanAttributes.Create("queue:invoice.process", "4bf92f3577b34da6a3ce929d0e0e4736", "b7ad6b7169203334", "ok")
+        .WithLink(SpanLinkSummary.FromTraceparent("00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01")
+            .WithMetadata(new Dictionary<string, object?> { ["relation"] = "message" })));
+```
+
+Span link summaries are capped at eight entries per span, store only trace ID/span ID/sampled plus primitive metadata, and never copy raw `traceparent`, baggage, tracestate, payloads, headers, message bodies, broker URLs, or queue credentials. The packaged `examples/DependencySpansTelemetry.cs` file shows database, cache, and queue spans running from a small console app, with trace correlation, queue propagation, linked message summaries, type-only dependency exception events, and dependency metadata redaction.
 
 ## Support Ticket Diagnostics Drafts
 

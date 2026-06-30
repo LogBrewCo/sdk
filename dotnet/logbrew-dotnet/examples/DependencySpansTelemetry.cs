@@ -10,6 +10,7 @@ public static class Program
     {
         var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "0.1.0");
         var root = LogBrewTraceContext.FromTraceparent(IncomingTraceparent, "b7ad6b7169203331");
+        var queueHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         using (LogBrewTrace.Activate(root))
         {
@@ -81,7 +82,17 @@ public static class Program
             var queued = LogBrewOperationTracing.QueueOperation(
                 client,
                 "invoice.publish",
-                () => orderId.Length > 0 && cacheHit,
+                () =>
+                {
+                    if (!queueHeaders.TryGetValue("traceparent", out var traceparent)
+                        || LogBrewTrace.Current == null
+                        || traceparent != LogBrewTrace.Current.Traceparent)
+                    {
+                        throw new InvalidOperationException("expected queue traceparent header to match the active queue span");
+                    }
+
+                    return orderId.Length > 0 && cacheHit;
+                },
                 LogBrewOperationTracing.QueueOperationOptions.Create()
                     .WithEventIdPrefix("dotnet_dependency")
                     .WithSystem("kafka")
@@ -89,6 +100,7 @@ public static class Program
                     .WithQueueName("invoices")
                     .WithTaskName("invoice.created")
                     .WithMessageCount(1)
+                    .WithTraceparentHeaderSetter((name, value) => queueHeaders[name] = value)
                     .WithMetadata(new Dictionary<string, object?>
                     {
                         ["feature"] = "checkout",
@@ -100,6 +112,31 @@ public static class Program
                 throw new InvalidOperationException("expected queue operation to complete");
             }
         }
+
+        LogBrewOperationTracing.QueueOperation(
+            client,
+            "invoice.process",
+            () =>
+            {
+                if (LogBrewTrace.Current == null || LogBrewTrace.Current.ParentSpanId == null)
+                {
+                    throw new InvalidOperationException("expected incoming message trace to be active");
+                }
+
+                return true;
+            },
+            LogBrewOperationTracing.QueueOperationOptions.Create()
+                .WithEventIdPrefix("dotnet_dependency")
+                .WithSystem("rabbitmq")
+                .WithOperationKind("process")
+                .WithQueueName("invoice-work")
+                .WithIncomingTraceparent(queueHeaders.TryGetValue("traceparent", out var incomingTraceparent) ? incomingTraceparent : null)
+                .WithMetadata(new Dictionary<string, object?> { ["feature"] = "checkout" })
+                .WithLinkedMessageTraceparent("00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01", new Dictionary<string, object?>
+                {
+                    ["relation"] = "message",
+                    ["payload"] = "sample payload"
+                }));
 
         var events = client.PendingEvents();
         Console.WriteLine(client.PreviewJson());

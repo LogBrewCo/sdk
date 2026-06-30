@@ -72,10 +72,10 @@ def main():
     events = payload.get("events", [])
 
     require(summary.get("ok") is True, "summary ok flag missing")
-    require(summary.get("events") == 4, "summary event count mismatch")
+    require(summary.get("events") == 5, "summary event count mismatch")
     require(summary.get("status") == 202, "summary status mismatch")
     require(summary.get("attempts") == 1, "summary attempts mismatch")
-    require(len(events) == 4, f"expected 4 events, got {len(events)}")
+    require(len(events) == 5, f"expected 5 events, got {len(events)}")
 
     for blocked in (
         "cart:sample",
@@ -87,12 +87,14 @@ def main():
         "connection_string",
         "cache-key",
         "messageBody",
+        "traceparent",
     ):
         require(blocked not in payload_text, f"unsafe dependency data leaked: {blocked}")
 
     db = event_by_name(events, "database:orders.select")
     cache = event_by_name(events, "cache:cart.get")
     queue = event_by_name(events, "queue:invoice.publish")
+    queue_process = event_by_name(events, "queue:invoice.process")
     failing_db = event_by_name(events, "database:orders.fail")
 
     assert_span(db, "database.operation")
@@ -121,6 +123,28 @@ def main():
     require(queue_meta.get("queueName") == "invoices", "queue name mismatch")
     require(queue_meta.get("taskName") == "invoice.created", "queue task name mismatch")
     require(queue_meta.get("messageCount") == 1, "queue message count mismatch")
+
+    process_attrs = queue_process.get("attributes", {})
+    process_meta = metadata(queue_process)
+    require(process_attrs.get("traceId") == TRACE_ID, "queue process trace id mismatch")
+    require(process_attrs.get("parentSpanId") == queue.get("attributes", {}).get("spanId"), "queue process parent span mismatch")
+    require(process_attrs.get("status") == "ok", "queue process status mismatch")
+    require(process_meta.get("source") == "queue.operation", "queue process source mismatch")
+    require(process_meta.get("feature") == "checkout", "queue process feature metadata missing")
+    require(process_meta.get("queueSystem") == "rabbitmq", "queue process system mismatch")
+    require(process_meta.get("queueOperation") == "invoice.process", "queue process operation mismatch")
+    require(process_meta.get("queueOperationKind") == "process", "queue process operation kind mismatch")
+    require(process_meta.get("queueName") == "invoice-work", "queue process name mismatch")
+    links = process_attrs.get("links", [])
+    require(isinstance(links, list), "queue process links must be a list")
+    require(len(links) == 1, "queue process expected one linked message")
+    linked = links[0]
+    require(linked.get("traceId") == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "queue process linked trace id mismatch")
+    require(linked.get("spanId") == "bbbbbbbbbbbbbbbb", "queue process linked span id mismatch")
+    require(linked.get("sampled") is True, "queue process linked sampled mismatch")
+    linked_meta = linked.get("metadata", {})
+    require(isinstance(linked_meta, dict), "queue process linked metadata must be an object")
+    require(linked_meta.get("relation") == "message", "queue process linked relation mismatch")
 
     assert_error_span(failing_db, "database.operation")
 

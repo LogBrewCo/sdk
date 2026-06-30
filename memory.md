@@ -1,5 +1,36 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-06-30: .NET queue/message rich-trace gap reduced after source reads
+  from Sentry .NET `getsentry/sentry-dotnet@951d98f789ec6794a1bbd82149d900f06fde0cfa`
+  (no first-party Kafka/RabbitMQ/MassTransit queue instrumentation found;
+  `SentryOptions` only listed `RabbitMQ` as an in-app exclude), Datadog .NET
+  tracer `DataDog/dd-trace-dotnet@a2346ba4fa5455164534a8427e510acd877f00a9`
+  (`KafkaHelper`, `KafkaHeadersCollectionAdapter`,
+  `KafkaProduceAsyncIntegration`, `RabbitMQIntegration`,
+  `RabbitMQHeadersCollectionAdapter`, `MessagingSchema`), OpenTelemetry .NET
+  Contrib `open-telemetry/opentelemetry-dotnet-contrib@7e8040413042ee663a9ef4dd04ab52d1a17ed77b`
+  (`ConfluentKafkaCommon`, `InstrumentedProducer`, `InstrumentedConsumer`,
+  `OpenTelemetryConsumeResultExtensions`, builder options), and PostHog .NET
+  `PostHog/posthog-dotnet@8fad3ff84cda2c741f397e1152e58a7b96c98124` (no
+  comparable queue instrumentation found). Core `LogBrew` now adds bounded
+  `SpanLinkSummary` plus queue options for app-owned
+  `WithTraceparentHeaderSetter(...)`, `WithIncomingTraceparent(...)`, and
+  `WithLinkedMessageTraceparent(...)`. Queue helpers inject exactly one
+  normalized `traceparent`, continue one valid incoming message context, drop
+  malformed propagation non-fatally through `OnError(...)`, cap message links
+  at eight, and serialize only trace ID/span ID/sampled plus primitive metadata.
+  They avoid broker dependencies, profilers/global patching, payloads, raw
+  headers, raw `traceparent`, baggage, tracestate, message bodies, broker URLs,
+  credentials, exception messages/stacks, usage inference, and support-ticket
+  creation. Evidence: RED missing API tests, GREEN 69 .NET tests,
+  `bash scripts/check_dotnet_package.sh`, `bash scripts/real_user_dotnet_smoke.sh`
+  installed NuGet proof with queue propagation/link checks, and
+  `bash scripts/real_user_dotnet_high_load_smoke.sh`. Report:
+  `docs/competitor-research/dotnet-queue-propagation-2026-06-30.md`.
+  Remaining .NET messaging gaps: automatic Kafka/RabbitMQ/Azure Service Bus/SQS
+  integration packages, richer messaging metrics/semantic tags, broker
+  delivery metadata, data-stream context, baggage/tracestate, and full OTel
+  exporter/processor interop.
 - 2026-06-30: .NET high-load/backpressure gap reduced after source reads from
   Sentry .NET
   `getsentry/sentry-dotnet@951d98f789ec6794a1bbd82149d900f06fde0cfa`
