@@ -17,7 +17,8 @@ from packaged artifacts.
   `dd-java-agent/instrumentation/jms/javax-jms-1.1/src/main/java/datadog/trace/instrumentation/jms/MessageInjectAdapter.java`
   (`set`, `injectTimeInQueue`),
   `MessageExtractAdapter.java` (`forEachKey`, `extractTimeInQueueStart`,
-  `extractMessageBatchId`).
+  `extractMessageBatchId`), and `JMSDecorator.java` (`component`,
+  `spanKind`, `onConsume`, `onProduce`, `toResourceName`).
 - OpenTelemetry Java Instrumentation:
   `https://github.com/open-telemetry/opentelemetry-java-instrumentation.git` at
   `3118b49eade43b82bac593a980cb83db1ee540b1`.
@@ -26,8 +27,10 @@ from packaged artifacts.
   (`createProducerInstrumenter`, `createConsumerReceiveInstrumenter`,
   `createConsumerProcessInstrumenter`, `PropagatorBasedSpanLinksExtractor`
   setup for receive/process spans),
-  `MessagePropertyGetter.java` (`keys`, `get`), and
-  `MessagePropertySetter.java` (`set`).
+  `JmsMessageAttributesGetter.java` (`getSystem`, `getDestination`,
+  `getBatchMessageCount`, `getMessageHeader`), `MessageWithDestination.java`
+  (`create`, queue/topic destination derivation), `MessagePropertyGetter.java`
+  (`keys`, `get`), and `MessagePropertySetter.java` (`set`).
 - Sentry Java `https://github.com/getsentry/sentry-java.git` at
   `307edcd968452d07d801c46362bf98f815fea808` was used as the comparison point
   for first-party Java messaging ergonomics through Kafka/Spring Kafka support;
@@ -43,16 +46,23 @@ Datadog and OpenTelemetry both use JMS message string properties as the
 propagation carrier. Both account for JMS property-name limits by mapping header
 keys with hyphens, and both treat property setter/getter failures as
 instrumentation diagnostics rather than application failures. Their strength is
-automatic producer/consumer breadth and richer messaging metadata. The tradeoff
-is javaagent/runtime instrumentation, JMS-version-specific modules, destination
-and lifecycle coupling, and a larger semantic surface.
+automatic producer/consumer breadth and richer messaging metadata such as
+system, destination, operation, span kind, batch count, resource naming, and
+queue timing. The tradeoff is javaagent/runtime instrumentation,
+JMS-version-specific modules, destination and lifecycle coupling, and a larger
+semantic surface.
 
 LogBrew intentionally copied only the safe carrier idea: one string property for
 `traceparent`, non-fatal read/write diagnostics, and child trace activation
-around app-owned work. LogBrew did not copy automatic producer/consumer advice,
-connection/session/listener patching, property enumeration, custom timing
-properties, data-stream metadata, baggage/tracestate, destination inspection, or
-message-body/property capture.
+around app-owned work. The follow-up semantic metadata copies only the safe,
+primitive OpenTelemetry-style keys that LogBrew already knows from app-provided
+configuration: `messaging.system`, `messaging.operation.name`,
+`messaging.operation.type`, `messaging.destination.name`, and
+`messaging.batch.message_count`. LogBrew did not copy automatic
+producer/consumer advice, connection/session/listener patching, property
+enumeration, custom timing properties, data-stream metadata, baggage/tracestate,
+destination inspection, message IDs/correlation IDs, or message-body/property
+capture.
 
 ## LogBrew Change
 
@@ -80,6 +90,12 @@ Core Java now includes dependency-free `LogBrewJmsTracing`:
   non-fatal diagnostic callback. `ConsumerConfig` also accepts primitive
   `messageCount` and `timeInQueueMs` values when the application already has
   them.
+- Shared queue span metadata now also emits safe OpenTelemetry-style messaging
+  keys derived from SDK-owned values: `messaging.system`,
+  `messaging.operation.name`, `messaging.operation.type`,
+  `messaging.destination.name`, and `messaging.batch.message_count`. These keys
+  override user-supplied metadata values with the same names so app metadata
+  cannot spoof system, destination, operation, or batch-count fields.
 - Property read/write failures produce `jms_property_read_failed` or
   `jms_property_write_failed` diagnostics through `onError(...)` without
   replacing the app operation result or original app operation exception.
@@ -101,9 +117,11 @@ an agent or JMS dependency in the base SDK. The batch helper now narrows the
 message-link ergonomics gap by giving explicit batch consumers first-parent plus
 bounded linked-message correlation, and the receive helper now narrows the
 OpenTelemetry receive-vs-process separation gap for apps that prefer explicit
-instrumentation. LogBrew is still worse than Datadog and OpenTelemetry for
-automatic JMS breadth, richer messaging semantic conventions, exported metrics,
-destination-specific metadata, baggage/tracestate, and full OTel
+instrumentation. The semantic metadata follow-up gives LogBrew portable
+messaging query keys without taking ownership of JMS destinations or messages.
+LogBrew is still worse than Datadog and OpenTelemetry for automatic JMS breadth,
+destination inspection, message IDs/correlation IDs, exported metrics,
+baggage/tracestate, and full OTel
 processor/exporter interop. It is intentionally not trying to match hidden agent
 coverage in core.
 
@@ -133,10 +151,23 @@ coverage in core.
   `bash scripts/real_user_java_high_load_smoke.sh`, ShellCheck 0.11.0,
   markdown links, backend contract reports, release metadata, confidentiality
   scan, generated-artifact hygiene, and `git diff --check`.
+- Follow-up semantic metadata verification added a RED queue-span test proving
+  missing/spoofable `messaging.*` fields, then passed `bash
+  scripts/check_java_package.sh` with SDK-owned `messaging.system`,
+  `messaging.operation.name`, `messaging.operation.type`,
+  `messaging.destination.name`, and `messaging.batch.message_count` values.
+  Installed and broader gates also passed: `bash scripts/real_user_java_jms_smoke.sh`,
+  `bash scripts/real_user_java_queue_trace_smoke.sh`,
+  `bash scripts/real_user_java_smoke.sh`,
+  `bash scripts/real_user_java_high_load_smoke.sh`,
+  `bash scripts/check_java_static.sh`, public SDK step tests, ShellCheck,
+  markdown links, backend contract reports, release metadata, confidentiality
+  scan, generated-artifact hygiene, and `git diff --check`.
 
 ## Remaining Gaps
 
-Next Java messaging gaps are richer messaging semantic attributes,
-privacy-bounded messaging metrics, optional Spring/JMS bean auto-registration
-only if privacy/runtime coupling is justified, baggage/tracestate only if a real
-interoperability need justifies it, and OTel exporter/processor interop.
+Next Java messaging gaps are privacy-bounded messaging metrics, optional
+Spring/JMS bean auto-registration only if privacy/runtime coupling is justified,
+safe destination/message identity enrichment only when app-provided and
+redaction-bounded, baggage/tracestate only if a real interoperability need
+justifies it, and OTel exporter/processor interop.

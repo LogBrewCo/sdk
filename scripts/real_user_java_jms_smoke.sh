@@ -241,6 +241,11 @@ public final class Main {
         require(payload.contains("\"queueName\": \"billing-queue\""), "JMS destination name");
         require(payload.contains("\"messageCount\": 1"), "JMS message count");
         require(payload.contains("\"messageCount\": 4"), "JMS batch message count");
+        require(payload.contains("\"messaging.system\": \"jms\""), "JMS semantic system");
+        require(payload.contains("\"messaging.operation.name\": \"jms.receive\""), "JMS semantic receive operation");
+        require(payload.contains("\"messaging.operation.type\": \"receive\""), "JMS semantic receive operation type");
+        require(payload.contains("\"messaging.destination.name\": \"billing-queue\""), "JMS semantic destination");
+        require(payload.contains("\"messaging.batch.message_count\": 4"), "JMS semantic batch count");
         require(payload.contains("\"timeInQueueMs\": 125.5"), "JMS queue latency");
         require(payload.contains("\"timeInQueueMs\": 250.5"), "JMS batch queue latency");
         require(payload.contains("\"parentSpanId\": \"2222222222222222\""), "incoming parent span");

@@ -191,6 +191,7 @@ public final class LogBrewOperationTracingTest {
                     .system("kafka")
                     .operationKind("publish")
                     .queueName("billing-events")
+                    .messageCount(1)
                     .eventIdPrefix("java_queue_header")
                     .spanId("b7ad6b7169203337")
                     .traceparentHeaderSetter((name, value) -> {
@@ -200,7 +201,9 @@ public final class LogBrewOperationTracingTest {
                     .metadata(Map.of(
                         "component", "billing",
                         "headers", "private",
-                        "messageBody", "private body"
+                        "messageBody", "private body",
+                        "messaging.system", "spoofed-system",
+                        "messaging.destination.name", "private-destination"
                     ))
                     .nowSequence(
                         Instant.parse("2026-06-02T10:00:02Z"),
@@ -226,8 +229,15 @@ public final class LogBrewOperationTracingTest {
         assertContains(payload, "\"queueSystem\": \"kafka\"");
         assertContains(payload, "\"queueOperationKind\": \"publish\"");
         assertContains(payload, "\"queueName\": \"billing-events\"");
+        assertContains(payload, "\"messaging.system\": \"kafka\"");
+        assertContains(payload, "\"messaging.operation.name\": \"publish invoice\"");
+        assertContains(payload, "\"messaging.operation.type\": \"publish\"");
+        assertContains(payload, "\"messaging.destination.name\": \"billing-events\"");
+        assertContains(payload, "\"messaging.batch.message_count\": 1");
         assertContains(payload, "\"component\": \"billing\"");
         assertNotContains(payload, "private body");
+        assertNotContains(payload, "spoofed-system");
+        assertNotContains(payload, "private-destination");
         assertNotContains(payload, "headers");
         assertNotContains(payload, "traceparent");
         testsRun++;

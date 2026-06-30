@@ -24,9 +24,12 @@
   trace context active during app work, records
   `jms.produce`/`jms.receive`/`jms.process`/`jms.process_batch` queue spans with
   destination label, primitive metadata, optional `messageCount`, optional
-  `timeInQueueMs`, and bounded span links for later valid batch message
-  traceparents, and reports property read/write failures plus malformed batch
-  propagation as non-fatal redacted diagnostics. It
+  `timeInQueueMs`, safe OTel-style `messaging.system`,
+  `messaging.operation.name`, `messaging.operation.type`,
+  `messaging.destination.name`, `messaging.batch.message_count`, and bounded
+  span links for later valid batch message traceparents, and reports property
+  read/write failures plus malformed batch propagation as non-fatal redacted
+  diagnostics. It
   avoids JMS dependencies, agents, hidden Spring/JMS bean registration,
   connection/session/producer/consumer/listener patching, arbitrary property
   enumeration, message IDs, message bodies, payloads, broker addresses, raw
@@ -41,10 +44,13 @@
   markdown links, release metadata, confidentiality scan, generated-artifact
   hygiene, and diff hygiene. Follow-up local RED/GREEN added `receive(...)`
   with 5 JMS tests and installed-artifact smoke coverage for `jms.receive`.
+  Another local RED/GREEN pass added SDK-owned `messaging.*` semantic metadata
+  to shared Java queue spans and proved user metadata cannot spoof those keys.
   Report: `docs/competitor-research/java-jms-tracing-2026-06-30.md`. Remaining
-  Java messaging gaps: richer messaging semantic attributes and metrics,
-  optional Spring/JMS auto-registration only if privacy/runtime coupling is
-  justified, baggage/tracestate only if explicitly justified, and OpenTelemetry
+  Java messaging gaps: privacy-bounded messaging metrics, broader safe semantic
+  conventions only when app-provided and redaction-bounded, optional Spring/JMS
+  auto-registration only if privacy/runtime coupling is justified,
+  baggage/tracestate only if explicitly justified, and OpenTelemetry
   exporter/processor interop.
 - 2026-06-30: Java queue/message and Spring Kafka rich-trace gaps reduced after source reads from
   Sentry Java

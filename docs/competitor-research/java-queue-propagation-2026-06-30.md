@@ -11,7 +11,7 @@ Close a rich-tracing gap in the Java SDK where queue spans could record handler 
 - Datadog Java tracer: `https://github.com/DataDog/dd-trace-java.git` at `015a24fa8a0d526b1a71a5418564b47df1f98ece` for the Kafka producer follow-up, with earlier queue-agent notes from `04ea23af81f738f81dc0f75ecbd99e83f9ab1d6a` and Spring Kafka notes from `dd95ecc5f440436eda34ff94169cec85900abadd`.
 - Datadog files/functions read: `dd-java-agent/instrumentation/kafka/kafka-clients-0.11/src/main/java/datadog/trace/instrumentation/kafka_clients/TextMapInjectAdapter.java` (`set`, `injectTimeInQueue`), `KafkaProducerInstrumentation.java` (`ProducerAdvice`, `ProducerRecordAdvice`, `ProducerRecordCallbackAdvice`, `ProducerContextPropagationAdvice`), `KafkaDecorator.java` (`onProduce`, `onConsume`, `beforeFinish`), `TextMapExtractAdapter.java` (`forEachKey`, `extractTimeInQueueStart`), `TracingIterator.java` (`startNewRecordSpan`), `dd-java-agent/instrumentation/jms/javax-jms-1.1/src/main/java/datadog/trace/instrumentation/jms/MessageInjectAdapter.java` (`set`, `injectTimeInQueue`), `MessageExtractAdapter.java` (`forEachKey`, `extractTimeInQueueStart`, `extractMessageBatchId`), `JMSMessageProducerInstrumentation.java` (`ProducerContextPropagationAdvice`), and `JMSMessageConsumerInstrumentation.java` (`ConsumerAdvice.afterReceive`).
 - OpenTelemetry Java Instrumentation: `https://github.com/open-telemetry/opentelemetry-java-instrumentation.git` at `3118b49eade43b82bac593a980cb83db1ee540b1`.
-- OpenTelemetry files/functions read: `instrumentation/kafka/kafka-clients/kafka-clients-common-0.11/library/src/main/java/io/opentelemetry/instrumentation/kafkaclients/common/v0_11/internal/KafkaInstrumenterFactory.java` (`createProducerInstrumenter`, `createConsumerReceiveInstrumenter`, `createConsumerProcessInstrumenter`, `createBatchProcessInstrumenter`), `KafkaPropagation.java` (`propagateContext`, `shouldPropagate`), `KafkaHeadersSetter.java` (`set`), `KafkaBatchProcessSpanLinksExtractor.java` (`extract`), `instrumentation/jms/jms-common-1.1/javaagent/src/main/java/io/opentelemetry/javaagent/instrumentation/jms/common/v1_1/JmsInstrumenterFactory.java`, `MessagePropertyGetter.java`, and `MessagePropertySetter.java`.
+- OpenTelemetry files/functions read: `instrumentation/kafka/kafka-clients/kafka-clients-common-0.11/library/src/main/java/io/opentelemetry/instrumentation/kafkaclients/common/v0_11/internal/KafkaInstrumenterFactory.java` (`createProducerInstrumenter`, `createConsumerReceiveInstrumenter`, `createConsumerProcessInstrumenter`, `createBatchProcessInstrumenter`), `KafkaPropagation.java` (`propagateContext`, `shouldPropagate`), `KafkaHeadersSetter.java` (`set`), `KafkaBatchProcessSpanLinksExtractor.java` (`extract`), `instrumentation/jms/jms-common-1.1/javaagent/src/main/java/io/opentelemetry/javaagent/instrumentation/jms/common/v1_1/JmsInstrumenterFactory.java`, `JmsMessageAttributesGetter.java` (`getSystem`, `getDestination`, `getBatchMessageCount`, `getMessageHeader`), `MessageWithDestination.java` (`create`), `MessagePropertyGetter.java`, and `MessagePropertySetter.java`.
 - PostHog Java: `https://github.com/PostHog/posthog-java.git` at `dcf8fd85d0f1a405ae3aca02d00e24a1daa4f17e`.
 - PostHog files/classes read: `posthog/src/main/java/com/posthog/java/QueueManager.java` (`QueuePtr`, `add`, `sendAll`, `run`) and `posthog/src/main/java/com/posthog/java/PostHog.java` (`capture`, `enqueue`, `startQueueManager`, `shutdown`). No comparable Java messaging trace propagation was found.
 
@@ -34,10 +34,11 @@ LogBrew Java now adds a lighter dependency-free queue propagation layer to the e
 - `QueueOperation.linkedMessageTraceparent(...)` records bounded batch-message span links with primitive metadata.
 - `QueueOperation.enqueuedAt(...)` computes a primitive `timeInQueueMs` from the message enqueue timestamp to the handler start time.
 - `QueueOperation.timeInQueueMs(...)` accepts an explicit broker-provided latency when the application already has one.
+- Queue spans emit safe OpenTelemetry-style messaging metadata derived only from SDK-owned/app-provided queue configuration: `messaging.system`, `messaging.operation.name`, `messaging.operation.type`, `messaging.destination.name`, and `messaging.batch.message_count`.
 - `SpanLinkSummary` and `SpanAttributes.link(s)` provide reusable privacy-bounded span links for manual advanced spans.
 - Malformed incoming/linked propagation, impossible negative time-in-queue, and setter failures are non-fatal diagnostics through `onError(...)`; the app callback result/error remains authoritative.
 
-The generic implementation avoids Kafka/JMS/Rabbit/AMQP dependencies, Java agents, Spring/Kafka auto-registration, broker client patching, custom timing-header injection, arbitrary header capture, raw enqueue timestamps, message bodies, payloads, broker URLs, receipt/message IDs, baggage, tracestate, raw propagation metadata, exception messages, stacks, and support-ticket creation.
+The generic implementation avoids Kafka/JMS/Rabbit/AMQP dependencies, Java agents, Spring/Kafka auto-registration, broker client patching, custom timing-header injection, arbitrary header capture, raw enqueue timestamps, message bodies, payloads, broker URLs, receipt/message IDs, destination inspection, baggage, tracestate, raw propagation metadata, exception messages, stacks, and support-ticket creation.
 
 LogBrew Java now also adds `LogBrewSpringKafkaTracing.producer(...)`, `producerPostProcessor(...)`, `producerSend(...)`, and `recordInterceptor(...)` for apps that already use Spring Kafka:
 
@@ -52,13 +53,22 @@ LogBrew Java now also adds `LogBrewSpringKafkaTracing.producer(...)`, `producerP
 
 ## Honest Comparison
 
-LogBrew is now better than PostHog Java for queue trace propagation and safer/lighter than Sentry, Datadog, and OpenTelemetry for explicit app-owned queue carriers with installed-artifact proof. The Spring Kafka producer wrapper, `ProducerPostProcessor`, `KafkaOperations` helper, and record interceptor close the most direct Sentry ergonomics gap for applications that prefer explicit registration and privacy-bounded payloads. LogBrew is still worse than Sentry for automatic Spring bean post-processing, Sentry timing-header interop, and out-of-the-box Kafka setup depth; worse than OpenTelemetry for standard automatic Kafka/JMS instrumenters and batch span-link depth; and worse than Datadog for automatic broker breadth, data-stream metadata, agent-driven coverage, and automatic time-in-queue spans.
+LogBrew is now better than PostHog Java for queue trace propagation and safer/lighter than Sentry, Datadog, and OpenTelemetry for explicit app-owned queue carriers with installed-artifact proof. The Spring Kafka producer wrapper, `ProducerPostProcessor`, `KafkaOperations` helper, record interceptor, and safe OTel-style messaging keys close the most direct Sentry/OpenTelemetry ergonomics gap for applications that prefer explicit registration and privacy-bounded payloads. LogBrew is still worse than Sentry for automatic Spring bean post-processing, Sentry timing-header interop, and out-of-the-box Kafka setup depth; worse than OpenTelemetry for standard automatic Kafka/JMS instrumenters, deeper semantic conventions, and batch span-link depth; and worse than Datadog for automatic broker breadth, data-stream metadata, agent-driven coverage, and automatic time-in-queue spans.
 
 ## Verification
 
 - Focused package gate: `bash scripts/check_java_package.sh` passed with Java operation tracing tests plus 9 Spring Kafka producer and record-interceptor tests for outgoing traceparent injection without mutating the original record, producer wrapper callback correlation, explicit `ProducerPostProcessor` wrapping, `KafkaOperations` immediate-send failed futures, incoming trace continuation, active trace scope during producer send and listener work, sanitized span capture, future-failure exception-type summaries, malformed propagation diagnostics, metadata redaction, and `clearThreadState(...)` completion.
 - Spring Kafka installed-artifact gate: `bash scripts/real_user_java_spring_kafka_smoke.sh` passed from a packaged jar, sending a real `ProducerRecord` through an app-owned `KafkaOperations` proxy, wrapping an app-owned Kafka `Producer`, applying a Spring `ProducerPostProcessor`, registering the interceptor against real `ConsumerRecord`/`RecordHeaders`, validating W3C correlation, validating callback trace scope and `timeInQueueMs`, and proving key/value/header/metadata redaction.
 - Queue installed-artifact gate: `bash scripts/real_user_java_queue_trace_smoke.sh` passed from packaged jar/source jar, proving generic queue traceparent injection, incoming continuation, span links, manual `SpanLinkSummary`, computed and explicit `timeInQueueMs`, flush behavior, and no private message/header/raw timestamp/propagation leakage.
+- Semantic metadata follow-up: RED `bash scripts/check_java_package.sh` failed because queue spans did not emit SDK-owned `messaging.*` metadata and user metadata could spoof those keys; GREEN package tests prove `messaging.system`, `messaging.operation.name`, `messaging.operation.type`, `messaging.destination.name`, and `messaging.batch.message_count`.
+- Installed and broader semantic follow-up gates passed:
+  `bash scripts/real_user_java_jms_smoke.sh`,
+  `bash scripts/real_user_java_queue_trace_smoke.sh`,
+  `bash scripts/real_user_java_smoke.sh`,
+  `bash scripts/real_user_java_high_load_smoke.sh`,
+  `bash scripts/check_java_static.sh`, public SDK step tests, ShellCheck,
+  markdown links, backend contract reports, release metadata, confidentiality
+  scan, generated-artifact hygiene, and `git diff --check`.
 - Spring Boot gate: `bash scripts/real_user_spring_boot_smoke.sh` passed with `spring-boot@4.1.0`.
 - High-load installed-artifact gate: `bash scripts/real_user_java_high_load_smoke.sh` passed with 1,500 logs, 1,000 flushed events, 500 bounded local drops, and 5xx-to-2xx retry behavior.
 - Release/static/hygiene gates passed: Java SpotBugs, ShellCheck, Maven Central bundle dry-run, payload fixture validation, release metadata, markdown links, backend contract reports, generated-artifact hygiene, diff hygiene, and public confidentiality scan.
@@ -67,8 +77,9 @@ LogBrew is now better than PostHog Java for queue trace propagation and safer/li
 
 Follow-up Java JMS helper coverage is now documented in
 `docs/competitor-research/java-jms-tracing-2026-06-30.md`. Next useful Java
-trace improvements after JMS batch process coverage are richer messaging
-semantic attributes, privacy-bounded messaging metrics, baggage/tracestate only
-if explicitly justified, optional Spring/JMS bean auto-registration only if
+trace improvements after JMS receive/batch coverage and safe `messaging.*`
+metadata are privacy-bounded messaging metrics, broader safe semantic
+conventions only when app-provided and redaction-bounded, baggage/tracestate
+only if explicitly justified, optional Spring/JMS bean auto-registration only if
 privacy/runtime coupling is justified, and OpenTelemetry processor/exporter
 interop. Do not add automatic broker/client patching to core `logbrew-sdk`.

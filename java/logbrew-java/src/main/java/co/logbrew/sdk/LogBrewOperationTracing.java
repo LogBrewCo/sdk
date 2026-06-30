@@ -322,8 +322,21 @@ public final class LogBrewOperationTracing {
         addString(metadata, "queueName", config.queueName);
         addString(metadata, "taskName", config.taskName);
         addNonNegativeInt(metadata, "messageCount", config.messageCount);
+        addMessagingSemanticMetadata(metadata, operationName, config);
         addQueueTimeInQueueMs(metadata, config, startedAt);
         return metadata;
+    }
+
+    private static void addMessagingSemanticMetadata(
+        Map<String, Object> metadata,
+        String operationName,
+        QueueOperation config
+    ) {
+        addString(metadata, "messaging.system", config.system);
+        addString(metadata, "messaging.operation.name", operationName);
+        addString(metadata, "messaging.operation.type", config.operationKind);
+        addString(metadata, "messaging.destination.name", config.queueName);
+        addNonNegativeInt(metadata, "messaging.batch.message_count", config.messageCount);
     }
 
     private static void addQueueTimeInQueueMs(
