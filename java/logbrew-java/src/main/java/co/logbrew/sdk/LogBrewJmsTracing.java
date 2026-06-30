@@ -2,6 +2,8 @@ package co.logbrew.sdk;
 
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
@@ -24,6 +26,7 @@ public final class LogBrewJmsTracing {
     private static final String JMS_SYSTEM = "jms";
     private static final String PRODUCE_OPERATION = "jms.produce";
     private static final String PROCESS_OPERATION = "jms.process";
+    private static final String PROCESS_BATCH_OPERATION = "jms.process_batch";
 
     private LogBrewJmsTracing() {
     }
@@ -82,6 +85,43 @@ public final class LogBrewJmsTracing {
         return LogBrewOperationTracing.queueOperation(client, PROCESS_OPERATION, operation, queueConfig);
     }
 
+    /**
+     * Processes an app-owned batch of JMS-style messages with default safe tracing settings.
+     */
+    public static <T> T processBatch(
+        LogBrewClient client,
+        Iterable<?> messages,
+        Callable<T> operation
+    ) throws Exception {
+        return processBatch(client, messages, operation, ConsumerConfig.create());
+    }
+
+    /**
+     * Processes an app-owned batch of JMS-style messages with app-owned tracing settings.
+     */
+    public static <T> T processBatch(
+        LogBrewClient client,
+        Iterable<?> messages,
+        Callable<T> operation,
+        ConsumerConfig config
+    ) throws Exception {
+        Objects.requireNonNull(messages, "messages");
+        ConsumerConfig safeConfig = config == null ? ConsumerConfig.create() : config;
+        BatchTraceparents traceparents = readBatchTraceparents(messages, configuredOnError(safeConfig));
+        LogBrewOperationTracing.QueueOperation queueConfig = baseQueueConfig(safeConfig, "process")
+            .messageCount(safeConfig.messageCount == null ? traceparents.messageCount : safeConfig.messageCount);
+        if (traceparents.incomingTraceparent != null) {
+            queueConfig.incomingTraceparent(traceparents.incomingTraceparent);
+        }
+        for (String linkedTraceparent : traceparents.linkedTraceparents) {
+            queueConfig.linkedMessageTraceparent(linkedTraceparent);
+        }
+        if (safeConfig.timeInQueueMs != null) {
+            queueConfig.timeInQueueMs(safeConfig.timeInQueueMs.doubleValue());
+        }
+        return LogBrewOperationTracing.queueOperation(client, PROCESS_BATCH_OPERATION, operation, queueConfig);
+    }
+
     private static LogBrewOperationTracing.QueueOperation baseQueueConfig(BaseConfig<?> config, String operationKind) {
         LogBrewOperationTracing.QueueOperation queueConfig = LogBrewOperationTracing.QueueOperation.create()
             .system(JMS_SYSTEM)
@@ -101,6 +141,37 @@ public final class LogBrewJmsTracing {
             queueConfig.onError(config.onError);
         }
         return queueConfig;
+    }
+
+    private static BatchTraceparents readBatchTraceparents(Iterable<?> messages, Consumer<SdkException> onError) {
+        BatchTraceparents result = new BatchTraceparents();
+        for (Object message : messages) {
+            Objects.requireNonNull(message, "message");
+            result.messageCount++;
+            String traceparent = getStringProperty(message, TRACEPARENT_PROPERTY, onError);
+            if (traceparent == null || traceparent.trim().isEmpty()) {
+                continue;
+            }
+            if (!isValidTraceparent(traceparent, onError)) {
+                continue;
+            }
+            if (result.incomingTraceparent == null) {
+                result.incomingTraceparent = traceparent;
+            } else {
+                result.linkedTraceparents.add(traceparent);
+            }
+        }
+        return result;
+    }
+
+    private static boolean isValidTraceparent(String traceparent, Consumer<SdkException> onError) {
+        try {
+            SpanLinkSummary.fromTraceparent(traceparent);
+            return true;
+        } catch (SdkException error) {
+            reportDiagnostic(onError, error);
+            return false;
+        }
     }
 
     private static void setStringProperty(
@@ -149,6 +220,12 @@ public final class LogBrewJmsTracing {
 
     private static Consumer<SdkException> configuredOnError(BaseConfig<?> config) {
         return config.onError;
+    }
+
+    private static final class BatchTraceparents {
+        private int messageCount;
+        private String incomingTraceparent;
+        private final List<String> linkedTraceparents = new ArrayList<>();
     }
 
     private static void reportDiagnostic(Consumer<SdkException> onError, SdkException error) {

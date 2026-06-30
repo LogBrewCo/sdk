@@ -424,9 +424,21 @@ LogBrewJmsTracing.process(
         .destinationName("billing-queue")
         .timeInQueueMs(125.5)
 );
+
+LogBrewJmsTracing.processBatch(
+    client,
+    messages,
+    () -> {
+        handleBatch(messages);
+        return null;
+    },
+    LogBrewJmsTracing.ConsumerConfig.create()
+        .destinationName("billing-queue")
+        .timeInQueueMs(250.5)
+);
 ```
 
-The JMS helper writes or reads only the `traceparent` string property, keeps the child trace active while app code runs, records `jms.produce` or `jms.process` queue spans, and treats property read/write failures as non-fatal `onError(...)` diagnostics. It does not create connections, patch sessions/producers/consumers/listeners, enumerate message properties, inspect destinations, capture message IDs, message bodies, payloads, arbitrary headers, broker addresses, baggage, tracestate, exception messages, or stack traces.
+The JMS helper writes or reads only the `traceparent` string property, keeps the child trace active while app code runs, records `jms.produce`, `jms.process`, or `jms.process_batch` queue spans, and treats property read/write failures or malformed batch propagation as non-fatal `onError(...)` diagnostics. `processBatch(...)` uses the first valid incoming message traceparent as the parent, links later valid message traceparents up to the shared span-link cap, and records the primitive batch `messageCount`. It does not create connections, patch sessions/producers/consumers/listeners, enumerate message properties, inspect destinations, capture message IDs, message bodies, payloads, arbitrary headers, broker addresses, raw propagation strings, baggage, tracestate, exception messages, or stack traces.
 
 For Kafka producer code that already owns an `org.apache.kafka.clients.producer.Producer`, wrap it explicitly:
 

@@ -23,7 +23,8 @@ work, and record privacy-bounded queue spans from packaged artifacts.
 - OpenTelemetry files/functions read:
   `instrumentation/jms/jms-common-1.1/javaagent/src/main/java/io/opentelemetry/javaagent/instrumentation/jms/common/v1_1/JmsInstrumenterFactory.java`
   (`createProducerInstrumenter`, `createConsumerReceiveInstrumenter`,
-  `createConsumerProcessInstrumenter`, span-link extractors),
+  `createConsumerProcessInstrumenter`, `PropagatorBasedSpanLinksExtractor`
+  setup for receive/process spans),
   `MessagePropertyGetter.java` (`keys`, `get`), and
   `MessagePropertySetter.java` (`set`).
 - Sentry Java `https://github.com/getsentry/sentry-java.git` at
@@ -64,6 +65,11 @@ Core Java now includes dependency-free `LogBrewJmsTracing`:
   `getStringProperty(String)` on the app-owned message object, continues one
   valid incoming traceparent, activates the child trace during app processing,
   and records a `queue:jms.process` span.
+- `LogBrewJmsTracing.processBatch(...)` iterates only the app-supplied message
+  objects, reflects only `getStringProperty(String)`, uses the first valid
+  incoming traceparent as the parent, links later valid message traceparents up
+  to the shared span-link cap, records a primitive `messageCount`, and emits one
+  `queue:jms.process_batch` span.
 - `ProducerConfig` and `ConsumerConfig` expose event ID prefix, deterministic
   span ID, safe destination label, primitive metadata, deterministic clock, and
   non-fatal diagnostic callback. `ConsumerConfig` also accepts primitive
@@ -72,6 +78,8 @@ Core Java now includes dependency-free `LogBrewJmsTracing`:
 - Property read/write failures produce `jms_property_read_failed` or
   `jms_property_write_failed` diagnostics through `onError(...)` without
   replacing the app operation result or original app operation exception.
+  Malformed batch propagation is reported as the existing redacted
+  `validation_error` diagnostic and skipped.
 
 The helper works with `javax.jms.Message`, `jakarta.jms.Message`, or compatible
 message objects through reflection. It avoids new JMS dependencies, Java agents,
@@ -84,32 +92,36 @@ baggage, tracestate, exception messages, stacks, and support-ticket creation.
 
 LogBrew is now better than PostHog Java for JMS trace correlation and safer than
 Datadog/OpenTelemetry for teams that want explicit app-owned JMS tracing without
-an agent or JMS dependency in the base SDK. It is still worse than Datadog and
+an agent or JMS dependency in the base SDK. The batch helper now narrows the
+message-link ergonomics gap by giving explicit batch consumers first-parent plus
+bounded linked-message correlation. LogBrew is still worse than Datadog and
 OpenTelemetry for automatic JMS breadth, receive-vs-process span separation,
-batch/message-link ergonomics, messaging semantic conventions, exported metrics,
-destination-specific metadata, baggage/tracestate, and full OTel
-processor/exporter interop. It is intentionally not trying to match hidden
-agent coverage in core.
+messaging semantic conventions, exported metrics, destination-specific metadata,
+baggage/tracestate, and full OTel processor/exporter interop. It is
+intentionally not trying to match hidden agent coverage in core.
 
 ## Verification
 
 - GREEN: `bash scripts/check_java_package.sh` passed with 3 JMS tests proving
   traceparent property injection, incoming continuation, active child trace
   scope, primitive `timeInQueueMs`, safe metadata filtering, and non-fatal
-  property read/write diagnostics.
+  property read/write diagnostics. A 2026-07-01 follow-up expanded this to 4
+  JMS tests proving `processBatch(...)` first-parent continuation, bounded valid
+  message links, malformed propagation diagnostics, computed `messageCount`, and
+  raw propagation redaction.
 - Installed artifact: `bash scripts/real_user_java_jms_smoke.sh` passed from a
   packaged jar/source jar, compiled a temp app against the installed jar, proved
-  `LogBrewJmsTracing` class/source/README packaging, exercised send/process and
-  property-failure paths, validated the emitted payload, and flushed through
-  local fake intake.
+  `LogBrewJmsTracing` class/source/README packaging, exercised send/process,
+  batch process, malformed propagation, and property-failure paths, validated
+  the emitted payload, and flushed through local fake intake.
 - Public verifier contract: `python3 -m unittest tests.test_check_public_sdks`
   passed after adding the Java JMS installed-artifact smoke step and matching
   label-order contract.
 
 ## Remaining Gaps
 
-Next Java messaging gaps are batch receive/process convenience helpers, JMS
-receive-vs-process split ergonomics, richer messaging semantic attributes,
-privacy-bounded messaging metrics, optional Spring/JMS bean auto-registration
-only if privacy/runtime coupling is justified, baggage/tracestate only if a real
-interoperability need justifies it, and OTel exporter/processor interop.
+Next Java messaging gaps are JMS receive-vs-process split ergonomics, richer
+messaging semantic attributes, privacy-bounded messaging metrics, optional
+Spring/JMS bean auto-registration only if privacy/runtime coupling is justified,
+baggage/tracestate only if a real interoperability need justifies it, and OTel
+exporter/processor interop.

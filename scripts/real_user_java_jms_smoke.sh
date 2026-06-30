@@ -45,6 +45,7 @@ grep -q '^co/logbrew/sdk/LogBrewJmsTracing\$ConsumerConfig.class$' "$tmp_dir/bin
 jar --list --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" > "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewJmsTracing.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q 'LogBrewJmsTracing' "$package_dir/README.md"
+grep -q 'processBatch' "$package_dir/README.md"
 grep -q 'setStringProperty' "$package_dir/README.md"
 grep -q 'getStringProperty' "$package_dir/README.md"
 
@@ -131,8 +132,41 @@ public final class Main {
         require("11111111111111111111111111111111".equals(processed.get().traceId()), "process trace id");
         require("2222222222222222".equals(processed.get().parentSpanId()), "process parent span id");
 
-        FailingMessage failing = new FailingMessage();
         List<String> errorCodes = new ArrayList<>();
+        FakeMessage batchFirst = new FakeMessage();
+        batchFirst.setStringProperty("traceparent", "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01");
+        FakeMessage batchSecond = new FakeMessage();
+        batchSecond.setStringProperty("traceparent", "00-cccccccccccccccccccccccccccccccc-dddddddddddddddd-00");
+        FakeMessage batchMalformed = new FakeMessage();
+        batchMalformed.setStringProperty("traceparent", "not-a-traceparent");
+        FakeMessage batchThird = new FakeMessage();
+        batchThird.setStringProperty("traceparent", "00-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-ffffffffffffffff-01");
+        AtomicReference<LogBrewTraceContext> batchProcessed = new AtomicReference<>();
+        String batchResult = LogBrewJmsTracing.processBatch(
+            client,
+            List.of(batchFirst, batchSecond, batchMalformed, batchThird),
+            () -> {
+                batchProcessed.set(LogBrewTrace.current().orElseThrow());
+                return "batch-processed";
+            },
+            LogBrewJmsTracing.ConsumerConfig.create()
+                .destinationName("billing-queue")
+                .timeInQueueMs(250.5)
+                .eventIdPrefix("java_jms_batch_process_installed")
+                .spanId("b7ad6b7169203704")
+                .metadata(Map.of("component", "billing-batch", "messageBody", "private batch process body"))
+                .onError(error -> errorCodes.add(error.code()))
+                .nowSequence(
+                    Instant.parse("2026-06-02T10:00:03.100Z"),
+                    Instant.parse("2026-06-02T10:00:03.150Z")
+                )
+        );
+        require("batch-processed".equals(batchResult), "JMS batch process result");
+        require("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".equals(batchProcessed.get().traceId()), "batch trace id");
+        require("bbbbbbbbbbbbbbbb".equals(batchProcessed.get().parentSpanId()), "batch parent span id");
+        require(errorCodes.contains("validation_error"), "malformed batch traceparent diagnostic");
+
+        FailingMessage failing = new FailingMessage();
         require("sent".equals(LogBrewJmsTracing.send(
             client,
             failing,
@@ -163,28 +197,42 @@ public final class Main {
         require(errorCodes.contains("jms_property_read_failed"), "read diagnostic");
 
         String payload = client.previewJson();
-        require(client.pendingEvents() == 4, "JMS smoke queues four spans");
+        require(client.pendingEvents() == 5, "JMS smoke queues five spans");
         require(payload.contains("\"source\": \"queue.operation\""), "queue source");
         require(payload.contains("\"queueSystem\": \"jms\""), "JMS queue system");
         require(payload.contains("\"queueOperation\": \"jms.produce\""), "JMS produce operation");
         require(payload.contains("\"queueOperation\": \"jms.process\""), "JMS process operation");
+        require(payload.contains("\"queueOperation\": \"jms.process_batch\""), "JMS batch process operation");
         require(payload.contains("\"queueName\": \"billing-queue\""), "JMS destination name");
         require(payload.contains("\"messageCount\": 1"), "JMS message count");
+        require(payload.contains("\"messageCount\": 4"), "JMS batch message count");
         require(payload.contains("\"timeInQueueMs\": 125.5"), "JMS queue latency");
+        require(payload.contains("\"timeInQueueMs\": 250.5"), "JMS batch queue latency");
         require(payload.contains("\"parentSpanId\": \"2222222222222222\""), "incoming parent span");
+        require(payload.contains("\"parentSpanId\": \"bbbbbbbbbbbbbbbb\""), "batch incoming parent span");
+        require(payload.contains("\"links\": ["), "batch span links");
+        require(payload.contains("\"traceId\": \"cccccccccccccccccccccccccccccccc\""), "batch linked trace id");
+        require(payload.contains("\"spanId\": \"dddddddddddddddd\""), "batch linked span id");
+        require(payload.contains("\"sampled\": false"), "batch linked sampled false");
+        require(payload.contains("\"traceId\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\""), "batch second linked trace id");
+        require(payload.contains("\"spanId\": \"ffffffffffffffff\""), "batch second linked span id");
         require(!payload.contains("private body"), "send message body omitted");
         require(!payload.contains("private process body"), "process message body omitted");
+        require(!payload.contains("private batch process body"), "batch process message body omitted");
         require(!payload.contains("private setter failure"), "setter exception message omitted");
         require(!payload.contains("private getter failure"), "getter exception message omitted");
         require(!payload.contains("4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7"), "raw outgoing traceparent omitted");
         require(!payload.contains("11111111111111111111111111111111-2222222222222222"), "raw incoming traceparent omitted");
+        require(!payload.contains("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb"), "raw batch parent traceparent omitted");
+        require(!payload.contains("cccccccccccccccccccccccccccccccc-dddddddddddddddd"), "raw batch link traceparent omitted");
+        require(!payload.contains("not-a-traceparent"), "malformed batch traceparent omitted");
         require(!payload.contains("traceparent"), "traceparent property name omitted");
 
         System.out.println(payload);
         TransportResponse response = client.flush(RecordingTransport.alwaysAccept());
         require(response.statusCode() == 202, "flush status");
         require(client.pendingEvents() == 0, "flush clears queue");
-        System.err.println("{\"ok\":true,\"events\":4,\"status\":202}");
+        System.err.println("{\"ok\":true,\"events\":5,\"status\":202}");
     }
 
     public static final class FakeMessage {
@@ -221,7 +269,7 @@ javac -Xlint:all -Werror --release 11 -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar"
 java -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar:$smoke_app/classes" Main > "$tmp_dir/java-jms.stdout.json" 2> "$tmp_dir/java-jms.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/java-jms.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/java-jms.stderr.json"
-grep -q '"events":4' "$tmp_dir/java-jms.stderr.json"
+grep -q '"events":5' "$tmp_dir/java-jms.stderr.json"
 grep -q '"status":202' "$tmp_dir/java-jms.stderr.json"
 
 echo "java jms smoke passed"

@@ -20,6 +20,7 @@ public final class LogBrewJmsTracingTest {
     private void run() {
         testSendInjectsTraceparentAndCapturesSanitizedSpan();
         testProcessContinuesIncomingTraceparentAndRecordsLatency();
+        testProcessBatchContinuesFirstTraceparentAndLinksRemainingMessages();
         testPropertyFailuresAreNonFatalDiagnostics();
         System.out.println("java jms tracing tests ok (" + testsRun + " tests)");
     }
@@ -141,6 +142,81 @@ public final class LogBrewJmsTracingTest {
         assertContains(payload, "\"worker\": \"billing\"");
         assertNotContains(payload, "private process body");
         assertNotContains(payload, "11111111111111111111111111111111-2222222222222222");
+        testsRun++;
+    }
+
+    private void testProcessBatchContinuesFirstTraceparentAndLinksRemainingMessages() {
+        LogBrewClient client = sampleClient();
+        FakeJmsMessage first = new FakeJmsMessage();
+        first.setStringProperty("traceparent", "00-11111111111111111111111111111111-2222222222222222-01");
+        FakeJmsMessage second = new FakeJmsMessage();
+        second.setStringProperty("traceparent", "00-33333333333333333333333333333333-4444444444444444-00");
+        FakeJmsMessage malformed = new FakeJmsMessage();
+        malformed.setStringProperty("traceparent", "not-a-traceparent");
+        FakeJmsMessage third = new FakeJmsMessage();
+        third.setStringProperty("traceparent", "00-55555555555555555555555555555555-6666666666666666-01");
+        AtomicReference<LogBrewTraceContext> active = new AtomicReference<>();
+        List<String> errorCodes = new ArrayList<>();
+
+        try {
+            String result = LogBrewJmsTracing.processBatch(
+                client,
+                List.of(first, second, malformed, third),
+                () -> {
+                    active.set(LogBrewTrace.current().orElseThrow());
+                    return "batch-processed";
+                },
+                LogBrewJmsTracing.ConsumerConfig.create()
+                    .eventIdPrefix("java_jms_batch_process")
+                    .spanId("b7ad6b7169203710")
+                    .destinationName("billing-queue")
+                    .timeInQueueMs(250.5)
+                    .metadata(Map.of(
+                        "worker", "billing-batch",
+                        "messageBody", "private batch body",
+                        "headers", "private headers"
+                    ))
+                    .onError(error -> errorCodes.add(error.code()))
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:12.000Z"),
+                        Instant.parse("2026-06-02T10:00:12.050Z")
+                    )
+            );
+            assertEquals("batch-processed", result, "jms batch process result");
+        } catch (Exception error) {
+            throw new AssertionError(error);
+        }
+
+        assertEquals("11111111111111111111111111111111", active.get().traceId(), "jms batch trace id");
+        assertEquals("2222222222222222", active.get().parentSpanId(), "jms batch parent span");
+        assertEquals("b7ad6b7169203710", active.get().spanId(), "jms batch child span");
+        assertTrue(errorCodes.contains("validation_error"), "malformed batch traceparent reported");
+
+        String payload = client.previewJson();
+        assertContains(payload, "\"id\": \"java_jms_batch_process_span_b7ad6b7169203710\"");
+        assertContains(payload, "\"name\": \"queue:jms.process_batch\"");
+        assertContains(payload, "\"traceId\": \"11111111111111111111111111111111\"");
+        assertContains(payload, "\"spanId\": \"b7ad6b7169203710\"");
+        assertContains(payload, "\"parentSpanId\": \"2222222222222222\"");
+        assertContains(payload, "\"queueSystem\": \"jms\"");
+        assertContains(payload, "\"queueOperation\": \"jms.process_batch\"");
+        assertContains(payload, "\"queueOperationKind\": \"process\"");
+        assertContains(payload, "\"queueName\": \"billing-queue\"");
+        assertContains(payload, "\"messageCount\": 4");
+        assertContains(payload, "\"timeInQueueMs\": 250.5");
+        assertContains(payload, "\"links\": [");
+        assertContains(payload, "\"traceId\": \"33333333333333333333333333333333\"");
+        assertContains(payload, "\"spanId\": \"4444444444444444\"");
+        assertContains(payload, "\"sampled\": false");
+        assertContains(payload, "\"traceId\": \"55555555555555555555555555555555\"");
+        assertContains(payload, "\"spanId\": \"6666666666666666\"");
+        assertContains(payload, "\"sampled\": true");
+        assertContains(payload, "\"worker\": \"billing-batch\"");
+        assertNotContains(payload, "private batch body");
+        assertNotContains(payload, "private headers");
+        assertNotContains(payload, "not-a-traceparent");
+        assertNotContains(payload, "11111111111111111111111111111111-2222222222222222");
+        assertNotContains(payload, "33333333333333333333333333333333-4444444444444444");
         testsRun++;
     }
 
