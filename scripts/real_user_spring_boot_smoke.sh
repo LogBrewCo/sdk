@@ -134,6 +134,9 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootVersion;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
@@ -165,8 +168,16 @@ public class Main implements CommandLineRunner {
             "Spring Boot JDBC auto-configuration registers DataSource post-processor"
         );
         require(
+            context.containsBean("logBrewSpringCacheManagerPostProcessor"),
+            "Spring Boot cache auto-configuration registers CacheManager post-processor"
+        );
+        require(
             context.getBean(DataSource.class).toString().contains("LogBrewJdbcTracing"),
             "Spring Boot JDBC auto-configuration wraps the DataSource bean"
+        );
+        require(
+            context.getBean(CacheManager.class).toString().contains("LogBrewSpringCacheTracing"),
+            "Spring Boot cache auto-configuration wraps the CacheManager bean"
         );
         context.close();
 
@@ -175,7 +186,7 @@ public class Main implements CommandLineRunner {
         require(CLIENT.pendingEvents() == 0, "Spring Boot appender stop flush clears queue");
         require(TRANSPORT.sentBodies().size() == 1, "Spring Boot appender sends one batch");
         require(occurrences(body, "\"type\": \"log\"") == 3, "Spring Boot appender captures three logs");
-        require(occurrences(body, "\"type\": \"span\"") == 4, "Spring Boot captures request and JDBC spans");
+        require(occurrences(body, "\"type\": \"span\"") == 7, "Spring Boot captures request, JDBC, and cache spans");
         require(occurrences(body, "\"type\": \"metric\"") == 1, "Spring Boot servlet filter captures one metric");
         require(body.contains("\"logger\": \"app.checkout\""), "captures app logger");
         require(body.contains("\"source\": \"logback\""), "records Logback source");
@@ -183,6 +194,7 @@ public class Main implements CommandLineRunner {
         require(body.contains("\"source\": \"jdbc.connection\""), "records JDBC connection source");
         require(body.contains("\"source\": \"jdbc.statement\""), "records JDBC statement source");
         require(body.contains("\"source\": \"jdbc.transaction\""), "records JDBC transaction source");
+        require(body.contains("\"source\": \"cache.operation\""), "records Spring cache source");
         require(body.contains("\"springApplicationName\": \"checkout-service\""), "captures Spring application name");
         require(body.contains("\"mdc.traceId\": \"trace_123\""), "captures MDC trace id");
         require(body.contains("\"kv.cartId\": 42"), "captures SLF4J key value pair");
@@ -194,9 +206,16 @@ public class Main implements CommandLineRunner {
         require(body.contains("\"name\": \"jdbc:CONNECT\""), "auto-configured JDBC acquisition span");
         require(body.contains("\"name\": \"jdbc:SELECT\""), "auto-configured JDBC statement span");
         require(body.contains("\"name\": \"jdbc:COMMIT\""), "auto-configured JDBC transaction span");
+        require(body.contains("\"name\": \"cache:put\""), "auto-configured Spring cache put span");
+        require(body.contains("\"name\": \"cache:get\""), "auto-configured Spring cache get span");
+        require(body.contains("\"name\": \"cache:evictIfPresent\""), "auto-configured Spring cache evict span");
         require(body.contains("\"name\": \"http.server.duration\""), "captures request duration metric");
         require(body.contains("\"dbSystem\": \"postgresql\""), "records configured JDBC system");
         require(body.contains("\"dbName\": \"orders\""), "records configured JDBC database name");
+        require(body.contains("\"cacheSystem\": \"spring-cache\""), "records configured cache system");
+        require(body.contains("\"cacheName\": \"checkout-cache\""), "records Spring cache name");
+        require(body.contains("\"cacheHit\": true"), "records Spring cache hit");
+        require(body.contains("\"cacheWrite\": true"), "records Spring cache write/delete");
         require(body.contains("\"routeTemplate\": \"/checkout/{cartId}\""), "records route template metadata");
         require(body.contains("\"routeSource\": \"spring_best_matching_pattern\""), "records Spring route source");
         require(body.contains("\"statusCode\": 202"), "captures HTTP status");
@@ -210,8 +229,11 @@ public class Main implements CommandLineRunner {
         require(!body.contains("jdbc_user_fixture"), "omits JDBC login argument");
         require(!body.contains("jdbc_pass_fixture"), "omits JDBC second login argument");
         require(!body.contains("checkoutDataSource"), "omits Spring data-source bean name");
+        require(!body.contains("checkoutCacheManager"), "omits Spring cache-manager bean name");
+        require(!body.contains("cart:private-cache-key"), "omits raw cache key");
+        require(!body.contains("cache-fixture-value"), "omits raw cache value");
         require(!body.contains("logbackStackTrace"), "omits stack text by default");
-        System.err.println("{\"ok\":true,\"springBootVersion\":\"" + SpringBootVersion.getVersion() + "\",\"events\":8}");
+        System.err.println("{\"ok\":true,\"springBootVersion\":\"" + SpringBootVersion.getVersion() + "\",\"events\":11}");
     }
 
     @Override
@@ -251,6 +273,11 @@ public class Main implements CommandLineRunner {
         return fakeDataSource();
     }
 
+    @Bean
+    CacheManager checkoutCacheManager() {
+        return new ConcurrentMapCacheManager("checkout-cache");
+    }
+
     private static Map<String, Object> defaultProperties() {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("spring.application.name", "checkout-service");
@@ -264,6 +291,7 @@ public class Main implements CommandLineRunner {
         values.put("logbrew.jdbc.trace-transactions", "true");
         values.put("logbrew.jdbc.db-system", "postgresql");
         values.put("logbrew.jdbc.db-name", "orders");
+        values.put("logbrew.cache.system", "spring-cache");
         return values;
     }
 
@@ -319,9 +347,11 @@ public class Main implements CommandLineRunner {
     @RestController
     static final class CheckoutController {
         private final DataSource dataSource;
+        private final CacheManager cacheManager;
 
-        CheckoutController(DataSource dataSource) {
+        CheckoutController(DataSource dataSource, CacheManager cacheManager) {
             this.dataSource = dataSource;
+            this.cacheManager = cacheManager;
         }
 
         @PostMapping("/checkout/{cartId}")
@@ -331,12 +361,24 @@ public class Main implements CommandLineRunner {
                 dataSource.toString().contains("LogBrewJdbcTracing"),
                 "Spring controller receives wrapped DataSource"
             );
+            require(
+                cacheManager.toString().contains("LogBrewSpringCacheTracing"),
+                "Spring controller receives wrapped CacheManager"
+            );
             Connection connection = dataSource.getConnection("jdbc_user_fixture", "jdbc_pass_fixture");
             connection
                 .createStatement()
                 .executeQuery("SELECT synthetic_column FROM orders WHERE lookup_key = 'synthetic_value'");
             connection.commit();
             require(CLIENT.previewJson().contains("jdbc:SELECT"), "Spring controller queues JDBC spans");
+            Cache cache = cacheManager.getCache("checkout-cache");
+            cache.put("cart:private-cache-key", "cache-fixture-value");
+            require(
+                "cache-fixture-value".equals(cache.get("cart:private-cache-key").get()),
+                "Spring cache returns app value"
+            );
+            require(cache.evictIfPresent("cart:private-cache-key"), "Spring cache evicts app value");
+            require(CLIENT.previewJson().contains("cache:get"), "Spring controller queues cache spans");
             logbackLogger("app.checkout")
                 .atInfo()
                 .addKeyValue("routeVerified", Boolean.TRUE)
@@ -461,7 +503,9 @@ grep -q '"routeSource": "spring_best_matching_pattern"' "$tmp_dir/spring-boot.st
 grep -q '"parentSpanId": "00f067aa0ba902b7"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"source": "jdbc.statement"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"name": "jdbc:SELECT"' "$tmp_dir/spring-boot.stdout.json"
+grep -q '"source": "cache.operation"' "$tmp_dir/spring-boot.stdout.json"
+grep -q '"name": "cache:get"' "$tmp_dir/spring-boot.stdout.json"
 grep -q '"ok":true' "$tmp_dir/spring-boot.stderr.json"
-grep -q '"events":8' "$tmp_dir/spring-boot.stderr.json"
+grep -q '"events":11' "$tmp_dir/spring-boot.stderr.json"
 
 echo "spring boot real-user smoke passed with spring-boot@$spring_boot_version"

@@ -50,7 +50,7 @@ If you copy live OpenTelemetry span context with `LogBrewOpenTelemetry`, include
 </dependency>
 ```
 
-If you manually register `LogBrewServletFilter` in a Jakarta Servlet app, include the Servlet API already used by your runtime. Spring Boot servlet apps usually already get this from `spring-boot-starter-web`; they can use `LogBrewSpringBootAutoConfiguration` by exposing an app-owned `LogBrewClient` bean. Spring Boot apps with a `DataSource` bean can also use `LogBrewSpringBootJdbcAutoConfiguration` from the same package path; no extra starter or ingest-property client setup is required.
+If you manually register `LogBrewServletFilter` in a Jakarta Servlet app, include the Servlet API already used by your runtime. Spring Boot servlet apps usually already get this from `spring-boot-starter-web`; they can use `LogBrewSpringBootAutoConfiguration` by exposing an app-owned `LogBrewClient` bean. Spring Boot apps with a `CacheManager` or `DataSource` bean can also use `LogBrewSpringBootCacheAutoConfiguration` and `LogBrewSpringBootJdbcAutoConfiguration` from the same package path; no extra starter or ingest-property client setup is required.
 
 ```xml
 <dependency>
@@ -336,6 +336,29 @@ String orderId = LogBrewOperationTracing.databaseOperation(
 
 The database, cache, and queue helpers create a child `LogBrewTraceContext`, activate it for the callback, record one span, return the original result, and rethrow the original operation error. Add `SpanEventSummary` values when a span needs small lifecycle markers such as row counts, enqueue checkpoints, or retry decisions. Events are capped, metadata is primitive-only, and failed dependency callbacks add an exception-type-only summary without exception messages or stack traces. Metadata is intentionally stripped of SQL text, parameters, connection details, hosts, cache keys/values, raw commands, payloads, message bodies, broker URLs, headers, cookies, and auth-like fields. These helpers do not import or patch Redis, Kafka, JMS, AMQP, or framework clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
 
+For Spring Cache apps that already own a `CacheManager` or `Cache`, use `LogBrewSpringCacheTracing` when you want cache hit/write/delete spans under an active request or task trace:
+
+```java
+import co.logbrew.sdk.LogBrewSpringCacheTracing;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+
+CacheManager tracedCacheManager = LogBrewSpringCacheTracing.instrumentCacheManager(
+    cacheManager,
+    client,
+    LogBrewSpringCacheTracing.CacheConfig.create()
+        .system("spring-cache")
+        .eventIdPrefix("spring_cache")
+);
+
+Cache cache = tracedCacheManager.getCache("checkout-cache");
+cache.put("cart-id", "value");
+cache.get("cart-id");
+cache.evictIfPresent("cart-id");
+```
+
+The wrapper delegates normal Spring Cache behavior, traces `get`, `retrieve`, `put`, `putIfAbsent`, `evict`, `evictIfPresent`, `clear`, and `invalidate`, and records only operation kind, cache system, cache name, hit/write booleans, sampled state, duration, and failure status; asynchronous completion failures also include a type-only exception summary. By default it requires an active `LogBrewTrace` so cache activity correlates with request spans without producing background root traces; set `traceWithoutActiveContext(true)` only when you intentionally want standalone cache spans. It does not capture cache keys, values, native cache objects, backend hosts, payloads, headers, baggage, tracestate, exception messages, stack traces, or Spring bean names.
+
 For JDBC apps that already own a `java.sql.Connection` or `javax.sql.DataSource`, use `LogBrewJdbcTracing` when you want spans for statements created through those app-owned objects:
 
 ```java
@@ -390,6 +413,16 @@ logbrew.jdbc.trace-transactions=false
 ```
 
 Set `logbrew.jdbc.enabled=false` to disable auto-wrapping. The auto-configuration skips scoped-target beans, already wrapped data sources, and Spring routing data sources; it does not create clients from properties, read connection metadata, record bean names, patch `DriverManager`, or capture SQL text, connection URLs, JDBC login arguments, baggage, or tracestate.
+
+Spring Boot Cache apps can skip manual wrapping. When Spring Boot, Spring Cache, and an app-owned `LogBrewClient` bean are present, `LogBrewSpringBootCacheAutoConfiguration` wraps initialized Spring `CacheManager` beans through a bean post-processor and reuses the same `LogBrewSpringCacheTracing` privacy rules:
+
+```properties
+logbrew.cache.enabled=true
+logbrew.cache.system=spring-cache
+logbrew.cache.trace-without-active-context=false
+```
+
+Set `logbrew.cache.enabled=false` to disable auto-wrapping. The auto-configuration skips scoped-target beans and already wrapped cache managers; it does not create clients from properties, record bean names, inspect native cache objects, capture cache keys/values, or add baggage/tracestate propagation.
 
 ## Support Ticket Drafts
 
@@ -549,6 +582,8 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when OpenTelemetry API jars are already present.
 - `LogBrewServletFilter` activates request-local trace context for Jakarta Servlet/Spring Boot handlers and emits one request span plus one duration metric without hidden Java-agent instrumentation.
 - `LogBrewSpringBootAutoConfiguration` registers that filter only when Spring Boot, Jakarta Servlet, and an app-owned `LogBrewClient` bean are present.
+- `LogBrewSpringCacheTracing` wraps app-owned Spring `CacheManager` or `Cache` objects with privacy-bounded cache hit/write spans under an active trace by default.
+- `LogBrewSpringBootCacheAutoConfiguration` wraps app-owned Spring `CacheManager` beans when Spring Boot, Spring Cache, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewSpringBootJdbcAutoConfiguration` wraps app-owned Spring `DataSource` beans with privacy-bounded JDBC statement spans when Spring Boot, `DataSource`, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans with bounded `SpanEventSummary` markers, without adding driver dependencies or automatic client patching.
 - `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
