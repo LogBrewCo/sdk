@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/amqplib",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "RabbitMQ amqplib tracing helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",
