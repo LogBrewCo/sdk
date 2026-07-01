@@ -96,6 +96,7 @@ STEP_LABELS=(
   "PHP package install"
   "PHP package tests"
   "PHP real-user smoke"
+  "Packagist public install smoke"
   "Python package build checks"
   "Objective-C package checks"
   "Objective-C real-user smoke"
@@ -699,6 +700,10 @@ mark_step_complete
 
 begin_next_step "PHP real-user smoke"
 run_shell_step "bash scripts/real_user_php_smoke.sh"
+mark_step_complete
+
+begin_next_step "Packagist public install smoke"
+run_shell_step "bash scripts/real_user_packagist_public_smoke.sh"
 mark_step_complete
 
 begin_next_step "Python package build checks"
