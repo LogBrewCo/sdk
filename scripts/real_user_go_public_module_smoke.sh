@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.0}}"
+requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.3}}"
 module_version="v${requested_version#v}"
 module_path="github.com/LogBrewCo/sdk/go/logbrew"
 tmp_dir="$(mktemp -d)"
@@ -67,7 +67,7 @@ func main() {
 	client, err := logbrew.NewClient(logbrew.Config{
 		APIKey:     "LOGBREW_API_KEY",
 		SDKName:    "go-public-module-smoke",
-		SDKVersion: "0.1.0",
+		SDKVersion: "0.1.3",
 	})
 	must(err)
 
@@ -182,7 +182,7 @@ func main() {
 	httpClient, err := logbrew.NewClient(logbrew.Config{
 		APIKey:     "LOGBREW_API_KEY",
 		SDKName:    "go-public-module-http-smoke",
-		SDKVersion: "0.1.0",
+		SDKVersion: "0.1.3",
 		MaxRetries: 1,
 	})
 	must(err)
@@ -211,6 +211,354 @@ func must(err error) {
 	if err != nil {
 		panic(err)
 	}
+}
+GO
+
+cat > rich_test.go <<'GO'
+package main
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/LogBrewCo/sdk/go/logbrew"
+)
+
+func TestPublicModuleBoundedQueueDrops(t *testing.T) {
+	var drops []logbrew.EventDrop
+	client, err := logbrew.NewClient(logbrew.Config{
+		APIKey:       "LOGBREW_API_KEY",
+		SDKName:      "go-public-module-rich-smoke",
+		SDKVersion:   "0.1.3",
+		MaxQueueSize: 1,
+		OnEventDropped: func(drop logbrew.EventDrop) {
+			drops = append(drops, drop)
+		},
+	})
+	if err != nil {
+		t.Fatalf("create bounded client: %v", err)
+	}
+	if err := client.Log("evt_public_go_kept", "2026-06-02T10:00:07Z", logbrew.LogAttributes{
+		Message: "kept event",
+		Level:   "info",
+	}); err != nil {
+		t.Fatalf("capture kept log: %v", err)
+	}
+	if err := client.Log("evt_public_go_dropped", "2026-06-02T10:00:08Z", logbrew.LogAttributes{
+		Message: "dropped event",
+		Level:   "info",
+	}); err != nil {
+		t.Fatalf("capture dropped log: %v", err)
+	}
+	if client.PendingEvents() != 1 || client.DroppedEvents() != 1 {
+		t.Fatalf("unexpected bounded queue state pending=%d dropped=%d", client.PendingEvents(), client.DroppedEvents())
+	}
+	if len(drops) != 1 ||
+		drops[0].EventID != "evt_public_go_dropped" ||
+		drops[0].EventType != "log" ||
+		drops[0].Reason != "queue_overflow" ||
+		drops[0].DroppedEvents != 1 {
+		t.Fatalf("unexpected drop advisory: %#v", drops)
+	}
+	preview, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatalf("preview bounded queue: %v", err)
+	}
+	if !strings.Contains(preview, "evt_public_go_kept") || strings.Contains(preview, "evt_public_go_dropped") {
+		t.Fatalf("bounded queue preview did not preserve only accepted events: %s", preview)
+	}
+}
+
+func TestPublicModuleQueuePropagationAndLinks(t *testing.T) {
+	client, err := logbrew.NewClient(logbrew.Config{
+		APIKey:     "LOGBREW_API_KEY",
+		SDKName:    "go-public-module-rich-smoke",
+		SDKVersion: "0.1.3",
+	})
+	if err != nil {
+		t.Fatalf("create queue client: %v", err)
+	}
+	parent, err := logbrew.NewTraceContext(logbrew.TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatalf("create parent trace: %v", err)
+	}
+	headers := map[string]string{"traceparent": "spoofed"}
+	_, err = logbrew.QueueOperationWithLogBrewSpan(
+		logbrew.ContextWithLogBrewTrace(context.Background(), parent),
+		client,
+		"publish checkout",
+		func(operationCtx context.Context) (string, error) {
+			trace, ok := logbrew.LogBrewTraceFromContext(operationCtx)
+			if !ok || trace.SpanID != "b7ad6b7169203345" {
+				t.Fatalf("missing active producer trace: %#v", trace)
+			}
+			return "published", nil
+		},
+		logbrew.QueueOperationConfig{
+			System:        "kafka",
+			OperationKind: "publish",
+			QueueName:     "checkout-events",
+			TaskName:      "checkout.completed",
+			TraceparentSetter: func(traceparent string) error {
+				headers["traceparent"] = traceparent
+				return nil
+			},
+			Metadata: map[string]any{
+				"component":   "checkout",
+				"payload":     "private-body",
+				"traceparent": "raw-propagation",
+			},
+			EventIDPrefix: "public_go_queue_publish",
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203345"
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("queue publish returned error: %v", err)
+	}
+	if headers["traceparent"] != "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203345-01" {
+		t.Fatalf("unexpected outgoing traceparent: %q", headers["traceparent"])
+	}
+
+	messageCount := 2
+	_, err = logbrew.QueueOperationWithLogBrewSpan(
+		context.Background(),
+		client,
+		"process checkout batch",
+		func(operationCtx context.Context) (int, error) {
+			trace, ok := logbrew.LogBrewTraceFromContext(operationCtx)
+			if !ok || trace.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" || trace.ParentSpanID != "b7ad6b7169203345" {
+				t.Fatalf("missing active consumer trace: %#v", trace)
+			}
+			return 2, nil
+		},
+		logbrew.QueueOperationConfig{
+			System:              "kafka",
+			OperationKind:       "process",
+			QueueName:           "checkout-events",
+			MessageCount:        &messageCount,
+			IncomingTraceparent: headers["traceparent"],
+			LinkedTraceparents: []string{
+				headers["traceparent"],
+				"malformed-traceparent",
+				"00-55555555555555555555555555555555-6666666666666666-00",
+			},
+			LinkMetadata: map[string]any{
+				"relation":    "batch_item",
+				"payload":     "private-link-payload",
+				"traceparent": "raw-link-propagation",
+			},
+			EventIDPrefix: "public_go_queue_process",
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203346"
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("queue process returned error: %v", err)
+	}
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatalf("preview queue payload: %v", err)
+	}
+	for _, want := range []string{
+		"\"id\": \"public_go_queue_publish_span_b7ad6b7169203345\"",
+		"\"id\": \"public_go_queue_process_span_b7ad6b7169203346\"",
+		"\"links\": [",
+		"\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\"",
+		"\"traceId\": \"55555555555555555555555555555555\"",
+		"\"messaging.system\": \"kafka\"",
+		"\"messaging.batch.message_count\": 2",
+		"\"relation\": \"batch_item\"",
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("missing queue propagation payload %s: %s", want, payload)
+		}
+	}
+	for _, unsafe := range []string{"private-body", "raw-propagation", "private-link-payload", "raw-link-propagation", "malformed-traceparent", "spoofed"} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("queue propagation leaked %q: %s", unsafe, payload)
+		}
+	}
+	link, err := logbrew.SpanLinkSummaryFromTraceparent(headers["traceparent"])
+	if err != nil {
+		t.Fatalf("span link from traceparent: %v", err)
+	}
+	if link.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" || link.SpanID != "b7ad6b7169203345" || !link.Sampled {
+		t.Fatalf("unexpected span link: %#v", link)
+	}
+	explicit, err := logbrew.NewSpanLinkSummary("11111111111111111111111111111111", "2222222222222222", false)
+	if err != nil {
+		t.Fatalf("new span link: %v", err)
+	}
+	if explicit.TraceID != "11111111111111111111111111111111" || explicit.SpanID != "2222222222222222" || explicit.Sampled {
+		t.Fatalf("unexpected explicit span link: %#v", explicit)
+	}
+}
+
+func TestPublicModuleSQLHelpers(t *testing.T) {
+	client, err := logbrew.NewClient(logbrew.Config{
+		APIKey:     "LOGBREW_API_KEY",
+		SDKName:    "go-public-module-rich-smoke",
+		SDKVersion: "0.1.3",
+	})
+	if err != nil {
+		t.Fatalf("create SQL client: %v", err)
+	}
+	parent, err := logbrew.NewTraceContext(logbrew.TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatalf("create parent trace: %v", err)
+	}
+	ctx := logbrew.ContextWithLogBrewTrace(context.Background(), parent)
+	queryer := &fakeSQLQueryer{}
+	execer := &fakeSQLExecer{result: fakeSQLResult{rowsAffected: 2}}
+	_, err = logbrew.SQLQueryContextWithLogBrewSpan(
+		ctx,
+		client,
+		queryer,
+		"lookup checkout order",
+		"SELECT * FROM orders WHERE account_ref = ?",
+		logbrew.DatabaseOperationConfig{
+			System:        "postgresql",
+			DatabaseName:  "orders",
+			EventIDPrefix: "public_go_sql_query",
+			Metadata: map[string]any{
+				"component":        "checkout",
+				"sql":              "SELECT * FROM orders WHERE account_ref = 'opaque-ref-value'",
+				"connectionString": "opaque-private-target",
+			},
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203335"
+			},
+		},
+		"opaque-ref-value",
+	)
+	if err != nil {
+		t.Fatalf("query helper returned error: %v", err)
+	}
+	if queryer.query != "SELECT * FROM orders WHERE account_ref = ?" ||
+		len(queryer.args) != 1 ||
+		queryer.args[0] != "opaque-ref-value" ||
+		queryer.trace.ParentSpanID != parent.SpanID ||
+		queryer.trace.SpanID != "b7ad6b7169203335" {
+		t.Fatalf("query helper did not preserve app call and trace: %#v", queryer)
+	}
+
+	_, err = logbrew.SQLExecContextWithLogBrewSpan(
+		ctx,
+		client,
+		execer,
+		"update checkout order",
+		"UPDATE orders SET status = ? WHERE id = ?",
+		logbrew.DatabaseOperationConfig{
+			System:        "postgresql",
+			DatabaseName:  "orders",
+			EventIDPrefix: "public_go_sql_exec",
+			Metadata:      map[string]any{"params": []any{"private"}, "component": "checkout"},
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203336"
+			},
+		},
+		"paid",
+		"order-ref-value",
+	)
+	if err != nil {
+		t.Fatalf("exec helper returned error: %v", err)
+	}
+	if execer.query != "UPDATE orders SET status = ? WHERE id = ?" ||
+		len(execer.args) != 2 ||
+		execer.args[0] != "paid" ||
+		execer.args[1] != "order-ref-value" ||
+		execer.trace.ParentSpanID != parent.SpanID ||
+		execer.trace.SpanID != "b7ad6b7169203336" {
+		t.Fatalf("exec helper did not preserve app call and trace: %#v", execer)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatalf("preview SQL payload: %v", err)
+	}
+	for _, want := range []string{
+		`"dbOperation": "lookup checkout order"`,
+		`"dbOperationKind": "query"`,
+		`"dbOperation": "update checkout order"`,
+		`"dbOperationKind": "exec"`,
+		`"rowCount": 2`,
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("missing SQL trace metadata %s in payload: %s", want, payload)
+		}
+	}
+	for _, unsafe := range []string{
+		"SELECT * FROM orders",
+		"UPDATE orders",
+		"opaque-ref-value",
+		"opaque-private-target",
+		"order-ref-value",
+		"connectionString",
+		"params",
+	} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("SQL helper leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
+type fakeSQLQueryer struct {
+	query string
+	args  []any
+	trace logbrew.TraceContext
+}
+
+func (q *fakeSQLQueryer) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	q.query = query
+	q.args = append([]any{}, args...)
+	trace, ok := logbrew.LogBrewTraceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing LogBrew trace")
+	}
+	q.trace = trace
+	return nil, nil
+}
+
+type fakeSQLExecer struct {
+	query  string
+	args   []any
+	trace  logbrew.TraceContext
+	result sql.Result
+}
+
+func (e *fakeSQLExecer) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	e.query = query
+	e.args = append([]any{}, args...)
+	trace, ok := logbrew.LogBrewTraceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing LogBrew trace")
+	}
+	e.trace = trace
+	return e.result, nil
+}
+
+type fakeSQLResult struct {
+	rowsAffected int64
+}
+
+func (r fakeSQLResult) LastInsertId() (int64, error) {
+	return 0, nil
+}
+
+func (r fakeSQLResult) RowsAffected() (int64, error) {
+	return r.rowsAffected, nil
 }
 GO
 
@@ -264,6 +612,14 @@ grep -q "go doc github.com/LogBrewCo/sdk/go/logbrew NewClient" "$module_dir/READ
 grep -q "AlwaysAcceptTransport" "$module_dir/README.md"
 grep -q "NewHTTPTransport" "$module_dir/README.md"
 grep -q "ParseTraceparent" "$module_dir/README.md"
+grep -q "MaxQueueSize" "$module_dir/README.md"
+grep -q "DroppedEvents" "$module_dir/README.md"
+grep -q "TraceparentSetter" "$module_dir/README.md"
+grep -q "IncomingTraceparent" "$module_dir/README.md"
+grep -q "LinkedTraceparents" "$module_dir/README.md"
+grep -q "SQLTransactionWithLogBrewSpan" "$module_dir/README.md"
+grep -q "SQLQueryContextWithLogBrewSpan" "$module_dir/README.md"
+grep -q "SQLExecContextWithLogBrewSpan" "$module_dir/README.md"
 
 go mod verify > "$tmp_dir/go-mod-verify.txt"
 grep -q "all modules verified" "$tmp_dir/go-mod-verify.txt"
@@ -279,10 +635,18 @@ run_go_doc() {
 run_go_doc go-doc-package.txt "$module_path"
 run_go_doc go-doc-new-client.txt "$module_path" NewClient
 run_go_doc go-doc-config.txt "$module_path" Config
+run_go_doc go-doc-event-drop.txt "$module_path" EventDrop
 run_go_doc go-doc-recording-transport.txt "$module_path" RecordingTransport
 run_go_doc go-doc-http-transport.txt "$module_path" NewHTTPTransport
 run_go_doc go-doc-parse-traceparent.txt "$module_path" ParseTraceparent
 run_go_doc go-doc-span-from-traceparent.txt "$module_path" SpanAttributesFromTraceparent
+run_go_doc go-doc-queue-operation.txt "$module_path" QueueOperationWithLogBrewSpan
+run_go_doc go-doc-span-link.txt "$module_path" SpanLinkSummary
+run_go_doc go-doc-span-link-from-traceparent.txt "$module_path" SpanLinkSummaryFromTraceparent
+run_go_doc go-doc-new-span-link.txt "$module_path" NewSpanLinkSummary
+run_go_doc go-doc-sql-transaction.txt "$module_path" SQLTransactionWithLogBrewSpan
+run_go_doc go-doc-sql-query.txt "$module_path" SQLQueryContextWithLogBrewSpan
+run_go_doc go-doc-sql-exec.txt "$module_path" SQLExecContextWithLogBrewSpan
 
 go run . > "$tmp_dir/run.stdout.json" 2> "$tmp_dir/run.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/run.stdout.json" >/dev/null
