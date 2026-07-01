@@ -77,6 +77,7 @@ with zipfile.ZipFile(nupkg) as archive:
         "examples/FirstUsefulTelemetry.cs",
         "examples/HttpTraceCorrelation.cs",
         "examples/ActivityTraceCorrelation.cs",
+        "examples/ActivitySourceListenerTelemetry.cs",
         "examples/HttpClientOutboundTelemetry.cs",
         "examples/DbCommandTelemetry.cs",
         "examples/AspNetCoreRequestTelemetry.cs",
@@ -102,6 +103,11 @@ for needle in (
     "TryCreateChildFromCurrentActivity",
     "TryCreateChildFromActivityContext",
     "ActivityTraceCorrelation.cs",
+    "ActivitySourceListenerTelemetry.cs",
+    "LogBrewActivitySourceListener",
+    "WithSourceName(\"Checkout.Service\")",
+    "Calling `Start(client)` without source names is fail-closed",
+    "does not create OpenTelemetry processors, exporters",
     "LogBrewHttpClientTelemetry",
     "LogBrewHttpClientHandler",
     "WithRouteTemplateSelector",
@@ -254,6 +260,10 @@ python3 "$repo_root/scripts/check_dotnet_http_trace_payload.py" "$tmp_dir/packag
 run_packaged_example ActivityTraceCorrelation.cs PackagedActivityTrace "$tmp_dir/packaged-activity-trace.stdout.json" "$tmp_dir/packaged-activity-trace.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-activity-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_activity_trace_payload.py" "$tmp_dir/packaged-activity-trace.stdout.json" "$tmp_dir/packaged-activity-trace.stderr.json" >/dev/null
+
+run_packaged_example ActivitySourceListenerTelemetry.cs PackagedActivitySourceListener "$tmp_dir/packaged-activity-source-listener.stdout.json" "$tmp_dir/packaged-activity-source-listener.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-activity-source-listener.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_activity_source_listener_payload.py" "$tmp_dir/packaged-activity-source-listener.stdout.json" "$tmp_dir/packaged-activity-source-listener.stderr.json" >/dev/null
 
 run_packaged_example DbCommandTelemetry.cs PackagedDbCommand "$tmp_dir/packaged-db-command.stdout.json" "$tmp_dir/packaged-db-command.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-db-command.stdout.json" >/dev/null

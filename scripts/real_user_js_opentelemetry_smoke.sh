@@ -353,7 +353,13 @@ test -s "$tmp_dir/processor-body.json"
 grep -q '"source": "opentelemetry.readable_span"' "$tmp_dir/processor-body.json"
 grep -q '"http.route": "/orders/:id"' "$tmp_dir/processor-body.json"
 grep -q '"messaging.operation.name": "process"' "$tmp_dir/processor-body.json"
-! grep -q 'api_key=redacted' "$tmp_dir/processor-body.json"
-! grep -q 'db.statement' "$tmp_dir/processor-body.json"
+if grep -q 'api_key=redacted' "$tmp_dir/processor-body.json"; then
+  echo "expected OpenTelemetry processor payload to omit unsafe API key attributes" >&2
+  exit 1
+fi
+if grep -q 'db.statement' "$tmp_dir/processor-body.json"; then
+  echo "expected OpenTelemetry processor payload to omit database statements" >&2
+  exit 1
+fi
 
 echo "JavaScript OpenTelemetry installed-artifact smoke passed"
