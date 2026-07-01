@@ -263,6 +263,7 @@ try {
   const processor = createLogBrewOpenTelemetrySpanProcessor({
     client: processorClient,
     eventAttributeKeys: ["cache.hit"],
+    includeTraceSummary: true,
     linkAttributeKeys: ["messaging.operation.name"],
     metadata: { release: "checkout@1.2.3" },
     transport: processorTransport
@@ -309,13 +310,33 @@ try {
   await processor.shutdown();
 
   const processorPayload = JSON.parse(processorTransport.lastBody());
-  const processorEvent = processorPayload.events[0];
+  const processorEvent = processorPayload.events.find((event) => (
+    event.attributes.metadata.source === "opentelemetry.readable_span"
+  ));
+  const traceSummaryEvent = processorPayload.events.find((event) => (
+    event.attributes.metadata.source === "opentelemetry.trace_summary"
+  ));
   const serializedProcessorPayload = JSON.stringify(processorPayload);
-  if (processorPayload.events.length !== 1 || processorEvent.type !== "span") {
+  if (
+    processorPayload.events.length !== 2 ||
+    !processorEvent ||
+    !traceSummaryEvent ||
+    processorEvent.type !== "span" ||
+    traceSummaryEvent.type !== "span"
+  ) {
     throw new Error(`unexpected processor payload: ${serializedProcessorPayload}`);
   }
   if (processorEvent.attributes.metadata.source !== "opentelemetry.readable_span") {
     throw new Error("processor did not mark the OpenTelemetry source");
+  }
+  if (
+    traceSummaryEvent.attributes.name !== "opentelemetry.trace:GET /orders/:id" ||
+    traceSummaryEvent.attributes.traceId !== processorEvent.attributes.traceId ||
+    traceSummaryEvent.attributes.metadata["otel.trace.span_count"] !== 1 ||
+    traceSummaryEvent.attributes.metadata["otel.trace.root_span_id"] !== processorEvent.attributes.spanId ||
+    traceSummaryEvent.attributes.metadata["otel.trace.root_name"] !== "GET /orders/:id"
+  ) {
+    throw new Error("processor trace summary omitted expected root span metadata");
   }
   if (
     serializedProcessorPayload.includes("url.full") ||
@@ -351,8 +372,10 @@ grep -q '"actionSpanId":"b7ad6b7169203331"' "$tmp_dir/otel.stdout.json"
 grep -q '"traceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$tmp_dir/otel.stdout.json"
 test -s "$tmp_dir/processor-body.json"
 grep -q '"source": "opentelemetry.readable_span"' "$tmp_dir/processor-body.json"
+grep -q '"source": "opentelemetry.trace_summary"' "$tmp_dir/processor-body.json"
 grep -q '"http.route": "/orders/:id"' "$tmp_dir/processor-body.json"
 grep -q '"messaging.operation.name": "process"' "$tmp_dir/processor-body.json"
+grep -q '"otel.trace.span_count": 1' "$tmp_dir/processor-body.json"
 if grep -q 'api_key=redacted' "$tmp_dir/processor-body.json"; then
   echo "expected OpenTelemetry processor payload to omit unsafe API key attributes" >&2
   exit 1

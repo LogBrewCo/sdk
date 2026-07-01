@@ -1007,6 +1007,100 @@ test("OpenTelemetry span processor queues bounded spans and flushes without owni
   assert.equal(client.pendingEvents(), 0);
 });
 
+test("OpenTelemetry span processor can emit a trace summary on flush", async () => {
+  const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+  const rootSpanId = "00f067aa0ba902b7";
+  const childSpanId = "b7ad6b7169203331";
+  const client = sampleClient();
+  const transport = RecordingTransport.alwaysAccept();
+  const processor = createLogBrewOpenTelemetrySpanProcessor({
+    client,
+    eventIdPrefix: "otel",
+    includeTraceSummary: true,
+    transport
+  });
+
+  processor.onEnd(sampleOpenTelemetryReadableSpan({
+    name: "SELECT orders.by_id",
+    kind: 0,
+    spanContext: () => ({
+      traceId,
+      spanId: childSpanId,
+      traceFlags: 1
+    }),
+    parentSpanContext: {
+      traceId,
+      spanId: rootSpanId,
+      traceFlags: 1
+    },
+    startTime: [1780000000, 150000000],
+    endTime: [1780000000, 220000000],
+    duration: [0, 70000000],
+    status: { code: 2 },
+    attributes: {
+      "db.statement": "select * from users where api_key = 'redacted'",
+      "db.system": "postgresql"
+    }
+  }));
+  processor.onEnd(sampleOpenTelemetryReadableSpan({
+    name: "GET /orders/:id",
+    kind: 1,
+    spanContext: () => ({
+      traceId,
+      spanId: rootSpanId,
+      traceFlags: 1
+    }),
+    parentSpanContext: undefined,
+    parentSpanId: undefined,
+    startTime: [1780000000, 100000000],
+    endTime: [1780000000, 400000000],
+    duration: [0, 300000000],
+    status: { code: 1 },
+    attributes: {
+      "http.request.method": "GET",
+      "http.response.status_code": 200,
+      "http.route": "/orders/:id",
+      "url.full": "https://api.example/orders/42?api_key=redacted#frag"
+    }
+  }));
+
+  await processor.forceFlush();
+
+  const payload = JSON.parse(transport.lastBody());
+  assert.equal(payload.events.length, 3);
+  const summary = payload.events.find((event) => event.id === "otel_trace_1");
+  assert.ok(summary);
+  assert.equal(summary.type, "span");
+  assert.equal(summary.timestamp, "2026-05-28T20:26:40.100Z");
+  assert.deepEqual(summary.attributes, {
+    name: "opentelemetry.trace:GET /orders/:id",
+    traceId,
+    spanId: summary.attributes.spanId,
+    status: "error",
+    durationMs: 300,
+    metadata: {
+      source: "opentelemetry.trace_summary",
+      "deployment.environment.name": "production",
+      "service.name": "checkout",
+      "db.system": "postgresql",
+      "http.request.method": "GET",
+      "http.response.status_code": 200,
+      "http.route": "/orders/:id",
+      "otel.trace.span_count": 2,
+      "otel.trace.error_span_count": 1,
+      "otel.trace.root_span_id": rootSpanId,
+      "otel.trace.root_name": "GET /orders/:id",
+      "otel.trace.root_kind": "server",
+      "otel.trace.summary_kind": "rooted"
+    }
+  });
+  assert.match(summary.attributes.spanId, /^[0-9a-f]{16}$/);
+  const serializedSummary = JSON.stringify(summary);
+  assert.equal(serializedSummary.includes("api_key=redacted"), false);
+  assert.equal(serializedSummary.includes("db.statement"), false);
+  assert.equal(serializedSummary.includes("url.full"), false);
+});
+
 test("OpenTelemetry span processor coalesces concurrent forceFlush calls", async () => {
   const client = LogBrewClient.create({
     apiKey: "LOGBREW_API_KEY",

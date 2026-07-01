@@ -26,18 +26,25 @@
   status/service/environment/scope/kind/dropped-count metadata, requires
   allowlists for extra attributes, and blocks full URLs, headers, query/
   fragment values, payloads, cookies, private auth values, DB statements, exception
-  messages, and stacks. Concurrent `forceFlush()` calls now share one in-flight
-  transport send so a single queued batch is not duplicated. Evidence: RED
-  missing-export JS tests, concurrent-forceFlush regression coverage, `npm test
-  --prefix js/logbrew-js` (80 tests), and `bash
+  messages, and stacks. Follow-up added `includeTraceSummary: true`: one
+  synthetic `opentelemetry.trace:<root-name>` span per trace is emitted on
+  `forceFlush()`/`shutdown()` with trace ID, span count, error count, root span
+  ID/name/kind, duration, and safe service/environment/route metadata so OTel
+  batches read more like Sentry-style request/transaction groups without
+  adopting Sentry's transaction lifecycle. Concurrent `forceFlush()` calls now
+  share one in-flight transport send so a single queued batch is not duplicated.
+  Evidence: RED missing-export JS tests, RED trace-summary test first flushing
+  only detail spans, concurrent-forceFlush regression coverage, `npm test
+  --prefix js/logbrew-js` (81 tests), and `bash
   scripts/real_user_js_opentelemetry_smoke.sh` with packed installed package,
   install/remove/reinstall, no-OTel fallback, real `@opentelemetry/api`,
   `@opentelemetry/context-async-hooks`, `@opentelemetry/sdk-trace-base`,
   TypeScript declaration proof, active context copy, and real
-  `BasicTracerProvider` processor payload sanitization. Research:
+  `BasicTracerProvider` processor plus trace-summary payload sanitization.
+  Research:
   `docs/competitor-research/js-opentelemetry-span-processor-2026-07-01.md`.
   Remaining JS rich-trace gaps: automatic framework-owned instrumentation,
-  root/child transaction grouping, advanced batching/exporter interop,
+  full transaction assembly/streaming spans, advanced batching/exporter interop,
   broader safe semantic conventions, baggage/tracestate only with justified
   interop, and automatic outbound/DB/cache/queue spans.
 - 2026-07-01: JavaScript OpenTelemetry active-context bridge added after

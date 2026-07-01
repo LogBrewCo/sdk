@@ -254,6 +254,7 @@ const processor = createLogBrewOpenTelemetrySpanProcessor({
   client,
   transport: RecordingTransport.alwaysAccept(),
   eventAttributeKeys: ["cache.hit"],
+  includeTraceSummary: true,
   linkAttributeKeys: ["messaging.operation.name"],
   metadata: { release: "checkout@1.2.3", environment: "production" }
 });
@@ -274,7 +275,7 @@ span.end();
 await processor.forceFlush();
 ```
 
-The OTel processor follows normal OTel sampled-span behavior by default and summarizes up to eight span events and eight links. It copies only a small safe default set such as service, environment, route, method, status code, span kind, instrumentation scope, exception type, and dropped-count metadata. Additional event/link/span/resource attributes require explicit allowlists, and high-risk keys such as full URLs, headers, query strings, payloads, cookies, private auth values, DB statements, exception messages, and stacks stay blocked. Concurrent `forceFlush()` calls share the same in-flight flush to avoid duplicate sends. The helpers do not add an OpenTelemetry dependency, patch clients, serialize baggage or tracestate, copy raw propagation headers, or capture request/response bodies.
+The OTel processor follows normal OTel sampled-span behavior by default and summarizes up to eight span events and eight links. Set `includeTraceSummary: true` when you also want one synthetic `opentelemetry.trace:<root-name>` span per trace on `forceFlush()`/`shutdown()`; the summary carries the trace ID, span count, error count, root span ID/name/kind, duration, and safe service/environment/route metadata so a batch reads like one request or transaction. It copies only a small safe default set such as service, environment, route, method, status code, span kind, instrumentation scope, exception type, and dropped-count metadata. Additional event/link/span/resource attributes require explicit allowlists, and high-risk keys such as full URLs, headers, query strings, payloads, cookies, private auth values, DB statements, exception messages, and stacks stay blocked. Concurrent `forceFlush()` calls share the same in-flight flush to avoid duplicate sends. The helpers do not add an OpenTelemetry dependency, patch clients, serialize baggage or tracestate, copy raw propagation headers, or capture request/response bodies.
 
 LogBrew severity categories are `info`, `warning`, `error`, and `critical`. The JavaScript SDK accepts common runtime aliases such as `trace`, `debug`, `warn`, and `fatal` for compatibility, then serializes canonical values before queued events are sent. The shared mapping is documented in the [LogBrew severity contract](../../docs/severity-contract.md).
 

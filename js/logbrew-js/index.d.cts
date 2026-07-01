@@ -148,6 +148,8 @@ export type OpenTelemetrySpanProcessorConfig = OpenTelemetryReadableSpanOptions 
   client: LogBrewClient;
   transport?: Transport;
   flushOnForceFlush?: boolean;
+  /** Emit one privacy-bounded synthetic trace summary span per trace on forceFlush/shutdown. Defaults to false. */
+  includeTraceSummary?: boolean;
   timestamp?: () => string;
   eventIdPrefix?: string;
   spanFilter?: (span: unknown) => boolean | void;

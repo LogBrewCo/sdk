@@ -29,6 +29,24 @@ const DEFAULT_OTEL_EVENT_ATTRIBUTE_KEYS = new Set([
   "exception.type"
 ]);
 const DEFAULT_OTEL_LINK_ATTRIBUTE_KEYS = new Set();
+const TRACE_SUMMARY_METADATA_KEYS = new Set([
+  ...DEFAULT_OTEL_RESOURCE_ATTRIBUTE_KEYS,
+  "db.operation.name",
+  "db.system",
+  "faas.trigger",
+  "graphql.operation.name",
+  "graphql.operation.type",
+  "http.method",
+  "http.request.method",
+  "http.response.status_code",
+  "http.route",
+  "http.status_code",
+  "messaging.operation.name",
+  "messaging.system",
+  "rpc.method",
+  "rpc.service",
+  "rpc.system"
+]);
 const OTEL_SPAN_KIND_NAMES = new Map([
   [0, "internal"],
   [1, "server"],
@@ -137,12 +155,15 @@ function buildOpenTelemetryHelpers({
     const onError = typeof config.onError === "function" ? config.onError : () => {};
     const spanFilter = typeof config.spanFilter === "function" ? config.spanFilter : null;
     const flushOnForceFlush = config.flushOnForceFlush !== false;
+    const includeTraceSummary = config.includeTraceSummary === true;
     const resolvedOptions = resolveOpenTelemetryReadableSpanOptions(config);
     const state = {
       captured: 0,
       closed: false,
       flushInFlight: false,
-      pendingFlush: Promise.resolve(null)
+      pendingFlush: Promise.resolve(null),
+      traceSummaryCount: 0,
+      traceSummaries: includeTraceSummary ? new Map() : null
     };
 
     return {
@@ -159,6 +180,7 @@ function buildOpenTelemetryHelpers({
           if (!attributes) {
             return;
           }
+          recordOpenTelemetryTraceSummary(state, attributes, span);
           state.captured += 1;
           client.span(
             `${eventIdPrefix}_${state.captured}`,
@@ -172,9 +194,12 @@ function buildOpenTelemetryHelpers({
       async forceFlush() {
         await flushOpenTelemetryProcessorQueue({
           client,
+          eventIdPrefix,
           flushOnForceFlush,
+          includeTraceSummary,
           onError,
           state,
+          timestamp,
           transport
         });
       },
@@ -182,9 +207,12 @@ function buildOpenTelemetryHelpers({
         state.closed = true;
         await flushOpenTelemetryProcessorQueue({
           client,
+          eventIdPrefix,
           flushOnForceFlush,
+          includeTraceSummary,
           onError,
           state,
+          timestamp,
           transport
         });
       }
@@ -489,6 +517,129 @@ function buildOpenTelemetryHelpers({
     return summaries.length > 0 ? summaries : undefined;
   }
 
+  function recordOpenTelemetryTraceSummary(state, attributes, span) {
+    if (!(state.traceSummaries instanceof Map)) {
+      return;
+    }
+    let summary = state.traceSummaries.get(attributes.traceId);
+    if (!summary) {
+      summary = {
+        traceId: attributes.traceId,
+        spanCount: 0,
+        errorSpanCount: 0,
+        metadata: {},
+        rootSeen: false
+      };
+      state.traceSummaries.set(attributes.traceId, summary);
+    }
+
+    summary.spanCount += 1;
+    if (attributes.status === "error") {
+      summary.errorSpanCount += 1;
+    }
+
+    const startMs = openTelemetryTimeMs(span.startTime);
+    const durationMs = attributes.durationMs;
+    const endMs = endMsFromOpenTelemetryReadableSpan(span, startMs, durationMs);
+    if (startMs !== undefined && (summary.firstStartMs === undefined || startMs < summary.firstStartMs)) {
+      summary.firstStartMs = startMs;
+    }
+    if (endMs !== undefined && (summary.lastEndMs === undefined || endMs > summary.lastEndMs)) {
+      summary.lastEndMs = endMs;
+    }
+
+    copyOpenTelemetryTraceSummaryMetadata(summary, attributes.metadata);
+
+    const isRootSpan = attributes.parentSpanId === undefined;
+    if (isRootSpan || !summary.rootSpanId) {
+      summary.rootSpanId = attributes.spanId;
+      summary.rootName = attributes.name;
+      summary.rootKind = attributes.metadata?.["otel.kind"];
+      summary.rootSeen = isRootSpan;
+      if (startMs !== undefined) {
+        summary.rootStartMs = startMs;
+      }
+      if (durationMs !== undefined) {
+        summary.rootDurationMs = durationMs;
+      }
+      copyOpenTelemetryTraceSummaryMetadata(summary, attributes.metadata, { overwrite: true });
+    }
+  }
+
+  function copyOpenTelemetryTraceSummaryMetadata(summary, metadata, options = {}) {
+    if (!metadata || Array.isArray(metadata) || typeof metadata !== "object") {
+      return;
+    }
+    for (const [key, value] of Object.entries(metadata)) {
+      if (
+        TRACE_SUMMARY_METADATA_KEYS.has(key) &&
+        (options.overwrite === true || summary.metadata[key] === undefined) &&
+        isMetadataValue(value)
+      ) {
+        summary.metadata[key] = value;
+      }
+    }
+  }
+
+  function enqueueOpenTelemetryTraceSummaries({ client, eventIdPrefix, onError, state, timestamp }) {
+    if (!(state.traceSummaries instanceof Map) || state.traceSummaries.size === 0) {
+      return;
+    }
+    const summaries = Array.from(state.traceSummaries.values());
+    state.traceSummaries.clear();
+    for (const summary of summaries) {
+      try {
+        state.traceSummaryCount += 1;
+        client.span(
+          `${eventIdPrefix}_trace_${state.traceSummaryCount}`,
+          timestampFromOpenTelemetryTraceSummary(summary, timestamp),
+          openTelemetryTraceSummaryAttributes(summary)
+        );
+      } catch (error) {
+        onError(error);
+      }
+    }
+  }
+
+  function openTelemetryTraceSummaryAttributes(summary) {
+    const metadata = compactMetadata({
+      source: "opentelemetry.trace_summary",
+      ...summary.metadata,
+      "otel.trace.span_count": summary.spanCount,
+      ...(summary.errorSpanCount > 0 ? { "otel.trace.error_span_count": summary.errorSpanCount } : {}),
+      ...(summary.rootSpanId ? { "otel.trace.root_span_id": summary.rootSpanId } : {}),
+      ...(summary.rootName ? { "otel.trace.root_name": summary.rootName } : {}),
+      ...(summary.rootKind ? { "otel.trace.root_kind": summary.rootKind } : {}),
+      "otel.trace.summary_kind": summary.rootSeen ? "rooted" : "flush_batch"
+    });
+    const durationMs = durationMsFromOpenTelemetryTraceSummary(summary);
+    return {
+      name: summary.rootName ? `opentelemetry.trace:${summary.rootName}` : "opentelemetry.trace",
+      traceId: summary.traceId,
+      spanId: defaultSpanIdFactory(),
+      status: summary.errorSpanCount > 0 ? "error" : "ok",
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {})
+    };
+  }
+
+  function durationMsFromOpenTelemetryTraceSummary(summary) {
+    if (
+      summary.firstStartMs !== undefined &&
+      summary.lastEndMs !== undefined &&
+      summary.lastEndMs >= summary.firstStartMs
+    ) {
+      return summary.lastEndMs - summary.firstStartMs;
+    }
+    return summary.rootDurationMs;
+  }
+
+  function timestampFromOpenTelemetryTraceSummary(summary, fallbackTimestamp) {
+    return timestampFromOpenTelemetryTime(summary.rootStartMs)
+      ?? timestampFromOpenTelemetryTime(summary.firstStartMs)
+      ?? (typeof fallbackTimestamp === "function" ? fallbackTimestamp() : new Date().toISOString());
+  }
+
   function openTelemetrySpanKindName(kind) {
     if (typeof kind === "number") {
       return OTEL_SPAN_KIND_NAMES.get(kind);
@@ -514,6 +665,17 @@ function buildOpenTelemetryHelpers({
     const endMs = openTelemetryTimeMs(span.endTime);
     if (startMs !== undefined && endMs !== undefined && endMs >= startMs) {
       return endMs - startMs;
+    }
+    return undefined;
+  }
+
+  function endMsFromOpenTelemetryReadableSpan(span, startMs, durationMs) {
+    const endMs = openTelemetryTimeMs(span.endTime);
+    if (endMs !== undefined) {
+      return endMs;
+    }
+    if (startMs !== undefined && durationMs !== undefined) {
+      return startMs + durationMs;
     }
     return undefined;
   }
@@ -559,7 +721,19 @@ function buildOpenTelemetryHelpers({
     return undefined;
   }
 
-  async function flushOpenTelemetryProcessorQueue({ client, flushOnForceFlush, onError, state, transport }) {
+  async function flushOpenTelemetryProcessorQueue({
+    client,
+    eventIdPrefix,
+    flushOnForceFlush,
+    includeTraceSummary,
+    onError,
+    state,
+    timestamp,
+    transport
+  }) {
+    if (includeTraceSummary) {
+      enqueueOpenTelemetryTraceSummaries({ client, eventIdPrefix, onError, state, timestamp });
+    }
     if (!transport || !flushOnForceFlush || client.pendingEvents() === 0) {
       await state.pendingFlush;
       return;
