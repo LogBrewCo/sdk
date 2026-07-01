@@ -22,6 +22,8 @@ from logbrew_sdk import (
     create_traceparent,
     create_traceparent_headers,
     get_active_logbrew_trace,
+    logbrew_trace_context_from_open_telemetry_span,
+    logbrew_trace_context_from_open_telemetry_span_context,
     parse_traceparent,
     requests_request_with_logbrew_span,
     span_attributes_from_traceparent,
@@ -41,6 +43,34 @@ class StubHttpResponse:
 
     def close(self) -> None:
         self.closed = True
+
+
+class FakeOpenTelemetryTraceFlags:
+    def __init__(self, *, sampled: bool) -> None:
+        self.sampled = sampled
+
+
+class FakeOpenTelemetrySpanContext:
+    def __init__(
+        self,
+        *,
+        trace_id: int,
+        span_id: int,
+        trace_flags: Any,
+        is_valid: bool = True,
+    ) -> None:
+        self.trace_id = trace_id
+        self.span_id = span_id
+        self.trace_flags = trace_flags
+        self.is_valid = is_valid
+
+
+class FakeOpenTelemetrySpan:
+    def __init__(self, span_context: FakeOpenTelemetrySpanContext) -> None:
+        self._span_context = span_context
+
+    def get_span_context(self) -> FakeOpenTelemetrySpanContext:
+        return self._span_context
 
 
 def sample_client() -> LogBrewClient:
@@ -542,6 +572,81 @@ class LogBrewSdkTests(unittest.TestCase):
 
     def test_trace_metadata_returns_empty_without_active_trace(self) -> None:
         self.assertEqual(trace_metadata(), {})
+
+    def test_open_telemetry_span_context_creates_child_logbrew_trace(self) -> None:
+        otel_context = FakeOpenTelemetrySpanContext(
+            trace_id=int("4bf92f3577b34da6a3ce929d0e0e4736", 16),
+            span_id=int("00f067aa0ba902b7", 16),
+            trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+        )
+
+        trace = logbrew_trace_context_from_open_telemetry_span_context(
+            otel_context,
+            span_id="b7ad6b7169203331",
+        )
+
+        self.assertEqual(
+            trace,
+            LogBrewTraceContext(
+                trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+                span_id="b7ad6b7169203331",
+                parent_span_id="00f067aa0ba902b7",
+                sampled=True,
+            ),
+        )
+
+    def test_open_telemetry_span_creates_child_logbrew_trace_from_int_flags(self) -> None:
+        otel_context = FakeOpenTelemetrySpanContext(
+            trace_id=int("4bf92f3577b34da6a3ce929d0e0e4736", 16),
+            span_id=int("00f067aa0ba902b7", 16),
+            trace_flags=1,
+        )
+
+        trace = logbrew_trace_context_from_open_telemetry_span(
+            FakeOpenTelemetrySpan(otel_context),
+            span_id="b7ad6b7169203331",
+        )
+
+        self.assertIsNotNone(trace)
+        assert trace is not None
+        self.assertEqual(trace.trace_id, "4bf92f3577b34da6a3ce929d0e0e4736")
+        self.assertEqual(trace.span_id, "b7ad6b7169203331")
+        self.assertEqual(trace.parent_span_id, "00f067aa0ba902b7")
+        self.assertIs(trace.sampled, True)
+
+    def test_open_telemetry_helpers_return_none_for_invalid_contexts(self) -> None:
+        invalid_contexts = [
+            FakeOpenTelemetrySpanContext(
+                trace_id=0,
+                span_id=int("00f067aa0ba902b7", 16),
+                trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+            ),
+            FakeOpenTelemetrySpanContext(
+                trace_id=int("4bf92f3577b34da6a3ce929d0e0e4736", 16),
+                span_id=0,
+                trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+            ),
+            FakeOpenTelemetrySpanContext(
+                trace_id=int("4bf92f3577b34da6a3ce929d0e0e4736", 16),
+                span_id=int("00f067aa0ba902b7", 16),
+                trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+                is_valid=False,
+            ),
+        ]
+
+        for invalid_context in invalid_contexts:
+            self.assertIsNone(
+                logbrew_trace_context_from_open_telemetry_span_context(
+                    invalid_context,
+                    span_id="b7ad6b7169203331",
+                )
+            )
+            self.assertIsNone(
+                logbrew_trace_context_from_open_telemetry_span(
+                    FakeOpenTelemetrySpan(invalid_context),
+                    span_id="b7ad6b7169203331",
+                )
+            )
 
     def test_traceparent_helpers_reject_malformed_w3c_trace_context(self) -> None:
         with self.assertRaisesRegex(SdkError, "traceparent traceId must not be all zeros"):

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import TypeAlias
+from importlib import import_module
+from typing import Any, TypeAlias
 
 MetadataValue: TypeAlias = str | int | float | bool | None
 Metadata: TypeAlias = dict[str, MetadataValue]
+SpanIdValidator: TypeAlias = Callable[[str, str], None]
+OPEN_TELEMETRY_TRACE_ID_MAX = 2**128 - 1
+OPEN_TELEMETRY_SPAN_ID_MAX = 2**64 - 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,3 +64,100 @@ def trace_metadata(trace: LogBrewTraceContext | None = None) -> Metadata:
 
     active_trace = trace if trace is not None else get_active_logbrew_trace()
     return active_trace.metadata() if active_trace is not None else {}
+
+
+def _create_logbrew_context_from_open_telemetry_span_context(
+    span_context: Any,
+    *,
+    span_id: str | None,
+    span_id_factory: Callable[[], str],
+    span_id_validator: SpanIdValidator,
+) -> LogBrewTraceContext | None:
+    """Create a LogBrew child context from a live OpenTelemetry SpanContext."""
+
+    if span_context is None or getattr(span_context, "is_valid", True) is False:
+        return None
+
+    trace_id = _format_open_telemetry_id(
+        getattr(span_context, "trace_id", None),
+        width=32,
+        maximum=OPEN_TELEMETRY_TRACE_ID_MAX,
+    )
+    parent_span_id = _format_open_telemetry_id(
+        getattr(span_context, "span_id", None),
+        width=16,
+        maximum=OPEN_TELEMETRY_SPAN_ID_MAX,
+    )
+    if trace_id is None or parent_span_id is None:
+        return None
+
+    child_span_id = span_id if span_id is not None else span_id_factory()
+    span_id_validator("span_id", child_span_id)
+
+    return LogBrewTraceContext(
+        trace_id=trace_id,
+        span_id=child_span_id.lower(),
+        parent_span_id=parent_span_id,
+        sampled=_open_telemetry_trace_flags_sampled(getattr(span_context, "trace_flags", 0)),
+    )
+
+
+def _create_logbrew_context_from_open_telemetry_span(
+    span: Any,
+    *,
+    span_id: str | None,
+    span_id_factory: Callable[[], str],
+    span_id_validator: SpanIdValidator,
+) -> LogBrewTraceContext | None:
+    """Create a LogBrew child context from an OpenTelemetry Span-like object."""
+
+    get_span_context = getattr(span, "get_span_context", None)
+    if not callable(get_span_context):
+        return None
+    try:
+        span_context = get_span_context()
+    except Exception:
+        return None
+    return _create_logbrew_context_from_open_telemetry_span_context(
+        span_context,
+        span_id=span_id,
+        span_id_factory=span_id_factory,
+        span_id_validator=span_id_validator,
+    )
+
+
+def _create_logbrew_context_from_current_open_telemetry_span(
+    *,
+    span_id: str | None,
+    span_id_factory: Callable[[], str],
+    span_id_validator: SpanIdValidator,
+) -> LogBrewTraceContext | None:
+    """Create a LogBrew child context from OpenTelemetry's current span, if present."""
+
+    try:
+        open_telemetry_trace = import_module("opentelemetry.trace")
+        span = open_telemetry_trace.get_current_span()
+    except Exception:
+        return None
+    return _create_logbrew_context_from_open_telemetry_span(
+        span,
+        span_id=span_id,
+        span_id_factory=span_id_factory,
+        span_id_validator=span_id_validator,
+    )
+
+
+def _format_open_telemetry_id(value: Any, *, width: int, maximum: int) -> str | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0 or value > maximum:
+        return None
+    return format(value, f"0{width}x")
+
+
+def _open_telemetry_trace_flags_sampled(trace_flags: Any) -> bool:
+    sampled = getattr(trace_flags, "sampled", None)
+    if isinstance(sampled, bool):
+        return sampled
+    try:
+        return (int(trace_flags) & 1) == 1
+    except (TypeError, ValueError):
+        return False

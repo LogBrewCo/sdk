@@ -309,6 +309,28 @@ with use_logbrew_trace(trace):
 
 `parse_traceparent()` validates W3C shape, rejects all-zero trace/span IDs, normalizes IDs to lowercase, and exposes the sampled flag. `create_logbrew_trace_context()` creates the request-local `LogBrewTraceContext` used to correlate request spans, app-owned logs, issues, actions, metrics, and outgoing milestones with one safe set of IDs. `use_logbrew_trace()` makes that context available through `trace_metadata()` and `get_active_logbrew_trace()` during framework handler work, including async work that keeps Python `contextvars`. `create_traceparent_headers()` returns an explicit outbound carrier with only `traceparent` for app-owned HTTP clients. FastAPI and Django integrations use these helpers automatically for valid inbound `traceparent` headers and start a fresh W3C-shaped local trace when the header is missing or malformed. The helpers do not patch HTTP clients or capture request payloads, headers, cookies, query strings, or the raw `traceparent` value.
 
+If your app already installs OpenTelemetry, copy the active OTel parent into a LogBrew child context without adding an SDK dependency on OTel:
+
+```python
+from logbrew_sdk import (
+    logbrew_trace_context_from_current_open_telemetry_span,
+    span_attributes_from_trace_context,
+    use_logbrew_trace,
+)
+
+trace = logbrew_trace_context_from_current_open_telemetry_span()
+if trace is not None:
+    with use_logbrew_trace(trace):
+        attributes = span_attributes_from_trace_context(
+            trace,
+            name="checkout.otel_child",
+            status="ok",
+            metadata={"service": "checkout"},
+        )
+```
+
+`logbrew_trace_context_from_current_open_telemetry_span()` returns `None` when OpenTelemetry is not installed or no valid current OTel span exists. It copies only the validated trace ID, parent span ID, and sampled flag into a fresh LogBrew child context. It does not install OTel, own exporters or processors, read attributes/events/links, ingest baggage or tracestate, serialize raw propagation metadata, patch clients, or capture payloads, headers, cookies, full URLs, query strings, or fragments.
+
 Span payloads may include up to eight privacy-bounded event summaries through `events` or helper-level `span_events`. Each summary has a required `name`, optional timezone-aware `timestamp`, and primitive-only `metadata`. LogBrew drops nested objects and helper deny-listed key names so milestones can improve trace timelines without sending payloads, headers, query parameters, cache keys, queue messages, exception messages, or stack traces. Dependency helpers add one automatic type-only `exception` event when the wrapped operation fails.
 
 ## Outbound HTTP Client Spans

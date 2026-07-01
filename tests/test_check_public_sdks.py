@@ -277,6 +277,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         script = SCRIPT.read_text()
 
         self.assertIn('"Python Celery real-user smoke"', script)
+        self.assertIn('"Python OpenTelemetry installed-artifact smoke"', script)
         self.assertRegex(
             script,
             r'begin_next_step "Python real-user smoke"\n'
@@ -284,6 +285,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete\n\n"
             r'begin_next_step "Python high-load installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_python_high_load_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Python OpenTelemetry installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_python_opentelemetry_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Python Celery real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_python_celery_smoke\.sh"\n'

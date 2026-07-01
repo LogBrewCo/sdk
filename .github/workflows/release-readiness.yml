@@ -356,6 +356,9 @@ jobs:
       - name: Run Python real-user smoke test
         run: bash scripts/real_user_python_smoke.sh
 
+      - name: Run Python OpenTelemetry installed-artifact smoke test
+        run: bash scripts/real_user_python_opentelemetry_smoke.sh
+
       - name: Run FastAPI real-user smoke test
         run: bash scripts/real_user_fastapi_smoke.sh
 

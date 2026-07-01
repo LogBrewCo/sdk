@@ -24,6 +24,9 @@ from logbrew_sdk._support_ticket import (
 )
 from logbrew_sdk._trace_context import (
     LogBrewTraceContext,
+    _create_logbrew_context_from_current_open_telemetry_span,
+    _create_logbrew_context_from_open_telemetry_span,
+    _create_logbrew_context_from_open_telemetry_span_context,
     get_active_logbrew_trace,
     trace_metadata,
     use_logbrew_trace,
@@ -631,6 +634,56 @@ def create_logbrew_trace_context(
     )
 
 
+def logbrew_trace_context_from_open_telemetry_span_context(
+    span_context: Any,
+    *,
+    span_id: str | None = None,
+    span_id_factory: Callable[[], str] | None = None,
+) -> LogBrewTraceContext | None:
+    """Create a LogBrew child context from a live OpenTelemetry SpanContext.
+
+    The helper intentionally duck-types OpenTelemetry objects so default LogBrew
+    installs do not gain an OpenTelemetry dependency.
+    """
+
+    return _create_logbrew_context_from_open_telemetry_span_context(
+        span_context,
+        span_id=span_id,
+        span_id_factory=span_id_factory or default_span_id_factory,
+        span_id_validator=require_span_id,
+    )
+
+
+def logbrew_trace_context_from_open_telemetry_span(
+    span: Any,
+    *,
+    span_id: str | None = None,
+    span_id_factory: Callable[[], str] | None = None,
+) -> LogBrewTraceContext | None:
+    """Create a LogBrew child context from an OpenTelemetry Span-like object."""
+
+    return _create_logbrew_context_from_open_telemetry_span(
+        span,
+        span_id=span_id,
+        span_id_factory=span_id_factory or default_span_id_factory,
+        span_id_validator=require_span_id,
+    )
+
+
+def logbrew_trace_context_from_current_open_telemetry_span(
+    *,
+    span_id: str | None = None,
+    span_id_factory: Callable[[], str] | None = None,
+) -> LogBrewTraceContext | None:
+    """Create a LogBrew child context from OpenTelemetry's current span, if present."""
+
+    return _create_logbrew_context_from_current_open_telemetry_span(
+        span_id=span_id,
+        span_id_factory=span_id_factory or default_span_id_factory,
+        span_id_validator=require_span_id,
+    )
+
+
 def span_attributes_from_traceparent(
     traceparent: str,
     *,
@@ -1027,6 +1080,9 @@ __all__ = [
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "log_attributes_from_record",
     "logbrew_trace_context_from_celery_headers",
+    "logbrew_trace_context_from_current_open_telemetry_span",
+    "logbrew_trace_context_from_open_telemetry_span",
+    "logbrew_trace_context_from_open_telemetry_span_context",
     "parse_traceparent",
     "queue_operation_with_logbrew_span",
     "requests_request_with_logbrew_span",

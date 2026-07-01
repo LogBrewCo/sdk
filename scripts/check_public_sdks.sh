@@ -65,6 +65,7 @@ STEP_LABELS=(
   "Next.js real-user smoke"
   "Python real-user smoke"
   "Python high-load installed-artifact smoke"
+  "Python OpenTelemetry installed-artifact smoke"
   "Python Celery real-user smoke"
   "FastAPI real-user smoke"
   "Django real-user smoke"
@@ -568,6 +569,10 @@ mark_step_complete
 
 begin_next_step "Python high-load installed-artifact smoke"
 run_shell_step "bash scripts/real_user_python_high_load_smoke.sh"
+mark_step_complete
+
+begin_next_step "Python OpenTelemetry installed-artifact smoke"
+run_shell_step "bash scripts/real_user_python_opentelemetry_smoke.sh"
 mark_step_complete
 
 begin_next_step "Python Celery real-user smoke"

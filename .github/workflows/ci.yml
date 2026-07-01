@@ -252,6 +252,10 @@ jobs:
         if: ${{ hashFiles('python/logbrew_py/pyproject.toml') != '' }}
         run: bash scripts/real_user_python_high_load_smoke.sh
 
+      - name: Run Python OpenTelemetry installed-artifact smoke test
+        if: ${{ hashFiles('python/logbrew_py/pyproject.toml') != '' }}
+        run: bash scripts/real_user_python_opentelemetry_smoke.sh
+
       - name: Run Python Celery real-user smoke test
         if: ${{ hashFiles('python/logbrew_py/pyproject.toml') != '' }}
         run: bash scripts/real_user_python_celery_smoke.sh
