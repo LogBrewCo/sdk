@@ -4,6 +4,7 @@ export const {
   createBaggage,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
+  createLogBrewOpenTelemetrySpanProcessor,
   createSupportTicketDraft,
   createTraceContextHeaders,
   createTraceparent,
@@ -25,6 +26,7 @@ export const {
   parseTracestate,
   RecordingTransport,
   SdkError,
+  spanAttributesFromOpenTelemetryReadableSpan,
   spanAttributesFromTraceparent,
   TransportError
 } = sdk;

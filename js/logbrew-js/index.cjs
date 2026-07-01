@@ -1,4 +1,5 @@
 const { buildCreateSupportTicketDraft } = require("./support-ticket.cjs");
+const { buildOpenTelemetryHelpers } = require("./opentelemetry.cjs");
 const { buildTraceContextHelpers } = require("./trace-context.cjs");
 
 const SEVERITY_ALIASES = new Map([
@@ -509,132 +510,6 @@ function createTraceparentHeaders(input) {
   return { traceparent: createTraceparent(input) };
 }
 
-function logbrewTraceContextFromOpenTelemetrySpanContext(spanContext, options = {}) {
-  const context = normalizeOpenTelemetrySpanContext(spanContext);
-  if (!context) {
-    return null;
-  }
-  return {
-    traceId: context.traceId,
-    spanId: resolveLogBrewChildSpanId(options),
-    parentSpanId: context.parentSpanId,
-    sampled: context.sampled
-  };
-}
-
-function logbrewTraceContextFromOpenTelemetrySpan(span, options = {}) {
-  if (!span || typeof span !== "object") {
-    return null;
-  }
-  const getSpanContext = typeof span.spanContext === "function"
-    ? span.spanContext
-    : span.getSpanContext;
-  if (typeof getSpanContext !== "function") {
-    return null;
-  }
-  let spanContext;
-  try {
-    spanContext = getSpanContext.call(span);
-  } catch {
-    return null;
-  }
-  return logbrewTraceContextFromOpenTelemetrySpanContext(spanContext, options);
-}
-
-function logbrewTraceContextFromCurrentOpenTelemetrySpan(options = {}) {
-  const openTelemetryApi = options?.openTelemetryApi ?? optionalOpenTelemetryApi();
-  const getActiveSpan = openTelemetryApi?.trace?.getActiveSpan;
-  if (typeof getActiveSpan !== "function") {
-    return null;
-  }
-  let activeSpan;
-  try {
-    activeSpan = getActiveSpan.call(openTelemetryApi.trace);
-  } catch {
-    return null;
-  }
-  return logbrewTraceContextFromOpenTelemetrySpan(activeSpan, options);
-}
-
-function normalizeOpenTelemetrySpanContext(spanContext) {
-  if (!spanContext || typeof spanContext !== "object" || spanContext.isValid === false) {
-    return null;
-  }
-  const traceId = normalizeTraceId(spanContext.traceId);
-  const parentSpanId = normalizeSpanId(spanContext.spanId);
-  if (!traceId || !parentSpanId) {
-    return null;
-  }
-  return {
-    traceId,
-    parentSpanId,
-    sampled: openTelemetryTraceFlagsSampled(spanContext.traceFlags)
-  };
-}
-
-function resolveLogBrewChildSpanId(options = {}) {
-  if (options.spanId !== undefined) {
-    requireSpanId("spanId", options.spanId);
-    return options.spanId.toLowerCase();
-  }
-  const spanIdFactory = typeof options.spanIdFactory === "function"
-    ? options.spanIdFactory
-    : defaultSpanIdFactory;
-  const spanId = spanIdFactory();
-  requireSpanId("spanId", spanId);
-  return spanId.toLowerCase();
-}
-
-function defaultSpanIdFactory() {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const spanId = randomHex(8);
-    if (spanId !== ZERO_SPAN_ID) {
-      return spanId;
-    }
-  }
-  throw new SdkError("configuration_error", "spanIdFactory must return a non-zero 16-character hex span id");
-}
-
-function randomHex(byteLength) {
-  const bytes = new Uint8Array(byteLength);
-  if (typeof globalThis.crypto?.getRandomValues === "function") {
-    globalThis.crypto.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function openTelemetryTraceFlagsSampled(traceFlags) {
-  const sampled = traceFlags?.sampled;
-  if (typeof sampled === "boolean") {
-    return sampled;
-  }
-  if (typeof traceFlags === "number" && Number.isFinite(traceFlags)) {
-    return (traceFlags & 1) === 1;
-  }
-  return false;
-}
-
-function optionalOpenTelemetryApi() {
-  const packageName = "@opentelemetry/api";
-  const optionalRequire = typeof module !== "undefined" && typeof module.require === "function"
-    ? module.require.bind(module)
-    : typeof require === "function"
-      ? require
-      : undefined;
-  if (!optionalRequire) {
-    return undefined;
-  }
-  try {
-    return optionalRequire(packageName);
-  } catch {
-    return undefined;
-  }
-}
-
 const {
   createBaggage,
   createTraceContextHeaders,
@@ -651,6 +526,25 @@ const createSupportTicketDraft = buildCreateSupportTicketDraft({
   requireAllowedValue,
   requireNonEmpty,
   requireTraceId
+});
+
+const {
+  createLogBrewOpenTelemetrySpanProcessor,
+  logbrewTraceContextFromCurrentOpenTelemetrySpan,
+  logbrewTraceContextFromOpenTelemetrySpan,
+  logbrewTraceContextFromOpenTelemetrySpanContext,
+  spanAttributesFromOpenTelemetryReadableSpan
+} = buildOpenTelemetryHelpers({
+  compactMetadata,
+  isMetadataValue,
+  LogBrewClient,
+  maxSpanEvents: MAX_SPAN_EVENTS,
+  maxSpanLinks: MAX_SPAN_LINKS,
+  requireNonEmpty,
+  requireSpanId,
+  requireTraceId,
+  SdkError,
+  stringOrUndefined
 });
 
 function spanAttributesFromTraceparent(traceparent, attributes) {
@@ -1705,6 +1599,7 @@ module.exports = {
   createBaggage,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
+  createLogBrewOpenTelemetrySpanProcessor,
   createSupportTicketDraft,
   createTraceContextHeaders,
   createTraceparent,
@@ -1726,6 +1621,7 @@ module.exports = {
   parseTracestate,
   RecordingTransport,
   SdkError,
+  spanAttributesFromOpenTelemetryReadableSpan,
   spanAttributesFromTraceparent,
   TransportError
 };

@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import {
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
+  createLogBrewOpenTelemetrySpanProcessor,
   createSupportTicketDraft,
   createBaggage,
   createTraceparent,
@@ -27,6 +28,7 @@ import {
   parseTracestate,
   RecordingTransport,
   SdkError,
+  spanAttributesFromOpenTelemetryReadableSpan,
   spanAttributesFromTraceparent,
   TransportError
 } from "../index.js";
@@ -51,6 +53,83 @@ function sampleClient() {
     sdkVersion: "0.1.0",
     maxRetries: 2
   });
+}
+
+function sampleOpenTelemetryReadableSpan(overrides = {}) {
+  return {
+    name: "GET /orders/:id",
+    kind: 2,
+    spanContext: () => ({
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      spanId: "b7ad6b7169203331",
+      traceFlags: 1
+    }),
+    parentSpanContext: {
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      spanId: "00f067aa0ba902b7",
+      traceFlags: 1
+    },
+    startTime: [1780000000, 100000000],
+    endTime: [1780000000, 225000000],
+    duration: [0, 125000000],
+    status: { code: 1 },
+    attributes: {
+      "db.statement": "select * from users where api_key = 'redacted'",
+      "http.request.method": "GET",
+      "http.response.status_code": 200,
+      "http.route": "/orders/:id",
+      "url.full": "https://api.example/orders/42?api_key=redacted#frag"
+    },
+    events: [
+      {
+        name: "exception",
+        time: [1780000000, 160000000],
+        attributes: {
+          "exception.escaped": false,
+          "exception.message": "contains private payload",
+          "exception.stacktrace": "private stack",
+          "exception.type": "TypeError"
+        }
+      },
+      {
+        name: "cache.lookup",
+        time: [1780000000, 180000000],
+        attributes: {
+          "cache.hit": false,
+          "cache.key": "private-cache-key"
+        }
+      }
+    ],
+    links: [
+      {
+        context: {
+          traceId: "11111111111111111111111111111111",
+          spanId: "2222222222222222",
+          traceFlags: 1
+        },
+        attributes: {
+          "http.url": "https://api.example/internal?api_key=redacted",
+          "messaging.operation.name": "process"
+        }
+      }
+    ],
+    resource: {
+      attributes: {
+        "deployment.environment.name": "production",
+        "host.name": "private-host",
+        "service.name": "checkout"
+      }
+    },
+    instrumentationScope: {
+      name: "@opentelemetry/instrumentation-http",
+      version: "1.2.3"
+    },
+    droppedAttributesCount: 1,
+    droppedEventsCount: 2,
+    droppedLinksCount: 3,
+    ended: true,
+    ...overrides
+  };
 }
 
 function enqueueAll(client) {
@@ -812,6 +891,120 @@ test("OpenTelemetry current span helper uses explicit API seam and returns null 
     }),
     null
   );
+});
+
+test("OpenTelemetry ReadableSpan helper creates privacy-bounded LogBrew span attributes", () => {
+  const span = spanAttributesFromOpenTelemetryReadableSpan(sampleOpenTelemetryReadableSpan(), {
+    attributeKeys: ["messaging.operation.name"],
+    eventAttributeKeys: ["cache.hit"],
+    linkAttributeKeys: ["messaging.operation.name"],
+    metadata: { release: "checkout@1.2.3" }
+  });
+
+  assert.deepEqual(span, {
+    name: "GET /orders/:id",
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    parentSpanId: "00f067aa0ba902b7",
+    status: "ok",
+    durationMs: 125,
+    events: [
+      {
+        name: "exception",
+        timestamp: "2026-05-28T20:26:40.160Z",
+        metadata: {
+          "exception.escaped": false,
+          "exception.type": "TypeError"
+        }
+      },
+      {
+        name: "cache.lookup",
+        timestamp: "2026-05-28T20:26:40.180Z",
+        metadata: {
+          "cache.hit": false
+        }
+      }
+    ],
+    links: [
+      {
+        traceId: "11111111111111111111111111111111",
+        spanId: "2222222222222222",
+        sampled: true,
+        metadata: {
+          "messaging.operation.name": "process"
+        }
+      }
+    ],
+    metadata: {
+      source: "opentelemetry.readable_span",
+      release: "checkout@1.2.3",
+      "deployment.environment.name": "production",
+      "service.name": "checkout",
+      "otel.kind": "client",
+      "otel.scope.name": "@opentelemetry/instrumentation-http",
+      "otel.scope.version": "1.2.3",
+      "otel.dropped_attributes_count": 1,
+      "otel.dropped_events_count": 2,
+      "otel.dropped_links_count": 3,
+      "http.request.method": "GET",
+      "http.response.status_code": 200,
+      "http.route": "/orders/:id"
+    }
+  });
+});
+
+test("OpenTelemetry span processor queues bounded spans and flushes without owning OTel setup", async () => {
+  const dropped = [];
+  const errors = [];
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    maxQueueSize: 1,
+    onEventDropped: (event) => dropped.push(event)
+  });
+  const transport = RecordingTransport.alwaysAccept();
+  const processor = createLogBrewOpenTelemetrySpanProcessor({
+    client,
+    eventIdPrefix: "otel",
+    onError: (error) => errors.push(error),
+    timestamp: () => "2026-06-02T10:00:04Z",
+    transport
+  });
+
+  processor.onStart({}, {});
+  processor.onEnd(sampleOpenTelemetryReadableSpan());
+  processor.onEnd(sampleOpenTelemetryReadableSpan({
+    spanContext: () => ({
+      traceId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      spanId: "bbbbbbbbbbbbbbbb",
+      traceFlags: 1
+    })
+  }));
+  processor.onEnd(sampleOpenTelemetryReadableSpan({
+    spanContext: () => ({
+      traceId: "cccccccccccccccccccccccccccccccc",
+      spanId: "dddddddddddddddd",
+      traceFlags: 0
+    })
+  }));
+
+  assert.equal(client.pendingEvents(), 1);
+  assert.equal(client.droppedEvents(), 1);
+  assert.equal(dropped[0].eventId, "otel_2");
+  assert.deepEqual(errors, []);
+
+  await processor.forceFlush();
+
+  assert.equal(client.pendingEvents(), 0);
+  const payload = JSON.parse(transport.lastBody());
+  assert.equal(payload.events[0].id, "otel_1");
+  assert.equal(payload.events[0].timestamp, "2026-05-28T20:26:40.100Z");
+  assert.equal(payload.events[0].attributes.metadata.source, "opentelemetry.readable_span");
+
+  await processor.shutdown();
+  processor.onEnd(sampleOpenTelemetryReadableSpan());
+  assert.equal(client.pendingEvents(), 0);
 });
 
 test("traceparent helpers reject malformed W3C trace context", () => {

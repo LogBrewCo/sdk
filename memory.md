@@ -1,5 +1,43 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-01: JavaScript OpenTelemetry ended-span bridge added after source
+  reads from Sentry JavaScript
+  `getsentry/sentry-javascript@88e7ad5444ece21f074e53768cb8633e00fa3a2b`
+  (`packages/opentelemetry/src/spanProcessor.ts`
+  `SentrySpanProcessor.onStart`/`onEnd`/`forceFlush`/`shutdown`,
+  `packages/opentelemetry/src/spanExporter.ts`
+  `SentrySpanExporter.export`/`flush`/`_maybeSend`,
+  `createTransactionForOtelSpan`, `createAndFinishSpanForOtelSpan`),
+  OpenTelemetry JS
+  `open-telemetry/opentelemetry-js@c989308b87403e19923f440810d6ab47e7c2ba0d`
+  (`ReadableSpan`, `SpanProcessor`, `SimpleSpanProcessor`,
+  `BatchSpanProcessorBase`), Datadog JS
+  `DataDog/dd-trace-js@7ffe20cf044810793377b05f4e97490ecd2c903c`
+  (`opentelemetry/tracer.js`, `span.js`, `span_processor.js`), and PostHog JS
+  `PostHog/posthog-js@a5181ba36f64cf69108be2f0fbf1e68dbeb4e827`
+  (`packages/ai/src/otel/processor.ts`, `exporter.ts`, `redact.ts`,
+  `spans.ts`). Core `@logbrew/sdk` now exports
+  `spanAttributesFromOpenTelemetryReadableSpan(...)` and
+  `createLogBrewOpenTelemetrySpanProcessor(...)`: apps that already own an OTel
+  provider can opt in to converting ended `ReadableSpan` data into queued
+  LogBrew spans without adding default OTel dependencies or letting LogBrew own
+  providers/exporters/instrumentation. The bridge follows sampled-span behavior
+  by default, summarizes up to eight events and links, copies safe route/method/
+  status/service/environment/scope/kind/dropped-count metadata, requires
+  allowlists for extra attributes, and blocks full URLs, headers, query/
+  fragment values, payloads, cookies, private auth values, DB statements, exception
+  messages, and stacks. Evidence: RED missing-export JS tests, `npm test
+  --prefix js/logbrew-js` (79 tests), and `bash
+  scripts/real_user_js_opentelemetry_smoke.sh` with packed installed package,
+  install/remove/reinstall, no-OTel fallback, real `@opentelemetry/api`,
+  `@opentelemetry/context-async-hooks`, `@opentelemetry/sdk-trace-base`,
+  TypeScript declaration proof, active context copy, and real
+  `BasicTracerProvider` processor payload sanitization. Research:
+  `docs/competitor-research/js-opentelemetry-span-processor-2026-07-01.md`.
+  Remaining JS rich-trace gaps: automatic framework-owned instrumentation,
+  root/child transaction grouping, advanced batching/exporter interop,
+  broader safe semantic conventions, baggage/tracestate only with justified
+  interop, and automatic outbound/DB/cache/queue spans.
 - 2026-07-01: JavaScript OpenTelemetry active-context bridge added after
   source reads from Sentry JavaScript
   `getsentry/sentry-javascript@e3161515dd5324e664b97e69ddcb7fa8ef6cd838`

@@ -180,6 +180,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_java_jdbc_metadata_denylist_literal(relative_text, line):
         return True
 
+    if is_js_opentelemetry_privacy_denylist_literal(relative_text, line):
+        return True
+
     if is_release_artifact_upload_verifier_reference(relative_text, line):
         return True
 
@@ -386,6 +389,12 @@ def is_java_jdbc_metadata_denylist_literal(relative_text: str, line: str) -> boo
         "username",
         "value",
     }
+
+
+def is_js_opentelemetry_privacy_denylist_literal(relative_text: str, line: str) -> bool:
+    if relative_text != "js/logbrew-js/opentelemetry.cjs":
+        return False
+    return "SENSITIVE_OTEL_ATTRIBUTE_PATTERN" in line
 
 
 def is_release_artifact_upload_verifier_reference(relative_text: str, line: str) -> bool:

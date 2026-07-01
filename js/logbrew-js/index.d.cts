@@ -73,6 +73,45 @@ export type OpenTelemetryApiLike = {
   };
 };
 
+/** OpenTelemetry high-resolution time tuple accepted by dependency-free ReadableSpan helpers. */
+export type OpenTelemetryHrTimeLike = readonly [number, number];
+
+/** Minimal OpenTelemetry event-like shape summarized from ended spans. */
+export type OpenTelemetryTimedEventLike = {
+  name?: unknown;
+  time?: OpenTelemetryHrTimeLike | number | Date;
+  timestamp?: OpenTelemetryHrTimeLike | number | Date;
+  attributes?: Record<string, unknown>;
+};
+
+/** Minimal OpenTelemetry link-like shape summarized from ended spans. */
+export type OpenTelemetrySpanLinkLike = {
+  context?: OpenTelemetrySpanContextLike | null | undefined;
+  spanContext?: OpenTelemetrySpanContextLike | null | undefined;
+  attributes?: Record<string, unknown>;
+};
+
+/** Minimal OpenTelemetry ReadableSpan-like shape accepted by dependency-free bridge helpers. */
+export type OpenTelemetryReadableSpanLike = {
+  name?: unknown;
+  kind?: unknown;
+  spanContext?: () => OpenTelemetrySpanContextLike | null | undefined;
+  parentSpanContext?: OpenTelemetrySpanContextLike | null | undefined;
+  parentSpanId?: unknown;
+  startTime?: OpenTelemetryHrTimeLike | number | Date;
+  endTime?: OpenTelemetryHrTimeLike | number | Date;
+  duration?: OpenTelemetryHrTimeLike;
+  status?: { code?: unknown };
+  attributes?: Record<string, unknown>;
+  events?: OpenTelemetryTimedEventLike[];
+  links?: OpenTelemetrySpanLinkLike[];
+  resource?: { attributes?: Record<string, unknown> };
+  instrumentationScope?: { name?: unknown; version?: unknown };
+  droppedAttributesCount?: unknown;
+  droppedEventsCount?: unknown;
+  droppedLinksCount?: unknown;
+};
+
 /** Options for creating a LogBrew child trace from OpenTelemetry context. */
 export type OpenTelemetryTraceContextOptions = {
   spanId?: string;
@@ -82,6 +121,45 @@ export type OpenTelemetryTraceContextOptions = {
 /** Options for reading OpenTelemetry's current active span without requiring an OTel dependency. */
 export type CurrentOpenTelemetryTraceContextOptions = OpenTelemetryTraceContextOptions & {
   openTelemetryApi?: OpenTelemetryApiLike;
+};
+
+/** Options for privacy-bounded OpenTelemetry ReadableSpan conversion. */
+export type OpenTelemetryReadableSpanOptions = {
+  /** Additional safe span attribute keys to copy; sensitive keys remain blocked. */
+  attributeKeys?: string[];
+  /** Capture unsampled spans. Defaults to false to follow common OTel processor behavior. */
+  captureUnsampled?: boolean;
+  /** Additional safe span event attribute keys to copy; sensitive keys remain blocked. */
+  eventAttributeKeys?: string[];
+  /** Include privacy-bounded span event summaries. Defaults to true. */
+  includeSpanEvents?: boolean;
+  /** Include privacy-bounded span link summaries. Defaults to true. */
+  includeSpanLinks?: boolean;
+  /** Additional safe span link attribute keys to copy; sensitive keys remain blocked. */
+  linkAttributeKeys?: string[];
+  /** Primitive app metadata merged into every converted span. */
+  metadata?: Metadata;
+  /** Additional safe resource attribute keys to copy; sensitive keys remain blocked. */
+  resourceAttributeKeys?: string[];
+};
+
+/** Configuration for an opt-in OpenTelemetry SpanProcessor-compatible LogBrew bridge. */
+export type OpenTelemetrySpanProcessorConfig = OpenTelemetryReadableSpanOptions & {
+  client: LogBrewClient;
+  transport?: Transport;
+  flushOnForceFlush?: boolean;
+  timestamp?: () => string;
+  eventIdPrefix?: string;
+  spanFilter?: (span: unknown) => boolean | void;
+  onError?: (error: unknown) => void;
+};
+
+/** SpanProcessor-compatible handle for app-owned OpenTelemetry setup. */
+export type OpenTelemetrySpanProcessorHandle = {
+  onStart(span: unknown, parentContext: unknown): void;
+  onEnd(span: OpenTelemetryReadableSpanLike | unknown): void;
+  forceFlush(): Promise<void>;
+  shutdown(): Promise<void>;
 };
 
 /** Span fields supplied when deriving LogBrew span attributes from traceparent. */
@@ -543,6 +621,17 @@ export declare function logbrewTraceContextFromOpenTelemetrySpan(
 export declare function logbrewTraceContextFromCurrentOpenTelemetrySpan(
   options?: CurrentOpenTelemetryTraceContextOptions
 ): LogCorrelationTraceContext | null;
+
+/** Convert an ended OpenTelemetry ReadableSpan-like object into safe LogBrew span attributes. */
+export declare function spanAttributesFromOpenTelemetryReadableSpan(
+  span: OpenTelemetryReadableSpanLike | null | undefined,
+  options?: OpenTelemetryReadableSpanOptions
+): SpanAttributes | null;
+
+/** Create an opt-in SpanProcessor-compatible bridge for app-owned OpenTelemetry providers. */
+export declare function createLogBrewOpenTelemetrySpanProcessor(
+  config: OpenTelemetrySpanProcessorConfig
+): OpenTelemetrySpanProcessorHandle;
 
 /** Build LogBrew span attributes that continue an incoming W3C traceparent value. */
 export declare function spanAttributesFromTraceparent(

@@ -37,6 +37,7 @@
     "index.js",
     "index.d.ts",
     "index.d.cts",
+    "opentelemetry.cjs",
     "support-ticket.cjs",
     "trace-context.cjs",
     "release-artifacts-common.js",

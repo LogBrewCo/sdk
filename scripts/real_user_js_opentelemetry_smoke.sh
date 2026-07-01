@@ -15,6 +15,7 @@ on_error() {
     "$tmp_dir/no-otel.stdout.json" \
     "$tmp_dir/npm-list-after-otel.txt" \
     "$tmp_dir/otel.stdout.json" \
+    "$tmp_dir/processor-body.json" \
     "$tmp_dir/typecheck.log"; do
     if [[ -f "$diagnostic" ]]; then
       echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
@@ -73,18 +74,24 @@ npm install \
   --fund=false \
   "@opentelemetry/api@latest" \
   "@opentelemetry/context-async-hooks@latest" \
+  "@opentelemetry/sdk-trace-base@latest" \
   "typescript@latest" \
   >/dev/null
-npm ls @logbrew/sdk @opentelemetry/api @opentelemetry/context-async-hooks > "$tmp_dir/npm-list-after-otel.txt"
+npm ls @logbrew/sdk @opentelemetry/api @opentelemetry/context-async-hooks @opentelemetry/sdk-trace-base > "$tmp_dir/npm-list-after-otel.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-after-otel.txt"
 grep -q '@opentelemetry/api@' "$tmp_dir/npm-list-after-otel.txt"
 grep -q '@opentelemetry/context-async-hooks@' "$tmp_dir/npm-list-after-otel.txt"
+grep -q '@opentelemetry/sdk-trace-base@' "$tmp_dir/npm-list-after-otel.txt"
 
 cat > typecheck.mts <<'EOF'
 import {
+  createLogBrewOpenTelemetrySpanProcessor,
+  LogBrewClient,
   logbrewTraceContextFromCurrentOpenTelemetrySpan,
   logbrewTraceContextFromOpenTelemetrySpan,
   logbrewTraceContextFromOpenTelemetrySpanContext,
+  spanAttributesFromOpenTelemetryReadableSpan,
+  type OpenTelemetryReadableSpanLike,
   type OpenTelemetrySpanContextLike
 } from "@logbrew/sdk";
 
@@ -98,6 +105,27 @@ const fromContext = logbrewTraceContextFromOpenTelemetrySpanContext(spanContext,
 });
 const fromSpan = logbrewTraceContextFromOpenTelemetrySpan({ spanContext: () => spanContext });
 const fromCurrent = logbrewTraceContextFromCurrentOpenTelemetrySpan();
+const readableSpan: OpenTelemetryReadableSpanLike = {
+  name: "GET /orders/:id",
+  spanContext: () => spanContext,
+  parentSpanContext: spanContext,
+  startTime: [1780000000, 100000000],
+  duration: [0, 12000000],
+  status: { code: 1 },
+  attributes: { "http.route": "/orders/:id" },
+  events: [{ name: "cache.lookup", attributes: { "cache.hit": false } }]
+};
+const converted = spanAttributesFromOpenTelemetryReadableSpan(readableSpan, {
+  eventAttributeKeys: ["cache.hit"]
+});
+const processor = createLogBrewOpenTelemetrySpanProcessor({
+  client: LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "typecheck",
+    sdkVersion: "0.1.0"
+  })
+});
+processor.onEnd(readableSpan);
 
 if (!fromContext) {
   throw new Error("expected typed span context to produce a LogBrew trace");
@@ -105,6 +133,8 @@ if (!fromContext) {
 fromContext.traceId satisfies string;
 fromSpan?.sampled satisfies boolean | undefined;
 fromCurrent?.spanId satisfies string | undefined;
+converted?.events?.[0]?.metadata?.["cache.hit"] satisfies string | number | boolean | null | undefined;
+processor.forceFlush() satisfies Promise<void>;
 EOF
 ./node_modules/.bin/tsc \
   --noEmit \
@@ -118,11 +148,14 @@ EOF
 
 cat > otel.mjs <<'EOF'
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import { context, TraceFlags, trace } from "@opentelemetry/api";
+import { context, SpanKind, TraceFlags, trace } from "@opentelemetry/api";
+import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import {
+  createLogBrewOpenTelemetrySpanProcessor,
   createTraceparentHeaders,
   LogBrewClient,
-  logbrewTraceContextFromCurrentOpenTelemetrySpan
+  logbrewTraceContextFromCurrentOpenTelemetrySpan,
+  RecordingTransport
 } from "@logbrew/sdk";
 
 const manager = new AsyncLocalStorageContextManager().enable();
@@ -220,18 +253,107 @@ try {
       traceparent: true
     }).sort()) + "\n");
   });
+
+  const processorClient = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "js-opentelemetry-processor-smoke",
+    sdkVersion: "0.1.0"
+  });
+  const processorTransport = RecordingTransport.alwaysAccept();
+  const processor = createLogBrewOpenTelemetrySpanProcessor({
+    client: processorClient,
+    eventAttributeKeys: ["cache.hit"],
+    linkAttributeKeys: ["messaging.operation.name"],
+    metadata: { release: "checkout@1.2.3" },
+    transport: processorTransport
+  });
+  const provider = new BasicTracerProvider({ spanProcessors: [processor] });
+  if (typeof provider.addSpanProcessor === "function") {
+    provider.addSpanProcessor(processor);
+  }
+  const tracer = provider.getTracer("logbrew-otel-smoke", "1.0.0");
+  const processorSpan = tracer.startSpan("GET /orders/:id", {
+    attributes: {
+      "db.statement": "select * from users where api_key = 'redacted'",
+      "http.request.method": "GET",
+      "http.response.status_code": 200,
+      "http.route": "/orders/:id",
+      "url.full": "https://api.example/orders/42?api_key=redacted#frag"
+    },
+    kind: SpanKind.CLIENT,
+    links: [
+      {
+        context: {
+          traceId: "11111111111111111111111111111111",
+          spanId: "2222222222222222",
+          traceFlags: TraceFlags.SAMPLED
+        },
+        attributes: {
+          "http.url": "https://api.example/internal?api_key=redacted",
+          "messaging.operation.name": "process"
+        }
+      }
+    ]
+  });
+  processorSpan.addEvent("exception", {
+    "exception.message": "private message",
+    "exception.stacktrace": "private stack",
+    "exception.type": "TypeError"
+  });
+  processorSpan.addEvent("cache.lookup", {
+    "cache.hit": false,
+    "cache.key": "private-cache-key"
+  });
+  processorSpan.end();
+  await processor.forceFlush();
+  await processor.shutdown();
+
+  const processorPayload = JSON.parse(processorTransport.lastBody());
+  const processorEvent = processorPayload.events[0];
+  const serializedProcessorPayload = JSON.stringify(processorPayload);
+  if (processorPayload.events.length !== 1 || processorEvent.type !== "span") {
+    throw new Error(`unexpected processor payload: ${serializedProcessorPayload}`);
+  }
+  if (processorEvent.attributes.metadata.source !== "opentelemetry.readable_span") {
+    throw new Error("processor did not mark the OpenTelemetry source");
+  }
+  if (
+    serializedProcessorPayload.includes("url.full") ||
+    serializedProcessorPayload.includes("db.statement") ||
+    serializedProcessorPayload.includes("exception.message") ||
+    serializedProcessorPayload.includes("exception.stacktrace") ||
+    serializedProcessorPayload.includes("private-cache-key") ||
+    serializedProcessorPayload.includes("api_key=redacted")
+  ) {
+    throw new Error("processor payload copied sensitive OpenTelemetry data");
+  }
+  if (processorEvent.attributes.metadata["http.route"] !== "/orders/:id") {
+    throw new Error("processor omitted safe HTTP route metadata");
+  }
+  if (processorEvent.attributes.links[0].metadata["messaging.operation.name"] !== "process") {
+    throw new Error("processor omitted safe link metadata");
+  }
+  await import("node:fs").then(({ writeFileSync }) => {
+    writeFileSync(process.env.PROCESSOR_BODY_PATH, JSON.stringify(processorPayload, null, 2));
+  });
 } finally {
   context.disable();
   manager.disable();
 }
 EOF
 
-node otel.mjs > "$tmp_dir/otel.stdout.json"
+PROCESSOR_BODY_PATH="$tmp_dir/processor-body.json" node otel.mjs > "$tmp_dir/otel.stdout.json"
 grep -q '"ok":true' "$tmp_dir/otel.stdout.json"
 grep -q '"events":3' "$tmp_dir/otel.stdout.json"
 grep -q '"logTraceId":"4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/otel.stdout.json"
 grep -q '"spanParentSpanId":"00f067aa0ba902b7"' "$tmp_dir/otel.stdout.json"
 grep -q '"actionSpanId":"b7ad6b7169203331"' "$tmp_dir/otel.stdout.json"
 grep -q '"traceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$tmp_dir/otel.stdout.json"
+test -s "$tmp_dir/processor-body.json"
+grep -q '"source": "opentelemetry.readable_span"' "$tmp_dir/processor-body.json"
+grep -q '"http.route": "/orders/:id"' "$tmp_dir/processor-body.json"
+grep -q '"messaging.operation.name": "process"' "$tmp_dir/processor-body.json"
+! grep -q 'api_key=redacted' "$tmp_dir/processor-body.json"
+! grep -q 'db.statement' "$tmp_dir/processor-body.json"
 
 echo "JavaScript OpenTelemetry installed-artifact smoke passed"

@@ -232,7 +232,49 @@ if (trace) {
 }
 ```
 
-The OpenTelemetry helpers also accept explicit `spanContext` and `span` objects through `logbrewTraceContextFromOpenTelemetrySpanContext()` and `logbrewTraceContextFromOpenTelemetrySpan()`. They duck-type the public OTel shape, return `null` when OpenTelemetry is absent or invalid, create a fresh LogBrew child span ID by default, and copy only valid trace ID, parent span ID, and sampled state. They do not add an OpenTelemetry dependency, own tracer providers/exporters/processors, read OTel attributes/events/links, serialize baggage or tracestate, patch clients, or copy raw propagation headers.
+The OpenTelemetry helpers also accept explicit `spanContext` and `span` objects through `logbrewTraceContextFromOpenTelemetrySpanContext()` and `logbrewTraceContextFromOpenTelemetrySpan()`. They duck-type the public OTel shape, return `null` when OpenTelemetry is absent or invalid, create a fresh LogBrew child span ID by default, and copy only valid trace ID, parent span ID, and sampled state.
+
+If your app already owns an OpenTelemetry provider, `createLogBrewOpenTelemetrySpanProcessor()` can convert ended OTel `ReadableSpan` objects into queued LogBrew spans without making LogBrew own your provider, exporter, or instrumentation setup:
+
+```js
+import { SpanKind } from "@opentelemetry/api";
+import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
+import {
+  createLogBrewOpenTelemetrySpanProcessor,
+  LogBrewClient,
+  RecordingTransport
+} from "@logbrew/sdk";
+
+const client = LogBrewClient.create({
+  apiKey: "LOGBREW_API_KEY",
+  sdkName: "checkout-api",
+  sdkVersion: "1.0.0"
+});
+const processor = createLogBrewOpenTelemetrySpanProcessor({
+  client,
+  transport: RecordingTransport.alwaysAccept(),
+  eventAttributeKeys: ["cache.hit"],
+  linkAttributeKeys: ["messaging.operation.name"],
+  metadata: { release: "checkout@1.2.3", environment: "production" }
+});
+const provider = new BasicTracerProvider({ spanProcessors: [processor] });
+const tracer = provider.getTracer("checkout-api");
+
+const span = tracer.startSpan("GET /orders/:id", {
+  kind: SpanKind.CLIENT,
+  attributes: {
+    "http.request.method": "GET",
+    "http.response.status_code": 200,
+    "http.route": "/orders/:id"
+  }
+});
+span.addEvent("cache.lookup", { "cache.hit": false });
+span.end();
+
+await processor.forceFlush();
+```
+
+The OTel processor follows normal OTel sampled-span behavior by default and summarizes up to eight span events and eight links. It copies only a small safe default set such as service, environment, route, method, status code, span kind, instrumentation scope, exception type, and dropped-count metadata. Additional event/link/span/resource attributes require explicit allowlists, and high-risk keys such as full URLs, headers, query strings, payloads, cookies, private auth values, DB statements, exception messages, and stacks stay blocked. The helpers do not add an OpenTelemetry dependency, patch clients, serialize baggage or tracestate, copy raw propagation headers, or capture request/response bodies.
 
 LogBrew severity categories are `info`, `warning`, `error`, and `critical`. The JavaScript SDK accepts common runtime aliases such as `trace`, `debug`, `warn`, and `fatal` for compatibility, then serializes canonical values before queued events are sent. The shared mapping is documented in the [LogBrew severity contract](../../docs/severity-contract.md).
 
