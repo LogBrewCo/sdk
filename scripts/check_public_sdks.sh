@@ -90,6 +90,7 @@ STEP_LABELS=(
   "Unity real-user smoke"
   "Kotlin real-user smoke"
   "Ruby real-user smoke"
+  "RubyGems public install smoke"
   "Swift real-user smoke"
   "PHP package metadata"
   "PHP package install"
@@ -674,6 +675,10 @@ mark_step_complete
 
 begin_next_step "Ruby real-user smoke"
 run_shell_step "bash scripts/real_user_ruby_smoke.sh"
+mark_step_complete
+
+begin_next_step "RubyGems public install smoke"
+run_shell_step "bash scripts/real_user_rubygems_public_smoke.sh"
 mark_step_complete
 
 begin_next_step "Swift real-user smoke"

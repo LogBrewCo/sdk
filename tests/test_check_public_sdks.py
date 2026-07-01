@@ -316,6 +316,21 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "Unity real-user smoke"',
         )
 
+    def test_public_verifier_runs_rubygems_public_install_smoke(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"RubyGems public install smoke"', script)
+        self.assertRegex(
+            script,
+            r'begin_next_step "Ruby real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_ruby_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "RubyGems public install smoke"\n'
+            r'run_shell_step "bash scripts/real_user_rubygems_public_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Swift real-user smoke"',
+        )
+
     def test_public_verifier_runs_python_celery_smoke(self) -> None:
         script = SCRIPT.read_text()
 
