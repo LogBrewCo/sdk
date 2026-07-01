@@ -89,6 +89,7 @@ STEP_LABELS=(
   ".NET high-load installed-artifact smoke"
   ".NET public NuGet install smoke"
   "Unity real-user smoke"
+  "OpenUPM public install smoke"
   "Kotlin real-user smoke"
   "Ruby real-user smoke"
   "RubyGems public install smoke"
@@ -673,6 +674,10 @@ mark_step_complete
 
 begin_next_step "Unity real-user smoke"
 run_shell_step "bash scripts/real_user_unity_smoke.sh"
+mark_step_complete
+
+begin_next_step "OpenUPM public install smoke"
+run_shell_step "bash scripts/real_user_openupm_public_smoke.sh"
 mark_step_complete
 
 begin_next_step "Kotlin real-user smoke"
