@@ -310,6 +310,38 @@ _ = err
 
 The SQL helpers keep the same explicit boundary as the generic database helper. LogBrew passes query text and args only to query-text runners such as `*sql.DB`, `*sql.Tx`, and `*sql.Conn`; prepared statement runners such as `*sql.Stmt` receive args only. The exported runner interfaces are `SQLQueryContextRunner`, `SQLExecContextRunner`, `SQLStatementQueryContextRunner`, and `SQLStatementExecContextRunner`. In both cases LogBrew activates a child trace for logs inside that call, records safe operation metadata, and captures `RowsAffected()` for successful exec results when the driver exposes it. It does not wrap or register drivers, does not alter app connection inputs, and does not capture query text, parameters, connection details, user names, result rows, exception messages, stacks, baggage, or tracestate. If you want a sanitized statement template in telemetry, pass your own placeholder-only `StatementTemplate`; LogBrew will not derive one from query text.
 
+For transaction-level hierarchy, use `SQLTransactionWithLogBrewSpan` with an app-owned `*sql.DB` or `*sql.Conn`, then pass the callback context to SQL query/exec helpers so those child spans sit under the transaction span:
+
+```go
+result, err := logbrew.SQLTransactionWithLogBrewSpan(
+  r.Context(),
+  client,
+  db,
+  "checkout transaction",
+  nil,
+  func(txCtx context.Context, tx *sql.Tx) (string, error) {
+    _, err := logbrew.SQLExecContextWithLogBrewSpan(
+      txCtx,
+      client,
+      tx,
+      "insert checkout order",
+      "INSERT INTO orders(account_ref) VALUES (?)",
+      logbrew.DatabaseOperationConfig{System: "postgresql", DatabaseName: "orders"},
+      accountRef,
+    )
+    if err != nil {
+      return "", err
+    }
+    return "committed", nil
+  },
+  logbrew.DatabaseOperationConfig{System: "postgresql", DatabaseName: "orders"},
+)
+_ = result
+_ = err
+```
+
+The transaction helper begins through the app-owned `SQLBeginTxRunner`, commits when the callback succeeds, rolls back when the callback returns an error, rolls back before re-panicking when the callback panics, records a safe `dbTransactionOutcome`, and preserves the original callback, commit error, or panic. Rollback failures are reported through `OnError` with a redacted SDK diagnostic. It does not wrap drivers, register global SQL drivers, patch pools, capture SQL text, parameters, DSNs, connection details, result rows, exception messages, stacks, baggage, or tracestate.
+
 ## Agent-Readable Timelines
 
 Use `CreateProductActionAttributes` and `CreateNetworkMilestoneAttributes` when your Go service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.

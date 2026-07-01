@@ -3,9 +3,13 @@ package logbrew
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -18,6 +22,8 @@ var _ SQLExecContextRunner = (*sql.DB)(nil)
 var _ SQLExecContextRunner = (*sql.Tx)(nil)
 var _ SQLExecContextRunner = (*sql.Conn)(nil)
 var _ SQLStatementExecContextRunner = (*sql.Stmt)(nil)
+var _ SQLBeginTxRunner = (*sql.DB)(nil)
+var _ SQLBeginTxRunner = (*sql.Conn)(nil)
 
 func TestOperationSpanHelpersCorrelateAndSanitizeMetadata(t *testing.T) {
 	client := sampleClient(t)
@@ -476,6 +482,239 @@ func TestSQLContextHelpersSupportPreparedStatementRunners(t *testing.T) {
 	}
 }
 
+func TestSQLTransactionWithLogBrewSpanCommitsAndParentsSQLSpans(t *testing.T) {
+	client := sampleClient(t)
+	parent, err := NewTraceContext(TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := ContextWithLogBrewTrace(context.Background(), parent)
+	state := &fakeSQLDriverState{}
+	db := newFakeSQLDB(t, state)
+	defer func() { _ = db.Close() }()
+
+	var transactionTrace TraceContext
+	result, err := SQLTransactionWithLogBrewSpan(
+		ctx,
+		client,
+		db,
+		"checkout transaction",
+		nil,
+		func(txCtx context.Context, tx *sql.Tx) (string, error) {
+			var ok bool
+			transactionTrace, ok = LogBrewTraceFromContext(txCtx)
+			if !ok {
+				t.Fatal("expected transaction callback context to carry child trace")
+			}
+			if _, err := SQLExecContextWithLogBrewSpan(
+				txCtx,
+				client,
+				tx,
+				"insert checkout order",
+				"INSERT INTO orders(account_ref) VALUES (?)",
+				DatabaseOperationConfig{
+					System:        "postgresql",
+					DatabaseName:  "orders",
+					EventIDPrefix: "go_sql_tx_exec",
+					SpanIDFactory: func() string {
+						return "b7ad6b7169203341"
+					},
+					Now: fixedOperationNow(),
+				},
+				"opaque-account-ref",
+			); err != nil {
+				return "", err
+			}
+			rows, err := SQLQueryContextWithLogBrewSpan(
+				txCtx,
+				client,
+				tx,
+				"select checkout order",
+				"SELECT * FROM orders WHERE account_ref = ?",
+				DatabaseOperationConfig{
+					System:        "postgresql",
+					DatabaseName:  "orders",
+					EventIDPrefix: "go_sql_tx_query",
+					SpanIDFactory: func() string {
+						return "b7ad6b7169203342"
+					},
+					Now: fixedOperationNow(),
+				},
+				"opaque-account-ref",
+			)
+			if err != nil {
+				return "", err
+			}
+			if err := rows.Close(); err != nil {
+				return "", err
+			}
+			return "committed", nil
+		},
+		DatabaseOperationConfig{
+			System:        "postgresql",
+			DatabaseName:  "orders",
+			EventIDPrefix: "go_sql_tx",
+			Metadata: map[string]any{
+				"component":        "checkout",
+				"connectionString": "opaque-private-target",
+				"sql":              "BEGIN; INSERT INTO orders(account_ref) VALUES ('opaque-account-ref')",
+			},
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203340"
+			},
+			Now: fixedOperationNow(),
+		},
+	)
+	if err != nil || result != "committed" {
+		t.Fatalf("unexpected transaction result=%q err=%v", result, err)
+	}
+	if state.commits.Load() != 1 || state.rollbacks.Load() != 0 {
+		t.Fatalf("unexpected transaction finish: commits=%d rollbacks=%d", state.commits.Load(), state.rollbacks.Load())
+	}
+	if transactionTrace.TraceID != parent.TraceID ||
+		transactionTrace.ParentSpanID != parent.SpanID ||
+		transactionTrace.SpanID != "b7ad6b7169203340" {
+		t.Fatalf("unexpected transaction trace: %#v", transactionTrace)
+	}
+	if state.beginTrace.SpanID != transactionTrace.SpanID ||
+		state.beginTrace.ParentSpanID != transactionTrace.ParentSpanID {
+		t.Fatalf("expected BeginTx to receive transaction trace: begin=%#v tx=%#v", state.beginTrace, transactionTrace)
+	}
+	if state.execTrace.ParentSpanID != transactionTrace.SpanID ||
+		state.queryTrace.ParentSpanID != transactionTrace.SpanID {
+		t.Fatalf("expected SQL child spans under transaction span: exec=%#v query=%#v tx=%#v", state.execTrace, state.queryTrace, transactionTrace)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"dbOperation": "checkout transaction"`,
+		`"dbOperationKind": "transaction"`,
+		`"dbTransactionOutcome": "commit"`,
+		`"dbOperation": "insert checkout order"`,
+		`"dbOperationKind": "exec"`,
+		`"dbOperation": "select checkout order"`,
+		`"dbOperationKind": "query"`,
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("missing transaction SQL trace metadata %s in payload: %s", want, payload)
+		}
+	}
+	for _, unsafe := range []string{
+		"INSERT INTO orders",
+		"SELECT * FROM orders",
+		"opaque-account-ref",
+		"opaque-private-target",
+		"connectionString",
+	} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("transaction SQL helper leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
+func TestSQLTransactionWithLogBrewSpanRollsBackAndKeepsRollbackDiagnosticRedacted(t *testing.T) {
+	client := sampleClient(t)
+	state := &fakeSQLDriverState{rollbackErr: errors.New("driver rollback exposed private detail")}
+	db := newFakeSQLDB(t, state)
+	defer func() { _ = db.Close() }()
+	operationErr := errors.New("application failure with private detail")
+	var reported error
+
+	_, err := SQLTransactionWithLogBrewSpan(
+		context.Background(),
+		client,
+		db,
+		"checkout transaction",
+		nil,
+		func(context.Context, *sql.Tx) (string, error) {
+			return "not-committed", operationErr
+		},
+		DatabaseOperationConfig{
+			System:        "postgresql",
+			EventIDPrefix: "go_sql_tx_rollback",
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203343"
+			},
+			Now:     fixedOperationNow(),
+			OnError: func(err error) { reported = err },
+		},
+	)
+	if !errors.Is(err, operationErr) {
+		t.Fatalf("expected original operation error, got %v", err)
+	}
+	if state.commits.Load() != 0 || state.rollbacks.Load() != 1 {
+		t.Fatalf("unexpected transaction finish after error: commits=%d rollbacks=%d", state.commits.Load(), state.rollbacks.Load())
+	}
+	if reported == nil || !strings.Contains(reported.Error(), "transaction rollback failed") {
+		t.Fatalf("expected redacted rollback diagnostic, got %v", reported)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"dbOperation": "checkout transaction"`,
+		`"dbOperationKind": "transaction"`,
+		`"dbTransactionOutcome": "rollback_error"`,
+		`"status": "error"`,
+		`"errorType": "*errors.errorString"`,
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("missing rollback transaction metadata %s in payload: %s", want, payload)
+		}
+	}
+	for _, unsafe := range []string{
+		"application failure with private detail",
+		"driver rollback exposed private detail",
+	} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("transaction rollback path leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
+func TestSQLTransactionWithLogBrewSpanRollsBackAndRepanics(t *testing.T) {
+	client := sampleClient(t)
+	state := &fakeSQLDriverState{}
+	db := newFakeSQLDB(t, state)
+	defer func() { _ = db.Close() }()
+	defer func() {
+		recovered := recover()
+		if recovered != "panic from app transaction" {
+			t.Fatalf("expected original panic to propagate, got %#v", recovered)
+		}
+		if state.commits.Load() != 0 || state.rollbacks.Load() != 1 {
+			t.Fatalf("expected rollback before repanic: commits=%d rollbacks=%d", state.commits.Load(), state.rollbacks.Load())
+		}
+	}()
+
+	_, _ = SQLTransactionWithLogBrewSpan(
+		context.Background(),
+		client,
+		db,
+		"checkout transaction",
+		nil,
+		func(context.Context, *sql.Tx) (string, error) {
+			panic("panic from app transaction")
+		},
+		DatabaseOperationConfig{
+			EventIDPrefix: "go_sql_tx_panic",
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203344"
+			},
+			Now: fixedOperationNow(),
+		},
+	)
+	t.Fatal("expected transaction helper to repanic")
+}
+
 func fixedOperationNow() func() time.Time {
 	return func() time.Time {
 		return time.Date(2026, 6, 2, 10, 0, 0, 25*int(time.Millisecond), time.UTC)
@@ -582,4 +821,113 @@ func intPtr(value int) *int {
 
 func boolPtr(value bool) *bool {
 	return &value
+}
+
+var fakeSQLDriverCounter atomic.Uint64
+
+type fakeSQLDriverState struct {
+	commits     atomic.Int64
+	rollbacks   atomic.Int64
+	rollbackErr error
+	beginTrace  TraceContext
+	execTrace   TraceContext
+	queryTrace  TraceContext
+}
+
+func newFakeSQLDB(t *testing.T, state *fakeSQLDriverState) *sql.DB {
+	t.Helper()
+	driverName := fmt.Sprintf("logbrew_fake_sql_%d", fakeSQLDriverCounter.Add(1))
+	sql.Register(driverName, &fakeSQLDriver{state: state})
+	db, err := sql.Open(driverName, "")
+	if err != nil {
+		t.Fatalf("open fake SQL DB: %v", err)
+	}
+	return db
+}
+
+type fakeSQLDriver struct {
+	state *fakeSQLDriverState
+}
+
+func (d *fakeSQLDriver) Open(string) (driver.Conn, error) {
+	return &fakeSQLDriverConn{state: d.state}, nil
+}
+
+type fakeSQLDriverConn struct {
+	state *fakeSQLDriverState
+}
+
+func (c *fakeSQLDriverConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("prepare is not used by the fake SQL driver")
+}
+
+func (c *fakeSQLDriverConn) Close() error {
+	return nil
+}
+
+func (c *fakeSQLDriverConn) Begin() (driver.Tx, error) {
+	return c.BeginTx(context.Background(), driver.TxOptions{})
+}
+
+func (c *fakeSQLDriverConn) BeginTx(ctx context.Context, _ driver.TxOptions) (driver.Tx, error) {
+	if trace, ok := LogBrewTraceFromContext(ctx); ok {
+		c.state.beginTrace = trace
+	}
+	return &fakeSQLDriverTx{state: c.state}, nil
+}
+
+func (c *fakeSQLDriverConn) ExecContext(ctx context.Context, _ string, _ []driver.NamedValue) (driver.Result, error) {
+	trace, ok := LogBrewTraceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing LogBrew trace")
+	}
+	c.state.execTrace = trace
+	return fakeSQLDriverResult(1), nil
+}
+
+func (c *fakeSQLDriverConn) QueryContext(ctx context.Context, _ string, _ []driver.NamedValue) (driver.Rows, error) {
+	trace, ok := LogBrewTraceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing LogBrew trace")
+	}
+	c.state.queryTrace = trace
+	return fakeSQLDriverRows{}, nil
+}
+
+type fakeSQLDriverTx struct {
+	state *fakeSQLDriverState
+}
+
+func (tx *fakeSQLDriverTx) Commit() error {
+	tx.state.commits.Add(1)
+	return nil
+}
+
+func (tx *fakeSQLDriverTx) Rollback() error {
+	tx.state.rollbacks.Add(1)
+	return tx.state.rollbackErr
+}
+
+type fakeSQLDriverResult int64
+
+func (r fakeSQLDriverResult) LastInsertId() (int64, error) {
+	return 0, nil
+}
+
+func (r fakeSQLDriverResult) RowsAffected() (int64, error) {
+	return int64(r), nil
+}
+
+type fakeSQLDriverRows struct{}
+
+func (fakeSQLDriverRows) Columns() []string {
+	return []string{"ok"}
+}
+
+func (fakeSQLDriverRows) Close() error {
+	return nil
+}
+
+func (fakeSQLDriverRows) Next([]driver.Value) error {
+	return io.EOF
 }

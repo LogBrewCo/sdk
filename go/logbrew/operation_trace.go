@@ -76,6 +76,12 @@ type SQLStatementExecContextRunner interface {
 	ExecContext(ctx context.Context, args ...any) (sql.Result, error)
 }
 
+// SQLBeginTxRunner is implemented by app-owned *sql.DB and *sql.Conn values
+// that can start database/sql transactions.
+type SQLBeginTxRunner interface {
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
+}
+
 // DatabaseOperationWithLogBrewSpan runs operation under a child trace context
 // and queues one privacy-bounded database span.
 func DatabaseOperationWithLogBrewSpan[T any](
@@ -93,6 +99,74 @@ func DatabaseOperationWithLogBrewSpan[T any](
 		spanIDFactory: config.SpanIDFactory,
 		now:           config.Now,
 		onError:       config.OnError,
+	})
+}
+
+// SQLTransactionWithLogBrewSpan runs an app-owned database/sql transaction
+// callback under a child transaction span. LogBrew starts the transaction
+// through the app-owned runner, passes the active transaction context to the
+// callback, commits on callback success, and rolls back on callback error.
+// Query and exec helpers called with the callback context become children of
+// this transaction span. SQL text, args, connection details, and rollback error
+// messages are not copied into telemetry.
+func SQLTransactionWithLogBrewSpan[T any](
+	ctx context.Context,
+	client *Client,
+	beginner SQLBeginTxRunner,
+	operationName string,
+	opts *sql.TxOptions,
+	operation func(context.Context, *sql.Tx) (T, error),
+	config DatabaseOperationConfig,
+) (T, error) {
+	var zero T
+	if sqlBeginTxRunnerIsNil(beginner) {
+		return zero, &SdkError{Code: "configuration_error", Message: "database sql transaction runner must be non-nil"}
+	}
+	if operation == nil {
+		return zero, &SdkError{Code: "configuration_error", Message: "database sql transaction callback must be non-nil"}
+	}
+	if strings.TrimSpace(config.OperationKind) == "" {
+		config.OperationKind = "transaction"
+	}
+	outcome := ""
+	transaction := func(operationCtx context.Context) (T, error) {
+		tx, err := beginner.BeginTx(operationCtx, opts)
+		if err != nil {
+			outcome = "begin_error"
+			return zero, err
+		}
+		result, operationErr := func() (T, error) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					outcome = "panic_rollback"
+					if rollbackErr := tx.Rollback(); rollbackErr != nil {
+						outcome = "panic_rollback_error"
+						reportSQLTransactionRollbackFailure(config.OnError)
+					}
+					panic(recovered)
+				}
+			}()
+			return operation(operationCtx, tx)
+		}()
+		if operationErr != nil {
+			outcome = "rollback"
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				outcome = "rollback_error"
+				reportSQLTransactionRollbackFailure(config.OnError)
+			}
+			return result, operationErr
+		}
+		if err := tx.Commit(); err != nil {
+			outcome = "commit_error"
+			return result, err
+		}
+		outcome = "commit"
+		return result, nil
+	}
+	return sqlDatabaseOperationWithLogBrewSpan(ctx, client, operationName, transaction, config, func(_ T, _ error, enriched *DatabaseOperationConfig) {
+		if outcome != "" {
+			enriched.Metadata = mergeMetadata(enriched.Metadata, map[string]any{"dbTransactionOutcome": outcome})
+		}
 	})
 }
 
@@ -329,6 +403,26 @@ func sqlExecOperation(execer any, query string, args []any) (func(context.Contex
 	default:
 		return nil, &SdkError{Code: "configuration_error", Message: "database sql exec runner must implement ExecContext"}
 	}
+}
+
+func sqlBeginTxRunnerIsNil(beginner SQLBeginTxRunner) bool {
+	if beginner == nil {
+		return true
+	}
+	value := reflect.ValueOf(beginner)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func reportSQLTransactionRollbackFailure(onError func(error)) {
+	reportOperationSpanError(onError, &SdkError{
+		Code:    "capture_error",
+		Message: "database sql transaction rollback failed",
+	})
 }
 
 func operationChildTrace(ctx context.Context, spanIDFactory func() string) (TraceContext, error) {

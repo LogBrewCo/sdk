@@ -39,24 +39,28 @@
   `PostHog/posthog-go@2b6e1878570f91ba7a155720923bbf3b98cc9216`
   (no comparable `database/sql` tracing found). Core
   `github.com/LogBrewCo/sdk/go/logbrew` now exposes standard-library-only
-  `SQLQueryContextWithLogBrewSpan(...)` and
-  `SQLExecContextWithLogBrewSpan(...)` for app-owned `*sql.DB`, `*sql.Tx`,
-  `*sql.Conn`, prepared `*sql.Stmt`, or compatible runners. Query-text runners
-  receive query text and args; prepared statement runners receive args only.
-  The helpers activate a child LogBrew trace for logs inside that call, default
-  operation kind to `query`/`exec`, preserve the original result/error, and
-  record `RowsAffected()` only when successful exec results expose it. They
-  avoid driver registration/wrapping, connection input mutation, automatic
-  statement derivation, query/args/connection/user capture, result rows,
-  exception messages/stacks, baggage, and tracestate. Evidence: RED
-  missing-symbol Go tests, RED prepared-statement runner contract test,
-  `cd go/logbrew && go test ./...`, `bash scripts/real_user_go_smoke.sh` with
-  packaged README/`go doc`/temp-app SQL helper proof,
+  `SQLTransactionWithLogBrewSpan(...)`, `SQLQueryContextWithLogBrewSpan(...)`,
+  and `SQLExecContextWithLogBrewSpan(...)` for app-owned `*sql.DB`, `*sql.Conn`,
+  `*sql.Tx`, prepared `*sql.Stmt`, or compatible runners. The transaction
+  helper begins through app-owned `SQLBeginTxRunner`, activates a transaction
+  child trace for the callback, lets nested query/exec helpers parent under the
+  transaction span, commits on callback success, rolls back on callback error,
+  rolls back before re-panicking on callback panic, records safe
+  `dbTransactionOutcome`, preserves callback/commit errors and original panics,
+  and reports rollback failures only through redacted `OnError` diagnostics.
+  Query-text runners receive query text and args; prepared statement runners
+  receive args only. The helpers avoid driver registration/wrapping, pool/global
+  patching, connection input mutation, automatic statement derivation,
+  query/args/connection/user capture, result rows, rollback/panic/exception
+  messages/stacks, baggage, and tracestate. Evidence: RED missing-symbol Go
+  tests, RED prepared-statement runner contract test, RED transaction helper
+  tests, `cd go/logbrew && go test ./...`, `bash scripts/real_user_go_smoke.sh`
+  with packaged README/`go doc`/temp-app SQL transaction proof,
   `bash scripts/check_go_static.sh`, ShellCheck, markdown links, backend
   reports, release metadata, confidentiality scan, generated-artifact hygiene,
   and diff hygiene. Report:
   `docs/competitor-research/go-dependency-spans-2026-06-19.md`.
-  Remaining Go gaps: driver-wide automatic SQL spans, transaction hierarchy,
+  Remaining Go gaps: driver-wide automatic SQL spans, DBM/comment correlation,
   DB/cache metrics, Redis/Kafka/client integrations, richer semantic
   conventions, baggage/tracestate only with real interop need, and OTel
   processor/exporter interop.

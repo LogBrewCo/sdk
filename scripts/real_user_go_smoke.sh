@@ -132,8 +132,10 @@ for needle in (
     "NewHTTPClientTransport",
     "NewSlogHandler",
     "DatabaseOperationWithLogBrewSpan",
+    "SQLTransactionWithLogBrewSpan",
     "SQLQueryContextWithLogBrewSpan",
     "SQLExecContextWithLogBrewSpan",
+    "SQLBeginTxRunner",
     "SQLStatementQueryContextRunner",
     "SQLStatementExecContextRunner",
     "CacheOperationWithLogBrewSpan",
@@ -565,8 +567,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/LogBrewCo/sdk/go/logbrew"
@@ -902,6 +907,112 @@ func TestInstalledSQLContextHelpers(t *testing.T) {
 	}
 }
 
+func TestInstalledSQLTransactionWithLogBrewSpan(t *testing.T) {
+	client, err := logbrew.NewClient(logbrew.Config{
+		APIKey:     "LOGBREW_API_KEY",
+		SDKName:    "smoke-app-test",
+		SDKVersion: "0.1.0",
+	})
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	parent, err := logbrew.NewTraceContext(logbrew.TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatalf("create parent trace: %v", err)
+	}
+	ctx := logbrew.ContextWithLogBrewTrace(context.Background(), parent)
+	state := &fakeSQLDriverState{}
+	db := newFakeSQLDB(t, state)
+	defer func() { _ = db.Close() }()
+	var transactionTrace logbrew.TraceContext
+
+	result, err := logbrew.SQLTransactionWithLogBrewSpan(
+		ctx,
+		client,
+		db,
+		"checkout transaction",
+		nil,
+		func(txCtx context.Context, tx *sql.Tx) (string, error) {
+			var ok bool
+			transactionTrace, ok = logbrew.LogBrewTraceFromContext(txCtx)
+			if !ok {
+				t.Fatalf("expected transaction callback context to carry child trace")
+			}
+			if _, err := logbrew.SQLExecContextWithLogBrewSpan(
+				txCtx,
+				client,
+				tx,
+				"insert checkout order",
+				"INSERT INTO orders(account_ref) VALUES (?)",
+				logbrew.DatabaseOperationConfig{
+					System:        "postgresql",
+					DatabaseName:  "orders",
+					EventIDPrefix: "go_sql_tx_exec_test",
+					SpanIDFactory: func() string {
+						return "b7ad6b7169203341"
+					},
+				},
+				"opaque-account-ref",
+			); err != nil {
+				return "", err
+			}
+			return "committed", nil
+		},
+		logbrew.DatabaseOperationConfig{
+			System:        "postgresql",
+			DatabaseName:  "orders",
+			EventIDPrefix: "go_sql_tx_test",
+			Metadata: map[string]any{
+				"connectionString": "opaque-private-target",
+				"sql":              "BEGIN; INSERT INTO orders(account_ref) VALUES ('opaque-account-ref')",
+			},
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203340"
+			},
+		},
+	)
+	if err != nil || result != "committed" {
+		t.Fatalf("unexpected transaction result=%q err=%v", result, err)
+	}
+	if state.commits.Load() != 1 || state.rollbacks.Load() != 0 {
+		t.Fatalf("unexpected transaction finish: commits=%d rollbacks=%d", state.commits.Load(), state.rollbacks.Load())
+	}
+	if transactionTrace.TraceID != parent.TraceID ||
+		transactionTrace.ParentSpanID != parent.SpanID ||
+		transactionTrace.SpanID != "b7ad6b7169203340" ||
+		state.execTrace.ParentSpanID != transactionTrace.SpanID {
+		t.Fatalf("unexpected transaction trace hierarchy: tx=%#v exec=%#v", transactionTrace, state.execTrace)
+	}
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatalf("preview json: %v", err)
+	}
+	for _, want := range []string{
+		`"dbOperation": "checkout transaction"`,
+		`"dbOperationKind": "transaction"`,
+		`"dbTransactionOutcome": "commit"`,
+		`"dbOperation": "insert checkout order"`,
+		`"dbOperationKind": "exec"`,
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("missing transaction SQL trace metadata %s in payload: %s", want, payload)
+		}
+	}
+	for _, unsafe := range []string{
+		"INSERT INTO orders",
+		"opaque-account-ref",
+		"opaque-private-target",
+		"connectionString",
+	} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("SQL transaction helper leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
 type fakeSQLQueryer struct {
 	query string
 	args  []any
@@ -990,6 +1101,86 @@ func (r fakeSQLResult) LastInsertId() (int64, error) {
 
 func (r fakeSQLResult) RowsAffected() (int64, error) {
 	return r.rowsAffected, nil
+}
+
+var fakeSQLDriverCounter atomic.Uint64
+
+type fakeSQLDriverState struct {
+	commits   atomic.Int64
+	rollbacks atomic.Int64
+	execTrace logbrew.TraceContext
+}
+
+func newFakeSQLDB(t *testing.T, state *fakeSQLDriverState) *sql.DB {
+	t.Helper()
+	driverName := fmt.Sprintf("logbrew_fake_sql_%d", fakeSQLDriverCounter.Add(1))
+	sql.Register(driverName, &fakeSQLDriver{state: state})
+	db, err := sql.Open(driverName, "")
+	if err != nil {
+		t.Fatalf("open fake SQL DB: %v", err)
+	}
+	return db
+}
+
+type fakeSQLDriver struct {
+	state *fakeSQLDriverState
+}
+
+func (d *fakeSQLDriver) Open(string) (driver.Conn, error) {
+	return &fakeSQLDriverConn{state: d.state}, nil
+}
+
+type fakeSQLDriverConn struct {
+	state *fakeSQLDriverState
+}
+
+func (c *fakeSQLDriverConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("prepare is not used by the fake SQL driver")
+}
+
+func (c *fakeSQLDriverConn) Close() error {
+	return nil
+}
+
+func (c *fakeSQLDriverConn) Begin() (driver.Tx, error) {
+	return c.BeginTx(context.Background(), driver.TxOptions{})
+}
+
+func (c *fakeSQLDriverConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
+	return &fakeSQLDriverTx{state: c.state}, nil
+}
+
+func (c *fakeSQLDriverConn) ExecContext(ctx context.Context, _ string, _ []driver.NamedValue) (driver.Result, error) {
+	trace, ok := logbrew.LogBrewTraceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing LogBrew trace")
+	}
+	c.state.execTrace = trace
+	return fakeSQLDriverResult(1), nil
+}
+
+type fakeSQLDriverTx struct {
+	state *fakeSQLDriverState
+}
+
+func (tx *fakeSQLDriverTx) Commit() error {
+	tx.state.commits.Add(1)
+	return nil
+}
+
+func (tx *fakeSQLDriverTx) Rollback() error {
+	tx.state.rollbacks.Add(1)
+	return nil
+}
+
+type fakeSQLDriverResult int64
+
+func (r fakeSQLDriverResult) LastInsertId() (int64, error) {
+	return 0, nil
+}
+
+func (r fakeSQLDriverResult) RowsAffected() (int64, error) {
+	return int64(r), nil
 }
 EOF
 
@@ -1188,8 +1379,10 @@ for needle in (
     "NewHTTPHandler",
     "NewSlogHandler",
     "DatabaseOperationWithLogBrewSpan",
+    "SQLTransactionWithLogBrewSpan",
     "SQLQueryContextWithLogBrewSpan",
     "SQLExecContextWithLogBrewSpan",
+    "SQLBeginTxRunner",
     "SQLStatementQueryContextRunner",
     "SQLStatementExecContextRunner",
     "CacheOperationWithLogBrewSpan",
@@ -1288,6 +1481,9 @@ grep -q 'QueueOperationConfig configures an explicit app-owned queue span' queue
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.DatabaseOperationWithLogBrewSpan > database-operation-doc.txt
 grep -q '^func DatabaseOperationWithLogBrewSpan' database-operation-doc.txt
 grep -q 'queues one privacy-bounded database span' database-operation-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLTransactionWithLogBrewSpan > sql-transaction-operation-doc.txt
+grep -q '^func SQLTransactionWithLogBrewSpan' sql-transaction-operation-doc.txt
+grep -q 'runs an app-owned database/sql transaction' sql-transaction-operation-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLQueryContextWithLogBrewSpan > sql-query-operation-doc.txt
 grep -q '^func SQLQueryContextWithLogBrewSpan' sql-query-operation-doc.txt
 grep -q 'Query-text runners receive query text and args' sql-query-operation-doc.txt
@@ -1302,6 +1498,8 @@ GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLExecContextR
 grep -q '^type SQLExecContextRunner interface' sql-exec-runner-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLStatementExecContextRunner > sql-statement-exec-runner-doc.txt
 grep -q '^type SQLStatementExecContextRunner interface' sql-statement-exec-runner-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLBeginTxRunner > sql-begin-tx-runner-doc.txt
+grep -q '^type SQLBeginTxRunner interface' sql-begin-tx-runner-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.CacheOperationWithLogBrewSpan > cache-operation-doc.txt
 grep -q '^func CacheOperationWithLogBrewSpan' cache-operation-doc.txt
 grep -q 'queues one privacy-bounded cache span' cache-operation-doc.txt
