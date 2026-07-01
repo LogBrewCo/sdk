@@ -15,6 +15,9 @@ import {
   createLogBrewWinstonTransport,
   installLogBrewConsoleCapture,
   LogBrewClient,
+  logbrewTraceContextFromCurrentOpenTelemetrySpan,
+  logbrewTraceContextFromOpenTelemetrySpan,
+  logbrewTraceContextFromOpenTelemetrySpanContext,
   logAttributesFromConsoleArgs,
   logAttributesFromPinoRecord,
   logAttributesFromWinstonInfo,
@@ -585,6 +588,7 @@ test("CommonJS entry exposes the public API", () => {
   assert.equal(typeof sdk.createNetworkMilestoneAttributes, "function");
   assert.equal(typeof sdk.createSupportTicketDraft, "function");
   assert.equal(typeof sdk.installLogBrewConsoleCapture, "function");
+  assert.equal(typeof sdk.logbrewTraceContextFromCurrentOpenTelemetrySpan, "function");
   assert.equal(typeof sdk.parseTraceparent, "function");
   assert.match(client.previewJson(), /"type": "release"/);
 });
@@ -705,6 +709,108 @@ test("trace context helpers reject oversized or malformed carriers", () => {
       value: "v"
     }))),
     /baggage must contain at most 64 entries/
+  );
+});
+
+test("OpenTelemetry span context helper creates a LogBrew child trace", () => {
+  const trace = logbrewTraceContextFromOpenTelemetrySpanContext(
+    {
+      traceId: "4BF92F3577B34DA6A3CE929D0E0E4736",
+      spanId: "00F067AA0BA902B7",
+      traceFlags: 1,
+      traceState: { raw: "not-copied" }
+    },
+    { spanId: "b7ad6b7169203331" }
+  );
+
+  assert.deepEqual(trace, {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    parentSpanId: "00f067aa0ba902b7",
+    sampled: true
+  });
+});
+
+test("OpenTelemetry span helper duck-types span objects and validates child span ids", () => {
+  const trace = logbrewTraceContextFromOpenTelemetrySpan(
+    {
+      spanContext: () => ({
+        traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+        spanId: "00f067aa0ba902b7",
+        traceFlags: 0
+      })
+    },
+    { spanIdFactory: () => "b7ad6b7169203331" }
+  );
+
+  assert.deepEqual(trace, {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    parentSpanId: "00f067aa0ba902b7",
+    sampled: false
+  });
+  assert.throws(
+    () => logbrewTraceContextFromOpenTelemetrySpanContext(
+      {
+        traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+        spanId: "00f067aa0ba902b7",
+        traceFlags: 1
+      },
+      { spanIdFactory: () => "0000000000000000" }
+    ),
+    /spanId must not be all zeros/
+  );
+  assert.throws(
+    () => logbrewTraceContextFromOpenTelemetrySpan(
+      {
+        spanContext: () => ({
+          traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+          spanId: "00f067aa0ba902b7",
+          traceFlags: 1
+        })
+      },
+      { spanId: "bad" }
+    ),
+    /spanId must be 16/
+  );
+});
+
+test("OpenTelemetry current span helper uses explicit API seam and returns null for invalid contexts", () => {
+  const trace = logbrewTraceContextFromCurrentOpenTelemetrySpan({
+    openTelemetryApi: {
+      trace: {
+        getActiveSpan: () => ({
+          spanContext: () => ({
+            traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+            spanId: "00f067aa0ba902b7",
+            traceFlags: 1
+          })
+        })
+      }
+    },
+    spanId: "b7ad6b7169203331"
+  });
+
+  assert.deepEqual(trace, {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    parentSpanId: "00f067aa0ba902b7",
+    sampled: true
+  });
+  assert.equal(
+    logbrewTraceContextFromCurrentOpenTelemetrySpan({
+      openTelemetryApi: { trace: { getActiveSpan: () => undefined } },
+      spanId: "b7ad6b7169203331"
+    }),
+    null
+  );
+  assert.equal(
+    logbrewTraceContextFromOpenTelemetrySpanContext({
+      traceId: "00000000000000000000000000000000",
+      spanId: "00f067aa0ba902b7",
+      traceFlags: 1
+    }),
+    null
   );
 });
 

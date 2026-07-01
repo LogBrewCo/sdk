@@ -1,5 +1,43 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-01: JavaScript OpenTelemetry active-context bridge added after
+  source reads from Sentry JavaScript
+  `getsentry/sentry-javascript@e3161515dd5324e664b97e69ddcb7fa8ef6cd838`
+  (`packages/opentelemetry/src/trace.ts`, the OTel async context setup module,
+  `utils/getActiveSpan.ts`, `utils/getTraceData.ts`, `contextManager.ts`, plus
+  Cloudflare/Deno OTel tracer shims), OpenTelemetry JS
+  `open-telemetry/opentelemetry-js@c989308b87403e19923f440810d6ab47e7c2ba0d`
+  (`api/src/trace/context-utils.ts`, `spancontext-utils.ts`,
+  `trace_flags.ts`, `span_context.ts`, `NoopTracer.ts`,
+  `NonRecordingSpan.ts`), Datadog JS
+  `DataDog/dd-trace-js@7ffe20cf044810793377b05f4e97490ecd2c903c`
+  (`packages/dd-trace/src/opentelemetry/tracer.js`, `span_context.js`,
+  `span.js`, Prisma OTel DBM proof), and PostHog JS
+  `PostHog/posthog-js@a5181ba36f64cf69108be2f0fbf1e68dbeb4e827`
+  (`packages/ai/src/otel/*`). Core `@logbrew/sdk` now exports
+  `logbrewTraceContextFromCurrentOpenTelemetrySpan(...)`,
+  `logbrewTraceContextFromOpenTelemetrySpan(...)`, and
+  `logbrewTraceContextFromOpenTelemetrySpanContext(...)`: default installs add
+  no OTel dependency, absent/invalid OTel returns `null`, valid OTel
+  `SpanContext` copies only trace ID, parent span ID, and sampled state into a
+  fresh LogBrew child trace, and TypeScript uses duck-typed OTel shapes. It
+  avoids tracer providers/exporters/processors, global context managers,
+  automatic instrumentation, attributes/events/links, baggage/tracestate, raw
+  propagation headers, payloads, headers, cookies, full URLs, query strings, and
+  fragments. Evidence: RED JS tests, `npm test --prefix js/logbrew-js`, `python3
+  scripts/check_js_sources.py`, `bash scripts/check_js_lint.sh`, `bash
+  scripts/check_js_package.sh`, and `bash
+  scripts/real_user_js_opentelemetry_smoke.sh` with packed installed package
+  install/remove/reinstall, no-OTel `null` proof, real
+  `@opentelemetry/api@1.9.1` plus
+  `@opentelemetry/context-async-hooks@2.8.0`, TypeScript `5.9.2` declaration
+  proof, and active `AsyncLocalStorageContextManager` log/span/action
+  correlation. Research:
+  `docs/competitor-research/js-opentelemetry-context-2026-07-01.md`.
+  Remaining JS rich-trace gaps: full OTel processor/exporter interop,
+  automatic framework/driver spans, broader semantic attributes, baggage/
+  tracestate generation from real context, span events/exceptions/links from
+  OTel spans, and source-backed safe auto instrumentation.
 - 2026-07-01: Go high-load/backpressure gap reduced after source reads from
   Sentry Go `getsentry/sentry-go@ea6e493b6bd7bd5810b996c8245211982818114e`
   (`batch_processor.go` `Send`/`Flush`/`Shutdown`/`run`,

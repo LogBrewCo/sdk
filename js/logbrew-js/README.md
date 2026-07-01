@@ -200,6 +200,40 @@ await client.flush(RecordingTransport.alwaysAccept());
 
 The helpers validate the W3C `version-traceId-parentSpanId-traceFlags` shape, reject all-zero trace/span ids, normalize valid ids to lowercase, expose the sampled flag from `traceFlags`, and keep span metadata primitive-only. Optional span `events` record up to eight low-cardinality milestones with optional timestamps and primitive metadata only. Optional span `links` record up to eight privacy-bounded references to related trace/span IDs for batch, fan-out, queue, or retry workflows. `createTraceparentHeaders()` returns an explicit outbound carrier with only `traceparent`. `parseTracestate()`, `createTracestate()`, `parseBaggage()`, `createBaggage()`, and `createTraceContextHeaders()` add opt-in W3C `tracestate` and `baggage` propagation with bounded entry counts and header sizes. The helpers do not install OpenTelemetry, patch HTTP clients, infer baggage/tracestate automatically, or capture payloads; use them when you need explicit interop in code you own.
 
+If your app already installs OpenTelemetry JS, use `logbrewTraceContextFromCurrentOpenTelemetrySpan()` to copy the current active OTel span into a LogBrew child trace before recording logs, spans, or actions:
+
+```js
+import {
+  LogBrewClient,
+  logbrewTraceContextFromCurrentOpenTelemetrySpan
+} from "@logbrew/sdk";
+
+const client = LogBrewClient.create({
+  apiKey: "LOGBREW_API_KEY",
+  sdkName: "checkout-web",
+  sdkVersion: "1.0.0"
+});
+
+const trace = logbrewTraceContextFromCurrentOpenTelemetrySpan();
+if (trace) {
+  client.log("evt_checkout_log", "2026-06-02T10:00:03Z", {
+    message: "checkout step rendered",
+    level: "info",
+    logger: "checkout",
+    metadata: {
+      release: "checkout@1.2.3",
+      environment: "production",
+      traceId: trace.traceId,
+      spanId: trace.spanId,
+      parentSpanId: trace.parentSpanId,
+      sampled: trace.sampled
+    }
+  });
+}
+```
+
+The OpenTelemetry helpers also accept explicit `spanContext` and `span` objects through `logbrewTraceContextFromOpenTelemetrySpanContext()` and `logbrewTraceContextFromOpenTelemetrySpan()`. They duck-type the public OTel shape, return `null` when OpenTelemetry is absent or invalid, create a fresh LogBrew child span ID by default, and copy only valid trace ID, parent span ID, and sampled state. They do not add an OpenTelemetry dependency, own tracer providers/exporters/processors, read OTel attributes/events/links, serialize baggage or tracestate, patch clients, or copy raw propagation headers.
+
 LogBrew severity categories are `info`, `warning`, `error`, and `critical`. The JavaScript SDK accepts common runtime aliases such as `trace`, `debug`, `warn`, and `fatal` for compatibility, then serializes canonical values before queued events are sent. The shared mapping is documented in the [LogBrew severity contract](../../docs/severity-contract.md).
 
 ## Event Filtering

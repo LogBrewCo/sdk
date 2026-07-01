@@ -52,6 +52,38 @@ export type TraceContextInput = TraceparentInput & {
   baggage?: string | BaggageEntry[];
 };
 
+/** Minimal OpenTelemetry SpanContext-like shape copied by dependency-free bridge helpers. */
+export type OpenTelemetrySpanContextLike = {
+  traceId?: unknown;
+  spanId?: unknown;
+  traceFlags?: unknown;
+  isValid?: boolean;
+};
+
+/** Minimal OpenTelemetry Span-like shape accepted by dependency-free bridge helpers. */
+export type OpenTelemetrySpanLike = {
+  spanContext?: () => OpenTelemetrySpanContextLike | null | undefined;
+  getSpanContext?: () => OpenTelemetrySpanContextLike | null | undefined;
+};
+
+/** Minimal OpenTelemetry API-like shape used for the current active span helper. */
+export type OpenTelemetryApiLike = {
+  trace?: {
+    getActiveSpan?: () => OpenTelemetrySpanLike | null | undefined;
+  };
+};
+
+/** Options for creating a LogBrew child trace from OpenTelemetry context. */
+export type OpenTelemetryTraceContextOptions = {
+  spanId?: string;
+  spanIdFactory?: () => string;
+};
+
+/** Options for reading OpenTelemetry's current active span without requiring an OTel dependency. */
+export type CurrentOpenTelemetryTraceContextOptions = OpenTelemetryTraceContextOptions & {
+  openTelemetryApi?: OpenTelemetryApiLike;
+};
+
 /** Span fields supplied when deriving LogBrew span attributes from traceparent. */
 export type TraceparentSpanInput = {
   name: string;
@@ -494,6 +526,23 @@ export declare function createTraceContextHeaders(input: TraceContextInput): {
   tracestate?: string;
   baggage?: string;
 };
+
+/** Create a LogBrew child trace from a live OpenTelemetry SpanContext-like object. */
+export declare function logbrewTraceContextFromOpenTelemetrySpanContext(
+  spanContext: OpenTelemetrySpanContextLike | null | undefined,
+  options?: OpenTelemetryTraceContextOptions
+): LogCorrelationTraceContext | null;
+
+/** Create a LogBrew child trace from a live OpenTelemetry Span-like object. */
+export declare function logbrewTraceContextFromOpenTelemetrySpan(
+  span: OpenTelemetrySpanLike | null | undefined,
+  options?: OpenTelemetryTraceContextOptions
+): LogCorrelationTraceContext | null;
+
+/** Create a LogBrew child trace from OpenTelemetry's current active span, when available. */
+export declare function logbrewTraceContextFromCurrentOpenTelemetrySpan(
+  options?: CurrentOpenTelemetryTraceContextOptions
+): LogCorrelationTraceContext | null;
 
 /** Build LogBrew span attributes that continue an incoming W3C traceparent value. */
 export declare function spanAttributesFromTraceparent(
