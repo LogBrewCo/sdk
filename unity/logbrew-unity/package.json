@@ -1,6 +1,6 @@
 {
   "name": "co.logbrew.unity",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "LogBrew Unity SDK",
   "description": "Unity SDK for building, validating, previewing, and flushing LogBrew event batches.",
   "unity": "2021.3",

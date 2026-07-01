@@ -19,6 +19,7 @@ from release_metadata_dotnet import validate_dotnet_packages
 
 PUBLIC_VERSION = "0.1.0"
 DOTNET_VERSION = "0.1.4"
+UNITY_VERSION = "0.1.1"
 PUBLIC_LICENSE = "MIT"
 REPO_URL = "https://github.com/LogBrewCo/sdk"
 NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"
@@ -652,7 +653,7 @@ def validate_unity(root: Path, failures: list[str]) -> None:
     location = "unity/logbrew-unity/package.json"
     expected = {
         "name": "co.logbrew.unity",
-        "version": PUBLIC_VERSION,
+        "version": UNITY_VERSION,
         "displayName": "LogBrew Unity SDK",
         "unity": "2021.3",
         "license": PUBLIC_LICENSE,

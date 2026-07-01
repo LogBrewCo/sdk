@@ -52,7 +52,7 @@ from pathlib import Path
 manifest = json.loads(Path(sys.argv[1]).read_text())
 expected = {
     "name": "co.logbrew.unity",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "displayName": "LogBrew Unity SDK",
     "unity": "2021.3",
     "license": "MIT",
@@ -72,7 +72,7 @@ PY
 
 dotnet run --project "$package_dir/tests/LogBrew.Unity.Tests/LogBrew.Unity.Tests.csproj" --configuration Release
 
-package_tgz="$tmp_dir/co.logbrew.unity-0.1.0.tgz"
+package_tgz="$tmp_dir/co.logbrew.unity-0.1.1.tgz"
 (cd "$package_dir" && tar -czf "$package_tgz" package.json README.md Runtime Samples~ examples)
 tar -tzf "$package_tgz" > "$tmp_dir/package-contents.txt"
 grep -qx 'package.json' "$tmp_dir/package-contents.txt"

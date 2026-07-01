@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${1:-${LOGBREW_OPENUPM_VERSION:-0.1.0}}"
+version="${1:-${LOGBREW_OPENUPM_VERSION:-0.1.1}}"
 registry_url="${LOGBREW_OPENUPM_REGISTRY_URL:-https://package.openupm.com}"
 package_name="co.logbrew.unity"
 tmp_dir="$(mktemp -d)"
@@ -17,7 +17,12 @@ on_error() {
     "$tmp_dir/installed-readme.stdout.json" \
     "$tmp_dir/installed-readme.stderr.json" \
     "$tmp_dir/installed-smoke.stdout.json" \
-    "$tmp_dir/installed-smoke.stderr.json"; do
+    "$tmp_dir/installed-smoke.stderr.json" \
+    "$tmp_dir/installed-trace-correlation.stderr.json" \
+    "$tmp_dir/installed-lifecycle-spans.stderr.json" \
+    "$tmp_dir/installed-lifecycle-tracker.stderr.json" \
+    "$tmp_dir/installed-request-tracker.stderr.json" \
+    "$tmp_dir/installed-coroutine-tracker.stderr.json"; do
     if [[ -f "$diagnostic" ]]; then
       echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
       sed -n '1,140p' "$diagnostic" >&2
@@ -65,11 +70,20 @@ expected_files = {
     "Runtime/JsonSupport.cs",
     "Runtime/LogBrew.Unity.asmdef",
     "Runtime/LogBrewClient.cs",
+    "Runtime/LogBrewTrace.cs",
     "Runtime/PublicTypes.cs",
+    "Runtime/UnityCoroutineTrace.cs",
     "Runtime/UnityHelpers.cs",
+    "Runtime/UnityLifecycleTracker.cs",
+    "Runtime/UnityRequestTrace.cs",
     "Samples~/ReadmeExample/ReadmeExample.cs",
     "Samples~/RealUserSmoke/RealUserSmoke.cs",
     "examples/Makefile",
+    "examples/coroutine_tracker/CoroutineTracker.cs",
+    "examples/lifecycle_spans/LifecycleSpans.cs",
+    "examples/lifecycle_tracker/LifecycleTracker.cs",
+    "examples/request_tracker/RequestTracker.cs",
+    "examples/trace_correlation/TraceCorrelation.cs",
     "package.json",
     "tests/LogBrew.Unity.Tests/LogBrew.Unity.Tests.csproj",
     "tests/LogBrew.Unity.Tests/Program.cs",
@@ -130,11 +144,20 @@ for required_file in \
   Runtime/JsonSupport.cs \
   Runtime/LogBrew.Unity.asmdef \
   Runtime/LogBrewClient.cs \
+  Runtime/LogBrewTrace.cs \
   Runtime/PublicTypes.cs \
+  Runtime/UnityCoroutineTrace.cs \
   Runtime/UnityHelpers.cs \
+  Runtime/UnityLifecycleTracker.cs \
+  Runtime/UnityRequestTrace.cs \
   Samples~/ReadmeExample/ReadmeExample.cs \
   Samples~/RealUserSmoke/RealUserSmoke.cs \
-  examples/Makefile; do
+  examples/Makefile \
+  examples/trace_correlation/TraceCorrelation.cs \
+  examples/lifecycle_spans/LifecycleSpans.cs \
+  examples/lifecycle_tracker/LifecycleTracker.cs \
+  examples/request_tracker/RequestTracker.cs \
+  examples/coroutine_tracker/CoroutineTracker.cs; do
   test -f "$installed_package_dir/$required_file"
 done
 
@@ -195,5 +218,27 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"retryAttempts":2' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"unityHelperEvents":3' "$tmp_dir/installed-smoke.stderr.json"
 grep -q '"httpAttempts":1' "$tmp_dir/installed-smoke.stderr.json"
+
+make --no-print-directory -C "$installed_package_dir/examples" run-trace-correlation > "$tmp_dir/installed-trace-correlation.stdout.json" 2> "$tmp_dir/installed-trace-correlation.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-trace-correlation.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_unity_trace_correlation_payload.py" "$tmp_dir/installed-trace-correlation.stdout.json" "$tmp_dir/installed-trace-correlation.stderr.json"
+
+make --no-print-directory -C "$installed_package_dir/examples" run-lifecycle-spans > "$tmp_dir/installed-lifecycle-spans.stdout.json" 2> "$tmp_dir/installed-lifecycle-spans.stderr.json"
+test ! -s "$tmp_dir/installed-lifecycle-spans.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-lifecycle-spans.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_unity_lifecycle_payload.py" "$tmp_dir/installed-lifecycle-spans.stdout.json"
+
+make --no-print-directory -C "$installed_package_dir/examples" run-lifecycle-tracker > "$tmp_dir/installed-lifecycle-tracker.stdout.json" 2> "$tmp_dir/installed-lifecycle-tracker.stderr.json"
+test ! -s "$tmp_dir/installed-lifecycle-tracker.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-lifecycle-tracker.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_unity_lifecycle_payload.py" "$tmp_dir/installed-lifecycle-tracker.stdout.json"
+
+make --no-print-directory -C "$installed_package_dir/examples" run-request-tracker > "$tmp_dir/installed-request-tracker.stdout.json" 2> "$tmp_dir/installed-request-tracker.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-request-tracker.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_unity_request_tracker_payload.py" "$tmp_dir/installed-request-tracker.stdout.json" "$tmp_dir/installed-request-tracker.stderr.json"
+
+make --no-print-directory -C "$installed_package_dir/examples" run-coroutine-tracker > "$tmp_dir/installed-coroutine-tracker.stdout.json" 2> "$tmp_dir/installed-coroutine-tracker.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/installed-coroutine-tracker.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_unity_coroutine_tracker_payload.py" "$tmp_dir/installed-coroutine-tracker.stdout.json" "$tmp_dir/installed-coroutine-tracker.stderr.json"
 
 printf 'openupm public install smoke passed for %s %s\n' "$package_name" "$version"
