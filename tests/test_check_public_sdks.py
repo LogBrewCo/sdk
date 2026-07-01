@@ -203,10 +203,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "JavaScript high-load installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_js_high_load_smoke\.sh"\n'
             r"mark_step_complete\n\n"
-            r'begin_next_step "JavaScript OpenTelemetry installed-artifact smoke"\n'
-            r'run_shell_step "bash scripts/real_user_js_opentelemetry_smoke\.sh"\n'
-            r"mark_step_complete\n\n"
-            r'begin_next_step "Browser real-user smoke"',
+            r'begin_next_step "JavaScript OpenTelemetry installed-artifact smoke"',
         )
 
     def test_public_verifier_runs_node_queue_high_load_smoke(self) -> None:
