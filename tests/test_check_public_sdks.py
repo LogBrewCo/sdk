@@ -280,6 +280,27 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "Spring Boot real-user smoke"',
         )
 
+    def test_public_verifier_runs_cratesio_public_install_smoke(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"crates.io public install smoke"', script)
+        self.assertRegex(
+            script,
+            r'begin_next_step "Rust Actix real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_rust_actix_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Rust Rocket real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_rust_rocket_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Rust tracing real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_rust_tracing_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "crates\.io public install smoke"\n'
+            r'run_shell_step "bash scripts/real_user_cratesio_public_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "JavaScript real-user smoke"',
+        )
+
     def test_public_verifier_runs_dotnet_high_load_smoke(self) -> None:
         script = SCRIPT.read_text()
 

@@ -44,6 +44,7 @@ STEP_LABELS=(
   "Rust Actix real-user smoke"
   "Rust Rocket real-user smoke"
   "Rust tracing real-user smoke"
+  "crates.io public install smoke"
   "JavaScript real-user smoke"
   "JavaScript high-load installed-artifact smoke"
   "JavaScript OpenTelemetry installed-artifact smoke"
@@ -492,6 +493,10 @@ mark_step_complete
 
 begin_next_step "Rust tracing real-user smoke"
 run_shell_step "bash scripts/real_user_rust_tracing_smoke.sh"
+mark_step_complete
+
+begin_next_step "crates.io public install smoke"
+run_shell_step "bash scripts/real_user_cratesio_public_smoke.sh"
 mark_step_complete
 
 begin_next_step "JavaScript real-user smoke"
