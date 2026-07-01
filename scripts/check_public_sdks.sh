@@ -55,6 +55,7 @@ STEP_LABELS=(
   "KafkaJS real-user smoke"
   "AMQP/RabbitMQ real-user smoke"
   "AWS SQS real-user smoke"
+  "npm public registry install smoke"
   "Express real-user smoke"
   "Fastify real-user smoke"
   "NestJS real-user smoke"
@@ -530,6 +531,10 @@ mark_step_complete
 
 begin_next_step "AWS SQS real-user smoke"
 run_shell_step "bash scripts/real_user_aws_sqs_smoke.sh"
+mark_step_complete
+
+begin_next_step "npm public registry install smoke"
+run_shell_step "bash scripts/real_user_npm_public_registry_smoke.sh"
 mark_step_complete
 
 begin_next_step "Express real-user smoke"

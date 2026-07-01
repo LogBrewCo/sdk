@@ -230,6 +230,24 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "AWS SQS real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_aws_sqs_smoke\.sh"\n'
             r"mark_step_complete\n\n"
+            r'begin_next_step "npm public registry install smoke"\n'
+            r'run_shell_step "bash scripts/real_user_npm_public_registry_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Express real-user smoke"',
+        )
+
+    def test_public_verifier_runs_npm_public_registry_install_smoke(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"npm public registry install smoke"', script)
+        self.assertRegex(
+            script,
+            r'begin_next_step "AWS SQS real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_aws_sqs_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "npm public registry install smoke"\n'
+            r'run_shell_step "bash scripts/real_user_npm_public_registry_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
             r'begin_next_step "Express real-user smoke"',
         )
 
