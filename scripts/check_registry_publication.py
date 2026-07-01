@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from check_release_metadata import JS_PACKAGES, PUBLIC_VERSION, RUBYGEMS_VERSION
+from check_release_metadata import JS_PACKAGES, PACKAGIST_VERSION, PUBLIC_VERSION, RUBYGEMS_VERSION
 
 
 NPM_PACKAGES = tuple(sorted(JS_PACKAGES.values()))
@@ -26,7 +26,11 @@ NPM_VERSION_PACKAGES = NPM_PACKAGES + ("co.logbrew.unity",)
 PYPI_PACKAGES = ("logbrew-sdk",)
 PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-django")
 RUBYGEMS_PACKAGES = ("logbrew-sdk",)
-DEFAULT_PACKAGE_VERSIONS = {package_name: RUBYGEMS_VERSION for package_name in RUBYGEMS_PACKAGES}
+PACKAGIST_PACKAGES = ("logbrew/sdk",)
+DEFAULT_PACKAGE_VERSIONS = {
+    **{package_name: RUBYGEMS_VERSION for package_name in RUBYGEMS_PACKAGES},
+    **{package_name: PACKAGIST_VERSION for package_name in PACKAGIST_PACKAGES},
+}
 NUGET_PACKAGES = ("LogBrew", "LogBrew.AspNetCore", "LogBrew.EntityFrameworkCore", "LogBrew.StackExchangeRedis")
 CRATES = ("logbrew",)
 MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin", "logbrew-kotlin-okhttp")
@@ -250,7 +254,7 @@ def checks_for(args: argparse.Namespace) -> list[RegistryCheck]:
     if "nuget" in requested:
         checks.extend(nuget_check(package_name) for package_name in NUGET_PACKAGES)
     if "packagist" in requested:
-        checks.extend(packagist_check(package_name) for package_name in ("logbrew/sdk",))
+        checks.extend(packagist_check(package_name) for package_name in PACKAGIST_PACKAGES)
     if "crates" in requested:
         checks.extend(crates_check(crate_name) for crate_name in CRATES)
     if "maven" in requested:
@@ -421,12 +425,18 @@ def success_summary(args: argparse.Namespace) -> str:
         if "rubygems" in requested_targets or "all" in requested_targets
         else {}
     )
+    packagist_versions = (
+        {package_name: DEFAULT_PACKAGE_VERSIONS[package_name] for package_name in PACKAGIST_PACKAGES}
+        if "packagist" in requested_targets or "all" in requested_targets
+        else {}
+    )
     overrides = [
         formatted
         for formatted in (
             format_overrides("npm", args.npm_versions),
             format_overrides("pypi", args.pypi_versions),
             format_overrides("RubyGems", rubygems_versions),
+            format_overrides("Packagist", packagist_versions),
             format_overrides("nuget", args.nuget_versions),
             format_overrides("maven", getattr(args, "maven_versions", {})),
         )

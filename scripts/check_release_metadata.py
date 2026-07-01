@@ -19,6 +19,7 @@ from release_metadata_dotnet import validate_dotnet_packages
 
 PUBLIC_VERSION = "0.1.0"
 RUBYGEMS_VERSION = "0.1.1"
+PACKAGIST_VERSION = "0.1.1"
 DOTNET_VERSION = "0.1.4"
 UNITY_VERSION = "0.1.1"
 PUBLIC_LICENSE = "MIT"

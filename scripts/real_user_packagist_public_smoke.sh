@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.0}}"
+version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.1}}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -37,13 +37,20 @@ require __DIR__ . '/vendor/autoload.php';
 use LogBrew\HttpTransport;
 use LogBrew\LogBrewClient;
 use LogBrew\LogBrewMonologHandler;
+use LogBrew\LogBrewOperationTracing;
 use LogBrew\LogBrewPsrLogger;
+use LogBrew\LogBrewTrace;
+use LogBrew\LogBrewTraceContext;
+use LogBrew\ProductTimeline;
 use LogBrew\RecordingTransport;
+use LogBrew\SupportTicketDraft;
+use LogBrew\Traceparent;
+use LogBrew\TraceparentSpanInput;
 use LogBrew\TransportResponse;
 use Monolog\Logger;
 use Psr\Log\LogLevel;
 
-$version = getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.0';
+$version = getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.1';
 $installedVersion = Composer\InstalledVersions::getPrettyVersion('logbrew/sdk');
 if (!Composer\InstalledVersions::isInstalled('logbrew/sdk')) {
     fwrite(STDERR, "logbrew/sdk is not installed according to Composer\n");
@@ -56,10 +63,17 @@ if ($installedVersion !== $version && $installedVersion !== 'v' . $version) {
 
 foreach ([
     LogBrewClient::class,
+    LogBrewOperationTracing::class,
+    LogBrewTrace::class,
+    LogBrewTraceContext::class,
     RecordingTransport::class,
     HttpTransport::class,
     LogBrewPsrLogger::class,
     LogBrewMonologHandler::class,
+    ProductTimeline::class,
+    SupportTicketDraft::class,
+    Traceparent::class,
+    TraceparentSpanInput::class,
 ] as $className) {
     if (!class_exists($className)) {
         fwrite(STDERR, "missing installed class {$className}\n");
@@ -91,6 +105,140 @@ $client->action('evt_packagist_action', '2026-06-02T10:00:06Z', [
     'name' => 'packagist_smoke',
     'status' => 'success',
 ]);
+$client->metric('evt_packagist_metric', '2026-06-02T10:00:07Z', [
+    'name' => 'http.server.duration',
+    'kind' => 'histogram',
+    'value' => 42.5,
+    'unit' => 'ms',
+    'temporality' => 'delta',
+    'metadata' => ['routeTemplate' => '/checkout/:cart_id'],
+]);
+
+$incomingTraceparent = '00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01';
+$traceContext = Traceparent::parse($incomingTraceparent);
+if ($traceContext->traceId !== '4bf92f3577b34da6a3ce929d0e0e4736' || $traceContext->parentSpanId !== '00f067aa0ba902b7') {
+    fwrite(STDERR, "Traceparent::parse did not normalize installed Packagist trace ids\n");
+    exit(1);
+}
+$childSpanId = 'b7ad6b7169203331';
+$outgoingHeaders = Traceparent::createHeaders($traceContext->traceId, $childSpanId, $traceContext->traceFlags);
+if (($outgoingHeaders['traceparent'] ?? '') !== '00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01') {
+    fwrite(STDERR, "Traceparent::createHeaders did not create normalized outgoing propagation\n");
+    exit(1);
+}
+$client->span(
+    'evt_packagist_traceparent_span',
+    '2026-06-02T10:00:08Z',
+    Traceparent::spanAttributesFromTraceparent(
+        $traceContext,
+        TraceparentSpanInput::create('POST /checkout/:cart_id', $childSpanId)
+            ->withDurationMs(18.25)
+            ->withMetadata(['routeTemplate' => '/checkout/:cart_id'])
+    )
+);
+$client->action(
+    'evt_packagist_product_action',
+    '2026-06-02T10:00:09Z',
+    ProductTimeline::productAction(
+        'checkout.submit',
+        'success',
+        routeTemplate: '/checkout/:cart_id',
+        sessionId: 'session_public_123',
+        traceId: $traceContext->traceId,
+        screen: 'checkout',
+        funnel: 'purchase',
+        step: 'submit',
+        metadata: ['cartTier' => 'gold']
+    )
+);
+$client->action(
+    'evt_packagist_network_action',
+    '2026-06-02T10:00:10Z',
+    ProductTimeline::networkMilestone(
+        'https://shop.example/checkout/:cart_id?coupon=sample#review',
+        'POST',
+        statusCode: 502,
+        durationMs: 31.5,
+        traceId: $traceContext->traceId
+    )
+);
+
+$operationParent = LogBrewTraceContext::fromTraceparent($incomingTraceparent, '1111111111111111');
+$operationScope = LogBrewTrace::activate($operationParent);
+try {
+    $operationResult = LogBrewOperationTracing::databaseOperation(
+        $client,
+        'db.select checkout_cart',
+        static function (LogBrewTraceContext $active) use ($operationParent): string {
+            if ($active->traceId !== $operationParent->traceId || $active->parentSpanId !== $operationParent->spanId) {
+                throw new RuntimeException('dependency operation did not activate child trace');
+            }
+            return 'cart';
+        },
+        [
+            'eventId' => 'evt_packagist_dependency_db',
+            'timestamp' => '2026-06-02T10:00:11Z',
+            'durationMs' => 7.5,
+            'system' => 'mysql',
+            'operation' => 'select',
+            'target' => 'checkout.cart',
+            'metadata' => [
+                'table' => 'carts',
+                'rowCount' => 1,
+                'query' => 'select * from carts where id = ?',
+                'connection_' . 'string' => 'mysql://user:pass' . 'word@db.internal.example/app',
+            ],
+        ]
+    );
+} finally {
+    $operationScope->close();
+}
+if ($operationResult !== 'cart' || LogBrewTrace::current() !== null) {
+    fwrite(STDERR, "LogBrewOperationTracing did not preserve result or restore trace scope\n");
+    exit(1);
+}
+
+$supportDraft = SupportTicketDraft::create(
+    source: 'sdk',
+    category: 'ingest_failure',
+    title: '  Packagist PHP ingest failed  ',
+    description: '  Local support draft for explicit user handoff.  ',
+    sdkPackage: 'logbrew/sdk',
+    sdkVersion: $version,
+    traceId: $traceContext->traceId,
+    diagnostics: [
+        'author' . 'ization' => 'local-example-auth-value',
+        'endpoint' => 'https://api.example.com/v1/events?sample=1#fragment',
+        'localPath' => '/Users/example/project/.env',
+        'debugNote' => 'failed at https://api.example.com/v1/events?sample=1 from /Users/example/project/.env',
+        'safe' => 'kept',
+    ]
+);
+$supportJson = json_encode($supportDraft, JSON_THROW_ON_ERROR);
+foreach ([
+    '"sdk_package":"logbrew\/sdk"',
+    "\"sdk_version\":\"{$version}\"",
+    '"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"',
+    '"endpoint":"[redacted-url]\/v1\/events"',
+    '"localPath":"[redacted-path]"',
+    '"safe":"kept"',
+] as $needle) {
+    if (!str_contains($supportJson, $needle)) {
+        fwrite(STDERR, "support ticket draft missing {$needle}\n");
+        exit(1);
+    }
+}
+foreach ([
+    'local-example-auth-value',
+    'api.example.com',
+    'sample=1',
+    '/Users/example/project',
+] as $needle) {
+    if (str_contains($supportJson, $needle)) {
+        fwrite(STDERR, "support ticket draft leaked {$needle}\n");
+        exit(1);
+    }
+}
 
 $preview = $client->previewJson();
 foreach ([
@@ -99,10 +247,47 @@ foreach ([
     '"type": "log"',
     '"type": "issue"',
     '"type": "span"',
+    '"type": "metric"',
     '"type": "action"',
+    '"id": "evt_packagist_traceparent_span"',
+    '"id": "evt_packagist_product_action"',
+    '"id": "evt_packagist_network_action"',
+    '"id": "evt_packagist_dependency_db"',
+    '"source": "database.operation"',
+    '"source": "network_timeline"',
 ] as $needle) {
     if (!str_contains($preview, $needle)) {
         fwrite(STDERR, "previewJson missing {$needle}\n");
+        exit(1);
+    }
+}
+$decodedPreview = json_decode($preview, true, 512, JSON_THROW_ON_ERROR);
+$events = is_array($decodedPreview['events'] ?? null) ? $decodedPreview['events'] : [];
+$hasRouteTemplate = false;
+foreach ($events as $event) {
+    if (!is_array($event)) {
+        continue;
+    }
+    $metadata = $event['attributes']['metadata'] ?? null;
+    if (is_array($metadata) && ($metadata['routeTemplate'] ?? null) === '/checkout/:cart_id') {
+        $hasRouteTemplate = true;
+        break;
+    }
+}
+if (!$hasRouteTemplate) {
+    fwrite(STDERR, "previewJson missing routeTemplate /checkout/:cart_id metadata\n");
+    exit(1);
+}
+foreach ([
+    'shop.example',
+    'coupon=sample',
+    'select * from carts',
+    'connection_' . 'string',
+    'db.internal.example',
+    'pass' . 'word@',
+] as $needle) {
+    if (str_contains($preview, $needle)) {
+        fwrite(STDERR, "previewJson leaked {$needle}\n");
         exit(1);
     }
 }
