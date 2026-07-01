@@ -29,13 +29,14 @@ Improve LogBrew JavaScript rich trace interop for apps that already use OpenTele
 - The processor queues spans through the existing `LogBrewClient.span(...)` path and uses existing flush/shutdown transport behavior when an app provides a transport.
 - It follows OTel sampled-span behavior by default; apps can opt into unsampled capture.
 - It summarizes up to eight events and eight links, carries W3C trace/span IDs, duration, parent span ID, status, route/method/status metadata, service/environment resource metadata, instrumentation scope, span kind, and dropped-count metadata.
+- Concurrent `forceFlush()` calls share the in-flight flush so the same queued batch is not sent twice.
 - It blocks high-risk OTel keys by default: full URLs, headers, query/fragment values, payload/body, cookies, private auth values, DB statements, exception messages, and stacks.
 - Additional span, event, link, and resource attributes require explicit allowlists and still pass the sensitive-key block.
 
 ## Verification
 
 - Red test first: `npm test` failed because `createLogBrewOpenTelemetrySpanProcessor` was not exported.
-- Unit verification: `npm test` passed with 79 tests, including sanitized `ReadableSpan` conversion and SpanProcessor queue/drop/flush behavior.
+- Unit verification: `npm test` passed with 80 tests, including sanitized `ReadableSpan` conversion, SpanProcessor queue/drop/flush behavior, and concurrent `forceFlush()` coalescing.
 - Installed-artifact verification: `bash scripts/real_user_js_opentelemetry_smoke.sh` passed. The temporary npm app installed the packed `@logbrew/sdk`, `@opentelemetry/api`, `@opentelemetry/context-async-hooks`, `@opentelemetry/sdk-trace-base`, and `typescript`; proved no-OTel fallback, active context copy, type declarations, real `BasicTracerProvider` ended-span processing, safe event/link metadata, and absence of blocked sensitive OTel keys in the flushed payload.
 
 ## Honest Comparison

@@ -26,8 +26,10 @@
   status/service/environment/scope/kind/dropped-count metadata, requires
   allowlists for extra attributes, and blocks full URLs, headers, query/
   fragment values, payloads, cookies, private auth values, DB statements, exception
-  messages, and stacks. Evidence: RED missing-export JS tests, `npm test
-  --prefix js/logbrew-js` (79 tests), and `bash
+  messages, and stacks. Concurrent `forceFlush()` calls now share one in-flight
+  transport send so a single queued batch is not duplicated. Evidence: RED
+  missing-export JS tests, concurrent-forceFlush regression coverage, `npm test
+  --prefix js/logbrew-js` (80 tests), and `bash
   scripts/real_user_js_opentelemetry_smoke.sh` with packed installed package,
   install/remove/reinstall, no-OTel fallback, real `@opentelemetry/api`,
   `@opentelemetry/context-async-hooks`, `@opentelemetry/sdk-trace-base`,
