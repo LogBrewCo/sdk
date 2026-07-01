@@ -1,5 +1,43 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-01: Go `database/sql` rich-trace ergonomics improved after fresh
+  source reads from Sentry Go
+  `getsentry/sentry-go@ea6e493b6bd7bd5810b996c8245211982818114e`
+  (`sql/doc.go`, `sql/sentrysql.go` `Open`/`OpenDB`/`WrapDriver`/
+  `WrapConnector`/`Register`, `sql/conn.go` `QueryContext`/`ExecContext`/
+  `PrepareContext`, `sql/span.go` `startQuerySpan`/`setSQLData`/
+  `finishSpan`, and `sql/options.go` database options/query obfuscation),
+  Datadog Go tracer
+  `DataDog/dd-trace-go@061ffc340dae85a53729895d0f9b22d906940ca9`
+  (`contrib/database/sql/sql.go` traced connector/OpenDB,
+  `contrib/database/sql/conn.go` `ExecContext`/`QueryContext`/`tryTrace`/
+  DBM propagation comment injection, `tx.go`, and `propagation_test.go`),
+  OpenTelemetry Go Contrib
+  `open-telemetry/opentelemetry-go-contrib@cf444e3f2822448f31782f83c7217b8179d59c61`
+  (no first-party `database/sql` wrapper found; MongoDB/HTTP/gRPC/framework
+  paths remain the official contrib DB-style evidence), and PostHog Go
+  `PostHog/posthog-go@2b6e1878570f91ba7a155720923bbf3b98cc9216`
+  (no comparable `database/sql` tracing found). Core
+  `github.com/LogBrewCo/sdk/go/logbrew` now exposes standard-library-only
+  `SQLQueryContextWithLogBrewSpan(...)` and
+  `SQLExecContextWithLogBrewSpan(...)` for app-owned `*sql.DB`, `*sql.Tx`,
+  `*sql.Conn`, `*sql.Stmt`, or compatible runners. The helpers pass query text
+  and args only to the app-owned runner, activate a child LogBrew trace for
+  logs inside that call, default operation kind to `query`/`exec`, preserve the
+  original result/error, and record `RowsAffected()` only when successful
+  exec results expose it. They avoid driver registration/wrapping, connection
+  input mutation, automatic statement derivation, query/args/connection/user
+  capture, result rows, exception messages/stacks, baggage, and tracestate.
+  Evidence: RED missing-symbol Go tests, `cd go/logbrew && go test ./...`,
+  `bash scripts/real_user_go_smoke.sh` with packaged README/`go doc`/temp-app
+  SQL helper proof, `bash scripts/check_go_static.sh`, ShellCheck, markdown
+  links, backend reports, release metadata, confidentiality scan,
+  generated-artifact hygiene, and diff hygiene. Report:
+  `docs/competitor-research/go-dependency-spans-2026-06-19.md`.
+  Remaining Go gaps: driver-wide automatic SQL spans, transaction hierarchy,
+  DB/cache metrics, Redis/Kafka/client integrations, richer semantic
+  conventions, baggage/tracestate only with real interop need, and OTel
+  processor/exporter interop.
 - 2026-07-01: Java Spring Kafka setup ergonomics improved after fresh source reads from Sentry Java
   `getsentry/sentry-java@307edcd968452d07d801c46362bf98f815fea808`
   (`sentry-spring-boot-4/.../SentryAutoConfiguration` `SentryKafkaQueueConfiguration`,

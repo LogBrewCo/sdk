@@ -2,6 +2,7 @@ package logbrew
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
@@ -51,6 +52,18 @@ type QueueOperationConfig struct {
 	OnError       func(error)
 }
 
+// SQLQueryContextRunner is implemented by app-owned *sql.DB, *sql.Tx,
+// *sql.Conn, and *sql.Stmt values that can run query operations.
+type SQLQueryContextRunner interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// SQLExecContextRunner is implemented by app-owned *sql.DB, *sql.Tx,
+// *sql.Conn, and *sql.Stmt values that can run exec operations.
+type SQLExecContextRunner interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // DatabaseOperationWithLogBrewSpan runs operation under a child trace context
 // and queues one privacy-bounded database span.
 func DatabaseOperationWithLogBrewSpan[T any](
@@ -68,6 +81,69 @@ func DatabaseOperationWithLogBrewSpan[T any](
 		spanIDFactory: config.SpanIDFactory,
 		now:           config.Now,
 		onError:       config.OnError,
+	})
+}
+
+// SQLQueryContextWithLogBrewSpan runs an app-owned database/sql QueryContext
+// call under a child trace and queues one privacy-bounded database span. The
+// query text and args are passed only to the app-owned runner and are never
+// copied into telemetry by this helper.
+func SQLQueryContextWithLogBrewSpan(
+	ctx context.Context,
+	client *Client,
+	queryer SQLQueryContextRunner,
+	operationName string,
+	query string,
+	config DatabaseOperationConfig,
+	args ...any,
+) (*sql.Rows, error) {
+	if queryer == nil {
+		return nil, &SdkError{Code: "configuration_error", Message: "database sql query runner must be non-nil"}
+	}
+	if strings.TrimSpace(config.OperationKind) == "" {
+		config.OperationKind = "query"
+	}
+	return sqlDatabaseOperationWithLogBrewSpan(ctx, client, operationName, func(operationCtx context.Context) (*sql.Rows, error) {
+		return queryer.QueryContext(operationCtx, query, args...)
+	}, config, nil)
+}
+
+// SQLExecContextWithLogBrewSpan runs an app-owned database/sql ExecContext
+// call under a child trace and queues one privacy-bounded database span. The
+// query text and args are passed only to the app-owned runner and are never
+// copied into telemetry by this helper.
+func SQLExecContextWithLogBrewSpan(
+	ctx context.Context,
+	client *Client,
+	execer SQLExecContextRunner,
+	operationName string,
+	query string,
+	config DatabaseOperationConfig,
+	args ...any,
+) (sql.Result, error) {
+	if execer == nil {
+		return nil, &SdkError{Code: "configuration_error", Message: "database sql exec runner must be non-nil"}
+	}
+	if strings.TrimSpace(config.OperationKind) == "" {
+		config.OperationKind = "exec"
+	}
+	return sqlDatabaseOperationWithLogBrewSpan(ctx, client, operationName, func(operationCtx context.Context) (sql.Result, error) {
+		return execer.ExecContext(operationCtx, query, args...)
+	}, config, func(result sql.Result, operationErr error, enriched *DatabaseOperationConfig) {
+		if operationErr != nil || result == nil || enriched.RowCount != nil {
+			return
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			reportOperationSpanError(enriched.OnError, &SdkError{
+				Code:    "capture_error",
+				Message: "database sql rows affected unavailable",
+			})
+			return
+		}
+		if rowCount, ok := nonNegativeInt64ToInt(rows); ok {
+			enriched.RowCount = &rowCount
+		}
 	})
 }
 
@@ -156,6 +232,56 @@ func operationWithLogBrewSpan[T any](
 	result, operationErr := operation(operationCtx)
 	finished := now()
 	captureOperationSpan(client, operationName, trace, operationErr, finished.Sub(start), finished, config)
+	return result, operationErr
+}
+
+func sqlDatabaseOperationWithLogBrewSpan[T any](
+	ctx context.Context,
+	client *Client,
+	operationName string,
+	operation func(context.Context) (T, error),
+	config DatabaseOperationConfig,
+	enrich func(T, error, *DatabaseOperationConfig),
+) (T, error) {
+	var zero T
+	if client == nil {
+		return zero, &SdkError{Code: "configuration_error", Message: "operation span client must be non-nil"}
+	}
+	if operation == nil {
+		return zero, &SdkError{Code: "configuration_error", Message: "operation span callback must be non-nil"}
+	}
+	if err := requireNonEmpty("operation name", operationName); err != nil {
+		return zero, err
+	}
+	now := config.Now
+	if now == nil {
+		now = time.Now
+	}
+	trace, traceErr := operationChildTrace(ctx, config.SpanIDFactory)
+	if traceErr != nil {
+		reportOperationSpanError(config.OnError, traceErr)
+	}
+	if trace.TraceID == "" {
+		return operation(ctx)
+	}
+
+	start := now()
+	operationCtx := ContextWithLogBrewTrace(ctxWithDefault(ctx), trace)
+	result, operationErr := operation(operationCtx)
+	finished := now()
+	enriched := config
+	if enrich != nil {
+		enrich(result, operationErr, &enriched)
+	}
+	captureOperationSpan(client, operationName, trace, operationErr, finished.Sub(start), finished, operationSpanConfig{
+		source:        "database.operation",
+		namePrefix:    "database",
+		eventIDPrefix: eventIDPrefix(enriched.EventIDPrefix, "go_database"),
+		metadata:      databaseOperationMetadata(operationName, enriched),
+		spanIDFactory: enriched.SpanIDFactory,
+		now:           enriched.Now,
+		onError:       enriched.OnError,
+	})
 	return result, operationErr
 }
 
@@ -306,6 +432,14 @@ func addNonNegativeInt(metadata map[string]any, key string, value *int) {
 	if value != nil && *value >= 0 {
 		metadata[key] = *value
 	}
+}
+
+func nonNegativeInt64ToInt(value int64) (int, bool) {
+	maxInt := int64(^uint(0) >> 1)
+	if value < 0 || value > maxInt {
+		return 0, false
+	}
+	return int(value), true
 }
 
 func operationSpanStatus(err error) string {

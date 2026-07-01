@@ -288,6 +288,28 @@ result, err := logbrew.DatabaseOperationWithLogBrewSpan(r.Context(), client, "se
 
 Each helper creates a child `TraceContext`, activates it for the callback, records one span, returns the original result, and re-raises the original error. Metadata is primitive-only and intentionally drops SQL text, parameters, connection details, cache keys/values, commands, message bodies, broker URLs, headers, cookies, and auth-like fields. These helpers do not import or patch `database/sql`, Redis, Kafka, AMQP, or queue clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
 
+For common `database/sql` calls, use `SQLQueryContextWithLogBrewSpan` and `SQLExecContextWithLogBrewSpan` with an app-owned `*sql.DB`, `*sql.Tx`, `*sql.Conn`, or `*sql.Stmt`:
+
+```go
+rows, err := logbrew.SQLQueryContextWithLogBrewSpan(
+  r.Context(),
+  client,
+  db,
+  "lookup checkout order",
+  "SELECT * FROM orders WHERE account_ref = ?",
+  logbrew.DatabaseOperationConfig{
+    System:       "postgresql",
+    DatabaseName: "orders",
+    Metadata:     map[string]any{"service": "checkout"},
+  },
+  accountRef,
+)
+_ = rows
+_ = err
+```
+
+The SQL helpers keep the same explicit boundary as the generic database helper. LogBrew passes the query text and args only to your app-owned `QueryContext` or `ExecContext` runner, activates a child trace for logs inside that call, records safe operation metadata, and captures `RowsAffected()` for successful exec results when the driver exposes it. It does not wrap or register drivers, does not alter app connection inputs, and does not capture query text, parameters, connection details, user names, result rows, exception messages, stacks, baggage, or tracestate. If you want a sanitized statement template in telemetry, pass your own placeholder-only `StatementTemplate`; LogBrew will not derive one from query text.
+
 ## Agent-Readable Timelines
 
 Use `CreateProductActionAttributes` and `CreateNetworkMilestoneAttributes` when your Go service already knows important product steps or API milestones. The helpers create normal `action` event attributes with primitive metadata that AI assistants can analyze across sessions without visual replay, global HTTP patching, payload capture, or header capture.

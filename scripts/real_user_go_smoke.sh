@@ -132,6 +132,8 @@ for needle in (
     "NewHTTPClientTransport",
     "NewSlogHandler",
     "DatabaseOperationWithLogBrewSpan",
+    "SQLQueryContextWithLogBrewSpan",
+    "SQLExecContextWithLogBrewSpan",
     "CacheOperationWithLogBrewSpan",
     "QueueOperationWithLogBrewSpan",
     "CreateProductActionAttributes",
@@ -559,6 +561,9 @@ cat > smoke_test.go <<'EOF'
 package main
 
 import (
+	"context"
+	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 
@@ -720,6 +725,171 @@ func TestInstalledTimelineHelpers(t *testing.T) {
 	if _, ok := action.Metadata["nested"]; ok {
 		t.Fatalf("expected nested product action metadata to be filtered: %#v", action.Metadata)
 	}
+}
+
+func TestInstalledSQLContextHelpers(t *testing.T) {
+	client, err := logbrew.NewClient(logbrew.Config{
+		APIKey:     "LOGBREW_API_KEY",
+		SDKName:    "smoke-app-test",
+		SDKVersion: "0.1.0",
+	})
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	parent, err := logbrew.NewTraceContext(logbrew.TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatalf("create parent trace: %v", err)
+	}
+	ctx := logbrew.ContextWithLogBrewTrace(context.Background(), parent)
+	queryer := &fakeSQLQueryer{}
+	execer := &fakeSQLExecer{result: fakeSQLResult{rowsAffected: 2}}
+
+	_, err = logbrew.SQLQueryContextWithLogBrewSpan(
+		ctx,
+		client,
+		queryer,
+		"lookup checkout order",
+		"SELECT * FROM orders WHERE account_ref = ?",
+		logbrew.DatabaseOperationConfig{
+			System:        "postgresql",
+			DatabaseName:  "orders",
+			EventIDPrefix: "go_sql_query_test",
+			Metadata: map[string]any{
+				"component":        "checkout",
+				"sql":              "SELECT * FROM orders WHERE account_ref = 'opaque-ref-value'",
+				"connectionString": "opaque-private-target",
+			},
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203335"
+			},
+		},
+		"opaque-ref-value",
+	)
+	if err != nil {
+		t.Fatalf("query helper returned error: %v", err)
+	}
+	if queryer.query != "SELECT * FROM orders WHERE account_ref = ?" ||
+		len(queryer.args) != 1 ||
+		queryer.args[0] != "opaque-ref-value" {
+		t.Fatalf("query helper did not preserve app-owned query call: query=%q args=%#v", queryer.query, queryer.args)
+	}
+	if queryer.trace.TraceID != parent.TraceID ||
+		queryer.trace.ParentSpanID != parent.SpanID ||
+		queryer.trace.SpanID != "b7ad6b7169203335" {
+		t.Fatalf("query helper did not activate child trace: %#v", queryer.trace)
+	}
+
+	_, err = logbrew.SQLExecContextWithLogBrewSpan(
+		ctx,
+		client,
+		execer,
+		"update checkout order",
+		"UPDATE orders SET status = ? WHERE id = ?",
+		logbrew.DatabaseOperationConfig{
+			System:        "postgresql",
+			DatabaseName:  "orders",
+			EventIDPrefix: "go_sql_exec_test",
+			Metadata:      map[string]any{"params": []any{"private"}, "component": "checkout"},
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203336"
+			},
+		},
+		"paid",
+		"order-ref-value",
+	)
+	if err != nil {
+		t.Fatalf("exec helper returned error: %v", err)
+	}
+	if execer.query != "UPDATE orders SET status = ? WHERE id = ?" ||
+		len(execer.args) != 2 ||
+		execer.args[0] != "paid" ||
+		execer.args[1] != "order-ref-value" {
+		t.Fatalf("exec helper did not preserve app-owned exec call: query=%q args=%#v", execer.query, execer.args)
+	}
+	if execer.trace.TraceID != parent.TraceID ||
+		execer.trace.ParentSpanID != parent.SpanID ||
+		execer.trace.SpanID != "b7ad6b7169203336" {
+		t.Fatalf("exec helper did not activate child trace: %#v", execer.trace)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatalf("preview json: %v", err)
+	}
+	for _, want := range []string{
+		`"dbOperation": "lookup checkout order"`,
+		`"dbOperationKind": "query"`,
+		`"dbOperation": "update checkout order"`,
+		`"dbOperationKind": "exec"`,
+		`"rowCount": 2`,
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("missing SQL trace metadata %s in payload: %s", want, payload)
+		}
+	}
+	for _, unsafe := range []string{
+		"SELECT * FROM orders",
+		"UPDATE orders",
+		"opaque-ref-value",
+		"opaque-private-target",
+		"order-ref-value",
+		"connectionString",
+		"params",
+	} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("SQL helper leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
+type fakeSQLQueryer struct {
+	query string
+	args  []any
+	trace logbrew.TraceContext
+}
+
+func (q *fakeSQLQueryer) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	q.query = query
+	q.args = append([]any{}, args...)
+	trace, ok := logbrew.LogBrewTraceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing LogBrew trace")
+	}
+	q.trace = trace
+	return nil, nil
+}
+
+type fakeSQLExecer struct {
+	query  string
+	args   []any
+	trace  logbrew.TraceContext
+	result sql.Result
+}
+
+func (e *fakeSQLExecer) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	e.query = query
+	e.args = append([]any{}, args...)
+	trace, ok := logbrew.LogBrewTraceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing LogBrew trace")
+	}
+	e.trace = trace
+	return e.result, nil
+}
+
+type fakeSQLResult struct {
+	rowsAffected int64
+}
+
+func (r fakeSQLResult) LastInsertId() (int64, error) {
+	return 0, errors.New("last insert id unsupported")
+}
+
+func (r fakeSQLResult) RowsAffected() (int64, error) {
+	return r.rowsAffected, nil
 }
 EOF
 
@@ -918,6 +1088,8 @@ for needle in (
     "NewHTTPHandler",
     "NewSlogHandler",
     "DatabaseOperationWithLogBrewSpan",
+    "SQLQueryContextWithLogBrewSpan",
+    "SQLExecContextWithLogBrewSpan",
     "CacheOperationWithLogBrewSpan",
     "QueueOperationWithLogBrewSpan",
     "CreateProductActionAttributes",
@@ -1014,6 +1186,16 @@ grep -q 'QueueOperationConfig configures an explicit app-owned queue span' queue
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.DatabaseOperationWithLogBrewSpan > database-operation-doc.txt
 grep -q '^func DatabaseOperationWithLogBrewSpan' database-operation-doc.txt
 grep -q 'queues one privacy-bounded database span' database-operation-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLQueryContextWithLogBrewSpan > sql-query-operation-doc.txt
+grep -q '^func SQLQueryContextWithLogBrewSpan' sql-query-operation-doc.txt
+grep -q 'query text and args are passed only to the app-owned runner' sql-query-operation-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLExecContextWithLogBrewSpan > sql-exec-operation-doc.txt
+grep -q '^func SQLExecContextWithLogBrewSpan' sql-exec-operation-doc.txt
+grep -q 'query text and args are passed only to the app-owned runner' sql-exec-operation-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLQueryContextRunner > sql-query-runner-doc.txt
+grep -q '^type SQLQueryContextRunner interface' sql-query-runner-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLExecContextRunner > sql-exec-runner-doc.txt
+grep -q '^type SQLExecContextRunner interface' sql-exec-runner-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.CacheOperationWithLogBrewSpan > cache-operation-doc.txt
 grep -q '^func CacheOperationWithLogBrewSpan' cache-operation-doc.txt
 grep -q 'queues one privacy-bounded cache span' cache-operation-doc.txt
