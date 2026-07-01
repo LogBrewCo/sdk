@@ -188,6 +188,10 @@ jobs:
         if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
         run: bash scripts/real_user_node_smoke.sh
 
+      - name: Run Node queue high-load fake-intake smoke test
+        if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
+        run: bash scripts/real_user_node_queue_high_load_smoke.sh
+
       - name: Run BullMQ real-user smoke test
         if: ${{ hashFiles('js/logbrew-bullmq/package.json') != '' }}
         run: bash scripts/real_user_bullmq_smoke.sh
