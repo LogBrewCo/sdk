@@ -260,6 +260,12 @@ jobs:
       - name: Run JavaScript real-user smoke test
         run: bash scripts/real_user_js_smoke.sh
 
+      - name: Run JavaScript high-load installed-artifact smoke test
+        run: bash scripts/real_user_js_high_load_smoke.sh
+
+      - name: Run JavaScript OpenTelemetry installed-artifact smoke test
+        run: bash scripts/real_user_js_opentelemetry_smoke.sh
+
       - name: Run Browser real-user smoke test
         run: bash scripts/real_user_browser_smoke.sh
 
