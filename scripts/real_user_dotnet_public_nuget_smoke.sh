@@ -5,10 +5,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 source "$repo_root/scripts/dotnet_verifier_lock.sh"
 
-core_version="${1:-${LOGBREW_DOTNET_CORE_VERSION:-}}"
-aspnetcore_version="${2:-${LOGBREW_DOTNET_ASPNETCORE_VERSION:-}}"
-efcore_version="${3:-${LOGBREW_DOTNET_EFCORE_VERSION:-}}"
-redis_version="${4:-${LOGBREW_DOTNET_REDIS_VERSION:-}}"
+core_version="${1:-${LOGBREW_NUGET_CORE_VERSION:-${LOGBREW_DOTNET_CORE_VERSION:-0.1.4}}}"
+aspnetcore_version="${2:-${LOGBREW_NUGET_ASPNETCORE_VERSION:-${LOGBREW_DOTNET_ASPNETCORE_VERSION:-0.1.0}}}"
+efcore_version="${3:-${LOGBREW_NUGET_EFCORE_VERSION:-${LOGBREW_DOTNET_EFCORE_VERSION:-0.1.0}}}"
+redis_version="${4:-${LOGBREW_NUGET_REDIS_VERSION:-${LOGBREW_DOTNET_REDIS_VERSION:-0.1.0}}}"
 
 cleanup() {
   rm -rf "$tmp_dir"
@@ -20,7 +20,7 @@ require_version() {
   local value="$2"
   if [[ -z "$value" ]]; then
     echo "missing required $label version" >&2
-    echo "usage: bash scripts/real_user_dotnet_public_nuget_smoke.sh <LogBrew> <LogBrew.AspNetCore> <LogBrew.EntityFrameworkCore> <LogBrew.StackExchangeRedis>" >&2
+    echo "usage: bash scripts/real_user_dotnet_public_nuget_smoke.sh [LogBrew] [LogBrew.AspNetCore] [LogBrew.EntityFrameworkCore] [LogBrew.StackExchangeRedis]" >&2
     exit 2
   fi
 }

@@ -84,6 +84,7 @@ STEP_LABELS=(
   "Spring Boot real-user smoke"
   ".NET real-user smoke"
   ".NET high-load installed-artifact smoke"
+  ".NET public NuGet install smoke"
   "Unity real-user smoke"
   "Kotlin real-user smoke"
   "Ruby real-user smoke"
@@ -647,6 +648,10 @@ mark_step_complete
 
 begin_next_step ".NET high-load installed-artifact smoke"
 run_shell_step "bash scripts/real_user_dotnet_high_load_smoke.sh"
+mark_step_complete
+
+begin_next_step ".NET public NuGet install smoke"
+run_shell_step "bash scripts/real_user_dotnet_public_nuget_smoke.sh"
 mark_step_complete
 
 begin_next_step "Unity real-user smoke"

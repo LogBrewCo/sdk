@@ -288,6 +288,27 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "\.NET high-load installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_dotnet_high_load_smoke\.sh"\n'
             r"mark_step_complete\n\n"
+            r'begin_next_step "\.NET public NuGet install smoke"\n'
+            r'run_shell_step "bash scripts/real_user_dotnet_public_nuget_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Unity real-user smoke"',
+        )
+
+    def test_public_verifier_runs_dotnet_public_nuget_smoke(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('".NET public NuGet install smoke"', script)
+        self.assertRegex(
+            script,
+            r'begin_next_step "\.NET real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_dotnet_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "\.NET high-load installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_dotnet_high_load_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "\.NET public NuGet install smoke"\n'
+            r'run_shell_step "bash scripts/real_user_dotnet_public_nuget_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
             r'begin_next_step "Unity real-user smoke"',
         )
 
