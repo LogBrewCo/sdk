@@ -19,7 +19,7 @@ class GoPublicModuleSmokeTests(unittest.TestCase):
             "go get github.com/LogBrewCo/sdk/go/logbrew@",
             "go mod download -json",
             "go mod verify",
-            "go doc github.com/LogBrewCo/sdk/go/logbrew NewClient",
+            'run_go_doc go-doc-new-client.txt "$module_path" NewClient',
             'run_go_doc go-doc-config.txt "$module_path" Config',
             'run_go_doc go-doc-event-drop.txt "$module_path" EventDrop',
             'run_go_doc go-doc-queue-operation.txt "$module_path" QueueOperationWithLogBrewSpan',
