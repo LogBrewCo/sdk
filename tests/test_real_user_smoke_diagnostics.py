@@ -32,6 +32,17 @@ class RealUserSmokeDiagnosticsTests(unittest.TestCase):
         self.assertIn("Kotlin fake intake did not become ready", script)
         self.assertNotIn("for _attempt in {1..50}", script)
 
+    def test_kotlin_smoke_base_gradle_app_resolves_runtime_dependencies(self):
+        script = (ROOT / "scripts" / "real_user_kotlin_smoke.sh").read_text(
+            encoding="utf-8"
+        )
+
+        base_gradle_build = script.split('cat > "$gradle_app/build.gradle" <<EOF', 1)[1]
+        base_gradle_build = base_gradle_build.split("EOF", 1)[0]
+
+        self.assertIn("url = uri('$tmp_dir/maven')", base_gradle_build)
+        self.assertIn("mavenCentral()", base_gradle_build)
+
 
 if __name__ == "__main__":
     unittest.main()

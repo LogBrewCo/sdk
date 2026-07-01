@@ -187,6 +187,7 @@ repositories {
     maven {
         url = uri('$tmp_dir/maven')
     }
+    mavenCentral()
 }
 
 dependencies {
