@@ -6,11 +6,14 @@ Core Kotlin users do not need this package. Install it only where the app alread
 
 ## Install
 
-```text
-co.logbrew:logbrew-kotlin-okhttp:0.1.0
-```
+The optional OkHttp artifact is built and tested from this source package, but
+it is not published on Maven Central yet. Use `co.logbrew:logbrew-kotlin:0.1.0`
+from Maven Central for core Kotlin telemetry, or vendor this directory from the
+SDK repository until the OkHttp artifact is published.
 
-The package depends on `co.logbrew:logbrew-kotlin:0.1.0` and OkHttp `4.12.0`.
+When published, the package coordinates will be
+`co.logbrew:logbrew-kotlin-okhttp:0.1.0`. The package depends on
+`co.logbrew:logbrew-kotlin:0.1.0` and OkHttp `4.12.0`.
 
 ## Usage
 

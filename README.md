@@ -67,7 +67,7 @@ library your app already uses.
 | Rust | [`logbrew`](rust/logbrew) | Core Rust client and optional blocking HTTP delivery |
 | Apple apps | [`logbrew-swift`](swift/logbrew-swift) primary; [`logbrew-objc`](objc/logbrew-objc) advanced source/header variant | SwiftPM `LogBrew` product for iOS, macOS, tvOS, watchOS, Apple-style logger ergonomics, URLSession delivery; Objective-C vendoring for mixed or Objective-C-only apps |
 | Kotlin | [`co.logbrew:logbrew-kotlin`](kotlin/logbrew-kotlin) | Kotlin/JVM client, Android-style helper APIs, HTTP delivery |
-| Kotlin OkHttp | [`co.logbrew:logbrew-kotlin-okhttp`](kotlin/logbrew-kotlin-okhttp) | Optional OkHttp interceptor for outbound request spans and W3C traceparent propagation |
+| Kotlin OkHttp | [`kotlin/logbrew-kotlin-okhttp`](kotlin/logbrew-kotlin-okhttp) | Optional OkHttp interceptor source package; Maven Central publication is pending, so use the core Kotlin package or local source until the artifact is published |
 | Unity | [`co.logbrew.unity`](unity/logbrew-unity) | Unity package with runtime helpers and HTTP delivery |
 | C | [`logbrew-c`](c/logbrew-c) | C source/header client |
 | C++ | [`logbrew-cpp`](cpp/logbrew-cpp) | C++ RAII source/header client with optional HTTP delivery |
