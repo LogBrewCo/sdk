@@ -272,6 +272,10 @@ jobs:
         if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
         run: bash scripts/real_user_go_smoke.sh
 
+      - name: Run Go high-load installed-artifact smoke test
+        if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
+        run: bash scripts/real_user_go_high_load_smoke.sh
+
       - name: Run Go support-ticket real-user smoke test
         if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
         run: bash scripts/real_user_go_support_ticket_smoke.sh

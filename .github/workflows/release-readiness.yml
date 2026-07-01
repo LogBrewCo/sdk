@@ -459,6 +459,9 @@ jobs:
       - name: Run Go real-user smoke test
         run: bash scripts/real_user_go_smoke.sh
 
+      - name: Run Go high-load installed-artifact smoke test
+        run: bash scripts/real_user_go_high_load_smoke.sh
+
       - name: Run Go support-ticket real-user smoke test
         run: bash scripts/real_user_go_support_ticket_smoke.sh
 

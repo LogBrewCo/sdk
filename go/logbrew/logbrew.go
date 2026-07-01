@@ -48,7 +48,10 @@ const (
 	zeroTraceID = "00000000000000000000000000000000"
 	zeroSpanID  = "0000000000000000"
 
-	maxSpanLinks = 8
+	defaultMaxQueueSize = 1000
+	maxSpanLinks        = 8
+
+	eventDropReasonQueueOverflow = "queue_overflow"
 )
 
 var defaultHTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
@@ -240,6 +243,20 @@ type Config struct {
 	SDKVersion string
 	// MaxRetries sets the retry budget for retryable transport failures.
 	MaxRetries int
+	// MaxQueueSize bounds the in-memory event queue. Zero defaults to 1000.
+	MaxQueueSize int
+	// OnEventDropped is an advisory callback for local queue overflow. It must
+	// not be used for critical app control flow because panics are recovered.
+	OnEventDropped func(EventDrop)
+}
+
+// EventDrop is a privacy-bounded advisory emitted when the client drops a local
+// event before transport. It never includes event attributes, payloads, or keys.
+type EventDrop struct {
+	EventID       string `json:"eventId"`
+	EventType     string `json:"eventType"`
+	Reason        string `json:"reason"`
+	DroppedEvents int    `json:"droppedEvents"`
 }
 
 type sdkInfo struct {
@@ -269,12 +286,15 @@ type eventBatch struct {
 // Client buffers validated LogBrew events until they are previewed, flushed,
 // or shut down through a transport.
 type Client struct {
-	mu         sync.Mutex
-	apiKey     string
-	sdk        sdkInfo
-	maxRetries int
-	events     []Event
-	closed     bool
+	mu             sync.Mutex
+	apiKey         string
+	sdk            sdkInfo
+	maxRetries     int
+	maxQueueSize   int
+	events         []Event
+	droppedEvents  int
+	onEventDropped func(EventDrop)
+	closed         bool
 }
 
 // NewClient creates a public LogBrew client from user-supplied SDK identity
@@ -293,6 +313,13 @@ func NewClient(config Config) (*Client, error) {
 	if maxRetries == 0 {
 		maxRetries = 2
 	}
+	if config.MaxQueueSize < 0 {
+		return nil, &SdkError{Code: "configuration_error", Message: "max queue size must be non-negative"}
+	}
+	maxQueueSize := config.MaxQueueSize
+	if maxQueueSize == 0 {
+		maxQueueSize = defaultMaxQueueSize
+	}
 	return &Client{
 		apiKey: config.APIKey,
 		sdk: sdkInfo{
@@ -300,8 +327,10 @@ func NewClient(config Config) (*Client, error) {
 			Language: "go",
 			Version:  config.SDKVersion,
 		},
-		maxRetries: maxRetries,
-		events:     make([]Event, 0),
+		maxRetries:     maxRetries,
+		maxQueueSize:   maxQueueSize,
+		events:         make([]Event, 0),
+		onEventDropped: config.OnEventDropped,
 	}, nil
 }
 
@@ -311,6 +340,14 @@ func (c *Client) PendingEvents() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.events)
+}
+
+// DroppedEvents returns the number of locally dropped events since the client
+// was created. Flush does not reset this diagnostic counter.
+func (c *Client) DroppedEvents() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.droppedEvents
 }
 
 // PreviewJSON returns the queued event batch as stable, pretty-printed JSON.
@@ -517,21 +554,47 @@ func (c *Client) Metric(id, timestamp string, attributes MetricAttributes) error
 }
 
 func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[string]any) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
-	}
 	if err := requireNonEmpty("event id", id); err != nil {
 		return err
 	}
 	if err := requireTimestamp(timestamp); err != nil {
 		return err
 	}
+	var dropped EventDrop
+	var droppedHandler func(EventDrop)
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
+	}
+	if len(c.events) >= c.maxQueueSize {
+		c.droppedEvents++
+		dropped = EventDrop{
+			EventID:       id,
+			EventType:     eventType,
+			Reason:        eventDropReasonQueueOverflow,
+			DroppedEvents: c.droppedEvents,
+		}
+		droppedHandler = c.onEventDropped
+		c.mu.Unlock()
+		notifyEventDropped(droppedHandler, dropped)
+		return nil
+	}
 	c.events = append(c.events, Event{
 		Type: eventType, ID: id, Timestamp: timestamp, Attributes: attributes,
 	})
+	c.mu.Unlock()
 	return nil
+}
+
+func notifyEventDropped(handler func(EventDrop), drop EventDrop) {
+	if handler == nil {
+		return
+	}
+	defer func() {
+		_ = recover()
+	}()
+	handler(drop)
 }
 
 func (c *Client) flushInternalLocked(transport Transport) (*TransportResponse, error) {

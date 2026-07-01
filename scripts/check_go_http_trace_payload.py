@@ -22,7 +22,14 @@ FORBIDDEN_PAYLOAD_TEXT = (
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text())
+    text = path.read_text().strip()
+    if text.startswith("{"):
+        return json.loads(text)
+    for line in reversed(text.splitlines()):
+        candidate = line.strip()
+        if candidate.startswith("{") and candidate.endswith("}"):
+            return json.loads(candidate)
+    return json.loads(text)
 
 
 def _require(condition: bool, message: str) -> None:

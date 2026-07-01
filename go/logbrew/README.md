@@ -90,6 +90,26 @@ func must(err error) {
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `Flush` or `Shutdown` to send queued events through a transport, and use `PreviewJSON` when you want a stable local JSON preview before sending anything.
 
+## High-Load Behavior
+
+`NewClient` keeps the in-memory event queue bounded to 1,000 events by default. Set `Config.MaxQueueSize` when your service needs a larger or smaller local buffer. When the queue is full, LogBrew drops new events instead of blocking app logging or discarding already-buffered release/environment/request context. Use `DroppedEvents()` for a local counter and `OnEventDropped` for an advisory callback:
+
+```go
+client, err := logbrew.NewClient(logbrew.Config{
+  APIKey:       "LOGBREW_API_KEY",
+  SDKName:      "go-worker",
+  SDKVersion:   "0.1.0",
+  MaxRetries:   1,
+  MaxQueueSize: 1000,
+  OnEventDropped: func(drop logbrew.EventDrop) {
+    fmt.Printf("dropped %s %s after %d total drops\n", drop.EventType, drop.EventID, drop.DroppedEvents)
+  },
+})
+must(err)
+```
+
+`EventDrop` contains only `eventId`, `eventType`, `reason`, and the cumulative dropped count; it never includes event attributes, payloads, API keys, headers, or transport details. The advisory callback is panic-safe and cannot interrupt capture. `Flush` and `Shutdown` still preserve accepted events across retryable transport failures, and `DroppedEvents()` is not reset by a successful flush.
+
 ## First Useful Telemetry
 
 For a production Go service, the first useful LogBrew payload is usually a release marker, environment marker, one service log, one product action, one network milestone, one request duration metric, and one W3C-linked request span. That gives developers and AI assistants enough context to answer "what changed?", "where did this happen?", "what did the user do?", "which API call mattered?", and "which trace links the signals?" without installing a large instrumentation stack.

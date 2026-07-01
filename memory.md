@@ -1,5 +1,35 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-01: Go high-load/backpressure gap reduced after source reads from
+  Sentry Go `getsentry/sentry-go@ea6e493b6bd7bd5810b996c8245211982818114e`
+  (`batch_processor.go` `Send`/`Flush`/`Shutdown`/`run`,
+  `transport.go` `HTTPTransport.SendEventWithContext`/`flushInternal`/`worker`),
+  Datadog Go tracer
+  `DataDog/dd-trace-go@061ffc340dae85a53729895d0f9b22d906940ca9`
+  (`ddtrace/tracer/writer.go` `agentTraceWriter.add`/`flush`/`stop`,
+  `ddtrace/tracer/payload.go` `safePayload`/`payloadStats`), OpenTelemetry Go
+  `open-telemetry/opentelemetry-go@77954066ebef2c7bcbc28e05ea93ecfb57fad86a`
+  (`sdk/trace/batch_span_processor.go` `BatchSpanProcessorOptions`/
+  `enqueueDrop`/`enqueueBlockOnQueueFull`/`Shutdown`/`ForceFlush`,
+  `sdk/trace/evictedqueue.go` `evictedQueue.add`), and PostHog Go
+  `PostHog/posthog-go@2b6e1878570f91ba7a155720923bbf3b98cc9216`
+  (`posthog.go` `NewWithConfig`/`EnqueueWithContext`/`sendBatch`/
+  `CloseWithContext`/`loop`, `message.go` batch size constants). Core
+  `github.com/LogBrewCo/sdk/go/logbrew` now defaults to a bounded 1,000-event
+  in-memory queue, accepts `Config.MaxQueueSize`, drops new overflow events to
+  preserve already-buffered release/environment/request context, exposes
+  `DroppedEvents()`, and emits panic-safe `OnEventDropped(EventDrop)`
+  advisories with only event id/type, `queue_overflow`, and cumulative drop
+  count. Evidence: RED missing-symbol/unit tests, `cd go/logbrew && go test
+  ./...`, and `bash scripts/real_user_go_high_load_smoke.sh` installed-module
+  proof with local Go proxy install/remove/reinstall, 1,500 logs plus first
+  context into a 1,000-event queue, 504 drops, fake-intake 503-to-202 retry,
+  shutdown proof, and no API key/unsafe metadata/dropped-event leakage. Report:
+  `docs/competitor-research/go-high-load-backpressure-2026-07-01.md`.
+  Remaining Go production-safety gaps: async background batching, byte-size
+  batch/event limits, built-in queue/drop/flush metrics exporters,
+  context-aware flush deadlines/retry-after handling, and OTel
+  exporter/processor interop.
 - 2026-07-01: Go queue propagation implemented after source research from
   Datadog Go tracer
   `DataDog/dd-trace-go@061ffc340dae85a53729895d0f9b22d906940ca9` remains the

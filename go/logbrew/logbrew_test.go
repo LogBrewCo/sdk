@@ -117,6 +117,80 @@ func TestFlushSuccessClearsQueue(t *testing.T) {
 	}
 }
 
+func TestBoundedQueueDropsNewEventsAndReportsAdvisory(t *testing.T) {
+	drops := make([]EventDrop, 0)
+	client, err := NewClient(Config{
+		APIKey:         "LOGBREW_API_KEY",
+		SDKName:        "logbrew-go",
+		SDKVersion:     "0.1.0",
+		MaxQueueSize:   2,
+		OnEventDropped: func(drop EventDrop) { drops = append(drops, drop) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for index, id := range []string{"evt_log_001", "evt_log_002", "evt_log_003"} {
+		if err := client.Log(id, "2026-06-02T10:00:03Z", LogAttributes{Message: "high volume log", Level: "info"}); err != nil {
+			t.Fatalf("log %d failed: %v", index, err)
+		}
+	}
+
+	if client.PendingEvents() != 2 {
+		t.Fatalf("expected bounded queue to keep 2 events, got %d", client.PendingEvents())
+	}
+	if client.DroppedEvents() != 1 {
+		t.Fatalf("expected one dropped event, got %d", client.DroppedEvents())
+	}
+	if len(drops) != 1 {
+		t.Fatalf("expected one advisory drop, got %#v", drops)
+	}
+	if drops[0].EventID != "evt_log_003" || drops[0].EventType != "log" || drops[0].Reason != "queue_overflow" || drops[0].DroppedEvents != 1 {
+		t.Fatalf("unexpected drop advisory: %#v", drops[0])
+	}
+
+	transport := AlwaysAcceptTransport()
+	response, err := client.Flush(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != 202 || response.Attempts != 1 {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	body := string(transport.LastBody())
+	if !strings.Contains(body, "evt_log_001") || !strings.Contains(body, "evt_log_002") {
+		t.Fatalf("expected first two events in body: %s", body)
+	}
+	if strings.Contains(body, "evt_log_003") {
+		t.Fatalf("dropped event leaked into body: %s", body)
+	}
+}
+
+func TestEventDropAdvisoryCannotInterruptCapture(t *testing.T) {
+	client, err := NewClient(Config{
+		APIKey:       "LOGBREW_API_KEY",
+		SDKName:      "logbrew-go",
+		SDKVersion:   "0.1.0",
+		MaxQueueSize: 1,
+		OnEventDropped: func(EventDrop) {
+			panic("advisory failure should not interrupt app logging")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := client.Log("evt_log_001", "2026-06-02T10:00:03Z", LogAttributes{Message: "kept", Level: "info"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Log("evt_log_002", "2026-06-02T10:00:04Z", LogAttributes{Message: "dropped", Level: "info"}); err != nil {
+		t.Fatalf("drop advisory interrupted capture: %v", err)
+	}
+	if client.PendingEvents() != 1 || client.DroppedEvents() != 1 {
+		t.Fatalf("unexpected queue state pending=%d dropped=%d", client.PendingEvents(), client.DroppedEvents())
+	}
+}
+
 func TestInvalidTimestampFailsValidation(t *testing.T) {
 	client := sampleClient(t)
 	err := client.Log("evt_log_001", "2026-06-02T10:00:03", LogAttributes{Message: "worker started", Level: "info"})

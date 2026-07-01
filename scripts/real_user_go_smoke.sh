@@ -127,6 +127,11 @@ for needle in (
     "SpanLinkSummary",
     "SpanLinkSummaryFromTraceparent",
     "NewSpanLinkSummary",
+    "High-Load Behavior",
+    "MaxQueueSize",
+    "DroppedEvents",
+    "OnEventDropped",
+    "EventDrop",
     "NewTraceContext",
     "LogBrewTraceFromContext",
     "LogAttributesWithTrace",
@@ -1580,6 +1585,12 @@ grep -q 'APIKey is the public LogBrew API key sent to the transport' config-doc.
 grep -q 'SDKName identifies the calling SDK or application in emitted payloads' config-doc.txt
 grep -q 'SDKVersion identifies the calling SDK or application version' config-doc.txt
 grep -q 'MaxRetries sets the retry budget for retryable transport failures' config-doc.txt
+grep -q 'MaxQueueSize bounds the in-memory event queue' config-doc.txt
+grep -q 'OnEventDropped is an advisory callback for local queue overflow' config-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.EventDrop > event-drop-doc.txt
+grep -q '^type EventDrop struct {' event-drop-doc.txt
+grep -q 'EventDrop is a privacy-bounded advisory emitted when the client drops' event-drop-doc.txt
+grep -q 'never includes event attributes' event-drop-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Event > event-doc.txt
 grep -q '^type Event struct {' event-doc.txt
 grep -q 'Event is the public event shape buffered, previewed, and flushed by the' event-doc.txt
@@ -1770,6 +1781,10 @@ grep -Fq 'func (c *Client) PendingEvents() int' pending-doc.txt
 grep -q 'PendingEvents returns the number of validated events currently buffered' pending-doc.txt
 grep -q 'in' pending-doc.txt
 grep -q 'memory' pending-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Client.DroppedEvents > dropped-doc.txt
+grep -Fq 'func (c *Client) DroppedEvents() int' dropped-doc.txt
+grep -q 'DroppedEvents returns the number of locally dropped events since the' dropped-doc.txt
+grep -q 'Flush does not reset this diagnostic counter' dropped-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.Client.PreviewJSON > preview-doc.txt
 grep -Fq 'func (c *Client) PreviewJSON() (string, error)' preview-doc.txt
 grep -q 'PreviewJSON returns the queued event batch as stable, pretty-printed JSON' preview-doc.txt
