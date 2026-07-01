@@ -1,5 +1,31 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-01: Java Spring Kafka setup ergonomics improved after fresh source reads from Sentry Java
+  `getsentry/sentry-java@307edcd968452d07d801c46362bf98f815fea808`
+  (`sentry-spring-boot-4/.../SentryAutoConfiguration` `SentryKafkaQueueConfiguration`,
+  `sentry-spring-7/.../SentryKafkaProducerBeanPostProcessor`, and
+  `SentryKafkaConsumerBeanPostProcessor`), OpenTelemetry Java Instrumentation
+  `open-telemetry/opentelemetry-java-instrumentation@3118b49eade43b82bac593a980cb83db1ee540b1`
+  (`KafkaInstrumentationAutoConfiguration`,
+  `ConcurrentKafkaListenerContainerFactoryPostProcessor`,
+  `ProducerFactoryCustomizerConfiguration`), and Datadog Java tracer
+  `DataDog/dd-trace-java@2c3db2130802ee4ec90e9eacbdb4cb7e90b021c6`
+  (`kafka-clients-3.8` producer advice/callback/decorator/iterator adapters).
+  `co.logbrew:logbrew-sdk` now ships explicit opt-in
+  `LogBrewSpringBootKafkaAutoConfiguration`: Spring Boot apps expose an
+  app-owned `LogBrewClient` bean and set `logbrew.kafka.enabled=true`; LogBrew
+  then adds its producer post-processor to Spring Kafka producer factories and
+  composes a record interceptor into listener container factories. It stays off
+  by default, has independent producer/consumer disable switches, does not
+  create clients from properties, does not mutate `KafkaTemplate`/brokers, and
+  omits keys, values, arbitrary headers, broker URLs, consumer groups, bean
+  names, baggage/tracestate, exception messages, and stacks. Regression tests
+  prove third-party interceptors with matching class-name text are composed
+  rather than mistaken for LogBrew; installed-artifact Spring Kafka smoke proves
+  packaged auto-config off-by-default and explicit-enable behavior. Remaining
+  Java messaging gaps: default-on agent-style Kafka/JMS breadth, richer safe
+  messaging metrics/semantic conventions, baggage/tracestate only if justified,
+  and OpenTelemetry processor/exporter interop.
 - 2026-07-01: Java JMS trace correlation and explicit batch processing are now
   packaged and verified after
   source reads from Datadog Java tracer
@@ -83,7 +109,7 @@
   serialize only trace ID/span ID/sampled/time-in-queue plus primitive metadata.
   They avoid
   Kafka/JMS/Rabbit/AMQP dependencies, Java agents, hidden client patching,
-  Spring/Kafka auto-registration, arbitrary header capture, payloads, message
+  default-on Spring/Kafka auto-registration, arbitrary header capture, payloads, message
   bodies, broker URLs, raw enqueue timestamps, custom timing-header injection,
   raw propagation metadata, receipt/message IDs, baggage, tracestate, exception
   messages/stacks, and support-ticket creation. The Spring Kafka helpers can
@@ -111,7 +137,7 @@
   release metadata, markdown links, backend contract reports, generated
   artifact hygiene, diff hygiene, and confidentiality scan. Report:
   `docs/competitor-research/java-queue-propagation-2026-06-30.md`. Remaining
-  Java messaging gaps: hidden automatic Spring bean registration only if
+  Java messaging gaps: default-on/agent-style Spring bean registration only if
   privacy/runtime coupling is justified, batch
   receive/process convenience helpers, richer messaging semantic
   attributes/metrics, baggage/tracestate only if explicitly justified, and

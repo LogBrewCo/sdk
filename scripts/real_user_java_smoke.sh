@@ -58,7 +58,24 @@ grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/binary-jar-conte
 grep -q '^co/logbrew/sdk/SpanEventSummary.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewServletFilter.class$' "$tmp_dir/binary-jar-contents.txt"
-printf '%s\n' 'co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.class' 'co/logbrew/sdk/LogBrewSpringCacheTracing.class' 'co/logbrew/sdk/LogBrewSpringCacheTracing$CacheConfig.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.class' 'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor$SingleLogBrewClientProvider.class' 'co/logbrew/sdk/LogBrewSpringKafkaTracing.class' 'co/logbrew/sdk/LogBrewSpringKafkaTracing$ConsumerConfig.class' 'co/logbrew/sdk/LogBrewSpringKafkaTracing$ProducerConfig.class' | while IFS= read -r expected; do grep -Fxq "$expected" "$tmp_dir/binary-jar-contents.txt"; done
+while IFS= read -r expected; do
+  grep -Fxq "$expected" "$tmp_dir/binary-jar-contents.txt"
+done < <(printf '%s\n' \
+  'co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.class' \
+  'co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.class' \
+  'co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.class' \
+  'co/logbrew/sdk/LogBrewSpringCacheTracing.class' \
+  'co/logbrew/sdk/LogBrewSpringCacheTracing$CacheConfig.class' \
+  'co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.class' \
+  'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.class' \
+  'co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor$SingleLogBrewClientProvider.class' \
+  'co/logbrew/sdk/LogBrewSpringBootKafkaAutoConfiguration.class' \
+  'co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor.class' \
+  'co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor$LogBrewKafkaProducerPostProcessor.class' \
+  'co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor$SingleLogBrewClientProvider.class' \
+  'co/logbrew/sdk/LogBrewSpringKafkaTracing.class' \
+  'co/logbrew/sdk/LogBrewSpringKafkaTracing$ConsumerConfig.class' \
+  'co/logbrew/sdk/LogBrewSpringKafkaTracing$ProducerConfig.class')
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$DatabaseOperation.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOperationTracing\$CacheOperation.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -89,7 +106,18 @@ grep -q '^src/main/java/co/logbrew/sdk/LogBrewOpenTelemetry.java$' "$tmp_dir/sou
 grep -q '^src/main/java/co/logbrew/sdk/SpanEventSummary.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewServletFilter.java$' "$tmp_dir/source-jar-contents.txt"
-printf '%s\n' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringCacheTracing.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.java' 'src/main/java/co/logbrew/sdk/LogBrewSpringKafkaTracing.java' | while IFS= read -r expected; do grep -Fxq "$expected" "$tmp_dir/source-jar-contents.txt"; done
+while IFS= read -r expected; do
+  grep -Fxq "$expected" "$tmp_dir/source-jar-contents.txt"
+done < <(printf '%s\n' \
+  'src/main/java/co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.java' \
+  'src/main/java/co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.java' \
+  'src/main/java/co/logbrew/sdk/LogBrewSpringBootCacheManagerPostProcessor.java' \
+  'src/main/java/co/logbrew/sdk/LogBrewSpringCacheTracing.java' \
+  'src/main/java/co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.java' \
+  'src/main/java/co/logbrew/sdk/LogBrewSpringBootJdbcDataSourcePostProcessor.java' \
+  'src/main/java/co/logbrew/sdk/LogBrewSpringBootKafkaAutoConfiguration.java' \
+  'src/main/java/co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor.java' \
+  'src/main/java/co/logbrew/sdk/LogBrewSpringKafkaTracing.java')
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewOperationTracing.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewJdbcTracing.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/SupportTicketDraft.java$' "$tmp_dir/source-jar-contents.txt"
@@ -114,7 +142,18 @@ grep -q 'LogBrewOpenTelemetry' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
 grep -q 'LogBrewJdbcTracing' "$package_dir/README.md"
 grep -q 'LogBrewServletFilter' "$package_dir/README.md"
-printf '%s\n' 'LogBrewSpringBootAutoConfiguration' 'LogBrewSpringBootCacheAutoConfiguration' 'LogBrewSpringCacheTracing' 'LogBrewSpringBootJdbcAutoConfiguration' 'LogBrewSpringKafkaTracing' 'producerPostProcessor' 'producerSend' 'ProducerConfig' | while IFS= read -r expected; do grep -Fq "$expected" "$package_dir/README.md"; done
+while IFS= read -r expected; do
+  grep -Fq "$expected" "$package_dir/README.md"
+done < <(printf '%s\n' \
+  'LogBrewSpringBootAutoConfiguration' \
+  'LogBrewSpringBootCacheAutoConfiguration' \
+  'LogBrewSpringCacheTracing' \
+  'LogBrewSpringBootJdbcAutoConfiguration' \
+  'LogBrewSpringBootKafkaAutoConfiguration' \
+  'LogBrewSpringKafkaTracing' \
+  'producerPostProcessor' \
+  'producerSend' \
+  'ProducerConfig')
 grep -q 'SupportTicketDraft' "$package_dir/README.md"
 grep -q 'droppedEvents()' "$package_dir/README.md"
 grep -q 'maxQueueSize' "$package_dir/README.md"

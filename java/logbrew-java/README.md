@@ -61,7 +61,7 @@ If you manually register `LogBrewServletFilter` in a Jakarta Servlet app, includ
 </dependency>
 ```
 
-If you register `LogBrewSpringKafkaTracing` in a Spring Kafka listener container, include the Spring Kafka and Kafka client jars your app already uses:
+If you register `LogBrewSpringKafkaTracing` manually, or enable `LogBrewSpringBootKafkaAutoConfiguration`, include the Spring Kafka and Kafka client jars your app already uses:
 
 ```xml
 <dependency>
@@ -536,6 +536,29 @@ ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFa
 ```
 
 The interceptor continues one incoming W3C `traceparent`, keeps the child trace active while listener code and LogBrew-aware loggers run, and emits one `spring.kafka.process:<topic>` span on success or failure. It records primitive framework, topic, sampled-state, duration, and non-negative `timeInQueueMs` from the Kafka record timestamp when available. It treats malformed propagation as a non-fatal diagnostic through `onError(...)`, preserves app-owned delegates, and clears active trace state during Spring Kafka lifecycle cleanup. It does not capture record keys, values, offsets, arbitrary headers, broker addresses, consumer group IDs, baggage, tracestate, exception messages, or stack traces.
+
+Spring Boot apps can opt in to automatic app-owned Spring Kafka bean post-processing by exposing a `LogBrewClient` bean and setting `logbrew.kafka.enabled=true`. `LogBrewSpringBootKafkaAutoConfiguration` then adds LogBrew's producer post-processor to Spring Kafka producer factories and composes the record interceptor into listener container factories. It reuses the app-owned Spring Kafka beans, keeps producer and consumer tracing independently disableable with `logbrew.kafka.producer.enabled=false` or `logbrew.kafka.consumer.enabled=false`, and leaves Kafka tracing off when the explicit `logbrew.kafka.enabled=true` opt-in is absent.
+
+```java
+import co.logbrew.sdk.LogBrewClient;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+class LogBrewConfig {
+    @Bean
+    LogBrewClient logbrewClient() {
+        return LogBrewClient.create(System.getenv("LOGBREW_INGEST_KEY"), "checkout-api", "1.0.0");
+    }
+}
+```
+
+```properties
+logbrew.kafka.enabled=true
+logbrew.kafka.event-id-prefix=spring_kafka
+```
+
+The Spring Boot auto-configuration does not create ingest clients from properties, patch Kafka clients globally, replace payload handling, capture record keys, values, arbitrary headers, broker addresses, consumer group IDs, baggage, tracestate, exception messages, or stack traces.
 
 For Spring Cache apps that already own a `CacheManager` or `Cache`, use `LogBrewSpringCacheTracing` when you want cache hit/write/delete spans under an active request or task trace:
 

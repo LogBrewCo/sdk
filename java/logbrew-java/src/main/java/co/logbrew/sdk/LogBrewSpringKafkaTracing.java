@@ -72,6 +72,10 @@ public final class LogBrewSpringKafkaTracing {
         );
     }
 
+    static boolean isInstrumentedRecordInterceptor(Object value) {
+        return value instanceof LogBrewRecordInterceptor;
+    }
+
     /**
      * Sends one app-owned Spring Kafka producer record with a LogBrew traceparent.
      */

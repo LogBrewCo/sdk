@@ -1,3 +1,4 @@
 co.logbrew.sdk.LogBrewSpringBootAutoConfiguration
 co.logbrew.sdk.LogBrewSpringBootCacheAutoConfiguration
 co.logbrew.sdk.LogBrewSpringBootJdbcAutoConfiguration
+co.logbrew.sdk.LogBrewSpringBootKafkaAutoConfiguration

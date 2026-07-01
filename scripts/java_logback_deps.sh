@@ -92,6 +92,7 @@ fetch_java_spring_kafka_deps() {
   local spring_kafka_version="${LOGBREW_SPRING_KAFKA_VERSION:-4.1.0}"
   local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.8}"
   local kafka_clients_version="${LOGBREW_KAFKA_CLIENTS_VERSION:-4.2.1}"
+  local micrometer_observation_version="${LOGBREW_MICROMETER_OBSERVATION_VERSION:-1.17.0}"
 
   mkdir -p "$deps_dir"
   fetch_maven_jar \
@@ -106,12 +107,16 @@ fetch_java_spring_kafka_deps() {
   fetch_maven_jar \
     "org/springframework/spring-tx/$spring_framework_version/spring-tx-$spring_framework_version" \
     "$deps_dir"
+  fetch_maven_jar \
+    "io/micrometer/micrometer-observation/$micrometer_observation_version/micrometer-observation-$micrometer_observation_version" \
+    "$deps_dir"
 
-  printf '%s:%s:%s:%s\n' \
+  printf '%s:%s:%s:%s:%s\n' \
     "$deps_dir/spring-kafka-$spring_kafka_version.jar" \
     "$deps_dir/kafka-clients-$kafka_clients_version.jar" \
     "$deps_dir/spring-messaging-$spring_framework_version.jar" \
-    "$deps_dir/spring-tx-$spring_framework_version.jar"
+    "$deps_dir/spring-tx-$spring_framework_version.jar" \
+    "$deps_dir/micrometer-observation-$micrometer_observation_version.jar"
 }
 
 fetch_maven_jar() {

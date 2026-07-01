@@ -37,6 +37,7 @@ mkdir -p "$spring_kafka_app/src" "$spring_kafka_app/classes" "$spring_kafka_app/
 cp "$tmp_dir/logbrew-sdk-0.1.0.jar" "$spring_kafka_app/lib/logbrew-sdk-0.1.0.jar"
 cat > "$spring_kafka_app/src/SpringKafkaApp.java" <<'JAVA'
 import co.logbrew.sdk.LogBrewClient;
+import co.logbrew.sdk.LogBrewSpringBootKafkaAutoConfiguration;
 import co.logbrew.sdk.LogBrewSpringKafkaTracing;
 import co.logbrew.sdk.LogBrewTrace;
 import co.logbrew.sdk.LogBrewTraceContext;
@@ -53,11 +54,19 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.apache.kafka.common.record.TimestampType;
+import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaOperations;
 import org.springframework.kafka.core.ProducerPostProcessor;
 import org.springframework.kafka.listener.RecordInterceptor;
@@ -233,7 +242,9 @@ public final class SpringKafkaApp {
         require(LogBrewTrace.current().isPresent(), "trace is active during listener processing");
         interceptor.success(record, null);
         require(!LogBrewTrace.current().isPresent(), "trace scope is cleared after success");
-        require(client.pendingEvents() == 4, "four Spring Kafka spans are queued");
+
+        runAutoConfigurationPackagedProof(client, producerRecord, record, parent);
+        require(client.pendingEvents() == 6, "six Spring Kafka spans are queued");
 
         String payload = client.previewJson();
         requireContains(payload, "\"id\": \"spring_kafka_producer_packaged_span_b7ad6b7169203801\"");
@@ -244,6 +255,8 @@ public final class SpringKafkaApp {
         requireContains(payload, "\"id\": \"spring_kafka_wrapped_packaged_span_b7ad6b7169203802\"");
         requireContains(payload, "\"id\": \"spring_kafka_post_processor_packaged_span_b7ad6b7169203803\"");
         requireContains(payload, "\"id\": \"spring_kafka_packaged_span_b7ad6b7169203800\"");
+        requireContains(payload, "\"id\": \"spring_kafka_auto_packaged_span_");
+        requireContains(payload, "\"springApplicationName\": \"checkout-service\"");
         requireContains(payload, "\"name\": \"spring.kafka.process:orders-events\"");
         requireContains(payload, "\"source\": \"spring.kafka.record\"");
         requireContains(payload, "\"traceId\": \"11111111111111111111111111111111\"");
@@ -260,8 +273,77 @@ public final class SpringKafkaApp {
         requireNotContains(payload, "authorization");
         requireNotContains(payload, "baggage");
         requireNotContains(payload, "traceparent");
+        requireNotContains(payload, "localhost:9092");
+        requireNotContains(payload, "ordersProducerFactory");
+        requireNotContains(payload, "ordersListenerFactory");
         System.out.println(payload);
-        System.err.println("{\"springKafkaEvents\":" + client.pendingEvents() + "}");
+        System.err.println("{\"springKafkaEvents\":" + client.pendingEvents() + ",\"autoConfigured\":true}");
+    }
+
+    private static void runAutoConfigurationPackagedProof(
+        LogBrewClient client,
+        ProducerRecord<String, String> producerRecord,
+        ConsumerRecord<String, String> record,
+        LogBrewTraceContext parent
+    ) {
+        BeanPostProcessor disabledProcessor = LogBrewSpringBootKafkaAutoConfiguration
+            .logBrewSpringKafkaBeanPostProcessor(new SingleLogBrewClientProvider(client), new StandardEnvironment());
+        DefaultKafkaProducerFactory<String, String> defaultProducerFactory = kafkaProducerFactory();
+        ConcurrentKafkaListenerContainerFactory<String, String> defaultListenerFactory =
+            new ConcurrentKafkaListenerContainerFactory<>();
+
+        disabledProcessor.postProcessAfterInitialization(defaultProducerFactory, "defaultProducerFactory");
+        disabledProcessor.postProcessAfterInitialization(defaultListenerFactory, "defaultListenerFactory");
+
+        require(defaultProducerFactory.getPostProcessors().isEmpty(), "auto config stays off without explicit property");
+        require(defaultListenerFactory.getRecordInterceptor() == null, "auto listener stays off without explicit property");
+
+        StandardEnvironment environment = new StandardEnvironment();
+        environment.getPropertySources().addFirst(new MapPropertySource("logbrew", Map.of(
+            "logbrew.kafka.enabled", "true",
+            "logbrew.kafka.event-id-prefix", "spring_kafka_auto_packaged",
+            "spring.application.name", "checkout-service"
+        )));
+        BeanPostProcessor enabledProcessor = LogBrewSpringBootKafkaAutoConfiguration
+            .logBrewSpringKafkaBeanPostProcessor(new SingleLogBrewClientProvider(client), environment);
+        DefaultKafkaProducerFactory<String, String> producerFactory = kafkaProducerFactory();
+        ConcurrentKafkaListenerContainerFactory<String, String> listenerFactory =
+            new ConcurrentKafkaListenerContainerFactory<>();
+
+        enabledProcessor.postProcessAfterInitialization(producerFactory, "ordersProducerFactory");
+        enabledProcessor.postProcessAfterInitialization(listenerFactory, "ordersListenerFactory");
+
+        require(producerFactory.getPostProcessors().size() == 1, "auto config adds producer post processor");
+        require(listenerFactory.getRecordInterceptor() != null, "auto config adds listener interceptor");
+
+        RecordingKafkaProducer autoProducer = new RecordingKafkaProducer();
+        Producer<String, String> tracedAutoProducer = producerFactory
+            .getPostProcessors()
+            .get(0)
+            .apply(autoProducer.proxy());
+        LogBrewTrace.Scope autoProducerScope = LogBrewTrace.activate(parent);
+        try {
+            tracedAutoProducer.send(producerRecord);
+        } finally {
+            autoProducerScope.close();
+        }
+        require(autoProducer.sentRecord != null, "auto producer delegates send");
+        require(countTraceparentHeaders(autoProducer.sentRecord.headers()) == 1, "auto producer writes one traceparent");
+        autoProducer.callback.onCompletion(null, null);
+
+        ConsumerRecord<String, String> intercepted = listenerFactory.getRecordInterceptor().intercept(record, null);
+        require(intercepted == record, "auto listener returns original record");
+        require(LogBrewTrace.current().isPresent(), "auto listener has active trace");
+        listenerFactory.getRecordInterceptor().success(record, null);
+        require(!LogBrewTrace.current().isPresent(), "auto listener clears trace");
+    }
+
+    private static DefaultKafkaProducerFactory<String, String> kafkaProducerFactory() {
+        return new DefaultKafkaProducerFactory<>(Map.of(
+            ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092",
+            ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
+            ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class
+        ));
     }
 
     private static void require(boolean condition, String message) {
@@ -300,6 +382,34 @@ public final class SpringKafkaApp {
             }
         }
         return count;
+    }
+
+    private static final class SingleLogBrewClientProvider implements ObjectProvider<LogBrewClient> {
+        private final LogBrewClient client;
+
+        private SingleLogBrewClientProvider(LogBrewClient client) {
+            this.client = client;
+        }
+
+        @Override
+        public LogBrewClient getObject(Object... args) {
+            return client;
+        }
+
+        @Override
+        public LogBrewClient getIfAvailable() {
+            return client;
+        }
+
+        @Override
+        public LogBrewClient getIfUnique() {
+            return client;
+        }
+
+        @Override
+        public LogBrewClient getObject() {
+            return client;
+        }
     }
 
     private static final class RecordingKafkaOperations implements InvocationHandler {
@@ -373,6 +483,6 @@ JAVA
 javac -Xlint:all -Werror --release 11 -cp "$spring_kafka_app/lib/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$spring_kafka_app/classes" "$spring_kafka_app/src/SpringKafkaApp.java"
 java -cp "$spring_kafka_app/lib/logbrew-sdk-0.1.0.jar:$spring_kafka_app/classes:$java_optional_classpath" SpringKafkaApp > "$tmp_dir/spring-kafka-app.stdout.json" 2> "$tmp_dir/spring-kafka-app.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/spring-kafka-app.stdout.json" >/dev/null
-grep -q '"springKafkaEvents":4' "$tmp_dir/spring-kafka-app.stderr.json"
+grep -q '"springKafkaEvents":6,"autoConfigured":true' "$tmp_dir/spring-kafka-app.stderr.json"
 
 echo "java spring kafka installed-artifact smoke passed"
