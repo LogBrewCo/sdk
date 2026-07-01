@@ -132,12 +132,19 @@ jobs:
           VERIFY_NPM_VERSIONS=""
           VERIFY_PYPI_VERSIONS=""
           VERIFY_NUGET_VERSIONS=""
+          VERIFY_MAVEN_ARTIFACTS=""
+          VERIFY_MAVEN_VERSIONS=""
           verify_args=(--target all)
-          append_version_overrides() { :; }
+          append_values() { :; }
           verify_args+=(--version "$VERIFY_VERSION")
-          append_version_overrides --npm-version "$VERIFY_NPM_VERSIONS"
-          append_version_overrides --pypi-version "$VERIFY_PYPI_VERSIONS"
-          append_version_overrides --nuget-version "$VERIFY_NUGET_VERSIONS"
+          append_values --npm-version "$VERIFY_NPM_VERSIONS"
+          append_values --pypi-version "$VERIFY_PYPI_VERSIONS"
+          append_values --nuget-version "$VERIFY_NUGET_VERSIONS"
+          append_values --maven-artifact "$VERIFY_MAVEN_ARTIFACTS"
+          append_values --maven-version "$VERIFY_MAVEN_VERSIONS"
+          if [[ -n "$VERIFY_MAVEN_ARTIFACTS" || -n "$VERIFY_MAVEN_VERSIONS" ]]; then
+            verify_args+=(--include-maven)
+          fi
           python3 scripts/check_registry_publication.py "${verify_args[@]}"
 """.strip()
         + "\n"
@@ -264,6 +271,8 @@ jobs:
 
         self.assertTrue(any("verify target exact version input" in failure for failure in failures))
         self.assertTrue(any("verify target NuGet version override" in failure for failure in failures))
+        self.assertTrue(any("verify target Maven artifact filter input" in failure for failure in failures))
+        self.assertTrue(any("verify target Maven version override" in failure for failure in failures))
 
     def test_publish_packages_workflow_lists_every_js_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -365,12 +374,19 @@ jobs:
           VERIFY_NPM_VERSIONS=""
           VERIFY_PYPI_VERSIONS=""
           VERIFY_NUGET_VERSIONS=""
+          VERIFY_MAVEN_ARTIFACTS=""
+          VERIFY_MAVEN_VERSIONS=""
           verify_args=(--target all)
-          append_version_overrides() { :; }
+          append_values() { :; }
           verify_args+=(--version "$VERIFY_VERSION")
-          append_version_overrides --npm-version "$VERIFY_NPM_VERSIONS"
-          append_version_overrides --pypi-version "$VERIFY_PYPI_VERSIONS"
-          append_version_overrides --nuget-version "$VERIFY_NUGET_VERSIONS"
+          append_values --npm-version "$VERIFY_NPM_VERSIONS"
+          append_values --pypi-version "$VERIFY_PYPI_VERSIONS"
+          append_values --nuget-version "$VERIFY_NUGET_VERSIONS"
+          append_values --maven-artifact "$VERIFY_MAVEN_ARTIFACTS"
+          append_values --maven-version "$VERIFY_MAVEN_VERSIONS"
+          if [[ -n "$VERIFY_MAVEN_ARTIFACTS" || -n "$VERIFY_MAVEN_VERSIONS" ]]; then
+            verify_args+=(--include-maven)
+          fi
           python3 scripts/check_registry_publication.py "${verify_args[@]}"
 """.strip()
                 + "\n",

@@ -92,6 +92,16 @@ on:
         required: false
         type: string
         default: ""
+      verify_maven_artifacts:
+        description: "Comma-separated Maven artifact ids for target=verify"
+        required: false
+        type: string
+        default: ""
+      verify_maven_versions:
+        description: "Comma-separated Maven PACKAGE=VERSION overrides for target=verify"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -774,30 +784,34 @@ jobs:
           VERIFY_NPM_VERSIONS: ${{ inputs.verify_npm_versions }}
           VERIFY_PYPI_VERSIONS: ${{ inputs.verify_pypi_versions }}
           VERIFY_NUGET_VERSIONS: ${{ inputs.verify_nuget_versions }}
+          VERIFY_MAVEN_ARTIFACTS: ${{ inputs.verify_maven_artifacts }}
+          VERIFY_MAVEN_VERSIONS: ${{ inputs.verify_maven_versions }}
         run: |
           set -Eeuo pipefail
           verify_args=(--target all)
-          append_version_overrides() {
+          append_values() {
             local flag="$1"
-            local raw_versions="$2"
-            local version_entry
-            if [[ -z "$raw_versions" ]]; then
+            local raw_values="$2"
+            local value_entry
+            if [[ -z "$raw_values" ]]; then
               return
             fi
-            IFS=',' read -ra version_entries <<< "$raw_versions"
-            for version_entry in "${version_entries[@]}"; do
-              version_entry="$(printf '%s' "$version_entry" | xargs)"
-              if [[ -n "$version_entry" ]]; then
-                verify_args+=("$flag" "$version_entry")
+            IFS=',' read -ra value_entries <<< "$raw_values"
+            for value_entry in "${value_entries[@]}"; do
+              value_entry="$(printf '%s' "$value_entry" | xargs)"
+              if [[ -n "$value_entry" ]]; then
+                verify_args+=("$flag" "$value_entry")
               fi
             done
           }
           if [[ -n "$VERIFY_VERSION" ]]; then
             verify_args+=(--version "$VERIFY_VERSION")
           fi
-          append_version_overrides --npm-version "$VERIFY_NPM_VERSIONS"
-          append_version_overrides --pypi-version "$VERIFY_PYPI_VERSIONS"
-          append_version_overrides --nuget-version "$VERIFY_NUGET_VERSIONS"
+          append_values --npm-version "$VERIFY_NPM_VERSIONS"
+          append_values --pypi-version "$VERIFY_PYPI_VERSIONS"
+          append_values --nuget-version "$VERIFY_NUGET_VERSIONS"
+          append_values --maven-artifact "$VERIFY_MAVEN_ARTIFACTS"
+          append_values --maven-version "$VERIFY_MAVEN_VERSIONS"
           if [[ "${{ inputs.include_unity_npm }}" == "true" ]]; then
             verify_args+=(--include-unity-npm)
           fi
@@ -810,7 +824,7 @@ jobs:
           if [[ "${{ inputs.include_packagist_update }}" == "true" ]]; then
             verify_args+=(--include-packagist)
           fi
-          if [[ "${{ inputs.include_maven_publish }}" == "true" ]]; then
+          if [[ "${{ inputs.include_maven_publish }}" == "true" || -n "$VERIFY_MAVEN_ARTIFACTS" || -n "$VERIFY_MAVEN_VERSIONS" ]]; then
             verify_args+=(--include-maven)
           fi
           if [[ "${{ inputs.include_go_module }}" == "true" ]]; then

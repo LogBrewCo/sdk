@@ -840,10 +840,19 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "NuGet public install smoke": "bash scripts/real_user_dotnet_public_nuget_smoke.sh",
             "verify target exact version input": "verify_version:",
             "verify target exact version argument": 'verify_args+=(--version "$VERIFY_VERSION")',
-            "verify target npm version override": 'append_version_overrides --npm-version "$VERIFY_NPM_VERSIONS"',
-            "verify target PyPI version override": 'append_version_overrides --pypi-version "$VERIFY_PYPI_VERSIONS"',
+            "verify target npm version override": 'append_values --npm-version "$VERIFY_NPM_VERSIONS"',
+            "verify target PyPI version override": 'append_values --pypi-version "$VERIFY_PYPI_VERSIONS"',
             "verify target NuGet version override": (
-                'append_version_overrides --nuget-version "$VERIFY_NUGET_VERSIONS"'
+                'append_values --nuget-version "$VERIFY_NUGET_VERSIONS"'
+            ),
+            "verify target Maven artifact filter input": "verify_maven_artifacts:",
+            "verify target Maven version input": "verify_maven_versions:",
+            "verify target Maven artifact filter": 'append_values --maven-artifact "$VERIFY_MAVEN_ARTIFACTS"',
+            "verify target Maven version override": (
+                'append_values --maven-version "$VERIFY_MAVEN_VERSIONS"'
+            ),
+            "verify target Maven override include": (
+                '-n "$VERIFY_MAVEN_ARTIFACTS" || -n "$VERIFY_MAVEN_VERSIONS"'
             ),
             "npm initial publish opt-in": "allow_initial_npm_publish:",
             "npm first-publish guard": "missing_npm_packages",

@@ -136,7 +136,7 @@ For PHP packages specifically, prefer a smoke path that creates a fresh Composer
 - JavaScript release-artifact upload proof: `bash scripts/real_user_js_release_artifact_upload_smoke.sh`
 - Native/mobile release-artifact dry-run proof: `bash scripts/real_user_native_release_artifact_smoke.sh`
 - Native/mobile release-artifact upload proof: `bash scripts/real_user_native_release_artifact_upload_smoke.sh`
-- Public registry versions after real publishes: `python3 scripts/check_registry_publication.py --target all`
+- Public registry versions after real publishes: `python3 scripts/check_registry_publication.py --target all`; for Maven verification while optional artifacts are still pending publication, pass `--maven-artifact` and `--maven-version` only for the currently public artifacts.
 - Shared Markdown docs: `python3 scripts/check_markdown_links.py`
 - Shared shell smoke/package scripts: `bash scripts/check_shell_static.sh`
 - JavaScript, Browser, Node.js, Express, Fastify, NestJS, Angular, Vue, Svelte, React, React Native, or Next.js: `python3 scripts/check_js_sources.py`, `bash scripts/check_js_lint.sh`, `bash scripts/check_js_package.sh`, package `npm test`, framework smoke scripts, and `npm pack --dry-run`

@@ -111,6 +111,8 @@ Packagist does not use GitHub OIDC trusted publishing. The public `logbrew/sdk` 
 
 The `co.logbrew` namespace is verified in Maven Central. Keep the public TXT record on `logbrew.co` in place through the first Central release.
 
+For a later verification-only run before every optional Maven artifact is public, dispatch `publish-packages.yml` with `target=verify`, `verify_maven_artifacts=logbrew-sdk,logbrew-kotlin`, and matching `verify_maven_versions=co.logbrew:logbrew-sdk=<version>,co.logbrew:logbrew-kotlin=<version>` so the workflow rechecks only the artifacts that are actually available.
+
 Maven Central does not currently offer the same first-party GitHub OIDC trusted publisher flow. The workflow builds a Central Portal deployment bundle with Java and Kotlin jars, source jars, javadoc jars, POMs, and checksums during dry-runs. Real Maven Central upload runs from published GitHub Releases after adding these `release` environment secrets:
 
 - `CENTRAL_PORTAL_USERNAME`
