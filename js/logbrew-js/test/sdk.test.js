@@ -1007,6 +1007,43 @@ test("OpenTelemetry span processor queues bounded spans and flushes without owni
   assert.equal(client.pendingEvents(), 0);
 });
 
+test("OpenTelemetry span processor coalesces concurrent forceFlush calls", async () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0"
+  });
+  const sends = [];
+  const resolvers = [];
+  const transport = {
+    send(_apiKey, body) {
+      sends.push(body);
+      return new Promise((resolve) => {
+        resolvers.push(() => resolve({ statusCode: 202 }));
+      });
+    }
+  };
+  const processor = createLogBrewOpenTelemetrySpanProcessor({
+    client,
+    transport
+  });
+
+  processor.onEnd(sampleOpenTelemetryReadableSpan());
+  const firstFlush = processor.forceFlush();
+  const secondFlush = processor.forceFlush();
+
+  try {
+    assert.equal(sends.length, 1);
+  } finally {
+    for (const resolve of resolvers) {
+      resolve();
+    }
+    await Promise.allSettled([firstFlush, secondFlush]);
+  }
+  assert.equal(client.pendingEvents(), 0);
+  assert.equal(sends.length, 1);
+});
+
 test("traceparent helpers reject malformed W3C trace context", () => {
   assert.throws(
     () => parseTraceparent("00-00000000000000000000000000000000-00f067aa0ba902b7-01"),

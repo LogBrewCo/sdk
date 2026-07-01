@@ -141,6 +141,7 @@ function buildOpenTelemetryHelpers({
     const state = {
       captured: 0,
       closed: false,
+      flushInFlight: false,
       pendingFlush: Promise.resolve(null)
     };
 
@@ -563,11 +564,19 @@ function buildOpenTelemetryHelpers({
       await state.pendingFlush;
       return;
     }
+    if (state.flushInFlight) {
+      await state.pendingFlush;
+      return;
+    }
+    state.flushInFlight = true;
     state.pendingFlush = Promise.resolve(client.flush(transport))
       .then(() => null)
       .catch((error) => {
         onError(error);
         return null;
+      })
+      .finally(() => {
+        state.flushInFlight = false;
       });
     await state.pendingFlush;
   }
