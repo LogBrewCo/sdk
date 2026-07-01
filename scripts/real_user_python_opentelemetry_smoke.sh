@@ -21,7 +21,8 @@ on_error() {
         "$tmp_dir/build.log" \
         "$tmp_dir/pip-freeze.txt" \
         "$tmp_dir/no-otel.stdout.json" \
-        "$tmp_dir/otel.stdout.json"; do
+        "$tmp_dir/otel.stdout.json" \
+        "$tmp_dir/processor.stdout.json"; do
         if [[ -f "$diagnostic" ]]; then
             echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
             sed -n '1,120p' "$diagnostic" >&2
@@ -52,7 +53,7 @@ print(json.dumps({"ok": logbrew_trace_context_from_current_open_telemetry_span()
 PY
 grep -q '"ok": true' "$tmp_dir/no-otel.stdout.json"
 
-python -m pip install "opentelemetry-api>=1,<2" >/dev/null
+python -m pip install "opentelemetry-sdk>=1,<2" >/dev/null
 
 python - <<'PY' > "$tmp_dir/otel.stdout.json"
 import json
@@ -143,8 +144,118 @@ print(
 )
 PY
 
+python - <<'PY' > "$tmp_dir/processor.stdout.json"
+import json
+
+from logbrew_sdk import (
+    LogBrewClient,
+    create_logbrew_open_telemetry_span_processor,
+)
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.trace import SpanKind, Status, StatusCode
+
+client = LogBrewClient.create(api_key="LOGBREW_API_KEY", sdk_name="checkout-api", sdk_version="0.1.2")
+provider = TracerProvider(
+    resource=Resource.create(
+        {
+            "service.name": "checkout-api",
+            "service.version": "2026.07.01",
+            "deployment.environment": "production",
+            "cloud.account.id": "blocked-account",
+        }
+    )
+)
+processor = create_logbrew_open_telemetry_span_processor(
+    client=client,
+    include_trace_summary=True,
+    metadata={"release": "2026.07.01"},
+)
+provider.add_span_processor(processor)
+tracer = provider.get_tracer("checkout-smoke", "0.1.0")
+
+with tracer.start_as_current_span(
+    "GET /checkout",
+    kind=SpanKind.SERVER,
+    attributes={
+        "http.method": "GET",
+        "http.route": "/checkout",
+        "http.url": "https://api.example.test/checkout?debug=blocked",
+    },
+) as root_span:
+    root_span.add_event(
+        "exception",
+        {
+            "exception.type": "ValueError",
+            "exception.message": "blocked card failed",
+            "exception.stacktrace": "blocked stack",
+        },
+    )
+    root_span.set_status(Status(StatusCode.ERROR))
+    with tracer.start_as_current_span(
+        "redis GET",
+        kind=SpanKind.CLIENT,
+        attributes={
+            "db.system": "redis",
+            "db.operation.name": "GET",
+            "db.statement": "GET blocked-key",
+        },
+    ):
+        pass
+
+if provider.force_flush() is not True:
+    raise SystemExit("OpenTelemetry provider did not force-flush")
+
+payload = json.loads(client.preview_json())
+events = payload["events"]
+serialized = json.dumps(payload)
+blocked_values = [
+    "blocked-account",
+    "debug=blocked",
+    "blocked card",
+    "blocked stack",
+    "GET blocked-key",
+    "http.url",
+    "db.statement",
+]
+leaked = [value for value in blocked_values if value in serialized]
+if leaked:
+    raise SystemExit(f"OpenTelemetry payload leaked blocked values: {leaked}")
+
+detail_spans = [event for event in events if event["id"].startswith("otel_") and "_trace_" not in event["id"]]
+summary_spans = [event for event in events if "_trace_" in event["id"]]
+if len(detail_spans) != 2 or len(summary_spans) != 1:
+    raise SystemExit(f"unexpected span counts: detail={len(detail_spans)} summary={len(summary_spans)}")
+
+summary = summary_spans[0]["attributes"]
+root = next(event["attributes"] for event in detail_spans if event["attributes"]["name"] == "GET /checkout")
+dependency = next(event["attributes"] for event in detail_spans if event["attributes"]["name"] == "redis GET")
+print(
+    json.dumps(
+        {
+            "ok": True,
+            "events": len(events),
+            "rootTraceId": root["traceId"],
+            "dependencyParentSpanId": dependency["parentSpanId"],
+            "rootStatus": root["status"],
+            "summaryName": summary["name"],
+            "summaryStatus": summary["status"],
+            "summarySpanCount": summary["metadata"]["otel.trace.span_count"],
+            "summaryErrorSpanCount": summary["metadata"]["otel.trace.error_span_count"],
+            "service": summary["metadata"]["service.name"],
+            "environment": summary["metadata"]["deployment.environment"],
+            "route": summary["metadata"]["http.route"],
+            "dependencySystem": summary["metadata"]["db.system"],
+        },
+        sort_keys=True,
+    )
+)
+PY
+
 python -m pip freeze > "$tmp_dir/pip-freeze.txt"
 grep -q '^opentelemetry-api==' "$tmp_dir/pip-freeze.txt"
+grep -q '^opentelemetry-sdk==' "$tmp_dir/pip-freeze.txt"
 grep -q '"ok": true' "$tmp_dir/otel.stdout.json"
 grep -q '"events": 2' "$tmp_dir/otel.stdout.json"
 grep -q '"logTraceId": "4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/otel.stdout.json"
@@ -153,5 +264,16 @@ grep -q '"logParentSpanId": "00f067aa0ba902b7"' "$tmp_dir/otel.stdout.json"
 grep -q '"spanParentSpanId": "00f067aa0ba902b7"' "$tmp_dir/otel.stdout.json"
 grep -q '"sampled": true' "$tmp_dir/otel.stdout.json"
 grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$tmp_dir/otel.stdout.json"
+grep -q '"ok": true' "$tmp_dir/processor.stdout.json"
+grep -q '"events": 3' "$tmp_dir/processor.stdout.json"
+grep -q '"rootStatus": "error"' "$tmp_dir/processor.stdout.json"
+grep -q '"summaryName": "opentelemetry.trace:GET /checkout"' "$tmp_dir/processor.stdout.json"
+grep -q '"summaryStatus": "error"' "$tmp_dir/processor.stdout.json"
+grep -q '"summarySpanCount": 2' "$tmp_dir/processor.stdout.json"
+grep -q '"summaryErrorSpanCount": 1' "$tmp_dir/processor.stdout.json"
+grep -q '"service": "checkout-api"' "$tmp_dir/processor.stdout.json"
+grep -q '"environment": "production"' "$tmp_dir/processor.stdout.json"
+grep -q '"route": "/checkout"' "$tmp_dir/processor.stdout.json"
+grep -q '"dependencySystem": "redis"' "$tmp_dir/processor.stdout.json"
 
 echo "Python OpenTelemetry installed-artifact smoke passed"

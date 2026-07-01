@@ -183,6 +183,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_js_opentelemetry_privacy_denylist_literal(relative_text, line):
         return True
 
+    if is_python_opentelemetry_privacy_denylist_literal(relative_text, line):
+        return True
+
     if is_release_artifact_upload_verifier_reference(relative_text, line):
         return True
 
@@ -395,6 +398,16 @@ def is_js_opentelemetry_privacy_denylist_literal(relative_text: str, line: str) 
     if relative_text != "js/logbrew-js/opentelemetry.cjs":
         return False
     return "SENSITIVE_OTEL_ATTRIBUTE_PATTERN" in line
+
+
+def is_python_opentelemetry_privacy_denylist_literal(relative_text: str, line: str) -> bool:
+    if relative_text != "python/logbrew_py/src/logbrew_sdk/_opentelemetry_processor.py":
+        return False
+    return (
+        "SENSITIVE_OTEL_ATTRIBUTE_PATTERN" in line
+        or 'r"(^|[._-])(' in line
+        or 'r"private[-_]?key|' in line
+    )
 
 
 def is_release_artifact_upload_verifier_reference(relative_text: str, line: str) -> bool:

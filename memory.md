@@ -1,5 +1,39 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-01: Python OpenTelemetry ended-span processor gap reduced after
+  source reads from Sentry Python
+  `getsentry/sentry-python@4b98ef1d1d72e8bdc1a11006776e1a89b1325eed`
+  (`SentrySpanProcessor.on_start`/`on_end`, trace-data/status/attribute
+  mapping, OTLP exporter setup), OpenTelemetry Python
+  `open-telemetry/opentelemetry-python@9ffd585e2f5eb296e2c9e834887b382af0c18727`
+  (`SpanProcessor`, `_on_ending`, `ReadableSpan`, `SimpleSpanProcessor`,
+  `BatchSpanProcessor`), Datadog dd-trace-py
+  `DataDog/dd-trace-py@ad931e9b9a8087d963a639b8c1eaff0b749b81cc`
+  (OTel tracer/provider/span shim, status/events/exceptions), and PostHog
+  Python `PostHog/posthog-python@bce671277cfe161587c9230efb5f9dd60c9dc47a`
+  (`PostHogSpanProcessor`, `PostHogTraceExporter`, AI span filter). Core
+  `logbrew-sdk` now exports
+  `span_attributes_from_open_telemetry_readable_span(...)`,
+  `LogBrewOpenTelemetrySpanProcessor`, and
+  `create_logbrew_open_telemetry_span_processor(...)`: apps that already own an
+  OTel `TracerProvider` can register a dependency-optional, SpanProcessor-
+  compatible bridge that queues sampled ended spans and optional trace summary
+  spans without LogBrew owning OTel providers/exporters/instrumentation. It
+  copies safe service/environment/route/method/status/kind/scope/dropped-count
+  metadata and type-only event summaries, blocks sensitive allowlist keys such
+  as full URLs, headers, query/payload/cookie/auth values, DB statements,
+  exception messages, and stacks, and implements Python OTel's `_on_ending`
+  hook. Evidence: `PYTHONPATH=python/logbrew_py/src python3 -m unittest
+  python/logbrew_py/tests/test_opentelemetry_processor.py` (3 tests), full
+  Python unit discovery (109 tests), strict Python static analysis, and `bash
+  scripts/real_user_python_opentelemetry_smoke.sh` building/installing the
+  wheel in a temp app with current `opentelemetry-sdk`, no-OTel fallback, active
+  context copy, real `TracerProvider.add_span_processor(...)`, detail+summary
+  payload proof, and blocked-value leak checks. Research:
+  `docs/competitor-research/python-opentelemetry-span-processor-2026-07-01.md`.
+  Remaining Python rich-trace gaps: full OTel exporter/provider ownership,
+  span links, baggage/tracestate, broader semantic-convention coverage,
+  automatic framework/client instrumentation depth, and advanced batching.
 - 2026-07-01: JavaScript OpenTelemetry ended-span bridge added after source
   reads from Sentry JavaScript
   `getsentry/sentry-javascript@88e7ad5444ece21f074e53768cb8633e00fa3a2b`
