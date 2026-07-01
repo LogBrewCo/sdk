@@ -24,6 +24,17 @@ Reduce the Go backend dependency-tracing gap after LogBrew already shipped `net/
 - PostHog Go: `PostHog/posthog-go@2b6e1878570f91ba7a155720923bbf3b98cc9216`.
   - Source search found error tracking, stack traces, request context, and slog paths, but no comparable `database/sql` tracing integration.
 
+## 2026-07-01 Queue Propagation Source Refresh
+
+- Datadog Go tracer: `DataDog/dd-trace-go@061ffc340dae85a53729895d0f9b22d906940ca9`.
+  - Read `contrib/segmentio/kafka-go/kafka.go` (`WrapReader`, `WrapWriter`, `ReadMessage`, `FetchMessage`, `WriteMessages`), `contrib/segmentio/kafka-go/headers.go` (`messageCarrier` header reader/writer), `contrib/segmentio/kafka-go/internal/tracing/tracing.go` (`StartConsumeSpan`, `StartProduceSpan`, injected/extracted carrier context, topic/partition/offset/broker tags), `contrib/segmentio/kafka-go/internal/tracing/message_carrier.go` (`MessageCarrier.Set` uniqueness), `contrib/IBM/sarama/headers.go` (`ProducerMessageCarrier`, `ConsumerMessageCarrier`), `contrib/confluentinc/confluent-kafka-go/kafkatrace/message_carrier.go`, `contrib/cloud.google.com/go/pubsubtrace/tracing.go` (`TracePublish`, `TraceReceiveFunc`), and `datastreams/propagation.go` (`TextMapReader`/`TextMapWriter`, pathway injection/extraction).
+- OpenTelemetry Go Contrib: `open-telemetry/opentelemetry-go-contrib@cf444e3f2822448f31782f83c7217b8179d59c61`.
+  - Source tree search found no first-party Kafka/Sarama/PubSub/Rabbit/AMQP messaging instrumentation path in this snapshot; HTTP/gRPC/MongoDB/framework paths remain the official contrib evidence for Go.
+- Sentry Go SDK: `getsentry/sentry-go@ea6e493b6bd7bd5810b996c8245211982818114e`.
+  - Read `propagation_context.go` (`PropagationContext`, `PropagationContextFromHeaders`) and searched the source tree for Kafka/Sarama/PubSub/Rabbit/AMQP/message queue paths; no first-party Go queue client instrumentation was found.
+- PostHog Go: `PostHog/posthog-go@2b6e1878570f91ba7a155720923bbf3b98cc9216`.
+  - Read `message.go` (`Message`, `BeforeSendFunc`, batching) and searched the source tree for Kafka/Sarama/PubSub/Rabbit/AMQP/traceparent queue paths; no comparable queue trace propagation path was found.
+
 ## Runtime Evidence
 
 - Sentry Go SQL integration runtime check passed with `go test ./sql` in `getsentry/sentry-go@c299195fc44e4c637d24a6ba1f2b38e0ccedb816`.
@@ -33,6 +44,7 @@ Reduce the Go backend dependency-tracing gap after LogBrew already shipped `net/
 
 - Sentry wraps `database/sql/driver` connections, statements, queries, exec calls, and transactions. It starts child spans only when a Sentry parent span exists, obfuscates SQL descriptions, records DB system/driver/namespace/server metadata, and marks spans by operation outcome. This is useful automatic SQL visibility, but it owns driver wrapping and can include server/user metadata depending on configuration.
 - Datadog exposes broad Go integration packages and Orchestrion coverage for SQL, Redis, Kafka, Pub/Sub, HTTP routers, loggers, gRPC, and more. Its Redis wrappers can record command, argument length, pipeline length, DB system, component, and optional raw command text. This is deep but adds client-version coupling and broader metadata risk.
+- Datadog is the strongest Go messaging reference in the sources read. Its Kafka/Sarama/Confluent carriers mutate client message headers to inject or extract trace context, remove duplicate propagation keys before setting a new value, start producer/consumer spans from wrapped readers/writers, and add topic/partition/offset/broker and data-stream metadata. Its Pub/Sub path injects into message attributes and extracts in receive handlers, also recording message size, ordering key, message id, publish time, and delivery attempt. This gives rich automatic queue visibility but couples to specific client packages and records broker/message metadata that LogBrew should keep optional and app-provided.
 - OpenTelemetry Go Contrib favors separate instrumentation packages per framework/client with standards-rich span attributes and metrics. It is portable but requires apps to adopt OTel tracer/provider/exporter setup and the relevant instrumentation packages.
 
 ## LogBrew Implementation
@@ -51,6 +63,7 @@ Reduce the Go backend dependency-tracing gap after LogBrew already shipped `net/
 - Better than default Sentry/Datadog/OTel automatic integrations for teams that want one explicit dependency span around the operation that matters, no Go driver/client imports, no global instrumentation, no local agent/exporter setup, and predictable privacy behavior.
 - Worse than Sentry/Datadog/OTel for teams that want automatic coverage across every SQL query, Redis command, Kafka publish/consume, richer semantic conventions, transaction hierarchy, propagation through brokers, raw-command debugging, or standards-native OTel exporter/processor interop.
 - The next safe step is optional integration packages or source snippets for specific Go clients only if demand justifies dependency/version proof. Core `go/logbrew` should stay dependency-free and explicit.
+- 2026-07-01 queue propagation research update: the next safe Go queue step is a dependency-free app-owned propagation helper, not automatic Kafka/Sarama/Pub/Sub wrappers. It should let apps write one normalized W3C `traceparent` through a caller-provided setter, continue one valid incoming `traceparent` for processing, optionally summarize bounded links for batch/fan-in, and record only primitive queue metadata already accepted by `QueueOperationConfig`. It should not capture arbitrary headers, message bodies, broker addresses, raw propagation values, message ids, offsets, delivery attempts, baggage, tracestate, or exception messages/stacks.
 
 ## Verification
 

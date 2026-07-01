@@ -1,5 +1,25 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-01: Go queue propagation source research completed before adding any
+  new public API. Datadog Go tracer
+  `DataDog/dd-trace-go@061ffc340dae85a53729895d0f9b22d906940ca9` remains the
+  strongest Go messaging source read: `contrib/segmentio/kafka-go/kafka.go`,
+  `headers.go`, `internal/tracing/tracing.go`, and `message_carrier.go` wrap
+  readers/writers, start producer/consumer spans, inject/extract through
+  message headers, and ensure propagation-key uniqueness; `contrib/IBM/sarama`
+  and `contrib/confluentinc/confluent-kafka-go/kafkatrace` use similar
+  carriers, while `contrib/cloud.google.com/go/pubsubtrace/tracing.go` injects
+  into message attributes and extracts in receive handlers. OTel Go Contrib
+  `cf444e3` had no first-party Kafka/Sarama/PubSub/Rabbit/AMQP path in this
+  snapshot, Sentry Go `ea6e493` had generic propagation context but no Go queue
+  client instrumentation, and PostHog Go `2b6e187` had batching/message types
+  but no traceparent queue propagation. Next safe LogBrew Go step is a
+  dependency-free app-owned queue propagation helper: caller-provided setter for
+  one normalized W3C `traceparent`, one valid incoming continuation for
+  processing, optional bounded link summaries for batch/fan-in, and no arbitrary
+  headers, message bodies, broker addresses, raw propagation values, message
+  ids, offsets, delivery attempts, baggage, tracestate, or exception
+  messages/stacks.
 - 2026-07-01: Go `database/sql` rich-trace ergonomics improved after fresh
   source reads from Sentry Go
   `getsentry/sentry-go@ea6e493b6bd7bd5810b996c8245211982818114e`
