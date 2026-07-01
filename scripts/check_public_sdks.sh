@@ -337,6 +337,8 @@ fi
 
 cleanup_build_artifacts() {
   rm -rf \
+    Cargo.lock \
+    target \
     php/logbrew-php/vendor \
     php/logbrew-php/composer.lock \
     .mypy_cache \
@@ -356,6 +358,7 @@ cleanup_build_artifacts() {
   rm -rf cpp/logbrew-cpp/build cpp/logbrew-cpp/examples/build
   rm -rf objc/logbrew-objc/build objc/logbrew-objc/examples/build
   find scripts tests python/logbrew_py python/logbrew_fastapi python/logbrew_django -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+  find js -maxdepth 2 -type f -path 'js/logbrew-*/*.tgz' -delete 2>/dev/null || true
   find dotnet/logbrew-dotnet -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
   find unity/logbrew-unity -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
   find kotlin/logbrew-kotlin -type d \( -name build -o -name .gradle \) -prune -exec rm -rf {} + 2>/dev/null || true

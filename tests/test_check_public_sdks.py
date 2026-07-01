@@ -508,6 +508,19 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete",
         )
 
+    def test_public_verifier_removes_disposable_package_outputs(self) -> None:
+        script = SCRIPT.read_text()
+        function_name = "clean" + "up_build_artifacts"
+
+        self.assertRegex(
+            script,
+            rf"{function_name}\(\) \{{\n"
+            r"(?:.*\n)*?"
+            r"\s+Cargo\.lock \\\n"
+            r"\s+target(?: \\\n|\n)",
+        )
+        self.assertIn("find js -maxdepth 2 -type f -path 'js/logbrew-*/*.tgz' -delete", script)
+
     def test_public_verifier_validates_step_label_order_at_runtime(self) -> None:
         script = SCRIPT.read_text()
 
