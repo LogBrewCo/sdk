@@ -34,6 +34,7 @@ type TraceContextSpanInput struct {
 	Status     string
 	DurationMs *float64
 	Metadata   map[string]any
+	Links      []SpanLinkSummary
 }
 
 // NewTraceContext creates a request-local trace context. When Traceparent is
@@ -175,6 +176,7 @@ func SpanAttributesFromTraceContext(input TraceContextSpanInput) (SpanAttributes
 		Status:       input.Status,
 		DurationMs:   input.DurationMs,
 		Metadata:     compactMetadata(input.Metadata),
+		Links:        input.Links,
 	}, nil
 }
 

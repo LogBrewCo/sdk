@@ -124,6 +124,9 @@ for needle in (
     "ParseTraceparent",
     "CreateTraceparent",
     "SpanAttributesFromTraceparent",
+    "SpanLinkSummary",
+    "SpanLinkSummaryFromTraceparent",
+    "NewSpanLinkSummary",
     "NewTraceContext",
     "LogBrewTraceFromContext",
     "LogAttributesWithTrace",
@@ -140,6 +143,9 @@ for needle in (
     "SQLStatementExecContextRunner",
     "CacheOperationWithLogBrewSpan",
     "QueueOperationWithLogBrewSpan",
+    "TraceparentSetter",
+    "IncomingTraceparent",
+    "LinkedTraceparents",
     "CreateProductActionAttributes",
     "CreateNetworkMilestoneAttributes",
     "HTTPTransport",
@@ -692,6 +698,138 @@ func TestInstalledTraceparentHelpers(t *testing.T) {
 	}
 	if _, err := logbrew.ParseTraceparent("00-00000000000000000000000000000000-00f067aa0ba902b7-01"); err == nil {
 		t.Fatalf("expected malformed traceparent to fail")
+	}
+}
+
+func TestInstalledQueueTracePropagation(t *testing.T) {
+	client, err := logbrew.NewClient(logbrew.Config{
+		APIKey:     "LOGBREW_API_KEY",
+		SDKName:    "smoke-app-test",
+		SDKVersion: "0.1.0",
+	})
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	parent, err := logbrew.NewTraceContext(logbrew.TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatalf("create parent trace: %v", err)
+	}
+	headers := map[string]string{"traceparent": "spoofed"}
+	_, err = logbrew.QueueOperationWithLogBrewSpan(
+		logbrew.ContextWithLogBrewTrace(context.Background(), parent),
+		client,
+		"publish checkout",
+		func(operationCtx context.Context) (string, error) {
+			trace, ok := logbrew.LogBrewTraceFromContext(operationCtx)
+			if !ok || trace.SpanID != "b7ad6b7169203345" {
+				t.Fatalf("missing active producer trace: %#v", trace)
+			}
+			return "published", nil
+		},
+		logbrew.QueueOperationConfig{
+			System:        "kafka",
+			OperationKind: "publish",
+			QueueName:     "checkout-events",
+			TaskName:      "checkout.completed",
+			TraceparentSetter: func(traceparent string) error {
+				headers["traceparent"] = traceparent
+				return nil
+			},
+			Metadata: map[string]any{
+				"component":   "checkout",
+				"payload":     "private-body",
+				"traceparent": "raw-propagation",
+			},
+			EventIDPrefix: "installed_go_queue_publish",
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203345"
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("producer queue helper returned error: %v", err)
+	}
+	if headers["traceparent"] != "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203345-01" {
+		t.Fatalf("unexpected outgoing traceparent: %q", headers["traceparent"])
+	}
+
+	messageCount := 2
+	_, err = logbrew.QueueOperationWithLogBrewSpan(
+		context.Background(),
+		client,
+		"process checkout batch",
+		func(operationCtx context.Context) (int, error) {
+			trace, ok := logbrew.LogBrewTraceFromContext(operationCtx)
+			if !ok || trace.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" || trace.ParentSpanID != "b7ad6b7169203345" {
+				t.Fatalf("missing active consumer trace: %#v", trace)
+			}
+			return 2, nil
+		},
+		logbrew.QueueOperationConfig{
+			System:              "kafka",
+			OperationKind:       "process",
+			QueueName:           "checkout-events",
+			MessageCount:        &messageCount,
+			IncomingTraceparent: headers["traceparent"],
+			LinkedTraceparents: []string{
+				headers["traceparent"],
+				"malformed-traceparent",
+				"00-55555555555555555555555555555555-6666666666666666-00",
+			},
+			LinkMetadata: map[string]any{
+				"relation":    "batch_item",
+				"payload":     "private-link-payload",
+				"traceparent": "raw-link-propagation",
+			},
+			EventIDPrefix: "installed_go_queue_process",
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203346"
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("consumer queue helper returned error: %v", err)
+	}
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatalf("preview json: %v", err)
+	}
+	for _, want := range []string{
+		"\"id\": \"installed_go_queue_publish_span_b7ad6b7169203345\"",
+		"\"id\": \"installed_go_queue_process_span_b7ad6b7169203346\"",
+		"\"links\": [",
+		"\"traceId\": \"4bf92f3577b34da6a3ce929d0e0e4736\"",
+		"\"traceId\": \"55555555555555555555555555555555\"",
+		"\"messaging.system\": \"kafka\"",
+		"\"messaging.batch.message_count\": 2",
+		"\"relation\": \"batch_item\"",
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("missing queue propagation payload %s: %s", want, payload)
+		}
+	}
+	for _, unsafe := range []string{"private-body", "raw-propagation", "private-link-payload", "raw-link-propagation", "malformed-traceparent", "spoofed"} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("queue propagation leaked %q: %s", unsafe, payload)
+		}
+	}
+
+	link, err := logbrew.SpanLinkSummaryFromTraceparent(headers["traceparent"])
+	if err != nil {
+		t.Fatalf("span link from traceparent: %v", err)
+	}
+	if link.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" || link.SpanID != "b7ad6b7169203345" || !link.Sampled {
+		t.Fatalf("unexpected span link: %#v", link)
+	}
+	explicit, err := logbrew.NewSpanLinkSummary("11111111111111111111111111111111", "2222222222222222", false)
+	if err != nil {
+		t.Fatalf("new span link: %v", err)
+	}
+	if explicit.TraceID != "11111111111111111111111111111111" || explicit.SpanID != "2222222222222222" || explicit.Sampled {
+		t.Fatalf("unexpected explicit span link: %#v", explicit)
 	}
 }
 
@@ -1372,6 +1510,9 @@ for needle in (
     "ParseTraceparent",
     "CreateTraceparent",
     "SpanAttributesFromTraceparent",
+    "SpanLinkSummary",
+    "SpanLinkSummaryFromTraceparent",
+    "NewSpanLinkSummary",
     "NewTraceContext",
     "LogBrewTraceFromContext",
     "LogAttributesWithTrace",
@@ -1387,6 +1528,9 @@ for needle in (
     "SQLStatementExecContextRunner",
     "CacheOperationWithLogBrewSpan",
     "QueueOperationWithLogBrewSpan",
+    "TraceparentSetter",
+    "IncomingTraceparent",
+    "LinkedTraceparents",
     "CreateProductActionAttributes",
     "CreateNetworkMilestoneAttributes",
     "HTTPTransport",
@@ -1465,6 +1609,15 @@ GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SpanAttributes 
 grep -q '^type SpanAttributes struct {' span-attributes-doc.txt
 grep -q 'SpanAttributes describes the public payload fields for a span' span-attributes-doc.txt
 grep -q 'event' span-attributes-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SpanLinkSummary > span-link-summary-doc.txt
+grep -q '^type SpanLinkSummary struct {' span-link-summary-doc.txt
+grep -q 'SpanLinkSummary is a privacy-bounded link' span-link-summary-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SpanLinkSummaryFromTraceparent > span-link-from-traceparent-doc.txt
+grep -q '^func SpanLinkSummaryFromTraceparent(traceparent string) (SpanLinkSummary, error)$' span-link-from-traceparent-doc.txt
+grep -q 'without retaining the raw propagation string' span-link-from-traceparent-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.NewSpanLinkSummary > new-span-link-doc.txt
+grep -q '^func NewSpanLinkSummary(traceID, spanID string, sampled bool) (SpanLinkSummary, error)$' new-span-link-doc.txt
+grep -q 'validates explicit W3C trace and span IDs' new-span-link-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.MetricAttributes > metric-attributes-doc.txt
 grep -q '^type MetricAttributes struct {' metric-attributes-doc.txt
 grep -q 'MetricAttributes describes the public payload fields for an explicit metric' metric-attributes-doc.txt

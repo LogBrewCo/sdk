@@ -1,7 +1,7 @@
 # LogBrew SDK Readiness Memory
 
-- 2026-07-01: Go queue propagation source research completed before adding any
-  new public API. Datadog Go tracer
+- 2026-07-01: Go queue propagation implemented after source research from
+  Datadog Go tracer
   `DataDog/dd-trace-go@061ffc340dae85a53729895d0f9b22d906940ca9` remains the
   strongest Go messaging source read: `contrib/segmentio/kafka-go/kafka.go`,
   `headers.go`, `internal/tracing/tracing.go`, and `message_carrier.go` wrap
@@ -13,13 +13,25 @@
   `cf444e3` had no first-party Kafka/Sarama/PubSub/Rabbit/AMQP path in this
   snapshot, Sentry Go `ea6e493` had generic propagation context but no Go queue
   client instrumentation, and PostHog Go `2b6e187` had batching/message types
-  but no traceparent queue propagation. Next safe LogBrew Go step is a
-  dependency-free app-owned queue propagation helper: caller-provided setter for
-  one normalized W3C `traceparent`, one valid incoming continuation for
-  processing, optional bounded link summaries for batch/fan-in, and no arbitrary
-  headers, message bodies, broker addresses, raw propagation values, message
-  ids, offsets, delivery attempts, baggage, tracestate, or exception
-  messages/stacks.
+  but no traceparent queue propagation. Core
+  `github.com/LogBrewCo/sdk/go/logbrew` now extends
+  `QueueOperationWithLogBrewSpan(...)` with app-owned `TraceparentSetter`,
+  `IncomingTraceparent`, `LinkedTraceparents`, `SpanLinkSummary`, and
+  `LinkMetadata`: producers write one normalized W3C `traceparent`, processors
+  continue one valid incoming message context, batch spans serialize up to eight
+  linked message summaries, malformed propagation is skipped through redacted
+  `OnError` diagnostics, and safe `messaging.*` metadata is emitted from
+  app-provided queue fields. It avoids arbitrary header capture, message bodies,
+  broker addresses, raw propagation values, message ids, offsets, delivery
+  attempts, baggage, tracestate, and exception messages/stacks. Evidence: RED
+  missing-field Go tests, privacy RED where raw `traceparent` leaked from
+  metadata, `cd go/logbrew && go test ./...`, and `bash
+  scripts/real_user_go_smoke.sh` installed-module proof for queue propagation
+  plus `SpanLinkSummaryFromTraceparent`/`NewSpanLinkSummary`. Remaining Go
+  messaging gaps: automatic Kafka/Sarama/Confluent/Pub/Sub integration
+  packages, explicit opt-in broker/client metadata, queue/cache metrics,
+  data-stream style path context, baggage/tracestate only with a real interop
+  need, and OTel exporter/processor interop.
 - 2026-07-01: Go `database/sql` rich-trace ergonomics improved after fresh
   source reads from Sentry Go
   `getsentry/sentry-go@ea6e493b6bd7bd5810b996c8245211982818114e`

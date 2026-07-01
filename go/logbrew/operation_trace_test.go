@@ -193,6 +193,166 @@ func TestCacheAndQueueOperationSpansPreserveErrors(t *testing.T) {
 	}
 }
 
+func TestQueueOperationWithLogBrewSpanInjectsOutgoingTraceparent(t *testing.T) {
+	client := sampleClient(t)
+	parent, err := NewTraceContext(TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := ContextWithLogBrewTrace(context.Background(), parent)
+	headers := map[string]string{
+		"traceparent": "caller-value-to-replace",
+	}
+	var active TraceContext
+
+	result, err := QueueOperationWithLogBrewSpan(ctx, client, "publish checkout", func(operationCtx context.Context) (string, error) {
+		var ok bool
+		active, ok = LogBrewTraceFromContext(operationCtx)
+		if !ok {
+			t.Fatal("expected active queue trace")
+		}
+		return "published", nil
+	}, QueueOperationConfig{
+		System:        "kafka",
+		OperationKind: "publish",
+		QueueName:     "checkout-events",
+		TaskName:      "checkout.completed",
+		EventIDPrefix: "go_queue_publish",
+		TraceparentSetter: func(traceparent string) error {
+			headers["traceparent"] = traceparent
+			headers["traceparent-duplicate"] = "must not be touched by LogBrew"
+			return nil
+		},
+		Metadata: map[string]any{
+			"component":   "checkout",
+			"headers":     "private headers",
+			"messageBody": "private body",
+			"traceparent": "raw propagation must not serialize",
+		},
+		SpanIDFactory: func() string {
+			return "b7ad6b7169203345"
+		},
+		Now: fixedOperationNow(),
+	})
+	if err != nil || result != "published" {
+		t.Fatalf("unexpected result=%q err=%v", result, err)
+	}
+	if headers["traceparent"] != "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203345-01" {
+		t.Fatalf("unexpected outgoing traceparent: %q", headers["traceparent"])
+	}
+	if active.TraceID != parent.TraceID || active.ParentSpanID != parent.SpanID || active.SpanID != "b7ad6b7169203345" || !active.Sampled {
+		t.Fatalf("unexpected active queue trace: %#v", active)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"id": "go_queue_publish_span_b7ad6b7169203345"`,
+		`"name": "queue:publish checkout"`,
+		`"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"`,
+		`"spanId": "b7ad6b7169203345"`,
+		`"parentSpanId": "a7ad6b7169203330"`,
+		`"queueSystem": "kafka"`,
+		`"queueOperationKind": "publish"`,
+		`"queueName": "checkout-events"`,
+		`"taskName": "checkout.completed"`,
+		`"component": "checkout"`,
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("missing %s in payload: %s", want, payload)
+		}
+	}
+	for _, unsafe := range []string{"private headers", "private body", "raw propagation", "caller-value-to-replace", "traceparent-duplicate"} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("queue propagation leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
+func TestQueueOperationWithLogBrewSpanContinuesIncomingAndLinksBatchTraceparents(t *testing.T) {
+	client := sampleClient(t)
+	incoming := "00-11111111111111111111111111111111-2222222222222222-01"
+	var active TraceContext
+	var reported []error
+
+	result, err := QueueOperationWithLogBrewSpan(context.Background(), client, "process batch", func(operationCtx context.Context) (int, error) {
+		var ok bool
+		active, ok = LogBrewTraceFromContext(operationCtx)
+		if !ok {
+			t.Fatal("expected active queue trace")
+		}
+		return 2, nil
+	}, QueueOperationConfig{
+		System:              "pubsub",
+		OperationKind:       "process",
+		QueueName:           "checkout-events",
+		MessageCount:        intPtr(3),
+		IncomingTraceparent: incoming,
+		LinkedTraceparents: []string{
+			"00-33333333333333333333333333333333-4444444444444444-01",
+			"malformed-traceparent-value",
+			"00-55555555555555555555555555555555-6666666666666666-00",
+		},
+		LinkMetadata: map[string]any{
+			"relation":    "batch_item",
+			"delivery":    2,
+			"payload":     "private batch payload",
+			"traceparent": "raw link propagation",
+		},
+		EventIDPrefix: "go_queue_process",
+		SpanIDFactory: func() string {
+			return "b7ad6b7169203346"
+		},
+		Now: fixedOperationNow(),
+		OnError: func(err error) {
+			reported = append(reported, err)
+		},
+	})
+	if err != nil || result != 2 {
+		t.Fatalf("unexpected result=%d err=%v", result, err)
+	}
+	if active.TraceID != "11111111111111111111111111111111" || active.ParentSpanID != "2222222222222222" || active.SpanID != "b7ad6b7169203346" || !active.Sampled {
+		t.Fatalf("unexpected active incoming queue trace: %#v", active)
+	}
+	if len(reported) != 1 || !strings.Contains(reported[0].Error(), "queue linked traceparent skipped") {
+		t.Fatalf("expected one malformed linked traceparent diagnostic, got %#v", reported)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"traceId": "11111111111111111111111111111111"`,
+		`"spanId": "b7ad6b7169203346"`,
+		`"parentSpanId": "2222222222222222"`,
+		`"messageCount": 3`,
+		`"links": [`,
+		`"traceId": "33333333333333333333333333333333"`,
+		`"spanId": "4444444444444444"`,
+		`"sampled": true`,
+		`"traceId": "55555555555555555555555555555555"`,
+		`"spanId": "6666666666666666"`,
+		`"sampled": false`,
+		`"relation": "batch_item"`,
+		`"delivery": 2`,
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("missing %s in payload: %s", want, payload)
+		}
+	}
+	for _, unsafe := range []string{"malformed-traceparent-value", "private batch payload", "raw link propagation", "traceparent"} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("queue linked propagation leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
 func TestOperationSpanCaptureFailureDoesNotReplaceOperationResult(t *testing.T) {
 	client := sampleClient(t)
 	if _, err := client.Shutdown(AlwaysAcceptTransport()); err != nil {

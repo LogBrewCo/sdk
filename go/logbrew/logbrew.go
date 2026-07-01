@@ -47,6 +47,8 @@ const (
 
 	zeroTraceID = "00000000000000000000000000000000"
 	zeroSpanID  = "0000000000000000"
+
+	maxSpanLinks = 8
 )
 
 var defaultHTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
@@ -387,13 +389,23 @@ type LogAttributes struct {
 
 // SpanAttributes describes the public payload fields for a span event.
 type SpanAttributes struct {
-	Name         string         `json:"name"`
-	TraceID      string         `json:"traceId"`
-	SpanID       string         `json:"spanId"`
-	ParentSpanID string         `json:"parentSpanId,omitempty"`
-	Status       string         `json:"status"`
-	DurationMs   *float64       `json:"durationMs,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
+	Name         string            `json:"name"`
+	TraceID      string            `json:"traceId"`
+	SpanID       string            `json:"spanId"`
+	ParentSpanID string            `json:"parentSpanId,omitempty"`
+	Status       string            `json:"status"`
+	DurationMs   *float64          `json:"durationMs,omitempty"`
+	Metadata     map[string]any    `json:"metadata,omitempty"`
+	Links        []SpanLinkSummary `json:"links,omitempty"`
+}
+
+// SpanLinkSummary is a privacy-bounded link from one span to another W3C trace
+// context, useful for queue batch/fan-in relationships.
+type SpanLinkSummary struct {
+	TraceID  string         `json:"traceId"`
+	SpanID   string         `json:"spanId"`
+	Sampled  bool           `json:"sampled"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // TraceparentContext describes an incoming W3C traceparent header after
@@ -653,6 +665,38 @@ func SpanAttributesFromTraceparent(input TraceparentSpanInput) (SpanAttributes, 
 	}, nil
 }
 
+// SpanLinkSummaryFromTraceparent validates a W3C traceparent value and returns
+// a safe span-link summary without retaining the raw propagation string.
+func SpanLinkSummaryFromTraceparent(traceparent string) (SpanLinkSummary, error) {
+	context, err := ParseTraceparent(traceparent)
+	if err != nil {
+		return SpanLinkSummary{}, err
+	}
+	return SpanLinkSummary{
+		TraceID: context.TraceID,
+		SpanID:  context.ParentSpanID,
+		Sampled: context.Sampled,
+	}, nil
+}
+
+// NewSpanLinkSummary validates explicit W3C trace and span IDs and returns a
+// safe span-link summary.
+func NewSpanLinkSummary(traceID, spanID string, sampled bool) (SpanLinkSummary, error) {
+	normalizedTraceID := strings.ToLower(strings.TrimSpace(traceID))
+	normalizedSpanID := strings.ToLower(strings.TrimSpace(spanID))
+	if err := requireTraceID(normalizedTraceID); err != nil {
+		return SpanLinkSummary{}, err
+	}
+	if err := requireSpanID("span link span id", normalizedSpanID); err != nil {
+		return SpanLinkSummary{}, err
+	}
+	return SpanLinkSummary{
+		TraceID: normalizedTraceID,
+		SpanID:  normalizedSpanID,
+		Sampled: sampled,
+	}, nil
+}
+
 func cloneHTTPHeaders(headers map[string]string) (map[string]string, error) {
 	cloned := make(map[string]string, len(headers))
 	for name, value := range headers {
@@ -786,6 +830,36 @@ func cloneMetadata(metadata map[string]any) map[string]any {
 	return cloned
 }
 
+func cloneSpanLinks(links []SpanLinkSummary) ([]map[string]any, error) {
+	if len(links) == 0 {
+		return nil, nil
+	}
+	if len(links) > maxSpanLinks {
+		return nil, &SdkError{Code: "validation_error", Message: fmt.Sprintf("span links must contain at most %d entries", maxSpanLinks)}
+	}
+	cloned := make([]map[string]any, 0, len(links))
+	for _, link := range links {
+		normalizedTraceID := strings.ToLower(strings.TrimSpace(link.TraceID))
+		normalizedSpanID := strings.ToLower(strings.TrimSpace(link.SpanID))
+		if err := requireTraceID(normalizedTraceID); err != nil {
+			return nil, err
+		}
+		if err := requireSpanID("span link span id", normalizedSpanID); err != nil {
+			return nil, err
+		}
+		value := map[string]any{
+			"traceId": normalizedTraceID,
+			"spanId":  normalizedSpanID,
+			"sampled": link.Sampled,
+		}
+		if metadata := compactMetadata(link.Metadata); metadata != nil {
+			value["metadata"] = metadata
+		}
+		cloned = append(cloned, value)
+	}
+	return cloned, nil
+}
+
 func validateRelease(attributes ReleaseAttributes) (map[string]any, error) {
 	if err := requireNonEmpty("release version", attributes.Version); err != nil {
 		return nil, err
@@ -890,6 +964,11 @@ func validateSpan(attributes SpanAttributes) (map[string]any, error) {
 	}
 	if metadata := cloneMetadata(attributes.Metadata); metadata != nil {
 		result["metadata"] = metadata
+	}
+	if links, err := cloneSpanLinks(attributes.Links); err != nil {
+		return nil, err
+	} else if links != nil {
+		result["links"] = links
 	}
 	return result, nil
 }

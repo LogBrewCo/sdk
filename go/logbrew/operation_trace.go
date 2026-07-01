@@ -40,16 +40,21 @@ type CacheOperationConfig struct {
 
 // QueueOperationConfig configures an explicit app-owned queue span.
 type QueueOperationConfig struct {
-	System        string
-	OperationKind string
-	QueueName     string
-	TaskName      string
-	MessageCount  *int
-	EventIDPrefix string
-	Metadata      map[string]any
-	SpanIDFactory func() string
-	Now           func() time.Time
-	OnError       func(error)
+	System              string
+	OperationKind       string
+	QueueName           string
+	TaskName            string
+	MessageCount        *int
+	EventIDPrefix       string
+	Metadata            map[string]any
+	TraceparentSetter   func(string) error
+	IncomingTraceparent string
+	LinkedTraceparents  []string
+	Links               []SpanLinkSummary
+	LinkMetadata        map[string]any
+	SpanIDFactory       func() string
+	Now                 func() time.Time
+	OnError             func(error)
 }
 
 // SQLQueryContextRunner is implemented by app-owned *sql.DB, *sql.Tx, and
@@ -262,15 +267,44 @@ func QueueOperationWithLogBrewSpan[T any](
 	operation func(context.Context) (T, error),
 	config QueueOperationConfig,
 ) (T, error) {
-	return operationWithLogBrewSpan(ctx, client, operationName, operation, operationSpanConfig{
+	var zero T
+	if client == nil {
+		return zero, &SdkError{Code: "configuration_error", Message: "operation span client must be non-nil"}
+	}
+	if operation == nil {
+		return zero, &SdkError{Code: "configuration_error", Message: "operation span callback must be non-nil"}
+	}
+	if err := requireNonEmpty("operation name", operationName); err != nil {
+		return zero, err
+	}
+	now := config.Now
+	if now == nil {
+		now = time.Now
+	}
+	trace, traceErr := queueOperationTrace(ctx, config)
+	if traceErr != nil {
+		reportOperationSpanError(config.OnError, traceErr)
+	}
+	if trace.TraceID == "" {
+		return operation(ctx)
+	}
+	setQueueTraceparent(config.TraceparentSetter, trace, config.OnError)
+
+	start := now()
+	operationCtx := ContextWithLogBrewTrace(ctxWithDefault(ctx), trace)
+	result, operationErr := operation(operationCtx)
+	finished := now()
+	captureOperationSpan(client, operationName, trace, operationErr, finished.Sub(start), finished, operationSpanConfig{
 		source:        "queue.operation",
 		namePrefix:    "queue",
 		eventIDPrefix: eventIDPrefix(config.EventIDPrefix, "go_queue"),
 		metadata:      queueOperationMetadata(operationName, config),
+		links:         queueTraceLinks(config),
 		spanIDFactory: config.SpanIDFactory,
 		now:           config.Now,
 		onError:       config.OnError,
 	})
+	return result, operationErr
 }
 
 type operationSpanConfig struct {
@@ -278,6 +312,7 @@ type operationSpanConfig struct {
 	namePrefix    string
 	eventIDPrefix string
 	metadata      map[string]any
+	links         []SpanLinkSummary
 	spanIDFactory func() string
 	now           func() time.Time
 	onError       func(error)
@@ -426,24 +461,36 @@ func reportSQLTransactionRollbackFailure(onError func(error)) {
 }
 
 func operationChildTrace(ctx context.Context, spanIDFactory func() string) (TraceContext, error) {
+	spanID, err := operationSpanID(spanIDFactory)
+	if err != nil {
+		return TraceContext{}, err
+	}
+	return operationChildTraceWithSpanID(ctx, spanID)
+}
+
+func operationSpanID(spanIDFactory func() string) (string, error) {
 	spanID := ""
 	if spanIDFactory != nil {
 		spanID = spanIDFactory()
-	}
-	parent, ok := LogBrewTraceFromContext(ctx)
-	if !ok {
-		return NewTraceContext(TraceContextInput{SpanID: spanID})
 	}
 	spanID = strings.ToLower(strings.TrimSpace(spanID))
 	if spanID == "" {
 		generated, err := GenerateSpanID()
 		if err != nil {
-			return TraceContext{}, err
+			return "", err
 		}
 		spanID = generated
 	}
 	if err := requireSpanID("span id", spanID); err != nil {
-		return TraceContext{}, err
+		return "", err
+	}
+	return spanID, nil
+}
+
+func operationChildTraceWithSpanID(ctx context.Context, spanID string) (TraceContext, error) {
+	parent, ok := LogBrewTraceFromContext(ctx)
+	if !ok {
+		return NewTraceContext(TraceContextInput{SpanID: spanID})
 	}
 	if err := validateTraceContext(parent); err != nil {
 		fallback, fallbackErr := NewTraceContext(TraceContextInput{SpanID: spanID})
@@ -459,6 +506,70 @@ func operationChildTrace(ctx context.Context, spanIDFactory func() string) (Trac
 		TraceFlags:   normalizedTraceFlags(parent),
 		Sampled:      parent.Sampled,
 	}, nil
+}
+
+func queueOperationTrace(ctx context.Context, config QueueOperationConfig) (TraceContext, error) {
+	spanID, err := operationSpanID(config.SpanIDFactory)
+	if err != nil {
+		return TraceContext{}, err
+	}
+	if strings.TrimSpace(config.IncomingTraceparent) != "" {
+		trace, incomingErr := NewTraceContext(TraceContextInput{
+			Traceparent: config.IncomingTraceparent,
+			SpanID:      spanID,
+		})
+		if incomingErr == nil {
+			return trace, nil
+		}
+		fallback, fallbackErr := operationChildTraceWithSpanID(ctx, spanID)
+		if fallbackErr != nil {
+			return TraceContext{}, fallbackErr
+		}
+		return fallback, &SdkError{Code: "capture_error", Message: "queue incoming traceparent skipped"}
+	}
+	return operationChildTraceWithSpanID(ctx, spanID)
+}
+
+func setQueueTraceparent(setter func(string) error, trace TraceContext, onError func(error)) {
+	if setter == nil {
+		return
+	}
+	traceparent, err := CreateTraceparent(trace.TraceID, trace.SpanID, normalizedTraceFlags(trace))
+	if err != nil {
+		reportOperationSpanError(onError, err)
+		return
+	}
+	if err := setter(traceparent); err != nil {
+		reportOperationSpanError(onError, &SdkError{Code: "capture_error", Message: "queue traceparent setter failed"})
+	}
+}
+
+func queueTraceLinks(config QueueOperationConfig) []SpanLinkSummary {
+	links := make([]SpanLinkSummary, 0, len(config.Links)+len(config.LinkedTraceparents))
+	for _, link := range config.Links {
+		if len(links) >= maxSpanLinks {
+			return links
+		}
+		links = append(links, sanitizedQueueLink(link))
+	}
+	for _, traceparent := range config.LinkedTraceparents {
+		if len(links) >= maxSpanLinks {
+			break
+		}
+		link, err := SpanLinkSummaryFromTraceparent(traceparent)
+		if err != nil {
+			reportOperationSpanError(config.OnError, &SdkError{Code: "capture_error", Message: "queue linked traceparent skipped"})
+			continue
+		}
+		link.Metadata = safeQueueLinkMetadata(config.LinkMetadata)
+		links = append(links, link)
+	}
+	return links
+}
+
+func sanitizedQueueLink(link SpanLinkSummary) SpanLinkSummary {
+	link.Metadata = safeQueueLinkMetadata(link.Metadata)
+	return link
 }
 
 func captureOperationSpan(
@@ -484,6 +595,7 @@ func captureOperationSpan(
 		Status:     operationSpanStatus(operationErr),
 		DurationMs: &durationMs,
 		Metadata:   metadata,
+		Links:      config.links,
 	})
 	if err != nil {
 		reportOperationSpanError(config.onError, err)
@@ -527,6 +639,25 @@ func queueOperationMetadata(operationName string, config QueueOperationConfig) m
 	addString(metadata, "queueName", config.QueueName)
 	addString(metadata, "taskName", config.TaskName)
 	addNonNegativeInt(metadata, "messageCount", config.MessageCount)
+	addString(metadata, "messaging.system", config.System)
+	addString(metadata, "messaging.operation.name", operationName)
+	addString(metadata, "messaging.operation.type", config.OperationKind)
+	addString(metadata, "messaging.destination.name", config.QueueName)
+	addNonNegativeInt(metadata, "messaging.batch.message_count", config.MessageCount)
+	return metadata
+}
+
+func safeQueueLinkMetadata(input map[string]any) map[string]any {
+	metadata := map[string]any{}
+	for key, value := range compactMetadata(input) {
+		if blockedOperationMetadataKey(key) {
+			continue
+		}
+		metadata[key] = value
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
 	return metadata
 }
 
@@ -544,14 +675,14 @@ func safeOperationMetadata(input map[string]any) map[string]any {
 func blockedOperationMetadataKey(key string) bool {
 	normalized := strings.NewReplacer("_", "", "-", "", ".", "").Replace(strings.ToLower(strings.TrimSpace(key)))
 	blocked := []string{
-		"args", "arguments", "auth", "authorization", "body", "brokerurl",
+		"args", "arguments", "auth", "authorization", "baggage", "body", "brokerurl",
 		strings.Join([]string{"cache", "key"}, ""), "command", "connectionstring",
 		strings.Join([]string{"coo", "kie"}, ""), strings.Join([]string{"coo", "kies"}, ""),
 		strings.Join([]string{"head", "ers"}, ""), strings.Join([]string{"ho", "st"}, ""),
 		strings.Join([]string{"host", "name"}, ""), strings.Join([]string{"k", "ey"}, ""), "message",
 		"messagebody", "params", "parameters", "payload", "query", "rawcommand",
 		"rawmessage", strings.Join([]string{"pass", "word"}, ""), strings.Join([]string{"se", "cret"}, ""),
-		"sql", "statement", strings.Join([]string{"to", "ken"}, ""), "url", "username", "value",
+		"sql", "statement", strings.Join([]string{"to", "ken"}, ""), "traceparent", "tracestate", "url", "username", "value",
 	}
 	for _, candidate := range blocked {
 		if normalized == candidate || strings.Contains(normalized, candidate) {

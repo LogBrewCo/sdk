@@ -286,7 +286,45 @@ result, err := logbrew.DatabaseOperationWithLogBrewSpan(r.Context(), client, "se
 })
 ```
 
-Each helper creates a child `TraceContext`, activates it for the callback, records one span, returns the original result, and re-raises the original error. Metadata is primitive-only and intentionally drops SQL text, parameters, connection details, cache keys/values, commands, message bodies, broker URLs, headers, cookies, and auth-like fields. These helpers do not import or patch `database/sql`, Redis, Kafka, AMQP, or queue clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
+Each helper creates a child `TraceContext`, activates it for the callback, records one span, returns the original result, and re-raises the original error. Metadata is primitive-only and intentionally drops SQL text, parameters, connection details, cache keys/values, commands, message bodies, broker URLs, headers, cookies, raw `traceparent` values, baggage, tracestate, and auth-like fields. These helpers do not import or patch `database/sql`, Redis, Kafka, AMQP, or queue clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
+
+For app-owned queue clients, use `TraceparentSetter` to write exactly one outgoing W3C `traceparent`, `IncomingTraceparent` to continue one valid message trace while processing, and `LinkedTraceparents` or `SpanLinkSummary` values to summarize batch/fan-in relationships. Use `SpanLinkSummaryFromTraceparent` for message-carrier traceparents or `NewSpanLinkSummary` for explicit W3C trace/span IDs:
+
+```go
+headers := map[string]string{}
+_, err = logbrew.QueueOperationWithLogBrewSpan(r.Context(), client, "publish checkout", func(ctx context.Context) (string, error) {
+  // Send your Kafka/SQS/Pub/Sub/AMQP message here with headers["traceparent"].
+  return "published", nil
+}, logbrew.QueueOperationConfig{
+  System:        "kafka",
+  OperationKind: "publish",
+  QueueName:     "checkout-events",
+  TaskName:      "checkout.completed",
+  TraceparentSetter: func(traceparent string) error {
+    headers["traceparent"] = traceparent
+    return nil
+  },
+})
+if err != nil {
+  panic(err)
+}
+
+messageCount := 2
+_, err = logbrew.QueueOperationWithLogBrewSpan(context.Background(), client, "process checkout batch", func(ctx context.Context) (int, error) {
+  // Logs emitted with ctx correlate to the message-processing child span.
+  return 2, nil
+}, logbrew.QueueOperationConfig{
+  System:              "kafka",
+  OperationKind:       "process",
+  QueueName:           "checkout-events",
+  MessageCount:        &messageCount,
+  IncomingTraceparent: headers["traceparent"],
+  LinkedTraceparents:  []string{headers["traceparent"]},
+  LinkMetadata:        map[string]any{"relation": "batch_item"},
+})
+```
+
+Malformed incoming or linked propagation is reported through `OnError` as a redacted diagnostic and skipped without interrupting app work. Span links are capped at eight and store only normalized trace ID, span ID, sampled flag, and primitive safe metadata.
 
 For common `database/sql` calls, use `SQLQueryContextWithLogBrewSpan` and `SQLExecContextWithLogBrewSpan` with an app-owned `*sql.DB`, `*sql.Tx`, `*sql.Conn`, or prepared `*sql.Stmt`:
 
