@@ -334,6 +334,27 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "FastAPI real-user smoke"',
         )
 
+    def test_public_verifier_runs_python_public_pypi_smoke(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"Python public PyPI install smoke"', script)
+        self.assertRegex(
+            script,
+            r'begin_next_step "Python Celery real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_python_celery_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "FastAPI real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_fastapi_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Django real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_django_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Python public PyPI install smoke"\n'
+            r'run_shell_step "bash scripts/real_user_python_public_pypi_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Go real-user smoke"',
+        )
+
     def test_public_verifier_runs_javascript_opentelemetry_smoke(self) -> None:
         script = SCRIPT.read_text()
 

@@ -71,6 +71,7 @@ STEP_LABELS=(
   "Python Celery real-user smoke"
   "FastAPI real-user smoke"
   "Django real-user smoke"
+  "Python public PyPI install smoke"
   "Go real-user smoke"
   "Go high-load installed-artifact smoke"
   "Go support-ticket real-user smoke"
@@ -596,6 +597,10 @@ mark_step_complete
 
 begin_next_step "Django real-user smoke"
 run_shell_step "bash scripts/real_user_django_smoke.sh"
+mark_step_complete
+
+begin_next_step "Python public PyPI install smoke"
+run_shell_step "bash scripts/real_user_python_public_pypi_smoke.sh"
 mark_step_complete
 
 begin_next_step "Go real-user smoke"
