@@ -256,6 +256,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
 
         self.assertIn('"Java JMS installed-artifact smoke"', script)
         self.assertIn('"Java high-load installed-artifact smoke"', script)
+        self.assertIn('"Maven Central public install smoke"', script)
         self.assertRegex(
             script,
             r'begin_next_step "Java real-user smoke"\n'
@@ -272,6 +273,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete\n\n"
             r'begin_next_step "Java high-load installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_java_high_load_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Maven Central public install smoke"\n'
+            r'run_shell_step "bash scripts/real_user_maven_central_public_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Spring Boot real-user smoke"',
         )

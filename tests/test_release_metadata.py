@@ -787,6 +787,54 @@ jobs:
         self.assertTrue(any("developers.developer.name" in failure for failure in failures))
         self.assertTrue(any("scm.url" in failure for failure in failures))
 
+    def test_kotlin_maven_metadata_requires_stdlib_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package_dir = root / "kotlin" / "logbrew-kotlin"
+            package_dir.mkdir(parents=True)
+            (package_dir / "README.md").write_text("# LogBrew Kotlin\n", encoding="utf-8")
+            (package_dir / "pom.xml").write_text(
+                """
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>co.logbrew</groupId>
+  <artifactId>logbrew-kotlin</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+  <name>LogBrew Kotlin SDK</name>
+  <description>Public LogBrew Kotlin SDK.</description>
+  <url>https://github.com/LogBrewCo/sdk</url>
+  <licenses>
+    <license>
+      <name>MIT</name>
+      <url>https://opensource.org/license/mit</url>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <name>LogBrew</name>
+    </developer>
+  </developers>
+  <scm>
+    <url>https://github.com/LogBrewCo/sdk</url>
+  </scm>
+</project>
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_maven_pom(
+                root,
+                "kotlin/logbrew-kotlin/pom.xml",
+                "logbrew-kotlin",
+                "LogBrew Kotlin SDK",
+                failures,
+            )
+
+        self.assertTrue(any("dependencies" in failure and "kotlin-stdlib" in failure for failure in failures))
+
     def test_python_integration_requires_declared_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

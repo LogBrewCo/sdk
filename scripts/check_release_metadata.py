@@ -624,6 +624,22 @@ def validate_maven_pom(
     require_equal(failures, relative_path, "scm.url", path_text(project, "scm", "url"), REPO_URL)
     if require_compiler_release:
         require_equal(failures, relative_path, "properties.maven.compiler.release", path_text(project, "properties", "maven.compiler.release"), "11")
+    if expected_artifact == "logbrew-kotlin":
+        dependencies_node = child(project, "dependencies")
+        dependency_nodes = [] if dependencies_node is None else list(dependencies_node)
+        dependencies = {
+            (
+                path_text(dependency, "groupId"),
+                path_text(dependency, "artifactId"),
+            )
+            for dependency in dependency_nodes
+            if local_name(dependency.tag) == "dependency"
+        }
+        require(
+            ("org.jetbrains.kotlin", "kotlin-stdlib") in dependencies,
+            failures,
+            f"{relative_path}: dependencies must include org.jetbrains.kotlin:kotlin-stdlib",
+        )
 
 
 def validate_unity(root: Path, failures: list[str]) -> None:

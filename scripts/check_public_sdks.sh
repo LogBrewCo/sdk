@@ -82,6 +82,7 @@ STEP_LABELS=(
   "Java queue trace installed-artifact smoke"
   "Java JMS installed-artifact smoke"
   "Java high-load installed-artifact smoke"
+  "Maven Central public install smoke"
   "Spring Boot real-user smoke"
   ".NET real-user smoke"
   ".NET high-load installed-artifact smoke"
@@ -641,6 +642,10 @@ mark_step_complete
 
 begin_next_step "Java high-load installed-artifact smoke"
 run_shell_step "bash scripts/real_user_java_high_load_smoke.sh"
+mark_step_complete
+
+begin_next_step "Maven Central public install smoke"
+run_shell_step "bash scripts/real_user_maven_central_public_smoke.sh"
 mark_step_complete
 
 begin_next_step "Spring Boot real-user smoke"
