@@ -143,6 +143,25 @@ class RegistryPublicationTests(unittest.TestCase):
 
         self.assertEqual({"@logbrew/nestjs"}, labels)
 
+    def test_maven_artifact_filter_limits_maven_registry_checks(self) -> None:
+        args = argparse.Namespace(
+            target=["maven"],
+            include_unity_npm=False,
+            include_pypi_extras=False,
+            include_crates=False,
+            include_packagist=False,
+            include_maven=False,
+            include_openupm=False,
+            include_go=False,
+            npm_package=[],
+            maven_artifact=["logbrew-sdk", "logbrew-kotlin"],
+            npm_versions={},
+        )
+
+        labels = {check.label for check in check_registry_publication.checks_for(args)}
+
+        self.assertEqual({"co.logbrew:logbrew-sdk", "co.logbrew:logbrew-kotlin"}, labels)
+
     def test_parse_npm_package_versions(self) -> None:
         self.assertEqual(
             check_registry_publication.parse_package_versions(["@logbrew/nestjs=0.1.1"]),
@@ -168,6 +187,16 @@ class RegistryPublicationTests(unittest.TestCase):
                 package_family="NuGet",
             ),
             {"LogBrew.StackExchangeRedis": "0.1.1"},
+        )
+
+    def test_parse_maven_package_versions(self) -> None:
+        self.assertEqual(
+            check_registry_publication.parse_package_versions(
+                ["co.logbrew:logbrew-sdk=0.1.0"],
+                allowed_packages=check_registry_publication.MAVEN_PACKAGE_LABELS,
+                package_family="Maven",
+            ),
+            {"co.logbrew:logbrew-sdk": "0.1.0"},
         )
 
     def test_success_summary_reports_npm_version_overrides(self) -> None:
@@ -206,6 +235,7 @@ class RegistryPublicationTests(unittest.TestCase):
             npm_versions={},
             pypi_versions={},
             nuget_versions={"LogBrew": "0.1.1"},
+            maven_versions={},
         )
 
         summary = check_registry_publication.success_summary(args)
@@ -213,7 +243,22 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertIn("public registry versions ok for nuget at 0.1.0", summary)
         self.assertIn("LogBrew@0.1.1", summary)
 
-    def test_parse_args_combines_npm_and_pypi_version_overrides(self) -> None:
+    def test_success_summary_reports_maven_version_overrides(self) -> None:
+        args = argparse.Namespace(
+            target=["maven"],
+            version="0.1.0",
+            npm_versions={},
+            pypi_versions={},
+            nuget_versions={},
+            maven_versions={"co.logbrew:logbrew-sdk": "0.1.0"},
+        )
+
+        summary = check_registry_publication.success_summary(args)
+
+        self.assertIn("public registry versions ok for maven at 0.1.0", summary)
+        self.assertIn("co.logbrew:logbrew-sdk@0.1.0", summary)
+
+    def test_parse_args_combines_package_version_overrides(self) -> None:
         args = check_registry_publication.parse_args(
             [
                 "--target",
@@ -224,12 +269,19 @@ class RegistryPublicationTests(unittest.TestCase):
                 "logbrew-fastapi=0.1.2",
                 "--nuget-version",
                 "LogBrew=0.1.3",
+                "--maven-version",
+                "co.logbrew:logbrew-sdk=0.1.0",
             ]
         )
 
         self.assertEqual(
             args.package_versions,
-            {"@logbrew/nestjs": "0.1.1", "logbrew-fastapi": "0.1.2", "LogBrew": "0.1.3"},
+            {
+                "@logbrew/nestjs": "0.1.1",
+                "logbrew-fastapi": "0.1.2",
+                "LogBrew": "0.1.3",
+                "co.logbrew:logbrew-sdk": "0.1.0",
+            },
         )
 
     def test_validate_check_passes_when_expected_version_is_found(self) -> None:

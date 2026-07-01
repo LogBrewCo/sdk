@@ -29,6 +29,7 @@ RUBYGEMS_PACKAGES = ("logbrew-sdk",)
 NUGET_PACKAGES = ("LogBrew", "LogBrew.AspNetCore", "LogBrew.EntityFrameworkCore", "LogBrew.StackExchangeRedis")
 CRATES = ("logbrew",)
 MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin", "logbrew-kotlin-okhttp")
+MAVEN_PACKAGE_LABELS = tuple(f"co.logbrew:{artifact_id}" for artifact_id in MAVEN_ARTIFACTS)
 OPENUPM_PACKAGES = ("co.logbrew.unity",)
 
 def decode_json(raw: bytes) -> Any:
@@ -252,7 +253,8 @@ def checks_for(args: argparse.Namespace) -> list[RegistryCheck]:
     if "crates" in requested:
         checks.extend(crates_check(crate_name) for crate_name in CRATES)
     if "maven" in requested:
-        checks.extend(maven_check(artifact_id) for artifact_id in MAVEN_ARTIFACTS)
+        maven_artifacts = tuple(args.maven_artifact) if getattr(args, "maven_artifact", []) else MAVEN_ARTIFACTS
+        checks.extend(maven_check(artifact_id) for artifact_id in maven_artifacts)
     if "openupm" in requested:
         checks.extend(openupm_check(package_name) for package_name in OPENUPM_PACKAGES)
     return checks
@@ -417,6 +419,7 @@ def success_summary(args: argparse.Namespace) -> str:
             format_overrides("npm", args.npm_versions),
             format_overrides("pypi", args.pypi_versions),
             format_overrides("nuget", args.nuget_versions),
+            format_overrides("maven", getattr(args, "maven_versions", {})),
         )
         if formatted is not None
     ]
@@ -463,6 +466,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="PACKAGE=VERSION",
         help="Expected version for one NuGet package. May be passed more than once.",
     )
+    parser.add_argument(
+        "--maven-artifact",
+        action="append",
+        choices=MAVEN_ARTIFACTS,
+        default=[],
+        help="Restrict Maven Central verification to one co.logbrew artifact id. May be passed more than once.",
+    )
+    parser.add_argument(
+        "--maven-version",
+        action="append",
+        default=[],
+        metavar="PACKAGE=VERSION",
+        help="Expected version for one Maven package, for example co.logbrew:logbrew-sdk=0.1.0.",
+    )
     parser.add_argument("--include-pypi-extras", action="store_true")
     parser.add_argument("--include-crates", action="store_true")
     parser.add_argument("--include-packagist", action="store_true")
@@ -481,6 +498,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--pypi-version requires --target pypi or --target all")
     if args.nuget_version and "nuget" not in args.target and "all" not in args.target:
         parser.error("--nuget-version requires --target nuget or --target all")
+    if args.maven_artifact and "maven" not in args.target and "all" not in args.target:
+        parser.error("--maven-artifact requires --target maven or --target all")
+    if args.maven_version and "maven" not in args.target and "all" not in args.target:
+        parser.error("--maven-version requires --target maven or --target all")
     try:
         args.npm_versions = parse_package_versions(args.npm_version)
         args.pypi_versions = parse_package_versions(
@@ -493,9 +514,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             allowed_packages=NUGET_PACKAGES,
             package_family="NuGet",
         )
+        args.maven_versions = parse_package_versions(
+            args.maven_version,
+            allowed_packages=MAVEN_PACKAGE_LABELS,
+            package_family="Maven",
+        )
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
-    args.package_versions = {**args.npm_versions, **args.pypi_versions, **args.nuget_versions}
+    args.package_versions = {**args.npm_versions, **args.pypi_versions, **args.nuget_versions, **args.maven_versions}
     return args
 
 
