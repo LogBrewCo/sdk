@@ -95,6 +95,7 @@ STEP_LABELS=(
   "Ruby real-user smoke"
   "RubyGems public install smoke"
   "Swift real-user smoke"
+  "SwiftPM public install smoke"
   "PHP package metadata"
   "PHP package install"
   "PHP package tests"
@@ -699,6 +700,10 @@ mark_step_complete
 
 begin_next_step "Swift real-user smoke"
 run_shell_step "bash scripts/real_user_swift_smoke.sh"
+mark_step_complete
+
+begin_next_step "SwiftPM public install smoke"
+run_shell_step "bash scripts/real_user_swiftpm_public_smoke.sh"
 mark_step_complete
 
 begin_next_step "PHP package metadata"

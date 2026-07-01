@@ -11,7 +11,7 @@ For Apple app setup flows, choose the Swift path first. Use this SDK for iOS, ma
 ## Install
 
 ```swift
-.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.0")
+.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.1")
 ```
 
 Use the `LogBrew` product from the repository root SwiftPM package. Local contributors can also open the Swift package directly from `swift/logbrew-swift`.

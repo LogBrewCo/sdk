@@ -479,6 +479,24 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "C real-user smoke"',
         )
 
+    def test_public_verifier_runs_swiftpm_public_install_smoke(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"SwiftPM public install smoke"', script)
+        self.assertRegex(
+            script,
+            r'begin_next_step "RubyGems public install smoke"\n'
+            r'run_shell_step "bash scripts/real_user_rubygems_public_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Swift real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_swift_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "SwiftPM public install smoke"\n'
+            r'run_shell_step "bash scripts/real_user_swiftpm_public_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "PHP package metadata"',
+        )
+
     def test_public_verifier_runs_github_release_safety_gate(self) -> None:
         script = SCRIPT.read_text()
 
