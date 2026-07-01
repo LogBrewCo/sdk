@@ -52,16 +52,28 @@ type QueueOperationConfig struct {
 	OnError       func(error)
 }
 
-// SQLQueryContextRunner is implemented by app-owned *sql.DB, *sql.Tx,
-// *sql.Conn, and *sql.Stmt values that can run query operations.
+// SQLQueryContextRunner is implemented by app-owned *sql.DB, *sql.Tx, and
+// *sql.Conn values that can run query operations from query text.
 type SQLQueryContextRunner interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// SQLExecContextRunner is implemented by app-owned *sql.DB, *sql.Tx,
-// *sql.Conn, and *sql.Stmt values that can run exec operations.
+// SQLStatementQueryContextRunner is implemented by app-owned *sql.Stmt values
+// that can run prepared query operations from args only.
+type SQLStatementQueryContextRunner interface {
+	QueryContext(ctx context.Context, args ...any) (*sql.Rows, error)
+}
+
+// SQLExecContextRunner is implemented by app-owned *sql.DB, *sql.Tx, and
+// *sql.Conn values that can run exec operations from query text.
 type SQLExecContextRunner interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// SQLStatementExecContextRunner is implemented by app-owned *sql.Stmt values
+// that can run prepared exec operations from args only.
+type SQLStatementExecContextRunner interface {
+	ExecContext(ctx context.Context, args ...any) (sql.Result, error)
 }
 
 // DatabaseOperationWithLogBrewSpan runs operation under a child trace context
@@ -85,51 +97,51 @@ func DatabaseOperationWithLogBrewSpan[T any](
 }
 
 // SQLQueryContextWithLogBrewSpan runs an app-owned database/sql QueryContext
-// call under a child trace and queues one privacy-bounded database span. The
-// query text and args are passed only to the app-owned runner and are never
-// copied into telemetry by this helper.
+// call under a child trace and queues one privacy-bounded database span.
+// Query-text runners receive query text and args; prepared statement runners
+// receive args only. Neither query text nor args are copied into telemetry by
+// this helper.
 func SQLQueryContextWithLogBrewSpan(
 	ctx context.Context,
 	client *Client,
-	queryer SQLQueryContextRunner,
+	queryer any,
 	operationName string,
 	query string,
 	config DatabaseOperationConfig,
 	args ...any,
 ) (*sql.Rows, error) {
-	if queryer == nil {
-		return nil, &SdkError{Code: "configuration_error", Message: "database sql query runner must be non-nil"}
+	operation, err := sqlQueryOperation(queryer, query, args)
+	if err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(config.OperationKind) == "" {
 		config.OperationKind = "query"
 	}
-	return sqlDatabaseOperationWithLogBrewSpan(ctx, client, operationName, func(operationCtx context.Context) (*sql.Rows, error) {
-		return queryer.QueryContext(operationCtx, query, args...)
-	}, config, nil)
+	return sqlDatabaseOperationWithLogBrewSpan(ctx, client, operationName, operation, config, nil)
 }
 
 // SQLExecContextWithLogBrewSpan runs an app-owned database/sql ExecContext
-// call under a child trace and queues one privacy-bounded database span. The
-// query text and args are passed only to the app-owned runner and are never
-// copied into telemetry by this helper.
+// call under a child trace and queues one privacy-bounded database span.
+// Query-text runners receive query text and args; prepared statement runners
+// receive args only. Neither query text nor args are copied into telemetry by
+// this helper.
 func SQLExecContextWithLogBrewSpan(
 	ctx context.Context,
 	client *Client,
-	execer SQLExecContextRunner,
+	execer any,
 	operationName string,
 	query string,
 	config DatabaseOperationConfig,
 	args ...any,
 ) (sql.Result, error) {
-	if execer == nil {
-		return nil, &SdkError{Code: "configuration_error", Message: "database sql exec runner must be non-nil"}
+	operation, err := sqlExecOperation(execer, query, args)
+	if err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(config.OperationKind) == "" {
 		config.OperationKind = "exec"
 	}
-	return sqlDatabaseOperationWithLogBrewSpan(ctx, client, operationName, func(operationCtx context.Context) (sql.Result, error) {
-		return execer.ExecContext(operationCtx, query, args...)
-	}, config, func(result sql.Result, operationErr error, enriched *DatabaseOperationConfig) {
+	return sqlDatabaseOperationWithLogBrewSpan(ctx, client, operationName, operation, config, func(result sql.Result, operationErr error, enriched *DatabaseOperationConfig) {
 		if operationErr != nil || result == nil || enriched.RowCount != nil {
 			return
 		}
@@ -283,6 +295,40 @@ func sqlDatabaseOperationWithLogBrewSpan[T any](
 		onError:       enriched.OnError,
 	})
 	return result, operationErr
+}
+
+func sqlQueryOperation(queryer any, query string, args []any) (func(context.Context) (*sql.Rows, error), error) {
+	switch runner := queryer.(type) {
+	case nil:
+		return nil, &SdkError{Code: "configuration_error", Message: "database sql query runner must be non-nil"}
+	case SQLQueryContextRunner:
+		return func(operationCtx context.Context) (*sql.Rows, error) {
+			return runner.QueryContext(operationCtx, query, args...)
+		}, nil
+	case SQLStatementQueryContextRunner:
+		return func(operationCtx context.Context) (*sql.Rows, error) {
+			return runner.QueryContext(operationCtx, args...)
+		}, nil
+	default:
+		return nil, &SdkError{Code: "configuration_error", Message: "database sql query runner must implement QueryContext"}
+	}
+}
+
+func sqlExecOperation(execer any, query string, args []any) (func(context.Context) (sql.Result, error), error) {
+	switch runner := execer.(type) {
+	case nil:
+		return nil, &SdkError{Code: "configuration_error", Message: "database sql exec runner must be non-nil"}
+	case SQLExecContextRunner:
+		return func(operationCtx context.Context) (sql.Result, error) {
+			return runner.ExecContext(operationCtx, query, args...)
+		}, nil
+	case SQLStatementExecContextRunner:
+		return func(operationCtx context.Context) (sql.Result, error) {
+			return runner.ExecContext(operationCtx, args...)
+		}, nil
+	default:
+		return nil, &SdkError{Code: "configuration_error", Message: "database sql exec runner must implement ExecContext"}
+	}
 }
 
 func operationChildTrace(ctx context.Context, spanIDFactory func() string) (TraceContext, error) {

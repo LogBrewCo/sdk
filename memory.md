@@ -21,18 +21,20 @@
   `github.com/LogBrewCo/sdk/go/logbrew` now exposes standard-library-only
   `SQLQueryContextWithLogBrewSpan(...)` and
   `SQLExecContextWithLogBrewSpan(...)` for app-owned `*sql.DB`, `*sql.Tx`,
-  `*sql.Conn`, `*sql.Stmt`, or compatible runners. The helpers pass query text
-  and args only to the app-owned runner, activate a child LogBrew trace for
-  logs inside that call, default operation kind to `query`/`exec`, preserve the
-  original result/error, and record `RowsAffected()` only when successful
-  exec results expose it. They avoid driver registration/wrapping, connection
-  input mutation, automatic statement derivation, query/args/connection/user
-  capture, result rows, exception messages/stacks, baggage, and tracestate.
-  Evidence: RED missing-symbol Go tests, `cd go/logbrew && go test ./...`,
-  `bash scripts/real_user_go_smoke.sh` with packaged README/`go doc`/temp-app
-  SQL helper proof, `bash scripts/check_go_static.sh`, ShellCheck, markdown
-  links, backend reports, release metadata, confidentiality scan,
-  generated-artifact hygiene, and diff hygiene. Report:
+  `*sql.Conn`, prepared `*sql.Stmt`, or compatible runners. Query-text runners
+  receive query text and args; prepared statement runners receive args only.
+  The helpers activate a child LogBrew trace for logs inside that call, default
+  operation kind to `query`/`exec`, preserve the original result/error, and
+  record `RowsAffected()` only when successful exec results expose it. They
+  avoid driver registration/wrapping, connection input mutation, automatic
+  statement derivation, query/args/connection/user capture, result rows,
+  exception messages/stacks, baggage, and tracestate. Evidence: RED
+  missing-symbol Go tests, RED prepared-statement runner contract test,
+  `cd go/logbrew && go test ./...`, `bash scripts/real_user_go_smoke.sh` with
+  packaged README/`go doc`/temp-app SQL helper proof,
+  `bash scripts/check_go_static.sh`, ShellCheck, markdown links, backend
+  reports, release metadata, confidentiality scan, generated-artifact hygiene,
+  and diff hygiene. Report:
   `docs/competitor-research/go-dependency-spans-2026-06-19.md`.
   Remaining Go gaps: driver-wide automatic SQL spans, transaction hierarchy,
   DB/cache metrics, Redis/Kafka/client integrations, richer semantic

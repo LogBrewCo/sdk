@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+var _ SQLQueryContextRunner = (*sql.DB)(nil)
+var _ SQLQueryContextRunner = (*sql.Tx)(nil)
+var _ SQLQueryContextRunner = (*sql.Conn)(nil)
+var _ SQLStatementQueryContextRunner = (*sql.Stmt)(nil)
+var _ SQLExecContextRunner = (*sql.DB)(nil)
+var _ SQLExecContextRunner = (*sql.Tx)(nil)
+var _ SQLExecContextRunner = (*sql.Conn)(nil)
+var _ SQLStatementExecContextRunner = (*sql.Stmt)(nil)
+
 func TestOperationSpanHelpersCorrelateAndSanitizeMetadata(t *testing.T) {
 	client := sampleClient(t)
 	parent, err := NewTraceContext(TraceContextInput{
@@ -374,6 +383,99 @@ func TestSQLExecRowsAffectedFailureIsDiagnosticOnly(t *testing.T) {
 	}
 }
 
+func TestSQLContextHelpersSupportPreparedStatementRunners(t *testing.T) {
+	client := sampleClient(t)
+	parent, err := NewTraceContext(TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := ContextWithLogBrewTrace(context.Background(), parent)
+	queryer := &fakeSQLStmtQueryer{}
+	execer := &fakeSQLStmtExecer{result: fakeSQLResult{rowsAffected: 4}}
+
+	_, err = SQLQueryContextWithLogBrewSpan(
+		ctx,
+		client,
+		queryer,
+		"prepared lookup checkout order",
+		"SELECT * FROM orders WHERE account_ref = ?",
+		DatabaseOperationConfig{
+			EventIDPrefix: "go_sql_stmt_query",
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203338"
+			},
+			Now: fixedOperationNow(),
+		},
+		"opaque-ref-value",
+	)
+	if err != nil {
+		t.Fatalf("statement query helper returned error: %v", err)
+	}
+	if queryer.queryTextReceived ||
+		len(queryer.args) != 1 ||
+		queryer.args[0] != "opaque-ref-value" ||
+		queryer.trace.SpanID != "b7ad6b7169203338" {
+		t.Fatalf("statement query helper did not use statement-style runner: %#v", queryer)
+	}
+
+	result, err := SQLExecContextWithLogBrewSpan(
+		ctx,
+		client,
+		execer,
+		"prepared update checkout order",
+		"UPDATE orders SET status = ? WHERE id = ?",
+		DatabaseOperationConfig{
+			EventIDPrefix: "go_sql_stmt_exec",
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203339"
+			},
+			Now: fixedOperationNow(),
+		},
+		"paid",
+		"order-ref-value",
+	)
+	if err != nil {
+		t.Fatalf("statement exec helper returned error: %v", err)
+	}
+	if result == nil ||
+		execer.queryTextReceived ||
+		len(execer.args) != 2 ||
+		execer.args[0] != "paid" ||
+		execer.args[1] != "order-ref-value" ||
+		execer.trace.SpanID != "b7ad6b7169203339" {
+		t.Fatalf("statement exec helper did not use statement-style runner: result=%v execer=%#v", result, execer)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"dbOperation": "prepared lookup checkout order"`,
+		`"dbOperationKind": "query"`,
+		`"dbOperation": "prepared update checkout order"`,
+		`"dbOperationKind": "exec"`,
+		`"rowCount": 4`,
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("missing statement SQL trace metadata %s in payload: %s", want, payload)
+		}
+	}
+	for _, unsafe := range []string{
+		"SELECT * FROM orders",
+		"UPDATE orders",
+		"opaque-ref-value",
+		"order-ref-value",
+	} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("statement SQL helper leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
 func fixedOperationNow() func() time.Time {
 	return func() time.Time {
 		return time.Date(2026, 6, 2, 10, 0, 0, 25*int(time.Millisecond), time.UTC)
@@ -414,6 +516,49 @@ func (e *fakeSQLExecer) ExecContext(ctx context.Context, query string, args ...a
 	}
 	e.trace = trace
 	return e.result, e.err
+}
+
+type fakeSQLStmtQueryer struct {
+	queryTextReceived bool
+	args              []any
+	trace             TraceContext
+}
+
+func (q *fakeSQLStmtQueryer) QueryContext(ctx context.Context, args ...any) (*sql.Rows, error) {
+	q.args = append([]any{}, args...)
+	if len(args) > 0 {
+		if value, ok := args[0].(string); ok && strings.Contains(value, "SELECT * FROM orders") {
+			q.queryTextReceived = true
+		}
+	}
+	trace, ok := LogBrewTraceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing LogBrew trace")
+	}
+	q.trace = trace
+	return nil, nil
+}
+
+type fakeSQLStmtExecer struct {
+	queryTextReceived bool
+	args              []any
+	trace             TraceContext
+	result            sql.Result
+}
+
+func (e *fakeSQLStmtExecer) ExecContext(ctx context.Context, args ...any) (sql.Result, error) {
+	e.args = append([]any{}, args...)
+	if len(args) > 0 {
+		if value, ok := args[0].(string); ok && strings.Contains(value, "UPDATE orders") {
+			e.queryTextReceived = true
+		}
+	}
+	trace, ok := LogBrewTraceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing LogBrew trace")
+	}
+	e.trace = trace
+	return e.result, nil
 }
 
 type fakeSQLResult struct {

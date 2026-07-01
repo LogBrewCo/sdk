@@ -134,6 +134,8 @@ for needle in (
     "DatabaseOperationWithLogBrewSpan",
     "SQLQueryContextWithLogBrewSpan",
     "SQLExecContextWithLogBrewSpan",
+    "SQLStatementQueryContextRunner",
+    "SQLStatementExecContextRunner",
     "CacheOperationWithLogBrewSpan",
     "QueueOperationWithLogBrewSpan",
     "CreateProductActionAttributes",
@@ -746,6 +748,8 @@ func TestInstalledSQLContextHelpers(t *testing.T) {
 	ctx := logbrew.ContextWithLogBrewTrace(context.Background(), parent)
 	queryer := &fakeSQLQueryer{}
 	execer := &fakeSQLExecer{result: fakeSQLResult{rowsAffected: 2}}
+	stmtQueryer := &fakeSQLStmtQueryer{}
+	stmtExecer := &fakeSQLStmtExecer{result: fakeSQLResult{rowsAffected: 4}}
 
 	_, err = logbrew.SQLQueryContextWithLogBrewSpan(
 		ctx,
@@ -815,6 +819,56 @@ func TestInstalledSQLContextHelpers(t *testing.T) {
 		t.Fatalf("exec helper did not activate child trace: %#v", execer.trace)
 	}
 
+	_, err = logbrew.SQLQueryContextWithLogBrewSpan(
+		ctx,
+		client,
+		stmtQueryer,
+		"prepared lookup checkout order",
+		"SELECT * FROM orders WHERE account_ref = ?",
+		logbrew.DatabaseOperationConfig{
+			EventIDPrefix: "go_sql_stmt_query_test",
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203337"
+			},
+		},
+		"opaque-ref-value",
+	)
+	if err != nil {
+		t.Fatalf("statement query helper returned error: %v", err)
+	}
+	if stmtQueryer.queryTextReceived ||
+		len(stmtQueryer.args) != 1 ||
+		stmtQueryer.args[0] != "opaque-ref-value" ||
+		stmtQueryer.trace.SpanID != "b7ad6b7169203337" {
+		t.Fatalf("statement query helper did not use statement-style runner: %#v", stmtQueryer)
+	}
+
+	_, err = logbrew.SQLExecContextWithLogBrewSpan(
+		ctx,
+		client,
+		stmtExecer,
+		"prepared update checkout order",
+		"UPDATE orders SET status = ? WHERE id = ?",
+		logbrew.DatabaseOperationConfig{
+			EventIDPrefix: "go_sql_stmt_exec_test",
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203338"
+			},
+		},
+		"paid",
+		"order-ref-value",
+	)
+	if err != nil {
+		t.Fatalf("statement exec helper returned error: %v", err)
+	}
+	if stmtExecer.queryTextReceived ||
+		len(stmtExecer.args) != 2 ||
+		stmtExecer.args[0] != "paid" ||
+		stmtExecer.args[1] != "order-ref-value" ||
+		stmtExecer.trace.SpanID != "b7ad6b7169203338" {
+		t.Fatalf("statement exec helper did not use statement-style runner: %#v", stmtExecer)
+	}
+
 	payload, err := client.PreviewJSON()
 	if err != nil {
 		t.Fatalf("preview json: %v", err)
@@ -825,6 +879,9 @@ func TestInstalledSQLContextHelpers(t *testing.T) {
 		`"dbOperation": "update checkout order"`,
 		`"dbOperationKind": "exec"`,
 		`"rowCount": 2`,
+		`"dbOperation": "prepared lookup checkout order"`,
+		`"dbOperation": "prepared update checkout order"`,
+		`"rowCount": 4`,
 	} {
 		if !strings.Contains(payload, want) {
 			t.Fatalf("missing SQL trace metadata %s in payload: %s", want, payload)
@@ -872,6 +929,49 @@ type fakeSQLExecer struct {
 func (e *fakeSQLExecer) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	e.query = query
 	e.args = append([]any{}, args...)
+	trace, ok := logbrew.LogBrewTraceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing LogBrew trace")
+	}
+	e.trace = trace
+	return e.result, nil
+}
+
+type fakeSQLStmtQueryer struct {
+	queryTextReceived bool
+	args              []any
+	trace             logbrew.TraceContext
+}
+
+func (q *fakeSQLStmtQueryer) QueryContext(ctx context.Context, args ...any) (*sql.Rows, error) {
+	q.args = append([]any{}, args...)
+	if len(args) > 0 {
+		if value, ok := args[0].(string); ok && strings.Contains(value, "SELECT * FROM orders") {
+			q.queryTextReceived = true
+		}
+	}
+	trace, ok := logbrew.LogBrewTraceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("missing LogBrew trace")
+	}
+	q.trace = trace
+	return nil, nil
+}
+
+type fakeSQLStmtExecer struct {
+	queryTextReceived bool
+	args              []any
+	trace             logbrew.TraceContext
+	result            sql.Result
+}
+
+func (e *fakeSQLStmtExecer) ExecContext(ctx context.Context, args ...any) (sql.Result, error) {
+	e.args = append([]any{}, args...)
+	if len(args) > 0 {
+		if value, ok := args[0].(string); ok && strings.Contains(value, "UPDATE orders") {
+			e.queryTextReceived = true
+		}
+	}
 	trace, ok := logbrew.LogBrewTraceFromContext(ctx)
 	if !ok {
 		return nil, errors.New("missing LogBrew trace")
@@ -1090,6 +1190,8 @@ for needle in (
     "DatabaseOperationWithLogBrewSpan",
     "SQLQueryContextWithLogBrewSpan",
     "SQLExecContextWithLogBrewSpan",
+    "SQLStatementQueryContextRunner",
+    "SQLStatementExecContextRunner",
     "CacheOperationWithLogBrewSpan",
     "QueueOperationWithLogBrewSpan",
     "CreateProductActionAttributes",
@@ -1188,14 +1290,18 @@ grep -q '^func DatabaseOperationWithLogBrewSpan' database-operation-doc.txt
 grep -q 'queues one privacy-bounded database span' database-operation-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLQueryContextWithLogBrewSpan > sql-query-operation-doc.txt
 grep -q '^func SQLQueryContextWithLogBrewSpan' sql-query-operation-doc.txt
-grep -q 'query text and args are passed only to the app-owned runner' sql-query-operation-doc.txt
+grep -q 'Query-text runners receive query text and args' sql-query-operation-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLExecContextWithLogBrewSpan > sql-exec-operation-doc.txt
 grep -q '^func SQLExecContextWithLogBrewSpan' sql-exec-operation-doc.txt
-grep -q 'query text and args are passed only to the app-owned runner' sql-exec-operation-doc.txt
+grep -q 'Query-text runners receive query text and args' sql-exec-operation-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLQueryContextRunner > sql-query-runner-doc.txt
 grep -q '^type SQLQueryContextRunner interface' sql-query-runner-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLStatementQueryContextRunner > sql-statement-query-runner-doc.txt
+grep -q '^type SQLStatementQueryContextRunner interface' sql-statement-query-runner-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLExecContextRunner > sql-exec-runner-doc.txt
 grep -q '^type SQLExecContextRunner interface' sql-exec-runner-doc.txt
+GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.SQLStatementExecContextRunner > sql-statement-exec-runner-doc.txt
+grep -q '^type SQLStatementExecContextRunner interface' sql-statement-exec-runner-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.CacheOperationWithLogBrewSpan > cache-operation-doc.txt
 grep -q '^func CacheOperationWithLogBrewSpan' cache-operation-doc.txt
 grep -q 'queues one privacy-bounded cache span' cache-operation-doc.txt
