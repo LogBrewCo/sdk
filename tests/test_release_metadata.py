@@ -743,6 +743,44 @@ jobs:
         self.assertTrue(any("Version" in failure for failure in default_failures))
         self.assertEqual(override_failures, [])
 
+    def test_ruby_metadata_uses_rubygems_package_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package_dir = root / "ruby" / "logbrew-ruby"
+            package_dir.mkdir(parents=True)
+            (package_dir / "README.md").write_text("# LogBrew Ruby\n", encoding="utf-8")
+            (package_dir / "logbrew-sdk.gemspec").write_text(
+                """
+Gem::Specification.new do |spec|
+  spec.name = "logbrew-sdk"
+  spec.version = "0.1.1"
+  spec.summary = "Public LogBrew Ruby SDK"
+  spec.description = "Public LogBrew Ruby SDK for building, validating, and flushing event batches."
+  spec.authors = ["LogBrew"]
+  spec.license = "MIT"
+  spec.required_ruby_version = ">= 2.6"
+  spec.homepage = "https://github.com/LogBrewCo/sdk"
+  spec.metadata = {
+    "source_code_uri" => "https://github.com/LogBrewCo/sdk"
+  }
+  spec.files = Dir[
+    "README.md",
+    "lib/**/*.rb",
+    "examples/**/*.rb",
+    "examples/Makefile"
+  ]
+  spec.require_paths = ["lib"]
+end
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_ruby(root, failures)
+
+        self.assertEqual(failures, [])
+
     def test_maven_metadata_requires_license_url_developer_and_scm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

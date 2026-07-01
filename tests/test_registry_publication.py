@@ -125,6 +125,42 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertIn("logbrew/sdk", labels)
         self.assertIn("co.logbrew:logbrew-sdk", labels)
 
+    def test_rubygems_target_uses_rubygems_package_version_by_default(self) -> None:
+        args = argparse.Namespace(
+            target=["rubygems"],
+            include_unity_npm=False,
+            include_pypi_extras=False,
+            include_crates=False,
+            include_packagist=False,
+            include_maven=False,
+            include_openupm=False,
+            include_go=False,
+            npm_package=[],
+            version=check_registry_publication.PUBLIC_VERSION,
+            package_versions={},
+            timeout=20.0,
+            retries=0,
+            retry_delay=0.0,
+        )
+        observed: dict[str, set[str]] = {}
+        original_validate_check = check_registry_publication.validate_check
+
+        def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None):  # type: ignore[no-untyped-def]
+            observed[check.label] = expected
+            return []
+
+        try:
+            check_registry_publication.validate_check = fake_validate_check
+            failures = check_registry_publication.validate(args)
+        finally:
+            check_registry_publication.validate_check = original_validate_check
+
+        self.assertEqual(failures, [])
+        self.assertEqual(
+            observed["logbrew-sdk"],
+            check_registry_publication.expected_versions(check_release_metadata.RUBYGEMS_VERSION),
+        )
+
     def test_npm_package_filter_limits_npm_registry_checks(self) -> None:
         args = argparse.Namespace(
             target=["npm"],
@@ -242,6 +278,21 @@ class RegistryPublicationTests(unittest.TestCase):
 
         self.assertIn("public registry versions ok for nuget at 0.1.0", summary)
         self.assertIn("LogBrew@0.1.1", summary)
+
+    def test_success_summary_reports_rubygems_default_version(self) -> None:
+        args = argparse.Namespace(
+            target=["rubygems"],
+            version=check_registry_publication.PUBLIC_VERSION,
+            npm_versions={},
+            pypi_versions={},
+            nuget_versions={},
+            maven_versions={},
+        )
+
+        summary = check_registry_publication.success_summary(args)
+
+        self.assertIn("public registry versions ok for rubygems at 0.1.0", summary)
+        self.assertIn(f"logbrew-sdk@{check_release_metadata.RUBYGEMS_VERSION}", summary)
 
     def test_success_summary_reports_maven_version_overrides(self) -> None:
         args = argparse.Namespace(

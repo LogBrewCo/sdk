@@ -14,7 +14,7 @@ class RubyGemsPublicSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_RUBYGEMS_VERSION",
-            'version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.0}}"',
+            'version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.1}}"',
             "https://rubygems.org",
             "gem install",
             "gem list --local",
@@ -26,11 +26,19 @@ class RubyGemsPublicSmokeTests(unittest.TestCase):
             "LogBrew::Logger",
             "LogBrew::RackMiddleware",
             "LogBrew::RailsErrorSubscriber",
+            "LogBrew::Traceparent",
+            "LogBrew::Trace",
+            "LogBrew::OperationTracing",
+            "LogBrew::SupportTicketDraft",
             "RecordingTransport",
             "readme_example.rb",
             "real_user_smoke.rb",
+            "first_useful_telemetry.rb",
+            "http_trace_correlation.rb",
+            "operation tracing",
+            "support ticket draft",
             "flush_status",
-            "ruby public RubyGems install smoke passed",
+            "ruby public RubyGems install smoke passed for logbrew-sdk",
         ):
             self.assertIn(expected, body)
 

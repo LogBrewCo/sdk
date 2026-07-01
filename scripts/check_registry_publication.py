@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from check_release_metadata import JS_PACKAGES, PUBLIC_VERSION
+from check_release_metadata import JS_PACKAGES, PUBLIC_VERSION, RUBYGEMS_VERSION
 
 
 NPM_PACKAGES = tuple(sorted(JS_PACKAGES.values()))
@@ -26,6 +26,7 @@ NPM_VERSION_PACKAGES = NPM_PACKAGES + ("co.logbrew.unity",)
 PYPI_PACKAGES = ("logbrew-sdk",)
 PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-django")
 RUBYGEMS_PACKAGES = ("logbrew-sdk",)
+DEFAULT_PACKAGE_VERSIONS = {package_name: RUBYGEMS_VERSION for package_name in RUBYGEMS_PACKAGES}
 NUGET_PACKAGES = ("LogBrew", "LogBrew.AspNetCore", "LogBrew.EntityFrameworkCore", "LogBrew.StackExchangeRedis")
 CRATES = ("logbrew",)
 MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin", "logbrew-kotlin-okhttp")
@@ -376,7 +377,8 @@ def validate_go_module(version: str) -> list[str]:
 def validate(args: argparse.Namespace) -> list[str]:
     failures: list[str] = []
     for check in checks_for(args):
-        version = args.package_versions.get(check.label, args.version)
+        default_version = DEFAULT_PACKAGE_VERSIONS.get(check.label, args.version)
+        version = args.package_versions.get(check.label, default_version)
         failures.extend(validate_check(check, expected_versions(version), args.timeout, args.retries, args.retry_delay))
     if "go" in args.target or ("all" in args.target and args.include_go):
         failures.extend(validate_go_module(args.version))
@@ -413,11 +415,18 @@ def format_overrides(label: str, versions: dict[str, str]) -> str | None:
 
 def success_summary(args: argparse.Namespace) -> str:
     targets = ", ".join(args.target)
+    requested_targets = set(args.target)
+    rubygems_versions = (
+        {package_name: DEFAULT_PACKAGE_VERSIONS[package_name] for package_name in RUBYGEMS_PACKAGES}
+        if "rubygems" in requested_targets or "all" in requested_targets
+        else {}
+    )
     overrides = [
         formatted
         for formatted in (
             format_overrides("npm", args.npm_versions),
             format_overrides("pypi", args.pypi_versions),
+            format_overrides("RubyGems", rubygems_versions),
             format_overrides("nuget", args.nuget_versions),
             format_overrides("maven", getattr(args, "maven_versions", {})),
         )

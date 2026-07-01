@@ -4,6 +4,10 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_dir="$repo_root/ruby/logbrew-ruby"
 tmp_dir="$(mktemp -d)"
+package_version="$(
+  cd "$package_dir"
+  ruby -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "failed to load logbrew-sdk.gemspec"; print spec.version'
+)"
 
 remove_tmp_dir() {
   rm -rf "$tmp_dir"
@@ -26,15 +30,15 @@ test -f "$tmp_dir/rdoc/LogBrew/RecordingTransport.html"
 test -f "$tmp_dir/rdoc/LogBrew/SdkError.html"
 test -f "$tmp_dir/rdoc/LogBrew/SupportTicketDraft.html"
 
-(cd "$package_dir" && gem build logbrew-sdk.gemspec --strict --output "$tmp_dir/logbrew-sdk-0.1.0.gem" >/dev/null)
-test -f "$tmp_dir/logbrew-sdk-0.1.0.gem"
-gem specification "$tmp_dir/logbrew-sdk-0.1.0.gem" --yaml > "$tmp_dir/spec.yaml"
+(cd "$package_dir" && gem build logbrew-sdk.gemspec --strict --output "$tmp_dir/logbrew-sdk-${package_version}.gem" >/dev/null)
+test -f "$tmp_dir/logbrew-sdk-${package_version}.gem"
+gem specification "$tmp_dir/logbrew-sdk-${package_version}.gem" --yaml > "$tmp_dir/spec.yaml"
 grep -q '^name: logbrew-sdk$' "$tmp_dir/spec.yaml"
 grep -q '^version: !ruby/object:Gem::Version$' "$tmp_dir/spec.yaml"
 grep -q '^summary: Public LogBrew Ruby SDK$' "$tmp_dir/spec.yaml"
 
-gem unpack "$tmp_dir/logbrew-sdk-0.1.0.gem" --target "$tmp_dir/unpacked" >/dev/null
-unpacked_dir="$tmp_dir/unpacked/logbrew-sdk-0.1.0"
+gem unpack "$tmp_dir/logbrew-sdk-${package_version}.gem" --target "$tmp_dir/unpacked" >/dev/null
+unpacked_dir="$tmp_dir/unpacked/logbrew-sdk-${package_version}"
 test -f "$unpacked_dir/lib/logbrew.rb"
 test -f "$unpacked_dir/lib/logbrew/trace.rb"
 test -f "$unpacked_dir/lib/logbrew/support_ticket.rb"

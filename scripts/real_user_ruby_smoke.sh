@@ -4,6 +4,11 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_dir="$repo_root/ruby/logbrew-ruby"
 tmp_dir="$(mktemp -d)"
+package_version="$(
+  cd "$package_dir"
+  ruby -e 'spec = Gem::Specification.load("logbrew-sdk.gemspec") or abort "failed to load logbrew-sdk.gemspec"; print spec.version'
+)"
+export LOGBREW_RUBY_PACKAGE_VERSION="$package_version"
 
 remove_tmp_dir() {
   rm -rf "$tmp_dir"
@@ -11,7 +16,7 @@ remove_tmp_dir() {
 
 trap remove_tmp_dir EXIT
 
-gem_path="$tmp_dir/logbrew-sdk-0.1.0.gem"
+gem_path="$tmp_dir/logbrew-sdk-${package_version}.gem"
 (cd "$package_dir" && gem build logbrew-sdk.gemspec --strict --output "$gem_path" >/dev/null)
 test -f "$gem_path"
 
@@ -21,7 +26,7 @@ grep -q '^summary: Public LogBrew Ruby SDK$' "$tmp_dir/spec.yaml"
 grep -q '^required_ruby_version: !ruby/object:Gem::Requirement$' "$tmp_dir/spec.yaml"
 
 gem unpack "$gem_path" --target "$tmp_dir/unpacked" >/dev/null
-unpacked_dir="$tmp_dir/unpacked/logbrew-sdk-0.1.0"
+unpacked_dir="$tmp_dir/unpacked/logbrew-sdk-${package_version}"
 test -f "$unpacked_dir/logbrew-sdk.gemspec" || true
 test -f "$unpacked_dir/lib/logbrew.rb"
 test -f "$unpacked_dir/lib/logbrew/product_timeline.rb"
@@ -82,8 +87,8 @@ gem_home="$tmp_dir/gems"
 mkdir -p "$gem_home"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" gem install --local --install-dir "$gem_home" --no-document "$gem_path" >/dev/null
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" gem list --local logbrew-sdk > "$tmp_dir/gem-list.txt"
-grep -q '^logbrew-sdk (0.1.0)$' "$tmp_dir/gem-list.txt"
-GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts LogBrew::Client.create(api_key: "LOGBREW_API_KEY", sdk_name: "installed-app", sdk_version: "0.1.0").pending_events' > "$tmp_dir/installed-require.out"
+grep -q "^logbrew-sdk (${package_version})$" "$tmp_dir/gem-list.txt"
+GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts LogBrew::Client.create(api_key: "LOGBREW_API_KEY", sdk_name: "installed-app", sdk_version: ENV.fetch("LOGBREW_RUBY_PACKAGE_VERSION")).pending_events' > "$tmp_dir/installed-require.out"
 grep -qx '0' "$tmp_dir/installed-require.out"
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby -e 'require "logbrew"; puts(LogBrew::Logger < ::Logger)' > "$tmp_dir/installed-logger-class.out"
 grep -qx 'true' "$tmp_dir/installed-logger-class.out"
@@ -154,7 +159,7 @@ cat > "$tmp_dir/installed-operation-tracing.rb" <<'RUBY'
 require "json"
 require "logbrew"
 
-client = LogBrew::Client.create(api_key: "LOGBREW_API_KEY", sdk_name: "installed-ruby-app", sdk_version: "0.1.0")
+client = LogBrew::Client.create(api_key: "LOGBREW_API_KEY", sdk_name: "installed-ruby-app", sdk_version: ENV.fetch("LOGBREW_RUBY_PACKAGE_VERSION"))
 parent = LogBrew::Trace.create(trace_id: "11111111111111111111111111111111", span_id: "2222222222222222")
 result = LogBrew::Trace.with_context(parent) do
   LogBrew::OperationTracing.database_operation(
@@ -262,7 +267,7 @@ def enqueue_all(client)
 end
 
 def client(max_retries: 2)
-  LogBrew::Client.create(api_key: "LOGBREW_API_KEY", sdk_name: "smoke-app", sdk_version: "0.1.0", max_retries: max_retries)
+  LogBrew::Client.create(api_key: "LOGBREW_API_KEY", sdk_name: "smoke-app", sdk_version: ENV.fetch("LOGBREW_RUBY_PACKAGE_VERSION"), max_retries: max_retries)
 end
 
 def expect(code)
