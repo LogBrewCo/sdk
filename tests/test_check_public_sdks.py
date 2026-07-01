@@ -458,6 +458,27 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "Go support-ticket real-user smoke"',
         )
 
+    def test_public_verifier_runs_go_public_module_smoke(self) -> None:
+        script = SCRIPT.read_text()
+
+        self.assertIn('"Go public module install smoke"', script)
+        self.assertRegex(
+            script,
+            r'begin_next_step "Go real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_go_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Go high-load installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_go_high_load_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Go support-ticket real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_go_support_ticket_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Go public module install smoke"\n'
+            r'run_shell_step "bash scripts/real_user_go_public_module_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "C real-user smoke"',
+        )
+
     def test_public_verifier_runs_github_release_safety_gate(self) -> None:
         script = SCRIPT.read_text()
 

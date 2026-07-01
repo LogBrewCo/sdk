@@ -76,6 +76,7 @@ STEP_LABELS=(
   "Go real-user smoke"
   "Go high-load installed-artifact smoke"
   "Go support-ticket real-user smoke"
+  "Go public module install smoke"
   "C real-user smoke"
   "C++ real-user smoke"
   "Java real-user smoke"
@@ -622,6 +623,10 @@ mark_step_complete
 
 begin_next_step "Go support-ticket real-user smoke"
 run_shell_step "bash scripts/real_user_go_support_ticket_smoke.sh"
+mark_step_complete
+
+begin_next_step "Go public module install smoke"
+run_shell_step "bash scripts/real_user_go_public_module_smoke.sh"
 mark_step_complete
 
 begin_next_step "C real-user smoke"
