@@ -18,6 +18,7 @@ import {
 import { instrumentLogBrewMongoCollection as instrumentMongoCollection } from "./mongo.js";
 import { instrumentLogBrewPgClient as instrumentPgClient } from "./pg.js";
 import { instrumentLogBrewRedisClient as instrumentRedisClient } from "./redis.js";
+import { installLogBrewUndiciInstrumentation as installUndiciInstrumentation } from "./undici.js";
 
 const DEFAULT_SDK_NAME = "logbrew-node";
 const DEFAULT_SDK_VERSION = "0.1.0";
@@ -341,6 +342,13 @@ export function installLogBrewFetchInstrumentation({
       }
       installed = false;
     }
+  });
+}
+
+export function installLogBrewUndiciInstrumentation(options = {}) {
+  return installUndiciInstrumentation({
+    ...options,
+    activeTraceProvider: getActiveLogBrewTrace
   });
 }
 
@@ -1222,6 +1230,7 @@ export default {
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
   installLogBrewFetchInstrumentation,
+  installLogBrewUndiciInstrumentation,
   instrumentLogBrewMongoCollection,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,

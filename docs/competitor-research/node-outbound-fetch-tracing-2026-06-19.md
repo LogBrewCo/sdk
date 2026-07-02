@@ -87,3 +87,24 @@ Evidence:
 - GREEN: `bash scripts/real_user_node_smoke.sh` on Node `v22.18.0` now proves app-owned timing metadata for explicit fetch and reversible global fetch, TypeScript declarations for timing objects/functions, invalid value dropping, unknown-key dropping, route-template-only timing context, failure-span timing, and existing no-query/no-unsafe-content guards.
 
 Honest comparison: LogBrew remains worse than Sentry/Datadog/OpenTelemetry for automatic all-Undici timing and HTTP duration metrics. LogBrew is better for privacy-bounded apps that want explicit timing context without hidden global diagnostics-channel subscriptions or header/body/full-URL capture.
+
+## 2026-07-03 Target-Gated Undici Diagnostics Follow-Up
+
+Fresh source reads for the remaining Node automatic outbound gap:
+
+- Sentry JavaScript `getsentry/sentry-javascript@cf895c95995a6dff121484eadfa3a82980646f91`: re-read `packages/node-core/src/integrations/node-fetch/undici-instrumentation.ts` (`instrumentUndici(...)`, `subscribeToChannel(...)`, `onRequestCreated`, `onRequestHeaders`, `onResponseHeaders`, `onDone`, `onError`, request WeakMap state, propagation decision cache).
+- OpenTelemetry JS Contrib `open-telemetry/opentelemetry-js-contrib@2353bd7fbb75ae682c8dde42f32caa10a82bc315`: re-read `packages/instrumentation-undici/src/undici.ts` (`UndiciInstrumentation.enable/disable`, `_recordFromReq`, channel unsubscribe lifecycle, HTTP client duration histogram, request/response hooks) and `packages/instrumentation-undici/src/types.ts` (`UndiciRequest`, `UndiciInstrumentationConfig`).
+- Datadog JavaScript `DataDog/dd-trace-js@80c5d963ec7ff5d20c7fc2d662deff463fd47843`: re-read `packages/datadog-plugin-undici/src/index.js` (`UndiciPlugin`, `#onNativeRequestCreate`, `#onNativeRequestHeaders`, `#onNativeRequestTrailers`, `#onNativeRequestError`, `addConfiguredHeaders`, `normalizeHeaders`).
+- PostHog JavaScript `PostHog/posthog-js@cc01eea218219b1f36145143c62586c66c459e84`: re-read `packages/node/src/client.ts`; no comparable broad Undici diagnostic-channel instrumentation found.
+
+Competitor pattern: Sentry, OpenTelemetry, and Datadog subscribe to Undici diagnostic channels, keep request lifecycle state in a WeakMap, inject propagation at request creation, attach response status on headers, and finish spans on trailers or request errors. OpenTelemetry also records HTTP duration metrics, and Datadog/Sentry support optional richer/header attributes. This is better for setup friction and trace breadth, but it increases process-wide runtime ownership and can collect broader metadata when configured.
+
+LogBrew now adds a lighter explicit version: `installLogBrewUndiciInstrumentation(...)` subscribes to Node's public Undici diagnostic channels only after app opt-in, captures only requests matching `captureTargets` or `tracePropagationTargets`, writes one W3C `traceparent`, emits one `node:undici` span, records status, total duration, bounded request/wait/response phase timings, and `content-length` as `http.response_content_length`, then reversibly unsubscribes. It does not add an Undici dependency, capture arbitrary headers, payloads, query strings, fragments, hosts, socket addresses, error messages, baggage, tracestate, or raw propagation metadata. One process installation is allowed at a time to prevent duplicate spans.
+
+Evidence:
+
+- RED: packed temp app smoke failed because `@logbrew/node` README, ESM import, CJS require, TypeScript declaration, package files, and runtime behavior for `installLogBrewUndiciInstrumentation(...)` were missing.
+- GREEN: `bash scripts/real_user_node_smoke.sh` on Node `v22.18.0` now proves packed ESM/CJS/TypeScript exports, packaged `undici.js`/`undici.cjs`, real Node built-in `fetch` diagnostics-channel propagation to a local HTTP server, target pass-through, uninstall pass-through, `node:undici` span payloads, bounded automatic phase metadata, HTTP 503 error status handling without error-message capture, and existing no-query/no-unsafe-content guards.
+- Focused syntax: `npm --prefix js/logbrew-node test` and `python3 scripts/check_js_sources.py js/logbrew-node`.
+
+Honest comparison: LogBrew is now closer to Sentry/Datadog/OpenTelemetry for rich Node outbound tracing because it covers real Undici-backed requests beyond a fetch wrapper. LogBrew is still worse for zero-code default breadth, HTTP duration metrics, baggage/tracestate, optional semantic/header conventions, and automatic framework/client instrumentation. LogBrew is better for explicit target scope, reversible teardown, no extra dependency, installed-artifact proof, and stricter privacy defaults.

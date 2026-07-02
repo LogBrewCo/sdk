@@ -1,7 +1,7 @@
 # LogBrew SDK Readiness Memory
 
-- 2026-07-03: Node opt-in global fetch instrumentation and app-owned fetch
-  timing metadata added after source reads
+- 2026-07-03: Node opt-in global fetch, app-owned fetch timing metadata,
+  and target-gated Undici diagnostics instrumentation added after source reads
   from Sentry JavaScript
   `getsentry/sentry-javascript@cf895c95995a6dff121484eadfa3a82980646f91`
   (`packages/core/src/fetch.ts`, `packages/node-core/src/integrations/node-fetch/undici-instrumentation.ts`,
@@ -14,27 +14,27 @@
   `PostHog/posthog-js@cc01eea218219b1f36145143c62586c66c459e84`
   (`packages/node/src/client.ts`, `packages/ai/src/otel/processor.ts`).
   `@logbrew/node` now exports `installLogBrewFetchInstrumentation(...)`, a
-  reversible wrapper for an app-owned/global fetch function. It captures only
-  URLs matching the union of configured `tracePropagationTargets` and
-  `captureTargets`, writes one
-  normalized W3C `traceparent`, records the existing safe `node:fetch` span
-  shape, accepts optional sanitized `timings` objects/functions for numeric
-  phase durations/content lengths, drops unsafe wrapper metadata and exception
-  messages, and puts back the original fetch only when LogBrew still owns the
-  slot. It avoids hidden
-  diagnostics-channel subscriptions, broad Undici/client patching, payloads,
-  arbitrary headers, full URLs/query/hash text, cookies, auth values, raw
-  propagation, baggage, and tracestate. Evidence: RED packed import failure,
-  GREEN `bash scripts/real_user_node_smoke.sh`, `npm --prefix
+  reversible wrapper for an app-owned/global fetch function, and
+  `installLogBrewUndiciInstrumentation(...)`, an explicit process-wide
+  diagnostics-channel subscriber for real Undici-backed requests. Both capture
+  only URLs matching configured `tracePropagationTargets`/`captureTargets` and
+  write one normalized W3C `traceparent`. Fetch spans accept sanitized
+  app-owned `timings`; Undici spans derive bounded request/wait/response phase
+  timings and `content-length` from lifecycle events. Both drop unsafe metadata
+  and exception messages, keep query/hash/full URL/header/payload/auth values
+  out of payloads, avoid baggage/tracestate, and offer reversible teardown.
+  Evidence: RED packed import/doc/API/runtime failures, GREEN
+  `bash scripts/real_user_node_smoke.sh`, `npm --prefix
   js/logbrew-node test`, `python3 scripts/check_js_sources.py
   js/logbrew-node`, `bash scripts/check_js_lint.sh`, `bash
   scripts/check_js_package.sh`, `bash scripts/real_user_js_high_load_smoke.sh`,
   and `bash scripts/real_user_node_queue_high_load_smoke.sh`. Research:
   `docs/competitor-research/node-outbound-fetch-tracing-2026-06-19.md`.
   Honest remaining Node gap: Sentry/Datadog/OpenTelemetry remain stronger for
-  zero-code all-Undici instrumentation, automatic phase timing, HTTP duration metrics,
-  baggage/tracestate, broad semantic conventions, and deeper automatic
-  framework/client spans.
+  zero-code default breadth, HTTP duration metrics, baggage/tracestate, broad
+  semantic conventions/header options, and deeper automatic framework/client
+  spans; LogBrew is now stronger on explicit target scope, dependency-light
+  setup, reversible teardown, installed-artifact proof, and privacy defaults.
 - 2026-07-02: .NET optional OpenTelemetry processor bridge added after source
   reads from Sentry .NET
   `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`

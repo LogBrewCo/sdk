@@ -20,6 +20,7 @@ const {
 const { instrumentLogBrewMongoCollection: instrumentMongoCollection } = require("./mongo.cjs");
 const { instrumentLogBrewPgClient: instrumentPgClient } = require("./pg.cjs");
 const { instrumentLogBrewRedisClient: instrumentRedisClient } = require("./redis.cjs");
+const { installLogBrewUndiciInstrumentation: installUndiciInstrumentation } = require("./undici.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-node";
 const DEFAULT_SDK_VERSION = "0.1.0";
@@ -343,6 +344,13 @@ function installLogBrewFetchInstrumentation({
       }
       installed = false;
     }
+  });
+}
+
+function installLogBrewUndiciInstrumentation(options = {}) {
+  return installUndiciInstrumentation({
+    ...options,
+    activeTraceProvider: getActiveLogBrewTrace
   });
 }
 
@@ -1221,6 +1229,7 @@ const exported = {
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
   installLogBrewFetchInstrumentation,
+  installLogBrewUndiciInstrumentation,
   instrumentLogBrewMongoCollection,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,

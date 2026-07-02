@@ -45,6 +45,8 @@ grep -q '^package/redis.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/redis.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/mongo.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/mongo.cjs$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/undici.js$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/undici.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/examples/first-useful-telemetry.mjs$' "$tmp_dir/node-tarball.txt"
@@ -64,6 +66,7 @@ grep -q 'createNodeFetchTransport' "$tmp_dir/node-readme.md"
 grep -q 'databaseOperationWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'fetchWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'installLogBrewFetchInstrumentation' "$tmp_dir/node-readme.md"
+grep -q 'installLogBrewUndiciInstrumentation' "$tmp_dir/node-readme.md"
 grep -q 'instrumentLogBrewPgClient' "$tmp_dir/node-readme.md"
 grep -q 'instrumentLogBrewRedisClient' "$tmp_dir/node-readme.md"
 grep -q 'instrumentLogBrewMongoCollection' "$tmp_dir/node-readme.md"
@@ -126,6 +129,7 @@ import {
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
   installLogBrewFetchInstrumentation,
+  installLogBrewUndiciInstrumentation,
   instrumentLogBrewMongoCollection,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,
@@ -442,6 +446,126 @@ assertMetadata(globalFetchFailureSpan.metadata, {
   "http.phase.request_ms": 50
 }, "global fetch failure timing metadata should use sanitized timing context", JSON.stringify(globalFetchPayload));
 assertNoUnsafeContent(JSON.stringify(globalFetchPayload));
+
+const undiciClient = createLogBrewNodeClient({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "node-undici-smoke",
+  sdkVersion: "0.1.0"
+});
+const undiciRequests = [];
+const undiciServer = createServer((req, res) => {
+  undiciRequests.push({
+    traceparent: req.headers.traceparent,
+    url: req.url
+  });
+  if (req.url?.startsWith("/fail/")) {
+    res.statusCode = 503;
+    res.setHeader("content-length", "9");
+    res.end("try later");
+    return;
+  }
+  res.statusCode = req.url?.startsWith("/cdn/") ? 200 : 202;
+  res.setHeader("content-length", "8");
+  res.end("accepted");
+});
+undiciServer.listen(0);
+await once(undiciServer, "listening");
+const undiciPort = undiciServer.address().port;
+const undiciClock = [1000, 1004, 1020, 1035, 2000, 2003, 2020, 2030];
+const undiciSpanIds = ["e7ad6b7169203331", "e7ad6b7169203332"];
+const undiciInstrumentation = installLogBrewUndiciInstrumentation({
+  captureTargets({ path }) {
+    return path.startsWith("/orders/") || path.startsWith("/fail/");
+  },
+  client: undiciClient,
+  metadata: {
+    release: "checkout-api@1.2.3",
+    service: "checkout-api",
+    headers: "must not leak"
+  },
+  now: () => "2026-06-02T10:00:09Z",
+  nowMs: () => undiciClock.shift() ?? 2030,
+  routeTemplateFactory({ path }) {
+    return path.replace(/\/\d+/gu, "/:id");
+  },
+  spanIdFactory: () => undiciSpanIds.shift() ?? "e7ad6b7169203333",
+  trace: {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    parentSpanId: "00f067aa0ba902b7",
+    sampled: true
+  }
+});
+if (!undiciInstrumentation.isInstalled()) {
+  throw new Error("expected undici diagnostics instrumentation to report installed");
+}
+const undiciSuccessResponse = await fetch(`http://127.0.0.1:${undiciPort}/orders/42?debug=hidden`, {
+  method: "POST"
+});
+await undiciSuccessResponse.text();
+await fetch(`http://127.0.0.1:${undiciPort}/cdn/logo.png?debug=hidden`);
+const undiciFailureResponse = await fetch(`http://127.0.0.1:${undiciPort}/fail/42?debug=hidden`);
+await undiciFailureResponse.text();
+undiciInstrumentation.uninstall();
+if (undiciInstrumentation.isInstalled()) {
+  throw new Error("expected undici diagnostics instrumentation to uninstall");
+}
+await fetch(`http://127.0.0.1:${undiciPort}/orders/99?debug=hidden`);
+await closeServer(undiciServer);
+if (!undiciRequests[0]?.traceparent?.startsWith("00-4bf92f3577b34da6a3ce929d0e0e4736-e7ad6b7169203331-")) {
+  throw new Error(`expected propagated undici traceparent for target fetch, got ${undiciRequests[0]?.traceparent}`);
+}
+if (undiciRequests[1]?.traceparent !== undefined) {
+  throw new Error("non-target undici fetch received traceparent");
+}
+if (!undiciRequests[2]?.traceparent?.startsWith("00-4bf92f3577b34da6a3ce929d0e0e4736-e7ad6b7169203332-")) {
+  throw new Error(`expected propagated undici traceparent for failed target fetch, got ${undiciRequests[2]?.traceparent}`);
+}
+if (undiciRequests[3]?.traceparent !== undefined) {
+  throw new Error("undici fetch after uninstall should not receive traceparent");
+}
+const undiciPayload = JSON.parse(undiciClient.previewJson());
+if (undiciPayload.events.length !== 2) {
+  throw new Error(`expected two captured undici spans, got ${undiciPayload.events.length}`);
+}
+const undiciSpan = undiciPayload.events[0].attributes;
+if (
+  undiciSpan.name !== "POST /orders/:id" ||
+  undiciSpan.parentSpanId !== "b7ad6b7169203331" ||
+  undiciSpan.status !== "ok" ||
+  undiciSpan.durationMs !== 35 ||
+  undiciSpan.metadata.framework !== "node:undici" ||
+  undiciSpan.metadata["http.route"] !== "/orders/:id" ||
+  undiciSpan.metadata["url.path"] !== "/orders/:id" ||
+  undiciSpan.metadata.service !== "checkout-api" ||
+  undiciSpan.metadata.release !== "checkout-api@1.2.3"
+) {
+  throw new Error(`unexpected undici span: ${JSON.stringify(undiciSpan)}`);
+}
+assertMetadata(undiciSpan.metadata, {
+  "http.phase.request_ms": 4,
+  "http.phase.response_ms": 15,
+  "http.phase.wait_ms": 16,
+  "http.response_content_length": 8
+}, "undici diagnostics instrumentation should preserve bounded automatic phase metadata", JSON.stringify(undiciPayload));
+const undiciFailureSpan = undiciPayload.events[1].attributes;
+if (
+  undiciFailureSpan.name !== "GET /fail/:id" ||
+  undiciFailureSpan.status !== "error" ||
+  undiciFailureSpan.durationMs !== 30 ||
+  undiciFailureSpan.metadata.framework !== "node:undici" ||
+  undiciFailureSpan.metadata["http.response.status_code"] !== 503 ||
+  undiciFailureSpan.metadata.errorMessage !== undefined
+) {
+  throw new Error(`unexpected undici failure span: ${JSON.stringify(undiciFailureSpan)}`);
+}
+assertMetadata(undiciFailureSpan.metadata, {
+  "http.phase.request_ms": 3,
+  "http.phase.response_ms": 10,
+  "http.phase.wait_ms": 17,
+  "http.response_content_length": 9
+}, "undici diagnostics failure span should include bounded phase metadata", JSON.stringify(undiciPayload));
+assertNoUnsafeContent(JSON.stringify(undiciPayload));
 
 const errorTransport = RecordingTransport.alwaysAccept();
 const errorClient = createLogBrewNodeClient({
@@ -1424,6 +1548,7 @@ import {
   databaseOperationWithLogBrewSpan,
   getActiveLogBrewTrace,
   installLogBrewFetchInstrumentation,
+  installLogBrewUndiciInstrumentation,
   instrumentLogBrewMongoCollection,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,
@@ -1480,6 +1605,16 @@ const typedFetchInstrumentation = installLogBrewFetchInstrumentation({
 });
 typedFetchInstrumentation.isInstalled() satisfies boolean;
 typedFetchInstrumentation.uninstall();
+const typedUndiciInstrumentation = installLogBrewUndiciInstrumentation({
+  captureTargets: ["https://payments.example.invalid/"],
+  client,
+  routeTemplateFactory({ path }) {
+    return path;
+  },
+  trace
+});
+typedUndiciInstrumentation.isInstalled() satisfies boolean;
+typedUndiciInstrumentation.uninstall();
 const databaseResult = await databaseOperationWithLogBrewSpan("orders.select_by_id", {
   client,
   databaseName: "checkout",
@@ -1603,6 +1738,7 @@ node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBre
 node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewRedisClient !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewMongoCollection !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.installLogBrewFetchInstrumentation !== "function") process.exit(1)'
+node -e 'const node = require("@logbrew/node"); if (typeof node.installLogBrewUndiciInstrumentation !== "function") process.exit(1)'
 
 node node_modules/@logbrew/node/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry' "$tmp_dir/launcher-help.txt"

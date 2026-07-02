@@ -200,6 +200,22 @@ export type LogBrewFetchInstrumentationHandle = {
   uninstall(): void;
 };
 
+export type LogBrewUndiciInstrumentationContext = {
+  method: string;
+  path: string;
+  url: string;
+};
+
+export type LogBrewUndiciInstrumentationTarget =
+  | string
+  | RegExp
+  | ((context: LogBrewUndiciInstrumentationContext) => boolean);
+
+export type LogBrewUndiciInstrumentationHandle = {
+  isInstalled(): boolean;
+  uninstall(): void;
+};
+
 export type LogBrewFetchInstrumentationOptions = Omit<
   FetchWithLogBrewSpanOptions,
   "fetchImpl" | "routeTemplate"
@@ -211,6 +227,28 @@ export type LogBrewFetchInstrumentationOptions = Omit<
   routeTemplate?: string;
   routeTemplateFactory?: (context: LogBrewFetchInstrumentationContext) => string;
   tracePropagationTargets?: LogBrewFetchInstrumentationTarget | LogBrewFetchInstrumentationTarget[];
+};
+
+export type LogBrewUndiciInstrumentationOptions = {
+  client: LogBrewClient;
+  trace?: LogBrewTraceContext;
+  metadata?: Record<string, string | number | boolean | null>;
+  now?: () => string;
+  nowMs?: () => number;
+  spanIdFactory?: () => string;
+  traceIdFactory?: () => string;
+  captureTargets?: LogBrewUndiciInstrumentationTarget | LogBrewUndiciInstrumentationTarget[];
+  routeTemplate?: string;
+  routeTemplateFactory?: (context: LogBrewUndiciInstrumentationContext) => string;
+  tracePropagationTargets?: LogBrewUndiciInstrumentationTarget | LogBrewUndiciInstrumentationTarget[];
+  onCaptureError?: (
+    error: unknown,
+    context: {
+      client: LogBrewClient;
+      error?: unknown;
+      trace: LogBrewTraceContext;
+    }
+  ) => void | Promise<void>;
 };
 
 export type DatabaseOperationWithLogBrewSpanOptions<Result = unknown> = {
@@ -474,6 +512,10 @@ export declare function installLogBrewFetchInstrumentation(
   options: LogBrewFetchInstrumentationOptions
 ): LogBrewFetchInstrumentationHandle;
 
+export declare function installLogBrewUndiciInstrumentation(
+  options: LogBrewUndiciInstrumentationOptions
+): LogBrewUndiciInstrumentationHandle;
+
 export declare function databaseOperationWithLogBrewSpan<Result>(
   operationName: string,
   options: DatabaseOperationWithLogBrewSpanOptions<Result>
@@ -559,6 +601,7 @@ declare const defaultExport: {
   fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   installLogBrewFetchInstrumentation: typeof installLogBrewFetchInstrumentation;
+  installLogBrewUndiciInstrumentation: typeof installLogBrewUndiciInstrumentation;
   instrumentLogBrewMongoCollection: typeof instrumentLogBrewMongoCollection;
   instrumentLogBrewPgClient: typeof instrumentLogBrewPgClient;
   instrumentLogBrewRedisClient: typeof instrumentLogBrewRedisClient;

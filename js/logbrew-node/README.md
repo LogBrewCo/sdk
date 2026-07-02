@@ -230,6 +230,31 @@ fetchInstrumentation.uninstall();
 
 Global fetch instrumentation also accepts the same `timings` option. The timing function receives only the emitted method, route-template path, duration, response/error, and trace context so it cannot accidentally depend on full URLs or request headers.
 
+When your app already uses Node's built-in `fetch` or Undici clients broadly and you want one target-gated process-wide hook, use `installLogBrewUndiciInstrumentation()`:
+
+```js
+import { installLogBrewUndiciInstrumentation } from "@logbrew/node";
+
+const undiciInstrumentation = installLogBrewUndiciInstrumentation({
+  client: logbrew.client,
+  trace: logbrew.trace,
+  captureTargets({ path }) {
+    return path.startsWith("/payments/");
+  },
+  routeTemplateFactory({ path }) {
+    return path.replace(/\/\d+/g, "/:id");
+  }
+});
+
+await fetch("https://api.example.com/payments/42?email=hidden", {
+  method: "POST"
+});
+
+undiciInstrumentation.uninstall();
+```
+
+This installer subscribes to Node's public Undici diagnostic channels and captures matching `fetch`, `undici.request`, `undici.stream`, and other Undici-backed requests without adding an Undici dependency. It writes one normalized `traceparent`, creates one `node:undici` client span, records status, total duration, safe phase timings (`http.phase.request_ms`, `http.phase.wait_ms`, `http.phase.response_ms`), and `content-length` as `http.response_content_length` when available. It is off by default, target-gated, reversible, and one installation per process to avoid duplicate spans. It does not capture arbitrary headers, request or response payloads, query strings, fragments, hosts, socket addresses, error messages, baggage, tracestate, or raw propagation metadata.
+
 ## Database Operation Spans
 
 Use `databaseOperationWithLogBrewSpan()` around important app-owned database calls when you want request, log, error, and DB timing correlation without installing driver instrumentation:
