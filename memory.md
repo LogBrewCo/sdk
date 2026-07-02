@@ -25,7 +25,9 @@
   `bash scripts/real_user_dotnet_smoke.sh`,
   `bash scripts/real_user_dotnet_high_load_smoke.sh`, Activity smoke-script
   guard, markdown links, backend reports, release metadata, confidentiality
-  scan, generated-artifact hygiene, and diff check. Research:
+  scan, generated-artifact hygiene, diff check, and GitHub Actions run
+  `28609357405` passing Contract, Swift, Kotlin, and Objective-C checks on
+  pushed commit `ff380df0c8fdc5ec15d83300f6c54a8c6d636b5a`. Research:
   `docs/competitor-research/dotnet-trace-correlation-2026-06-16.md`.
   Remaining .NET gap: Sentry/Datadog/OpenTelemetry still lead on automatic
   ActivitySource/ASP.NET/HttpClient/EF/SqlClient/Redis/Kafka instrumentation,
