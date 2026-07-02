@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import importlib
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Any, TypeAlias, cast
 
 from logbrew_sdk import SdkError, _instrumentation
@@ -137,6 +139,11 @@ class _NormalizedSpanContext:
     sampled: bool
 
 
+class _FallbackSpanExportResult(Enum):
+    SUCCESS = 0
+    FAILURE = 1
+
+
 class LogBrewOpenTelemetrySpanProcessor:
     """OpenTelemetry SpanProcessor-compatible bridge into a caller-owned LogBrew client."""
 
@@ -193,23 +200,7 @@ class LogBrewOpenTelemetrySpanProcessor:
     def on_end(self, span: Any) -> None:
         """Convert one ended OpenTelemetry ReadableSpan-like object into a queued LogBrew span."""
 
-        if self._closed:
-            return
-        try:
-            if self._span_filter is not None and not self._span_filter(span):
-                return
-            attributes = _span_attributes_from_resolved_open_telemetry_readable_span(span, self._options)
-            if attributes is None:
-                return
-            self._record_trace_summary(attributes, span)
-            self._captured_spans += 1
-            self._client.span(
-                f"{self._event_id_prefix}_{self._captured_spans}",
-                _timestamp_from_open_telemetry_readable_span(span, self._timestamp_factory),
-                attributes,
-            )
-        except Exception as error:
-            _notify_capture_error(self._on_capture_error, error)
+        self._capture_span(span)
 
     def force_flush(self, timeout_millis: int | None = 30000) -> bool:
         """Emit pending trace summaries, then optionally flush the caller-owned LogBrew client."""
@@ -221,6 +212,31 @@ class LogBrewOpenTelemetrySpanProcessor:
 
         self._closed = True
         return self._flush()
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def _capture_span(self, span: Any) -> bool:
+        if self._closed:
+            return False
+        try:
+            if self._span_filter is not None and not self._span_filter(span):
+                return True
+            attributes = _span_attributes_from_resolved_open_telemetry_readable_span(span, self._options)
+            if attributes is None:
+                return True
+            self._record_trace_summary(attributes, span)
+            self._captured_spans += 1
+            self._client.span(
+                f"{self._event_id_prefix}_{self._captured_spans}",
+                _timestamp_from_open_telemetry_readable_span(span, self._timestamp_factory),
+                attributes,
+            )
+        except Exception as error:
+            _notify_capture_error(self._on_capture_error, error)
+            return False
+        return True
 
     def _flush(self) -> bool:
         self._enqueue_trace_summaries()
@@ -283,6 +299,70 @@ class LogBrewOpenTelemetrySpanProcessor:
                 _notify_capture_error(self._on_capture_error, error)
 
 
+class LogBrewOpenTelemetrySpanExporter:
+    """OpenTelemetry SpanExporter-compatible bridge for caller-owned OpenTelemetry processors."""
+
+    def __init__(
+        self,
+        *,
+        client: Any,
+        transport: Any | None = None,
+        event_id_prefix: str = "otel_export",
+        timestamp_factory: TimestampFactory | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        attribute_keys: Iterable[str] | None = None,
+        resource_attribute_keys: Iterable[str] | None = None,
+        event_attribute_keys: Iterable[str] | None = None,
+        link_attribute_keys: Iterable[str] | None = None,
+        capture_unsampled: bool = False,
+        include_span_events: bool = True,
+        include_span_links: bool = True,
+        include_trace_summary: bool = False,
+        flush_on_force_flush: bool = True,
+        span_filter: SpanFilter | None = None,
+        on_capture_error: CaptureErrorHandler | None = None,
+    ) -> None:
+        self._processor = LogBrewOpenTelemetrySpanProcessor(
+            client=client,
+            transport=transport,
+            event_id_prefix=event_id_prefix,
+            timestamp_factory=timestamp_factory,
+            metadata=metadata,
+            attribute_keys=attribute_keys,
+            resource_attribute_keys=resource_attribute_keys,
+            event_attribute_keys=event_attribute_keys,
+            link_attribute_keys=link_attribute_keys,
+            capture_unsampled=capture_unsampled,
+            include_span_events=include_span_events,
+            include_span_links=include_span_links,
+            include_trace_summary=include_trace_summary,
+            flush_on_force_flush=flush_on_force_flush,
+            span_filter=span_filter,
+            on_capture_error=on_capture_error,
+        )
+
+    def export(self, spans: Any) -> Any:
+        """Queue ended OpenTelemetry ReadableSpan objects and return a SpanExportResult-compatible value."""
+
+        if self._processor.closed or not isinstance(spans, Iterable) or isinstance(spans, str | bytes | Mapping):
+            return _open_telemetry_span_export_result(False)
+
+        captured = True
+        for span in list(spans):
+            captured = self._processor._capture_span(span) and captured
+        return _open_telemetry_span_export_result(captured)
+
+    def shutdown(self) -> None:
+        """Flush pending summaries/client events and mark the exporter closed."""
+
+        self._processor.shutdown()
+
+    def force_flush(self, timeout_millis: int | None = 30000) -> bool:
+        """Flush pending summaries and caller-owned LogBrew client events."""
+
+        return self._processor.force_flush(timeout_millis)
+
+
 def create_logbrew_open_telemetry_span_processor(
     *,
     client: Any,
@@ -305,6 +385,47 @@ def create_logbrew_open_telemetry_span_processor(
     """Create an OpenTelemetry SpanProcessor-compatible LogBrew bridge."""
 
     return LogBrewOpenTelemetrySpanProcessor(
+        client=client,
+        transport=transport,
+        event_id_prefix=event_id_prefix,
+        timestamp_factory=timestamp_factory,
+        metadata=metadata,
+        attribute_keys=attribute_keys,
+        resource_attribute_keys=resource_attribute_keys,
+        event_attribute_keys=event_attribute_keys,
+        capture_unsampled=capture_unsampled,
+        include_span_events=include_span_events,
+        include_span_links=include_span_links,
+        link_attribute_keys=link_attribute_keys,
+        include_trace_summary=include_trace_summary,
+        flush_on_force_flush=flush_on_force_flush,
+        span_filter=span_filter,
+        on_capture_error=on_capture_error,
+    )
+
+
+def create_logbrew_open_telemetry_span_exporter(
+    *,
+    client: Any,
+    transport: Any | None = None,
+    event_id_prefix: str = "otel_export",
+    timestamp_factory: TimestampFactory | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    attribute_keys: Iterable[str] | None = None,
+    resource_attribute_keys: Iterable[str] | None = None,
+    event_attribute_keys: Iterable[str] | None = None,
+    link_attribute_keys: Iterable[str] | None = None,
+    capture_unsampled: bool = False,
+    include_span_events: bool = True,
+    include_span_links: bool = True,
+    include_trace_summary: bool = False,
+    flush_on_force_flush: bool = True,
+    span_filter: SpanFilter | None = None,
+    on_capture_error: CaptureErrorHandler | None = None,
+) -> LogBrewOpenTelemetrySpanExporter:
+    """Create an OpenTelemetry SpanExporter-compatible LogBrew bridge."""
+
+    return LogBrewOpenTelemetrySpanExporter(
         client=client,
         transport=transport,
         event_id_prefix=event_id_prefix,
@@ -351,6 +472,15 @@ def span_attributes_from_open_telemetry_readable_span(
             resource_attribute_keys=resource_attribute_keys,
         ),
     )
+
+
+def _open_telemetry_span_export_result(success: bool) -> Any:
+    try:
+        export_module = importlib.import_module("opentelemetry.sdk.trace.export")
+        span_export_result = export_module.SpanExportResult
+    except Exception:
+        return _FallbackSpanExportResult.SUCCESS if success else _FallbackSpanExportResult.FAILURE
+    return span_export_result.SUCCESS if success else span_export_result.FAILURE
 
 
 def _span_attributes_from_resolved_open_telemetry_readable_span(

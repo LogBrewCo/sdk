@@ -22,7 +22,8 @@ on_error() {
         "$tmp_dir/pip-freeze.txt" \
         "$tmp_dir/no-otel.stdout.json" \
         "$tmp_dir/otel.stdout.json" \
-        "$tmp_dir/processor.stdout.json"; do
+        "$tmp_dir/processor.stdout.json" \
+        "$tmp_dir/exporter.stdout.json"; do
         if [[ -f "$diagnostic" ]]; then
             echo "--- ${diagnostic#"$tmp_dir"/} ---" >&2
             sed -n '1,120p' "$diagnostic" >&2
@@ -276,6 +277,143 @@ print(
 )
 PY
 
+python - <<'PY' > "$tmp_dir/exporter.stdout.json"
+import json
+
+from logbrew_sdk import (
+    LogBrewClient,
+    create_logbrew_open_telemetry_span_exporter,
+)
+from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult
+from opentelemetry.trace import Link, SpanContext, SpanKind, Status, StatusCode, TraceFlags, TraceState
+
+client = LogBrewClient.create(api_key="LOGBREW_API_KEY", sdk_name="checkout-api", sdk_version="0.1.2")
+provider = TracerProvider(
+    resource=Resource.create(
+        {
+            "service.name": "checkout-api",
+            "service.version": "2026.07.02",
+            "deployment.environment": "production",
+            "cloud.account.id": "blocked-account",
+        }
+    )
+)
+exporter = create_logbrew_open_telemetry_span_exporter(
+    client=client,
+    include_trace_summary=True,
+    link_attribute_keys=["messaging.operation.name"],
+    metadata={"release": "2026.07.02"},
+)
+provider.add_span_processor(SimpleSpanProcessor(exporter))
+tracer = provider.get_tracer("checkout-exporter-smoke", "0.1.0")
+linked_context = SpanContext(
+    trace_id=int("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 16),
+    span_id=int("bbbbbbbbbbbbbbbb", 16),
+    is_remote=True,
+    trace_flags=TraceFlags(TraceFlags.SAMPLED),
+    trace_state=TraceState.get_default(),
+)
+empty_result = exporter.export(())
+if empty_result is not SpanExportResult.SUCCESS:
+    raise SystemExit(f"unexpected empty export result: {empty_result!r}")
+
+with tracer.start_as_current_span(
+    "GET /checkout/exporter",
+    kind=SpanKind.SERVER,
+    attributes={
+        "http.method": "GET",
+        "http.route": "/checkout/exporter",
+        "http.url": "https://api.example.test/checkout/exporter?debug=blocked",
+    },
+) as root_span:
+    root_span.add_event(
+        "exception",
+        {
+            "exception.type": "RuntimeError",
+            "exception.message": "blocked exporter failure",
+            "exception.stacktrace": "blocked stack",
+        },
+    )
+    root_span.set_status(Status(StatusCode.ERROR))
+    with tracer.start_as_current_span(
+        "postgres SELECT",
+        kind=SpanKind.CLIENT,
+        links=[
+            Link(
+                linked_context,
+                attributes={
+                    "messaging.operation.name": "receive",
+                    "messaging.message.id": "blocked-message-id",
+                },
+            )
+        ],
+        attributes={
+            "db.system": "postgresql",
+            "db.operation.name": "SELECT",
+            "db.statement": "SELECT * FROM users WHERE email = 'blocked@example.test'",
+        },
+    ):
+        pass
+
+if exporter.force_flush() is not True:
+    raise SystemExit("LogBrew OpenTelemetry exporter did not force-flush")
+provider.shutdown()
+payload = json.loads(client.preview_json())
+events = payload["events"]
+serialized = json.dumps(payload)
+blocked_values = [
+    "blocked-account",
+    "debug=blocked",
+    "blocked exporter failure",
+    "blocked stack",
+    "blocked@example.test",
+    "http.url",
+    "db.statement",
+    "blocked-message-id",
+    "messaging.message.id",
+]
+leaked = [value for value in blocked_values if value in serialized]
+if leaked:
+    raise SystemExit(f"OpenTelemetry exporter payload leaked blocked values: {leaked}")
+
+detail_spans = [event for event in events if event["id"].startswith("otel_export_") and "_trace_" not in event["id"]]
+summary_spans = [event for event in events if "_trace_" in event["id"]]
+if len(detail_spans) != 2 or len(summary_spans) != 1:
+    raise SystemExit(f"unexpected exporter span counts: detail={len(detail_spans)} summary={len(summary_spans)}")
+
+summary = summary_spans[0]["attributes"]
+root = next(event["attributes"] for event in detail_spans if event["attributes"]["name"] == "GET /checkout/exporter")
+dependency = next(event["attributes"] for event in detail_spans if event["attributes"]["name"] == "postgres SELECT")
+dependency_links = dependency.get("links", [])
+print(
+    json.dumps(
+        {
+            "ok": True,
+            "events": len(events),
+            "emptyExportResult": empty_result.name,
+            "rootTraceId": root["traceId"],
+            "dependencyParentSpanId": dependency["parentSpanId"],
+            "rootStatus": root["status"],
+            "summaryName": summary["name"],
+            "summaryStatus": summary["status"],
+            "summarySpanCount": summary["metadata"]["otel.trace.span_count"],
+            "summaryErrorSpanCount": summary["metadata"]["otel.trace.error_span_count"],
+            "dependencyLinkCount": len(dependency_links),
+            "dependencyLinkTraceId": dependency_links[0]["traceId"],
+            "dependencyLinkOperation": dependency_links[0]["metadata"]["messaging.operation.name"],
+            "service": summary["metadata"]["service.name"],
+            "environment": summary["metadata"]["deployment.environment"],
+            "route": summary["metadata"]["http.route"],
+            "dependencySystem": summary["metadata"]["db.system"],
+        },
+        sort_keys=True,
+    )
+)
+PY
+
 python -m pip freeze > "$tmp_dir/pip-freeze.txt"
 grep -q '^opentelemetry-api==' "$tmp_dir/pip-freeze.txt"
 grep -q '^opentelemetry-sdk==' "$tmp_dir/pip-freeze.txt"
@@ -301,5 +439,20 @@ grep -q '"service": "checkout-api"' "$tmp_dir/processor.stdout.json"
 grep -q '"environment": "production"' "$tmp_dir/processor.stdout.json"
 grep -q '"route": "/checkout"' "$tmp_dir/processor.stdout.json"
 grep -q '"dependencySystem": "redis"' "$tmp_dir/processor.stdout.json"
+grep -q '"ok": true' "$tmp_dir/exporter.stdout.json"
+grep -q '"events": 3' "$tmp_dir/exporter.stdout.json"
+grep -q '"emptyExportResult": "SUCCESS"' "$tmp_dir/exporter.stdout.json"
+grep -q '"rootStatus": "error"' "$tmp_dir/exporter.stdout.json"
+grep -q '"summaryName": "opentelemetry.trace:GET /checkout/exporter"' "$tmp_dir/exporter.stdout.json"
+grep -q '"summaryStatus": "error"' "$tmp_dir/exporter.stdout.json"
+grep -q '"summarySpanCount": 2' "$tmp_dir/exporter.stdout.json"
+grep -q '"summaryErrorSpanCount": 1' "$tmp_dir/exporter.stdout.json"
+grep -q '"dependencyLinkCount": 1' "$tmp_dir/exporter.stdout.json"
+grep -q '"dependencyLinkTraceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' "$tmp_dir/exporter.stdout.json"
+grep -q '"dependencyLinkOperation": "receive"' "$tmp_dir/exporter.stdout.json"
+grep -q '"service": "checkout-api"' "$tmp_dir/exporter.stdout.json"
+grep -q '"environment": "production"' "$tmp_dir/exporter.stdout.json"
+grep -q '"route": "/checkout/exporter"' "$tmp_dir/exporter.stdout.json"
+grep -q '"dependencySystem": "postgresql"' "$tmp_dir/exporter.stdout.json"
 
 echo "Python OpenTelemetry installed-artifact smoke passed"

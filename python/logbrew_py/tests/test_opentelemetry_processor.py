@@ -7,6 +7,7 @@ from typing import Any
 from logbrew_sdk import (
     LogBrewClient,
     SdkError,
+    create_logbrew_open_telemetry_span_exporter,
     create_logbrew_open_telemetry_span_processor,
     span_attributes_from_open_telemetry_readable_span,
 )
@@ -123,6 +124,11 @@ def sample_client() -> LogBrewClient:
         sdk_version="0.1.0",
         max_retries=2,
     )
+
+
+def export_result_name(result: Any) -> str:
+    name = getattr(result, "name", None)
+    return name if isinstance(name, str) else str(result)
 
 
 class OpenTelemetryProcessorTests(unittest.TestCase):
@@ -395,6 +401,108 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
         )
         capture_unsampled.on_end(span)
         self.assertEqual(client.pending_events(), 1)
+
+    def test_open_telemetry_span_exporter_queues_details_and_trace_summary(self) -> None:
+        client = sample_client()
+        root_context = FakeOpenTelemetrySpanContext(
+            trace_id=int("4bf92f3577b34da6a3ce929d0e0e4736", 16),
+            span_id=int("00f067aa0ba902b7", 16),
+            trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+        )
+        child_context = FakeOpenTelemetrySpanContext(
+            trace_id=int("4bf92f3577b34da6a3ce929d0e0e4736", 16),
+            span_id=int("b7ad6b7169203331", 16),
+            trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+        )
+        exporter = create_logbrew_open_telemetry_span_exporter(
+            client=client,
+            include_trace_summary=True,
+            link_attribute_keys=["messaging.operation.name"],
+            timestamp_factory=lambda: "2026-07-02T12:00:00Z",
+            metadata={"release": "2026.07.02"},
+        )
+
+        result = exporter.export(
+            [
+                FakeOpenTelemetryReadableSpan(
+                    name="GET /checkout",
+                    context=root_context,
+                    status_name="ERROR",
+                    attributes={"http.method": "GET", "http.route": "/checkout"},
+                    resource_attributes={"service.name": "checkout-api"},
+                    start_time=1_780_000_000_000_000_000,
+                    end_time=1_780_000_000_050_000_000,
+                ),
+                FakeOpenTelemetryReadableSpan(
+                    name="postgres SELECT",
+                    context=child_context,
+                    parent=root_context,
+                    attributes={"db.system": "postgresql", "db.operation.name": "SELECT"},
+                    links=[
+                        FakeOpenTelemetryLink(
+                            context=FakeOpenTelemetrySpanContext(
+                                trace_id=int("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 16),
+                                span_id=int("bbbbbbbbbbbbbbbb", 16),
+                                trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+                            ),
+                            attributes={
+                                "messaging.operation.name": "fan-in",
+                                "messaging.message.id": "blocked-message-id",
+                            },
+                        )
+                    ],
+                    resource_attributes={"service.name": "checkout-api"},
+                    start_time=1_780_000_000_005_000_000,
+                    end_time=1_780_000_000_020_000_000,
+                ),
+            ]
+        )
+
+        self.assertEqual(export_result_name(result), "SUCCESS")
+        self.assertTrue(exporter.force_flush())
+        payload = json.loads(client.preview_json())
+        self.assertEqual(
+            [event["id"] for event in payload["events"]],
+            ["otel_export_1", "otel_export_2", "otel_export_trace_1"],
+        )
+        self.assertEqual(payload["events"][0]["attributes"]["status"], "error")
+        self.assertEqual(payload["events"][1]["attributes"]["parentSpanId"], "00f067aa0ba902b7")
+        self.assertEqual(
+            payload["events"][1]["attributes"]["links"],
+            [
+                {
+                    "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "spanId": "bbbbbbbbbbbbbbbb",
+                    "sampled": True,
+                    "metadata": {"messaging.operation.name": "fan-in"},
+                }
+            ],
+        )
+        serialized = json.dumps(payload)
+        self.assertNotIn("blocked-message-id", serialized)
+        self.assertNotIn("messaging.message.id", serialized)
+        self.assertEqual(payload["events"][2]["attributes"]["name"], "opentelemetry.trace:GET /checkout")
+
+    def test_open_telemetry_span_exporter_returns_failure_after_shutdown(self) -> None:
+        client = sample_client()
+        exporter = create_logbrew_open_telemetry_span_exporter(client=client)
+        exporter.shutdown()
+
+        result = exporter.export(
+            [
+                FakeOpenTelemetryReadableSpan(
+                    name="ignored after shutdown",
+                    context=FakeOpenTelemetrySpanContext(
+                        trace_id=int("4bf92f3577b34da6a3ce929d0e0e4736", 16),
+                        span_id=int("b7ad6b7169203331", 16),
+                        trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+                    ),
+                )
+            ]
+        )
+
+        self.assertEqual(export_result_name(result), "FAILURE")
+        self.assertEqual(client.pending_events(), 0)
 
 
 if __name__ == "__main__":

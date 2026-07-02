@@ -1041,7 +1041,9 @@ from logbrew_sdk._queue_client import (  # noqa: E402
 from logbrew_sdk._rq_client import rq_operation_with_logbrew_span  # noqa: E402
 from logbrew_sdk._timeline import create_network_milestone_attributes, create_product_action_attributes  # noqa: E402
 from logbrew_sdk._opentelemetry_processor import (  # noqa: E402
+    LogBrewOpenTelemetrySpanExporter,
     LogBrewOpenTelemetrySpanProcessor,
+    create_logbrew_open_telemetry_span_exporter,
     create_logbrew_open_telemetry_span_processor,
     span_attributes_from_open_telemetry_readable_span,
 )
@@ -1059,6 +1061,7 @@ __all__ = [
     "LogBrewDjangoCacheInstrumentation",
     "LogBrewFlaskCacheInstrumentation",
     "LogBrewLoggingHandler",
+    "LogBrewOpenTelemetrySpanExporter",
     "LogBrewOpenTelemetrySpanProcessor",
     "LogBrewPymemcacheInstrumentation",
     "LogBrewRedisInstrumentation",
@@ -1089,6 +1092,7 @@ __all__ = [
     "celery_operation_with_logbrew_span",
     "connect_dbapi_connection_with_logbrew_spans",
     "create_celery_trace_headers",
+    "create_logbrew_open_telemetry_span_exporter",
     "create_logbrew_open_telemetry_span_processor",
     "create_logbrew_trace_context",
     "create_network_milestone_attributes",
