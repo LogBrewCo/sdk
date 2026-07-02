@@ -47,3 +47,23 @@ Sentry, Datadog, and OpenTelemetry are stronger for hidden automatic coverage. L
 - Node still lacks optional framework-owned automatic Undici/global fetch instrumentation for teams that explicitly want it.
 - Server SDKs outside Node still need deeper outbound HTTP, DB, cache, and queue spans.
 - LogBrew still avoids baggage/tracestate, response-body capture, and phase-timing streams. Bounded span events and span links now exist for explicit milestones, exception type summaries, and app-owned fan-out/batch relationships, not automatic full OpenTelemetry/Sentry event/link streams.
+
+## 2026-07-03 Reversible Global Fetch Follow-Up
+
+Fresh source reads for the next rich-trace gap:
+
+- Sentry JavaScript `getsentry/sentry-javascript@cf895c95995a6dff121484eadfa3a82980646f91`: read `packages/core/src/fetch.ts` (`instrumentFetchRequest(...)`, shallow option cloning, trace header attachment, span end hooks), `packages/node-core/src/integrations/node-fetch/undici-instrumentation.ts` (`instrumentUndici(...)`, diagnostics-channel subscription lifecycle, propagation decision cache), and `packages/node-core/src/utils/outgoingFetchRequest.ts` (`instrumentOutgoingFetchRequest(...)`, target-gated propagation).
+- OpenTelemetry JS Contrib `open-telemetry/opentelemetry-js-contrib@2353bd7fbb75ae682c8dde42f32caa10a82bc315`: read `packages/instrumentation-undici/src/undici.ts` (`UndiciInstrumentation.enable/disable`, `onRequestCreated`, `onRequestHeaders`, `onResponseHeaders`, `onDone`, `onError`, propagation injection, HTTP duration metric recording).
+- Datadog JavaScript `DataDog/dd-trace-js@80c5d963ec7ff5d20c7fc2d662deff463fd47843`: read `packages/datadog-plugin-undici/src/index.js` (`UndiciPlugin`, native diagnostic-channel handlers, fallback `bindStart`, header normalization, request filtering and propagation).
+- PostHog JavaScript `PostHog/posthog-js@cc01eea218219b1f36145143c62586c66c459e84`: read `packages/node/src/client.ts` (`fetch(...)`, `captureException(...)`, `captureExceptionImmediate(...)`) and `packages/ai/src/otel/processor.ts` (`PostHogSpanProcessor`, blank project-key no-op, AI-span filtering before export). PostHog has a narrower fetch seam and AI/exception instrumentation, not broad Node HTTP client auto-instrumentation.
+
+Competitor pattern: Sentry, OpenTelemetry, and Datadog win on automatic or instrumentation-owned fetch/Undici coverage. They create spans at request creation, inject propagation, record status/error and some timing, and can hook all Undici traffic through diagnostics channels. The tradeoff is wider runtime ownership, duplicate-instrumentation risk, optional header capture, more semantic data, and vendor/runtime coupling.
+
+LogBrew now ships the safer subset in `@logbrew/node`: `installLogBrewFetchInstrumentation(...)` wraps only the fetch function the app opts into (`globalThis.fetch` by default or another app-supplied `globalObject.fetch`), captures only URLs matching `tracePropagationTargets` or `captureTargets`, writes one normalized W3C `traceparent`, records the same privacy-bounded `node:fetch` spans as `fetchWithLogBrewSpan(...)`, and puts the original function back through `uninstall()` only when LogBrew still owns that fetch slot. It drops unsafe wrapper metadata keys such as bodies, payloads, headers, URLs, query text, cookies, auth values, raw `traceparent`, and exception messages.
+
+Evidence:
+
+- RED: a packed temp app importing `installLogBrewFetchInstrumentation` from `@logbrew/node` failed with `SyntaxError: The requested module '@logbrew/node' does not provide an export named 'installLogBrewFetchInstrumentation'`.
+- GREEN: `bash scripts/real_user_node_smoke.sh` now packs `@logbrew/sdk` and `@logbrew/node`, installs them into a disposable npm app, proves ESM/CJS/TypeScript surfaces, target-scoped global fetch propagation, unmatched pass-through, caller-header immutability, failure span exception-type-only capture, unsafe metadata/query/error-message dropping, and uninstall restoration.
+
+Honest comparison: LogBrew is still worse than Sentry/Datadog/OpenTelemetry for zero-code all-Undici diagnostics-channel coverage, phase timing, HTTP duration metrics, broad semantic conventions, baggage/tracestate, and automatic framework/client instrumentation. LogBrew is better for teams that want a small opt-in global fetch bridge with exact target scope, reversible teardown, installed-artifact proof, and safer defaults.

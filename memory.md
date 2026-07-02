@@ -1,5 +1,37 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: Node opt-in global fetch instrumentation added after source reads
+  from Sentry JavaScript
+  `getsentry/sentry-javascript@cf895c95995a6dff121484eadfa3a82980646f91`
+  (`packages/core/src/fetch.ts`, `packages/node-core/src/integrations/node-fetch/undici-instrumentation.ts`,
+  `packages/node-core/src/utils/outgoingFetchRequest.ts`), OpenTelemetry JS
+  Contrib
+  `open-telemetry/opentelemetry-js-contrib@2353bd7fbb75ae682c8dde42f32caa10a82bc315`
+  (`packages/instrumentation-undici/src/undici.ts`), Datadog JavaScript
+  `DataDog/dd-trace-js@80c5d963ec7ff5d20c7fc2d662deff463fd47843`
+  (`packages/datadog-plugin-undici/src/index.js`), and PostHog JavaScript
+  `PostHog/posthog-js@cc01eea218219b1f36145143c62586c66c459e84`
+  (`packages/node/src/client.ts`, `packages/ai/src/otel/processor.ts`).
+  `@logbrew/node` now exports `installLogBrewFetchInstrumentation(...)`, a
+  reversible wrapper for an app-owned/global fetch function. It captures only
+  URLs matching the union of configured `tracePropagationTargets` and
+  `captureTargets`, writes one
+  normalized W3C `traceparent`, records the existing safe `node:fetch` span
+  shape, drops unsafe wrapper metadata and exception messages, and puts back the
+  original fetch only when LogBrew still owns the slot. It avoids hidden
+  diagnostics-channel subscriptions, broad Undici/client patching, payloads,
+  arbitrary headers, full URLs/query/hash text, cookies, auth values, raw
+  propagation, baggage, and tracestate. Evidence: RED packed import failure,
+  GREEN `bash scripts/real_user_node_smoke.sh`, `npm --prefix
+  js/logbrew-node test`, `python3 scripts/check_js_sources.py
+  js/logbrew-node`, `bash scripts/check_js_lint.sh`, `bash
+  scripts/check_js_package.sh`, `bash scripts/real_user_js_high_load_smoke.sh`,
+  and `bash scripts/real_user_node_queue_high_load_smoke.sh`. Research:
+  `docs/competitor-research/node-outbound-fetch-tracing-2026-06-19.md`.
+  Honest remaining Node gap: Sentry/Datadog/OpenTelemetry remain stronger for
+  zero-code all-Undici instrumentation, phase timing, HTTP duration metrics,
+  baggage/tracestate, broad semantic conventions, and deeper automatic
+  framework/client spans.
 - 2026-07-02: .NET optional OpenTelemetry processor bridge added after source
   reads from Sentry .NET
   `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`

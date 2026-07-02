@@ -6,7 +6,7 @@
 
 Node.js HTTP helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, outbound `fetch`, database/cache/queue operation span capture, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, outbound `fetch`, opt-in reversible global fetch instrumentation, database/cache/queue operation span capture, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
 
 ## Install
 
@@ -191,7 +191,34 @@ if (!response.ok) {
 }
 ```
 
-The emitted span records the method, route template or URL path, status code, duration, sampled flag, W3C trace IDs, and portable HTTP semantic metadata (`http.request.method`, `http.response.status_code`, `http.route`, `url.path`). It does not globally patch `fetch`, capture payloads, serialize arbitrary headers, store the raw propagation header, or keep query strings/fragments.
+The emitted span records the method, route template or URL path, status code, duration, sampled flag, W3C trace IDs, and portable HTTP semantic metadata (`http.request.method`, `http.response.status_code`, `http.route`, `url.path`). It does not capture payloads, serialize arbitrary headers, store the raw propagation header, or keep query strings/fragments.
+
+If a service has many existing `fetch(...)` calls, opt into reversible global fetch instrumentation explicitly:
+
+```js
+import { installLogBrewFetchInstrumentation } from "@logbrew/node";
+
+const fetchInstrumentation = installLogBrewFetchInstrumentation({
+  client: logbrew.client,
+  trace: logbrew.trace,
+  tracePropagationTargets: ["https://api.example.com/"],
+  routeTemplateFactory({ path }) {
+    return path.replace(/\/\d+/g, "/:id");
+  },
+  metadata: {
+    service: "checkout-api",
+    release: "checkout-api@1.4.0"
+  }
+});
+
+await fetch("https://api.example.com/orders/42?email=hidden", {
+  method: "POST"
+});
+
+fetchInstrumentation.uninstall();
+```
+
+`installLogBrewFetchInstrumentation()` wraps `globalThis.fetch` by default, or another fetch owner when you pass `globalObject`. Only URLs matching `tracePropagationTargets` or `captureTargets` are captured and receive a normalized W3C `traceparent`; unmatched fetches pass through unchanged. `uninstall()` puts the original fetch back only if LogBrew still owns the slot, so a later app wrapper is not clobbered. The captured spans use the same safe `node:fetch` metadata as `fetchWithLogBrewSpan()` and drop unsafe metadata keys such as bodies, headers, URLs, query text, cookies, auth values, raw `traceparent`, payloads, and exception messages. It does not subscribe to Undici diagnostic channels, patch HTTP clients globally beyond the fetch function you opt into, capture request/response bodies, read arbitrary headers, persist offline requests, infer baggage/tracestate, or instrument LogBrew transport calls unless your target list matches them.
 
 ## Database Operation Spans
 

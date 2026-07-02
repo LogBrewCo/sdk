@@ -63,6 +63,7 @@ grep -q 'queueOperationWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'createNodeFetchTransport' "$tmp_dir/node-readme.md"
 grep -q 'databaseOperationWithLogBrewSpan' "$tmp_dir/node-readme.md"
 grep -q 'fetchWithLogBrewSpan' "$tmp_dir/node-readme.md"
+grep -q 'installLogBrewFetchInstrumentation' "$tmp_dir/node-readme.md"
 grep -q 'instrumentLogBrewPgClient' "$tmp_dir/node-readme.md"
 grep -q 'instrumentLogBrewRedisClient' "$tmp_dir/node-readme.md"
 grep -q 'instrumentLogBrewMongoCollection' "$tmp_dir/node-readme.md"
@@ -124,6 +125,7 @@ import {
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
+  installLogBrewFetchInstrumentation,
   instrumentLogBrewMongoCollection,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,
@@ -288,6 +290,128 @@ const nonFatalCaptureResponse = await fetchWithLogBrewSpan("https://payments.exa
 if (nonFatalCaptureResponse.status !== 203 || !captureFailureCallbackRan) {
   throw new Error("fetch span capture failures should not replace the fetch response");
 }
+
+const globalFetchClient = createLogBrewNodeClient({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  sdkName: "node-global-fetch-instrumentation-smoke",
+  sdkVersion: "0.1.0"
+});
+const globalFetchCalls = [];
+const originalGlobalFetch = async (input, init = {}) => {
+  globalFetchCalls.push({
+    input,
+    init,
+    traceparent: headerValue(init.headers, "traceparent")
+  });
+  if (String(input).includes("/fail")) {
+    throw new TypeError("downstream detail");
+  }
+  return new Response("accepted", { status: String(input).includes("/cdn/") ? 200 : 201 });
+};
+const globalObject = { fetch: originalGlobalFetch };
+const globalFetchInstrumentation = installLogBrewFetchInstrumentation({
+  client: globalFetchClient,
+  globalObject,
+  metadata: {
+    service: "checkout-api",
+    body: "must not leak",
+    release: "checkout-api@1.2.3"
+  },
+  now: () => "2026-06-02T10:00:09Z",
+  nowMs: (() => {
+    const values = [100, 139, 200, 250];
+    return () => values.shift() ?? 250;
+  })(),
+  routeTemplateFactory({ path }) {
+    return path.replace(/\/\d+/gu, "/:id");
+  },
+  spanIdFactory: (() => {
+    const values = ["d7ad6b7169203331", "d7ad6b7169203332"];
+    return () => values.shift() ?? "d7ad6b7169203333";
+  })(),
+  captureTargets: ["https://batch.example.test/"],
+  trace: {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    parentSpanId: "00f067aa0ba902b7",
+    sampled: true
+  },
+  tracePropagationTargets: ["https://api.example.test/"]
+});
+if (!globalFetchInstrumentation.isInstalled()) {
+  throw new Error("expected global fetch instrumentation to report installed");
+}
+const callerHeaders = {
+  accept: "application/json",
+  traceparent: "00-11111111111111111111111111111111-2222222222222222-01"
+};
+const globalFetchResponse = await globalObject.fetch("https://api.example.test/orders/42?email=dev@example.test#frag", {
+  headers: callerHeaders,
+  method: "POST"
+});
+if (globalFetchResponse.status !== 201) {
+  throw new Error(`unexpected global fetch status: ${globalFetchResponse.status}`);
+}
+if (callerHeaders.traceparent !== "00-11111111111111111111111111111111-2222222222222222-01") {
+  throw new Error("global fetch instrumentation mutated caller headers");
+}
+await globalObject.fetch("https://cdn.example.test/cdn/logo.png?debug=hidden");
+try {
+  await globalObject.fetch("https://api.example.test/fail?debug=hidden");
+  throw new Error("expected instrumented global fetch failure");
+} catch (error) {
+  if (!(error instanceof TypeError)) {
+    throw error;
+  }
+}
+globalFetchInstrumentation.uninstall();
+if (globalFetchInstrumentation.isInstalled() || globalObject.fetch !== originalGlobalFetch) {
+  throw new Error("expected global fetch instrumentation to restore original fetch");
+}
+await globalObject.fetch("https://api.example.test/orders/99");
+if (globalFetchCalls.length !== 4) {
+  throw new Error(`unexpected global fetch call count: ${globalFetchCalls.length}`);
+}
+if (!globalFetchCalls[0].traceparent?.startsWith("00-4bf92f3577b34da6a3ce929d0e0e4736-d7ad6b7169203331-")) {
+  throw new Error(`expected propagated traceparent for target fetch, got ${globalFetchCalls[0].traceparent}`);
+}
+if (globalFetchCalls[1].traceparent !== undefined) {
+  throw new Error("non-target global fetch received traceparent");
+}
+if (!globalFetchCalls[2].traceparent?.startsWith("00-4bf92f3577b34da6a3ce929d0e0e4736-d7ad6b7169203332-")) {
+  throw new Error(`expected propagated traceparent for failed target fetch, got ${globalFetchCalls[2].traceparent}`);
+}
+if (globalFetchCalls[3].traceparent !== undefined) {
+  throw new Error("fetch after uninstall should not receive traceparent");
+}
+const globalFetchPayload = JSON.parse(globalFetchClient.previewJson());
+if (globalFetchPayload.events.length !== 2) {
+  throw new Error(`expected two captured global fetch spans, got ${globalFetchPayload.events.length}`);
+}
+const globalFetchSpan = globalFetchPayload.events[0].attributes;
+if (
+  globalFetchSpan.name !== "POST /orders/:id" ||
+  globalFetchSpan.parentSpanId !== "b7ad6b7169203331" ||
+  globalFetchSpan.status !== "ok" ||
+  globalFetchSpan.metadata.framework !== "node:fetch" ||
+  globalFetchSpan.metadata["http.route"] !== "/orders/:id" ||
+  globalFetchSpan.metadata["url.path"] !== "/orders/:id" ||
+  globalFetchSpan.metadata.service !== "checkout-api" ||
+  globalFetchSpan.metadata.release !== "checkout-api@1.2.3"
+) {
+  throw new Error(`unexpected global fetch span: ${JSON.stringify(globalFetchSpan)}`);
+}
+const globalFetchFailureSpan = globalFetchPayload.events[1].attributes;
+if (
+  globalFetchFailureSpan.status !== "error" ||
+  globalFetchFailureSpan.metadata.errorType !== "TypeError" ||
+  globalFetchFailureSpan.metadata.errorMessage !== undefined ||
+  !Array.isArray(globalFetchFailureSpan.events) ||
+  globalFetchFailureSpan.events[0]?.metadata?.exceptionType !== "TypeError"
+) {
+  throw new Error(`unexpected global fetch failure span: ${JSON.stringify(globalFetchFailureSpan)}`);
+}
+assertNoUnsafeContent(JSON.stringify(globalFetchPayload));
 
 const errorTransport = RecordingTransport.alwaysAccept();
 const errorClient = createLogBrewNodeClient({
@@ -1181,6 +1305,39 @@ async function waitFor(predicate) {
 function assertJsonEqual(actual, expected, message, preview) { if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${message}: ${preview}`); }
 function assertMetadata(actual, expected, message, preview) { for (const [key, value] of Object.entries(expected)) if (actual[key] !== value) throw new Error(`${message}: ${preview}`); }
 function exceptionEvents(exceptionType) { return [{ name: "exception", metadata: { exceptionEscaped: true, exceptionType } }]; }
+function assertNoUnsafeContent(value) {
+  const text = String(value);
+  for (const unsafe of [
+    "dev@example.test",
+    "email=",
+    "debug=hidden",
+    "downstream detail",
+    "must not leak",
+    "body"
+  ]) {
+    if (text.includes(unsafe)) {
+      throw new Error(`unsafe global fetch payload leaked ${unsafe}: ${text}`);
+    }
+  }
+}
+function headerValue(headers, name) {
+  if (!headers) {
+    return undefined;
+  }
+  if (typeof headers.get === "function") {
+    return headers.get(name) ?? undefined;
+  }
+  if (Array.isArray(headers)) {
+    const match = headers.find(([key]) => String(key).toLowerCase() === name.toLowerCase());
+    return match ? match[1] : undefined;
+  }
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === name.toLowerCase()) {
+      return value;
+    }
+  }
+  return undefined;
+}
 
 async function closeServer(server) {
   await new Promise((resolve, reject) => {
@@ -1219,6 +1376,7 @@ import {
   createLogBrewNodeClient,
   databaseOperationWithLogBrewSpan,
   getActiveLogBrewTrace,
+  installLogBrewFetchInstrumentation,
   instrumentLogBrewMongoCollection,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,
@@ -1252,6 +1410,19 @@ await fetchWithLogBrewSpan("https://payments.example.invalid/payments/123?coupon
   routeTemplate: "/payments/:paymentId",
   trace
 });
+const typedFetchInstrumentation = installLogBrewFetchInstrumentation({
+  client,
+  globalObject: {
+    fetch: async () => new Response("accepted", { status: 202 })
+  },
+  trace,
+  tracePropagationTargets: ["https://payments.example.invalid/"],
+  routeTemplateFactory({ path }) {
+    return path;
+  }
+});
+typedFetchInstrumentation.isInstalled() satisfies boolean;
+typedFetchInstrumentation.uninstall();
 const databaseResult = await databaseOperationWithLogBrewSpan("orders.select_by_id", {
   client,
   databaseName: "checkout",
@@ -1374,6 +1545,7 @@ node -e 'const node = require("@logbrew/node"); if (typeof node.createNodeFetchT
 node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewPgClient !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewRedisClient !== "function") process.exit(1)'
 node -e 'const node = require("@logbrew/node"); if (typeof node.instrumentLogBrewMongoCollection !== "function") process.exit(1)'
+node -e 'const node = require("@logbrew/node"); if (typeof node.installLogBrewFetchInstrumentation !== "function") process.exit(1)'
 
 node node_modules/@logbrew/node/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/node/examples/index.mjs first-useful-telemetry' "$tmp_dir/launcher-help.txt"

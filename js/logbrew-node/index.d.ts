@@ -154,6 +154,37 @@ export type FetchWithLogBrewSpanOptions = {
   ) => void | Promise<void>;
 };
 
+export type LogBrewFetchInstrumentationContext = {
+  input: Parameters<typeof fetch>[0];
+  init?: Parameters<typeof fetch>[1];
+  method: string;
+  path: string;
+  url: string;
+};
+
+export type LogBrewFetchInstrumentationTarget =
+  | string
+  | RegExp
+  | ((context: LogBrewFetchInstrumentationContext) => boolean);
+
+export type LogBrewFetchInstrumentationHandle = {
+  isInstalled(): boolean;
+  uninstall(): void;
+};
+
+export type LogBrewFetchInstrumentationOptions = Omit<
+  FetchWithLogBrewSpanOptions,
+  "fetchImpl" | "routeTemplate"
+> & {
+  globalObject?: {
+    fetch?: typeof fetch;
+  };
+  captureTargets?: LogBrewFetchInstrumentationTarget | LogBrewFetchInstrumentationTarget[];
+  routeTemplate?: string;
+  routeTemplateFactory?: (context: LogBrewFetchInstrumentationContext) => string;
+  tracePropagationTargets?: LogBrewFetchInstrumentationTarget | LogBrewFetchInstrumentationTarget[];
+};
+
 export type DatabaseOperationWithLogBrewSpanOptions<Result = unknown> = {
   client: LogBrewClient;
   operation: () => Result | Promise<Result>;
@@ -411,6 +442,10 @@ export declare function fetchWithLogBrewSpan(
   options: FetchWithLogBrewSpanOptions
 ): Promise<Response>;
 
+export declare function installLogBrewFetchInstrumentation(
+  options: LogBrewFetchInstrumentationOptions
+): LogBrewFetchInstrumentationHandle;
+
 export declare function databaseOperationWithLogBrewSpan<Result>(
   operationName: string,
   options: DatabaseOperationWithLogBrewSpanOptions<Result>
@@ -495,6 +530,7 @@ declare const defaultExport: {
   databaseOperationWithLogBrewSpan: typeof databaseOperationWithLogBrewSpan;
   fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
+  installLogBrewFetchInstrumentation: typeof installLogBrewFetchInstrumentation;
   instrumentLogBrewMongoCollection: typeof instrumentLogBrewMongoCollection;
   instrumentLogBrewPgClient: typeof instrumentLogBrewPgClient;
   instrumentLogBrewRedisClient: typeof instrumentLogBrewRedisClient;

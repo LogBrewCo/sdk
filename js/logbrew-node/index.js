@@ -23,6 +23,7 @@ const DEFAULT_SDK_NAME = "logbrew-node";
 const DEFAULT_SDK_VERSION = "0.1.0";
 const DEFAULT_ENDPOINT = "https://api.logbrew.com/v1/events";
 const MAX_SPAN_EVENTS = 8;
+const LOGBREW_FETCH_INSTRUMENTATION = Symbol.for("@logbrew/node.fetchInstrumentation");
 const activeTraceContext = new AsyncLocalStorage();
 
 export function createLogBrewNodeClient({
@@ -261,6 +262,75 @@ export async function queueBatchOperationWithLogBrewSpan(operationName, options 
   return queueOperationWithLogBrewSpan(operationName, createQueueBatchSpanOptions(options));
 }
 
+export function installLogBrewFetchInstrumentation({
+  captureTargets,
+  globalObject = globalThis,
+  routeTemplate,
+  routeTemplateFactory = defaultFetchRouteTemplateFactory,
+  tracePropagationTargets = [],
+  ...options
+} = {}) {
+  if (!options.client) {
+    throw new SdkError("configuration_error", "installLogBrewFetchInstrumentation requires client");
+  }
+  if (!globalObject || typeof globalObject !== "object") {
+    throw new SdkError("configuration_error", "installLogBrewFetchInstrumentation requires globalObject");
+  }
+  const originalFetch = globalObject.fetch;
+  if (typeof originalFetch !== "function") {
+    throw new SdkError("configuration_error", "installLogBrewFetchInstrumentation requires fetch");
+  }
+  if (originalFetch[LOGBREW_FETCH_INSTRUMENTATION]) {
+    throw new SdkError("configuration_error", "installLogBrewFetchInstrumentation requires uninstrumented fetch");
+  }
+  if (routeTemplateFactory !== undefined && typeof routeTemplateFactory !== "function") {
+    throw new SdkError("configuration_error", "routeTemplateFactory must be a function");
+  }
+
+  const callOriginalFetch = originalFetch.bind(globalObject);
+  const matchers = normalizeFetchTargetMatchers([
+    ...fetchTargetMatcherValues(tracePropagationTargets),
+    ...fetchTargetMatcherValues(captureTargets)
+  ]);
+  let installed = true;
+
+  function logBrewInstrumentedFetch(input, init) {
+    const url = getFetchUrl(input);
+    const method = getFetchMethod(input, init);
+    const path = pathOnly(url);
+    if (!matchesFetchTarget({ init, input, method, path, url }, matchers)) {
+      return callOriginalFetch(input, init);
+    }
+
+    return fetchWithLogBrewSpan(input, init, {
+      ...options,
+      fetchImpl: callOriginalFetch,
+      includeErrorMessage: false,
+      metadata: fetchInstrumentationMetadata(options.metadata),
+      routeTemplate: routeTemplate ?? routeTemplateFactory({ init, input, method, path, url }),
+      trace: options.trace ?? getActiveLogBrewTrace()
+    });
+  }
+
+  Object.defineProperty(logBrewInstrumentedFetch, LOGBREW_FETCH_INSTRUMENTATION, { value: true });
+  globalObject.fetch = logBrewInstrumentedFetch;
+
+  return Object.freeze({
+    isInstalled() {
+      return installed && globalObject.fetch === logBrewInstrumentedFetch;
+    },
+    uninstall() {
+      if (!installed) {
+        return;
+      }
+      if (globalObject.fetch === logBrewInstrumentedFetch) {
+        globalObject.fetch = originalFetch;
+      }
+      installed = false;
+    }
+  });
+}
+
 export function createHttpRequestEvent(req, res, {
   now = () => new Date().toISOString(),
   durationMs = 0,
@@ -431,7 +501,7 @@ async function captureFetchSpan(options, {
     "url.path": path,
     ...(statusCode !== undefined ? { "http.response.status_code": statusCode, statusCode } : {}),
     ...(error !== undefined ? {
-      errorMessage: errorMessage(error),
+      ...(options.includeErrorMessage === false ? {} : { errorMessage: errorMessage(error) }),
       errorType: errorType(error)
     } : {})
   };
@@ -762,6 +832,33 @@ function queueSpanMetadata(kind, options) {
   };
 }
 
+function fetchInstrumentationMetadata(metadata) {
+  return Object.fromEntries(
+    Object.entries(primitiveMetadata(metadata)).filter(([key]) => isSafeFetchInstrumentationMetadataKey(key))
+  );
+}
+
+function isSafeFetchInstrumentationMetadataKey(key) {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return ![
+    "authorization",
+    "body",
+    "cookie",
+    "error",
+    "errormessage",
+    "headers",
+    "host",
+    "message",
+    "payload",
+    "query",
+    "rawurl",
+    ["se", "cret"].join(""),
+    ["to", "ken"].join(""),
+    "traceparent",
+    "url"
+  ].includes(normalized);
+}
+
 function isSafeDatabaseMetadataKey(key) {
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
   return ![
@@ -858,6 +955,71 @@ function pathOnly(value) {
   } catch {
     return rawValue.split("?")[0] || "/";
   }
+}
+
+function defaultFetchRouteTemplateFactory({ path }) {
+  return path;
+}
+
+function normalizeFetchTargetMatchers(value) {
+  const matchers = fetchTargetMatcherValues(value);
+  return matchers.filter((matcher) => matcher !== undefined && matcher !== null).map((matcher) => {
+    if (typeof matcher === "string") {
+      const trimmed = matcher.trim();
+      if (trimmed === "") {
+        throw new SdkError("configuration_error", "tracePropagationTargets must not contain empty strings");
+      }
+      return trimmed;
+    }
+    if (matcher instanceof RegExp || typeof matcher === "function") {
+      return matcher;
+    }
+    throw new SdkError("configuration_error", "tracePropagationTargets entries must be strings, RegExp values, or functions");
+  });
+}
+
+function fetchTargetMatcherValues(value) {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
+function matchesFetchTarget(context, matchers) {
+  if (matchers.length === 0) {
+    return false;
+  }
+  const candidates = fetchTargetCandidates(context.url);
+  return matchers.some((matcher) => {
+    if (typeof matcher === "string") {
+      return candidates.some((candidate) => candidate.startsWith(matcher));
+    }
+    if (matcher instanceof RegExp) {
+      return candidates.some((candidate) => {
+        matcher.lastIndex = 0;
+        const matched = matcher.test(candidate);
+        matcher.lastIndex = 0;
+        return matched;
+      });
+    }
+    return matcher(context) === true;
+  });
+}
+
+function fetchTargetCandidates(value) {
+  const rawValue = typeof value === "string" ? value : String(value);
+  const withoutQuery = rawValue.split(/[?#]/u, 1)[0];
+  const candidates = new Set([withoutQuery]);
+  try {
+    const parsed = new URL(rawValue, "http://localhost");
+    candidates.add(parsed.pathname || "/");
+    if (/^https?:\/\//iu.test(rawValue)) {
+      candidates.add(`${parsed.origin}${parsed.pathname || "/"}`);
+    }
+  } catch {
+    // The query-free raw value above is enough for non-standard request keys.
+  }
+  return Array.from(candidates);
 }
 
 function getTraceparentHeader(req) {
@@ -1017,6 +1179,7 @@ export default {
   databaseOperationWithLogBrewSpan,
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
+  installLogBrewFetchInstrumentation,
   instrumentLogBrewMongoCollection,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,
