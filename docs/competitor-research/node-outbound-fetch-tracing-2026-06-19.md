@@ -66,4 +66,24 @@ Evidence:
 - RED: a packed temp app importing `installLogBrewFetchInstrumentation` from `@logbrew/node` failed with `SyntaxError: The requested module '@logbrew/node' does not provide an export named 'installLogBrewFetchInstrumentation'`.
 - GREEN: `bash scripts/real_user_node_smoke.sh` now packs `@logbrew/sdk` and `@logbrew/node`, installs them into a disposable npm app, proves ESM/CJS/TypeScript surfaces, target-scoped global fetch propagation, unmatched pass-through, caller-header immutability, failure span exception-type-only capture, unsafe metadata/query/error-message dropping, and uninstall restoration.
 
-Honest comparison: LogBrew is still worse than Sentry/Datadog/OpenTelemetry for zero-code all-Undici diagnostics-channel coverage, phase timing, HTTP duration metrics, broad semantic conventions, baggage/tracestate, and automatic framework/client instrumentation. LogBrew is better for teams that want a small opt-in global fetch bridge with exact target scope, reversible teardown, installed-artifact proof, and safer defaults.
+Honest comparison: LogBrew is still worse than Sentry/Datadog/OpenTelemetry for zero-code all-Undici diagnostics-channel coverage, automatic phase timing, HTTP duration metrics, broad semantic conventions, baggage/tracestate, and automatic framework/client instrumentation. LogBrew is better for teams that want a small opt-in global fetch bridge with exact target scope, reversible teardown, installed-artifact proof, and safer defaults.
+
+## 2026-07-03 App-Owned Timing Follow-Up
+
+Fresh source reads for the next rich-trace timing gap:
+
+- Sentry JavaScript `getsentry/sentry-javascript@cf895c95995a6dff121484eadfa3a82980646f91`: re-read `packages/node-core/src/integrations/node-fetch/undici-instrumentation.ts` (`instrumentUndici(...)`, `onRequestCreated`, `onRequestHeaders`, `onResponseHeaders`, `onDone`, `onError`) and `packages/core/src/fetch.ts` (`endSpan(...)`, response content-length handling).
+- OpenTelemetry JS Contrib `open-telemetry/opentelemetry-js-contrib@2353bd7fbb75ae682c8dde42f32caa10a82bc315`: re-read `packages/instrumentation-undici/src/undici.ts` (`onRequestCreated`, `onRequestHeaders`, `onResponseHeaders`, `onDone`, `onError`, `recordRequestDuration(...)`) and `packages/instrumentation-undici/src/types.ts` (`requestHook`, `responseHook`, `startSpanHook`, `headersToSpanAttributes`).
+- Datadog JavaScript `DataDog/dd-trace-js@80c5d963ec7ff5d20c7fc2d662deff463fd47843`: re-read `packages/datadog-plugin-undici/src/index.js` (`#onNativeRequestCreate`, `#onNativeRequestHeaders`, `#onNativeRequestTrailers`, `#onNativeRequestError`, `addConfiguredHeaders`, `normalizeHeaders`) and `packages/datadog-plugin-http/test/client.spec.js` semantic HTTP assertions.
+- PostHog JavaScript `PostHog/posthog-js@cc01eea218219b1f36145143c62586c66c459e84`: re-read `packages/node/src/client.ts` fetch seam and exception capture paths; still no comparable broad Node HTTP client tracing source path found.
+
+Competitor pattern: Sentry, OpenTelemetry, and Datadog use instrumentation-owned lifecycle hooks to add response status, network peer attributes, optional header-derived attributes, exception status, and request-duration metrics. This is strong for time-to-answer and low setup, but it expands runtime ownership and can expose broader metadata if users enable header capture.
+
+LogBrew now adds the lighter timing subset to `fetchWithLogBrewSpan(...)` and `installLogBrewFetchInstrumentation(...)`: apps may pass a `timings` object or function with only finite non-negative numeric phase durations/content sizes. The timing function receives emitted method, route-template path, duration, response/error, and trace context, not full URLs or request headers. LogBrew records safe keys such as `http.phase.name_lookup_ms`, `http.phase.connect_ms`, `http.phase.tls_ms`, `http.phase.wait_ms`, `http.phase.response_ms`, `http.request_content_length`, and `http.response_content_length`; invalid values and unknown keys are dropped.
+
+Evidence:
+
+- RED: packed temp app smoke failed because `fetchWithLogBrewSpan(...)` and global fetch instrumentation did not emit timing metadata from installed artifacts.
+- GREEN: `bash scripts/real_user_node_smoke.sh` on Node `v22.18.0` now proves app-owned timing metadata for explicit fetch and reversible global fetch, TypeScript declarations for timing objects/functions, invalid value dropping, unknown-key dropping, route-template-only timing context, failure-span timing, and existing no-query/no-unsafe-content guards.
+
+Honest comparison: LogBrew remains worse than Sentry/Datadog/OpenTelemetry for automatic all-Undici timing and HTTP duration metrics. LogBrew is better for privacy-bounded apps that want explicit timing context without hidden global diagnostics-channel subscriptions or header/body/full-URL capture.

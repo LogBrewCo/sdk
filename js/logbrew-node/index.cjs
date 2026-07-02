@@ -25,6 +25,19 @@ const DEFAULT_SDK_NAME = "logbrew-node";
 const DEFAULT_SDK_VERSION = "0.1.0";
 const DEFAULT_ENDPOINT = "https://api.logbrew.com/v1/events";
 const MAX_SPAN_EVENTS = 8;
+const FETCH_TIMING_METADATA_KEYS = Object.freeze({
+  connectMs: "http.phase.connect_ms",
+  decodedBodySize: "http.response.decoded_size",
+  encodedBodySize: "http.response.encoded_size",
+  nameLookupMs: "http.phase.name_lookup_ms",
+  redirectMs: "http.phase.redirect_ms",
+  requestBodyBytes: "http.request_content_length",
+  requestMs: "http.phase.request_ms",
+  responseBodyBytes: "http.response_content_length",
+  responseMs: "http.phase.response_ms",
+  tlsMs: "http.phase.tls_ms",
+  waitMs: "http.phase.wait_ms"
+});
 const LOGBREW_FETCH_INSTRUMENTATION = Symbol.for("@logbrew/node.fetchInstrumentation");
 const activeTraceContext = new AsyncLocalStorage();
 
@@ -494,6 +507,7 @@ async function captureFetchSpan(options, {
   const statusCode = response?.status;
   const metadata = {
     ...primitiveMetadata(options.metadata),
+    ...fetchTimingMetadata(options.timings, { durationMs, error, method, path, response, trace }),
     framework: "node:fetch",
     "http.request.method": method,
     "http.route": path,
@@ -835,6 +849,34 @@ function fetchInstrumentationMetadata(metadata) {
   return Object.fromEntries(
     Object.entries(primitiveMetadata(metadata)).filter(([key]) => isSafeFetchInstrumentationMetadataKey(key))
   );
+}
+
+function fetchTimingMetadata(timings, context) {
+  const resolvedTimings = resolveFetchTimings(timings, context);
+  if (!resolvedTimings || Array.isArray(resolvedTimings) || typeof resolvedTimings !== "object") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(FETCH_TIMING_METADATA_KEYS).flatMap(([sourceKey, metadataKey]) => {
+      const value = resolvedTimings[sourceKey];
+      return Number.isFinite(value) && value >= 0 ? [[metadataKey, roundTimingValue(value)]] : [];
+    })
+  );
+}
+
+function resolveFetchTimings(timings, context) {
+  if (typeof timings === "function") {
+    try {
+      return timings(context);
+    } catch {
+      return undefined;
+    }
+  }
+  return timings;
+}
+
+function roundTimingValue(value) {
+  return Math.round(value * 1000) / 1000;
 }
 
 function isSafeFetchInstrumentationMetadataKey(key) {

@@ -1,6 +1,7 @@
 # LogBrew SDK Readiness Memory
 
-- 2026-07-03: Node opt-in global fetch instrumentation added after source reads
+- 2026-07-03: Node opt-in global fetch instrumentation and app-owned fetch
+  timing metadata added after source reads
   from Sentry JavaScript
   `getsentry/sentry-javascript@cf895c95995a6dff121484eadfa3a82980646f91`
   (`packages/core/src/fetch.ts`, `packages/node-core/src/integrations/node-fetch/undici-instrumentation.ts`,
@@ -17,8 +18,10 @@
   URLs matching the union of configured `tracePropagationTargets` and
   `captureTargets`, writes one
   normalized W3C `traceparent`, records the existing safe `node:fetch` span
-  shape, drops unsafe wrapper metadata and exception messages, and puts back the
-  original fetch only when LogBrew still owns the slot. It avoids hidden
+  shape, accepts optional sanitized `timings` objects/functions for numeric
+  phase durations/content lengths, drops unsafe wrapper metadata and exception
+  messages, and puts back the original fetch only when LogBrew still owns the
+  slot. It avoids hidden
   diagnostics-channel subscriptions, broad Undici/client patching, payloads,
   arbitrary headers, full URLs/query/hash text, cookies, auth values, raw
   propagation, baggage, and tracestate. Evidence: RED packed import failure,
@@ -29,7 +32,7 @@
   and `bash scripts/real_user_node_queue_high_load_smoke.sh`. Research:
   `docs/competitor-research/node-outbound-fetch-tracing-2026-06-19.md`.
   Honest remaining Node gap: Sentry/Datadog/OpenTelemetry remain stronger for
-  zero-code all-Undici instrumentation, phase timing, HTTP duration metrics,
+  zero-code all-Undici instrumentation, automatic phase timing, HTTP duration metrics,
   baggage/tracestate, broad semantic conventions, and deeper automatic
   framework/client spans.
 - 2026-07-02: .NET optional OpenTelemetry processor bridge added after source

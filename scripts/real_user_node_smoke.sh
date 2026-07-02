@@ -234,7 +234,20 @@ const captureServer = createServer(withLogBrewHttpHandler(async (req, res, logbr
       routeTemplate: "/payments/:paymentId",
       now: () => "2026-06-02T10:00:07Z",
       nowMs: () => fetchClock.shift() ?? 43,
-      spanIdFactory: () => "c7ad6b7169203331"
+      spanIdFactory: () => "c7ad6b7169203331",
+      timings: {
+        connectMs: 2,
+        encodedBodySize: 600,
+        nameLookupMs: 1.25,
+        redirectMs: -1,
+        requestBodyBytes: 128,
+        requestMs: 4,
+        responseBodyBytes: 512,
+        responseMs: 6,
+        tlsMs: 3,
+        droppedMarker: "not retained",
+        waitMs: 11.5
+      }
     }
   );
   if (downstreamResponse.status !== 202) {
@@ -329,6 +342,15 @@ const globalFetchInstrumentation = installLogBrewFetchInstrumentation({
     const values = ["d7ad6b7169203331", "d7ad6b7169203332"];
     return () => values.shift() ?? "d7ad6b7169203333";
   })(),
+  timings({ durationMs, error, path, response }) {
+    if (error) {
+      return { requestMs: durationMs };
+    }
+    if (path === "/orders/:id" && response?.status === 201) {
+      return { responseBodyBytes: 8, responseMs: 7, tlsMs: Number.NaN, waitMs: durationMs - 7 };
+    }
+    return undefined;
+  },
   captureTargets: ["https://batch.example.test/"],
   trace: {
     traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -401,6 +423,11 @@ if (
 ) {
   throw new Error(`unexpected global fetch span: ${JSON.stringify(globalFetchSpan)}`);
 }
+assertMetadata(globalFetchSpan.metadata, {
+  "http.phase.response_ms": 7,
+  "http.phase.wait_ms": 32,
+  "http.response_content_length": 8
+}, "global fetch instrumentation should preserve bounded app-owned timing metadata", JSON.stringify(globalFetchPayload));
 const globalFetchFailureSpan = globalFetchPayload.events[1].attributes;
 if (
   globalFetchFailureSpan.status !== "error" ||
@@ -411,6 +438,9 @@ if (
 ) {
   throw new Error(`unexpected global fetch failure span: ${JSON.stringify(globalFetchFailureSpan)}`);
 }
+assertMetadata(globalFetchFailureSpan.metadata, {
+  "http.phase.request_ms": 50
+}, "global fetch failure timing metadata should use sanitized timing context", JSON.stringify(globalFetchPayload));
 assertNoUnsafeContent(JSON.stringify(globalFetchPayload));
 
 const errorTransport = RecordingTransport.alwaysAccept();
@@ -1216,6 +1246,23 @@ if (
   throw new Error(`fetch span metadata was not useful and privacy bounded: ${captureTransport.lastBody()}`);
 }
 assertMetadata(fetchSpanEvent.attributes.metadata, { "http.request.method": "POST", "http.response.status_code": 202, "http.route": "/payments/:paymentId", "url.path": "/payments/:paymentId" }, "fetch span missing portable HTTP semantic metadata", captureTransport.lastBody());
+assertMetadata(fetchSpanEvent.attributes.metadata, {
+  "http.phase.connect_ms": 2,
+  "http.phase.request_ms": 4,
+  "http.phase.name_lookup_ms": 1.25,
+  "http.phase.response_ms": 6,
+  "http.phase.tls_ms": 3,
+  "http.phase.wait_ms": 11.5,
+  "http.request_content_length": 128,
+  "http.response_content_length": 512,
+  "http.response.encoded_size": 600
+}, "fetch span should include bounded app-owned phase timing metadata", captureTransport.lastBody());
+if (
+  "http.phase.redirect_ms" in fetchSpanEvent.attributes.metadata ||
+  JSON.stringify(fetchSpanEvent.attributes.metadata).includes("not retained")
+) {
+  throw new Error(`fetch span timing metadata should drop invalid values and unknown keys: ${captureTransport.lastBody()}`);
+}
 if (downstreamRequests[0]?.traceparent !== "00-4bf92f3577b34da6a3ce929d0e0e4736-c7ad6b7169203331-01") {
   throw new Error(`fetch span did not inject one normalized traceparent: ${JSON.stringify(downstreamRequests)}`);
 }
@@ -1384,6 +1431,7 @@ import {
   type LogBrewNodeContext,
   type LogBrewMongoCollection,
   type LogBrewMongoCollectionInstrumentation,
+  type LogBrewFetchTimingContext,
   type LogBrewPgInstrumentation,
   type LogBrewPgQueryable,
   type LogBrewRedisClientInstrumentation,
@@ -1408,6 +1456,12 @@ await fetchWithLogBrewSpan("https://payments.example.invalid/payments/123?coupon
   client,
   fetchImpl: async () => new Response("accepted", { status: 202 }),
   routeTemplate: "/payments/:paymentId",
+  timings: {
+    nameLookupMs: 1,
+    requestBodyBytes: 12,
+    responseBodyBytes: 24,
+    waitMs: 3
+  },
   trace
 });
 const typedFetchInstrumentation = installLogBrewFetchInstrumentation({
@@ -1419,6 +1473,9 @@ const typedFetchInstrumentation = installLogBrewFetchInstrumentation({
   tracePropagationTargets: ["https://payments.example.invalid/"],
   routeTemplateFactory({ path }) {
     return path;
+  },
+  timings(context: LogBrewFetchTimingContext) {
+    return { responseMs: context.durationMs };
   }
 });
 typedFetchInstrumentation.isInstalled() satisfies boolean;

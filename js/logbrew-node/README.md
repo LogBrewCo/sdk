@@ -183,7 +183,15 @@ const response = await fetchWithLogBrewSpan("https://payments.example/payments/1
 }, {
   client: logbrew.client,
   trace: logbrew.trace,
-  routeTemplate: "/payments/:paymentId"
+  routeTemplate: "/payments/:paymentId",
+  timings({ durationMs, response }) {
+    const contentLength = Number(response?.headers.get("content-length"));
+    return {
+      responseBodyBytes: Number.isFinite(contentLength) ? contentLength : undefined,
+      responseMs: 6,
+      waitMs: Math.max(0, durationMs - 6)
+    };
+  }
 });
 
 if (!response.ok) {
@@ -191,7 +199,7 @@ if (!response.ok) {
 }
 ```
 
-The emitted span records the method, route template or URL path, status code, duration, sampled flag, W3C trace IDs, and portable HTTP semantic metadata (`http.request.method`, `http.response.status_code`, `http.route`, `url.path`). It does not capture payloads, serialize arbitrary headers, store the raw propagation header, or keep query strings/fragments.
+The emitted span records the method, route template or URL path, status code, duration, sampled flag, W3C trace IDs, and portable HTTP semantic metadata (`http.request.method`, `http.response.status_code`, `http.route`, `url.path`). If your app already has safe timing data, pass `timings` as either an object or function. LogBrew keeps only finite non-negative numbers for `nameLookupMs`, `connectMs`, `tlsMs`, `requestMs`, `waitMs`, `responseMs`, `redirectMs`, `requestBodyBytes`, `responseBodyBytes`, `encodedBodySize`, and `decodedBodySize`; invalid values and unknown keys are dropped. It does not capture payloads, serialize arbitrary headers, store the raw propagation header, keep query strings/fragments, or infer timing streams from hidden fetch/Undici hooks.
 
 If a service has many existing `fetch(...)` calls, opt into reversible global fetch instrumentation explicitly:
 
@@ -219,6 +227,8 @@ fetchInstrumentation.uninstall();
 ```
 
 `installLogBrewFetchInstrumentation()` wraps `globalThis.fetch` by default, or another fetch owner when you pass `globalObject`. Only URLs matching `tracePropagationTargets` or `captureTargets` are captured and receive a normalized W3C `traceparent`; unmatched fetches pass through unchanged. `uninstall()` puts the original fetch back only if LogBrew still owns the slot, so a later app wrapper is not clobbered. The captured spans use the same safe `node:fetch` metadata as `fetchWithLogBrewSpan()` and drop unsafe metadata keys such as bodies, headers, URLs, query text, cookies, auth values, raw `traceparent`, payloads, and exception messages. It does not subscribe to Undici diagnostic channels, patch HTTP clients globally beyond the fetch function you opt into, capture request/response bodies, read arbitrary headers, persist offline requests, infer baggage/tracestate, or instrument LogBrew transport calls unless your target list matches them.
+
+Global fetch instrumentation also accepts the same `timings` option. The timing function receives only the emitted method, route-template path, duration, response/error, and trace context so it cannot accidentally depend on full URLs or request headers.
 
 ## Database Operation Spans
 

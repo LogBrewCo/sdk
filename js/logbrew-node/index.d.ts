@@ -130,6 +130,33 @@ export type LogBrewNodeOptions = CreateLogBrewNodeClientConfig & {
   ) => void | Promise<void>;
 };
 
+export type LogBrewFetchTimings = {
+  connectMs?: number;
+  decodedBodySize?: number;
+  encodedBodySize?: number;
+  nameLookupMs?: number;
+  redirectMs?: number;
+  requestBodyBytes?: number;
+  requestMs?: number;
+  responseBodyBytes?: number;
+  responseMs?: number;
+  tlsMs?: number;
+  waitMs?: number;
+};
+
+export type LogBrewFetchTimingContext = {
+  durationMs: number;
+  error?: unknown;
+  method: string;
+  path: string;
+  response?: Response;
+  trace: LogBrewTraceContext;
+};
+
+export type LogBrewFetchTimingSource =
+  | LogBrewFetchTimings
+  | ((context: LogBrewFetchTimingContext) => LogBrewFetchTimings | null | undefined);
+
 export type FetchWithLogBrewSpanOptions = {
   client: LogBrewClient;
   fetchImpl?: typeof fetch;
@@ -142,6 +169,7 @@ export type FetchWithLogBrewSpanOptions = {
   now?: () => string;
   nowMs?: () => number;
   spanIdFactory?: () => string;
+  timings?: LogBrewFetchTimingSource;
   traceIdFactory?: () => string;
   onCaptureError?: (
     error: unknown,
