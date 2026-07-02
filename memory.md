@@ -1,5 +1,36 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-02: .NET Activity event/link rich-trace gap reduced after source
+  reads from Sentry .NET
+  `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`
+  (`SentrySpanProcessor.GenerateSentryErrorsFromOtelSpan`),
+  OpenTelemetry .NET
+  `open-telemetry/opentelemetry-dotnet@8b03fd9a515d44deab8a0aebfbd9dc0eb0fd5161`
+  (`WriteSpanEvents`, `WriteEventAttributes`, `WriteSpanLinks`,
+  `WriteLinkAttributes`, console Activity event/link rendering, exception
+  event helpers), Datadog .NET tracer
+  `DataDog/dd-trace-dotnet@93bb6e629d52987cf4d0e323dd68c4d58fcd13df`
+  (`OtlpHelpers.ExtractActivityLinks`, `ExtractActivityEvents`,
+  `Span.AddLink`, `Span.AddEvent`, `SpanLink`), and PostHog .NET
+  `PostHog/posthog-dotnet@9737231a8231f58b4f6938f6d24ad671b3ccf54c`
+  (no comparable first-party Activity event/link bridge found).
+  `LogBrewActivitySpanTelemetry.Capture(...)` now copies up to eight
+  privacy-bounded Activity event summaries and Activity link summaries into the
+  captured LogBrew span: event names/timestamps plus `exceptionType` and safe
+  semantic tags, and link trace ID/span ID/sampled plus safe messaging tags.
+  It still omits tracestate, baggage, arbitrary tags, full URLs, headers,
+  payloads, message IDs, exception messages, and stacks. Evidence:
+  RED focused .NET test for missing rich Activity payload, GREEN 70 core .NET
+  tests, `bash scripts/check_dotnet_package.sh`,
+  `bash scripts/real_user_dotnet_smoke.sh`,
+  `bash scripts/real_user_dotnet_high_load_smoke.sh`, Activity smoke-script
+  guard, markdown links, backend reports, release metadata, confidentiality
+  scan, generated-artifact hygiene, and diff check. Research:
+  `docs/competitor-research/dotnet-trace-correlation-2026-06-16.md`.
+  Remaining .NET gap: Sentry/Datadog/OpenTelemetry still lead on automatic
+  ActivitySource/ASP.NET/HttpClient/EF/SqlClient/Redis/Kafka instrumentation,
+  resource attributes, full OTel exporter pipelines, baggage/tracestate,
+  profiling, and mature backend trace querying.
 - 2026-07-01: Python OpenTelemetry ended-span processor gap reduced after
   source reads from Sentry Python
   `getsentry/sentry-python@4b98ef1d1d72e8bdc1a11006776e1a89b1325eed`

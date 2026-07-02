@@ -54,6 +54,11 @@ def main():
     require("card=sample" not in payload_text, "query/card data must not be serialized")
     require("Authorization" not in payload_text, "headers must not be serialized")
     require("Bearer" not in payload_text, "header values must not be serialized")
+    require("private path" not in payload_text, "exception stacks must not be serialized")
+    require("msg-" + "sample" not in payload_text, "message ids must not be serialized")
+    require("vendor=sample" not in payload_text, "tracestate must not be serialized")
+    require("exception.message" not in payload_text, "exception message tags must not be serialized")
+    require("exception.stacktrace" not in payload_text, "exception stack tags must not be serialized")
 
     log_event = event_by_id(events, "dotnet_activity_trace_1")
     action_event = event_by_id(events, "evt_action_checkout_activity_trace")
@@ -85,6 +90,21 @@ def main():
     require(activity_span_meta.get("httpRoute") == "/checkout/:cart_id", "Activity route metadata mismatch")
     require(activity_span_meta.get("httpStatusCode") == 202, "Activity status code metadata mismatch")
     require(activity_span_meta.get("safe") is True, "Activity safe metadata missing")
+    activity_events = activity_span_attrs.get("events")
+    require(isinstance(activity_events, list), "Activity span events missing")
+    require(len(activity_events) == 1, "Activity span event count mismatch")
+    require(activity_events[0]["name"] == "exception", "Activity event name mismatch")
+    require(activity_events[0]["timestamp"] == "2026-06-02T10:00:06.0000000+00:00", "Activity event timestamp mismatch")
+    require(activity_events[0]["metadata"]["exceptionType"] == "System.InvalidOperationException", "Activity event exception type mismatch")
+    require(activity_events[0]["metadata"]["httpStatusCode"] == 503, "Activity event status mismatch")
+    activity_links = activity_span_attrs.get("links")
+    require(isinstance(activity_links, list), "Activity span links missing")
+    require(len(activity_links) == 1, "Activity span link count mismatch")
+    require(activity_links[0]["traceId"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "Activity link trace id mismatch")
+    require(activity_links[0]["spanId"] == "bbbbbbbbbbbbbbbb", "Activity link span id mismatch")
+    require(activity_links[0]["sampled"] is True, "Activity link sampled mismatch")
+    require(activity_links[0]["metadata"]["messagingSystem"] == "kafka", "Activity link messaging system mismatch")
+    require(activity_links[0]["metadata"]["messagingOperation"] == "process", "Activity link messaging operation mismatch")
 
     for event, label in (
         (log_event, "logger"),

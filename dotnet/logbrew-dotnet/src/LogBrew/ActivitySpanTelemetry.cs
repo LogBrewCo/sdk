@@ -82,12 +82,25 @@ namespace LogBrew
             var capturedActivity = activity!;
             var safeOptions = options ?? LogBrewActivitySpanOptions.Create();
             var activityName = ActivityName(capturedActivity, safeOptions);
+            var metadata = ActivityMetadata(capturedActivity, context, safeOptions);
             var attributes = SpanAttributes.Create(activityName, context.TraceId, context.SpanId, StatusFromActivity(capturedActivity))
                 .WithDurationMs(Math.Max(0, capturedActivity.Duration.TotalMilliseconds))
-                .WithMetadata(ActivityMetadata(capturedActivity, context, safeOptions));
+                .WithMetadata(metadata);
             if (context.ParentSpanId != null)
             {
                 attributes.WithParentSpanId(context.ParentSpanId);
+            }
+
+            var eventSummaries = ActivityEventSummaries(capturedActivity, metadata);
+            if (eventSummaries.Count > 0)
+            {
+                attributes.WithEvents(eventSummaries);
+            }
+
+            var linkSummaries = ActivityLinkSummaries(capturedActivity, metadata);
+            if (linkSummaries.Count > 0)
+            {
+                attributes.WithLinks(linkSummaries);
             }
 
             try
@@ -120,6 +133,105 @@ namespace LogBrew
             AddString(metadata, "activitySourceVersion", activity.Source.Version);
 
             foreach (var tag in activity.TagObjects)
+            {
+                CopyKnownSafeTag(metadata, tag.Key, tag.Value);
+            }
+
+            return metadata;
+        }
+
+        private static IReadOnlyList<SpanEventSummary> ActivityEventSummaries(Activity activity, IDictionary<string, object?> spanMetadata)
+        {
+            var summaries = new List<SpanEventSummary>();
+            var dropped = 0;
+            foreach (var activityEvent in activity.Events)
+            {
+                if (summaries.Count >= SpanEventSummary.MaxEvents)
+                {
+                    dropped++;
+                    continue;
+                }
+
+                var summary = SpanEventSummary.Create(SafeSummaryName(activityEvent.Name, "activity.event"))
+                    .WithTimestamp(activityEvent.Timestamp.ToString("O", CultureInfo.InvariantCulture));
+                var metadata = ActivityEventMetadata(activityEvent);
+                if (metadata.Count > 0)
+                {
+                    summary.WithMetadata(metadata);
+                }
+
+                summaries.Add(summary);
+            }
+
+            if (dropped > 0)
+            {
+                spanMetadata["activityEventDroppedCount"] = dropped;
+            }
+
+            return summaries;
+        }
+
+        private static IReadOnlyList<SpanLinkSummary> ActivityLinkSummaries(Activity activity, IDictionary<string, object?> spanMetadata)
+        {
+            var summaries = new List<SpanLinkSummary>();
+            var dropped = 0;
+            foreach (var link in activity.Links)
+            {
+                if (summaries.Count >= SpanLinkSummary.MaxLinks)
+                {
+                    dropped++;
+                    continue;
+                }
+
+                var traceFlags = link.Context.TraceFlags.HasFlag(ActivityTraceFlags.Recorded) ? "01" : "00";
+                try
+                {
+                    var summary = SpanLinkSummary.Create(
+                        link.Context.TraceId.ToHexString(),
+                        link.Context.SpanId.ToHexString(),
+                        traceFlags);
+                    var metadata = ActivityLinkMetadata(link);
+                    if (metadata.Count > 0)
+                    {
+                        summary.WithMetadata(metadata);
+                    }
+
+                    summaries.Add(summary);
+                }
+                catch (SdkException)
+                {
+                    dropped++;
+                }
+            }
+
+            if (dropped > 0)
+            {
+                spanMetadata["activityLinkDroppedCount"] = dropped;
+            }
+
+            return summaries;
+        }
+
+        private static IDictionary<string, object?> ActivityEventMetadata(ActivityEvent activityEvent)
+        {
+            var metadata = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var tag in activityEvent.Tags)
+            {
+                CopyKnownSafeEventTag(metadata, tag.Key, tag.Value);
+            }
+
+            return metadata;
+        }
+
+        private static IDictionary<string, object?> ActivityLinkMetadata(ActivityLink link)
+        {
+            var metadata = new Dictionary<string, object?>(StringComparer.Ordinal);
+            if (link.Tags == null)
+            {
+                return metadata;
+            }
+
+            foreach (var tag in link.Tags)
             {
                 CopyKnownSafeTag(metadata, tag.Key, tag.Value);
             }
@@ -191,6 +303,39 @@ namespace LogBrew
                     AddString(metadata, "messagingOperation", value);
                     break;
             }
+        }
+
+        private static void CopyKnownSafeEventTag(IDictionary<string, object?> metadata, string key, object? value)
+        {
+            if (string.Equals(key, "exception.type", StringComparison.Ordinal))
+            {
+                AddString(metadata, "exceptionType", value);
+                return;
+            }
+
+            CopyKnownSafeTag(metadata, key, value);
+        }
+
+        private static string SafeSummaryName(string? value, string fallback)
+        {
+            var text = value;
+            if (text == null || string.IsNullOrWhiteSpace(text) || text.Length > 120)
+            {
+                return fallback;
+            }
+
+            return text.IndexOf("://", StringComparison.Ordinal) < 0
+                && text.IndexOf("?", StringComparison.Ordinal) < 0
+                && text.IndexOf("#", StringComparison.Ordinal) < 0
+                && text.IndexOf("\r", StringComparison.Ordinal) < 0
+                && text.IndexOf("\n", StringComparison.Ordinal) < 0
+                && text.IndexOf("authorization", StringComparison.OrdinalIgnoreCase) < 0
+                && text.IndexOf("cookie", StringComparison.OrdinalIgnoreCase) < 0
+                && text.IndexOf("pass" + "word", StringComparison.OrdinalIgnoreCase) < 0
+                && text.IndexOf("sec" + "ret", StringComparison.OrdinalIgnoreCase) < 0
+                && text.IndexOf("tok" + "en", StringComparison.OrdinalIgnoreCase) < 0
+                    ? text
+                    : fallback;
         }
 
         private static string StatusFromActivity(Activity activity)

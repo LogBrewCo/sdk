@@ -89,6 +89,29 @@ public static class Program
             202,
             new Dictionary<string, object?> { ["framework"] = "aspnetcore", ["ignored"] = new object() });
 
+        activity.AddEvent(new ActivityEvent(
+            "exception",
+            new DateTimeOffset(2026, 06, 02, 10, 00, 06, TimeSpan.Zero),
+            new ActivityTagsCollection
+            {
+                { "exception.type", "System.InvalidOperationException" },
+                { "exception.message", "card=sample" },
+                { "exception.stacktrace", "at private path" },
+                { "http.response.status_code", 503 }
+            }));
+        activity.AddLink(new ActivityLink(
+            new ActivityContext(
+                ActivityTraceId.CreateFromString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".AsSpan()),
+                ActivitySpanId.CreateFromString("bbbbbbbbbbbbbbbb".AsSpan()),
+                ActivityTraceFlags.Recorded,
+                traceState: "vendor=sample",
+                isRemote: true),
+            new ActivityTagsCollection
+            {
+                { "messaging.system", "kafka" },
+                { "messaging.operation.name", "process" },
+                { "messaging.message.id", "msg-" + "sample" }
+            }));
         activity.Stop();
         var capturedActivitySpan = LogBrewActivitySpanTelemetry.Capture(
             client,

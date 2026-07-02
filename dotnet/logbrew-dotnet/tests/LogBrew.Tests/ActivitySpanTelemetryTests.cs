@@ -13,6 +13,8 @@ internal static class ActivitySpanTelemetryTests
         var tests = 0;
         CaptureCopiesActivityAsSanitizedSpan();
         tests++;
+        CaptureCopiesActivityEventsAndLinksSafely();
+        tests++;
         CaptureIgnoresInvalidActivity();
         tests++;
         CaptureFailureReportsErrorWithoutThrowing();
@@ -92,6 +94,77 @@ internal static class ActivitySpanTelemetryTests
         foreach (var blocked in new[] { "shop" + ".example", "card=sample", "Author" + "ization", "Bear" + "er", "headers", "body", "\"url\"", authLikeTag, "ignoredObject", "\"ignored\"" })
         {
             Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected unsafe Activity metadata to be omitted: " + blocked);
+        }
+    }
+
+    private static void CaptureCopiesActivityEventsAndLinksSafely()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "activity-tests", "0.1.0");
+        using var activity = new Activity("checkout.activity.rich");
+        activity.SetIdFormat(ActivityIdFormat.W3C);
+        activity.SetParentId(
+            ActivityTraceId.CreateFromString(IncomingTraceId.AsSpan()),
+            ActivitySpanId.CreateFromString(IncomingParentSpanId.AsSpan()),
+            ActivityTraceFlags.Recorded);
+        activity.ActivityTraceFlags = ActivityTraceFlags.Recorded;
+        activity.Start();
+        activity.AddEvent(new ActivityEvent(
+            "exception",
+            new DateTimeOffset(2026, 06, 02, 10, 00, 15, TimeSpan.Zero),
+            new ActivityTagsCollection
+            {
+                { "exception.type", "System.InvalidOperationException" },
+                { "exception.message", "card=sample" },
+                { "exception.stacktrace", "at private path" },
+                { "http.response.status_code", 503 },
+                { "request.body", "card=sample" }
+            }));
+        activity.AddLink(new ActivityLink(
+            new ActivityContext(
+                ActivityTraceId.CreateFromString("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".AsSpan()),
+                ActivitySpanId.CreateFromString("bbbbbbbbbbbbbbbb".AsSpan()),
+                ActivityTraceFlags.Recorded,
+                traceState: "vendor=sample",
+                isRemote: true),
+            new ActivityTagsCollection
+            {
+                { "messaging.system", "kafka" },
+                { "messaging.operation.name", "process" },
+                { "messaging.message.id", "msg-" + "sample" },
+                { "http.url", "https://shop.example/checkout?card=sample" }
+            }));
+        activity.Stop();
+
+        var captured = LogBrewActivitySpanTelemetry.Capture(
+            client,
+            activity,
+            LogBrewActivitySpanOptions.Create()
+                .WithEventIdPrefix("dotnet_activity")
+                .WithTimestampProvider(() => "2026-06-02T10:00:15Z"));
+
+        Require(captured, "expected rich Activity to be captured");
+        var payload = client.PreviewJson();
+        foreach (var expected in new[]
+        {
+            "\"events\": [",
+            "\"name\": \"exception\"",
+            "\"timestamp\": \"2026-06-02T10:00:15.0000000+00:00\"",
+            "\"exceptionType\": \"System.InvalidOperationException\"",
+            "\"httpStatusCode\": 503",
+            "\"links\": [",
+            "\"traceId\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+            "\"spanId\": \"bbbbbbbbbbbbbbbb\"",
+            "\"sampled\": true",
+            "\"messagingSystem\": \"kafka\"",
+            "\"messagingOperation\": \"process\""
+        })
+        {
+            Require(payload.Contains(expected, StringComparison.Ordinal), "missing rich Activity payload: " + expected);
+        }
+
+        foreach (var blocked in new[] { "card=sample", "private path", "msg-" + "sample", "shop.example", "vendor=sample", "exception.message", "exception.stacktrace", "request.body", "http.url" })
+        {
+            Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected unsafe rich Activity data to be omitted: " + blocked);
         }
     }
 

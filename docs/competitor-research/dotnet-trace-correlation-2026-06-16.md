@@ -314,3 +314,42 @@ This verifier-focused follow-up uses the existing source evidence above for Sent
 ### Remaining Gap
 
 LogBrew now has installed-artifact proof for explicit DB/cache/queue operation spans, which is safer and easier to audit than hidden dependency auto-instrumentation. It is still weaker than Sentry/Datadog/OpenTelemetry for automatic EF/SqlClient/Redis/Kafka discovery, richer semantic conventions, span events/exceptions/links, baggage/tracestate, and profiling.
+
+## 2026-07-02 Activity Event and Link Summary Follow-Up
+
+### Source Reviewed
+
+- Sentry .NET `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`.
+- Read `src/Sentry.OpenTelemetry/SentrySpanProcessor.cs`: `GenerateSentryErrorsFromOtelSpan(...)`, which scans Activity exception events and maps `exception.type`, `exception.message`, and `exception.stacktrace` into Sentry error context.
+- OpenTelemetry .NET `open-telemetry/opentelemetry-dotnet@8b03fd9a515d44deab8a0aebfbd9dc0eb0fd5161`.
+- Read `src/OpenTelemetry.Exporter.OpenTelemetryProtocol/Implementation/Serializer/ProtobufOtlpTraceSerializer.cs`: `WriteSpanEvents(...)`, `WriteEventAttributes(...)`, `WriteSpanLinks(...)`, and `WriteLinkAttributes(...)`.
+- Read `src/OpenTelemetry.Exporter.Console/ConsoleActivityExporter.cs`: Activity event/link rendering.
+- Read `src/OpenTelemetry.Api/Trace/ActivityExtensions.cs`: exception event recording shape.
+- Datadog .NET tracer `DataDog/dd-trace-dotnet@93bb6e629d52987cf4d0e323dd68c4d58fcd13df`.
+- Read `tracer/src/Datadog.Trace/Activity/OtlpHelpers.cs`: `ExtractActivityLinks(...)` and `ExtractActivityEvents(...)`.
+- Read `tracer/src/Datadog.Trace/Span.cs`: `AddLink(...)` and `AddEvent(...)`.
+- Read `tracer/src/Datadog.Trace/SpanLink.cs`: span-link context and attribute storage.
+- PostHog .NET `PostHog/posthog-dotnet@9737231a8231f58b4f6938f6d24ad671b3ccf54c`.
+- Source search did not find a comparable first-party Activity event/link bridge in the inspected PostHog .NET source.
+
+### Pattern
+
+OpenTelemetry and Datadog preserve Activity events and links as first-class span fields with attributes and dropped-count handling. Sentry focuses on exception events to create Sentry error records from OTel spans. These paths improve rich trace debugging, but they can carry arbitrary attributes, exception messages, stack traces, tracestate, and broad semantic data.
+
+### LogBrew Change
+
+- `LogBrewActivitySpanTelemetry.Capture(...)` now copies up to eight Activity event summaries and up to eight Activity link summaries into the captured LogBrew span.
+- Event summaries include sanitized event names, timestamps, `exception.type` as `exceptionType`, and known safe semantic tags such as HTTP status.
+- Link summaries include only linked trace ID, span ID, sampled flag, and known safe semantic tags such as messaging system/operation.
+- Dropped or invalid Activity events/links are counted as primitive span metadata.
+- The bridge still avoids OpenTelemetry dependencies, exporters/processors, provider ownership, Activity global patching, tracestate, baggage, arbitrary tags, full URLs, headers, payloads, message IDs, exception messages, and stack traces.
+- `examples/ActivityTraceCorrelation.cs`, README guidance, and `scripts/check_dotnet_activity_trace_payload.py` now prove Activity event/link capture from the installed package path.
+
+### Evidence
+
+- RED TDD: `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release` failed with `missing rich Activity payload: "name": "exception"` before implementation.
+- Focused GREEN: the same command passed with 70 .NET core tests after implementation.
+
+### Remaining Gap
+
+LogBrew is now richer for explicit, privacy-bounded .NET Activity capture than before and safer than broad exporter serialization for teams that do not want arbitrary Activity attributes captured. Sentry, Datadog, and OpenTelemetry still lead on automatic ActivitySource/ASP.NET/HttpClient/EF/SqlClient/Redis/Kafka instrumentation, resource attributes, dropped-count semantics, full OTel exporter pipelines, baggage/tracestate, and mature backend trace querying.
