@@ -17,6 +17,12 @@ namespace LogBrew
 
         internal string? ActivityNameOverride { get; private set; }
 
+        internal string? ServiceName { get; private set; }
+
+        internal string? ServiceVersion { get; private set; }
+
+        internal string? DeploymentEnvironment { get; private set; }
+
         public static LogBrewActivitySpanOptions Create()
         {
             return new LogBrewActivitySpanOptions();
@@ -47,11 +53,51 @@ namespace LogBrew
             return this;
         }
 
+        public LogBrewActivitySpanOptions WithServiceName(string value)
+        {
+            ServiceName = ResourceValue("Activity span service name", value);
+            return this;
+        }
+
+        public LogBrewActivitySpanOptions WithServiceVersion(string value)
+        {
+            ServiceVersion = ResourceValue("Activity span service version", value);
+            return this;
+        }
+
+        public LogBrewActivitySpanOptions WithDeploymentEnvironment(string value)
+        {
+            DeploymentEnvironment = ResourceValue("Activity span deployment environment", value);
+            return this;
+        }
+
         internal LogBrewActivitySpanOptions WithActivityNameOverride(string value)
         {
             Validation.RequireNonEmpty("Activity span name", value);
             ActivityNameOverride = value.Trim();
             return this;
+        }
+
+        private static string ResourceValue(string label, string value)
+        {
+            Validation.RequireNonEmpty(label, value);
+            var trimmed = value.Trim();
+            if (trimmed.Length > 120
+                || trimmed.IndexOf("://", StringComparison.Ordinal) >= 0
+                || trimmed.IndexOf("?", StringComparison.Ordinal) >= 0
+                || trimmed.IndexOf("#", StringComparison.Ordinal) >= 0
+                || trimmed.IndexOf("\r", StringComparison.Ordinal) >= 0
+                || trimmed.IndexOf("\n", StringComparison.Ordinal) >= 0
+                || trimmed.IndexOf("authorization", StringComparison.OrdinalIgnoreCase) >= 0
+                || trimmed.IndexOf("cookie", StringComparison.OrdinalIgnoreCase) >= 0
+                || trimmed.IndexOf("pass" + "word", StringComparison.OrdinalIgnoreCase) >= 0
+                || trimmed.IndexOf("sec" + "ret", StringComparison.OrdinalIgnoreCase) >= 0
+                || trimmed.IndexOf("tok" + "en", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                throw new SdkException("validation_error", label + " must be a low-cardinality resource value");
+            }
+
+            return trimmed;
         }
 
         private static string DefaultTimestamp()
@@ -137,6 +183,9 @@ namespace LogBrew
                 CopyKnownSafeTag(metadata, tag.Key, tag.Value);
             }
 
+            AddString(metadata, "serviceName", options.ServiceName);
+            AddString(metadata, "serviceVersion", options.ServiceVersion);
+            AddString(metadata, "deploymentEnvironment", options.DeploymentEnvironment);
             return metadata;
         }
 

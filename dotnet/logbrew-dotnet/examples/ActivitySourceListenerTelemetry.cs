@@ -25,6 +25,9 @@ public static class Program
                 .WithHttpClientSources()
                 .WithEventIdPrefix("dotnet_activity_source_listener")
                 .WithTimestampProvider(() => "2026-06-02T10:00:16Z")
+                .WithServiceName("checkout-dotnet-service")
+                .WithServiceVersion("1.0.0")
+                .WithDeploymentEnvironment("production")
                 .WithMetadata(new Dictionary<string, object?> { ["component"] = "checkout" })
                 .WithMetadataProvider(activity => new Dictionary<string, object?>
                 {

@@ -15,6 +15,8 @@ internal static class ActivitySpanTelemetryTests
         tests++;
         CaptureCopiesActivityEventsAndLinksSafely();
         tests++;
+        CaptureCopiesExplicitResourceContextSafely();
+        tests++;
         CaptureIgnoresInvalidActivity();
         tests++;
         CaptureFailureReportsErrorWithoutThrowing();
@@ -166,6 +168,49 @@ internal static class ActivitySpanTelemetryTests
         {
             Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected unsafe rich Activity data to be omitted: " + blocked);
         }
+    }
+
+    private static void CaptureCopiesExplicitResourceContextSafely()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "activity-tests", "0.1.0");
+        using var activity = new Activity("checkout.resource");
+        activity.SetIdFormat(ActivityIdFormat.W3C);
+        activity.SetParentId(
+            ActivityTraceId.CreateFromString(IncomingTraceId.AsSpan()),
+            ActivitySpanId.CreateFromString(IncomingParentSpanId.AsSpan()),
+            ActivityTraceFlags.Recorded);
+        activity.Start();
+        activity.Stop();
+
+        var captured = LogBrewActivitySpanTelemetry.Capture(
+            client,
+            activity,
+            LogBrewActivitySpanOptions.Create()
+                .WithEventIdPrefix("dotnet_activity_resource")
+                .WithTimestampProvider(() => "2026-06-02T10:00:16Z")
+                .WithServiceName("checkout-api")
+                .WithServiceVersion("1.2.3")
+                .WithDeploymentEnvironment("production"));
+
+        Require(captured, "expected Activity with resource context to be captured");
+        var payload = client.PreviewJson();
+        foreach (var expected in new[]
+        {
+            "\"id\": \"dotnet_activity_resource_span_" + activity.SpanId.ToHexString() + "\"",
+            "\"serviceName\": \"checkout-api\"",
+            "\"serviceVersion\": \"1.2.3\"",
+            "\"deploymentEnvironment\": \"production\""
+        })
+        {
+            Require(payload.Contains(expected, StringComparison.Ordinal), "missing Activity resource context: " + expected);
+        }
+
+        RequireThrows<SdkException>(
+            () => LogBrewActivitySpanOptions.Create().WithServiceName("https://shop.example/checkout?cred=sample"),
+            "expected unsafe service name validation");
+        RequireThrows<SdkException>(
+            () => LogBrewActivitySpanOptions.Create().WithDeploymentEnvironment("prod\nwest"),
+            "expected unsafe deployment environment validation");
     }
 
     private static void CaptureIgnoresInvalidActivity()

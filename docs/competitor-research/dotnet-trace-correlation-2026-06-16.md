@@ -470,3 +470,41 @@ The most successful .NET setup paths meet users where they already configure ASP
 ### Remaining Gap
 
 LogBrew now has a more idiomatic ASP.NET Core setup path for explicit dependency ActivitySource capture, but Sentry, Datadog, and OpenTelemetry still lead on automatic instrumentation breadth, richer semantic conventions and resource attributes, baggage/tracestate, profiling, exporter/collector interop, and backend trace-query maturity.
+
+## 2026-07-02 Activity Resource Context Follow-Up
+
+### Additional Source Reviewed
+
+- Sentry .NET `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`.
+- Read `samples/Sentry.Samples.OpenTelemetry.AspNetCore/Program.cs`: the sample uses `.ConfigureResource(resource => resource.AddService(...))` before Sentry export, making service identity part of trace setup.
+- Read `src/Sentry.OpenTelemetry/SentrySpanProcessor.cs`: constructor resource setup stores provider resource attributes and `GetOtelContext(...)` includes a `resource` object when attributes exist.
+- OpenTelemetry .NET `open-telemetry/opentelemetry-dotnet@8b03fd9a515d44deab8a0aebfbd9dc0eb0fd5161`.
+- Read `src/OpenTelemetry.Extensions.Hosting/OpenTelemetryBuilder.cs`: `ConfigureResource(Action<ResourceBuilder>)` exposes resource configuration through the host builder.
+- Read `src/OpenTelemetry.Exporter.Console/ConsoleActivityExporter.cs`: exported Activity output includes the resource associated with spans.
+- Read `src/OpenTelemetry/ProviderExtensions.cs`: provider resources are a first-class SDK concept exposed through `GetResource(...)`.
+- Datadog .NET tracer `DataDog/dd-trace-dotnet@93bb6e629d52987cf4d0e323dd68c4d58fcd13df`.
+- Read `tracer/src/Datadog.Trace.Tools.dd_dotnet/RunSettings.cs`: CLI options expose `--dd-env`, `--dd-service`, and `--dd-version` for unified service tagging.
+
+### Pattern
+
+Competitors treat service identity, version, and environment as first-class trace context because users debug faster when every span can be filtered by deployed service and release. Sentry and OpenTelemetry model this as resource attributes; Datadog exposes the same idea as unified service tagging. The tradeoff is broader resource capture and configuration surface.
+
+### LogBrew Change
+
+- Added explicit `WithServiceName(...)`, `WithServiceVersion(...)`, and `WithDeploymentEnvironment(...)` options to `LogBrewActivitySpanOptions`.
+- Added the same forwarding methods to `LogBrewActivitySourceListenerOptions`, so ActivitySource listeners can attach service context to every captured Activity span.
+- Values are trimmed, low-cardinality, length-bounded, and reject URL/query/fragment/newline and sensitive-looking text before they enter telemetry metadata.
+- The packaged `examples/ActivitySourceListenerTelemetry.cs` and README now show service context on the installed ActivitySource path.
+- The change stays dependency-free and avoids arbitrary resource attributes, OpenTelemetry provider/exporter ownership, environment-variable scraping, baggage, tracestate, payloads, headers, full URLs, and support-ticket behavior.
+
+### Evidence
+
+- RED TDD: `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release` failed because `LogBrewActivitySpanOptions` and `LogBrewActivitySourceListenerOptions` had no service-context methods.
+- Focused GREEN: the same command passed with 72 .NET core tests.
+- Package proof: `bash scripts/check_dotnet_package.sh` passed, including packaged README/example checks and ActivitySource payload validation.
+- Installed proof: `bash scripts/real_user_dotnet_smoke.sh` passed with installed NuGet artifact proof.
+- Load proof: `bash scripts/real_user_dotnet_high_load_smoke.sh` passed.
+
+### Remaining Gap
+
+LogBrew now gives .NET users the most important service/release/environment trace filters without adopting arbitrary resource capture. Sentry, Datadog, and OpenTelemetry still lead on richer resource conventions, automatic resource detection, full exporter pipelines, baggage/tracestate, profiling, and backend trace-query maturity.

@@ -71,6 +71,24 @@ namespace LogBrew
             return this;
         }
 
+        public LogBrewActivitySourceListenerOptions WithServiceName(string value)
+        {
+            SpanOptions.WithServiceName(value);
+            return this;
+        }
+
+        public LogBrewActivitySourceListenerOptions WithServiceVersion(string value)
+        {
+            SpanOptions.WithServiceVersion(value);
+            return this;
+        }
+
+        public LogBrewActivitySourceListenerOptions WithDeploymentEnvironment(string value)
+        {
+            SpanOptions.WithDeploymentEnvironment(value);
+            return this;
+        }
+
         public LogBrewActivitySourceListenerOptions WithMetadataProvider(Func<Activity, IDictionary<string, object?>?> value)
         {
             MetadataProvider = value ?? throw new ArgumentNullException(nameof(value));
@@ -205,6 +223,7 @@ namespace LogBrew
                 .WithEventIdPrefix(options.SpanOptions.EventIdPrefix)
                 .WithTimestampProvider(options.SpanOptions.TimestampProvider)
                 .WithActivityNameOverride(SafeActivityName(activity));
+            CopyResourceContext(spanOptions, options.SpanOptions);
             if (options.SpanOptions.OnErrorHandler != null)
             {
                 spanOptions.OnError(options.SpanOptions.OnErrorHandler);
@@ -223,6 +242,24 @@ namespace LogBrew
             }
 
             return spanOptions;
+        }
+
+        private static void CopyResourceContext(LogBrewActivitySpanOptions target, LogBrewActivitySpanOptions source)
+        {
+            if (source.ServiceName != null)
+            {
+                target.WithServiceName(source.ServiceName);
+            }
+
+            if (source.ServiceVersion != null)
+            {
+                target.WithServiceVersion(source.ServiceVersion);
+            }
+
+            if (source.DeploymentEnvironment != null)
+            {
+                target.WithDeploymentEnvironment(source.DeploymentEnvironment);
+            }
         }
 
         private IDictionary<string, object?> DynamicMetadata(Activity activity)

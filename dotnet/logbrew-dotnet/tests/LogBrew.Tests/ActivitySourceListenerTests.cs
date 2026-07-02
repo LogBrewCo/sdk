@@ -34,6 +34,9 @@ internal static class ActivitySourceListenerTests
                 .WithSourceName("LogBrew.Tests.Checkout")
                 .WithEventIdPrefix("dotnet_activity_source")
                 .WithTimestampProvider(() => "2026-06-02T10:00:14Z")
+                .WithServiceName("checkout-worker")
+                .WithServiceVersion("1.2.3")
+                .WithDeploymentEnvironment("staging")
                 .WithMetadataProvider(activity =>
                 {
                     metadataCalls++;
@@ -75,6 +78,9 @@ internal static class ActivitySourceListenerTests
             "\"httpMethod\": \"POST\"",
             "\"httpRoute\": \"/checkout/:cart_id\"",
             "\"httpStatusCode\": 201",
+            "\"serviceName\": \"checkout-worker\"",
+            "\"serviceVersion\": \"1.2.3\"",
+            "\"deploymentEnvironment\": \"staging\"",
             "\"safe\": \"LogBrew.Tests.Checkout\""
         })
         {

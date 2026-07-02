@@ -1,5 +1,31 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-02: .NET Activity resource/service context added after source reads
+  from Sentry .NET
+  `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`
+  (`samples/Sentry.Samples.OpenTelemetry.AspNetCore/Program.cs`
+  `ConfigureResource(...AddService...)`, `SentrySpanProcessor` resource
+  capture and `GetOtelContext`), OpenTelemetry .NET
+  `open-telemetry/opentelemetry-dotnet@8b03fd9a515d44deab8a0aebfbd9dc0eb0fd5161`
+  (`OpenTelemetryBuilder.ConfigureResource`,
+  `ConsoleActivityExporter`, `ProviderExtensions.GetResource`), and Datadog
+  .NET tracer
+  `DataDog/dd-trace-dotnet@93bb6e629d52987cf4d0e323dd68c4d58fcd13df`
+  (`dd_dotnet` `--dd-env`, `--dd-service`, `--dd-version`). Core .NET now
+  exposes `WithServiceName(...)`, `WithServiceVersion(...)`, and
+  `WithDeploymentEnvironment(...)` on `LogBrewActivitySpanOptions` and
+  `LogBrewActivitySourceListenerOptions`, with low-cardinality validation and
+  installed ActivitySource payload proof. It remains dependency-free and avoids
+  arbitrary resource attributes, OTel provider/exporter ownership, environment
+  variable scraping, baggage, tracestate, payloads, headers, full URLs, and
+  support-ticket behavior. Evidence: RED missing-method .NET tests, GREEN
+  72 core tests, `bash scripts/check_dotnet_package.sh`,
+  `bash scripts/real_user_dotnet_smoke.sh`, and
+  `bash scripts/real_user_dotnet_high_load_smoke.sh`. Research:
+  `docs/competitor-research/dotnet-trace-correlation-2026-06-16.md`.
+  Remaining .NET gap: richer resource conventions/detection, automatic
+  instrumentation breadth, exporter/collector interop, baggage/tracestate,
+  profiling, and backend trace-query maturity.
 - 2026-07-02: .NET ASP.NET Core ActivitySource setup now has an idiomatic
   service-registration path after
   source reads from Sentry .NET

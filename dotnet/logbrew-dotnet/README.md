@@ -257,6 +257,9 @@ using var listener = LogBrewActivitySourceListener.Start(
     options => options
         .WithHttpClientSources()
         .WithEventIdPrefix("dotnet_activity_source")
+        .WithServiceName("checkout-dotnet-service")
+        .WithServiceVersion("1.0.0")
+        .WithDeploymentEnvironment("production")
         .WithMetadataProvider(activity => new Dictionary<string, object?>
         {
             ["component"] = activity.Source.Name
@@ -271,9 +274,9 @@ using (var activity = source.StartActivity("checkout.pay", ActivityKind.Client))
 }
 ```
 
-`LogBrewActivitySourceListener` captures only stopped Activities from explicit `WithSourceName(...)` entries or source-backed presets such as `WithHttpClientSources()`, `WithAspNetCoreSources()`, `WithEntityFrameworkCoreSources()`, `WithSqlClientSources()`, `WithStackExchangeRedisSources()`, and `WithCommonDotNetSources()`. It delegates payload construction to `LogBrewActivitySpanTelemetry` and reports SDK capture errors through optional `OnError(...)`. Calling `Start(client)` without source names is fail-closed and captures no Activities. It does not create OpenTelemetry processors, exporters, tracestate, baggage, global HTTP instrumentation, payload/header capture, or full URL/query capture.
+`LogBrewActivitySourceListener` captures only stopped Activities from explicit `WithSourceName(...)` entries or source-backed presets such as `WithHttpClientSources()`, `WithAspNetCoreSources()`, `WithEntityFrameworkCoreSources()`, `WithSqlClientSources()`, `WithStackExchangeRedisSources()`, and `WithCommonDotNetSources()`. Use `WithServiceName(...)`, `WithServiceVersion(...)`, and `WithDeploymentEnvironment(...)` to attach the same low-cardinality service context competitors expose through OpenTelemetry resources or unified service tagging, without enabling arbitrary resource attributes. It delegates payload construction to `LogBrewActivitySpanTelemetry` and reports SDK capture errors through optional `OnError(...)`. Calling `Start(client)` without source names is fail-closed and captures no Activities. It does not create OpenTelemetry processors, exporters, tracestate, baggage, global HTTP instrumentation, payload/header capture, full URL/query capture, or environment-variable scraping.
 
-The packaged `examples/ActivitySourceListenerTelemetry.cs` file shows the same listener in a small console app, including safe route naming, explicit source filtering, and primitive-only metadata.
+The packaged `examples/ActivitySourceListenerTelemetry.cs` file shows the same listener in a small console app, including safe route naming, explicit source filtering, low-cardinality service context, and primitive-only metadata.
 
 For outbound calls, use `LogBrewHttpClientTelemetry` when your app owns the `HttpClient` request and wants one child span plus one normalized downstream `traceparent`:
 
