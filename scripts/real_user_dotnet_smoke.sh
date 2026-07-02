@@ -126,6 +126,7 @@ for needle in (
     "AspNetCoreRequestTelemetry.cs",
     "dotnet add package LogBrew.AspNetCore",
     "UseLogBrewRequestTelemetry",
+    "AddLogBrewDependencyActivitySourceTelemetry",
     "UseLogBrewDependencyActivitySourceTelemetry",
     "AspNetCoreMiddlewareTelemetry.cs",
     "does not patch ASP.NET Core",
@@ -181,6 +182,7 @@ if 'dependency id="LogBrew"' not in nuspec:
 for needle in (
     "dotnet add package LogBrew.AspNetCore",
     "UseLogBrewRequestTelemetry",
+    "AddLogBrewDependencyActivitySourceTelemetry",
     "UseLogBrewDependencyActivitySourceTelemetry",
     "WithRequestFilter",
     "WithRouteTemplateSelector",

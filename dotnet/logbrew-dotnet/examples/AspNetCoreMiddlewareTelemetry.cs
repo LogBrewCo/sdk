@@ -18,6 +18,16 @@ builder.Logging.AddLogBrew(client, new LogBrewLoggerOptions
     EventIdPrefix = "aspnetcore_log",
     TimestampProvider = () => DateTimeOffset.Parse("2026-06-02T10:00:40Z", CultureInfo.InvariantCulture)
 });
+builder.Services.AddLogBrewDependencyActivitySourceTelemetry(
+    client,
+    options => options
+        .WithEventIdPrefix("aspnetcore_dependency")
+        .WithTimestampProvider(() => "2026-06-02T10:00:42Z")
+        .WithMetadata(new Dictionary<string, object?>
+        {
+            ["framework"] = "aspnetcore",
+            ["component"] = "checkout-api"
+        }));
 
 var app = builder.Build();
 app.UseRouting();
@@ -27,16 +37,6 @@ app.UseLogBrewRequestTelemetry(
         .WithEventIdPrefix("aspnetcore_request")
         .WithTimestampProvider(() => "2026-06-02T10:00:41Z")
         .WithRequestFilter(context => !IsLocalVerificationRoute(context))
-        .WithMetadata(new Dictionary<string, object?>
-        {
-            ["framework"] = "aspnetcore",
-            ["component"] = "checkout-api"
-        }));
-app.UseLogBrewDependencyActivitySourceTelemetry(
-    client,
-    options => options
-        .WithEventIdPrefix("aspnetcore_dependency")
-        .WithTimestampProvider(() => "2026-06-02T10:00:42Z")
         .WithMetadata(new Dictionary<string, object?>
         {
             ["framework"] = "aspnetcore",

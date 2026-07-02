@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -119,6 +120,19 @@ namespace LogBrew
     {
         private const string DependencyActivitySourceListenerKey = "LogBrew.DependencyActivitySourceListener";
 
+        public static IServiceCollection AddLogBrewDependencyActivitySourceTelemetry(
+            this IServiceCollection services,
+            LogBrewClient client,
+            Action<LogBrewActivitySourceListenerOptions>? configure = null)
+        {
+            ArgumentNullException.ThrowIfNull(services);
+            ArgumentNullException.ThrowIfNull(client);
+
+            services.AddSingleton<IHostedService>(_ =>
+                new LogBrewDependencyActivitySourceHostedService(client, configure));
+            return services;
+        }
+
         public static IApplicationBuilder UseLogBrewRequestTelemetry(
             this IApplicationBuilder app,
             LogBrewClient client,
@@ -155,18 +169,67 @@ namespace LogBrew
 
             var listener = LogBrewActivitySourceListener.Start(
                 client,
-                options =>
-                {
-                    options
-                        .WithHttpClientSources()
-                        .WithEntityFrameworkCoreSources()
-                        .WithSqlClientSources()
-                        .WithStackExchangeRedisSources();
-                    configure?.Invoke(options);
-                });
+                options => ConfigureDependencyActivitySourceOptions(options, configure));
             app.Properties[DependencyActivitySourceListenerKey] = listener;
             lifetime.ApplicationStopping.Register(listener.Dispose);
             return app;
+        }
+
+        private static void ConfigureDependencyActivitySourceOptions(
+            LogBrewActivitySourceListenerOptions options,
+            Action<LogBrewActivitySourceListenerOptions>? configure)
+        {
+            options
+                .WithHttpClientSources()
+                .WithEntityFrameworkCoreSources()
+                .WithSqlClientSources()
+                .WithStackExchangeRedisSources();
+            configure?.Invoke(options);
+        }
+
+        private sealed class LogBrewDependencyActivitySourceHostedService : IHostedService, IDisposable
+        {
+            private readonly LogBrewClient client;
+            private readonly Action<LogBrewActivitySourceListenerOptions>? configure;
+            private LogBrewActivitySourceListener? listener;
+
+            public LogBrewDependencyActivitySourceHostedService(
+                LogBrewClient client,
+                Action<LogBrewActivitySourceListenerOptions>? configure)
+            {
+                this.client = client ?? throw new ArgumentNullException(nameof(client));
+                this.configure = configure;
+            }
+
+            public Task StartAsync(CancellationToken cancellationToken)
+            {
+                if (listener == null)
+                {
+                    listener = LogBrewActivitySourceListener.Start(
+                        client,
+                        options => ConfigureDependencyActivitySourceOptions(options, configure));
+                }
+
+                return Task.CompletedTask;
+            }
+
+            public Task StopAsync(CancellationToken cancellationToken)
+            {
+                DisposeListener();
+                return Task.CompletedTask;
+            }
+
+            public void Dispose()
+            {
+                DisposeListener();
+                GC.SuppressFinalize(this);
+            }
+
+            private void DisposeListener()
+            {
+                listener?.Dispose();
+                listener = null;
+            }
         }
     }
 

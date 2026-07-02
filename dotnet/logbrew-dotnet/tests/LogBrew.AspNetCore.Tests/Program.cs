@@ -25,6 +25,8 @@ await AspNetCoreMiddlewareFilterSkipsTelemetryAndTraceHeaderInjection().Configur
 tests++;
 AspNetCoreDependencyActivitySourceTelemetryCapturesAndDisposesWithHostLifetime();
 tests++;
+await AspNetCoreServicesHostedDependencyActivitySourceTelemetryStartsAndStops().ConfigureAwait(false);
+tests++;
 Console.WriteLine("dotnet aspnetcore package tests ok (" + tests.ToString(System.Globalization.CultureInfo.InvariantCulture) + " tests)");
 
 static async Task AspNetCoreMiddlewareCapturesRequestSpanMetricAndActiveTrace()
@@ -247,6 +249,77 @@ static void AspNetCoreDependencyActivitySourceTelemetryCapturesAndDisposesWithHo
     }
 
     Require(client.PendingEvents() == capturedEvents, "expected host lifetime stop to dispose ActivitySource listener");
+}
+
+static async Task AspNetCoreServicesHostedDependencyActivitySourceTelemetryStartsAndStops()
+{
+    var services = new ServiceCollection();
+    var client = LogBrewClient.Create("LOGBREW_API_KEY", "aspnetcore-hosted-activity-sources", "0.1.0");
+    services.AddLogBrewDependencyActivitySourceTelemetry(
+        client,
+        options => options
+            .WithEventIdPrefix("dotnet_aspnetcore_hosted_activity")
+            .WithTimestampProvider(() => "2026-06-02T10:00:43Z")
+            .WithMetadataProvider(activity => new Dictionary<string, object?>
+            {
+                ["framework"] = "aspnetcore",
+                ["activitySource"] = activity.Source.Name,
+                ["fullUrl"] = "https://shop.example/checkout?card=dropme",
+                ["ignoredObject"] = new object()
+            }));
+
+    using var serviceProvider = services.BuildServiceProvider();
+    IHostedService? hostedService = null;
+    foreach (var service in serviceProvider.GetServices<IHostedService>())
+    {
+        Require(hostedService == null, "expected a single LogBrew hosted ActivitySource service");
+        hostedService = service;
+    }
+
+    Require(hostedService != null, "expected hosted ActivitySource service registration");
+    await hostedService!.StartAsync(CancellationToken.None).ConfigureAwait(false);
+    using var source = new ActivitySource("System.Net.Http", "10.0.0");
+    using (var activity = source.StartActivity(
+        "https://shop.example/checkout?card=dropme",
+        ActivityKind.Client))
+    {
+        Require(activity != null, "expected hosted service to enable dependency ActivitySource listener");
+        activity!.SetTag("http.request.method", "POST");
+        activity.SetTag("http.route", "https://shop.example/checkout/:cart_id?card=dropme#review");
+        activity.SetTag("http.response.status_code", 202);
+        activity.SetTag("request.body", "card=dropme");
+    }
+
+    var preview = client.PreviewJson();
+    foreach (var expected in new[]
+    {
+        "\"id\": \"dotnet_aspnetcore_hosted_activity_span_",
+        "\"source\": \"dotnet.activity\"",
+        "\"activitySourceName\": \"System.Net.Http\"",
+        "\"activitySourceVersion\": \"10.0.0\"",
+        "\"httpMethod\": \"POST\"",
+        "\"httpRoute\": \"/checkout/:cart_id\"",
+        "\"httpStatusCode\": 202",
+        "\"framework\": \"aspnetcore\"",
+        "\"activitySource\": \"System.Net.Http\""
+    })
+    {
+        Require(preview.Contains(expected, StringComparison.Ordinal), "missing hosted ASP.NET Core ActivitySource payload: " + expected);
+    }
+
+    foreach (var blocked in new[] { "card=dropme", "shop.example", "fullUrl", "ignoredObject", "request.body" })
+    {
+        Require(!preview.Contains(blocked, StringComparison.Ordinal), "expected hosted ActivitySource payload to omit unsafe value: " + blocked);
+    }
+
+    var capturedEvents = client.PendingEvents();
+    await hostedService.StopAsync(CancellationToken.None).ConfigureAwait(false);
+    using (var afterStop = source.StartActivity("after.stop", ActivityKind.Client))
+    {
+        afterStop?.SetTag("http.request.method", "GET");
+    }
+
+    Require(client.PendingEvents() == capturedEvents, "expected hosted service stop to dispose ActivitySource listener");
 }
 
 static DefaultHttpContext CreateHttpContext()

@@ -435,3 +435,38 @@ Competitors reduce real-user setup friction by tying tracing setup to the host/f
 ### Remaining Gap
 
 This reduces ASP.NET Core setup friction and lifecycle mistakes for common dependency ActivitySource capture, but LogBrew is still less automatic than Sentry, Datadog, and OpenTelemetry. Remaining high-value .NET gaps are safe optional automatic framework/client instrumentation beyond ActivitySource listening, richer semantic conventions and resource attributes, baggage/tracestate interop where justified, profiling, exporter/collector interop, and mature backend trace querying.
+
+## 2026-07-02 ASP.NET Core Service Registration Follow-Up
+
+### Additional Source Reviewed
+
+- Sentry .NET `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`.
+- Re-read `samples/Sentry.Samples.OpenTelemetry.AspNetCore/Program.cs`: ASP.NET Core setup uses `builder.Services.AddOpenTelemetry().WithTracing(...)` for framework/client instrumentation plus `builder.WebHost.UseSentry(...)`.
+- Read `src/Sentry.AspNetCore/SentryWebHostBuilderExtensions.cs`: `UseSentry(...)` attaches SDK setup to the host builder instead of asking users to manage listener lifetime manually.
+- OpenTelemetry .NET Contrib `open-telemetry/opentelemetry-dotnet-contrib@41c029dd83cec8a188df83d162d11cb4741c783f`.
+- Re-read `src/OpenTelemetry.Instrumentation.Http/HttpClientInstrumentationTracerProviderBuilderExtensions.cs`: HTTP instrumentation is exposed as an obvious builder registration.
+- Re-read `src/OpenTelemetry.Instrumentation.AspNetCore/AspNetCoreInstrumentationTracerProviderBuilderExtensions.cs`: ASP.NET Core instrumentation is registered through DI and guards duplicate provider registration.
+
+### Pattern
+
+The most successful .NET setup paths meet users where they already configure ASP.NET Core: `builder.Services` or the host builder. This avoids hidden global patching while still preventing common lifecycle mistakes such as creating listeners after the host is built or forgetting to dispose them.
+
+### LogBrew Change
+
+- Added `builder.Services.AddLogBrewDependencyActivitySourceTelemetry(client, options => ...)` to `LogBrew.AspNetCore`.
+- The extension registers an `IHostedService` that starts the same dependency `LogBrewActivitySourceListener` with HTTP client, Entity Framework Core, SqlClient, and StackExchange.Redis presets, then disposes it on host shutdown.
+- `app.UseLogBrewDependencyActivitySourceTelemetry(...)` remains available as a fallback for apps that cannot use service registration.
+- The service-registration path stays opt-in and avoids OpenTelemetry exporters/processors, provider ownership, arbitrary `DiagnosticSource` subscriptions, profiler hooks, framework/client patching, ASP.NET Core server ActivitySource capture by default, baggage, tracestate, payloads, headers, full URLs, support tickets, and usage/quota inference.
+- The packaged ASP.NET Core example now shows the lower-friction `builder.Services` registration before `builder.Build()`.
+
+### Evidence
+
+- RED TDD: `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.AspNetCore.Tests/LogBrew.AspNetCore.Tests.csproj --configuration Release` failed because `IServiceCollection` had no `AddLogBrewDependencyActivitySourceTelemetry(...)`.
+- Focused GREEN: the same command passed with 6 ASP.NET Core tests.
+- Package proof: `bash scripts/check_dotnet_package.sh` passed, including NuGet package content/readme checks and example build checks.
+- Installed proof: `bash scripts/real_user_dotnet_smoke.sh` passed with installed `LogBrew.AspNetCore` proof.
+- Load proof: `bash scripts/real_user_dotnet_high_load_smoke.sh` passed.
+
+### Remaining Gap
+
+LogBrew now has a more idiomatic ASP.NET Core setup path for explicit dependency ActivitySource capture, but Sentry, Datadog, and OpenTelemetry still lead on automatic instrumentation breadth, richer semantic conventions and resource attributes, baggage/tracestate, profiling, exporter/collector interop, and backend trace-query maturity.
