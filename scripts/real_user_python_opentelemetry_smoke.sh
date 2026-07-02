@@ -154,7 +154,7 @@ from logbrew_sdk import (
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.trace import SpanKind, Status, StatusCode
+from opentelemetry.trace import Link, SpanContext, SpanKind, Status, StatusCode, TraceFlags, TraceState
 
 client = LogBrewClient.create(api_key="LOGBREW_API_KEY", sdk_name="checkout-api", sdk_version="0.1.2")
 provider = TracerProvider(
@@ -170,10 +170,18 @@ provider = TracerProvider(
 processor = create_logbrew_open_telemetry_span_processor(
     client=client,
     include_trace_summary=True,
+    link_attribute_keys=["messaging.operation.name"],
     metadata={"release": "2026.07.01"},
 )
 provider.add_span_processor(processor)
 tracer = provider.get_tracer("checkout-smoke", "0.1.0")
+linked_context = SpanContext(
+    trace_id=int("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 16),
+    span_id=int("bbbbbbbbbbbbbbbb", 16),
+    is_remote=True,
+    trace_flags=TraceFlags(TraceFlags.SAMPLED),
+    trace_state=TraceState.get_default(),
+)
 
 with tracer.start_as_current_span(
     "GET /checkout",
@@ -196,6 +204,15 @@ with tracer.start_as_current_span(
     with tracer.start_as_current_span(
         "redis GET",
         kind=SpanKind.CLIENT,
+        links=[
+            Link(
+                linked_context,
+                attributes={
+                    "messaging.operation.name": "receive",
+                    "messaging.message.id": "blocked-message-id",
+                },
+            )
+        ],
         attributes={
             "db.system": "redis",
             "db.operation.name": "GET",
@@ -218,6 +235,8 @@ blocked_values = [
     "GET blocked-key",
     "http.url",
     "db.statement",
+    "blocked-message-id",
+    "messaging.message.id",
 ]
 leaked = [value for value in blocked_values if value in serialized]
 if leaked:
@@ -231,6 +250,7 @@ if len(detail_spans) != 2 or len(summary_spans) != 1:
 summary = summary_spans[0]["attributes"]
 root = next(event["attributes"] for event in detail_spans if event["attributes"]["name"] == "GET /checkout")
 dependency = next(event["attributes"] for event in detail_spans if event["attributes"]["name"] == "redis GET")
+dependency_links = dependency.get("links", [])
 print(
     json.dumps(
         {
@@ -243,6 +263,9 @@ print(
             "summaryStatus": summary["status"],
             "summarySpanCount": summary["metadata"]["otel.trace.span_count"],
             "summaryErrorSpanCount": summary["metadata"]["otel.trace.error_span_count"],
+            "dependencyLinkCount": len(dependency_links),
+            "dependencyLinkTraceId": dependency_links[0]["traceId"],
+            "dependencyLinkOperation": dependency_links[0]["metadata"]["messaging.operation.name"],
             "service": summary["metadata"]["service.name"],
             "environment": summary["metadata"]["deployment.environment"],
             "route": summary["metadata"]["http.route"],
@@ -271,6 +294,9 @@ grep -q '"summaryName": "opentelemetry.trace:GET /checkout"' "$tmp_dir/processor
 grep -q '"summaryStatus": "error"' "$tmp_dir/processor.stdout.json"
 grep -q '"summarySpanCount": 2' "$tmp_dir/processor.stdout.json"
 grep -q '"summaryErrorSpanCount": 1' "$tmp_dir/processor.stdout.json"
+grep -q '"dependencyLinkCount": 1' "$tmp_dir/processor.stdout.json"
+grep -q '"dependencyLinkTraceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' "$tmp_dir/processor.stdout.json"
+grep -q '"dependencyLinkOperation": "receive"' "$tmp_dir/processor.stdout.json"
 grep -q '"service": "checkout-api"' "$tmp_dir/processor.stdout.json"
 grep -q '"environment": "production"' "$tmp_dir/processor.stdout.json"
 grep -q '"route": "/checkout"' "$tmp_dir/processor.stdout.json"

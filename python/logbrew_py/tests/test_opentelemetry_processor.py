@@ -66,6 +66,17 @@ class FakeOpenTelemetryEvent:
         self.attributes = attributes or {}
 
 
+class FakeOpenTelemetryLink:
+    def __init__(
+        self,
+        *,
+        context: FakeOpenTelemetrySpanContext,
+        attributes: dict[str, Any] | None = None,
+    ) -> None:
+        self.context = context
+        self.attributes = attributes or {}
+
+
 class FakeOpenTelemetryReadableSpan:
     def __init__(
         self,
@@ -78,6 +89,7 @@ class FakeOpenTelemetryReadableSpan:
         attributes: dict[str, Any] | None = None,
         resource_attributes: dict[str, Any] | None = None,
         events: list[FakeOpenTelemetryEvent] | None = None,
+        links: list[FakeOpenTelemetryLink] | None = None,
         start_time: int = 1_780_000_000_000_000_000,
         end_time: int = 1_780_000_000_025_000_000,
         dropped_attributes: int = 0,
@@ -92,6 +104,7 @@ class FakeOpenTelemetryReadableSpan:
         self.attributes = attributes or {}
         self.resource = FakeOpenTelemetryResource(resource_attributes or {})
         self.events = events or []
+        self.links = links or []
         self.start_time = start_time
         self.end_time = end_time
         self.dropped_attributes = dropped_attributes
@@ -154,6 +167,28 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
                     },
                 )
             ],
+            links=[
+                FakeOpenTelemetryLink(
+                    context=FakeOpenTelemetrySpanContext(
+                        trace_id=int("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 16),
+                        span_id=int("bbbbbbbbbbbbbbbb", 16),
+                        trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+                    ),
+                    attributes={
+                        "messaging.operation.name": "process",
+                        "messaging.message.id": "blocked-message-id",
+                        "safe.link": "fan-in",
+                    },
+                ),
+                FakeOpenTelemetryLink(
+                    context=FakeOpenTelemetrySpanContext(
+                        trace_id=int("cccccccccccccccccccccccccccccccc", 16),
+                        span_id=int("dddddddddddddddd", 16),
+                        trace_flags=FakeOpenTelemetryTraceFlags(sampled=False),
+                    ),
+                    attributes={"safe.link": "retry"},
+                ),
+            ],
             dropped_attributes=2,
             dropped_events=1,
             dropped_links=3,
@@ -162,6 +197,7 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
         attributes = span_attributes_from_open_telemetry_readable_span(
             span,
             attribute_keys=["custom.safe"],
+            link_attribute_keys=["safe.link"],
             metadata={"team": "payments", "payload": {"card": "blocked"}},
         )
 
@@ -205,14 +241,34 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
                 }
             ],
         )
+        self.assertEqual(
+            attributes["links"],
+            [
+                {
+                    "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "spanId": "bbbbbbbbbbbbbbbb",
+                    "sampled": True,
+                    "metadata": {"safe.link": "fan-in"},
+                },
+                {
+                    "traceId": "cccccccccccccccccccccccccccccccc",
+                    "spanId": "dddddddddddddddd",
+                    "sampled": False,
+                    "metadata": {"safe.link": "retry"},
+                },
+            ],
+        )
 
         serialized = json.dumps(attributes)
         self.assertNotIn("blocked@example.test", serialized)
         self.assertNotIn("authorization", serialized)
         self.assertNotIn("db.statement", serialized)
         self.assertNotIn("http.url", serialized)
+        self.assertNotIn("blocked-message-id", serialized)
         with self.assertRaisesRegex(SdkError, "cannot include sensitive key: db.statement"):
             span_attributes_from_open_telemetry_readable_span(span, attribute_keys=["db.statement"])
+        with self.assertRaisesRegex(SdkError, "cannot include sensitive key: messaging.message.id"):
+            span_attributes_from_open_telemetry_readable_span(span, link_attribute_keys=["messaging.message.id"])
 
     def test_open_telemetry_span_processor_queues_details_and_trace_summary(self) -> None:
         client = sample_client()
@@ -229,6 +285,7 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
         processor = create_logbrew_open_telemetry_span_processor(
             client=client,
             include_trace_summary=True,
+            link_attribute_keys=["messaging.operation.name"],
             timestamp_factory=lambda: "2026-07-01T12:00:00Z",
             metadata={"release": "2026.07.01"},
         )
@@ -250,6 +307,16 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
                 context=child_context,
                 parent=root_context,
                 attributes={"db.system": "redis", "db.operation.name": "GET"},
+                links=[
+                    FakeOpenTelemetryLink(
+                        context=FakeOpenTelemetrySpanContext(
+                            trace_id=int("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 16),
+                            span_id=int("bbbbbbbbbbbbbbbb", 16),
+                            trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+                        ),
+                        attributes={"messaging.operation.name": "receive"},
+                    )
+                ],
                 resource_attributes={"service.name": "checkout-api"},
                 start_time=1_780_000_000_010_000_000,
                 end_time=1_780_000_000_020_000_000,
@@ -261,6 +328,17 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
         self.assertEqual([event["id"] for event in payload["events"]], ["otel_1", "otel_2", "otel_trace_1"])
         self.assertEqual(payload["events"][0]["attributes"]["status"], "error")
         self.assertEqual(payload["events"][1]["attributes"]["parentSpanId"], "00f067aa0ba902b7")
+        self.assertEqual(
+            payload["events"][1]["attributes"]["links"],
+            [
+                {
+                    "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "spanId": "bbbbbbbbbbbbbbbb",
+                    "sampled": True,
+                    "metadata": {"messaging.operation.name": "receive"},
+                }
+            ],
+        )
 
         summary = payload["events"][2]["attributes"]
         self.assertEqual(summary["name"], "opentelemetry.trace:GET /checkout")

@@ -39,3 +39,35 @@ Improve Python rich-trace interop for apps that already use OpenTelemetry. Befor
 ## Honest Gap After This Pass
 
 LogBrew is now better for lightweight, dependency-optional, privacy-bounded OTel span ingestion that works from an installed wheel and does not take over the user's OTel runtime. Sentry, Datadog, and native OpenTelemetry remain stronger for full exporter/provider ownership, automatic instrumentation breadth, links, baggage/tracestate, richer semantic conventions, streaming/batching internals, and cross-signal OTel runtime integration. PostHog remains stronger for its focused AI-span OTLP export path. The next Python trace work should target the highest-demand automatic framework/outbound/DB/cache/queue gaps with the same installed-artifact and fake-intake proof.
+
+## 2026-07-02 Span Link Follow-Up
+
+### Public Source Read
+
+- Sentry Python `getsentry/sentry-python@1bd120f41780bfd5fd4d4b7c65aae395e425adab`.
+- Re-read `sentry_sdk/integrations/opentelemetry/span_processor.py` (`link_trace_context_to_error_event`, `SentrySpanProcessor.on_start`, `on_end`, `_get_trace_data`, `_update_span_with_otel_data`). Pattern: the Python OTel bridge maps OTel spans into Sentry spans and links current OTel span context into error events, but this path does not visibly preserve OTel `ReadableSpan.links` as exported span-link arrays.
+
+- OpenTelemetry Python `open-telemetry/opentelemetry-python@9ffd585e2f5eb296e2c9e834887b382af0c18727`.
+- Re-read `opentelemetry-sdk/src/opentelemetry/sdk/trace/__init__.py` (`ReadableSpan.links`, `ReadableSpan.dropped_links`, `_format_links`, `Span._new_links`, `Span.add_link`, `Tracer.start_span`) and `opentelemetry-api/src/opentelemetry/trace/__init__.py` (`Link`, `dropped_attributes`). Pattern: span links are first-class `SpanContext` plus attributes, bounded by SDK limits, and are preferably supplied at span creation so samplers/exporters see them.
+
+- Datadog Python `DataDog/dd-trace-py@ad931e9b9a8087d963a639b8c1eaff0b749b81cc`.
+- Re-read `ddtrace/internal/opentelemetry/trace.py` (`Tracer.start_span`, `start_as_current_span` link handling), `ddtrace/_trace/_span_link.py` (`SpanLink`, `SpanLinkKind`), and `ddtrace/internal/encoding.py` (`span_links` serialization). Pattern: Datadog maps OTel `Link` objects into Datadog span links with trace ID, span ID, tracestate, flags, and attributes, then serializes them in trace payloads. Tradeoff: rich and portable, but it carries more propagation and attribute surface than LogBrew should copy by default.
+
+- PostHog Python `PostHog/posthog-python@df9f2115859f27b33a1d7380bcd5b467374759d3`.
+- Re-read `posthog/ai/otel/processor.py` (`PostHogSpanProcessor`), `posthog/ai/otel/exporter.py` (`PostHogTraceExporter`), and `posthog/ai/otel/spans.py` (`is_ai_span`). Pattern: PostHog delegates matching AI spans to an internal OTLP batch/export path and does not add a general lightweight link-summary bridge.
+
+### LogBrew Update
+
+- Added Python `SpanLinkSummary` support to the shared span validator so direct `client.span(...)` payloads can carry up to eight privacy-bounded `links`.
+- Added `include_span_links=True` and `link_attribute_keys=[...]` to Python OTel readable-span conversion and `LogBrewOpenTelemetrySpanProcessor`.
+- OTel links copy only valid linked trace ID, linked span ID, sampled flag, and explicitly allowlisted primitive link metadata; message IDs, full URLs, headers, payloads, cookies, DB statements, exception messages, stacks, baggage, tracestate, and raw propagation metadata stay out.
+
+### Verification
+
+- RED/green focused unit proof: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python/logbrew_py/tests/test_opentelemetry_processor.py` now covers OTel link summary conversion, sensitive link-key rejection, processor queue preservation, and trace summary behavior.
+- Core public span proof: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python/logbrew_py/tests/test_span_links.py` verifies direct span links serialize with primitive metadata and reject invalid span IDs.
+- Installed-artifact proof updated: `bash scripts/real_user_python_opentelemetry_smoke.sh` creates a real OpenTelemetry `Link`, registers the LogBrew processor on a real `TracerProvider`, verifies one dependency link survives, and checks message IDs do not leak.
+
+### Honest Gap After Link Follow-Up
+
+LogBrew is now stronger than Sentry Python's current OTel processor path for a lightweight privacy-bounded link-summary use case, because it can preserve span links without owning the provider/exporter or copying broad attributes. Datadog and native OpenTelemetry remain stronger for full span-link fidelity, tracestate, link attributes, exporter lifecycle, automatic instrumentation, and batching. LogBrew intentionally stays narrower until a backend-supported, privacy-bounded richer trace model exists.

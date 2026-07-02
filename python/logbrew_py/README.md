@@ -347,14 +347,15 @@ provider.add_span_processor(
     create_logbrew_open_telemetry_span_processor(
         client=client,
         include_trace_summary=True,
+        link_attribute_keys=["messaging.operation.name"],
         metadata={"service": "checkout"},
     )
 )
 ```
 
-The processor follows normal sampled-span behavior by default and can emit one synthetic `opentelemetry.trace:<root-name>` summary span on `force_flush()` or `shutdown()`. Detail spans copy a small safe allowlist such as service, environment, route, method, status code, span kind, instrumentation scope, dropped-count metadata, and type-only exception events. Additional OTel attributes require explicit allowlists, and sensitive keys such as full URLs, headers, query strings, payloads, cookies, private auth values, DB statements, exception messages, and stacks stay blocked. The processor does not add an OTel dependency to default LogBrew installs, own your provider/exporter, serialize baggage or tracestate, patch clients, or capture request/response bodies.
+The processor follows normal sampled-span behavior by default and can emit one synthetic `opentelemetry.trace:<root-name>` summary span on `force_flush()` or `shutdown()`. Detail spans copy a small safe allowlist such as service, environment, route, method, status code, span kind, instrumentation scope, dropped-count metadata, type-only exception events, and up to eight span links. Link summaries retain only normalized trace ID, span ID, sampled state, and explicitly allowlisted primitive link metadata such as `messaging.operation.name`; sensitive keys such as message IDs, full URLs, headers, query strings, payloads, cookies, private auth values, DB statements, exception messages, and stacks stay blocked. Additional OTel attributes require explicit allowlists. The processor does not add an OTel dependency to default LogBrew installs, own your provider/exporter, serialize baggage or tracestate, patch clients, or capture request/response bodies.
 
-Span payloads may include up to eight privacy-bounded event summaries through `events` or helper-level `span_events`. Each summary has a required `name`, optional timezone-aware `timestamp`, and primitive-only `metadata`. LogBrew drops nested objects and helper deny-listed key names so milestones can improve trace timelines without sending payloads, headers, query parameters, cache keys, queue messages, exception messages, or stack traces. Dependency helpers add one automatic type-only `exception` event when the wrapped operation fails.
+Span payloads may include up to eight privacy-bounded event summaries through `events` or helper-level `span_events`, and up to eight privacy-bounded `links` for batch, fan-in, retry, or queue relationships. Each event summary has a required `name`, optional timezone-aware `timestamp`, and primitive-only `metadata`; each link summary has W3C-shaped `traceId` and `spanId`, optional `sampled`, and primitive-only `metadata`. LogBrew drops nested objects and helper deny-listed key names so milestones and related-span links can improve trace timelines without sending payloads, headers, query parameters, cache keys, queue messages, exception messages, stack traces, or raw propagation data. Dependency helpers add one automatic type-only `exception` event when the wrapped operation fails.
 
 ## Outbound HTTP Client Spans
 

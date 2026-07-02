@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any, TypeAlias, cast
 
 from logbrew_sdk import SdkError, _instrumentation
-from logbrew_sdk._span_events import SpanAttributes
+from logbrew_sdk._span_events import SPAN_LINK_LIMIT, SpanAttributes
 from logbrew_sdk._trace_context import (
     OPEN_TELEMETRY_SPAN_ID_MAX,
     OPEN_TELEMETRY_TRACE_ID_MAX,
@@ -53,6 +53,7 @@ DEFAULT_OTEL_RESOURCE_ATTRIBUTE_KEYS = frozenset(
     }
 )
 DEFAULT_OTEL_EVENT_ATTRIBUTE_KEYS = frozenset({"exception.escaped", "exception.type"})
+DEFAULT_OTEL_LINK_ATTRIBUTE_KEYS: frozenset[str] = frozenset()
 TRACE_SUMMARY_METADATA_KEYS = frozenset(
     {
         *DEFAULT_OTEL_RESOURCE_ATTRIBUTE_KEYS,
@@ -89,6 +90,7 @@ SENSITIVE_OTEL_ATTRIBUTE_KEYS = frozenset(
         "http.request.body",
         "http.response.body",
         "http.url",
+        "messaging.message.id",
         "url.full",
     }
 )
@@ -106,6 +108,8 @@ class _ReadableSpanOptions:
     capture_unsampled: bool
     event_attribute_keys: frozenset[str]
     include_span_events: bool
+    include_span_links: bool
+    link_attribute_keys: frozenset[str]
     metadata: Metadata
     resource_attribute_keys: frozenset[str]
 
@@ -147,8 +151,10 @@ class LogBrewOpenTelemetrySpanProcessor:
         attribute_keys: Iterable[str] | None = None,
         resource_attribute_keys: Iterable[str] | None = None,
         event_attribute_keys: Iterable[str] | None = None,
+        link_attribute_keys: Iterable[str] | None = None,
         capture_unsampled: bool = False,
         include_span_events: bool = True,
+        include_span_links: bool = True,
         include_trace_summary: bool = False,
         flush_on_force_flush: bool = True,
         span_filter: SpanFilter | None = None,
@@ -172,6 +178,8 @@ class LogBrewOpenTelemetrySpanProcessor:
             capture_unsampled=capture_unsampled,
             event_attribute_keys=event_attribute_keys,
             include_span_events=include_span_events,
+            include_span_links=include_span_links,
+            link_attribute_keys=link_attribute_keys,
             metadata=metadata,
             resource_attribute_keys=resource_attribute_keys,
         )
@@ -285,8 +293,10 @@ def create_logbrew_open_telemetry_span_processor(
     attribute_keys: Iterable[str] | None = None,
     resource_attribute_keys: Iterable[str] | None = None,
     event_attribute_keys: Iterable[str] | None = None,
+    link_attribute_keys: Iterable[str] | None = None,
     capture_unsampled: bool = False,
     include_span_events: bool = True,
+    include_span_links: bool = True,
     include_trace_summary: bool = False,
     flush_on_force_flush: bool = True,
     span_filter: SpanFilter | None = None,
@@ -305,6 +315,8 @@ def create_logbrew_open_telemetry_span_processor(
         event_attribute_keys=event_attribute_keys,
         capture_unsampled=capture_unsampled,
         include_span_events=include_span_events,
+        include_span_links=include_span_links,
+        link_attribute_keys=link_attribute_keys,
         include_trace_summary=include_trace_summary,
         flush_on_force_flush=flush_on_force_flush,
         span_filter=span_filter,
@@ -319,8 +331,10 @@ def span_attributes_from_open_telemetry_readable_span(
     attribute_keys: Iterable[str] | None = None,
     resource_attribute_keys: Iterable[str] | None = None,
     event_attribute_keys: Iterable[str] | None = None,
+    link_attribute_keys: Iterable[str] | None = None,
     capture_unsampled: bool = False,
     include_span_events: bool = True,
+    include_span_links: bool = True,
 ) -> SpanAttributes | None:
     """Convert an OpenTelemetry ReadableSpan-like object into privacy-bounded span attributes."""
 
@@ -331,6 +345,8 @@ def span_attributes_from_open_telemetry_readable_span(
             capture_unsampled=capture_unsampled,
             event_attribute_keys=event_attribute_keys,
             include_span_events=include_span_events,
+            include_span_links=include_span_links,
+            link_attribute_keys=link_attribute_keys,
             metadata=metadata,
             resource_attribute_keys=resource_attribute_keys,
         ),
@@ -355,6 +371,11 @@ def _span_attributes_from_resolved_open_telemetry_readable_span(
         if options.include_span_events
         else []
     )
+    span_links = (
+        _open_telemetry_readable_span_links(getattr(span, "links", ()), options.link_attribute_keys)
+        if options.include_span_links
+        else []
+    )
     duration_ms = _duration_ms_from_open_telemetry_readable_span(span)
     parent_context = _normalize_open_telemetry_span_context(getattr(span, "parent", None))
     parent_span_id = (
@@ -373,6 +394,7 @@ def _span_attributes_from_resolved_open_telemetry_readable_span(
             "status": _open_telemetry_span_status(getattr(span, "status", None)),
             **({"durationMs": duration_ms} if duration_ms is not None else {}),
             **({"events": span_events} if span_events else {}),
+            **({"links": span_links} if span_links else {}),
             **({"metadata": metadata} if metadata else {}),
         },
     )
@@ -384,6 +406,8 @@ def _readable_span_options(
     capture_unsampled: bool,
     event_attribute_keys: Iterable[str] | None,
     include_span_events: bool,
+    include_span_links: bool,
+    link_attribute_keys: Iterable[str] | None,
     metadata: Mapping[str, Any] | None,
     resource_attribute_keys: Iterable[str] | None,
 ) -> _ReadableSpanOptions:
@@ -400,6 +424,12 @@ def _readable_span_options(
             "OpenTelemetry event_attribute_keys",
         ),
         include_span_events=include_span_events,
+        include_span_links=include_span_links,
+        link_attribute_keys=_open_telemetry_attribute_key_set(
+            DEFAULT_OTEL_LINK_ATTRIBUTE_KEYS,
+            link_attribute_keys,
+            "OpenTelemetry link_attribute_keys",
+        ),
         metadata=_instrumentation.compact_metadata(metadata),
         resource_attribute_keys=_open_telemetry_attribute_key_set(
             DEFAULT_OTEL_RESOURCE_ATTRIBUTE_KEYS,
@@ -526,6 +556,28 @@ def _open_telemetry_readable_span_events(events: Any, event_attribute_keys: froz
             {
                 "name": name,
                 **({"timestamp": timestamp} if timestamp is not None else {}),
+                **({"metadata": metadata} if metadata else {}),
+            }
+        )
+    return summaries
+
+
+def _open_telemetry_readable_span_links(links: Any, link_attribute_keys: frozenset[str]) -> list[dict[str, Any]]:
+    if not isinstance(links, Iterable) or isinstance(links, str | bytes | Mapping):
+        return []
+    summaries: list[dict[str, Any]] = []
+    for link in list(links)[:SPAN_LINK_LIMIT]:
+        context = _normalize_open_telemetry_span_context(
+            _first_attr(link, "context", "span_context", "spanContext"),
+        )
+        if context is None:
+            continue
+        metadata = _open_telemetry_selected_metadata(getattr(link, "attributes", None), link_attribute_keys)
+        summaries.append(
+            {
+                "traceId": context.trace_id,
+                "spanId": context.span_id,
+                "sampled": context.sampled,
                 **({"metadata": metadata} if metadata else {}),
             }
         )

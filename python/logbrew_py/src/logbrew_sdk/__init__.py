@@ -14,7 +14,13 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
-from logbrew_sdk._span_events import SpanAttributes, SpanEventSummary, validate_span_events
+from logbrew_sdk._span_events import (
+    SpanAttributes,
+    SpanEventSummary,
+    SpanLinkSummary,
+    validate_span_events,
+    validate_span_links,
+)
 from logbrew_sdk._support_ticket import (
     SupportDiagnosticsValue,
     SupportTicketCategory,
@@ -946,6 +952,19 @@ def validate_span(attributes: SpanAttributes) -> dict[str, Any]:
                 )
                 else {}
             ),
+            **(
+                {"links": span_links}
+                if (
+                    span_links := validate_span_links(
+                        attributes.get("links"),
+                        error_factory=SdkError,
+                        require_trace_id=require_trace_id,
+                        require_span_id=require_span_id,
+                        compact_metadata=compact_metadata,
+                    )
+                )
+                else {}
+            ),
         },
         attributes.get("metadata"),
     )
@@ -1053,6 +1072,7 @@ __all__ = [
     "SdkError",
     "SpanAttributes",
     "SpanEventSummary",
+    "SpanLinkSummary",
     "SupportDiagnosticsValue",
     "SupportTicketCategory",
     "SupportTicketDraft",
