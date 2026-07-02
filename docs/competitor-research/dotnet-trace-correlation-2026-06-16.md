@@ -394,3 +394,44 @@ Sentry and OpenTelemetry reduce setup friction by giving developers one or two o
 ### Remaining Gap
 
 LogBrew is easier to set up for common .NET ActivitySource capture than before while preserving explicit ownership and privacy. Sentry, Datadog, and OpenTelemetry still lead on truly automatic framework/client instrumentation, richer semantic conventions, resource attributes, full exporter pipelines, baggage/tracestate, profiling, and backend trace querying maturity.
+
+## 2026-07-02 ASP.NET Core ActivitySource Lifecycle Follow-Up
+
+### Additional Source Reviewed
+
+- Sentry .NET `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`.
+- Read `samples/Sentry.Samples.OpenTelemetry.AspNetCore/Program.cs`: a single ASP.NET Core setup path combines `AddAspNetCoreInstrumentation()`, `AddHttpClientInstrumentation()`, Sentry OTLP export, and `builder.WebHost.UseSentry(...)`.
+- Re-read `src/Sentry.AspNetCore/SentryTracingMiddleware.cs`: request pipeline tracing is owned by ASP.NET Core middleware and original request execution is preserved.
+- OpenTelemetry .NET Contrib `open-telemetry/opentelemetry-dotnet-contrib@41c029dd83cec8a188df83d162d11cb4741c783f`.
+- Re-read `src/OpenTelemetry.Instrumentation.Http/HttpClientInstrumentationTracerProviderBuilderExtensions.cs`: `AddHttpClientInstrumentation(...)` registers HTTP client sources and lifecycle objects through dependency injection.
+- Re-read `src/OpenTelemetry.Instrumentation.AspNetCore/AspNetCoreInstrumentationTracerProviderBuilderExtensions.cs`: `AddAspNetCoreInstrumentation(...)` registers ASP.NET Core instrumentation through DI and guards duplicate provider registration.
+- Datadog .NET tracer `DataDog/dd-trace-dotnet@93bb6e629d52987cf4d0e323dd68c4d58fcd13df`.
+- Re-read `tracer/src/Datadog.Trace/Activity/ActivityListener.cs`: Activity listener state is centralized, idempotent, and stoppable.
+- PostHog .NET `PostHog/posthog-dotnet@9737231a8231f58b4f6938f6d24ad671b3ccf54c`.
+- Re-read `src/PostHog.AspNetCore/Tracing/PostHogRequestContextMiddlewareExtensions.cs`: `UsePostHogRequestContext(...)` gives ASP.NET Core users a single middleware setup call.
+- Re-read `src/PostHog.AI/PostHogAIExtensions.cs`: app-owned `IHttpClientBuilder` registration keeps HTTP interception explicit.
+
+### Pattern
+
+Competitors reduce real-user setup friction by tying tracing setup to the host/framework lifecycle. Sentry and OpenTelemetry use DI/host-builder registration for ASP.NET Core and HTTP instrumentation. Datadog centralizes listener lifecycle internally. PostHog stays lighter but still exposes a one-call ASP.NET Core middleware extension. The tradeoff is that broader automation can duplicate spans or capture too much if defaults are not bounded.
+
+### LogBrew Change
+
+- Added `app.UseLogBrewDependencyActivitySourceTelemetry(client, options => ...)` to `LogBrew.AspNetCore`.
+- The extension starts a `LogBrewActivitySourceListener` with dependency presets for HTTP client, Entity Framework Core, SqlClient, and StackExchange.Redis, and disposes the listener from `IHostApplicationLifetime.ApplicationStopping`.
+- The extension is idempotent per `IApplicationBuilder` and does not enable ASP.NET Core server ActivitySource capture by default, avoiding duplicate request spans when apps already use `UseLogBrewRequestTelemetry(...)`.
+- Apps may still customize the listener options or explicitly add ASP.NET Core sources when they choose that ActivitySource path.
+- The extension does not add OpenTelemetry exporters/processors, own providers, subscribe to arbitrary `DiagnosticSource` events, install profiler hooks, patch ASP.NET Core/HTTP/database clients, capture headers/payloads/full URLs, open support tickets, or infer usage/quota.
+- The packaged `examples/AspNetCoreMiddlewareTelemetry.cs` now proves request span/log/metric correlation plus one dependency ActivitySource span from an installed `LogBrew.AspNetCore` package.
+
+### Evidence
+
+- RED TDD: `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.AspNetCore.Tests/LogBrew.AspNetCore.Tests.csproj --configuration Release` failed because `UseLogBrewDependencyActivitySourceTelemetry(...)` did not exist.
+- Focused GREEN: the same command passed with 5 ASP.NET Core tests.
+- Package proof: `bash scripts/check_dotnet_package.sh` passed, including NuGet package content/readme checks and example build checks.
+- Installed proof: `bash scripts/real_user_dotnet_smoke.sh` passed, including installed `LogBrew.AspNetCore` middleware example proof with `--expect-dependency`.
+- Load proof: `bash scripts/real_user_dotnet_high_load_smoke.sh` passed.
+
+### Remaining Gap
+
+This reduces ASP.NET Core setup friction and lifecycle mistakes for common dependency ActivitySource capture, but LogBrew is still less automatic than Sentry, Datadog, and OpenTelemetry. Remaining high-value .NET gaps are safe optional automatic framework/client instrumentation beyond ActivitySource listening, richer semantic conventions and resource attributes, baggage/tracestate interop where justified, profiling, exporter/collector interop, and mature backend trace querying.

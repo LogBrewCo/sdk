@@ -126,6 +126,7 @@ for needle in (
     "AspNetCoreRequestTelemetry.cs",
     "dotnet add package LogBrew.AspNetCore",
     "UseLogBrewRequestTelemetry",
+    "UseLogBrewDependencyActivitySourceTelemetry",
     "AspNetCoreMiddlewareTelemetry.cs",
     "does not patch ASP.NET Core",
     "first useful .NET service telemetry",
@@ -180,6 +181,7 @@ if 'dependency id="LogBrew"' not in nuspec:
 for needle in (
     "dotnet add package LogBrew.AspNetCore",
     "UseLogBrewRequestTelemetry",
+    "UseLogBrewDependencyActivitySourceTelemetry",
     "WithRequestFilter",
     "WithRouteTemplateSelector",
     "does not read request or response bodies",
@@ -367,7 +369,8 @@ curl -fsS \
 curl -fsS "$server_url/logbrew-preview" > "$tmp_dir/aspnetcore-middleware-preview.json"
 python3 "$repo_root/scripts/check_dotnet_aspnetcore_request_payload.py" \
   "$tmp_dir/aspnetcore-middleware-preview.json" \
-  "$tmp_dir/aspnetcore-middleware-response.json" >/dev/null
+  "$tmp_dir/aspnetcore-middleware-response.json" \
+  --expect-dependency >/dev/null
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
 server_pid=""

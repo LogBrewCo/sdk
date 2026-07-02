@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 #pragma warning disable CA1031 // Middleware diagnostics callbacks must never break app-owned requests.
 
@@ -115,6 +117,8 @@ namespace LogBrew
 
     public static class LogBrewAspNetCoreApplicationBuilderExtensions
     {
+        private const string DependencyActivitySourceListenerKey = "LogBrew.DependencyActivitySourceListener";
+
         public static IApplicationBuilder UseLogBrewRequestTelemetry(
             this IApplicationBuilder app,
             LogBrewClient client,
@@ -126,6 +130,43 @@ namespace LogBrew
             var options = LogBrewAspNetCoreOptions.Create();
             configure?.Invoke(options);
             return app.UseMiddleware<LogBrewAspNetCoreMiddleware>(client, options);
+        }
+
+        public static IApplicationBuilder UseLogBrewDependencyActivitySourceTelemetry(
+            this IApplicationBuilder app,
+            LogBrewClient client,
+            Action<LogBrewActivitySourceListenerOptions>? configure = null)
+        {
+            ArgumentNullException.ThrowIfNull(app);
+            ArgumentNullException.ThrowIfNull(client);
+
+            if (app.Properties.ContainsKey(DependencyActivitySourceListenerKey))
+            {
+                return app;
+            }
+
+            var lifetime = app.ApplicationServices.GetService<IHostApplicationLifetime>();
+            if (lifetime == null)
+            {
+                throw new SdkException(
+                    "validation_error",
+                    "ASP.NET Core host application lifetime service is required for LogBrew ActivitySource telemetry disposal");
+            }
+
+            var listener = LogBrewActivitySourceListener.Start(
+                client,
+                options =>
+                {
+                    options
+                        .WithHttpClientSources()
+                        .WithEntityFrameworkCoreSources()
+                        .WithSqlClientSources()
+                        .WithStackExchangeRedisSources();
+                    configure?.Invoke(options);
+                });
+            app.Properties[DependencyActivitySourceListenerKey] = listener;
+            lifetime.ApplicationStopping.Register(listener.Dispose);
+            return app;
         }
     }
 

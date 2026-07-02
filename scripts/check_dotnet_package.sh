@@ -121,6 +121,7 @@ for needle in (
     "AspNetCoreRequestTelemetry.cs",
     "dotnet add package LogBrew.AspNetCore",
     "UseLogBrewRequestTelemetry",
+    "UseLogBrewDependencyActivitySourceTelemetry",
     "AspNetCoreMiddlewareTelemetry.cs",
     "does not patch ASP.NET Core",
     "first useful .NET service telemetry",
@@ -164,6 +165,7 @@ if "<icon>logbrew-logo-espresso-bg-128.png</icon>" not in nuspec:
 for needle in (
     "dotnet add package LogBrew.AspNetCore",
     "UseLogBrewRequestTelemetry",
+    "UseLogBrewDependencyActivitySourceTelemetry",
     "WithRequestFilter",
     "WithRouteTemplateSelector",
     "does not read request or response bodies",

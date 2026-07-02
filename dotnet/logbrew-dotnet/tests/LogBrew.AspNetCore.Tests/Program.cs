@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using LogBrew;
 using Microsoft.AspNetCore.Builder;
@@ -7,6 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 const string IncomingTraceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
@@ -19,6 +22,8 @@ tests++;
 await AspNetCoreMiddlewareRouteSelectorStripsAbsoluteUrls().ConfigureAwait(false);
 tests++;
 await AspNetCoreMiddlewareFilterSkipsTelemetryAndTraceHeaderInjection().ConfigureAwait(false);
+tests++;
+AspNetCoreDependencyActivitySourceTelemetryCapturesAndDisposesWithHostLifetime();
 tests++;
 Console.WriteLine("dotnet aspnetcore package tests ok (" + tests.ToString(System.Globalization.CultureInfo.InvariantCulture) + " tests)");
 
@@ -178,6 +183,72 @@ static ApplicationBuilder CreateApplicationBuilder()
     return new ApplicationBuilder(new ServiceCollection().BuildServiceProvider());
 }
 
+static void AspNetCoreDependencyActivitySourceTelemetryCapturesAndDisposesWithHostLifetime()
+{
+    using var lifetime = new LogBrew.AspNetCore.Tests.TestHostApplicationLifetime();
+    var services = new ServiceCollection();
+    services.AddSingleton<IHostApplicationLifetime>(lifetime);
+    using var serviceProvider = services.BuildServiceProvider();
+    var app = new ApplicationBuilder(serviceProvider);
+    var client = LogBrewClient.Create("LOGBREW_API_KEY", "aspnetcore-activity-sources", "0.1.0");
+
+    app.UseLogBrewDependencyActivitySourceTelemetry(
+        client,
+        options => options
+            .WithEventIdPrefix("dotnet_aspnetcore_activity")
+            .WithTimestampProvider(() => "2026-06-02T10:00:42Z")
+            .WithMetadataProvider(activity => new Dictionary<string, object?>
+            {
+                ["framework"] = "aspnetcore",
+                ["activitySource"] = activity.Source.Name,
+                ["fullUrl"] = "https://shop.example/checkout?card=dropme",
+                ["ignoredObject"] = new object()
+            }));
+
+    using var source = new ActivitySource("System.Net.Http", "10.0.0");
+    using (var activity = source.StartActivity(
+        "https://shop.example/checkout?card=dropme",
+        ActivityKind.Client))
+    {
+        Require(activity != null, "expected ASP.NET Core extension to enable dependency ActivitySource listener");
+        activity!.SetTag("http.request.method", "POST");
+        activity.SetTag("http.route", "https://shop.example/checkout/:cart_id?card=dropme#review");
+        activity.SetTag("http.response.status_code", 202);
+        activity.SetTag("request.body", "card=dropme");
+    }
+
+    var preview = client.PreviewJson();
+    foreach (var expected in new[]
+    {
+        "\"id\": \"dotnet_aspnetcore_activity_span_",
+        "\"source\": \"dotnet.activity\"",
+        "\"activitySourceName\": \"System.Net.Http\"",
+        "\"activitySourceVersion\": \"10.0.0\"",
+        "\"httpMethod\": \"POST\"",
+        "\"httpRoute\": \"/checkout/:cart_id\"",
+        "\"httpStatusCode\": 202",
+        "\"framework\": \"aspnetcore\"",
+        "\"activitySource\": \"System.Net.Http\""
+    })
+    {
+        Require(preview.Contains(expected, StringComparison.Ordinal), "missing ASP.NET Core ActivitySource payload: " + expected);
+    }
+
+    foreach (var blocked in new[] { "card=dropme", "shop.example", "fullUrl", "ignoredObject", "request.body" })
+    {
+        Require(!preview.Contains(blocked, StringComparison.Ordinal), "expected ActivitySource payload to omit unsafe value: " + blocked);
+    }
+
+    var capturedEvents = client.PendingEvents();
+    lifetime.StopApplication();
+    using (var afterStop = source.StartActivity("after.stop", ActivityKind.Client))
+    {
+        afterStop?.SetTag("http.request.method", "GET");
+    }
+
+    Require(client.PendingEvents() == capturedEvents, "expected host lifetime stop to dispose ActivitySource listener");
+}
+
 static DefaultHttpContext CreateHttpContext()
 {
     var context = new DefaultHttpContext();
@@ -199,5 +270,35 @@ static void Require(bool condition, string message)
     if (!condition)
     {
         throw new InvalidOperationException(message);
+    }
+}
+
+namespace LogBrew.AspNetCore.Tests
+{
+    internal sealed class TestHostApplicationLifetime : IHostApplicationLifetime, IDisposable
+    {
+        private readonly CancellationTokenSource started = new CancellationTokenSource();
+        private readonly CancellationTokenSource stopping = new CancellationTokenSource();
+        private readonly CancellationTokenSource stopped = new CancellationTokenSource();
+
+        public CancellationToken ApplicationStarted => started.Token;
+
+        public CancellationToken ApplicationStopping => stopping.Token;
+
+        public CancellationToken ApplicationStopped => stopped.Token;
+
+        public void StopApplication()
+        {
+            stopping.Cancel();
+            stopped.Cancel();
+        }
+
+        public void Dispose()
+        {
+            started.Dispose();
+            stopping.Dispose();
+            stopped.Dispose();
+            GC.SuppressFinalize(this);
+        }
     }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using LogBrew;
 using Microsoft.AspNetCore.Builder;
@@ -31,10 +32,27 @@ app.UseLogBrewRequestTelemetry(
             ["framework"] = "aspnetcore",
             ["component"] = "checkout-api"
         }));
+app.UseLogBrewDependencyActivitySourceTelemetry(
+    client,
+    options => options
+        .WithEventIdPrefix("aspnetcore_dependency")
+        .WithTimestampProvider(() => "2026-06-02T10:00:42Z")
+        .WithMetadata(new Dictionary<string, object?>
+        {
+            ["framework"] = "aspnetcore",
+            ["component"] = "checkout-api"
+        }));
 
 app.MapGet("/ready", () => Results.Ok(new { ok = true }));
+using var outboundSource = new ActivitySource("System.Net.Http", "10.0.0");
 app.MapGet("/checkout/{cartId}", (ILogger<Program> logger, string cartId) =>
 {
+    using var dependency = outboundSource.StartActivity("GET /payments/{cartId}", ActivityKind.Client);
+    dependency?.SetTag("http.request.method", "GET");
+    dependency?.SetTag("http.route", "/payments/{cartId}");
+    dependency?.SetTag("http.response.status_code", 202);
+    dependency?.SetTag("http.url", "https://payments.example.test/payments/" + cartId + "?card=dropme");
+    dependency?.SetTag("request.body", "card=dropme");
     logger.LogInformation("checkout route accepted for {CartId}", cartId);
     return Results.Ok(new { ok = true, cartId });
 });

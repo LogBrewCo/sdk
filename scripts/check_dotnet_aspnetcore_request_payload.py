@@ -30,6 +30,12 @@ def event_by_type(events: list[dict[str, Any]], event_type: str) -> dict[str, An
     return matches[0]
 
 
+def event_by_id_prefix(events: list[dict[str, Any]], prefix: str) -> dict[str, Any]:
+    matches = [event for event in events if str(event.get("id", "")).startswith(prefix)]
+    require(len(matches) == 1, f"expected one event with id prefix {prefix}, got {len(matches)}")
+    return matches[0]
+
+
 def metadata(event: dict[str, Any]) -> dict[str, Any]:
     value = event.get("attributes", {}).get("metadata", {})
     require(isinstance(value, dict), "metadata must be an object")
@@ -37,8 +43,10 @@ def metadata(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: check_dotnet_aspnetcore_request_payload.py preview.json response.json")
+    if len(sys.argv) not in (3, 4):
+        raise SystemExit("usage: check_dotnet_aspnetcore_request_payload.py preview.json response.json [--expect-dependency]")
+    expect_dependency = len(sys.argv) == 4 and sys.argv[3] == "--expect-dependency"
+    require(len(sys.argv) == 3 or expect_dependency, f"unknown option: {sys.argv[3] if len(sys.argv) == 4 else ''}")
 
     payload_text = Path(sys.argv[1]).read_text()
     response = json.loads(Path(sys.argv[2]).read_text())
@@ -48,10 +56,13 @@ def main() -> int:
 
     payload = json.loads(payload_text)
     events = payload.get("events", [])
-    require([event.get("type") for event in events] == ["log", "span", "metric"], f"unexpected events: {events!r}")
+    event_types = [event.get("type") for event in events]
+    require(event_types.count("log") == 1, f"unexpected log events: {events!r}")
+    require(event_types.count("metric") == 1, f"unexpected metric events: {events!r}")
+    require(event_types.count("span") == (2 if expect_dependency else 1), f"unexpected span events: {events!r}")
 
     log = event_by_type(events, "log")
-    span = event_by_type(events, "span")
+    span = event_by_id_prefix(events, "aspnetcore_request_span_")
     metric = event_by_type(events, "metric")
     span_attributes = span["attributes"]
     span_id = span_attributes["spanId"]
@@ -86,6 +97,22 @@ def main() -> int:
     require(span_meta.get("statusCode") == 200, "status metadata missing")
     require(metric_meta.get("routeTemplate") == "/checkout/{cartId}", "metric route metadata mismatch")
     require(metadata(log).get("dotnetCategory") == "Program", "logger category mismatch")
+    if expect_dependency:
+        dependency_span = event_by_id_prefix(events, "aspnetcore_dependency_span_")
+        dependency_attrs = dependency_span["attributes"]
+        dependency_meta = metadata(dependency_span)
+        require(dependency_attrs["name"] == "GET /payments/{cartId}", "dependency span name mismatch")
+        require(dependency_attrs["status"] == "ok", "dependency span status mismatch")
+        require(dependency_attrs["durationMs"] >= 0, "dependency duration must be non-negative")
+        require(dependency_meta.get("source") == "dotnet.activity", "dependency source marker mismatch")
+        require(dependency_meta.get("activityKind") == "client", "dependency Activity kind mismatch")
+        require(dependency_meta.get("activitySourceName") == "System.Net.Http", "dependency ActivitySource name mismatch")
+        require(dependency_meta.get("activitySourceVersion") == "10.0.0", "dependency ActivitySource version mismatch")
+        require(dependency_meta.get("httpMethod") == "GET", "dependency HTTP method mismatch")
+        require(dependency_meta.get("httpRoute") == "/payments/{cartId}", "dependency HTTP route mismatch")
+        require(dependency_meta.get("httpStatusCode") == 202, "dependency HTTP status mismatch")
+        require(dependency_meta.get("framework") == "aspnetcore", "dependency framework metadata missing")
+        require(dependency_meta.get("component") == "checkout-api", "dependency component metadata missing")
     print("dotnet ASP.NET Core request telemetry payload ok")
     return 0
 

@@ -1,5 +1,36 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-02: .NET ASP.NET Core ActivitySource lifecycle setup improved after
+  source reads from Sentry .NET
+  `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`
+  (`samples/Sentry.Samples.OpenTelemetry.AspNetCore/Program.cs`,
+  `SentryTracingMiddleware.InvokeAsync`), OpenTelemetry .NET Contrib
+  `open-telemetry/opentelemetry-dotnet-contrib@41c029dd83cec8a188df83d162d11cb4741c783f`
+  (`AddHttpClientInstrumentation`, `AddAspNetCoreInstrumentation`),
+  Datadog .NET tracer
+  `DataDog/dd-trace-dotnet@93bb6e629d52987cf4d0e323dd68c4d58fcd13df`
+  (`ActivityListener.Initialize` lifecycle), and PostHog .NET
+  `PostHog/posthog-dotnet@9737231a8231f58b4f6938f6d24ad671b3ccf54c`
+  (`UsePostHogRequestContext`, app-owned HTTP handler setup). `LogBrew.AspNetCore`
+  now has `app.UseLogBrewDependencyActivitySourceTelemetry(client, ...)`,
+  which starts dependency ActivitySource capture for HTTP client, EF Core,
+  SqlClient, and StackExchange.Redis and disposes it on
+  `IHostApplicationLifetime.ApplicationStopping`. It is app-opt-in, idempotent
+  per app builder, avoids ASP.NET Core server ActivitySource by default to
+  prevent duplicate request spans with `UseLogBrewRequestTelemetry`, and still
+  avoids OTel exporter/provider ownership, arbitrary DiagnosticSource
+  subscriptions, profiler hooks, client/framework patching, baggage,
+  tracestate, payload/header/full-URL capture, support-ticket behavior, and
+  local usage/quota inference. Evidence: RED missing-extension ASP.NET Core
+  test, GREEN 5 ASP.NET Core tests, `bash scripts/check_dotnet_package.sh`,
+  `bash scripts/real_user_dotnet_smoke.sh` with installed
+  `LogBrew.AspNetCore` dependency span proof, and
+  `bash scripts/real_user_dotnet_high_load_smoke.sh`. Research:
+  `docs/competitor-research/dotnet-trace-correlation-2026-06-16.md`.
+  Remaining .NET gap: Sentry/Datadog/OTel still lead on truly automatic
+  instrumentation breadth, semantic conventions/resource attributes,
+  baggage/tracestate, profiling, exporter/collector interop, and backend trace
+  querying maturity.
 - 2026-07-02: .NET ActivitySource setup friction reduced after source reads
   from Sentry .NET
   `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`
