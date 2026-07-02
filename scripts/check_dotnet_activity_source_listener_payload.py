@@ -54,8 +54,8 @@ def main():
     require(meta.get("source") == "dotnet.activity", "Activity source marker missing")
     require(meta.get("activityName") == "POST /checkout/:cart_id", "Activity metadata name mismatch")
     require(meta.get("activityKind") == "client", "Activity kind mismatch")
-    require(meta.get("activitySourceName") == "Checkout.Service", "ActivitySource name mismatch")
-    require(meta.get("activitySourceVersion") == "1.0.0", "ActivitySource version mismatch")
+    require(meta.get("activitySourceName") == "System.Net.Http", "ActivitySource name mismatch")
+    require(meta.get("activitySourceVersion") == "10.0.0", "ActivitySource version mismatch")
     require(meta.get("traceFlags") == "01", "trace flags mismatch")
     require(meta.get("traceSampled") is True, "sampled flag mismatch")
     require(meta.get("httpMethod") == "POST", "HTTP method mismatch")
@@ -63,7 +63,7 @@ def main():
     require(meta.get("httpStatusCode") == 202, "HTTP status mismatch")
     require(meta.get("component") == "checkout", "static metadata missing")
     require(meta.get("feature") == "payments", "dynamic metadata missing")
-    require(meta.get("activitySource") == "Checkout.Service", "dynamic ActivitySource metadata missing")
+    require(meta.get("activitySource") == "System.Net.Http", "dynamic ActivitySource metadata missing")
 
 
 if __name__ == "__main__":

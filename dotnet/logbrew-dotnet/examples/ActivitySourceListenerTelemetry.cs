@@ -11,7 +11,7 @@ public static class Program
     public static void Main()
     {
         var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "0.1.0");
-        using var source = new ActivitySource("Checkout.Service", "1.0.0");
+        using var source = new ActivitySource("System.Net.Http", "10.0.0");
         using var ignoredSource = new ActivitySource("Checkout.Ignored", "1.0.0");
         var parent = new ActivityContext(
             ActivityTraceId.CreateFromString(IncomingTraceId.AsSpan()),
@@ -22,7 +22,7 @@ public static class Program
         using (LogBrewActivitySourceListener.Start(
             client,
             options => options
-                .WithSourceName("Checkout.Service")
+                .WithHttpClientSources()
                 .WithEventIdPrefix("dotnet_activity_source_listener")
                 .WithTimestampProvider(() => "2026-06-02T10:00:16Z")
                 .WithMetadata(new Dictionary<string, object?> { ["component"] = "checkout" })

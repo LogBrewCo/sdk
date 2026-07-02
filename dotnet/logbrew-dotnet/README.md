@@ -255,14 +255,14 @@ var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", 
 using var listener = LogBrewActivitySourceListener.Start(
     client,
     options => options
-        .WithSourceName("Checkout.Service")
+        .WithHttpClientSources()
         .WithEventIdPrefix("dotnet_activity_source")
         .WithMetadataProvider(activity => new Dictionary<string, object?>
         {
             ["component"] = activity.Source.Name
         }));
 
-using var source = new ActivitySource("Checkout.Service", "1.0.0");
+using var source = new ActivitySource("System.Net.Http", "10.0.0");
 using (var activity = source.StartActivity("checkout.pay", ActivityKind.Client))
 {
     activity?.SetTag("http.request.method", "POST");
@@ -271,7 +271,7 @@ using (var activity = source.StartActivity("checkout.pay", ActivityKind.Client))
 }
 ```
 
-`LogBrewActivitySourceListener` captures only stopped Activities from explicit `WithSourceName(...)` entries, delegates payload construction to `LogBrewActivitySpanTelemetry`, and reports SDK capture errors through optional `OnError(...)`. Calling `Start(client)` without source names is fail-closed and captures no Activities. It does not create OpenTelemetry processors, exporters, tracestate, baggage, global HTTP instrumentation, payload/header capture, or full URL/query capture.
+`LogBrewActivitySourceListener` captures only stopped Activities from explicit `WithSourceName(...)` entries or source-backed presets such as `WithHttpClientSources()`, `WithAspNetCoreSources()`, `WithEntityFrameworkCoreSources()`, `WithSqlClientSources()`, `WithStackExchangeRedisSources()`, and `WithCommonDotNetSources()`. It delegates payload construction to `LogBrewActivitySpanTelemetry` and reports SDK capture errors through optional `OnError(...)`. Calling `Start(client)` without source names is fail-closed and captures no Activities. It does not create OpenTelemetry processors, exporters, tracestate, baggage, global HTTP instrumentation, payload/header capture, or full URL/query capture.
 
 The packaged `examples/ActivitySourceListenerTelemetry.cs` file shows the same listener in a small console app, including safe route naming, explicit source filtering, and primitive-only metadata.
 

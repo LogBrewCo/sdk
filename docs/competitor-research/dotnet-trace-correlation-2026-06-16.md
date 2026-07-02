@@ -353,3 +353,44 @@ OpenTelemetry and Datadog preserve Activity events and links as first-class span
 ### Remaining Gap
 
 LogBrew is now richer for explicit, privacy-bounded .NET Activity capture than before and safer than broad exporter serialization for teams that do not want arbitrary Activity attributes captured. Sentry, Datadog, and OpenTelemetry still lead on automatic ActivitySource/ASP.NET/HttpClient/EF/SqlClient/Redis/Kafka instrumentation, resource attributes, dropped-count semantics, full OTel exporter pipelines, baggage/tracestate, and mature backend trace querying.
+
+## 2026-07-02 ActivitySource Preset Follow-Up
+
+### Additional Source Reviewed
+
+- Sentry .NET `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`.
+- Read `src/Sentry.OpenTelemetry/TracerProviderBuilderExtensions.cs`: `AddSentry(...)` registers a span processor and Sentry propagator with the app-owned OTel `TracerProviderBuilder`.
+- Read `src/Sentry.OpenTelemetry/SentrySpanProcessor.cs`: `OnStart(...)` and constructor resource/enricher setup map app OTel Activities into Sentry transaction/span state.
+- Read `src/Sentry.AspNetCore/SentryTracingMiddleware.cs`: middleware-owned ASP.NET Core request transaction setup and route/status/error completion.
+- OpenTelemetry .NET Contrib `open-telemetry/opentelemetry-dotnet-contrib@41c029dd83cec8a188df83d162d11cb4741c783f`.
+- Read `src/OpenTelemetry.Instrumentation.Http/HttpClientInstrumentationTracerProviderBuilderExtensions.cs`: `AddHttpClientInstrumentation(...)` and `AddHttpClientInstrumentationSource(...)` register `System.Net.Http`, `OpenTelemetry.Instrumentation.Http.HttpClient`, and legacy HTTP sources.
+- Read `src/OpenTelemetry.Instrumentation.Http/Implementation/HttpHandlerDiagnosticListener.cs`: source names and DiagnosticSource event names for `System.Net.Http`.
+- Read `src/OpenTelemetry.Instrumentation.AspNetCore/AspNetCoreInstrumentationTracerProviderBuilderExtensions.cs`: `AddAspNetCoreInstrumentation(...)` registers ASP.NET Core sources and guards duplicate subscriptions.
+- Read `src/OpenTelemetry.Instrumentation.AspNetCore/Implementation/HttpInListener.cs`: `Microsoft.AspNetCore` and legacy ASP.NET Core source names.
+- Read `src/Shared/ActivitySourceFactory.cs`, `OpenTelemetry.Instrumentation.EntityFrameworkCore/Implementation/EntityFrameworkDiagnosticListener.cs`, `OpenTelemetry.Instrumentation.SqlClient/Implementation/SqlTelemetryHelper.cs`, and `OpenTelemetry.Instrumentation.StackExchangeRedis/StackExchangeRedisConnectionInstrumentation.cs`: instrumentation package ActivitySource names.
+- Datadog .NET tracer `DataDog/dd-trace-dotnet@93bb6e629d52987cf4d0e323dd68c4d58fcd13df`.
+- Read `tracer/src/Datadog.Trace/Activity/ActivityListener.cs`: Activity listener initialization and current Activity access.
+- Read `tracer/src/Datadog.Trace/Configuration/TracerSettings.cs`: disabled ActivitySource configuration and Activity listener enablement.
+- PostHog .NET `PostHog/posthog-dotnet@9737231a8231f58b4f6938f6d24ad671b3ccf54c`.
+- Read `src/PostHog.AspNetCore/Tracing/PostHogRequestContextMiddleware.cs` and `PostHogRequestContextOptions.cs`: explicit ASP.NET Core request context middleware.
+- Read `src/PostHog.AI/PostHogAIExtensions.cs`: app-owned `IHttpClientBuilder` handler registration for OpenAI client analytics.
+
+### Pattern
+
+Sentry and OpenTelemetry reduce setup friction by giving developers one or two obvious registration calls instead of making them remember every framework ActivitySource name. Datadog goes further with profiler/ActivityListener infrastructure and disabled-source configuration. PostHog stays lighter in the inspected .NET source, using explicit ASP.NET Core middleware and app-owned HTTP handler registration rather than broad ActivitySource collection.
+
+### LogBrew Change
+
+- Added source-backed preset helpers on `LogBrewActivitySourceListenerOptions`: `WithHttpClientSources()`, `WithAspNetCoreSources()`, `WithEntityFrameworkCoreSources()`, `WithSqlClientSources()`, `WithStackExchangeRedisSources()`, and `WithCommonDotNetSources()`.
+- The listener still captures nothing by default; apps must explicitly start `LogBrewActivitySourceListener` and choose manual sources or presets.
+- Presets only add known source names. They do not create OpenTelemetry providers/exporters/processors, DiagnosticSource subscriptions, profiler hooks, HTTP/ASP.NET patching, baggage, tracestate, payload/header/full URL capture, or support-ticket behavior.
+- The packaged `examples/ActivitySourceListenerTelemetry.cs` now proves the HTTP client preset path from the installed package with sanitized `System.Net.Http` ActivitySource payload.
+
+### Evidence
+
+- RED TDD: focused .NET tests failed because `LogBrewActivitySourceListenerOptions` had no `WithCommonDotNetSources()` API.
+- Focused GREEN: `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release` passed with 71 .NET core tests.
+
+### Remaining Gap
+
+LogBrew is easier to set up for common .NET ActivitySource capture than before while preserving explicit ownership and privacy. Sentry, Datadog, and OpenTelemetry still lead on truly automatic framework/client instrumentation, richer semantic conventions, resource attributes, full exporter pipelines, baggage/tracestate, profiling, and backend trace querying maturity.

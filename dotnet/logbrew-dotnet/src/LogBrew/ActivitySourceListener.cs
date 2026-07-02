@@ -7,6 +7,37 @@ namespace LogBrew
 {
     public sealed class LogBrewActivitySourceListenerOptions
     {
+        private static readonly string[] HttpClientSourceNames =
+        {
+            "System.Net.Http",
+            "OpenTelemetry.Instrumentation.Http.HttpClient",
+            "OpenTelemetry.Instrumentation.Http.HttpWebRequest"
+        };
+
+        private static readonly string[] AspNetCoreSourceNames =
+        {
+            "Microsoft.AspNetCore",
+            "OpenTelemetry.Instrumentation.AspNetCore",
+            "Microsoft.AspNetCore.SignalR.Server",
+            "Microsoft.AspNetCore.Components",
+            "Microsoft.AspNetCore.Components.Server.Circuits"
+        };
+
+        private static readonly string[] EntityFrameworkCoreSourceNames =
+        {
+            "OpenTelemetry.Instrumentation.EntityFrameworkCore"
+        };
+
+        private static readonly string[] SqlClientSourceNames =
+        {
+            "OpenTelemetry.Instrumentation.SqlClient"
+        };
+
+        private static readonly string[] StackExchangeRedisSourceNames =
+        {
+            "OpenTelemetry.Instrumentation.StackExchangeRedis"
+        };
+
         private readonly HashSet<string> sourceNames = new HashSet<string>(StringComparer.Ordinal);
 
         internal LogBrewActivitySpanOptions SpanOptions { get; } = LogBrewActivitySpanOptions.Create();
@@ -53,6 +84,40 @@ namespace LogBrew
             return this;
         }
 
+        public LogBrewActivitySourceListenerOptions WithHttpClientSources()
+        {
+            return WithSourceNames(HttpClientSourceNames);
+        }
+
+        public LogBrewActivitySourceListenerOptions WithAspNetCoreSources()
+        {
+            return WithSourceNames(AspNetCoreSourceNames);
+        }
+
+        public LogBrewActivitySourceListenerOptions WithEntityFrameworkCoreSources()
+        {
+            return WithSourceNames(EntityFrameworkCoreSourceNames);
+        }
+
+        public LogBrewActivitySourceListenerOptions WithSqlClientSources()
+        {
+            return WithSourceNames(SqlClientSourceNames);
+        }
+
+        public LogBrewActivitySourceListenerOptions WithStackExchangeRedisSources()
+        {
+            return WithSourceNames(StackExchangeRedisSourceNames);
+        }
+
+        public LogBrewActivitySourceListenerOptions WithCommonDotNetSources()
+        {
+            return WithHttpClientSources()
+                .WithAspNetCoreSources()
+                .WithEntityFrameworkCoreSources()
+                .WithSqlClientSources()
+                .WithStackExchangeRedisSources();
+        }
+
         public LogBrewActivitySourceListenerOptions WithTimestampProvider(Func<string> value)
         {
             SpanOptions.WithTimestampProvider(value);
@@ -62,6 +127,16 @@ namespace LogBrew
         public LogBrewActivitySourceListenerOptions OnError(Action<SdkException> value)
         {
             SpanOptions.OnError(value);
+            return this;
+        }
+
+        private LogBrewActivitySourceListenerOptions WithSourceNames(IEnumerable<string> values)
+        {
+            foreach (var value in values)
+            {
+                WithSourceName(value);
+            }
+
             return this;
         }
     }

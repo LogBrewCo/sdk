@@ -12,6 +12,8 @@ internal static class ActivitySourceListenerTests
         tests++;
         ListenerUsesSafeNameForConfiguredUrlLikeActivity();
         tests++;
+        ListenerCommonDotNetSourcesCaptureKnownFrameworkSources();
+        tests++;
         ListenerRequiresExplicitSourceName();
         tests++;
         ListenerDisposeStopsCapture();
@@ -109,6 +111,50 @@ internal static class ActivitySourceListenerTests
         }
     }
 
+    private static void ListenerCommonDotNetSourcesCaptureKnownFrameworkSources()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "activity-source-tests", "0.1.0");
+
+        using var httpSource = new ActivitySource("System.Net.Http", "10.0.0");
+        using var aspNetCoreSource = new ActivitySource("Microsoft.AspNetCore", "10.0.0");
+        using var efCoreSource = new ActivitySource("OpenTelemetry.Instrumentation.EntityFrameworkCore", "1.14.0");
+        using var sqlClientSource = new ActivitySource("OpenTelemetry.Instrumentation.SqlClient", "1.14.0");
+        using var redisSource = new ActivitySource("OpenTelemetry.Instrumentation.StackExchangeRedis", "1.14.0");
+        using var ignoredSource = new ActivitySource("LogBrew.Tests.NotKnown", "1.0.0");
+
+        using (LogBrewActivitySourceListener.Start(
+            client,
+            options => options
+                .WithCommonDotNetSources()
+                .WithEventIdPrefix("dotnet_known_sources")))
+        {
+            CaptureOne(httpSource, "GET", "/api/:id", 202);
+            CaptureOne(aspNetCoreSource, "POST", "/checkout/:cart_id", 201);
+            CaptureOne(efCoreSource, "POST", "/db/:operation", 200);
+            CaptureOne(sqlClientSource, "POST", "/sql/:operation", 200);
+            CaptureOne(redisSource, "POST", "/cache/:operation", 200);
+            using var ignored = ignoredSource.StartActivity("GET /ignored", ActivityKind.Client);
+            ignored?.SetTag("http.request.method", "GET");
+            ignored?.SetTag("http.route", "/ignored");
+        }
+
+        Require(client.PendingEvents() == 5, "expected known .NET ActivitySource presets to capture only known sources");
+        var payload = client.PreviewJson();
+        foreach (var expected in new[]
+        {
+            "\"activitySourceName\": \"System.Net.Http\"",
+            "\"activitySourceName\": \"Microsoft.AspNetCore\"",
+            "\"activitySourceName\": \"OpenTelemetry.Instrumentation.EntityFrameworkCore\"",
+            "\"activitySourceName\": \"OpenTelemetry.Instrumentation.SqlClient\"",
+            "\"activitySourceName\": \"OpenTelemetry.Instrumentation.StackExchangeRedis\""
+        })
+        {
+            Require(payload.Contains(expected, StringComparison.Ordinal), "missing known ActivitySource preset payload: " + expected);
+        }
+
+        Require(!payload.Contains("LogBrew.Tests.NotKnown", StringComparison.Ordinal), "expected unknown source to remain uncaptured");
+    }
+
     private static void ListenerRequiresExplicitSourceName()
     {
         var client = LogBrewClient.Create("LOGBREW_API_KEY", "activity-source-tests", "0.1.0");
@@ -152,5 +198,15 @@ internal static class ActivitySourceListenerTests
     private static string BlockedQuery()
     {
         return "tok" + "en=sample";
+    }
+
+    private static void CaptureOne(ActivitySource source, string method, string route, int statusCode)
+    {
+        using var activity = source.StartActivity(method + " " + route, ActivityKind.Client);
+        Require(activity != null, "expected configured ActivitySource to create an Activity");
+        activity!.SetTag("http.request.method", method);
+        activity.SetTag("http.route", route);
+        activity.SetTag("http.response.status_code", statusCode);
+        activity.SetTag("http.url", "https://shop.example" + route + "?card=sample");
     }
 }

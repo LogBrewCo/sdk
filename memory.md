@@ -1,5 +1,41 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-02: .NET ActivitySource setup friction reduced after source reads
+  from Sentry .NET
+  `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`
+  (`TracerProviderBuilderExtensions.AddSentry`,
+  `SentrySpanProcessor.OnStart`, `SentryTracingMiddleware.InvokeAsync`),
+  OpenTelemetry .NET Contrib
+  `open-telemetry/opentelemetry-dotnet-contrib@41c029dd83cec8a188df83d162d11cb4741c783f`
+  (`AddHttpClientInstrumentation`, `AddHttpClientInstrumentationSource`,
+  `HttpHandlerDiagnosticListener`, `AddAspNetCoreInstrumentation`,
+  `HttpInListener`, `ActivitySourceFactory`, EF Core/SqlClient/Redis
+  ActivitySource helpers), Datadog .NET tracer
+  `DataDog/dd-trace-dotnet@93bb6e629d52987cf4d0e323dd68c4d58fcd13df`
+  (`ActivityListener.Initialize`, `TracerSettings.DisabledActivitySources`),
+  and PostHog .NET
+  `PostHog/posthog-dotnet@9737231a8231f58b4f6938f6d24ad671b3ccf54c`
+  (explicit ASP.NET Core middleware and app-owned HTTP handler patterns).
+  `LogBrewActivitySourceListenerOptions` now has source-backed presets:
+  `WithHttpClientSources()`, `WithAspNetCoreSources()`,
+  `WithEntityFrameworkCoreSources()`, `WithSqlClientSources()`,
+  `WithStackExchangeRedisSources()`, and `WithCommonDotNetSources()`.
+  The listener remains fail-closed without explicit source selection and still
+  avoids OTel provider/exporter/processor ownership, DiagnosticSource
+  subscriptions, profiler hooks, HTTP/ASP.NET patching, baggage, tracestate,
+  payload/header/full-URL capture, and support-ticket behavior. Evidence:
+  RED missing-preset .NET test, GREEN 71 core .NET tests,
+  `bash scripts/check_dotnet_package.sh`,
+  `bash scripts/real_user_dotnet_smoke.sh`,
+  `bash scripts/real_user_dotnet_high_load_smoke.sh`, focused installed-smoke
+  guard, Python payload checker compile, markdown links, backend reports,
+  release metadata, confidentiality scan, generated-artifact hygiene, diff
+  check, and thermo review. Research:
+  `docs/competitor-research/dotnet-trace-correlation-2026-06-16.md`.
+  Remaining .NET gap: Sentry/Datadog/OpenTelemetry still lead on truly
+  automatic framework/client instrumentation, richer semantic conventions,
+  resource attributes, full exporter pipelines, baggage/tracestate, profiling,
+  and mature trace querying.
 - 2026-07-02: .NET Activity event/link rich-trace gap reduced after source
   reads from Sentry .NET
   `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`
