@@ -31,18 +31,22 @@ dotnet pack "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release --
 dotnet pack "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
+dotnet pack "$package_dir/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 package_version="$(dotnet msbuild "$package_dir/src/LogBrew/LogBrew.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 aspnetcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 efcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 redis_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
+otel_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 nupkg="$tmp_dir/packages/LogBrew.${package_version}.nupkg"
 aspnetcore_nupkg="$tmp_dir/packages/LogBrew.AspNetCore.${aspnetcore_package_version}.nupkg"
 efcore_nupkg="$tmp_dir/packages/LogBrew.EntityFrameworkCore.${efcore_package_version}.nupkg"
 redis_nupkg="$tmp_dir/packages/LogBrew.StackExchangeRedis.${redis_package_version}.nupkg"
+otel_nupkg="$tmp_dir/packages/LogBrew.OpenTelemetry.${otel_package_version}.nupkg"
 test -f "$nupkg"
 test -f "$aspnetcore_nupkg"
 test -f "$efcore_nupkg"
 test -f "$redis_nupkg"
+test -f "$otel_nupkg"
 export NUGET_PACKAGES="$tmp_dir/nuget-packages"
 nuget_org_source="https://api.nuget.org/v3/index.json"
 cat > "$tmp_dir/NuGet.config" <<EOF
@@ -122,8 +126,10 @@ for needle in (
     "LogBrewOperationTracing",
     "LogBrewDbCommandTelemetry",
     "dotnet add package LogBrew.StackExchangeRedis",
+    "dotnet add package LogBrew.OpenTelemetry",
     "TraceLogBrewCommand",
     "StackExchangeRedisCommandTelemetry.cs",
+    "OpenTelemetrySpanProcessorTelemetry.cs",
     "DbCommandTelemetry.cs",
     "LogBrewServerRequestTelemetry",
     "AspNetCoreRequestTelemetry.cs",
@@ -157,6 +163,43 @@ PY
 redis_extract_dir="$tmp_dir/redis-package-extract"
 mkdir -p "$redis_extract_dir"
 python3 "$repo_root/scripts/check_dotnet_stackexchange_redis_nupkg.py" "$redis_nupkg" "$redis_extract_dir" >/dev/null
+
+otel_extract_dir="$tmp_dir/opentelemetry-package-extract"
+mkdir -p "$otel_extract_dir"
+python3 - "$otel_nupkg" "$otel_extract_dir" <<'PY'
+import sys
+import zipfile
+from pathlib import Path
+
+nupkg = Path(sys.argv[1])
+extract_dir = Path(sys.argv[2])
+with zipfile.ZipFile(nupkg) as archive:
+    archive.extractall(extract_dir)
+    names = set(archive.namelist())
+    for required in (
+        "LogBrew.OpenTelemetry.nuspec",
+        "lib/netstandard2.0/LogBrew.OpenTelemetry.dll",
+        "README.md",
+        "examples/OpenTelemetrySpanProcessorTelemetry.cs",
+    ):
+        if required not in names:
+            raise SystemExit(f"missing OpenTelemetry nupkg file: {required}")
+    readme = archive.read("README.md").decode()
+    nuspec = archive.read("LogBrew.OpenTelemetry.nuspec").decode()
+if 'dependency id="LogBrew"' not in nuspec:
+    raise SystemExit("missing LogBrew dependency metadata")
+if 'dependency id="OpenTelemetry"' not in nuspec:
+    raise SystemExit("missing OpenTelemetry dependency metadata")
+for needle in (
+    "dotnet add package LogBrew.OpenTelemetry",
+    "TracerProviderBuilder.AddLogBrew",
+    "LogBrewOpenTelemetrySpanProcessor",
+    "does not create an OpenTelemetry provider",
+    "OpenTelemetrySpanProcessorTelemetry.cs",
+):
+    if needle not in readme:
+        raise SystemExit(f"missing OpenTelemetry README guidance: {needle}")
+PY
 
 aspnetcore_extract_dir="$tmp_dir/aspnetcore-package-extract"
 mkdir -p "$aspnetcore_extract_dir"
@@ -297,6 +340,14 @@ dotnet run --project "$redis_example_dir/RedisExampleApp.csproj" --configuration
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/redis-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_stackexchange_redis_payload.py" "$tmp_dir/redis-example.stdout.json" "$tmp_dir/redis-example.stderr.json" >/dev/null
 
+otel_example_dir="$tmp_dir/opentelemetry-example-app"
+dotnet new console --framework net10.0 --name OpenTelemetryExampleApp --output "$otel_example_dir" >/dev/null
+cp "$otel_extract_dir/examples/OpenTelemetrySpanProcessorTelemetry.cs" "$otel_example_dir/Program.cs"
+dotnet add "$otel_example_dir/OpenTelemetryExampleApp.csproj" package LogBrew.OpenTelemetry --version "$otel_package_version" >/dev/null
+dotnet run --project "$otel_example_dir/OpenTelemetryExampleApp.csproj" --configuration Release > "$tmp_dir/opentelemetry-example.stdout.json" 2> "$tmp_dir/opentelemetry-example.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/opentelemetry-example.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_opentelemetry_payload.py" "$tmp_dir/opentelemetry-example.stdout.json" "$tmp_dir/opentelemetry-example.stderr.json" >/dev/null
+
 aspnet_dir="$tmp_dir/aspnetcore-app"
 dotnet new web --framework net10.0 --name AspNetCoreApp --output "$aspnet_dir" >/dev/null
 cp "$extract_dir/examples/AspNetCoreRequestTelemetry.cs" "$aspnet_dir/Program.cs"
@@ -386,16 +437,24 @@ dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version "$pack
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.AspNetCore --version "$aspnetcore_package_version" >/dev/null
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.EntityFrameworkCore --version "$efcore_package_version" >/dev/null
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.StackExchangeRedis --version "$redis_package_version" >/dev/null
+dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.OpenTelemetry --version "$otel_package_version" >/dev/null
 dotnet list "$lifecycle_dir/LifecycleApp.csproj" package > "$tmp_dir/lifecycle-packages.txt"
 grep -q 'LogBrew' "$tmp_dir/lifecycle-packages.txt"
 grep -q 'LogBrew.AspNetCore' "$tmp_dir/lifecycle-packages.txt"
 grep -q 'LogBrew.EntityFrameworkCore' "$tmp_dir/lifecycle-packages.txt"
 grep -q 'LogBrew.StackExchangeRedis' "$tmp_dir/lifecycle-packages.txt"
+grep -q 'LogBrew.OpenTelemetry' "$tmp_dir/lifecycle-packages.txt"
 dotnet list "$lifecycle_dir/LifecycleApp.csproj" package --include-transitive > "$tmp_dir/lifecycle-packages-transitive.txt"
 grep -q 'Microsoft.Extensions.Logging' "$tmp_dir/lifecycle-packages-transitive.txt"
 grep -q 'Microsoft.EntityFrameworkCore.Relational' "$tmp_dir/lifecycle-packages-transitive.txt"
 grep -q 'StackExchange.Redis' "$tmp_dir/lifecycle-packages-transitive.txt"
+grep -q 'OpenTelemetry' "$tmp_dir/lifecycle-packages-transitive.txt"
 grep -q 'LogBrew' "$tmp_dir/lifecycle-packages-transitive.txt"
+dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.OpenTelemetry >/dev/null
+if grep -q 'PackageReference Include="LogBrew.OpenTelemetry"' "$lifecycle_dir/LifecycleApp.csproj"; then
+  echo "expected dotnet remove package to remove LogBrew.OpenTelemetry reference" >&2
+  exit 1
+fi
 dotnet remove "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.StackExchangeRedis >/dev/null
 if grep -q 'PackageReference Include="LogBrew.StackExchangeRedis"' "$lifecycle_dir/LifecycleApp.csproj"; then
   echo "expected dotnet remove package to remove LogBrew.StackExchangeRedis reference" >&2
@@ -420,10 +479,12 @@ dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew --version "$pack
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.AspNetCore --version "$aspnetcore_package_version" >/dev/null
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.EntityFrameworkCore --version "$efcore_package_version" >/dev/null
 dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.StackExchangeRedis --version "$redis_package_version" >/dev/null
+dotnet add "$lifecycle_dir/LifecycleApp.csproj" package LogBrew.OpenTelemetry --version "$otel_package_version" >/dev/null
 grep -q "PackageReference Include=\"LogBrew\" Version=\"$package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
 grep -q "PackageReference Include=\"LogBrew.AspNetCore\" Version=\"$aspnetcore_package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
 grep -q "PackageReference Include=\"LogBrew.EntityFrameworkCore\" Version=\"$efcore_package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
 grep -q "PackageReference Include=\"LogBrew.StackExchangeRedis\" Version=\"$redis_package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
+grep -q "PackageReference Include=\"LogBrew.OpenTelemetry\" Version=\"$otel_package_version\"" "$lifecycle_dir/LifecycleApp.csproj"
 
 logging_dir="$tmp_dir/logging-app"
 dotnet new console --framework net10.0 --name LoggingApp --output "$logging_dir" >/dev/null

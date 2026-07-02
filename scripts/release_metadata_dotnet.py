@@ -11,6 +11,7 @@ def validate_dotnet_packages(
     aspnetcore_version: str,
     efcore_version: str,
     redis_version: str,
+    otel_version: str,
     public_license: str,
     repo_url: str,
 ) -> None:
@@ -130,6 +131,33 @@ def validate_dotnet_packages(
             ("ProjectReference Include=\"../LogBrew/LogBrew.csproj\"", "package must depend on the core LogBrew project"),
             ("PackageReference Include=\"StackExchange.Redis\"", "package must depend on StackExchange.Redis APIs"),
             ("examples/StackExchangeRedisCommandTelemetry.cs", "package must include examples/StackExchangeRedisCommandTelemetry.cs"),
+        ),
+    )
+    _validate_package(
+        root,
+        failures,
+        "dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj",
+        required_paths=(
+            "dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/README.md",
+            "dotnet/logbrew-dotnet/examples/OpenTelemetrySpanProcessorTelemetry.cs",
+            "assets/brand/logbrew-logo-espresso-bg-128.png",
+        ),
+        expected={
+            "TargetFramework": "netstandard2.0",
+            "PackageId": "LogBrew.OpenTelemetry",
+            "Version": otel_version,
+            "Authors": "LogBrew",
+            "Company": "LogBrew",
+            "PackageLicenseExpression": public_license,
+            "PackageProjectUrl": repo_url,
+            "RepositoryUrl": repo_url,
+            "PackageReadmeFile": "README.md",
+            "PackageIcon": "logbrew-logo-espresso-bg-128.png",
+        },
+        project_needles=(
+            ("ProjectReference Include=\"../LogBrew/LogBrew.csproj\"", "package must depend on the core LogBrew project"),
+            ("PackageReference Include=\"OpenTelemetry\"", "package must depend on OpenTelemetry APIs"),
+            ("examples/OpenTelemetrySpanProcessorTelemetry.cs", "package must include examples/OpenTelemetrySpanProcessorTelemetry.cs"),
         ),
     )
 

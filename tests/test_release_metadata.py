@@ -97,15 +97,19 @@ jobs:
           echo "aspnetcore_version=0.1.0" >> "$GITHUB_OUTPUT"
           echo "efcore_version=0.1.0" >> "$GITHUB_OUTPUT"
           echo "redis_version=0.1.0" >> "$GITHUB_OUTPUT"
+          echo "otel_version=0.1.0" >> "$GITHUB_OUTPUT"
       - name: Validate NuGet metadata
         run: |
           python3 scripts/check_release_metadata.py \\
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
             --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \\
-            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}"
+            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \\
+            --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}"
       - name: Pack NuGet package
-        run: dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj
+        run: |
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj
       - name: Publish NuGet package
         run: dotnet nuget push --skip-duplicate
       - name: Verify public NuGet package
@@ -114,14 +118,16 @@ jobs:
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
             --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \\
-            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}"
+            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \\
+            --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}"
       - name: Verify public NuGet install
         run: |
           bash scripts/real_user_dotnet_public_nuget_smoke.sh \\
             "${{ steps.nuget-version.outputs.core_version }}" \\
             "${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
             "${{ steps.nuget-version.outputs.efcore_version }}" \\
-            "${{ steps.nuget-version.outputs.redis_version }}"
+            "${{ steps.nuget-version.outputs.redis_version }}" \\
+            "${{ steps.nuget-version.outputs.otel_version }}"
   verify:
     name: Public registry verification
     if: ${{ inputs.target == 'verify' }}
@@ -226,7 +232,8 @@ jobs:
             "${{ steps.nuget-version.outputs.core_version }}" \\
             "${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
             "${{ steps.nuget-version.outputs.efcore_version }}" \\
-            "${{ steps.nuget-version.outputs.redis_version }}"
+            "${{ steps.nuget-version.outputs.redis_version }}" \\
+            "${{ steps.nuget-version.outputs.otel_version }}"
 """,
                 "",
             )
@@ -581,18 +588,21 @@ jobs:
             aspnetcore_dir = package_dir / "src" / "LogBrew.AspNetCore"
             efcore_dir = package_dir / "src" / "LogBrew.EntityFrameworkCore"
             redis_dir = package_dir / "src" / "LogBrew.StackExchangeRedis"
+            otel_dir = package_dir / "src" / "LogBrew.OpenTelemetry"
             examples_dir = package_dir / "examples"
             assets_dir = root / "assets" / "brand"
             project_dir.mkdir(parents=True)
             aspnetcore_dir.mkdir(parents=True)
             efcore_dir.mkdir(parents=True)
             redis_dir.mkdir(parents=True)
+            otel_dir.mkdir(parents=True)
             examples_dir.mkdir(parents=True)
             assets_dir.mkdir(parents=True)
             (package_dir / "README.md").write_text("# LogBrew .NET\n", encoding="utf-8")
             (aspnetcore_dir / "README.md").write_text("# LogBrew ASP.NET Core\n", encoding="utf-8")
             (efcore_dir / "README.md").write_text("# LogBrew Entity Framework Core\n", encoding="utf-8")
             (redis_dir / "README.md").write_text("# LogBrew StackExchange.Redis\n", encoding="utf-8")
+            (otel_dir / "README.md").write_text("# LogBrew OpenTelemetry\n", encoding="utf-8")
             for example in (
                 "FirstUsefulTelemetry.cs",
                 "ActivityTraceCorrelation.cs",
@@ -604,6 +614,7 @@ jobs:
                 "AspNetCoreMiddlewareTelemetry.cs",
                 "EntityFrameworkCoreCommandTelemetry.cs",
                 "StackExchangeRedisCommandTelemetry.cs",
+                "OpenTelemetrySpanProcessorTelemetry.cs",
             ):
                 (examples_dir / example).write_text("// example\n", encoding="utf-8")
             (assets_dir / "logbrew-logo-transparent-128.png").write_bytes(b"png")
@@ -716,12 +727,39 @@ jobs:
                 + "\n",
                 encoding="utf-8",
             )
+            (otel_dir / "LogBrew.OpenTelemetry.csproj").write_text(
+                """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>LogBrew.OpenTelemetry</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>LogBrew</Authors>
+    <Company>LogBrew</Company>
+    <Description>Public LogBrew OpenTelemetry integration.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logbrew-logo-espresso-bg-128.png</PackageIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../LogBrew/LogBrew.csproj" />
+    <PackageReference Include="OpenTelemetry" Version="1.16.0" />
+    <None Include="../../examples/OpenTelemetrySpanProcessorTelemetry.cs" Pack="true" PackagePath="examples/" />
+  </ItemGroup>
+</Project>
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
 
             default_failures: list[str] = []
             check_release_metadata.validate_dotnet_packages(
                 root,
                 default_failures,
                 check_release_metadata.DOTNET_VERSION,
+                check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
@@ -733,6 +771,7 @@ jobs:
                 root,
                 override_failures,
                 "0.1.5",
+                check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,

@@ -570,7 +570,8 @@ jobs:
           aspnetcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           efcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           redis_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
-          if [[ -z "$core_version" || -z "$aspnetcore_version" || -z "$efcore_version" || -z "$redis_version" ]]; then
+          otel_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          if [[ -z "$core_version" || -z "$aspnetcore_version" || -z "$efcore_version" || -z "$redis_version" || -z "$otel_version" ]]; then
             echo "Could not read NuGet package versions from .NET package projects" >&2
             exit 1
           fi
@@ -578,6 +579,7 @@ jobs:
           echo "aspnetcore_version=$aspnetcore_version" >> "$GITHUB_OUTPUT"
           echo "efcore_version=$efcore_version" >> "$GITHUB_OUTPUT"
           echo "redis_version=$redis_version" >> "$GITHUB_OUTPUT"
+          echo "otel_version=$otel_version" >> "$GITHUB_OUTPUT"
 
       - name: Validate NuGet release metadata
         run: |
@@ -585,7 +587,8 @@ jobs:
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
             --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
-            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}"
+            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
+            --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}"
 
       - name: Pack NuGet package
         run: |
@@ -593,6 +596,7 @@ jobs:
           dotnet pack dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj --configuration Release --output dist/nuget
           dotnet pack dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj --configuration Release --output dist/nuget
           dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj --configuration Release --output dist/nuget
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj --configuration Release --output dist/nuget
 
       - name: Authenticate to NuGet
         if: ${{ ! inputs.dry_run }}
@@ -619,6 +623,7 @@ jobs:
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
             --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
             --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
+            --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}" \
             --retries 20 --retry-delay 30
 
       - name: Verify public NuGet install
@@ -628,7 +633,8 @@ jobs:
             "${{ steps.nuget-version.outputs.core_version }}" \
             "${{ steps.nuget-version.outputs.aspnetcore_version }}" \
             "${{ steps.nuget-version.outputs.efcore_version }}" \
-            "${{ steps.nuget-version.outputs.redis_version }}"
+            "${{ steps.nuget-version.outputs.redis_version }}" \
+            "${{ steps.nuget-version.outputs.otel_version }}"
 
   packagist:
     name: Packagist package

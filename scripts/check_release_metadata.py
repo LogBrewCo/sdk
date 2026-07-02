@@ -47,7 +47,13 @@ JS_PACKAGES = {
     "js/logbrew-svelte": "@logbrew/svelte",
     "js/logbrew-vue": "@logbrew/vue",
 }
-NUGET_PACKAGES = {"LogBrew", "LogBrew.AspNetCore", "LogBrew.EntityFrameworkCore", "LogBrew.StackExchangeRedis"}
+NUGET_PACKAGES = {
+    "LogBrew",
+    "LogBrew.AspNetCore",
+    "LogBrew.EntityFrameworkCore",
+    "LogBrew.StackExchangeRedis",
+    "LogBrew.OpenTelemetry",
+}
 
 OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
 PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
@@ -855,6 +861,7 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         required_publish_needles = {
             "NuGet package version output": "id: nuget-version",
             "NuGet StackExchange.Redis pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj",
+            "NuGet OpenTelemetry pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj",
             "NuGet duplicate-safe publish": "--skip-duplicate",
             "NuGet public install smoke": "bash scripts/real_user_dotnet_public_nuget_smoke.sh",
             "verify target exact version input": "verify_version:",
@@ -888,6 +895,7 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             ("ASP.NET Core", "LogBrew.AspNetCore", "aspnetcore_version"),
             ("Entity Framework Core", "LogBrew.EntityFrameworkCore", "efcore_version"),
             ("StackExchange.Redis", "LogBrew.StackExchangeRedis", "redis_version"),
+            ("OpenTelemetry", "LogBrew.OpenTelemetry", "otel_version"),
         )
         for label, package, output_name in nuget_output_versions:
             needle = f'--nuget-version "{package}=${{{{ steps.nuget-version.outputs.{output_name} }}}}"'
@@ -954,6 +962,7 @@ def validate(
         nuget_versions.get("LogBrew.AspNetCore", PUBLIC_VERSION),
         nuget_versions.get("LogBrew.EntityFrameworkCore", PUBLIC_VERSION),
         nuget_versions.get("LogBrew.StackExchangeRedis", PUBLIC_VERSION),
+        nuget_versions.get("LogBrew.OpenTelemetry", PUBLIC_VERSION),
         PUBLIC_LICENSE,
         REPO_URL,
     )

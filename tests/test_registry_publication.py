@@ -90,6 +90,7 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertIn("logbrew-sdk", labels)
         self.assertIn("LogBrew", labels)
         self.assertIn("LogBrew.StackExchangeRedis", labels)
+        self.assertIn("LogBrew.OpenTelemetry", labels)
         self.assertNotIn("logbrew-fastapi", labels)
         self.assertNotIn("logbrew", labels)
         self.assertNotIn("logbrew/sdk", labels)

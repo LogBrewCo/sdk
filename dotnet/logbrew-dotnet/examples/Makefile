@@ -1,4 +1,4 @@
-.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation run-activity-trace-correlation run-activity-source-listener-telemetry run-dependency-spans-telemetry run-db-command-telemetry run-http-client-outbound-telemetry run-entity-framework-core-command-telemetry run-stackexchange-redis-command-telemetry run-aspnetcore-request-telemetry run-aspnetcore-middleware-telemetry
+.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation run-activity-trace-correlation run-activity-source-listener-telemetry run-dependency-spans-telemetry run-db-command-telemetry run-http-client-outbound-telemetry run-entity-framework-core-command-telemetry run-stackexchange-redis-command-telemetry run-opentelemetry-span-processor-telemetry run-aspnetcore-request-telemetry run-aspnetcore-middleware-telemetry
 
 help:
 	@printf '%s\n' 'run-readme-example -> make run-readme-example'
@@ -13,6 +13,7 @@ help:
 	@printf '%s\n' 'run-http-client-outbound-telemetry -> make run-http-client-outbound-telemetry'
 	@printf '%s\n' 'run-entity-framework-core-command-telemetry -> make run-entity-framework-core-command-telemetry'
 	@printf '%s\n' 'run-stackexchange-redis-command-telemetry -> make run-stackexchange-redis-command-telemetry'
+	@printf '%s\n' 'run-opentelemetry-span-processor-telemetry -> make run-opentelemetry-span-processor-telemetry'
 	@printf '%s\n' 'run-aspnetcore-request-telemetry -> make run-aspnetcore-request-telemetry'
 	@printf '%s\n' 'run-aspnetcore-middleware-telemetry -> make run-aspnetcore-middleware-telemetry'
 
@@ -50,6 +51,9 @@ run-entity-framework-core-command-telemetry:
 
 run-stackexchange-redis-command-telemetry:
 	@tmp_dir="$$(realpath "$$(mktemp -d)")" && trap 'rm -rf "$$tmp_dir"' EXIT && dotnet new console --framework net10.0 --name StackExchangeRedisCommandTelemetry --output "$$tmp_dir/app" >/dev/null && cp StackExchangeRedisCommandTelemetry.cs "$$tmp_dir/app/Program.cs" && dotnet add "$$tmp_dir/app/StackExchangeRedisCommandTelemetry.csproj" reference "$$(cd .. && pwd -P)/src/LogBrew/LogBrew.csproj" >/dev/null && dotnet add "$$tmp_dir/app/StackExchangeRedisCommandTelemetry.csproj" reference "$$(cd .. && pwd -P)/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" >/dev/null && dotnet run --project "$$tmp_dir/app/StackExchangeRedisCommandTelemetry.csproj" --configuration Release
+
+run-opentelemetry-span-processor-telemetry:
+	@tmp_dir="$$(realpath "$$(mktemp -d)")" && trap 'rm -rf "$$tmp_dir"' EXIT && dotnet new console --framework net10.0 --name OpenTelemetrySpanProcessorTelemetry --output "$$tmp_dir/app" >/dev/null && cp OpenTelemetrySpanProcessorTelemetry.cs "$$tmp_dir/app/Program.cs" && dotnet add "$$tmp_dir/app/OpenTelemetrySpanProcessorTelemetry.csproj" reference "$$(cd .. && pwd -P)/src/LogBrew/LogBrew.csproj" >/dev/null && dotnet add "$$tmp_dir/app/OpenTelemetrySpanProcessorTelemetry.csproj" reference "$$(cd .. && pwd -P)/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" >/dev/null && dotnet run --project "$$tmp_dir/app/OpenTelemetrySpanProcessorTelemetry.csproj" --configuration Release
 
 run-aspnetcore-request-telemetry:
 	@tmp_dir="$$(realpath "$$(mktemp -d)")" && app_dir="$$tmp_dir/app" && project_path="$$(cd .. && pwd -P)/src/LogBrew/LogBrew.csproj" && trap 'rm -rf "$$tmp_dir"' EXIT && dotnet new web --framework net10.0 --name AspNetCoreRequestTelemetry --output "$$app_dir" >/dev/null && cp AspNetCoreRequestTelemetry.cs "$$app_dir/Program.cs" && printf '%s\n' '<Project Sdk="Microsoft.NET.Sdk.Web">' '  <PropertyGroup>' '    <TargetFramework>net10.0</TargetFramework>' '    <Nullable>enable</Nullable>' '    <ImplicitUsings>enable</ImplicitUsings>' '    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>' '  </PropertyGroup>' '  <ItemGroup>' "    <ProjectReference Include=\"$$project_path\" />" '  </ItemGroup>' '</Project>' > "$$app_dir/AspNetCoreRequestTelemetry.csproj" && dotnet build "$$app_dir/AspNetCoreRequestTelemetry.csproj" --configuration Release >/dev/null && printf '%s\n' 'aspnetcore request telemetry example builds'

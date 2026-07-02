@@ -27,26 +27,32 @@ dotnet build "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release -
 dotnet build "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release -warnaserror >/dev/null
 dotnet build "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" --configuration Release -warnaserror >/dev/null
 dotnet build "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" --configuration Release -warnaserror >/dev/null
+dotnet build "$package_dir/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" --configuration Release -warnaserror >/dev/null
 dotnet run --project "$package_dir/tests/LogBrew.Tests/LogBrew.Tests.csproj" --configuration Release
 dotnet run --project "$package_dir/tests/LogBrew.AspNetCore.Tests/LogBrew.AspNetCore.Tests.csproj" --configuration Release
 dotnet run --project "$package_dir/tests/LogBrew.EntityFrameworkCore.Tests/LogBrew.EntityFrameworkCore.Tests.csproj" --configuration Release
 dotnet run --project "$package_dir/tests/LogBrew.StackExchangeRedis.Tests/LogBrew.StackExchangeRedis.Tests.csproj" --configuration Release
+dotnet run --project "$package_dir/tests/LogBrew.OpenTelemetry.Tests/LogBrew.OpenTelemetry.Tests.csproj" --configuration Release
 dotnet pack "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
+dotnet pack "$package_dir/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 package_version="$(dotnet msbuild "$package_dir/src/LogBrew/LogBrew.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 aspnetcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 efcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 redis_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
+otel_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 nupkg="$tmp_dir/packages/LogBrew.${package_version}.nupkg"
 aspnetcore_nupkg="$tmp_dir/packages/LogBrew.AspNetCore.${aspnetcore_package_version}.nupkg"
 efcore_nupkg="$tmp_dir/packages/LogBrew.EntityFrameworkCore.${efcore_package_version}.nupkg"
 redis_nupkg="$tmp_dir/packages/LogBrew.StackExchangeRedis.${redis_package_version}.nupkg"
+otel_nupkg="$tmp_dir/packages/LogBrew.OpenTelemetry.${otel_package_version}.nupkg"
 test -f "$nupkg"
 test -f "$aspnetcore_nupkg"
 test -f "$efcore_nupkg"
 test -f "$redis_nupkg"
+test -f "$otel_nupkg"
 
 python3 - "$nupkg" <<'PY'
 import sys
@@ -100,8 +106,10 @@ for needle in (
     "LogBrewDbCommandTelemetry",
     "LogBrewDbCommandOptions",
     "dotnet add package LogBrew.StackExchangeRedis",
+    "dotnet add package LogBrew.OpenTelemetry",
     "TraceLogBrewCommand",
     "StackExchangeRedisCommandTelemetry.cs",
+    "OpenTelemetrySpanProcessorTelemetry.cs",
     "LogBrewActivitySourceListener",
     "WithHttpClientSources",
     "WithCommonDotNetSources",
@@ -143,6 +151,44 @@ for needle in (
 PY
 
 python3 "$repo_root/scripts/check_dotnet_stackexchange_redis_nupkg.py" "$redis_nupkg" >/dev/null
+
+python3 - "$otel_nupkg" <<'PY'
+import sys
+import zipfile
+
+nupkg = sys.argv[1]
+with zipfile.ZipFile(nupkg) as archive:
+    names = set(archive.namelist())
+    required = {
+        "lib/netstandard2.0/LogBrew.OpenTelemetry.dll",
+        "README.md",
+        "logbrew-logo-espresso-bg-128.png",
+        "examples/OpenTelemetrySpanProcessorTelemetry.cs",
+    }
+    missing = sorted(required - names)
+    if missing:
+        raise SystemExit(f"missing OpenTelemetry nupkg files: {missing}")
+    readme = archive.read("README.md").decode()
+    nuspec = archive.read("LogBrew.OpenTelemetry.nuspec").decode()
+if 'dependency id="LogBrew"' not in nuspec:
+    raise SystemExit("missing LogBrew dependency metadata")
+if 'dependency id="OpenTelemetry"' not in nuspec:
+    raise SystemExit("missing OpenTelemetry dependency metadata")
+if "<icon>logbrew-logo-espresso-bg-128.png</icon>" not in nuspec:
+    raise SystemExit("missing OpenTelemetry NuGet package icon metadata")
+for needle in (
+    "dotnet add package LogBrew.OpenTelemetry",
+    "TracerProviderBuilder.AddLogBrew",
+    "LogBrewOpenTelemetrySpanProcessor",
+    "WithServiceName",
+    "WithDeploymentEnvironment",
+    "does not create an OpenTelemetry provider",
+    "payload/header/full-URL/query capture",
+    "OpenTelemetrySpanProcessorTelemetry.cs",
+):
+    if needle not in readme:
+        raise SystemExit(f"missing OpenTelemetry README guidance: {needle}")
+PY
 
 python3 - "$aspnetcore_nupkg" <<'PY'
 import sys
@@ -325,6 +371,28 @@ dotnet run --project "$redis_dir/StackExchangeRedisCommandTelemetry.csproj" --co
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/stackexchange-redis.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_dotnet_stackexchange_redis_payload.py" "$tmp_dir/stackexchange-redis.stdout.json" "$tmp_dir/stackexchange-redis.stderr.json" >/dev/null
 
+otel_dir="$tmp_dir/OpenTelemetrySpanProcessorTelemetry"
+dotnet new console --framework net10.0 --name OpenTelemetrySpanProcessorTelemetry --output "$otel_dir" >/dev/null
+cp "$package_dir/examples/OpenTelemetrySpanProcessorTelemetry.cs" "$otel_dir/Program.cs"
+cat > "$otel_dir/OpenTelemetrySpanProcessorTelemetry.csproj" <<EOF
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$package_dir/src/LogBrew/LogBrew.csproj" />
+    <ProjectReference Include="$package_dir/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" />
+  </ItemGroup>
+</Project>
+EOF
+dotnet run --project "$otel_dir/OpenTelemetrySpanProcessorTelemetry.csproj" --configuration Release > "$tmp_dir/opentelemetry.stdout.json" 2> "$tmp_dir/opentelemetry.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/opentelemetry.stdout.json" >/dev/null
+python3 "$repo_root/scripts/check_dotnet_opentelemetry_payload.py" "$tmp_dir/opentelemetry.stdout.json" "$tmp_dir/opentelemetry.stderr.json" >/dev/null
+
 web_dir="$tmp_dir/AspNetCoreRequestTelemetry"
 dotnet new web --framework net10.0 --name AspNetCoreRequestTelemetry --output "$web_dir" >/dev/null
 cp "$package_dir/examples/AspNetCoreRequestTelemetry.cs" "$web_dir/Program.cs"
@@ -375,6 +443,7 @@ grep -qx 'run-db-command-telemetry -> make run-db-command-telemetry' "$tmp_dir/e
 grep -qx 'run-http-client-outbound-telemetry -> make run-http-client-outbound-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-entity-framework-core-command-telemetry -> make run-entity-framework-core-command-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-stackexchange-redis-command-telemetry -> make run-stackexchange-redis-command-telemetry' "$tmp_dir/examples-help.txt"
+grep -qx 'run-opentelemetry-span-processor-telemetry -> make run-opentelemetry-span-processor-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-request-telemetry -> make run-aspnetcore-request-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-middleware-telemetry -> make run-aspnetcore-middleware-telemetry' "$tmp_dir/examples-help.txt"
 

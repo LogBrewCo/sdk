@@ -14,6 +14,15 @@ The library targets `netstandard2.0`, uses `System.Net.Http` for built-in HTTP d
 dotnet add package LogBrew
 ```
 
+Optional integration packages install only when you need their runtime:
+
+```bash
+dotnet add package LogBrew.AspNetCore
+dotnet add package LogBrew.EntityFrameworkCore
+dotnet add package LogBrew.StackExchangeRedis
+dotnet add package LogBrew.OpenTelemetry
+```
+
 ## Usage
 
 ```csharp
@@ -277,6 +286,36 @@ using (var activity = source.StartActivity("checkout.pay", ActivityKind.Client))
 `LogBrewActivitySourceListener` captures only stopped Activities from explicit `WithSourceName(...)` entries or source-backed presets such as `WithHttpClientSources()`, `WithAspNetCoreSources()`, `WithEntityFrameworkCoreSources()`, `WithSqlClientSources()`, `WithStackExchangeRedisSources()`, and `WithCommonDotNetSources()`. Use `WithServiceName(...)`, `WithServiceVersion(...)`, and `WithDeploymentEnvironment(...)` to attach the same low-cardinality service context competitors expose through OpenTelemetry resources or unified service tagging, without enabling arbitrary resource attributes. It delegates payload construction to `LogBrewActivitySpanTelemetry` and reports SDK capture errors through optional `OnError(...)`. Calling `Start(client)` without source names is fail-closed and captures no Activities. It does not create OpenTelemetry processors, exporters, tracestate, baggage, global HTTP instrumentation, payload/header capture, full URL/query capture, or environment-variable scraping.
 
 The packaged `examples/ActivitySourceListenerTelemetry.cs` file shows the same listener in a small console app, including safe route naming, explicit source filtering, low-cardinality service context, and primitive-only metadata.
+
+If your app already owns an OpenTelemetry `TracerProvider`, install the optional `LogBrew.OpenTelemetry` package and add LogBrew as one processor in that app-owned pipeline:
+
+```csharp
+using LogBrew;
+using LogBrew.OpenTelemetry;
+using OpenTelemetry;
+using OpenTelemetry.Trace;
+using System.Diagnostics;
+
+var client = LogBrewClient.Create("LOGBREW_API_KEY", "checkout-dotnet-service", "1.0.0");
+using var source = new ActivitySource("Checkout.Api", "1.0.0");
+using var provider = Sdk.CreateTracerProviderBuilder()
+    .AddSource("Checkout.Api")
+    .AddLogBrew(client, options => options
+        .WithEventIdPrefix("checkout_otel")
+        .WithServiceName("checkout-dotnet-service")
+        .WithServiceVersion("1.0.0")
+        .WithDeploymentEnvironment("production"))
+    .Build();
+
+using (var activity = source.StartActivity("GET /checkout/{id}", ActivityKind.Server))
+{
+    activity?.SetTag("http.request.method", "GET");
+    activity?.SetTag("http.route", "/checkout/{id}");
+    activity?.SetTag("http.response.status_code", 200);
+}
+```
+
+`LogBrew.OpenTelemetry` adds `LogBrewOpenTelemetrySpanProcessor` and `TracerProviderBuilder.AddLogBrew(...)` for ended, recorded W3C Activities. It reuses the same safe Activity span path as the core SDK, including capped event/link summaries and low-cardinality service context. It does not create an OpenTelemetry provider, exporter, sampler, resource detector, instrumentation package, baggage/tracestate reader, global Activity listener, HTTP/database patch, payload/header/full-URL/query capture, exception message/stack capture, support ticket, or background upload path. The packaged `examples/OpenTelemetrySpanProcessorTelemetry.cs` file proves installed-package OpenTelemetry span correlation and redaction.
 
 For outbound calls, use `LogBrewHttpClientTelemetry` when your app owns the `HttpClient` request and wants one child span plus one normalized downstream `traceparent`:
 
@@ -678,6 +717,7 @@ The `examples` directory contains copyable snippets for creating a client, previ
 - `LogBrewDbCommandTelemetry` creates app-owned ADO.NET `DbCommand` spans for sync/async non-query, scalar, and reader calls without capturing raw SQL, parameters, connection strings, result rows, provider exception messages, or stacks.
 - `LogBrew.EntityFrameworkCore` is an optional package for EF Core command spans through app-owned `AddLogBrewCommandTelemetry(...)`, without adding EF Core dependencies to the base `LogBrew` package.
 - `LogBrew.StackExchangeRedis` is an optional package for sync/async StackExchange.Redis command spans through app-owned `TraceLogBrewCommand(...)` calls, without capturing Redis keys, values, arguments, connection endpoints, exception messages, or stacks.
+- `LogBrew.OpenTelemetry` is an optional package for app-owned OpenTelemetry `TracerProviderBuilder.AddLogBrew(...)` span processing, without adding OpenTelemetry dependencies to the base `LogBrew` package.
 - `SupportTicketDraft` builds local-only support-ticket create payload drafts and redacts diagnostics without calling backend support routes.
 - `Shutdown(transport)` flushes queued events and rejects later writes.
 - `AddLogBrew(client, options)` connects existing `ILogger` calls to LogBrew without global logging side effects.

@@ -31,7 +31,13 @@ DEFAULT_PACKAGE_VERSIONS = {
     **{package_name: RUBYGEMS_VERSION for package_name in RUBYGEMS_PACKAGES},
     **{package_name: PACKAGIST_VERSION for package_name in PACKAGIST_PACKAGES},
 }
-NUGET_PACKAGES = ("LogBrew", "LogBrew.AspNetCore", "LogBrew.EntityFrameworkCore", "LogBrew.StackExchangeRedis")
+NUGET_PACKAGES = (
+    "LogBrew",
+    "LogBrew.AspNetCore",
+    "LogBrew.EntityFrameworkCore",
+    "LogBrew.StackExchangeRedis",
+    "LogBrew.OpenTelemetry",
+)
 CRATES = ("logbrew",)
 MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin", "logbrew-kotlin-okhttp")
 MAVEN_PACKAGE_LABELS = tuple(f"co.logbrew:{artifact_id}" for artifact_id in MAVEN_ARTIFACTS)

@@ -1,5 +1,38 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-02: .NET optional OpenTelemetry processor bridge added after source
+  reads from Sentry .NET
+  `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`
+  (`TracerProviderBuilderExtensions.AddSentry`, `SentrySpanProcessor`),
+  OpenTelemetry .NET
+  `open-telemetry/opentelemetry-dotnet@8b03fd9a515d44deab8a0aebfbd9dc0eb0fd5161`
+  (`BaseProcessor<T>`, `TracerProviderBuilderExtensions.AddProcessor`,
+  `SimpleActivityExportProcessor`), Datadog .NET tracer
+  `DataDog/dd-trace-dotnet@93bb6e629d52987cf4d0e323dd68c4d58fcd13df`
+  (`ActivityListener`, `OtlpHelpers`, OpenTelemetry gating in
+  `TracerSettings`), and PostHog .NET
+  `PostHog/posthog-dotnet@9737231a8231f58b4f6938f6d24ad671b3ccf54c`
+  (AI trace/span context only; no general OTel processor found).
+  New `LogBrew.OpenTelemetry` NuGet package exposes
+  `LogBrewOpenTelemetrySpanProcessor` and
+  `TracerProviderBuilder.AddLogBrew(...)`, delegates ended recorded W3C
+  Activities into existing privacy-bounded `LogBrewActivitySpanTelemetry`, and
+  keeps core `LogBrew` free of OTel dependencies. It avoids owning providers,
+  exporters, samplers, resource detectors, instrumentation packages, global
+  listeners, baggage/tracestate, HTTP/database patching, payload/header/full
+  URL/query capture, exception messages/stacks, support tickets, and background
+  upload paths. Evidence: RED missing-package test, GREEN 3 focused OTel tests
+  including 128-span burst queue pressure, `bash scripts/check_dotnet_package.sh`,
+  `bash scripts/real_user_dotnet_smoke.sh`,
+  `bash scripts/real_user_dotnet_high_load_smoke.sh`,
+  `bash scripts/real_user_dotnet_public_nuget_smoke.sh` (current packages,
+  OTel package version-gated until release), `python3 tests/test_release_metadata.py`,
+  `python3 tests/test_registry_publication.py`, and
+  `python3 scripts/check_release_metadata.py`. Research:
+  `docs/competitor-research/dotnet-trace-correlation-2026-06-16.md`.
+  Remaining .NET gap: automatic ASP.NET/HttpClient/DB/cache/queue breadth,
+  full exporter/collector ownership, baggage/tracestate, richer resource
+  detection, profiling, and backend-native trace query/symbolication depth.
 - 2026-07-02: .NET Activity resource/service context added after source reads
   from Sentry .NET
   `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`

@@ -508,3 +508,47 @@ Competitors treat service identity, version, and environment as first-class trac
 ### Remaining Gap
 
 LogBrew now gives .NET users the most important service/release/environment trace filters without adopting arbitrary resource capture. Sentry, Datadog, and OpenTelemetry still lead on richer resource conventions, automatic resource detection, full exporter pipelines, baggage/tracestate, profiling, and backend trace-query maturity.
+
+## 2026-07-02 OpenTelemetry Span Processor Follow-Up
+
+### Additional Source Reviewed
+
+- Sentry .NET `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`.
+- Read `src/Sentry.OpenTelemetry/TracerProviderBuilderExtensions.cs`: `AddSentry(...)` and `ImplementationFactory(...)` register a `BaseProcessor<Activity>` with the app-owned `TracerProviderBuilder`.
+- Read `src/Sentry.OpenTelemetry/SentrySpanProcessor.cs`: `OnStart(...)`, `OnEnd(...)`, Activity-to-Sentry span/transaction mapping, pruning, resource/attribute handling, HTTP status mapping, and exception synthesis.
+- OpenTelemetry .NET `open-telemetry/opentelemetry-dotnet@8b03fd9a515d44deab8a0aebfbd9dc0eb0fd5161`.
+- Read `src/OpenTelemetry/BaseProcessor.cs`: `OnStart(...)`/`OnEnd(...)` synchronous processor lifecycle and non-blocking/no-throw expectations.
+- Read `src/OpenTelemetry/Trace/Builder/TracerProviderBuilderExtensions.cs`: `AddProcessor(...)` overloads for direct processor, typed processor, and service-provider factory.
+- Read `src/OpenTelemetry/Trace/Processor/SimpleActivityExportProcessor.cs`: ended, recorded Activities are the simple export point.
+- Datadog .NET tracer `DataDog/dd-trace-dotnet@93bb6e629d52987cf4d0e323dd68c4d58fcd13df`.
+- Read `tracer/src/Datadog.Trace/Activity/ActivityListener.cs`: heavier Activity listener initialization and compatibility path.
+- Read `tracer/src/Datadog.Trace/Activity/OtlpHelpers.cs`: Activity/OTLP status, source/library, service/resource mapping, and tracestate TODO.
+- Read `tracer/src/Datadog.Trace/Configuration/TracerSettings.cs`: OpenTelemetry-enabled Activity listener gating.
+- PostHog .NET `PostHog/posthog-dotnet@9737231a8231f58b4f6938f6d24ad671b3ccf54c`.
+- Read `src/PostHog.AI/PostHogOpenAIHandler.cs` and `src/PostHog.AI/PostHogAIContext.cs`: AI trace/span IDs are explicit event properties; no general OpenTelemetry trace processor was found in inspected source.
+
+### Pattern
+
+Sentry's best-fit pattern for LogBrew is a dedicated OpenTelemetry processor registered through `TracerProviderBuilder`; OpenTelemetry's SDK makes `BaseProcessor<Activity>` the natural extension point for ended spans. Datadog's source shows the heavier alternative: broad Activity listener/profiler/config integration. PostHog's .NET source is narrower and does not provide a general OTel span processor.
+
+### LogBrew Change
+
+- Added optional `LogBrew.OpenTelemetry` NuGet package, keeping the base `LogBrew` package free of OpenTelemetry dependencies.
+- Added `LogBrewOpenTelemetrySpanProcessor : BaseProcessor<Activity>` and `TracerProviderBuilder.AddLogBrew(...)`.
+- The processor captures ended, recorded W3C Activities by delegating to existing `LogBrewActivitySpanTelemetry`, preserving the same trace/span IDs, parent span ID, sampled flag, duration, Activity name/kind/source, capped event/link summaries, safe semantic tag allowlist, and explicit service/version/environment context.
+- Added source and installed-package examples through `examples/OpenTelemetrySpanProcessorTelemetry.cs`, package README, Makefile target, release metadata, public NuGet release workflow wiring, and local/public NuGet smoke handling.
+- The package does not create an OpenTelemetry provider, exporter, sampler, resource detector, instrumentation package, baggage/tracestate reader, global Activity listener, HTTP/database patch, payload/header/full-URL/query capture, exception message/stack capture, support ticket, or background upload path.
+
+### Evidence
+
+- RED TDD: `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.OpenTelemetry.Tests/LogBrew.OpenTelemetry.Tests.csproj --configuration Release` failed before implementation because `LogBrew.OpenTelemetry` was missing.
+- Focused tests now pass: 3 tests covering real `TracerProviderBuilder.AddLogBrew(...)` capture, capture-failure isolation after shutdown, and 128-span burst queue pressure with bounded overflow reporting.
+- `bash scripts/check_dotnet_package.sh`: passed with source build/test/pack, OpenTelemetry nupkg metadata, source example execution, README/package checks, and payload validation.
+- `bash scripts/real_user_dotnet_smoke.sh`: passed with local nupkg install, packaged OpenTelemetry example run, install/remove/reinstall lifecycle, and transitive OpenTelemetry dependency proof.
+- `bash scripts/real_user_dotnet_high_load_smoke.sh`: passed for existing high-load installed-artifact coverage.
+- `bash scripts/real_user_dotnet_public_nuget_smoke.sh`: passed for currently published packages; it verifies `LogBrew.OpenTelemetry` only when a release workflow passes the new package version.
+- `python3 tests/test_release_metadata.py`, `python3 tests/test_registry_publication.py`, and `python3 scripts/check_release_metadata.py`: passed.
+
+### Remaining Gap
+
+LogBrew now has Sentry-style opt-in OTel processor interop for .NET while staying lighter and safer by default. It remains weaker than Sentry/Datadog/OpenTelemetry for automatic ASP.NET/HttpClient/DB/cache/queue instrumentation breadth, full OTel exporter/collector ownership, baggage/tracestate, richer resource detection, profiling, and backend-native trace query/symbolication depth.

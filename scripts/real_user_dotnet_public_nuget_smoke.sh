@@ -9,6 +9,7 @@ core_version="${1:-${LOGBREW_NUGET_CORE_VERSION:-${LOGBREW_DOTNET_CORE_VERSION:-
 aspnetcore_version="${2:-${LOGBREW_NUGET_ASPNETCORE_VERSION:-${LOGBREW_DOTNET_ASPNETCORE_VERSION:-0.1.0}}}"
 efcore_version="${3:-${LOGBREW_NUGET_EFCORE_VERSION:-${LOGBREW_DOTNET_EFCORE_VERSION:-0.1.0}}}"
 redis_version="${4:-${LOGBREW_NUGET_REDIS_VERSION:-${LOGBREW_DOTNET_REDIS_VERSION:-0.1.0}}}"
+otel_version="${5:-${LOGBREW_NUGET_OTEL_VERSION:-${LOGBREW_DOTNET_OTEL_VERSION:-}}}"
 
 cleanup() {
   rm -rf "$tmp_dir"
@@ -20,7 +21,7 @@ require_version() {
   local value="$2"
   if [[ -z "$value" ]]; then
     echo "missing required $label version" >&2
-    echo "usage: bash scripts/real_user_dotnet_public_nuget_smoke.sh [LogBrew] [LogBrew.AspNetCore] [LogBrew.EntityFrameworkCore] [LogBrew.StackExchangeRedis]" >&2
+    echo "usage: bash scripts/real_user_dotnet_public_nuget_smoke.sh [LogBrew] [LogBrew.AspNetCore] [LogBrew.EntityFrameworkCore] [LogBrew.StackExchangeRedis] [LogBrew.OpenTelemetry]" >&2
     exit 2
   fi
 }
@@ -59,12 +60,18 @@ dotnet add "$app_dir/DotnetPublicNuGetApp.csproj" package LogBrew --version "$co
 dotnet add "$app_dir/DotnetPublicNuGetApp.csproj" package LogBrew.AspNetCore --version "$aspnetcore_version" --source https://api.nuget.org/v3/index.json >/dev/null
 dotnet add "$app_dir/DotnetPublicNuGetApp.csproj" package LogBrew.EntityFrameworkCore --version "$efcore_version" --source https://api.nuget.org/v3/index.json >/dev/null
 dotnet add "$app_dir/DotnetPublicNuGetApp.csproj" package LogBrew.StackExchangeRedis --version "$redis_version" --source https://api.nuget.org/v3/index.json >/dev/null
+if [[ -n "$otel_version" ]]; then
+  dotnet add "$app_dir/DotnetPublicNuGetApp.csproj" package LogBrew.OpenTelemetry --version "$otel_version" --source https://api.nuget.org/v3/index.json >/dev/null
+fi
 
 dotnet list "$app_dir/DotnetPublicNuGetApp.csproj" package > "$tmp_dir/packages.txt"
 require_package_line "LogBrew" "$core_version"
 require_package_line "LogBrew.AspNetCore" "$aspnetcore_version"
 require_package_line "LogBrew.EntityFrameworkCore" "$efcore_version"
 require_package_line "LogBrew.StackExchangeRedis" "$redis_version"
+if [[ -n "$otel_version" ]]; then
+  require_package_line "LogBrew.OpenTelemetry" "$otel_version"
+fi
 
 cat > "$app_dir/Program.cs" <<'CS'
 using System;
@@ -85,6 +92,13 @@ Console.WriteLine(efCoreOptions.GetType().FullName);
 Console.WriteLine(redisOptions.GetType().FullName);
 CS
 
+if [[ -n "$otel_version" ]]; then
+  cat >> "$app_dir/Program.cs" <<'CS'
+var otelProcessor = new LogBrew.OpenTelemetry.LogBrewOpenTelemetrySpanProcessor(client);
+Console.WriteLine(otelProcessor.GetType().FullName);
+CS
+fi
+
 dotnet build "$app_dir/DotnetPublicNuGetApp.csproj" --configuration Release --no-restore >/dev/null
 dotnet run --project "$app_dir/DotnetPublicNuGetApp.csproj" --configuration Release --no-build > "$tmp_dir/run.out"
 
@@ -92,5 +106,8 @@ grep -qx '1' "$tmp_dir/run.out"
 grep -q '^LogBrew\.LogBrewAspNetCoreOptions$' "$tmp_dir/run.out"
 grep -q '^LogBrew\.EntityFrameworkCore\.LogBrewEntityFrameworkCoreOptions$' "$tmp_dir/run.out"
 grep -q '^LogBrew\.StackExchangeRedis\.LogBrewStackExchangeRedisCommandOptions$' "$tmp_dir/run.out"
+if [[ -n "$otel_version" ]]; then
+  grep -q '^LogBrew\.OpenTelemetry\.LogBrewOpenTelemetrySpanProcessor$' "$tmp_dir/run.out"
+fi
 
 echo "dotnet public NuGet install smoke passed"

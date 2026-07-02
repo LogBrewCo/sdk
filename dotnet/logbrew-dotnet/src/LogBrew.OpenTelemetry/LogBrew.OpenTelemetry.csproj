@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisMode>All</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+    <PackageId>LogBrew.OpenTelemetry</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>LogBrew</Authors>
+    <Company>LogBrew</Company>
+    <Description>Public LogBrew OpenTelemetry integration for opt-in Activity span processor telemetry.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logbrew-logo-espresso-bg-128.png</PackageIcon>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../LogBrew/LogBrew.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry" Version="1.16.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="../../../../assets/brand/logbrew-logo-espresso-bg-128.png" Pack="true" PackagePath="\" />
+    <None Include="../../examples/OpenTelemetrySpanProcessorTelemetry.cs" Pack="true" PackagePath="examples/" />
+  </ItemGroup>
+</Project>
