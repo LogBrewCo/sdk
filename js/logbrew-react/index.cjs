@@ -11,15 +11,26 @@ const LogBrewContext = React.createContext(null);
 function createLogBrewReactClient({
   apiKey,
   clientKey,
+  eventFilter,
   sdkName = "logbrew-react",
   sdkVersion = "0.1.0",
-  maxRetries = 2
+  maxQueueSize,
+  maxRetries = 2,
+  onEventDropped
 }) {
   const authKey = clientKey ?? apiKey;
   if (!authKey) {
     throw new SdkError("configuration_error", "createLogBrewReactClient requires clientKey or apiKey");
   }
-  return LogBrewClient.create({ apiKey: authKey, sdkName, sdkVersion, maxRetries });
+  return LogBrewClient.create({
+    apiKey: authKey,
+    eventFilter,
+    maxQueueSize,
+    maxRetries,
+    onEventDropped,
+    sdkName,
+    sdkVersion
+  });
 }
 
 function createReactTraceparent({
@@ -126,6 +137,7 @@ function useLogBrewActions() {
     shutdown: client.shutdown.bind(client),
     previewJson: client.previewJson.bind(client),
     pendingEvents: client.pendingEvents.bind(client),
+    droppedEvents: client.droppedEvents.bind(client),
     captureReactError: (error, options = {}) => captureReactError(client, error, options)
   };
 }
@@ -221,6 +233,95 @@ function captureReactNetwork(client, input = {}) {
 function useLogBrewNetwork(defaults = {}) {
   const client = useLogBrew();
   return (input = {}) => captureReactNetwork(client, mergeEventInput(defaults, input));
+}
+
+function createReactRouterRouteTemplate(routeMatches, { fallback } = {}) {
+  const routeTemplate = routeTemplateFromMatches(routeMatches);
+  return routeTemplate ?? stripQueryAndHash(fallback);
+}
+
+function createReactRouterNavigationSpanEvent({
+  durationMs,
+  id,
+  idFactory = defaultRouterNavigationSpanId,
+  metadata = {},
+  navigationType,
+  now = () => new Date().toISOString(),
+  parentSpanId,
+  routeMatches,
+  routeTemplate,
+  spanId,
+  status = "ok",
+  timestamp,
+  traceId,
+  traceparent
+} = {}) {
+  const trace = traceContextFromInput({ parentSpanId, spanId, traceId, traceparent });
+  const safeRouteTemplate = stripQueryAndHash(routeTemplate) ?? createReactRouterRouteTemplate(routeMatches);
+  if (!safeRouteTemplate) {
+    throw new SdkError("configuration_error", "React Router navigation requires routeTemplate or routeMatches");
+  }
+  return {
+    id: id ?? idFactory({ routeTemplate: safeRouteTemplate }),
+    timestamp: timestamp ?? now(),
+    attributes: {
+      durationMs,
+      name: `react.route ${safeRouteTemplate}`,
+      parentSpanId: trace.parentSpanId,
+      spanId: trace.spanId,
+      status,
+      traceId: trace.traceId,
+      metadata: compactMetadata({
+        framework: "react-router",
+        navigationType,
+        routeTemplate: safeRouteTemplate,
+        source: "react.router",
+        ...metadata
+      })
+    }
+  };
+}
+
+function captureReactRouterNavigation(client, input = {}) {
+  if (!client) {
+    throw new SdkError("configuration_error", "captureReactRouterNavigation requires a client");
+  }
+  const event = createReactRouterNavigationSpanEvent(input);
+  client.span(event.id, event.timestamp, event.attributes);
+  return event;
+}
+
+function useLogBrewReactRouterNavigation(options = {}) {
+  const client = useLogBrew();
+  const lastNavigationKey = React.useRef(null);
+  React.useEffect(() => {
+    try {
+      const routeMatches = options.routeMatches ?? matchReactRouterRoutes(options);
+      const routeTemplate = stripQueryAndHash(options.routeTemplate) ?? createReactRouterRouteTemplate(routeMatches);
+      if (!routeTemplate) {
+        return;
+      }
+      const navigationKey = reactRouterNavigationKey(options.location, routeTemplate);
+      if (navigationKey === lastNavigationKey.current) {
+        return;
+      }
+      lastNavigationKey.current = navigationKey;
+      const event = captureReactRouterNavigation(client, {
+        ...options,
+        routeMatches,
+        routeTemplate
+      });
+      if (typeof options.onNavigation === "function") {
+        options.onNavigation(event);
+      }
+    } catch (error) {
+      if (typeof options.onCaptureError === "function") {
+        options.onCaptureError(error);
+        return;
+      }
+      throw error;
+    }
+  });
 }
 
 function createReactErrorEvent(error, {
@@ -511,6 +612,10 @@ function defaultNetworkEventId({ method, routeTemplate }) {
   return `evt_react_network_${slugify([method, routeTemplate].filter(Boolean).join("_") || "request")}`;
 }
 
+function defaultRouterNavigationSpanId({ routeTemplate }) {
+  return `evt_react_router_${slugify(routeTemplate ?? "route")}`;
+}
+
 function slugify(value) {
   return String(value)
     .toLowerCase()
@@ -530,6 +635,71 @@ function stripQueryAndHash(value) {
     return undefined;
   }
   return String(value).split(/[?#]/u, 1)[0];
+}
+
+function routeTemplateFromMatches(routeMatches) {
+  if (!Array.isArray(routeMatches) || routeMatches.length === 0) {
+    return undefined;
+  }
+  let routeTemplate = "/";
+  for (const routeMatch of routeMatches) {
+    const routePath = stripQueryAndHash(routeMatch?.route?.path ?? routeMatch?.path);
+    if (routePath === undefined || routePath === "" || routePath === "/") {
+      continue;
+    }
+    if (routePath.startsWith("/")) {
+      routeTemplate = routePath;
+      continue;
+    }
+    routeTemplate = joinRoutePaths(routeTemplate, routePath);
+  }
+  return routeTemplate;
+}
+
+function joinRoutePaths(basePath, childPath) {
+  const base = basePath === "/" ? "" : basePath.replace(/\/+$/u, "");
+  const child = childPath.replace(/^\/+/u, "").replace(/\/+$/u, "");
+  return `${base}/${child}`;
+}
+
+function traceContextFromInput({ parentSpanId, spanId, traceId, traceparent }) {
+  if (typeof traceparent === "string") {
+    const parsed = parseTraceparent(traceparent);
+    return {
+      parentSpanId,
+      spanId: spanId ?? parsed.parentSpanId,
+      traceId: traceId ?? parsed.traceId
+    };
+  }
+  if (!traceId || !spanId) {
+    throw new SdkError("configuration_error", "React Router navigation requires traceparent or traceId and spanId");
+  }
+  return { parentSpanId, spanId, traceId };
+}
+
+function matchReactRouterRoutes({ location, matchRoutes, routes }) {
+  if (typeof matchRoutes !== "function" || !Array.isArray(routes)) {
+    return undefined;
+  }
+  const pathname = locationPathname(location);
+  if (!pathname) {
+    return undefined;
+  }
+  return matchRoutes(routes, pathname) ?? undefined;
+}
+
+function reactRouterNavigationKey(location, routeTemplate) {
+  return `${routeTemplate}|${locationPathname(location) ?? ""}`;
+}
+
+function locationPathname(location) {
+  if (typeof location === "string") {
+    return stripQueryAndHash(location);
+  }
+  if (typeof location?.pathname === "string") {
+    return stripQueryAndHash(location.pathname);
+  }
+  return undefined;
 }
 
 function traceparentForRequest({
@@ -554,16 +724,20 @@ module.exports = {
   captureReactAction,
   captureReactError,
   captureReactNetwork,
+  captureReactRouterNavigation,
   createLogBrewReactClient,
   createReactActionEvent,
   createReactErrorEvent,
   createReactNetworkEvent,
+  createReactRouterNavigationSpanEvent,
+  createReactRouterRouteTemplate,
   createReactTraceparent,
   createTraceparentFetch,
   shouldPropagateTraceparent,
   useLogBrew,
   useLogBrewAction,
   useLogBrewActions,
+  useLogBrewReactRouterNavigation,
   useLogBrewNetwork,
   default: {
     LogBrewErrorBoundary,
@@ -571,16 +745,20 @@ module.exports = {
     captureReactAction,
     captureReactError,
     captureReactNetwork,
+    captureReactRouterNavigation,
     createLogBrewReactClient,
     createReactActionEvent,
     createReactErrorEvent,
     createReactNetworkEvent,
+    createReactRouterNavigationSpanEvent,
+    createReactRouterRouteTemplate,
     createReactTraceparent,
     createTraceparentFetch,
     shouldPropagateTraceparent,
     useLogBrew,
     useLogBrewAction,
     useLogBrewActions,
+    useLogBrewReactRouterNavigation,
     useLogBrewNetwork
   }
 };

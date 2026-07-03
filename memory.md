@@ -1,5 +1,39 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: React Router route-pattern tracing gap reduced after source reads
+  from Sentry JS
+  `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
+  (`ReactRouterOptions`, `updateNavigationSpan`,
+  `createReactRouterV6CompatibleTracingIntegration`,
+  `createV6CompatibleWrapUseRoutes`), Datadog Browser SDK
+  `DataDog/browser-sdk@d2c7e303e4533f40e93d447042a67571f7ba97ff`
+  (`startReactRouterView`, `computeViewName`, `wrapUseRoutes`,
+  React Router v7 entrypoint wrappers), PostHog JS
+  `PostHog/posthog-js@e480a3e23ecff45d2f9cf50332f6f59c54a7c736`
+  (history-change pageviews), and OTel JS Contrib
+  `open-telemetry/opentelemetry-js-contrib@04d6f6af917d2858cc732cffbd1308caadab5a33`
+  (generic user-interaction history patching). LogBrew `@logbrew/react` now
+  exports dependency-free `createReactRouterRouteTemplate(...)`,
+  `createReactRouterNavigationSpanEvent(...)`,
+  `captureReactRouterNavigation(...)`, and
+  `useLogBrewReactRouterNavigation(...)`; apps pass their own React Router
+  matches or `routes`/`matchRoutes`/`location`, route changes queue
+  `react.route <template>` spans with explicit W3C trace correlation, and
+  dynamic route params/query/hash/history state remain out of payloads.
+  `createLogBrewReactClient(...)` now passes through `maxQueueSize`,
+  `eventFilter`, `onEventDropped`, and `maxRetries` for bounded React bursts.
+  Evidence: RED `bash scripts/real_user_react_smoke.sh` failed on missing
+  README/API surface; GREEN packed temp React app smoke with React/React DOM/
+  React Test Renderer `19.2.7`, TypeScript and CJS proof, packaged
+  `react-router-route-spans` example, 503-to-202 shutdown retry, bounded
+  80-span route burst proof (`maxQueueSize: 25`, 55 drop callbacks),
+  syntax/source checks, JS lint, JS package publint, and ShellCheck passed.
+  Research:
+  `docs/competitor-research/react-router-route-pattern-tracing-2026-07-04.md`.
+  Remaining frontend gaps: Next.js client route-pattern spans, safe
+  navigation/resource/fetch timing spans, automatic fetch/XHR spans, visual
+  replay, and backend source-map/symbolication proof still trail
+  Sentry/Datadog.
 - 2026-07-03: Browser SPA navigation trace gap reduced after source reads from
   Sentry JS `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
   (`browserTracingIntegration`, `startBrowserTracingNavigationSpan`, React

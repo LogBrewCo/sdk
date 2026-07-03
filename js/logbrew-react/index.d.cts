@@ -1,7 +1,9 @@
 import type * as React from "react";
 import type {
   ActionAttributes,
+  DroppedEvent,
   EnvironmentAttributes,
+  EventFilter,
   IssueAttributes,
   LogAttributes,
   LogBrewClient,
@@ -18,6 +20,9 @@ export type CreateLogBrewReactClientConfig = {
   sdkName?: string;
   sdkVersion?: string;
   maxRetries?: number;
+  eventFilter?: EventFilter;
+  maxQueueSize?: number;
+  onEventDropped?: (drop: DroppedEvent) => void;
 };
 
 export type TracePropagationTarget = string | RegExp | ((url: string) => boolean);
@@ -112,10 +117,61 @@ export type ReactNetworkInput = {
   traceId?: string;
 };
 
+export type ReactRouterLocationLike = string | {
+  pathname?: string;
+};
+
+export type ReactRouterRouteMatchLike = {
+  route?: {
+    path?: string;
+  };
+  path?: string;
+  params?: Record<string, string | undefined>;
+};
+
+export type ReactRouterRouteTemplateOptions = {
+  fallback?: string;
+};
+
+export type ReactRouterNavigationSpanIdFactoryContext = {
+  routeTemplate?: string;
+};
+
+export type ReactRouterNavigationInput = {
+  durationMs?: number;
+  id?: string;
+  idFactory?: (context: ReactRouterNavigationSpanIdFactoryContext) => string;
+  location?: ReactRouterLocationLike;
+  matchRoutes?: (
+    routes: unknown[],
+    pathname: string
+  ) => ReactRouterRouteMatchLike[] | null | undefined;
+  metadata?: Metadata;
+  navigationType?: string;
+  now?: () => string;
+  onCaptureError?: (error: unknown) => void;
+  onNavigation?: (event: ReactRouterNavigationSpanEvent) => void;
+  parentSpanId?: string;
+  routeMatches?: ReactRouterRouteMatchLike[];
+  routes?: unknown[];
+  routeTemplate?: string;
+  spanId?: string;
+  status?: SpanAttributes["status"];
+  timestamp?: string;
+  traceId?: string;
+  traceparent?: string;
+};
+
 export type ReactActionEvent = {
   id: string;
   timestamp: string;
   attributes: ActionAttributes;
+};
+
+export type ReactRouterNavigationSpanEvent = {
+  id: string;
+  timestamp: string;
+  attributes: SpanAttributes;
 };
 
 export type LogBrewErrorBoundaryFallbackProps = {
@@ -144,6 +200,7 @@ export type LogBrewActions = {
   shutdown(transport: Transport): Promise<TransportResponse>;
   previewJson(): string;
   pendingEvents(): number;
+  droppedEvents(): number;
   captureReactError(error: unknown, options?: CaptureReactErrorOptions): ReactErrorEvent;
 };
 
@@ -172,6 +229,20 @@ export declare function captureReactNetwork(client: LogBrewClient, input: ReactN
 export declare function useLogBrewNetwork(
   defaults?: Partial<ReactNetworkInput>
 ): (input?: Partial<ReactNetworkInput>) => ReactActionEvent;
+export declare function createReactRouterRouteTemplate(
+  routeMatches?: ReactRouterRouteMatchLike[],
+  options?: ReactRouterRouteTemplateOptions
+): string | undefined;
+export declare function createReactRouterNavigationSpanEvent(
+  input: ReactRouterNavigationInput
+): ReactRouterNavigationSpanEvent;
+export declare function captureReactRouterNavigation(
+  client: LogBrewClient,
+  input: ReactRouterNavigationInput
+): ReactRouterNavigationSpanEvent;
+export declare function useLogBrewReactRouterNavigation(
+  options?: ReactRouterNavigationInput
+): void;
 export declare function useLogBrew(): LogBrewClient;
 export declare function useLogBrewActions(): LogBrewActions;
 
@@ -181,16 +252,20 @@ declare const defaultExport: {
   captureReactAction: typeof captureReactAction;
   captureReactError: typeof captureReactError;
   captureReactNetwork: typeof captureReactNetwork;
+  captureReactRouterNavigation: typeof captureReactRouterNavigation;
   createLogBrewReactClient: typeof createLogBrewReactClient;
   createReactActionEvent: typeof createReactActionEvent;
   createReactErrorEvent: typeof createReactErrorEvent;
   createReactNetworkEvent: typeof createReactNetworkEvent;
+  createReactRouterNavigationSpanEvent: typeof createReactRouterNavigationSpanEvent;
+  createReactRouterRouteTemplate: typeof createReactRouterRouteTemplate;
   createReactTraceparent: typeof createReactTraceparent;
   createTraceparentFetch: typeof createTraceparentFetch;
   shouldPropagateTraceparent: typeof shouldPropagateTraceparent;
   useLogBrew: typeof useLogBrew;
   useLogBrewAction: typeof useLogBrewAction;
   useLogBrewActions: typeof useLogBrewActions;
+  useLogBrewReactRouterNavigation: typeof useLogBrewReactRouterNavigation;
   useLogBrewNetwork: typeof useLogBrewNetwork;
 };
 

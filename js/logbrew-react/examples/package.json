@@ -4,6 +4,7 @@
   "scripts": {
     "help": "node ./index.mjs --help",
     "list": "node ./index.mjs --list",
+    "react-router-route-spans": "node ./index.mjs react-router-route-spans",
     "readme-example": "node ./index.mjs readme-example",
     "real-user-smoke": "node ./index.mjs real-user-smoke"
   }

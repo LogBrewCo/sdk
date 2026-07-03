@@ -42,6 +42,7 @@ grep -q '^package/index.d.ts$' "$tmp_dir/react-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/react-tarball.txt"
 grep -q '^package/examples/index.mjs$' "$tmp_dir/react-tarball.txt"
 grep -q '^package/examples/package.json$' "$tmp_dir/react-tarball.txt"
+grep -q '^package/examples/react-router-route-spans.mjs$' "$tmp_dir/react-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/react-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/react-tarball.txt"
 tar -xOf "$react_tgz" package/README.md > "$tmp_dir/react-readme.md"
@@ -56,6 +57,8 @@ grep -q 'useLogBrewNetwork' "$tmp_dir/react-readme.md"
 grep -q 'captureReactError' "$tmp_dir/react-readme.md"
 grep -q 'createTraceparentFetch' "$tmp_dir/react-readme.md"
 grep -q 'createReactTraceparent' "$tmp_dir/react-readme.md"
+grep -q 'useLogBrewReactRouterNavigation' "$tmp_dir/react-readme.md"
+grep -q 'createReactRouterRouteTemplate' "$tmp_dir/react-readme.md"
 grep -q 'tracePropagationTargets' "$tmp_dir/react-readme.md"
 
 app_dir="$tmp_dir/react-smoke-app"
@@ -112,16 +115,20 @@ import {
   captureReactAction,
   captureReactError,
   captureReactNetwork,
+  captureReactRouterNavigation,
   createLogBrewReactClient,
   createReactActionEvent,
   createReactErrorEvent,
   createReactNetworkEvent,
+  createReactRouterNavigationSpanEvent,
+  createReactRouterRouteTemplate,
   createReactTraceparent,
   createTraceparentFetch,
   shouldPropagateTraceparent,
   useLogBrew,
   useLogBrewAction,
   useLogBrewActions,
+  useLogBrewReactRouterNavigation,
   useLogBrewNetwork
 } from "@logbrew/react";
 
@@ -250,6 +257,187 @@ if (networkAction.attributes.metadata.method !== "POST" || networkAction.attribu
 }
 if ("ignoredNested" in networkAction.attributes.metadata) {
   throw new Error("expected React network helper to drop nested metadata");
+}
+
+const routerTraceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01";
+const routerMatches = [
+  { route: { path: "/" }, params: {} },
+  { route: { path: "projects" }, params: {} },
+  { route: { path: ":projectId" }, params: { projectId: "private-project-123" } },
+  { route: { path: "settings?debug=true#panel" }, params: {} }
+];
+const routerRouteTemplate = createReactRouterRouteTemplate(routerMatches);
+if (routerRouteTemplate !== "/projects/:projectId/settings") {
+  throw new Error(`unexpected React Router template: ${routerRouteTemplate}`);
+}
+const directRouterSpan = createReactRouterNavigationSpanEvent({
+  durationMs: 42,
+  id: "evt_span_react_router_direct",
+  location: {
+    pathname: "/projects/private-project-123/settings",
+    search: "?debug=true&email=hidden@example.test",
+    hash: "#panel"
+  },
+  metadata: {
+    ignoredNested: { value: "drop" },
+    owner: "checkout-ui"
+  },
+  navigationType: "PUSH",
+  routeMatches: routerMatches,
+  timestamp: "2026-06-02T10:00:07Z",
+  traceparent: routerTraceparent
+});
+if (directRouterSpan.attributes.name !== "react.route /projects/:projectId/settings") {
+  throw new Error(`unexpected React Router span name: ${directRouterSpan.attributes.name}`);
+}
+if (directRouterSpan.attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+  throw new Error("expected React Router span trace id from traceparent");
+}
+if (directRouterSpan.attributes.metadata.routeTemplate !== "/projects/:projectId/settings") {
+  throw new Error("expected React Router route template metadata");
+}
+if (directRouterSpan.attributes.metadata.owner !== "checkout-ui") {
+  throw new Error("expected primitive React Router metadata");
+}
+const directRouterBody = JSON.stringify(directRouterSpan);
+if (
+  directRouterBody.includes("private-project-123") ||
+  directRouterBody.includes("hidden@example.test") ||
+  directRouterBody.includes("#panel") ||
+  directRouterBody.includes("ignoredNested")
+) {
+  throw new Error(`React Router span leaked route details: ${directRouterBody}`);
+}
+
+const routerClient = createLogBrewReactClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-router-smoke-app",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+const routerEvents = [];
+function RouterProbe({ location, navigationType }) {
+  useLogBrewReactRouterNavigation({
+    durationMs: 17,
+    location,
+    navigationType,
+    onNavigation: (event) => {
+      routerEvents.push(event.id);
+    },
+    routeMatches: routerMatches,
+    timestamp: "2026-06-02T10:00:12Z",
+    traceparent: routerTraceparent
+  });
+  return React.createElement("span", { "data-route": routerRouteTemplate }, "route");
+}
+let routerRenderer;
+await act(async () => {
+  routerRenderer = TestRenderer.create(
+    React.createElement(
+      LogBrewProvider,
+      { client: routerClient },
+      React.createElement(RouterProbe, {
+        location: { pathname: "/projects/private-project-123/settings", search: "?debug=true", hash: "#panel" },
+        navigationType: "PUSH"
+      })
+    )
+  );
+});
+await act(async () => {
+  routerRenderer.update(
+    React.createElement(
+      LogBrewProvider,
+      { client: routerClient },
+      React.createElement(RouterProbe, {
+        location: { pathname: "/projects/private-project-123/settings", search: "?debug=false", hash: "#other" },
+        navigationType: "PUSH"
+      })
+    )
+  );
+});
+await act(async () => {
+  routerRenderer.update(
+    React.createElement(
+      LogBrewProvider,
+      { client: routerClient },
+      React.createElement(RouterProbe, {
+        location: { pathname: "/projects/private-project-456/settings", search: "?debug=true", hash: "#panel" },
+        navigationType: "POP"
+      })
+    )
+  );
+});
+const routerPreview = JSON.parse(routerClient.previewJson());
+const routerBody = JSON.stringify(routerPreview);
+if (routerPreview.events.length !== 2) {
+  throw new Error(`expected two React Router spans for two concrete paths, got ${routerPreview.events.length}: ${routerBody}`);
+}
+if (routerEvents.length !== 2) {
+  throw new Error(`expected two React Router navigation callbacks, got ${routerEvents.length}`);
+}
+for (const event of routerPreview.events) {
+  if (event.type !== "span" || event.attributes.metadata.source !== "react.router") {
+    throw new Error(`expected React Router span source metadata: ${routerBody}`);
+  }
+  if (event.attributes.metadata.routeTemplate !== "/projects/:projectId/settings") {
+    throw new Error(`expected route-template metadata on React Router span: ${routerBody}`);
+  }
+}
+if (
+  routerBody.includes("private-project-123") ||
+  routerBody.includes("private-project-456") ||
+  routerBody.includes("debug=true") ||
+  routerBody.includes("#panel")
+) {
+  throw new Error(`React Router hook leaked concrete route data: ${routerBody}`);
+}
+
+const routerLoadDrops = [];
+const routerLoadClient = createLogBrewReactClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  maxQueueSize: 25,
+  maxRetries: 1,
+  onEventDropped: (drop) => {
+    routerLoadDrops.push(drop);
+  },
+  sdkName: "react-router-load-smoke-app",
+  sdkVersion: "0.1.0"
+});
+for (let index = 0; index < 80; index += 1) {
+  captureReactRouterNavigation(routerLoadClient, {
+    id: `evt_span_react_router_load_${index}`,
+    routeTemplate: "/projects/:projectId/settings",
+    spanId: (index + 1).toString(16).padStart(16, "0"),
+    timestamp: "2026-06-02T10:00:14Z",
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+  });
+}
+if (routerLoadClient.pendingEvents() !== 25) {
+  throw new Error(`expected bounded React Router queue to retain 25 events, got ${routerLoadClient.pendingEvents()}`);
+}
+if (routerLoadClient.droppedEvents() !== 55 || routerLoadDrops.length !== 55) {
+  throw new Error(`expected 55 dropped React Router spans, got ${routerLoadClient.droppedEvents()} drops and ${routerLoadDrops.length} callbacks`);
+}
+const lastRouterDrop = routerLoadDrops.at(-1);
+if (
+  lastRouterDrop.reason !== "queue_overflow" ||
+  lastRouterDrop.eventType !== "span" ||
+  lastRouterDrop.eventId !== "evt_span_react_router_load_79" ||
+  lastRouterDrop.droppedEvents !== 55
+) {
+  throw new Error(`unexpected React Router load drop callback: ${JSON.stringify(lastRouterDrop)}`);
+}
+const routerLoadTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
+const routerLoadResponse = await routerLoadClient.shutdown(routerLoadTransport);
+if (routerLoadResponse.statusCode !== 202 || routerLoadResponse.attempts !== 2) {
+  throw new Error(`expected React Router load shutdown retry, got ${JSON.stringify(routerLoadResponse)}`);
+}
+if (routerLoadClient.pendingEvents() !== 0) {
+  throw new Error("expected React Router load shutdown to clear retained spans");
+}
+const routerLoadBody = routerLoadTransport.lastBody() ?? "";
+if (!routerLoadBody.includes("evt_span_react_router_load_24") || routerLoadBody.includes("evt_span_react_router_load_25")) {
+  throw new Error(`expected React Router load body to keep only retained bounded events: ${routerLoadBody}`);
 }
 
 const directClient = createLogBrewReactClient({
@@ -484,17 +672,22 @@ import {
   captureReactAction,
   captureReactError,
   captureReactNetwork,
+  captureReactRouterNavigation,
   createLogBrewReactClient,
   createReactActionEvent,
   createReactErrorEvent,
   createReactNetworkEvent,
+  createReactRouterNavigationSpanEvent,
+  createReactRouterRouteTemplate,
   createReactTraceparent,
   createTraceparentFetch,
   useLogBrew,
   useLogBrewAction,
   useLogBrewActions,
+  useLogBrewReactRouterNavigation,
   useLogBrewNetwork,
   type LogBrewActions,
+  type ReactRouterNavigationSpanEvent,
   type ReactActionEvent,
   type ReactErrorEvent,
   type ReactNetworkInput,
@@ -530,6 +723,25 @@ const typedNetworkInput: ReactNetworkInput = {
   statusCode: 202
 };
 const typedNetworkEvent: ReactActionEvent = createReactNetworkEvent(typedNetworkInput);
+const typedLoadClient = createLogBrewReactClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  eventFilter: (event) => event.id !== "evt_react_router_filtered",
+  maxQueueSize: 3,
+  onEventDropped: (drop) => {
+    void drop.droppedEvents;
+  }
+});
+const typedRouterSpan: ReactRouterNavigationSpanEvent = createReactRouterNavigationSpanEvent({
+  routeMatches: [{ route: { path: "/typed" } }, { route: { path: ":id" } }],
+  spanId: "b7ad6b7169203331",
+  timestamp: "2026-06-02T10:00:10Z",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+});
+const typedRouteTemplate: string | undefined = createReactRouterRouteTemplate([
+  { route: { path: "/typed" } },
+  { route: { path: ":id" } }
+]);
+captureReactRouterNavigation(typedLoadClient, typedRouterSpan);
 captureReactError(client, new Error("typed handled error"), {
   componentStack: "\n    at Component"
 });
@@ -547,6 +759,14 @@ function Component(): React.ReactElement {
   const actions: LogBrewActions = useLogBrewActions();
   const captureAction = useLogBrewAction({ sessionId: "sess_typed" });
   const captureNetwork = useLogBrewNetwork({ routeTemplate: "/api/typed" });
+  const dropped: number = actions.droppedEvents();
+  useLogBrewReactRouterNavigation({
+    location: { pathname: "/typed/private-id" },
+    routeMatches: [{ route: { path: "/typed" } }, { route: { path: ":id" } }],
+    spanId: "b7ad6b7169203332",
+    timestamp: "2026-06-02T10:00:13Z",
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+  });
   actions.log("evt_log_001", "2026-06-02T10:00:03Z", {
     message: "worker started",
     level: "info"
@@ -566,7 +786,14 @@ function Component(): React.ReactElement {
   void actions.flush(RecordingTransport.alwaysAccept());
   return React.createElement(
     "span",
-    { "data-network": typedNetworkEvent.id, "data-pending": directClient.pendingEvents(), "data-event": typedErrorEvent.id },
+    {
+      "data-network": typedNetworkEvent.id,
+      "data-pending": directClient.pendingEvents(),
+      "data-event": typedErrorEvent.id,
+      "data-route": typedRouteTemplate,
+      "data-router-dropped": dropped,
+      "data-router-span": typedRouterSpan.id
+    },
     "typed"
   );
 }
@@ -618,6 +845,12 @@ if (typeof react.captureReactAction !== "function" || typeof react.createReactAc
 if (typeof react.captureReactNetwork !== "function" || typeof react.createReactNetworkEvent !== "function") {
   throw new Error("missing CommonJS React network helpers");
 }
+if (typeof react.createReactRouterRouteTemplate !== "function" || typeof react.createReactRouterNavigationSpanEvent !== "function") {
+  throw new Error("missing CommonJS React Router helpers");
+}
+if (typeof react.captureReactRouterNavigation !== "function") {
+  throw new Error("missing CommonJS React Router capture helper");
+}
 if (!react.shouldPropagateTraceparent("https://api.example.test/ping", ["https://api.example.test/"])) {
   throw new Error("CommonJS trace target helper did not match");
 }
@@ -655,8 +888,15 @@ node cjs-smoke.cjs
 
 node node_modules/@logbrew/react/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/react/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"
+grep -q 'node node_modules/@logbrew/react/examples/index.mjs react-router-route-spans' "$tmp_dir/launcher-help.txt"
 node node_modules/@logbrew/react/examples/index.mjs --list > "$tmp_dir/launcher-list.txt"
+grep -q 'react-router-route-spans -> node node_modules/@logbrew/react/examples/index.mjs react-router-route-spans' "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/react/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
+node node_modules/@logbrew/react/examples/index.mjs react-router-route-spans > "$tmp_dir/example-router.stdout.json" 2> "$tmp_dir/example-router.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-router.stdout.json" >/dev/null
+grep -q '"ok":true' "$tmp_dir/example-router.stderr.json"
+grep -q '"attempts":2' "$tmp_dir/example-router.stderr.json"
+grep -q '"routeTemplate":"/projects/:projectId/settings"' "$tmp_dir/example-router.stderr.json"
 node node_modules/@logbrew/react/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/example-readme.stdout.json" >/dev/null
@@ -669,9 +909,15 @@ grep -q '"manualErrorAttempts":2' "$tmp_dir/example-default.stderr.json"
 grep -q '"manualErrorEvents":3' "$tmp_dir/example-default.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/react/examples run list > "$tmp_dir/npm-helper-list.txt"
+grep -q 'react-router-route-spans -> node node_modules/@logbrew/react/examples/index.mjs react-router-route-spans' "$tmp_dir/npm-helper-list.txt"
 grep -q 'readme-example -> node node_modules/@logbrew/react/examples/index.mjs readme-example' "$tmp_dir/npm-helper-list.txt"
 npm --prefix node_modules/@logbrew/react/examples run help > "$tmp_dir/npm-helper-help.txt"
+grep -q 'npm --prefix node_modules/@logbrew/react/examples run react-router-route-spans' "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/react/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
+npm --prefix node_modules/@logbrew/react/examples run --silent react-router-route-spans > "$tmp_dir/npm-helper-router.stdout.json" 2> "$tmp_dir/npm-helper-router.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-router.stdout.json" >/dev/null
+grep -q '"ok":true' "$tmp_dir/npm-helper-router.stderr.json"
+grep -q '"routeTemplate":"/projects/:projectId/settings"' "$tmp_dir/npm-helper-router.stderr.json"
 npm --prefix node_modules/@logbrew/react/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null

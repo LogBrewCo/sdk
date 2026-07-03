@@ -48,6 +48,6 @@
     "react": ">=18"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check examples/index.mjs && node --check examples/react-router-route-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
   }
 }

@@ -8,6 +8,7 @@ const repoLauncherPrefix = "node examples/index.mjs";
 const installedLauncherPrefix = "node node_modules/@logbrew/react/examples/index.mjs";
 
 const examples = {
+  "react-router-route-spans": new URL("./react-router-route-spans.mjs", import.meta.url),
   "readme-example": new URL("./readme-example.mjs", import.meta.url),
   "real-user-smoke": new URL("./real-user-smoke.mjs", import.meta.url)
 };
@@ -19,6 +20,7 @@ function isInstalledPackageContext() {
 function exampleCommands() {
   if (!isInstalledPackageContext()) {
     return {
+      "react-router-route-spans": `${repoPrefix} && ${repoLauncherPrefix} react-router-route-spans`,
       "readme-example": `${repoPrefix} && ${repoLauncherPrefix} readme-example`,
       "real-user-smoke": `${repoPrefix} && ${repoLauncherPrefix} real-user-smoke`,
       "default (real-user-smoke)": `${repoPrefix} && ${repoLauncherPrefix}`
@@ -26,6 +28,7 @@ function exampleCommands() {
   }
 
   return {
+    "react-router-route-spans": `${installedLauncherPrefix} react-router-route-spans`,
     "readme-example": `${installedLauncherPrefix} readme-example`,
     "real-user-smoke": `${installedLauncherPrefix} real-user-smoke`,
     "default (real-user-smoke)": installedLauncherPrefix
@@ -35,12 +38,14 @@ function exampleCommands() {
 function helperCommands() {
   if (!isInstalledPackageContext()) {
     return {
+      "react-router-route-spans": `${repoExamplesPrefix} && npm run react-router-route-spans | ${repoExamplesPrefix} && pnpm run react-router-route-spans`,
       "readme-example": `${repoExamplesPrefix} && npm run readme-example | ${repoExamplesPrefix} && pnpm run readme-example`,
       "real-user-smoke": `${repoExamplesPrefix} && npm run real-user-smoke | ${repoExamplesPrefix} && pnpm run real-user-smoke`
     };
   }
 
   return {
+    "react-router-route-spans": `${installedHelperPrefix} react-router-route-spans | ${installedPnpmHelperPrefix} react-router-route-spans`,
     "readme-example": `${installedHelperPrefix} readme-example | ${installedPnpmHelperPrefix} readme-example`,
     "real-user-smoke": `${installedHelperPrefix} real-user-smoke | ${installedPnpmHelperPrefix} real-user-smoke`
   };
