@@ -35,7 +35,8 @@
   semantic conventions/header options, and deeper automatic framework/client
   spans; LogBrew is now stronger on explicit target scope, dependency-light
   setup, reversible teardown, installed-artifact proof, and privacy defaults.
-- 2026-07-02: .NET optional OpenTelemetry processor bridge added after source
+- 2026-07-03: .NET optional OpenTelemetry processor/exporter bridge added after
+  source
   reads from Sentry .NET
   `getsentry/sentry-dotnet@bfcb8a9410917a99826803683ae4b0f2191869f5`
   (`TracerProviderBuilderExtensions.AddSentry`, `SentrySpanProcessor`),
@@ -50,14 +51,18 @@
   (AI trace/span context only; no general OTel processor found).
   New `LogBrew.OpenTelemetry` NuGet package exposes
   `LogBrewOpenTelemetrySpanProcessor` and
-  `TracerProviderBuilder.AddLogBrew(...)`, delegates ended recorded W3C
-  Activities into existing privacy-bounded `LogBrewActivitySpanTelemetry`, and
-  keeps core `LogBrew` free of OTel dependencies. It avoids owning providers,
-  exporters, samplers, resource detectors, instrumentation packages, global
-  listeners, baggage/tracestate, HTTP/database patching, payload/header/full
-  URL/query capture, exception messages/stacks, support tickets, and background
-  upload paths. Evidence: RED missing-package test, GREEN 3 focused OTel tests
-  including 128-span burst queue pressure, `bash scripts/check_dotnet_package.sh`,
+  `TracerProviderBuilder.AddLogBrew(...)` plus
+  `LogBrewOpenTelemetrySpanExporter` for standard OTel processors such as
+  `SimpleActivityExportProcessor` and `BatchActivityExportProcessor`. Both
+  delegate ended recorded W3C Activities into existing privacy-bounded
+  `LogBrewActivitySpanTelemetry` and keep core `LogBrew` free of OTel
+  dependencies. The package avoids owning providers, samplers, resource
+  detectors, instrumentation packages, global listeners, baggage/tracestate,
+  OTLP forwarding, HTTP/database patching, payload/header/full URL/query
+  capture, exception messages/stacks, support tickets, and background upload
+  paths. Evidence: RED missing-package/exporter tests, GREEN 5 focused OTel
+  tests including exporter failure behavior and 128-span burst queue pressure,
+  `bash scripts/check_dotnet_package.sh`,
   `bash scripts/real_user_dotnet_smoke.sh`,
   `bash scripts/real_user_dotnet_high_load_smoke.sh`,
   `bash scripts/real_user_dotnet_public_nuget_smoke.sh` (current packages,
