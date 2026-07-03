@@ -55,6 +55,8 @@ const OTEL_SPAN_KIND_NAMES = new Map([
   [4, "consumer"]
 ]);
 const OTEL_STATUS_CODE_ERROR = 2;
+const OTEL_EXPORT_RESULT_SUCCESS = 0;
+const OTEL_EXPORT_RESULT_FAILED = 1;
 const ZERO_SPAN_ID = "0000000000000000";
 const SENSITIVE_OTEL_ATTRIBUTE_KEYS = new Set([
   "code.stacktrace",
@@ -173,20 +175,15 @@ function buildOpenTelemetryHelpers({
           return;
         }
         try {
-          if (spanFilter && spanFilter(span) === false) {
-            return;
-          }
-          const attributes = spanAttributesFromResolvedOpenTelemetryReadableSpan(span, resolvedOptions);
-          if (!attributes) {
-            return;
-          }
-          recordOpenTelemetryTraceSummary(state, attributes, span);
-          state.captured += 1;
-          client.span(
-            `${eventIdPrefix}_${state.captured}`,
-            timestampFromOpenTelemetryReadableSpan(span, timestamp),
-            attributes
-          );
+          enqueueOpenTelemetryReadableSpan({
+            client,
+            eventIdPrefix,
+            resolvedOptions,
+            span,
+            spanFilter,
+            state,
+            timestamp
+          });
         } catch (error) {
           onError(error);
         }
@@ -217,6 +214,135 @@ function buildOpenTelemetryHelpers({
         });
       }
     };
+  }
+
+  function createLogBrewOpenTelemetrySpanExporter(config) {
+    if (!config || Array.isArray(config) || typeof config !== "object") {
+      throw new SdkError("validation_error", "OpenTelemetry span exporter config must be an object");
+    }
+    const client = config.client;
+    if (!(client instanceof LogBrewClient)) {
+      throw new SdkError("validation_error", "OpenTelemetry span exporter client must be a LogBrewClient");
+    }
+    const eventIdPrefix = config.eventIdPrefix ?? "otel";
+    requireNonEmpty("OpenTelemetry eventIdPrefix", eventIdPrefix);
+    const transport = config.transport;
+    const timestamp = typeof config.timestamp === "function"
+      ? config.timestamp
+      : undefined;
+    const onError = typeof config.onError === "function" ? config.onError : () => {};
+    const spanFilter = typeof config.spanFilter === "function" ? config.spanFilter : null;
+    const flushOnExport = config.flushOnExport !== false;
+    const includeTraceSummary = config.includeTraceSummary === true;
+    const resolvedOptions = resolveOpenTelemetryReadableSpanOptions(config);
+    const state = {
+      captured: 0,
+      closed: false,
+      flushInFlight: false,
+      pendingFlush: Promise.resolve(null),
+      traceSummaryCount: 0,
+      traceSummaries: includeTraceSummary ? new Map() : null
+    };
+
+    return {
+      export(spans, resultCallback) {
+        const callback = typeof resultCallback === "function" ? resultCallback : () => {};
+        if (state.closed) {
+          const error = new SdkError("shutdown_error", "OpenTelemetry span exporter is already shut down");
+          callback(openTelemetryExportFailure(error));
+          return;
+        }
+        if (!Array.isArray(spans)) {
+          const error = new SdkError("validation_error", "OpenTelemetry span exporter spans must be an array");
+          onError(error);
+          callback(openTelemetryExportFailure(error));
+          return;
+        }
+        try {
+          for (const span of spans) {
+            enqueueOpenTelemetryReadableSpan({
+              client,
+              eventIdPrefix,
+              resolvedOptions,
+              span,
+              spanFilter,
+              state,
+              timestamp
+            });
+          }
+        } catch (error) {
+          onError(error);
+          callback(openTelemetryExportFailure(error));
+          return;
+        }
+        flushOpenTelemetryExporterQueue({
+          client,
+          eventIdPrefix,
+          flushOnExport,
+          includeTraceSummary,
+          onError,
+          state,
+          timestamp,
+          transport
+        }).then(
+          () => callback({ code: OTEL_EXPORT_RESULT_SUCCESS }),
+          (error) => {
+            onError(error);
+            callback(openTelemetryExportFailure(error));
+          }
+        );
+      },
+      async forceFlush() {
+        await flushOpenTelemetryExporterQueue({
+          client,
+          eventIdPrefix,
+          flushOnExport: true,
+          includeTraceSummary,
+          onError,
+          state,
+          timestamp,
+          transport
+        });
+      },
+      async shutdown() {
+        state.closed = true;
+        await flushOpenTelemetryExporterQueue({
+          client,
+          eventIdPrefix,
+          flushOnExport: true,
+          includeTraceSummary,
+          onError,
+          state,
+          timestamp,
+          transport
+        });
+      }
+    };
+  }
+
+  function enqueueOpenTelemetryReadableSpan({
+    client,
+    eventIdPrefix,
+    resolvedOptions,
+    span,
+    spanFilter,
+    state,
+    timestamp
+  }) {
+    if (spanFilter && spanFilter(span) === false) {
+      return;
+    }
+    const attributes = spanAttributesFromResolvedOpenTelemetryReadableSpan(span, resolvedOptions);
+    if (!attributes) {
+      return;
+    }
+    recordOpenTelemetryTraceSummary(state, attributes, span);
+    state.captured += 1;
+    client.span(
+      `${eventIdPrefix}_${state.captured}`,
+      timestampFromOpenTelemetryReadableSpan(span, timestamp),
+      attributes
+    );
   }
 
   function spanAttributesFromResolvedOpenTelemetryReadableSpan(span, options) {
@@ -755,6 +881,42 @@ function buildOpenTelemetryHelpers({
     await state.pendingFlush;
   }
 
+  async function flushOpenTelemetryExporterQueue({
+    client,
+    eventIdPrefix,
+    flushOnExport,
+    includeTraceSummary,
+    onError,
+    state,
+    timestamp,
+    transport
+  }) {
+    if (includeTraceSummary) {
+      enqueueOpenTelemetryTraceSummaries({ client, eventIdPrefix, onError, state, timestamp });
+    }
+    if (!transport || !flushOnExport || client.pendingEvents() === 0) {
+      await state.pendingFlush;
+      return;
+    }
+    if (state.flushInFlight) {
+      await state.pendingFlush;
+      return;
+    }
+    state.flushInFlight = true;
+    state.pendingFlush = Promise.resolve(client.flush(transport))
+      .finally(() => {
+        state.flushInFlight = false;
+      });
+    await state.pendingFlush;
+  }
+
+  function openTelemetryExportFailure(error) {
+    return {
+      code: OTEL_EXPORT_RESULT_FAILED,
+      ...(error instanceof Error ? { error } : {})
+    };
+  }
+
   function isSensitiveOpenTelemetryAttributeKey(key) {
     if (SENSITIVE_OTEL_ATTRIBUTE_KEYS.has(key)) {
       return true;
@@ -766,6 +928,7 @@ function buildOpenTelemetryHelpers({
   }
 
   return {
+    createLogBrewOpenTelemetrySpanExporter,
     createLogBrewOpenTelemetrySpanProcessor,
     logbrewTraceContextFromCurrentOpenTelemetrySpan,
     logbrewTraceContextFromOpenTelemetrySpan,

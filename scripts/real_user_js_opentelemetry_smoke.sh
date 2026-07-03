@@ -86,6 +86,7 @@ grep -q '@opentelemetry/sdk-trace-base@' "$tmp_dir/npm-list-after-otel.txt"
 cat > typecheck.mts <<'EOF'
 import {
   createLogBrewOpenTelemetrySpanProcessor,
+  createLogBrewOpenTelemetrySpanExporter,
   LogBrewClient,
   logbrewTraceContextFromCurrentOpenTelemetrySpan,
   logbrewTraceContextFromOpenTelemetrySpan,
@@ -126,6 +127,16 @@ const processor = createLogBrewOpenTelemetrySpanProcessor({
   })
 });
 processor.onEnd(readableSpan);
+const exporter = createLogBrewOpenTelemetrySpanExporter({
+  client: LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "typecheck-exporter",
+    sdkVersion: "0.1.0"
+  })
+});
+exporter.export([readableSpan], (result) => {
+  result.code satisfies number;
+});
 
 if (!fromContext) {
   throw new Error("expected typed span context to produce a LogBrew trace");
@@ -135,6 +146,8 @@ fromSpan?.sampled satisfies boolean | undefined;
 fromCurrent?.spanId satisfies string | undefined;
 converted?.events?.[0]?.metadata?.["cache.hit"] satisfies string | number | boolean | null | undefined;
 processor.forceFlush() satisfies Promise<void>;
+exporter.forceFlush() satisfies Promise<void>;
+exporter.shutdown() satisfies Promise<void>;
 EOF
 ./node_modules/.bin/tsc \
   --noEmit \
@@ -149,8 +162,9 @@ EOF
 cat > otel.mjs <<'EOF'
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { context, SpanKind, TraceFlags, trace } from "@opentelemetry/api";
-import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
+import { BasicTracerProvider, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import {
+  createLogBrewOpenTelemetrySpanExporter,
   createLogBrewOpenTelemetrySpanProcessor,
   createTraceparentHeaders,
   LogBrewClient,
@@ -308,6 +322,67 @@ try {
   processorSpan.end();
   await processor.forceFlush();
   await processor.shutdown();
+
+  const exporterClient = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "js-opentelemetry-exporter-smoke",
+    sdkVersion: "0.1.0"
+  });
+  const exporterTransport = RecordingTransport.alwaysAccept();
+  const exporter = createLogBrewOpenTelemetrySpanExporter({
+    client: exporterClient,
+    eventIdPrefix: "otel_export",
+    includeTraceSummary: true,
+    metadata: { release: "checkout@1.2.3" },
+    transport: exporterTransport
+  });
+  const exporterProvider = new BasicTracerProvider({
+    spanProcessors: [new SimpleSpanProcessor(exporter)]
+  });
+  const exporterTracer = exporterProvider.getTracer("logbrew-otel-exporter-smoke", "1.0.0");
+  const exporterSpan = exporterTracer.startSpan("POST /checkout", {
+    attributes: {
+      "http.request.method": "POST",
+      "http.response.status_code": 201,
+      "http.route": "/checkout",
+      "url.full": "https://api.example/checkout?api_key=redacted"
+    },
+    kind: SpanKind.SERVER
+  });
+  exporterSpan.end();
+  await exporterProvider.forceFlush();
+  await exporterProvider.shutdown();
+
+  const exporterPayload = JSON.parse(exporterTransport.lastBody());
+  const exporterDetail = exporterPayload.events.find((event) => (
+    event.attributes.metadata.source === "opentelemetry.readable_span"
+  ));
+  const exporterSummary = exporterPayload.events.find((event) => (
+    event.attributes.metadata.source === "opentelemetry.trace_summary"
+  ));
+  const serializedExporterPayload = JSON.stringify(exporterPayload);
+  if (
+    exporterPayload.events.length !== 2 ||
+    !exporterDetail ||
+    !exporterSummary ||
+    exporterDetail.type !== "span" ||
+    exporterSummary.type !== "span" ||
+    exporterDetail.id !== "otel_export_1" ||
+    exporterSummary.id !== "otel_export_trace_1"
+  ) {
+    throw new Error(`unexpected exporter payload: ${serializedExporterPayload}`);
+  }
+  if (
+    exporterSummary.attributes.name !== "opentelemetry.trace:POST /checkout" ||
+    exporterSummary.attributes.traceId !== exporterDetail.attributes.traceId ||
+    exporterSummary.attributes.metadata["otel.trace.span_count"] !== 1 ||
+    exporterSummary.attributes.metadata["otel.trace.root_span_id"] !== exporterDetail.attributes.spanId
+  ) {
+    throw new Error("exporter trace summary omitted expected root span metadata");
+  }
+  if (serializedExporterPayload.includes("api_key=redacted") || serializedExporterPayload.includes("url.full")) {
+    throw new Error("exporter payload copied unsafe OpenTelemetry attributes");
+  }
 
   const processorPayload = JSON.parse(processorTransport.lastBody());
   const processorEvent = processorPayload.events.find((event) => (

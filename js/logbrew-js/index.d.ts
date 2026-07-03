@@ -156,6 +156,36 @@ export type OpenTelemetrySpanProcessorConfig = OpenTelemetryReadableSpanOptions 
   onError?: (error: unknown) => void;
 };
 
+/** Configuration for an opt-in OpenTelemetry SpanExporter-compatible LogBrew bridge. */
+export type OpenTelemetrySpanExporterConfig = OpenTelemetryReadableSpanOptions & {
+  client: LogBrewClient;
+  transport?: Transport;
+  /** Flush with the provided transport during export. Defaults to true when a transport is supplied. */
+  flushOnExport?: boolean;
+  /** Emit one privacy-bounded synthetic trace summary span per exported batch. Defaults to false. */
+  includeTraceSummary?: boolean;
+  timestamp?: () => string;
+  eventIdPrefix?: string;
+  spanFilter?: (span: unknown) => boolean | void;
+  onError?: (error: unknown) => void;
+};
+
+/** Minimal OpenTelemetry export result shape; success is code 0, failure is code 1. */
+export type OpenTelemetryExportResult = {
+  code: number;
+  error?: Error;
+};
+
+/** SpanExporter-compatible handle for app-owned OpenTelemetry processors. */
+export type OpenTelemetrySpanExporterHandle = {
+  export(
+    spans: readonly (OpenTelemetryReadableSpanLike | unknown)[],
+    resultCallback: (result: OpenTelemetryExportResult) => void
+  ): void;
+  forceFlush(): Promise<void>;
+  shutdown(): Promise<void>;
+};
+
 /** SpanProcessor-compatible handle for app-owned OpenTelemetry setup. */
 export type OpenTelemetrySpanProcessorHandle = {
   onStart(span: unknown, parentContext: unknown): void;
@@ -634,6 +664,11 @@ export declare function spanAttributesFromOpenTelemetryReadableSpan(
 export declare function createLogBrewOpenTelemetrySpanProcessor(
   config: OpenTelemetrySpanProcessorConfig
 ): OpenTelemetrySpanProcessorHandle;
+
+/** Create an opt-in SpanExporter-compatible bridge for app-owned OpenTelemetry processors. */
+export declare function createLogBrewOpenTelemetrySpanExporter(
+  config: OpenTelemetrySpanExporterConfig
+): OpenTelemetrySpanExporterHandle;
 
 /** Build LogBrew span attributes that continue an incoming W3C traceparent value. */
 export declare function spanAttributesFromTraceparent(

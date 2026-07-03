@@ -230,53 +230,44 @@
   Remaining Python rich-trace gaps: full OTel exporter/provider ownership,
   span links, baggage/tracestate, broader semantic-convention coverage,
   automatic framework/client instrumentation depth, and advanced batching.
-- 2026-07-01: JavaScript OpenTelemetry ended-span bridge added after source
-  reads from Sentry JavaScript
-  `getsentry/sentry-javascript@88e7ad5444ece21f074e53768cb8633e00fa3a2b`
-  (`packages/opentelemetry/src/spanProcessor.ts`
-  `SentrySpanProcessor.onStart`/`onEnd`/`forceFlush`/`shutdown`,
-  `packages/opentelemetry/src/spanExporter.ts`
-  `SentrySpanExporter.export`/`flush`/`_maybeSend`,
-  `createTransactionForOtelSpan`, `createAndFinishSpanForOtelSpan`),
-  OpenTelemetry JS
-  `open-telemetry/opentelemetry-js@c989308b87403e19923f440810d6ab47e7c2ba0d`
-  (`ReadableSpan`, `SpanProcessor`, `SimpleSpanProcessor`,
-  `BatchSpanProcessorBase`), Datadog JS
-  `DataDog/dd-trace-js@7ffe20cf044810793377b05f4e97490ecd2c903c`
-  (`opentelemetry/tracer.js`, `span.js`, `span_processor.js`), and PostHog JS
-  `PostHog/posthog-js@a5181ba36f64cf69108be2f0fbf1e68dbeb4e827`
-  (`packages/ai/src/otel/processor.ts`, `exporter.ts`, `redact.ts`,
-  `spans.ts`). Core `@logbrew/sdk` now exports
-  `spanAttributesFromOpenTelemetryReadableSpan(...)` and
-  `createLogBrewOpenTelemetrySpanProcessor(...)`: apps that already own an OTel
-  provider can opt in to converting ended `ReadableSpan` data into queued
-  LogBrew spans without adding default OTel dependencies or letting LogBrew own
-  providers/exporters/instrumentation. The bridge follows sampled-span behavior
-  by default, summarizes up to eight events and links, copies safe route/method/
-  status/service/environment/scope/kind/dropped-count metadata, requires
-  allowlists for extra attributes, and blocks full URLs, headers, query/
-  fragment values, payloads, cookies, private auth values, DB statements, exception
-  messages, and stacks. Follow-up added `includeTraceSummary: true`: one
-  synthetic `opentelemetry.trace:<root-name>` span per trace is emitted on
-  `forceFlush()`/`shutdown()` with trace ID, span count, error count, root span
-  ID/name/kind, duration, and safe service/environment/route metadata so OTel
-  batches read more like Sentry-style request/transaction groups without
-  adopting Sentry's transaction lifecycle. Concurrent `forceFlush()` calls now
-  share one in-flight transport send so a single queued batch is not duplicated.
-  Evidence: RED missing-export JS tests, RED trace-summary test first flushing
-  only detail spans, concurrent-forceFlush regression coverage, `npm test
-  --prefix js/logbrew-js` (81 tests), and `bash
-  scripts/real_user_js_opentelemetry_smoke.sh` with packed installed package,
-  install/remove/reinstall, no-OTel fallback, real `@opentelemetry/api`,
-  `@opentelemetry/context-async-hooks`, `@opentelemetry/sdk-trace-base`,
-  TypeScript declaration proof, active context copy, and real
-  `BasicTracerProvider` processor plus trace-summary payload sanitization.
-  Research:
+- 2026-07-03: JavaScript OpenTelemetry ended-span interop now covers both
+  processor and exporter paths. Original 2026-07-01 source reads covered Sentry
+  JS `88e7ad5444ece21f074e53768cb8633e00fa3a2b`, OTel JS
+  `c989308b87403e19923f440810d6ab47e7c2ba0d`, Datadog JS
+  `7ffe20cf044810793377b05f4e97490ecd2c903c`, and PostHog JS
+  `a5181ba36f64cf69108be2f0fbf1e68dbeb4e827`. Exporter follow-up reread
+  current public HEADs: Sentry JS `cf895c95995a6dff121484eadfa3a82980646f91`
+  (`SentrySpanExporter.export`/`flush`, `SentrySpanProcessor.onEnd`), OTel JS
+  `40d67b7690a61bd9af0a4e5b5b9f4a14b11fc50e` (`SpanExporter.export`,
+  `SimpleSpanProcessor`, `BatchSpanProcessorBase`), PostHog JS
+  `cc01eea218219b1f36145143c62586c66c459e84`
+  (`PostHogTraceExporter.export`, `PostHogSpanProcessor`), and Datadog JS
+  `80c5d963ec7ff5d20c7fc2d662deff463fd47843` (`span_processor.js` export
+  boundary). Core `@logbrew/sdk` now exports
+  `spanAttributesFromOpenTelemetryReadableSpan(...)`,
+  `createLogBrewOpenTelemetrySpanProcessor(...)`, and
+  `createLogBrewOpenTelemetrySpanExporter(...)`: apps can convert ended OTel
+  `ReadableSpan` data through a direct LogBrew processor or through standard
+  app-owned OTel processors such as `SimpleSpanProcessor(exporter)` without
+  adding default OTel dependencies or letting LogBrew own providers/
+  instrumentation. The bridge follows sampled-span behavior, summarizes up to
+  eight events and links, can emit privacy-bounded trace summaries, copies safe
+  route/method/status/service/environment/scope/kind/dropped-count metadata,
+  requires allowlists for extras, and blocks full URLs, headers, query/fragment
+  values, payloads, cookies, auth values, DB statements, exception messages,
+  and stacks. Evidence: RED missing factory tests, RED trace-summary test,
+  concurrent flush regression coverage, `npm test --prefix js/logbrew-js` (82
+  tests), and `bash scripts/real_user_js_opentelemetry_smoke.sh` with packed
+  install/remove/reinstall, no-OTel fallback, current npm `@opentelemetry/api`
+  `1.9.1`, `@opentelemetry/context-async-hooks`/`sdk-trace-base` `2.9.0`,
+  TypeScript declarations, active context copy, real `BasicTracerProvider`
+  processor proof, real `SimpleSpanProcessor(exporter)` proof, and
+  blocked-value sanitization. Research:
   `docs/competitor-research/js-opentelemetry-span-processor-2026-07-01.md`.
   Remaining JS rich-trace gaps: automatic framework-owned instrumentation,
-  full transaction assembly/streaming spans, advanced batching/exporter interop,
-  broader safe semantic conventions, baggage/tracestate only with justified
-  interop, and automatic outbound/DB/cache/queue spans.
+  full transaction assembly/streaming spans, advanced batching/OTLP collector
+  interop, broader safe semantic conventions, baggage/tracestate only when
+  justified, and automatic outbound/DB/cache/queue spans.
 - 2026-07-01: JavaScript OpenTelemetry active-context bridge added after
   source reads from Sentry JavaScript
   `getsentry/sentry-javascript@e3161515dd5324e664b97e69ddcb7fa8ef6cd838`

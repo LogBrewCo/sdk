@@ -529,6 +529,7 @@ const createSupportTicketDraft = buildCreateSupportTicketDraft({
 });
 
 const {
+  createLogBrewOpenTelemetrySpanExporter,
   createLogBrewOpenTelemetrySpanProcessor,
   logbrewTraceContextFromCurrentOpenTelemetrySpan,
   logbrewTraceContextFromOpenTelemetrySpan,
@@ -1599,6 +1600,7 @@ module.exports = {
   createBaggage,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
+  createLogBrewOpenTelemetrySpanExporter,
   createLogBrewOpenTelemetrySpanProcessor,
   createSupportTicketDraft,
   createTraceContextHeaders,

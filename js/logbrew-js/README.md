@@ -275,7 +275,33 @@ span.end();
 await processor.forceFlush();
 ```
 
-The OTel processor follows normal OTel sampled-span behavior by default and summarizes up to eight span events and eight links. Set `includeTraceSummary: true` when you also want one synthetic `opentelemetry.trace:<root-name>` span per trace on `forceFlush()`/`shutdown()`; the summary carries the trace ID, span count, error count, root span ID/name/kind, duration, and safe service/environment/route metadata so a batch reads like one request or transaction. It copies only a small safe default set such as service, environment, route, method, status code, span kind, instrumentation scope, exception type, and dropped-count metadata. Additional event/link/span/resource attributes require explicit allowlists, and high-risk keys such as full URLs, headers, query strings, payloads, cookies, private auth values, DB statements, exception messages, and stacks stay blocked. Concurrent `forceFlush()` calls share the same in-flight flush to avoid duplicate sends. The helpers do not add an OpenTelemetry dependency, patch clients, serialize baggage or tracestate, copy raw propagation headers, or capture request/response bodies.
+If your OpenTelemetry setup already uses standard processors such as `SimpleSpanProcessor` or `BatchSpanProcessor`, use `createLogBrewOpenTelemetrySpanExporter()` instead:
+
+```js
+import { BasicTracerProvider, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import {
+  createLogBrewOpenTelemetrySpanExporter,
+  LogBrewClient,
+  RecordingTransport
+} from "@logbrew/sdk";
+
+const client = LogBrewClient.create({
+  apiKey: "LOGBREW_API_KEY",
+  sdkName: "checkout-api",
+  sdkVersion: "1.0.0"
+});
+const exporter = createLogBrewOpenTelemetrySpanExporter({
+  client,
+  transport: RecordingTransport.alwaysAccept(),
+  includeTraceSummary: true,
+  metadata: { release: "checkout@1.2.3", environment: "production" }
+});
+const provider = new BasicTracerProvider({
+  spanProcessors: [new SimpleSpanProcessor(exporter)]
+});
+```
+
+The OTel processor and exporter follow normal OTel sampled-span behavior by default and summarize up to eight span events and eight links. Set `includeTraceSummary: true` when you also want one synthetic `opentelemetry.trace:<root-name>` span per trace on processor `forceFlush()`/`shutdown()` or exporter `export()`/`forceFlush()`/`shutdown()`; the summary carries the trace ID, span count, error count, root span ID/name/kind, duration, and safe service/environment/route metadata so a batch reads like one request or transaction. They copy only a small safe default set such as service, environment, route, method, status code, span kind, instrumentation scope, exception type, and dropped-count metadata. Additional event/link/span/resource attributes require explicit allowlists, and high-risk keys such as full URLs, headers, query strings, payloads, cookies, private auth values, DB statements, exception messages, and stacks stay blocked. Concurrent flush calls share the same in-flight send to avoid duplicate payloads. These helpers do not add an OpenTelemetry dependency, patch clients, own tracer providers, serialize baggage or tracestate, copy raw propagation headers, or capture request/response bodies.
 
 LogBrew severity categories are `info`, `warning`, `error`, and `critical`. The JavaScript SDK accepts common runtime aliases such as `trace`, `debug`, `warn`, and `fatal` for compatibility, then serializes canonical values before queued events are sent. The shared mapping is documented in the [LogBrew severity contract](../../docs/severity-contract.md).
 

@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import {
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
+  createLogBrewOpenTelemetrySpanExporter,
   createLogBrewOpenTelemetrySpanProcessor,
   createSupportTicketDraft,
   createBaggage,
@@ -667,6 +668,7 @@ test("CommonJS entry exposes the public API", () => {
   assert.equal(typeof sdk.createNetworkMilestoneAttributes, "function");
   assert.equal(typeof sdk.createSupportTicketDraft, "function");
   assert.equal(typeof sdk.installLogBrewConsoleCapture, "function");
+  assert.equal(typeof sdk.createLogBrewOpenTelemetrySpanExporter, "function");
   assert.equal(typeof sdk.logbrewTraceContextFromCurrentOpenTelemetrySpan, "function");
   assert.equal(typeof sdk.parseTraceparent, "function");
   assert.match(client.previewJson(), /"type": "release"/);
@@ -1136,6 +1138,52 @@ test("OpenTelemetry span processor coalesces concurrent forceFlush calls", async
   }
   assert.equal(client.pendingEvents(), 0);
   assert.equal(sends.length, 1);
+});
+
+test("OpenTelemetry span exporter exports batches through standard exporter callbacks", async () => {
+  const errors = [];
+  const client = sampleClient();
+  const transport = RecordingTransport.alwaysAccept();
+  const exporter = createLogBrewOpenTelemetrySpanExporter({
+    client,
+    eventIdPrefix: "otel_export",
+    includeTraceSummary: true,
+    linkAttributeKeys: ["messaging.operation.name"],
+    onError: (error) => errors.push(error),
+    transport
+  });
+
+  const result = await new Promise((resolve) => {
+    exporter.export([
+      sampleOpenTelemetryReadableSpan(),
+      sampleOpenTelemetryReadableSpan({
+        spanContext: () => ({
+          traceId: "cccccccccccccccccccccccccccccccc",
+          spanId: "dddddddddddddddd",
+          traceFlags: 0
+        })
+      })
+    ], resolve);
+  });
+
+  assert.deepEqual(result, { code: 0 });
+  assert.deepEqual(errors, []);
+  assert.equal(client.pendingEvents(), 0);
+
+  const payload = JSON.parse(transport.lastBody());
+  assert.equal(payload.events.length, 2);
+  assert.deepEqual(payload.events.map((event) => event.id), ["otel_export_1", "otel_export_trace_1"]);
+  assert.equal(payload.events[0].attributes.metadata.source, "opentelemetry.readable_span");
+  assert.equal(payload.events[1].attributes.metadata.source, "opentelemetry.trace_summary");
+  assert.equal(payload.events[0].attributes.links[0].metadata["messaging.operation.name"], "process");
+  assert.equal(JSON.stringify(payload).includes("api_key=redacted"), false);
+  assert.equal(JSON.stringify(payload).includes("db.statement"), false);
+
+  await exporter.shutdown();
+  const closedResult = await new Promise((resolve) => {
+    exporter.export([sampleOpenTelemetryReadableSpan()], resolve);
+  });
+  assert.equal(closedResult.code, 1);
 });
 
 test("traceparent helpers reject malformed W3C trace context", () => {

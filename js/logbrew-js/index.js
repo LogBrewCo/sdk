@@ -4,6 +4,7 @@ export const {
   createBaggage,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
+  createLogBrewOpenTelemetrySpanExporter,
   createLogBrewOpenTelemetrySpanProcessor,
   createSupportTicketDraft,
   createTraceContextHeaders,
