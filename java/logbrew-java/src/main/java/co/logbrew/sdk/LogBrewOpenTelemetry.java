@@ -9,8 +9,8 @@ import java.util.Optional;
  * Optional OpenTelemetry API helpers for apps that already install OpenTelemetry.
  *
  * <p>The helpers copy only valid trace ID, span ID, and trace flags into a
- * LogBrew child trace context. They do not own OpenTelemetry exporters,
- * processors, attributes, links, events, baggage, or tracestate.</p>
+ * LogBrew child trace context. They do not own OpenTelemetry SDK providers,
+ * exporters, processors, attributes, links, events, baggage, or tracestate.</p>
  */
 public final class LogBrewOpenTelemetry {
     private LogBrewOpenTelemetry() {

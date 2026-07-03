@@ -30,11 +30,19 @@ fetch_java_opentelemetry_deps() {
   fetch_maven_jar \
     "io/opentelemetry/opentelemetry-common/$opentelemetry_version/opentelemetry-common-$opentelemetry_version" \
     "$deps_dir"
+  fetch_maven_jar \
+    "io/opentelemetry/opentelemetry-sdk-common/$opentelemetry_version/opentelemetry-sdk-common-$opentelemetry_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "io/opentelemetry/opentelemetry-sdk-trace/$opentelemetry_version/opentelemetry-sdk-trace-$opentelemetry_version" \
+    "$deps_dir"
 
-  printf '%s:%s:%s\n' \
+  printf '%s:%s:%s:%s:%s\n' \
     "$deps_dir/opentelemetry-api-$opentelemetry_version.jar" \
     "$deps_dir/opentelemetry-context-$opentelemetry_version.jar" \
-    "$deps_dir/opentelemetry-common-$opentelemetry_version.jar"
+    "$deps_dir/opentelemetry-common-$opentelemetry_version.jar" \
+    "$deps_dir/opentelemetry-sdk-common-$opentelemetry_version.jar" \
+    "$deps_dir/opentelemetry-sdk-trace-$opentelemetry_version.jar"
 }
 
 fetch_java_servlet_deps() {

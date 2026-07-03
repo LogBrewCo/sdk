@@ -50,6 +50,16 @@ If you copy live OpenTelemetry span context with `LogBrewOpenTelemetry`, include
 </dependency>
 ```
 
+If you also register the optional LogBrew OpenTelemetry span exporter or processor, include the OpenTelemetry SDK trace jar your app-owned `SdkTracerProvider` already uses:
+
+```xml
+<dependency>
+  <groupId>io.opentelemetry</groupId>
+  <artifactId>opentelemetry-sdk-trace</artifactId>
+  <version>1.63.0</version>
+</dependency>
+```
+
 If you manually register `LogBrewServletFilter` in a Jakarta Servlet app, include the Servlet API already used by your runtime. Spring Boot servlet apps usually already get this from `spring-boot-starter-web`; they can use `LogBrewSpringBootAutoConfiguration` by exposing an app-owned `LogBrewClient` bean. Spring Boot apps with a `CacheManager` or `DataSource` bean can also use `LogBrewSpringBootCacheAutoConfiguration` and `LogBrewSpringBootJdbcAutoConfiguration` from the same package path; no extra starter or ingest-property client setup is required.
 
 ```xml
@@ -232,7 +242,21 @@ Optional<LogBrewTraceContext> fromSpan =
     LogBrewOpenTelemetry.traceContextFromSpan(Span.current());
 ```
 
-The helper returns `Optional.empty()` when no valid OpenTelemetry span is active. It copies only the valid trace ID, parent span ID, and sampled trace flags into a new LogBrew child context. It does not install an OpenTelemetry SDK, create exporters or processors, read attributes, copy baggage/tracestate, patch HTTP clients, or capture payloads, headers, SQL, URLs, exception messages, or stack traces.
+The context-copy helpers return `Optional.empty()` when no valid OpenTelemetry span is active. They copy only the valid trace ID, parent span ID, and sampled trace flags into a new LogBrew child context. They do not install an OpenTelemetry SDK, read attributes, copy baggage/tracestate, patch HTTP clients, or capture payloads, headers, SQL, URLs, exception messages, or stack traces.
+
+When your app already owns an OpenTelemetry SDK provider and wants ended OTel spans queued into LogBrew, register the app-owned exporter or simple processor:
+
+```java
+import co.logbrew.sdk.LogBrewOpenTelemetry;
+import co.logbrew.sdk.LogBrewOpenTelemetrySdk;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+
+SdkTracerProvider provider = SdkTracerProvider.builder()
+    .addSpanProcessor(LogBrewOpenTelemetrySdk.spanProcessor(client))
+    .build();
+```
+
+`LogBrewOpenTelemetrySdk.spanExporter(client)` and `LogBrewOpenTelemetrySdk.spanProcessor(client)` convert ended spans into normal LogBrew `span` events through the existing client queue. They preserve trace/span/parent IDs, status, duration, span kind, instrumentation scope, small event summaries, span links, and allowlisted primitive metadata such as HTTP method/route/status, database system/operation, messaging system/operation, RPC service/method, service name/version, and exception type. They intentionally omit baggage, tracestate, arbitrary resource attributes, full URLs, SQL statements, headers, payloads, exception messages, and stack traces. LogBrew does not set the global OTel provider, own exporters/processors beyond the object you register, or patch framework instrumentation.
 
 ## Request Trace Correlation
 
@@ -803,7 +827,7 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `LogBrewClient` keeps a bounded in-memory queue of 1,000 events by default; use `LogBrewClient.create(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, drop -> ...)` to tune the cap and receive redacted advisory drop summaries. When the queue is full, the newest event is dropped, `droppedEvents()` increments, and drop-callback failures do not interrupt application logging.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
-- `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when OpenTelemetry API jars are already present.
+- `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when only OpenTelemetry API jars are present; `LogBrewOpenTelemetrySdk` exposes an app-owned `spanExporter` or `spanProcessor` when the app also uses `opentelemetry-sdk-trace`.
 - `LogBrewServletFilter` activates request-local trace context for Jakarta Servlet/Spring Boot handlers and emits one request span plus one duration metric without hidden Java-agent instrumentation.
 - `LogBrewSpringBootAutoConfiguration` registers that filter only when Spring Boot, Jakarta Servlet, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewSpringCacheTracing` wraps app-owned Spring `CacheManager` or `Cache` objects with privacy-bounded cache hit/write spans under an active trace by default.

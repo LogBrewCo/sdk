@@ -1,5 +1,41 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: Java optional OpenTelemetry ended-span exporter bridge added
+  after source reads from Sentry Java
+  `getsentry/sentry-java@34c912af8ac0b9def83ad0dbfe8d1452d460c7ed`
+  (`OtelSentrySpanProcessor`, `OtelSpanFactory`, `SentryWeakSpanStorage`,
+  Spring OTel config), OpenTelemetry Java
+  `open-telemetry/opentelemetry-java@4d974ba1bb300157d3cb296cd466f8d1d96b9333`
+  (`SpanExporter`, `SimpleSpanProcessor`, `SpanData`, `EventData`,
+  `LinkData`, `StatusData`), Datadog Java
+  `DataDog/dd-trace-java@0eeac731fafa60d5e10c302cf7bf3560380e4127`
+  (OTel shim tracer/span/event/link classes), and PostHog Java
+  `PostHog/posthog-java@dcf8fd85d0f1a405ae3aca02d00e24a1daa4f17e`
+  (no general OTel exporter found). `LogBrewOpenTelemetry` now exposes
+  `spanExporter(client)` and `spanProcessor(client)` backed by
+  `LogBrewOpenTelemetrySpanExporter`; `LogBrewOpenTelemetry` remains API-only
+  so context-copy apps do not need `opentelemetry-sdk-trace`. Apps keep OTel provider ownership while
+  ended spans queue through existing `LogBrewClient.span(...)`. It preserves
+  trace/span/parent IDs, duration, status, span kind, instrumentation scope,
+  up to eight event summaries and links, and allowlisted HTTP/DB/messaging/RPC,
+  service, environment, and exception-type metadata while dropping baggage,
+  tracestate, full URLs, SQL, headers, payloads, exception messages/stacks,
+  status descriptions, and raw propagation. Evidence: RED
+  `bash scripts/check_java_package.sh` failed on missing
+  `LogBrewOpenTelemetrySdk.spanExporter(LogBrewClient)` after the API-only
+  smoke exposed and fixed the split-class boundary; GREEN
+  `bash scripts/check_java_package.sh`,
+  `bash scripts/real_user_java_opentelemetry_smoke.sh`,
+  `bash scripts/check_java_static.sh`, and
+  `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest
+  tests.test_java_opentelemetry_smoke tests.test_check_public_sdks`.
+  Research updated:
+  `docs/competitor-research/java-opentelemetry-context-2026-06-29.md`.
+  Remaining Java gaps: Sentry/Datadog still lead on automatic
+  Spring/Servlet/JDBC/cache/messaging and outbound HTTP breadth,
+  baggage/tracestate, profiling, broader semantic conventions, and automatic
+  exception capture; prioritize source-backed framework/client integrations
+  only when installed-artifact privacy and failure proof justify the coupling.
 - 2026-07-03: Go optional OpenTelemetry bridge added after source reads from
   Sentry Go
   `getsentry/sentry-go@b818debe0bfa3171bd4256b60b52a0566eb7978a`

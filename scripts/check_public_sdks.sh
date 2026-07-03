@@ -81,6 +81,7 @@ STEP_LABELS=(
   "C real-user smoke"
   "C++ real-user smoke"
   "Java real-user smoke"
+  "Java OpenTelemetry installed-artifact smoke"
   "Java Spring Kafka installed-artifact smoke"
   "Java queue trace installed-artifact smoke"
   "Java JMS installed-artifact smoke"
@@ -648,6 +649,10 @@ mark_step_complete
 
 begin_next_step "Java real-user smoke"
 run_shell_step "bash scripts/real_user_java_smoke.sh"
+mark_step_complete
+
+begin_next_step "Java OpenTelemetry installed-artifact smoke"
+run_shell_step "bash scripts/real_user_java_opentelemetry_smoke.sh"
 mark_step_complete
 
 begin_next_step "Java Spring Kafka installed-artifact smoke"

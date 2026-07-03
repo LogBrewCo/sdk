@@ -1,12 +1,19 @@
 package co.logbrew.sdk;
 
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.TraceFlags;
 import io.opentelemetry.api.trace.TraceState;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 public final class LogBrewOpenTelemetryTest {
     private static final String TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
@@ -23,6 +30,7 @@ public final class LogBrewOpenTelemetryTest {
         testSpanContextCopiesValidOtelParentIntoLogBrewChildContext();
         testCurrentSpanAndExplicitContextCopyActiveOtelContext();
         testInvalidAndMissingOtelContextsReturnEmpty();
+        testSpanExporterQueuesSanitizedEndedOpenTelemetrySpan();
         System.out.println("java opentelemetry context tests ok (" + testsRun + " tests)");
     }
 
@@ -109,6 +117,95 @@ public final class LogBrewOpenTelemetryTest {
         testsRun++;
     }
 
+    private void testSpanExporterQueuesSanitizedEndedOpenTelemetrySpan() {
+        LogBrewClient client = LogBrewClient.create("lbw_ingest_java_otel", "logbrew-java", "0.1.0");
+        SpanContext parent = SpanContext.createFromRemoteParent(
+            TRACE_ID,
+            OTEL_SPAN_ID,
+            TraceFlags.getSampled(),
+            TraceState.getDefault()
+        );
+        SpanContext linked = SpanContext.createFromRemoteParent(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbb",
+            TraceFlags.getDefault(),
+            TraceState.getDefault()
+        );
+        SdkTracerProvider provider = SdkTracerProvider.builder()
+            .addSpanProcessor(SimpleSpanProcessor.create(LogBrewOpenTelemetrySdk.spanExporter(client)))
+            .build();
+
+        try {
+            Span span = provider.get("checkout-service", "1.2.3")
+                .spanBuilder("POST /checkout")
+                .setSpanKind(SpanKind.SERVER)
+                .setParent(Context.root().with(Span.wrap(parent)))
+                .addLink(
+                    linked,
+                    Attributes.of(
+                        AttributeKey.stringKey("messaging.system"),
+                        "kafka",
+                        AttributeKey.stringKey("messaging.message.id"),
+                        "private-message-id"
+                    )
+                )
+                .setStartTimestamp(1_780_000_000_000_000_000L, TimeUnit.NANOSECONDS)
+                .startSpan();
+            span.setAttribute("http.request.method", "POST");
+            span.setAttribute("http.route", "/checkout/{cartId}");
+            span.setAttribute("http.response.status_code", 202L);
+            span.setAttribute("url.full", "https://example.invalid/orders?debug=blocked");
+            span.setAttribute("db.statement", "select * from orders where marker = 'blocked'");
+            span.addEvent(
+                "exception",
+                Attributes.of(
+                    AttributeKey.stringKey("exception.type"),
+                    "java.lang.IllegalStateException",
+                    AttributeKey.stringKey("exception.message"),
+                    "private exception message",
+                    AttributeKey.stringKey("exception.stacktrace"),
+                    "private stacktrace"
+                ),
+                1_780_000_001_000_000_000L,
+                TimeUnit.NANOSECONDS
+            );
+            span.setStatus(StatusCode.ERROR, "private status description");
+            span.end(1_780_000_002_500_000_000L, TimeUnit.NANOSECONDS);
+        } finally {
+            provider.shutdown().join(5, TimeUnit.SECONDS);
+        }
+
+        assertEquals(1, client.pendingEvents(), "OpenTelemetry exporter queues one span");
+        String payload = client.previewJson();
+        assertContains(payload, "\"type\": \"span\"");
+        assertContains(payload, "\"name\": \"POST /checkout\"");
+        assertContains(payload, "\"traceId\": \"" + TRACE_ID + "\"");
+        assertContains(payload, "\"parentSpanId\": \"" + OTEL_SPAN_ID + "\"");
+        assertContains(payload, "\"status\": \"error\"");
+        assertContains(payload, "\"durationMs\": 2500.0");
+        assertContains(payload, "\"httpMethod\": \"POST\"");
+        assertContains(payload, "\"httpRoute\": \"/checkout/{cartId}\"");
+        assertContains(payload, "\"httpStatusCode\": 202");
+        assertContains(payload, "\"instrumentationScopeName\": \"checkout-service\"");
+        assertContains(payload, "\"instrumentationScopeVersion\": \"1.2.3\"");
+        assertContains(payload, "\"events\": [");
+        assertContains(payload, "\"exceptionType\": \"java.lang.IllegalStateException\"");
+        assertContains(payload, "\"links\": [");
+        assertContains(payload, "\"traceId\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"");
+        assertContains(payload, "\"spanId\": \"bbbbbbbbbbbbbbbb\"");
+        assertContains(payload, "\"sampled\": false");
+        assertContains(payload, "\"messagingSystem\": \"kafka\"");
+        assertNotContains(payload, "private-message-id");
+        assertNotContains(payload, "private exception message");
+        assertNotContains(payload, "private stacktrace");
+        assertNotContains(payload, "private status description");
+        assertNotContains(payload, "example.invalid");
+        assertNotContains(payload, "db.statement");
+        assertNotContains(payload, "debug=blocked");
+        assertNotContains(payload, "traceparent");
+        testsRun++;
+    }
+
     private static void assertEquals(Object expected, Object actual, String label) {
         if (!expected.equals(actual)) {
             throw new AssertionError(label + ": expected " + expected + ", got " + actual);
@@ -118,6 +215,18 @@ public final class LogBrewOpenTelemetryTest {
     private static void assertTrue(boolean condition, String label) {
         if (!condition) {
             throw new AssertionError(label);
+        }
+    }
+
+    private static void assertContains(String value, String expected) {
+        if (!value.contains(expected)) {
+            throw new AssertionError("expected payload to contain " + expected + "\n" + value);
+        }
+    }
+
+    private static void assertNotContains(String value, String unexpected) {
+        if (value.contains(unexpected)) {
+            throw new AssertionError("expected payload to omit " + unexpected + "\n" + value);
         }
     }
 }
