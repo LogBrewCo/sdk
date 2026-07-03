@@ -23,6 +23,8 @@
     "index.js",
     "persistence.cjs",
     "persistence.js",
+    "trace-context.cjs",
+    "trace-context.js",
     "index.d.ts",
     "index.d.cts",
     "README.md",
@@ -51,6 +53,6 @@
     "@logbrew/sdk": "^0.1.0"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check persistence.js && node --check persistence.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --test test/*.test.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check persistence.js && node --check persistence.cjs && node --check trace-context.js && node --check trace-context.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --test test/*.test.mjs"
   }
 }

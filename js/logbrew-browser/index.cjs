@@ -1,14 +1,20 @@
 "use strict";
 
 const {
-  createTraceparent,
   LogBrewClient,
-  parseTraceparent,
   RecordingTransport,
   SdkError,
   TransportError
 } = require("@logbrew/sdk");
 const { createPersistentBrowserTransport } = require("./persistence.cjs");
+const {
+  browserTraceMetadata,
+  createBrowserTraceContext,
+  createBrowserTraceparent,
+  createTraceparentFetch,
+  optionalBrowserTraceContext,
+  shouldPropagateTraceparent
+} = require("./trace-context.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
 const DEFAULT_SDK_VERSION = "0.1.0";
@@ -77,82 +83,6 @@ function createFetchTransport({
   };
 }
 
-function createBrowserTraceparent({
-  randomValues = defaultRandomValues,
-  spanId,
-  traceFlags = "01",
-  traceId
-} = {}) {
-  return createTraceparent({
-    spanId: spanId ?? randomHex(8, randomValues),
-    traceFlags,
-    traceId: traceId ?? randomHex(16, randomValues)
-  });
-}
-
-function createTraceparentFetch({
-  fetchImpl = defaultFetch(),
-  randomValues = defaultRandomValues,
-  traceFlags = "01",
-  traceparent,
-  traceparentFactory,
-  tracePropagationTargets = []
-} = {}) {
-  if (typeof fetchImpl !== "function") {
-    throw new SdkError("configuration_error", "createTraceparentFetch requires fetch");
-  }
-  if (!Array.isArray(tracePropagationTargets)) {
-    throw new SdkError("configuration_error", "tracePropagationTargets must be an array");
-  }
-  if (traceparentFactory !== undefined && typeof traceparentFactory !== "function") {
-    throw new SdkError("configuration_error", "traceparentFactory must be a function");
-  }
-
-  return async function tracedFetch(input, init) {
-    const url = requestUrl(input);
-    if (!shouldPropagateTraceparent(url, tracePropagationTargets)) {
-      return init === undefined ? fetchImpl(input) : fetchImpl(input, init);
-    }
-
-    const requestInit = init ?? {};
-    const nextTraceparent = traceparentForRequest({
-      init,
-      input,
-      randomValues,
-      traceFlags,
-      traceparent,
-      traceparentFactory,
-      url
-    });
-    const nextInit = {
-      ...requestInit,
-      headers: headersWithTraceparent(requestHeaders(input, requestInit), nextTraceparent)
-    };
-    return fetchImpl(input, nextInit);
-  };
-}
-
-function shouldPropagateTraceparent(url, tracePropagationTargets = []) {
-  if (!Array.isArray(tracePropagationTargets)) {
-    throw new SdkError("configuration_error", "tracePropagationTargets must be an array");
-  }
-  return tracePropagationTargets.some((target) => {
-    if (typeof target === "string") {
-      return shouldPropagateToStringTarget(url, target);
-    }
-    if (target instanceof RegExp) {
-      target.lastIndex = 0;
-      const matched = target.test(url);
-      target.lastIndex = 0;
-      return matched;
-    }
-    if (typeof target === "function") {
-      return target(url) === true;
-    }
-    throw new SdkError("configuration_error", "tracePropagationTargets entries must be strings, RegExp values, or functions");
-  });
-}
-
 function installLogBrewBrowser(options = {}) {
   const browserWindow = options.browserWindow ?? defaultWindow();
   if (!browserWindow || typeof browserWindow.addEventListener !== "function") {
@@ -161,6 +91,7 @@ function installLogBrewBrowser(options = {}) {
 
   const client = options.client ?? createLogBrewBrowserClient(options);
   const transport = createBrowserTransport(options, browserWindow);
+  const traceContext = resolveBrowserTraceContext(options);
   let installed = true;
   const context = createLogBrewBrowserContext(client, transport, browserWindow, () => {
     if (!installed) {
@@ -168,7 +99,7 @@ function installLogBrewBrowser(options = {}) {
     }
     installed = false;
     removeListeners(browserWindow, listeners);
-  });
+  }, traceContext);
 
   const listeners = {
     error: (event) => {
@@ -215,7 +146,13 @@ function installLogBrewBrowser(options = {}) {
   return context;
 }
 
-function createLogBrewBrowserContext(client, transport, browserWindow = defaultWindow(), uninstall = () => undefined) {
+function createLogBrewBrowserContext(
+  client,
+  transport,
+  browserWindow = defaultWindow(),
+  uninstall = () => undefined,
+  traceContext
+) {
   return {
     browserWindow,
     client,
@@ -224,24 +161,27 @@ function createLogBrewBrowserContext(client, transport, browserWindow = defaultW
     previewJson: () => client.previewJson(),
     replayStoredBatches: () => replayStoredBrowserBatches({ client, transport }),
     shutdown: () => client.shutdown(transport),
+    traceContext: optionalBrowserTraceContext(traceContext),
     transport,
     uninstall
   };
 }
 
 async function capturePageView(context, options = {}) {
+  const eventOptions = eventOptionsWithContext(context, options);
   const event = typeof options.pageViewEvent === "function"
-    ? options.pageViewEvent({ browserWindow: context.browserWindow, client: context.client })
-    : createPageViewEvent(context.browserWindow, options);
+    ? options.pageViewEvent(eventCallbackContext(context))
+    : createPageViewEvent(context.browserWindow, eventOptions);
 
   context.client.span(event.id, event.timestamp, event.attributes);
   return flushAfterCapture(context, options);
 }
 
 async function captureBrowserError(error, context, options = {}) {
+  const eventOptions = eventOptionsWithContext(context, options);
   const event = typeof options.errorEvent === "function"
-    ? options.errorEvent(error, { browserWindow: context.browserWindow, client: context.client })
-    : createBrowserErrorEvent(error, context.browserWindow, options);
+    ? options.errorEvent(error, eventCallbackContext(context))
+    : createBrowserErrorEvent(error, context.browserWindow, eventOptions);
 
   context.client.issue(event.id, event.timestamp, event.attributes);
   maybePreventDefault(error, options);
@@ -249,9 +189,10 @@ async function captureBrowserError(error, context, options = {}) {
 }
 
 async function captureUnhandledRejection(rejection, context, options = {}) {
+  const eventOptions = eventOptionsWithContext(context, options);
   const event = typeof options.rejectionEvent === "function"
-    ? options.rejectionEvent(rejection, { browserWindow: context.browserWindow, client: context.client })
-    : createUnhandledRejectionEvent(rejection, context.browserWindow, options);
+    ? options.rejectionEvent(rejection, eventCallbackContext(context))
+    : createUnhandledRejectionEvent(rejection, context.browserWindow, eventOptions);
 
   context.client.issue(event.id, event.timestamp, event.attributes);
   maybePreventDefault(rejection, options);
@@ -259,18 +200,20 @@ async function captureUnhandledRejection(rejection, context, options = {}) {
 }
 
 async function captureBrowserAction(action, context, options = {}) {
+  const eventOptions = eventOptionsWithContext(context, options);
   const event = typeof options.actionEvent === "function"
-    ? options.actionEvent(action, { browserWindow: context.browserWindow, client: context.client })
-    : createBrowserActionEvent(action, context.browserWindow, options);
+    ? options.actionEvent(action, eventCallbackContext(context))
+    : createBrowserActionEvent(action, context.browserWindow, eventOptions);
 
   context.client.action(event.id, event.timestamp, event.attributes);
   return flushAfterCapture(context, options);
 }
 
 async function captureBrowserNetwork(request, context, options = {}) {
+  const eventOptions = eventOptionsWithContext(context, options);
   const event = typeof options.networkEvent === "function"
-    ? options.networkEvent(request, { browserWindow: context.browserWindow, client: context.client })
-    : createBrowserNetworkEvent(request, context.browserWindow, options);
+    ? options.networkEvent(request, eventCallbackContext(context))
+    : createBrowserNetworkEvent(request, context.browserWindow, eventOptions);
 
   context.client.action(event.id, event.timestamp, event.attributes);
   return flushAfterCapture(context, options);
@@ -284,9 +227,11 @@ function createPageViewEvent(browserWindow = defaultWindow(), {
   includeUserAgent = false,
   metadata,
   now = () => new Date().toISOString(),
-  sanitizeMetadata = defaultSanitizeMetadata
+  sanitizeMetadata = defaultSanitizeMetadata,
+  traceContext
 } = {}) {
   const path = browserPath(browserWindow, { includeHash, includeQueryString });
+  const browserTraceContext = optionalBrowserTraceContext(traceContext);
   const baseMetadata = browserMetadata(browserWindow, {
     includeDocumentTitle,
     includeUserAgent,
@@ -301,9 +246,9 @@ function createPageViewEvent(browserWindow = defaultWindow(), {
       durationMs: 0,
       metadata: safeMetadata,
       name: `page_view ${path}`,
-      spanId: `span_browser_${slugify(path)}`,
+      spanId: browserTraceContext?.spanId ?? `span_browser_${slugify(path)}`,
       status: "ok",
-      traceId: `trace_browser_${slugify(path)}`
+      traceId: browserTraceContext?.traceId ?? `trace_browser_${slugify(path)}`
     }
   };
 }
@@ -316,10 +261,12 @@ function createBrowserActionEvent(action, browserWindow = defaultWindow(), {
   includeUserAgent = false,
   metadata,
   now = () => new Date().toISOString(),
-  sanitizeMetadata = defaultSanitizeMetadata
+  sanitizeMetadata = defaultSanitizeMetadata,
+  traceContext
 } = {}) {
   const details = actionDetails(action);
   const path = browserPath(browserWindow, { includeHash, includeQueryString });
+  const browserTraceContext = optionalBrowserTraceContext(traceContext);
   const baseMetadata = browserMetadata(browserWindow, {
     includeDocumentTitle,
     includeUserAgent,
@@ -327,7 +274,10 @@ function createBrowserActionEvent(action, browserWindow = defaultWindow(), {
     source: "browser.action"
   });
   const safeMetadata = sanitizeMetadata(
-    mergeMetadata(mergeMetadata(baseMetadata, metadata), details.metadata),
+    mergeMetadata(
+      mergeMetadata(mergeMetadata(baseMetadata, metadata), details.metadata),
+      browserTraceMetadata(browserTraceContext)
+    ),
     "action"
   );
   return {
@@ -349,10 +299,12 @@ function createBrowserNetworkEvent(request, browserWindow = defaultWindow(), {
   includeUserAgent = false,
   metadata,
   now = () => new Date().toISOString(),
-  sanitizeMetadata = defaultSanitizeMetadata
+  sanitizeMetadata = defaultSanitizeMetadata,
+  traceContext
 } = {}) {
   const details = networkDetails(request);
   const path = browserPath(browserWindow, { includeHash, includeQueryString });
+  const browserTraceContext = optionalBrowserTraceContext(traceContext);
   const baseMetadata = browserMetadata(browserWindow, {
     includeDocumentTitle,
     includeUserAgent,
@@ -368,7 +320,10 @@ function createBrowserNetworkEvent(request, browserWindow = defaultWindow(), {
     traceId: details.traceId
   });
   const safeMetadata = sanitizeMetadata(
-    mergeMetadata(mergeMetadata(mergeMetadata(baseMetadata, metadata), networkMetadata), details.metadata),
+    mergeMetadata(
+      mergeMetadata(mergeMetadata(mergeMetadata(baseMetadata, metadata), networkMetadata), details.metadata),
+      browserTraceMetadata(browserTraceContext, { traceId: details.traceId })
+    ),
     "network"
   );
   return {
@@ -390,10 +345,12 @@ function createBrowserErrorEvent(error, browserWindow = defaultWindow(), {
   includeUserAgent = false,
   metadata,
   now = () => new Date().toISOString(),
-  sanitizeMetadata = defaultSanitizeMetadata
+  sanitizeMetadata = defaultSanitizeMetadata,
+  traceContext
 } = {}) {
   const details = errorDetails(error);
   const path = browserPath(browserWindow, { includeHash, includeQueryString });
+  const browserTraceContext = optionalBrowserTraceContext(traceContext);
   const baseMetadata = browserMetadata(browserWindow, {
     columnNumber: details.columnNumber,
     errorName: details.name,
@@ -404,7 +361,10 @@ function createBrowserErrorEvent(error, browserWindow = defaultWindow(), {
     source: "browser.error",
     sourcePath: sanitizeSourcePath(details.source)
   });
-  const safeMetadata = sanitizeMetadata(mergeMetadata(baseMetadata, metadata), "error");
+  const safeMetadata = sanitizeMetadata(
+    mergeMetadata(mergeMetadata(baseMetadata, metadata), browserTraceMetadata(browserTraceContext)),
+    "error"
+  );
   return {
     id: idFactory({ error, message: details.message, path, source: "error" }),
     timestamp: now(),
@@ -425,10 +385,12 @@ function createUnhandledRejectionEvent(rejection, browserWindow = defaultWindow(
   includeUserAgent = false,
   metadata,
   now = () => new Date().toISOString(),
-  sanitizeMetadata = defaultSanitizeMetadata
+  sanitizeMetadata = defaultSanitizeMetadata,
+  traceContext
 } = {}) {
   const reason = rejectionReason(rejection);
   const path = browserPath(browserWindow, { includeHash, includeQueryString });
+  const browserTraceContext = optionalBrowserTraceContext(traceContext);
   const baseMetadata = browserMetadata(browserWindow, {
     errorName: reason.name,
     includeDocumentTitle,
@@ -436,7 +398,10 @@ function createUnhandledRejectionEvent(rejection, browserWindow = defaultWindow(
     path,
     source: "browser.unhandledrejection"
   });
-  const safeMetadata = sanitizeMetadata(mergeMetadata(baseMetadata, metadata), "unhandledrejection");
+  const safeMetadata = sanitizeMetadata(
+    mergeMetadata(mergeMetadata(baseMetadata, metadata), browserTraceMetadata(browserTraceContext)),
+    "unhandledrejection"
+  );
   return {
     id: idFactory({ error: rejection, message: reason.message, path, source: "unhandledrejection" }),
     timestamp: now(),
@@ -516,6 +481,24 @@ function maybePreventDefault(event, options) {
   event.preventDefault();
 }
 
+function eventOptionsWithContext(context, options) {
+  if (options.traceContext !== undefined || context.traceContext === undefined) {
+    return options;
+  }
+  return {
+    ...options,
+    traceContext: context.traceContext
+  };
+}
+
+function eventCallbackContext(context) {
+  return {
+    browserWindow: context.browserWindow,
+    client: context.client,
+    traceContext: context.traceContext
+  };
+}
+
 function createBrowserTransport(options, browserWindow) {
   const transport = options.transport ?? createFetchTransport(options);
   if (!options.persistOffline) {
@@ -587,6 +570,22 @@ function compactMetadata(metadata) {
 
 function defaultSanitizeMetadata(metadata) {
   return safeMetadata(metadata);
+}
+
+function resolveBrowserTraceContext(options) {
+  if (options.traceContext === false) {
+    return undefined;
+  }
+  if (options.traceContext !== undefined) {
+    return optionalBrowserTraceContext(options.traceContext);
+  }
+  return createBrowserTraceContext({
+    randomValues: options.randomValues,
+    sampled: options.sampled,
+    spanId: options.spanId,
+    traceFlags: options.traceFlags,
+    traceId: options.traceId
+  });
 }
 
 function browserPath(browserWindow, { includeHash = false, includeQueryString = false } = {}) {
@@ -729,14 +728,6 @@ function defaultFetch() {
   return typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
 }
 
-function defaultRandomValues(length) {
-  if (!globalThis.crypto || typeof globalThis.crypto.getRandomValues !== "function") {
-    throw new SdkError("configuration_error", "createBrowserTraceparent requires crypto.getRandomValues or randomValues");
-  }
-  const bytes = new Uint8Array(length);
-  return globalThis.crypto.getRandomValues(bytes);
-}
-
 function defaultWindow() {
   return typeof globalThis.window === "object" ? globalThis.window : undefined;
 }
@@ -803,131 +794,11 @@ function fallbackUtf8ByteLength(text) {
   return bytes;
 }
 
-function headersWithTraceparent(headers, traceparent) {
-  const nextHeaders = {};
-  for (const [key, value] of headerEntries(headers)) {
-    if (String(key).toLowerCase() !== "traceparent") {
-      nextHeaders[key] = value;
-    }
-  }
-  nextHeaders.traceparent = traceparent;
-  return nextHeaders;
-}
-
-function headerEntries(headers) {
-  if (headers === undefined || headers === null) {
-    return [];
-  }
-  const HeadersConstructor = globalThis.Headers;
-  if (typeof HeadersConstructor === "function" && headers instanceof HeadersConstructor) {
-    const entries = [];
-    headers.forEach((value, key) => {
-      entries.push([key, value]);
-    });
-    return entries;
-  }
-  if (Array.isArray(headers)) {
-    return headers;
-  }
-  if (typeof headers[Symbol.iterator] === "function") {
-    return Array.from(headers);
-  }
-  if (typeof headers === "object") {
-    return Object.entries(headers);
-  }
-  return [];
-}
-
-function randomHex(length, randomValues) {
-  if (typeof randomValues !== "function") {
-    throw new SdkError("configuration_error", "randomValues must be a function");
-  }
-  const bytes = Array.from(randomValues(length));
-  if (bytes.length !== length || bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
-    throw new SdkError("configuration_error", "randomValues must return byte values for the requested length");
-  }
-  return bytes.map((value) => value.toString(16).padStart(2, "0")).join("");
-}
-
-function shouldPropagateToStringTarget(url, target) {
-  const targetText = target.trim();
-  if (targetText === "") {
-    return false;
-  }
-  if (targetText.startsWith("/")) {
-    return url.startsWith(targetText);
-  }
-
-  const URLConstructor = globalThis.URL;
-  if (typeof URLConstructor === "function") {
-    try {
-      const targetUrl = new URLConstructor(targetText);
-      if (!hasUrlScheme(url)) {
-        return false;
-      }
-      const requestUrl = new URLConstructor(url, targetUrl.origin);
-      if (requestUrl.origin !== targetUrl.origin) {
-        return false;
-      }
-      const targetPath = targetUrl.pathname || "/";
-      return requestUrl.pathname === targetPath || requestUrl.pathname.startsWith(pathPrefix(targetPath));
-    } catch {
-      return url.startsWith(targetText);
-    }
-  }
-
-  return url.startsWith(targetText);
-}
-
-function pathPrefix(pathname) {
-  return pathname.endsWith("/") ? pathname : `${pathname}/`;
-}
-
-function hasUrlScheme(url) {
-  return /^[a-z][a-z0-9+.-]*:/iu.test(url);
-}
-
-function requestHeaders(input, init) {
-  if (init && init.headers !== undefined) {
-    return init.headers;
-  }
-  return input?.headers;
-}
-
-function requestUrl(input) {
-  if (typeof input === "string") {
-    return input;
-  }
-  if (input instanceof URL) {
-    return input.toString();
-  }
-  if (typeof input?.url === "string") {
-    return input.url;
-  }
-  return String(input);
-}
-
 function slugify(value) {
   return String(value)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "") || "event";
-}
-
-function traceparentForRequest({
-  init,
-  input,
-  randomValues,
-  traceFlags,
-  traceparent,
-  traceparentFactory,
-  url
-}) {
-  const nextTraceparent = typeof traceparentFactory === "function"
-    ? traceparentFactory({ init, input, url })
-    : traceparent ?? createBrowserTraceparent({ randomValues, traceFlags });
-  parseTraceparent(nextTraceparent);
-  return nextTraceparent;
 }
 
 module.exports = {
@@ -937,6 +808,7 @@ module.exports = {
   captureBrowserNetwork,
   capturePageView,
   captureUnhandledRejection,
+  createBrowserTraceContext,
   createBrowserTraceparent,
   createBrowserActionEvent,
   createBrowserErrorEvent,
@@ -951,14 +823,17 @@ module.exports = {
   default: {
     captureBrowserAction,
     captureBrowserError,
+    captureBrowserNetwork,
     capturePageView,
     captureUnhandledRejection,
+    createBrowserTraceContext,
     createBrowserTraceparent,
     createBrowserActionEvent,
     createBrowserErrorEvent,
     createFetchTransport,
     createLogBrewBrowserClient,
     createLogBrewBrowserContext,
+    createBrowserNetworkEvent,
     createPageViewEvent,
     createPersistentBrowserTransport,
     createTraceparentFetch,

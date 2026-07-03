@@ -45,6 +45,8 @@ grep -q '^package/index.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/persistence.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/persistence.cjs$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/trace-context.js$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/trace-context.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/examples/index.mjs$' "$tmp_dir/browser-tarball.txt"
@@ -66,7 +68,7 @@ grep -q 'createPersistentBrowserTransport' "$tmp_dir/browser-readme.md"
 grep -q 'persistOffline' "$tmp_dir/browser-readme.md"
 grep -q 'sessionId' "$tmp_dir/browser-readme.md"
 grep -q 'createTraceparentFetch' "$tmp_dir/browser-readme.md"
-grep -q 'createBrowserTraceparent' "$tmp_dir/browser-readme.md"
+grep -q 'createBrowserTraceContext' "$tmp_dir/browser-readme.md"
 grep -q 'tracePropagationTargets' "$tmp_dir/browser-readme.md"
 
 app_dir="$tmp_dir/browser-smoke-app"
@@ -114,7 +116,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserNetwork,
-  createBrowserTraceparent,
+  createBrowserTraceContext,
   createFetchTransport,
   createLogBrewBrowserClient,
   createPersistentBrowserTransport,
@@ -131,6 +133,10 @@ browserWindow.document.title = "LogBrew Browser Smoke";
 let tick = 0;
 const transport = RecordingTransport.alwaysAccept();
 const flushed = [];
+const traceContext = createBrowserTraceContext({
+  spanId: "00f067aa0ba902b7",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+});
 const logbrew = installLogBrewBrowser({
   clientKey: "LOGBREW_BROWSER_KEY",
   browserWindow,
@@ -138,6 +144,7 @@ const logbrew = installLogBrewBrowser({
   onFlush(response) {
     flushed.push(response);
   },
+  traceContext,
   transport
 });
 
@@ -152,6 +159,9 @@ if (pagePayload.events[0].attributes.metadata.documentTitle !== undefined) {
 }
 if (pagePayload.events[0].attributes.metadata.userAgent !== undefined) {
   throw new Error("user agent should be opt-in");
+}
+if (pagePayload.events[0].attributes.traceId !== traceContext.traceId || pagePayload.events[0].attributes.spanId !== traceContext.spanId) {
+  throw new Error(`expected shared page trace context: ${transport.sentBodies[0]}`);
 }
 
 await captureBrowserAction({
@@ -174,6 +184,9 @@ if (actionPayload.events[0].type !== "action") {
 }
 if (actionPayload.events[0].attributes.metadata.sessionId !== "sess_browser_001") {
   throw new Error(`expected session correlation metadata: ${transport.sentBodies[1]}`);
+}
+if (actionPayload.events[0].attributes.metadata.traceId !== traceContext.traceId || actionPayload.events[0].attributes.metadata.spanId !== traceContext.spanId) {
+  throw new Error(`expected action trace correlation metadata: ${transport.sentBodies[1]}`);
 }
 if (actionPayload.events[0].attributes.metadata.ignoredNested !== undefined) {
   throw new Error(`nested action metadata should be dropped: ${transport.sentBodies[1]}`);
@@ -206,6 +219,9 @@ if (networkPayload.events[0].attributes.metadata.routeTemplate !== "/api/checkou
 }
 if (networkPayload.events[0].attributes.metadata.durationMs !== 842) {
   throw new Error(`expected network duration metadata: ${transport.sentBodies[2]}`);
+}
+if (networkPayload.events[0].attributes.metadata.traceId !== traceContext.traceId || networkPayload.events[0].attributes.metadata.spanId !== traceContext.spanId) {
+  throw new Error(`expected network trace correlation metadata: ${transport.sentBodies[2]}`);
 }
 if (networkPayload.events[0].attributes.metadata.ignoredNested !== undefined) {
   throw new Error(`nested network metadata should be dropped: ${transport.sentBodies[2]}`);
@@ -435,9 +451,7 @@ const tracedFetch = createTraceparentFetch({
     tracedFetchRequests.push({ input, init });
     return { status: 204 };
   },
-  traceparentFactory: () => createBrowserTraceparent({
-    randomValues: deterministicBytes
-  }),
+  traceContext: logbrew.traceContext,
   tracePropagationTargets: ["https://api.example.test/", /^\/internal\//u]
 });
 if (!shouldPropagateTraceparent("https://api.example.test/checkout", ["https://api.example.test/"])) {
@@ -466,7 +480,7 @@ if (tracedFetchRequests.length !== 3) {
   throw new Error(`expected three traced fetch calls, got ${tracedFetchRequests.length}`);
 }
 const propagatedTraceparent = tracedFetchRequests[0].init.headers.traceparent;
-if (propagatedTraceparent !== "00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01") {
+if (propagatedTraceparent !== `00-${traceContext.traceId}-${traceContext.spanId}-01`) {
   throw new Error(`unexpected propagated traceparent: ${propagatedTraceparent}`);
 }
 if (tracedFetchRequests[0].init.headers.accept !== "application/json") {
@@ -563,10 +577,6 @@ function setVisibilityState(document, visibilityState) {
   });
 }
 
-function deterministicBytes(length) {
-  return Uint8Array.from({ length }, (_value, index) => index + 1);
-}
-
 function createMemoryStorage() {
   const values = new Map();
   return {
@@ -611,7 +621,7 @@ grep -q '"pagePath":"/dashboard"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"pagehideFlush":"evt_browser_pagehide_001"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"persistedDirectReplay":1' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"persistedOnlineSends":3' "$tmp_dir/browser-smoke.stderr.json"
-grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"sessionAction":"sess_browser_001"' "$tmp_dir/browser-smoke.stderr.json"
 
 cat > consumer.ts <<'EOF'
@@ -619,7 +629,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserNetwork,
-  createBrowserTraceparent,
+  createBrowserTraceContext,
   createBrowserActionEvent,
   createBrowserNetworkEvent,
   createBrowserErrorEvent,
@@ -697,12 +707,13 @@ const persistentTransport: PersistentBrowserTransport = createPersistentBrowserT
 const replay: Promise<BrowserPersistedReplay> = persistentTransport.replayStoredBatches("LOGBREW_BROWSER_KEY");
 void replay;
 const traceTargets: TracePropagationTarget[] = ["https://api.example.test/", /^\/internal\//u];
+const traceContext = createBrowserTraceContext({
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  spanId: "b7ad6b7169203331"
+});
 const tracedFetch = createTraceparentFetch({
   fetchImpl: fetch,
-  traceparentFactory: () => createBrowserTraceparent({
-    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
-    spanId: "b7ad6b7169203331"
-  }),
+  traceContext,
   tracePropagationTargets: traceTargets
 });
 void tracedFetch("/internal/ping");
@@ -731,7 +742,7 @@ const { RecordingTransport } = require("@logbrew/sdk");
 if (typeof browser.installLogBrewBrowser !== "function") {
   throw new Error("missing CommonJS browser install helper");
 }
-if (typeof browser.createTraceparentFetch !== "function" || typeof browser.createBrowserTraceparent !== "function") {
+if (typeof browser.createTraceparentFetch !== "function" || typeof browser.createBrowserTraceContext !== "function") {
   throw new Error("missing CommonJS browser trace helpers");
 }
 if (typeof browser.captureBrowserAction !== "function" || typeof browser.createBrowserActionEvent !== "function") {
@@ -772,7 +783,7 @@ grep -q '"path":"/dashboard"' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/browser/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
 grep -q '"pagehideFlushEvents":6' "$tmp_dir/example-default.stderr.json"
-grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/example-default.stderr.json"
+grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/browser/examples run list > "$tmp_dir/npm-helper-list.txt"
 grep -q 'readme-example -> node node_modules/@logbrew/browser/examples/index.mjs readme-example' "$tmp_dir/npm-helper-list.txt"
 npm --prefix node_modules/@logbrew/browser/examples run help > "$tmp_dir/npm-helper-help.txt"
@@ -780,6 +791,6 @@ grep -q 'Default example: real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/browser/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 grep -q '"pagehideFlushEvents":6' "$tmp_dir/npm-helper-smoke.stderr.json"
-grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/npm-helper-smoke.stderr.json"
 
 echo "browser real-user smoke passed with happy-dom@$(node -p 'require("happy-dom/package.json").version')"

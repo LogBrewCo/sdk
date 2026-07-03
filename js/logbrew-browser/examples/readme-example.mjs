@@ -2,16 +2,22 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserNetwork,
+  createBrowserTraceContext,
   installLogBrewBrowser
 } from "@logbrew/browser";
 
 const transport = RecordingTransport.alwaysAccept();
 const browserWindow = createExampleWindow("https://app.example.test/dashboard?email=dev@example.test#section");
+const traceContext = createBrowserTraceContext({
+  spanId: "00f067aa0ba902b7",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+});
 const logbrew = installLogBrewBrowser({
   clientKey: "LOGBREW_BROWSER_KEY",
   browserWindow,
   capturePageViews: false,
   flushOnCapture: false,
+  traceContext,
   transport
 });
 
@@ -43,7 +49,7 @@ await captureBrowserNetwork({
   statusCode: 503,
   durationMs: 842,
   sessionId: "sess_browser_001",
-  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  traceId: traceContext.traceId,
   metadata: {
     funnel: "checkout",
     retryAttempt: 1

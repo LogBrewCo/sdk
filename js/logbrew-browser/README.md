@@ -31,7 +31,7 @@ logbrew.client.log("evt_log_001", new Date().toISOString(), {
 });
 ```
 
-`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, flushes queued events when the page becomes hidden, receives `pagehide`, or comes back `online`, and returns a handle with `client`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`.
+`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, creates one W3C trace context for the browser session, flushes queued events when the page becomes hidden, receives `pagehide`, or comes back `online`, and returns a handle with `client`, `traceContext`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`.
 
 `onFlush(response, context, details)` and `onCaptureError(error, context, details)` receive `details.reason` as `capture`, `online`, `pagehide`, or `visibility_hidden`, so apps can distinguish normal capture flushes from lifecycle and connectivity delivery without parsing browser events globally.
 
@@ -132,12 +132,14 @@ Use `createTraceparentFetch()` when the browser app should connect frontend work
 
 ```js
 import {
-  createBrowserTraceparent,
+  createBrowserTraceContext,
   createTraceparentFetch
 } from "@logbrew/browser";
 
+const traceContext = createBrowserTraceContext();
+
 const tracedFetch = createTraceparentFetch({
-  traceparentFactory: () => createBrowserTraceparent(),
+  traceContext,
   tracePropagationTargets: [
     "https://api.example.com/",
     /^\/api\//
@@ -150,7 +152,11 @@ await tracedFetch("/api/checkout", {
 });
 ```
 
+`installLogBrewBrowser()` creates a shared `traceContext` automatically and uses it for the initial page-view span, browser action metadata, browser error metadata, unhandled rejection metadata, and app-owned network milestone metadata. Pass `traceContext: logbrew.traceContext` to `createTraceparentFetch()` when the browser request should use the same trace as the page and product actions.
+
 `tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. String URL targets apply only to the same origin plus a path prefix, so `https://api.example.com/v1` covers `/v1/orders` on that origin but not `https://wrong.example.com` or `/v10`. Keep targets narrow so browser requests do not send tracing headers to unrelated origins. If the API is on another origin, configure that backend's CORS policy to allow the `traceparent` request header.
+
+LogBrew does not patch global `fetch` or XHR, capture request/response bodies, copy arbitrary headers, store query strings or hash fragments by default, or emit W3C baggage/tracestate from the browser helper. Use explicit app-owned network milestones for the routes that matter.
 
 ## Example Source
 

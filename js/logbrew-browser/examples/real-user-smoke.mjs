@@ -2,7 +2,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserNetwork,
-  createBrowserTraceparent,
+  createBrowserTraceContext,
   createTraceparentFetch,
   installLogBrewBrowser,
   shouldPropagateTraceparent
@@ -11,11 +11,16 @@ import {
 let tick = 0;
 const transport = RecordingTransport.alwaysAccept();
 const browserWindow = createExampleWindow("https://app.example.test/settings?email=dev@example.test#profile");
+const traceContext = createBrowserTraceContext({
+  spanId: "00f067aa0ba902b7",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+});
 const logbrew = installLogBrewBrowser({
   clientKey: "LOGBREW_BROWSER_KEY",
   browserWindow,
   flushOnCapture: false,
   now: nextTimestamp,
+  traceContext,
   transport
 });
 
@@ -41,7 +46,7 @@ await captureBrowserNetwork({
   statusCode: 503,
   durationMs: 842,
   sessionId: "sess_browser_001",
-  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  traceId: logbrew.traceContext.traceId,
   metadata: {
     funnel: "checkout",
     ignoredNested: { value: "nested" },
@@ -90,9 +95,15 @@ const paths = parsed.events
 if (paths.some((path) => path !== "/settings")) {
   throw new Error(`expected query/hash-free paths, got ${JSON.stringify(paths)}`);
 }
+if (parsed.events[0].attributes.traceId !== traceContext.traceId || parsed.events[0].attributes.spanId !== traceContext.spanId) {
+  throw new Error(`expected page view to use shared trace context, got ${payload}`);
+}
 const action = parsed.events.find((event) => event.type === "action");
 if (action?.attributes.metadata?.sessionId !== "sess_browser_001") {
   throw new Error(`expected action session metadata, got ${payload}`);
+}
+if (action.attributes.metadata.traceId !== traceContext.traceId || action.attributes.metadata.spanId !== traceContext.spanId) {
+  throw new Error(`expected action trace metadata, got ${payload}`);
 }
 if (action.attributes.metadata.ignoredNested !== undefined) {
   throw new Error(`nested action metadata should be dropped: ${payload}`);
@@ -100,6 +111,9 @@ if (action.attributes.metadata.ignoredNested !== undefined) {
 const network = parsed.events.find((event) => event.type === "action" && event.attributes.metadata?.source === "browser.network");
 if (network?.attributes.metadata?.routeTemplate !== "/api/checkout") {
   throw new Error(`expected query-free network route template, got ${payload}`);
+}
+if (network.attributes.metadata.traceId !== traceContext.traceId || network.attributes.metadata.spanId !== traceContext.spanId) {
+  throw new Error(`expected network trace metadata, got ${payload}`);
 }
 if (network.attributes.metadata.statusCode !== 503 || network.attributes.status !== "failure") {
   throw new Error(`expected failed network metadata, got ${payload}`);
@@ -118,9 +132,7 @@ const tracedFetch = createTraceparentFetch({
     propagatedRequests.push({ input, init });
     return { status: 204 };
   },
-  traceparentFactory: () => createBrowserTraceparent({
-    randomValues: deterministicBytes
-  }),
+  traceContext: logbrew.traceContext,
   tracePropagationTargets: ["https://api.example.test/", /^\/internal\//u]
 });
 if (!shouldPropagateTraceparent("https://api.example.test/checkout", ["https://api.example.test/"])) {
@@ -140,7 +152,7 @@ if (propagatedRequests.length !== 3) {
   throw new Error(`expected three fetch calls, got ${propagatedRequests.length}`);
 }
 const firstTraceparent = propagatedRequests[0].init.headers.traceparent;
-if (firstTraceparent !== "00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01") {
+if (firstTraceparent !== `00-${traceContext.traceId}-${traceContext.spanId}-01`) {
   throw new Error(`unexpected propagated traceparent: ${firstTraceparent}`);
 }
 if (propagatedRequests[0].init.headers.accept !== "application/json") {
@@ -239,10 +251,6 @@ function createExampleWindow(href) {
       listeners.set(type, (listeners.get(type) ?? []).filter((candidate) => candidate !== listener));
     }
   };
-}
-
-function deterministicBytes(length) {
-  return Uint8Array.from({ length }, (_value, index) => index + 1);
 }
 
 async function waitFor(predicate) {

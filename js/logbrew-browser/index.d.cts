@@ -76,9 +76,21 @@ export type BrowserTraceparentConfig = {
   randomValues?: (length: number) => ArrayLike<number>;
 };
 
+export type BrowserTraceContext = {
+  traceId: string;
+  spanId: string;
+  traceFlags: string;
+  sampled: boolean;
+};
+
+export type BrowserTraceContextConfig = BrowserTraceparentConfig & {
+  sampled?: boolean;
+};
+
 export type TraceparentFetchConfig = {
   fetchImpl?: typeof fetch;
   randomValues?: (length: number) => ArrayLike<number>;
+  traceContext?: BrowserTraceContext | BrowserTraceContextConfig | string | false;
   traceFlags?: string;
   traceparent?: string;
   traceparentFactory?: (context: {
@@ -93,6 +105,7 @@ export type LogBrewBrowserContext = {
   browserWindow?: Window;
   client: LogBrewClient;
   logbrew: LogBrewClient;
+  traceContext?: BrowserTraceContext;
   transport: Transport;
   previewJson(): string;
   flush(): Promise<TransportResponse>;
@@ -155,24 +168,25 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
   raiseCaptureErrors?: boolean;
   replayPersistedOnInstall?: boolean;
   sanitizeMetadata?: (metadata: Metadata, kind: BrowserMetadataKind) => Metadata;
+  traceContext?: BrowserTraceContext | BrowserTraceContextConfig | string | false;
   pageViewEvent?: (
-    context: { browserWindow?: Window; client: LogBrewClient }
+    context: { browserWindow?: Window; client: LogBrewClient; traceContext?: BrowserTraceContext }
   ) => LogBrewBrowserEvent<SpanAttributes>;
   errorEvent?: (
     error: unknown,
-    context: { browserWindow?: Window; client: LogBrewClient }
+    context: { browserWindow?: Window; client: LogBrewClient; traceContext?: BrowserTraceContext }
   ) => LogBrewBrowserEvent<IssueAttributes>;
   rejectionEvent?: (
     rejection: unknown,
-    context: { browserWindow?: Window; client: LogBrewClient }
+    context: { browserWindow?: Window; client: LogBrewClient; traceContext?: BrowserTraceContext }
   ) => LogBrewBrowserEvent<IssueAttributes>;
   actionEvent?: (
     action: BrowserActionInput,
-    context: { browserWindow?: Window; client: LogBrewClient }
+    context: { browserWindow?: Window; client: LogBrewClient; traceContext?: BrowserTraceContext }
   ) => LogBrewBrowserEvent<ActionAttributes>;
   networkEvent?: (
     request: BrowserNetworkInput,
-    context: { browserWindow?: Window; client: LogBrewClient }
+    context: { browserWindow?: Window; client: LogBrewClient; traceContext?: BrowserTraceContext }
   ) => LogBrewBrowserEvent<ActionAttributes>;
   idFactory?: (context: {
     action?: BrowserActionInput;
@@ -211,6 +225,10 @@ export declare function createBrowserTraceparent(
   config?: BrowserTraceparentConfig
 ): string;
 
+export declare function createBrowserTraceContext(
+  config?: BrowserTraceContextConfig
+): BrowserTraceContext;
+
 export declare function createTraceparentFetch(
   config?: TraceparentFetchConfig
 ): typeof fetch;
@@ -228,7 +246,8 @@ export declare function createLogBrewBrowserContext(
   client: LogBrewClient,
   transport: Transport,
   browserWindow?: Window,
-  uninstall?: () => void
+  uninstall?: () => void,
+  traceContext?: BrowserTraceContext | BrowserTraceContextConfig | string | false
 ): LogBrewBrowserContext;
 
 export declare function capturePageView(
@@ -295,6 +314,7 @@ declare const defaultExport: {
   captureBrowserNetwork: typeof captureBrowserNetwork;
   capturePageView: typeof capturePageView;
   captureUnhandledRejection: typeof captureUnhandledRejection;
+  createBrowserTraceContext: typeof createBrowserTraceContext;
   createBrowserTraceparent: typeof createBrowserTraceparent;
   createBrowserActionEvent: typeof createBrowserActionEvent;
   createBrowserErrorEvent: typeof createBrowserErrorEvent;
