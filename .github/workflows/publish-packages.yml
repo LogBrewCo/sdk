@@ -750,13 +750,24 @@ jobs:
           print(base64.b64encode(raw).decode())
           PY
           )"
+          curl_stderr="$RUNNER_TEMP/maven-central-upload.stderr"
+          set +e
           response="$(
             curl --fail-with-body --silent --show-error \
               --request POST \
               --header "Authorization: Bearer ${central_bearer}" \
               --form "bundle=@${RUNNER_TEMP}/logbrew-maven-central-bundle.zip" \
-              "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC"
+              "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC" \
+              2>"$curl_stderr"
           )"
+          curl_status=$?
+          set -e
+          if [[ "$curl_status" -ne 0 ]]; then
+            cat "$curl_stderr" >&2
+            echo "Maven Central upload failed." >&2
+            echo "For HTTP 401, verify the Central Portal release env pair uses generated Central Portal publishing values with co.logbrew namespace publish access, not Central account login values." >&2
+            exit "$curl_status"
+          fi
           python3 - "$response" <<'PY'
           import sys
 

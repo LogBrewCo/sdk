@@ -355,6 +355,22 @@ jobs:
 
         self.assertTrue(any("Maven Central public install smoke" in failure for failure in failures))
 
+    def test_publish_packages_workflow_requires_maven_generated_publishing_values_hint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
+            workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(encoding="utf-8")
+            workflow = workflow.replace(
+                "generated Central Portal publishing values",
+                "Central Portal publishing values",
+            )
+            (workflow_dir / "publish-packages.yml").write_text(workflow, encoding="utf-8")
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("Maven Central generated publishing-values hint" in failure for failure in failures))
+
     def test_publish_packages_verify_target_requires_exact_version_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

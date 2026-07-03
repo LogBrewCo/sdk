@@ -121,6 +121,8 @@ Maven Central does not currently offer the same first-party GitHub OIDC trusted 
 - `MAVEN_GPG_KEY_ID`
 - `MAVEN_GPG_PASSPHRASE` only when the signing key requires one
 
+`CENTRAL_PORTAL_USERNAME` and `CENTRAL_PORTAL_PASSWORD` must be generated Central Portal publishing values with `co.logbrew` namespace publish access, not Central account-login values. A masked-env upload failure with HTTP 401 means those values or namespace permission must be corrected before rerunning the Maven publish workflow; do not rerun source/package checks to solve that state.
+
 Published GitHub Releases pass `include_maven_publish=true`, so Maven Central participates in `target=all` once the release settings above exist. A next-version release is still the first real proof of Central Portal upload and public Maven metadata verification because Maven Central will not accept re-uploading the existing `0.1.0` artifacts.
 
 ## OpenUPM

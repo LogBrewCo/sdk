@@ -930,6 +930,7 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
                 '--target crates --version "${{ steps.crate-version.outputs.version }}"'
             ),
             "Maven Central public install smoke": "bash scripts/real_user_maven_central_public_smoke.sh",
+            "Maven Central generated publishing-values hint": "generated Central Portal publishing values",
         }
         nuget_output_versions = (
             ("exact", "LogBrew", "core_version"),
