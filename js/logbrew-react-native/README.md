@@ -422,7 +422,7 @@ If you pass `metadataFactory: createReactNativeGraphQLMetadataFactory({ endpoint
 
 ## Release Artifact Preparation
 
-Use the release-artifacts subpath after your React Native build has emitted a Metro bundle and source map. The helper prepares local bundle artifacts with matching Debug IDs, strips embedded source content by default, writes a local manifest, and leaves upload/symbolication to future backend-owned release-artifact support:
+Use the release-artifacts subpath after your React Native build has emitted a Metro bundle and source map. The helper prepares local bundle artifacts with matching Debug IDs, strips embedded source content by default, writes a local manifest, and can exercise the installed loopback-only upload path. Hosted upload, storage, lookup, and symbolication still wait for public backend-owned release-artifact support:
 
 ```js
 import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
@@ -435,6 +435,25 @@ prepareLogBrewReactNativeReleaseArtifacts({
   environment: "production",
   service: "checkout-mobile",
   root: process.cwd()
+});
+```
+
+For a local loopback upload check, use the upload helper against a `localhost` or `127.0.0.1` endpoint only:
+
+```js
+import { uploadLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
+
+uploadLogBrewReactNativeReleaseArtifacts({
+  bundle: "dist/index.android.bundle",
+  sourcemap: "dist/index.android.bundle.map",
+  platform: "android",
+  release: "2026.06.18",
+  environment: "production",
+  service: "checkout-mobile",
+  root: process.cwd(),
+  endpoint: "http://127.0.0.1:4319/retry-success",
+  maxRetries: 2,
+  retryDelay: 0
 });
 ```
 

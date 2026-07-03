@@ -1,5 +1,29 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: React Native release-artifact upload-helper gap reduced after
+  current source reads from Sentry React Native
+  `getsentry/sentry-react-native@6acdf1d66bd00b1f8b13ad5f744404db8eddf45e`
+  (`sentry.gradle.kts` upload task setup, `sentry-xcode.sh`,
+  `copy-debugid.js`, `has-sourcemap-debugid.js`, and Expo source-map upload)
+  and Datadog CI
+  `DataDog/datadog-ci@3bac12402541936f16532104884240b3f3a5ad64`
+  (`ReactNativeUploadCommand.execute`, payload construction, source-content
+  removal, Debug ID extraction, shared multipart upload, and retry helper).
+  LogBrew now exposes `uploadLogBrewReactNativeReleaseArtifacts(...)` from
+  `@logbrew/react-native/release-artifacts`: it composes explicit Metro
+  bundle/source-map prepare plus ready manifest generation with installed
+  `@logbrew/sdk` `upload-js`, keeps hosted endpoints blocked by the existing
+  loopback-only verifier, and preserves ESM/CommonJS/type exports. Evidence:
+  RED `node --test js/logbrew-react-native/test/release-artifacts.test.js`
+  failed on the missing export; GREEN `npm test --prefix
+  js/logbrew-react-native` passed 23 tests; `bash
+  scripts/real_user_react_native_release_artifact_smoke.sh` passed from packed
+  packages with React Native 0.86.0/React 19.2.7/CLI 20.2.0, proving Metro
+  bundle/source-map prep, local symbolication, loopback 503-to-202 upload
+  retry, multipart manifest/minified/source-map parts, and no auth/query/hash/
+  temp-path/source-content leakage. Remaining RN gaps: public backend
+  upload/storage/lookup/symbolication, backend-symbolicated minified-error
+  proof, native symbolication, and optional build-hook automation.
 - 2026-07-03: Kotlin OkHttp request phase timing gap reduced after current
   source reads from Sentry Java/Android
   `getsentry/sentry-java@44d18f56b41c98a11883a40899745a8af3960284`

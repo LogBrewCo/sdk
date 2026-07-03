@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
+server_pid=""
 export PYTHONDONTWRITEBYTECODE=1
 export npm_config_cache="$tmp_dir/npm-cache"
 export npm_config_update_notifier=false
@@ -12,6 +13,11 @@ export CI=true
 unset NO_COLOR FORCE_COLOR
 
 remove_tmp_dir() {
+  if [[ -n "${server_pid:-}" ]]; then
+    if kill "$server_pid" 2>/dev/null; then
+      wait "$server_pid" 2>/dev/null || true
+    fi
+  fi
   rm -rf "$tmp_dir"
 }
 
@@ -122,19 +128,25 @@ JS
   npm ls @logbrew/sdk @logbrew/react-native react react-native @react-native-community/cli @react-native/metro-config >/dev/null
   node --input-type=module - <<'JS'
 import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
+import { uploadLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
 
 if (typeof prepareLogBrewReactNativeReleaseArtifacts !== "function") {
   throw new Error("expected React Native release-artifact helper export");
+}
+if (typeof uploadLogBrewReactNativeReleaseArtifacts !== "function") {
+  throw new Error("expected React Native release-artifact upload helper export");
 }
 JS
   node - <<'JS'
 const {
   prepareLogBrewReactNativeReleaseArtifacts,
+  uploadLogBrewReactNativeReleaseArtifacts,
   default: defaultExport,
 } = require("@logbrew/react-native/release-artifacts");
 
 if (
   typeof prepareLogBrewReactNativeReleaseArtifacts !== "function" ||
+  typeof uploadLogBrewReactNativeReleaseArtifacts !== "function" ||
   defaultExport !== prepareLogBrewReactNativeReleaseArtifacts
 ) {
   throw new Error("expected CommonJS React Native release-artifact helper export");
@@ -378,6 +390,99 @@ assert "react native checkout exploded" not in serialized_manifest
 assert "react native checkout exploded" not in serialized_symbolication
 assert app_dir not in serialized_manifest
 assert app_dir not in serialized_symbolication
+PY
+
+port_file="$tmp_dir/fake-intake-port"
+state_file="$tmp_dir/fake-intake-state.json"
+expected_bearer="fake-react-native-release-artifact-auth-value"
+
+python3 "$repo_root/scripts/js_release_artifact_fake_intake.py" \
+  --port-file "$port_file" \
+  --state-file "$state_file" \
+  --expected-bearer "$expected_bearer" \
+  --source-sentinel "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" \
+  --query-placeholder "logbrew_rn_query_placeholder" \
+  --hash-fragment "logbrew_rn_hash_placeholder" &
+server_pid=$!
+
+for _ in $(seq 1 100); do
+  if [[ -s "$port_file" ]]; then
+    break
+  fi
+  sleep 0.05
+done
+
+if [[ ! -s "$port_file" ]]; then
+  echo "fake React Native release-artifact intake did not start" >&2
+  exit 1
+fi
+
+endpoint_base="http://127.0.0.1:$(cat "$port_file")"
+export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_bearer"
+upload_manifest="$tmp_dir/react-native-upload-manifest.json"
+upload_helper_report="$tmp_dir/react-native-upload-helper-report.json"
+(
+  cd "$app_dir"
+  node --input-type=module - "$bundle_file" "$map_file" "$app_dir_real" "$upload_manifest" "$endpoint_base/retry-success?logbrew_rn_query_placeholder=1#logbrew_rn_hash_placeholder" > "$upload_helper_report" <<'JS'
+import { uploadLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
+
+const [, , bundle, sourcemap, root, manifestPath, endpoint] = process.argv;
+const result = uploadLogBrewReactNativeReleaseArtifacts({
+  bundle,
+  sourcemap,
+  platform: "android",
+  release: "2026.06.18-react-native-upload",
+  environment: "production",
+  service: "checkout-react-native",
+  root,
+  manifestPath,
+  endpoint,
+  maxRetries: 2,
+  retryDelay: 0,
+  timeout: 5
+});
+
+process.stdout.write(JSON.stringify({
+  manifestStatus: result.manifestReport.validation.status,
+  uploadStatus: result.uploadReport.status,
+  retryCount: result.uploadReport.retryCount,
+  attempts: result.uploadReport.attempts,
+  endpoint: result.uploadReport.endpoint,
+  artifactCount: result.uploadReport.artifactCount,
+  filePartCount: result.uploadReport.filePartCount
+}, null, 2));
+JS
+)
+
+python3 - "$upload_helper_report" "$state_file" "$tmp_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+upload_report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+state = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[3]
+
+assert upload_report["manifestStatus"] == "ready"
+assert upload_report["uploadStatus"] == "uploaded"
+assert upload_report["retryCount"] == 1
+assert [attempt["httpStatus"] for attempt in upload_report["attempts"]] == [503, 202]
+assert upload_report["endpoint"].endswith("/retry-success")
+assert upload_report["artifactCount"] == 1
+assert upload_report["filePartCount"] == 2
+assert "logbrew_rn_query_placeholder" not in json.dumps(upload_report)
+
+events = state["events"]
+assert [event["path"] for event in events].count("/retry-success") == 2
+assert all(event["containsManifest"] for event in events)
+assert all(event["containsSourceMapPart"] for event in events)
+assert all(event["containsMinifiedPart"] for event in events)
+assert not any(event["containsSourceSentinel"] for event in events)
+assert not any(event["containsAuthValue"] for event in events)
+assert not any(event["containsQueryPlaceholder"] for event in events)
+assert not any(event["containsHashFragment"] for event in events)
+assert not any(event["containsTempPath"] for event in events)
+assert tmp_dir not in json.dumps(upload_report)
 PY
 
 printf 'real-user React Native release artifact smoke ok with react-native@%s react@%s cli@%s\n' \

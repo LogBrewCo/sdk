@@ -2,6 +2,7 @@
 
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
+const net = require("node:net");
 const path = require("node:path");
 
 const PACKAGE_DIR = path.dirname(require.resolve("./package.json"));
@@ -24,6 +25,23 @@ function optionalString(options, name) {
   }
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`LogBrew React Native release-artifact helper option ${name} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function optionalUploadScalar(options, name) {
+  const value = options?.[name];
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`LogBrew React Native release-artifact helper option ${name} must be non-negative`);
+    }
+    return String(value);
+  }
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`LogBrew React Native release-artifact helper option ${name} must be a non-empty string or number`);
   }
   return value.trim();
 }
@@ -71,6 +89,27 @@ function resolveLogBrewReleaseArtifactsCli() {
       return sourceTreeCli;
     }
     throw new Error("LogBrew React Native release-artifact helper requires @logbrew/sdk to be installed");
+  }
+}
+
+function requireLoopbackUploadEndpoint(endpoint) {
+  let parsed;
+  try {
+    parsed = new URL(endpoint);
+  } catch (error) {
+    throw new Error(`upload endpoint is not a valid URL: ${error.message}`, { cause: error });
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("release artifact upload proof endpoint must use http or https");
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  const isLoopback =
+    hostname === "localhost" ||
+    hostname === "[::1]" ||
+    hostname === "::1" ||
+    (net.isIP(hostname) !== 0 && (hostname.startsWith("127.") || hostname === "::1"));
+  if (!isLoopback) {
+    throw new Error("release artifact upload proof endpoint must be loopback-only until the backend upload contract exists");
   }
 }
 
@@ -221,7 +260,53 @@ function prepareLogBrewReactNativeReleaseArtifacts(options = {}) {
   };
 }
 
+function uploadLogBrewReactNativeReleaseArtifacts(options = {}) {
+  const endpoint = requiredString(options, "endpoint");
+  requireLoopbackUploadEndpoint(endpoint);
+  const tokenEnv = optionalString(options, "tokenEnv");
+  const maxRetries = optionalUploadScalar(options, "maxRetries");
+  const retryDelay = optionalUploadScalar(options, "retryDelay");
+  const timeout = optionalUploadScalar(options, "timeout");
+  const dryRun = options?.dryRun;
+  if (dryRun !== undefined && typeof dryRun !== "boolean") {
+    throw new Error("LogBrew React Native release-artifact helper option dryRun must be a boolean");
+  }
+
+  const prepared = prepareLogBrewReactNativeReleaseArtifacts(options);
+  const uploadArgs = [
+    "--build-dir",
+    prepared.buildDir,
+    "--manifest",
+    prepared.manifestPath,
+    "--endpoint",
+    endpoint,
+  ];
+
+  if (tokenEnv) {
+    uploadArgs.push("--token-env", tokenEnv);
+  }
+  if (dryRun === true) {
+    uploadArgs.push("--dry-run");
+  }
+  if (maxRetries) {
+    uploadArgs.push("--max-retries", maxRetries);
+  }
+  if (retryDelay) {
+    uploadArgs.push("--retry-delay", retryDelay);
+  }
+  if (timeout) {
+    uploadArgs.push("--timeout", timeout);
+  }
+
+  const { report: uploadReport } = runReleaseArtifactCli("upload-js", uploadArgs);
+  return {
+    ...prepared,
+    uploadReport,
+  };
+}
+
 module.exports = {
   prepareLogBrewReactNativeReleaseArtifacts,
+  uploadLogBrewReactNativeReleaseArtifacts,
   default: prepareLogBrewReactNativeReleaseArtifacts,
 };

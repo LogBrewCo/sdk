@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { prepareLogBrewReactNativeReleaseArtifacts } from "../release-artifacts.js";
+import {
+  prepareLogBrewReactNativeReleaseArtifacts,
+  uploadLogBrewReactNativeReleaseArtifacts,
+} from "../release-artifacts.js";
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-rn-release-artifacts-"));
@@ -185,6 +188,69 @@ test("React Native release-artifact helper trusts the explicit sourcemap for Her
     assert.doesNotMatch(bundleSource, /sourceMappingURL=packager\.map/u);
     assert.equal(finalSourceMap.sourcesContent, undefined);
     assert.deepEqual(finalSourceMap.sources, ["index.js"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("React Native release-artifact helper prepares and dry-runs upload through the loopback verifier", () => {
+  const root = tempDir();
+  try {
+    const buildDir = path.join(root, "dist");
+    const { appRoot, bundlePath, sourcemapPath } = writeReactNativeBundle(buildDir);
+
+    const result = uploadLogBrewReactNativeReleaseArtifacts({
+      bundle: bundlePath,
+      sourcemap: sourcemapPath,
+      platform: "android",
+      release: "2026.06.18-react-native-upload",
+      environment: "production",
+      service: "checkout-react-native",
+      root: appRoot,
+      endpoint: "http://127.0.0.1:9/retry-success?hidden=1#fragment",
+      dryRun: true,
+    });
+
+    assert.equal(result.uploadReport.status, "dry_run");
+    assert.equal(result.uploadReport.endpoint, "http://127.0.0.1:9/retry-success");
+    assert.equal(result.uploadReport.release, "2026.06.18-react-native-upload");
+    assert.equal(result.uploadReport.environment, "production");
+    assert.equal(result.uploadReport.service, "checkout-react-native");
+    assert.equal(result.uploadReport.artifactType, "javascript_source_map_manifest");
+    assert.equal(result.uploadReport.artifactCount, 1);
+    assert.equal(result.uploadReport.filePartCount, 2);
+    assert.equal(result.uploadReport.retryCount, 0);
+    assert.equal(result.manifestReport.validation.status, "ready");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("React Native release-artifact helper keeps hosted upload blocked until backend upload routes exist", () => {
+  const root = tempDir();
+  try {
+    const buildDir = path.join(root, "dist");
+    const { appRoot, bundlePath, sourcemapPath } = writeReactNativeBundle(buildDir);
+    const originalBundleSource = fs.readFileSync(bundlePath, "utf8");
+    const originalSourceMap = JSON.parse(fs.readFileSync(sourcemapPath, "utf8"));
+
+    assert.throws(
+      () =>
+        uploadLogBrewReactNativeReleaseArtifacts({
+          bundle: bundlePath,
+          sourcemap: sourcemapPath,
+          platform: "ios",
+          release: "2026.06.18-react-native-upload",
+          environment: "production",
+          service: "checkout-react-native",
+          root: appRoot,
+          endpoint: "https://example.com/release-artifacts",
+          dryRun: true,
+        }),
+      /loopback-only/u,
+    );
+    assert.equal(fs.readFileSync(bundlePath, "utf8"), originalBundleSource);
+    assert.deepEqual(JSON.parse(fs.readFileSync(sourcemapPath, "utf8")), originalSourceMap);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

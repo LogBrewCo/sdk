@@ -418,6 +418,9 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
         return True
     if relative_text in {
         "js/logbrew-js/release-artifacts-upload.js",
+        "js/logbrew-react-native/release-artifacts.cjs",
+        "js/logbrew-react-native/release-artifacts.d.cts",
+        "js/logbrew-react-native/release-artifacts.d.ts",
         "scripts/release_artifact_upload_common.py",
         "scripts/upload_js_release_artifacts.py",
         "scripts/upload_native_release_artifacts.py",
@@ -430,6 +433,7 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
             "hostname =",
             "hostname ===",
             "net.isIP(hostname)",
+            "requireLoopbackUploadEndpoint",
             "if not hostname:",
             "hostname.lower()",
             "token: str",
@@ -439,6 +443,7 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
             "--token-env",
             "release-artifact token",
             "const tokenEnv",
+            "tokenEnv?: string",
             "if (tokenEnv",
             "const token =",
             "token = os.environ.get",
@@ -458,6 +463,7 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
         "scripts/real_user_js_release_artifact_upload_smoke.sh",
         "scripts/real_user_native_release_artifact_upload_smoke.sh",
         "scripts/real_user_next_release_artifact_smoke.sh",
+        "scripts/real_user_react_native_release_artifact_smoke.sh",
         "scripts/real_user_vite_release_artifact_smoke.sh",
     }:
         allowed_fragments = (

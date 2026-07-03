@@ -27,9 +27,26 @@ export type LogBrewReactNativeReleaseArtifactsResult = {
   manifestReport: Record<string, unknown>;
 };
 
+export type LogBrewReactNativeReleaseArtifactUploadOptions = LogBrewReactNativeReleaseArtifactsOptions & {
+  endpoint: string;
+  tokenEnv?: string;
+  dryRun?: boolean;
+  maxRetries?: string | number;
+  retryDelay?: string | number;
+  timeout?: string | number;
+};
+
+export type LogBrewReactNativeReleaseArtifactUploadResult = LogBrewReactNativeReleaseArtifactsResult & {
+  uploadReport: Record<string, unknown>;
+};
+
 export declare function prepareLogBrewReactNativeReleaseArtifacts(
   options: LogBrewReactNativeReleaseArtifactsOptions
 ): LogBrewReactNativeReleaseArtifactsResult;
+
+export declare function uploadLogBrewReactNativeReleaseArtifacts(
+  options: LogBrewReactNativeReleaseArtifactUploadOptions
+): LogBrewReactNativeReleaseArtifactUploadResult;
 
 declare const defaultExport: typeof prepareLogBrewReactNativeReleaseArtifacts;
 
