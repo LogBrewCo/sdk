@@ -43,6 +43,8 @@ tar -tzf "$browser_tgz" > "$tmp_dir/browser-tarball.txt"
 grep -q '^package/README.md$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/beacon-transport.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/beacon-transport.cjs$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/fetch-spans.js$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/fetch-spans.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/persistence.js$' "$tmp_dir/browser-tarball.txt"
@@ -77,6 +79,8 @@ grep -q 'createPersistentBrowserTransport' "$tmp_dir/browser-readme.md"
 grep -q 'persistOffline' "$tmp_dir/browser-readme.md"
 grep -q 'sessionId' "$tmp_dir/browser-readme.md"
 grep -q 'createTraceparentFetch' "$tmp_dir/browser-readme.md"
+grep -q 'createLogBrewBrowserFetch' "$tmp_dir/browser-readme.md"
+grep -q 'installLogBrewBrowserFetchInstrumentation' "$tmp_dir/browser-readme.md"
 grep -q 'createBrowserTraceContext' "$tmp_dir/browser-readme.md"
 grep -q 'tracePropagationTargets' "$tmp_dir/browser-readme.md"
 grep -q 'traceContext: () => logbrew.traceContext' "$tmp_dir/browser-readme.md"
@@ -126,6 +130,7 @@ import { Window } from "happy-dom";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
+  createLogBrewBrowserFetch,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
   createBrowserTraceContext,
@@ -135,6 +140,7 @@ import {
   createPersistentBrowserTransport,
   createTraceparentFetch,
   installLogBrewBrowser,
+  installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
   shouldPropagateTraceparent
@@ -544,6 +550,111 @@ if (tracedFetchRequests[2].init.headers.traceparent !== propagatedTraceparent) {
   throw new Error("relative target should receive traceparent");
 }
 
+const browserFetchWindow = new Window({
+  url: "https://app.example.test/fetch?email=dev@example.test#panel"
+});
+const browserFetchTraceContext = createBrowserTraceContext({
+  spanId: "00f067aa0ba902b7",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+});
+const browserFetchContext = installLogBrewBrowser({
+  browserWindow: browserFetchWindow,
+  capturePageViews: false,
+  clientKey: "LOGBREW_BROWSER_KEY",
+  flushOnCapture: false,
+  traceContext: browserFetchTraceContext,
+  transport: RecordingTransport.alwaysAccept()
+});
+const browserFetchCalls = [];
+const browserFetch = createLogBrewBrowserFetch(browserFetchContext, {
+  fetchImpl: async (input, init = {}) => {
+    browserFetchCalls.push({ input, init });
+    return {
+      headers: new Headers({ "content-length": "456" }),
+      status: 503
+    };
+  },
+  flushOnCapture: false,
+  now: () => "2026-06-02T10:00:11Z",
+  nowMs: sequenceNumbers([1000, 1088.5]),
+  randomValues: () => fillBytes(8, 0x99),
+  resourcePathTemplate: "/api/orders/:id",
+  tracePropagationTargets: [/^https:\/\/api\.example\.test\/api\//u]
+});
+await browserFetch("https://api.example.test/api/orders/123?email=dev@example.test#fragment", {
+  body: "private body",
+  headers: { accept: "application/json" },
+  method: "POST"
+});
+const browserFetchPayload = JSON.parse(browserFetchContext.previewJson());
+const browserFetchBody = JSON.stringify(browserFetchPayload);
+const browserFetchSpan = browserFetchPayload.events[0];
+if (browserFetchCalls[0].init.headers.traceparent !== `00-${browserFetchTraceContext.traceId}-9999999999999999-01`) {
+  throw new Error(`expected fetch span traceparent, got ${browserFetchCalls[0].init.headers.traceparent}`);
+}
+if (browserFetchSpan.attributes.name !== "browser.fetch POST /api/orders/:id") {
+  throw new Error(`unexpected fetch span name: ${browserFetchBody}`);
+}
+if (browserFetchSpan.attributes.traceId !== browserFetchTraceContext.traceId || browserFetchSpan.attributes.parentSpanId !== browserFetchTraceContext.spanId) {
+  throw new Error(`expected fetch child span correlation, got ${browserFetchBody}`);
+}
+if (browserFetchSpan.attributes.status !== "error" || browserFetchSpan.attributes.metadata.statusCode !== 503) {
+  throw new Error(`expected failed fetch status metadata, got ${browserFetchBody}`);
+}
+if (browserFetchSpan.attributes.metadata.responseBodySize !== 456 || browserFetchSpan.attributes.durationMs !== 88.5) {
+  throw new Error(`expected bounded fetch timing and size metadata, got ${browserFetchBody}`);
+}
+if (browserFetchBody.includes("api.example.test") || browserFetchBody.includes("email=dev@example.test") || browserFetchBody.includes("#fragment") || browserFetchBody.includes("private body") || browserFetchBody.includes("application/json")) {
+  throw new Error(`fetch span metadata leaked request details: ${browserFetchBody}`);
+}
+
+let browserFetchFailureCaptured = false;
+const browserFetchFailureError = new TypeError("Failed to fetch hidden query");
+const failingBrowserFetch = createLogBrewBrowserFetch(browserFetchContext, {
+  fetchImpl: async () => {
+    throw browserFetchFailureError;
+  },
+  flushOnCapture: false,
+  now: () => "2026-06-02T10:00:12Z",
+  nowMs: sequenceNumbers([2000, 2007]),
+  randomValues: () => fillBytes(8, 0x98)
+});
+try {
+  await failingBrowserFetch("/api/profile/42?sample=hidden", { method: "PATCH" });
+} catch (error) {
+  browserFetchFailureCaptured = error === browserFetchFailureError;
+}
+if (!browserFetchFailureCaptured) {
+  throw new Error("fetch wrapper should rethrow the original network error");
+}
+const browserFetchFailureBody = JSON.stringify(JSON.parse(browserFetchContext.previewJson()).events.at(-1));
+if (!browserFetchFailureBody.includes('"errorType":"TypeError"') || browserFetchFailureBody.includes("sample=hidden") || browserFetchFailureBody.includes("hidden query")) {
+  throw new Error(`fetch failure span should keep only the error type: ${browserFetchFailureBody}`);
+}
+
+const originalWindowFetch = async () => ({ headers: new Headers(), status: 202 });
+browserFetchWindow.fetch = originalWindowFetch;
+const browserFetchInstrumentation = installLogBrewBrowserFetchInstrumentation(browserFetchContext, {
+  flushOnCapture: false,
+  now: () => "2026-06-02T10:00:13Z",
+  nowMs: sequenceNumbers([3000, 3012]),
+  randomValues: () => fillBytes(8, 0x97),
+  resourcePathTemplate({ path }) {
+    return path.replace(/\/\d+$/u, "/:id");
+  }
+});
+if (browserFetchWindow.fetch === originalWindowFetch) {
+  throw new Error("fetch instrumentation should patch only after explicit install");
+}
+await browserFetchWindow.fetch("/api/accounts/123", { method: "GET" });
+browserFetchInstrumentation.uninstall();
+if (browserFetchWindow.fetch !== originalWindowFetch) {
+  throw new Error("fetch instrumentation should restore the original fetch");
+}
+if (!JSON.stringify(JSON.parse(browserFetchContext.previewJson()).events.at(-1)).includes("browser.fetch GET /api/accounts/:id")) {
+  throw new Error("fetch instrumentation did not capture the route-templated fetch span");
+}
+
 const resourceWindow = new Window({
   url: "https://app.example.test/resources?email=dev@example.test#panel"
 });
@@ -691,6 +802,7 @@ console.error(JSON.stringify({
   beaconEnvelope: beaconPayload.envelope.events[0].id,
   browserDeliveries: transport.sentBodies.length,
   events: JSON.parse(preview).events.length,
+  fetchSpan: browserFetchSpan.attributes.name,
   fetchStatus: fetchResponse.statusCode,
   fullAttempts: fullResponse.attempts,
   hiddenFlush: hiddenPayload.events[0].id,
@@ -860,6 +972,11 @@ function sequenceRandomValues(values) {
   };
 }
 
+function sequenceNumbers(values) {
+  let index = 0;
+  return () => values[index++] ?? values.at(-1);
+}
+
 async function waitFor(predicate) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (predicate()) {
@@ -900,23 +1017,29 @@ cat > consumer.ts <<'EOF'
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
+  captureBrowserFetchSpan,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
   createBrowserTraceContext,
   createBrowserActionEvent,
+  createBrowserFetchSpanEvent,
   createBrowserNetworkEvent,
   createBrowserResourceTimingEvent,
   createBrowserErrorEvent,
   createBeaconTransport,
   createFetchTransport,
+  createLogBrewBrowserFetch,
   createLogBrewBrowserClient,
   createPageViewEvent,
   createPersistentBrowserTransport,
   createTraceparentFetch,
   installLogBrewBrowser,
+  installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
   type BrowserNavigationInstrumentation,
+  type BrowserFetchInput,
+  type BrowserFetchInstrumentation,
   type BrowserMetadataKind,
   type BrowserPersistedReplay,
   type BrowserPersistentStorage,
@@ -979,13 +1102,28 @@ const resourceEntry: BrowserResourceTimingInput = {
 const resource = createBrowserResourceTimingEvent(resourceEntry, window, {
   resourcePathTemplate: "/api/checkout"
 });
+const fetchEntry: BrowserFetchInput = {
+  durationMs: 18,
+  method: "POST",
+  responseBodySize: 456,
+  statusCode: 202,
+  tracePropagated: true,
+  url: "https://api.example.test/api/checkout?sample=private"
+};
+const fetchSpan = createBrowserFetchSpanEvent(fetchEntry, window, {
+  resourcePathTemplate: "/api/checkout"
+});
 client.span(page.id, page.timestamp, page.attributes);
+client.span(fetchSpan.id, fetchSpan.timestamp, fetchSpan.attributes);
 client.span(resource.id, resource.timestamp, resource.attributes);
 client.action(action.id, action.timestamp, action.attributes);
 client.action(network.id, network.timestamp, network.attributes);
 client.issue(issue.id, issue.timestamp, issue.attributes);
 void captureBrowserAction("checkout.submitted", context);
 void captureBrowserNetwork("/api/checkout", context);
+void captureBrowserFetchSpan(fetchEntry, context, {
+  resourcePathTemplate: "/api/checkout"
+});
 void captureBrowserResourceTiming(resourceEntry, context, {
   resourcePathTemplate: "/api/checkout"
 });
@@ -1023,6 +1161,15 @@ const resourceTimingInstrumentation: BrowserResourceTimingInstrumentation =
     performanceObserver: window.PerformanceObserver,
     resourcePathTemplate: ({ path }) => path
   });
+const browserFetch = createLogBrewBrowserFetch(context, {
+  fetchImpl: fetch,
+  resourcePathTemplate: "/api/checkout",
+  tracePropagationTargets: traceTargets
+});
+const fetchInstrumentation: BrowserFetchInstrumentation = installLogBrewBrowserFetchInstrumentation(context, {
+  browserWindow: window,
+  resourcePathTemplate: ({ path }) => path
+});
 const tracedFetch = createTraceparentFetch({
   fetchImpl: fetch,
   traceContext,
@@ -1035,6 +1182,8 @@ const dynamicTraceFetch = createTraceparentFetch({
 });
 void tracedFetch("/internal/ping");
 void dynamicTraceFetch("/internal/ping");
+void browserFetch("/internal/ping");
+fetchInstrumentation.uninstall();
 navigation.uninstall();
 resourceTimingInstrumentation.uninstall();
 context.uninstall();
@@ -1080,6 +1229,12 @@ if (typeof browser.captureBrowserResourceTiming !== "function" || typeof browser
 if (typeof browser.installLogBrewBrowserResourceTimingInstrumentation !== "function") {
   throw new Error("missing CommonJS browser resource timing instrumentation helper");
 }
+if (typeof browser.createLogBrewBrowserFetch !== "function" || typeof browser.captureBrowserFetchSpan !== "function") {
+  throw new Error("missing CommonJS browser fetch span helpers");
+}
+if (typeof browser.installLogBrewBrowserFetchInstrumentation !== "function") {
+  throw new Error("missing CommonJS browser fetch instrumentation helper");
+}
 if (typeof browser.createPersistentBrowserTransport !== "function") {
   throw new Error("missing CommonJS persistent browser transport helper");
 }
@@ -1114,7 +1269,8 @@ grep -q '"ok":true' "$tmp_dir/example-readme.stderr.json"
 grep -q '"path":"/dashboard"' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/browser/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":6' "$tmp_dir/example-default.stderr.json"
+grep -q '"pagehideFlushEvents":7' "$tmp_dir/example-default.stderr.json"
+grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/example-default.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/browser/examples run list > "$tmp_dir/npm-helper-list.txt"
 grep -q 'readme-example -> node node_modules/@logbrew/browser/examples/index.mjs readme-example' "$tmp_dir/npm-helper-list.txt"
@@ -1122,7 +1278,8 @@ npm --prefix node_modules/@logbrew/browser/examples run help > "$tmp_dir/npm-hel
 grep -q 'Default example: real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/browser/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":6' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"pagehideFlushEvents":7' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/npm-helper-smoke.stderr.json"
 
 echo "browser real-user smoke passed with happy-dom@$(node -p 'require("happy-dom/package.json").version')"

@@ -132,6 +132,49 @@ resources.uninstall();
 
 Resource timing spans keep the active trace ID, create a child span ID, record duration, status code when the browser exposes it, initiator type, size fields, and bounded phase timings such as lookup, connect, TLS, request, and response time. They store only path/template metadata; full URLs, hosts, query strings, hash fragments, headers, request or response bodies, cookies, baggage, and tracestate are not captured.
 
+## Fetch Spans
+
+Use `createLogBrewBrowserFetch()` when browser API calls should become trace spans and optionally propagate W3C `traceparent` to your own backend. This wraps an app-owned `fetch` function and is separate from the lower-level `createTraceparentFetch()` header helper.
+
+```js
+import {
+  createLogBrewBrowserFetch,
+  installLogBrewBrowser
+} from "@logbrew/browser";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+
+const logbrewFetch = createLogBrewBrowserFetch(logbrew, {
+  resourcePathTemplate({ path }) {
+    return path.replace(/\/\d+$/u, "/:id");
+  },
+  tracePropagationTargets: [/^\/api\//]
+});
+
+await logbrewFetch("/api/orders/123", {
+  method: "POST",
+  body: JSON.stringify({ cartId: "cart_123" })
+});
+```
+
+`createLogBrewBrowserFetch()` creates a child span under the active page or route trace, injects exactly one normalized `traceparent` only when `tracePropagationTargets` matches, measures duration, records method, path/template, status code, response content length when exposed, and error type for network failures, then rethrows the original fetch error. It never captures request or response bodies, arbitrary headers, full URLs, hosts, query strings, hash fragments, cookies, error messages, baggage, or tracestate.
+
+If your app intentionally wants a global browser fetch patch, opt in with `installLogBrewBrowserFetchInstrumentation()` and keep the returned teardown handle.
+
+```js
+const fetchInstrumentation = installLogBrewBrowserFetchInstrumentation(logbrew, {
+  resourcePathTemplate: "/api/orders/:id",
+  tracePropagationTargets: [/^\/api\/orders\//]
+});
+
+// Later, if your app owns teardown.
+fetchInstrumentation.uninstall();
+```
+
+Fetch instrumentation is not installed by default. XHR is still app-owned: use `captureBrowserNetwork()` or `captureBrowserResourceTiming()` for XHR milestones until a dedicated XHR helper exists.
+
 ## Fetch Transport
 
 ```js
@@ -232,7 +275,7 @@ const tracedFetch = createTraceparentFetch({
 
 `tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. String URL targets apply only to the same origin plus a path prefix, so `https://api.example.com/v1` covers `/v1/orders` on that origin but not `https://wrong.example.com` or `/v10`. Keep targets narrow so browser requests do not send tracing headers to unrelated origins. If the API is on another origin, configure that backend's CORS policy to allow the `traceparent` request header.
 
-LogBrew does not patch global `fetch` or XHR, capture request/response bodies, copy arbitrary headers, store query strings or hash fragments by default, or emit W3C baggage/tracestate from the browser helper. Use explicit app-owned network milestones for the routes that matter.
+LogBrew does not patch global `fetch` or XHR by default, capture request/response bodies, copy arbitrary headers, store query strings or hash fragments by default, or emit W3C baggage/tracestate from the browser helper. Use explicit app-owned fetch spans or network milestones for the routes that matter.
 
 ## SPA Navigation Tracing
 

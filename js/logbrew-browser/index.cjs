@@ -7,6 +7,12 @@ const {
   TransportError
 } = require("@logbrew/sdk");
 const { createBeaconTransport } = require("./beacon-transport.cjs");
+const {
+  captureBrowserFetchSpan,
+  createBrowserFetchSpanEvent,
+  createLogBrewBrowserFetch,
+  installLogBrewBrowserFetchInstrumentation
+} = require("./fetch-spans.cjs");
 const { createPersistentBrowserTransport } = require("./persistence.cjs");
 const {
   captureBrowserResourceTiming,
@@ -913,6 +919,7 @@ module.exports = {
   RecordingTransport,
   captureBrowserAction,
   captureBrowserError,
+  captureBrowserFetchSpan,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
   capturePageView,
@@ -921,9 +928,11 @@ module.exports = {
   createBrowserTraceparent,
   createBrowserActionEvent,
   createBrowserErrorEvent,
+  createBrowserFetchSpanEvent,
   createBrowserResourceTimingEvent,
   createBeaconTransport,
   createFetchTransport,
+  createLogBrewBrowserFetch,
   createLogBrewBrowserClient,
   createLogBrewBrowserContext,
   createBrowserNetworkEvent,
@@ -934,6 +943,7 @@ module.exports = {
   default: {
     captureBrowserAction,
     captureBrowserError,
+    captureBrowserFetchSpan,
     captureBrowserNetwork,
     captureBrowserResourceTiming,
     capturePageView,
@@ -942,9 +952,11 @@ module.exports = {
     createBrowserTraceparent,
     createBrowserActionEvent,
     createBrowserErrorEvent,
+    createBrowserFetchSpanEvent,
     createBrowserResourceTimingEvent,
     createBeaconTransport,
     createFetchTransport,
+    createLogBrewBrowserFetch,
     createLogBrewBrowserClient,
     createLogBrewBrowserContext,
     createBrowserNetworkEvent,
@@ -953,11 +965,13 @@ module.exports = {
     createTraceparentFetch,
     createUnhandledRejectionEvent,
     installLogBrewBrowserNavigationInstrumentation,
+    installLogBrewBrowserFetchInstrumentation,
     installLogBrewBrowserResourceTimingInstrumentation,
     installLogBrewBrowser,
     shouldPropagateTraceparent
   },
   installLogBrewBrowserNavigationInstrumentation,
+  installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
   installLogBrewBrowser,
   shouldPropagateTraceparent

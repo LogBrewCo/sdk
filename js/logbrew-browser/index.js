@@ -5,6 +5,12 @@ import {
   TransportError
 } from "@logbrew/sdk";
 import { createBeaconTransport } from "./beacon-transport.js";
+import {
+  captureBrowserFetchSpan,
+  createBrowserFetchSpanEvent,
+  createLogBrewBrowserFetch,
+  installLogBrewBrowserFetchInstrumentation
+} from "./fetch-spans.js";
 import { createPersistentBrowserTransport } from "./persistence.js";
 import {
   captureBrowserResourceTiming,
@@ -22,11 +28,15 @@ import {
 
 export {
   createBeaconTransport,
+  captureBrowserFetchSpan,
   captureBrowserResourceTiming,
+  createBrowserFetchSpanEvent,
   createBrowserResourceTimingEvent,
   createBrowserTraceContext,
   createBrowserTraceparent,
+  createLogBrewBrowserFetch,
   createTraceparentFetch,
+  installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
   shouldPropagateTraceparent
 };
@@ -923,6 +933,7 @@ export { RecordingTransport, createPersistentBrowserTransport };
 export default {
   captureBrowserAction,
   captureBrowserError,
+  captureBrowserFetchSpan,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
   capturePageView,
@@ -931,9 +942,11 @@ export default {
   createBrowserTraceparent,
   createBrowserActionEvent,
   createBrowserErrorEvent,
+  createBrowserFetchSpanEvent,
   createBrowserResourceTimingEvent,
   createBeaconTransport,
   createFetchTransport,
+  createLogBrewBrowserFetch,
   createLogBrewBrowserClient,
   createLogBrewBrowserContext,
   createBrowserNetworkEvent,
@@ -942,6 +955,7 @@ export default {
   createTraceparentFetch,
   createUnhandledRejectionEvent,
   installLogBrewBrowserNavigationInstrumentation,
+  installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
   installLogBrewBrowser,
   shouldPropagateTraceparent

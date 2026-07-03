@@ -1,5 +1,33 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: Browser fetch span gap reduced after source reads from Sentry JS
+  `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
+  (`instrumentFetchRequest`, fetch and XHR instrumentation), Datadog Browser
+  SDK `DataDog/browser-sdk@d2c7e303e4533f40e93d447042a67571f7ba97ff`
+  (`trackFetch`, `trackXhr`, request tracing/resource correlation), OTel JS
+  Contrib
+  `open-telemetry/opentelemetry-js-contrib@04d6f6af917d2858cc732cffbd1308caadab5a33`
+  (`getWebAutoInstrumentations`), and PostHog JS
+  `PostHog/posthog-js@e480a3e23ecff45d2f9cf50332f6f59c54a7c736`
+  (`TracingHeaders`, reversible fetch/XHR patching). `@logbrew/browser` now
+  exports explicit `createLogBrewBrowserFetch(...)`, reversible
+  `installLogBrewBrowserFetchInstrumentation(...)`,
+  `captureBrowserFetchSpan(...)`, and `createBrowserFetchSpanEvent(...)`.
+  Fetch calls become child spans under the active browser trace, can inject one
+  normalized W3C `traceparent` for matching targets, record method,
+  path/template, status, response content length, bounded duration, error type,
+  and propagation status, and rethrow original fetch failures. It avoids bodies,
+  arbitrary headers, full URLs, hosts, query/hash, cookies, error messages,
+  baggage, tracestate, replay, and XHR. Evidence: RED missing export test,
+  GREEN `npm --prefix js/logbrew-browser test`, and
+  `scripts/real_user_browser_smoke.sh` with packed temp app/happy-dom 20.10.1
+  proving tarball/README/ESM/CJS/types, explicit fetch spans, failure rethrow,
+  reversible patching, sanitized metadata, and no request-detail leakage.
+  Research:
+  `docs/competitor-research/browser-fetch-spans-2026-07-04.md`. Honest gap:
+  Sentry/Datadog still lead on zero-config fetch/XHR coverage, automatic
+  request/resource joining, first-page attribution, richer RUM, replay, and
+  hosted source-map/symbolication.
 - 2026-07-04: Browser resource timing span gap reduced after source reads from
   Sentry JS
   `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`

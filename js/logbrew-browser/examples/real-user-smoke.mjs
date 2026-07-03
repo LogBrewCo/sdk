@@ -3,6 +3,7 @@ import {
   captureBrowserAction,
   captureBrowserNetwork,
   createBrowserTraceContext,
+  createLogBrewBrowserFetch,
   createTraceparentFetch,
   installLogBrewBrowser,
   shouldPropagateTraceparent
@@ -57,8 +58,30 @@ await captureBrowserNetwork({
   now: nextTimestamp
 });
 
-if (logbrew.client.pendingEvents() !== 5) {
-  throw new Error(`expected 5 captured events, got ${logbrew.client.pendingEvents()}`);
+const fetchCalls = [];
+const logbrewFetch = createLogBrewBrowserFetch(logbrew, {
+  fetchImpl: async (input, init = {}) => {
+    fetchCalls.push({ input, init });
+    return {
+      headers: new globalThis.Headers({ "content-length": "456" }),
+      status: 503
+    };
+  },
+  flushOnCapture: false,
+  now: nextTimestamp,
+  nowMs: sequenceNumbers([1000, 1033]),
+  randomValues: () => fillBytes(8, 0x44),
+  resourcePathTemplate: "/api/checkout/:id",
+  tracePropagationTargets: [/^https:\/\/api\.example\.test\/api\//u]
+});
+await logbrewFetch("https://api.example.test/api/checkout/123?email=dev@example.test#retry", {
+  body: "private body",
+  headers: { accept: "application/json" },
+  method: "POST"
+});
+
+if (logbrew.client.pendingEvents() !== 6) {
+  throw new Error(`expected 6 captured events, got ${logbrew.client.pendingEvents()}`);
 }
 
 logbrew.client.log("evt_browser_pagehide_001", nextTimestamp(), {
@@ -121,6 +144,22 @@ if (network.attributes.metadata.statusCode !== 503 || network.attributes.status 
 if (network.attributes.metadata.ignoredNested !== undefined) {
   throw new Error(`nested network metadata should be dropped: ${payload}`);
 }
+const fetchSpan = parsed.events.find((event) => event.type === "span" && event.attributes.metadata?.source === "browser.fetch");
+if (fetchSpan?.attributes.name !== "browser.fetch POST /api/checkout/:id") {
+  throw new Error(`expected fetch span route template, got ${payload}`);
+}
+if (fetchSpan.attributes.traceId !== traceContext.traceId || fetchSpan.attributes.parentSpanId !== traceContext.spanId) {
+  throw new Error(`expected fetch child span trace correlation, got ${payload}`);
+}
+if (fetchSpan.attributes.metadata.statusCode !== 503 || fetchSpan.attributes.metadata.responseBodySize !== 456 || fetchSpan.attributes.durationMs !== 33) {
+  throw new Error(`expected fetch status, size, and duration metadata, got ${payload}`);
+}
+if (fetchCalls[0].init.headers.traceparent !== `00-${traceContext.traceId}-4444444444444444-01`) {
+  throw new Error(`unexpected fetch span traceparent: ${fetchCalls[0].init.headers.traceparent}`);
+}
+if (payload.includes("api.example.test") || payload.includes("email=dev@example.test") || payload.includes("#retry") || payload.includes("private body") || payload.includes("application/json")) {
+  throw new Error(`fetch span metadata leaked request details: ${payload}`);
+}
 const visibilityPayload = JSON.parse(transport.sentBodies[1]);
 if (visibilityPayload.events[0].id !== "evt_browser_hidden_001") {
   throw new Error(`expected hidden visibility flush, got ${transport.sentBodies[1]}`);
@@ -169,6 +208,7 @@ console.log(payload);
 console.error(JSON.stringify({
   ok: true,
   events: parsed.events.length,
+  fetchSpan: fetchSpan.attributes.name,
   hiddenFlushEvents: visibilityPayload.events.length,
   networkAction: network.attributes.metadata.routeTemplate,
   pageView: parsed.events[0].attributes.name,
@@ -181,6 +221,15 @@ console.error(JSON.stringify({
 function nextTimestamp() {
   tick += 1;
   return `2026-06-02T10:00:0${tick}Z`;
+}
+
+function fillBytes(length, value) {
+  return Array.from({ length }, () => value);
+}
+
+function sequenceNumbers(values) {
+  let index = 0;
+  return () => values[index++] ?? values.at(-1);
 }
 
 function createErrorEvent(message, filename, lineno, colno) {
