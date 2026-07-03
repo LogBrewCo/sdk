@@ -128,6 +128,13 @@ jobs:
             "${{ steps.nuget-version.outputs.efcore_version }}" \\
             "${{ steps.nuget-version.outputs.redis_version }}" \\
             "${{ steps.nuget-version.outputs.otel_version }}"
+  crates:
+    steps:
+      - name: Read Rust crate version
+        id: crate-version
+        run: echo "version=$(python3 scripts/read_rust_crate_version.py rust/logbrew/Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - name: Verify public crates.io package
+        run: python3 scripts/check_registry_publication.py --target crates --version "${{ steps.crate-version.outputs.version }}"
   verify:
     name: Public registry verification
     if: ${{ inputs.target == 'verify' }}
@@ -161,6 +168,35 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_repo_release_metadata_passes(self) -> None:
         self.assertEqual(check_release_metadata.validate(ROOT), [])
 
+    def test_rust_metadata_accepts_current_crate_release_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package_dir = root / "rust" / "logbrew"
+            package_dir.mkdir(parents=True)
+            (package_dir / "Cargo.toml").write_text(
+                """
+[package]
+name = "logbrew"
+version = "0.1.1"
+license = "MIT"
+repository = "https://github.com/LogBrewCo/sdk"
+readme = "README.md"
+description = "Public LogBrew Rust SDK"
+keywords = ["logbrew"]
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            (package_dir / "README.md").write_text(
+                "Metrics MetricEvent client.metric low-cardinality OpenTelemetry Span Exporter opentelemetry-exporter\n",
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_rust(root, failures)
+
+        self.assertEqual(failures, [])
+
     def test_swift_metadata_requires_root_swiftpm_package(self) -> None:
         manifest_path = ROOT / "Package.swift"
 
@@ -193,6 +229,33 @@ jobs:
             check_release_metadata.validate_release_workflows(root, failures)
 
         self.assertTrue(any("NuGet exact public version verification" in failure for failure in failures))
+
+    def test_publish_packages_workflow_requires_exact_crates_version_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
+            (workflow_dir / "publish-packages.yml").write_text(
+                """
+name: Publish Packages
+on:
+  workflow_dispatch:
+    inputs:
+      allow_initial_npm_publish:
+        default: false
+jobs:
+  crates:
+    steps:
+      - name: Verify public crates.io package
+        run: python3 scripts/check_registry_publication.py --target crates
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("crates.io exact public version verification" in failure for failure in failures))
 
     def test_publish_packages_workflow_requires_exact_nuget_metadata_version_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

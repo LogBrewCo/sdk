@@ -1,6 +1,6 @@
 [package]
 name = "logbrew"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 description = "Public LogBrew Rust SDK for building, validating, and flushing event batches."

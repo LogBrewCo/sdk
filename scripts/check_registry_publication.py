@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from check_release_metadata import JS_PACKAGES, PACKAGIST_VERSION, PUBLIC_VERSION, RUBYGEMS_VERSION
+from check_release_metadata import JS_PACKAGES, PACKAGIST_VERSION, PUBLIC_VERSION, RUBYGEMS_VERSION, RUST_VERSION
 
 
 NPM_PACKAGES = tuple(sorted(JS_PACKAGES.values()))
@@ -27,9 +27,11 @@ PYPI_PACKAGES = ("logbrew-sdk",)
 PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-django")
 RUBYGEMS_PACKAGES = ("logbrew-sdk",)
 PACKAGIST_PACKAGES = ("logbrew/sdk",)
+CRATES = ("logbrew",)
 DEFAULT_PACKAGE_VERSIONS = {
     **{package_name: RUBYGEMS_VERSION for package_name in RUBYGEMS_PACKAGES},
     **{package_name: PACKAGIST_VERSION for package_name in PACKAGIST_PACKAGES},
+    **{package_name: RUST_VERSION for package_name in CRATES},
 }
 NUGET_PACKAGES = (
     "LogBrew",
@@ -38,7 +40,6 @@ NUGET_PACKAGES = (
     "LogBrew.StackExchangeRedis",
     "LogBrew.OpenTelemetry",
 )
-CRATES = ("logbrew",)
 MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin", "logbrew-kotlin-okhttp")
 MAVEN_PACKAGE_LABELS = tuple(f"co.logbrew:{artifact_id}" for artifact_id in MAVEN_ARTIFACTS)
 OPENUPM_PACKAGES = ("co.logbrew.unity",)
@@ -436,6 +437,11 @@ def success_summary(args: argparse.Namespace) -> str:
         if "packagist" in requested_targets or "all" in requested_targets
         else {}
     )
+    crate_versions = (
+        {package_name: DEFAULT_PACKAGE_VERSIONS[package_name] for package_name in CRATES}
+        if "crates" in requested_targets or "all" in requested_targets
+        else {}
+    )
     overrides = [
         formatted
         for formatted in (
@@ -443,6 +449,7 @@ def success_summary(args: argparse.Namespace) -> str:
             format_overrides("pypi", args.pypi_versions),
             format_overrides("RubyGems", rubygems_versions),
             format_overrides("Packagist", packagist_versions),
+            format_overrides("crates.io", crate_versions),
             format_overrides("nuget", args.nuget_versions),
             format_overrides("maven", getattr(args, "maven_versions", {})),
         )

@@ -5,6 +5,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 trap 'echo "rust dependency real-user smoke failed near line $LINENO" >&2' ERR
+crate_version="$(python3 "$repo_root/scripts/read_rust_crate_version.py" "$repo_root/rust/logbrew/Cargo.toml")"
+crate_name="logbrew-$crate_version"
 
 cargo package \
   --allow-dirty \
@@ -12,9 +14,9 @@ cargo package \
   --manifest-path "$repo_root/rust/logbrew/Cargo.toml" \
   --target-dir "$tmp_dir/cargo-package" >/dev/null
 
-crate_archive="$tmp_dir/cargo-package/package/logbrew-0.1.0.crate"
+crate_archive="$tmp_dir/cargo-package/package/$crate_name.crate"
 tar -xzf "$crate_archive" -C "$tmp_dir"
-crate_dir="$tmp_dir/logbrew-0.1.0"
+crate_dir="$tmp_dir/$crate_name"
 
 test -f "$crate_dir/src/operation_tracing.rs"
 grep -q 'Dependency Operation Spans' "$crate_dir/README.md"

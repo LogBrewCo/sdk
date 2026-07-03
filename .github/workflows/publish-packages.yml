@@ -451,6 +451,10 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Read Rust crate version
+        id: crate-version
+        run: echo "version=$(python3 scripts/read_rust_crate_version.py rust/logbrew/Cargo.toml)" >> "$GITHUB_OUTPUT"
+
       - name: Dry-run crate package
         working-directory: rust/logbrew
         run: cargo publish --dry-run
@@ -475,7 +479,7 @@ jobs:
 
       - name: Verify public crates.io package
         if: ${{ ! inputs.dry_run && inputs.include_crates_publish }}
-        run: python3 scripts/check_registry_publication.py --target crates
+        run: python3 scripts/check_registry_publication.py --target crates --version "${{ steps.crate-version.outputs.version }}"
 
       - name: Explain skipped crate publish
         if: ${{ ! inputs.dry_run && ! inputs.include_crates_publish && inputs.target == 'all' }}

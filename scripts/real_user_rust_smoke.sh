@@ -7,6 +7,9 @@ trap 'rm -rf "$tmp_dir"' EXIT
 trap 'echo "rust real-user smoke failed near line $LINENO" >&2' ERR
 export CARGO_HOME="$tmp_dir/cargo-home"
 mkdir -p "$CARGO_HOME"
+crate_version="$(python3 "$repo_root/scripts/read_rust_crate_version.py" "$repo_root/rust/logbrew/Cargo.toml")"
+crate_name="logbrew-$crate_version"
+export LOGBREW_RUST_CRATE_VERSION="$crate_version"
 
 assert_cargo_manifest_dependency() {
 	local manifest_path="$1"
@@ -17,9 +20,11 @@ assert_cargo_manifest_dependency() {
 	python3 - "$manifest_path" "$package_name" "$dependency_name" "$path_suffix" "$expected_features" <<'PY'
 import sys
 import tomllib
+import os
 from pathlib import Path
 
 manifest_path, package_name, dependency_name, path_suffix, expected_features = sys.argv[1:]
+expected_version = os.environ["LOGBREW_RUST_CRATE_VERSION"]
 manifest = tomllib.loads(Path(manifest_path).read_text())
 package = manifest.get("package", {})
 if package.get("name") != package_name:
@@ -32,7 +37,7 @@ dependencies = manifest.get("dependencies", {})
 dependency = dependencies.get(dependency_name)
 if not isinstance(dependency, dict):
     raise SystemExit(f"expected table dependency for {dependency_name}, found: {dependency!r}")
-if dependency.get("version") not in (None, "0.1.0"):
+if dependency.get("version") not in (None, expected_version):
     raise SystemExit(f"unexpected {dependency_name} version requirement: {dependency.get('version')!r}")
 dependency_path = str(dependency.get("path", ""))
 if not dependency_path.endswith(path_suffix):
@@ -89,26 +94,26 @@ PY
 }
 
 cargo package --allow-dirty --no-verify --manifest-path "$repo_root/rust/logbrew/Cargo.toml" --target-dir "$tmp_dir/cargo-package" >/dev/null
-crate_path="$tmp_dir/cargo-package/package/logbrew-0.1.0.crate"
+crate_path="$tmp_dir/cargo-package/package/$crate_name.crate"
 test -f "$crate_path"
 tar -tf "$crate_path" > "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/README.md$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/Cargo.toml$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/src/http_fields.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/src/http_server.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/src/product_timeline.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/src/traceparent.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/examples/readme_example.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/examples/real_user_smoke.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/examples/first_useful_telemetry.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/examples/http_server_request.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/examples/axum_request_middleware.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/examples/actix_request_middleware.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/examples/rocket_request_fairing.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/examples/tracing_bridge.rs$' "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/examples/Makefile$' "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/README.md" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/Cargo.toml" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/src/http_fields.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/src/http_server.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/src/product_timeline.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/src/traceparent.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/examples/readme_example.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/examples/real_user_smoke.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/examples/first_useful_telemetry.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/examples/http_server_request.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/examples/axum_request_middleware.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/examples/actix_request_middleware.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/examples/rocket_request_fairing.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/examples/tracing_bridge.rs" "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/examples/Makefile" "$tmp_dir/crate-contents.txt"
 crate_readme="$tmp_dir/crate-readme.md"
-tar -xOf "$crate_path" logbrew-0.1.0/README.md > "$crate_readme"
+tar -xOf "$crate_path" "$crate_name/README.md" > "$crate_readme"
 grep -q 'cargo add logbrew' "$crate_readme"
 grep -q 'cargo add logbrew --features http' "$crate_readme"
 grep -q 'LOGBREW_API_KEY' "$crate_readme"
@@ -138,9 +143,9 @@ grep -q 'do not patch HTTP clients' "$crate_readme"
 grep -q 'copyable snippets' "$crate_readme"
 grep -q 'optional HTTP transport' "$crate_readme"
 crate_manifest="$tmp_dir/crate-Cargo.toml"
-tar -xOf "$crate_path" logbrew-0.1.0/Cargo.toml > "$crate_manifest"
+tar -xOf "$crate_path" "$crate_name/Cargo.toml" > "$crate_manifest"
 crate_examples_makefile="$tmp_dir/crate-examples-Makefile"
-tar -xOf "$crate_path" logbrew-0.1.0/examples/Makefile > "$crate_examples_makefile"
+tar -xOf "$crate_path" "$crate_name/examples/Makefile" > "$crate_examples_makefile"
 grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware run-actix-request-middleware run-rocket-request-fairing run-tracing-bridge run-opentelemetry-exporter$' "$crate_examples_makefile"
 grep -q '^help:$' "$crate_examples_makefile"
 grep -q '^run: run-real-user-smoke$' "$crate_examples_makefile"
@@ -173,6 +178,7 @@ grep -q 'run-rocket-request-fairing -> make run-rocket-request-fairing' "$crate_
 grep -q 'run-tracing-bridge -> make run-tracing-bridge' "$crate_examples_makefile"
 grep -q 'run-opentelemetry-exporter -> make run-opentelemetry-exporter' "$crate_examples_makefile"
 python3 - "$crate_manifest" <<'PY'
+import os
 from pathlib import Path
 import tomllib
 
@@ -180,7 +186,7 @@ manifest = tomllib.loads(Path(__import__("sys").argv[1]).read_text())
 package = manifest.get("package", {})
 if package.get("name") != "logbrew":
     raise SystemExit(f"unexpected packaged crate name: {package.get('name')!r}")
-if package.get("version") != "0.1.0":
+if package.get("version") != os.environ["LOGBREW_RUST_CRATE_VERSION"]:
     raise SystemExit(f"unexpected packaged crate version: {package.get('version')!r}")
 if package.get("license") != "MIT":
     raise SystemExit(f"unexpected packaged crate license: {package.get('license')!r}")
@@ -227,7 +233,7 @@ PY
 crate_src_root="$tmp_dir/extracted-crate"
 mkdir -p "$crate_src_root"
 tar -xf "$crate_path" -C "$crate_src_root"
-crate_dir="$crate_src_root/logbrew-0.1.0"
+crate_dir="$crate_src_root/$crate_name"
 test -f "$crate_dir/Cargo.toml"
 test -f "$crate_dir/src/http_fields.rs"
 test -f "$crate_dir/src/http_server.rs"
@@ -326,14 +332,17 @@ cargo new --quiet lifecycle-app
 cd lifecycle-app
 
 cargo add logbrew --path "$crate_dir" >/dev/null
-assert_cargo_manifest_dependency Cargo.toml lifecycle-app logbrew "/extracted-crate/logbrew-0.1.0"
+assert_cargo_manifest_dependency Cargo.toml lifecycle-app logbrew "/extracted-crate/$crate_name"
 grep -q '^name = "logbrew"$' Cargo.lock
-grep -q '^version = "0.1.0"$' Cargo.lock
+grep -F -q "version = \"$crate_version\"" Cargo.lock
 cargo metadata --locked --format-version 1 > lifecycle-cargo-metadata.json
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
+crate_version = os.environ["LOGBREW_RUST_CRATE_VERSION"]
+crate_name = f"logbrew-{crate_version}"
 payload = json.loads(Path("lifecycle-cargo-metadata.json").read_text())
 packages = payload.get("packages", [])
 workspace_root = str(Path.cwd())
@@ -346,15 +355,15 @@ root_dependencies = root_package.get("dependencies", [])
 logbrew_dependency = next((dep for dep in root_dependencies if dep.get("name") == "logbrew"), None)
 if logbrew_dependency is None:
     raise SystemExit("expected lifecycle-app dependency on logbrew before removal")
-if logbrew_dependency.get("req") not in ("^0.1.0", "*"):
+if logbrew_dependency.get("req") not in (f"^{crate_version}", "*"):
     raise SystemExit(f"unexpected lifecycle-app dependency requirement: {logbrew_dependency.get('req')}")
 dependency_path = str(logbrew_dependency.get("path", ""))
-if not dependency_path.endswith("/extracted-crate/logbrew-0.1.0"):
+if not dependency_path.endswith(f"/extracted-crate/{crate_name}"):
     raise SystemExit(f"unexpected lifecycle-app dependency path: {dependency_path}")
 PY
 cargo tree --locked --depth 1 --charset ascii > lifecycle-cargo-tree.txt
 grep -q '^lifecycle-app v0.1.0 (' lifecycle-cargo-tree.txt
-assert_cargo_tree_package lifecycle-cargo-tree.txt logbrew 0.1.0 "/extracted-crate/logbrew-0.1.0"
+assert_cargo_tree_package lifecycle-cargo-tree.txt logbrew "$crate_version" "/extracted-crate/$crate_name"
 
 cargo remove logbrew >/dev/null
 assert_cargo_manifest_without_dependency Cargo.toml lifecycle-app logbrew
@@ -388,24 +397,24 @@ if root_node.get("dependencies"):
 PY
 cargo tree --locked --depth 1 --charset ascii > lifecycle-cargo-tree-removed.txt
 grep -q '^lifecycle-app v0.1.0 (' lifecycle-cargo-tree-removed.txt
-if grep -q 'logbrew v0.1.0' lifecycle-cargo-tree-removed.txt; then
+if grep -F -q "logbrew v$crate_version" lifecycle-cargo-tree-removed.txt; then
 	echo "expected cargo tree to omit logbrew after cargo remove" >&2
 	exit 1
 fi
 
 cargo add logbrew --path "$crate_dir" >/dev/null
-assert_cargo_manifest_dependency Cargo.toml lifecycle-app logbrew "/extracted-crate/logbrew-0.1.0"
+assert_cargo_manifest_dependency Cargo.toml lifecycle-app logbrew "/extracted-crate/$crate_name"
 grep -q '^name = "logbrew"$' Cargo.lock
-grep -q '^version = "0.1.0"$' Cargo.lock
+grep -F -q "version = \"$crate_version\"" Cargo.lock
 cargo tree --locked --depth 1 --charset ascii > lifecycle-cargo-tree-readded.txt
-assert_cargo_tree_package lifecycle-cargo-tree-readded.txt logbrew 0.1.0 "/extracted-crate/logbrew-0.1.0"
+assert_cargo_tree_package lifecycle-cargo-tree-readded.txt logbrew "$crate_version" "/extracted-crate/$crate_name"
 
 cd "$tmp_dir"
 cargo new --quiet smoke-app
 cd smoke-app
 
 cargo add logbrew --path "$crate_dir" >/dev/null
-assert_cargo_manifest_dependency Cargo.toml smoke-app logbrew "/extracted-crate/logbrew-0.1.0"
+assert_cargo_manifest_dependency Cargo.toml smoke-app logbrew "/extracted-crate/$crate_name"
 
 mkdir -p .cargo
 cat > .cargo/config.toml <<'EOF'
@@ -684,13 +693,16 @@ cargo metadata --locked --format-version 1 > cargo-metadata.json
 test -f Cargo.lock
 grep -q '^version = 4$' Cargo.lock
 grep -q '^name = "logbrew"$' Cargo.lock
-grep -q '^version = "0.1.0"$' Cargo.lock
+grep -F -q "version = \"$crate_version\"" Cargo.lock
 grep -q '^ "serde",$' Cargo.lock
 grep -q '^ "serde_json",$' Cargo.lock
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
+crate_version = os.environ["LOGBREW_RUST_CRATE_VERSION"]
+crate_name = f"logbrew-{crate_version}"
 payload = json.loads(Path("cargo-metadata.json").read_text())
 packages = payload.get("packages", [])
 workspace_root = str(Path.cwd())
@@ -704,19 +716,19 @@ root_dependencies = root_package.get("dependencies", [])
 logbrew_dependency = next((dep for dep in root_dependencies if dep.get("name") == "logbrew"), None)
 if logbrew_dependency is None:
     raise SystemExit("expected smoke-app metadata dependency on logbrew")
-if logbrew_dependency.get("req") not in ("^0.1.0", "*"):
+if logbrew_dependency.get("req") not in (f"^{crate_version}", "*"):
     raise SystemExit(f"unexpected logbrew dependency requirement: {logbrew_dependency.get('req')}")
 dependency_path = str(logbrew_dependency.get("path", ""))
-if not dependency_path.endswith("/extracted-crate/logbrew-0.1.0"):
+if not dependency_path.endswith(f"/extracted-crate/{crate_name}"):
     raise SystemExit(f"unexpected logbrew dependency path: {dependency_path}")
 matches = [pkg for pkg in packages if pkg.get("name") == "logbrew"]
 if len(matches) != 1:
     raise SystemExit("expected one resolved logbrew package")
 package = matches[0]
-if package.get("version") != "0.1.0":
+if package.get("version") != crate_version:
     raise SystemExit(f"unexpected logbrew version: {package.get('version')}")
 manifest_path = str(package.get("manifest_path", ""))
-if not manifest_path.endswith("/extracted-crate/logbrew-0.1.0/Cargo.toml"):
+if not manifest_path.endswith(f"/extracted-crate/{crate_name}/Cargo.toml"):
     raise SystemExit(f"unexpected logbrew manifest path: {manifest_path}")
 resolve = payload.get("resolve", {})
 root_id = resolve.get("root")
@@ -730,14 +742,14 @@ if package.get("id") not in resolved_dependencies:
     raise SystemExit("missing smoke-app -> logbrew resolve edge")
 PY
 cargo pkgid logbrew > cargo-pkgid.txt
-grep -q '^path+file://.*/extracted-crate/logbrew-0.1.0#logbrew@0.1.0$' cargo-pkgid.txt
+grep -F -q "extracted-crate/$crate_name#logbrew@$crate_version" cargo-pkgid.txt
 cargo fetch --locked >/dev/null
 cargo smoke-check
 cargo smoke-build
 cargo smoke-test
 cargo tree --locked --depth 1 --charset ascii > cargo-tree.txt
 grep -q '^smoke-app v0.1.0 (' cargo-tree.txt
-assert_cargo_tree_package cargo-tree.txt logbrew 0.1.0 "/extracted-crate/logbrew-0.1.0"
+assert_cargo_tree_package cargo-tree.txt logbrew "$crate_version" "/extracted-crate/$crate_name"
 cargo smoke-doc
 test -f target/doc/logbrew/index.html
 grep -q 'Public Rust client for building, validating, previewing, and flushing LogBrew event batches\.' target/doc/logbrew/index.html
@@ -1139,15 +1151,18 @@ cargo new --quiet http-app
 cd http-app
 
 cargo add logbrew --path "$crate_dir" --features http >/dev/null
-assert_cargo_manifest_dependency Cargo.toml http-app logbrew "/extracted-crate/logbrew-0.1.0" http
+assert_cargo_manifest_dependency Cargo.toml http-app logbrew "/extracted-crate/$crate_name" http
 
 grep -q '^name = "logbrew"$' Cargo.lock
 grep -q '^name = "ureq"$' Cargo.lock
 cargo metadata --locked --format-version 1 > http-cargo-metadata.json
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
+crate_version = os.environ["LOGBREW_RUST_CRATE_VERSION"]
+crate_name = f"logbrew-{crate_version}"
 payload = json.loads(Path("http-cargo-metadata.json").read_text())
 root = next((pkg for pkg in payload.get("packages", []) if pkg.get("name") == "http-app"), None)
 if root is None:
@@ -1157,15 +1172,15 @@ if dependency is None:
     raise SystemExit("expected http-app dependency on logbrew")
 if dependency.get("features") != ["http"]:
     raise SystemExit(f"unexpected http-app logbrew features: {dependency.get('features')!r}")
-if dependency.get("req") not in ("^0.1.0", "*"):
+if dependency.get("req") not in (f"^{crate_version}", "*"):
     raise SystemExit(f"unexpected http-app logbrew requirement: {dependency.get('req')}")
 dependency_path = str(dependency.get("path", ""))
-if not dependency_path.endswith("/extracted-crate/logbrew-0.1.0"):
+if not dependency_path.endswith(f"/extracted-crate/{crate_name}"):
     raise SystemExit(f"unexpected http-app dependency path: {dependency_path}")
 PY
 cargo tree --locked --charset ascii > http-cargo-tree.txt
 grep -q '^http-app v0.1.0 (' http-cargo-tree.txt
-assert_cargo_tree_package http-cargo-tree.txt logbrew 0.1.0 "/extracted-crate/logbrew-0.1.0"
+assert_cargo_tree_package http-cargo-tree.txt logbrew "$crate_version" "/extracted-crate/$crate_name"
 assert_cargo_tree_package http-cargo-tree.txt ureq 3.3.0
 
 cat > src/main.rs <<'EOF'

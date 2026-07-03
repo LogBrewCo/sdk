@@ -18,6 +18,7 @@ from release_metadata_dotnet import validate_dotnet_packages
 
 
 PUBLIC_VERSION = "0.1.0"
+RUST_VERSION = "0.1.1"
 RUBYGEMS_VERSION = "0.1.1"
 PACKAGIST_VERSION = "0.1.1"
 DOTNET_VERSION = "0.1.4"
@@ -410,14 +411,21 @@ def validate_rust(root: Path, failures: list[str]) -> None:
     package = read_toml(manifest_path, failures).get("package", {})
     location = "rust/logbrew/Cargo.toml"
     require_equal(failures, location, "package.name", package.get("name"), "logbrew")
-    require_equal(failures, location, "package.version", package.get("version"), PUBLIC_VERSION)
+    require_equal(failures, location, "package.version", package.get("version"), RUST_VERSION)
     require_equal(failures, location, "package.license", package.get("license"), PUBLIC_LICENSE)
     require_equal(failures, location, "package.repository", package.get("repository"), REPO_URL)
     require_equal(failures, location, "package.readme", package.get("readme"), "README.md")
     require_contains(failures, location, "package.description", package.get("description"), "LogBrew")
     require("logbrew" in package.get("keywords", []), failures, f"{location}: keywords must include 'logbrew'")
     readme = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
-    for needle in ("Metrics", "MetricEvent", "client.metric", "low-cardinality"):
+    for needle in (
+        "Metrics",
+        "MetricEvent",
+        "client.metric",
+        "low-cardinality",
+        "OpenTelemetry Span Exporter",
+        "opentelemetry-exporter",
+    ):
         require(needle in readme, failures, f"rust/logbrew/README.md: missing guidance {needle}")
 
 
@@ -914,6 +922,11 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             ),
             "npm first-publish trusted publishing warning": (
                 "npm trusted publishing requires existing package pages"
+            ),
+            "crates.io package version output": "id: crate-version",
+            "crates.io manifest version reader": "python3 scripts/read_rust_crate_version.py rust/logbrew/Cargo.toml",
+            "crates.io exact public version verification": (
+                '--target crates --version "${{ steps.crate-version.outputs.version }}"'
             ),
         }
         nuget_output_versions = (

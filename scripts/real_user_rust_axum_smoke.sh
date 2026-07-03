@@ -7,6 +7,9 @@ trap 'rm -rf "$tmp_dir"' EXIT
 trap 'echo "rust axum real-user smoke failed near line $LINENO" >&2' ERR
 export CARGO_HOME="$tmp_dir/cargo-home"
 mkdir -p "$CARGO_HOME"
+crate_version="$(python3 "$repo_root/scripts/read_rust_crate_version.py" "$repo_root/rust/logbrew/Cargo.toml")"
+crate_name="logbrew-$crate_version"
+export LOGBREW_RUST_CRATE_VERSION="$crate_version"
 
 assert_logbrew_path_dependency() {
 	local manifest_path="$1"
@@ -15,9 +18,11 @@ assert_logbrew_path_dependency() {
 	python3 - "$manifest_path" "$package_name" "$path_suffix" <<'PY'
 import sys
 import tomllib
+import os
 from pathlib import Path
 
 manifest_path, package_name, path_suffix = sys.argv[1:]
+expected_version = os.environ["LOGBREW_RUST_CRATE_VERSION"]
 manifest = tomllib.loads(Path(manifest_path).read_text())
 package = manifest.get("package", {})
 if package.get("name") != package_name:
@@ -25,7 +30,7 @@ if package.get("name") != package_name:
 dependency = manifest.get("dependencies", {}).get("logbrew")
 if not isinstance(dependency, dict):
     raise SystemExit(f"expected table dependency for logbrew, found: {dependency!r}")
-if dependency.get("version") not in (None, "0.1.0"):
+if dependency.get("version") not in (None, expected_version):
     raise SystemExit(f"unexpected logbrew version requirement: {dependency.get('version')!r}")
 if "tower" not in dependency.get("features", []):
     raise SystemExit(f"expected logbrew tower feature, found: {dependency.get('features')!r}")
@@ -36,15 +41,15 @@ PY
 }
 
 cargo package --allow-dirty --no-verify --manifest-path "$repo_root/rust/logbrew/Cargo.toml" --target-dir "$tmp_dir/cargo-package" >/dev/null
-crate_path="$tmp_dir/cargo-package/package/logbrew-0.1.0.crate"
+crate_path="$tmp_dir/cargo-package/package/$crate_name.crate"
 test -f "$crate_path"
 tar -tf "$crate_path" > "$tmp_dir/crate-contents.txt"
-grep -q '^logbrew-0.1.0/examples/axum_request_middleware.rs$' "$tmp_dir/crate-contents.txt"
+grep -F -q "$crate_name/examples/axum_request_middleware.rs" "$tmp_dir/crate-contents.txt"
 
 crate_src_root="$tmp_dir/extracted-crate"
 mkdir -p "$crate_src_root"
 tar -xf "$crate_path" -C "$crate_src_root"
-crate_dir="$crate_src_root/logbrew-0.1.0"
+crate_dir="$crate_src_root/$crate_name"
 test -f "$crate_dir/examples/axum_request_middleware.rs"
 grep -q 'TowerHttpClientSpanLayer' "$crate_dir/README.md"
 
@@ -56,7 +61,7 @@ cargo add axum@0.8 >/dev/null
 cargo add serde_json@1 >/dev/null
 cargo add tokio@1 --features macros,rt-multi-thread >/dev/null
 cargo add tower@0.5 --features util >/dev/null
-assert_logbrew_path_dependency Cargo.toml axum-app "/extracted-crate/logbrew-0.1.0"
+assert_logbrew_path_dependency Cargo.toml axum-app "/extracted-crate/$crate_name"
 cp "$crate_dir/examples/axum_request_middleware.rs" src/main.rs
 mkdir -p src/bin
 cat > src/bin/tower_http_client_span.rs <<'EOF'
@@ -138,8 +143,11 @@ grep -q '^name = "tower"$' Cargo.lock
 cargo metadata --locked --format-version 1 > axum-cargo-metadata.json
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
+crate_version = os.environ["LOGBREW_RUST_CRATE_VERSION"]
+crate_name = f"logbrew-{crate_version}"
 payload = json.loads(Path("axum-cargo-metadata.json").read_text())
 root = next((pkg for pkg in payload.get("packages", []) if pkg.get("name") == "axum-app"), None)
 if root is None:
@@ -149,16 +157,17 @@ for name in ["axum", "logbrew", "tokio", "tower"]:
     if name not in direct:
         raise SystemExit(f"missing axum-app direct dependency: {name}")
 logbrew = direct["logbrew"]
-if logbrew.get("req") not in ("^0.1.0", "*"):
+if logbrew.get("req") not in (f"^{crate_version}", "*"):
     raise SystemExit(f"unexpected logbrew requirement: {logbrew.get('req')}")
-if not str(logbrew.get("path", "")).endswith("/extracted-crate/logbrew-0.1.0"):
+if not str(logbrew.get("path", "")).endswith(f"/extracted-crate/{crate_name}"):
     raise SystemExit(f"unexpected logbrew path: {logbrew.get('path')}")
 if "tower" not in logbrew.get("features", []):
     raise SystemExit(f"missing logbrew tower feature: {logbrew.get('features')}")
 PY
 cargo tree --locked --depth 1 --charset ascii > axum-cargo-tree.txt
 grep -q '^axum-app v0.1.0 (' axum-cargo-tree.txt
-grep -q 'logbrew v0\.1\.0 .*extracted-crate/logbrew-0\.1\.0' axum-cargo-tree.txt
+grep -F -q "logbrew v$crate_version" axum-cargo-tree.txt
+grep -F -q "extracted-crate/$crate_name" axum-cargo-tree.txt
 grep -q 'axum v0\.8\.' axum-cargo-tree.txt
 grep -q 'tokio v1\.' axum-cargo-tree.txt
 grep -q 'tower v0\.5\.' axum-cargo-tree.txt
