@@ -13,6 +13,8 @@ EXACT_PATHS = (
     "Cargo.lock",
     "php/logbrew-php/composer.lock",
     "php/logbrew-php/vendor",
+    "js/logbrew-js/examples/node_modules",
+    "js/logbrew-js/examples/pnpm-lock.yaml",
     "target",
     ".mypy_cache",
     ".ruff_cache",

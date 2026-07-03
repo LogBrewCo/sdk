@@ -24,11 +24,18 @@ class GeneratedArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "php" / "logbrew-php" / "vendor").mkdir(parents=True)
+            (root / "js" / "logbrew-js" / "examples" / "node_modules").mkdir(parents=True)
+            (root / "js" / "logbrew-js" / "examples" / "pnpm-lock.yaml").write_text(
+                "",
+                encoding="utf-8",
+            )
             (root / "Cargo.lock").write_text("", encoding="utf-8")
 
             failures = check_generated_artifacts.validate(root)
 
         self.assertIn("generated artifact remains: Cargo.lock", failures)
+        self.assertIn("generated artifact remains: js/logbrew-js/examples/node_modules", failures)
+        self.assertIn("generated artifact remains: js/logbrew-js/examples/pnpm-lock.yaml", failures)
         self.assertIn("generated artifact remains: php/logbrew-php/vendor", failures)
 
     def test_reports_globbed_generated_paths(self) -> None:

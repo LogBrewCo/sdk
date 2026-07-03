@@ -77,7 +77,8 @@ class BackendContractReportTests(unittest.TestCase):
             "auth-gated release-artifact upload, lookup, byte retention, and one-frame JavaScript symbolication are deployed",
             report,
         )
-        self.assertIn("real minified/native symbolicated-error proof and native/mobile hosted upload support remain incomplete", report)
+        self.assertIn("real hosted minified/native symbolicated-error proof", report)
+        self.assertIn("native/mobile hosted upload support remain incomplete", report)
         self.assertIn("explicit JavaScript release-artifact hosted upload opt-in", report)
         self.assertNotIn("no backend release-artifact route/schema/lookup surface", report)
 

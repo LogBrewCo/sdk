@@ -33,6 +33,8 @@ const ZERO_SPAN_ID = "0000000000000000";
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const MAX_SPAN_EVENTS = 8;
 const MAX_SPAN_LINKS = 8;
+const SAFE_DEBUG_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u;
+const LOCAL_ABSOLUTE_PATH_PATTERN = /^(?:\/(?:Users|home|private|tmp|var|Volumes)\/|[A-Za-z]:[\\/])/u;
 class SdkError extends Error {
   constructor(code, message, details = {}) {
     super(message);
@@ -410,6 +412,178 @@ function logAttributesFromConsoleArgs(method, args, options = {}) {
     ...(options.logger ? { logger: options.logger } : {}),
     metadata
   };
+}
+
+function createIssueAttributesFromError(error, options = {}) {
+  if (!options || Array.isArray(options) || typeof options !== "object") {
+    throw new SdkError("validation_error", "error issue options must be an object");
+  }
+  const details = errorDetails(error);
+  const frame = firstJavaScriptStackFrame(details.stack);
+  const metadata = {
+    ...compactMetadata(options.metadata),
+    source: stringOrUndefined(options.source) ?? "javascript.error",
+    errorName: details.name,
+    ...(details.message ? { errorMessage: details.message } : {}),
+    ...(frame ? {
+      errorFrameFile: frame.filename,
+      errorFrameLine: frame.line,
+      errorFrameColumn: frame.column
+    } : {}),
+    ...(stringOrUndefined(options.release) ? { release: options.release } : {}),
+    ...(stringOrUndefined(options.environment) ? { environment: options.environment } : {}),
+    ...(stringOrUndefined(options.service) ? { service: options.service } : {}),
+    ...(stringOrUndefined(options.runtime) ? { runtime: options.runtime } : {}),
+    ...(stringOrUndefined(options.platform) ? { platform: options.platform } : {}),
+    ...traceMetadata(options.trace),
+    ...releaseArtifactMetadata(frame, options.debugIdMap),
+    ...(options.includeErrorStack === true && details.stack ? { errorStack: details.stack } : {})
+  };
+
+  return {
+    title: stringOrUndefined(options.title) ?? details.name,
+    level: normalizeSeverity("issue level", options.level ?? "error"),
+    ...(stringOrUndefined(options.message) ? { message: options.message } : details.message ? { message: details.message } : {}),
+    metadata: compactMetadata(metadata)
+  };
+}
+
+function errorDetails(error) {
+  if (error instanceof Error) {
+    return {
+      name: stringOrUndefined(error.name) ?? "Error",
+      message: stringOrUndefined(error.message),
+      stack: typeof error.stack === "string" && error.stack.trim() !== "" ? error.stack : undefined
+    };
+  }
+  if (error && typeof error === "object") {
+    const name = typeof error.name === "string" && error.name.trim() !== "" ? error.name : "Error";
+    const message = typeof error.message === "string" && error.message.trim() !== "" ? error.message : undefined;
+    const stack = typeof error.stack === "string" && error.stack.trim() !== "" ? error.stack : undefined;
+    return { name, message, stack };
+  }
+  if (typeof error === "string" && error.trim() !== "") {
+    return { name: "Error", message: error };
+  }
+  return { name: "Error" };
+}
+
+function firstJavaScriptStackFrame(stack) {
+  if (typeof stack !== "string" || stack.trim() === "") {
+    return null;
+  }
+  for (const rawLine of stack.split(/\r?\n/u)) {
+    const parsed = parseJavaScriptStackFrame(rawLine);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function parseJavaScriptStackFrame(rawLine) {
+  const line = typeof rawLine === "string" ? rawLine.trim() : "";
+  if (!line) {
+    return null;
+  }
+  let location = line;
+  if (location.startsWith("at ")) {
+    location = location.slice(3).trim();
+    if (location.endsWith(")") && location.includes("(")) {
+      location = location.slice(location.lastIndexOf("(") + 1, -1);
+    }
+  } else if (location.includes("@")) {
+    location = location.slice(location.lastIndexOf("@") + 1);
+  }
+  const parts = location.split(":");
+  if (parts.length < 3) {
+    return null;
+  }
+  const column = positiveIntegerFromText(parts.pop());
+  const lineNumber = positiveIntegerFromText(parts.pop());
+  const filename = sanitizeFrameFilename(parts.join(":"));
+  if (!filename || lineNumber === null || column === null) {
+    return null;
+  }
+  return { filename, line: lineNumber, column };
+}
+
+function positiveIntegerFromText(value) {
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function sanitizeFrameFilename(value) {
+  let filename = String(value ?? "").trim();
+  if (!filename) {
+    return "";
+  }
+  filename = filename.split("?", 1)[0].split("#", 1)[0];
+  if (filename.startsWith("file://")) {
+    filename = filename.slice("file://".length);
+  }
+  if (LOCAL_ABSOLUTE_PATH_PATTERN.test(filename)) {
+    return basename(filename);
+  }
+  return filename;
+}
+
+function basename(value) {
+  const normalized = String(value).replace(/\\/gu, "/").replace(/\/+$/u, "");
+  const marker = normalized.lastIndexOf("/");
+  return marker === -1 ? normalized : normalized.slice(marker + 1);
+}
+
+function traceMetadata(trace) {
+  if (trace === undefined || trace === null) {
+    return {};
+  }
+  const normalized = normalizeLogTraceContext(trace);
+  if (!normalized) {
+    return {};
+  }
+  return {
+    traceId: normalized.traceId,
+    spanId: normalized.spanId,
+    ...(normalized.parentSpanId ? { parentSpanId: normalized.parentSpanId } : {}),
+    ...(normalized.sampled !== undefined ? { sampled: normalized.sampled } : {})
+  };
+}
+
+function releaseArtifactMetadata(frame, debugIdMap) {
+  if (!frame) {
+    return {};
+  }
+  const debugId = debugIdForFrame(frame.filename, debugIdMap);
+  if (!debugId) {
+    return {};
+  }
+  return {
+    releaseArtifactType: "sourcemap",
+    releaseArtifactCodeFile: frame.filename,
+    releaseArtifactDebugId: debugId
+  };
+}
+
+function debugIdForFrame(filename, debugIdMap) {
+  if (debugIdMap === undefined || debugIdMap === null) {
+    return null;
+  }
+  if (!debugIdMap || Array.isArray(debugIdMap) || typeof debugIdMap !== "object") {
+    throw new SdkError("validation_error", "debugIdMap must be an object");
+  }
+  const normalizedFilename = sanitizeFrameFilename(filename);
+  const aliases = new Set([normalizedFilename, basename(normalizedFilename)].filter(Boolean));
+  for (const [candidate, debugId] of Object.entries(debugIdMap)) {
+    if (typeof debugId !== "string" || !SAFE_DEBUG_ID_PATTERN.test(debugId.trim())) {
+      continue;
+    }
+    const normalizedCandidate = sanitizeFrameFilename(candidate);
+    if (aliases.has(normalizedCandidate) || aliases.has(basename(normalizedCandidate))) {
+      return debugId.trim().toLowerCase();
+    }
+  }
+  return null;
 }
 
 function logbrewLevelFromConsoleMethod(method) {
@@ -1598,6 +1772,7 @@ function formatConsoleArgument(value, includeErrorStack) {
 
 module.exports = {
   createBaggage,
+  createIssueAttributesFromError,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
   createLogBrewOpenTelemetrySpanExporter,

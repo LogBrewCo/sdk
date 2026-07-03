@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 import {
+  createIssueAttributesFromError,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
   createLogBrewOpenTelemetrySpanExporter,
@@ -222,6 +223,90 @@ test("severity aliases normalize before preview", () => {
     payload.events.map((event) => event.attributes.level),
     ["critical", "info", "warning"]
   );
+});
+
+test("createIssueAttributesFromError attaches privacy-bounded release artifact metadata", () => {
+  const error = new TypeError("Checkout exploded");
+  error.stack = [
+    "TypeError: Checkout exploded",
+    "    at checkout (https://cdn.example/assets/app.js?debug=true#section:12:34)",
+    "    at ignored (https://cdn.example/assets/vendor.js?debug=true#section:1:2)"
+  ].join("\n");
+
+  const attributes = createIssueAttributesFromError(error, {
+    debugIdMap: {
+      "https://cdn.example/assets/app.js": "11111111-2222-4333-8444-555555555555"
+    },
+    environment: "production",
+    metadata: { routeTemplate: "/checkout", ignoredObject: { nested: true } },
+    release: "web@2026.07.03",
+    runtime: "browser",
+    service: "checkout-web",
+    trace: LOGGER_TRACE
+  });
+
+  assert.deepEqual(attributes, {
+    title: "TypeError",
+    level: "error",
+    message: "Checkout exploded",
+    metadata: {
+      source: "javascript.error",
+      routeTemplate: "/checkout",
+      errorName: "TypeError",
+      errorMessage: "Checkout exploded",
+      errorFrameFile: "https://cdn.example/assets/app.js",
+      errorFrameLine: 12,
+      errorFrameColumn: 34,
+      release: "web@2026.07.03",
+      environment: "production",
+      service: "checkout-web",
+      runtime: "browser",
+      traceId: LOGGER_TRACE.traceId,
+      spanId: LOGGER_TRACE.spanId,
+      parentSpanId: LOGGER_TRACE.parentSpanId,
+      sampled: true,
+      releaseArtifactType: "sourcemap",
+      releaseArtifactCodeFile: "https://cdn.example/assets/app.js",
+      releaseArtifactDebugId: "11111111-2222-4333-8444-555555555555"
+    }
+  });
+
+  const serialized = JSON.stringify(attributes);
+  assert.doesNotMatch(serialized, /debug=true|section|vendor\.js|ignoredObject|nested/u);
+  assert.doesNotMatch(serialized, /errorStack/u);
+});
+
+test("createIssueAttributesFromError omits local paths and stack text by default", () => {
+  const error = new Error("Local build failed");
+  error.stack = [
+    "Error: Local build failed",
+    "    at compile (/Users/example/private/project/dist/app.js:4:5)"
+  ].join("\n");
+
+  const attributes = createIssueAttributesFromError(error, {
+    debugIdMap: {
+      "/Users/example/private/project/dist/app.js": "22222222-3333-4444-8555-666666666666"
+    },
+    metadata: { flow: "build" }
+  });
+
+  assert.equal(attributes.metadata.errorFrameFile, "app.js");
+  assert.equal(attributes.metadata.releaseArtifactCodeFile, "app.js");
+  assert.equal(attributes.metadata.releaseArtifactDebugId, "22222222-3333-4444-8555-666666666666");
+
+  const serialized = JSON.stringify(attributes);
+  assert.doesNotMatch(serialized, /\/Users\/example|private\/project|errorStack/u);
+});
+
+test("createIssueAttributesFromError includes stack only when explicitly requested", () => {
+  const error = new Error("Stack allowed");
+  error.stack = "Error: Stack allowed\n    at allowed (app:///assets/app.js:1:2)";
+
+  const attributes = createIssueAttributesFromError(error, {
+    includeErrorStack: true
+  });
+
+  assert.equal(attributes.metadata.errorStack, error.stack);
 });
 
 test("timeline helpers create safe action attributes", () => {

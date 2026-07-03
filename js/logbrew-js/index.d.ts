@@ -228,6 +228,32 @@ export type IssueAttributes = {
   metadata?: Metadata;
 };
 
+/** Options for creating privacy-bounded issue attributes from a JavaScript error. */
+export type JavaScriptErrorIssueOptions = {
+  title?: string;
+  level?: SeverityInput;
+  message?: string;
+  metadata?: Metadata;
+  /** Metadata source label. Defaults to `javascript.error`. */
+  source?: string;
+  /** Active trace copied into primitive correlation metadata. */
+  trace?: LogCorrelationTraceContext | null;
+  /** Release name associated with the runtime error. */
+  release?: string;
+  /** Environment associated with the runtime error. */
+  environment?: string;
+  /** Service associated with the runtime error. */
+  service?: string;
+  /** Runtime label such as `browser`, `node`, or `react-native`. */
+  runtime?: string;
+  /** Platform label such as `web`, `ios`, or `android`. */
+  platform?: string;
+  /** Map of sanitized frame filenames or minified URLs to release-artifact Debug IDs. */
+  debugIdMap?: Record<string, string>;
+  /** Include raw stack text only when the app has explicitly approved it. Defaults to false. */
+  includeErrorStack?: boolean;
+};
+
 /** Public log event attributes. */
 export type LogAttributes = {
   message: string;
@@ -594,6 +620,12 @@ export declare function createNetworkMilestoneAttributes(
 
 /** Build a local-only, token-free support-ticket create payload draft without calling backend routes. */
 export declare function createSupportTicketDraft(input: SupportTicketDraftInput): SupportTicketDraft;
+
+/** Convert a JavaScript Error-like value into safe issue attributes with optional source-map Debug ID metadata. */
+export declare function createIssueAttributesFromError(
+  error: unknown,
+  options?: JavaScriptErrorIssueOptions
+): IssueAttributes;
 
 /** Convert console arguments into safe LogBrew log attributes without installing capture. */
 export declare function logAttributesFromConsoleArgs(

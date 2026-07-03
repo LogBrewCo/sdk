@@ -88,6 +88,39 @@ npx logbrew-release-artifacts upload-js \
 
 Non-loopback endpoints require `--allow-hosted`, must use HTTPS, and must not include embedded auth values, query strings, or fragments. The upload command never uses normal SDK ingest keys or account/session API auth values. Full backend-symbolicated issue support is separate from artifact upload until your project has completed hosted symbolication for its release.
 
+When you capture a JavaScript error, use `createIssueAttributesFromError()` to keep error metadata structured and source-map-friendly without sending raw stack text by default. Pass a Debug ID map from your app-owned build setup when you want the issue event to carry release-artifact metadata:
+
+```js
+import { createIssueAttributesFromError, LogBrewClient } from "@logbrew/sdk";
+
+const client = LogBrewClient.create({
+  apiKey: "LOGBREW_API_KEY",
+  sdkName: "checkout-web",
+  sdkVersion: "1.0.0"
+});
+
+try {
+  checkout();
+} catch (error) {
+  client.issue(
+    "evt_checkout_error",
+    new Date().toISOString(),
+    createIssueAttributesFromError(error, {
+      release: "web@1.2.3",
+      environment: "production",
+      service: "checkout-web",
+      runtime: "browser",
+      debugIdMap: {
+        "https://cdn.example/assets/app.js": "11111111-2222-4333-8444-555555555555"
+      },
+      metadata: { routeTemplate: "/checkout" }
+    })
+  );
+}
+```
+
+The helper records the error name/message, the first parsed frame filename/line/column with query strings and hashes removed, optional trace/release/environment/service metadata, and optional `releaseArtifactDebugId` metadata. Local absolute frame paths are reduced before enqueueing. Raw stack text is included only with `includeErrorStack: true`.
+
 ## Example
 
 ```js

@@ -2,6 +2,7 @@ import sdk from "./index.cjs";
 
 export const {
   createBaggage,
+  createIssueAttributesFromError,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
   createLogBrewOpenTelemetrySpanExporter,

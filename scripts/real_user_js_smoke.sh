@@ -550,6 +550,9 @@ if (!readme.includes("createNetworkMilestoneAttributes")) {
 if (!readme.includes("createSupportTicketDraft")) {
   throw new Error("missing installed README support ticket draft guidance");
 }
+if (!readme.includes("createIssueAttributesFromError")) {
+  throw new Error("missing installed README JavaScript error issue helper guidance");
+}
 if (!readme.includes("agent-timeline")) {
   throw new Error("missing installed README agent timeline packaged example guidance");
 }
@@ -598,6 +601,9 @@ if (!declarations.includes("Public environment event attributes.")) {
 }
 if (!declarations.includes("Public issue event attributes.")) {
   throw new Error("missing installed IssueAttributes declaration docs");
+}
+if (!declarations.includes("Options for creating privacy-bounded issue attributes from a JavaScript error.")) {
+  throw new Error("missing installed JavaScriptErrorIssueOptions declaration docs");
 }
 if (!declarations.includes("Public log event attributes.")) {
   throw new Error("missing installed LogAttributes declaration docs");
@@ -715,6 +721,9 @@ if (!declarations.includes("Create a dependency-free Winston object-mode transpo
 }
 if (!declarations.includes("Convert a Winston info object into safe LogBrew log attributes without installing a transport.")) {
   throw new Error("missing installed Winston info declaration docs");
+}
+if (!declarations.includes("Convert a JavaScript Error-like value into safe issue attributes with optional source-map Debug ID metadata.")) {
+  throw new Error("missing installed JavaScript error issue helper declaration docs");
 }
 if (!declarations.includes("Create a transport that accepts queued flushes with a 202 response.")) {
   throw new Error("missing installed alwaysAccept declaration docs");
@@ -1236,6 +1245,9 @@ if (!readme.includes("createNetworkMilestoneAttributes")) {
 if (!readme.includes("createSupportTicketDraft")) {
   throw new Error("missing packed README support ticket draft guidance");
 }
+if (!readme.includes("createIssueAttributesFromError")) {
+  throw new Error("missing packed README JavaScript error issue helper guidance");
+}
 if (!readme.includes("agent-timeline")) {
   throw new Error("missing packed README agent timeline packaged example guidance");
 }
@@ -1284,6 +1296,9 @@ if (!declarations.includes("Public environment event attributes.")) {
 }
 if (!declarations.includes("Public issue event attributes.")) {
   throw new Error("missing packed IssueAttributes declaration docs");
+}
+if (!declarations.includes("Options for creating privacy-bounded issue attributes from a JavaScript error.")) {
+  throw new Error("missing packed JavaScriptErrorIssueOptions declaration docs");
 }
 if (!declarations.includes("Public log event attributes.")) {
   throw new Error("missing packed LogAttributes declaration docs");
@@ -1374,6 +1389,9 @@ if (!declarations.includes("Create a dependency-free Winston object-mode transpo
 }
 if (!declarations.includes("Build a local-only, token-free support-ticket create payload draft without calling backend routes.")) {
   throw new Error("missing packed support ticket draft declaration docs");
+}
+if (!declarations.includes("Convert a JavaScript Error-like value into safe issue attributes with optional source-map Debug ID metadata.")) {
+  throw new Error("missing packed JavaScript error issue helper declaration docs");
 }
 if (!declarations.includes("Convert a Winston info object into safe LogBrew log attributes without installing a transport.")) {
   throw new Error("missing packed Winston info declaration docs");
@@ -1650,6 +1668,7 @@ EOF
 
 cat > types-smoke.ts <<'EOF'
 import {
+  createIssueAttributesFromError,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
   createSupportTicketDraft,
@@ -1669,6 +1688,7 @@ import {
   type EnvironmentAttributes,
   type EventFilter,
   type IssueAttributes,
+  type JavaScriptErrorIssueOptions,
   type LogCorrelationTraceContext,
   type LogAttributes,
   type MetricAttributes,
@@ -1779,6 +1799,17 @@ const loggerTrace: LogCorrelationTraceContext = {
   parentSpanId: "00f067aa0ba902b7",
   sampled: true
 };
+const errorIssueOptions: JavaScriptErrorIssueOptions = {
+  release: "web@1.2.3",
+  environment: "production",
+  service: "checkout-web",
+  runtime: "browser",
+  trace: loggerTrace,
+  debugIdMap: {
+    "https://cdn.example/assets/app.js": "11111111-2222-4333-8444-555555555555"
+  },
+  metadata: { routeTemplate: "/checkout" }
+};
 
 async function main() {
   const client = LogBrewClient.create({
@@ -1790,6 +1821,16 @@ async function main() {
   client.release("evt_release_001", "2026-06-02T10:00:00Z", release);
   client.environment("evt_environment_001", "2026-06-02T10:00:01Z", environment);
   client.issue("evt_issue_001", "2026-06-02T10:00:02Z", issue);
+  client.issue(
+    "evt_js_error_001",
+    "2026-06-02T10:00:02.500Z",
+    createIssueAttributesFromError(
+      Object.assign(new Error("Checkout exploded"), {
+        stack: "Error: Checkout exploded\n    at checkout (https://cdn.example/assets/app.js?debug=true#section:12:34)"
+      }),
+      errorIssueOptions
+    )
+  );
   client.log("evt_log_001", "2026-06-02T10:00:03Z", log);
   client.span("evt_span_001", "2026-06-02T10:00:04Z", span);
   client.action("evt_action_001", "2026-06-02T10:00:05Z", action);
@@ -1943,6 +1984,27 @@ const supportTicketInput: sdk.SupportTicketDraftInput = {
   }
 };
 const supportTicketDraft: sdk.SupportTicketDraft = sdk.createSupportTicketDraft(supportTicketInput);
+const errorIssueOptions: sdk.JavaScriptErrorIssueOptions = {
+  release: "web@1.2.3",
+  environment: "production",
+  service: "checkout-web",
+  runtime: "browser",
+  trace: {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    parentSpanId: "00f067aa0ba902b7",
+    sampled: true
+  },
+  debugIdMap: {
+    "https://cdn.example/assets/app.js": "11111111-2222-4333-8444-555555555555"
+  }
+};
+const errorIssue: sdk.IssueAttributes = sdk.createIssueAttributesFromError(
+  Object.assign(new Error("Checkout exploded"), {
+    stack: "Error: Checkout exploded\n    at checkout (https://cdn.example/assets/app.js?debug=true#section:12:34)"
+  }),
+  errorIssueOptions
+);
 if (productTimelineAction.metadata?.routeTemplate !== "/checkout/:step") {
   throw new Error("unexpected product timeline route template");
 }
@@ -1951,6 +2013,9 @@ if (networkTimelineAction.metadata?.method !== "POST") {
 }
 if (supportTicketDraft.diagnostics?.authHeader !== "[redacted]") {
   throw new Error("unexpected support ticket diagnostic redaction");
+}
+if (errorIssue.metadata?.releaseArtifactDebugId !== "11111111-2222-4333-8444-555555555555") {
+  throw new Error("unexpected error issue release-artifact metadata");
 }
 const metric: sdk.MetricAttributes = {
   name: "checkout.requests",
@@ -2034,6 +2099,7 @@ cat > installed-user.test.mjs <<'EOF'
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  createIssueAttributesFromError,
   createSupportTicketDraft,
   createTraceparent,
   createLogBrewPinoDestination,
@@ -2095,6 +2161,54 @@ test("installed traceparent helpers continue W3C trace context", () => {
     () => parseTraceparent("00-00000000000000000000000000000000-00f067aa0ba902b7-01"),
     /traceparent traceId must not be all zeros/
   );
+});
+
+test("installed JavaScript error helper attaches bounded release-artifact metadata", () => {
+  const error = new TypeError("Checkout exploded");
+  error.stack = [
+    "TypeError: Checkout exploded",
+    "    at checkout (https://cdn.example/assets/app.js?debug=true#section:12:34)",
+    "    at ignored (https://cdn.example/assets/vendor.js?debug=true#section:1:2)"
+  ].join("\n");
+  const trace = {
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+    spanId: "b7ad6b7169203331",
+    parentSpanId: "00f067aa0ba902b7",
+    sampled: true
+  };
+
+  const attributes = createIssueAttributesFromError(error, {
+    debugIdMap: {
+      "https://cdn.example/assets/app.js": "11111111-2222-4333-8444-555555555555"
+    },
+    environment: "production",
+    metadata: { routeTemplate: "/checkout", ignoredObject: { nested: true } },
+    release: "web@1.2.3",
+    runtime: "browser",
+    service: "checkout-web",
+    trace
+  });
+  const serialized = JSON.stringify(attributes);
+
+  assert.equal(attributes.title, "TypeError");
+  assert.equal(attributes.level, "error");
+  assert.equal(attributes.message, "Checkout exploded");
+  assert.equal(attributes.metadata.errorFrameFile, "https://cdn.example/assets/app.js");
+  assert.equal(attributes.metadata.errorFrameLine, 12);
+  assert.equal(attributes.metadata.errorFrameColumn, 34);
+  assert.equal(attributes.metadata.releaseArtifactType, "sourcemap");
+  assert.equal(attributes.metadata.releaseArtifactCodeFile, "https://cdn.example/assets/app.js");
+  assert.equal(attributes.metadata.releaseArtifactDebugId, "11111111-2222-4333-8444-555555555555");
+  assert.equal(attributes.metadata.traceId, trace.traceId);
+  assert.equal(attributes.metadata.spanId, trace.spanId);
+  assert.equal(attributes.metadata.parentSpanId, trace.parentSpanId);
+  assert.equal(attributes.metadata.sampled, true);
+  assert.equal(serialized.includes("debug=true"), false);
+  assert.equal(serialized.includes("section"), false);
+  assert.equal(serialized.includes("vendor.js"), false);
+  assert.equal(serialized.includes("ignoredObject"), false);
+  assert.equal(serialized.includes("nested"), false);
+  assert.equal(serialized.includes("errorStack"), false);
 });
 
 test("installed support ticket draft stays local and redacts diagnostics", () => {
