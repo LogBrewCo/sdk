@@ -97,7 +97,25 @@ installLogBrewBrowser({
 });
 ```
 
-`createFetchTransport()` uses browser `fetch` with `keepalive: true` by default so explicit page-lifecycle flushes can finish during navigation. To keep that behavior predictable, LogBrew refuses keepalive payloads above `maxKeepaliveBodyBytes` before calling `fetch`; the queued events remain available for a later non-keepalive flush. Set `keepalive: false` for app-owned large-batch delivery. LogBrew does not use `sendBeacon` by default because it cannot preserve the same header-based client-key delivery as `fetch`; keep browser delivery on the documented fetch transport unless your own integration owns a different public contract.
+`createFetchTransport()` uses browser `fetch` with `keepalive: true` by default so explicit page-lifecycle flushes can finish during navigation. To keep that behavior predictable, LogBrew refuses keepalive payloads above `maxKeepaliveBodyBytes` before calling `fetch`; the queued events remain available for a later non-keepalive flush. Set `keepalive: false` for app-owned large-batch delivery. LogBrew does not use `sendBeacon` by default because beacon cannot send the same Authorization header as `fetch`; use the explicit beacon transport only when your intake endpoint accepts the Authorization-headerless browser beacon envelope.
+
+## Optional Beacon Transport
+
+Use `createBeaconTransport()` for app-owned page-exit delivery only when the target endpoint accepts a JSON body shaped as `{ ingest_key, envelope }`.
+
+```js
+import { createBeaconTransport, installLogBrewBrowser } from "@logbrew/browser";
+
+installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY",
+  transport: createBeaconTransport({
+    endpoint: "https://example.com/logbrew/browser-beacon",
+    maxBeaconBodyBytes: 60 * 1024
+  })
+});
+```
+
+The beacon transport sends a `Blob` with `Content-Type: application/json` when the browser supports it, falls back to `fetch` when `sendBeacon` is unavailable, refused, or the body exceeds `maxBeaconBodyBytes`, and never places the browser key in the URL or request headers. The fallback fetch uses the same body-authenticated envelope and disables `keepalive` for oversized bodies to avoid browser keepalive failures. Persisted delivery still stores only the original sanitized telemetry envelope, not the browser key.
 
 When an intake returns HTTP `429`, the browser transport reads the standard `Retry-After` header and passes it to the core SDK as `retryAfterMs`. The flush then raises `SdkError` code `rate_limited`, preserves queued events, and avoids immediate retry; use that signal for app-owned retry timing or user-facing recovery.
 

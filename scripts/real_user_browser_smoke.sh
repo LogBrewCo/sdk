@@ -41,6 +41,8 @@ test -f "$browser_tgz"
 
 tar -tzf "$browser_tgz" > "$tmp_dir/browser-tarball.txt"
 grep -q '^package/README.md$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/beacon-transport.js$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/beacon-transport.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/persistence.js$' "$tmp_dir/browser-tarball.txt"
@@ -64,6 +66,7 @@ grep -q 'sanitizeMetadata' "$tmp_dir/browser-readme.md"
 grep -q 'query string or hash' "$tmp_dir/browser-readme.md"
 grep -q 'captureBrowserAction' "$tmp_dir/browser-readme.md"
 grep -q 'captureBrowserNetwork' "$tmp_dir/browser-readme.md"
+grep -q 'createBeaconTransport' "$tmp_dir/browser-readme.md"
 grep -q 'createPersistentBrowserTransport' "$tmp_dir/browser-readme.md"
 grep -q 'persistOffline' "$tmp_dir/browser-readme.md"
 grep -q 'sessionId' "$tmp_dir/browser-readme.md"
@@ -117,6 +120,7 @@ import {
   captureBrowserAction,
   captureBrowserNetwork,
   createBrowserTraceContext,
+  createBeaconTransport,
   createFetchTransport,
   createLogBrewBrowserClient,
   createPersistentBrowserTransport,
@@ -341,6 +345,42 @@ if (fetchRequests[0].init.headers.authorization !== "Bearer LOGBREW_BROWSER_KEY"
   throw new Error("fetch transport did not attach the expected auth header");
 }
 
+const beaconCalls = [];
+const beaconTransport = createBeaconTransport({
+  endpoint: "https://app.example.test/logbrew/browser-beacon",
+  fetchImpl: async () => {
+    throw new Error("queued beacon smoke should not call fetch fallback");
+  },
+  sendBeacon(endpoint, payload) {
+    beaconCalls.push({ endpoint, payload });
+    return true;
+  }
+});
+const beaconClient = createLogBrewBrowserClient({
+  clientKey: "LOGBREW_BROWSER_KEY",
+  sdkName: "browser-beacon-smoke",
+  sdkVersion: "0.1.0"
+});
+beaconClient.log("evt_beacon_log_001", "2026-06-02T10:00:08Z", {
+  message: "beacon transport ready",
+  level: "info",
+  logger: "browser"
+});
+const beaconResponse = await beaconClient.flush(beaconTransport);
+const beaconPayload = await readBeaconPayload(beaconCalls[0].payload);
+if (beaconResponse.statusCode !== 202 || beaconCalls.length !== 1) {
+  throw new Error("beacon transport did not queue the expected response");
+}
+if (beaconCalls[0].endpoint !== "https://app.example.test/logbrew/browser-beacon") {
+  throw new Error(`unexpected beacon endpoint: ${beaconCalls[0].endpoint}`);
+}
+if (beaconPayload.ingest_key !== "LOGBREW_BROWSER_KEY") {
+  throw new Error("beacon envelope did not carry the expected browser key");
+}
+if (beaconPayload.envelope.events[0].id !== "evt_beacon_log_001") {
+  throw new Error(`unexpected beacon envelope: ${JSON.stringify(beaconPayload)}`);
+}
+
 const directPersistentStorage = createMemoryStorage();
 let directPersistentStatus = 503;
 const directPersistentSends = [];
@@ -505,6 +545,7 @@ const fullResponse = await fullClient.shutdown(new RecordingTransport([{ statusC
 console.log(preview);
 console.error(JSON.stringify({
   ok: true,
+  beaconEnvelope: beaconPayload.envelope.events[0].id,
   browserDeliveries: transport.sentBodies.length,
   events: JSON.parse(preview).events.length,
   fetchStatus: fetchResponse.statusCode,
@@ -520,6 +561,13 @@ console.error(JSON.stringify({
   sessionAction: actionPayload.events[0].attributes.metadata.sessionId,
   syncTitle: syncPayload.events[0].attributes.title
 }));
+
+async function readBeaconPayload(payload) {
+  if (payload && typeof payload.text === "function") {
+    return JSON.parse(await payload.text());
+  }
+  return JSON.parse(String(payload));
+}
 
 function addFullBatch(logbrew) {
   logbrew.release("evt_release_001", "2026-06-02T10:00:00Z", {
@@ -613,6 +661,7 @@ node smoke.mjs > "$tmp_dir/browser-smoke.stdout.json" 2> "$tmp_dir/browser-smoke
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/browser-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/browser-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"beaconEnvelope":"evt_beacon_log_001"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"browserDeliveries":8' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"fullAttempts":2' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"hiddenFlush":"evt_browser_hidden_001"' "$tmp_dir/browser-smoke.stderr.json"
@@ -633,6 +682,7 @@ import {
   createBrowserActionEvent,
   createBrowserNetworkEvent,
   createBrowserErrorEvent,
+  createBeaconTransport,
   createFetchTransport,
   createLogBrewBrowserClient,
   createPageViewEvent,
@@ -699,6 +749,12 @@ createFetchTransport({
   endpoint: "https://api.logbrew.com/v1/events",
   fetchImpl: fetch
 });
+createBeaconTransport({
+  endpoint: "https://example.com/logbrew/browser-beacon",
+  sendBeacon(_endpoint, _payload) {
+    return true;
+  }
+});
 const storage: BrowserPersistentStorage = window.localStorage;
 const persistentTransport: PersistentBrowserTransport = createPersistentBrowserTransport({
   storage,
@@ -753,6 +809,9 @@ if (typeof browser.captureBrowserNetwork !== "function" || typeof browser.create
 }
 if (typeof browser.createPersistentBrowserTransport !== "function") {
   throw new Error("missing CommonJS persistent browser transport helper");
+}
+if (typeof browser.createBeaconTransport !== "function") {
+  throw new Error("missing CommonJS beacon transport helper");
 }
 const client = browser.createLogBrewBrowserClient({
   clientKey: "LOGBREW_BROWSER_KEY",

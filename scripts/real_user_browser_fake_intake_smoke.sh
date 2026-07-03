@@ -65,11 +65,14 @@ grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 cat > smoke.mjs <<'EOF'
 import http from "node:http";
 import { createRequire } from "node:module";
-import { createFetchTransport, createLogBrewBrowserClient, installLogBrewBrowser } from "@logbrew/browser";
+import { createBeaconTransport, createFetchTransport, createLogBrewBrowserClient, installLogBrewBrowser } from "@logbrew/browser";
 import { SdkError, TransportError } from "@logbrew/sdk";
 
 const require = createRequire(import.meta.url);
-const { createFetchTransport: createCjsFetchTransport } = require("@logbrew/browser");
+const {
+  createBeaconTransport: createCjsBeaconTransport,
+  createFetchTransport: createCjsFetchTransport
+} = require("@logbrew/browser");
 const highVolumeLogs = 250;
 const clientKey = "LOGBREW_BROWSER_KEY";
 const wrongClientKey = "WRONG_LOGBREW_BROWSER_KEY";
@@ -102,6 +105,11 @@ const onlineIntake = await startFakeIntake({
 });
 const shutdownIntake = await startFakeIntake({
   expectedAuthorization: `Bearer ${clientKey}`,
+  statuses: [202]
+});
+const beaconIntake = await startFakeIntake({
+  expectedIngestKey: clientKey,
+  path: "/api/telemetry/ingest/browser-beacon",
   statuses: [202]
 });
 
@@ -269,6 +277,45 @@ try {
   ));
   assertEqual(cjsKeepaliveError.code, "keepalive_body_too_large", "CJS oversized keepalive error code");
 
+  const beaconClient = createLogBrewBrowserClient({
+    clientKey,
+    maxRetries: 0,
+    sdkName: "logbrew-browser-fake-intake-smoke",
+    sdkVersion: "0.1.0"
+  });
+  beaconClient.log("evt_browser_beacon_001", timestamp(780), {
+    level: "info",
+    logger: "browser.delivery",
+    message: "headerless beacon delivery smoke",
+    metadata: baseMetadata({ traceId })
+  });
+  const beaconResponse = await beaconClient.flush(createBeaconTransport({
+    endpoint: `${beaconIntake.url}/api/telemetry/ingest/browser-beacon`,
+    fetchImpl: fetch
+  }));
+  assertEqual(beaconResponse.statusCode, 202, "beacon fallback fake intake status");
+  assertEqual(beaconIntake.requests.length, 1, "beacon fake intake request count");
+  assertEqual(beaconIntake.requests[0].authorization, undefined, "beacon fake intake must omit Authorization");
+  const beaconBody = JSON.parse(beaconIntake.requests[0].body);
+  assertEqual(beaconBody.ingest_key, clientKey, "beacon fake intake body key");
+  assertEqual(beaconBody.envelope.events[0].id, "evt_browser_beacon_001", "beacon fake intake envelope event id");
+
+  const cjsBeaconCalls = [];
+  const cjsBeaconTransport = createCjsBeaconTransport({
+    endpoint: `${beaconIntake.url}/api/telemetry/ingest/browser-beacon`,
+    sendBeacon(endpoint, payload) {
+      cjsBeaconCalls.push({ endpoint, payload });
+      return true;
+    }
+  });
+  const cjsBeaconResponse = await cjsBeaconTransport.send(clientKey, JSON.stringify({
+    events: [{ id: "evt_browser_beacon_cjs_001", type: "log" }],
+    sdk: { name: "logbrew-browser", version: "0.1.0" }
+  }));
+  const cjsBeaconBody = JSON.parse(await cjsBeaconCalls[0].payload.text());
+  assertEqual(cjsBeaconResponse.queued, true, "CJS beacon queued response");
+  assertEqual(cjsBeaconBody.envelope.events[0].id, "evt_browser_beacon_cjs_001", "CJS beacon envelope event id");
+
   const dropped = [];
   const boundedClient = createLogBrewBrowserClient({
     clientKey,
@@ -323,6 +370,9 @@ try {
 
   console.error(JSON.stringify({
     fakeIntakeAttempts: retryResponse.attempts,
+    fakeIntakeBeaconEvent: beaconBody.envelope.events[0].id,
+    fakeIntakeBeaconAuthHeaderless: beaconIntake.requests[0].authorization === undefined,
+    fakeIntakeBeaconCjs: cjsBeaconBody.envelope.events[0].id,
     fakeIntakeEvents: retryPayload.events.length,
     fakeIntakeHighVolumeLogs: highVolumeLogs,
     fakeIntakeInvalidKey: invalidError.code,
@@ -345,6 +395,7 @@ try {
   await lifecycleIntake.close();
   await onlineIntake.close();
   await shutdownIntake.close();
+  await beaconIntake.close();
 }
 
 function queueAccountRecoveryEvents(client) {
@@ -417,7 +468,7 @@ function baseMetadata(extra = {}) {
   };
 }
 
-async function startFakeIntake({ expectedAuthorization, statuses }) {
+async function startFakeIntake({ expectedAuthorization, expectedIngestKey, path = "/v1/events", statuses }) {
   const requests = [];
   const pendingStatuses = [...statuses];
   const server = http.createServer(async (request, response) => {
@@ -439,15 +490,29 @@ async function startFakeIntake({ expectedAuthorization, statuses }) {
       "content-type": "application/json",
       ...(typeof statusEntry === "number" ? {} : statusEntry.headers ?? {})
     };
-    if (request.method !== "POST" || request.url !== "/v1/events") {
+    if (request.method !== "POST" || request.url !== path) {
       response.writeHead(404, { "content-type": "application/json" });
       response.end(JSON.stringify({ code: "not_found" }));
       return;
     }
-    if (request.headers.authorization !== expectedAuthorization) {
+    if (expectedAuthorization !== undefined && request.headers.authorization !== expectedAuthorization) {
       response.writeHead(401, { "content-type": "application/json" });
       response.end(JSON.stringify({ code: "ingest_key_invalid" }));
       return;
+    }
+    if (expectedIngestKey !== undefined) {
+      try {
+        const parsed = JSON.parse(body);
+        if (request.headers.authorization !== undefined || parsed.ingest_key !== expectedIngestKey) {
+          response.writeHead(401, { "content-type": "application/json" });
+          response.end(JSON.stringify({ code: "ingest_key_invalid" }));
+          return;
+        }
+      } catch {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({ code: "invalid_json" }));
+        return;
+      }
     }
     response.writeHead(status, responseHeaders);
     response.end(JSON.stringify({ ok: status >= 200 && status < 300 }));
@@ -647,6 +712,9 @@ if ! node smoke.mjs > "$tmp_dir/browser-fake-intake.stdout.json" 2> "$tmp_dir/br
   exit 1
 fi
 grep -q '"ok":true' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeBeaconEvent":"evt_browser_beacon_001"' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeBeaconAuthHeaderless":true' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeBeaconCjs":"evt_browser_beacon_cjs_001"' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeEvents":257' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeAttempts":2' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeRequests":2' "$tmp_dir/browser-fake-intake.stderr.json"

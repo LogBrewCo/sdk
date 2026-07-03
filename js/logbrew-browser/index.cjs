@@ -6,6 +6,7 @@ const {
   SdkError,
   TransportError
 } = require("@logbrew/sdk");
+const { createBeaconTransport } = require("./beacon-transport.cjs");
 const { createPersistentBrowserTransport } = require("./persistence.cjs");
 const {
   browserTraceMetadata,
@@ -812,6 +813,7 @@ module.exports = {
   createBrowserTraceparent,
   createBrowserActionEvent,
   createBrowserErrorEvent,
+  createBeaconTransport,
   createFetchTransport,
   createLogBrewBrowserClient,
   createLogBrewBrowserContext,
@@ -830,6 +832,7 @@ module.exports = {
     createBrowserTraceparent,
     createBrowserActionEvent,
     createBrowserErrorEvent,
+    createBeaconTransport,
     createFetchTransport,
     createLogBrewBrowserClient,
     createLogBrewBrowserContext,

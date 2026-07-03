@@ -1,5 +1,30 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: Browser unload-safe delivery gap reduced after source reads from
+  Sentry JS `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
+  (`packages/browser/src/transports/fetch.ts`, fetch keepalive byte/count
+  caps), Datadog Browser SDK
+  `DataDog/browser-sdk@d2c7e303e4533f40e93d447042a67571f7ba97ff`
+  (`packages/browser-core/src/transport/httpRequest.ts`, `sendOnExit`
+  beacon then fetch fallback), PostHog JS
+  `PostHog/posthog-js@e480a3e23ecff45d2f9cf50332f6f59c54a7c736`
+  (`packages/browser/src/request.ts`, Blob beacon and keepalive thresholding),
+  and OpenTelemetry JS
+  `open-telemetry/opentelemetry-js@d9c170c94884e345dff6d67322794e85e6e07f18`
+  (Zipkin beacon when no custom headers; OTLP fetch keepalive limits).
+  `@logbrew/browser` now exports explicit `createBeaconTransport(...)` for
+  endpoints that accept Authorization-headerless `{ ingest_key, envelope }`
+  browser beacon bodies. It
+  uses a JSON Blob when possible, keeps keys out of URL/header surfaces, falls
+  back to fetch when beacon is unavailable/refused/oversized, disables
+  oversized fallback keepalive, preserves `Retry-After`, and leaves default
+  install on fetch transport. Evidence: RED `node --test
+  js/logbrew-browser/test/beacon-transport.test.mjs` failed on missing export;
+  GREEN focused test, `npm test --prefix js/logbrew-browser`, installed
+  tarball smoke, and local fake-intake/high-volume smoke passed. Report:
+  `docs/competitor-research/browser-beacon-delivery-2026-07-03.md`. Remaining
+  gap: hosted browser beacon intake must be deployed/verified before public
+  default-hosted support claims.
 - 2026-07-03: JavaScript hosted release-artifact upload opt-in reduced a
   Sentry/Datadog source-map gap after fresh source reads from Sentry CLI
   `getsentry/sentry-cli@fb79c59a35d79135d9eb84f4845572ce4548c455`

@@ -4,6 +4,7 @@ import {
   SdkError,
   TransportError
 } from "@logbrew/sdk";
+import { createBeaconTransport } from "./beacon-transport.js";
 import { createPersistentBrowserTransport } from "./persistence.js";
 import {
   browserTraceMetadata,
@@ -15,6 +16,7 @@ import {
 } from "./trace-context.js";
 
 export {
+  createBeaconTransport,
   createBrowserTraceContext,
   createBrowserTraceparent,
   createTraceparentFetch,
@@ -818,6 +820,7 @@ export default {
   createBrowserTraceparent,
   createBrowserActionEvent,
   createBrowserErrorEvent,
+  createBeaconTransport,
   createFetchTransport,
   createLogBrewBrowserClient,
   createLogBrewBrowserContext,

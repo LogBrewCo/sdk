@@ -27,6 +27,21 @@ export type FetchTransportConfig = {
   maxKeepaliveBodyBytes?: number;
 };
 
+export type BeaconTransportConfig = {
+  endpoint: string;
+  fetchImpl?: typeof fetch;
+  maxBeaconBodyBytes?: number;
+  sendBeacon?: (endpoint: string, payload: string | Blob) => boolean;
+};
+
+export type BeaconTransportResponse = TransportResponse & {
+  queued: boolean;
+};
+
+export type BeaconTransport = Transport & {
+  send(apiKey: string, body: string): Promise<BeaconTransportResponse>;
+};
+
 export type BrowserPersistentStorage = {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -216,6 +231,10 @@ export declare function createLogBrewBrowserClient(
 export declare function createFetchTransport(
   config?: FetchTransportConfig
 ): Transport;
+
+export declare function createBeaconTransport(
+  config: BeaconTransportConfig
+): BeaconTransport;
 
 export declare function createPersistentBrowserTransport(
   config: PersistentBrowserTransportConfig

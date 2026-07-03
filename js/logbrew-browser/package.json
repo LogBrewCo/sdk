@@ -19,6 +19,8 @@
     }
   },
   "files": [
+    "beacon-transport.cjs",
+    "beacon-transport.js",
     "index.cjs",
     "index.js",
     "persistence.cjs",
@@ -53,6 +55,6 @@
     "@logbrew/sdk": "^0.1.0"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check persistence.js && node --check persistence.cjs && node --check trace-context.js && node --check trace-context.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --test test/*.test.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check beacon-transport.js && node --check beacon-transport.cjs && node --check persistence.js && node --check persistence.cjs && node --check trace-context.js && node --check trace-context.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --test test/*.test.mjs"
   }
 }
