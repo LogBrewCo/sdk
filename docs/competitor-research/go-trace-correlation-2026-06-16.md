@@ -44,7 +44,7 @@ Follow-up to the all-SDK tracing priority. The Go SDK already had dependency-fre
 ## Where LogBrew Is Still Worse
 
 - No automatic panic recovery helper yet; Sentry's Go HTTP integration captures panics and links them to the active request transaction.
-- No OpenTelemetry active context interop yet; LogBrew continues W3C headers but does not read an existing OTel span from context.
+- OpenTelemetry active-context interop was still missing in this pass; see the 2026-07-03 follow-up below for the optional bridge that closes that specific gap.
 - No Gin, Chi, Echo, Fiber, gRPC, database, queue, or outbound HTTP integrations yet.
 - No baggage support, rich span events, or exception stack capture controls in the Go trace helper yet.
 
@@ -57,3 +57,49 @@ Follow-up to the all-SDK tracing priority. The Go SDK already had dependency-fre
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_generated_artifacts.py`.
 
 The installed-artifact Go smoke now packages and runs `examples/http_trace_correlation`, verifies release/environment/log/issue/span/metric output, proves one request span ID is reused across app log, issue, request span, and request duration metric metadata, verifies wrapped `slog` output receives trace IDs, and checks that query strings, fragments, request payload values, and non-primitive slog fields are not copied into LogBrew telemetry.
+
+## OpenTelemetry Bridge Follow-Up - 2026-07-03
+
+### Source Reviewed
+
+- Sentry Go `getsentry/sentry-go` at commit `b818debe0bfa3171bd4256b60b52a0566eb7978a`.
+- Read `otel/otlp/span_exporter.go`: `NewTraceExporter`, `sentryOTLPExporter.ExportSpans`, and `Shutdown`.
+- Read `otel/linking_integration.go`: `NewOtelIntegration` and `SetupOnce`.
+- Read `otel/internal/common/event_processor.go`: `ResolveTraceContext`.
+- OpenTelemetry Go `open-telemetry/opentelemetry-go` at commit `852dabed9f85cd10d41d1c00ffcf4c8b41e1b934`.
+- Read `sdk/trace/span_processor.go`: `SpanProcessor`.
+- Read `sdk/trace/simple_span_processor.go`: `NewSimpleSpanProcessor` and synchronous export behavior.
+- Read `sdk/trace/batch_span_processor.go`: bounded queue, drop, shutdown, and force-flush behavior.
+- Read `sdk/trace/span.go`: `ReadOnlySpan`.
+- Read `sdk/trace/span_exporter.go`: `SpanExporter`.
+- Datadog Go `DataDog/dd-trace-go` at commit `6b801cd948a96857bcd3f3f8049416c32b354f53`.
+- Read `ddtrace/opentelemetry/span.go`: OTel span adapter backed by Datadog spans.
+- Read `ddtrace/opentelemetry/tracer_provider.go`: `NewTracerProvider`, `Tracer`, `Shutdown`, and `ForceFlush`.
+- Read `ddtrace/opentelemetry/tracer.go`: `Start`, OTel parent/context handling, attributes, events, links, and baggage mapping.
+- PostHog Go `PostHog/posthog-go` at commit `6affc1549498bbd8f8ee3fe5beaaab6da5d13ca1`.
+- Searched trace-related source and found error stack trace helpers, but no general OTel span processor/exporter bridge.
+
+### Competitor Pattern
+
+- Sentry offers an OTel exporter path and a linking integration that resolves active OTel trace context for Sentry events.
+- Datadog implements a fuller OTel tracer provider/span adapter, including attributes, links, events, status, sampling, and baggage/tracestate mapping.
+- OTel Go expects exporters to honor context cancellation and leaves retry behavior to the exporter; `SimpleSpanProcessor` exports synchronously and `BatchSpanProcessor` owns bounded batching/drop behavior.
+
+### LogBrew Improvement From This Pass
+
+- Added optional Go module `github.com/LogBrewCo/sdk/go/logbrew/otel`; the base `github.com/LogBrewCo/sdk/go/logbrew` module remains dependency-free and still has no OTel module graph.
+- Added `TraceContextFromContext` and `TraceContextFromSpanContext` to copy only valid active OTel trace ID/span ID/sampled flags into a LogBrew child trace context.
+- Added `NewSpanExporter`, implementing `sdktrace.SpanExporter` by queueing ended OTel spans into an app-owned LogBrew client with safe method/route/status, DB, messaging, RPC, exception-type, span-kind, instrumentation-scope, and span-link summaries.
+- Selected `go.opentelemetry.io/otel@v1.41.0`/`sdk@v1.41.0` because `v1.42+` requires Go 1.25; this preserves the current Go 1.24 SDK baseline.
+- Added installed-artifact proof through `scripts/real_user_go_opentelemetry_smoke.sh`: local fake Go proxy for LogBrew parent and OTel modules, install/remove/reinstall, real OTel dependencies, context copy, span export, flush/shutdown, docs lookup, and unsafe metadata filtering.
+
+### Where LogBrew Is Better Today
+
+- More explicit and safer for teams that already own an OTel provider: LogBrew does not install globals, create exporters/processors, own retry, capture payloads/headers/full URLs/SQL statements/exception messages/stacks, or force OTel dependencies into the base Go module.
+- The installed smoke proves root Go consumers still get only the base LogBrew module, while OTel users opt into a separate module.
+
+### Where LogBrew Is Still Worse
+
+- Sentry and Datadog still have richer automatic framework coverage and deeper OTel pipeline ownership.
+- Datadog's OTel adapter carries richer span events, attributes, links, baggage, and tracestate; LogBrew intentionally exports a smaller privacy-bounded subset.
+- Go still lacks Gin/Chi/Echo/Fiber/gRPC automatic middleware, automatic panic recovery helpers, and first-party automatic driver integrations for common DB/cache/queue clients.

@@ -461,15 +461,13 @@ jobs:
           go-version: "1.24"
 
       - name: Run Go tests
-        shell: bash
-        run: |
-          mapfile -t go_dirs < <(find . -name go.mod -exec dirname {} \; | sort -u)
-          for dir in "${go_dirs[@]}"; do
-            (cd "$dir" && go test ./...)
-          done
+        run: bash scripts/check_go_tests.sh
 
       - name: Run Go real-user smoke test
         run: bash scripts/real_user_go_smoke.sh
+
+      - name: Run Go OpenTelemetry installed-artifact smoke test
+        run: bash scripts/real_user_go_opentelemetry_smoke.sh
 
       - name: Run Go high-load installed-artifact smoke test
         run: bash scripts/real_user_go_high_load_smoke.sh

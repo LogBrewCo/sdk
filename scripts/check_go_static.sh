@@ -19,7 +19,9 @@ mkdir -p "$GOBIN" "$GOCACHE" "$GOMODCACHE"
 
 go install honnef.co/go/tools/cmd/staticcheck@v0.6.1
 
-(cd "$repo_root/go/logbrew" && "$GOBIN/staticcheck" ./...)
+while IFS= read -r dir; do
+	(cd "$dir" && "$GOBIN/staticcheck" ./...)
+done < <(find "$repo_root/go/logbrew" -name go.mod -exec dirname {} \; | sort -u)
 
 "$GOBIN/staticcheck" -version
 printf '%s\n' "go static analysis ok"

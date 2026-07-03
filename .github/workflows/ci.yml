@@ -47,7 +47,10 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: "1.24"
-          cache-dependency-path: go/logbrew/go.mod
+          cache-dependency-path: |
+            go/logbrew/go.mod
+            go/logbrew/otel/go.mod
+            go/logbrew/otel/go.sum
 
       - name: Set up Java
         if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
@@ -282,11 +285,15 @@ jobs:
 
       - name: Run Go SDK tests
         if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
-        run: cd go/logbrew && go test ./...
+        run: bash scripts/check_go_tests.sh
 
       - name: Run Go real-user smoke test
         if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
         run: bash scripts/real_user_go_smoke.sh
+
+      - name: Run Go OpenTelemetry installed-artifact smoke test
+        if: ${{ hashFiles('go/logbrew/otel/go.mod') != '' }}
+        run: bash scripts/real_user_go_opentelemetry_smoke.sh
 
       - name: Run Go high-load installed-artifact smoke test
         if: ${{ hashFiles('go/logbrew/go.mod') != '' }}

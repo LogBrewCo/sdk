@@ -74,6 +74,7 @@ STEP_LABELS=(
   "Django real-user smoke"
   "Python public PyPI install smoke"
   "Go real-user smoke"
+  "Go OpenTelemetry installed-artifact smoke"
   "Go high-load installed-artifact smoke"
   "Go support-ticket real-user smoke"
   "Go public module install smoke"
@@ -438,7 +439,7 @@ run_shell_step "bash scripts/check_django_package.sh"
 mark_step_complete
 
 begin_next_step "Go tests"
-run_shell_step "cd go/logbrew && test -z \"\$(gofmt -l .)\" && go vet ./... && go test ./... && cd ../.. && bash scripts/check_go_static.sh"
+run_shell_step "bash scripts/check_go_tests.sh && bash scripts/check_go_static.sh"
 mark_step_complete
 
 begin_next_step "C package checks"
@@ -619,6 +620,10 @@ mark_step_complete
 
 begin_next_step "Go real-user smoke"
 run_shell_step "bash scripts/real_user_go_smoke.sh"
+mark_step_complete
+
+begin_next_step "Go OpenTelemetry installed-artifact smoke"
+run_shell_step "bash scripts/real_user_go_opentelemetry_smoke.sh"
 mark_step_complete
 
 begin_next_step "Go high-load installed-artifact smoke"

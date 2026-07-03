@@ -229,6 +229,33 @@ must(client.Log("evt_handler_log", "2026-06-02T10:00:03Z", logbrew.LogAttributes
 })))
 ```
 
+## OpenTelemetry Bridge
+
+If your Go app already installs OpenTelemetry, add the optional bridge module instead of changing the base SDK install:
+
+```bash
+go get github.com/LogBrewCo/sdk/go/logbrew/otel
+```
+
+```go
+import (
+  logbrewotel "github.com/LogBrewCo/sdk/go/logbrew/otel"
+  sdktrace "go.opentelemetry.io/otel/sdk/trace"
+)
+
+exporter, err := logbrewotel.NewSpanExporter(client, logbrewotel.SpanExporterConfig{
+  EventIDPrefix: "checkout_otel",
+  Metadata:      map[string]any{"service": "checkout-api"},
+})
+if err != nil {
+  panic(err)
+}
+provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sdktrace.NewSimpleSpanProcessor(exporter)))
+_ = provider
+```
+
+`TraceContextFromContext` and `TraceContextFromSpanContext` copy only valid OTel trace ID, span ID, and sampled flags into LogBrew child trace context. `NewSpanExporter` queues ended OTel spans as LogBrew span events with safe method/route/status, database, messaging, RPC, exception-type, span-kind, instrumentation-scope, and span-link summaries. It does not install global providers, own exporters/processors, retry, flush, capture full URLs, headers, payloads, SQL statements, exception messages, stacks, baggage, tracestate, or raw propagation values. Keep using `client.Flush` or `client.Shutdown` with your app-owned transport.
+
 `NewHTTPHandler` wraps an app-owned `net/http` handler, reads only W3C `traceparent`, creates one request span, optionally emits `http.server.duration`, and passes the active `TraceContext` to downstream code through `context.Context`. `NewSlogHandler` wraps an app-owned `slog.Handler`, queues a LogBrew log, and adds `traceId` / `spanId` fields to the wrapped app log when the context contains a LogBrew trace:
 
 ```go

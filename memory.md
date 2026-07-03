@@ -1,5 +1,34 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: Go optional OpenTelemetry bridge added after source reads from
+  Sentry Go
+  `getsentry/sentry-go@b818debe0bfa3171bd4256b60b52a0566eb7978a`
+  (`otel/otlp/span_exporter.go`, `otel/linking_integration.go`,
+  `otel/internal/common/event_processor.go`), OpenTelemetry Go
+  `open-telemetry/opentelemetry-go@852dabed9f85cd10d41d1c00ffcf4c8b41e1b934`
+  (`sdk/trace/span_processor.go`, `simple_span_processor.go`,
+  `batch_span_processor.go`, `span.go`, `span_exporter.go`), Datadog Go
+  `DataDog/dd-trace-go@6b801cd948a96857bcd3f3f8049416c32b354f53`
+  (`ddtrace/opentelemetry/span.go`, `tracer_provider.go`, `tracer.go`), and
+  PostHog Go
+  `PostHog/posthog-go@6affc1549498bbd8f8ee3fe5beaaab6da5d13ca1` (no general
+  OTel exporter bridge found). New module
+  `github.com/LogBrewCo/sdk/go/logbrew/otel` exposes
+  `TraceContextFromContext`, `TraceContextFromSpanContext`, and
+  `NewSpanExporter` for app-owned OTel pipelines. It copies only valid OTel
+  trace/span IDs and sampled flags, queues ended spans into an app-owned
+  LogBrew client, preserves safe method/route/status, DB, messaging, RPC,
+  exception-type, span-kind, instrumentation-scope, and span-link summaries,
+  and drops full URLs, headers, payloads, SQL statements, exception messages,
+  stacks, baggage, tracestate, and raw propagation. Root Go module remains
+  dependency-free; OTel bridge pins `go.opentelemetry.io/otel@v1.41.0` because
+  `v1.42+` requires Go 1.25 and would raise the current Go 1.24 baseline.
+  Evidence: RED missing OTel package, GREEN `bash scripts/check_go_tests.sh`,
+  `bash scripts/real_user_go_opentelemetry_smoke.sh`, and release metadata.
+  Research: `docs/competitor-research/go-trace-correlation-2026-06-16.md`.
+  Remaining Go gaps: Sentry/Datadog still lead on automatic framework/client
+  coverage, panic recovery, full OTel pipeline ownership, baggage/tracestate,
+  and richer automatic DB/cache/queue spans.
 - 2026-07-03: Node opt-in global fetch, app-owned fetch timing metadata,
   and target-gated Undici diagnostics instrumentation added after source reads
   from Sentry JavaScript

@@ -51,8 +51,9 @@ with zipfile.ZipFile(
     version_dir / f"{version}.zip", "w", compression=zipfile.ZIP_DEFLATED
 ) as archive:
     for path in repo.rglob("*"):
-        if path.is_file() and ".git" not in path.parts:
-            archive.write(path, zip_prefix + path.relative_to(repo).as_posix())
+        relative = path.relative_to(repo)
+        if path.is_file() and ".git" not in path.parts and (not relative.parts or relative.parts[0] != "otel"):
+            archive.write(path, zip_prefix + relative.as_posix())
 PY
 info_file="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.0.info"
 mod_file="$proxy_dir/github.com/!log!brew!co/sdk/go/logbrew/@v/v0.1.0.mod"

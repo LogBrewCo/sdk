@@ -465,6 +465,8 @@ def validate_python(root: Path, failures: list[str]) -> None:
 def validate_go(root: Path, failures: list[str]) -> None:
     go_mod_path = require_path(root, "go/logbrew/go.mod", failures)
     require_path(root, "go/logbrew/README.md", failures)
+    otel_mod_path = require_path(root, "go/logbrew/otel/go.mod", failures)
+    require_path(root, "go/logbrew/otel/README.md", failures)
     if not go_mod_path.exists():
         return
     content = go_mod_path.read_text(encoding="utf-8")
@@ -477,6 +479,29 @@ def validate_go(root: Path, failures: list[str]) -> None:
         re.search(r"^go 1\.24\.0$", content, re.MULTILINE) is not None,
         failures,
         "go/logbrew/go.mod: expected go 1.24.0",
+    )
+    if not otel_mod_path.exists():
+        return
+    otel_content = otel_mod_path.read_text(encoding="utf-8")
+    require(
+        re.search(r"^module github\.com/LogBrewCo/sdk/go/logbrew/otel$", otel_content, re.MULTILINE) is not None,
+        failures,
+        "go/logbrew/otel/go.mod: unexpected module path",
+    )
+    require(
+        re.search(r"^go 1\.24\.0$", otel_content, re.MULTILINE) is not None,
+        failures,
+        "go/logbrew/otel/go.mod: expected go 1.24.0",
+    )
+    require(
+        "github.com/LogBrewCo/sdk/go/logbrew v0.1.0" in otel_content,
+        failures,
+        "go/logbrew/otel/go.mod: expected parent LogBrew module requirement",
+    )
+    require(
+        "go.opentelemetry.io/otel/sdk v1.41.0" in otel_content,
+        failures,
+        "go/logbrew/otel/go.mod: expected OpenTelemetry SDK requirement",
     )
 
 
