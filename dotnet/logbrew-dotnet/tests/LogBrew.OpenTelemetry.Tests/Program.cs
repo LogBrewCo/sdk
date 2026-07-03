@@ -18,7 +18,11 @@ var tests = 0;
 
 OpenTelemetryProcessorCapturesEndedActivity();
 tests++;
+OpenTelemetryExporterWorksWithSimpleActivityExportProcessor();
+tests++;
 OpenTelemetryProcessorDoesNotInterruptProviderOnCaptureFailure();
+tests++;
+OpenTelemetryExporterReturnsFailureWhenCaptureFails();
 tests++;
 OpenTelemetryProcessorHandlesHighVolumeQueuePressure();
 tests++;
@@ -98,6 +102,73 @@ static void OpenTelemetryProcessorCapturesEndedActivity()
     }
 }
 
+static void OpenTelemetryExporterWorksWithSimpleActivityExportProcessor()
+{
+    var client = LogBrewClient.Create("LOGBREW_API_KEY", "dotnet-opentelemetry-tests", "0.1.0");
+    const string sourceName = "LogBrew.Tests.OpenTelemetry.Exporter";
+    using var exporter = new LogBrewOpenTelemetrySpanExporter(client, options => options
+        .WithEventIdPrefix("dotnet_otel_exporter")
+        .WithServiceName("checkout-worker")
+        .WithServiceVersion("2.3.4")
+        .WithDeploymentEnvironment("staging"));
+    using var processor = new SimpleActivityExportProcessor(exporter);
+
+    using var source = new ActivitySource(sourceName, "2.3.4");
+    using (Sdk.CreateTracerProviderBuilder()
+        .AddSource(sourceName)
+        .AddProcessor(processor)
+        .Build())
+    {
+        using var activity = source.StartActivity("POST /jobs/{id}", ActivityKind.Producer);
+        Require(activity != null, "expected sampled OpenTelemetry exporter activity");
+        activity!.SetTag("messaging.system", "memory");
+        activity.SetTag("messaging.operation", "publish");
+        activity.SetTag("messaging.message.id", "message-id-omitted");
+        activity.SetTag("url.full", "https://example.test/jobs/123?debug=omitted");
+        activity.AddLink(new ActivityLink(
+            new ActivityContext(
+                ActivityTraceId.CreateFromString("4bf92f3577b34da6a3ce929d0e0e4736".AsSpan()),
+                ActivitySpanId.CreateFromString("00f067aa0ba902b7".AsSpan()),
+                ActivityTraceFlags.Recorded),
+            new ActivityTagsCollection
+            {
+                ["messaging.system"] = "memory",
+                ["messaging.message.id"] = "linked-message-id-omitted"
+            }));
+    }
+
+    var payload = client.PreviewJson();
+    foreach (var expected in new[]
+    {
+        "\"id\": \"dotnet_otel_exporter_span_",
+        "\"name\": \"POST /jobs/{id}\"",
+        "\"source\": \"dotnet.activity\"",
+        "\"activityKind\": \"producer\"",
+        "\"activitySourceName\": \"" + sourceName + "\"",
+        "\"activitySourceVersion\": \"2.3.4\"",
+        "\"messagingSystem\": \"memory\"",
+        "\"messagingOperation\": \"publish\"",
+        "\"serviceName\": \"checkout-worker\"",
+        "\"serviceVersion\": \"2.3.4\"",
+        "\"deploymentEnvironment\": \"staging\"",
+        "\"links\":"
+    })
+    {
+        Require(payload.Contains(expected, StringComparison.Ordinal), "missing OpenTelemetry exporter payload: " + expected);
+    }
+
+    foreach (var blocked in new[]
+    {
+        "message-id-omitted",
+        "linked-message-id-omitted",
+        "debug=omitted",
+        "example.test"
+    })
+    {
+        Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected OpenTelemetry exporter detail to be omitted: " + blocked);
+    }
+}
+
 static void OpenTelemetryProcessorDoesNotInterruptProviderOnCaptureFailure()
 {
     var errors = new List<string>();
@@ -116,6 +187,28 @@ static void OpenTelemetryProcessorDoesNotInterruptProviderOnCaptureFailure()
 
     Require(errors.Count == 1, "expected one capture error");
     Require(errors[0] == "shutdown_error", "expected shutdown error to be reported");
+}
+
+static void OpenTelemetryExporterReturnsFailureWhenCaptureFails()
+{
+    var errors = new List<string>();
+    var client = LogBrewClient.Create("LOGBREW_API_KEY", "dotnet-opentelemetry-tests", "0.1.0");
+    client.Shutdown(new NoopTransport());
+    using var exporter = new LogBrewOpenTelemetrySpanExporter(
+        client,
+        options => options.OnError(error => errors.Add(error.Code)));
+
+    using var activity = new Activity("operation after shutdown");
+    activity.SetIdFormat(ActivityIdFormat.W3C);
+    activity.ActivityTraceFlags = ActivityTraceFlags.Recorded;
+    activity.Start();
+    activity.Stop();
+
+    var result = exporter.Export(new Batch<Activity>(activity));
+
+    Require(result == ExportResult.Failure, "expected exporter failure when LogBrew capture fails");
+    Require(errors.Count == 1, "expected one exporter capture error");
+    Require(errors[0] == "shutdown_error", "expected shutdown error to be reported by exporter");
 }
 
 static void OpenTelemetryProcessorHandlesHighVolumeQueuePressure()

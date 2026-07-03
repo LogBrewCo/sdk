@@ -180,9 +180,12 @@ for needle in (
     "dotnet add package LogBrew.OpenTelemetry",
     "TracerProviderBuilder.AddLogBrew",
     "LogBrewOpenTelemetrySpanProcessor",
+    "LogBrewOpenTelemetrySpanExporter",
+    "SimpleActivityExportProcessor",
     "WithServiceName",
     "WithDeploymentEnvironment",
     "does not create an OpenTelemetry provider",
+    "OTLP forwarding path",
     "payload/header/full-URL/query capture",
     "OpenTelemetrySpanProcessorTelemetry.cs",
 ):

@@ -95,7 +95,9 @@ CS
 if [[ -n "$otel_version" ]]; then
   cat >> "$app_dir/Program.cs" <<'CS'
 var otelProcessor = new LogBrew.OpenTelemetry.LogBrewOpenTelemetrySpanProcessor(client);
+using var otelExporter = new LogBrew.OpenTelemetry.LogBrewOpenTelemetrySpanExporter(client);
 Console.WriteLine(otelProcessor.GetType().FullName);
+Console.WriteLine(otelExporter.GetType().FullName);
 CS
 fi
 
@@ -108,6 +110,7 @@ grep -q '^LogBrew\.EntityFrameworkCore\.LogBrewEntityFrameworkCoreOptions$' "$tm
 grep -q '^LogBrew\.StackExchangeRedis\.LogBrewStackExchangeRedisCommandOptions$' "$tmp_dir/run.out"
 if [[ -n "$otel_version" ]]; then
   grep -q '^LogBrew\.OpenTelemetry\.LogBrewOpenTelemetrySpanProcessor$' "$tmp_dir/run.out"
+  grep -q '^LogBrew\.OpenTelemetry\.LogBrewOpenTelemetrySpanExporter$' "$tmp_dir/run.out"
 fi
 
 echo "dotnet public NuGet install smoke passed"

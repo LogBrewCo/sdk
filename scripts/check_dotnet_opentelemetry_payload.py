@@ -24,10 +24,18 @@ def main() -> None:
     require(stderr == "", "expected OpenTelemetry example stderr to be empty")
     events = payload.get("events")
     require(isinstance(events, list), "expected events list")
-    require(len(events) == 1, f"expected one OpenTelemetry span, got {len(events)}")
-    event = events[0]
+    require(len(events) == 2, f"expected two OpenTelemetry spans, got {len(events)}")
+    event = next(
+        (
+            item
+            for item in events
+            if isinstance(item, dict)
+            and str(item.get("id", "")).startswith("checkout_otel_span_")
+        ),
+        None,
+    )
+    require(isinstance(event, dict), "expected processor OpenTelemetry span")
     require(event.get("type") == "span", "expected OpenTelemetry span event")
-    require(str(event.get("id", "")).startswith("checkout_otel_span_"), "expected OpenTelemetry event id prefix")
     attrs = event.get("attributes")
     require(isinstance(attrs, dict), "expected span attributes")
     require(attrs.get("name") == "GET /checkout/{id}", "expected sanitized span name")
@@ -62,11 +70,50 @@ def main() -> None:
     require(isinstance(event_metadata, dict), "expected event summary metadata")
     require(event_metadata.get("messagingSystem") == "memory", "expected safe event metadata")
 
+    exporter_event = next(
+        (
+            item
+            for item in events
+            if isinstance(item, dict)
+            and str(item.get("id", "")).startswith("checkout_otel_exporter_span_")
+        ),
+        None,
+    )
+    require(isinstance(exporter_event, dict), "expected exporter OpenTelemetry span")
+    require(exporter_event.get("type") == "span", "expected exporter span event")
+    exporter_attrs = exporter_event.get("attributes")
+    require(isinstance(exporter_attrs, dict), "expected exporter span attributes")
+    require(exporter_attrs.get("name") == "POST /jobs/{id}", "expected exporter span name")
+    require(exporter_attrs.get("status") == "ok", "expected exporter span status")
+    exporter_metadata = exporter_attrs.get("metadata")
+    require(isinstance(exporter_metadata, dict), "expected exporter span metadata")
+    for key, value in {
+        "source": "dotnet.activity",
+        "activityName": "POST /jobs/{id}",
+        "activityKind": "producer",
+        "activitySourceName": "Checkout.Exporter",
+        "activitySourceVersion": "1.0.0",
+        "messagingSystem": "memory",
+        "messagingOperation": "publish",
+        "serviceName": "checkout-worker",
+        "serviceVersion": "1.0.0",
+        "deploymentEnvironment": "staging",
+    }.items():
+        require(exporter_metadata.get(key) == value, f"expected exporter metadata {key}={value!r}")
+    exporter_links = exporter_attrs.get("links")
+    require(isinstance(exporter_links, list) and len(exporter_links) == 1, "expected one exporter span link")
+    exporter_link_metadata = exporter_links[0].get("metadata")
+    require(isinstance(exporter_link_metadata, dict), "expected exporter link metadata")
+    require(exporter_link_metadata.get("messagingSystem") == "memory", "expected exporter link metadata")
+
     text = json.dumps(payload, sort_keys=True)
     for blocked in (
         "coupon=omitted",
         "example.test",
         "not captured",
+        "message-id-omitted",
+        "linked-message-id-omitted",
+        "debug=omitted",
         "url.full",
         "exception.message",
     ):

@@ -552,3 +552,32 @@ Sentry's best-fit pattern for LogBrew is a dedicated OpenTelemetry processor reg
 ### Remaining Gap
 
 LogBrew now has Sentry-style opt-in OTel processor interop for .NET while staying lighter and safer by default. It remains weaker than Sentry/Datadog/OpenTelemetry for automatic ASP.NET/HttpClient/DB/cache/queue instrumentation breadth, full OTel exporter/collector ownership, baggage/tracestate, richer resource detection, profiling, and backend-native trace query/symbolication depth.
+
+## 2026-07-03 OpenTelemetry Span Exporter Follow-Up
+
+### Source Basis
+
+This follow-up uses the source evidence already recorded in the 2026-07-02 OpenTelemetry span processor pass: Sentry .NET's `TracerProviderBuilder` processor registration and span processor mapping, OpenTelemetry .NET's `BaseProcessor<Activity>`, `SimpleActivityExportProcessor`, and exporter processor lifecycle, and Datadog's heavier Activity listener/OTLP mapping path.
+
+### Pattern
+
+Some .NET applications centralize OpenTelemetry setup around exporters and export processors rather than direct provider-builder processor registration. Native OpenTelemetry supports this through `BaseExporter<Activity>` plus `SimpleActivityExportProcessor` or `BatchActivityExportProcessor`. Sentry's processor path is ergonomic for one-call registration; the exporter shape is more portable for teams that already standardize exporter composition.
+
+### LogBrew Change
+
+- Added `LogBrewOpenTelemetrySpanExporter : BaseExporter<Activity>` and `LogBrewOpenTelemetrySpanExporterOptions`.
+- The exporter delegates to the same `LogBrewActivitySpanTelemetry` path as the processor, preserving W3C trace/span IDs, parent span ID, sampled flag, duration, Activity name/kind/source, capped event/link summaries, safe semantic tag allowlist, and explicit service/version/environment context.
+- Export returns `ExportResult.Failure` when LogBrew capture fails, reports the same optional `OnError(...)` callback, and skips null or unrecorded Activities.
+- The packaged `examples/OpenTelemetrySpanProcessorTelemetry.cs` now proves both direct `TracerProviderBuilder.AddLogBrew(...)` and standard `SimpleActivityExportProcessor(new LogBrewOpenTelemetrySpanExporter(...))` setup from the installed package.
+- The package still avoids provider creation, sampler/resource detector ownership, instrumentation packages, baggage/tracestate, global Activity listeners, HTTP/database patching, payload/header/full-URL/query capture, exception messages/stacks, support tickets, OTLP forwarding, and background upload ownership.
+
+### Evidence
+
+- RED TDD: `dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.OpenTelemetry.Tests/LogBrew.OpenTelemetry.Tests.csproj --configuration Release` failed on missing `LogBrewOpenTelemetrySpanExporter`.
+- Focused GREEN: the same command passed with 5 tests covering processor capture, exporter capture through `SimpleActivityExportProcessor`, processor failure isolation, exporter `ExportResult.Failure`, and queue-pressure behavior.
+- Package proof: `bash scripts/check_dotnet_package.sh` passed with source build/test/pack, OpenTelemetry nupkg README checks, and source example payload validation for both processor and exporter spans.
+- Installed proof: `bash scripts/real_user_dotnet_smoke.sh` passed with local packed `LogBrew.OpenTelemetry` install and packaged example validation for both paths.
+
+### Remaining Gap
+
+LogBrew is now closer to native OpenTelemetry and PostHog-style exporter ergonomics while retaining stricter privacy defaults. Sentry, Datadog, and OpenTelemetry still lead on automatic instrumentation breadth, OTLP/collector/provider ownership, resource detectors, baggage/tracestate, profiling, and mature backend trace querying.

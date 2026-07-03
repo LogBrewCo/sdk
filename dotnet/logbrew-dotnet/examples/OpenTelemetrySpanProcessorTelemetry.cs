@@ -34,4 +34,33 @@ using (Sdk.CreateTracerProviderBuilder()
         }));
 }
 
+using var exporterSource = new ActivitySource("Checkout.Exporter", "1.0.0");
+using var exporter = new LogBrewOpenTelemetrySpanExporter(client, options => options
+    .WithEventIdPrefix("checkout_otel_exporter")
+    .WithServiceName("checkout-worker")
+    .WithServiceVersion("1.0.0")
+    .WithDeploymentEnvironment("staging"));
+using var exportProcessor = new SimpleActivityExportProcessor(exporter);
+using (Sdk.CreateTracerProviderBuilder()
+    .AddSource("Checkout.Exporter")
+    .AddProcessor(exportProcessor)
+    .Build())
+{
+    using var activity = exporterSource.StartActivity("POST /jobs/{id}", ActivityKind.Producer);
+    activity?.SetTag("messaging.system", "memory");
+    activity?.SetTag("messaging.operation", "publish");
+    activity?.SetTag("messaging.message.id", "message-id-omitted");
+    activity?.SetTag("url.full", "https://example.test/jobs/123?debug=omitted");
+    activity?.AddLink(new ActivityLink(
+        new ActivityContext(
+            ActivityTraceId.CreateFromString("4bf92f3577b34da6a3ce929d0e0e4736".AsSpan()),
+            ActivitySpanId.CreateFromString("00f067aa0ba902b7".AsSpan()),
+            ActivityTraceFlags.Recorded),
+        new ActivityTagsCollection
+        {
+            ["messaging.system"] = "memory",
+            ["messaging.message.id"] = "linked-message-id-omitted"
+        }));
+}
+
 Console.WriteLine(client.PreviewJson());

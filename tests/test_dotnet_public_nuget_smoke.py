@@ -17,6 +17,7 @@ class DotnetPublicNugetSmokeTests(unittest.TestCase):
             "LogBrew.AspNetCore",
             "LogBrew.EntityFrameworkCore",
             "LogBrew.StackExchangeRedis",
+            "LogBrew.OpenTelemetry",
         ):
             self.assertIn(package, body)
 
@@ -25,14 +26,17 @@ class DotnetPublicNugetSmokeTests(unittest.TestCase):
             "LOGBREW_NUGET_ASPNETCORE_VERSION",
             "LOGBREW_NUGET_EFCORE_VERSION",
             "LOGBREW_NUGET_REDIS_VERSION",
+            "LOGBREW_NUGET_OTEL_VERSION",
             "LOGBREW_DOTNET_CORE_VERSION",
             "LOGBREW_DOTNET_ASPNETCORE_VERSION",
             "LOGBREW_DOTNET_EFCORE_VERSION",
             "LOGBREW_DOTNET_REDIS_VERSION",
+            "LOGBREW_DOTNET_OTEL_VERSION",
             'core_version="${1:-${LOGBREW_NUGET_CORE_VERSION:-${LOGBREW_DOTNET_CORE_VERSION:-0.1.4}}}"',
             'aspnetcore_version="${2:-${LOGBREW_NUGET_ASPNETCORE_VERSION:-${LOGBREW_DOTNET_ASPNETCORE_VERSION:-0.1.0}}}"',
             'efcore_version="${3:-${LOGBREW_NUGET_EFCORE_VERSION:-${LOGBREW_DOTNET_EFCORE_VERSION:-0.1.0}}}"',
             'redis_version="${4:-${LOGBREW_NUGET_REDIS_VERSION:-${LOGBREW_DOTNET_REDIS_VERSION:-0.1.0}}}"',
+            'otel_version="${5:-${LOGBREW_NUGET_OTEL_VERSION:-${LOGBREW_DOTNET_OTEL_VERSION:-}}}"',
             "--source https://api.nuget.org/v3/index.json",
             "dotnet list",
             "dotnet build",
@@ -41,6 +45,8 @@ class DotnetPublicNugetSmokeTests(unittest.TestCase):
             "LogBrewAspNetCoreOptions.Create",
             "LogBrewEntityFrameworkCoreOptions.Create",
             "LogBrewStackExchangeRedisCommandOptions.Create",
+            "LogBrewOpenTelemetrySpanProcessor",
+            "LogBrewOpenTelemetrySpanExporter",
         ):
             self.assertIn(expected, body)
 

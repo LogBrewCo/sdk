@@ -21,6 +21,7 @@ PUBLIC_VERSION = "0.1.0"
 RUBYGEMS_VERSION = "0.1.1"
 PACKAGIST_VERSION = "0.1.1"
 DOTNET_VERSION = "0.1.4"
+DOTNET_OTEL_VERSION = "0.1.1"
 UNITY_VERSION = "0.1.1"
 PUBLIC_LICENSE = "MIT"
 REPO_URL = "https://github.com/LogBrewCo/sdk"
@@ -962,7 +963,7 @@ def validate(
         nuget_versions.get("LogBrew.AspNetCore", PUBLIC_VERSION),
         nuget_versions.get("LogBrew.EntityFrameworkCore", PUBLIC_VERSION),
         nuget_versions.get("LogBrew.StackExchangeRedis", PUBLIC_VERSION),
-        nuget_versions.get("LogBrew.OpenTelemetry", PUBLIC_VERSION),
+        nuget_versions.get("LogBrew.OpenTelemetry", DOTNET_OTEL_VERSION),
         PUBLIC_LICENSE,
         REPO_URL,
     )

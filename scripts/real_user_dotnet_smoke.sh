@@ -194,7 +194,10 @@ for needle in (
     "dotnet add package LogBrew.OpenTelemetry",
     "TracerProviderBuilder.AddLogBrew",
     "LogBrewOpenTelemetrySpanProcessor",
+    "LogBrewOpenTelemetrySpanExporter",
+    "SimpleActivityExportProcessor",
     "does not create an OpenTelemetry provider",
+    "OTLP forwarding path",
     "OpenTelemetrySpanProcessorTelemetry.cs",
 ):
     if needle not in readme:
