@@ -197,6 +197,27 @@ keywords = ["logbrew"]
 
         self.assertEqual(failures, [])
 
+    def test_maven_metadata_requires_current_maven_release_version(self) -> None:
+        pom_paths = (
+            ROOT / "java" / "logbrew-java" / "pom.xml",
+            ROOT / "kotlin" / "logbrew-kotlin" / "pom.xml",
+            ROOT / "kotlin" / "logbrew-kotlin-okhttp" / "pom.xml",
+        )
+
+        for pom_path in pom_paths:
+            self.assertIn(
+                "<version>0.1.1</version>",
+                pom_path.read_text(encoding="utf-8"),
+                f"{pom_path.relative_to(ROOT)} must use the current Maven release version",
+            )
+
+    def test_maven_central_public_smoke_covers_kotlin_okhttp_artifact(self) -> None:
+        smoke = (ROOT / "scripts" / "real_user_maven_central_public_smoke.sh").read_text(encoding="utf-8")
+
+        self.assertIn("logbrew-kotlin-okhttp", smoke)
+        self.assertIn("LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION", smoke)
+        self.assertIn("LogBrewOkHttpRouteTemplates", smoke)
+
     def test_swift_metadata_requires_root_swiftpm_package(self) -> None:
         manifest_path = ROOT / "Package.swift"
 
@@ -309,6 +330,30 @@ jobs:
             check_release_metadata.validate_release_workflows(root, failures)
 
         self.assertTrue(any("NuGet public install smoke" in failure for failure in failures))
+
+    def test_publish_packages_workflow_requires_public_maven_install_smoke(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
+            (workflow_dir / "publish-packages.yml").write_text(
+                """
+name: Publish Packages
+jobs:
+  maven:
+    steps:
+      - name: Build Maven Central deployment bundle
+        run: bash scripts/build_maven_central_bundle.sh
+      - name: Verify Maven Central publication
+        run: python3 scripts/check_registry_publication.py --target maven --retries 20 --retry-delay 30
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("Maven Central public install smoke" in failure for failure in failures))
 
     def test_publish_packages_verify_target_requires_exact_version_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

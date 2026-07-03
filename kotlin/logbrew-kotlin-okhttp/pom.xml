@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>co.logbrew</groupId>
   <artifactId>logbrew-kotlin-okhttp</artifactId>
-  <version>0.1.0</version>
+  <version>0.1.1</version>
   <packaging>jar</packaging>
   <name>LogBrew Kotlin OkHttp Integration</name>
   <description>Optional LogBrew Kotlin OkHttp integration for outbound request spans and W3C traceparent propagation.</description>
@@ -27,7 +27,7 @@
     <dependency>
       <groupId>co.logbrew</groupId>
       <artifactId>logbrew-kotlin</artifactId>
-      <version>0.1.0</version>
+      <version>0.1.1</version>
     </dependency>
     <dependency>
       <groupId>com.squareup.okhttp3</groupId>

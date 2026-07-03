@@ -770,6 +770,10 @@ jobs:
         if: ${{ ! inputs.dry_run }}
         run: python3 scripts/check_registry_publication.py --target maven --retries 20 --retry-delay 30
 
+      - name: Verify public Maven Central install
+        if: ${{ ! inputs.dry_run }}
+        run: bash scripts/real_user_maven_central_public_smoke.sh
+
   verify:
     name: Public registry verification
     if: ${{ inputs.target == 'verify' }}

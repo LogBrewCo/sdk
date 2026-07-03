@@ -11,6 +11,26 @@ lock_pid_file="$lock_dir/pid"
 # shellcheck source=scripts/kotlin_okhttp_deps.sh
 source "$repo_root/scripts/kotlin_okhttp_deps.sh"
 
+pom_value() {
+  python3 - "$1" "$2" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+pom = Path(sys.argv[1])
+tag = sys.argv[2]
+root = ET.fromstring(pom.read_text(encoding="utf-8"))
+namespace = {"m": "http://maven.apache.org/POM/4.0.0"}
+value = root.findtext(f"m:{tag}", namespaces=namespace) or root.findtext(tag)
+if not value:
+    raise SystemExit(f"missing {tag} in {pom}")
+print(value)
+PY
+}
+
+kotlin_version="$(pom_value "$package_dir/pom.xml" version)"
+okhttp_version="$(pom_value "$okhttp_package_dir/pom.xml" version)"
+
 acquire_lock() {
   if mkdir "$lock_dir" 2>/dev/null; then
     printf '%s\n' "$$" > "$lock_pid_file"
@@ -95,10 +115,10 @@ python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
   "$okhttp_package_dir/pom.xml" \
   --group-id co.logbrew \
   --artifact-id logbrew-kotlin-okhttp \
-  --version 0.1.0
+  --version "$okhttp_version"
 
-jar --create --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0-sources.jar" -C "$okhttp_package_dir/src/main/kotlin" .
-jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0-sources.jar" > "$tmp_dir/okhttp-sources-jar-contents.txt"
+jar --create --file "$tmp_dir/logbrew-kotlin-okhttp-$okhttp_version-sources.jar" -C "$okhttp_package_dir/src/main/kotlin" .
+jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-$okhttp_version-sources.jar" > "$tmp_dir/okhttp-sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallbacks.kt$' "$tmp_dir/okhttp-sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallFactory.kt$' "$tmp_dir/okhttp-sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpInterceptor.kt$' "$tmp_dir/okhttp-sources-jar-contents.txt"
@@ -106,16 +126,16 @@ grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpRouteTemplates.kt$' "$tmp_dir/okhtt
 
 mkdir -p "$tmp_dir/okhttp-javadoc-stage"
 cp "$okhttp_package_dir/README.md" "$tmp_dir/okhttp-javadoc-stage/README.md"
-jar --create --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0-javadoc.jar" -C "$tmp_dir/okhttp-javadoc-stage" README.md
-jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0-javadoc.jar" > "$tmp_dir/okhttp-javadoc-jar-contents.txt"
+jar --create --file "$tmp_dir/logbrew-kotlin-okhttp-$okhttp_version-javadoc.jar" -C "$tmp_dir/okhttp-javadoc-stage" README.md
+jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-$okhttp_version-javadoc.jar" > "$tmp_dir/okhttp-javadoc-jar-contents.txt"
 grep -q '^README.md$' "$tmp_dir/okhttp-javadoc-jar-contents.txt"
 
 cp "$okhttp_package_dir/pom.xml" "$tmp_dir/okhttp-jar-stage/META-INF/maven/co.logbrew/logbrew-kotlin-okhttp/pom.xml"
 cp "$okhttp_package_dir/README.md" "$tmp_dir/okhttp-jar-stage/README.md"
 mkdir -p "$tmp_dir/okhttp-jar-stage/examples"
 cp -R "$okhttp_package_dir/examples/okhttp_request" "$tmp_dir/okhttp-jar-stage/examples/okhttp_request"
-jar --create --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" -C "$tmp_dir/okhttp-classes" . -C "$tmp_dir/okhttp-jar-stage" .
-jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" > "$tmp_dir/okhttp-jar-contents.txt"
+jar --create --file "$tmp_dir/logbrew-kotlin-okhttp-$okhttp_version.jar" -C "$tmp_dir/okhttp-classes" . -C "$tmp_dir/okhttp-jar-stage" .
+jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-$okhttp_version.jar" > "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallbacks.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallbacks\$TracedCallback.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallFactory.class$' "$tmp_dir/okhttp-jar-contents.txt"
@@ -130,17 +150,19 @@ grep -q '^META-INF/maven/co.logbrew/logbrew-kotlin-okhttp/pom.xml$' "$tmp_dir/ok
 grep -q '^README.md$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^examples/okhttp_request/OkHttpRequestExample.kt$' "$tmp_dir/okhttp-jar-contents.txt"
 
-python3 - "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" <<'PY'
+python3 - "$tmp_dir/logbrew-kotlin-okhttp-$okhttp_version.jar" "$okhttp_version" "$kotlin_version" <<'PY'
 import sys
 import zipfile
 
 jar_path = sys.argv[1]
+okhttp_version = sys.argv[2]
+kotlin_version = sys.argv[3]
 with zipfile.ZipFile(jar_path) as archive:
     readme = archive.read("README.md").decode()
     pom = archive.read("META-INF/maven/co.logbrew/logbrew-kotlin-okhttp/pom.xml").decode()
 for needle in (
-    "co.logbrew:logbrew-kotlin-okhttp:0.1.0",
-    "co.logbrew:logbrew-kotlin:0.1.0",
+    f"co.logbrew:logbrew-kotlin-okhttp:{okhttp_version}",
+    f"co.logbrew:logbrew-kotlin:{kotlin_version}",
     "LogBrewOkHttpInterceptor",
     "LogBrewOkHttpCallbacks",
     "LogBrewOkHttpCallFactory",
@@ -172,10 +194,10 @@ python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
   "$package_dir/pom.xml" \
   --group-id co.logbrew \
   --artifact-id logbrew-kotlin \
-  --version 0.1.0
+  --version "$kotlin_version"
 
-jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0-sources.jar" -C "$package_dir/src/main/kotlin" .
-jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
+jar --create --file "$tmp_dir/logbrew-kotlin-$kotlin_version-sources.jar" -C "$package_dir/src/main/kotlin" .
+jar --list --file "$tmp_dir/logbrew-kotlin-$kotlin_version-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewAndroid.kt$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewCoroutines.kt$' "$tmp_dir/sources-jar-contents.txt"
@@ -186,8 +208,8 @@ grep -q '^co/logbrew/sdk/PublicTypes.kt$' "$tmp_dir/sources-jar-contents.txt"
 
 mkdir -p "$tmp_dir/javadoc-stage"
 cp "$package_dir/README.md" "$tmp_dir/javadoc-stage/README.md"
-jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0-javadoc.jar" -C "$tmp_dir/javadoc-stage" README.md
-jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0-javadoc.jar" > "$tmp_dir/javadoc-jar-contents.txt"
+jar --create --file "$tmp_dir/logbrew-kotlin-$kotlin_version-javadoc.jar" -C "$tmp_dir/javadoc-stage" README.md
+jar --list --file "$tmp_dir/logbrew-kotlin-$kotlin_version-javadoc.jar" > "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^README.md$' "$tmp_dir/javadoc-jar-contents.txt"
 
 cp "$package_dir/pom.xml" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-kotlin/pom.xml"
@@ -198,8 +220,8 @@ cp -R "$package_dir/examples/real_user_smoke" "$tmp_dir/jar-stage/examples/real_
 cp -R "$package_dir/examples/trace_correlation" "$tmp_dir/jar-stage/examples/trace_correlation"
 cp -R "$package_dir/examples/dependency_spans" "$tmp_dir/jar-stage/examples/dependency_spans"
 cp "$package_dir/examples/Makefile" "$tmp_dir/jar-stage/examples/Makefile"
-jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" -C "$tmp_dir/classes" . -C "$tmp_dir/jar-stage" .
-jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
+jar --create --file "$tmp_dir/logbrew-kotlin-$kotlin_version.jar" -C "$tmp_dir/classes" . -C "$tmp_dir/jar-stage" .
+jar --list --file "$tmp_dir/logbrew-kotlin-$kotlin_version.jar" > "$tmp_dir/jar-contents.txt"
 if grep -q '^co/logbrew/sdk/okhttp/' "$tmp_dir/jar-contents.txt"; then
   echo "core Kotlin jar must not contain optional OkHttp integration classes" >&2
   exit 1
@@ -234,16 +256,17 @@ grep -q '^examples/trace_correlation/TraceCorrelation.kt$' "$tmp_dir/jar-content
 grep -q '^examples/dependency_spans/DependencySpans.kt$' "$tmp_dir/jar-contents.txt"
 grep -q '^examples/Makefile$' "$tmp_dir/jar-contents.txt"
 
-python3 - "$tmp_dir/logbrew-kotlin-0.1.0.jar" <<'PY'
+python3 - "$tmp_dir/logbrew-kotlin-$kotlin_version.jar" "$kotlin_version" <<'PY'
 import sys
 import zipfile
 
 jar_path = sys.argv[1]
+kotlin_version = sys.argv[2]
 with zipfile.ZipFile(jar_path) as archive:
     readme = archive.read("README.md").decode()
     pom = archive.read("META-INF/maven/co.logbrew/logbrew-kotlin/pom.xml").decode()
 for needle in (
-    "co.logbrew:logbrew-kotlin:0.1.0",
+    f"co.logbrew:logbrew-kotlin:{kotlin_version}",
     "HttpTransport",
     "https://api.logbrew.com/v1/events",
     "LOGBREW_API_KEY",
@@ -288,7 +311,11 @@ for needle in (
 ):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
-for needle in ("<groupId>co.logbrew</groupId>", "<artifactId>logbrew-kotlin</artifactId>", "<version>0.1.0</version>"):
+for needle in (
+    "<groupId>co.logbrew</groupId>",
+    "<artifactId>logbrew-kotlin</artifactId>",
+    f"<version>{kotlin_version}</version>",
+):
     if needle not in pom:
         raise SystemExit(f"missing pom metadata: {needle}")
 PY
@@ -301,13 +328,13 @@ run_example() {
   shift 4
   local jar_path="$tmp_dir/$name.jar"
   kotlinc "$@" \
-    -classpath "$tmp_dir/logbrew-kotlin-0.1.0.jar" \
+    -classpath "$tmp_dir/logbrew-kotlin-$kotlin_version.jar" \
     -jvm-target 11 \
     -Xjdk-release=11 \
     -Werror \
     -include-runtime \
     -d "$jar_path"
-  java -cp "$jar_path:$tmp_dir/logbrew-kotlin-0.1.0.jar" "$main_class" > "$stdout_path" 2> "$stderr_path"
+  java -cp "$jar_path:$tmp_dir/logbrew-kotlin-$kotlin_version.jar" "$main_class" > "$stdout_path" 2> "$stderr_path"
 }
 
 run_example \

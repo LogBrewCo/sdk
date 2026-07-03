@@ -24,6 +24,7 @@ PACKAGIST_VERSION = "0.1.1"
 DOTNET_VERSION = "0.1.4"
 DOTNET_OTEL_VERSION = "0.1.1"
 UNITY_VERSION = "0.1.1"
+MAVEN_VERSION = "0.1.1"
 PUBLIC_LICENSE = "MIT"
 REPO_URL = "https://github.com/LogBrewCo/sdk"
 NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"
@@ -656,7 +657,7 @@ def validate_maven_pom(
 
     require_equal(failures, relative_path, "groupId", child_text(project, "groupId"), "co.logbrew")
     require_equal(failures, relative_path, "artifactId", child_text(project, "artifactId"), expected_artifact)
-    require_equal(failures, relative_path, "version", child_text(project, "version"), PUBLIC_VERSION)
+    require_equal(failures, relative_path, "version", child_text(project, "version"), MAVEN_VERSION)
     require_equal(failures, relative_path, "packaging", child_text(project, "packaging"), "jar")
     require_equal(failures, relative_path, "name", child_text(project, "name"), expected_name)
     require_equal(failures, relative_path, "url", child_text(project, "url"), REPO_URL)
@@ -928,6 +929,7 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "crates.io exact public version verification": (
                 '--target crates --version "${{ steps.crate-version.outputs.version }}"'
             ),
+            "Maven Central public install smoke": "bash scripts/real_user_maven_central_public_smoke.sh",
         }
         nuget_output_versions = (
             ("exact", "LogBrew", "core_version"),

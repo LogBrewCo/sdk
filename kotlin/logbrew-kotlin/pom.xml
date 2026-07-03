@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>co.logbrew</groupId>
   <artifactId>logbrew-kotlin</artifactId>
-  <version>0.1.0</version>
+  <version>0.1.1</version>
   <packaging>jar</packaging>
   <name>LogBrew Kotlin SDK</name>
   <description>Public LogBrew Kotlin SDK for building, validating, and flushing event batches.</description>

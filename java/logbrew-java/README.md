@@ -10,13 +10,13 @@ The core client, `HttpTransport`, request trace helpers, JDBC helpers, JMS-style
 
 ## Install
 
-After publication, use Maven coordinate:
+Install from Maven Central:
 
 ```xml
 <dependency>
   <groupId>co.logbrew</groupId>
   <artifactId>logbrew-sdk</artifactId>
-  <version>0.1.0</version>
+  <version>0.1.1</version>
 </dependency>
 ```
 

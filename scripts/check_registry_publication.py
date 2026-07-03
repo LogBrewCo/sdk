@@ -18,7 +18,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from check_release_metadata import JS_PACKAGES, PACKAGIST_VERSION, PUBLIC_VERSION, RUBYGEMS_VERSION, RUST_VERSION
+from check_release_metadata import (
+    JS_PACKAGES,
+    MAVEN_VERSION,
+    PACKAGIST_VERSION,
+    PUBLIC_VERSION,
+    RUBYGEMS_VERSION,
+    RUST_VERSION,
+)
 
 
 NPM_PACKAGES = tuple(sorted(JS_PACKAGES.values()))
@@ -28,10 +35,13 @@ PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-django")
 RUBYGEMS_PACKAGES = ("logbrew-sdk",)
 PACKAGIST_PACKAGES = ("logbrew/sdk",)
 CRATES = ("logbrew",)
+MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin", "logbrew-kotlin-okhttp")
+MAVEN_PACKAGE_LABELS = tuple(f"co.logbrew:{artifact_id}" for artifact_id in MAVEN_ARTIFACTS)
 DEFAULT_PACKAGE_VERSIONS = {
     **{package_name: RUBYGEMS_VERSION for package_name in RUBYGEMS_PACKAGES},
     **{package_name: PACKAGIST_VERSION for package_name in PACKAGIST_PACKAGES},
     **{package_name: RUST_VERSION for package_name in CRATES},
+    **{package_name: MAVEN_VERSION for package_name in MAVEN_PACKAGE_LABELS},
 }
 NUGET_PACKAGES = (
     "LogBrew",
@@ -40,8 +50,6 @@ NUGET_PACKAGES = (
     "LogBrew.StackExchangeRedis",
     "LogBrew.OpenTelemetry",
 )
-MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin", "logbrew-kotlin-okhttp")
-MAVEN_PACKAGE_LABELS = tuple(f"co.logbrew:{artifact_id}" for artifact_id in MAVEN_ARTIFACTS)
 OPENUPM_PACKAGES = ("co.logbrew.unity",)
 
 def decode_json(raw: bytes) -> Any:

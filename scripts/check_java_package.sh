@@ -8,6 +8,25 @@ tmp_dir="$(mktemp -d)"
 # shellcheck source=scripts/java_logback_deps.sh
 source "$repo_root/scripts/java_logback_deps.sh"
 
+pom_value() {
+  python3 - "$package_dir/pom.xml" "$1" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+pom = Path(sys.argv[1])
+tag = sys.argv[2]
+root = ET.fromstring(pom.read_text(encoding="utf-8"))
+namespace = {"m": "http://maven.apache.org/POM/4.0.0"}
+value = root.findtext(f"m:{tag}", namespaces=namespace) or root.findtext(tag)
+if not value:
+    raise SystemExit(f"missing {tag} in {pom}")
+print(value)
+PY
+}
+
+package_version="$(pom_value version)"
+
 remove_tmp_dir() {
   rm -rf "$tmp_dir"
 }
@@ -54,7 +73,7 @@ python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
   "$package_dir/pom.xml" \
   --group-id co.logbrew \
   --artifact-id logbrew-sdk \
-  --version 0.1.0
+  --version "$package_version"
 
 javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$java_optional_classpath" -d "$tmp_dir/javadoc" @"$main_sources"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewClient.html"
@@ -87,11 +106,11 @@ test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewLogbackAppender.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/RecordingTransport.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/SdkException.html"
 
-jar --create --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" -C "$package_dir/src/main/java" .
+jar --create --file "$tmp_dir/logbrew-sdk-$package_version-sources.jar" -C "$package_dir/src/main/java" .
 if [ -d "$package_dir/src/main/resources" ]; then
-  jar --update --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" -C "$package_dir/src/main/resources" .
+  jar --update --file "$tmp_dir/logbrew-sdk-$package_version-sources.jar" -C "$package_dir/src/main/resources" .
 fi
-jar --list --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
+jar --list --file "$tmp_dir/logbrew-sdk-$package_version-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.java$' "$tmp_dir/sources-jar-contents.txt"
@@ -123,8 +142,8 @@ grep -q '^co/logbrew/sdk/SupportTicketDraft.java$' "$tmp_dir/sources-jar-content
 grep -q '^co/logbrew/sdk/package-info.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports$' "$tmp_dir/sources-jar-contents.txt"
 
-jar --create --file "$tmp_dir/logbrew-sdk-0.1.0-javadoc.jar" -C "$tmp_dir/javadoc" .
-jar --list --file "$tmp_dir/logbrew-sdk-0.1.0-javadoc.jar" > "$tmp_dir/javadoc-jar-contents.txt"
+jar --create --file "$tmp_dir/logbrew-sdk-$package_version-javadoc.jar" -C "$tmp_dir/javadoc" .
+jar --list --file "$tmp_dir/logbrew-sdk-$package_version-javadoc.jar" > "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^index.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.html$' "$tmp_dir/javadoc-jar-contents.txt"
@@ -159,8 +178,8 @@ cp -R "$tmp_dir/classes/co" "$tmp_dir/jar-stage/co"
 if [ -d "$package_dir/src/main/resources" ]; then
   cp -R "$package_dir/src/main/resources/." "$tmp_dir/jar-stage/"
 fi
-jar --create --file "$tmp_dir/logbrew-sdk-0.1.0.jar" -C "$tmp_dir/jar-stage" .
-jar --list --file "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
+jar --create --file "$tmp_dir/logbrew-sdk-$package_version.jar" -C "$tmp_dir/jar-stage" .
+jar --list --file "$tmp_dir/logbrew-sdk-$package_version.jar" > "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDrop.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDroppedHandler.class$' "$tmp_dir/jar-contents.txt"
@@ -259,24 +278,24 @@ grep -q 'first useful LogBrew payload' "$package_dir/README.md"
 grep -q 'without visual replay, HTTP client patching, request/response payload capture, or header capture' "$package_dir/README.md"
 grep -q 'This SDK does not automatically collect JVM, runtime, or framework metrics yet.' "$package_dir/README.md"
 
-javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$tmp_dir/example-classes" @"$example_sources"
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" ReadmeExample > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
+javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/logbrew-sdk-$package_version.jar:$java_optional_classpath" -d "$tmp_dir/example-classes" @"$example_sources"
+java -cp "$tmp_dir/logbrew-sdk-$package_version.jar:$tmp_dir/example-classes:$java_logback_classpath" ReadmeExample > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme-example.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme-example.stderr.json"
 grep -q '"status":202' "$tmp_dir/readme-example.stderr.json"
 
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" RealUserSmoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
+java -cp "$tmp_dir/logbrew-sdk-$package_version.jar:$tmp_dir/example-classes:$java_logback_classpath" RealUserSmoke > "$tmp_dir/real-user-smoke.stdout.json" 2> "$tmp_dir/real-user-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/real-user-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/real-user-smoke.stderr.json"
 grep -q '"retryAttempts":2' "$tmp_dir/real-user-smoke.stderr.json"
 
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" FirstUsefulTelemetry > "$tmp_dir/first-useful.stdout.json" 2> "$tmp_dir/first-useful.stderr.json"
+java -cp "$tmp_dir/logbrew-sdk-$package_version.jar:$tmp_dir/example-classes:$java_logback_classpath" FirstUsefulTelemetry > "$tmp_dir/first-useful.stdout.json" 2> "$tmp_dir/first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/first-useful.stdout.json" "$tmp_dir/first-useful.stderr.json" >/dev/null
 
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_logback_classpath" HttpTraceCorrelation > "$tmp_dir/http-trace.stdout.json" 2> "$tmp_dir/http-trace.stderr.json"
+java -cp "$tmp_dir/logbrew-sdk-$package_version.jar:$tmp_dir/example-classes:$java_logback_classpath" HttpTraceCorrelation > "$tmp_dir/http-trace.stdout.json" 2> "$tmp_dir/http-trace.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_http_trace_payload.py" "$tmp_dir/http-trace.stdout.json" "$tmp_dir/http-trace.stderr.json" >/dev/null
 
