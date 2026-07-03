@@ -47,6 +47,8 @@ grep -q '^package/index.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/persistence.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/persistence.cjs$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/resource-timing.js$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/resource-timing.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/trace-context.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/trace-context.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/browser-tarball.txt"
@@ -67,6 +69,9 @@ grep -q 'sanitizeMetadata' "$tmp_dir/browser-readme.md"
 grep -q 'query string or hash' "$tmp_dir/browser-readme.md"
 grep -q 'captureBrowserAction' "$tmp_dir/browser-readme.md"
 grep -q 'captureBrowserNetwork' "$tmp_dir/browser-readme.md"
+grep -q 'captureBrowserResourceTiming' "$tmp_dir/browser-readme.md"
+grep -q 'installLogBrewBrowserResourceTimingInstrumentation' "$tmp_dir/browser-readme.md"
+grep -q 'PerformanceObserver' "$tmp_dir/browser-readme.md"
 grep -q 'createBeaconTransport' "$tmp_dir/browser-readme.md"
 grep -q 'createPersistentBrowserTransport' "$tmp_dir/browser-readme.md"
 grep -q 'persistOffline' "$tmp_dir/browser-readme.md"
@@ -122,6 +127,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserNetwork,
+  captureBrowserResourceTiming,
   createBrowserTraceContext,
   createBeaconTransport,
   createFetchTransport,
@@ -130,6 +136,7 @@ import {
   createTraceparentFetch,
   installLogBrewBrowser,
   installLogBrewBrowserNavigationInstrumentation,
+  installLogBrewBrowserResourceTimingInstrumentation,
   shouldPropagateTraceparent
 } from "@logbrew/browser";
 
@@ -537,6 +544,62 @@ if (tracedFetchRequests[2].init.headers.traceparent !== propagatedTraceparent) {
   throw new Error("relative target should receive traceparent");
 }
 
+const resourceWindow = new Window({
+  url: "https://app.example.test/resources?email=dev@example.test#panel"
+});
+const resourceTraceContext = createBrowserTraceContext({
+  spanId: "00f067aa0ba902b7",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+});
+const resourceContext = installLogBrewBrowser({
+  browserWindow: resourceWindow,
+  capturePageViews: false,
+  clientKey: "LOGBREW_BROWSER_KEY",
+  flushOnCapture: false,
+  traceContext: resourceTraceContext,
+  transport: RecordingTransport.alwaysAccept()
+});
+await captureBrowserResourceTiming(createResourceTimingEntry(), resourceContext, {
+  flushOnCapture: false,
+  now: () => "2026-06-02T10:00:11Z",
+  randomValues: () => fillBytes(8, 0x77),
+  resourcePathTemplate: "/api/orders/:id"
+});
+const fakeResourceObserver = createFakePerformanceObserver();
+const resourceInstrumentation = installLogBrewBrowserResourceTimingInstrumentation(resourceContext, {
+  flushOnCapture: false,
+  now: () => "2026-06-02T10:00:12Z",
+  performanceObserver: fakeResourceObserver.PerformanceObserver,
+  randomValues: () => fillBytes(8, 0x88),
+  resourcePathTemplate: ({ path }) => path.replace(/\/\d+$/u, "/:id")
+});
+fakeResourceObserver.emit([createResourceTimingEntry(), { entryType: "mark", name: "ignore-me" }]);
+resourceInstrumentation.uninstall();
+const resourcePayload = JSON.parse(resourceContext.previewJson());
+const resourceBody = JSON.stringify(resourcePayload);
+const resourceSpans = resourcePayload.events.filter((event) => event.type === "span");
+if (resourceSpans.length !== 2) {
+  throw new Error(`expected direct and observed resource spans, got ${resourceBody}`);
+}
+if (fakeResourceObserver.observedOptions().type !== "resource" || fakeResourceObserver.disconnected() !== true) {
+  throw new Error("resource timing observer should be opt-in and reversible");
+}
+if (resourceBody.includes("api.example.test") || resourceBody.includes("sample=private") || resourceBody.includes("#fragment")) {
+  throw new Error(`resource timing metadata leaked URL details: ${resourceBody}`);
+}
+if (resourceSpans[0].attributes.name !== "browser.resource fetch /api/orders/:id") {
+  throw new Error(`unexpected resource span name: ${resourceBody}`);
+}
+if (resourceSpans[0].attributes.traceId !== resourceTraceContext.traceId || resourceSpans[0].attributes.parentSpanId !== resourceTraceContext.spanId) {
+  throw new Error(`expected resource child span correlation, got ${resourceBody}`);
+}
+if (resourceSpans[0].attributes.status !== "error" || resourceSpans[0].attributes.metadata.statusCode !== 503) {
+  throw new Error(`expected failed resource timing status metadata, got ${resourceBody}`);
+}
+if (resourceSpans[0].attributes.metadata.lookupMs !== 5 || resourceSpans[0].attributes.metadata.responseMs !== 50) {
+  throw new Error(`expected bounded resource phase timings, got ${resourceBody}`);
+}
+
 const navigationWindow = new Window({
   url: "https://app.example.test/start?sample=1#hash"
 });
@@ -640,6 +703,7 @@ console.error(JSON.stringify({
   persistedOnlineSends: persistentSends.length,
   propagatedTraceparent,
   rejectionTitle: rejectionPayload.events[0].attributes.title,
+  resourceSpan: resourceSpans[0].attributes.name,
   sessionAction: actionPayload.events[0].attributes.metadata.sessionId,
   syncTitle: syncPayload.events[0].attributes.title
 }));
@@ -693,6 +757,65 @@ function assertPathOnly(payload, expectedPath) {
   if (path !== expectedPath) {
     throw new Error(`expected path ${expectedPath}, got ${path}`);
   }
+}
+
+function createResourceTimingEntry() {
+  return {
+    connectEnd: 40,
+    connectStart: 22,
+    decodedBodySize: 1200,
+    domainLookupEnd: 20,
+    domainLookupStart: 15,
+    duration: 120,
+    encodedBodySize: 900,
+    entryType: "resource",
+    fetchStart: 10,
+    initiatorType: "fetch",
+    name: "https://api.example.test/api/orders/123?sample=private#fragment",
+    redirectEnd: 10,
+    redirectStart: 5,
+    requestStart: 40,
+    responseEnd: 130,
+    responseStart: 80,
+    responseStatus: 503,
+    secureConnectionStart: 25,
+    startTime: 10,
+    transferSize: 1024
+  };
+}
+
+function createFakePerformanceObserver() {
+  let callback;
+  let disconnected = false;
+  let observedOptions;
+  return {
+    PerformanceObserver: class FakePerformanceObserver {
+      constructor(nextCallback) {
+        callback = nextCallback;
+      }
+
+      disconnect() {
+        disconnected = true;
+      }
+
+      observe(nextObservedOptions) {
+        observedOptions = nextObservedOptions;
+      }
+    },
+    disconnected() {
+      return disconnected;
+    },
+    emit(entries) {
+      callback?.({
+        getEntries() {
+          return entries;
+        }
+      });
+    },
+    observedOptions() {
+      return observedOptions;
+    }
+  };
 }
 
 function nextTimestamp() {
@@ -770,6 +893,7 @@ grep -q '"pagehideFlush":"evt_browser_pagehide_001"' "$tmp_dir/browser-smoke.std
 grep -q '"persistedDirectReplay":1' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"persistedOnlineSends":3' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"resourceSpan":"browser.resource fetch /api/orders/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"sessionAction":"sess_browser_001"' "$tmp_dir/browser-smoke.stderr.json"
 
 cat > consumer.ts <<'EOF'
@@ -777,9 +901,11 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserNetwork,
+  captureBrowserResourceTiming,
   createBrowserTraceContext,
   createBrowserActionEvent,
   createBrowserNetworkEvent,
+  createBrowserResourceTimingEvent,
   createBrowserErrorEvent,
   createBeaconTransport,
   createFetchTransport,
@@ -789,10 +915,13 @@ import {
   createTraceparentFetch,
   installLogBrewBrowser,
   installLogBrewBrowserNavigationInstrumentation,
+  installLogBrewBrowserResourceTimingInstrumentation,
   type BrowserNavigationInstrumentation,
   type BrowserMetadataKind,
   type BrowserPersistedReplay,
   type BrowserPersistentStorage,
+  type BrowserResourceTimingInput,
+  type BrowserResourceTimingInstrumentation,
   type LogBrewBrowserContext,
   type PersistentBrowserTransport,
   type TracePropagationTarget
@@ -839,12 +968,27 @@ const network = createBrowserNetworkEvent({
   durationMs: 123,
   sessionId: "sess_browser_001"
 }, window);
+const resourceEntry: BrowserResourceTimingInput = {
+  duration: 12,
+  entryType: "resource",
+  initiatorType: "fetch",
+  name: "https://api.example.test/api/checkout?sample=private",
+  responseStatus: 202,
+  startTime: 0
+};
+const resource = createBrowserResourceTimingEvent(resourceEntry, window, {
+  resourcePathTemplate: "/api/checkout"
+});
 client.span(page.id, page.timestamp, page.attributes);
+client.span(resource.id, resource.timestamp, resource.attributes);
 client.action(action.id, action.timestamp, action.attributes);
 client.action(network.id, network.timestamp, network.attributes);
 client.issue(issue.id, issue.timestamp, issue.attributes);
 void captureBrowserAction("checkout.submitted", context);
 void captureBrowserNetwork("/api/checkout", context);
+void captureBrowserResourceTiming(resourceEntry, context, {
+  resourcePathTemplate: "/api/checkout"
+});
 void context.flush();
 createFetchTransport({
   endpoint: "https://api.logbrew.com/v1/events",
@@ -874,6 +1018,11 @@ const navigation: BrowserNavigationInstrumentation = installLogBrewBrowserNaviga
   randomValues: (length) => new Uint8Array(length),
   traceFlags: "01"
 });
+const resourceTimingInstrumentation: BrowserResourceTimingInstrumentation =
+  installLogBrewBrowserResourceTimingInstrumentation(context, {
+    performanceObserver: window.PerformanceObserver,
+    resourcePathTemplate: ({ path }) => path
+  });
 const tracedFetch = createTraceparentFetch({
   fetchImpl: fetch,
   traceContext,
@@ -887,6 +1036,7 @@ const dynamicTraceFetch = createTraceparentFetch({
 void tracedFetch("/internal/ping");
 void dynamicTraceFetch("/internal/ping");
 navigation.uninstall();
+resourceTimingInstrumentation.uninstall();
 context.uninstall();
 EOF
 cat > tsconfig.json <<'EOF'
@@ -923,6 +1073,12 @@ if (typeof browser.captureBrowserAction !== "function" || typeof browser.createB
 }
 if (typeof browser.captureBrowserNetwork !== "function" || typeof browser.createBrowserNetworkEvent !== "function") {
   throw new Error("missing CommonJS browser network helpers");
+}
+if (typeof browser.captureBrowserResourceTiming !== "function" || typeof browser.createBrowserResourceTimingEvent !== "function") {
+  throw new Error("missing CommonJS browser resource timing helpers");
+}
+if (typeof browser.installLogBrewBrowserResourceTimingInstrumentation !== "function") {
+  throw new Error("missing CommonJS browser resource timing instrumentation helper");
 }
 if (typeof browser.createPersistentBrowserTransport !== "function") {
   throw new Error("missing CommonJS persistent browser transport helper");

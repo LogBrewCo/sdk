@@ -85,6 +85,53 @@ await captureBrowserNetwork({
 
 Action and network metadata is sanitized to primitive values. Keep it low-cardinality and avoid raw selectors, full URLs, query strings, headers, request or response bodies, user-entered text, screenshots, or replay payloads unless your application owns a clear opt-in and redaction policy. `captureBrowserNetwork()` records route templates, methods, status codes, durations, trace IDs, session IDs, and your own primitive metadata; it does not patch `fetch` or inspect network payloads automatically.
 
+## Resource Timing Spans
+
+Use `captureBrowserResourceTiming()` when your app wants browser `PerformanceResourceTiming` entries to appear as trace spans under the current page or route trace. Pass `resourcePathTemplate` for high-cardinality routes so resource spans group by a stable path instead of a specific ID.
+
+```js
+import {
+  captureBrowserResourceTiming,
+  installLogBrewBrowser
+} from "@logbrew/browser";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+
+for (const entry of performance.getEntriesByType("resource")) {
+  if (entry.name.includes("/api/checkout/")) {
+    await captureBrowserResourceTiming(entry, logbrew, {
+      resourcePathTemplate: "/api/checkout/:id"
+    });
+  }
+}
+```
+
+For app-owned automatic capture, opt in with `installLogBrewBrowserResourceTimingInstrumentation()` after setup. It uses `PerformanceObserver` for `resource` entries, can be removed with `uninstall()`, and is not enabled by default.
+
+```js
+import {
+  installLogBrewBrowser,
+  installLogBrewBrowserResourceTimingInstrumentation
+} from "@logbrew/browser";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+
+const resources = installLogBrewBrowserResourceTimingInstrumentation(logbrew, {
+  resourcePathTemplate({ path }) {
+    return path.replace(/\/\d+$/u, "/:id");
+  }
+});
+
+// Later, if your app owns teardown.
+resources.uninstall();
+```
+
+Resource timing spans keep the active trace ID, create a child span ID, record duration, status code when the browser exposes it, initiator type, size fields, and bounded phase timings such as lookup, connect, TLS, request, and response time. They store only path/template metadata; full URLs, hosts, query strings, hash fragments, headers, request or response bodies, cookies, baggage, and tracestate are not captured.
+
 ## Fetch Transport
 
 ```js

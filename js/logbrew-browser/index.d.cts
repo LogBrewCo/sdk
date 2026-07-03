@@ -155,7 +155,43 @@ export type BrowserNetworkInput = string | {
   metadata?: Metadata;
 };
 
-export type BrowserMetadataKind = "page_view" | "action" | "network" | "error" | "unhandledrejection";
+export type BrowserResourceTimingInput = PerformanceResourceTiming | {
+  entryType?: string;
+  name?: string;
+  initiatorType?: string;
+  startTime?: number;
+  duration?: number;
+  workerStart?: number;
+  redirectStart?: number;
+  redirectEnd?: number;
+  fetchStart?: number;
+  domainLookupStart?: number;
+  domainLookupEnd?: number;
+  connectStart?: number;
+  secureConnectionStart?: number;
+  connectEnd?: number;
+  requestStart?: number;
+  responseStart?: number;
+  responseEnd?: number;
+  responseStatus?: number;
+  statusCode?: number;
+  transferSize?: number;
+  encodedBodySize?: number;
+  decodedBodySize?: number;
+  deliveryType?: string;
+};
+
+export type BrowserResourceTimingTemplateContext = {
+  entry: BrowserResourceTimingInput;
+  initiatorType: string;
+  path: string;
+};
+
+export type BrowserResourcePathTemplate =
+  | string
+  | ((context: BrowserResourceTimingTemplateContext) => string | undefined);
+
+export type BrowserMetadataKind = "page_view" | "action" | "network" | "resource" | "error" | "unhandledrejection";
 
 export type BrowserFlushReason = "capture" | "online" | "pagehide" | "visibility_hidden";
 
@@ -239,6 +275,25 @@ export type BrowserNavigationInstrumentation = {
   uninstall(): void;
 };
 
+export type BrowserResourceTimingObserver = {
+  observe(options: { buffered?: boolean; type: "resource" } | { entryTypes: string[] }): void;
+  disconnect(): void;
+};
+
+export type BrowserResourceTimingObserverConstructor = new (
+  callback: (entryList: { getEntries(): BrowserResourceTimingInput[] }) => void
+) => BrowserResourceTimingObserver;
+
+export type BrowserResourceTimingOptions = LogBrewBrowserOptions & {
+  buffered?: boolean;
+  performanceObserver?: BrowserResourceTimingObserverConstructor;
+  resourcePathTemplate?: BrowserResourcePathTemplate;
+};
+
+export type BrowserResourceTimingInstrumentation = {
+  uninstall(): void;
+};
+
 export declare function createLogBrewBrowserClient(
   config?: CreateLogBrewBrowserClientConfig
 ): LogBrewClient;
@@ -281,6 +336,11 @@ export declare function installLogBrewBrowserNavigationInstrumentation(
   options?: BrowserNavigationInstrumentationOptions
 ): BrowserNavigationInstrumentation;
 
+export declare function installLogBrewBrowserResourceTimingInstrumentation(
+  context: LogBrewBrowserContext,
+  options?: BrowserResourceTimingOptions
+): BrowserResourceTimingInstrumentation;
+
 export declare function createLogBrewBrowserContext(
   client: LogBrewClient,
   transport: Transport,
@@ -318,6 +378,12 @@ export declare function captureBrowserNetwork(
   options?: LogBrewBrowserOptions
 ): Promise<TransportResponse | undefined>;
 
+export declare function captureBrowserResourceTiming(
+  entry: BrowserResourceTimingInput,
+  context: LogBrewBrowserContext,
+  options?: BrowserResourceTimingOptions
+): Promise<TransportResponse | undefined>;
+
 export declare function createPageViewEvent(
   browserWindow?: Window,
   options?: LogBrewBrowserOptions
@@ -335,6 +401,12 @@ export declare function createBrowserNetworkEvent(
   options?: LogBrewBrowserOptions
 ): LogBrewBrowserEvent<ActionAttributes>;
 
+export declare function createBrowserResourceTimingEvent(
+  entry: BrowserResourceTimingInput,
+  browserWindow?: Window,
+  options?: BrowserResourceTimingOptions
+): LogBrewBrowserEvent<SpanAttributes>;
+
 export declare function createBrowserErrorEvent(
   error: unknown,
   browserWindow?: Window,
@@ -351,12 +423,14 @@ declare const defaultExport: {
   captureBrowserAction: typeof captureBrowserAction;
   captureBrowserError: typeof captureBrowserError;
   captureBrowserNetwork: typeof captureBrowserNetwork;
+  captureBrowserResourceTiming: typeof captureBrowserResourceTiming;
   capturePageView: typeof capturePageView;
   captureUnhandledRejection: typeof captureUnhandledRejection;
   createBrowserTraceContext: typeof createBrowserTraceContext;
   createBrowserTraceparent: typeof createBrowserTraceparent;
   createBrowserActionEvent: typeof createBrowserActionEvent;
   createBrowserErrorEvent: typeof createBrowserErrorEvent;
+  createBrowserResourceTimingEvent: typeof createBrowserResourceTimingEvent;
   createFetchTransport: typeof createFetchTransport;
   createLogBrewBrowserClient: typeof createLogBrewBrowserClient;
   createLogBrewBrowserContext: typeof createLogBrewBrowserContext;
@@ -366,6 +440,7 @@ declare const defaultExport: {
   createTraceparentFetch: typeof createTraceparentFetch;
   createUnhandledRejectionEvent: typeof createUnhandledRejectionEvent;
   installLogBrewBrowserNavigationInstrumentation: typeof installLogBrewBrowserNavigationInstrumentation;
+  installLogBrewBrowserResourceTimingInstrumentation: typeof installLogBrewBrowserResourceTimingInstrumentation;
   installLogBrewBrowser: typeof installLogBrewBrowser;
   shouldPropagateTraceparent: typeof shouldPropagateTraceparent;
 };

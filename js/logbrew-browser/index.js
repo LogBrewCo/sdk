@@ -7,6 +7,11 @@ import {
 import { createBeaconTransport } from "./beacon-transport.js";
 import { createPersistentBrowserTransport } from "./persistence.js";
 import {
+  captureBrowserResourceTiming,
+  createBrowserResourceTimingEvent,
+  installLogBrewBrowserResourceTimingInstrumentation
+} from "./resource-timing.js";
+import {
   browserTraceMetadata,
   createBrowserTraceContext,
   createBrowserTraceparent,
@@ -17,9 +22,12 @@ import {
 
 export {
   createBeaconTransport,
+  captureBrowserResourceTiming,
+  createBrowserResourceTimingEvent,
   createBrowserTraceContext,
   createBrowserTraceparent,
   createTraceparentFetch,
+  installLogBrewBrowserResourceTimingInstrumentation,
   shouldPropagateTraceparent
 };
 
@@ -916,12 +924,14 @@ export default {
   captureBrowserAction,
   captureBrowserError,
   captureBrowserNetwork,
+  captureBrowserResourceTiming,
   capturePageView,
   captureUnhandledRejection,
   createBrowserTraceContext,
   createBrowserTraceparent,
   createBrowserActionEvent,
   createBrowserErrorEvent,
+  createBrowserResourceTimingEvent,
   createBeaconTransport,
   createFetchTransport,
   createLogBrewBrowserClient,
@@ -932,6 +942,7 @@ export default {
   createTraceparentFetch,
   createUnhandledRejectionEvent,
   installLogBrewBrowserNavigationInstrumentation,
+  installLogBrewBrowserResourceTimingInstrumentation,
   installLogBrewBrowser,
   shouldPropagateTraceparent
 };

@@ -9,6 +9,11 @@ const {
 const { createBeaconTransport } = require("./beacon-transport.cjs");
 const { createPersistentBrowserTransport } = require("./persistence.cjs");
 const {
+  captureBrowserResourceTiming,
+  createBrowserResourceTimingEvent,
+  installLogBrewBrowserResourceTimingInstrumentation
+} = require("./resource-timing.cjs");
+const {
   browserTraceMetadata,
   createBrowserTraceContext,
   createBrowserTraceparent,
@@ -909,12 +914,14 @@ module.exports = {
   captureBrowserAction,
   captureBrowserError,
   captureBrowserNetwork,
+  captureBrowserResourceTiming,
   capturePageView,
   captureUnhandledRejection,
   createBrowserTraceContext,
   createBrowserTraceparent,
   createBrowserActionEvent,
   createBrowserErrorEvent,
+  createBrowserResourceTimingEvent,
   createBeaconTransport,
   createFetchTransport,
   createLogBrewBrowserClient,
@@ -928,12 +935,14 @@ module.exports = {
     captureBrowserAction,
     captureBrowserError,
     captureBrowserNetwork,
+    captureBrowserResourceTiming,
     capturePageView,
     captureUnhandledRejection,
     createBrowserTraceContext,
     createBrowserTraceparent,
     createBrowserActionEvent,
     createBrowserErrorEvent,
+    createBrowserResourceTimingEvent,
     createBeaconTransport,
     createFetchTransport,
     createLogBrewBrowserClient,
@@ -944,10 +953,12 @@ module.exports = {
     createTraceparentFetch,
     createUnhandledRejectionEvent,
     installLogBrewBrowserNavigationInstrumentation,
+    installLogBrewBrowserResourceTimingInstrumentation,
     installLogBrewBrowser,
     shouldPropagateTraceparent
   },
   installLogBrewBrowserNavigationInstrumentation,
+  installLogBrewBrowserResourceTimingInstrumentation,
   installLogBrewBrowser,
   shouldPropagateTraceparent
 };
