@@ -141,7 +141,7 @@ crate_manifest="$tmp_dir/crate-Cargo.toml"
 tar -xOf "$crate_path" logbrew-0.1.0/Cargo.toml > "$crate_manifest"
 crate_examples_makefile="$tmp_dir/crate-examples-Makefile"
 tar -xOf "$crate_path" logbrew-0.1.0/examples/Makefile > "$crate_examples_makefile"
-grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware run-actix-request-middleware run-rocket-request-fairing run-tracing-bridge$' "$crate_examples_makefile"
+grep -q '^\.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-server-request run-axum-request-middleware run-actix-request-middleware run-rocket-request-fairing run-tracing-bridge run-opentelemetry-exporter$' "$crate_examples_makefile"
 grep -q '^help:$' "$crate_examples_makefile"
 grep -q '^run: run-real-user-smoke$' "$crate_examples_makefile"
 grep -q '^run-readme-example:$' "$crate_examples_makefile"
@@ -160,6 +160,8 @@ grep -q '^run-rocket-request-fairing:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --example rocket_request_fairing --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q '^run-tracing-bridge:$' "$crate_examples_makefile"
 grep -q '^	@cargo run --quiet --features tracing --example tracing_bridge --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
+grep -q '^run-opentelemetry-exporter:$' "$crate_examples_makefile"
+grep -q '^	@cargo run --quiet --features opentelemetry-exporter --example opentelemetry_exporter --manifest-path \.\./Cargo.toml$' "$crate_examples_makefile"
 grep -q 'run-readme-example -> make run-readme-example' "$crate_examples_makefile"
 grep -q 'run (real-user-smoke) -> make run' "$crate_examples_makefile"
 grep -q 'run-real-user-smoke -> make run-real-user-smoke' "$crate_examples_makefile"
@@ -169,6 +171,7 @@ grep -q 'run-axum-request-middleware -> make run-axum-request-middleware' "$crat
 grep -q 'run-actix-request-middleware -> make run-actix-request-middleware' "$crate_examples_makefile"
 grep -q 'run-rocket-request-fairing -> make run-rocket-request-fairing' "$crate_examples_makefile"
 grep -q 'run-tracing-bridge -> make run-tracing-bridge' "$crate_examples_makefile"
+grep -q 'run-opentelemetry-exporter -> make run-opentelemetry-exporter' "$crate_examples_makefile"
 python3 - "$crate_manifest" <<'PY'
 from pathlib import Path
 import tomllib
@@ -198,9 +201,15 @@ if features.get("tower") != ["dep:http_types", "dep:tower"]:
     raise SystemExit(f"unexpected packaged tower feature: {features.get('tower')!r}")
 if features.get("tracing") != ["dep:tracing-core", "dep:tracing-subscriber"]:
     raise SystemExit(f"unexpected packaged tracing feature: {features.get('tracing')!r}")
+if features.get("opentelemetry-exporter") != ["dep:opentelemetry", "dep:opentelemetry_sdk"]:
+    raise SystemExit(
+        f"unexpected packaged opentelemetry-exporter feature: {features.get('opentelemetry-exporter')!r}"
+    )
 dependencies = manifest.get("dependencies", {})
 expected_optional = {
     "http_types": "1",
+    "opentelemetry": "0.32",
+    "opentelemetry_sdk": "0.32",
     "tower": "0.5",
     "tracing-core": "0.1",
     "tracing-subscriber": "0.3",
@@ -232,6 +241,7 @@ test -f "$crate_dir/examples/axum_request_middleware.rs"
 test -f "$crate_dir/examples/actix_request_middleware.rs"
 test -f "$crate_dir/examples/rocket_request_fairing.rs"
 test -f "$crate_dir/examples/tracing_bridge.rs"
+test -f "$crate_dir/examples/opentelemetry_exporter.rs"
 test -f "$crate_dir/examples/Makefile"
 
 cargo run --quiet --manifest-path "$crate_dir/Cargo.toml" --example readme_example > "$tmp_dir/packaged-readme-example.stdout.json" 2> "$tmp_dir/packaged-readme-example.stderr.json"
@@ -267,7 +277,8 @@ grep -qx 'run-axum-request-middleware -> make run-axum-request-middleware' <(sed
 grep -qx 'run-actix-request-middleware -> make run-actix-request-middleware' <(sed -n '7p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run-rocket-request-fairing -> make run-rocket-request-fairing' <(sed -n '8p' "$tmp_dir/packaged-example-make-help.txt")
 grep -qx 'run-tracing-bridge -> make run-tracing-bridge' <(sed -n '9p' "$tmp_dir/packaged-example-make-help.txt")
-test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "9"
+grep -qx 'run-opentelemetry-exporter -> make run-opentelemetry-exporter' <(sed -n '10p' "$tmp_dir/packaged-example-make-help.txt")
+test "$(wc -l < "$tmp_dir/packaged-example-make-help.txt" | tr -d ' ')" = "10"
 (cd "$crate_dir/examples" && make run-readme-example) > "$tmp_dir/packaged-readme-example-make.stdout.json" 2> "$tmp_dir/packaged-readme-example-make.stderr.json"
 grep -q '"type": "release"' "$tmp_dir/packaged-readme-example-make.stdout.json"
 grep -q '"type": "environment"' "$tmp_dir/packaged-readme-example-make.stdout.json"
