@@ -102,10 +102,12 @@ export type BrowserTraceContextConfig = BrowserTraceparentConfig & {
   sampled?: boolean;
 };
 
+export type BrowserTraceContextInput = BrowserTraceContext | BrowserTraceContextConfig | string | false | undefined;
+
 export type TraceparentFetchConfig = {
   fetchImpl?: typeof fetch;
   randomValues?: (length: number) => ArrayLike<number>;
-  traceContext?: BrowserTraceContext | BrowserTraceContextConfig | string | false;
+  traceContext?: BrowserTraceContextInput | (() => BrowserTraceContextInput);
   traceFlags?: string;
   traceparent?: string;
   traceparentFactory?: (context: {
@@ -180,10 +182,15 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
   now?: () => string;
   persistOffline?: boolean | Omit<PersistentBrowserTransportConfig, "transport">;
   preventDefault?: boolean;
+  randomValues?: (length: number) => ArrayLike<number>;
   raiseCaptureErrors?: boolean;
   replayPersistedOnInstall?: boolean;
+  sampled?: boolean;
   sanitizeMetadata?: (metadata: Metadata, kind: BrowserMetadataKind) => Metadata;
-  traceContext?: BrowserTraceContext | BrowserTraceContextConfig | string | false;
+  spanId?: string;
+  traceContext?: BrowserTraceContextInput;
+  traceFlags?: string;
+  traceId?: string;
   pageViewEvent?: (
     context: { browserWindow?: Window; client: LogBrewClient; traceContext?: BrowserTraceContext }
   ) => LogBrewBrowserEvent<SpanAttributes>;
@@ -224,6 +231,14 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
   ) => void | Promise<void>;
 };
 
+export type BrowserNavigationInstrumentationOptions = LogBrewBrowserOptions & {
+  captureInitial?: boolean;
+};
+
+export type BrowserNavigationInstrumentation = {
+  uninstall(): void;
+};
+
 export declare function createLogBrewBrowserClient(
   config?: CreateLogBrewBrowserClientConfig
 ): LogBrewClient;
@@ -261,12 +276,17 @@ export declare function installLogBrewBrowser(
   options?: LogBrewBrowserOptions
 ): LogBrewBrowserContext;
 
+export declare function installLogBrewBrowserNavigationInstrumentation(
+  context: LogBrewBrowserContext,
+  options?: BrowserNavigationInstrumentationOptions
+): BrowserNavigationInstrumentation;
+
 export declare function createLogBrewBrowserContext(
   client: LogBrewClient,
   transport: Transport,
   browserWindow?: Window,
   uninstall?: () => void,
-  traceContext?: BrowserTraceContext | BrowserTraceContextConfig | string | false
+  traceContext?: BrowserTraceContextInput
 ): LogBrewBrowserContext;
 
 export declare function capturePageView(
@@ -345,6 +365,7 @@ declare const defaultExport: {
   createPersistentBrowserTransport: typeof createPersistentBrowserTransport;
   createTraceparentFetch: typeof createTraceparentFetch;
   createUnhandledRejectionEvent: typeof createUnhandledRejectionEvent;
+  installLogBrewBrowserNavigationInstrumentation: typeof installLogBrewBrowserNavigationInstrumentation;
   installLogBrewBrowser: typeof installLogBrewBrowser;
   shouldPropagateTraceparent: typeof shouldPropagateTraceparent;
 };

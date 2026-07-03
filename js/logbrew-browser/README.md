@@ -33,6 +33,8 @@ logbrew.client.log("evt_log_001", new Date().toISOString(), {
 
 `installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, creates one W3C trace context for the browser session, flushes queued events when the page becomes hidden, receives `pagehide`, or comes back `online`, and returns a handle with `client`, `traceContext`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`.
 
+Route changes in single-page apps are explicit. Use `installLogBrewBrowserNavigationInstrumentation()` when your app wants LogBrew to observe `history.pushState`, `history.replaceState`, and `popstate`, create a fresh route trace context, and capture a page-view span for each path change. It is not installed by default.
+
 `onFlush(response, context, details)` and `onCaptureError(error, context, details)` receive `details.reason` as `capture`, `online`, `pagehide`, or `visibility_hidden`, so apps can distinguish normal capture flushes from lifecycle and connectivity delivery without parsing browser events globally.
 
 For browser apps, prefer a browser-scoped public key through `clientKey`. `apiKey` is still accepted for compatibility with lower-level SDK examples.
@@ -172,9 +174,55 @@ await tracedFetch("/api/checkout", {
 
 `installLogBrewBrowser()` creates a shared `traceContext` automatically and uses it for the initial page-view span, browser action metadata, browser error metadata, unhandled rejection metadata, and app-owned network milestone metadata. Pass `traceContext: logbrew.traceContext` to `createTraceparentFetch()` when the browser request should use the same trace as the page and product actions.
 
+If your app renews the active trace on SPA navigation, pass a provider so each request gets the current route trace:
+
+```js
+const tracedFetch = createTraceparentFetch({
+  traceContext: () => logbrew.traceContext,
+  tracePropagationTargets: [/^\/api\//]
+});
+```
+
 `tracePropagationTargets` accepts strings, regular expressions, or `(url) => boolean` functions. String URL targets apply only to the same origin plus a path prefix, so `https://api.example.com/v1` covers `/v1/orders` on that origin but not `https://wrong.example.com` or `/v10`. Keep targets narrow so browser requests do not send tracing headers to unrelated origins. If the API is on another origin, configure that backend's CORS policy to allow the `traceparent` request header.
 
 LogBrew does not patch global `fetch` or XHR, capture request/response bodies, copy arbitrary headers, store query strings or hash fragments by default, or emit W3C baggage/tracestate from the browser helper. Use explicit app-owned network milestones for the routes that matter.
+
+## SPA Navigation Tracing
+
+Use the navigation helper after `installLogBrewBrowser()` when a browser app wants route-level page-view spans and route-scoped trace correlation without adopting a framework integration.
+
+```js
+import {
+  captureBrowserAction,
+  createTraceparentFetch,
+  installLogBrewBrowser,
+  installLogBrewBrowserNavigationInstrumentation
+} from "@logbrew/browser";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+
+const navigation = installLogBrewBrowserNavigationInstrumentation(logbrew);
+
+const tracedFetch = createTraceparentFetch({
+  traceContext: () => logbrew.traceContext,
+  tracePropagationTargets: [/^\/api\//]
+});
+
+await captureBrowserAction({
+  name: "settings.opened",
+  metadata: {
+    routeTemplate: "/settings"
+  }
+}, logbrew);
+
+await tracedFetch("/api/settings");
+
+navigation.uninstall();
+```
+
+The helper captures only path changes by default. Query strings, hash fragments, history state objects, request bodies, response bodies, headers, browser storage values, screenshots, and replay data are not copied into telemetry. `uninstall()` removes the `popstate` listener and puts the original `history.pushState` and `history.replaceState` functions back when they are still the LogBrew wrappers.
 
 ## Example Source
 

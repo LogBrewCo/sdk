@@ -1,5 +1,28 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: Browser SPA navigation trace gap reduced after source reads from
+  Sentry JS `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
+  (`browserTracingIntegration`, `startBrowserTracingNavigationSpan`, React
+  Router instrumentation), Datadog Browser SDK
+  `DataDog/browser-sdk@d2c7e303e4533f40e93d447042a67571f7ba97ff`
+  (`trackViews`, `renewViewOnLocationChange`, Next/React router view helpers),
+  PostHog JS `PostHog/posthog-js@e480a3e23ecff45d2f9cf50332f6f59c54a7c736`
+  (`startHistoryChangeTracking`, `captureNavigationEvent`,
+  `capture_pageview: "history_change"`), and OTel JS Contrib
+  `open-telemetry/opentelemetry-js-contrib@366df61d2dab9dfda93f60f49bb4436d9c49d157`
+  (web/document-load/fetch/user-interaction instrumentation). LogBrew now
+  exports opt-in `installLogBrewBrowserNavigationInstrumentation(...)` plus
+  dynamic `createTraceparentFetch({ traceContext: () => logbrew.traceContext })`:
+  SPA path changes renew the active W3C trace context, capture path-only
+  page-view spans, correlate later actions/errors/network milestones, and
+  uninstall cleanly. Evidence: RED focused browser trace test failed on missing
+  helper; GREEN `node --test js/logbrew-browser/test/trace-context.test.mjs`,
+  `npm test --prefix js/logbrew-browser`, and packed temporary-app browser
+  smoke with `happy-dom@20.10.1` passed. Research:
+  `docs/competitor-research/browser-navigation-tracing-2026-07-03.md`.
+  Remaining browser gaps: framework-owned route-pattern helpers, safe
+  navigation/resource timing spans, automatic fetch/XHR spans, and backend
+  source-map/symbolication proof still trail Sentry/Datadog.
 - 2026-07-03: Browser unload-safe delivery gap reduced after source reads from
   Sentry JS `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
   (`packages/browser/src/transports/fetch.ts`, fetch keepalive byte/count

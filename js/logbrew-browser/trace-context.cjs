@@ -52,7 +52,7 @@ function createTraceparentFetch({
   if (traceparentFactory !== undefined && typeof traceparentFactory !== "function") {
     throw new SdkError("configuration_error", "traceparentFactory must be a function");
   }
-  const fetchTraceContext = optionalBrowserTraceContext(traceContext);
+  const fetchTraceContext = traceContextProvider(traceContext);
 
   return async function tracedFetch(input, init) {
     const url = requestUrl(input);
@@ -65,7 +65,7 @@ function createTraceparentFetch({
       init,
       input,
       randomValues,
-      traceContext: fetchTraceContext,
+      traceContext: fetchTraceContext(),
       traceFlags,
       traceparent,
       traceparentFactory,
@@ -149,6 +149,14 @@ function browserTraceContextFromParsed(parsed) {
     traceFlags: parsed.traceFlags,
     traceId: parsed.traceId
   };
+}
+
+function traceContextProvider(traceContext) {
+  if (typeof traceContext === "function") {
+    return () => optionalBrowserTraceContext(traceContext());
+  }
+  const fetchTraceContext = optionalBrowserTraceContext(traceContext);
+  return () => fetchTraceContext;
 }
 
 function traceparentForRequest({

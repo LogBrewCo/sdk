@@ -153,6 +153,72 @@ export function installLogBrewBrowser(options = {}) {
   return context;
 }
 
+export function installLogBrewBrowserNavigationInstrumentation(context, options = {}) {
+  if (!context || typeof context !== "object" || !context.client) {
+    throw new SdkError("configuration_error", "installLogBrewBrowserNavigationInstrumentation requires a browser context");
+  }
+  const browserWindow = options.browserWindow ?? context.browserWindow ?? defaultWindow();
+  if (!browserWindow || typeof browserWindow.addEventListener !== "function") {
+    throw new SdkError("configuration_error", "installLogBrewBrowserNavigationInstrumentation requires a browser window");
+  }
+
+  const includeHash = options.includeHash === true;
+  const includeQueryString = options.includeQueryString === true;
+  let currentPath = browserPath(browserWindow, { includeHash, includeQueryString });
+  let installed = true;
+  const history = browserWindow.history;
+  const originalPushState = typeof history?.pushState === "function" ? history.pushState : undefined;
+  const originalReplaceState = typeof history?.replaceState === "function" ? history.replaceState : undefined;
+  let wrappedPushState;
+  let wrappedReplaceState;
+  const updateCurrentPath = (nextPath) => {
+    currentPath = nextPath;
+  };
+  const popstate = () => {
+    captureNavigationPageView(context, browserWindow, currentPath, "popstate", options, updateCurrentPath);
+  };
+
+  if (options.captureInitial === true) {
+    captureNavigationPageView(context, browserWindow, undefined, "initial", options, updateCurrentPath);
+  }
+
+  if (originalPushState) {
+    wrappedPushState = function logbrewPushState(...args) {
+      const result = Reflect.apply(originalPushState, history, args);
+      captureNavigationPageView(context, browserWindow, currentPath, "pushState", options, updateCurrentPath);
+      return result;
+    };
+    history.pushState = wrappedPushState;
+  }
+
+  if (originalReplaceState) {
+    wrappedReplaceState = function logbrewReplaceState(...args) {
+      const result = Reflect.apply(originalReplaceState, history, args);
+      captureNavigationPageView(context, browserWindow, currentPath, "replaceState", options, updateCurrentPath);
+      return result;
+    };
+    history.replaceState = wrappedReplaceState;
+  }
+
+  browserWindow.addEventListener("popstate", popstate);
+
+  return {
+    uninstall() {
+      if (!installed) {
+        return;
+      }
+      installed = false;
+      browserWindow.removeEventListener?.("popstate", popstate);
+      if (wrappedPushState && history.pushState === wrappedPushState) {
+        history.pushState = originalPushState;
+      }
+      if (wrappedReplaceState && history.replaceState === wrappedReplaceState) {
+        history.replaceState = originalReplaceState;
+      }
+    }
+  };
+}
+
 export function createLogBrewBrowserContext(
   client,
   transport,
@@ -224,6 +290,42 @@ export async function captureBrowserNetwork(request, context, options = {}) {
 
   context.client.action(event.id, event.timestamp, event.attributes);
   return flushAfterCapture(context, options);
+}
+
+function captureNavigationPageView(context, browserWindow, previousPath, navigationType, options, updateCurrentPath) {
+  const includeHash = options.includeHash === true;
+  const includeQueryString = options.includeQueryString === true;
+  const nextPath = browserPath(browserWindow, { includeHash, includeQueryString });
+  if (previousPath !== undefined && nextPath === previousPath) {
+    return;
+  }
+
+  updateCurrentPath(nextPath);
+  context.traceContext = createBrowserTraceContext({
+    randomValues: options.randomValues,
+    sampled: options.sampled,
+    traceFlags: options.traceFlags
+  });
+  const navigationMetadata = compactMetadata({
+    navigationType,
+    previousPath,
+    routeChange: true
+  });
+  const captureOptions = {
+    ...options,
+    metadata: mergeMetadata(options.metadata, navigationMetadata),
+    traceContext: context.traceContext
+  };
+  try {
+    void capturePageView(context, captureOptions);
+  } catch (error) {
+    if (typeof options.onCaptureError === "function") {
+      void options.onCaptureError(error, context, { reason: "capture" });
+    }
+    if (options.raiseCaptureErrors === true) {
+      throw error;
+    }
+  }
 }
 
 export function createPageViewEvent(browserWindow = defaultWindow(), {
@@ -829,6 +931,7 @@ export default {
   createPersistentBrowserTransport,
   createTraceparentFetch,
   createUnhandledRejectionEvent,
+  installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowser,
   shouldPropagateTraceparent
 };

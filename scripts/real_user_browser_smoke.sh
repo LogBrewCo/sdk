@@ -60,6 +60,7 @@ grep -q 'npm install @logbrew/sdk @logbrew/browser' "$tmp_dir/browser-readme.md"
 grep -q 'pnpm add @logbrew/sdk @logbrew/browser' "$tmp_dir/browser-readme.md"
 grep -q 'LOGBREW_BROWSER_KEY' "$tmp_dir/browser-readme.md"
 grep -q 'installLogBrewBrowser' "$tmp_dir/browser-readme.md"
+grep -q 'installLogBrewBrowserNavigationInstrumentation' "$tmp_dir/browser-readme.md"
 grep -q 'flushOnPageHide' "$tmp_dir/browser-readme.md"
 grep -q 'flushOnVisibilityHidden' "$tmp_dir/browser-readme.md"
 grep -q 'sanitizeMetadata' "$tmp_dir/browser-readme.md"
@@ -73,6 +74,8 @@ grep -q 'sessionId' "$tmp_dir/browser-readme.md"
 grep -q 'createTraceparentFetch' "$tmp_dir/browser-readme.md"
 grep -q 'createBrowserTraceContext' "$tmp_dir/browser-readme.md"
 grep -q 'tracePropagationTargets' "$tmp_dir/browser-readme.md"
+grep -q 'traceContext: () => logbrew.traceContext' "$tmp_dir/browser-readme.md"
+grep -q 'history.pushState' "$tmp_dir/browser-readme.md"
 
 app_dir="$tmp_dir/browser-smoke-app"
 mkdir -p "$app_dir"
@@ -126,6 +129,7 @@ import {
   createPersistentBrowserTransport,
   createTraceparentFetch,
   installLogBrewBrowser,
+  installLogBrewBrowserNavigationInstrumentation,
   shouldPropagateTraceparent
 } from "@logbrew/browser";
 
@@ -533,6 +537,82 @@ if (tracedFetchRequests[2].init.headers.traceparent !== propagatedTraceparent) {
   throw new Error("relative target should receive traceparent");
 }
 
+const navigationWindow = new Window({
+  url: "https://app.example.test/start?sample=1#hash"
+});
+const navigationContext = installLogBrewBrowser({
+  browserWindow: navigationWindow,
+  capturePageViews: false,
+  clientKey: "LOGBREW_BROWSER_KEY",
+  flushOnCapture: false,
+  traceContext: createBrowserTraceContext({
+    spanId: "00f067aa0ba902b7",
+    traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+  }),
+  transport: RecordingTransport.alwaysAccept()
+});
+const navigationInstrumentation = installLogBrewBrowserNavigationInstrumentation(navigationContext, {
+  flushOnCapture: false,
+  randomValues: sequenceRandomValues([
+    fillBytes(8, 0x22),
+    fillBytes(16, 0x11)
+  ])
+});
+navigationWindow.history.pushState({ marker: "drop" }, "", "/account?sample=1#panel");
+await captureBrowserAction({
+  name: "account.loaded",
+  metadata: {
+    ignoredNested: { marker: "drop" },
+    routeTemplate: "/account"
+  }
+}, navigationContext, {
+  flushOnCapture: false
+});
+const navigationRequests = [];
+const navigationFetch = createTraceparentFetch({
+  fetchImpl: async (input, init = {}) => {
+    navigationRequests.push({ input, init });
+    return { status: 204 };
+  },
+  traceContext: () => navigationContext.traceContext,
+  tracePropagationTargets: [/^\/api\//u]
+});
+await navigationFetch("/api/account?sample=1");
+navigationInstrumentation.uninstall();
+navigationWindow.history.pushState({}, "", "/after-uninstall?sample=1#hash");
+const navigationPayload = JSON.parse(navigationContext.previewJson());
+const navigationSpan = navigationPayload.events.find((event) => event.type === "span");
+const navigationAction = navigationPayload.events.find((event) => event.type === "action");
+const navigationBody = JSON.stringify(navigationPayload);
+if (navigationPayload.events.length !== 2) {
+  throw new Error(`expected navigation span plus action only: ${navigationBody}`);
+}
+if (navigationBody.includes("sample=1") || navigationBody.includes("#panel")) {
+  throw new Error(`navigation instrumentation leaked URL details: ${navigationBody}`);
+}
+if (navigationSpan.attributes.metadata.path !== "/account") {
+  throw new Error(`expected navigation path, got ${navigationBody}`);
+}
+if (navigationSpan.attributes.metadata.previousPath !== "/start") {
+  throw new Error(`expected previous navigation path, got ${navigationBody}`);
+}
+if (navigationSpan.attributes.metadata.navigationType !== "pushState") {
+  throw new Error(`expected pushState navigation metadata, got ${navigationBody}`);
+}
+if (navigationSpan.attributes.traceId !== "11111111111111111111111111111111" || navigationSpan.attributes.spanId !== "2222222222222222") {
+  throw new Error(`expected renewed navigation trace context, got ${navigationBody}`);
+}
+if (navigationAction.attributes.metadata.traceId !== navigationSpan.attributes.traceId || navigationAction.attributes.metadata.spanId !== navigationSpan.attributes.spanId) {
+  throw new Error(`expected action to use route trace context, got ${navigationBody}`);
+}
+if (navigationAction.attributes.metadata.ignoredNested !== undefined) {
+  throw new Error(`nested navigation action metadata should be dropped: ${navigationBody}`);
+}
+const navigationTraceparent = navigationRequests[0].init.headers.traceparent;
+if (navigationTraceparent !== "00-11111111111111111111111111111111-2222222222222222-01") {
+  throw new Error(`expected dynamic route traceparent, got ${navigationTraceparent}`);
+}
+
 const fullClient = createLogBrewBrowserClient({
   clientKey: "LOGBREW_BROWSER_KEY",
   sdkName: "browser-smoke-app",
@@ -552,6 +632,8 @@ console.error(JSON.stringify({
   fullAttempts: fullResponse.attempts,
   hiddenFlush: hiddenPayload.events[0].id,
   networkRoute: networkPayload.events[0].attributes.metadata.routeTemplate,
+  navigationPath: navigationSpan.attributes.metadata.path,
+  navigationTraceparent,
   pagePath: pagePayload.events[0].attributes.metadata.path,
   pagehideFlush: pagehidePayload.events[0].id,
   persistedDirectReplay: directPersistentReplay.delivered,
@@ -640,6 +722,21 @@ function createMemoryStorage() {
   };
 }
 
+function fillBytes(length, value) {
+  return Array.from({ length }, () => value);
+}
+
+function sequenceRandomValues(values) {
+  let index = 0;
+  return (length) => {
+    const next = values[index++] ?? fillBytes(length, 0xaa);
+    if (next.length !== length) {
+      throw new Error(`expected ${length} random bytes, got ${next.length}`);
+    }
+    return next;
+  };
+}
+
 async function waitFor(predicate) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (predicate()) {
@@ -666,6 +763,8 @@ grep -q '"browserDeliveries":8' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"fullAttempts":2' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"hiddenFlush":"evt_browser_hidden_001"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"networkRoute":"/api/checkout"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"navigationPath":"/account"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"navigationTraceparent":"00-11111111111111111111111111111111-2222222222222222-01"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"pagePath":"/dashboard"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"pagehideFlush":"evt_browser_pagehide_001"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"persistedDirectReplay":1' "$tmp_dir/browser-smoke.stderr.json"
@@ -689,6 +788,8 @@ import {
   createPersistentBrowserTransport,
   createTraceparentFetch,
   installLogBrewBrowser,
+  installLogBrewBrowserNavigationInstrumentation,
+  type BrowserNavigationInstrumentation,
   type BrowserMetadataKind,
   type BrowserPersistedReplay,
   type BrowserPersistentStorage,
@@ -767,12 +868,25 @@ const traceContext = createBrowserTraceContext({
   traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
   spanId: "b7ad6b7169203331"
 });
+const navigation: BrowserNavigationInstrumentation = installLogBrewBrowserNavigationInstrumentation(context, {
+  captureInitial: false,
+  flushOnCapture: false,
+  randomValues: (length) => new Uint8Array(length),
+  traceFlags: "01"
+});
 const tracedFetch = createTraceparentFetch({
   fetchImpl: fetch,
   traceContext,
   tracePropagationTargets: traceTargets
 });
+const dynamicTraceFetch = createTraceparentFetch({
+  fetchImpl: fetch,
+  traceContext: () => context.traceContext,
+  tracePropagationTargets: traceTargets
+});
 void tracedFetch("/internal/ping");
+void dynamicTraceFetch("/internal/ping");
+navigation.uninstall();
 context.uninstall();
 EOF
 cat > tsconfig.json <<'EOF'
@@ -797,6 +911,9 @@ const { RecordingTransport } = require("@logbrew/sdk");
 
 if (typeof browser.installLogBrewBrowser !== "function") {
   throw new Error("missing CommonJS browser install helper");
+}
+if (typeof browser.installLogBrewBrowserNavigationInstrumentation !== "function") {
+  throw new Error("missing CommonJS browser navigation helper");
 }
 if (typeof browser.createTraceparentFetch !== "function" || typeof browser.createBrowserTraceContext !== "function") {
   throw new Error("missing CommonJS browser trace helpers");
