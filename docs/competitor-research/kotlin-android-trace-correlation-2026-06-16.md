@@ -436,3 +436,36 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 ### Remaining Gaps After Span Event Summaries
 
 - Kotlin still lacks OpenTelemetry-style links, baggage, tracestate, full exception payloads, automatic event capture, automatic HttpURLConnection instrumentation, and native symbolication parity. Those remain deliberate gaps until they have source-backed, privacy-bounded designs.
+
+## 2026-07-03 OkHttp Route Template Follow-Up
+
+### Source Re-Read
+
+- Read Sentry Java/Android `getsentry/sentry-java@2ad4e0dfc7b8138bbce76e521555dbc1ccacdd0e` `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpInterceptor.kt`: constructor `beforeSpan`, `intercept(...)`, request builder propagation, response/error finish, and `SentryOkHttpInterceptorTest.kt` customizer coverage.
+- Read Sentry `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpUtils.kt`: parameterized route limitation and query/fragment stripping.
+- Read OpenTelemetry Java Instrumentation `open-telemetry/opentelemetry-java-instrumentation@43737cfdd5902e3d19c722f5f846bae085513ab4` `OkHttpTelemetryBuilder.java`: `setSpanNameExtractorCustomizer(...)`, plus `internal/TracingInterceptor.java` and `TracingCallFactory.java` for request-context propagation and scoped execution.
+- Read Datadog Android `DataDog/dd-sdk-android@c1b82590987a81348f3d4236a71662cd2b8db7b0` `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/trace/TracingInterceptor.kt`: resource-name span setup, request update, response/error handling, and 404 resource-name redaction options.
+- Read Datadog `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/internal/OkHttpRequestInfo.kt`: request identity model for RUM/APM resource tracking.
+- Checked PostHog Android `PostHog/posthog-android@47eca08cccf002c576b5cf5e87aafa0ed3fe96aa`; no comparable OkHttp tracing/interceptor source was found.
+
+### Pattern And Tradeoffs
+
+- Mature OkHttp integrations give teams a way to avoid high-cardinality request names. Sentry exposes a broad span customizer, OpenTelemetry exposes a span-name extractor customizer, and Datadog derives sanitized resource names with configurable redaction behavior.
+- Broad customizers are powerful but can also let app code attach full URLs, headers, payload-like values, or unstable IDs to spans. LogBrew should provide the common low-cardinality route-template path directly and keep richer mutation surfaces out until they have stronger privacy and verification evidence.
+
+### LogBrew Follow-Up Implementation
+
+- Added `LogBrewOkHttpRouteTemplates.tag(request, routeTemplate)` and builder overloads so API clients can tag each known request route such as `/api/orders/{order_id}` before the `OkHttpClient` executes it.
+- `LogBrewOkHttpInterceptor` now prefers the request-local route template, then its constructor fallback, then the sanitized path. This makes one shared `OkHttpClient` useful across many endpoints without leaking path IDs, query strings, fragments, headers, payloads, baggage, or tracestate.
+- `LogBrewAndroid.startRequestSpan(...)` now also emits low-cardinality semantic keys `http.request.method` and `http.route`; request completion adds `http.response.status_code`.
+- README and packaged OkHttp example now show per-request route tagging as the primary path and interceptor-level `routeTemplate` only as a fallback for same-route clients.
+
+### Verification
+
+- TDD red: `bash scripts/check_kotlin_package.sh` failed on unresolved `LogBrewOkHttpRouteTemplates` before the helper existed.
+- Green: `bash scripts/check_kotlin_package.sh` passed with 32 core Kotlin tests, 7 OkHttp tests, Maven metadata checks, source/javadoc/binary jar inspection, README checks, packaged example checks, and the core-jar isolation guard.
+- Installed-artifact proof: `bash scripts/real_user_kotlin_smoke.sh` passed from a temporary Gradle app resolving local Maven artifacts; the OkHttp artifact now includes the route-template helper classes.
+
+### Remaining Gaps After OkHttp Route Template Follow-Up
+
+- Kotlin Android still lacks hidden/global OkHttp or HttpURLConnection instrumentation, request phase timings, baggage/tracestate, richer automatic span events/exceptions, DB/cache/queue automatic spans, and native crash/symbolication parity.

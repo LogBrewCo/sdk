@@ -1,5 +1,34 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: Kotlin OkHttp route-template cardinality gap reduced after
+  source reads from Sentry Java/Android
+  `getsentry/sentry-java@2ad4e0dfc7b8138bbce76e521555dbc1ccacdd0e`
+  (`SentryOkHttpInterceptor` `beforeSpan`/`intercept`,
+  `SentryOkHttpUtils`, and customizer tests), OpenTelemetry Java
+  Instrumentation
+  `open-telemetry/opentelemetry-java-instrumentation@43737cfdd5902e3d19c722f5f846bae085513ab4`
+  (`OkHttpTelemetryBuilder.setSpanNameExtractorCustomizer`,
+  `TracingInterceptor`, `TracingCallFactory`), Datadog Android
+  `DataDog/dd-sdk-android@c1b82590987a81348f3d4236a71662cd2b8db7b0`
+  (`TracingInterceptor`, `OkHttpRequestInfo`), and PostHog Android
+  `PostHog/posthog-android@47eca08cccf002c576b5cf5e87aafa0ed3fe96aa`
+  (no comparable OkHttp tracing path found). New
+  `LogBrewOkHttpRouteTemplates` lets app API clients tag each request with a
+  known route pattern; `LogBrewOkHttpInterceptor` prefers that per-request
+  route, then constructor fallback, then sanitized path, and core Android
+  request spans now include `http.request.method`, `http.route`, and
+  `http.response.status_code`. This keeps one shared OkHttp client useful
+  across many endpoints while avoiding broad span customizers, global HTTP
+  patching, full URLs, query/fragment IDs, headers, payloads, baggage, and
+  tracestate. Evidence: RED `bash scripts/check_kotlin_package.sh` failed on
+  missing `LogBrewOkHttpRouteTemplates`; GREEN `bash
+  scripts/check_kotlin_package.sh` and `bash scripts/real_user_kotlin_smoke.sh`
+  passed with packaged route helper classes and 7 OkHttp tests. Research:
+  `docs/competitor-research/kotlin-android-trace-correlation-2026-06-16.md`.
+  Remaining Kotlin HTTP gaps: hidden/global OkHttp/HttpURLConnection
+  instrumentation, request phase timings, baggage/tracestate, richer automatic
+  span events/exceptions, automatic DB/cache/queue spans, and native
+  symbolication parity.
 - 2026-07-03: Java outbound `java.net.http.HttpClient` tracing helper added
   after source reads from Sentry Java
   `getsentry/sentry-java@34c912af8ac0b9def83ad0dbfe8d1452d460c7ed`

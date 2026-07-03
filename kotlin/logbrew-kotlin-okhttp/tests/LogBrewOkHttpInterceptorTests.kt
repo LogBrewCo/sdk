@@ -7,6 +7,7 @@ import co.logbrew.sdk.okhttp.LogBrewOkHttpCallbacks
 import co.logbrew.sdk.okhttp.LogBrewOkHttpCaptureFailureHandler
 import co.logbrew.sdk.okhttp.LogBrewOkHttpEventIdProvider
 import co.logbrew.sdk.okhttp.LogBrewOkHttpInterceptor
+import co.logbrew.sdk.okhttp.LogBrewOkHttpRouteTemplates
 import co.logbrew.sdk.okhttp.LogBrewOkHttpTimestampProvider
 import okhttp3.Call
 import okhttp3.Callback
@@ -22,10 +23,12 @@ import java.util.concurrent.TimeUnit
 fun main() {
     run("okhttp_interceptor_injects_traceparent_and_captures_response_span", ::okHttpInterceptorCapturesResponse)
     run("okhttp_interceptor_rethrows_original_failure_and_captures_error_span", ::okHttpInterceptorCapturesFailure)
+    run("okhttp_interceptor_prefers_request_route_template_tag", ::okHttpInterceptorPrefersRequestRouteTemplateTag)
     run("okhttp_interceptor_reports_capture_failure_without_breaking_request", ::okHttpInterceptorReportsCaptureFailure)
     run("okhttp_callback_wrapper_reactivates_registration_trace", ::okHttpCallbackWrapperReactivatesTrace)
     run("okhttp_call_factory_carries_trace_into_async_request_and_callback", ::okHttpCallFactoryCarriesTrace)
-    println("kotlin okhttp package tests ok (5 tests)")
+    run("okhttp_call_factory_preserves_request_route_template_tag", ::okHttpCallFactoryPreservesRouteTemplateTag)
+    println("kotlin okhttp package tests ok (7 tests)")
 }
 
 private fun run(
@@ -129,6 +132,49 @@ private fun okHttpInterceptorCapturesFailure() {
     check("\"errorType\": \"IOException\"" in body)
     check("\"errorMessage\": \"network down\"" in body)
     check("debug_code=abc" !in body)
+    check("traceparent" !in body)
+}
+
+private fun okHttpInterceptorPrefersRequestRouteTemplateTag() {
+    val parent =
+        LogBrewTrace.continueOrCreate(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+        )
+    val client = newClient()
+    val request =
+        LogBrewOkHttpRouteTemplates.tag(
+            Request
+                .Builder()
+                .url("https://mobile.example.test/api/orders/ord_123/private?cart=123#pay")
+                .build(),
+            "/api/orders/{order_id}",
+        )
+    val chain =
+        FakeChain(
+            request,
+            code = 202,
+        )
+    val interceptor =
+        LogBrewOkHttpInterceptor(
+            client = client,
+            routeTemplate = "/interceptor/default/{id}",
+            eventIdProvider = LogBrewOkHttpEventIdProvider { "evt_okhttp_route_tag_001" },
+            timestampProvider = LogBrewOkHttpTimestampProvider { "2026-06-02T10:00:37Z" },
+        )
+
+    LogBrewTrace.use(parent).use {
+        check(interceptor.intercept(chain).code == 202)
+    }
+
+    val body = client.previewJson()
+    check("\"id\": \"evt_okhttp_route_tag_001\"" in body)
+    check("\"name\": \"GET /api/orders/{order_id}\"" in body)
+    check("\"routeTemplate\": \"/api/orders/{order_id}\"" in body)
+    check("\"http.route\": \"/api/orders/{order_id}\"" in body)
+    check("/interceptor/default" !in body)
+    check("ord_123" !in body)
+    check("cart=123" !in body)
+    check("#pay" !in body)
     check("traceparent" !in body)
 }
 
@@ -283,6 +329,38 @@ private fun okHttpCallFactoryCarriesTrace() {
     check("\"traceId\": \"${parent.traceId}\"" in body)
     check("\"parentSpanId\": \"${parent.spanId}\"" in body)
     check("debug=1" !in body)
+}
+
+private fun okHttpCallFactoryPreservesRouteTemplateTag() {
+    val parent =
+        LogBrewTrace.continueOrCreate(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+        )
+    val request =
+        LogBrewOkHttpRouteTemplates.tag(
+            Request.Builder().url("https://mobile.example.test/api/users/user_123").build(),
+            "/api/users/{user_id}",
+        )
+    var delegatedRequest: Request? = null
+    val call =
+        LogBrewTrace.use(parent).use {
+            LogBrewOkHttpCallFactory(
+                Call.Factory { delegated ->
+                    delegatedRequest = delegated
+                    FakeCall(delegated)
+                },
+            ).newCall(request)
+        }
+    check(call.execute().code == 200)
+
+    val routeTemplate =
+        LogBrewOkHttpRouteTemplates.get(delegatedRequest ?: error("expected delegated request"))
+    check(routeTemplate == "/api/users/{user_id}")
+    check(
+        delegatedRequest
+            .tag(LogBrewTraceContext::class.java)
+            ?.spanId == parent.spanId,
+    )
 }
 
 private fun newClient(): LogBrewClient =

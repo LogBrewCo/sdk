@@ -23,6 +23,7 @@ import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.okhttp.LogBrewOkHttpCallbacks
 import co.logbrew.sdk.okhttp.LogBrewOkHttpCallFactory
 import co.logbrew.sdk.okhttp.LogBrewOkHttpInterceptor
+import co.logbrew.sdk.okhttp.LogBrewOkHttpRouteTemplates
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -41,7 +42,12 @@ val okHttp =
 LogBrewTrace.use(LogBrewTrace.continueOrCreate(incomingTraceparent)).use {
     val response =
         okHttp
-            .newCall(Request.Builder().url("https://api.example.com/api/checkout?cart=123").build())
+            .newCall(
+                LogBrewOkHttpRouteTemplates.tag(
+                    Request.Builder().url("https://api.example.com/api/checkout?cart=123").build(),
+                    "/api/checkout/{cart_id}",
+                ),
+            )
             .execute()
 
     response.close()
@@ -66,7 +72,19 @@ LogBrewTrace.use(LogBrewTrace.continueOrCreate(incomingTraceparent)).use {
 
 If your app already owns custom call creation and only needs callback scope, use `LogBrewOkHttpCallbacks.wrap(appCallback)` directly. `LogBrewOkHttpCallFactory` and `LogBrewOkHttpCallbacks.wrap(...)` do not create support tickets, patch OkHttp globally, capture callback payloads, or swallow callback exceptions.
 
-Use `routeTemplate` when you want low-cardinality span names instead of raw path segments:
+Use a per-request route template when you know the endpoint pattern at call sites. This keeps span names low-cardinality even when one `OkHttpClient` talks to many endpoints:
+
+```kotlin
+val request =
+    LogBrewOkHttpRouteTemplates.tag(
+        Request.Builder().url("https://api.example.com/api/orders/ord_123?cart=123").build(),
+        "/api/orders/{order_id}",
+    )
+
+okHttp.newCall(request).execute().close()
+```
+
+Use the interceptor `routeTemplate` only as a fallback for clients where every request has the same route pattern:
 
 ```kotlin
 val okHttp =

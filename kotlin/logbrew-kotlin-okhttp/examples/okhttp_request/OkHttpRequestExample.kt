@@ -3,6 +3,7 @@ import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.okhttp.LogBrewOkHttpCallFactory
 import co.logbrew.sdk.okhttp.LogBrewOkHttpEventIdProvider
 import co.logbrew.sdk.okhttp.LogBrewOkHttpInterceptor
+import co.logbrew.sdk.okhttp.LogBrewOkHttpRouteTemplates
 import co.logbrew.sdk.okhttp.LogBrewOkHttpTimestampProvider
 import com.sun.net.httpserver.HttpServer
 import okhttp3.Call
@@ -39,7 +40,6 @@ fun main() {
                 .addInterceptor(
                     LogBrewOkHttpInterceptor(
                         client = client,
-                        routeTemplate = "/api/orders/{order_id}",
                         eventIdProvider =
                             LogBrewOkHttpEventIdProvider {
                                 "evt_okhttp_installed_%03d".format(nextEventId.getAndIncrement())
@@ -53,19 +53,25 @@ fun main() {
         LogBrewTrace.use(parent).use {
             tracedCalls
                 .newCall(
-                    Request
-                        .Builder()
-                        .url("http://127.0.0.1:$port/api/orders?cart=123#pay")
-                        .build(),
+                    LogBrewOkHttpRouteTemplates.tag(
+                        Request
+                            .Builder()
+                            .url("http://127.0.0.1:$port/api/orders?cart=123#pay")
+                            .build(),
+                        "/api/orders/{order_id}",
+                    ),
                 ).execute()
                 .use { response -> check(response.code == 202) }
 
             tracedCalls
                 .newCall(
-                    Request
-                        .Builder()
-                        .url("http://127.0.0.1:$port/api/orders?cart=456#async")
-                        .build(),
+                    LogBrewOkHttpRouteTemplates.tag(
+                        Request
+                            .Builder()
+                            .url("http://127.0.0.1:$port/api/orders?cart=456#async")
+                            .build(),
+                        "/api/orders/{order_id}",
+                    ),
                 ).enqueue(
                     object : Callback {
                         override fun onFailure(

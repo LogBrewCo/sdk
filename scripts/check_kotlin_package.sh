@@ -102,6 +102,7 @@ jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0-sources.jar" > "$tmp_dir
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallbacks.kt$' "$tmp_dir/okhttp-sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallFactory.kt$' "$tmp_dir/okhttp-sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpInterceptor.kt$' "$tmp_dir/okhttp-sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpRouteTemplates.kt$' "$tmp_dir/okhttp-sources-jar-contents.txt"
 
 mkdir -p "$tmp_dir/okhttp-javadoc-stage"
 cp "$okhttp_package_dir/README.md" "$tmp_dir/okhttp-javadoc-stage/README.md"
@@ -123,6 +124,8 @@ grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpInterceptor.class$' "$tmp_dir/okhtt
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpEventIdProvider.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpTimestampProvider.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCaptureFailureHandler.class$' "$tmp_dir/okhttp-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpRouteTemplates.class$' "$tmp_dir/okhttp-jar-contents.txt"
+grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpRouteTemplate.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^META-INF/maven/co.logbrew/logbrew-kotlin-okhttp/pom.xml$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^README.md$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^examples/okhttp_request/OkHttpRequestExample.kt$' "$tmp_dir/okhttp-jar-contents.txt"
@@ -142,10 +145,12 @@ for needle in (
     "LogBrewOkHttpCallbacks",
     "LogBrewOkHttpCallFactory",
     "LogBrewOkHttpCaptureFailureHandler",
+    "LogBrewOkHttpRouteTemplates",
     "enqueue",
     "dispatcher threads",
     "callback exceptions",
     "traceparent",
+    "per-request route template",
     "routeTemplate",
     "request or response bodies",
     "baggage",

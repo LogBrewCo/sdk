@@ -199,6 +199,8 @@ object LogBrewAndroid {
                     "source" to "android.request",
                     "method" to safeMethod,
                     "routeTemplate" to safeRouteTemplate,
+                    "http.request.method" to safeMethod,
+                    "http.route" to safeRouteTemplate,
                 )
         return AndroidRequestSpan(
             method = safeMethod,
@@ -246,6 +248,7 @@ object LogBrewAndroid {
             requestSpan.metadata +
                 compactMetadata(metadata) +
                 optionalMetadata("statusCode", safeStatusCode) +
+                optionalMetadata("http.response.status_code", safeStatusCode) +
                 (error?.let { requestErrorMetadata(it) } ?: emptyMap())
         client.span(
             id,

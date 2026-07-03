@@ -49,7 +49,10 @@ class LogBrewOkHttpInterceptor
                 try {
                     LogBrewAndroid.startRequestSpan(
                         method = originalRequest.method,
-                        routeTemplate = routeTemplate ?: originalRequest.url.encodedPath,
+                        routeTemplate =
+                            LogBrewOkHttpRouteTemplates.get(originalRequest)
+                                ?: routeTemplate
+                                ?: originalRequest.url.encodedPath,
                         context = context,
                         metadata = metadata,
                     )
