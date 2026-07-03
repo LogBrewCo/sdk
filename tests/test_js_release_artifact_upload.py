@@ -86,12 +86,40 @@ class JavaScriptReleaseArtifactUploadTests(unittest.TestCase):
         with self.assertRaisesRegex(upload_js_release_artifacts.UploadValidationError, "loopback-only"):
             upload_js_release_artifacts.require_loopback_endpoint("https://127.example.com/upload")
 
-        upload_js_release_artifacts.require_loopback_endpoint("http://127.0.0.1:4319/upload?token=ignored")
-        upload_js_release_artifacts.require_loopback_endpoint("http://[::1]:4319/upload?token=ignored")
+        upload_js_release_artifacts.require_loopback_endpoint("http://127.0.0.1:4319/upload?marker=ignored")
+        upload_js_release_artifacts.require_loopback_endpoint("http://[::1]:4319/upload?marker=ignored")
         self.assertEqual(
-            upload_js_release_artifacts.endpoint_without_query("http://127.0.0.1:4319/upload?token=ignored#frag"),
+            upload_js_release_artifacts.endpoint_without_query("http://127.0.0.1:4319/upload?marker=ignored#frag"),
             "http://127.0.0.1:4319/upload",
         )
+
+    def test_hosted_endpoint_requires_explicit_opt_in_and_https(self) -> None:
+        with self.assertRaisesRegex(upload_js_release_artifacts.UploadValidationError, "--allow-hosted"):
+            upload_js_release_artifacts.require_upload_endpoint(
+                "https://api.logbrew.com/api/release-artifacts",
+                allow_hosted=False,
+            )
+
+        upload_js_release_artifacts.require_upload_endpoint(
+            "https://api.logbrew.com/api/release-artifacts",
+            allow_hosted=True,
+        )
+
+        with self.assertRaisesRegex(upload_js_release_artifacts.UploadValidationError, "https"):
+            upload_js_release_artifacts.require_upload_endpoint(
+                "http://api.logbrew.com/api/release-artifacts",
+                allow_hosted=True,
+            )
+        with self.assertRaisesRegex(upload_js_release_artifacts.UploadValidationError, "query strings or fragments"):
+            upload_js_release_artifacts.require_upload_endpoint(
+                "https://api.logbrew.com/api/release-artifacts?marker=placeholder",
+                allow_hosted=True,
+            )
+        with self.assertRaisesRegex(upload_js_release_artifacts.UploadValidationError, "embedded auth values"):
+            upload_js_release_artifacts.require_upload_endpoint(
+                "https://user:pass@api.logbrew.com/api/release-artifacts",
+                allow_hosted=True,
+            )
 
     def test_multipart_uses_basename_file_headers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -226,7 +226,36 @@ test("React Native release-artifact helper prepares and dry-runs upload through 
   }
 });
 
-test("React Native release-artifact helper keeps hosted upload blocked until backend upload routes exist", () => {
+test("React Native release-artifact helper allows explicit hosted upload dry-run", () => {
+  const root = tempDir();
+  try {
+    const buildDir = path.join(root, "dist");
+    const { appRoot, bundlePath, sourcemapPath } = writeReactNativeBundle(buildDir);
+
+    const result = uploadLogBrewReactNativeReleaseArtifacts({
+      bundle: bundlePath,
+      sourcemap: sourcemapPath,
+      platform: "ios",
+      release: "2026.06.18-react-native-upload",
+      environment: "production",
+      service: "checkout-react-native",
+      root: appRoot,
+      endpoint: "https://api.logbrew.com/api/release-artifacts",
+      allowHostedUpload: true,
+      dryRun: true,
+    });
+
+    assert.equal(result.uploadReport.status, "dry_run");
+    assert.equal(result.uploadReport.endpoint, "https://api.logbrew.com/api/release-artifacts");
+    assert.equal(result.uploadReport.artifactCount, 1);
+    assert.equal(result.uploadReport.filePartCount, 2);
+    assert.equal(result.manifestReport.validation.status, "ready");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("React Native release-artifact helper keeps hosted upload blocked without explicit opt-in", () => {
   const root = tempDir();
   try {
     const buildDir = path.join(root, "dist");
@@ -247,7 +276,7 @@ test("React Native release-artifact helper keeps hosted upload blocked until bac
           endpoint: "https://example.com/release-artifacts",
           dryRun: true,
         }),
-      /loopback-only/u,
+      /allowHostedUpload/u,
     );
     assert.equal(fs.readFileSync(bundlePath, "utf8"), originalBundleSource);
     assert.deepEqual(JSON.parse(fs.readFileSync(sourcemapPath, "utf8")), originalSourceMap);

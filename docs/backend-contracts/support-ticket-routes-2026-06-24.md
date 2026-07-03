@@ -2,9 +2,9 @@
 
 ## Status
 
-Backend handoff is pending for deploy and live verification. Backend coordination
-reports that support-ticket storage/routes are code-level verified locally but not deploy/live verified.
-Backend coordination now also reports that a redacted post-deploy live verifier
+Backend contract status is pending for deploy and live verification. SDK-facing contract notes
+say support-ticket storage/routes are code-level verified locally but not deploy/live verified.
+SDK-facing contract notes also say that a redacted post-deploy live verifier
 exists for the route family; that verifier is useful next-step evidence, but it
 does not clear SDK network-call gating until it passes against a deployed API.
 This SDK-originated public contract note does not claim that any support-ticket
@@ -84,7 +84,7 @@ diagnostics draft that:
 - redacts sensitive auth, browser, network, filesystem, and exception text;
 - bounds diagnostic depth, field count, item count, and string size;
 - records runtime/package context only when the app or user supplies it;
-- leaves the final handoff as an explicit user or agent action.
+- leaves ticket submission as an explicit user or agent action.
 
 After backend deploy/live verification, SDK work can add opt-in ticket creation
 helpers, but only with explicit user/agent action, placeholder-only public docs,
@@ -110,5 +110,5 @@ account API material is used as ingest configuration.
   reports to prove support-ticket examples use only placeholders and do not
   include private backend details, sensitive account material, screenshots, or
   real user data.
-- Coordination update from backend automation stating that the route is deployed
+- SDK-facing contract update stating that the route is deployed
   and live verified before SDK docs or examples tell users to call it.

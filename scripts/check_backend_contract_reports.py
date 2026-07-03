@@ -12,8 +12,8 @@ from pathlib import Path
 REPORT_DIR = Path("docs/backend-contracts")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 PRIORITY_RE = re.compile(r"\bP[0-3]\b")
-HANDOFF_RE = re.compile(
-    r"\b(backend handoff is pending|sent to backend|backend automation/thread)\b",
+STATUS_RE = re.compile(
+    r"\b(backend contract status|SDK-facing contract|public API contract)\b",
     re.IGNORECASE,
 )
 
@@ -60,9 +60,9 @@ def validate_report(path: Path, root: Path) -> list[str]:
             failures.append(f"{relative}: '## {section}' section must not be empty")
 
     status = sections.get("Status", "")
-    if status and HANDOFF_RE.search(status) is None:
+    if status and STATUS_RE.search(status) is None:
         failures.append(
-            f"{relative}: Status must state backend handoff is pending or sent to backend automation/thread"
+            f"{relative}: Status must state SDK-facing backend contract status"
         )
 
     priority = sections.get("Priority", "")

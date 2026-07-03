@@ -2,7 +2,7 @@
 
 ## Status
 
-Backend handoff is pending. This report is SDK-originated from public browser SDK verification and competitor source comparison. It does not claim any new backend route is live.
+Backend contract status is pending. This report is SDK-originated from public browser SDK verification and competitor source comparison. It does not claim any new backend route is live.
 
 ## Priority
 

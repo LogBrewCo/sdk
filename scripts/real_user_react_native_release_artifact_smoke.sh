@@ -421,6 +421,8 @@ endpoint_base="http://127.0.0.1:$(cat "$port_file")"
 export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_bearer"
 upload_manifest="$tmp_dir/react-native-upload-manifest.json"
 upload_helper_report="$tmp_dir/react-native-upload-helper-report.json"
+hosted_upload_manifest="$tmp_dir/react-native-hosted-upload-manifest.json"
+hosted_upload_helper_report="$tmp_dir/react-native-hosted-upload-helper-report.json"
 (
   cd "$app_dir"
   node --input-type=module - "$bundle_file" "$map_file" "$app_dir_real" "$upload_manifest" "$endpoint_base/retry-success?logbrew_rn_query_placeholder=1#logbrew_rn_hash_placeholder" > "$upload_helper_report" <<'JS'
@@ -454,14 +456,45 @@ process.stdout.write(JSON.stringify({
 JS
 )
 
-python3 - "$upload_helper_report" "$state_file" "$tmp_dir" <<'PY'
+(
+  cd "$app_dir"
+  node --input-type=module - "$bundle_file" "$map_file" "$app_dir_real" "$hosted_upload_manifest" > "$hosted_upload_helper_report" <<'JS'
+import { uploadLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
+
+const [, , bundle, sourcemap, root, manifestPath] = process.argv;
+const result = uploadLogBrewReactNativeReleaseArtifacts({
+  bundle,
+  sourcemap,
+  platform: "ios",
+  release: "2026.06.18-react-native-hosted-upload",
+  environment: "production",
+  service: "checkout-react-native",
+  root,
+  manifestPath,
+  endpoint: "https://api.logbrew.com/api/release-artifacts",
+  allowHostedUpload: true,
+  dryRun: true
+});
+
+process.stdout.write(JSON.stringify({
+  manifestStatus: result.manifestReport.validation.status,
+  uploadStatus: result.uploadReport.status,
+  endpoint: result.uploadReport.endpoint,
+  artifactCount: result.uploadReport.artifactCount,
+  filePartCount: result.uploadReport.filePartCount
+}, null, 2));
+JS
+)
+
+python3 - "$upload_helper_report" "$hosted_upload_helper_report" "$state_file" "$tmp_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 upload_report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-state = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-tmp_dir = sys.argv[3]
+hosted_upload_report = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+state = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[4]
 
 assert upload_report["manifestStatus"] == "ready"
 assert upload_report["uploadStatus"] == "uploaded"
@@ -471,6 +504,11 @@ assert upload_report["endpoint"].endswith("/retry-success")
 assert upload_report["artifactCount"] == 1
 assert upload_report["filePartCount"] == 2
 assert "logbrew_rn_query_placeholder" not in json.dumps(upload_report)
+assert hosted_upload_report["manifestStatus"] == "ready"
+assert hosted_upload_report["uploadStatus"] == "dry_run"
+assert hosted_upload_report["endpoint"] == "https://api.logbrew.com/api/release-artifacts"
+assert hosted_upload_report["artifactCount"] == 1
+assert hosted_upload_report["filePartCount"] == 2
 
 events = state["events"]
 assert [event["path"] for event in events].count("/retry-success") == 2

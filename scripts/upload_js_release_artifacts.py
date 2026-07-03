@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Upload JavaScript release artifacts to a loopback fake intake.
+"""Upload JavaScript release artifacts to a local or explicitly hosted intake.
 
 This is a transport verifier for SDK release-artifact readiness. It is
-intentionally loopback-only until the backend-owned upload contract exists.
+loopback-only by default and requires explicit hosted opt-in for production
+release-artifact endpoints.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from release_artifact_upload_common import (  # noqa: E402
     endpoint_without_query,
     read_manifest,
     require_loopback_endpoint,
+    require_upload_endpoint,
     safe_resolve,
     sha256_file,
     upload_with_retries,
@@ -148,7 +150,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Upload a ready JavaScript release-artifact manifest and its local files to a loopback fake intake. "
-            "This verifier does not claim backend release-artifact support."
+            "Hosted HTTPS endpoints require --allow-hosted."
         )
     )
     parser.add_argument("--build-dir", required=True, type=Path, help="Directory used to create the manifest.")
@@ -160,6 +162,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Environment variable containing the fake-intake release-artifact token. Default: {DEFAULT_TOKEN_ENV}.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Validate files and print the upload plan without network.")
+    parser.add_argument(
+        "--allow-hosted",
+        action="store_true",
+        help="Allow an explicit non-loopback HTTPS release-artifact endpoint with no embedded auth values, query, or fragment.",
+    )
     parser.add_argument("--max-retries", type=parse_non_negative_int, default=2, help="Retryable upload retries. Default: 2.")
     parser.add_argument(
         "--retry-delay",
@@ -179,7 +186,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        require_loopback_endpoint(args.endpoint)
+        require_upload_endpoint(args.endpoint, allow_hosted=args.allow_hosted)
         build_dir = args.build_dir.resolve()
         if not build_dir.is_dir():
             raise UploadValidationError(f"build directory does not exist: {build_dir}")

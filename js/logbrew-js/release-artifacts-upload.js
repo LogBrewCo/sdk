@@ -28,6 +28,7 @@ function parseOptions(args) {
     endpoint: "string",
     "token-env": "string",
     "dry-run": "boolean",
+    "allow-hosted": "boolean",
     "max-retries": "string",
     "retry-delay": "string",
     timeout: "string"
@@ -92,7 +93,7 @@ function endpointWithoutQuery(endpoint) {
   return `${parsed.protocol}//${parsed.host}${parsed.pathname || "/"}`;
 }
 
-function requireLoopbackEndpoint(endpoint) {
+function parseEndpoint(endpoint) {
   let parsed;
   try {
     parsed = new URL(endpoint);
@@ -102,14 +103,35 @@ function requireLoopbackEndpoint(endpoint) {
   if (!["http:", "https:"].includes(parsed.protocol)) {
     throw new Error("release artifact upload proof endpoint must use http or https");
   }
+  return parsed;
+}
+
+function isLoopbackEndpoint(parsed) {
   const hostname = parsed.hostname.toLowerCase();
-  const isLoopback =
+  return (
     hostname === "localhost" ||
     hostname === "[::1]" ||
     hostname === "::1" ||
-    (net.isIP(hostname) !== 0 && (hostname.startsWith("127.") || hostname === "::1"));
-  if (!isLoopback) {
-    throw new Error("release artifact upload proof endpoint must be loopback-only until the backend upload contract exists");
+    (net.isIP(hostname) !== 0 && (hostname.startsWith("127.") || hostname === "::1"))
+  );
+}
+
+function requireUploadEndpoint(endpoint, allowHosted) {
+  const parsed = parseEndpoint(endpoint);
+  if (isLoopbackEndpoint(parsed)) {
+    return;
+  }
+  if (!allowHosted) {
+    throw new Error("release artifact hosted upload requires explicit --allow-hosted; use loopback endpoints for local proof");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("hosted release artifact upload endpoints must use https");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("hosted release artifact upload endpoints must not include embedded auth values");
+  }
+  if (parsed.search || parsed.hash) {
+    throw new Error("hosted release artifact upload endpoints must not include query strings or fragments");
   }
 }
 
@@ -297,7 +319,7 @@ export async function runUploadJs(args) {
   const options = parseOptions(args);
   try {
     const endpoint = requireOption(options, "endpoint");
-    requireLoopbackEndpoint(endpoint);
+    requireUploadEndpoint(endpoint, Boolean(options["allow-hosted"]));
     const buildDir = requireBuildDir(requireOption(options, "build-dir"));
     const manifestPath = path.resolve(requireOption(options, "manifest"));
     if (!fs.existsSync(manifestPath)) {

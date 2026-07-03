@@ -167,6 +167,27 @@ export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_token"
   --max-retries 2 \
   > "$tmp_dir/upload-success.json"
 
+"$release_artifacts_cli" \
+  upload-js \
+  --build-dir "$dist_dir" \
+  --manifest "$manifest" \
+  --endpoint "https://api.logbrew.com/api/release-artifacts" \
+  --allow-hosted \
+  --dry-run \
+  > "$tmp_dir/upload-hosted-dry-run.json"
+
+if "$release_artifacts_cli" \
+  upload-js \
+  --build-dir "$dist_dir" \
+  --manifest "$manifest" \
+  --endpoint "https://api.logbrew.com/api/release-artifacts?marker=placeholder#fragment" \
+  --allow-hosted \
+  --dry-run \
+  > "$tmp_dir/upload-hosted-unsafe.json"; then
+  echo "upload verifier unexpectedly accepted an unsafe hosted endpoint" >&2
+  exit 1
+fi
+
 export LOGBREW_RELEASE_ARTIFACT_TOKEN_BAD="wrong-token"
 if "$release_artifacts_cli" \
   upload-js \
@@ -205,23 +226,32 @@ if "$release_artifacts_cli" \
   exit 1
 fi
 
-python3 - "$tmp_dir/upload-success.json" "$tmp_dir/upload-auth-failure.json" "$tmp_dir/upload-validation-failure.json" "$tmp_dir/upload-local-validation-failure.json" "$state_file" "$tmp_dir" <<'PY'
+python3 - "$tmp_dir/upload-success.json" "$tmp_dir/upload-hosted-dry-run.json" "$tmp_dir/upload-hosted-unsafe.json" "$tmp_dir/upload-auth-failure.json" "$tmp_dir/upload-validation-failure.json" "$tmp_dir/upload-local-validation-failure.json" "$state_file" "$tmp_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 success = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-auth_failure = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-validation_failure = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
-local_validation_failure = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
-state = json.loads(Path(sys.argv[5]).read_text(encoding="utf-8"))
-tmp_dir = sys.argv[6]
+hosted_dry_run = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+hosted_unsafe = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+auth_failure = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
+validation_failure = json.loads(Path(sys.argv[5]).read_text(encoding="utf-8"))
+local_validation_failure = json.loads(Path(sys.argv[6]).read_text(encoding="utf-8"))
+state = json.loads(Path(sys.argv[7]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[8]
 
 assert success["status"] == "uploaded"
 assert success["retryCount"] == 1
 assert [attempt["httpStatus"] for attempt in success["attempts"]] == [503, 202]
 assert success["endpoint"].endswith("/retry-success")
 assert "ignored=query" not in json.dumps(success)
+assert hosted_dry_run["status"] == "dry_run"
+assert hosted_dry_run["endpoint"] == "https://api.logbrew.com/api/release-artifacts"
+assert hosted_dry_run["artifactCount"] == 1
+assert hosted_dry_run["filePartCount"] == 2
+assert hosted_unsafe["status"] == "validation_failed"
+assert "query strings or fragments" in json.dumps(hosted_unsafe)
+assert "marker=placeholder" not in json.dumps(hosted_unsafe)
 assert auth_failure["status"] == "auth_failed"
 assert len(auth_failure["attempts"]) == 1
 assert validation_failure["status"] == "validation_failed"

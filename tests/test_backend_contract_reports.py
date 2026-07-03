@@ -19,7 +19,7 @@ VALID_REPORT = """# Backend Contract Report: Example - 2026-06-14
 
 ## Status
 
-Backend handoff is pending because no backend automation/thread target is exposed.
+Backend contract status is pending for the SDK-facing API shape.
 
 ## Priority
 
@@ -73,11 +73,13 @@ class BackendContractReportTests(unittest.TestCase):
             / "release-artifact-symbolication-2026-06-13.md"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("sent to backend coordination", report)
-        self.assertIn("auth-gated release-artifact upload, lookup, byte retention, and one-frame JavaScript symbolication", report)
-        self.assertIn("scoped live upload/lookup/retention/symbolication verification", report)
+        self.assertIn(
+            "auth-gated release-artifact upload, lookup, byte retention, and one-frame JavaScript symbolication are deployed",
+            report,
+        )
+        self.assertIn("real minified/native symbolicated-error proof and native/mobile hosted upload support remain incomplete", report)
+        self.assertIn("explicit JavaScript release-artifact hosted upload opt-in", report)
         self.assertNotIn("no backend release-artifact route/schema/lookup surface", report)
-        self.assertNotIn("no backend automation/thread target is exposed", report)
 
     def test_support_ticket_report_blocks_sdk_network_calls_until_live_verified(self) -> None:
         report = (
@@ -118,14 +120,14 @@ class BackendContractReportTests(unittest.TestCase):
 
         self.assertTrue(any("missing required '## Priority'" in failure for failure in failures))
 
-    def test_missing_handoff_status_is_reported(self) -> None:
+    def test_missing_backend_contract_status_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             report_dir = root / "docs" / "backend-contracts"
             report_dir.mkdir(parents=True)
             (report_dir / "example.md").write_text(
                 VALID_REPORT.replace(
-                    "Backend handoff is pending because no backend automation/thread target is exposed.",
+                    "Backend contract status is pending for the SDK-facing API shape.",
                     "This report is ready for backend work.",
                 ),
                 encoding="utf-8",
@@ -133,7 +135,7 @@ class BackendContractReportTests(unittest.TestCase):
 
             failures = check_backend_contract_reports.validate(root)
 
-        self.assertTrue(any("Status must state backend handoff" in failure for failure in failures))
+        self.assertTrue(any("Status must state SDK-facing backend contract status" in failure for failure in failures))
 
 
 if __name__ == "__main__":

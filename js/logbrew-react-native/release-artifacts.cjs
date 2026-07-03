@@ -92,7 +92,7 @@ function resolveLogBrewReleaseArtifactsCli() {
   }
 }
 
-function requireLoopbackUploadEndpoint(endpoint) {
+function parseUploadEndpoint(endpoint) {
   let parsed;
   try {
     parsed = new URL(endpoint);
@@ -102,14 +102,35 @@ function requireLoopbackUploadEndpoint(endpoint) {
   if (!["http:", "https:"].includes(parsed.protocol)) {
     throw new Error("release artifact upload proof endpoint must use http or https");
   }
+  return parsed;
+}
+
+function isLoopbackUploadEndpoint(parsed) {
   const hostname = parsed.hostname.toLowerCase();
-  const isLoopback =
+  return (
     hostname === "localhost" ||
     hostname === "[::1]" ||
     hostname === "::1" ||
-    (net.isIP(hostname) !== 0 && (hostname.startsWith("127.") || hostname === "::1"));
-  if (!isLoopback) {
-    throw new Error("release artifact upload proof endpoint must be loopback-only until the backend upload contract exists");
+    (net.isIP(hostname) !== 0 && (hostname.startsWith("127.") || hostname === "::1"))
+  );
+}
+
+function requireUploadEndpoint(endpoint, allowHosted) {
+  const parsed = parseUploadEndpoint(endpoint);
+  if (isLoopbackUploadEndpoint(parsed)) {
+    return;
+  }
+  if (!allowHosted) {
+    throw new Error("release artifact hosted upload requires explicit allowHostedUpload; use loopback endpoints for local proof");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("hosted release artifact upload endpoints must use https");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("hosted release artifact upload endpoints must not include embedded auth values");
+  }
+  if (parsed.search || parsed.hash) {
+    throw new Error("hosted release artifact upload endpoints must not include query strings or fragments");
   }
 }
 
@@ -262,7 +283,11 @@ function prepareLogBrewReactNativeReleaseArtifacts(options = {}) {
 
 function uploadLogBrewReactNativeReleaseArtifacts(options = {}) {
   const endpoint = requiredString(options, "endpoint");
-  requireLoopbackUploadEndpoint(endpoint);
+  const allowHostedUpload = options?.allowHostedUpload === true;
+  if (options?.allowHostedUpload !== undefined && typeof options.allowHostedUpload !== "boolean") {
+    throw new Error("LogBrew React Native release-artifact helper option allowHostedUpload must be a boolean");
+  }
+  requireUploadEndpoint(endpoint, allowHostedUpload);
   const tokenEnv = optionalString(options, "tokenEnv");
   const maxRetries = optionalUploadScalar(options, "maxRetries");
   const retryDelay = optionalUploadScalar(options, "retryDelay");
@@ -287,6 +312,9 @@ function uploadLogBrewReactNativeReleaseArtifacts(options = {}) {
   }
   if (dryRun === true) {
     uploadArgs.push("--dry-run");
+  }
+  if (allowHostedUpload) {
+    uploadArgs.push("--allow-hosted");
   }
   if (maxRetries) {
     uploadArgs.push("--max-retries", maxRetries);

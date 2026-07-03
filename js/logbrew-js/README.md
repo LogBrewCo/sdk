@@ -44,7 +44,7 @@ export default {
 
 The plugin runs only during Vite builds. It does not upload source maps, open support tickets, use account/session API values, or claim backend symbolication support.
 
-The package also ships the dependency-free `logbrew-release-artifacts` command for local JavaScript source-map preparation. Use it in CI after your frontend build to inject matching Debug IDs, strip embedded source text by default, and create a privacy-bounded manifest that can be inspected before any backend upload contract exists:
+The package also ships the dependency-free `logbrew-release-artifacts` command for JavaScript source-map preparation and upload. Use it after your frontend build to inject matching Debug IDs, strip embedded source text by default, and create a privacy-bounded manifest that can be inspected before upload:
 
 ```bash
 npx logbrew-release-artifacts prepare-js \
@@ -73,7 +73,20 @@ npx logbrew-release-artifacts upload-js \
   --dry-run
 ```
 
-The command validates local files only. The `symbolicate-js` check resolves one generated stack frame through the prepared manifest so you can catch bad path prefixes, embedded source content, and local source-path leaks before deploy. The `upload-js` check revalidates the manifest and can post the manifest/minified/source-map parts only to a loopback fake intake for local CI transport checks; it rejects non-loopback endpoints until backend-owned release-artifact upload routes exist. It does not upload source maps to LogBrew, open support tickets, use account/session API values, or claim backend symbolication support.
+The `symbolicate-js` command resolves one generated stack frame through the prepared manifest so you can catch bad path prefixes, embedded source content, and local source-path leaks before deploy. The `upload-js` command revalidates the manifest and can post the manifest/minified/source-map parts to a local loopback intake. For a hosted release-artifact endpoint, opt in explicitly and keep the release-artifact auth value in an environment variable:
+
+```bash
+export LOGBREW_RELEASE_ARTIFACT_AUTH="<release-artifact-auth>"
+
+npx logbrew-release-artifacts upload-js \
+  --build-dir dist \
+  --manifest logbrew-release-artifacts.json \
+  --endpoint https://api.logbrew.com/api/release-artifacts \
+  --token-env LOGBREW_RELEASE_ARTIFACT_AUTH \
+  --allow-hosted
+```
+
+Non-loopback endpoints require `--allow-hosted`, must use HTTPS, and must not include embedded auth values, query strings, or fragments. The upload command never uses normal SDK ingest keys or account/session API auth values. Full backend-symbolicated issue support is separate from artifact upload until your project has completed hosted symbolication for its release.
 
 ## Example
 

@@ -1,4 +1,4 @@
-"""Shared helpers for loopback release-artifact upload verifiers."""
+"""Shared helpers for release-artifact upload verifiers."""
 
 from __future__ import annotations
 
@@ -72,8 +72,26 @@ def is_loopback_endpoint(endpoint: str) -> bool:
 def require_loopback_endpoint(endpoint: str) -> None:
     if not is_loopback_endpoint(endpoint):
         raise UploadValidationError(
-            "release artifact upload proof endpoint must be loopback-only until the backend upload contract exists"
+            "release artifact upload proof endpoint must be loopback-only unless the verifier exposes explicit hosted upload opt-in"
         )
+
+
+def require_upload_endpoint(endpoint: str, *, allow_hosted: bool = False) -> None:
+    if is_loopback_endpoint(endpoint):
+        return
+    parsed = urlsplit(endpoint)
+    if not allow_hosted:
+        raise UploadValidationError(
+            "release artifact hosted upload requires explicit --allow-hosted; use loopback endpoints for local proof"
+        )
+    if parsed.scheme != "https":
+        raise UploadValidationError("hosted release artifact upload endpoints must use https")
+    if not parsed.hostname:
+        raise UploadValidationError("hosted release artifact upload endpoint must include a hostname")
+    if parsed.username or parsed.password:
+        raise UploadValidationError("hosted release artifact upload endpoints must not include embedded auth values")
+    if parsed.query or parsed.fragment:
+        raise UploadValidationError("hosted release artifact upload endpoints must not include query strings or fragments")
 
 
 def read_manifest(path: Path) -> dict[str, Any]:

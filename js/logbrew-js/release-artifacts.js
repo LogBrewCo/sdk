@@ -31,10 +31,10 @@ function usage() {
     "  logbrew-release-artifacts prepare-js --build-dir <dir> [--write] [--strip-sources-content] [--strip-source-prefix <path>...]",
     "  logbrew-release-artifacts manifest-js --build-dir <dir> --release <id> --environment <env> --service <name> --minified-path-prefix <url-or-path> [--repository-url <url>] [--commit-sha <sha>] [--allow-sources-content]",
     "  logbrew-release-artifacts symbolicate-js --build-dir <dir> --manifest <file> --stack-frame <frame>",
-    "  logbrew-release-artifacts upload-js --build-dir <dir> --manifest <file> --endpoint <loopback-url> [--token-env <env>] [--dry-run] [--max-retries <n>] [--retry-delay <seconds>] [--timeout <seconds>]",
+    "  logbrew-release-artifacts upload-js --build-dir <dir> --manifest <file> --endpoint <url> [--allow-hosted] [--token-env <env>] [--dry-run] [--max-retries <n>] [--retry-delay <seconds>] [--timeout <seconds>]",
     "",
-    "This installed-package helper prepares, validates, resolves, and loopback-tests JavaScript source-map artifacts.",
-    "upload-js is loopback-only until backend-owned release-artifact upload and symbolication routes exist."
+    "This installed-package helper prepares, validates, resolves, and uploads JavaScript source-map artifacts.",
+    "upload-js is loopback-only by default; pass --allow-hosted for explicit HTTPS release-artifact endpoints."
   ].join("\n");
 }
 

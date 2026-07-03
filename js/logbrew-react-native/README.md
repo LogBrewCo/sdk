@@ -422,7 +422,7 @@ If you pass `metadataFactory: createReactNativeGraphQLMetadataFactory({ endpoint
 
 ## Release Artifact Preparation
 
-Use the release-artifacts subpath after your React Native build has emitted a Metro bundle and source map. The helper prepares local bundle artifacts with matching Debug IDs, strips embedded source content by default, writes a local manifest, and can exercise the installed loopback-only upload path. Hosted upload, storage, lookup, and symbolication still wait for public backend-owned release-artifact support:
+Use the release-artifacts subpath after your React Native build has emitted a Metro bundle and source map. The helper prepares local bundle artifacts with matching Debug IDs, strips embedded source content by default, writes a local manifest, and can run the installed upload path. Hosted JavaScript bundle upload is an explicit opt-in; full backend-symbolicated issue support and native crash symbolication are still separate capabilities:
 
 ```js
 import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
@@ -438,7 +438,7 @@ prepareLogBrewReactNativeReleaseArtifacts({
 });
 ```
 
-For a local loopback upload check, use the upload helper against a `localhost` or `127.0.0.1` endpoint only:
+For a local loopback upload check, use the upload helper against a `localhost` or `127.0.0.1` endpoint:
 
 ```js
 import { uploadLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
@@ -457,7 +457,24 @@ uploadLogBrewReactNativeReleaseArtifacts({
 });
 ```
 
-The helper requires explicit `release`, `environment`, `service`, and `platform` metadata. It defaults minified bundle URLs to `app:///react-native/<platform>/...`, removes query strings and hashes from manifest URLs, and strips source paths under `root` or `stripSourcePrefix`. When `sourcemap` points at a final Hermes-composed map, the helper makes the bundle's `sourceMappingURL` point at that explicit map before injecting Debug IDs, so stale packager-map comments do not block manifest generation. It does not patch Gradle, Xcode, Metro, global fetch/XHR, or app runtime code; it only mutates the bundle and source map files you pass in.
+For a hosted release-artifact endpoint, keep the release-artifact auth value in an environment variable and opt in explicitly:
+
+```js
+uploadLogBrewReactNativeReleaseArtifacts({
+  bundle: "dist/index.android.bundle",
+  sourcemap: "dist/index.android.bundle.map",
+  platform: "android",
+  release: "2026.06.18",
+  environment: "production",
+  service: "checkout-mobile",
+  root: process.cwd(),
+  endpoint: "https://api.logbrew.com/api/release-artifacts",
+  allowHostedUpload: true,
+  tokenEnv: "LOGBREW_RELEASE_ARTIFACT_AUTH"
+});
+```
+
+The helper requires explicit `release`, `environment`, `service`, and `platform` metadata. It defaults minified bundle URLs to `app:///react-native/<platform>/...`, removes query strings and hashes from manifest URLs, and strips source paths under `root` or `stripSourcePrefix`. Hosted endpoints must use HTTPS and must not include embedded auth values, query strings, or fragments. The helper never uses normal SDK ingest keys or account/session API auth values. When `sourcemap` points at a final Hermes-composed map, the helper makes the bundle's `sourceMappingURL` point at that explicit map before injecting Debug IDs, so stale packager-map comments do not block manifest generation. It does not patch Gradle, Xcode, Metro, global fetch/XHR, or app runtime code; it only mutates the bundle and source map files you pass in.
 
 React Native native symbols are handled as release artifacts, not runtime telemetry. For local dry-run validation, use the repo release-artifact tooling against app-owned build outputs such as `ios/build/.../*.dSYM`, `android/app/build/outputs/mapping/release/mapping.txt`, and `android/app/build/intermediates/merged_native_libs/.../*.so`. The current public SDK validates metadata and privacy boundaries only; backend upload, storage, lookup, and native symbolication are still backend-owned future support, so do not rely on normal runtime error capture for native crash symbolication yet.
 

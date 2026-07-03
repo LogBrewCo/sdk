@@ -29,6 +29,7 @@ export type LogBrewReactNativeReleaseArtifactsResult = {
 
 export type LogBrewReactNativeReleaseArtifactUploadOptions = LogBrewReactNativeReleaseArtifactsOptions & {
   endpoint: string;
+  allowHostedUpload?: boolean;
   tokenEnv?: string;
   dryRun?: boolean;
   maxRetries?: string | number;

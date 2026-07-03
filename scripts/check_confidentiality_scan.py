@@ -265,12 +265,28 @@ def is_npm_first_publish_placeholder(relative_text: str, line: str) -> bool:
             "${npm_token:-}",
             "secret npm_token",
             "_authtoken=%s",
+            "central portal user-token credentials",
+            "generated central portal publishing credentials",
+            "central portal publishing credentials",
+            "generated central portal publishing values",
         )
         return any(fragment in lower_line for fragment in allowed_fragments)
     if relative_text == "scripts/check_release_metadata.py":
-        return '"npm first-publish token seam": "npm_token"' in lower_line
+        return (
+            '"npm first-publish token seam": "npm_token"' in lower_line
+            or '"maven central user-token credential hint": "central portal user-token credentials"' in lower_line
+            or '"maven central generated credential hint": "generated central portal publishing credentials"' in lower_line
+        )
     if relative_text == "tests/test_release_metadata.py":
-        return "npm_token: ${{ secrets.npm_token }}" in lower_line
+        return (
+            "npm_token: ${{ secrets.npm_token }}" in lower_line
+            or "maven central user-token credential hint" in lower_line
+            or "maven central generated credential hint" in lower_line
+            or "central portal user-token credentials" in lower_line
+            or "generated central portal publishing credentials" in lower_line
+            or "central portal publishing credentials" in lower_line
+            or "central portal credentials" in lower_line
+        )
     return False
 
 
@@ -416,6 +432,8 @@ def is_python_opentelemetry_privacy_denylist_literal(relative_text: str, line: s
 def is_release_artifact_upload_verifier_reference(relative_text: str, line: str) -> bool:
     if relative_text == "js/logbrew-js/release-artifacts.js" and "upload-js" in line and "--token-env" in line:
         return True
+    if relative_text == "js/logbrew-js/README.md" and "--token-env LOGBREW_RELEASE_ARTIFACT_AUTH" in line:
+        return True
     if relative_text in {
         "js/logbrew-js/release-artifacts-upload.js",
         "js/logbrew-react-native/release-artifacts.cjs",
@@ -429,12 +447,16 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
             "DEFAULT_UPLOAD_TOKEN_ENV",
             "DEFAULT_TOKEN_ENV",
             "parsed.hostname",
+            "parsed.username",
+            "parsed.password",
             "const hostname =",
             "hostname =",
             "hostname ===",
             "net.isIP(hostname)",
             "requireLoopbackUploadEndpoint",
+            "isLoopbackUploadEndpoint",
             "if not hostname:",
+            "must include a hostname",
             "hostname.lower()",
             "token: str",
             "Bearer ${token}",
@@ -459,6 +481,8 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
             "post_multipart",
         )
         return any(fragment in line for fragment in allowed_fragments)
+    if relative_text == "js/logbrew-react-native/README.md" and "tokenEnv" in line:
+        return True
     if relative_text in {
         "scripts/real_user_js_release_artifact_upload_smoke.sh",
         "scripts/real_user_native_release_artifact_upload_smoke.sh",

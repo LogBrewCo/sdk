@@ -1,5 +1,27 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: JavaScript hosted release-artifact upload opt-in reduced a
+  Sentry/Datadog source-map gap after fresh source reads from Sentry CLI
+  `getsentry/sentry-cli@fb79c59a35d79135d9eb84f4845572ce4548c455`
+  (`sourcemaps upload`, chunk upload setup, authenticated API handling),
+  Sentry React Native
+  `getsentry/sentry-react-native@6acdf1d66bd00b1f8b13ad5f744404db8eddf45e`
+  (Gradle/Xcode/Expo upload paths), and Datadog CI
+  `DataDog/datadog-ci@3bac12402541936f16532104884240b3f3a5ad64`
+  (`SourcemapsUploadCommand.execute`, React Native upload payloads, shared
+  upload/retry helpers). Pattern: mature tools keep hosted source-map upload in
+  explicit build/deploy commands, validate local artifacts before network,
+  support dry-run/no-upload, keep auth outside runtime SDK config, and avoid
+  retrying auth/validation failures. LogBrew now keeps `upload-js` loopback-first
+  but allows explicit hosted HTTPS endpoints only with `--allow-hosted`, no
+  embedded auth values, and no query/fragment; React Native exposes the same
+  as `allowHostedUpload: true`. Evidence: RED Python/Node/RN tests failed on
+  missing hosted opt-in; GREEN focused tests, installed JS upload smoke, packed
+  React Native smoke, JS lint/package checks, ShellCheck 0.11.0, markdown links,
+  backend reports, confidentiality scan, generated-artifact hygiene, diff check,
+  and thermo review. Remaining gap: full Sentry/Datadog parity still needs
+  hosted runtime symbolicated-error proof and native/mobile hosted artifact
+  upload/lookup/symbolication.
 - 2026-07-03: React Native release-artifact upload-helper gap reduced after
   current source reads from Sentry React Native
   `getsentry/sentry-react-native@6acdf1d66bd00b1f8b13ad5f744404db8eddf45e`

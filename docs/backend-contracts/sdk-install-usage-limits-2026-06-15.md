@@ -2,7 +2,7 @@
 
 ## Status
 
-This is an SDK-originated backend contract request from backend, website, and mobile convergence work. Backend handoff is pending because no backend automation/thread target is exposed in this session. Backend coordination reports that the project setup and ingest-key contract is implemented but not confirmed production-available yet, so public SDK docs and examples must not claim this setup flow is live until backend confirms availability. The public SDK repo should not implement or document account lifecycle, provider OAuth, project creation semantics, subscription state, setup status computation, usage accounting, or quota enforcement independently.
+This is an SDK-originated backend contract request for SDK-facing setup and usage behavior. Backend contract status is pending for production availability. The project setup and ingest-key contract is expected to be backend-owned but not confirmed production-available here, so public SDK docs and examples must not claim this setup flow is live until the public API contract is verified. The public SDK repo should not implement or document account lifecycle, provider OAuth, project creation semantics, subscription state, setup status computation, usage accounting, or quota enforcement independently.
 
 ## Priority
 
@@ -50,7 +50,7 @@ Ingest key behavior:
 - SDKs should accept an opaque project-scoped write-only ingestion key, currently represented in public SDK options as `api_key`.
 - When backend availability is confirmed, project setup should return a one-time project-scoped write-only ingest-key DTO with public fields such as `id`, `label`, `kind`, `created_at`, `expires_at`, and a separate raw key value for one-time setup.
 - Raw ingest keys should be displayed/used only once for SDK, CLI, browser, or server setup, should use a distinct `lbw_ingest_` prefix, and should authorize telemetry ingestion only for the matching `project_id`.
-- Backend coordination reports that successful project-scoped ingest-key creation is expected to mark setup as `setup_started` in backend-owned project state and publish project catalog updates only after safe key storage. If setup tracking fails after key storage, backend should still return the one-time key and avoid publishing unpersisted setup state. This is not production-confirmed yet, so SDKs should treat it as pending backend-owned setup state rather than adding local setup markers.
+- SDK-facing contract notes say successful project-scoped ingest-key creation is expected to mark setup as `setup_started` in backend-owned project state and publish project catalog updates only after safe key storage. If setup tracking fails after key storage, backend should still return the one-time key and avoid publishing unpersisted setup state. This is not production-confirmed yet, so SDKs should treat it as pending backend-owned setup state rather than adding local setup markers.
 - Key kinds `sdk`, `browser`, and `server` should map to SDK setup source for backend-owned setup tracking, while key kind `cli` should map to CLI setup source. Returned key metadata should still preserve the requested key kind.
 - SDKs should continue sending the key as `authorization: Bearer <value>` unless backend publishes a replacement header contract.
 - The key must not be a user session value, account bearer value, provider value, or key with read/admin scope.
@@ -65,12 +65,12 @@ Setup proof recommendation:
 Usage and limit behavior:
 
 - Backend should enforce usage limits on ingest and return stable redacted error envelopes.
-- Backend coordination reports configurable account usage/limit enforcement exists in backend code but is not production-confirmed yet, so SDKs should not claim the behavior is live until backend confirms availability.
+- SDK-facing contract notes say configurable account usage/limit enforcement exists in backend code but is not production-confirmed yet, so SDKs should not claim the behavior is live until backend confirms availability.
 - Native ingest may return HTTP `429` with redacted JSON fields `code: "usage_limit_exceeded"`, `limit: "events" | "bytes"`, `reset_at`, `error`, and actionable `next` when an incoming telemetry envelope would exceed configured account limits.
 - Usage checks happen after auth and before acceptance side effects, so SDKs should treat HTTP `429` as a backend-owned account limit state, not an SDK retry-loop condition.
 - `GET /api/account/usage` is the backend-owned source for usage and limit state; SDKs should not derive quota locally.
-- Backend coordination reports the account-usage DTO is expected to include `percent_used`, `warning`, `blocked`, `limit`, and actionable `next` fields in addition to usage totals, configured limits, and reset fields. This is not production-confirmed yet, so SDKs and docs should keep treating it as pending backend-owned contract shape.
-- Backend coordination also reports live account usage updates exist in backend code but are not production-confirmed yet. Successful native ingest can publish backend-owned usage feed events named `usage_updated`, `usage_limit_warning`, and `usage_limit_blocked`; their payload should match `GET /api/account/usage`, and SDKs should consume them only through backend-owned product surfaces or future stable public contracts.
+- SDK-facing contract notes say the account-usage DTO is expected to include `percent_used`, `warning`, `blocked`, `limit`, and actionable `next` fields in addition to usage totals, configured limits, and reset fields. This is not production-confirmed yet, so SDKs and docs should keep treating it as pending backend-owned contract shape.
+- SDK-facing contract notes also say live account usage updates exist in backend code but are not production-confirmed yet. Successful native ingest can publish backend-owned usage feed events named `usage_updated`, `usage_limit_warning`, and `usage_limit_blocked`; their payload should match `GET /api/account/usage`, and SDKs should consume them only through backend-owned product surfaces or future stable public contracts.
 - Suggested redacted fields also include `status`, `retryable`, optional `retry_after_ms`, and optional `limit_kind` if backend keeps those fields in the stable envelope.
 - Error envelopes must never echo raw keys, authorization headers, request bodies, non-public project internals, account/provider details, or user telemetry payloads.
 
