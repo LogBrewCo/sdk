@@ -7,6 +7,7 @@ import co.logbrew.sdk.okhttp.LogBrewOkHttpCallbacks
 import co.logbrew.sdk.okhttp.LogBrewOkHttpCaptureFailureHandler
 import co.logbrew.sdk.okhttp.LogBrewOkHttpEventIdProvider
 import co.logbrew.sdk.okhttp.LogBrewOkHttpInterceptor
+import co.logbrew.sdk.okhttp.LogBrewOkHttpPhaseTimings
 import co.logbrew.sdk.okhttp.LogBrewOkHttpRouteTemplates
 import co.logbrew.sdk.okhttp.LogBrewOkHttpTimestampProvider
 import okhttp3.Call
@@ -18,6 +19,8 @@ import okhttp3.Request
 import okhttp3.Response
 import okio.Timeout
 import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
 
 fun main() {
@@ -28,7 +31,8 @@ fun main() {
     run("okhttp_callback_wrapper_reactivates_registration_trace", ::okHttpCallbackWrapperReactivatesTrace)
     run("okhttp_call_factory_carries_trace_into_async_request_and_callback", ::okHttpCallFactoryCarriesTrace)
     run("okhttp_call_factory_preserves_request_route_template_tag", ::okHttpCallFactoryPreservesRouteTemplateTag)
-    println("kotlin okhttp package tests ok (7 tests)")
+    run("okhttp_phase_timings_add_bounded_phase_metadata", ::okHttpPhaseTimingsAddBoundedPhaseMetadata)
+    println("kotlin okhttp package tests ok (8 tests)")
 }
 
 private fun run(
@@ -363,6 +367,62 @@ private fun okHttpCallFactoryPreservesRouteTemplateTag() {
     )
 }
 
+private fun okHttpPhaseTimingsAddBoundedPhaseMetadata() {
+    val parent =
+        LogBrewTrace.continueOrCreate(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+        )
+    val client = newClient()
+    val request =
+        Request
+            .Builder()
+            .url("https://phase.example.test/api/orders?sample=redacted#debug")
+            .build()
+    val call = FakeCall(request)
+    val listener = LogBrewOkHttpPhaseTimings.eventListenerFactory().create(call)
+    listener.callStart(call)
+    listener.dnsStart(call, "phase.example.test")
+    listener.dnsEnd(call, "phase.example.test", emptyList())
+    listener.connectStart(call, InetSocketAddress("127.0.0.1", 443), Proxy.NO_PROXY)
+    listener.connectEnd(call, InetSocketAddress("127.0.0.1", 443), Proxy.NO_PROXY, Protocol.HTTP_1_1)
+    listener.requestHeadersStart(call)
+    listener.requestHeadersEnd(call, request)
+    listener.responseHeadersStart(call)
+    listener.responseHeadersEnd(call, fakeResponse(request, 203))
+    listener.callEnd(call)
+
+    val chain =
+        FakeChain(
+            request,
+            code = 203,
+            call = call,
+        )
+    val interceptor =
+        LogBrewOkHttpInterceptor(
+            client = client,
+            eventIdProvider = LogBrewOkHttpEventIdProvider { "evt_okhttp_phase_timing_001" },
+            timestampProvider = LogBrewOkHttpTimestampProvider { "2026-06-02T10:00:38Z" },
+        )
+
+    LogBrewTrace.use(parent).use {
+        check(interceptor.intercept(chain).code == 203)
+    }
+
+    val body = client.previewJson()
+    check("\"id\": \"evt_okhttp_phase_timing_001\"" in body)
+    check("\"okhttp.phase.dnsMs\"" in body)
+    check("\"okhttp.phase.connectMs\"" in body)
+    check("\"okhttp.phase.requestHeadersMs\"" in body)
+    check("\"okhttp.phase.responseHeadersMs\"" in body)
+    check("\"okhttp.phase.recorded\": true" in body)
+    check("phase.example.test" !in body)
+    check("127.0.0.1" !in body)
+    check("sample=redacted" !in body)
+    check("#debug" !in body)
+    check("traceparent" !in body)
+    check("HTTP_1_1" !in body)
+}
+
 private fun newClient(): LogBrewClient =
     LogBrewClient.create(
         apiKey = "LOGBREW_API_KEY",
@@ -374,6 +434,7 @@ private class FakeChain(
     private val initialRequest: Request,
     private val code: Int = 200,
     private val failure: IOException? = null,
+    private val call: Call? = null,
     private val assertion: (Request) -> Unit = {},
 ) : Interceptor.Chain {
     var proceededRequest: Request? = null
@@ -396,23 +457,24 @@ private class FakeChain(
     override fun connection(): Connection? = null
 
     override fun call(): Call =
-        object : Call {
-            override fun request(): Request = initialRequest
+        call
+            ?: object : Call {
+                override fun request(): Request = initialRequest
 
-            override fun execute(): Response = proceed(initialRequest)
+                override fun execute(): Response = proceed(initialRequest)
 
-            override fun enqueue(responseCallback: okhttp3.Callback) = Unit
+                override fun enqueue(responseCallback: okhttp3.Callback) = Unit
 
-            override fun cancel() = Unit
+                override fun cancel() = Unit
 
-            override fun isExecuted(): Boolean = false
+                override fun isExecuted(): Boolean = false
 
-            override fun isCanceled(): Boolean = false
+                override fun isCanceled(): Boolean = false
 
-            override fun clone(): Call = this
+                override fun clone(): Call = this
 
-            override fun timeout(): Timeout = Timeout.NONE
-        }
+                override fun timeout(): Timeout = Timeout.NONE
+            }
 
     override fun connectTimeoutMillis(): Int = 0
 

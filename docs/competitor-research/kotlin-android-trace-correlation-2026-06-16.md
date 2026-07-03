@@ -469,3 +469,87 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
 ### Remaining Gaps After OkHttp Route Template Follow-Up
 
 - Kotlin Android still lacks hidden/global OkHttp or HttpURLConnection instrumentation, request phase timings, baggage/tracestate, richer automatic span events/exceptions, DB/cache/queue automatic spans, and native crash/symbolication parity.
+
+## 2026-07-03 OkHttp Phase Timing Follow-Up
+
+### Source Re-Read
+
+- Read Sentry Java/Android `getsentry/sentry-java@44d18f56b41c98a11883a40899745a8af3960284`
+  `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpEventListener.kt`:
+  `callStart`, `dnsStart`/`dnsEnd`, `connectStart`/`connectEnd`,
+  `requestHeadersStart`/`requestHeadersEnd`,
+  `responseHeadersStart`/`responseHeadersEnd`, `callEnd`, and `callFailed`.
+- Re-read Sentry
+  `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpInterceptor.kt`
+  for request cloning, propagation, response/error span completion, and
+  optional network detail capture boundaries.
+- Read Datadog Android `DataDog/dd-sdk-android@c1b82590987a81348f3d4236a71662cd2b8db7b0`
+  `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/trace/TracingInterceptor.kt`:
+  `intercept`, `interceptAndTrace`, `updateRequest`, `handleResponse`,
+  `handleThrowable`, and docs recommending network-level interceptors for
+  redirect/retry insight.
+- Read Datadog
+  `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/DatadogInterceptor.kt`:
+  `intercept`, `onRequestIntercepted`, `handleResponse`, and
+  `handleThrowable` for combined RUM resource and APM span handling.
+- Re-read OpenTelemetry Java Instrumentation
+  `open-telemetry/opentelemetry-java-instrumentation@43737cfdd5902e3d19c722f5f846bae085513ab4`
+  `instrumentation/okhttp/okhttp-3.0/library/src/main/java/io/opentelemetry/instrumentation/okhttp/v3_0/internal/TracingInterceptor.java`
+  and `.../TracingCallFactory.java` for immutable request propagation,
+  scoped `chain.proceed`, sync/async call context, and callback wrapping.
+
+### Pattern And Tradeoffs
+
+- Sentry gets richer time-to-answer data by pairing its OkHttp interceptor with
+  an `EventListener` that tracks DNS, connect, request, response, body, and
+  failure phases, but it can also attach host/address/proxy/body-size details.
+- Datadog exposes a simple interceptor path and recommends network-level
+  instrumentation for redirect/retry insight, while also supporting richer RUM
+  resources and optional header/body-derived metadata.
+- OpenTelemetry keeps the core request span lifecycle in the interceptor/call
+  factory and leaves low-level timing to instrumentation internals.
+- LogBrew should improve debugging depth without copying the heavier capture
+  surface: app-owned OkHttp `EventListener` timing, duration numbers only,
+  same existing request span, no DNS names, IPs, proxies, protocols, TLS
+  details, headers, payloads, full URLs, baggage, or tracestate.
+
+### LogBrew Implementation
+
+- Added `LogBrewOkHttpPhaseTimings.eventListenerFactory(...)` to the optional
+  `co.logbrew:logbrew-kotlin-okhttp` artifact.
+- Apps can install it with
+  `OkHttpClient.Builder().eventListenerFactory(LogBrewOkHttpPhaseTimings.eventListenerFactory())`
+  alongside `LogBrewOkHttpInterceptor`.
+- The listener records only completed phase durations such as
+  `okhttp.phase.dnsMs`, `okhttp.phase.connectMs`,
+  `okhttp.phase.requestHeadersMs`, and
+  `okhttp.phase.responseHeadersMs`, plus `okhttp.phase.recorded=true`.
+- `LogBrewOkHttpInterceptor` merges those bounded phase durations into the
+  existing sanitized request span through the app-owned `Call`; telemetry
+  timing lookup failures go through the existing capture-failure seam and do
+  not interrupt the HTTP call.
+- Existing explicit boundaries remain: no hidden/global OkHttp patching, no
+  request/response body capture, no arbitrary header capture, no full URL,
+  query, fragment, DNS host, IP, proxy, protocol, TLS, baggage, tracestate,
+  retry, usage/quota, support-ticket, or symbolication behavior.
+
+### Verification
+
+- TDD red: `bash scripts/check_kotlin_package.sh` failed on unresolved
+  `LogBrewOkHttpPhaseTimings`.
+- Green package gate: `bash scripts/check_kotlin_package.sh` passed with 32
+  core Kotlin tests, 8 OkHttp tests, package metadata checks, README checks,
+  source/javadoc/binary jar inspection, and core-jar isolation.
+- Installed-artifact proof: `bash scripts/real_user_kotlin_smoke.sh` passed
+  after packing local Maven artifacts into a temporary Gradle app. The app ran
+  real OkHttp sync and async calls against a loopback server, installed
+  `LogBrewOkHttpPhaseTimings.eventListenerFactory()`, and verified phase
+  duration metadata on the captured spans without leaking traceparent, query,
+  fragment, IP, protocol, or body data.
+
+### Remaining Gaps After Phase Timings
+
+- Kotlin Android still trails Sentry/Datadog/OpenTelemetry on hidden/global
+  instrumentation, redirects/retries as separate spans, baggage/tracestate,
+  richer automatic exception/span events, DB/cache/queue automatic spans,
+  profiling, and native crash/symbolication parity.

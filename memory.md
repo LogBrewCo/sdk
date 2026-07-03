@@ -1,5 +1,28 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: Kotlin OkHttp request phase timing gap reduced after current
+  source reads from Sentry Java/Android
+  `getsentry/sentry-java@44d18f56b41c98a11883a40899745a8af3960284`
+  (`SentryOkHttpEventListener` phase callbacks and
+  `SentryOkHttpInterceptor`), Datadog Android
+  `DataDog/dd-sdk-android@c1b82590987a81348f3d4236a71662cd2b8db7b0`
+  (`TracingInterceptor`, `DatadogInterceptor`), and OpenTelemetry Java
+  Instrumentation
+  `open-telemetry/opentelemetry-java-instrumentation@43737cfdd5902e3d19c722f5f846bae085513ab4`
+  (`TracingInterceptor`, `TracingCallFactory`). LogBrew now adds optional
+  `LogBrewOkHttpPhaseTimings.eventListenerFactory(...)` to the
+  `logbrew-kotlin-okhttp` artifact. Apps install it on an app-owned
+  `OkHttpClient`; the existing interceptor merges only bounded phase duration
+  numbers such as DNS/connect/requestHeaders/responseHeaders into the sanitized
+  request span. It avoids DNS names, IPs, proxies, protocols, TLS details,
+  headers, bodies, full URLs, query/fragment, baggage, tracestate, hidden
+  patching, support tickets, and retry/usage inference. Evidence: RED
+  `bash scripts/check_kotlin_package.sh` failed on missing phase timing API;
+  GREEN `bash scripts/check_kotlin_package.sh` and
+  `bash scripts/real_user_kotlin_smoke.sh` passed with installed Gradle/OkHttp
+  proof. Remaining Kotlin gaps: hidden/global instrumentation, redirect/retry
+  spans, baggage/tracestate, richer automatic events/exceptions, DB/cache/queue
+  automatic spans, profiling, and native symbolication.
 - 2026-07-03: Java real-user smoke CI failure on main was caused by stale
   hardcoded `logbrew-sdk-0.1.0` artifact names after Java Maven metadata moved
   to `0.1.1`. Follow-up commit `fe506bb8` makes
@@ -14,6 +37,18 @@
   hygiene, and diff check passed. Lesson: Maven/JVM installed-artifact smokes
   must never hardcode package coordinates after version bumps; derive from POMs
   and keep telemetry fixture app versions separate from package versions.
+- 2026-07-03: Spring Boot real-user smoke had the same JVM installed-artifact
+  drift risk as the core Java smoke: it published a local temp Maven artifact
+  under hardcoded `logbrew-sdk-0.1.0` names while the Java POM is now `0.1.1`.
+  `scripts/real_user_spring_boot_smoke.sh` now reads the Java package version
+  from `java/logbrew-java/pom.xml`, installs `logbrew-sdk-$java_version.jar`,
+  and depends on `co.logbrew:logbrew-sdk:$java_version` in the temp Gradle app.
+  Guard: `tests/test_real_user_smoke_diagnostics.py` covers the Spring Boot
+  smoke version reader. Evidence: focused unittest and
+  `bash scripts/real_user_spring_boot_smoke.sh` passed with Spring Boot 4.1.0.
+  Lesson: all JVM framework installed-artifact smokes must derive Maven
+  coordinates from POMs; fixture telemetry versions are separate from package
+  coordinates.
 - 2026-07-03: .NET high-load installed-artifact proof moved into release
   readiness after current source reads from Sentry .NET
   `getsentry/sentry-dotnet@7c76204014b74b6bb48f367a9ac81f3f0be1f661`

@@ -3,6 +3,7 @@ import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.okhttp.LogBrewOkHttpCallFactory
 import co.logbrew.sdk.okhttp.LogBrewOkHttpEventIdProvider
 import co.logbrew.sdk.okhttp.LogBrewOkHttpInterceptor
+import co.logbrew.sdk.okhttp.LogBrewOkHttpPhaseTimings
 import co.logbrew.sdk.okhttp.LogBrewOkHttpRouteTemplates
 import co.logbrew.sdk.okhttp.LogBrewOkHttpTimestampProvider
 import com.sun.net.httpserver.HttpServer
@@ -46,7 +47,8 @@ fun main() {
                             },
                         timestampProvider = LogBrewOkHttpTimestampProvider { "2026-06-02T10:00:35Z" },
                     ),
-                ).build()
+                ).eventListenerFactory(LogBrewOkHttpPhaseTimings.eventListenerFactory())
+                .build()
         val tracedCalls = LogBrewOkHttpCallFactory(okHttp)
         val latch = CountDownLatch(1)
 
@@ -109,6 +111,9 @@ fun main() {
     check("\"name\": \"GET /api/orders/{order_id}\"" in body)
     check("\"statusCode\": 202" in body)
     check("\"durationMs\"" in body)
+    check("\"okhttp.phase.recorded\": true" in body)
+    check("\"okhttp.phase.requestHeadersMs\"" in body)
+    check("\"okhttp.phase.responseHeadersMs\"" in body)
     check("\"traceId\": \"${parent.traceId}\"" in body)
     check("\"parentSpanId\": \"${parent.spanId}\"" in body)
     check("cart=123" !in body)
@@ -116,5 +121,7 @@ fun main() {
     check("#pay" !in body)
     check("#async" !in body)
     check("traceparent" !in body)
+    check("127.0.0.1" !in body)
+    check("HTTP_1_1" !in body)
     println("okhttp bridge ok")
 }

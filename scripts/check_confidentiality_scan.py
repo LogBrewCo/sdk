@@ -192,6 +192,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_support_ticket_diagnostics_reference(relative_text, line):
         return True
 
+    if is_kotlin_okhttp_phase_timing_reference(relative_text, line, terms):
+        return True
+
     if is_kotlin_coroutine_context_reference(relative_text, line, terms):
         return True
 
@@ -743,6 +746,47 @@ def is_support_ticket_diagnostics_reference(relative_text: str, line: str) -> bo
             '"events": [{"token": "hidden"}, {"ok": True}],',
             '"events": [{"token": "[redacted]"}, {"ok": True}],',
         }
+
+    return False
+
+
+def is_kotlin_okhttp_phase_timing_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    if "dns" not in terms:
+        return False
+
+    lower_line = line.lower()
+    ok_http_phase_paths = {
+        "docs/competitor-research/kotlin-android-trace-correlation-2026-06-16.md",
+        "kotlin/logbrew-kotlin-okhttp/README.md",
+        "memory.md",
+    }
+    if relative_text in ok_http_phase_paths:
+        allowed_fragments = (
+            "dnsstart",
+            "dnsend",
+            "dns/connect",
+            "dns, connect",
+            "dns names",
+            "dns host",
+            "okhttp.phase.dnsms",
+        )
+        return any(
+            fragment in lower_line
+            for fragment in allowed_fragments
+        )
+
+    if relative_text == (
+        "kotlin/logbrew-kotlin-okhttp/src/main/kotlin/co/logbrew/sdk/okhttp/"
+        "LogBrewOkHttpPhaseTimings.kt"
+    ):
+        return "dns" in lower_line
+
+    if relative_text == "kotlin/logbrew-kotlin-okhttp/tests/LogBrewOkHttpInterceptorTests.kt":
+        return "dns" in lower_line or "okhttp.phase.dnsms" in lower_line
 
     return False
 

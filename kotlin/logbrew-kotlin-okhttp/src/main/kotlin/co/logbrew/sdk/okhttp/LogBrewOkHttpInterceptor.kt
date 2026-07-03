@@ -89,12 +89,21 @@ class LogBrewOkHttpInterceptor
                         statusCode = statusCode,
                         durationMs = (monotonicTimeMs() - startedAtMs).coerceAtLeast(0.0),
                         error = error,
+                        metadata = phaseTimingMetadata(chain),
                     )
                 } catch (captureError: Throwable) {
                     reportCaptureFailure(captureError)
                 }
             }
         }
+
+        private fun phaseTimingMetadata(chain: Interceptor.Chain): Map<String, Any?> =
+            try {
+                LogBrewOkHttpPhaseTimings.snapshot(chain.call())
+            } catch (error: Throwable) {
+                reportCaptureFailure(error)
+                emptyMap()
+            }
 
         private fun <T> withTaggedTrace(
             request: Request,
