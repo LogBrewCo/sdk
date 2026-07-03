@@ -1,5 +1,25 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: .NET high-load installed-artifact proof moved into release
+  readiness after current source reads from Sentry .NET
+  `getsentry/sentry-dotnet@7c76204014b74b6bb48f367a9ac81f3f0be1f661`
+  (`BatchProcessor`, `BackgroundWorker`), Datadog .NET
+  `DataDog/dd-trace-dotnet@bb5a5079a8a1950970fa82282ba3a2ccc06c943d`
+  (`BoundedConcurrentQueue` and bounded queue tests), OpenTelemetry .NET
+  `open-telemetry/opentelemetry-dotnet@8592991371f0227e0522d145546cc67757bea9e1`
+  (`BatchExportProcessor`, `BatchExportProcessorOptions`), and PostHog .NET
+  `PostHog/posthog-dotnet@1d74b329490b5b71a016115859fff71ba3f16b7d`
+  (`AsyncBatchHandler`). Pattern: mature SDKs make bounded queues, drops,
+  retry/export failure, flush, and shutdown drain release-critical. LogBrew
+  already had the high-load smoke; release readiness now runs
+  `bash scripts/real_user_dotnet_high_load_smoke.sh` after the core .NET
+  installed-artifact smoke, guarded by
+  `tests/test_dotnet_high_load_workflow_gates.py`, without adding duplicate
+  every-push CI. Evidence: RED focused unittest failed on missing workflow
+  step; GREEN focused unittest and `bash
+  scripts/real_user_dotnet_high_load_smoke.sh` passed. No package release.
+  Lesson: heavy logging/backpressure proofs belong in release-readiness unless
+  the touched queue/transport code needs immediate push-CI protection.
 - 2026-07-03: Java OpenTelemetry release-readiness gap closed without adding
   duplicate routine push-CI work. Source refresh rechecked current public
   Sentry Java `getsentry/sentry-java@44d18f56b41c98a11883a40899745a8af3960284`

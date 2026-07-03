@@ -221,7 +221,7 @@ import okhttp3.Request;
 public final class KotlinOkHttpMavenCentralSmoke {
     public static void main(String[] args) {
         Request original = new Request.Builder()
-            .url("https://api.example.com/api/orders/123?token=redacted")
+            .url("https://api.example.com/api/orders/123?page=2")
             .build();
         Request tagged = LogBrewOkHttpRouteTemplates.tag(original, "GET /api/orders/{order_id}");
         String route = LogBrewOkHttpRouteTemplates.get(tagged);

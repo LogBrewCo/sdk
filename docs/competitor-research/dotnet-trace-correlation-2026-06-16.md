@@ -581,3 +581,35 @@ Some .NET applications centralize OpenTelemetry setup around exporters and expor
 ### Remaining Gap
 
 LogBrew is now closer to native OpenTelemetry and PostHog-style exporter ergonomics while retaining stricter privacy defaults. Sentry, Datadog, and OpenTelemetry still lead on automatic instrumentation breadth, OTLP/collector/provider ownership, resource detectors, baggage/tracestate, profiling, and mature backend trace querying.
+
+## 2026-07-03 High-Load Release-Readiness Follow-Up
+
+### Additional Source Reviewed
+
+- Sentry .NET `getsentry/sentry-dotnet@7c76204014b74b6bb48f367a9ac81f3f0be1f661`.
+- Read `src/Sentry/Internal/BatchProcessor.cs`: `Enqueue(...)`, `Flush(...)`, `TryEnqueue(...)`, `CaptureItems(...)`, and `OnTimeoutExceeded(...)` show bounded buffering, batch flush, and timeout handling.
+- Read `src/Sentry/Internal/BackgroundWorker.cs`: `EnqueueEnvelope(...)`, `DoWorkAsync(...)`, and `FlushAsync(...)` show bounded queue admission, queue-overflow reporting, and shutdown drain behavior.
+- Datadog .NET tracer `DataDog/dd-trace-dotnet@bb5a5079a8a1950970fa82282ba3a2ccc06c943d`.
+- Read `tracer/src/Datadog.Trace/Util/BoundedConcurrentQueue.cs`: `TryEnqueue(...)`, `TryDequeue(...)`, and `Clear(...)` show explicit queue capacity behavior.
+- Read `tracer/test/Datadog.Trace.Tests/Logging/DirectSubmission/Sink/PeriodicBatching/BoundedConcurrentQueueTests.cs`: `WhenBoundedShouldNotExceedLimit(...)` verifies queue bounds under load.
+- OpenTelemetry .NET `open-telemetry/opentelemetry-dotnet@8592991371f0227e0522d145546cc67757bea9e1`.
+- Read `src/OpenTelemetry/BatchExportProcessor.cs`: `TryExport(...)`, `OnForceFlush(...)`, and `OnShutdown(...)` show batch export, flush, shutdown, and dropped-item reporting.
+- Read `src/OpenTelemetry/BatchExportProcessorOptions.cs`: `MaxQueueSize`, `ScheduledDelayMilliseconds`, `ExporterTimeoutMilliseconds`, and `MaxExportBatchSize` show validated production buffering knobs.
+- PostHog .NET `PostHog/posthog-dotnet@1d74b329490b5b71a016115859fff71ba3f16b7d`.
+- Read `src/PostHog/Library/AsyncBatchHandler.cs`: `Enqueue(...)`, `FlushAsync(...)`, `DrainBatchesAsync(...)`, and `DisposeAsync(...)` show channel-backed batching, flush, shutdown, and drop policy.
+
+### Pattern
+
+Mature SDKs treat bounded buffering, high-volume drops, retry/export failure, flush, and shutdown drain as release-critical behavior, not only unit-test behavior. The useful LogBrew-native response is to keep the normal push path lean while proving installed-package queue behavior in release readiness.
+
+### LogBrew Follow-Up
+
+- Release readiness now runs `bash scripts/real_user_dotnet_high_load_smoke.sh` immediately after the core .NET installed-artifact smoke.
+- The smoke packs and installs local NuGet artifacts, exercises install/remove/reinstall behavior, queues 1,500 logs, proves 1,000 flushed events, 504 dropped events, two retry attempts, and shutdown behavior against a local fake intake with a placeholder ingest key.
+- This keeps heavy logging/backpressure evidence tied to release confidence without duplicating it in every routine push check.
+
+### Evidence
+
+- RED TDD: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_dotnet_high_load_workflow_gates` failed because release readiness did not run the high-load smoke.
+- Focused GREEN: the same command passed with two workflow-gate tests.
+- Installed proof: `bash scripts/real_user_dotnet_high_load_smoke.sh` passed.

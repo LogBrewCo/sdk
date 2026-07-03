@@ -611,6 +611,9 @@ jobs:
       - name: Run .NET real-user smoke test
         run: bash scripts/real_user_dotnet_smoke.sh
 
+      - name: Run .NET high-load installed-artifact smoke test
+        run: bash scripts/real_user_dotnet_high_load_smoke.sh
+
   unity-dry-run:
     name: Unity package checks
     runs-on: ubuntu-latest
