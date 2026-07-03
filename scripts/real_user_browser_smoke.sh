@@ -43,6 +43,8 @@ tar -tzf "$browser_tgz" > "$tmp_dir/browser-tarball.txt"
 grep -q '^package/README.md$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/persistence.js$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/persistence.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/examples/index.mjs$' "$tmp_dir/browser-tarball.txt"
@@ -60,6 +62,8 @@ grep -q 'sanitizeMetadata' "$tmp_dir/browser-readme.md"
 grep -q 'query string or hash' "$tmp_dir/browser-readme.md"
 grep -q 'captureBrowserAction' "$tmp_dir/browser-readme.md"
 grep -q 'captureBrowserNetwork' "$tmp_dir/browser-readme.md"
+grep -q 'createPersistentBrowserTransport' "$tmp_dir/browser-readme.md"
+grep -q 'persistOffline' "$tmp_dir/browser-readme.md"
 grep -q 'sessionId' "$tmp_dir/browser-readme.md"
 grep -q 'createTraceparentFetch' "$tmp_dir/browser-readme.md"
 grep -q 'createBrowserTraceparent' "$tmp_dir/browser-readme.md"
@@ -113,6 +117,7 @@ import {
   createBrowserTraceparent,
   createFetchTransport,
   createLogBrewBrowserClient,
+  createPersistentBrowserTransport,
   createTraceparentFetch,
   installLogBrewBrowser,
   shouldPropagateTraceparent
@@ -320,6 +325,110 @@ if (fetchRequests[0].init.headers.authorization !== "Bearer LOGBREW_BROWSER_KEY"
   throw new Error("fetch transport did not attach the expected auth header");
 }
 
+const directPersistentStorage = createMemoryStorage();
+let directPersistentStatus = 503;
+const directPersistentSends = [];
+const directPersistentTransport = createPersistentBrowserTransport({
+  storage: directPersistentStorage,
+  transport: {
+    async send(apiKey, body) {
+      directPersistentSends.push({ apiKey, body });
+      return { statusCode: directPersistentStatus };
+    }
+  }
+});
+const directPersistentBody = JSON.stringify({
+  events: [{ id: "evt_browser_persisted_direct_001", type: "log" }],
+  sdk: { name: "logbrew-browser", version: "0.1.0" }
+});
+await directPersistentTransport.send("LOGBREW_BROWSER_KEY", directPersistentBody);
+const storedDirectPayload = directPersistentStorage.getItem("logbrew:browser:persisted-batches");
+if (!storedDirectPayload || storedDirectPayload.includes("LOGBREW_BROWSER_KEY")) {
+  throw new Error("persistent browser storage must retain the batch without storing the browser key");
+}
+directPersistentStatus = 202;
+const directPersistentReplay = await directPersistentTransport.replayStoredBatches("LOGBREW_BROWSER_KEY");
+if (directPersistentReplay.delivered !== 1 || directPersistentTransport.pendingStoredBatches() !== 0) {
+  throw new Error(`direct persistent replay failed: ${JSON.stringify(directPersistentReplay)}`);
+}
+
+const persistentWindow = new Window({
+  url: "https://app.example.test/offline?email=dev@example.test#retry"
+});
+const persistentStorage = createMemoryStorage();
+let persistentStatus = 503;
+const persistentSends = [];
+const failingPersistentLogbrew = installLogBrewBrowser({
+  browserWindow: persistentWindow,
+  capturePageViews: false,
+  clientKey: "LOGBREW_BROWSER_KEY",
+  flushOnCapture: false,
+  maxRetries: 0,
+  persistOffline: {
+    storage: persistentStorage
+  },
+  replayPersistedOnInstall: false,
+  transport: {
+    async send(apiKey, body) {
+      persistentSends.push({ apiKey, body });
+      return { statusCode: persistentStatus };
+    }
+  }
+});
+failingPersistentLogbrew.client.log("evt_browser_persisted_offline_001", "2026-06-02T10:00:09Z", {
+  message: "queued before offline navigation",
+  level: "warning",
+  logger: "browser.offline",
+  metadata: {
+    routeTemplate: "/offline"
+  }
+});
+await failingPersistentLogbrew.flush().catch((error) => {
+  if (error?.code !== "transport_error") {
+    throw error;
+  }
+});
+failingPersistentLogbrew.uninstall();
+const storedOnlinePayload = persistentStorage.getItem("logbrew:browser:persisted-batches");
+if (!storedOnlinePayload || storedOnlinePayload.includes("LOGBREW_BROWSER_KEY")) {
+  throw new Error("online replay storage must not contain the browser key");
+}
+persistentStatus = 202;
+const onlinePersistentLogbrew = installLogBrewBrowser({
+  browserWindow: persistentWindow,
+  capturePageViews: false,
+  clientKey: "LOGBREW_BROWSER_KEY",
+  flushOnCapture: false,
+  maxRetries: 0,
+  persistOffline: {
+    storage: persistentStorage
+  },
+  replayPersistedOnInstall: false,
+  transport: {
+    async send(apiKey, body) {
+      persistentSends.push({ apiKey, body });
+      return { statusCode: persistentStatus };
+    }
+  }
+});
+onlinePersistentLogbrew.client.log("evt_browser_after_online_001", "2026-06-02T10:00:10Z", {
+  message: "queued after browser comes online",
+  level: "info",
+  logger: "browser.offline"
+});
+persistentWindow.dispatchEvent(new persistentWindow.Event("online"));
+await waitFor(() => persistentSends.length === 3);
+if (JSON.parse(persistentSends[1].body).events[0].id !== "evt_browser_persisted_offline_001") {
+  throw new Error("online replay should deliver persisted batch before live queue");
+}
+if (JSON.parse(persistentSends[2].body).events[0].id !== "evt_browser_after_online_001") {
+  throw new Error("online replay should flush the live queue after persisted batches");
+}
+if (persistentStorage.getItem("logbrew:browser:persisted-batches") !== null) {
+  throw new Error("persistent browser storage should clear after successful replay");
+}
+onlinePersistentLogbrew.uninstall();
+
 const tracedFetchRequests = [];
 const tracedFetch = createTraceparentFetch({
   fetchImpl: async (input, init = {}) => {
@@ -390,6 +499,8 @@ console.error(JSON.stringify({
   networkRoute: networkPayload.events[0].attributes.metadata.routeTemplate,
   pagePath: pagePayload.events[0].attributes.metadata.path,
   pagehideFlush: pagehidePayload.events[0].id,
+  persistedDirectReplay: directPersistentReplay.delivered,
+  persistedOnlineSends: persistentSends.length,
   propagatedTraceparent,
   rejectionTitle: rejectionPayload.events[0].attributes.title,
   sessionAction: actionPayload.events[0].attributes.metadata.sessionId,
@@ -456,6 +567,21 @@ function deterministicBytes(length) {
   return Uint8Array.from({ length }, (_value, index) => index + 1);
 }
 
+function createMemoryStorage() {
+  const values = new Map();
+  return {
+    getItem(key) {
+      return values.has(key) ? values.get(key) : null;
+    },
+    removeItem(key) {
+      values.delete(key);
+    },
+    setItem(key, value) {
+      values.set(key, String(value));
+    }
+  };
+}
+
 async function waitFor(predicate) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (predicate()) {
@@ -483,6 +609,8 @@ grep -q '"hiddenFlush":"evt_browser_hidden_001"' "$tmp_dir/browser-smoke.stderr.
 grep -q '"networkRoute":"/api/checkout"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"pagePath":"/dashboard"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"pagehideFlush":"evt_browser_pagehide_001"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"persistedDirectReplay":1' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"persistedOnlineSends":3' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"sessionAction":"sess_browser_001"' "$tmp_dir/browser-smoke.stderr.json"
 
@@ -498,10 +626,14 @@ import {
   createFetchTransport,
   createLogBrewBrowserClient,
   createPageViewEvent,
+  createPersistentBrowserTransport,
   createTraceparentFetch,
   installLogBrewBrowser,
   type BrowserMetadataKind,
+  type BrowserPersistedReplay,
+  type BrowserPersistentStorage,
   type LogBrewBrowserContext,
+  type PersistentBrowserTransport,
   type TracePropagationTarget
 } from "@logbrew/browser";
 
@@ -557,6 +689,13 @@ createFetchTransport({
   endpoint: "https://api.logbrew.com/v1/events",
   fetchImpl: fetch
 });
+const storage: BrowserPersistentStorage = window.localStorage;
+const persistentTransport: PersistentBrowserTransport = createPersistentBrowserTransport({
+  storage,
+  transport
+});
+const replay: Promise<BrowserPersistedReplay> = persistentTransport.replayStoredBatches("LOGBREW_BROWSER_KEY");
+void replay;
 const traceTargets: TracePropagationTarget[] = ["https://api.example.test/", /^\/internal\//u];
 const tracedFetch = createTraceparentFetch({
   fetchImpl: fetch,
@@ -600,6 +739,9 @@ if (typeof browser.captureBrowserAction !== "function" || typeof browser.createB
 }
 if (typeof browser.captureBrowserNetwork !== "function" || typeof browser.createBrowserNetworkEvent !== "function") {
   throw new Error("missing CommonJS browser network helpers");
+}
+if (typeof browser.createPersistentBrowserTransport !== "function") {
+  throw new Error("missing CommonJS persistent browser transport helper");
 }
 const client = browser.createLogBrewBrowserClient({
   clientKey: "LOGBREW_BROWSER_KEY",

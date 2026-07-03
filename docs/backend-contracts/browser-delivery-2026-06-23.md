@@ -6,11 +6,11 @@ Backend handoff is pending. This report is SDK-originated from public browser SD
 
 ## Priority
 
-P2 - Browser developers expect telemetry delivery to survive navigation, tab close, temporary connectivity loss, and quota/rate-limit responses. LogBrew now has bounded fetch keepalive, lifecycle flush reasons, return-online in-memory recovery, retry-after parsing, and high-load queue-drop reporting, but remains weaker than Sentry, Datadog, and PostHog for durable unload/offline delivery until backend defines an authorization-safe browser delivery contract.
+P2 - Browser developers expect telemetry delivery to survive navigation, tab close, temporary connectivity loss, and quota/rate-limit responses. LogBrew now has bounded fetch keepalive, lifecycle flush reasons, return-online in-memory recovery, explicit persisted fetch-batch replay, retry-after parsing, and high-load queue-drop reporting, but remains weaker than Sentry, Datadog, and PostHog for beacon-style exit delivery until backend defines an authorization-safe browser unload contract.
 
 ## User Impact
 
-Without a backend-owned browser unload/offline contract, the browser SDK must keep using `fetch` with header-based client-key delivery. That is safer for today's public auth model, but it cannot match competitor `sendBeacon`/offline behavior in all page-exit cases. Users may lose queued events during abrupt navigation or prolonged offline sessions, and SDK docs must keep saying this is explicit in-memory recovery rather than durable browser storage.
+Without a backend-owned browser unload contract, the browser SDK must keep using `fetch` with header-based client-key delivery. That is safer for today's public auth model, and the SDK can now persist failed fetch batches without storing the browser key, but it still cannot match competitor `sendBeacon` behavior in all page-exit cases. Users may still lose events during abrupt termination before JavaScript can persist or flush them.
 
 ## Expected Backend Capability
 
@@ -44,10 +44,12 @@ Required backend behavior:
 The public browser SDK now proves the safe subset:
 
 - `createFetchTransport()` uses header-based client-key delivery and bounds `keepalive` body size before calling `fetch`.
+- `createPersistentBrowserTransport()` and `installLogBrewBrowser({ persistOffline })` persist failed fetch batch bodies in app-provided/Web Storage without storing the browser key, headers, cookies, query strings, hash fragments, or raw request payloads.
 - `installLogBrewBrowser()` flushes queued in-memory events for `pagehide`, hidden visibility, and browser `online` recovery.
+- Persisted batches are bounded by count/bytes, exact-batch deduplicated, replayed on install/online, cleared after success, and skip same-session persisted copies while the in-memory queue still owns those events.
 - `onFlush` and `onCaptureError` receive `details.reason` so apps can distinguish `capture`, `online`, `pagehide`, and `visibility_hidden`.
 - HTTP `429` surfaces as `SdkError` code `rate_limited` with optional `retryAfterMs`, preserves queued events, and avoids immediate retry.
-- The installed browser fake-intake smoke proves auth failure, retry, shutdown, high-volume logging, pagehide flush, online recovery, queue retention, and no client-key/query/hash/email leakage through packed packages.
+- The installed browser smokes prove auth failure, retry, shutdown, high-volume logging, pagehide flush, online recovery, persisted-batch replay, queue retention, and no client-key/query/hash/email leakage through packed packages.
 
 Competitor source pattern:
 
@@ -60,7 +62,7 @@ LogBrew should not copy those heavier mechanisms blindly because today's SDK aut
 ## Verification Needed
 
 - Backend tests for any browser beacon/exit endpoint covering accepted delivery, invalid key, wrong-project key, oversized payload, malformed payload, usage limit, and no key or payload echo in errors.
-- SDK fake-intake smoke for the final public contract proving success, auth failure, validation failure, retry/failure behavior, flush/shutdown fallback, and unload/online behavior from installed browser packages.
+- SDK fake-intake smoke for any final beacon contract proving success, auth failure, validation failure, retry/failure behavior, flush/shutdown fallback, and unload/online behavior from installed browser packages.
 - Browser temporary-app proof for pagehide/visibility/online cases with query/hash-free route metadata and no payload/header/cookie capture.
 - Confidentiality scans on public docs and examples so no account/session auth values or non-public backend details are used as browser ingest config.
 - Product/API proof that usage and category-suppression state, if exposed, comes from backend responses or product APIs rather than SDK-local counters.

@@ -27,6 +27,46 @@ export type FetchTransportConfig = {
   maxKeepaliveBodyBytes?: number;
 };
 
+export type BrowserPersistentStorage = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+export type BrowserPersistError = {
+  code:
+    | "persisted_batch_too_large"
+    | "persisted_queue_full"
+    | "persisted_storage_corrupt"
+    | "persisted_storage_unavailable";
+  message: string;
+};
+
+export type BrowserPersistedReplay = {
+  attempted: number;
+  delivered: number;
+  retained: number;
+};
+
+export type BrowserPersistedReplayOptions = {
+  skipOwnBatches?: boolean;
+};
+
+export type PersistentBrowserTransport = Transport & {
+  clearStoredBatches(): void;
+  pendingStoredBatches(): number;
+  replayStoredBatches(apiKey: string, options?: BrowserPersistedReplayOptions): Promise<BrowserPersistedReplay>;
+};
+
+export type PersistentBrowserTransportConfig = {
+  maxStoredBatches?: number;
+  maxStoredBytes?: number;
+  onPersistError?: (error: BrowserPersistError) => void;
+  storage?: BrowserPersistentStorage;
+  storageKey?: string;
+  transport: Transport;
+};
+
 export type TracePropagationTarget = string | RegExp | ((url: string) => boolean);
 
 export type BrowserTraceparentConfig = {
@@ -56,6 +96,7 @@ export type LogBrewBrowserContext = {
   transport: Transport;
   previewJson(): string;
   flush(): Promise<TransportResponse>;
+  replayStoredBatches(): Promise<BrowserPersistedReplay>;
   shutdown(): Promise<TransportResponse>;
   uninstall(): void;
 };
@@ -109,8 +150,10 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
   includeUserAgent?: boolean;
   metadata?: Metadata;
   now?: () => string;
+  persistOffline?: boolean | Omit<PersistentBrowserTransportConfig, "transport">;
   preventDefault?: boolean;
   raiseCaptureErrors?: boolean;
+  replayPersistedOnInstall?: boolean;
   sanitizeMetadata?: (metadata: Metadata, kind: BrowserMetadataKind) => Metadata;
   pageViewEvent?: (
     context: { browserWindow?: Window; client: LogBrewClient }
@@ -159,6 +202,10 @@ export declare function createLogBrewBrowserClient(
 export declare function createFetchTransport(
   config?: FetchTransportConfig
 ): Transport;
+
+export declare function createPersistentBrowserTransport(
+  config: PersistentBrowserTransportConfig
+): PersistentBrowserTransport;
 
 export declare function createBrowserTraceparent(
   config?: BrowserTraceparentConfig
@@ -256,6 +303,7 @@ declare const defaultExport: {
   createLogBrewBrowserContext: typeof createLogBrewBrowserContext;
   createBrowserNetworkEvent: typeof createBrowserNetworkEvent;
   createPageViewEvent: typeof createPageViewEvent;
+  createPersistentBrowserTransport: typeof createPersistentBrowserTransport;
   createTraceparentFetch: typeof createTraceparentFetch;
   createUnhandledRejectionEvent: typeof createUnhandledRejectionEvent;
   installLogBrewBrowser: typeof installLogBrewBrowser;

@@ -8,6 +8,7 @@ const {
   SdkError,
   TransportError
 } = require("@logbrew/sdk");
+const { createPersistentBrowserTransport } = require("./persistence.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
 const DEFAULT_SDK_VERSION = "0.1.0";
@@ -159,7 +160,7 @@ function installLogBrewBrowser(options = {}) {
   }
 
   const client = options.client ?? createLogBrewBrowserClient(options);
-  const transport = options.transport ?? createFetchTransport(options);
+  const transport = createBrowserTransport(options, browserWindow);
   let installed = true;
   const context = createLogBrewBrowserContext(client, transport, browserWindow, () => {
     if (!installed) {
@@ -177,7 +178,7 @@ function installLogBrewBrowser(options = {}) {
       void flushForLifecycle(context, options, "pagehide");
     },
     online: () => {
-      void flushForLifecycle(context, options, "online");
+      void replayStoredBatchesThenFlush(context, options);
     },
     rejection: (event) => {
       void captureUnhandledRejection(event, context, options);
@@ -204,6 +205,9 @@ function installLogBrewBrowser(options = {}) {
   if (options.flushOnVisibilityHidden !== false && typeof browserWindow.document?.addEventListener === "function") {
     browserWindow.document.addEventListener("visibilitychange", listeners.visibilitychange);
   }
+  if (options.replayPersistedOnInstall !== false) {
+    void replayStoredBrowserBatches(context);
+  }
   if (options.capturePageViews !== false) {
     void capturePageView(context, options);
   }
@@ -218,6 +222,7 @@ function createLogBrewBrowserContext(client, transport, browserWindow = defaultW
     flush: () => client.flush(transport),
     logbrew: client,
     previewJson: () => client.previewJson(),
+    replayStoredBatches: () => replayStoredBrowserBatches({ client, transport }),
     shutdown: () => client.shutdown(transport),
     transport,
     uninstall
@@ -459,6 +464,20 @@ async function flushForLifecycle(context, options, reason) {
   return flushWithCallbacks(context, options, { reason });
 }
 
+async function replayStoredBatchesThenFlush(context, options) {
+  await replayStoredBrowserBatches(context);
+  return flushForLifecycle(context, options, "online");
+}
+
+async function replayStoredBrowserBatches(context) {
+  if (typeof context.transport?.replayStoredBatches !== "function") {
+    return { attempted: 0, delivered: 0, retained: 0 };
+  }
+  return context.transport.replayStoredBatches(context.client.apiKey, {
+    skipOwnBatches: context.client.pendingEvents() > 0
+  });
+}
+
 async function flushWithCallbacks(context, options, details) {
   try {
     const response = await context.client.flush(context.transport);
@@ -495,6 +514,22 @@ function maybePreventDefault(event, options) {
     return;
   }
   event.preventDefault();
+}
+
+function createBrowserTransport(options, browserWindow) {
+  const transport = options.transport ?? createFetchTransport(options);
+  if (!options.persistOffline) {
+    return transport;
+  }
+  const persistConfig = options.persistOffline === true ? {} : options.persistOffline;
+  if (!persistConfig || typeof persistConfig !== "object" || Array.isArray(persistConfig)) {
+    throw new SdkError("configuration_error", "persistOffline must be true or a configuration object");
+  }
+  return createPersistentBrowserTransport({
+    ...persistConfig,
+    storage: persistConfig.storage ?? browserWindow.localStorage,
+    transport
+  });
 }
 
 function browserMetadata(browserWindow, {
@@ -910,6 +945,7 @@ module.exports = {
   createLogBrewBrowserContext,
   createBrowserNetworkEvent,
   createPageViewEvent,
+  createPersistentBrowserTransport,
   createTraceparentFetch,
   createUnhandledRejectionEvent,
   default: {
@@ -924,6 +960,7 @@ module.exports = {
     createLogBrewBrowserClient,
     createLogBrewBrowserContext,
     createPageViewEvent,
+    createPersistentBrowserTransport,
     createTraceparentFetch,
     createUnhandledRejectionEvent,
     installLogBrewBrowser,

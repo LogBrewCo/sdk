@@ -101,7 +101,28 @@ installLogBrewBrowser({
 
 When an intake returns HTTP `429`, the browser transport reads the standard `Retry-After` header and passes it to the core SDK as `retryAfterMs`. The flush then raises `SdkError` code `rate_limited`, preserves queued events, and avoids immediate retry; use that signal for app-owned retry timing or user-facing recovery.
 
-Browser clients inherit the core SDK's bounded in-memory queue. Pass `maxQueueSize` and `onEventDropped` to `installLogBrewBrowser()` or `createLogBrewBrowserClient()` when the app wants explicit drop reporting during high-volume browser logging. LogBrew also flushes queued in-memory events on the browser `online` event by default, which helps after temporary connectivity loss. This is recovery signaling only; it does not install offline storage, replay, or hidden background delivery.
+Browser clients inherit the core SDK's bounded in-memory queue. Pass `maxQueueSize` and `onEventDropped` to `installLogBrewBrowser()` or `createLogBrewBrowserClient()` when the app wants explicit drop reporting during high-volume browser logging. LogBrew also flushes queued in-memory events on the browser `online` event by default, which helps after temporary connectivity loss.
+
+## Optional Persisted Delivery
+
+Use `persistOffline: true` when a browser app should keep failed batches in Web Storage across a reload, navigation, or temporary offline session.
+
+```js
+import { installLogBrewBrowser } from "@logbrew/browser";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY",
+  persistOffline: {
+    maxStoredBatches: 10,
+    maxStoredBytes: 256 * 1024,
+    storage: window.localStorage
+  }
+});
+```
+
+Persisted delivery stores only the already-sanitized JSON batch body. It does not store the browser key, request headers, cookies, raw payloads, full URLs, query strings, or hash fragments. Stored batches are bounded by `maxStoredBatches` and `maxStoredBytes`, deduplicated by exact batch body, replayed on install and on `online`, and cleared after a successful replay. If the same page session still has the failed events in memory, LogBrew treats that in-memory queue as the source of truth and avoids replaying its own persisted copy separately.
+
+Use `createPersistentBrowserTransport({ transport, storage })` when your app wants to wrap a custom browser transport directly. Persistence is explicit recovery for the documented header-based `fetch` delivery path; it is not a hidden background worker or `sendBeacon` fallback.
 
 Use `RecordingTransport.alwaysAccept()` from `@logbrew/sdk` when you want to inspect queued browser events before network delivery.
 

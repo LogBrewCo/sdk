@@ -2,7 +2,7 @@
 
 ## Scope
 
-Improve LogBrew's real-user confidence for heavy JavaScript/Node logging bursts without adding hidden background workers, offline persistence, broad buffering policy, or private backend assumptions. This cycle adds a public installed-artifact verifier, not a new runtime transport contract.
+Improve LogBrew's real-user confidence for heavy JavaScript/Node logging bursts without adding hidden background workers, broad buffering policy, or private backend assumptions. This cycle adds a public installed-artifact verifier, not a new runtime transport contract.
 
 ## Competitor Source Read
 
@@ -34,4 +34,4 @@ LogBrew intentionally does not copy Sentry's in-flight promise-buffer transport 
 
 ## Remaining Gaps
 
-LogBrew still lacks configurable byte-based batch splitting, timeout-based autonomous flush, offline persistence, and a browser-safe backend unload/beacon contract. Those should remain explicit future work because they affect billing, privacy, retry semantics, and backend ingestion guarantees.
+LogBrew still lacks configurable byte-based batch splitting, timeout-based autonomous flush, and a browser-safe backend unload/beacon contract. Browser fetch-batch persistence is now explicit SDK-owned recovery, but beacon-style exit delivery remains future work because it affects billing, privacy, retry semantics, and backend ingestion guarantees.
