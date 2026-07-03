@@ -12,6 +12,20 @@ intake_pid=""
 # shellcheck source=scripts/kotlin_okhttp_deps.sh
 source "$repo_root/scripts/kotlin_okhttp_deps.sh"
 
+read_pom_version() {
+  python3 - "$1" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+namespace = {"m": "http://maven.apache.org/POM/4.0.0"}
+version = root.findtext("m:version", namespaces=namespace)
+if not version:
+    raise SystemExit(f"missing POM version in {sys.argv[1]}")
+print(version)
+PY
+}
+
 acquire_lock() {
   if mkdir "$lock_dir" 2>/dev/null; then
     printf '%s\n' "$$" > "$lock_pid_file"
@@ -112,6 +126,11 @@ if ! acquire_lock; then
   exit 1
 fi
 
+kotlin_version="$(read_pom_version "$package_dir/pom.xml")"
+okhttp_version="$(read_pom_version "$okhttp_package_dir/pom.xml")"
+kotlin_jar="$tmp_dir/logbrew-kotlin-$kotlin_version.jar"
+okhttp_jar="$tmp_dir/logbrew-kotlin-okhttp-$okhttp_version.jar"
+
 mkdir -p "$tmp_dir/classes" "$tmp_dir/jar-stage/META-INF/maven/co.logbrew/logbrew-kotlin"
 mkdir -p "$tmp_dir/okhttp-classes" "$tmp_dir/okhttp-jar-stage/META-INF/maven/co.logbrew/logbrew-kotlin-okhttp"
 kotlinc "$package_dir"/src/main/kotlin/co/logbrew/sdk/*.kt \
@@ -127,8 +146,8 @@ cp -R "$package_dir/examples/real_user_smoke" "$tmp_dir/jar-stage/examples/real_
 cp -R "$package_dir/examples/trace_correlation" "$tmp_dir/jar-stage/examples/trace_correlation"
 cp -R "$package_dir/examples/dependency_spans" "$tmp_dir/jar-stage/examples/dependency_spans"
 cp "$package_dir/examples/Makefile" "$tmp_dir/jar-stage/examples/Makefile"
-jar --create --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" -C "$tmp_dir/classes" . -C "$tmp_dir/jar-stage" .
-jar --list --file "$tmp_dir/logbrew-kotlin-0.1.0.jar" > "$tmp_dir/jar-contents.txt"
+jar --create --file "$kotlin_jar" -C "$tmp_dir/classes" . -C "$tmp_dir/jar-stage" .
+jar --list --file "$kotlin_jar" > "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTraceContext.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewCoroutines.class$' "$tmp_dir/jar-contents.txt"
@@ -156,8 +175,8 @@ cp "$okhttp_package_dir/pom.xml" "$tmp_dir/okhttp-jar-stage/META-INF/maven/co.lo
 cp "$okhttp_package_dir/README.md" "$tmp_dir/okhttp-jar-stage/README.md"
 mkdir -p "$tmp_dir/okhttp-jar-stage/examples"
 cp -R "$okhttp_package_dir/examples/okhttp_request" "$tmp_dir/okhttp-jar-stage/examples/okhttp_request"
-jar --create --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" -C "$tmp_dir/okhttp-classes" . -C "$tmp_dir/okhttp-jar-stage" .
-jar --list --file "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" > "$tmp_dir/okhttp-jar-contents.txt"
+jar --create --file "$okhttp_jar" -C "$tmp_dir/okhttp-classes" . -C "$tmp_dir/okhttp-jar-stage" .
+jar --list --file "$okhttp_jar" > "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallbacks.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpCallFactory.class$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpInterceptor.class$' "$tmp_dir/okhttp-jar-contents.txt"
@@ -166,14 +185,14 @@ grep -q '^co/logbrew/sdk/okhttp/LogBrewOkHttpRouteTemplate.class$' "$tmp_dir/okh
 grep -q '^META-INF/maven/co.logbrew/logbrew-kotlin-okhttp/pom.xml$' "$tmp_dir/okhttp-jar-contents.txt"
 grep -q '^examples/okhttp_request/OkHttpRequestExample.kt$' "$tmp_dir/okhttp-jar-contents.txt"
 
-maven_dir="$tmp_dir/maven/co/logbrew/logbrew-kotlin/0.1.0"
+maven_dir="$tmp_dir/maven/co/logbrew/logbrew-kotlin/$kotlin_version"
 mkdir -p "$maven_dir"
-cp "$tmp_dir/logbrew-kotlin-0.1.0.jar" "$maven_dir/logbrew-kotlin-0.1.0.jar"
-cp "$package_dir/pom.xml" "$maven_dir/logbrew-kotlin-0.1.0.pom"
-okhttp_maven_dir="$tmp_dir/maven/co/logbrew/logbrew-kotlin-okhttp/0.1.0"
+cp "$kotlin_jar" "$maven_dir/logbrew-kotlin-$kotlin_version.jar"
+cp "$package_dir/pom.xml" "$maven_dir/logbrew-kotlin-$kotlin_version.pom"
+okhttp_maven_dir="$tmp_dir/maven/co/logbrew/logbrew-kotlin-okhttp/$okhttp_version"
 mkdir -p "$okhttp_maven_dir"
-cp "$tmp_dir/logbrew-kotlin-okhttp-0.1.0.jar" "$okhttp_maven_dir/logbrew-kotlin-okhttp-0.1.0.jar"
-cp "$okhttp_package_dir/pom.xml" "$okhttp_maven_dir/logbrew-kotlin-okhttp-0.1.0.pom"
+cp "$okhttp_jar" "$okhttp_maven_dir/logbrew-kotlin-okhttp-$okhttp_version.jar"
+cp "$okhttp_package_dir/pom.xml" "$okhttp_maven_dir/logbrew-kotlin-okhttp-$okhttp_version.pom"
 
 gradle_app="$tmp_dir/gradle-app"
 mkdir -p "$gradle_app/src/main/java/app"
@@ -193,7 +212,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'co.logbrew:logbrew-kotlin:0.1.0'
+    implementation 'co.logbrew:logbrew-kotlin:$kotlin_version'
 }
 EOF
 cat > "$gradle_app/src/main/java/app/LifecycleApp.java" <<'JAVA'
@@ -211,24 +230,26 @@ public final class LifecycleApp {
 }
 JAVA
 (cd "$gradle_app" && gradle --no-daemon -q dependencies --configuration runtimeClasspath > "$tmp_dir/gradle-deps.txt")
-grep -q 'co.logbrew:logbrew-kotlin:0.1.0' "$tmp_dir/gradle-deps.txt"
+grep -q "co.logbrew:logbrew-kotlin:$kotlin_version" "$tmp_dir/gradle-deps.txt"
 (cd "$gradle_app" && gradle --no-daemon -q compileJava)
-python3 - "$gradle_app/build.gradle" <<'PY'
+python3 - "$gradle_app/build.gradle" "$kotlin_version" <<'PY'
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
+version = sys.argv[2]
+dependency = f"    implementation 'co.logbrew:logbrew-kotlin:{version}'\n"
 text = path.read_text()
-text = text.replace("    implementation 'co.logbrew:logbrew-kotlin:0.1.0'\n", "")
+text = text.replace(dependency, "")
 path.write_text(text)
 if "co.logbrew:logbrew-kotlin" in path.read_text():
     raise SystemExit("dependency removal failed")
-path.write_text(text.replace("dependencies {\n", "dependencies {\n    implementation 'co.logbrew:logbrew-kotlin:0.1.0'\n"))
-if "co.logbrew:logbrew-kotlin:0.1.0" not in path.read_text():
+path.write_text(text.replace("dependencies {\n", f"dependencies {{\n{dependency}"))
+if f"co.logbrew:logbrew-kotlin:{version}" not in path.read_text():
     raise SystemExit("dependency re-add failed")
 PY
 (cd "$gradle_app" && gradle --no-daemon -q dependencies --configuration runtimeClasspath > "$tmp_dir/gradle-deps-readded.txt")
-grep -q 'co.logbrew:logbrew-kotlin:0.1.0' "$tmp_dir/gradle-deps-readded.txt"
+grep -q "co.logbrew:logbrew-kotlin:$kotlin_version" "$tmp_dir/gradle-deps-readded.txt"
 
 okhttp_app="$tmp_dir/okhttp-gradle-app"
 kotlin_stdlib_version="$(kotlinc -version 2>&1 | sed -E 's/.*kotlinc-jvm ([^ ]+).*/\1/')"
@@ -249,7 +270,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'co.logbrew:logbrew-kotlin-okhttp:0.1.0'
+    implementation 'co.logbrew:logbrew-kotlin-okhttp:$okhttp_version'
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:$kotlin_stdlib_version'
 }
 
@@ -261,8 +282,8 @@ tasks.register('printRuntimeClasspath') {
 EOF
 cp "$okhttp_package_dir/examples/okhttp_request/OkHttpRequestExample.kt" "$okhttp_app/OkHttpApp.kt"
 (cd "$okhttp_app" && gradle --no-daemon -q dependencies --configuration runtimeClasspath > "$tmp_dir/okhttp-gradle-deps.txt")
-grep -q 'co.logbrew:logbrew-kotlin-okhttp:0.1.0' "$tmp_dir/okhttp-gradle-deps.txt"
-grep -q 'co.logbrew:logbrew-kotlin:0.1.0' "$tmp_dir/okhttp-gradle-deps.txt"
+grep -q "co.logbrew:logbrew-kotlin-okhttp:$okhttp_version" "$tmp_dir/okhttp-gradle-deps.txt"
+grep -q "co.logbrew:logbrew-kotlin:$kotlin_version" "$tmp_dir/okhttp-gradle-deps.txt"
 grep -q 'com.squareup.okhttp3:okhttp:4.12.0' "$tmp_dir/okhttp-gradle-deps.txt"
 (cd "$okhttp_app" && gradle --no-daemon -q printRuntimeClasspath > "$tmp_dir/okhttp-classpath.txt")
 okhttp_runtime_classpath="$(cat "$tmp_dir/okhttp-classpath.txt")"
@@ -299,7 +320,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'co.logbrew:logbrew-kotlin:0.1.0'
+    implementation 'co.logbrew:logbrew-kotlin:$kotlin_version'
     implementation 'io.opentelemetry:opentelemetry-api:1.63.0'
     implementation 'io.opentelemetry:opentelemetry-context:1.63.0'
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:$kotlin_stdlib_version'
@@ -383,7 +404,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'co.logbrew:logbrew-kotlin:0.1.0'
+    implementation 'co.logbrew:logbrew-kotlin:$kotlin_version'
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:$kotlin_stdlib_version'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2'
 }
@@ -543,18 +564,18 @@ fun main() {
 }
 KT
 kotlinc "$tmp_dir/HttpUrlConnectionApp.kt" \
-  -classpath "$maven_dir/logbrew-kotlin-0.1.0.jar" \
+  -classpath "$maven_dir/logbrew-kotlin-$kotlin_version.jar" \
   -jvm-target 11 \
   -Xjdk-release=11 \
   -Werror \
   -include-runtime \
   -d "$tmp_dir/http-url-connection-app.jar"
-java -cp "$tmp_dir/http-url-connection-app.jar:$maven_dir/logbrew-kotlin-0.1.0.jar" HttpUrlConnectionAppKt > "$tmp_dir/http-url-connection-app.out"
+java -cp "$tmp_dir/http-url-connection-app.jar:$maven_dir/logbrew-kotlin-$kotlin_version.jar" HttpUrlConnectionAppKt > "$tmp_dir/http-url-connection-app.out"
 grep -qx 'http url connection bridge ok' "$tmp_dir/http-url-connection-app.out"
 
 extract_dir="$tmp_dir/extracted-jar"
 mkdir -p "$extract_dir"
-(cd "$extract_dir" && jar --extract --file "$tmp_dir/logbrew-kotlin-0.1.0.jar")
+(cd "$extract_dir" && jar --extract --file "$kotlin_jar")
 test -f "$extract_dir/README.md"
 test -f "$extract_dir/examples/readme_example/ReadmeExample.kt"
 test -f "$extract_dir/examples/real_user_smoke/RealUserSmoke.kt"
@@ -585,13 +606,13 @@ grep -q 'spanContextFromContext' "$extract_dir/README.md"
 grep -q 'fromOpenTelemetrySpanContext' "$extract_dir/README.md"
 
 kotlinc "$extract_dir/examples/dependency_spans/DependencySpans.kt" \
-  -classpath "$maven_dir/logbrew-kotlin-0.1.0.jar" \
+  -classpath "$maven_dir/logbrew-kotlin-$kotlin_version.jar" \
   -jvm-target 11 \
   -Xjdk-release=11 \
   -Werror \
   -include-runtime \
   -d "$tmp_dir/dependency-spans.jar"
-java -cp "$tmp_dir/dependency-spans.jar:$maven_dir/logbrew-kotlin-0.1.0.jar" DependencySpansKt \
+java -cp "$tmp_dir/dependency-spans.jar:$maven_dir/logbrew-kotlin-$kotlin_version.jar" DependencySpansKt \
   > "$tmp_dir/dependency-spans.stdout.json" \
   2> "$tmp_dir/dependency-spans.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/dependency-spans.stdout.json" >/dev/null
@@ -605,13 +626,13 @@ run_app() {
   shift 4
   local app_jar="$tmp_dir/$name.jar"
   kotlinc "$@" \
-    -classpath "$maven_dir/logbrew-kotlin-0.1.0.jar" \
+    -classpath "$maven_dir/logbrew-kotlin-$kotlin_version.jar" \
     -jvm-target 11 \
     -Xjdk-release=11 \
     -Werror \
     -include-runtime \
     -d "$app_jar"
-  java -cp "$app_jar:$maven_dir/logbrew-kotlin-0.1.0.jar" "$main_class" > "$stdout_path" 2> "$stderr_path"
+  java -cp "$app_jar:$maven_dir/logbrew-kotlin-$kotlin_version.jar" "$main_class" > "$stdout_path" 2> "$stderr_path"
 }
 
 run_app \
