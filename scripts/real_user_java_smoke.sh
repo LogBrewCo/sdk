@@ -56,6 +56,8 @@ grep -q '^co/logbrew/sdk/LogBrewTrace.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewTrace\$Scope.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetry.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SpanEventSummary.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewHttpClientTracing.class$' "$tmp_dir/binary-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewHttpClientTracing\$ClientRequest.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewServletFilter.class$' "$tmp_dir/binary-jar-contents.txt"
 while IFS= read -r expected; do
@@ -104,6 +106,7 @@ grep -q '^src/main/java/co/logbrew/sdk/LogBrewTraceContext.java$' "$tmp_dir/sour
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewTrace.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewOpenTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/SpanEventSummary.java$' "$tmp_dir/source-jar-contents.txt"
+grep -q '^src/main/java/co/logbrew/sdk/LogBrewHttpClientTracing.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewServletFilter.java$' "$tmp_dir/source-jar-contents.txt"
 while IFS= read -r expected; do
@@ -139,6 +142,7 @@ grep -q 'MetricAttributes' "$package_dir/README.md"
 grep -q 'ProductTimeline' "$package_dir/README.md"
 grep -q 'Traceparent' "$package_dir/README.md"
 grep -q 'LogBrewOpenTelemetry' "$package_dir/README.md"
+grep -q 'LogBrewHttpClientTracing' "$package_dir/README.md"
 grep -q 'LogBrewOperationTracing' "$package_dir/README.md"
 grep -q 'LogBrewJdbcTracing' "$package_dir/README.md"
 grep -q 'LogBrewServletFilter' "$package_dir/README.md"
@@ -171,11 +175,11 @@ mkdir -p "$extract_dir"
 (cd "$extract_dir" && jar --extract --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar")
 test -f "$extract_dir/examples/Makefile"
 make -C "$extract_dir/examples" > "$tmp_dir/extracted-examples-help.txt"
-grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/extracted-examples-help.txt"
-grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/extracted-examples-help.txt"
-grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/extracted-examples-help.txt"
-grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/extracted-examples-help.txt"
-grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/extracted-examples-help.txt"
+grep -Fxq 'run-readme-example -> make run-readme-example' "$tmp_dir/extracted-examples-help.txt"
+grep -Fxq 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/extracted-examples-help.txt"
+grep -Fxq 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/extracted-examples-help.txt"
+grep -Fxq 'run (real-user-smoke) -> make run' "$tmp_dir/extracted-examples-help.txt"
+grep -Fxq 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/extracted-examples-help.txt"
 (cd "$extract_dir/examples" && make run-readme-example) > "$tmp_dir/extracted-readme-default.stdout.json" 2> "$tmp_dir/extracted-readme-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-readme-default.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/extracted-readme-default.stdout.json" >/dev/null
@@ -251,11 +255,13 @@ import co.logbrew.sdk.HttpTransport;
 import co.logbrew.sdk.IssueAttributes;
 import co.logbrew.sdk.LogAttributes;
 import co.logbrew.sdk.LogBrewClient;
+import co.logbrew.sdk.LogBrewHttpClientTracing;
 import co.logbrew.sdk.LogBrewJulHandler;
 import co.logbrew.sdk.LogBrewLogbackAppender;
 import co.logbrew.sdk.LogBrewJdbcTracing;
 import co.logbrew.sdk.LogBrewOpenTelemetry;
 import co.logbrew.sdk.LogBrewOperationTracing;
+import co.logbrew.sdk.LogBrewTrace;
 import co.logbrew.sdk.LogBrewTraceContext;
 import co.logbrew.sdk.MetricAttributes;
 import co.logbrew.sdk.ProductTimeline;
@@ -279,9 +285,16 @@ import io.opentelemetry.api.trace.TraceState;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import java.io.IOException;
+import java.net.Authenticator;
+import java.net.CookieHandler;
 import java.net.InetSocketAddress;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
@@ -295,9 +308,14 @@ import java.sql.Statement;
 import javax.sql.DataSource;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSession;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
@@ -497,6 +515,89 @@ public final class Main {
         require(!dependencyPayload.contains("SELECT private"), "dependency span events drop raw queries");
         require(!dependencyPayload.contains("private body"), "dependency metadata drops message body");
         require(!dependencyPayload.contains("private failure message body"), "dependency exception event drops messages");
+
+        LogBrewClient outbound = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
+        LogBrewTraceContext outboundParent = LogBrewTraceContext.fromTraceparent(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+            "a7ad6b7169203330"
+        );
+        String authHeader = "Author" + "ization";
+        String authValue = "Bea" + "rer redacted";
+        RecordingHttpClient okHttpClient = RecordingHttpClient.responding(202, "accepted");
+        HttpRequest outboundRequest = HttpRequest.newBuilder(
+                URI.create("https://api.example.invalid/orders/123?debug=redacted#frag"))
+            .header("traceparent", "00-11111111111111111111111111111111-2222222222222222-01")
+            .header(authHeader, authValue)
+            .GET()
+            .build();
+        HttpResponse<String> outboundResponse;
+        LogBrewTrace.Scope traceScope = LogBrewTrace.activate(outboundParent);
+        try {
+            outboundResponse = LogBrewHttpClientTracing.send(
+                outbound,
+                okHttpClient,
+                outboundRequest,
+                HttpResponse.BodyHandlers.ofString(),
+                LogBrewHttpClientTracing.ClientRequest.create()
+                    .routeTemplate("https://api.example.invalid/orders/{id}?debug=redacted#frag")
+                    .eventIdPrefix("java_http_client_smoke")
+                    .spanId("b7ad6b7169203501")
+                    .metadata(Map.of(
+                        "component", "checkout",
+                        "url", "https://api.example.invalid/orders/123?debug=redacted",
+                        "headers", authHeader + ": " + authValue,
+                        "payload", "private body"
+                    ))
+                    .nowSequence(
+                        Instant.parse("2026-06-02T10:00:10Z"),
+                        Instant.parse("2026-06-02T10:00:10.018Z")
+                    )
+            );
+        } finally {
+            traceScope.close();
+        }
+        require(outboundResponse.statusCode() == 202, "HTTP client helper preserves response status");
+        require(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203501-01".equals(
+                firstHeader(okHttpClient.lastRequest, "traceparent")
+            ),
+            "HTTP client helper injects child traceparent"
+        );
+        require(authValue.equals(firstHeader(okHttpClient.lastRequest, authHeader)), "HTTP headers preserved");
+
+        RecordingHttpClient busyHttpClient = RecordingHttpClient.responding(503, "busy");
+        LogBrewHttpClientTracing.sendAsync(
+            outbound,
+            busyHttpClient,
+            HttpRequest.newBuilder(URI.create("https://api.example.invalid/retry"))
+                .POST(HttpRequest.BodyPublishers.ofString("payload should not be captured"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString(),
+            LogBrewHttpClientTracing.ClientRequest.create()
+                .routeTemplate("/retry")
+                .eventIdPrefix("java_http_client_async_smoke")
+                .spanId("b7ad6b7169203502")
+                .nowSequence(
+                    Instant.parse("2026-06-02T10:00:11Z"),
+                    Instant.parse("2026-06-02T10:00:11.006Z")
+                )
+        ).join();
+        String outboundPayload = outbound.previewJson();
+        require(outbound.pendingEvents() == 2, "HTTP client helper queues two spans");
+        require(outboundPayload.contains("\"source\": \"http.client\""), "HTTP client span source");
+        require(outboundPayload.contains("\"id\": \"java_http_client_smoke_span_b7ad6b7169203501\""), "HTTP client span id");
+        require(outboundPayload.contains("\"name\": \"http.client:GET /orders/{id}\""), "HTTP client span name");
+        require(outboundPayload.contains("\"routeTemplate\": \"/orders/{id}\""), "HTTP client route template");
+        require(outboundPayload.contains("\"statusCode\": 202"), "HTTP client status code");
+        require(outboundPayload.contains("\"http.response.status_code\": 503"), "HTTP client async status code");
+        require(outboundPayload.contains("\"status\": \"error\""), "HTTP client records 5xx as error");
+        require(!outboundPayload.contains("api.example.invalid"), "HTTP client omits host");
+        require(!outboundPayload.contains("debug=redacted"), "HTTP client omits query");
+        require(!outboundPayload.contains(authHeader), "HTTP client omits header names");
+        require(!outboundPayload.contains(authValue), "HTTP client omits header values");
+        require(!outboundPayload.contains("private body"), "HTTP client omits metadata payload");
+        require(!outboundPayload.contains("payload should not be captured"), "HTTP client omits request body");
+        require(!outboundPayload.contains("11111111111111111111111111111111"), "HTTP client replaces incoming traceparent");
 
         LogBrewClient jdbcClient = LogBrewClient.create("LOGBREW_API_KEY", "smoke-app", "0.1.0");
         RecordingJdbc jdbc = new RecordingJdbc();
@@ -765,7 +866,7 @@ public final class Main {
 
         runHttpTransportSmoke();
 
-        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"jdbcEvents\":6,\"otelEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
+        System.err.println("{\"ok\":true,\"status\":202,\"attempts\":1,\"events\":6,\"metricEvents\":1,\"timelineEvents\":2,\"httpClientEvents\":2,\"jdbcEvents\":6,\"otelEvents\":1,\"httpAttempts\":2,\"httpRequests\":2,\"logbackEvents\":2}");
     }
 
     private static void runHttpTransportSmoke() {
@@ -979,6 +1080,10 @@ public final class Main {
         }
     }
 
+    private static String firstHeader(HttpRequest request, String name) {
+        return request.headers().firstValue(name).orElseThrow(() -> new AssertionError("missing header: " + name));
+    }
+
     private static String firstHeader(HttpExchange exchange, String name) {
         String value = exchange.getRequestHeaders().getFirst(name);
         if (value == null) {
@@ -1015,6 +1120,146 @@ public final class Main {
             cursor = index + needle.length();
         }
     }
+
+    private static final class RecordingHttpClient extends HttpClient {
+        private final int statusCode;
+        private final String body;
+        private HttpRequest lastRequest;
+
+        private RecordingHttpClient(int statusCode, String body) {
+            this.statusCode = statusCode;
+            this.body = body;
+        }
+
+        static RecordingHttpClient responding(int statusCode, String body) {
+            return new RecordingHttpClient(statusCode, body);
+        }
+
+        @Override
+        public Optional<CookieHandler> cookieHandler() {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<Duration> connectTimeout() {
+            return Optional.empty();
+        }
+
+        @Override
+        public Redirect followRedirects() {
+            return Redirect.NEVER;
+        }
+
+        @Override
+        public Optional<ProxySelector> proxy() {
+            return Optional.empty();
+        }
+
+        @Override
+        public SSLContext sslContext() {
+            return null;
+        }
+
+        @Override
+        public SSLParameters sslParameters() {
+            return null;
+        }
+
+        @Override
+        public Optional<Authenticator> authenticator() {
+            return Optional.empty();
+        }
+
+        @Override
+        public HttpClient.Version version() {
+            return HttpClient.Version.HTTP_1_1;
+        }
+
+        @Override
+        public Optional<Executor> executor() {
+            return Optional.empty();
+        }
+
+        @Override
+        public <T> HttpResponse<T> send(
+            HttpRequest request,
+            HttpResponse.BodyHandler<T> responseBodyHandler
+        ) {
+            lastRequest = request;
+            return new RecordingHttpResponse<>(request, statusCode, body);
+        }
+
+        @Override
+        public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+            HttpRequest request,
+            HttpResponse.BodyHandler<T> responseBodyHandler
+        ) {
+            lastRequest = request;
+            return CompletableFuture.completedFuture(new RecordingHttpResponse<>(request, statusCode, body));
+        }
+
+        @Override
+        public <T> CompletableFuture<HttpResponse<T>> sendAsync(
+            HttpRequest request,
+            HttpResponse.BodyHandler<T> responseBodyHandler,
+            HttpResponse.PushPromiseHandler<T> pushPromiseHandler
+        ) {
+            return sendAsync(request, responseBodyHandler);
+        }
+    }
+
+    private static final class RecordingHttpResponse<T> implements HttpResponse<T> {
+        private final HttpRequest request;
+        private final int statusCode;
+        private final Object body;
+
+        private RecordingHttpResponse(HttpRequest request, int statusCode, Object body) {
+            this.request = request;
+            this.statusCode = statusCode;
+            this.body = body;
+        }
+
+        @Override
+        public int statusCode() {
+            return statusCode;
+        }
+
+        @Override
+        public HttpRequest request() {
+            return request;
+        }
+
+        @Override
+        public Optional<HttpResponse<T>> previousResponse() {
+            return Optional.empty();
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public T body() {
+            return (T) body;
+        }
+
+        @Override
+        public HttpHeaders headers() {
+            return HttpHeaders.of(Collections.emptyMap(), (name, value) -> true);
+        }
+
+        @Override
+        public URI uri() {
+            return request.uri();
+        }
+
+        @Override
+        public HttpClient.Version version() {
+            return HttpClient.Version.HTTP_1_1;
+        }
+
+        @Override
+        public Optional<SSLSession> sslSession() {
+            return Optional.empty();
+        }
+    }
 }
 JAVA
 javac -Xlint:all -Werror --release 11 -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$smoke_app/classes" "$smoke_app/src/Main.java"
@@ -1027,6 +1272,7 @@ grep -q '"httpRequests":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"logbackEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"timelineEvents":2' "$tmp_dir/smoke-app.stderr.json"
+grep -q '"httpClientEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"jdbcEvents":6' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"otelEvents":1' "$tmp_dir/smoke-app.stderr.json"
 

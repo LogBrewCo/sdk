@@ -40,6 +40,7 @@ java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.lo
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewServletFilterTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.SpanEventSummaryTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewOpenTelemetryTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewHttpClientTracingTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewOperationTracingTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewJmsTracingTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewJdbcTracingTest
@@ -68,6 +69,7 @@ test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewOpenTelemetrySdk.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewOpenTelemetrySpanExporter.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/SpanEventSummary.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/SpanLinkSummary.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewHttpClientTracing.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewHttpRequestTelemetry.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewServletFilter.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.html"
@@ -102,6 +104,7 @@ grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySdk.java$' "$tmp_dir/sources-jar-co
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySpanExporter.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SpanEventSummary.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SpanLinkSummary.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewHttpClientTracing.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewServletFilter.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.java$' "$tmp_dir/sources-jar-contents.txt"
@@ -135,6 +138,7 @@ grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySdk.html$' "$tmp_dir/javadoc-jar-co
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySpanExporter.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SpanEventSummary.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/SpanLinkSummary.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewHttpClientTracing.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewServletFilter.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.html$' "$tmp_dir/javadoc-jar-contents.txt"
@@ -177,6 +181,8 @@ grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySdk.class$' "$tmp_dir/jar-contents.
 grep -q '^co/logbrew/sdk/LogBrewOpenTelemetrySpanExporter.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/SpanEventSummary.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/SpanLinkSummary.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewHttpClientTracing.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewHttpClientTracing\$ClientRequest.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewHttpRequestTelemetry.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewServletFilter.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.class$' "$tmp_dir/jar-contents.txt"
@@ -221,6 +227,7 @@ grep -q 'LogBrewOpenTelemetrySdk' "$package_dir/README.md"
 grep -q 'spanExporter' "$package_dir/README.md"
 grep -q 'spanProcessor' "$package_dir/README.md"
 grep -q 'opentelemetry-sdk-trace' "$package_dir/README.md"
+grep -q 'LogBrewHttpClientTracing' "$package_dir/README.md"
 grep -q 'LogBrewHttpRequestTelemetry' "$package_dir/README.md"
 grep -q 'LogBrewServletFilter' "$package_dir/README.md"
 grep -q 'LogBrewSpringBootAutoConfiguration' "$package_dir/README.md"

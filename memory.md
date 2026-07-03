@@ -1,5 +1,34 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: Java outbound `java.net.http.HttpClient` tracing helper added
+  after source reads from Sentry Java
+  `getsentry/sentry-java@34c912af8ac0b9def83ad0dbfe8d1452d460c7ed`
+  (`SentryFeignClient.execute`, `SentryOkHttpInterceptor.intercept`),
+  OpenTelemetry Java Instrumentation
+  `open-telemetry/opentelemetry-java-instrumentation@43737cfdd5902e3d19c722f5f846bae085513ab4`
+  (`JavaHttpClientTelemetry`, `OpenTelemetryHttpClient.send/sendAsync`),
+  Datadog Java tracer
+  `DataDog/dd-trace-java@0eeac731fafa60d5e10c302cf7bf3560380e4127`
+  (`SendAdvice`, `SendAsyncAdvice`, `JavaNetClientDecorator`), and PostHog
+  Java `PostHog/posthog-java@dcf8fd85d0f1a405ae3aca02d00e24a1daa4f17e`
+  (no comparable Java outbound HTTP tracing path found). New
+  `LogBrewHttpClientTracing.send(...)` and `sendAsync(...)` copy app requests,
+  replace only one W3C `traceparent`, preserve app-owned headers on the actual
+  request, queue one sanitized `http.client` span, and support active
+  `LogBrewTrace` child correlation, explicit span IDs, safe route templates,
+  duration/status mapping, and type-only exception events. It avoids Java
+  agents, global client patching, OTel provider/exporter ownership, baggage,
+  tracestate, full URLs, query strings, arbitrary header/payload capture,
+  exception messages, and stacks. Evidence: RED `bash
+  scripts/check_java_package.sh` failed before the helper existed; GREEN `bash
+  scripts/check_java_package.sh` and `bash scripts/real_user_java_smoke.sh`
+  passed with packaged jar/source examples plus sync 202, async 503,
+  existing-traceparent replacement, sanitized metadata, and payload/header
+  omission proof. Research:
+  `docs/competitor-research/java-http-client-tracing-2026-07-03.md`. Remaining
+  Java gaps: automatic framework/client breadth, HTTP phase timings,
+  baggage/tracestate, richer semantic conventions, profiling, and backend
+  trace-query depth still trail Sentry/Datadog/OTel.
 - 2026-07-03: Java optional OpenTelemetry ended-span exporter bridge added
   after source reads from Sentry Java
   `getsentry/sentry-java@34c912af8ac0b9def83ad0dbfe8d1452d460c7ed`
@@ -11,7 +40,7 @@
   `DataDog/dd-trace-java@0eeac731fafa60d5e10c302cf7bf3560380e4127`
   (OTel shim tracer/span/event/link classes), and PostHog Java
   `PostHog/posthog-java@dcf8fd85d0f1a405ae3aca02d00e24a1daa4f17e`
-  (no general OTel exporter found). `LogBrewOpenTelemetry` now exposes
+  (no general OTel exporter found). `LogBrewOpenTelemetrySdk` now exposes
   `spanExporter(client)` and `spanProcessor(client)` backed by
   `LogBrewOpenTelemetrySpanExporter`; `LogBrewOpenTelemetry` remains API-only
   so context-copy apps do not need `opentelemetry-sdk-trace`. Apps keep OTel provider ownership while

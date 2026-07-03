@@ -304,6 +304,36 @@ Map<String, String> outgoingHeaders = request.outgoingHeaders();
 
 `LogBrewTrace.activate(...)` reinstates the previous active trace when closed. Use `LogBrewTrace.wrapCurrent(...)` when handing work to another thread or executor; plain Java threads do not inherit request trace state automatically. The request helper falls back to a local root trace when incoming propagation is missing or malformed, while `Traceparent.parse(...)` stays strict for explicit validation paths. `LogBrewJulHandler` and `LogBrewLogbackAppender` attach active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata automatically, while preserving app-owned logger handlers and primitive metadata.
 
+## Java HttpClient Spans
+
+Use `LogBrewHttpClientTracing` around app-owned Java 11 `HttpClient` calls when you want outbound dependency spans without a Java agent or global HTTP patching:
+
+```java
+import co.logbrew.sdk.LogBrewHttpClientTracing;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.Map;
+
+HttpClient http = HttpClient.newHttpClient();
+HttpRequest outbound = HttpRequest.newBuilder(URI.create("https://api.example.com/orders/123"))
+    .GET()
+    .build();
+
+HttpResponse<String> response = LogBrewHttpClientTracing.send(
+    client,
+    http,
+    outbound,
+    HttpResponse.BodyHandlers.ofString(),
+    LogBrewHttpClientTracing.ClientRequest.create()
+        .routeTemplate("/orders/{id}")
+        .metadata(Map.of("service", "checkout-api"))
+);
+```
+
+`send(...)` and `sendAsync(...)` copy the request, replace only one normalized W3C `traceparent` header, create a child span under the active `LogBrewTrace` when present, and record method, route template, status code, duration, sampled state, and type-only exception summaries. They preserve app-owned headers on the actual request but never put arbitrary headers, payloads, full URLs, query strings, baggage, tracestate, exception messages, or stack traces into LogBrew payloads. Pass a low-cardinality `routeTemplate(...)` when paths contain user IDs or order IDs; otherwise the helper falls back to the request path with query and fragment removed.
+
 ## Jakarta Servlet and Spring Requests
 
 Spring Boot 3+/4+ apps only need to expose the `LogBrewClient` they already own. When Spring Boot, Jakarta Servlet, and that client bean are present, `LogBrewSpringBootAutoConfiguration` registers the servlet filter automatically:
@@ -828,6 +858,7 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
 - `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when only OpenTelemetry API jars are present; `LogBrewOpenTelemetrySdk` exposes an app-owned `spanExporter` or `spanProcessor` when the app also uses `opentelemetry-sdk-trace`.
+- `LogBrewHttpClientTracing` wraps app-owned Java 11 `HttpClient.send(...)` and `sendAsync(...)` calls with one W3C `traceparent` and one privacy-bounded `http.client` span.
 - `LogBrewServletFilter` activates request-local trace context for Jakarta Servlet/Spring Boot handlers and emits one request span plus one duration metric without hidden Java-agent instrumentation.
 - `LogBrewSpringBootAutoConfiguration` registers that filter only when Spring Boot, Jakarta Servlet, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewSpringCacheTracing` wraps app-owned Spring `CacheManager` or `Cache` objects with privacy-bounded cache hit/write spans under an active trace by default.
