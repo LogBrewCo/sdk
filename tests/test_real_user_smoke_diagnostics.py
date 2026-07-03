@@ -79,6 +79,51 @@ class RealUserSmokeDiagnosticsTests(unittest.TestCase):
         self.assertNotIn("logbrew-sdk-0.1.0-sources.jar", script)
         self.assertNotIn("<version>0.1.0</version>", script)
 
+    def test_spring_boot_smoke_reads_current_java_package_version_from_pom(self):
+        script = (ROOT / "scripts" / "real_user_spring_boot_smoke.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('java_version="$(read_pom_version "$package_dir/pom.xml")"', script)
+        self.assertIn('java_jar="$tmp_dir/logbrew-sdk-$java_version.jar"', script)
+        self.assertIn("logbrew-sdk-$java_version.jar", script)
+        self.assertIn("co.logbrew:logbrew-sdk:$java_version", script)
+
+        self.assertNotIn("co.logbrew:logbrew-sdk:0.1.0", script)
+        self.assertNotIn("logbrew-sdk-0.1.0.jar", script)
+
+    def test_spring_boot_jdbc_auto_configuration_registers_before_datasource_creation(self):
+        auto_config = (
+            ROOT
+            / "java"
+            / "logbrew-java"
+            / "src"
+            / "main"
+            / "java"
+            / "co"
+            / "logbrew"
+            / "sdk"
+            / "LogBrewSpringBootJdbcAutoConfiguration.java"
+        ).read_text(encoding="utf-8")
+        post_processor = (
+            ROOT
+            / "java"
+            / "logbrew-java"
+            / "src"
+            / "main"
+            / "java"
+            / "co"
+            / "logbrew"
+            / "sdk"
+            / "LogBrewSpringBootJdbcDataSourcePostProcessor.java"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("@AutoConfiguration(beforeName = {", auto_config)
+        self.assertNotIn("@ConditionalOnBean(LogBrewClient.class)", auto_config)
+        self.assertIn("postProcessBeforeInitialization", post_processor)
+        self.assertIn("postProcessAfterInitialization", post_processor)
+        self.assertIn("LogBrewClient client = clientProvider.getIfAvailable()", post_processor)
+
 
 if __name__ == "__main__":
     unittest.main()

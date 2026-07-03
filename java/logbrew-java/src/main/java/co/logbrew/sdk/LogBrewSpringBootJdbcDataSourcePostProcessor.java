@@ -31,7 +31,16 @@ final class LogBrewSpringBootJdbcDataSourcePostProcessor implements BeanPostProc
     }
 
     @Override
+    public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
+        return wrapDataSource(bean, beanName);
+    }
+
+    @Override
     public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+        return wrapDataSource(bean, beanName);
+    }
+
+    private Object wrapDataSource(Object bean, String beanName) {
         if (!enabled() || !(bean instanceof DataSource) || isScopedTarget(beanName)) {
             return bean;
         }

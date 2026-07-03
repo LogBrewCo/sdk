@@ -10,6 +10,20 @@ failure_diagnostics_printed=false
 # shellcheck source=scripts/java_logback_deps.sh
 source "$repo_root/scripts/java_logback_deps.sh"
 
+read_pom_version() {
+  python3 - "$1" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+namespace = {"m": "http://maven.apache.org/POM/4.0.0"}
+version = root.findtext("m:version", namespaces=namespace)
+if not version:
+    raise SystemExit(f"missing POM version in {sys.argv[1]}")
+print(version)
+PY
+}
+
 print_failure_diagnostics() {
   local status=$1
   if [ "$status" -eq 0 ]; then
@@ -39,6 +53,8 @@ cleanup() {
 }
 
 trap cleanup EXIT
+java_version="$(read_pom_version "$package_dir/pom.xml")"
+java_jar="$tmp_dir/logbrew-sdk-$java_version.jar"
 
 if ! command -v gradle >/dev/null 2>&1; then
   echo "gradle is required for the Spring Boot real-user smoke" >&2
@@ -63,12 +79,12 @@ cp -R "$tmp_dir/classes/co" "$tmp_dir/jar-stage/co"
 if [ -d "$package_dir/src/main/resources" ]; then
   cp -R "$package_dir/src/main/resources/." "$tmp_dir/jar-stage/"
 fi
-jar --create --file "$tmp_dir/logbrew-sdk-0.1.0.jar" -C "$tmp_dir/jar-stage" .
+jar --create --file "$java_jar" -C "$tmp_dir/jar-stage" .
 
-maven_dir="$tmp_dir/maven/co/logbrew/logbrew-sdk/0.1.0"
+maven_dir="$tmp_dir/maven/co/logbrew/logbrew-sdk/$java_version"
 mkdir -p "$maven_dir"
-cp "$tmp_dir/logbrew-sdk-0.1.0.jar" "$maven_dir/logbrew-sdk-0.1.0.jar"
-cp "$package_dir/pom.xml" "$maven_dir/logbrew-sdk-0.1.0.pom"
+cp "$java_jar" "$maven_dir/logbrew-sdk-$java_version.jar"
+cp "$package_dir/pom.xml" "$maven_dir/logbrew-sdk-$java_version.pom"
 
 gradle_app="$tmp_dir/spring-boot-app"
 gradle_home="$tmp_dir/gradle-home"
@@ -89,7 +105,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'co.logbrew:logbrew-sdk:0.1.0'
+    implementation 'co.logbrew:logbrew-sdk:$java_version'
     implementation 'org.springframework.boot:spring-boot-starter:$spring_boot_version'
     implementation 'org.springframework.boot:spring-boot-starter-web:$spring_boot_version'
 }
@@ -480,7 +496,7 @@ run_gradle() {
 }
 
 run_gradle dependencies --configuration runtimeClasspath > "$tmp_dir/gradle-deps.txt"
-grep -q 'co.logbrew:logbrew-sdk:0.1.0' "$tmp_dir/gradle-deps.txt"
+grep -q "co.logbrew:logbrew-sdk:$java_version" "$tmp_dir/gradle-deps.txt"
 grep -q "org.springframework.boot:spring-boot-starter:$spring_boot_version" "$tmp_dir/gradle-deps.txt"
 grep -q "org.springframework.boot:spring-boot-starter-web:$spring_boot_version" "$tmp_dir/gradle-deps.txt"
 grep -q 'ch.qos.logback:logback-classic' "$tmp_dir/gradle-deps.txt"
