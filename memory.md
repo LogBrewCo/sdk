@@ -1,5 +1,25 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: Java OpenTelemetry release-readiness gap closed without adding
+  duplicate routine push-CI work. Source refresh rechecked current public
+  Sentry Java `getsentry/sentry-java@44d18f56b41c98a11883a40899745a8af3960284`
+  `OtelSentrySpanProcessor`, OpenTelemetry Java
+  `open-telemetry/opentelemetry-java@4d974ba1bb300157d3cb296cd466f8d1d96b9333`
+  `SpanExporter`/`SimpleSpanProcessor`/`SpanData`, Datadog Java
+  `DataDog/dd-trace-java@0eeac731fafa60d5e10c302cf7bf3560380e4127`
+  `OtelTracerProvider`, and PostHog Java
+  `PostHog/posthog-java@dcf8fd85d0f1a405ae3aca02d00e24a1daa4f17e`
+  `PostHog`/`QueueManager`. Pattern unchanged: Sentry/Datadog own deeper OTel
+  processors/shims, OTel exposes the app-owned exporter/span-data seam, and
+  PostHog Java has no comparable general OTel exporter path. LogBrew already
+  had the lighter privacy-bounded exporter; release readiness now runs
+  `bash scripts/real_user_java_opentelemetry_smoke.sh` after core Java smoke
+  and before Java framework smokes, protected by
+  `tests/test_java_opentelemetry_smoke.py`. Evidence: RED focused unittest
+  failed on missing workflow step; GREEN focused unittest and installed-artifact
+  Java OTel smoke passed. No package release. Lesson: keep expensive rich-trace
+  installed-artifact proof in release-readiness unless a code change requires
+  routine push-CI coverage.
 - 2026-07-03: Swift URLSession real-request tracing convenience added after
   current public source reads from Sentry Cocoa
   `getsentry/sentry-cocoa@806a5e4d8bcb4c47399ee06269b8b15a4cde51e7`

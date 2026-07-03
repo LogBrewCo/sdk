@@ -578,6 +578,9 @@ jobs:
       - name: Run Java real-user smoke test
         run: bash scripts/real_user_java_smoke.sh
 
+      - name: Run Java OpenTelemetry installed-artifact smoke test
+        run: bash scripts/real_user_java_opentelemetry_smoke.sh
+
       - name: Run Java Spring Kafka installed-artifact smoke test
         run: bash scripts/real_user_java_spring_kafka_smoke.sh
 
