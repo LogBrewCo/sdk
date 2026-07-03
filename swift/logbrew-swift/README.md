@@ -149,7 +149,7 @@ let trace = LogBrewTrace.continueOrCreateContext(
     fromTraceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 )
 
-try LogBrewTrace.withContext(trace) {
+try await LogBrewTrace.withContext(trace) {
     logger.warning("checkout retry scheduled", metadata: ["screen": "Checkout"])
     try client.issue(
         "evt_issue_001",
@@ -193,6 +193,21 @@ try LogBrewTrace.withContext(trace) {
         timings: timings,
         metadata: ["component": "checkout-api"]
     )
+
+    let urlSessionTracer = try LogBrewURLSessionTracer(
+        client: client,
+        onCaptureError: { error in
+            // Telemetry capture failures should not break app networking.
+            print("LogBrew URLSession span capture failed: \(error)")
+        }
+    )
+    let (_, response) = try await urlSessionTracer.data(
+        for: request,
+        routeTemplate: "/api/checkout",
+        metadata: ["component": "checkout-api"]
+    )
+    print("status=\((response as? HTTPURLResponse)?.statusCode ?? 0)")
+
     let lifecycleTracker = try LogBrewLifecycleTracker(
         client: client,
         initialState: "active",
@@ -236,7 +251,7 @@ if let otelParent = try LogBrewTrace.openTelemetrySpanContext(from: appOwnedOpen
 }
 ```
 
-`LogBrewTrace.current` is task-local, so async work started inside `withContext(...)` can read the active context without global state. `LogBrewClient` automatically adds active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewLogger` receives the same correlation through the client. `LogBrewTrace.spanAttributes(...)` reuses the active span id for a span event, `LogBrewTrace.outgoingHeaders()` creates only a normalized `traceparent` header for app-owned requests, and `LogBrewTrace.startURLSessionSpan(...)` creates a child span context plus a copied `URLRequest` with only `traceparent` injected. Call `captureURLSessionSpan(...)` after your URLSession completion to record sanitized method, route template, status, duration, and primitive metadata. If your app collects `URLSessionTaskMetrics` through its own delegate, pass `try LogBrewURLSessionTimings(taskMetrics: metrics)` or app-supplied `LogBrewURLSessionTimings(...)` to include bounded phase timings such as name lookup, connect, TLS, send, wait, receive, and body byte counts.
+`LogBrewTrace.current` is task-local, so async work started inside `withContext(...)` can read the active context without global state. `LogBrewClient` automatically adds active `traceId`, `spanId`, `parentSpanId`, `traceFlags`, and `traceSampled` metadata to issue, log, action, and metric events. `LogBrewLogger` receives the same correlation through the client. `LogBrewTrace.spanAttributes(...)` reuses the active span id for a span event, `LogBrewTrace.outgoingHeaders()` creates only a normalized `traceparent` header for app-owned requests, and `LogBrewTrace.startURLSessionSpan(...)` creates a child span context plus a copied `URLRequest` with only `traceparent` injected. Call `captureURLSessionSpan(...)` after your URLSession completion to record sanitized method, route template, status, duration, and primitive metadata. Use `LogBrewURLSessionTracer` when you want a small app-owned wrapper around `URLSession.data(for:)`: it injects one `traceparent`, measures monotonic duration, captures success or failure spans, reports span-capture failures through `onCaptureError`, and rethrows the original request error. If your app collects `URLSessionTaskMetrics` through its own delegate, pass `try LogBrewURLSessionTimings(taskMetrics: metrics)` or app-supplied `LogBrewURLSessionTimings(...)` to include bounded phase timings such as name lookup, connect, TLS, send, wait, receive, and body byte counts.
 
 Use `LogBrewLifecycleTracker` from your own SwiftUI, UIKit, AppKit, or SceneDelegate lifecycle hooks when you want app state transitions such as `active -> background` to appear as child spans on the active trace. The tracker dedupes repeated states, computes previous-state duration from app-owned timestamps, records primitive metadata only, and overwrites spoofed trace metadata with the active child span context. Use the lower-level `captureLifecycleSpan(...)` helper only when your app already owns previous/current state and duration values.
 

@@ -1,5 +1,35 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: Swift URLSession real-request tracing convenience added after
+  current public source reads from Sentry Cocoa
+  `getsentry/sentry-cocoa@806a5e4d8bcb4c47399ee06269b8b15a4cde51e7`
+  (`SentryNetworkTracker`, `SentryNetworkTrackingIntegration`), Datadog iOS
+  `DataDog/dd-sdk-ios@d335d849ed100ac1fbaff6f7666329682dbb14ba`
+  (`URLSessionTaskInterception`, `TracingURLSessionHandler`), OpenTelemetry
+  Swift `open-telemetry/opentelemetry-swift@f2135cfe66be9e7a7cec7102375acfa1f7a564ec`
+  (`URLSessionLogger`, `URLSessionInstrumentation`), and PostHog iOS
+  `PostHog/posthog-ios@8497f6ea218b14c348a353f2bafbb26069e9da2c`
+  (`URLSessionInterceptor`, `PostHogSessionReplayNetworkPlugin`). New
+  `LogBrewURLSessionTracer` is an app-owned wrapper around caller-provided
+  `URLSession.data(for:)`: it injects one W3C `traceparent`, measures
+  monotonic duration, captures sanitized success/failure spans, strips
+  generated URLSession metadata spoofing, reports span-capture failures through
+  `onCaptureError`, and rethrows the original request error. It avoids
+  Sentry/Datadog/OTel/PostHog-style swizzling, global task maps, delegate
+  ownership, session replay, payload/header/full-URL/query/hash capture,
+  baggage, and tracestate. Evidence: RED focused Swift test failed on missing
+  tracer; GREEN `swift test --package-path swift/logbrew-swift --scratch-path
+  /tmp/logbrew-swift-urlsession-tracer-full` (40 tests), `bash
+  scripts/check_swift_style.sh`, `bash scripts/check_swift_package.sh`, `bash
+  scripts/real_user_swift_smoke.sh` with installed temporary consumer app
+  hitting a local traced GET plus 503-to-202 fake-intake flush, ShellCheck,
+  markdown links, confidentiality scan, release metadata, backend reports, and
+  generated-artifact hygiene. Research:
+  `docs/competitor-research/swift-trace-correlation-2026-06-16.md`.
+  Remaining Swift gaps: true automatic URLSession/lifecycle instrumentation
+  should live in a dedicated integration target/package, plus baggage/
+  tracestate, richer span events/exceptions, direct package-owned live OTel
+  extraction, and native symbolication parity.
 - 2026-07-03: Kotlin OkHttp route-template cardinality gap reduced after
   source reads from Sentry Java/Android
   `getsentry/sentry-java@2ad4e0dfc7b8138bbce76e521555dbc1ccacdd0e`

@@ -204,6 +204,9 @@ public extension LogBrewClient {
         let checkedDurationMs = try validatedDurationMs(durationMs)
         var spanMetadata: Metadata = [:]
         try copyMetadata(metadata, into: &spanMetadata)
+        for key in urlSessionGeneratedMetadataKeys {
+            spanMetadata.removeValue(forKey: key)
+        }
         spanMetadata["source"] = .string("swift.urlsession")
         spanMetadata["method"] = .string(span.method)
         spanMetadata["routeTemplate"] = .string(span.routeTemplate)
@@ -232,6 +235,24 @@ public extension LogBrewClient {
         )
     }
 }
+
+private let urlSessionGeneratedMetadataKeys: Set<String> = [
+    "source",
+    "method",
+    "routeTemplate",
+    "statusCode",
+    "errorType",
+    "requestFetchMs",
+    "requestRedirectMs",
+    "requestNameLookupMs",
+    "requestConnectMs",
+    "requestTlsMs",
+    "requestSendMs",
+    "requestWaitMs",
+    "requestReceiveMs",
+    "requestBodyBytes",
+    "responseBodyBytes",
+]
 
 private func routeTemplateFromURLRequest(_ request: URLRequest, routeTemplate: String?) throws -> String {
     if let routeTemplate {

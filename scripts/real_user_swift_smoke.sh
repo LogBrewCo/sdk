@@ -40,6 +40,7 @@ grep -q '/Sources/LogBrew/ProductTimeline.swift$' "$tmp_dir/archive-contents.txt
 grep -q '/Sources/LogBrew/PublicTypes.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/Transport.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/URLSessionTrace.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/URLSessionTracer.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/Validation.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/ReadmeExample/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/RealUserSmoke/main.swift$' "$tmp_dir/archive-contents.txt"
@@ -60,6 +61,7 @@ grep -q 'OpenTelemetry' "$tmp_dir/archive-readme.md"
 grep -q 'LogBrewLifecycleTracker' "$tmp_dir/archive-readme.md"
 grep -q 'captureLifecycleSpan' "$tmp_dir/archive-readme.md"
 grep -q 'startURLSessionSpan' "$tmp_dir/archive-readme.md"
+grep -q 'LogBrewURLSessionTracer' "$tmp_dir/archive-readme.md"
 grep -q 'LogBrewURLSessionTimings' "$tmp_dir/archive-readme.md"
 unzip -p "$archive_path" '*/Sources/LogBrew/LifecycleTrace.swift' > "$tmp_dir/archive-lifecycle.swift"
 grep -q 'LogBrewLifecycleTracker' "$tmp_dir/archive-lifecycle.swift"
@@ -73,6 +75,9 @@ grep -q 'spanAttributesFromOpenTelemetrySpanContext' "$tmp_dir/archive-trace.swi
 unzip -p "$archive_path" '*/Sources/LogBrew/URLSessionTrace.swift' > "$tmp_dir/archive-urlsession.swift"
 grep -q 'LogBrewURLSessionTimings' "$tmp_dir/archive-urlsession.swift"
 grep -q 'init(taskMetrics: URLSessionTaskMetrics)' "$tmp_dir/archive-urlsession.swift"
+unzip -p "$archive_path" '*/Sources/LogBrew/URLSessionTracer.swift' > "$tmp_dir/archive-urlsession-tracer.swift"
+grep -q 'LogBrewURLSessionTracer' "$tmp_dir/archive-urlsession-tracer.swift"
+grep -q 'func data(' "$tmp_dir/archive-urlsession-tracer.swift"
 unzip -p "$archive_path" '*/Sources/TraceCorrelationExample/main.swift' > "$tmp_dir/archive-trace-example.swift"
 grep -q 'AppOwnedOpenTelemetrySpanContext' "$tmp_dir/archive-trace-example.swift"
 grep -q 'openTelemetrySpanContext(' "$tmp_dir/archive-trace-example.swift"
@@ -430,6 +435,44 @@ precondition(!tracePreview.contains("cart_id"))
 precondition(!tracePreview.contains("#pay"))
 precondition(!tracePreview.contains("traceparent"))
 
+let urlSessionTraceEndpointValue = ProcessInfo.processInfo.environment["LOGBREW_SWIFT_TRACE_ENDPOINT"] ?? ""
+let urlSessionTraceEndpoint = URL(string: urlSessionTraceEndpointValue)!
+let urlSessionTraceClient = try LogBrewClient.create(
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "swift-consumer-urlsession",
+    sdkVersion: "0.1.0"
+)
+let urlSessionTracer = try LogBrewURLSessionTracer(
+    client: urlSessionTraceClient,
+    eventIDPrefix: "evt_installed_urlsession",
+    timestampProvider: { "2026-06-02T10:00:14Z" }
+)
+var tracedRequest = URLRequest(url: urlSessionTraceEndpoint)
+tracedRequest.httpMethod = "GET"
+tracedRequest.setValue("app-owned-header-value", forHTTPHeaderField: "x-app-context")
+let (_, tracedResponse) = try await LogBrewTrace.withContext(trace) {
+    try await urlSessionTracer.data(
+        for: tracedRequest,
+        routeTemplate: "/api/checkout",
+        metadata: ["component": "pay-api", "requestWaitMs": 999, "traceId": "spoofed_trace"]
+    )
+}
+precondition((tracedResponse as? HTTPURLResponse)?.statusCode == 202)
+let urlSessionTracePreview = try urlSessionTraceClient.previewJSON()
+precondition(urlSessionTracePreview.contains(#""id" : "evt_installed_urlsession_1""#))
+precondition(urlSessionTracePreview.contains(#""source" : "swift.urlsession""#))
+precondition(urlSessionTracePreview.contains(#""routeTemplate" : "\/api\/checkout""#) || urlSessionTracePreview.contains(#""routeTemplate" : "/api/checkout""#))
+precondition(urlSessionTracePreview.contains(#""method" : "GET""#))
+precondition(urlSessionTracePreview.contains(#""statusCode" : 202"#))
+precondition(urlSessionTracePreview.contains(#""durationMs""#))
+precondition(urlSessionTracePreview.contains(#""component" : "pay-api""#))
+precondition(!urlSessionTracePreview.contains("cart_id"))
+precondition(!urlSessionTracePreview.contains("#pay"))
+precondition(!urlSessionTracePreview.contains("app-owned-header-value"))
+precondition(!urlSessionTracePreview.contains("spoofed_trace"))
+precondition(!urlSessionTracePreview.contains("traceparent"))
+precondition(!urlSessionTracePreview.contains("requestWaitMs"))
+
 let otelSpanAttributes = LogBrewTrace.spanAttributesFromOpenTelemetrySpanContext(
     otelParent,
     name: "POST /api/checkout",
@@ -466,7 +509,7 @@ precondition(httpResponse.attempts == 2)
 
 print(preview)
 let summary = """
-{"ok":true,"status":\(response.statusCode),"attempts":\(response.attempts),"events":6,"loggerEvents":1,"metricEvents":1,"timelineEvents":2,"networkAction":"POST /api/checkout","httpAttempts":\(httpResponse.attempts)}
+{"ok":true,"status":\(response.statusCode),"attempts":\(response.attempts),"events":6,"loggerEvents":1,"metricEvents":1,"timelineEvents":2,"urlSessionTraceEvents":1,"networkAction":"POST /api/checkout","httpAttempts":\(httpResponse.attempts)}
 
 """
 FileHandle.standardError.write(Data(summary.utf8))
@@ -493,21 +536,38 @@ log_path = Path(sys.argv[3])
 
 
 class Handler(BaseHTTPRequestHandler):
-    count = 0
+    get_count = 0
+    post_count = 0
 
     def do_POST(self):
         content_length = int(self.headers.get("content-length", "0"))
         body = self.rfile.read(content_length).decode("utf-8")
-        Handler.count += 1
+        Handler.post_count += 1
         with log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({
                 "authorization": self.headers.get("authorization"),
                 "body": body,
                 "contentType": self.headers.get("content-type"),
+                "method": "POST",
                 "source": self.headers.get("x-logbrew-source"),
                 "path": self.path,
             }) + "\n")
-        self.send_response(503 if Handler.count == 1 else 202)
+        self.send_response(503 if Handler.post_count == 1 else 202)
+        self.end_headers()
+        self.wfile.write(b"accepted")
+
+    def do_GET(self):
+        Handler.get_count += 1
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "authorization": self.headers.get("authorization"),
+                "contentType": self.headers.get("content-type"),
+                "method": "GET",
+                "path": self.path,
+                "traceparent": self.headers.get("traceparent"),
+                "source": self.headers.get("x-logbrew-source"),
+            }) + "\n")
+        self.send_response(202)
         self.end_headers()
         self.wfile.write(b"accepted")
 
@@ -519,10 +579,13 @@ server = HTTPServer(("127.0.0.1", port), Handler)
 server.timeout = 1
 ready_path.write_text("ready", encoding="utf-8")
 deadline = time.monotonic() + 90
-while Handler.count < 2 and time.monotonic() < deadline:
+while (Handler.get_count < 1 or Handler.post_count < 2) and time.monotonic() < deadline:
     server.handle_request()
-if Handler.count < 2:
-    print(f"swift intake timed out after {Handler.count} request(s)", file=sys.stderr)
+if Handler.get_count < 1 or Handler.post_count < 2:
+    print(
+        f"swift intake timed out after {Handler.get_count} GET and {Handler.post_count} POST request(s)",
+        file=sys.stderr,
+    )
     sys.exit(1)
 PY
 intake_ready="$tmp_dir/intake.ready"
@@ -573,14 +636,15 @@ swift package --package-path "$consumer_dir" --scratch-path "$tmp_dir/consumer-d
 grep -q '"identity": "logbrew-swift"' "$tmp_dir/consumer-dependencies.json"
 grep -q '"name": "logbrew-swift"' "$tmp_dir/consumer-dependencies.json"
 
-if ! python3 - "$consumer_dir" "$tmp_dir/consumer-run-build" "http://127.0.0.1:$intake_port/v1/events" "$tmp_dir/consumer.stdout.json" "$tmp_dir/consumer.stderr.json" <<'PY'
+if ! python3 - "$consumer_dir" "$tmp_dir/consumer-run-build" "http://127.0.0.1:$intake_port/v1/events" "http://127.0.0.1:$intake_port/api/checkout?cart_id=123#pay" "$tmp_dir/consumer.stdout.json" "$tmp_dir/consumer.stderr.json" <<'PY'
 import os
 import subprocess
 import sys
 
-consumer_dir, scratch_path, endpoint, stdout_path, stderr_path = sys.argv[1:]
+consumer_dir, scratch_path, endpoint, trace_endpoint, stdout_path, stderr_path = sys.argv[1:]
 env = os.environ.copy()
 env["LOGBREW_SWIFT_HTTP_ENDPOINT"] = endpoint
+env["LOGBREW_SWIFT_TRACE_ENDPOINT"] = trace_endpoint
 with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
     try:
         result = subprocess.run(
@@ -614,6 +678,7 @@ grep -q '"events":6' "$tmp_dir/consumer.stderr.json"
 grep -q '"loggerEvents":1' "$tmp_dir/consumer.stderr.json"
 grep -q '"metricEvents":1' "$tmp_dir/consumer.stderr.json"
 grep -q '"timelineEvents":2' "$tmp_dir/consumer.stderr.json"
+grep -q '"urlSessionTraceEvents":1' "$tmp_dir/consumer.stderr.json"
 grep -q '"networkAction":"POST /api/checkout"' "$tmp_dir/consumer.stderr.json"
 grep -q '"httpAttempts":2' "$tmp_dir/consumer.stderr.json"
 python3 - "$intake_log" <<'PY'
@@ -625,9 +690,23 @@ requests = [
     json.loads(line)
     for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
 ]
-if len(requests) != 2:
-    raise SystemExit(f"expected 2 HTTP delivery attempts, got {len(requests)}")
-for request in requests:
+if len(requests) != 3:
+    raise SystemExit(f"expected 3 local HTTP requests, got {len(requests)}")
+gets = [request for request in requests if request.get("method") == "GET"]
+posts = [request for request in requests if request.get("method") == "POST"]
+if len(gets) != 1:
+    raise SystemExit(f"expected 1 traced URLSession GET, got {len(gets)}")
+if len(posts) != 2:
+    raise SystemExit(f"expected 2 HTTP delivery POST attempts, got {len(posts)}")
+traced_request = gets[0]
+traceparent = traced_request.get("traceparent")
+if not isinstance(traceparent, str) or not traceparent.startswith("00-4bf92f3577b34da6a3ce929d0e0e4736-"):
+    raise SystemExit(f"traced URLSession request missing W3C traceparent: {traceparent!r}")
+if traced_request["authorization"] is not None:
+    raise SystemExit("traced URLSession request unexpectedly included authorization")
+if traced_request["path"] != "/api/checkout?cart_id=123":
+    raise SystemExit(f"unexpected traced URLSession path: {traced_request['path']}")
+for request in posts:
     if request["authorization"] != "Bearer LOGBREW_API_KEY":
         raise SystemExit(f"unexpected authorization header: {request['authorization']}")
     if request["contentType"] != "application/json":
@@ -636,7 +715,7 @@ for request in requests:
         raise SystemExit(f"unexpected source header: {request['source']}")
     if request["path"] != "/v1/events":
         raise SystemExit(f"unexpected intake path: {request['path']}")
-if "evt_swift_http_transport" not in requests[1]["body"]:
+if "evt_swift_http_transport" not in posts[1]["body"]:
     raise SystemExit("missing HTTP transport event in final request body")
 PY
 
