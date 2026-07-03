@@ -1,5 +1,19 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-03: Java real-user smoke CI failure on main was caused by stale
+  hardcoded `logbrew-sdk-0.1.0` artifact names after Java Maven metadata moved
+  to `0.1.1`. Follow-up commit `fe506bb8` makes
+  `scripts/real_user_java_smoke.sh` read the version from
+  `java/logbrew-java/pom.xml` and use versioned jar/source-jar paths from that
+  value, matching the Kotlin fix in commit `0a375500`. Guard:
+  `tests/test_real_user_smoke_diagnostics.py` now asserts Java and Kotlin
+  real-user smokes derive package versions from POMs. Evidence: RED focused
+  unittest failed on missing Java POM-version reader; GREEN focused unittest,
+  full real-user smoke diagnostics tests, `bash scripts/real_user_java_smoke.sh`,
+  `bash scripts/check_shell_static.sh`, confidentiality scan, generated-artifact
+  hygiene, and diff check passed. Lesson: Maven/JVM installed-artifact smokes
+  must never hardcode package coordinates after version bumps; derive from POMs
+  and keep telemetry fixture app versions separate from package versions.
 - 2026-07-03: .NET high-load installed-artifact proof moved into release
   readiness after current source reads from Sentry .NET
   `getsentry/sentry-dotnet@7c76204014b74b6bb48f367a9ac81f3f0be1f661`
