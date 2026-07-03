@@ -40,8 +40,13 @@ grep -q '^package/index.js$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/next-tarball.txt"
+grep -q '^package/client.js$' "$tmp_dir/next-tarball.txt"
+grep -q '^package/client.cjs$' "$tmp_dir/next-tarball.txt"
+grep -q '^package/client.d.ts$' "$tmp_dir/next-tarball.txt"
+grep -q '^package/client.d.cts$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/examples/index.mjs$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/examples/package.json$' "$tmp_dir/next-tarball.txt"
+grep -q '^package/examples/client-route-spans.mjs$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/examples/readme-example.mjs$' "$tmp_dir/next-tarball.txt"
 grep -q '^package/examples/real-user-smoke.mjs$' "$tmp_dir/next-tarball.txt"
 tar -xOf "$next_tgz" package/README.md > "$tmp_dir/next-readme.md"
@@ -61,6 +66,11 @@ grep -q 'onCaptureError' "$tmp_dir/next-readme.md"
 grep -q 'captureRequestMetrics' "$tmp_dir/next-readme.md"
 grep -q 'http.server.duration' "$tmp_dir/next-readme.md"
 grep -q 'routeTemplate' "$tmp_dir/next-readme.md"
+grep -q '@logbrew/next/client' "$tmp_dir/next-readme.md"
+grep -q 'createLogBrewNextBrowserClient' "$tmp_dir/next-readme.md"
+grep -q 'useLogBrewNextNavigation' "$tmp_dir/next-readme.md"
+grep -q 'createNextRouteTemplate' "$tmp_dir/next-readme.md"
+grep -q 'LOGBREW_CLIENT_KEY' "$tmp_dir/next-readme.md"
 
 app_dir="$tmp_dir/next-smoke-app"
 mkdir -p "$app_dir/app/api/logbrew"
@@ -78,6 +88,7 @@ npm install \
   "next@$next_version" \
   "react@$react_version" \
   "react-dom@$react_dom_version" \
+  "react-test-renderer@$react_version" \
   typescript \
   @types/node \
   >/dev/null
@@ -87,6 +98,7 @@ grep -q '"@logbrew/next": "file:' package.json
 grep -q '"next":' package.json
 grep -q '"react":' package.json
 grep -q '"react-dom":' package.json
+grep -q '"react-test-renderer":' package.json
 grep -q '"@logbrew/next"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
 npm ls @logbrew/sdk @logbrew/next next react react-dom >/dev/null
@@ -103,7 +115,7 @@ from pathlib import Path
 
 payload = json.loads(Path(sys.argv[1]).read_text())
 deps = payload.get("dependencies", {})
-for name in ("@logbrew/next", "@logbrew/sdk", "next", "react", "react-dom"):
+for name in ("@logbrew/next", "@logbrew/sdk", "next", "react", "react-dom", "react-test-renderer"):
     if name not in deps:
         raise SystemExit(f"missing npm dependency entry: {name}")
 PY
@@ -329,7 +341,7 @@ const METRIC = withLogBrewRouteHandler(
     transport: metricTransport
   }
 );
-const metricResponse = await METRIC(new Request("https://example.com/api/orders/123?token=secret", {
+const metricResponse = await METRIC(new Request("https://example.com/api/orders/123?unsafe=sample", {
   method: "POST"
 }), {});
 if (metricResponse.status !== 201) {
@@ -438,6 +450,189 @@ grep -q 'http.server.duration' "$tmp_dir/capture-check.stderr.json"
 grep -q '/api/orders/\[id\]' "$tmp_dir/capture-check.stderr.json"
 grep -q 'GET /api/bad 200' "$tmp_dir/capture-check.stderr.json"
 
+cat > client-route-check.mjs <<'EOF'
+import React from "react";
+import TestRenderer, { act } from "react-test-renderer";
+import { RecordingTransport } from "@logbrew/sdk";
+import {
+  captureNextNavigation,
+  createLogBrewNextBrowserClient,
+  createNextNavigationSpanEvent,
+  createNextRouteTemplate,
+  useLogBrewNextNavigation
+} from "@logbrew/next/client";
+
+const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+const routePatterns = [
+  "/",
+  "/projects/[projectId]/settings",
+  "/blog/[...slug]",
+  "/docs/[[...slug]]",
+  "/(app)/dashboard/[teamId]"
+];
+
+const matchedTemplate = createNextRouteTemplate({
+  pathname: "/projects/tenant-123/settings?debug=true#panel",
+  routePatterns
+});
+if (matchedTemplate !== "/projects/[projectId]/settings") {
+  throw new Error(`unexpected route template: ${matchedTemplate}`);
+}
+const optionalCatchAll = createNextRouteTemplate({ pathname: "/docs", routePatterns });
+if (optionalCatchAll !== "/docs/[[...slug]]") {
+  throw new Error(`unexpected optional catch-all template: ${optionalCatchAll}`);
+}
+const groupedTemplate = createNextRouteTemplate({ pathname: "/dashboard/acme", routePatterns });
+if (groupedTemplate !== "/dashboard/[teamId]") {
+  throw new Error(`unexpected route-group template: ${groupedTemplate}`);
+}
+const unmatchedTemplate = createNextRouteTemplate({ pathname: "/private/unlisted?id=123", routePatterns });
+if (unmatchedTemplate !== undefined) {
+  throw new Error(`unmatched concrete path should not be emitted: ${unmatchedTemplate}`);
+}
+
+const spanEvent = createNextNavigationSpanEvent({
+  pathname: "https://example.com/projects/tenant-123/settings?debug=true#panel",
+  routePatterns,
+  traceparent,
+  timestamp: "2026-06-02T10:00:09Z",
+  durationMs: 19,
+  idFactory: () => "evt_next_client_nav_001",
+  spanIdFactory: () => "b7ad6b7169203331",
+  metadata: {
+    service: "checkout-web",
+    nested: { mustDrop: true },
+    userId: "safe-user-key"
+  }
+});
+if (!spanEvent || spanEvent.type !== "span") {
+  throw new Error(`expected span event: ${JSON.stringify(spanEvent)}`);
+}
+if (spanEvent.attributes.name !== "next.route /projects/[projectId]/settings") {
+  throw new Error(`unexpected navigation span name: ${JSON.stringify(spanEvent)}`);
+}
+if (spanEvent.attributes.traceId !== "4bf92f3577b34da6a3ce929d0e0e4736") {
+  throw new Error(`unexpected trace id: ${JSON.stringify(spanEvent)}`);
+}
+if (spanEvent.attributes.parentSpanId !== "00f067aa0ba902b7") {
+  throw new Error(`unexpected parent span id: ${JSON.stringify(spanEvent)}`);
+}
+if (spanEvent.attributes.spanId !== "b7ad6b7169203331") {
+  throw new Error(`unexpected child span id: ${JSON.stringify(spanEvent)}`);
+}
+if (spanEvent.attributes.metadata.routeTemplate !== "/projects/[projectId]/settings") {
+  throw new Error(`missing route template metadata: ${JSON.stringify(spanEvent)}`);
+}
+if (spanEvent.attributes.metadata.framework !== "nextjs") {
+  throw new Error(`missing framework metadata: ${JSON.stringify(spanEvent)}`);
+}
+if ("nested" in spanEvent.attributes.metadata) {
+  throw new Error(`nested metadata should be dropped: ${JSON.stringify(spanEvent)}`);
+}
+if (JSON.stringify(spanEvent).includes("tenant-123") || JSON.stringify(spanEvent).includes("debug=true") || JSON.stringify(spanEvent).includes("traceparent")) {
+  throw new Error(`span leaked concrete URL or raw propagation: ${JSON.stringify(spanEvent)}`);
+}
+
+const client = createLogBrewNextBrowserClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "next-client-smoke",
+  sdkVersion: "0.1.0",
+  maxQueueSize: 25,
+  maxRetries: 1
+});
+const capturedHookEvents = [];
+function Probe({ pathname }) {
+  useLogBrewNextNavigation({
+    client,
+    pathname,
+    routePatterns,
+    traceparent,
+    timestamp: "2026-06-02T10:00:10Z",
+    durationMs: 21,
+    idFactory: ({ routeTemplate, navigationIndex }) => `evt_hook_${navigationIndex}_${routeTemplate.replace(/[^a-z0-9]+/gi, "_")}`,
+    spanIdFactory: () => "c7ad6b7169203331",
+    onNavigation(event) {
+      capturedHookEvents.push(event);
+    }
+  });
+  return null;
+}
+
+let renderer;
+await act(async () => {
+  renderer = TestRenderer.create(React.createElement(Probe, { pathname: "/projects/tenant-123/settings?debug=true#panel" }));
+});
+await act(async () => {
+  renderer.update(React.createElement(Probe, { pathname: "/projects/tenant-123/settings?debug=false#other" }));
+});
+await act(async () => {
+  renderer.update(React.createElement(Probe, { pathname: "/projects/tenant-456/settings" }));
+});
+if (capturedHookEvents.length !== 2) {
+  throw new Error(`expected two route navigations, got ${capturedHookEvents.length}`);
+}
+const hookPayload = JSON.parse(client.previewJson());
+if (hookPayload.events.length !== 2) {
+  throw new Error(`expected two queued hook spans: ${client.previewJson()}`);
+}
+if (client.previewJson().includes("tenant-123") || client.previewJson().includes("tenant-456") || client.previewJson().includes("debug=")) {
+  throw new Error(`hook payload leaked concrete route values: ${client.previewJson()}`);
+}
+
+const heavyClient = createLogBrewNextBrowserClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "next-client-heavy-smoke",
+  sdkVersion: "0.1.0",
+  maxQueueSize: 25,
+  maxRetries: 1
+});
+for (let index = 0; index < 80; index += 1) {
+  const event = captureNextNavigation(heavyClient, {
+    pathname: `/projects/tenant-${index}/settings?unsafe=sample`,
+    routePatterns,
+    traceparent,
+    timestamp: "2026-06-02T10:00:11Z",
+    durationMs: index,
+    idFactory: () => `evt_heavy_${index}`,
+    spanIdFactory: () => "d7ad6b7169203331"
+  });
+  if (!event || event.attributes.metadata.routeTemplate !== "/projects/[projectId]/settings") {
+    throw new Error(`heavy navigation failed to template route: ${JSON.stringify(event)}`);
+  }
+}
+if (heavyClient.pendingEvents() !== 25) {
+  throw new Error(`heavy client should keep max queue size only: ${heavyClient.pendingEvents()}`);
+}
+if (heavyClient.droppedEvents() !== 55) {
+  throw new Error(`heavy client should count dropped events: ${heavyClient.droppedEvents()}`);
+}
+if (heavyClient.previewJson().includes("tenant-") || heavyClient.previewJson().includes("unsafe=sample")) {
+  throw new Error(`heavy payload leaked concrete route data: ${heavyClient.previewJson()}`);
+}
+const retryTransport = new RecordingTransport([{ statusCode: 503 }, { statusCode: 202 }]);
+const shutdownResponse = await heavyClient.shutdown(retryTransport);
+if (shutdownResponse.statusCode !== 202 || retryTransport.sentBodies.length !== 2) {
+  throw new Error(`heavy shutdown should retry 5xx once: ${JSON.stringify(shutdownResponse)}`);
+}
+if (heavyClient.pendingEvents() !== 0) {
+  throw new Error(`heavy client should flush queue: ${heavyClient.pendingEvents()}`);
+}
+
+console.error(JSON.stringify({
+  ok: true,
+  matchedTemplate,
+  hookSpans: hookPayload.events.length,
+  heavyAttempts: retryTransport.sentBodies.length,
+  heavyDropped: 55
+}));
+EOF
+node client-route-check.mjs 2> "$tmp_dir/client-route-check.stderr.json"
+grep -q '"ok":true' "$tmp_dir/client-route-check.stderr.json"
+grep -q '/projects/\[projectId\]/settings' "$tmp_dir/client-route-check.stderr.json"
+grep -q '"hookSpans":2' "$tmp_dir/client-route-check.stderr.json"
+grep -q '"heavyAttempts":2' "$tmp_dir/client-route-check.stderr.json"
+grep -q '"heavyDropped":55' "$tmp_dir/client-route-check.stderr.json"
+
 cat > consumer.ts <<'EOF'
 import { RecordingTransport, type TransportResponse } from "@logbrew/sdk";
 import {
@@ -532,6 +727,46 @@ cat > tsconfig.json <<'EOF'
 EOF
 npx tsc --project tsconfig.json
 
+cat > client-consumer.ts <<'EOF'
+import {
+  captureNextNavigation,
+  createLogBrewNextBrowserClient,
+  createNextNavigationSpanEvent,
+  createNextRouteTemplate,
+  useLogBrewNextNavigation,
+  type CreateLogBrewNextBrowserClientConfig,
+  type NextNavigationSpanEvent,
+  type NextRoutePattern
+} from "@logbrew/next/client";
+
+const config: CreateLogBrewNextBrowserClientConfig = {
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "typed-next-client-smoke",
+  sdkVersion: "0.1.0",
+  maxQueueSize: 25,
+  maxRetries: 1
+};
+const client = createLogBrewNextBrowserClient(config);
+const routePatterns: NextRoutePattern[] = ["/projects/[projectId]/settings"];
+const routeTemplate = createNextRouteTemplate({
+  pathname: "/projects/123/settings?debug=true",
+  routePatterns
+});
+const event: NextNavigationSpanEvent | undefined = createNextNavigationSpanEvent({
+  pathname: "/projects/123/settings?debug=true",
+  routeTemplate,
+  traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+});
+captureNextNavigation(client, {
+  pathname: "/projects/123/settings?debug=true",
+  routePatterns,
+  traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+});
+void useLogBrewNextNavigation;
+void event;
+EOF
+npx tsc --ignoreConfig --module NodeNext --moduleResolution NodeNext --target ES2022 --lib ES2022,DOM --strict --skipLibCheck false --noEmit client-consumer.ts
+
 cat > error-check.mjs <<'EOF'
 import { RecordingTransport } from "@logbrew/sdk";
 import { createRouteErrorEvent, withLogBrewRouteHandler } from "@logbrew/next";
@@ -552,7 +787,7 @@ const GET = withLogBrewRouteHandler(
 );
 
 try {
-  await GET(new Request("https://example.com/api/failure?token=secret", {
+  await GET(new Request("https://example.com/api/failure?unsafe=sample", {
     method: "GET",
     headers: { traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-1111111111111111-01" }
   }), {});
@@ -581,13 +816,13 @@ if (transport.lastBody().includes("traceparent") || transport.lastBody().include
 }
 const optedIn = createRouteErrorEvent(
   new Error("route exploded"),
-  new Request("https://example.com/api/failure?token=secret", { method: "GET" }),
+  new Request("https://example.com/api/failure?unsafe=sample", { method: "GET" }),
   {
     includeSearchParams: true,
     idFactory: () => "evt_next_error_opt_in"
   }
 );
-if (optedIn.attributes.metadata.search !== "?token=secret") {
+if (optedIn.attributes.metadata.search !== "?unsafe=sample") {
   throw new Error(`query string opt-in failed: ${JSON.stringify(optedIn)}`);
 }
 console.log(JSON.stringify({
@@ -601,13 +836,16 @@ node error-check.mjs > "$tmp_dir/error-check.json"
 grep -q '"ok":true' "$tmp_dir/error-check.json"
 grep -q 'GET /api/failure failed' "$tmp_dir/error-check.json"
 grep -q '"defaultSearchCaptured":false' "$tmp_dir/error-check.json"
-grep -q '"optInSearch":"?token=secret"' "$tmp_dir/error-check.json"
+grep -q '"optInSearch":"?unsafe=sample"' "$tmp_dir/error-check.json"
 
 node -e 'const next = require("@logbrew/next"); if (typeof next.withLogBrewRouteHandler !== "function" || typeof next.createRouteRequestEvent !== "function" || typeof next.createRequestMetricEvent !== "function" || typeof next.getActiveLogBrewTrace !== "function") process.exit(1)'
+node -e 'const nextClient = require("@logbrew/next/client"); if (typeof nextClient.createLogBrewNextBrowserClient !== "function" || typeof nextClient.useLogBrewNextNavigation !== "function" || typeof nextClient.createNextRouteTemplate !== "function" || typeof nextClient.captureNextNavigation !== "function") process.exit(1)'
 
 node node_modules/@logbrew/next/examples/index.mjs --help > "$tmp_dir/launcher-help.txt"
 grep -q 'node node_modules/@logbrew/next/examples/index.mjs readme-example' "$tmp_dir/launcher-help.txt"
+grep -q 'node node_modules/@logbrew/next/examples/index.mjs client-route-spans' "$tmp_dir/launcher-help.txt"
 node node_modules/@logbrew/next/examples/index.mjs --list > "$tmp_dir/launcher-list.txt"
+grep -q 'client-route-spans -> node node_modules/@logbrew/next/examples/index.mjs client-route-spans' "$tmp_dir/launcher-list.txt"
 grep -q 'real-user-smoke -> node node_modules/@logbrew/next/examples/index.mjs real-user-smoke' "$tmp_dir/launcher-list.txt"
 node node_modules/@logbrew/next/examples/index.mjs readme-example > "$tmp_dir/example-readme.stdout.json" 2> "$tmp_dir/example-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-readme.stdout.json" >/dev/null
@@ -620,7 +858,21 @@ grep -q '"attempts":2' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/next/examples run list > "$tmp_dir/npm-helper-list.txt"
 grep -q 'readme-example -> node node_modules/@logbrew/next/examples/index.mjs readme-example' "$tmp_dir/npm-helper-list.txt"
 npm --prefix node_modules/@logbrew/next/examples run help > "$tmp_dir/npm-helper-help.txt"
+grep -q 'npm --prefix node_modules/@logbrew/next/examples run client-route-spans' "$tmp_dir/npm-helper-help.txt"
 grep -q 'npm --prefix node_modules/@logbrew/next/examples run real-user-smoke' "$tmp_dir/npm-helper-help.txt"
+npm --prefix node_modules/@logbrew/next/examples run --silent client-route-spans > "$tmp_dir/npm-helper-client.stdout.json" 2> "$tmp_dir/npm-helper-client.stderr.json"
+python3 - "$tmp_dir/npm-helper-client.stdout.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+if payload.get("routeTemplate") != "/projects/[projectId]/settings":
+    raise SystemExit(payload)
+if payload.get("pendingEvents") != 1:
+    raise SystemExit(payload)
+PY
+grep -q '"ok":true' "$tmp_dir/npm-helper-client.stderr.json"
 npm --prefix node_modules/@logbrew/next/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null

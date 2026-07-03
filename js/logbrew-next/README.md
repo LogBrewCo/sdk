@@ -91,7 +91,52 @@ The metric includes primitive, low-cardinality metadata: `framework`, `method`, 
 
 The wrapper expects App Router Route Handlers that return standard `Response` objects. It does not call `NextResponse.next()` and does not use the deprecated `middleware` filename. For Next.js 16 request interception, use the framework's `proxy.js` convention separately and keep LogBrew event creation in server-side route code.
 
-## Client Helper
+## Client Route Spans
+
+Use the browser-safe `@logbrew/next/client` subpath from client components. It has no `node:` imports and uses `clientKey` wording for browser setup:
+
+```jsx
+"use client";
+
+import { usePathname } from "next/navigation";
+import {
+  createLogBrewNextBrowserClient,
+  useLogBrewNextNavigation
+} from "@logbrew/next/client";
+
+const client = createLogBrewNextBrowserClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "my-next-app",
+  sdkVersion: "0.1.0"
+});
+
+const routePatterns = [
+  "/",
+  "/projects/[projectId]/settings",
+  "/docs/[[...slug]]"
+];
+
+export function LogBrewNextNavigationSpans({ traceparent }) {
+  const pathname = usePathname();
+
+  useLogBrewNextNavigation({
+    client,
+    pathname,
+    routePatterns,
+    traceparent
+  });
+
+  return null;
+}
+```
+
+`useLogBrewNextNavigation` records one `next.route <routeTemplate>` span when `pathname` changes to a route that matches one of your stable `routePatterns`. Use `createNextRouteTemplate` directly when you want to preview how a concrete `pathname` maps to `/projects/[projectId]/settings`, `[...catchAll]`, `[[...optionalCatchAll]]`, or a route-group pattern such as `/(app)/dashboard/[teamId]`.
+
+The client helper requires explicit W3C trace context through `traceparent` or `traceId` plus `spanId`. It does not patch `fetch`, `XMLHttpRequest`, browser history, or the Next router. It never records the concrete pathname, query string, hash, headers, cookies, request body, or raw `traceparent` value. If a pathname cannot be matched to a stable route template, it skips the span instead of emitting a high-cardinality URL. Metadata is primitive-only.
+
+Use `captureNextNavigation(client, input)` when you want to emit a route span from app-owned navigation callbacks instead of the React hook.
+
+## Server Client Helper
 
 ```js
 import { createLogBrewNextClient } from "@logbrew/next";

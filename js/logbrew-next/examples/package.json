@@ -2,6 +2,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "client-route-spans": "node ./index.mjs client-route-spans",
     "help": "node ./index.mjs --help",
     "list": "node ./index.mjs --list",
     "readme-example": "node ./index.mjs readme-example",
