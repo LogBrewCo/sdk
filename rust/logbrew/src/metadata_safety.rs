@@ -22,6 +22,7 @@ const UNSAFE_KEY_PARTS: &[&str] = &[
     "sql",
     "statement",
     concat!("to", "ken"),
+    "unsafe",
     "url",
     "user",
     "value",

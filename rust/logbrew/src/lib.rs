@@ -12,6 +12,8 @@ mod http_fields;
 mod http_server;
 mod metadata_safety;
 mod metric;
+#[cfg(feature = "opentelemetry-exporter")]
+mod opentelemetry_exporter;
 mod operation_tracing;
 mod product_timeline;
 #[cfg(feature = "tower")]
@@ -26,10 +28,18 @@ pub use http_client::ReqwestCaptureError;
 pub use http_client::{HttpClientSpan, HttpClientSpanEvents};
 pub use http_server::{HttpRequestTelemetry, HttpRequestTelemetryEvents};
 pub use metric::MetricEvent;
+#[cfg(feature = "opentelemetry-exporter")]
+pub use opentelemetry_exporter::{
+    LogBrewOpenTelemetrySpanExporter, LogBrewOpenTelemetrySpanExporterConfig,
+};
 pub use operation_tracing::{DependencyOperationKind, DependencyOperationSpan};
 pub use product_timeline::{NetworkMilestoneTimeline, ProductActionTimeline, ProductTimeline};
 pub use serde_json::Value as MetadataValue;
-#[cfg(any(feature = "tower", feature = "tracing"))]
+#[cfg(any(
+    feature = "tower",
+    feature = "tracing",
+    feature = "opentelemetry-exporter"
+))]
 /// Shared thread-safe client handle used by optional framework and logging integrations.
 pub type SharedLogBrewClient = std::sync::Arc<std::sync::Mutex<LogBrewClient>>;
 #[cfg(feature = "tower")]

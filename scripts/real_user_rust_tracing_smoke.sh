@@ -43,8 +43,10 @@ crate_path="$tmp_dir/cargo-package/package/logbrew-0.1.0.crate"
 test -f "$crate_path"
 tar -tf "$crate_path" > "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/src/tracing_layer.rs$' "$tmp_dir/crate-contents.txt"
+grep -q '^logbrew-0.1.0/src/opentelemetry_exporter.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/tracing_bridge.rs$' "$tmp_dir/crate-contents.txt"
 grep -q '^logbrew-0.1.0/examples/tracing_opentelemetry_bridge.rs$' "$tmp_dir/crate-contents.txt"
+grep -q '^logbrew-0.1.0/examples/opentelemetry_exporter.rs$' "$tmp_dir/crate-contents.txt"
 
 crate_src_root="$tmp_dir/extracted-crate"
 mkdir -p "$crate_src_root"
@@ -133,3 +135,89 @@ grep -q 'opentelemetry v0\.32\.' tracing-otel-cargo-tree.txt
 grep -q 'tracing-opentelemetry v0\.33\.' tracing-otel-cargo-tree.txt
 cargo run --quiet --locked > tracing-otel.stdout.json 2> tracing-otel.stderr.json
 python3 "$repo_root/scripts/check_rust_tracing_opentelemetry_payload.py" tracing-otel.stdout.json tracing-otel.stderr.json >/dev/null
+
+cd "$tmp_dir"
+cargo new --quiet otel-exporter-app
+cd otel-exporter-app
+cargo add logbrew --path "$crate_dir" --features opentelemetry-exporter >/dev/null
+cargo add opentelemetry@0.32 --no-default-features --features trace >/dev/null
+cargo add opentelemetry_sdk@0.32 --no-default-features --features trace >/dev/null
+assert_logbrew_path_dependency Cargo.toml otel-exporter-app "/extracted-crate/logbrew-0.1.0" opentelemetry-exporter
+cp "$crate_dir/examples/opentelemetry_exporter.rs" src/main.rs
+
+grep -q '^name = "logbrew"$' Cargo.lock
+grep -q '^name = "opentelemetry"$' Cargo.lock
+grep -q '^name = "opentelemetry_sdk"$' Cargo.lock
+cargo metadata --locked --format-version 1 > otel-exporter-cargo-metadata.json
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+payload = json.loads(Path("otel-exporter-cargo-metadata.json").read_text())
+root = next((pkg for pkg in payload.get("packages", []) if pkg.get("name") == "otel-exporter-app"), None)
+if root is None:
+    raise SystemExit("expected resolved otel-exporter-app package")
+direct = {dep.get("name"): dep for dep in root.get("dependencies", [])}
+for name in ["logbrew", "opentelemetry", "opentelemetry_sdk"]:
+    if name not in direct:
+        raise SystemExit(f"missing otel-exporter-app direct dependency: {name}")
+logbrew = direct["logbrew"]
+if "opentelemetry-exporter" not in logbrew.get("features", []):
+    raise SystemExit(f"missing logbrew opentelemetry-exporter feature: {logbrew.get('features')}")
+if not str(logbrew.get("path", "")).endswith("/extracted-crate/logbrew-0.1.0"):
+    raise SystemExit(f"unexpected logbrew path: {logbrew.get('path')}")
+PY
+cargo tree --locked --depth 1 --charset ascii > otel-exporter-cargo-tree.txt
+grep -q '^otel-exporter-app v0.1.0 (' otel-exporter-cargo-tree.txt
+grep -q 'logbrew v0\.1\.0 .*extracted-crate/logbrew-0\.1\.0' otel-exporter-cargo-tree.txt
+grep -q 'opentelemetry v0\.32\.' otel-exporter-cargo-tree.txt
+grep -q 'opentelemetry_sdk v0\.32\.' otel-exporter-cargo-tree.txt
+cargo run --quiet --locked > otel-exporter.stdout.json 2> otel-exporter.stderr.json
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+payload = json.loads(Path("otel-exporter.stdout.json").read_text())
+events = payload.get("events", [])
+if len(events) != 1:
+    raise SystemExit(f"expected 1 event, got {len(events)}")
+event = events[0]
+if event.get("type") != "span" or event.get("id") != "evt_rust_otel_1":
+    raise SystemExit(f"unexpected event identity: {event!r}")
+span = event.get("attributes", {})
+metadata = span.get("metadata", {})
+expected = {
+    "source": "opentelemetry.span_exporter",
+    "service.name": "checkout-service",
+    "service.version": "1.2.3",
+    "deployment.environment": "production",
+    "otel.span.kind": "server",
+    "otel.instrumentation.scope.name": "checkout-instrumentation",
+    "http.request.method": "POST",
+    "http.route": "/checkout/{cart_id}",
+    "http.response.status_code": 202,
+}
+for key, value in expected.items():
+    if metadata.get(key) != value:
+        raise SystemExit(f"unexpected metadata {key}: {metadata.get(key)!r}")
+if span.get("status") != "ok":
+    raise SystemExit(f"unexpected span status: {span.get('status')!r}")
+if len(span.get("traceId", "")) != 32 or len(span.get("spanId", "")) != 16:
+    raise SystemExit(f"unexpected trace/span ids: {span!r}")
+text = json.dumps(payload).lower()
+for forbidden in [
+    "coupon=sample",
+    "bearer",
+    "not-for-telemetry",
+    "authorization",
+    "exception.message",
+    "baggage",
+    "tracestate",
+]:
+    if forbidden in text:
+        raise SystemExit(f"payload leaked forbidden text: {forbidden}")
+
+stderr = json.loads(Path("otel-exporter.stderr.json").read_text())
+if stderr.get("ok") is not True or stderr.get("status") != 202 or stderr.get("events") != 1:
+    raise SystemExit(f"unexpected smoke stderr: {stderr!r}")
+PY

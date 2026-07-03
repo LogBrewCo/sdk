@@ -15,9 +15,10 @@ cargo add logbrew --features hyper
 cargo add logbrew --features tower
 cargo add logbrew --features tracing
 cargo add logbrew --features tracing-opentelemetry
+cargo add logbrew --features opentelemetry-exporter
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `hyper` feature enabled, docs include an explicit `http::Request` async send helper for Hyper-compatible clients without adding Hyper as an SDK dependency. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry and `TowerHttpClientSpanLayer` for app-owned Tower client services. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `hyper` feature enabled, docs include an explicit `http::Request` async send helper for Hyper-compatible clients without adding Hyper as an SDK dependency. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry and `TowerHttpClientSpanLayer` for app-owned Tower client services. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`. With the `opentelemetry-exporter` feature enabled, docs include `LogBrewOpenTelemetrySpanExporter` for apps that already use the OpenTelemetry SDK and want finished spans queued into an app-owned LogBrew client.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -634,6 +635,72 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 `LogBrewTracingLayer` maps `trace`/`debug` to `info`, `warn` to `warning`, and `error` to `error`. It records `tracingTarget` and `tracingLevel`, but only copies additional primitive fields that your app allowlists with `with_allowed_fields(...)`; route-template field values are sanitized to remove query strings and hash fragments. With `with_span_events()`, the layer continues a valid `traceparent` or `trace_parent` field on a root span, generates W3C-shaped child span IDs, adds trace correlation to logs emitted inside a span, records parent/child span links, copies the sampled flag, marks the current span as `error` when an error-level event is emitted inside it, and adds privacy-bounded event summaries such as `tracingSpanEventCount`, `tracingSpanErrorEventCount`, `tracingLastErrorLevel`, and `tracingLastErrorTarget` to the closed span. Malformed trace context is ignored non-fatally and the raw propagation field is not emitted as metadata. Span event summaries intentionally do not copy error messages, stacks, payloads, headers, or arbitrary event fields. Do not allowlist payloads, headers, account session values, raw URLs, or user-specific identifiers.
 
 If your service already installs `tracing-opentelemetry`, enable `logbrew`'s `tracing-opentelemetry` feature and call `opentelemetry_span_context_from_current_tracing_span()` inside an entered span. The helper returns `None` when no valid OTel span is active; otherwise pass the copied context to `Traceparent::span_attributes_from_opentelemetry_context(...)` or `Traceparent::create_headers_from_opentelemetry_context(...)`. This is an opt-in copy bridge, not a LogBrew OpenTelemetry exporter or processor, and it does not read tracestate, baggage, span attributes, event arrays, links, payloads, headers, or raw URLs.
+
+## OpenTelemetry Span Exporter
+
+If your Rust service already uses `opentelemetry_sdk`, enable `opentelemetry-exporter` and install `LogBrewOpenTelemetrySpanExporter` as a normal span exporter. This queues finished OTel spans into your app-owned `LogBrewClient`; LogBrew does not create or own the OTel provider, processor, sampler, resource detectors, or transport.
+
+```bash
+cargo add logbrew --features opentelemetry-exporter
+cargo add opentelemetry --no-default-features --features trace
+cargo add opentelemetry_sdk --no-default-features --features trace
+```
+
+```rust
+use logbrew::{
+    LogBrewClient, LogBrewOpenTelemetrySpanExporter, LogBrewOpenTelemetrySpanExporterConfig,
+};
+use opentelemetry::{
+    KeyValue,
+    trace::{SpanKind, Tracer, TracerProvider},
+};
+use opentelemetry_sdk::trace::{SdkTracerProvider, SimpleSpanProcessor};
+use std::sync::{Arc, Mutex};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Arc::new(Mutex::new(
+        LogBrewClient::builder("checkout-service", "1.2.3")
+            .api_key("LOGBREW_API_KEY")
+            .build()?,
+    ));
+    let exporter = LogBrewOpenTelemetrySpanExporter::new(
+        Arc::clone(&client),
+        LogBrewOpenTelemetrySpanExporterConfig::new("2026-06-02T10:00:30Z")
+            .with_event_id_prefix("evt_rust_otel")
+            .with_service_name("checkout-service")
+            .with_service_version("1.2.3")
+            .with_deployment_environment("production")
+            .with_allowed_attribute_keys([
+                "http.request.method",
+                "http.route",
+                "http.response.status_code",
+                "exception.type",
+            ]),
+    );
+    let provider = SdkTracerProvider::builder()
+        .with_span_processor(SimpleSpanProcessor::new(exporter))
+        .build();
+    let tracer = provider.tracer("checkout-instrumentation");
+
+    let mut span = tracer
+        .span_builder("POST /checkout/{cart_id}")
+        .with_kind(SpanKind::Server)
+        .with_attributes([
+            KeyValue::new("http.request.method", "POST"),
+            KeyValue::new("http.route", "/checkout/{cart_id}?coupon=sample"),
+            KeyValue::new("http.response.status_code", 202_i64),
+            KeyValue::new("authorization", "Bearer not-for-telemetry"),
+        ])
+        .start(&tracer);
+    span.end();
+    provider.force_flush()?;
+
+    println!("{}", client.lock().unwrap().preview_json()?);
+    Ok(())
+}
+```
+
+The exporter copies trace ID, span ID, parent span ID, span kind, duration, instrumentation scope, and only primitive attributes explicitly allowlisted with `with_allowed_attribute_keys(...)`. Route-template strings are sanitized to remove query strings and hash fragments. It intentionally drops baggage, tracestate, arrays, payloads, arbitrary headers, full URLs, authorization values, exception messages, stack traces, SQL statements, and future unknown OTel value variants. Use this when you want LogBrew to receive spans from an existing OTel pipeline; use the `tracing-opentelemetry` context-copy helper when you only need IDs for child spans or outbound propagation.
 
 ## W3C Trace Context
 
