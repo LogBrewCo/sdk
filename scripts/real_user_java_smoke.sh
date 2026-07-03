@@ -7,11 +7,28 @@ tmp_dir="$(mktemp -d)"
 # shellcheck source=scripts/java_logback_deps.sh
 source "$repo_root/scripts/java_logback_deps.sh"
 
+read_pom_version() {
+  python3 - "$1" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+namespace = {"m": "http://maven.apache.org/POM/4.0.0"}
+version = root.findtext("m:version", namespaces=namespace)
+if not version:
+    raise SystemExit(f"missing POM version in {sys.argv[1]}")
+print(version)
+PY
+}
+
 remove_tmp_dir() {
   rm -rf "$tmp_dir"
 }
 
 trap remove_tmp_dir EXIT
+java_version="$(read_pom_version "$package_dir/pom.xml")"
+java_jar="$tmp_dir/logbrew-sdk-$java_version.jar"
+java_sources_jar="$tmp_dir/logbrew-sdk-$java_version-sources.jar"
 main_sources="$tmp_dir/main-sources.txt"
 example_sources="$tmp_dir/example-sources.txt"
 find "$package_dir/src/main/java" -name '*.java' | sort > "$main_sources"
@@ -32,13 +49,13 @@ cp -R "$tmp_dir/classes/co" "$tmp_dir/jar-stage/co"
 if [ -d "$package_dir/src/main/resources" ]; then
   cp -R "$package_dir/src/main/resources/." "$tmp_dir/jar-stage/"
 fi
-jar --create --file "$tmp_dir/logbrew-sdk-0.1.0.jar" -C "$tmp_dir/jar-stage" .
+jar --create --file "$java_jar" -C "$tmp_dir/jar-stage" .
 cp "$package_dir/pom.xml" "$tmp_dir/source-stage/pom.xml"
 cp "$package_dir/README.md" "$tmp_dir/source-stage/README.md"
 cp -R "$package_dir/src" "$tmp_dir/source-stage/src"
 cp -R "$package_dir/examples" "$tmp_dir/source-stage/examples"
-jar --create --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" -C "$tmp_dir/source-stage" .
-jar --list --file "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/binary-jar-contents.txt"
+jar --create --file "$java_sources_jar" -C "$tmp_dir/source-stage" .
+jar --list --file "$java_jar" > "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDrop.class$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDroppedHandler.class$' "$tmp_dir/binary-jar-contents.txt"
@@ -94,7 +111,7 @@ grep -q '^META-INF/spring/org.springframework.boot.autoconfigure.AutoConfigurati
 grep -q '^META-INF/maven/co.logbrew/logbrew-sdk/pom.xml$' "$tmp_dir/binary-jar-contents.txt"
 grep -q '^README.md$' "$tmp_dir/binary-jar-contents.txt"
 
-jar --list --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar" > "$tmp_dir/source-jar-contents.txt"
+jar --list --file "$java_sources_jar" > "$tmp_dir/source-jar-contents.txt"
 grep -q '^pom.xml$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^README.md$' "$tmp_dir/source-jar-contents.txt"
 grep -q '^src/main/java/co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/source-jar-contents.txt"
@@ -135,7 +152,7 @@ grep -q '^examples/Makefile$' "$tmp_dir/source-jar-contents.txt"
 
 grep -q '<groupId>co.logbrew</groupId>' "$package_dir/pom.xml"
 grep -q '<artifactId>logbrew-sdk</artifactId>' "$package_dir/pom.xml"
-grep -q '<version>0.1.0</version>' "$package_dir/pom.xml"
+grep -q "<version>${java_version}</version>" "$package_dir/pom.xml"
 grep -q 'LogBrewClient.create' "$package_dir/README.md"
 grep -q 'HttpTransport' "$package_dir/README.md"
 grep -q 'MetricAttributes' "$package_dir/README.md"
@@ -172,7 +189,7 @@ grep -q 'Logback' "$package_dir/README.md"
 grep -q 'copyable snippets' "$package_dir/README.md"
 extract_dir="$tmp_dir/source-extract"
 mkdir -p "$extract_dir"
-(cd "$extract_dir" && jar --extract --file "$tmp_dir/logbrew-sdk-0.1.0-sources.jar")
+(cd "$extract_dir" && jar --extract --file "$java_sources_jar")
 test -f "$extract_dir/examples/Makefile"
 make -C "$extract_dir/examples" > "$tmp_dir/extracted-examples-help.txt"
 grep -Fxq 'run-readme-example -> make run-readme-example' "$tmp_dir/extracted-examples-help.txt"
@@ -200,26 +217,26 @@ python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/extrac
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/extracted-http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_http_trace_payload.py" "$tmp_dir/extracted-http-trace.stdout.json" "$tmp_dir/extracted-http-trace.stderr.json" >/dev/null
 
-javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$tmp_dir/example-classes" @"$example_sources"
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_optional_classpath" ReadmeExample > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
+javac -Xlint:all -Werror --release 11 -cp "$java_jar:$java_optional_classpath" -d "$tmp_dir/example-classes" @"$example_sources"
+java -cp "$java_jar:$tmp_dir/example-classes:$java_optional_classpath" ReadmeExample > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-readme.stdout.json" >/dev/null
 grep -q '"events":6' "$tmp_dir/packaged-readme.stderr.json"
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_optional_classpath" RealUserSmoke > "$tmp_dir/packaged-smoke.stdout.json" 2> "$tmp_dir/packaged-smoke.stderr.json"
+java -cp "$java_jar:$tmp_dir/example-classes:$java_optional_classpath" RealUserSmoke > "$tmp_dir/packaged-smoke.stdout.json" 2> "$tmp_dir/packaged-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/packaged-smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":2' "$tmp_dir/packaged-smoke.stderr.json"
 grep -q '"supportDraftRedacted":true' "$tmp_dir/packaged-smoke.stderr.json"
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_optional_classpath" FirstUsefulTelemetry > "$tmp_dir/packaged-first-useful.stdout.json" 2> "$tmp_dir/packaged-first-useful.stderr.json"
+java -cp "$java_jar:$tmp_dir/example-classes:$java_optional_classpath" FirstUsefulTelemetry > "$tmp_dir/packaged-first-useful.stdout.json" 2> "$tmp_dir/packaged-first-useful.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-first-useful.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_first_useful_payload.py" "$tmp_dir/packaged-first-useful.stdout.json" "$tmp_dir/packaged-first-useful.stderr.json" >/dev/null
-java -cp "$tmp_dir/logbrew-sdk-0.1.0.jar:$tmp_dir/example-classes:$java_optional_classpath" HttpTraceCorrelation > "$tmp_dir/packaged-http-trace.stdout.json" 2> "$tmp_dir/packaged-http-trace.stderr.json"
+java -cp "$java_jar:$tmp_dir/example-classes:$java_optional_classpath" HttpTraceCorrelation > "$tmp_dir/packaged-http-trace.stdout.json" 2> "$tmp_dir/packaged-http-trace.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-http-trace.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_java_http_trace_payload.py" "$tmp_dir/packaged-http-trace.stdout.json" "$tmp_dir/packaged-http-trace.stderr.json" >/dev/null
 
 lifecycle_app="$tmp_dir/lifecycle-app"
 mkdir -p "$lifecycle_app/lib" "$lifecycle_app/src" "$lifecycle_app/classes"
-cp "$tmp_dir/logbrew-sdk-0.1.0.jar" "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar"
+cp "$java_jar" "$lifecycle_app/lib/logbrew-sdk-$java_version.jar"
 cat > "$lifecycle_app/src/LifecycleApp.java" <<'JAVA'
 import co.logbrew.sdk.LogBrewClient;
 
@@ -233,21 +250,21 @@ public final class LifecycleApp {
     }
 }
 JAVA
-javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$lifecycle_app/classes" "$lifecycle_app/src/LifecycleApp.java"
-java -cp "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar:$lifecycle_app/classes:$java_optional_classpath" LifecycleApp > "$tmp_dir/lifecycle.out"
+javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-$java_version.jar:$java_optional_classpath" -d "$lifecycle_app/classes" "$lifecycle_app/src/LifecycleApp.java"
+java -cp "$lifecycle_app/lib/logbrew-sdk-$java_version.jar:$lifecycle_app/classes:$java_optional_classpath" LifecycleApp > "$tmp_dir/lifecycle.out"
 grep -qx '0' "$tmp_dir/lifecycle.out"
-rm "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar"
-if javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar" -d "$lifecycle_app/classes-missing" "$lifecycle_app/src/LifecycleApp.java" 2> "$tmp_dir/lifecycle-missing.err"; then
+rm "$lifecycle_app/lib/logbrew-sdk-$java_version.jar"
+if javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-$java_version.jar" -d "$lifecycle_app/classes-missing" "$lifecycle_app/src/LifecycleApp.java" 2> "$tmp_dir/lifecycle-missing.err"; then
   echo "expected lifecycle app compile to fail after removing SDK jar" >&2
   exit 1
 fi
 test -s "$tmp_dir/lifecycle-missing.err"
-cp "$tmp_dir/logbrew-sdk-0.1.0.jar" "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar"
-javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$lifecycle_app/classes-readded" "$lifecycle_app/src/LifecycleApp.java"
+cp "$java_jar" "$lifecycle_app/lib/logbrew-sdk-$java_version.jar"
+javac -Xlint:all -Werror --release 11 -cp "$lifecycle_app/lib/logbrew-sdk-$java_version.jar:$java_optional_classpath" -d "$lifecycle_app/classes-readded" "$lifecycle_app/src/LifecycleApp.java"
 
 smoke_app="$tmp_dir/smoke-app"
 mkdir -p "$smoke_app/lib" "$smoke_app/src" "$smoke_app/classes"
-cp "$tmp_dir/logbrew-sdk-0.1.0.jar" "$smoke_app/lib/logbrew-sdk-0.1.0.jar"
+cp "$java_jar" "$smoke_app/lib/logbrew-sdk-$java_version.jar"
 cat > "$smoke_app/src/Main.java" <<'JAVA'
 import co.logbrew.sdk.ActionAttributes;
 import co.logbrew.sdk.EnvironmentAttributes;
@@ -1262,8 +1279,8 @@ public final class Main {
     }
 }
 JAVA
-javac -Xlint:all -Werror --release 11 -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar:$java_optional_classpath" -d "$smoke_app/classes" "$smoke_app/src/Main.java"
-java -cp "$smoke_app/lib/logbrew-sdk-0.1.0.jar:$smoke_app/classes:$java_optional_classpath" Main > "$tmp_dir/smoke-app.stdout.json" 2> "$tmp_dir/smoke-app.stderr.json"
+javac -Xlint:all -Werror --release 11 -cp "$smoke_app/lib/logbrew-sdk-$java_version.jar:$java_optional_classpath" -d "$smoke_app/classes" "$smoke_app/src/Main.java"
+java -cp "$smoke_app/lib/logbrew-sdk-$java_version.jar:$smoke_app/classes:$java_optional_classpath" Main > "$tmp_dir/smoke-app.stdout.json" 2> "$tmp_dir/smoke-app.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke-app.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/smoke-app.stderr.json"
@@ -1276,7 +1293,7 @@ grep -q '"httpClientEvents":2' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"jdbcEvents":6' "$tmp_dir/smoke-app.stderr.json"
 grep -q '"otelEvents":1' "$tmp_dir/smoke-app.stderr.json"
 
-jdeps --multi-release 11 --class-path "$tmp_dir/logbrew-sdk-0.1.0.jar:$java_optional_classpath" "$tmp_dir/logbrew-sdk-0.1.0.jar" > "$tmp_dir/jdeps.txt"
+jdeps --multi-release 11 --class-path "$java_jar:$java_optional_classpath" "$java_jar" > "$tmp_dir/jdeps.txt"
 for expected_jdeps in java.base java.net.http logback-classic opentelemetry-api spring-kafka kafka-clients; do
   grep -q "$expected_jdeps" "$tmp_dir/jdeps.txt"
 done

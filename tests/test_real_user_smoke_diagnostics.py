@@ -58,6 +58,27 @@ class RealUserSmokeDiagnosticsTests(unittest.TestCase):
         self.assertNotIn("co.logbrew:logbrew-kotlin:0.1.0", script)
         self.assertNotIn("co.logbrew:logbrew-kotlin-okhttp:0.1.0", script)
 
+    def test_java_smoke_reads_current_package_version_from_pom(self):
+        script = (ROOT / "scripts" / "real_user_java_smoke.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('java_version="$(read_pom_version "$package_dir/pom.xml")"', script)
+        self.assertIn('java_jar="$tmp_dir/logbrew-sdk-$java_version.jar"', script)
+        self.assertIn(
+            'java_sources_jar="$tmp_dir/logbrew-sdk-$java_version-sources.jar"',
+            script,
+        )
+        self.assertIn('logbrew-sdk-$java_version.jar', script)
+        self.assertIn('logbrew-sdk-$java_version-sources.jar', script)
+        self.assertIn('<version>${java_version}</version>', script)
+
+        self.assertNotIn('java_jar="$java_jar"', script)
+        self.assertNotIn('java_sources_jar="$java_sources_jar"', script)
+        self.assertNotIn("logbrew-sdk-0.1.0.jar", script)
+        self.assertNotIn("logbrew-sdk-0.1.0-sources.jar", script)
+        self.assertNotIn("<version>0.1.0</version>", script)
+
 
 if __name__ == "__main__":
     unittest.main()
