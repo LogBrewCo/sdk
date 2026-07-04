@@ -545,6 +545,40 @@ with httpx.Client() as session:
 
 The `httpx` helper returns a `LogBrewHttpxClientInstrumentation` handle. It wraps only the provided sync or async client instance, puts the original `request` method back with `uninstall()`, and keeps the same type-only failure metadata and sanitized route/status/duration span behavior as the explicit helpers. It does not patch `httpx.Client`, `httpx.AsyncClient`, transports, request hooks, response hooks, payloads, headers, full URLs, query strings, baggage, tracestate, or raw propagation metadata.
 
+For apps that use `aiohttp`, use `aiohttp_request_with_logbrew_span()` for one explicit async request, or install reversible instrumentation on one app-owned `aiohttp.ClientSession`:
+
+```python
+import aiohttp
+
+from logbrew_sdk import LogBrewClient, instrument_aiohttp_client_session_with_logbrew_spans
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+
+async def submit_payment() -> int:
+    async with aiohttp.ClientSession() as session:
+        instrumentation = instrument_aiohttp_client_session_with_logbrew_spans(
+            session,
+            client=client,
+            route_template_resolver=lambda method, url: "/payments/:payment_id",
+            metadata={"service": "checkout-api"},
+        )
+        try:
+            async with session.post(
+                "https://api.example.com/payments/123?coupon=summer",
+                timeout=3.5,
+                json={"amount": 42},
+            ) as response:
+                return response.status
+        finally:
+            instrumentation.uninstall()
+```
+
+The `aiohttp` helpers add no `aiohttp` dependency to LogBrew. They write one normalized child `traceparent`, keep the child trace active during the awaited request, queue one sanitized dependency span, and return the original response or re-raise the original exception. `instrument_aiohttp_client_session_with_logbrew_spans()` returns a `LogBrewAiohttpClientSessionInstrumentation` handle. The handle wraps only the provided session instance, returns the existing handle on duplicate install, and puts the original `_request` coroutine back with `uninstall()`. It does not patch `aiohttp.ClientSession` globally, add `TraceConfig`, own sessions/connectors, capture payloads, response bodies, headers, cookies, full URLs, query strings, fragments, exception messages, baggage, tracestate, or raw propagation values.
+
 ## Database Operation Spans
 
 Use `database_operation_with_logbrew_span()` for sync database calls and `async_database_operation_with_logbrew_span()` for async calls when you want one app-owned DB span without installing or patching a database driver:

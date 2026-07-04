@@ -216,6 +216,47 @@ async def async_httpx_request_with_logbrew_span(
     )
 
 
+async def aiohttp_request_with_logbrew_span(
+    method: str,
+    url: str,
+    *,
+    client: Any,
+    event_id: str,
+    timestamp: str | None = None,
+    request: Callable[..., Awaitable[Any]] | None = None,
+    session: Any | None = None,
+    headers: Mapping[str, str] | None = None,
+    timeout: Any | None = None,
+    trace: LogBrewTraceContext | None = None,
+    route_template: str | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    span_id_factory: Callable[[], str] | None = None,
+    clock: _instrumentation.Clock | None = None,
+    on_capture_error: Callable[[Exception], None] | None = None,
+    **request_kwargs: Any,
+) -> Any:
+    """Run a caller-owned async ``aiohttp`` request under a LogBrew child span."""
+
+    return await _async_request_with_logbrew_span(
+        method,
+        str(url),
+        client=client,
+        event_id=event_id,
+        timestamp=timestamp,
+        request_callable=_aiohttp_callable(request=request, session=session),
+        headers=headers,
+        timeout=timeout,
+        trace=trace,
+        route_template=route_template,
+        metadata=metadata,
+        span_id_factory=span_id_factory,
+        clock=clock,
+        on_capture_error=on_capture_error,
+        source="aiohttp",
+        request_kwargs=request_kwargs,
+    )
+
+
 def _sync_request_with_logbrew_span(
     method: str,
     url: str,
@@ -558,7 +599,7 @@ def _status_from_error(error: Exception) -> int | None:
     response = getattr(error, "response", None)
     if response is not None:
         return _status_from_response(response)
-    return None
+    return _status_from_response(error)
 
 
 def _method_name(method: str) -> str:
@@ -648,6 +689,24 @@ def _async_httpx_callable(
             return await async_client.request(method, url, **kwargs)
 
     return default_async_request
+
+
+def _aiohttp_callable(
+    *,
+    request: Callable[..., Awaitable[Any]] | None,
+    session: Any | None,
+) -> AsyncRequestCallable:
+    if request is not None:
+        return cast(
+            "AsyncRequestCallable",
+            _single_request_callable(request=request, session=session, dependency="aiohttp"),
+        )
+    if session is not None:
+        session_request = getattr(session, "_request", None)
+        if not callable(session_request):
+            raise TypeError("aiohttp session must expose a callable _request method")
+        return cast("AsyncRequestCallable", session_request)
+    raise TypeError("aiohttp_request_with_logbrew_span requires a request callable or session")
 
 
 def _single_request_callable(

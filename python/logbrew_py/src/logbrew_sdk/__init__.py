@@ -1016,12 +1016,20 @@ create_support_ticket_draft = build_create_support_ticket_draft(
 )
 
 from logbrew_sdk._http_client import (  # noqa: E402, I001
+    aiohttp_request_with_logbrew_span,
     async_httpx_request_with_logbrew_span,
     httpx_request_with_logbrew_span,
     requests_request_with_logbrew_span,
     urlopen_with_logbrew_span,
 )
-from logbrew_sdk._http_instrumentation import LogBrewHttpxClientInstrumentation, LogBrewRequestsSessionInstrumentation, instrument_httpx_client_with_logbrew_spans, instrument_requests_session_with_logbrew_spans  # noqa: E402, E501
+from logbrew_sdk._http_instrumentation import (  # noqa: E402
+    LogBrewAiohttpClientSessionInstrumentation,
+    LogBrewHttpxClientInstrumentation,
+    LogBrewRequestsSessionInstrumentation,
+    instrument_aiohttp_client_session_with_logbrew_spans,
+    instrument_httpx_client_with_logbrew_spans,
+    instrument_requests_session_with_logbrew_spans,
+)
 from logbrew_sdk._db_client import async_database_operation_with_logbrew_span, database_operation_with_logbrew_span  # noqa: E402
 from logbrew_sdk._dbapi_client import LogBrewDbapiConnection, LogBrewDbapiCursor, connect_dbapi_connection_with_logbrew_spans, instrument_dbapi_connection_with_logbrew_spans  # noqa: E402, E501
 from logbrew_sdk._sqlalchemy_client import LogBrewSqlAlchemyInstrumentation, instrument_sqlalchemy_engine_with_logbrew_spans  # noqa: E402, E501
@@ -1056,6 +1064,7 @@ __all__ = [
     "HttpTransport",
     "IssueAttributes",
     "LogAttributes",
+    "LogBrewAiohttpClientSessionInstrumentation",
     "LogBrewClient",
     "LogBrewDbapiConnection",
     "LogBrewDbapiCursor",
@@ -1087,6 +1096,7 @@ __all__ = [
     "Transport",
     "TransportError",
     "TransportResponse",
+    "aiohttp_request_with_logbrew_span",
     "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
@@ -1106,6 +1116,7 @@ __all__ = [
     "database_operation_with_logbrew_span",
     "get_active_logbrew_trace",
     "httpx_request_with_logbrew_span",
+    "instrument_aiohttp_client_session_with_logbrew_spans",
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
     "instrument_flask_cache_with_logbrew_spans",

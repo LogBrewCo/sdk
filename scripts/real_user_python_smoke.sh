@@ -358,6 +358,23 @@ run_httpx_span_smoke() {
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
+run_aiohttp_span_smoke() {
+    local output_prefix="$1"
+
+    python "$tmp_dir/aiohttp_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"status": 202' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 2' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"eventSpan": "b7ad6b7169203342"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoInstalled": false' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"method": "GET"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203342-01"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"afterUninstallTraceparent": null' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"failureErrorType": "ClientResponseError"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"failureStatusCode": 503' "$tmp_dir/$output_prefix.stdout.json"
+}
+
 run_database_span_smoke() {
     local output_prefix="$1"
 
@@ -566,6 +583,7 @@ run_reinstall_from_freeze() {
 
     python -m pip install --upgrade pip >/dev/null
     python -m pip install mypy >/dev/null
+    python -m pip install aiohttp >/dev/null
     python -m pip install --report "$report_path" -r "$freeze_file" >/dev/null
     python -m pip check >/dev/null
     python -m pip show logbrew-sdk > "$pip_show_path"
@@ -592,6 +610,7 @@ run_reinstall_from_freeze() {
     run_urlopen_span_smoke "$output_prefix-freeze-urlopen-span"
     run_requests_span_smoke "$output_prefix-freeze-requests-span"
     run_httpx_span_smoke "$output_prefix-freeze-httpx-span"
+    run_aiohttp_span_smoke "$output_prefix-freeze-aiohttp-span"
     run_database_span_smoke "$output_prefix-freeze-database-span"
     run_dbapi_span_smoke "$output_prefix-freeze-dbapi-span"
     run_sqlalchemy_span_smoke "$output_prefix-freeze-sqlalchemy-span"
@@ -621,6 +640,7 @@ run_reinstall_from_direct_requirement() {
 
     python -m pip install --upgrade pip >/dev/null
     python -m pip install mypy >/dev/null
+    python -m pip install aiohttp >/dev/null
     python -m pip install --require-hashes --report "$report_path" -r "$requirements_file" >/dev/null
     python -m pip check >/dev/null
     python -m pip show logbrew-sdk > "$pip_show_path"
@@ -650,6 +670,7 @@ run_reinstall_from_direct_requirement() {
     run_urlopen_span_smoke "$output_prefix-direct-urlopen-span"
     run_requests_span_smoke "$output_prefix-direct-requests-span"
     run_httpx_span_smoke "$output_prefix-direct-httpx-span"
+    run_aiohttp_span_smoke "$output_prefix-direct-aiohttp-span"
     run_database_span_smoke "$output_prefix-direct-database-span"
     run_dbapi_span_smoke "$output_prefix-direct-dbapi-span"
     run_sqlalchemy_span_smoke "$output_prefix-direct-sqlalchemy-span"
@@ -742,9 +763,11 @@ for needle in (
     "LOGBREW_API_KEY",
     "preview_json()",
     "HttpTransport",
+    "LogBrewAiohttpClientSessionInstrumentation",
     "LogBrewHttpxClientInstrumentation",
     "LogBrewLoggingHandler",
     "LogBrewRequestsSessionInstrumentation",
+    "aiohttp_request_with_logbrew_span",
     "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
@@ -755,6 +778,7 @@ for needle in (
     "create_celery_trace_headers",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_aiohttp_client_session_with_logbrew_spans",
     "instrument_httpx_client_with_logbrew_spans",
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
@@ -847,9 +871,11 @@ for needle in (
     "LOGBREW_API_KEY",
     "preview_json()",
     "HttpTransport",
+    "LogBrewAiohttpClientSessionInstrumentation",
     "LogBrewHttpxClientInstrumentation",
     "LogBrewLoggingHandler",
     "LogBrewRequestsSessionInstrumentation",
+    "aiohttp_request_with_logbrew_span",
     "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
@@ -860,6 +886,7 @@ for needle in (
     "create_celery_trace_headers",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_aiohttp_client_session_with_logbrew_spans",
     "instrument_httpx_client_with_logbrew_spans",
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
@@ -899,6 +926,7 @@ source "$tmp_dir/venv/bin/activate"
 
 python -m pip install --upgrade pip >/dev/null
 python -m pip install mypy >/dev/null
+python -m pip install aiohttp >/dev/null
 python -m pip install --report "$tmp_dir/pip-install-report.json" "$wheel_path" >/dev/null
 python -m pip check >/dev/null
 python -m pip show logbrew-sdk > "$tmp_dir/pip-show.txt"
@@ -1153,6 +1181,7 @@ from logbrew_sdk import (
     HttpTransport,
     IssueAttributes,
     LogAttributes,
+    LogBrewAiohttpClientSessionInstrumentation,
     LogBrewClient,
     LogBrewTraceContext,
     LogBrewDbapiConnection,
@@ -1171,6 +1200,7 @@ from logbrew_sdk import (
     TraceparentContext,
     Transport,
     TransportResponse,
+    aiohttp_request_with_logbrew_span,
     async_cache_operation_with_logbrew_span,
     async_database_operation_with_logbrew_span,
     async_httpx_request_with_logbrew_span,
@@ -1185,6 +1215,7 @@ from logbrew_sdk import (
     connect_dbapi_connection_with_logbrew_spans,
     database_operation_with_logbrew_span,
     httpx_request_with_logbrew_span,
+    instrument_aiohttp_client_session_with_logbrew_spans,
     instrument_dbapi_connection_with_logbrew_spans,
     instrument_flask_cache_with_logbrew_spans,
     instrument_httpx_client_with_logbrew_spans,
@@ -1366,6 +1397,27 @@ async def run_async_httpx_typecheck() -> None:
 asyncio.run(run_async_httpx_typecheck())
 
 
+async def aiohttp_request(_method: str, _url: str, **_kwargs: object) -> object:
+    return type("Response", (), {"status": 206})()
+
+
+async def run_aiohttp_typecheck() -> None:
+    aiohttp_response = await aiohttp_request_with_logbrew_span(
+        "GET",
+        "https://api.example.test/health?coupon=summer#fragment",
+        client=client,
+        event_id="evt_aiohttp_typecheck",
+        timestamp="2026-06-02T10:00:10Z",
+        request=aiohttp_request,
+        span_id_factory=lambda: "b7ad6b7169203335",
+    )
+    if aiohttp_response.status != 206:
+        raise RuntimeError("unexpected aiohttp status")
+
+
+asyncio.run(run_aiohttp_typecheck())
+
+
 class TypecheckRequestsSession:
     def request(self, _method: str, _url: str, **_kwargs: object) -> object:
         return type("Response", (), {"status_code": 204})()
@@ -1376,6 +1428,11 @@ class TypecheckHttpxClient:
         return type("Response", (), {"status_code": 204})()
 
 
+class TypecheckAiohttpClientSession:
+    async def _request(self, _method: str, _url: str, **_kwargs: object) -> object:
+        return type("Response", (), {"status": 206})()
+
+
 requests_instrumentation: LogBrewRequestsSessionInstrumentation = instrument_requests_session_with_logbrew_spans(
     TypecheckRequestsSession(),
     client=client,
@@ -1384,8 +1441,13 @@ httpx_instrumentation: LogBrewHttpxClientInstrumentation = instrument_httpx_clie
     TypecheckHttpxClient(),
     client=client,
 )
+aiohttp_instrumentation: LogBrewAiohttpClientSessionInstrumentation = instrument_aiohttp_client_session_with_logbrew_spans(
+    TypecheckAiohttpClientSession(),
+    client=client,
+)
 requests_instrumentation.uninstall()
 httpx_instrumentation.uninstall()
+aiohttp_instrumentation.uninstall()
 
 
 class TypecheckRows:
@@ -2622,6 +2684,173 @@ print(
 )
 EOF
 
+cat > "$tmp_dir/aiohttp_span_smoke.py" <<'EOF'
+from __future__ import annotations
+
+import asyncio
+import json
+
+from aiohttp import ClientResponseError, ClientSession, web
+
+from logbrew_sdk import (
+    LogBrewClient,
+    LogBrewTraceContext,
+    instrument_aiohttp_client_session_with_logbrew_spans,
+)
+
+
+async def main() -> None:
+    received: list[dict[str, str | None]] = []
+
+    async def record_request(request: web.Request) -> web.Response:
+        received.append(
+            {
+                "callerHeader": request.headers.get("x-caller"),
+                "traceparent": request.headers.get("traceparent"),
+            }
+        )
+        if request.path.startswith("/failures/"):
+            return web.Response(status=503, text="private upstream body")
+        if request.path == "/after-uninstall":
+            return web.Response(status=204)
+        return web.json_response({"ok": True}, status=202)
+
+    app = web.Application()
+    app.router.add_route("*", "/{tail:.*}", record_request)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    server = site._server
+    if server is None or not server.sockets:
+        raise RuntimeError("aiohttp test server did not bind")
+    port = server.sockets[0].getsockname()[1]
+    base_url = f"http://127.0.0.1:{port}"
+
+    client = LogBrewClient.create(
+        api_key="LOGBREW_API_KEY",
+        sdk_name="smoke-app-aiohttp",
+        sdk_version="0.1.0",
+    )
+    parent_trace = LogBrewTraceContext(
+        trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+        span_id="00f067aa0ba902b7",
+        sampled=True,
+    )
+    event_ids = iter(["evt_python_aiohttp_client", "evt_python_aiohttp_failure"])
+    span_ids = iter(["b7ad6b7169203342", "b7ad6b7169203343"])
+    clock_values = iter([80.0, 80.031, 81.0, 81.012])
+
+    try:
+        async with ClientSession() as session:
+            instrumentation = instrument_aiohttp_client_session_with_logbrew_spans(
+                session,
+                client=client,
+                event_id_factory=lambda: next(event_ids),
+                timestamp="2026-07-04T09:00:11Z",
+                trace=parent_trace,
+                route_template_resolver=lambda method, url: (
+                    "/failures/:failure_id" if "/failures/" in url else "/payments/:payment_id"
+                ),
+                span_id_factory=lambda: next(span_ids),
+                clock=lambda: next(clock_values),
+                metadata={"service": "checkout", "headers": {"authorization": "private"}},
+            )
+            duplicate = instrument_aiohttp_client_session_with_logbrew_spans(session, client=client)
+            if duplicate is not instrumentation:
+                raise RuntimeError("aiohttp instrumentation did not return duplicate handle")
+
+            async with session.get(
+                f"{base_url}/payments/123?coupon=summer#receipt",
+                headers={"Traceparent": "spoofed", "x-caller": "checkout"},
+            ) as response:
+                status = response.status
+                await response.read()
+            first_received = dict(received[-1])
+
+            instrumentation.uninstall()
+            async with session.get(
+                f"{base_url}/after-uninstall",
+                headers={"x-caller": "after-uninstall"},
+            ) as response:
+                await response.read()
+            after_received = dict(received[-1])
+            if instrumentation.installed:
+                raise RuntimeError("aiohttp instrumentation did not uninstall")
+
+            failure_instrumentation = instrument_aiohttp_client_session_with_logbrew_spans(
+                session,
+                client=client,
+                event_id_factory=lambda: next(event_ids),
+                timestamp="2026-07-04T09:00:12Z",
+                trace=parent_trace,
+                route_template_resolver=lambda method, url: (
+                    "/failures/:failure_id" if "/failures/" in url else "/payments/:payment_id"
+                ),
+                span_id_factory=lambda: next(span_ids),
+                clock=lambda: next(clock_values),
+            )
+            try:
+                await session.get(
+                    f"{base_url}/failures/123?debug=redacted",
+                    raise_for_status=True,
+                )
+            except ClientResponseError as error:
+                failure_error = error
+            else:
+                raise RuntimeError("aiohttp failure response was not raised")
+            failure_instrumentation.uninstall()
+
+        payload = json.loads(client.preview_json())
+        if len(payload["events"]) != 2:
+            raise RuntimeError("aiohttp instrumentation did not emit expected events")
+        success_event = payload["events"][0]
+        failure_event = payload["events"][1]
+        metadata = success_event["attributes"]["metadata"]
+        failure_metadata = failure_event["attributes"]["metadata"]
+        serialized = client.preview_json()
+        for forbidden in (
+            "coupon=summer",
+            "debug=redacted",
+            "authorization",
+            "private upstream body",
+            "Traceparent",
+            "traceparent",
+        ):
+            if forbidden in serialized:
+                raise RuntimeError(f"aiohttp span leaked private data: {forbidden}")
+        if failure_metadata.get("errorType") != "ClientResponseError":
+            raise RuntimeError("aiohttp failure span lost error type")
+        if failure_metadata.get("statusCode") != 503:
+            raise RuntimeError("aiohttp failure span lost status code")
+        if "errorMessage" in failure_metadata:
+            raise RuntimeError("aiohttp failure span leaked errorMessage metadata")
+
+        print(
+            json.dumps(
+                {
+                    "afterUninstallTraceparent": after_received["traceparent"],
+                    "autoInstalled": instrumentation.installed,
+                    "eventSpan": success_event["attributes"]["spanId"],
+                    "events": len(payload["events"]),
+                    "failureErrorType": failure_metadata["errorType"],
+                    "failureStatusCode": failure_metadata["statusCode"],
+                    "method": metadata["method"],
+                    "ok": True,
+                    "routeTemplate": metadata["routeTemplate"],
+                    "status": status,
+                    "traceparent": first_received["traceparent"],
+                },
+                sort_keys=True,
+            )
+        )
+    finally:
+        await runner.cleanup()
+
+
+asyncio.run(main())
+EOF
+
 cat > "$tmp_dir/metadata.py" <<'EOF'
 from importlib.metadata import distribution, files, metadata, version
 from pathlib import Path
@@ -2671,7 +2900,9 @@ for needle in (
     "LOGBREW_API_KEY",
     "preview_json()",
     "HttpTransport",
+    "LogBrewAiohttpClientSessionInstrumentation",
     "LogBrewLoggingHandler",
+    "aiohttp_request_with_logbrew_span",
     "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
@@ -2682,6 +2913,7 @@ for needle in (
     "create_celery_trace_headers",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_aiohttp_client_session_with_logbrew_spans",
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
     "LogBrewDjangoCacheInstrumentation",
@@ -3004,6 +3236,7 @@ run_http_transport_smoke "wheel-http-transport"
 run_urlopen_span_smoke "wheel-urlopen-span"
 run_requests_span_smoke "wheel-requests-span"
 run_httpx_span_smoke "wheel-httpx-span"
+run_aiohttp_span_smoke "wheel-aiohttp-span"
 run_database_span_smoke "wheel-database-span"
 run_dbapi_span_smoke "wheel-dbapi-span"
 run_sqlalchemy_span_smoke "wheel-sqlalchemy-span"
@@ -3044,6 +3277,7 @@ run_http_transport_smoke "wheel-reinstall-http-transport"
 run_urlopen_span_smoke "wheel-reinstall-urlopen-span"
 run_requests_span_smoke "wheel-reinstall-requests-span"
 run_httpx_span_smoke "wheel-reinstall-httpx-span"
+run_aiohttp_span_smoke "wheel-reinstall-aiohttp-span"
 run_database_span_smoke "wheel-reinstall-database-span"
 run_dbapi_span_smoke "wheel-reinstall-dbapi-span"
 run_sqlalchemy_span_smoke "wheel-reinstall-sqlalchemy-span"
@@ -3063,6 +3297,7 @@ source "$tmp_dir/sdist-venv/bin/activate"
 
 python -m pip install --upgrade pip >/dev/null
 python -m pip install mypy >/dev/null
+python -m pip install aiohttp >/dev/null
 python -m pip install --report "$tmp_dir/sdist-pip-install-report.json" "$sdist_path" >/dev/null
 python -m pip check >/dev/null
 python -m pip show logbrew-sdk > "$tmp_dir/sdist-pip-show.txt"
@@ -3094,6 +3329,7 @@ run_http_transport_smoke "sdist-http-transport"
 run_urlopen_span_smoke "sdist-urlopen-span"
 run_requests_span_smoke "sdist-requests-span"
 run_httpx_span_smoke "sdist-httpx-span"
+run_aiohttp_span_smoke "sdist-aiohttp-span"
 run_database_span_smoke "sdist-database-span"
 run_dbapi_span_smoke "sdist-dbapi-span"
 run_sqlalchemy_span_smoke "sdist-sqlalchemy-span"
@@ -3134,6 +3370,7 @@ run_http_transport_smoke "sdist-reinstall-http-transport"
 run_urlopen_span_smoke "sdist-reinstall-urlopen-span"
 run_requests_span_smoke "sdist-reinstall-requests-span"
 run_httpx_span_smoke "sdist-reinstall-httpx-span"
+run_aiohttp_span_smoke "sdist-reinstall-aiohttp-span"
 run_database_span_smoke "sdist-reinstall-database-span"
 run_dbapi_span_smoke "sdist-reinstall-dbapi-span"
 run_sqlalchemy_span_smoke "sdist-reinstall-sqlalchemy-span"

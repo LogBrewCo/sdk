@@ -97,3 +97,39 @@ Reduce the Python server-side outbound HTTP tracing gap after Node gained explic
 
 - RED before implementation: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python.logbrew_py.tests.test_http_client -v` failed because `instrument_httpx_client_with_logbrew_spans` and `instrument_requests_session_with_logbrew_spans` were not exported.
 - GREEN focused proof now covers requests session instrumentation, duplicate install, uninstall, sync httpx instrumentation, async httpx instrumentation, normalized traceparent injection, event ID factories, route-template resolver use, original error preservation, type-only failure metadata, and omission of query/header/payload/error-message data.
+
+## 2026-07-04 Aiohttp Client Session Pass
+
+### Sources Re-read
+
+- Sentry Python SDK, [`getsentry/sentry-python`](https://github.com/getsentry/sentry-python/tree/1bd120f41780bfd5fd4d4b7c65aae395e425adab) at commit `1bd120f41780bfd5fd4d4b7c65aae395e425adab`.
+- Sentry file/functions: `sentry_sdk/integrations/aiohttp.py` `AioHttpIntegration.setup_once`, `create_trace_config`, `on_request_start`, and `on_request_end`.
+- OpenTelemetry Python Contrib, [`open-telemetry/opentelemetry-python-contrib`](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/2359804163c7c2426858453d647d20d1b5d93782) at commit `2359804163c7c2426858453d647d20d1b5d93782`.
+- OpenTelemetry file/functions: `instrumentation/opentelemetry-instrumentation-aiohttp-client/src/opentelemetry/instrumentation/aiohttp_client/__init__.py` `create_trace_config`, `_end_trace`, `on_request_start`, `on_request_end`, `on_request_exception`, `_instrument`, `_uninstrument`, `_uninstrument_session`, `AioHttpClientInstrumentor._instrument`, and `AioHttpClientInstrumentor.uninstrument_session`.
+- Datadog `dd-trace-py`, [`DataDog/dd-trace-py`](https://github.com/DataDog/dd-trace-py/tree/c12bb9dfb723bb96a662b7b90f36c805c4af43fb) at commit `c12bb9dfb723bb96a662b7b90f36c805c4af43fb`.
+- Datadog file/functions: `ddtrace/contrib/internal/aiohttp/patch.py` `_traced_clientsession_request`, `_traced_clientsession_init`, `patch`, `_unpatch_client`, and `unpatch`.
+- PostHog Python, [`PostHog/posthog-python`](https://github.com/PostHog/posthog-python/tree/6f75afe77ff059e4f3b0b6b7b30912612a7b5ff1) at commit `6f75afe77ff059e4f3b0b6b7b30912612a7b5ff1`; searched public tree paths for `aiohttp` and async HTTP tracing and found no comparable general-purpose aiohttp client tracing integration.
+
+### Pattern and Tradeoff
+
+- Sentry and OpenTelemetry add `aiohttp` `TraceConfig` hooks during session setup, then create and finish spans from request start/end/exception callbacks.
+- Datadog uses broader process-level patching around `ClientSession.__init__`, `ClientSession._request`, and connector behavior so users get more automatic coverage and timing detail.
+- Those mature paths are still stronger for zero-touch coverage and request lifecycle richness, but they also carry broader mutation surfaces, optional URL/header/body capture paths, baggage/tracestate propagation, and extra dependency/runtime coupling.
+
+### LogBrew Change
+
+- Added `aiohttp_request_with_logbrew_span(...)` for explicit app-owned async requests and `instrument_aiohttp_client_session_with_logbrew_spans(...)` for one caller-owned `aiohttp.ClientSession`-style instance.
+- The instrumentation wraps only the session instance's `_request` coroutine, returns a `LogBrewAiohttpClientSessionInstrumentation` handle, returns the existing handle on duplicate install, and puts the original coroutine back with `uninstall()`.
+- It writes one normalized child W3C `traceparent`, keeps the child trace active during the awaited request, queues route/status/duration/source/error-type metadata, preserves original responses/errors, and captures direct `status`/`status_code` error shapes used by `aiohttp.ClientResponseError`.
+- It does not patch `aiohttp.ClientSession` globally, add `TraceConfig`, own connectors/sessions, capture payloads, headers, cookies, full URLs, query strings, fragments, exception messages, baggage, tracestate, raw propagation metadata, support tickets, or backend-owned behavior.
+
+### Verification
+
+- RED before implementation: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python.logbrew_py.tests.test_http_client -v` failed because `LogBrewAiohttpClientSessionInstrumentation` was not exported.
+- Second RED for real aiohttp status shape: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python.logbrew_py.tests.test_http_client.HttpClientInstrumentationTests.test_aiohttp_client_session_instrumentation_preserves_errors_without_message_metadata -v` failed with missing `statusCode` when the exception exposed direct `status`.
+- GREEN focused and full Python unit discovery cover explicit aiohttp request spans, per-session install/duplicate/uninstall behavior, normalized traceparent propagation, active child context during request execution, direct-status failure metadata, original error preservation, and omission of query/header/payload/error-message data.
+- Installed wheel/sdist smoke now installs real `aiohttp`, starts a local `aiohttp.web` server, instruments a real `ClientSession`, verifies propagated traceparent, clean uninstall, real `ClientResponseError` status capture, package metadata/type surface, and no query/header/body/error-message leakage.
+
+### Remaining Gap
+
+- Sentry, Datadog, and OpenTelemetry still lead on automatic aiohttp lifecycle coverage, TraceConfig ownership, connector/request phase timings, metrics, baggage/tracestate, and broader automatic HTTP client patching. Keep LogBrew core explicit and app-owned unless a separate integration package owns the heavier dependency, privacy, uninstall, and high-load behavior.

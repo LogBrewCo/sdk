@@ -5,11 +5,14 @@ import json
 import unittest
 
 from logbrew_sdk import (
+    LogBrewAiohttpClientSessionInstrumentation,
     LogBrewClient,
     LogBrewTraceContext,
+    aiohttp_request_with_logbrew_span,
     async_httpx_request_with_logbrew_span,
     get_active_logbrew_trace,
     httpx_request_with_logbrew_span,
+    instrument_aiohttp_client_session_with_logbrew_spans,
     instrument_httpx_client_with_logbrew_spans,
     instrument_requests_session_with_logbrew_spans,
     use_logbrew_trace,
@@ -229,6 +232,206 @@ class HttpxSpanTests(unittest.TestCase):
 
 
 class HttpClientInstrumentationTests(unittest.TestCase):
+    def test_aiohttp_request_with_logbrew_span_injects_child_trace_and_queues_span(self) -> None:
+        client = sample_client()
+        caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout"}
+        calls: list[dict[str, object]] = []
+        request_active_trace: LogBrewTraceContext | None = None
+        clock_values = iter([80.0, 80.044])
+        parent_trace = LogBrewTraceContext(
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="00f067aa0ba902b7",
+            sampled=True,
+        )
+
+        class StubAiohttpResponse:
+            status = 202
+
+        async def request(method: str, url: str, **kwargs: object) -> StubAiohttpResponse:
+            nonlocal request_active_trace
+            calls.append({"method": method, "url": url, **kwargs})
+            request_active_trace = get_active_logbrew_trace()
+            return StubAiohttpResponse()
+
+        async def run() -> None:
+            nonlocal request_active_trace
+            response = await aiohttp_request_with_logbrew_span(
+                "post",
+                "https://api.example.test/payments/123?coupon=summer#receipt",
+                client=client,
+                event_id="evt_python_aiohttp_client",
+                timestamp="2026-07-04T09:00:02Z",
+                request=request,
+                timeout=3.5,
+                headers=caller_headers,
+                json={"card": "sensitive"},
+                trace=parent_trace,
+                route_template="/payments/:payment_id",
+                span_id_factory=lambda: "b7ad6b7169203347",
+                clock=lambda: next(clock_values),
+                metadata={"service": "checkout", "headers": {"authorization": "sensitive"}},
+            )
+
+            self.assertEqual(response.status, 202)
+            self.assertEqual(caller_headers["Traceparent"], "spoofed")
+            self.assertEqual(
+                request_active_trace,
+                LogBrewTraceContext(
+                    trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+                    span_id="b7ad6b7169203347",
+                    parent_span_id="00f067aa0ba902b7",
+                    sampled=True,
+                ),
+            )
+            call = calls[0]
+            self.assertEqual(call["method"], "post")
+            self.assertEqual(call["url"], "https://api.example.test/payments/123?coupon=summer#receipt")
+            self.assertEqual(call["timeout"], 3.5)
+            sent_headers = call["headers"]
+            self.assertIsInstance(sent_headers, dict)
+            assert isinstance(sent_headers, dict)
+            self.assertEqual(sent_headers["x-caller"], "checkout")
+            self.assertEqual(
+                sent_headers["traceparent"],
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203347-01",
+            )
+            event = json.loads(client.preview_json())["events"][0]
+            self.assertEqual(event["attributes"]["name"], "POST /payments/:payment_id")
+            self.assertEqual(event["attributes"]["durationMs"], 44.0)
+            metadata = event["attributes"]["metadata"]
+            self.assertEqual(metadata["source"], "aiohttp")
+            self.assertEqual(metadata["method"], "POST")
+            self.assertEqual(metadata["statusCode"], 202)
+            serialized = client.preview_json()
+            self.assertNotIn("coupon=summer", serialized)
+            self.assertNotIn("authorization", serialized)
+            self.assertNotIn("traceparent", serialized)
+            self.assertNotIn("card", serialized)
+
+        asyncio.run(run())
+
+    def test_aiohttp_client_session_instrumentation_traces_request_and_uninstalls(self) -> None:
+        client = sample_client()
+        calls: list[dict[str, object]] = []
+        event_ids = iter(["evt_python_aiohttp_auto_get", "evt_python_aiohttp_after_uninstall"])
+        span_ids = iter(["b7ad6b7169203348", "b7ad6b7169203349"])
+        clock_values = iter([120.0, 120.039])
+
+        class StubAiohttpResponse:
+            status = 204
+
+        class StubAiohttpClientSession:
+            async def _request(self, method: str, url: str, **kwargs: object) -> StubAiohttpResponse:
+                calls.append({"method": method, "url": url, **kwargs})
+                return StubAiohttpResponse()
+
+            async def get(self, url: str, **kwargs: object) -> StubAiohttpResponse:
+                return await self._request("GET", url, **kwargs)
+
+        session = StubAiohttpClientSession()
+        parent_trace = LogBrewTraceContext(
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="00f067aa0ba902b7",
+            sampled=False,
+        )
+
+        instrumentation = instrument_aiohttp_client_session_with_logbrew_spans(
+            session,
+            client=client,
+            event_id_factory=lambda: next(event_ids),
+            timestamp="2026-07-04T09:00:03Z",
+            trace=parent_trace,
+            metadata={"service": "checkout", "headers": {"authorization": "sensitive"}},
+            route_template_resolver=lambda _method, _url: "/payments/:payment_id",
+            span_id_factory=lambda: next(span_ids),
+            clock=lambda: next(clock_values),
+        )
+        duplicate = instrument_aiohttp_client_session_with_logbrew_spans(session, client=client)
+
+        async def run() -> None:
+            response = await session.get(
+                "https://api.example.test/payments/123?coupon=summer#receipt",
+                headers={"Traceparent": "spoofed"},
+                json={"card": "sensitive"},
+            )
+
+            self.assertIs(duplicate, instrumentation)
+            self.assertIsInstance(instrumentation, LogBrewAiohttpClientSessionInstrumentation)
+            self.assertTrue(instrumentation.installed)
+            self.assertEqual(response.status, 204)
+            sent_headers = calls[0]["headers"]
+            self.assertIsInstance(sent_headers, dict)
+            assert isinstance(sent_headers, dict)
+            self.assertEqual(
+                sent_headers["traceparent"],
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203348-00",
+            )
+            event = json.loads(client.preview_json())["events"][0]
+            self.assertEqual(event["id"], "evt_python_aiohttp_auto_get")
+            self.assertEqual(event["attributes"]["name"], "GET /payments/:payment_id")
+            self.assertEqual(event["attributes"]["durationMs"], 39.0)
+            metadata = event["attributes"]["metadata"]
+            self.assertEqual(metadata["source"], "aiohttp")
+            self.assertEqual(metadata["method"], "GET")
+            self.assertEqual(metadata["statusCode"], 204)
+            serialized = client.preview_json()
+            self.assertNotIn("coupon=summer", serialized)
+            self.assertNotIn("authorization", serialized)
+            self.assertNotIn("traceparent", serialized)
+            self.assertNotIn("card", serialized)
+
+            instrumentation.uninstall()
+            self.assertFalse(instrumentation.installed)
+            await session.get("https://api.example.test/after-uninstall")
+            self.assertEqual(len(json.loads(client.preview_json())["events"]), 1)
+            self.assertNotIn("headers", calls[-1])
+
+        asyncio.run(run())
+
+    def test_aiohttp_client_session_instrumentation_preserves_errors_without_message_metadata(self) -> None:
+        client = sample_client()
+
+        class StubResponse:
+            status = 502
+
+        class StubAiohttpError(RuntimeError):
+            def __init__(self) -> None:
+                super().__init__("upstream failed with sensitive-auth-value")
+                self.status = StubResponse.status
+
+        class StubAiohttpClientSession:
+            async def _request(self, _method: str, _url: str, **_kwargs: object) -> object:
+                raise original_error
+
+        original_error = StubAiohttpError()
+        session = StubAiohttpClientSession()
+        instrument_aiohttp_client_session_with_logbrew_spans(
+            session,
+            client=client,
+            event_id_factory=lambda: "evt_python_aiohttp_auto_failure",
+            timestamp="2026-07-04T09:00:04Z",
+            span_id_factory=lambda: "b7ad6b7169203350",
+            clock=lambda: 130.0,
+        )
+
+        async def run() -> None:
+            with self.assertRaises(StubAiohttpError) as raised:
+                await session._request("GET", "https://api.example.test/payments/123?auth=hidden")
+
+            self.assertIs(raised.exception, original_error)
+            event = json.loads(client.preview_json())["events"][0]
+            metadata = event["attributes"]["metadata"]
+            self.assertEqual(event["attributes"]["status"], "error")
+            self.assertEqual(metadata["source"], "aiohttp")
+            self.assertEqual(metadata["statusCode"], 502)
+            self.assertEqual(metadata["errorType"], "StubAiohttpError")
+            serialized = client.preview_json()
+            self.assertNotIn("errorMessage", metadata)
+            self.assertNotIn("upstream failed with sensitive-auth-value", serialized)
+            self.assertNotIn("auth=hidden", serialized)
+
+        asyncio.run(run())
+
     def test_requests_session_instrumentation_traces_requests_and_uninstalls(self) -> None:
         client = sample_client()
         caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout"}
