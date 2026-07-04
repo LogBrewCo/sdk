@@ -477,6 +477,7 @@ function createBrowserNetworkEvent(request, browserWindow = defaultWindow(), {
 function createBrowserErrorEvent(error, browserWindow = defaultWindow(), {
   debugIdMap,
   environment,
+  fingerprint,
   idFactory = defaultErrorEventId,
   includeErrorStack = false,
   includeDocumentTitle = false,
@@ -508,6 +509,7 @@ function createBrowserErrorEvent(error, browserWindow = defaultWindow(), {
   const attributes = browserIssueAttributes(details.candidate, details.message, {
     debugIdMap,
     environment,
+    fingerprint,
     includeErrorStack,
     metadata: mergeMetadata(baseMetadata, metadata),
     platform,
@@ -532,6 +534,7 @@ function createBrowserErrorEvent(error, browserWindow = defaultWindow(), {
 function createUnhandledRejectionEvent(rejection, browserWindow = defaultWindow(), {
   debugIdMap,
   environment,
+  fingerprint,
   idFactory = defaultErrorEventId,
   includeErrorStack = false,
   includeDocumentTitle = false,
@@ -560,6 +563,7 @@ function createUnhandledRejectionEvent(rejection, browserWindow = defaultWindow(
   const attributes = browserIssueAttributes(reason.candidate, reason.message, {
     debugIdMap,
     environment,
+    fingerprint,
     includeErrorStack,
     metadata: mergeMetadata(baseMetadata, metadata),
     platform,
@@ -742,6 +746,7 @@ function defaultSanitizeMetadata(metadata) {
 function browserIssueAttributes(candidate, message, {
   debugIdMap,
   environment,
+  fingerprint,
   includeErrorStack,
   metadata,
   platform,
@@ -755,6 +760,7 @@ function browserIssueAttributes(candidate, message, {
   return createIssueAttributesFromError(candidate, {
     debugIdMap,
     environment,
+    fingerprint,
     includeErrorStack,
     level: "error",
     message,
@@ -783,7 +789,25 @@ function sanitizeBrowserIssueMetadata(metadata) {
   if (codeFile) {
     sanitized.releaseArtifactCodeFile = codeFile;
   }
+  const groupingKey = browserIssueGroupingKey(sanitized.issueGroupingKey);
+  if (groupingKey) {
+    sanitized.issueGroupingKey = groupingKey;
+  }
   return compactMetadata(sanitized);
+}
+
+function browserIssueGroupingKey(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  const firstSeparator = trimmed.indexOf(":");
+  const secondSeparator = firstSeparator === -1 ? -1 : trimmed.indexOf(":", firstSeparator + 1);
+  if (secondSeparator === -1) {
+    return trimmed;
+  }
+  const frameFile = browserCodePath(trimmed.slice(secondSeparator + 1));
+  return frameFile ? `${trimmed.slice(0, secondSeparator + 1)}${frameFile}` : trimmed;
 }
 
 function browserCodePath(value) {

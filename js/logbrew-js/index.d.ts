@@ -250,6 +250,8 @@ export type JavaScriptErrorIssueOptions = {
   platform?: string;
   /** Map of sanitized frame filenames or minified URLs to release-artifact Debug IDs. */
   debugIdMap?: Record<string, string>;
+  /** Optional stable app-owned grouping fingerprint. Keep it safe and low-cardinality. */
+  fingerprint?: string;
   /** Include raw stack text only when the app has explicitly approved it. Defaults to false. */
   includeErrorStack?: boolean;
 };

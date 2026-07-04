@@ -257,6 +257,8 @@ test("createIssueAttributesFromError attaches privacy-bounded release artifact m
       errorFrameFile: "https://cdn.example/assets/app.js",
       errorFrameLine: 12,
       errorFrameColumn: 34,
+      issueGroupingKey: "javascript.error:TypeError:https://cdn.example/assets/app.js",
+      issueGroupingSource: "error_type_and_frame",
       release: "web@2026.07.03",
       environment: "production",
       service: "checkout-web",
@@ -276,6 +278,34 @@ test("createIssueAttributesFromError attaches privacy-bounded release artifact m
   assert.doesNotMatch(serialized, /errorStack/u);
 });
 
+test("createIssueAttributesFromError supports explicit privacy-bounded grouping fingerprint", () => {
+  const error = new Error("payment failed for user dev@example.test order 12345");
+  error.stack = [
+    "Error: payment failed for user dev@example.test order 12345",
+    "    at submit (https://cdn.example/assets/checkout.js?email=dev@example.test#retry:8:9)"
+  ].join("\n");
+
+  const attributes = createIssueAttributesFromError(error, {
+    fingerprint: "checkout-payment-submit",
+    metadata: {
+      ignoredObject: { nested: true }
+    },
+    source: "browser.error"
+  });
+
+  assert.equal(attributes.metadata.issueFingerprint, "checkout-payment-submit");
+  assert.equal(attributes.metadata.issueGroupingKey, "browser.error:Error:https://cdn.example/assets/checkout.js");
+  assert.equal(attributes.metadata.issueGroupingSource, "explicit_fingerprint");
+  assert.equal(attributes.metadata.ignoredObject, undefined);
+
+  const serializedGroupingMetadata = JSON.stringify({
+    issueFingerprint: attributes.metadata.issueFingerprint,
+    issueGroupingKey: attributes.metadata.issueGroupingKey,
+    issueGroupingSource: attributes.metadata.issueGroupingSource
+  });
+  assert.doesNotMatch(serializedGroupingMetadata, /dev@example|12345|email=|retry|ignoredObject|nested/u);
+});
+
 test("createIssueAttributesFromError omits local paths and stack text by default", () => {
   const error = new Error("Local build failed");
   error.stack = [
@@ -291,6 +321,7 @@ test("createIssueAttributesFromError omits local paths and stack text by default
   });
 
   assert.equal(attributes.metadata.errorFrameFile, "app.js");
+  assert.equal(attributes.metadata.issueGroupingKey, "javascript.error:Error:app.js");
   assert.equal(attributes.metadata.releaseArtifactCodeFile, "app.js");
   assert.equal(attributes.metadata.releaseArtifactDebugId, "22222222-3333-4444-8555-666666666666");
 

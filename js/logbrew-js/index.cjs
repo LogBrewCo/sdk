@@ -420,9 +420,10 @@ function createIssueAttributesFromError(error, options = {}) {
   }
   const details = errorDetails(error);
   const frame = firstJavaScriptStackFrame(details.stack);
+  const source = stringOrUndefined(options.source) ?? "javascript.error";
   const metadata = {
     ...compactMetadata(options.metadata),
-    source: stringOrUndefined(options.source) ?? "javascript.error",
+    source,
     errorName: details.name,
     ...(details.message ? { errorMessage: details.message } : {}),
     ...(frame ? {
@@ -430,6 +431,7 @@ function createIssueAttributesFromError(error, options = {}) {
       errorFrameLine: frame.line,
       errorFrameColumn: frame.column
     } : {}),
+    ...issueGroupingMetadata(source, details, frame, options.fingerprint),
     ...(stringOrUndefined(options.release) ? { release: options.release } : {}),
     ...(stringOrUndefined(options.environment) ? { environment: options.environment } : {}),
     ...(stringOrUndefined(options.service) ? { service: options.service } : {}),
@@ -466,6 +468,28 @@ function errorDetails(error) {
     return { name: "Error", message: error };
   }
   return { name: "Error" };
+}
+
+function issueGroupingMetadata(source, details, frame, fingerprint) {
+  const groupingKey = frame
+    ? `${source}:${details.name}:${frame.filename}`
+    : `${source}:${details.name}`;
+  const explicitFingerprint = issueFingerprintOrUndefined(fingerprint);
+  return {
+    issueGroupingKey: groupingKey,
+    issueGroupingSource: explicitFingerprint ? "explicit_fingerprint" : frame ? "error_type_and_frame" : "error_type",
+    ...(explicitFingerprint ? { issueFingerprint: explicitFingerprint } : {})
+  };
+}
+
+function issueFingerprintOrUndefined(value) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new SdkError("validation_error", "issue fingerprint must be a non-empty string");
+  }
+  return value.trim();
 }
 
 function firstJavaScriptStackFrame(stack) {

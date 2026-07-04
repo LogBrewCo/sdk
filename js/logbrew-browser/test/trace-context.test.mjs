@@ -190,6 +190,8 @@ test("installed browser errors attach release artifact Debug ID metadata without
     assert.equal(issue.attributes.metadata.errorFrameFile, "/assets/app.js");
     assert.equal(issue.attributes.metadata.errorFrameLine, 12);
     assert.equal(issue.attributes.metadata.errorFrameColumn, 34);
+    assert.equal(issue.attributes.metadata.issueGroupingKey, "browser.error:TypeError:/assets/app.js");
+    assert.equal(issue.attributes.metadata.issueGroupingSource, "error_type_and_frame");
     assert.equal(issue.attributes.metadata.release, "web@2026.07.04");
     assert.equal(issue.attributes.metadata.environment, "production");
     assert.equal(issue.attributes.metadata.service, "checkout-web");
@@ -202,6 +204,44 @@ test("installed browser errors attach release artifact Debug ID metadata without
 
     const serialized = JSON.stringify(issue);
     assert.doesNotMatch(serialized, /cdn\.example|debug=true|section|vendor\.js|errorStack|nestedDropped|private/u);
+  } finally {
+    await removeTempDir();
+  }
+});
+
+test("installed browser error events support explicit low-cardinality grouping fingerprints", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const {
+    createBrowserErrorEvent,
+    createBrowserTraceContext
+  } = imported;
+  const browserWindow = createFakeBrowserWindow("https://app.example.test/checkout?email=dev@example.test#step2");
+  try {
+    const error = new Error("payment failed for user dev@example.test order 12345");
+    error.stack = [
+      "Error: payment failed for user dev@example.test order 12345",
+      "    at checkout (https://cdn.example/assets/checkout.js?email=dev@example.test#retry:8:9)"
+    ].join("\n");
+
+    const event = createBrowserErrorEvent(error, browserWindow, {
+      fingerprint: "checkout-payment-submit",
+      traceContext: createBrowserTraceContext({
+        sampled: true,
+        spanId: SPAN_ID,
+        traceId: TRACE_ID
+      })
+    });
+
+    assert.equal(event.attributes.metadata.issueFingerprint, "checkout-payment-submit");
+    assert.equal(event.attributes.metadata.issueGroupingKey, "browser.error:Error:/assets/checkout.js");
+    assert.equal(event.attributes.metadata.issueGroupingSource, "explicit_fingerprint");
+
+    const serializedGroupingMetadata = JSON.stringify({
+      issueFingerprint: event.attributes.metadata.issueFingerprint,
+      issueGroupingKey: event.attributes.metadata.issueGroupingKey,
+      issueGroupingSource: event.attributes.metadata.issueGroupingSource
+    });
+    assert.doesNotMatch(serializedGroupingMetadata, /dev@example|12345|email=|retry|cdn\.example/u);
   } finally {
     await removeTempDir();
   }

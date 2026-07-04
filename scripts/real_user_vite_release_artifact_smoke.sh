@@ -380,6 +380,8 @@ assert payload["events"][0]["type"] == "issue"
 assert runtime_issue["metadata"]["releaseArtifactDebugId"] == debug_id
 assert runtime_issue["metadata"]["releaseArtifactCodeFile"] == runtime_path
 assert runtime_issue["metadata"]["errorFrameFile"] == runtime_path
+assert runtime_issue["metadata"]["issueGroupingKey"] == f"browser.error:Error:{runtime_path}"
+assert runtime_issue["metadata"]["issueGroupingSource"] == "error_type_and_frame"
 assert runtime_issue["metadata"]["release"] == "2026.06.18-vite"
 assert runtime_issue["metadata"]["environment"] == "production"
 assert runtime_issue["metadata"]["service"] == "checkout-web"

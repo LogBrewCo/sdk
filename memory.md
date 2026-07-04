@@ -1,5 +1,30 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: Browser error grouping hint gap reduced after source reads from
+  Sentry JS
+  `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
+  (`Scope.setFingerprint`, `applyFingerprintToEvent`, browser exception-shape
+  grouping notes), Datadog Browser SDK
+  `DataDog/browser-sdk@d2c7e303e4533f40e93d447042a67571f7ba97ff`
+  (`tryToGetFingerprint`, RUM error fingerprint/debug-ID mapping), and PostHog
+  JS `PostHog/posthog-js@e480a3e23ecff45d2f9cf50332f6f59c54a7c736`
+  (exception autocapture rate limit, suppression matching, exception property
+  builder). `@logbrew/sdk` `createIssueAttributesFromError(...)` now emits
+  `issueGroupingKey` from source, error type, and sanitized first frame; accepts
+  optional app-owned non-empty `fingerprint` as `issueFingerprint`; and marks
+  `issueGroupingSource`. `@logbrew/browser` keeps browser grouping keys
+  path-only and passes explicit fingerprints through manual browser error/
+  rejection event creation. Evidence: RED focused JS issue tests failed on
+  missing grouping metadata; GREEN focused JS/browser grouping tests,
+  `npm --prefix js/logbrew-js test` (88 tests),
+  `npm --prefix js/logbrew-browser test` (syntax checks plus 26 tests), and
+  `scripts/real_user_vite_release_artifact_smoke.sh` with packed SDK/browser,
+  `vite@8.0.16`, path-only source-map metadata, grouping assertions, local
+  symbolication, and loopback fake-intake 503-to-202 retry. Research:
+  `docs/competitor-research/browser-error-grouping-2026-07-04.md`. Honest gap:
+  Sentry/Datadog still lead on hosted grouping engines, source-context UI,
+  cause chains, suppression rules, grouping previews, and symbolicated stack
+  presentation.
 - 2026-07-04: Vite/browser runtime source-map proof gap reduced after source
   reads from Sentry JS
   `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`

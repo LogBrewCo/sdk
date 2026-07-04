@@ -373,6 +373,8 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
   runtime?: string;
   /** Platform label such as `web`. */
   platform?: string;
+  /** Optional stable app-owned grouping fingerprint for explicit error capture. Keep it safe and low-cardinality. */
+  fingerprint?: string;
   /** Include raw error stack text only when the app has explicitly approved it. Defaults to false. */
   includeErrorStack?: boolean;
   includeDocumentTitle?: boolean;

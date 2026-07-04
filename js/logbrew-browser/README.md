@@ -60,7 +60,7 @@ const logbrew = installLogBrewBrowser({
 });
 ```
 
-Browser error metadata records the error type/message, path-only first frame, line, column, optional Debug ID, release, environment, service, runtime, and active trace/span IDs. It keeps raw stack text out by default; set `includeErrorStack: true` only if your app has a clear redaction policy. Debug ID code files are normalized to paths, so full URLs, hosts, query strings, hash fragments, headers, payloads, cookies, screenshots, replay data, baggage, and tracestate are not captured.
+Browser error metadata records the error type/message, path-only first frame, line, column, low-cardinality grouping key, optional Debug ID, release, environment, service, runtime, and active trace/span IDs. It keeps raw stack text out by default; set `includeErrorStack: true` only if your app has a clear redaction policy. Debug ID code files and browser grouping keys are normalized to paths, so full URLs, hosts, query strings, hash fragments, headers, payloads, cookies, screenshots, replay data, baggage, and tracestate are not captured.
 
 ## Structured Actions
 
