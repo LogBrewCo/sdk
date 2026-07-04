@@ -3,6 +3,7 @@ import {
   captureBrowserAction,
   captureBrowserNavigationTiming,
   captureBrowserNetwork,
+  captureBrowserWebVital,
   createBrowserTraceContext,
   createLogBrewBrowserFetch,
   createTraceparentFetch,
@@ -86,9 +87,15 @@ await captureBrowserNavigationTiming(createNavigationTimingEntry(), logbrew, {
   now: nextTimestamp,
   randomValues: () => fillBytes(8, 0x55)
 });
+await captureBrowserWebVital(createWebVitalMetric(), logbrew, {
+  flushOnCapture: false,
+  now: nextTimestamp,
+  randomValues: () => fillBytes(8, 0x66),
+  webVitalPathTemplate: "/settings"
+});
 
-if (logbrew.client.pendingEvents() !== 7) {
-  throw new Error(`expected 7 captured events, got ${logbrew.client.pendingEvents()}`);
+if (logbrew.client.pendingEvents() !== 8) {
+  throw new Error(`expected 8 captured events, got ${logbrew.client.pendingEvents()}`);
 }
 
 logbrew.client.log("evt_browser_pagehide_001", nextTimestamp(), {
@@ -177,6 +184,19 @@ if (documentSpan.attributes.traceId !== traceContext.traceId || documentSpan.att
 if (documentSpan.attributes.metadata.firstByteMs !== 120 || documentSpan.attributes.metadata.loadEventMs !== 384.123) {
   throw new Error(`expected document timing phase metadata, got ${payload}`);
 }
+const webVitalSpan = parsed.events.find((event) => event.type === "span" && event.attributes.metadata?.source === "browser.web_vital");
+if (webVitalSpan?.attributes.name !== "browser.web_vital LCP /settings") {
+  throw new Error(`expected Web Vital span, got ${payload}`);
+}
+if (webVitalSpan.attributes.traceId !== traceContext.traceId || webVitalSpan.attributes.parentSpanId !== traceContext.spanId) {
+  throw new Error(`expected Web Vital child span trace correlation, got ${payload}`);
+}
+if (webVitalSpan.attributes.metadata.metricName !== "LCP" || webVitalSpan.attributes.metadata.metricValue !== 2480.456) {
+  throw new Error(`expected Web Vital metric metadata, got ${payload}`);
+}
+if (payload.includes("hero.jpg") || payload.includes("button.checkout")) {
+  throw new Error(`Web Vital metadata leaked attribution details: ${payload}`);
+}
 const visibilityPayload = JSON.parse(transport.sentBodies[1]);
 if (visibilityPayload.events[0].id !== "evt_browser_hidden_001") {
   throw new Error(`expected hidden visibility flush, got ${transport.sentBodies[1]}`);
@@ -233,7 +253,8 @@ console.error(JSON.stringify({
   pagehideFlushEvents: parsed.events.length,
   propagatedTraceparent: firstTraceparent,
   syncError: parsed.events[1].attributes.title,
-  unhandledRejection: parsed.events[2].attributes.title
+  unhandledRejection: parsed.events[2].attributes.title,
+  webVitalSpan: webVitalSpan.attributes.name
 }));
 
 function nextTimestamp() {
@@ -280,6 +301,27 @@ function createNavigationTimingEntry() {
     transferSize: 4096,
     type: "navigate",
     workerStart: 5
+  };
+}
+
+function createWebVitalMetric() {
+  return {
+    attribution: {
+      element: "img.hero",
+      elementRenderDelay: 40,
+      interactionTarget: "button.checkout",
+      loadState: "dom-interactive",
+      resourceLoadDelay: 25,
+      resourceLoadDuration: 175.125,
+      timeToFirstByte: 121.5,
+      url: "https://cdn.example.test/assets/hero.jpg?asset=masked"
+    },
+    delta: 120.25,
+    id: "v4-123",
+    name: "LCP",
+    navigationType: "navigate",
+    rating: "needs-improvement",
+    value: 2480.456
   };
 }
 

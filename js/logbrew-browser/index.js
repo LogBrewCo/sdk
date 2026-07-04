@@ -31,6 +31,11 @@ import {
   shouldPropagateTraceparent
 } from "./trace-context.js";
 import {
+  captureBrowserWebVital,
+  createBrowserWebVitalEvent,
+  installLogBrewBrowserWebVitalsInstrumentation
+} from "./web-vitals.js";
+import {
   captureBrowserXhrSpan,
   createBrowserXhrSpanEvent,
   installLogBrewBrowserXhrInstrumentation
@@ -41,10 +46,12 @@ export {
   captureBrowserFetchSpan,
   captureBrowserNavigationTiming,
   captureBrowserResourceTiming,
+  captureBrowserWebVital,
   captureBrowserXhrSpan,
   createBrowserFetchSpanEvent,
   createBrowserNavigationTimingEvent,
   createBrowserResourceTimingEvent,
+  createBrowserWebVitalEvent,
   createBrowserXhrSpanEvent,
   createBrowserTraceContext,
   createBrowserTraceparent,
@@ -53,6 +60,7 @@ export {
   installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserNavigationTimingInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
+  installLogBrewBrowserWebVitalsInstrumentation,
   installLogBrewBrowserXhrInstrumentation,
   shouldPropagateTraceparent
 };

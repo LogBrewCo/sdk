@@ -55,6 +55,8 @@ grep -q '^package/resource-timing.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/resource-timing.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/trace-context.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/trace-context.cjs$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/web-vitals.js$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/web-vitals.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/xhr-spans.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/xhr-spans.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/browser-tarball.txt"
@@ -81,6 +83,9 @@ grep -q 'PerformanceObserver' "$tmp_dir/browser-readme.md"
 grep -q 'captureBrowserNavigationTiming' "$tmp_dir/browser-readme.md"
 grep -q 'installLogBrewBrowserNavigationTimingInstrumentation' "$tmp_dir/browser-readme.md"
 grep -q 'PerformanceNavigationTiming' "$tmp_dir/browser-readme.md"
+grep -q 'captureBrowserWebVital' "$tmp_dir/browser-readme.md"
+grep -q 'installLogBrewBrowserWebVitalsInstrumentation' "$tmp_dir/browser-readme.md"
+grep -q 'web-vitals' "$tmp_dir/browser-readme.md"
 grep -q 'createBeaconTransport' "$tmp_dir/browser-readme.md"
 grep -q 'createPersistentBrowserTransport' "$tmp_dir/browser-readme.md"
 grep -q 'persistOffline' "$tmp_dir/browser-readme.md"
@@ -144,6 +149,7 @@ import {
   createLogBrewBrowserFetch,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
+  captureBrowserWebVital,
   createBrowserNavigationTimingEvent,
   createBrowserTraceContext,
   createBrowserXhrSpanEvent,
@@ -157,6 +163,7 @@ import {
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserNavigationTimingInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
+  installLogBrewBrowserWebVitalsInstrumentation,
   installLogBrewBrowserXhrInstrumentation,
   shouldPropagateTraceparent
 } from "@logbrew/browser";
@@ -880,6 +887,88 @@ if (documentTimingSpans[0].attributes.metadata.firstByteMs !== 120 || documentTi
   throw new Error(`expected document timing phase metadata, got ${documentTimingBody}`);
 }
 
+const webVitalWindow = new Window({
+  url: "https://app.example.test/checkout/42?email=dev@example.test#pay"
+});
+const webVitalTraceContext = createBrowserTraceContext({
+  spanId: "00f067aa0ba902b7",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+});
+const webVitalContext = installLogBrewBrowser({
+  browserWindow: webVitalWindow,
+  capturePageViews: false,
+  clientKey: "LOGBREW_BROWSER_KEY",
+  flushOnCapture: false,
+  traceContext: webVitalTraceContext,
+  transport: RecordingTransport.alwaysAccept()
+});
+await captureBrowserWebVital(createWebVitalMetric(), webVitalContext, {
+  flushOnCapture: false,
+  now: () => "2026-06-02T10:00:15Z",
+  randomValues: () => fillBytes(8, 0x66),
+  webVitalPathTemplate: "/checkout/:id"
+});
+const webVitalCallbacks = {};
+const webVitalUnregistered = [];
+const webVitalInstrumentation = installLogBrewBrowserWebVitalsInstrumentation(webVitalContext, {
+  flushOnCapture: false,
+  metricNames: ["CLS"],
+  now: () => "2026-06-02T10:00:16Z",
+  randomValues: () => fillBytes(8, 0x77),
+  webVitalPathTemplate: "/checkout/:id",
+  webVitals: {
+    onCLS(callback) {
+      webVitalCallbacks.CLS = callback;
+      return () => webVitalUnregistered.push("CLS");
+    }
+  }
+});
+webVitalCallbacks.CLS({
+  attribution: {
+    largestShiftTarget: "main form",
+    loadState: "complete"
+  },
+  delta: 0.02,
+  id: "v4-cls",
+  name: "CLS",
+  navigationType: "navigate",
+  rating: "poor",
+  value: 0.12345
+});
+webVitalInstrumentation.uninstall();
+webVitalCallbacks.CLS({
+  id: "after-uninstall",
+  name: "CLS",
+  value: 0.3
+});
+const webVitalPayload = JSON.parse(webVitalContext.previewJson());
+const webVitalBody = JSON.stringify(webVitalPayload);
+const webVitalSpans = webVitalPayload.events.filter((event) => event.type === "span");
+if (webVitalSpans.length !== 2) {
+  throw new Error(`expected direct and installed Web Vital spans, got ${webVitalBody}`);
+}
+if (webVitalSpans[0].attributes.name !== "browser.web_vital LCP /checkout/:id") {
+  throw new Error(`unexpected Web Vital LCP span name: ${webVitalBody}`);
+}
+if (webVitalSpans[0].attributes.traceId !== webVitalTraceContext.traceId || webVitalSpans[0].attributes.parentSpanId !== webVitalTraceContext.spanId) {
+  throw new Error(`expected Web Vital child span correlation, got ${webVitalBody}`);
+}
+if (webVitalSpans[0].attributes.metadata.metricValue !== 2480.456 || webVitalSpans[0].attributes.metadata.timeToFirstByteMs !== 121.5) {
+  throw new Error(`expected Web Vital metric metadata, got ${webVitalBody}`);
+}
+if (webVitalSpans[1].attributes.name !== "browser.web_vital CLS /checkout/:id") {
+  throw new Error(`unexpected Web Vital CLS span name: ${webVitalBody}`);
+}
+if (webVitalSpans[1].attributes.durationMs !== undefined || webVitalSpans[1].attributes.metadata.metricUnit !== "score") {
+  throw new Error(`expected unitless CLS metadata, got ${webVitalBody}`);
+}
+if (webVitalUnregistered.length !== 1 || webVitalUnregistered[0] !== "CLS") {
+  throw new Error("Web Vital instrumentation should call app-owned unregister callbacks");
+}
+if (webVitalBody.includes("cdn.example.test") || webVitalBody.includes("email=dev@example.test") || webVitalBody.includes("hero.jpg") || webVitalBody.includes("main form") || webVitalBody.includes("after-uninstall")) {
+  throw new Error(`Web Vital metadata leaked private attribution details: ${webVitalBody}`);
+}
+
 const navigationWindow = new Window({
   url: "https://app.example.test/start?sample=1#hash"
 });
@@ -1100,6 +1189,27 @@ function createNavigationTimingEntry(overrides = {}) {
     workerStart: 5,
     ...overrides,
     serverTiming: [{ name: "sensitive", duration: 123 }]
+  };
+}
+
+function createWebVitalMetric() {
+  return {
+    attribution: {
+      element: "img.hero",
+      elementRenderDelay: 40,
+      interactionTarget: "button.checkout",
+      loadState: "dom-interactive",
+      resourceLoadDelay: 25,
+      resourceLoadDuration: 175.125,
+      timeToFirstByte: 121.5,
+      url: "https://cdn.example.test/assets/hero.jpg?asset=masked"
+    },
+    delta: 120.25,
+    id: "v4-123",
+    name: "LCP",
+    navigationType: "navigate",
+    rating: "needs-improvement",
+    value: 2480.456
   };
 }
 
@@ -1545,6 +1655,12 @@ if (typeof browser.captureBrowserNavigationTiming !== "function" || typeof brows
 if (typeof browser.installLogBrewBrowserNavigationTimingInstrumentation !== "function") {
   throw new Error("missing CommonJS browser navigation timing instrumentation helper");
 }
+if (typeof browser.captureBrowserWebVital !== "function" || typeof browser.createBrowserWebVitalEvent !== "function") {
+  throw new Error("missing CommonJS browser Web Vital helpers");
+}
+if (typeof browser.installLogBrewBrowserWebVitalsInstrumentation !== "function") {
+  throw new Error("missing CommonJS browser Web Vitals instrumentation helper");
+}
 if (typeof browser.createLogBrewBrowserFetch !== "function" || typeof browser.captureBrowserFetchSpan !== "function") {
   throw new Error("missing CommonJS browser fetch span helpers");
 }
@@ -1591,9 +1707,10 @@ grep -q '"ok":true' "$tmp_dir/example-readme.stderr.json"
 grep -q '"path":"/dashboard"' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/browser/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":8' "$tmp_dir/example-default.stderr.json"
+grep -q '"pagehideFlushEvents":9' "$tmp_dir/example-default.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/example-default.stderr.json"
+grep -q '"webVitalSpan":"browser.web_vital LCP /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/browser/examples run list > "$tmp_dir/npm-helper-list.txt"
 grep -q 'readme-example -> node node_modules/@logbrew/browser/examples/index.mjs readme-example' "$tmp_dir/npm-helper-list.txt"
@@ -1601,9 +1718,10 @@ npm --prefix node_modules/@logbrew/browser/examples run help > "$tmp_dir/npm-hel
 grep -q 'Default example: real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/browser/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":8' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"pagehideFlushEvents":9' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"webVitalSpan":"browser.web_vital LCP /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/npm-helper-smoke.stderr.json"
 
 echo "browser real-user smoke passed with happy-dom@$(node -p 'require("happy-dom/package.json").version')"

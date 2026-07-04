@@ -33,6 +33,11 @@ const {
   shouldPropagateTraceparent
 } = require("./trace-context.cjs");
 const {
+  captureBrowserWebVital,
+  createBrowserWebVitalEvent,
+  installLogBrewBrowserWebVitalsInstrumentation
+} = require("./web-vitals.cjs");
+const {
   captureBrowserXhrSpan,
   createBrowserXhrSpanEvent,
   installLogBrewBrowserXhrInstrumentation
@@ -933,6 +938,7 @@ module.exports = {
   captureBrowserNetwork,
   captureBrowserNavigationTiming,
   captureBrowserResourceTiming,
+  captureBrowserWebVital,
   captureBrowserXhrSpan,
   capturePageView,
   captureUnhandledRejection,
@@ -943,6 +949,7 @@ module.exports = {
   createBrowserFetchSpanEvent,
   createBrowserNavigationTimingEvent,
   createBrowserResourceTimingEvent,
+  createBrowserWebVitalEvent,
   createBrowserXhrSpanEvent,
   createBeaconTransport,
   createFetchTransport,
@@ -961,6 +968,7 @@ module.exports = {
     captureBrowserNetwork,
     captureBrowserNavigationTiming,
     captureBrowserResourceTiming,
+    captureBrowserWebVital,
     captureBrowserXhrSpan,
     capturePageView,
     captureUnhandledRejection,
@@ -971,6 +979,7 @@ module.exports = {
     createBrowserFetchSpanEvent,
     createBrowserNavigationTimingEvent,
     createBrowserResourceTimingEvent,
+    createBrowserWebVitalEvent,
     createBrowserXhrSpanEvent,
     createBeaconTransport,
     createFetchTransport,
@@ -986,6 +995,7 @@ module.exports = {
     installLogBrewBrowserFetchInstrumentation,
     installLogBrewBrowserNavigationTimingInstrumentation,
     installLogBrewBrowserResourceTimingInstrumentation,
+    installLogBrewBrowserWebVitalsInstrumentation,
     installLogBrewBrowserXhrInstrumentation,
     installLogBrewBrowser,
     shouldPropagateTraceparent
@@ -994,6 +1004,7 @@ module.exports = {
   installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserNavigationTimingInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
+  installLogBrewBrowserWebVitalsInstrumentation,
   installLogBrewBrowserXhrInstrumentation,
   installLogBrewBrowser,
   shouldPropagateTraceparent

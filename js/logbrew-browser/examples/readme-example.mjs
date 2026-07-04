@@ -2,6 +2,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserNetwork,
+  captureBrowserWebVital,
   createBrowserTraceContext,
   installLogBrewBrowser
 } from "@logbrew/browser";
@@ -56,6 +57,15 @@ await captureBrowserNetwork({
   }
 }, logbrew, {
   flushOnCapture: false
+});
+
+await captureBrowserWebVital({
+  name: "LCP",
+  rating: "needs-improvement",
+  value: 2480.456
+}, logbrew, {
+  flushOnCapture: false,
+  webVitalPathTemplate: "/dashboard"
 });
 
 const payload = logbrew.previewJson();

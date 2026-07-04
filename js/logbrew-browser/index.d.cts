@@ -280,12 +280,36 @@ export type BrowserNavigationPathTemplate =
   | string
   | ((context: BrowserNavigationTimingTemplateContext) => string | undefined);
 
+export type BrowserWebVitalInput = {
+  attribution?: Record<string, unknown>;
+  delta?: number;
+  entries?: unknown[];
+  id?: string;
+  name: string;
+  navigationType?: string;
+  rating?: string;
+  url?: string;
+  value: number;
+};
+
+export type BrowserWebVitalTemplateContext = {
+  metric: BrowserWebVitalInput;
+  metricName: string;
+  name: string;
+  path: string;
+};
+
+export type BrowserWebVitalPathTemplate =
+  | string
+  | ((context: BrowserWebVitalTemplateContext) => string | undefined);
+
 export type BrowserMetadataKind =
   | "page_view"
   | "action"
   | "network"
   | "document"
   | "resource"
+  | "web_vital"
   | "fetch"
   | "xhr"
   | "error"
@@ -404,6 +428,27 @@ export type BrowserNavigationTimingInstrumentation = {
   uninstall(): void;
 };
 
+export type BrowserWebVitalCallback = (metric: BrowserWebVitalInput) => void;
+
+export type BrowserWebVitalsModule = {
+  onCLS?: (callback: BrowserWebVitalCallback) => void | (() => void);
+  onFCP?: (callback: BrowserWebVitalCallback) => void | (() => void);
+  onFID?: (callback: BrowserWebVitalCallback) => void | (() => void);
+  onINP?: (callback: BrowserWebVitalCallback) => void | (() => void);
+  onLCP?: (callback: BrowserWebVitalCallback) => void | (() => void);
+  onTTFB?: (callback: BrowserWebVitalCallback) => void | (() => void);
+};
+
+export type BrowserWebVitalsOptions = LogBrewBrowserOptions & BrowserWebVitalsModule & {
+  metricNames?: string[];
+  webVitalPathTemplate?: BrowserWebVitalPathTemplate;
+  webVitals?: BrowserWebVitalsModule;
+};
+
+export type BrowserWebVitalsInstrumentation = {
+  uninstall(): void;
+};
+
 export type BrowserFetchOptions = LogBrewBrowserOptions & {
   captureTargets?: TracePropagationTarget[];
   fetchImpl?: typeof fetch;
@@ -485,6 +530,11 @@ export declare function installLogBrewBrowserNavigationTimingInstrumentation(
   options?: BrowserNavigationTimingOptions
 ): BrowserNavigationTimingInstrumentation;
 
+export declare function installLogBrewBrowserWebVitalsInstrumentation(
+  context: LogBrewBrowserContext,
+  options?: BrowserWebVitalsOptions
+): BrowserWebVitalsInstrumentation;
+
 export declare function installLogBrewBrowserFetchInstrumentation(
   context: LogBrewBrowserContext,
   options?: BrowserFetchOptions
@@ -544,6 +594,12 @@ export declare function captureBrowserNavigationTiming(
   options?: BrowserNavigationTimingOptions
 ): Promise<TransportResponse | undefined>;
 
+export declare function captureBrowserWebVital(
+  metric: BrowserWebVitalInput,
+  context: LogBrewBrowserContext,
+  options?: BrowserWebVitalsOptions
+): Promise<TransportResponse | undefined>;
+
 export declare function captureBrowserFetchSpan(
   request: BrowserFetchInput,
   context: LogBrewBrowserContext,
@@ -585,6 +641,12 @@ export declare function createBrowserNavigationTimingEvent(
   options?: BrowserNavigationTimingOptions
 ): LogBrewBrowserEvent<SpanAttributes>;
 
+export declare function createBrowserWebVitalEvent(
+  metric: BrowserWebVitalInput,
+  browserWindow?: Window,
+  options?: BrowserWebVitalsOptions
+): LogBrewBrowserEvent<SpanAttributes>;
+
 export declare function createBrowserFetchSpanEvent(
   request: BrowserFetchInput,
   browserWindow?: Window,
@@ -616,6 +678,7 @@ declare const defaultExport: {
   captureBrowserNetwork: typeof captureBrowserNetwork;
   captureBrowserNavigationTiming: typeof captureBrowserNavigationTiming;
   captureBrowserResourceTiming: typeof captureBrowserResourceTiming;
+  captureBrowserWebVital: typeof captureBrowserWebVital;
   captureBrowserXhrSpan: typeof captureBrowserXhrSpan;
   capturePageView: typeof capturePageView;
   captureUnhandledRejection: typeof captureUnhandledRejection;
@@ -626,6 +689,7 @@ declare const defaultExport: {
   createBrowserFetchSpanEvent: typeof createBrowserFetchSpanEvent;
   createBrowserNavigationTimingEvent: typeof createBrowserNavigationTimingEvent;
   createBrowserResourceTimingEvent: typeof createBrowserResourceTimingEvent;
+  createBrowserWebVitalEvent: typeof createBrowserWebVitalEvent;
   createBrowserXhrSpanEvent: typeof createBrowserXhrSpanEvent;
   createFetchTransport: typeof createFetchTransport;
   createLogBrewBrowserFetch: typeof createLogBrewBrowserFetch;
@@ -640,6 +704,7 @@ declare const defaultExport: {
   installLogBrewBrowserNavigationInstrumentation: typeof installLogBrewBrowserNavigationInstrumentation;
   installLogBrewBrowserNavigationTimingInstrumentation: typeof installLogBrewBrowserNavigationTimingInstrumentation;
   installLogBrewBrowserResourceTimingInstrumentation: typeof installLogBrewBrowserResourceTimingInstrumentation;
+  installLogBrewBrowserWebVitalsInstrumentation: typeof installLogBrewBrowserWebVitalsInstrumentation;
   installLogBrewBrowserXhrInstrumentation: typeof installLogBrewBrowserXhrInstrumentation;
   installLogBrewBrowser: typeof installLogBrewBrowser;
   shouldPropagateTraceparent: typeof shouldPropagateTraceparent;

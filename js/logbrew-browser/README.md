@@ -179,6 +179,53 @@ documentLoad.uninstall();
 
 Document load timing spans keep the active trace ID, create a child span ID, record status, transfer sizes, first byte, DOM milestones, load-event timing, and bounded phase durations. They store only path/template metadata; full URLs, hosts, query strings, hash fragments, server timing records, headers, request or response bodies, cookies, baggage, and tracestate are not captured.
 
+## Web Vitals Spans
+
+Use `captureBrowserWebVital()` when your app already receives Web Vital metrics, such as from the optional `web-vitals` package. LogBrew turns each metric into a `browser.web_vital <name> <path>` child span under the active page or route trace, so LCP, CLS, INP, FCP, and TTFB can be read next to page-load, route, fetch, XHR, resource, action, log, and error events.
+
+```js
+import {
+  captureBrowserWebVital,
+  installLogBrewBrowser
+} from "@logbrew/browser";
+import { onLCP } from "web-vitals";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+
+onLCP((metric) => {
+  void captureBrowserWebVital(metric, logbrew, {
+    webVitalPathTemplate: "/checkout"
+  });
+});
+```
+
+If your app wants LogBrew to register multiple app-owned Web Vital callbacks at once, pass the imported callbacks through `installLogBrewBrowserWebVitalsInstrumentation()`.
+
+```js
+import {
+  installLogBrewBrowser,
+  installLogBrewBrowserWebVitalsInstrumentation
+} from "@logbrew/browser";
+import * as webVitals from "web-vitals";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+
+const webVitalSpans = installLogBrewBrowserWebVitalsInstrumentation(logbrew, {
+  metricNames: ["LCP", "CLS", "INP", "FCP", "TTFB"],
+  webVitalPathTemplate: "/checkout",
+  webVitals
+});
+
+// Later, if your app owns teardown.
+webVitalSpans.uninstall();
+```
+
+Web Vital spans keep the active trace ID, create a child span ID, record metric name, value, unit, rating, navigation type, delta, and safe timing subparts such as time to first byte or resource load duration when the metric provides them. They do not include DOM selectors, interaction targets, raw attribution entries, full URLs, hosts, query strings, hash fragments, headers, request or response bodies, cookies, user text, baggage, or tracestate.
+
 ## Fetch Spans
 
 Use `createLogBrewBrowserFetch()` when browser API calls should become trace spans and optionally propagate W3C `traceparent` to your own backend. This wraps an app-owned `fetch` function and is separate from the lower-level `createTraceparentFetch()` header helper.
