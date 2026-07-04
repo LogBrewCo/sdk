@@ -1134,6 +1134,8 @@ test("OpenTelemetry ReadableSpan helper creates privacy-bounded LogBrew span att
       "otel.dropped_attributes_count": 1,
       "otel.dropped_events_count": 2,
       "otel.dropped_links_count": 3,
+      "otel.exception_event_count": 1,
+      "otel.exception_types": "TypeError",
       "http.request.method": "GET",
       "http.response.status_code": 200,
       "http.route": "/orders/:id"
@@ -1276,6 +1278,8 @@ test("OpenTelemetry span processor can emit a trace summary on flush", async () 
       "http.route": "/orders/:id",
       "otel.trace.span_count": 2,
       "otel.trace.error_span_count": 1,
+      "otel.trace.exception_event_count": 2,
+      "otel.trace.exception_types": "TypeError",
       "otel.trace.root_span_id": rootSpanId,
       "otel.trace.root_name": "GET /orders/:id",
       "otel.trace.root_kind": "server",
@@ -1287,6 +1291,79 @@ test("OpenTelemetry span processor can emit a trace summary on flush", async () 
   assert.equal(serializedSummary.includes("api_key=redacted"), false);
   assert.equal(serializedSummary.includes("db.statement"), false);
   assert.equal(serializedSummary.includes("url.full"), false);
+});
+
+test("OpenTelemetry trace summary records escaped exception event summaries", async () => {
+  const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+  const client = sampleClient();
+  const transport = RecordingTransport.alwaysAccept();
+  const processor = createLogBrewOpenTelemetrySpanProcessor({
+    client,
+    eventIdPrefix: "otel_exception",
+    includeTraceSummary: true,
+    transport
+  });
+
+  processor.onEnd(sampleOpenTelemetryReadableSpan({
+    name: "POST /checkout/:id",
+    kind: 1,
+    spanContext: () => ({
+      traceId,
+      spanId: "aaaaaaaaaaaaaaaa",
+      traceFlags: 1
+    }),
+    parentSpanContext: undefined,
+    parentSpanId: undefined,
+    status: { code: 0 },
+    events: [
+      ...Array.from({ length: 9 }, (_, index) => ({
+        name: `cache.lookup.${index}`,
+        time: [1780000000, 100000000 + index],
+        attributes: {
+          "cache.hit": index % 2 === 0
+        }
+      })),
+      {
+        name: "exception",
+        time: [1780000000, 170000000],
+        attributes: {
+          "exception.escaped": true,
+          "exception.message": "dynamic-user-marker checkout payload",
+          "exception.stacktrace": "opaque stack marker",
+          "exception.type": "CheckoutError"
+        }
+      },
+      {
+        name: "exception",
+        time: [1780000000, 180000000],
+        attributes: {
+          "exception.escaped": false,
+          "exception.message": "ignored nested marker",
+          "exception.type": "RetryError"
+        }
+      }
+    ]
+  }));
+
+  await processor.forceFlush();
+
+  const payload = JSON.parse(transport.lastBody());
+  const span = payload.events.find((event) => event.id === "otel_exception_1");
+  const summary = payload.events.find((event) => event.id === "otel_exception_trace_1");
+  assert.ok(span);
+  assert.ok(summary);
+  assert.equal(span.attributes.status, "error");
+  assert.equal(span.attributes.metadata["otel.exception_event_count"], 2);
+  assert.equal(span.attributes.metadata["otel.exception_escaped_count"], 1);
+  assert.equal(span.attributes.metadata["otel.exception_types"], "CheckoutError,RetryError");
+  assert.equal(summary.attributes.status, "error");
+  assert.equal(summary.attributes.metadata["otel.trace.exception_event_count"], 2);
+  assert.equal(summary.attributes.metadata["otel.trace.exception_escaped_count"], 1);
+  assert.equal(summary.attributes.metadata["otel.trace.exception_types"], "CheckoutError,RetryError");
+  const serializedPayload = JSON.stringify(payload);
+  assert.equal(serializedPayload.includes("dynamic-user-marker"), false);
+  assert.equal(serializedPayload.includes("opaque stack marker"), false);
+  assert.equal(serializedPayload.includes("ignored nested marker"), false);
 });
 
 test("OpenTelemetry span processor coalesces concurrent forceFlush calls", async () => {

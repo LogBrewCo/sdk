@@ -55,6 +55,7 @@ const OTEL_SPAN_KIND_NAMES = new Map([
   [4, "consumer"]
 ]);
 const OTEL_STATUS_CODE_ERROR = 2;
+const OTEL_STATUS_CODE_OK = 1;
 const OTEL_EXPORT_RESULT_SUCCESS = 0;
 const OTEL_EXPORT_RESULT_FAILED = 1;
 const ZERO_SPAN_ID = "0000000000000000";
@@ -364,18 +365,24 @@ function buildOpenTelemetryHelpers({
     const links = options.includeSpanLinks
       ? openTelemetryReadableSpanLinks(span.links, options)
       : undefined;
+    const exceptionSummary = openTelemetryExceptionEventSummary(span.events);
+    const exceptionMetadata = openTelemetryExceptionMetadata(exceptionSummary);
     const durationMs = durationMsFromOpenTelemetryReadableSpan(span);
+    const resolvedMetadata = {
+      ...metadata,
+      ...exceptionMetadata
+    };
 
     return {
       name: openTelemetrySpanName(span),
       traceId: context.traceId,
       spanId: context.spanId,
       ...(context.parentSpanId !== undefined ? { parentSpanId: context.parentSpanId } : {}),
-      status: openTelemetrySpanStatus(span.status),
+      status: openTelemetrySpanStatus(span.status, exceptionSummary),
       ...(durationMs !== undefined ? { durationMs } : {}),
       ...(events !== undefined ? { events } : {}),
       ...(links !== undefined ? { links } : {}),
-      ...(Object.keys(metadata).length > 0 ? { metadata } : {})
+      ...(Object.keys(resolvedMetadata).length > 0 ? { metadata: resolvedMetadata } : {})
     };
   }
 
@@ -552,8 +559,14 @@ function buildOpenTelemetryHelpers({
       : "opentelemetry.span";
   }
 
-  function openTelemetrySpanStatus(status) {
+  function openTelemetrySpanStatus(status, exceptionSummary = null) {
     if (status?.code === OTEL_STATUS_CODE_ERROR || status?.code === "ERROR") {
+      return "error";
+    }
+    if (status?.code === OTEL_STATUS_CODE_OK || status?.code === "OK") {
+      return "ok";
+    }
+    if (exceptionSummary?.escapedCount > 0) {
       return "error";
     }
     return "ok";
@@ -643,6 +656,44 @@ function buildOpenTelemetryHelpers({
     return summaries.length > 0 ? summaries : undefined;
   }
 
+  function openTelemetryExceptionEventSummary(events) {
+    if (!Array.isArray(events) || events.length === 0) {
+      return null;
+    }
+    const types = [];
+    let count = 0;
+    let escapedCount = 0;
+    for (const event of events) {
+      if (!event || Array.isArray(event) || typeof event !== "object" || event.name !== "exception") {
+        continue;
+      }
+      count += 1;
+      if (event.attributes?.["exception.escaped"] === true) {
+        escapedCount += 1;
+      }
+      const type = safeOpenTelemetryExceptionType(event.attributes?.["exception.type"]);
+      if (type && !types.includes(type) && types.length < maxSpanEvents) {
+        types.push(type);
+      }
+    }
+    return count > 0 ? { count, escapedCount, types } : null;
+  }
+
+  function openTelemetryExceptionMetadata(summary) {
+    if (!summary || summary.count === 0) {
+      return {};
+    }
+    return {
+      "otel.exception_event_count": summary.count,
+      ...(summary.escapedCount > 0 ? { "otel.exception_escaped_count": summary.escapedCount } : {}),
+      ...(summary.types.length > 0 ? { "otel.exception_types": summary.types.join(",") } : {})
+    };
+  }
+
+  function safeOpenTelemetryExceptionType(value) {
+    return typeof value === "string" && /^[A-Za-z_$][A-Za-z0-9_$:.]{0,127}$/u.test(value) ? value : undefined;
+  }
+
   function recordOpenTelemetryTraceSummary(state, attributes, span) {
     if (!(state.traceSummaries instanceof Map)) {
       return;
@@ -663,6 +714,7 @@ function buildOpenTelemetryHelpers({
     if (attributes.status === "error") {
       summary.errorSpanCount += 1;
     }
+    recordOpenTelemetryTraceSummaryExceptions(summary, attributes.metadata);
 
     const startMs = openTelemetryTimeMs(span.startTime);
     const durationMs = attributes.durationMs;
@@ -689,6 +741,28 @@ function buildOpenTelemetryHelpers({
         summary.rootDurationMs = durationMs;
       }
       copyOpenTelemetryTraceSummaryMetadata(summary, attributes.metadata, { overwrite: true });
+    }
+  }
+
+  function recordOpenTelemetryTraceSummaryExceptions(summary, metadata) {
+    if (!metadata || Array.isArray(metadata) || typeof metadata !== "object") {
+      return;
+    }
+    if (Number.isSafeInteger(metadata["otel.exception_event_count"]) && metadata["otel.exception_event_count"] > 0) {
+      summary.exceptionEventCount = (summary.exceptionEventCount ?? 0) + metadata["otel.exception_event_count"];
+    }
+    if (Number.isSafeInteger(metadata["otel.exception_escaped_count"]) && metadata["otel.exception_escaped_count"] > 0) {
+      summary.exceptionEscapedCount = (summary.exceptionEscapedCount ?? 0) + metadata["otel.exception_escaped_count"];
+    }
+    if (typeof metadata["otel.exception_types"] === "string" && metadata["otel.exception_types"].trim() !== "") {
+      const types = summary.exceptionTypes ?? new Set();
+      for (const type of metadata["otel.exception_types"].split(",")) {
+        const safeType = safeOpenTelemetryExceptionType(type);
+        if (safeType) {
+          types.add(safeType);
+        }
+      }
+      summary.exceptionTypes = types;
     }
   }
 
@@ -733,6 +807,9 @@ function buildOpenTelemetryHelpers({
       ...summary.metadata,
       "otel.trace.span_count": summary.spanCount,
       ...(summary.errorSpanCount > 0 ? { "otel.trace.error_span_count": summary.errorSpanCount } : {}),
+      ...(summary.exceptionEventCount > 0 ? { "otel.trace.exception_event_count": summary.exceptionEventCount } : {}),
+      ...(summary.exceptionEscapedCount > 0 ? { "otel.trace.exception_escaped_count": summary.exceptionEscapedCount } : {}),
+      ...(summary.exceptionTypes?.size > 0 ? { "otel.trace.exception_types": Array.from(summary.exceptionTypes).join(",") } : {}),
       ...(summary.rootSpanId ? { "otel.trace.root_span_id": summary.rootSpanId } : {}),
       ...(summary.rootName ? { "otel.trace.root_name": summary.rootName } : {}),
       ...(summary.rootKind ? { "otel.trace.root_kind": summary.rootKind } : {}),

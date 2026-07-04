@@ -311,6 +311,7 @@ try {
     ]
   });
   processorSpan.addEvent("exception", {
+    "exception.escaped": true,
     "exception.message": "private message",
     "exception.stacktrace": "private stack",
     "exception.type": "TypeError"
@@ -405,9 +406,21 @@ try {
     throw new Error("processor did not mark the OpenTelemetry source");
   }
   if (
+    processorEvent.attributes.status !== "error" ||
+    processorEvent.attributes.metadata["otel.exception_event_count"] !== 1 ||
+    processorEvent.attributes.metadata["otel.exception_escaped_count"] !== 1 ||
+    processorEvent.attributes.metadata["otel.exception_types"] !== "TypeError"
+  ) {
+    throw new Error("processor omitted safe OpenTelemetry exception summary metadata");
+  }
+  if (
     traceSummaryEvent.attributes.name !== "opentelemetry.trace:GET /orders/:id" ||
     traceSummaryEvent.attributes.traceId !== processorEvent.attributes.traceId ||
     traceSummaryEvent.attributes.metadata["otel.trace.span_count"] !== 1 ||
+    traceSummaryEvent.attributes.metadata["otel.trace.error_span_count"] !== 1 ||
+    traceSummaryEvent.attributes.metadata["otel.trace.exception_event_count"] !== 1 ||
+    traceSummaryEvent.attributes.metadata["otel.trace.exception_escaped_count"] !== 1 ||
+    traceSummaryEvent.attributes.metadata["otel.trace.exception_types"] !== "TypeError" ||
     traceSummaryEvent.attributes.metadata["otel.trace.root_span_id"] !== processorEvent.attributes.spanId ||
     traceSummaryEvent.attributes.metadata["otel.trace.root_name"] !== "GET /orders/:id"
   ) {
@@ -450,7 +463,14 @@ grep -q '"source": "opentelemetry.readable_span"' "$tmp_dir/processor-body.json"
 grep -q '"source": "opentelemetry.trace_summary"' "$tmp_dir/processor-body.json"
 grep -q '"http.route": "/orders/:id"' "$tmp_dir/processor-body.json"
 grep -q '"messaging.operation.name": "process"' "$tmp_dir/processor-body.json"
+grep -q '"otel.exception_event_count": 1' "$tmp_dir/processor-body.json"
+grep -q '"otel.exception_escaped_count": 1' "$tmp_dir/processor-body.json"
+grep -q '"otel.exception_types": "TypeError"' "$tmp_dir/processor-body.json"
 grep -q '"otel.trace.span_count": 1' "$tmp_dir/processor-body.json"
+grep -q '"otel.trace.error_span_count": 1' "$tmp_dir/processor-body.json"
+grep -q '"otel.trace.exception_event_count": 1' "$tmp_dir/processor-body.json"
+grep -q '"otel.trace.exception_escaped_count": 1' "$tmp_dir/processor-body.json"
+grep -q '"otel.trace.exception_types": "TypeError"' "$tmp_dir/processor-body.json"
 if grep -q 'api_key=redacted' "$tmp_dir/processor-body.json"; then
   echo "expected OpenTelemetry processor payload to omit unsafe API key attributes" >&2
   exit 1
