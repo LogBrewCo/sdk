@@ -151,6 +151,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserInteractionTiming,
+  captureBrowserInteractionToNextPaint,
   captureBrowserNavigationTiming,
   captureBrowserXhrSpan,
   createLogBrewBrowserFetch,
@@ -1004,6 +1005,13 @@ await captureBrowserInteractionTiming(createLongAnimationFrameEntry(), interacti
   now: () => "2026-06-02T10:00:17Z",
   randomValues: () => fillBytes(8, 0x89)
 });
+await captureBrowserInteractionToNextPaint(createInteractionToNextPaintEntries(), interactionContext, {
+  flushOnCapture: false,
+  interactionCount: 55,
+  interactionPathTemplate: "/products/:id",
+  now: () => "2026-06-02T10:00:17Z",
+  randomValues: () => fillBytes(8, 0x8a)
+});
 const fakeInteractionObserver = createFakePerformanceObserver();
 const interactionInstrumentation = installLogBrewBrowserInteractionTimingInstrumentation(interactionContext, {
   flushOnCapture: false,
@@ -1028,8 +1036,8 @@ if (fakeInteractionObserver.disconnectedCount() !== 2) {
 const interactionPayload = JSON.parse(interactionContext.previewJson());
 const interactionBody = JSON.stringify(interactionPayload);
 const interactionSpans = interactionPayload.events.filter((event) => event.type === "span");
-if (interactionSpans.length !== 4) {
-  throw new Error(`expected direct interaction, direct LoAF, observed interaction, and long-task spans, got ${interactionBody}`);
+if (interactionSpans.length !== 5) {
+  throw new Error(`expected direct interaction, direct LoAF, INP summary, observed interaction, and long-task spans, got ${interactionBody}`);
 }
 if (interactionSpans[0].attributes.name !== "browser.interaction click /products/:id") {
   throw new Error(`unexpected direct interaction span name: ${interactionBody}`);
@@ -1046,7 +1054,16 @@ if (interactionSpans[1].attributes.name !== "browser.long_animation_frame /produ
 if (interactionSpans[1].attributes.metadata.blockingDurationMs !== 45 || interactionSpans[1].attributes.metadata.scriptCount !== 2) {
   throw new Error(`expected long-animation-frame aggregate metadata, got ${interactionBody}`);
 }
-if (interactionSpans[3].attributes.name !== "browser.long_task /products/:id" || interactionSpans[3].attributes.metadata.taskName !== "self") {
+if (interactionSpans[2].attributes.name !== "browser.interaction_to_next_paint /products/:id") {
+  throw new Error(`expected interaction-to-next-paint span name, got ${interactionBody}`);
+}
+if (interactionSpans[2].attributes.traceId !== interactionTraceContext.traceId || interactionSpans[2].attributes.parentSpanId !== interactionTraceContext.spanId) {
+  throw new Error(`expected interaction-to-next-paint child span correlation, got ${interactionBody}`);
+}
+if (interactionSpans[2].attributes.metadata.candidateRank !== 2 || interactionSpans[2].attributes.metadata.interactionType !== "press") {
+  throw new Error(`expected interaction-to-next-paint ranking metadata, got ${interactionBody}`);
+}
+if (interactionSpans[4].attributes.name !== "browser.long_task /products/:id" || interactionSpans[4].attributes.metadata.taskName !== "self") {
   throw new Error(`expected long-task timing metadata, got ${interactionBody}`);
 }
 if (interactionBody.includes("button.checkout") || interactionBody.includes("cdn.example.test") || interactionBody.includes("iframe-private") || interactionBody.includes("renderCheckout") || interactionBody.includes("email=dev@example.test") || interactionBody.includes("#reviews")) {
@@ -1150,8 +1167,9 @@ console.error(JSON.stringify({
   fullAttempts: fullResponse.attempts,
   hiddenFlush: hiddenPayload.events[0].id,
   interactionSpan: interactionSpans[0].attributes.name,
+  inpSpan: interactionSpans[2].attributes.name,
   longAnimationFrameSpan: interactionSpans[1].attributes.name,
-  longTaskSpan: interactionSpans[3].attributes.name,
+  longTaskSpan: interactionSpans[4].attributes.name,
   networkRoute: networkPayload.events[0].attributes.metadata.routeTemplate,
   navigationPath: navigationSpan.attributes.metadata.path,
   navigationTraceparent,
@@ -1366,6 +1384,45 @@ function createLongAnimationFrameEntry() {
   };
 }
 
+function createInteractionToNextPaintEntries() {
+  return [
+    {
+      duration: 64,
+      entryType: "event",
+      interactionId: 1,
+      name: "click",
+      processingEnd: 230,
+      processingStart: 190,
+      startTime: 180,
+      target: {
+        selector: "button.checkout",
+        textContent: "Pay with private card"
+      }
+    },
+    {
+      duration: 180,
+      entryType: "event",
+      interactionId: 7,
+      name: "keydown",
+      processingEnd: 520,
+      processingStart: 450,
+      startTime: 430,
+      target: {
+        selector: "input.card-number"
+      }
+    },
+    {
+      duration: 320,
+      entryType: "first-input",
+      interactionId: 42,
+      name: "pointerdown",
+      processingEnd: 950,
+      processingStart: 860,
+      startTime: 820
+    }
+  ];
+}
+
 function createFakePerformanceObserver() {
   const callbacks = [];
   const observers = [];
@@ -1529,6 +1586,7 @@ grep -q '"documentTimingSpan":"browser.document /products/:id"' "$tmp_dir/browse
 grep -q '"fullAttempts":2' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"hiddenFlush":"evt_browser_hidden_001"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"interactionSpan":"browser.interaction click /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"inpSpan":"browser.interaction_to_next_paint /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"longAnimationFrameSpan":"browser.long_animation_frame /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"longTaskSpan":"browser.long_task /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"networkRoute":"/api/checkout"' "$tmp_dir/browser-smoke.stderr.json"
@@ -1549,6 +1607,7 @@ import {
   captureBrowserAction,
   captureBrowserFetchSpan,
   captureBrowserInteractionTiming,
+  captureBrowserInteractionToNextPaint,
   captureBrowserNavigationTiming,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
@@ -1557,6 +1616,7 @@ import {
   createBrowserActionEvent,
   createBrowserFetchSpanEvent,
   createBrowserInteractionTimingEvent,
+  createBrowserInteractionToNextPaintEvent,
   createBrowserNavigationTimingEvent,
   createBrowserNetworkEvent,
   createBrowserResourceTimingEvent,
@@ -1583,6 +1643,7 @@ import {
   type BrowserFetchInstrumentation,
   type BrowserInteractionTimingInput,
   type BrowserInteractionTimingInstrumentation,
+  type BrowserInteractionToNextPaintOptions,
   type BrowserMetadataKind,
   type BrowserPersistedReplay,
   type BrowserPersistentStorage,
@@ -1697,6 +1758,31 @@ const longAnimationFrameEntry: BrowserInteractionTimingInput = {
 const longAnimationFrameSpan = createBrowserInteractionTimingEvent(longAnimationFrameEntry, window, {
   interactionPathTemplate: "/checkout"
 });
+const inpEntries: BrowserInteractionTimingInput[] = [
+  {
+    duration: 180,
+    entryType: "event",
+    interactionId: 7,
+    name: "keydown",
+    processingEnd: 520,
+    processingStart: 450,
+    startTime: 430
+  },
+  {
+    duration: 320,
+    entryType: "first-input",
+    interactionId: 42,
+    name: "pointerdown",
+    processingEnd: 950,
+    processingStart: 860,
+    startTime: 820
+  }
+];
+const inpOptions: BrowserInteractionToNextPaintOptions = {
+  interactionCount: 55,
+  interactionPathTemplate: "/checkout"
+};
+const inpSpan = createBrowserInteractionToNextPaintEvent(inpEntries, window, inpOptions);
 const xhrEntry: BrowserXhrInput = {
   durationMs: 21,
   method: "POST",
@@ -1712,6 +1798,7 @@ client.span(page.id, page.timestamp, page.attributes);
 client.span(fetchSpan.id, fetchSpan.timestamp, fetchSpan.attributes);
 client.span(interactionSpan.id, interactionSpan.timestamp, interactionSpan.attributes);
 client.span(longAnimationFrameSpan.id, longAnimationFrameSpan.timestamp, longAnimationFrameSpan.attributes);
+client.span(inpSpan.id, inpSpan.timestamp, inpSpan.attributes);
 client.span(documentLoad.id, documentLoad.timestamp, documentLoad.attributes);
 client.span(resource.id, resource.timestamp, resource.attributes);
 client.span(xhrSpan.id, xhrSpan.timestamp, xhrSpan.attributes);
@@ -1726,6 +1813,7 @@ void captureBrowserFetchSpan(fetchEntry, context, {
 void captureBrowserInteractionTiming(interactionEntry, context, {
   interactionPathTemplate: "/checkout"
 });
+void captureBrowserInteractionToNextPaint(inpEntries, context, inpOptions);
 void captureBrowserNavigationTiming(navigationEntry, context, {
   navigationPathTemplate: "/checkout"
 });
@@ -1872,6 +1960,9 @@ if (typeof browser.installLogBrewBrowserWebVitalsInstrumentation !== "function")
 if (typeof browser.captureBrowserInteractionTiming !== "function" || typeof browser.createBrowserInteractionTimingEvent !== "function") {
   throw new Error("missing CommonJS browser interaction timing helpers");
 }
+if (typeof browser.captureBrowserInteractionToNextPaint !== "function" || typeof browser.createBrowserInteractionToNextPaintEvent !== "function") {
+  throw new Error("missing CommonJS browser interaction-to-next-paint helpers");
+}
 if (typeof browser.installLogBrewBrowserInteractionTimingInstrumentation !== "function") {
   throw new Error("missing CommonJS browser interaction timing instrumentation helper");
 }
@@ -1921,10 +2012,11 @@ grep -q '"ok":true' "$tmp_dir/example-readme.stderr.json"
 grep -q '"path":"/dashboard"' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/browser/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":12' "$tmp_dir/example-default.stderr.json"
+grep -q '"pagehideFlushEvents":13' "$tmp_dir/example-default.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/example-default.stderr.json"
 grep -q '"interactionSpan":"browser.interaction click /settings"' "$tmp_dir/example-default.stderr.json"
+grep -q '"inpSpan":"browser.interaction_to_next_paint /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"longAnimationFrameSpan":"browser.long_animation_frame /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"longTaskSpan":"browser.long_task /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"webVitalSpan":"browser.web_vital LCP /settings"' "$tmp_dir/example-default.stderr.json"
@@ -1935,10 +2027,11 @@ npm --prefix node_modules/@logbrew/browser/examples run help > "$tmp_dir/npm-hel
 grep -q 'Default example: real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/browser/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":12' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"pagehideFlushEvents":13' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"interactionSpan":"browser.interaction click /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"inpSpan":"browser.interaction_to_next_paint /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"longAnimationFrameSpan":"browser.long_animation_frame /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"longTaskSpan":"browser.long_task /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"webVitalSpan":"browser.web_vital LCP /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"

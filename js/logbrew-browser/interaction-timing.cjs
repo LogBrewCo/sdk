@@ -6,12 +6,24 @@ const {
 
 const DEFAULT_EVENT_DURATION_THRESHOLD_MS = 40;
 const DEFAULT_MAX_DURATION_MS = 60_000;
+const DEFAULT_MAX_RANKED_INTERACTIONS = 10;
 const DEFAULT_OBSERVED_ENTRY_TYPES = ["event", "longtask"];
 const DEFAULT_OBSERVED_ENTRY_TYPES_WITH_LONG_ANIMATION_FRAME = ["event", "long-animation-frame"];
 
 async function captureBrowserInteractionTiming(entry, context, options = {}) {
   assertBrowserContext(context, "captureBrowserInteractionTiming");
   const event = createBrowserInteractionTimingEvent(entry, context.browserWindow, optionsWithTraceContext(
+    options,
+    resolveTraceContext(context, options)
+  ));
+
+  context.client.span(event.id, event.timestamp, event.attributes);
+  return flushAfterCapture(context, options);
+}
+
+async function captureBrowserInteractionToNextPaint(entries, context, options = {}) {
+  assertBrowserContext(context, "captureBrowserInteractionToNextPaint");
+  const event = createBrowserInteractionToNextPaintEvent(entries, context.browserWindow, optionsWithTraceContext(
     options,
     resolveTraceContext(context, options)
   ));
@@ -72,6 +84,77 @@ function createInteractionTimingObserver(PerformanceObserverConstructor, entryTy
       }
     }
   });
+}
+
+function createBrowserInteractionToNextPaintEvent(entries, browserWindow = defaultWindow(), {
+  idFactory = defaultInteractionToNextPaintEventId,
+  includeDocumentTitle = false,
+  includeHash = false,
+  includeQueryString = false,
+  includeUserAgent = false,
+  interactionCount,
+  interactionPathTemplate,
+  maxDurationMs = DEFAULT_MAX_DURATION_MS,
+  maxRankedInteractions = DEFAULT_MAX_RANKED_INTERACTIONS,
+  metadata,
+  now = () => new Date().toISOString(),
+  randomValues,
+  sampled,
+  sanitizeMetadata = defaultSanitizeMetadata,
+  traceContext,
+  traceFlags
+} = {}) {
+  const path = browserPath(browserWindow, { includeHash, includeQueryString });
+  const details = interactionToNextPaintDetails(entries, {
+    interactionCount,
+    interactionPathTemplate,
+    maxDurationMs,
+    maxRankedInteractions,
+    path
+  });
+  const parentTraceContext = optionalBrowserTraceContext(traceContext);
+  const spanTraceContext = createBrowserTraceContext({
+    randomValues,
+    sampled: parentTraceContext?.sampled ?? sampled,
+    traceFlags: parentTraceContext?.traceFlags ?? traceFlags,
+    traceId: parentTraceContext?.traceId
+  });
+  const baseMetadata = browserMetadata(browserWindow, {
+    includeDocumentTitle,
+    includeUserAgent,
+    path,
+    source: "browser.interaction_to_next_paint"
+  });
+  const timingMetadata = compactMetadata({
+    candidateRank: details.candidateRank,
+    inputDelayMs: details.inputDelayMs,
+    interactionId: details.interactionId,
+    interactionPath: details.interactionPath,
+    interactionType: details.interactionType,
+    maxInteractionDurationMs: details.maxInteractionDurationMs,
+    presentationDelayMs: details.presentationDelayMs,
+    processingDurationMs: details.processingDurationMs,
+    rankedInteractionCount: details.rankedInteractionCount,
+    startTimeMs: details.startTimeMs,
+    viewInteractionCount: details.viewInteractionCount
+  });
+  const safeMetadata = sanitizeMetadata(
+    mergeMetadata(mergeMetadata(baseMetadata, metadata), timingMetadata),
+    "interaction"
+  );
+  return {
+    id: idFactory({ browserWindow, entry: details.entry, message: details.message, path, source: "interaction_to_next_paint" }),
+    timestamp: now(),
+    attributes: {
+      durationMs: details.durationMs,
+      metadata: safeMetadata,
+      name: details.name,
+      parentSpanId: parentTraceContext?.spanId,
+      spanId: spanTraceContext.spanId,
+      status: "ok",
+      traceId: spanTraceContext.traceId
+    }
+  };
 }
 
 function createBrowserInteractionTimingEvent(entry, browserWindow = defaultWindow(), {
@@ -145,6 +228,87 @@ function createBrowserInteractionTimingEvent(entry, browserWindow = defaultWindo
       traceId: spanTraceContext.traceId
     }
   };
+}
+
+function interactionToNextPaintDetails(entries, {
+  interactionCount,
+  interactionPathTemplate,
+  maxDurationMs,
+  maxRankedInteractions,
+  path
+}) {
+  const rankedInteractions = rankedInteractionEntries(entries, {
+    maxDurationMs: validMaxDurationMs(maxDurationMs),
+    maxRankedInteractions: validMaxRankedInteractions(maxRankedInteractions)
+  });
+  if (rankedInteractions.length === 0) {
+    throw new SdkError(
+      "configuration_error",
+      "createBrowserInteractionToNextPaintEvent requires at least one event or first-input entry with interactionId"
+    );
+  }
+  const viewInteractionCount = Math.max(
+    rankedInteractions.length,
+    interactionCount === undefined
+      ? rankedInteractions.length
+      : Math.floor(finiteNonNegativeNumber("interactionCount", interactionCount))
+  );
+  const candidateIndex = Math.min(rankedInteractions.length - 1, Math.floor(viewInteractionCount / 50));
+  const candidate = rankedInteractions[candidateIndex];
+  const interactionPath = templatePath(candidate.entry, interactionPathTemplate, path);
+  const interactionType = normalizeInpInteractionType(candidate.entry.name);
+  return {
+    candidateRank: candidateIndex + 1,
+    durationMs: candidate.durationMs,
+    entry: candidate.entry,
+    inputDelayMs: durationBetween(candidate.entry.startTime, candidate.entry.processingStart),
+    interactionId: candidate.interactionId,
+    interactionPath,
+    interactionType,
+    maxInteractionDurationMs: rankedInteractions[0].durationMs,
+    message: interactionPath,
+    name: `browser.interaction_to_next_paint ${interactionPath}`,
+    presentationDelayMs: durationBetween(
+      candidate.entry.processingEnd,
+      Number(candidate.entry.startTime) + Number(candidate.entry.duration)
+    ),
+    processingDurationMs: durationBetween(candidate.entry.processingStart, candidate.entry.processingEnd),
+    rankedInteractionCount: rankedInteractions.length,
+    startTimeMs: roundedNumber(nonNegativeNumberOrUndefined(candidate.entry.startTime)),
+    viewInteractionCount
+  };
+}
+
+function rankedInteractionEntries(entries, { maxDurationMs, maxRankedInteractions }) {
+  if (!Array.isArray(entries)) {
+    throw new SdkError("configuration_error", "createBrowserInteractionToNextPaintEvent requires an array of entries");
+  }
+  const byInteractionId = new Map();
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+    const entryType = stringOrUndefined(entry.entryType);
+    if (entryType !== "event" && entryType !== "first-input") {
+      continue;
+    }
+    const interactionId = nonNegativeNumberOrUndefined(entry.interactionId);
+    const durationMs = nonNegativeNumberOrUndefined(entry.duration);
+    if (!interactionId || durationMs === undefined || durationMs > maxDurationMs) {
+      continue;
+    }
+    const current = byInteractionId.get(interactionId);
+    if (!current || durationMs > current.durationMs) {
+      byInteractionId.set(interactionId, {
+        durationMs: roundedNumber(durationMs),
+        entry,
+        interactionId
+      });
+    }
+  }
+  return [...byInteractionId.values()]
+    .sort((left, right) => right.durationMs - left.durationMs)
+    .slice(0, maxRankedInteractions);
 }
 
 function observeEntryType(observer, entryType, options) {
@@ -456,8 +620,42 @@ function normalizeInteractionType(name) {
   return normalized;
 }
 
+function normalizeInpInteractionType(name) {
+  const normalized = normalizeInteractionType(name);
+  if (normalized === "click") {
+    return "click";
+  }
+  if (
+    normalized === "keydown"
+    || normalized === "keypress"
+    || normalized === "keyup"
+    || normalized === "input"
+  ) {
+    return "press";
+  }
+  if (
+    normalized === "mousedown"
+    || normalized === "mouseup"
+    || normalized === "pointerdown"
+    || normalized === "pointerup"
+    || normalized === "touchend"
+    || normalized === "touchstart"
+  ) {
+    return "tap";
+  }
+  return normalized;
+}
+
 function validMaxDurationMs(maxDurationMs) {
   return finiteNonNegativeNumber("maxDurationMs", maxDurationMs);
+}
+
+function validMaxRankedInteractions(maxRankedInteractions) {
+  const value = finiteNonNegativeNumber("maxRankedInteractions", maxRankedInteractions);
+  if (value < 1) {
+    throw new SdkError("configuration_error", "maxRankedInteractions must be at least 1");
+  }
+  return Math.floor(value);
 }
 
 function finiteNonNegativeNumber(label, value) {
@@ -491,6 +689,10 @@ function defaultInteractionTimingEventId({ message, path }) {
   return `evt_browser_interaction_${slugify(`${path}_${message}`)}`;
 }
 
+function defaultInteractionToNextPaintEventId({ message, path }) {
+  return `evt_browser_inp_${slugify(`${path}_${message}`)}`;
+}
+
 function defaultWindow() {
   return typeof globalThis.window === "object" ? globalThis.window : undefined;
 }
@@ -504,6 +706,8 @@ function slugify(value) {
 
 module.exports = {
   captureBrowserInteractionTiming,
+  captureBrowserInteractionToNextPaint,
   createBrowserInteractionTimingEvent,
+  createBrowserInteractionToNextPaintEvent,
   installLogBrewBrowserInteractionTimingInstrumentation
 };

@@ -15,7 +15,9 @@ const {
 } = require("./fetch-spans.cjs");
 const {
   captureBrowserInteractionTiming,
+  captureBrowserInteractionToNextPaint,
   createBrowserInteractionTimingEvent,
+  createBrowserInteractionToNextPaintEvent,
   installLogBrewBrowserInteractionTimingInstrumentation
 } = require("./interaction-timing.cjs");
 const {
@@ -941,6 +943,7 @@ module.exports = {
   captureBrowserError,
   captureBrowserFetchSpan,
   captureBrowserInteractionTiming,
+  captureBrowserInteractionToNextPaint,
   captureBrowserNetwork,
   captureBrowserNavigationTiming,
   captureBrowserResourceTiming,
@@ -954,6 +957,7 @@ module.exports = {
   createBrowserErrorEvent,
   createBrowserFetchSpanEvent,
   createBrowserInteractionTimingEvent,
+  createBrowserInteractionToNextPaintEvent,
   createBrowserNavigationTimingEvent,
   createBrowserResourceTimingEvent,
   createBrowserWebVitalEvent,
@@ -973,6 +977,7 @@ module.exports = {
     captureBrowserError,
     captureBrowserFetchSpan,
     captureBrowserInteractionTiming,
+    captureBrowserInteractionToNextPaint,
     captureBrowserNetwork,
     captureBrowserNavigationTiming,
     captureBrowserResourceTiming,
@@ -986,6 +991,7 @@ module.exports = {
     createBrowserErrorEvent,
     createBrowserFetchSpanEvent,
     createBrowserInteractionTimingEvent,
+    createBrowserInteractionToNextPaintEvent,
     createBrowserNavigationTimingEvent,
     createBrowserResourceTimingEvent,
     createBrowserWebVitalEvent,

@@ -2,6 +2,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserInteractionTiming,
+  captureBrowserInteractionToNextPaint,
   captureBrowserNetwork,
   captureBrowserWebVital,
   createBrowserTraceContext,
@@ -94,6 +95,31 @@ await captureBrowserInteractionTiming({
   styleAndLayoutStart: 675
 }, logbrew, {
   flushOnCapture: false,
+  interactionPathTemplate: "/dashboard"
+});
+
+await captureBrowserInteractionToNextPaint([
+  {
+    duration: 180,
+    entryType: "event",
+    interactionId: 7,
+    name: "keydown",
+    processingEnd: 520,
+    processingStart: 450,
+    startTime: 430
+  },
+  {
+    duration: 320,
+    entryType: "first-input",
+    interactionId: 42,
+    name: "pointerdown",
+    processingEnd: 950,
+    processingStart: 860,
+    startTime: 820
+  }
+], logbrew, {
+  flushOnCapture: false,
+  interactionCount: 55,
   interactionPathTemplate: "/dashboard"
 });
 

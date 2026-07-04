@@ -13,7 +13,9 @@ import {
 } from "./fetch-spans.js";
 import {
   captureBrowserInteractionTiming,
+  captureBrowserInteractionToNextPaint,
   createBrowserInteractionTimingEvent,
+  createBrowserInteractionToNextPaintEvent,
   installLogBrewBrowserInteractionTimingInstrumentation
 } from "./interaction-timing.js";
 import {
@@ -50,12 +52,14 @@ export {
   createBeaconTransport,
   captureBrowserFetchSpan,
   captureBrowserInteractionTiming,
+  captureBrowserInteractionToNextPaint,
   captureBrowserNavigationTiming,
   captureBrowserResourceTiming,
   captureBrowserWebVital,
   captureBrowserXhrSpan,
   createBrowserFetchSpanEvent,
   createBrowserInteractionTimingEvent,
+  createBrowserInteractionToNextPaintEvent,
   createBrowserNavigationTimingEvent,
   createBrowserResourceTimingEvent,
   createBrowserWebVitalEvent,
@@ -967,6 +971,7 @@ export default {
   captureBrowserError,
   captureBrowserFetchSpan,
   captureBrowserInteractionTiming,
+  captureBrowserInteractionToNextPaint,
   captureBrowserNetwork,
   captureBrowserNavigationTiming,
   captureBrowserResourceTiming,
@@ -980,6 +985,7 @@ export default {
   createBrowserErrorEvent,
   createBrowserFetchSpanEvent,
   createBrowserInteractionTimingEvent,
+  createBrowserInteractionToNextPaintEvent,
   createBrowserNavigationTimingEvent,
   createBrowserResourceTimingEvent,
   createBrowserWebVitalEvent,

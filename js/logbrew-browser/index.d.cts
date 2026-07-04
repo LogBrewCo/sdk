@@ -507,6 +507,11 @@ export type BrowserInteractionTimingOptions = LogBrewBrowserOptions & {
   performanceObserver?: BrowserInteractionTimingObserverConstructor;
 };
 
+export type BrowserInteractionToNextPaintOptions = BrowserInteractionTimingOptions & {
+  interactionCount?: number;
+  maxRankedInteractions?: number;
+};
+
 export type BrowserInteractionTimingInstrumentation = {
   uninstall(): void;
 };
@@ -673,6 +678,12 @@ export declare function captureBrowserInteractionTiming(
   options?: BrowserInteractionTimingOptions
 ): Promise<TransportResponse | undefined>;
 
+export declare function captureBrowserInteractionToNextPaint(
+  entries: BrowserInteractionTimingInput[],
+  context: LogBrewBrowserContext,
+  options?: BrowserInteractionToNextPaintOptions
+): Promise<TransportResponse | undefined>;
+
 export declare function captureBrowserFetchSpan(
   request: BrowserFetchInput,
   context: LogBrewBrowserContext,
@@ -726,6 +737,12 @@ export declare function createBrowserInteractionTimingEvent(
   options?: BrowserInteractionTimingOptions
 ): LogBrewBrowserEvent<SpanAttributes>;
 
+export declare function createBrowserInteractionToNextPaintEvent(
+  entries: BrowserInteractionTimingInput[],
+  browserWindow?: Window,
+  options?: BrowserInteractionToNextPaintOptions
+): LogBrewBrowserEvent<SpanAttributes>;
+
 export declare function createBrowserFetchSpanEvent(
   request: BrowserFetchInput,
   browserWindow?: Window,
@@ -755,6 +772,7 @@ declare const defaultExport: {
   captureBrowserError: typeof captureBrowserError;
   captureBrowserFetchSpan: typeof captureBrowserFetchSpan;
   captureBrowserInteractionTiming: typeof captureBrowserInteractionTiming;
+  captureBrowserInteractionToNextPaint: typeof captureBrowserInteractionToNextPaint;
   captureBrowserNetwork: typeof captureBrowserNetwork;
   captureBrowserNavigationTiming: typeof captureBrowserNavigationTiming;
   captureBrowserResourceTiming: typeof captureBrowserResourceTiming;
@@ -768,6 +786,7 @@ declare const defaultExport: {
   createBrowserErrorEvent: typeof createBrowserErrorEvent;
   createBrowserFetchSpanEvent: typeof createBrowserFetchSpanEvent;
   createBrowserInteractionTimingEvent: typeof createBrowserInteractionTimingEvent;
+  createBrowserInteractionToNextPaintEvent: typeof createBrowserInteractionToNextPaintEvent;
   createBrowserNavigationTimingEvent: typeof createBrowserNavigationTimingEvent;
   createBrowserResourceTimingEvent: typeof createBrowserResourceTimingEvent;
   createBrowserWebVitalEvent: typeof createBrowserWebVitalEvent;

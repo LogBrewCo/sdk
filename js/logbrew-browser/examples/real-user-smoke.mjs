@@ -2,6 +2,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserInteractionTiming,
+  captureBrowserInteractionToNextPaint,
   captureBrowserNavigationTiming,
   captureBrowserNetwork,
   captureBrowserWebVital,
@@ -112,9 +113,16 @@ await captureBrowserInteractionTiming(createLongAnimationFrameEntry(), logbrew, 
   now: nextTimestamp,
   randomValues: () => fillBytes(8, 0x99)
 });
+await captureBrowserInteractionToNextPaint(createInteractionToNextPaintEntries(), logbrew, {
+  flushOnCapture: false,
+  interactionCount: 55,
+  interactionPathTemplate: "/settings",
+  now: nextTimestamp,
+  randomValues: () => fillBytes(8, 0xaa)
+});
 
-if (logbrew.client.pendingEvents() !== 11) {
-  throw new Error(`expected 11 captured events, got ${logbrew.client.pendingEvents()}`);
+if (logbrew.client.pendingEvents() !== 12) {
+  throw new Error(`expected 12 captured events, got ${logbrew.client.pendingEvents()}`);
 }
 
 logbrew.client.log("evt_browser_pagehide_001", nextTimestamp(), {
@@ -243,6 +251,16 @@ if (longAnimationFrameSpan.attributes.traceId !== traceContext.traceId || longAn
 if (longAnimationFrameSpan.attributes.metadata.blockingDurationMs !== 45 || longAnimationFrameSpan.attributes.metadata.scriptCount !== 2) {
   throw new Error(`expected long-animation-frame timing metadata, got ${payload}`);
 }
+const inpSpan = parsed.events.find((event) => event.type === "span" && event.attributes.metadata?.source === "browser.interaction_to_next_paint");
+if (inpSpan?.attributes.name !== "browser.interaction_to_next_paint /settings") {
+  throw new Error(`expected interaction-to-next-paint span, got ${payload}`);
+}
+if (inpSpan.attributes.traceId !== traceContext.traceId || inpSpan.attributes.parentSpanId !== traceContext.spanId) {
+  throw new Error(`expected interaction-to-next-paint child span trace correlation, got ${payload}`);
+}
+if (inpSpan.attributes.metadata.candidateRank !== 2 || inpSpan.attributes.metadata.interactionType !== "press") {
+  throw new Error(`expected interaction-to-next-paint ranking metadata, got ${payload}`);
+}
 if (payload.includes("https://cdn.example.test/app.js") || payload.includes("iframe-private") || payload.includes("renderCheckout")) {
   throw new Error(`interaction timing metadata leaked attribution details: ${payload}`);
 }
@@ -298,6 +316,7 @@ console.error(JSON.stringify({
   fetchSpan: fetchSpan.attributes.name,
   hiddenFlushEvents: visibilityPayload.events.length,
   interactionSpan: interactionSpan.attributes.name,
+  inpSpan: inpSpan.attributes.name,
   longAnimationFrameSpan: longAnimationFrameSpan.attributes.name,
   longTaskSpan: longTaskSpan.attributes.name,
   networkAction: network.attributes.metadata.routeTemplate,
@@ -441,6 +460,45 @@ function createLongAnimationFrameEntry() {
     startTime: 600,
     styleAndLayoutStart: 675
   };
+}
+
+function createInteractionToNextPaintEntries() {
+  return [
+    {
+      duration: 64,
+      entryType: "event",
+      interactionId: 1,
+      name: "click",
+      processingEnd: 230,
+      processingStart: 190,
+      startTime: 180,
+      target: {
+        selector: "button.checkout",
+        textContent: "Pay with private card"
+      }
+    },
+    {
+      duration: 180,
+      entryType: "event",
+      interactionId: 7,
+      name: "keydown",
+      processingEnd: 520,
+      processingStart: 450,
+      startTime: 430,
+      target: {
+        selector: "input.card-number"
+      }
+    },
+    {
+      duration: 320,
+      entryType: "first-input",
+      interactionId: 42,
+      name: "pointerdown",
+      processingEnd: 950,
+      processingStart: 860,
+      startTime: 820
+    }
+  ];
 }
 
 function createErrorEvent(message, filename, lineno, colno) {

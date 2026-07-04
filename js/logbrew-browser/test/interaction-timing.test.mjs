@@ -259,6 +259,75 @@ test("installed browser interaction timing instrumentation observes event and lo
   }
 });
 
+test("installed browser interaction-to-next-paint capture emits sanitized p98-ranked span", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const {
+    captureBrowserInteractionToNextPaint,
+    createBrowserTraceContext,
+    installLogBrewBrowser
+  } = imported;
+  try {
+    assert.equal(typeof captureBrowserInteractionToNextPaint, "function");
+    const browserWindow = createFakeBrowserWindow("https://app.example.test/checkout?email=dev@example.test#pay");
+    const context = installLogBrewBrowser({
+      browserWindow,
+      capturePageViews: false,
+      clientKey: CLIENT_KEY,
+      flushOnCapture: false,
+      traceContext: createBrowserTraceContext({
+        sampled: true,
+        spanId: PARENT_SPAN_ID,
+        traceId: TRACE_ID
+      }),
+      transport: {
+        async send() {
+          return { statusCode: 202 };
+        }
+      }
+    });
+
+    await captureBrowserInteractionToNextPaint(createInpRankingEntries(), context, {
+      flushOnCapture: false,
+      interactionCount: 55,
+      interactionPathTemplate: "/checkout",
+      now: () => "2026-07-04T17:00:00.000Z",
+      randomValues: sequenceRandomValues([
+        fillBytes(8, 0x66)
+      ])
+    });
+
+    const payload = JSON.parse(context.previewJson());
+    assert.equal(payload.events.length, 1);
+    const [span] = payload.events;
+    assert.equal(span.type, "span");
+    assert.equal(span.attributes.name, "browser.interaction_to_next_paint /checkout");
+    assert.equal(span.attributes.traceId, TRACE_ID);
+    assert.equal(span.attributes.parentSpanId, PARENT_SPAN_ID);
+    assert.equal(span.attributes.spanId, "6666666666666666");
+    assert.equal(span.attributes.durationMs, 180);
+    assert.equal(span.attributes.metadata.source, "browser.interaction_to_next_paint");
+    assert.equal(span.attributes.metadata.path, "/checkout");
+    assert.equal(span.attributes.metadata.interactionPath, "/checkout");
+    assert.equal(span.attributes.metadata.interactionId, 7);
+    assert.equal(span.attributes.metadata.interactionType, "press");
+    assert.equal(span.attributes.metadata.viewInteractionCount, 55);
+    assert.equal(span.attributes.metadata.rankedInteractionCount, 3);
+    assert.equal(span.attributes.metadata.candidateRank, 2);
+    assert.equal(span.attributes.metadata.inputDelayMs, 20);
+    assert.equal(span.attributes.metadata.processingDurationMs, 70);
+    assert.equal(span.attributes.metadata.presentationDelayMs, 90);
+    assert.equal(span.attributes.metadata.maxInteractionDurationMs, 320);
+    assert.equal(span.attributes.metadata.target, undefined);
+    assert.equal(span.attributes.metadata.selector, undefined);
+    assert.equal(span.attributes.metadata.element, undefined);
+    assert.equal(JSON.stringify(payload).includes("button.checkout"), false);
+    assert.equal(JSON.stringify(payload).includes("email=dev@example.test"), false);
+    assert.equal(JSON.stringify(payload).includes("#pay"), false);
+  } finally {
+    await removeTempDir();
+  }
+});
+
 function createClickEventTimingEntry() {
   return {
     duration: 128,
@@ -326,6 +395,62 @@ function createLongAnimationFrameEntry() {
     startTime: 600,
     styleAndLayoutStart: 675
   };
+}
+
+function createInpRankingEntries() {
+  return [
+    {
+      duration: 64,
+      entryType: "event",
+      interactionId: 1,
+      name: "click",
+      processingEnd: 230,
+      processingStart: 190,
+      startTime: 180,
+      target: {
+        selector: "button.checkout",
+        textContent: "Pay with private card"
+      }
+    },
+    {
+      duration: 180,
+      entryType: "event",
+      interactionId: 7,
+      name: "keydown",
+      processingEnd: 520,
+      processingStart: 450,
+      startTime: 430,
+      target: {
+        selector: "input.card-number"
+      }
+    },
+    {
+      duration: 140,
+      entryType: "event",
+      interactionId: 7,
+      name: "keyup",
+      processingEnd: 560,
+      processingStart: 500,
+      startTime: 490
+    },
+    {
+      duration: 320,
+      entryType: "first-input",
+      interactionId: 42,
+      name: "pointerdown",
+      processingEnd: 950,
+      processingStart: 860,
+      startTime: 820
+    },
+    {
+      duration: 80,
+      entryType: "event",
+      name: "click",
+      processingEnd: 1020,
+      processingStart: 1000,
+      startTime: 980
+    }
+  ];
 }
 
 function createFakeBrowserWindow(href) {
