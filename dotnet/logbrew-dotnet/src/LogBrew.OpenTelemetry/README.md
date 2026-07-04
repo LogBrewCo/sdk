@@ -30,6 +30,10 @@ using var provider = Sdk.CreateTracerProviderBuilder()
 
 using (var activity = source.StartActivity("GET /checkout/{id}", ActivityKind.Server))
 {
+    activity?.SetTag("service.name", "checkout-api");
+    activity?.SetTag("service.version", "1.0.0");
+    activity?.SetTag("deployment.environment.name", "production");
+    activity?.SetTag("telemetry.sdk.name", "opentelemetry");
     activity?.SetTag("http.request.method", "GET");
     activity?.SetTag("http.route", "/checkout/{id}");
     activity?.SetTag("http.response.status_code", 200);
@@ -56,8 +60,8 @@ using (var activity = exporterSource.StartActivity("POST /jobs/{id}", ActivityKi
 Console.WriteLine(client.PreviewJson());
 ```
 
-The integration adds `LogBrewOpenTelemetrySpanProcessor`, `TracerProviderBuilder.AddLogBrew(...)`, and `LogBrewOpenTelemetrySpanExporter` for apps that prefer standard OpenTelemetry export processors such as `SimpleActivityExportProcessor` or `BatchActivityExportProcessor`. It captures ended, recorded W3C Activities through the same privacy-bounded `LogBrewActivitySpanTelemetry` path as the core SDK: trace/span IDs, parent span ID, sampled flag, duration, Activity name/kind/source, capped Activity event summaries, capped Activity link summaries, explicit service context, and a small allowlist of primitive semantic tags such as HTTP method/route/status, DB system/operation, messaging system/operation, and exception type.
+The integration adds `LogBrewOpenTelemetrySpanProcessor`, `TracerProviderBuilder.AddLogBrew(...)`, and `LogBrewOpenTelemetrySpanExporter` for apps that prefer standard OpenTelemetry export processors such as `SimpleActivityExportProcessor` or `BatchActivityExportProcessor`. It captures ended, recorded W3C Activities through the same privacy-bounded `LogBrewActivitySpanTelemetry` path as the core SDK: trace/span IDs, parent span ID, sampled flag, duration, Activity name/kind/source, capped Activity event summaries, capped Activity link summaries, explicit service context, safe `service.name`/`service.version`/`deployment.environment.name`/`telemetry.sdk.name` resource-convention tags, and a small allowlist of primitive semantic tags such as HTTP method/route/status, DB system/operation, messaging system/operation, and exception type.
 
-It does not create an OpenTelemetry provider, sampler, resource detector, instrumentation package, baggage/tracestate reader, global Activity listener, HTTP/database patch, payload/header/full-URL/query capture, exception message/stack capture, support ticket, OTLP forwarding path, or background upload path. Apps keep ownership of their OpenTelemetry pipeline and LogBrew only receives sanitized ended spans after the app opts in.
+It does not create an OpenTelemetry provider, sampler, resource detector, instrumentation package, baggage/tracestate reader, global Activity listener, HTTP/database patch, arbitrary resource copier, payload/header/full-URL/query capture, exception message/stack capture, support ticket, OTLP forwarding path, or background upload path. Apps keep ownership of their OpenTelemetry pipeline and LogBrew only receives sanitized ended spans after the app opts in.
 
 The packaged `examples/OpenTelemetrySpanProcessorTelemetry.cs` file shows copyable processor and exporter Activity-to-LogBrew span correlation setup with service context.

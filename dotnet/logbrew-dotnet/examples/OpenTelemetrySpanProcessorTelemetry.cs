@@ -14,17 +14,19 @@ using (Sdk.CreateTracerProviderBuilder()
     .AddSource("Checkout.Api")
     .AddLogBrew(client, options => options
         .WithEventIdPrefix("checkout_otel")
-        .WithServiceName("checkout-api")
-        .WithServiceVersion("1.0.0")
-        .WithDeploymentEnvironment("production")
         .WithMetadata(new Dictionary<string, object?> { ["component"] = "checkout" }))
     .Build())
 {
     using var activity = source.StartActivity("GET /checkout/{id}", ActivityKind.Server);
+    activity?.SetTag("service.name", "checkout-api");
+    activity?.SetTag("service.version", "1.0.0");
+    activity?.SetTag("deployment.environment.name", "production");
+    activity?.SetTag("telemetry.sdk.name", "opentelemetry");
     activity?.SetTag("http.request.method", "GET");
     activity?.SetTag("http.route", "/checkout/{id}");
     activity?.SetTag("http.response.status_code", 200);
     activity?.SetTag("url.full", "https://example.test/checkout/omitted?coupon=omitted");
+    activity?.SetTag("service.instance.id", "instance-opaque-marker");
     activity?.AddEvent(new ActivityEvent(
         "cache.lookup",
         tags: new ActivityTagsCollection

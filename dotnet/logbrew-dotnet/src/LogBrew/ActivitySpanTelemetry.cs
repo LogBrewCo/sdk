@@ -78,26 +78,50 @@ namespace LogBrew
             return this;
         }
 
-        private static string ResourceValue(string label, string value)
+        internal static string ResourceValue(string label, string value)
         {
             Validation.RequireNonEmpty(label, value);
             var trimmed = value.Trim();
-            if (trimmed.Length > 120
-                || trimmed.IndexOf("://", StringComparison.Ordinal) >= 0
-                || trimmed.IndexOf("?", StringComparison.Ordinal) >= 0
-                || trimmed.IndexOf("#", StringComparison.Ordinal) >= 0
-                || trimmed.IndexOf("\r", StringComparison.Ordinal) >= 0
-                || trimmed.IndexOf("\n", StringComparison.Ordinal) >= 0
-                || trimmed.IndexOf("authorization", StringComparison.OrdinalIgnoreCase) >= 0
-                || trimmed.IndexOf("cookie", StringComparison.OrdinalIgnoreCase) >= 0
-                || trimmed.IndexOf("pass" + "word", StringComparison.OrdinalIgnoreCase) >= 0
-                || trimmed.IndexOf("sec" + "ret", StringComparison.OrdinalIgnoreCase) >= 0
-                || trimmed.IndexOf("tok" + "en", StringComparison.OrdinalIgnoreCase) >= 0)
+            if (IsUnsafeResourceValue(trimmed))
             {
                 throw new SdkException("validation_error", label + " must be a low-cardinality resource value");
             }
 
             return trimmed;
+        }
+
+        internal static bool TryResourceValue(string value, out string safeValue)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                safeValue = string.Empty;
+                return false;
+            }
+
+            var trimmed = value.Trim();
+            if (IsUnsafeResourceValue(trimmed))
+            {
+                safeValue = string.Empty;
+                return false;
+            }
+
+            safeValue = trimmed;
+            return true;
+        }
+
+        private static bool IsUnsafeResourceValue(string value)
+        {
+            return value.Length > 120
+                || value.IndexOf("://", StringComparison.Ordinal) >= 0
+                || value.IndexOf("?", StringComparison.Ordinal) >= 0
+                || value.IndexOf("#", StringComparison.Ordinal) >= 0
+                || value.IndexOf("\r", StringComparison.Ordinal) >= 0
+                || value.IndexOf("\n", StringComparison.Ordinal) >= 0
+                || value.IndexOf("authorization", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("cookie", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("pass" + "word", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("sec" + "ret", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("tok" + "en", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static string DefaultTimestamp()
@@ -351,6 +375,18 @@ namespace LogBrew
                 case "messaging.operation":
                     AddString(metadata, "messagingOperation", value);
                     break;
+                case "service.name":
+                    AddResourceString(metadata, "serviceName", value);
+                    break;
+                case "service.version":
+                    AddResourceString(metadata, "serviceVersion", value);
+                    break;
+                case "deployment.environment.name":
+                    AddResourceString(metadata, "deploymentEnvironment", value);
+                    break;
+                case "telemetry.sdk.name":
+                    AddResourceString(metadata, "telemetrySdkName", value);
+                    break;
             }
         }
 
@@ -462,6 +498,20 @@ namespace LogBrew
             if (!string.IsNullOrWhiteSpace(text))
             {
                 metadata[key] = text;
+            }
+        }
+
+        private static void AddResourceString(IDictionary<string, object?> metadata, string key, object? value)
+        {
+            var text = Convert.ToString(value, CultureInfo.InvariantCulture);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            if (LogBrewActivitySpanOptions.TryResourceValue(text, out var safeValue))
+            {
+                metadata[key] = safeValue;
             }
         }
 

@@ -17,6 +17,8 @@ internal static class ActivitySpanTelemetryTests
         tests++;
         CaptureCopiesExplicitResourceContextSafely();
         tests++;
+        CaptureCopiesSafeResourceConventionTags();
+        tests++;
         CaptureIgnoresInvalidActivity();
         tests++;
         CaptureFailureReportsErrorWithoutThrowing();
@@ -211,6 +213,52 @@ internal static class ActivitySpanTelemetryTests
         RequireThrows<SdkException>(
             () => LogBrewActivitySpanOptions.Create().WithDeploymentEnvironment("prod\nwest"),
             "expected unsafe deployment environment validation");
+    }
+
+    private static void CaptureCopiesSafeResourceConventionTags()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "activity-tests", "0.1.0");
+        using var activity = new Activity("checkout.resource.tags");
+        activity.SetIdFormat(ActivityIdFormat.W3C);
+        activity.SetParentId(
+            ActivityTraceId.CreateFromString(IncomingTraceId.AsSpan()),
+            ActivitySpanId.CreateFromString(IncomingParentSpanId.AsSpan()),
+            ActivityTraceFlags.Recorded);
+        activity.SetTag("service.name", "checkout-api");
+        activity.SetTag("service.version", "1.2.3");
+        activity.SetTag("deployment.environment.name", "production");
+        activity.SetTag("deployment.environment", "legacy-prod");
+        activity.SetTag("telemetry.sdk.name", "opentelemetry");
+        activity.SetTag("service.instance.id", "instance-opaque-marker");
+        activity.SetTag("process.command_line", "dotnet checkout --opaque-marker=value");
+        activity.Start();
+        activity.Stop();
+
+        var captured = LogBrewActivitySpanTelemetry.Capture(
+            client,
+            activity,
+            LogBrewActivitySpanOptions.Create()
+                .WithEventIdPrefix("dotnet_activity_resource_tags")
+                .WithTimestampProvider(() => "2026-06-02T10:00:17Z"));
+
+        Require(captured, "expected Activity with safe resource tags to be captured");
+        var payload = client.PreviewJson();
+        foreach (var expected in new[]
+        {
+            "\"id\": \"dotnet_activity_resource_tags_span_" + activity.SpanId.ToHexString() + "\"",
+            "\"serviceName\": \"checkout-api\"",
+            "\"serviceVersion\": \"1.2.3\"",
+            "\"deploymentEnvironment\": \"production\"",
+            "\"telemetrySdkName\": \"opentelemetry\""
+        })
+        {
+            Require(payload.Contains(expected, StringComparison.Ordinal), "missing safe resource tag: " + expected);
+        }
+
+        foreach (var blocked in new[] { "legacy-prod", "instance-opaque-marker", "process.command_line", "--opaque-marker=value" })
+        {
+            Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected unsafe resource tag to be omitted: " + blocked);
+        }
     }
 
     private static void CaptureIgnoresInvalidActivity()

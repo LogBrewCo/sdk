@@ -59,6 +59,7 @@ def main() -> None:
         "serviceName": "checkout-api",
         "serviceVersion": "1.0.0",
         "deploymentEnvironment": "production",
+        "telemetrySdkName": "opentelemetry",
         "component": "checkout",
     }.items():
         require(metadata.get(key) == value, f"expected metadata {key}={value!r}")
@@ -114,6 +115,8 @@ def main() -> None:
         "message-id-omitted",
         "linked-message-id-omitted",
         "debug=omitted",
+        "instance-opaque-marker",
+        "service.instance.id",
         "url.full",
         "exception.message",
     ):
