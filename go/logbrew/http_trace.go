@@ -3,6 +3,7 @@ package logbrew
 import (
 	"fmt"
 	"net/http"
+	"reflect"
 	"sync/atomic"
 	"time"
 )
@@ -74,21 +75,37 @@ func (h *httpTraceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	recorder := &statusRecordingResponseWriter{ResponseWriter: w}
 	requestWithTrace := r.WithContext(ContextWithLogBrewTrace(r.Context(), trace))
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			h.captureRequestTelemetry(requestWithTrace, trace, start, recorder.StatusForPanic(), panicMetadata(recovered))
+			panic(recovered)
+		}
+	}()
 	h.next.ServeHTTP(recorder, requestWithTrace)
 
-	statusCode := recorder.Status()
+	h.captureRequestTelemetry(requestWithTrace, trace, start, recorder.Status(), nil)
+}
+
+func (h *httpTraceHandler) captureRequestTelemetry(
+	request *http.Request,
+	trace TraceContext,
+	start time.Time,
+	statusCode int,
+	extraMetadata map[string]any,
+) {
 	durationMs := float64(h.now().Sub(start).Microseconds()) / 1000
-	routeTemplate := h.routeTemplate(requestWithTrace)
-	metadata := mergeMetadata(h.config.Metadata, map[string]any{
-		"method":        requestWithTrace.Method,
+	routeTemplate := h.routeTemplate(request)
+	metadata := mergeMetadata(safeOperationMetadata(h.config.Metadata), map[string]any{
+		"method":        request.Method,
 		"routeTemplate": routeTemplate,
 		"sampled":       trace.Sampled,
 		"statusCode":    statusCode,
 	})
+	metadata = mergeMetadata(metadata, extraMetadata)
 	metricMetadata := mergeMetadata(metadata, trace.Metadata())
 	span, err := SpanAttributesFromTraceContext(TraceContextSpanInput{
 		Trace:      trace,
-		Name:       fmt.Sprintf("%s %s", requestWithTrace.Method, routeTemplate),
+		Name:       fmt.Sprintf("%s %s", request.Method, routeTemplate),
 		Status:     spanStatusFromHTTPStatus(statusCode),
 		DurationMs: &durationMs,
 		Metadata:   metadata,
@@ -112,6 +129,14 @@ func (h *httpTraceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.report(err)
 		}
 	}
+}
+
+func panicMetadata(recovered any) map[string]any {
+	metadata := map[string]any{"panic": true}
+	if recovered != nil {
+		metadata["panicType"] = reflect.TypeOf(recovered).String()
+	}
+	return metadata
 }
 
 func (h *httpTraceHandler) requestTrace(r *http.Request) (TraceContext, error) {
@@ -166,6 +191,13 @@ type statusRecordingResponseWriter struct {
 func (w *statusRecordingResponseWriter) Status() int {
 	if w.status == 0 {
 		return http.StatusOK
+	}
+	return w.status
+}
+
+func (w *statusRecordingResponseWriter) StatusForPanic() int {
+	if w.status == 0 {
+		return http.StatusInternalServerError
 	}
 	return w.status
 }

@@ -138,6 +138,7 @@ for needle in (
     "LogAttributesWithTrace",
     "IssueAttributesWithTrace",
     "NewHTTPHandler",
+    "type-only panic metadata",
     "NewHTTPClientTransport",
     "NewSlogHandler",
     "DatabaseOperationWithLogBrewSpan",
@@ -582,6 +583,8 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -704,6 +707,113 @@ func TestInstalledTraceparentHelpers(t *testing.T) {
 	}
 	if _, err := logbrew.ParseTraceparent("00-00000000000000000000000000000000-00f067aa0ba902b7-01"); err == nil {
 		t.Fatalf("expected malformed traceparent to fail")
+	}
+}
+
+func TestInstalledPanicSpansRepanicAndStaySanitized(t *testing.T) {
+	client, err := logbrew.NewClient(logbrew.Config{
+		APIKey:     "LOGBREW_API_KEY",
+		SDKName:    "smoke-app-test",
+		SDKVersion: "0.1.0",
+	})
+	if err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	handler, err := logbrew.NewHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := logbrew.LogBrewTraceFromContext(r.Context()); !ok {
+			t.Fatal("missing active HTTP trace before panic")
+		}
+		panic("private http panic value")
+	}), logbrew.HTTPHandlerConfig{
+		Client:        client,
+		RouteTemplate: "/checkout/:cart_id",
+		EventIDPrefix: "installed_go_http_panic",
+		Metadata: map[string]any{
+			"component": "checkout",
+			"payload":   "private request body",
+		},
+		SpanIDFactory: func() string {
+			return "b7ad6b7169203331"
+		},
+	})
+	if err != nil {
+		t.Fatalf("create HTTP handler: %v", err)
+	}
+	httpRecovered := captureInstalledPanic(func() {
+		request := httptest.NewRequest(http.MethodGet, "/checkout/cart_123?coupon=sale", nil)
+		request.Header.Set("traceparent", "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
+		handler.ServeHTTP(httptest.NewRecorder(), request)
+	})
+	if httpRecovered != "private http panic value" {
+		t.Fatalf("expected original HTTP panic value, got %#v", httpRecovered)
+	}
+
+	parent, err := logbrew.NewTraceContext(logbrew.TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatalf("create parent trace: %v", err)
+	}
+	dbRecovered := captureInstalledPanic(func() {
+		_, _ = logbrew.DatabaseOperationWithLogBrewSpan(
+			logbrew.ContextWithLogBrewTrace(context.Background(), parent),
+			client,
+			"select checkout",
+			func(operationCtx context.Context) (string, error) {
+				if _, ok := logbrew.LogBrewTraceFromContext(operationCtx); !ok {
+					t.Fatal("missing active database trace before panic")
+				}
+				panic(errors.New("private database panic value"))
+			},
+			logbrew.DatabaseOperationConfig{
+				System:        "postgresql",
+				OperationKind: "query",
+				DatabaseName:  "orders",
+				EventIDPrefix: "installed_go_db_panic",
+				Metadata: map[string]any{
+					"component": "checkout",
+					"query":     "SELECT private",
+				},
+				SpanIDFactory: func() string {
+					return "b7ad6b7169203332"
+				},
+			},
+		)
+	})
+	if dbRecovered == nil || fmt.Sprint(dbRecovered) != "private database panic value" {
+		t.Fatalf("expected original database panic value, got %#v", dbRecovered)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatalf("preview json: %v", err)
+	}
+	for _, want := range []string{
+		`"id": "installed_go_http_panic_span_1"`,
+		`"id": "installed_go_db_panic_span_b7ad6b7169203332"`,
+		`"status": "error"`,
+		`"statusCode": 500`,
+		`"panic": true`,
+		`"panicType": "string"`,
+		`"panicType": "*errors.errorString"`,
+		`"dbSystem": "postgresql"`,
+	} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("missing panic span payload %s: %s", want, payload)
+		}
+	}
+	for _, unsafe := range []string{
+		"private http panic value",
+		"private database panic value",
+		"private request body",
+		"SELECT private",
+		"coupon=sale",
+		"traceparent",
+	} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("panic span leaked %q: %s", unsafe, payload)
+		}
 	}
 }
 
@@ -1157,6 +1267,14 @@ func TestInstalledSQLTransactionWithLogBrewSpan(t *testing.T) {
 	}
 }
 
+func captureInstalledPanic(operation func()) (recovered any) {
+	defer func() {
+		recovered = recover()
+	}()
+	operation()
+	return nil
+}
+
 type fakeSQLQueryer struct {
 	query string
 	args  []any
@@ -1524,6 +1642,7 @@ for needle in (
     "LogAttributesWithTrace",
     "IssueAttributesWithTrace",
     "NewHTTPHandler",
+    "type-only panic metadata",
     "NewSlogHandler",
     "DatabaseOperationWithLogBrewSpan",
     "SQLTransactionWithLogBrewSpan",

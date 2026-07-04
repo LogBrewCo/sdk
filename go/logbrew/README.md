@@ -256,7 +256,7 @@ _ = provider
 
 `TraceContextFromContext` and `TraceContextFromSpanContext` copy only valid OTel trace ID, span ID, and sampled flags into LogBrew child trace context. `NewSpanExporter` queues ended OTel spans as LogBrew span events with safe method/route/status, database, messaging, RPC, exception-type, span-kind, instrumentation-scope, and span-link summaries. It does not install global providers, own exporters/processors, retry, flush, capture full URLs, headers, payloads, SQL statements, exception messages, stacks, baggage, tracestate, or raw propagation values. Keep using `client.Flush` or `client.Shutdown` with your app-owned transport.
 
-`NewHTTPHandler` wraps an app-owned `net/http` handler, reads only W3C `traceparent`, creates one request span, optionally emits `http.server.duration`, and passes the active `TraceContext` to downstream code through `context.Context`. `NewSlogHandler` wraps an app-owned `slog.Handler`, queues a LogBrew log, and adds `traceId` / `spanId` fields to the wrapped app log when the context contains a LogBrew trace:
+`NewHTTPHandler` wraps an app-owned `net/http` handler, reads only W3C `traceparent`, creates one request span, optionally emits `http.server.duration`, and passes the active `TraceContext` to downstream code through `context.Context`. If the handler panics, LogBrew records one failed request span with type-only panic metadata, then re-panics with the original value. `NewSlogHandler` wraps an app-owned `slog.Handler`, queues a LogBrew log, and adds `traceId` / `spanId` fields to the wrapped app log when the context contains a LogBrew trace:
 
 ```go
 slogHandler, err := logbrew.NewSlogHandler(logbrew.SlogHandlerConfig{
@@ -283,7 +283,7 @@ if err != nil {
 http.Handle("/checkout/", handler)
 ```
 
-The HTTP and slog helpers are dependency-free and explicit. They do not patch global HTTP clients, do not capture request or response bodies, do not capture arbitrary headers, and strip query/hash text from route metadata. Run `go run ./examples/http_trace_correlation` for a copyable local example where release, environment, slog, issue, request span, and request-duration metric events share the same W3C trace.
+The HTTP and slog helpers are dependency-free and explicit. They do not patch global HTTP clients, do not capture request or response bodies, do not capture arbitrary headers, do not capture panic messages or stacks, and strip query/hash text from route metadata. Run `go run ./examples/http_trace_correlation` for a copyable local example where release, environment, slog, issue, request span, and request-duration metric events share the same W3C trace.
 
 ## Outbound `net/http` Client Spans
 
@@ -333,7 +333,7 @@ result, err := logbrew.DatabaseOperationWithLogBrewSpan(r.Context(), client, "se
 })
 ```
 
-Each helper creates a child `TraceContext`, activates it for the callback, records one span, returns the original result, and re-raises the original error. Metadata is primitive-only and intentionally drops SQL text, parameters, connection details, cache keys/values, commands, message bodies, broker URLs, headers, cookies, raw `traceparent` values, baggage, tracestate, and auth-like fields. These helpers do not import or patch `database/sql`, Redis, Kafka, AMQP, or queue clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
+Each helper creates a child `TraceContext`, activates it for the callback, records one span, returns the original result, and re-raises the original error. If the callback panics, LogBrew records one failed span with type-only panic metadata, then re-panics with the original value. Metadata is primitive-only and intentionally drops SQL text, parameters, connection details, cache keys/values, commands, message bodies, broker URLs, headers, cookies, raw `traceparent` values, baggage, tracestate, panic messages, stacks, and auth-like fields. These helpers do not import or patch `database/sql`, Redis, Kafka, AMQP, or queue clients; future automatic coverage should live in explicit integration packages with separate dependency and privacy validation.
 
 For app-owned queue clients, use `TraceparentSetter` to write exactly one outgoing W3C `traceparent`, `IncomingTraceparent` to continue one valid message trace while processing, and `LinkedTraceparents` or `SpanLinkSummary` values to summarize batch/fan-in relationships. Use `SpanLinkSummaryFromTraceparent` for message-carrier traceparents or `NewSpanLinkSummary` for explicit W3C trace/span IDs:
 

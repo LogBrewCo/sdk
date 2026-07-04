@@ -43,7 +43,9 @@ Follow-up to the all-SDK tracing priority. The Go SDK already had dependency-fre
 
 ## Where LogBrew Is Still Worse
 
-- No automatic panic recovery helper yet; Sentry's Go HTTP integration captures panics and links them to the active request transaction.
+- No framework-wide automatic panic recovery helper yet; the 2026-07-04
+  follow-up below closes the explicit app-owned HTTP/dependency panic-span
+  subset while preserving original panics.
 - OpenTelemetry active-context interop was still missing in this pass; see the 2026-07-03 follow-up below for the optional bridge that closes that specific gap.
 - No Gin, Chi, Echo, Fiber, gRPC, database, queue, or outbound HTTP integrations yet.
 - No baggage support, rich span events, or exception stack capture controls in the Go trace helper yet.
@@ -57,6 +59,44 @@ Follow-up to the all-SDK tracing priority. The Go SDK already had dependency-fre
 - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_generated_artifacts.py`.
 
 The installed-artifact Go smoke now packages and runs `examples/http_trace_correlation`, verifies release/environment/log/issue/span/metric output, proves one request span ID is reused across app log, issue, request span, and request duration metric metadata, verifies wrapped `slog` output receives trace IDs, and checks that query strings, fragments, request payload values, and non-primitive slog fields are not copied into LogBrew telemetry.
+
+## Panic Span Follow-Up - 2026-07-04
+
+### Source Basis
+
+- Reused the earlier Sentry Go source read from `getsentry/sentry-go` commit
+  `c299195fc44e4c637d24a6ba1f2b38e0ccedb816`,
+  `http/sentryhttp.go` functions `handle` and `recoverWithSentry`.
+- Sentry's pattern is to recover handler panics, link the captured event to the
+  active request scope/transaction, then re-panic when configured so the app's
+  normal panic behavior is preserved.
+
+### LogBrew Improvement From This Pass
+
+- `NewHTTPHandler` now records one failed request span when the app-owned
+  handler panics, using status code `500` if no response was written, adding
+  only `panic=true` and type-only `panicType`, then re-panicking with the
+  original value.
+- `DatabaseOperationWithLogBrewSpan`, `CacheOperationWithLogBrewSpan`,
+  `QueueOperationWithLogBrewSpan`, and the SQL helper path now record one
+  failed dependency span when the app-owned callback panics, then re-panic with
+  the original value.
+- Server request metadata now uses the existing blocked-key sanitizer, so
+  payload/header/body/auth-like keys are not copied as primitive metadata.
+
+### Privacy Boundary
+
+- LogBrew intentionally does not capture panic messages, stacks, request or
+  response bodies, headers, full URLs, query/hash text, SQL text, args, cache
+  values, message bodies, baggage, tracestate, or raw propagation.
+
+### Updated Proof
+
+- RED focused Go tests first produced zero events for HTTP/dependency panics.
+- GREEN `bash scripts/check_go_tests.sh`.
+- GREEN `bash scripts/real_user_go_smoke.sh`, including packaged temp-app
+  proof that HTTP and database panics re-panic with original values while
+  emitting sanitized failed spans.
 
 ## OpenTelemetry Bridge Follow-Up - 2026-07-03
 
@@ -102,4 +142,7 @@ The installed-artifact Go smoke now packages and runs `examples/http_trace_corre
 
 - Sentry and Datadog still have richer automatic framework coverage and deeper OTel pipeline ownership.
 - Datadog's OTel adapter carries richer span events, attributes, links, baggage, and tracestate; LogBrew intentionally exports a smaller privacy-bounded subset.
-- Go still lacks Gin/Chi/Echo/Fiber/gRPC automatic middleware, automatic panic recovery helpers, and first-party automatic driver integrations for common DB/cache/queue clients.
+- Go still lacks Gin/Chi/Echo/Fiber/gRPC automatic middleware and first-party
+  automatic driver integrations for common DB/cache/queue clients. Explicit
+  app-owned HTTP and dependency panic spans are covered by the 2026-07-04
+  follow-up.

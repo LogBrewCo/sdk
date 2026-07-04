@@ -292,6 +292,22 @@ func QueueOperationWithLogBrewSpan[T any](
 
 	start := now()
 	operationCtx := ContextWithLogBrewTrace(ctxWithDefault(ctx), trace)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			finished := now()
+			captureOperationPanicSpan(client, operationName, trace, recovered, finished.Sub(start), finished, operationSpanConfig{
+				source:        "queue.operation",
+				namePrefix:    "queue",
+				eventIDPrefix: eventIDPrefix(config.EventIDPrefix, "go_queue"),
+				metadata:      queueOperationMetadata(operationName, config),
+				links:         queueTraceLinks(config),
+				spanIDFactory: config.SpanIDFactory,
+				now:           config.Now,
+				onError:       config.OnError,
+			})
+			panic(recovered)
+		}
+	}()
 	result, operationErr := operation(operationCtx)
 	finished := now()
 	captureOperationSpan(client, operationName, trace, operationErr, finished.Sub(start), finished, operationSpanConfig{
@@ -350,6 +366,13 @@ func operationWithLogBrewSpan[T any](
 
 	start := now()
 	operationCtx := ContextWithLogBrewTrace(ctxWithDefault(ctx), trace)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			finished := now()
+			captureOperationPanicSpan(client, operationName, trace, recovered, finished.Sub(start), finished, config)
+			panic(recovered)
+		}
+	}()
 	result, operationErr := operation(operationCtx)
 	finished := now()
 	captureOperationSpan(client, operationName, trace, operationErr, finished.Sub(start), finished, config)
@@ -388,9 +411,27 @@ func sqlDatabaseOperationWithLogBrewSpan[T any](
 
 	start := now()
 	operationCtx := ContextWithLogBrewTrace(ctxWithDefault(ctx), trace)
+	enriched := config
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			finished := now()
+			if enrich != nil {
+				enrich(zero, nil, &enriched)
+			}
+			captureOperationPanicSpan(client, operationName, trace, recovered, finished.Sub(start), finished, operationSpanConfig{
+				source:        "database.operation",
+				namePrefix:    "database",
+				eventIDPrefix: eventIDPrefix(enriched.EventIDPrefix, "go_database"),
+				metadata:      databaseOperationMetadata(operationName, enriched),
+				spanIDFactory: enriched.SpanIDFactory,
+				now:           enriched.Now,
+				onError:       enriched.OnError,
+			})
+			panic(recovered)
+		}
+	}()
 	result, operationErr := operation(operationCtx)
 	finished := now()
-	enriched := config
 	if enrich != nil {
 		enrich(result, operationErr, &enriched)
 	}
@@ -581,18 +622,63 @@ func captureOperationSpan(
 	finished time.Time,
 	config operationSpanConfig,
 ) {
+	extraMetadata := map[string]any{}
+	if operationErr != nil {
+		extraMetadata["errorType"] = reflect.TypeOf(operationErr).String()
+	}
+	captureOperationSpanWithMetadata(
+		client,
+		operationName,
+		trace,
+		operationSpanStatus(operationErr),
+		duration,
+		finished,
+		config,
+		extraMetadata,
+	)
+}
+
+func captureOperationPanicSpan(
+	client *Client,
+	operationName string,
+	trace TraceContext,
+	recovered any,
+	duration time.Duration,
+	finished time.Time,
+	config operationSpanConfig,
+) {
+	captureOperationSpanWithMetadata(
+		client,
+		operationName,
+		trace,
+		"error",
+		duration,
+		finished,
+		config,
+		panicMetadata(recovered),
+	)
+}
+
+func captureOperationSpanWithMetadata(
+	client *Client,
+	operationName string,
+	trace TraceContext,
+	status string,
+	duration time.Duration,
+	finished time.Time,
+	config operationSpanConfig,
+	extraMetadata map[string]any,
+) {
 	durationMs := float64(duration.Microseconds()) / 1000
 	metadata := mergeMetadata(config.metadata, map[string]any{
 		"source":  config.source,
 		"sampled": trace.Sampled,
 	})
-	if operationErr != nil {
-		metadata = mergeMetadata(metadata, map[string]any{"errorType": reflect.TypeOf(operationErr).String()})
-	}
+	metadata = mergeMetadata(metadata, extraMetadata)
 	span, err := SpanAttributesFromTraceContext(TraceContextSpanInput{
 		Trace:      trace,
 		Name:       fmt.Sprintf("%s:%s", config.namePrefix, strings.TrimSpace(operationName)),
-		Status:     operationSpanStatus(operationErr),
+		Status:     status,
 		DurationMs: &durationMs,
 		Metadata:   metadata,
 		Links:      config.links,

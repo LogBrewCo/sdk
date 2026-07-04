@@ -193,6 +193,72 @@ func TestCacheAndQueueOperationSpansPreserveErrors(t *testing.T) {
 	}
 }
 
+func TestOperationSpanHelpersCapturePanicSpanAndRepanicWithoutLeakingValue(t *testing.T) {
+	client := sampleClient(t)
+	parent, err := NewTraceContext(TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := ContextWithLogBrewTrace(context.Background(), parent)
+	nowCalls := 0
+	now := func() time.Time {
+		nowCalls++
+		switch nowCalls {
+		case 1:
+			return time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
+		default:
+			return time.Date(2026, 6, 2, 10, 0, 0, 19*int(time.Millisecond), time.UTC)
+		}
+	}
+
+	recovered := capturePanic(func() {
+		_, _ = DatabaseOperationWithLogBrewSpan(ctx, client, "select checkout", func(operationCtx context.Context) (string, error) {
+			if _, ok := LogBrewTraceFromContext(operationCtx); !ok {
+				t.Fatal("expected active operation trace before panic")
+			}
+			panic(errors.New("private database panic value"))
+		}, DatabaseOperationConfig{
+			System:        "postgresql",
+			OperationKind: "query",
+			DatabaseName:  "orders",
+			EventIDPrefix: "go_db_panic",
+			Metadata: map[string]any{
+				"component": "checkout",
+				"query":     "SELECT private",
+			},
+			SpanIDFactory: func() string {
+				return "b7ad6b7169203331"
+			},
+			Now: now,
+		})
+	})
+	if recovered == nil || fmt.Sprint(recovered) != "private database panic value" {
+		t.Fatalf("expected original panic value, got %#v", recovered)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload, `"id": "go_db_panic_span_b7ad6b7169203331"`) ||
+		!strings.Contains(payload, `"status": "error"`) ||
+		!strings.Contains(payload, `"durationMs": 19`) ||
+		!strings.Contains(payload, `"panic": true`) ||
+		!strings.Contains(payload, `"panicType": "*errors.errorString"`) ||
+		!strings.Contains(payload, `"component": "checkout"`) ||
+		!strings.Contains(payload, `"dbSystem": "postgresql"`) {
+		t.Fatalf("missing panic operation span metadata: %s", payload)
+	}
+	for _, unsafe := range []string{"private database panic value", "SELECT private"} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("panic operation span leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
 func TestQueueOperationWithLogBrewSpanInjectsOutgoingTraceparent(t *testing.T) {
 	client := sampleClient(t)
 	parent, err := NewTraceContext(TraceContextInput{
@@ -852,6 +918,24 @@ func TestSQLTransactionWithLogBrewSpanRollsBackAndRepanics(t *testing.T) {
 		}
 		if state.commits.Load() != 0 || state.rollbacks.Load() != 1 {
 			t.Fatalf("expected rollback before repanic: commits=%d rollbacks=%d", state.commits.Load(), state.rollbacks.Load())
+		}
+		payload, err := client.PreviewJSON()
+		if err != nil {
+			t.Fatalf("preview json: %v", err)
+		}
+		for _, want := range []string{
+			`"id": "go_sql_tx_panic_span_b7ad6b7169203344"`,
+			`"status": "error"`,
+			`"panic": true`,
+			`"panicType": "string"`,
+			`"dbTransactionOutcome": "panic_rollback"`,
+		} {
+			if !strings.Contains(payload, want) {
+				t.Fatalf("missing transaction panic span metadata %s: %s", want, payload)
+			}
+		}
+		if strings.Contains(payload, "panic from app transaction") {
+			t.Fatalf("transaction panic span leaked panic value: %s", payload)
 		}
 	}()
 

@@ -34,6 +34,14 @@ func sampleClient(t *testing.T) *Client {
 	return client
 }
 
+func capturePanic(operation func()) (recovered any) {
+	defer func() {
+		recovered = recover()
+	}()
+	operation()
+	return nil
+}
+
 func enqueueAll(t *testing.T, client *Client) {
 	t.Helper()
 	if err := client.Release("evt_release_001", "2026-06-02T10:00:00Z", ReleaseAttributes{Version: "1.2.3", Commit: "abc123def456"}); err != nil {

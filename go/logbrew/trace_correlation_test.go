@@ -231,6 +231,70 @@ func TestHTTPHandlerFallsBackWhenTraceparentIsMalformed(t *testing.T) {
 	}
 }
 
+func TestHTTPHandlerCapturesPanicSpanAndRepanicsWithoutLeakingValue(t *testing.T) {
+	client := sampleClient(t)
+	baseTime := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
+	nowCalls := 0
+	now := func() time.Time {
+		nowCalls++
+		switch nowCalls {
+		case 1:
+			return baseTime
+		default:
+			return baseTime.Add(17 * time.Millisecond)
+		}
+	}
+	handler, err := NewHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := LogBrewTraceFromContext(r.Context()); !ok {
+			t.Fatalf("expected active trace context before panic")
+		}
+		panic("private checkout panic value")
+	}), HTTPHandlerConfig{
+		Client:        client,
+		RouteTemplate: "/checkout/:cart_id",
+		EventIDPrefix: "go_http_panic",
+		Metadata: map[string]any{
+			"component": "checkout",
+			"payload":   "private request body",
+		},
+		SpanIDFactory: func() string {
+			return "b7ad6b7169203331"
+		},
+		Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recovered := capturePanic(func() {
+		request := httptest.NewRequest(http.MethodGet, "/checkout/cart_123?coupon=sale", nil)
+		request.Header.Set("traceparent", "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
+		handler.ServeHTTP(httptest.NewRecorder(), request)
+	})
+	if recovered != "private checkout panic value" {
+		t.Fatalf("expected original panic value, got %#v", recovered)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload, `"id": "go_http_panic_span_1"`) ||
+		!strings.Contains(payload, `"status": "error"`) ||
+		!strings.Contains(payload, `"durationMs": 17`) ||
+		!strings.Contains(payload, `"statusCode": 500`) ||
+		!strings.Contains(payload, `"panic": true`) ||
+		!strings.Contains(payload, `"panicType": "string"`) ||
+		!strings.Contains(payload, `"component": "checkout"`) {
+		t.Fatalf("missing panic span metadata: %s", payload)
+	}
+	for _, unsafe := range []string{"private checkout panic value", "private request body", "coupon=sale", "traceparent"} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("panic span leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
 func TestHTTPClientTransportInjectsChildTraceAndQueuesSpan(t *testing.T) {
 	client := sampleClient(t)
 	baseTime := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)

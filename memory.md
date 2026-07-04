@@ -1,5 +1,30 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: JavaScript OTel exception-trace discoverability gap reduced
+  after source reads from Sentry JS
+  `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
+  (`spanToJSON`, streamed span JSON/status helpers, fetch error span status),
+  OpenTelemetry JS
+  `open-telemetry/opentelemetry-js@d9c170c94884e345dff6d67322794e85e6e07f18`
+  (`ReadableSpan`, `Span.recordException`, Zipkin span transform), Datadog
+  `dd-trace-js@9919e404a97345a652d0090e281dd3d278077c86`
+  (`extractError`, `writeErrorMeta`, GraphQL span error tagging), and PostHog
+  JS `PostHog/posthog-js@e480a3e23ecff45d2f9cf50332f6f59c54a7c736`
+  (`captureException`, React Native exception steps). `@logbrew/sdk` now
+  summarizes OTel `exception` span events as `otel.exception_event_count`,
+  optional `otel.exception_escaped_count`, safe `otel.exception_types`, and
+  matching `otel.trace.*` summary fields; escaped exception events on unset
+  OTel status mark the LogBrew span as `error`, while explicit OTel `OK` stays
+  `ok`. Messages, stacks, raw propagation headers, full URLs, DB statements,
+  payloads, baggage, and tracestate stay blocked by default. Evidence: RED
+  focused JS OTel trace-summary test failed on missing exception metadata;
+  GREEN `npm --prefix js/logbrew-js test` (92 tests) and GREEN
+  `bash scripts/real_user_js_opentelemetry_smoke.sh` with packed SDK,
+  temporary app, current OTel packages, public API typecheck, processor/exporter
+  payload assertions, and unsafe-field omission. Research:
+  `docs/competitor-research/js-opentelemetry-exception-trace-summary-2026-07-04.md`.
+  Honest gap: Sentry/Datadog still lead on hosted trace UI, error grouping,
+  span-to-error navigation, and deeper automatic instrumentation.
 - 2026-07-04: Browser/JS error cause-chain summary gap reduced after source
   reads from Sentry JS
   `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
@@ -670,9 +695,18 @@
   Evidence: RED missing OTel package, GREEN `bash scripts/check_go_tests.sh`,
   `bash scripts/real_user_go_opentelemetry_smoke.sh`, and release metadata.
   Research: `docs/competitor-research/go-trace-correlation-2026-06-16.md`.
+- 2026-07-04 Go panic span follow-up: `NewHTTPHandler` and app-owned
+  database/cache/queue/SQL span helpers now record sanitized failed spans on
+  app panics and then re-panic with the original value. Panic metadata is
+  limited to `panic=true` and type-only `panicType`; no panic messages, stacks,
+  request/response bodies, headers, full URLs, SQL text, args, baggage, or
+  tracestate are copied. Server request metadata now uses the blocked-key
+  sanitizer. Evidence: RED focused Go tests first produced zero events for
+  HTTP/dependency panics; GREEN `bash scripts/check_go_tests.sh` and
+  `bash scripts/real_user_go_smoke.sh` with packaged HTTP/database panic proof.
   Remaining Go gaps: Sentry/Datadog still lead on automatic framework/client
-  coverage, panic recovery, full OTel pipeline ownership, baggage/tracestate,
-  and richer automatic DB/cache/queue spans.
+  coverage, full OTel pipeline ownership, baggage/tracestate, and richer
+  automatic DB/cache/queue spans.
 - 2026-07-03: Node opt-in global fetch, app-owned fetch timing metadata,
   and target-gated Undici diagnostics instrumentation added after source reads
   from Sentry JavaScript
