@@ -157,6 +157,7 @@ test("installed browser errors attach release artifact Debug ID metadata without
       }
     });
     const error = new TypeError("Checkout exploded");
+    error.cause = new RangeError("gateway marker dynamic-user-marker");
     error.stack = [
       "TypeError: Checkout exploded",
       "    at checkout (https://cdn.example/assets/app.js?debug=true#section:12:34)",
@@ -192,6 +193,9 @@ test("installed browser errors attach release artifact Debug ID metadata without
     assert.equal(issue.attributes.metadata.errorFrameColumn, 34);
     assert.equal(issue.attributes.metadata.issueGroupingKey, "browser.error:TypeError:/assets/app.js");
     assert.equal(issue.attributes.metadata.issueGroupingSource, "error_type_and_frame");
+    assert.equal(issue.attributes.metadata.errorCauseCount, 1);
+    assert.equal(issue.attributes.metadata.errorCauseTypes, "RangeError");
+    assert.equal(issue.attributes.metadata.errorCauseSources, "cause");
     assert.equal(issue.attributes.metadata.release, "web@2026.07.04");
     assert.equal(issue.attributes.metadata.environment, "production");
     assert.equal(issue.attributes.metadata.service, "checkout-web");
@@ -203,7 +207,7 @@ test("installed browser errors attach release artifact Debug ID metadata without
     assert.equal(issue.attributes.metadata.releaseArtifactDebugId, "11111111-2222-4333-8444-555555555555");
 
     const serialized = JSON.stringify(issue);
-    assert.doesNotMatch(serialized, /cdn\.example|debug=true|section|vendor\.js|errorStack|nestedDropped|private/u);
+    assert.doesNotMatch(serialized, /cdn\.example|debug=true|section|vendor\.js|errorStack|nestedDropped|dynamic-user-marker/u);
   } finally {
     await removeTempDir();
   }

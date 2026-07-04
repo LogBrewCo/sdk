@@ -323,6 +323,7 @@ try {
   sandbox.window.__logbrewViteProbe.checkoutFailureSignal();
 } catch (error) {
   error.stack = String(error.stack || "").replaceAll(jsPath, runtimeUrl);
+  error.cause = new TypeError("payment gateway marker hidden-user-marker");
 
   const traceContext = createBrowserTraceContext({
     sampled: true,
@@ -382,6 +383,9 @@ assert runtime_issue["metadata"]["releaseArtifactCodeFile"] == runtime_path
 assert runtime_issue["metadata"]["errorFrameFile"] == runtime_path
 assert runtime_issue["metadata"]["issueGroupingKey"] == f"browser.error:Error:{runtime_path}"
 assert runtime_issue["metadata"]["issueGroupingSource"] == "error_type_and_frame"
+assert runtime_issue["metadata"]["errorCauseCount"] == 1
+assert runtime_issue["metadata"]["errorCauseTypes"] == "TypeError"
+assert runtime_issue["metadata"]["errorCauseSources"] == "cause"
 assert runtime_issue["metadata"]["release"] == "2026.06.18-vite"
 assert runtime_issue["metadata"]["environment"] == "production"
 assert runtime_issue["metadata"]["service"] == "checkout-web"
@@ -392,6 +396,7 @@ assert "cdn.example" not in serialized_runtime_issue
 assert "cache=placeholder" not in serialized_runtime_issue
 assert "fragment" not in serialized_runtime_issue
 assert "hidden@example.test" not in serialized_runtime_issue
+assert "payment gateway marker" not in serialized_runtime_issue
 assert "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_runtime_issue
 assert tmp_dir not in serialized_runtime_issue
 PY

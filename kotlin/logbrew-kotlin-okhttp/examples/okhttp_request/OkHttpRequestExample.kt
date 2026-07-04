@@ -31,7 +31,7 @@ fun main() {
         exchange.responseBody.close()
     }
     server.createContext("/api/redirect") { exchange ->
-        exchange.responseHeaders.add("Location", "/api/orders?redirect_token=secret")
+        exchange.responseHeaders.add("Location", "/api/orders?redirect_marker=opaque")
         exchange.sendResponseHeaders(302, -1)
         exchange.close()
     }
@@ -75,7 +75,7 @@ fun main() {
                     LogBrewOkHttpRouteTemplates.tag(
                         Request
                             .Builder()
-                            .url("http://127.0.0.1:$port/api/redirect?redirect_token=secret#jump")
+                            .url("http://127.0.0.1:$port/api/redirect?redirect_marker=opaque#jump")
                             .build(),
                         "/api/redirect",
                     ),
@@ -140,7 +140,7 @@ fun main() {
     check("\"parentSpanId\": \"${parent.spanId}\"" in body)
     check("cart=123" !in body)
     check("cart=456" !in body)
-    check("redirect_token=secret" !in body)
+    check("redirect_marker=opaque" !in body)
     check("Location" !in body)
     check("#jump" !in body)
     check("#pay" !in body)

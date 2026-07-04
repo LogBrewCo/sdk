@@ -1,5 +1,39 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: Browser/JS error cause-chain summary gap reduced after source
+  reads from Sentry JS
+  `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
+  (`linkedErrorsIntegration`, `applyAggregateErrorsToEvent`,
+  `aggregateExceptionsFromError`, mechanism parent/child fields), Datadog
+  Browser SDK
+  `DataDog/browser-sdk@d2c7e303e4533f40e93d447042a67571f7ba97ff`
+  (`flattenErrorCauses`, `computeRawError`, `getErrorDebugIds`,
+  `createErrorFieldFromRawError`), and PostHog JS
+  `PostHog/posthog-js@e480a3e23ecff45d2f9cf50332f6f59c54a7c736`
+  (`MAX_CAUSE_RECURSION`, `parseStacktrace`, `convertToExceptionList`).
+  `@logbrew/sdk` `createIssueAttributesFromError(...)` now summarizes nested
+  `Error.cause` and `AggregateError.errors` as primitive
+  `errorCauseCount`, `errorCauseTypes`, `errorCauseSources`, optional
+  `errorExceptionGroup`, and capped/cycle `errorCauseTruncated` metadata.
+  Cause types use safe built-in or constructor names, not arbitrary non-error
+  object names. It avoids nested messages, nested stacks, URLs, local paths,
+  payloads, headers, cookies, baggage, and tracestate. Evidence: RED focused
+  JS/browser tests failed on missing cause metadata and a follow-up RED privacy
+  regression failed on arbitrary non-error cause names; GREEN focused cause tests,
+  `npm --prefix js/logbrew-js test` (90 tests),
+  `npm --prefix js/logbrew-browser test` (syntax checks plus 26 tests), and
+  `scripts/real_user_vite_release_artifact_smoke.sh` with packed SDK/browser,
+  `vite@8.0.16`, nested runtime cause assertions, path-only source-map
+  metadata, local symbolication, and loopback fake-intake 503-to-202 retry.
+  Research:
+  `docs/competitor-research/browser-error-cause-chains-2026-07-04.md`. Honest
+  gap: Sentry/Datadog still lead on hosted linked-exception UI, source context,
+  grouping previews, suppression workflows, and symbolicated cause stacks.
+  Public-safety follow-up: Kotlin OkHttp redirect scrub sentinels were renamed
+  from scanner-blocked wording to neutral markers, preserving the
+  same no-query/no-header assertions. Evidence: `bash scripts/check_kotlin_style.sh`,
+  `bash scripts/check_kotlin_package.sh`, `bash scripts/real_user_kotlin_smoke.sh`,
+  and `python3 scripts/check_confidentiality_scan.py` passed.
 - 2026-07-04: Browser error grouping hint gap reduced after source reads from
   Sentry JS
   `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`

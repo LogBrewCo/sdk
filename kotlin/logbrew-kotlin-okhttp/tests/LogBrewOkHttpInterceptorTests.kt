@@ -200,7 +200,7 @@ private fun okHttpInterceptorSummarizesPriorRedirectResponses() {
     val redirectRequest =
         Request
             .Builder()
-            .url("https://mobile.example.test/redirect/private?token=secret#follow")
+            .url("https://mobile.example.test/redirect/opaque?redirect_marker=opaque#follow")
             .build()
     val priorRedirect =
         Response
@@ -209,7 +209,7 @@ private fun okHttpInterceptorSummarizesPriorRedirectResponses() {
             .protocol(Protocol.HTTP_1_1)
             .code(302)
             .message("Found")
-            .header("Location", "https://mobile.example.test/api/checkout?token=secret")
+            .header("Location", "https://mobile.example.test/api/checkout?redirect_marker=opaque")
             .build()
     val chain =
         FakeChain(
@@ -235,8 +235,8 @@ private fun okHttpInterceptorSummarizesPriorRedirectResponses() {
     check("\"okhttp.redirectCount\": 1" in body)
     check("\"okhttp.retryCount\": 0" in body)
     check("Location" !in body)
-    check("redirect/private" !in body)
-    check("token=secret" !in body)
+    check("redirect/opaque" !in body)
+    check("redirect_marker=opaque" !in body)
     check("cart=123" !in body)
     check("#follow" !in body)
     check("#pay" !in body)

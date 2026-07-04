@@ -120,7 +120,7 @@ try {
 }
 ```
 
-The helper records the error name/message, the first parsed frame filename/line/column with query strings and hashes removed, optional trace/release/environment/service metadata, and optional `releaseArtifactDebugId` metadata. It also emits an `issueGroupingKey` based on source, error type, and the sanitized first frame, plus an optional app-owned `issueFingerprint` when you pass a stable, safe, low-cardinality `fingerprint`. Local absolute frame paths are reduced before enqueueing. Raw stack text is included only with `includeErrorStack: true`.
+The helper records the error name/message, the first parsed frame filename/line/column with query strings and hashes removed, optional trace/release/environment/service metadata, and optional `releaseArtifactDebugId` metadata. It also emits an `issueGroupingKey` based on source, error type, and the sanitized first frame, plus an optional app-owned `issueFingerprint` when you pass a stable, safe, low-cardinality `fingerprint`. Nested `Error.cause` chains and `AggregateError.errors` are summarized as bounded cause counts, types, and sources without copying nested messages or stacks. Local absolute frame paths are reduced before enqueueing. Raw stack text is included only with `includeErrorStack: true`.
 
 ## Example
 

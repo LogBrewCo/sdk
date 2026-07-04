@@ -31,6 +31,17 @@ const TRACEPARENT_PATTERN = /^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16
 const ZERO_TRACE_ID = "00000000000000000000000000000000";
 const ZERO_SPAN_ID = "0000000000000000";
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
+const MAX_ERROR_CAUSES = 5;
+const BUILTIN_ERROR_NAMES = new Set([
+  "AggregateError",
+  "Error",
+  "EvalError",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "TypeError",
+  "URIError"
+]);
 const MAX_SPAN_EVENTS = 8;
 const MAX_SPAN_LINKS = 8;
 const SAFE_DEBUG_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u;
@@ -432,6 +443,7 @@ function createIssueAttributesFromError(error, options = {}) {
       errorFrameColumn: frame.column
     } : {}),
     ...issueGroupingMetadata(source, details, frame, options.fingerprint),
+    ...errorCauseMetadata(error),
     ...(stringOrUndefined(options.release) ? { release: options.release } : {}),
     ...(stringOrUndefined(options.environment) ? { environment: options.environment } : {}),
     ...(stringOrUndefined(options.service) ? { service: options.service } : {}),
@@ -490,6 +502,89 @@ function issueFingerprintOrUndefined(value) {
     throw new SdkError("validation_error", "issue fingerprint must be a non-empty string");
   }
   return value.trim();
+}
+
+function errorCauseMetadata(error) {
+  const state = {
+    items: [],
+    seen: new Set(),
+    sawExceptionGroup: false,
+    truncated: false
+  };
+  if (isObjectLike(error)) {
+    state.seen.add(error);
+    collectNestedErrorCauses(error, state);
+  }
+  if (state.items.length === 0) {
+    return {};
+  }
+  return {
+    errorCauseCount: state.items.length,
+    errorCauseTypes: state.items.map((item) => item.type).join(","),
+    errorCauseSources: state.items.map((item) => item.source).join(","),
+    ...(state.sawExceptionGroup ? { errorExceptionGroup: true } : {}),
+    ...(state.truncated ? { errorCauseTruncated: true } : {})
+  };
+}
+
+function collectNestedErrorCauses(parent, state) {
+  if (!isObjectLike(parent)) {
+    return;
+  }
+  if ("cause" in parent) {
+    collectErrorCause(parent.cause, "cause", state);
+  }
+  if (Array.isArray(parent.errors)) {
+    state.sawExceptionGroup = true;
+    for (const [index, child] of parent.errors.entries()) {
+      collectErrorCause(child, `errors[${index}]`, state);
+    }
+  }
+}
+
+function collectErrorCause(value, source, state) {
+  if (value === undefined || value === null) {
+    return;
+  }
+  if (state.items.length >= MAX_ERROR_CAUSES) {
+    state.truncated = true;
+    return;
+  }
+  if (isObjectLike(value)) {
+    if (state.seen.has(value)) {
+      state.truncated = true;
+      return;
+    }
+    state.seen.add(value);
+  }
+  state.items.push({
+    source,
+    type: errorCauseType(value)
+  });
+  collectNestedErrorCauses(value, state);
+}
+
+function errorCauseType(value) {
+  if (isObjectLike(value)) {
+    const constructorName = safeCauseTypeName(value.constructor?.name);
+    if (value instanceof Error) {
+      if (constructorName && constructorName !== "Error") {
+        return constructorName;
+      }
+      const builtinName = BUILTIN_ERROR_NAMES.has(value.name) ? value.name : undefined;
+      return builtinName ?? constructorName ?? "Error";
+    }
+    return constructorName ?? "Object";
+  }
+  return "NonError";
+}
+
+function safeCauseTypeName(value) {
+  return typeof value === "string" && /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/u.test(value) ? value : undefined;
+}
+
+function isObjectLike(value) {
+  return value !== null && (typeof value === "object" || typeof value === "function");
 }
 
 function firstJavaScriptStackFrame(stack) {

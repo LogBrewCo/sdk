@@ -306,6 +306,76 @@ test("createIssueAttributesFromError supports explicit privacy-bounded grouping 
   assert.doesNotMatch(serializedGroupingMetadata, /dev@example|12345|email=|retry|ignoredObject|nested/u);
 });
 
+test("createIssueAttributesFromError summarizes cause chains without cause messages or stacks", () => {
+  const low = new TypeError("low wrapped detail for dynamic-user-marker");
+  low.stack = "TypeError: low wrapped detail\n    at low (/tmp/local/low.js:1:2)";
+  const mid = new RangeError("middle checkout numeric-marker-12345");
+  mid.cause = low;
+  mid.stack = "RangeError: middle checkout numeric-marker-12345\n    at mid (/tmp/local/mid.js:3:4)";
+  const side = new SyntaxError("side opaque-marker-abc123");
+  const error = new AggregateError([mid, side], "top checkout failed", {
+    cause: new URIError("wrapped callback dynamic-user-marker")
+  });
+
+  const attributes = createIssueAttributesFromError(error);
+
+  assert.equal(attributes.metadata.errorCauseCount, 4);
+  assert.equal(attributes.metadata.errorCauseTypes, "URIError,RangeError,TypeError,SyntaxError");
+  assert.equal(attributes.metadata.errorCauseSources, "cause,errors[0],cause,errors[1]");
+  assert.equal(attributes.metadata.errorExceptionGroup, true);
+  assert.equal(attributes.metadata.errorCauseTruncated, undefined);
+
+  const serializedCauseMetadata = JSON.stringify({
+    errorCauseCount: attributes.metadata.errorCauseCount,
+    errorCauseTypes: attributes.metadata.errorCauseTypes,
+    errorCauseSources: attributes.metadata.errorCauseSources,
+    errorExceptionGroup: attributes.metadata.errorExceptionGroup
+  });
+  assert.doesNotMatch(serializedCauseMetadata, /wrapped detail|dynamic-user-marker|12345|abc123|local|stack/u);
+});
+
+test("createIssueAttributesFromError caps cause chain summaries", () => {
+  class Cause0 extends Error {}
+  class Cause1 extends Error {}
+  class Cause2 extends Error {}
+  class Cause3 extends Error {}
+  class Cause4 extends Error {}
+  class Cause5 extends Error {}
+  class Cause6 extends Error {}
+
+  const causeTypes = [Cause0, Cause1, Cause2, Cause3, Cause4, Cause5, Cause6];
+  const error = new Error("root");
+  let cursor = error;
+  for (let index = 0; index < 7; index += 1) {
+    const CauseType = causeTypes[index];
+    const next = new CauseType(`cause ${index}`);
+    cursor.cause = next;
+    cursor = next;
+  }
+
+  const attributes = createIssueAttributesFromError(error);
+
+  assert.equal(attributes.metadata.errorCauseCount, 5);
+  assert.equal(attributes.metadata.errorCauseTypes, "Cause0,Cause1,Cause2,Cause3,Cause4");
+  assert.equal(attributes.metadata.errorCauseSources, "cause,cause,cause,cause,cause");
+  assert.equal(attributes.metadata.errorCauseTruncated, true);
+});
+
+test("createIssueAttributesFromError avoids arbitrary non-error cause names", () => {
+  const error = new Error("root");
+  error.cause = {
+    name: "dynamicUserMarker123",
+    message: "nested detail should not copy"
+  };
+
+  const attributes = createIssueAttributesFromError(error);
+
+  assert.equal(attributes.metadata.errorCauseCount, 1);
+  assert.equal(attributes.metadata.errorCauseTypes, "Object");
+  assert.equal(attributes.metadata.errorCauseSources, "cause");
+  assert.doesNotMatch(JSON.stringify(attributes.metadata), /dynamicUserMarker123|nested detail/u);
+});
+
 test("createIssueAttributesFromError omits local paths and stack text by default", () => {
   const error = new Error("Local build failed");
   error.stack = [
