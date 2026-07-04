@@ -199,6 +199,7 @@ with tracer.start_as_current_span(
             "exception.type": "ValueError",
             "exception.message": "blocked card failed",
             "exception.stacktrace": "blocked stack",
+            "exception.escaped": True,
         },
     )
     root_span.set_status(Status(StatusCode.ERROR))
@@ -260,10 +261,16 @@ print(
             "rootTraceId": root["traceId"],
             "dependencyParentSpanId": dependency["parentSpanId"],
             "rootStatus": root["status"],
+            "rootExceptionEventCount": root["metadata"]["otel.exception_event_count"],
+            "rootExceptionEscapedCount": root["metadata"]["otel.exception_escaped_count"],
+            "rootExceptionTypes": root["metadata"]["otel.exception_types"],
             "summaryName": summary["name"],
             "summaryStatus": summary["status"],
             "summarySpanCount": summary["metadata"]["otel.trace.span_count"],
             "summaryErrorSpanCount": summary["metadata"]["otel.trace.error_span_count"],
+            "summaryExceptionEventCount": summary["metadata"]["otel.trace.exception_event_count"],
+            "summaryExceptionEscapedCount": summary["metadata"]["otel.trace.exception_escaped_count"],
+            "summaryExceptionTypes": summary["metadata"]["otel.trace.exception_types"],
             "dependencyLinkCount": len(dependency_links),
             "dependencyLinkTraceId": dependency_links[0]["traceId"],
             "dependencyLinkOperation": dependency_links[0]["metadata"]["messaging.operation.name"],
@@ -335,6 +342,7 @@ with tracer.start_as_current_span(
             "exception.type": "RuntimeError",
             "exception.message": "blocked exporter failure",
             "exception.stacktrace": "blocked stack",
+            "exception.escaped": True,
         },
     )
     root_span.set_status(Status(StatusCode.ERROR))
@@ -397,10 +405,16 @@ print(
             "rootTraceId": root["traceId"],
             "dependencyParentSpanId": dependency["parentSpanId"],
             "rootStatus": root["status"],
+            "rootExceptionEventCount": root["metadata"]["otel.exception_event_count"],
+            "rootExceptionEscapedCount": root["metadata"]["otel.exception_escaped_count"],
+            "rootExceptionTypes": root["metadata"]["otel.exception_types"],
             "summaryName": summary["name"],
             "summaryStatus": summary["status"],
             "summarySpanCount": summary["metadata"]["otel.trace.span_count"],
             "summaryErrorSpanCount": summary["metadata"]["otel.trace.error_span_count"],
+            "summaryExceptionEventCount": summary["metadata"]["otel.trace.exception_event_count"],
+            "summaryExceptionEscapedCount": summary["metadata"]["otel.trace.exception_escaped_count"],
+            "summaryExceptionTypes": summary["metadata"]["otel.trace.exception_types"],
             "dependencyLinkCount": len(dependency_links),
             "dependencyLinkTraceId": dependency_links[0]["traceId"],
             "dependencyLinkOperation": dependency_links[0]["metadata"]["messaging.operation.name"],
@@ -428,10 +442,16 @@ grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01
 grep -q '"ok": true' "$tmp_dir/processor.stdout.json"
 grep -q '"events": 3' "$tmp_dir/processor.stdout.json"
 grep -q '"rootStatus": "error"' "$tmp_dir/processor.stdout.json"
+grep -q '"rootExceptionEventCount": 1' "$tmp_dir/processor.stdout.json"
+grep -q '"rootExceptionEscapedCount": 1' "$tmp_dir/processor.stdout.json"
+grep -q '"rootExceptionTypes": "ValueError"' "$tmp_dir/processor.stdout.json"
 grep -q '"summaryName": "opentelemetry.trace:GET /checkout"' "$tmp_dir/processor.stdout.json"
 grep -q '"summaryStatus": "error"' "$tmp_dir/processor.stdout.json"
 grep -q '"summarySpanCount": 2' "$tmp_dir/processor.stdout.json"
 grep -q '"summaryErrorSpanCount": 1' "$tmp_dir/processor.stdout.json"
+grep -q '"summaryExceptionEventCount": 1' "$tmp_dir/processor.stdout.json"
+grep -q '"summaryExceptionEscapedCount": 1' "$tmp_dir/processor.stdout.json"
+grep -q '"summaryExceptionTypes": "ValueError"' "$tmp_dir/processor.stdout.json"
 grep -q '"dependencyLinkCount": 1' "$tmp_dir/processor.stdout.json"
 grep -q '"dependencyLinkTraceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' "$tmp_dir/processor.stdout.json"
 grep -q '"dependencyLinkOperation": "receive"' "$tmp_dir/processor.stdout.json"
@@ -443,10 +463,16 @@ grep -q '"ok": true' "$tmp_dir/exporter.stdout.json"
 grep -q '"events": 3' "$tmp_dir/exporter.stdout.json"
 grep -q '"emptyExportResult": "SUCCESS"' "$tmp_dir/exporter.stdout.json"
 grep -q '"rootStatus": "error"' "$tmp_dir/exporter.stdout.json"
+grep -q '"rootExceptionEventCount": 1' "$tmp_dir/exporter.stdout.json"
+grep -q '"rootExceptionEscapedCount": 1' "$tmp_dir/exporter.stdout.json"
+grep -q '"rootExceptionTypes": "RuntimeError"' "$tmp_dir/exporter.stdout.json"
 grep -q '"summaryName": "opentelemetry.trace:GET /checkout/exporter"' "$tmp_dir/exporter.stdout.json"
 grep -q '"summaryStatus": "error"' "$tmp_dir/exporter.stdout.json"
 grep -q '"summarySpanCount": 2' "$tmp_dir/exporter.stdout.json"
 grep -q '"summaryErrorSpanCount": 1' "$tmp_dir/exporter.stdout.json"
+grep -q '"summaryExceptionEventCount": 1' "$tmp_dir/exporter.stdout.json"
+grep -q '"summaryExceptionEscapedCount": 1' "$tmp_dir/exporter.stdout.json"
+grep -q '"summaryExceptionTypes": "RuntimeError"' "$tmp_dir/exporter.stdout.json"
 grep -q '"dependencyLinkCount": 1' "$tmp_dir/exporter.stdout.json"
 grep -q '"dependencyLinkTraceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' "$tmp_dir/exporter.stdout.json"
 grep -q '"dependencyLinkOperation": "receive"' "$tmp_dir/exporter.stdout.json"

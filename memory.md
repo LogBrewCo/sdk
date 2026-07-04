@@ -1,5 +1,30 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: Python OpenTelemetry exception trace-summary gap reduced after
+  source reads from Sentry Python
+  `getsentry/sentry-python@1bd120f41780bfd5fd4d4b7c65aae395e425adab`
+  (`SentrySpanProcessor`, `on_end`, OTel span data/status mapping, trace
+  context to error-event linking), OpenTelemetry Python
+  `open-telemetry/opentelemetry-python@322c602c87f38933986a757db918591ade441bd3`
+  (`ReadableSpan`, `Span.add_event`, `Span.record_exception`, `Span.__exit__`),
+  Datadog Python
+  `DataDog/dd-trace-py@c12bb9dfb723bb96a662b7b90f36c805c4af43fb`
+  (`record_exception`, `set_exc_info`, span-event validation), and PostHog
+  Python `PostHog/posthog-python@6f75afe77ff059e4f3b0b6b7b30912612a7b5ff1`
+  (`PostHogSpanProcessor`, `PostHogTraceExporter`). Python OTel detail spans
+  now emit bounded `otel.exception_event_count`, optional escaped counts, and
+  safe exception type names; trace summaries aggregate matching
+  `otel.trace.exception_*` fields, and escaped exception events on unset OTel
+  status mark spans as `error` while explicit OTel OK remains `ok`. Exception
+  messages, stacks, payloads, headers, full URLs, baggage, tracestate, and raw
+  propagation values remain omitted by default. Evidence: RED focused tests
+  failed on missing exception metadata/status; GREEN focused OTel processor
+  tests, installed-artifact OTel smoke, and high-load installed-artifact OTel
+  smoke. Research:
+  `docs/competitor-research/python-opentelemetry-exception-trace-summary-2026-07-04.md`.
+  Honest gap: Sentry/Datadog still lead on hosted trace-to-error navigation,
+  grouping, semantic breadth, source context when enabled, and automatic
+  framework/outbound coverage.
 - 2026-07-04: Python OpenTelemetry high-load proof added after source reads
   from Sentry Python
   `getsentry/sentry-python@1bd120f41780bfd5fd4d4b7c65aae395e425adab`

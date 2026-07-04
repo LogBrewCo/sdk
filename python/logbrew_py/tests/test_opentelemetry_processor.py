@@ -232,6 +232,9 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
                 "http.method": "POST",
                 "http.route": "/checkout/:step",
                 "custom.safe": "allowlisted",
+                "otel.exception_event_count": 1,
+                "otel.exception_escaped_count": 1,
+                "otel.exception_types": "ValueError",
             },
         )
         self.assertEqual(
@@ -302,6 +305,17 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
                 context=root_context,
                 status_name="ERROR",
                 attributes={"http.method": "GET", "http.route": "/checkout"},
+                events=[
+                    FakeOpenTelemetryEvent(
+                        "exception",
+                        attributes={
+                            "exception.type": "CheckoutError",
+                            "exception.message": "checkout marker should stay private",
+                            "exception.stacktrace": "private stack marker",
+                            "exception.escaped": True,
+                        },
+                    )
+                ],
                 resource_attributes={"service.name": "checkout-api", "deployment.environment": "production"},
                 start_time=1_780_000_000_000_000_000,
                 end_time=1_780_000_000_040_000_000,
@@ -313,6 +327,16 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
                 context=child_context,
                 parent=root_context,
                 attributes={"db.system": "redis", "db.operation.name": "GET"},
+                events=[
+                    FakeOpenTelemetryEvent(
+                        "exception",
+                        attributes={
+                            "exception.type": "RetryError",
+                            "exception.message": "retry marker should stay private",
+                            "exception.escaped": False,
+                        },
+                    )
+                ],
                 links=[
                     FakeOpenTelemetryLink(
                         context=FakeOpenTelemetrySpanContext(
@@ -333,7 +357,13 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
         payload = json.loads(client.preview_json())
         self.assertEqual([event["id"] for event in payload["events"]], ["otel_1", "otel_2", "otel_trace_1"])
         self.assertEqual(payload["events"][0]["attributes"]["status"], "error")
+        self.assertEqual(payload["events"][0]["attributes"]["metadata"]["otel.exception_event_count"], 1)
+        self.assertEqual(payload["events"][0]["attributes"]["metadata"]["otel.exception_escaped_count"], 1)
+        self.assertEqual(payload["events"][0]["attributes"]["metadata"]["otel.exception_types"], "CheckoutError")
         self.assertEqual(payload["events"][1]["attributes"]["parentSpanId"], "00f067aa0ba902b7")
+        self.assertEqual(payload["events"][1]["attributes"]["metadata"]["otel.exception_event_count"], 1)
+        self.assertEqual(payload["events"][1]["attributes"]["metadata"]["otel.exception_types"], "RetryError")
+        self.assertNotIn("otel.exception_escaped_count", payload["events"][1]["attributes"]["metadata"])
         self.assertEqual(
             payload["events"][1]["attributes"]["links"],
             [
@@ -363,12 +393,19 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
                 "db.operation.name": "GET",
                 "otel.trace.span_count": 2,
                 "otel.trace.error_span_count": 1,
+                "otel.trace.exception_event_count": 2,
+                "otel.trace.exception_escaped_count": 1,
+                "otel.trace.exception_types": "CheckoutError,RetryError",
                 "otel.trace.root_span_id": "00f067aa0ba902b7",
                 "otel.trace.root_name": "GET /checkout",
                 "otel.trace.root_kind": "server",
                 "otel.trace.summary_kind": "rooted",
             },
         )
+        serialized = json.dumps(payload)
+        self.assertNotIn("checkout marker", serialized)
+        self.assertNotIn("retry marker", serialized)
+        self.assertNotIn("private stack marker", serialized)
 
         self.assertTrue(processor.shutdown())
         processor.on_end(
@@ -379,6 +416,37 @@ class OpenTelemetryProcessorTests(unittest.TestCase):
             )
         )
         self.assertEqual(len(json.loads(client.preview_json())["events"]), 3)
+
+    def test_open_telemetry_escaped_exception_on_unset_status_marks_span_error(self) -> None:
+        span = FakeOpenTelemetryReadableSpan(
+            name="worker task",
+            context=FakeOpenTelemetrySpanContext(
+                trace_id=int("4bf92f3577b34da6a3ce929d0e0e4736", 16),
+                span_id=int("b7ad6b7169203331", 16),
+                trace_flags=FakeOpenTelemetryTraceFlags(sampled=True),
+            ),
+            status_name="UNSET",
+            events=[
+                FakeOpenTelemetryEvent(
+                    "exception",
+                    attributes={
+                        "exception.type": "WorkerError",
+                        "exception.escaped": True,
+                        "exception.message": "private worker marker",
+                    },
+                )
+            ],
+        )
+
+        attributes = span_attributes_from_open_telemetry_readable_span(span)
+
+        self.assertIsNotNone(attributes)
+        assert attributes is not None
+        self.assertEqual(attributes["status"], "error")
+        self.assertEqual(attributes["metadata"]["otel.exception_event_count"], 1)
+        self.assertEqual(attributes["metadata"]["otel.exception_escaped_count"], 1)
+        self.assertEqual(attributes["metadata"]["otel.exception_types"], "WorkerError")
+        self.assertNotIn("private worker marker", json.dumps(attributes))
 
     def test_open_telemetry_span_processor_skips_unsampled_spans_by_default(self) -> None:
         client = sample_client()

@@ -102,6 +102,7 @@ SENSITIVE_OTEL_ATTRIBUTE_PATTERN = re.compile(
     r"private[-_]?key|query|secret|stack|stacktrace|token)([._-]|$)",
     re.IGNORECASE,
 )
+OPEN_TELEMETRY_EXCEPTION_TYPE_PATTERN = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$:.]{0,127}$")
 
 
 @dataclass(slots=True)
@@ -121,6 +122,9 @@ class _TraceSummary:
     trace_id: str
     span_count: int = 0
     error_span_count: int = 0
+    exception_event_count: int = 0
+    exception_escaped_count: int = 0
+    exception_types: list[str] = field(default_factory=list)
     metadata: Metadata = field(default_factory=dict)
     root_seen: bool = False
     root_span_id: str | None = None
@@ -137,6 +141,13 @@ class _NormalizedSpanContext:
     trace_id: str
     span_id: str
     sampled: bool
+
+
+@dataclass(slots=True)
+class _OpenTelemetryExceptionSummary:
+    count: int = 0
+    escaped_count: int = 0
+    types: list[str] = field(default_factory=list)
 
 
 class _FallbackSpanExportResult(Enum):
@@ -272,6 +283,7 @@ class LogBrewOpenTelemetrySpanProcessor:
 
         metadata = attributes.get("metadata")
         _copy_trace_summary_metadata(summary, metadata)
+        _record_trace_summary_exceptions(summary, metadata)
         is_root_span = attributes.get("parentSpanId") is None
         if is_root_span or summary.root_span_id is None:
             summary.root_span_id = attributes["spanId"]
@@ -495,9 +507,11 @@ def _span_attributes_from_resolved_open_telemetry_readable_span(
     if not options.capture_unsampled and not context.sampled:
         return None
 
-    metadata = _open_telemetry_readable_span_metadata(span, options)
+    raw_events = getattr(span, "events", ())
+    exception_summary = _open_telemetry_exception_summary(raw_events) if options.include_span_events else None
+    metadata = _open_telemetry_readable_span_metadata(span, options, exception_summary)
     span_events = (
-        _open_telemetry_readable_span_events(getattr(span, "events", ()), options.event_attribute_keys)
+        _open_telemetry_readable_span_events(raw_events, options.event_attribute_keys)
         if options.include_span_events
         else []
     )
@@ -521,7 +535,7 @@ def _span_attributes_from_resolved_open_telemetry_readable_span(
             "traceId": context.trace_id,
             "spanId": context.span_id,
             **({"parentSpanId": parent_span_id} if parent_span_id is not None else {}),
-            "status": _open_telemetry_span_status(getattr(span, "status", None)),
+            "status": _open_telemetry_span_status(getattr(span, "status", None), exception_summary),
             **({"durationMs": duration_ms} if duration_ms is not None else {}),
             **({"events": span_events} if span_events else {}),
             **({"links": span_links} if span_links else {}),
@@ -617,7 +631,11 @@ def _normalize_open_telemetry_span_context(span_context: Any) -> _NormalizedSpan
     )
 
 
-def _open_telemetry_readable_span_metadata(span: Any, options: _ReadableSpanOptions) -> Metadata:
+def _open_telemetry_readable_span_metadata(
+    span: Any,
+    options: _ReadableSpanOptions,
+    exception_summary: _OpenTelemetryExceptionSummary | None,
+) -> Metadata:
     metadata: Metadata = {
         "source": "opentelemetry.readable_span",
         **options.metadata,
@@ -653,6 +671,7 @@ def _open_telemetry_readable_span_metadata(span: Any, options: _ReadableSpanOpti
     )
     _add_positive_count(metadata, "otel.dropped_links_count", _first_attr(span, "dropped_links", "dropped_links_count"))
     metadata.update(_open_telemetry_selected_metadata(getattr(span, "attributes", None), options.attribute_keys))
+    metadata.update(_open_telemetry_exception_metadata(exception_summary))
     return metadata
 
 
@@ -692,6 +711,39 @@ def _open_telemetry_readable_span_events(events: Any, event_attribute_keys: froz
     return summaries
 
 
+def _open_telemetry_exception_summary(events: Any) -> _OpenTelemetryExceptionSummary | None:
+    if not isinstance(events, Iterable) or isinstance(events, str | bytes | Mapping):
+        return None
+    summary = _OpenTelemetryExceptionSummary()
+    for event in list(events)[: _instrumentation.SPAN_EVENT_LIMIT]:
+        if getattr(event, "name", None) != "exception":
+            continue
+        summary.count += 1
+        attributes = getattr(event, "attributes", None)
+        if not isinstance(attributes, Mapping):
+            continue
+        if _open_telemetry_exception_escaped(attributes.get("exception.escaped")):
+            summary.escaped_count += 1
+        exception_type = _safe_open_telemetry_exception_type(attributes.get("exception.type"))
+        if (
+            exception_type is not None
+            and exception_type not in summary.types
+            and len(summary.types) < _instrumentation.SPAN_EVENT_LIMIT
+        ):
+            summary.types.append(exception_type)
+    return summary if summary.count > 0 else None
+
+
+def _open_telemetry_exception_metadata(summary: _OpenTelemetryExceptionSummary | None) -> Metadata:
+    if summary is None or summary.count <= 0:
+        return {}
+    metadata: Metadata = {"otel.exception_event_count": summary.count}
+    _add_positive_count(metadata, "otel.exception_escaped_count", summary.escaped_count)
+    if summary.types:
+        metadata["otel.exception_types"] = ",".join(summary.types)
+    return metadata
+
+
 def _open_telemetry_readable_span_links(links: Any, link_attribute_keys: frozenset[str]) -> list[dict[str, Any]]:
     if not isinstance(links, Iterable) or isinstance(links, str | bytes | Mapping):
         return []
@@ -727,20 +779,48 @@ def _copy_trace_summary_metadata(
             summary.metadata[key] = value
 
 
+def _record_trace_summary_exceptions(summary: _TraceSummary, metadata: Metadata | None) -> None:
+    if metadata is None:
+        return
+    event_count = metadata.get("otel.exception_event_count")
+    if isinstance(event_count, int) and not isinstance(event_count, bool) and event_count > 0:
+        summary.exception_event_count += event_count
+    escaped_count = metadata.get("otel.exception_escaped_count")
+    if isinstance(escaped_count, int) and not isinstance(escaped_count, bool) and escaped_count > 0:
+        summary.exception_escaped_count += escaped_count
+    exception_types = metadata.get("otel.exception_types")
+    if not isinstance(exception_types, str) or not exception_types.strip():
+        return
+    for raw_type in exception_types.split(","):
+        exception_type = _safe_open_telemetry_exception_type(raw_type)
+        if (
+            exception_type is not None
+            and exception_type not in summary.exception_types
+            and len(summary.exception_types) < _instrumentation.SPAN_EVENT_LIMIT
+        ):
+            summary.exception_types.append(exception_type)
+
+
 def _open_telemetry_trace_summary_attributes(summary: _TraceSummary) -> SpanAttributes:
     duration_ms = _duration_ms_from_open_telemetry_trace_summary(summary)
-    metadata = _instrumentation.compact_metadata(
-        {
-            "source": "opentelemetry.trace_summary",
-            **summary.metadata,
-            "otel.trace.span_count": summary.span_count,
-            **({"otel.trace.error_span_count": summary.error_span_count} if summary.error_span_count > 0 else {}),
-            **({"otel.trace.root_span_id": summary.root_span_id} if summary.root_span_id is not None else {}),
-            **({"otel.trace.root_name": summary.root_name} if summary.root_name is not None else {}),
-            **({"otel.trace.root_kind": summary.root_kind} if summary.root_kind is not None else {}),
-            "otel.trace.summary_kind": "rooted" if summary.root_seen else "flush_batch",
-        }
-    )
+    metadata_values: Metadata = {
+        "source": "opentelemetry.trace_summary",
+        **summary.metadata,
+        "otel.trace.span_count": summary.span_count,
+        "otel.trace.summary_kind": "rooted" if summary.root_seen else "flush_batch",
+    }
+    _add_positive_count(metadata_values, "otel.trace.error_span_count", summary.error_span_count)
+    _add_positive_count(metadata_values, "otel.trace.exception_event_count", summary.exception_event_count)
+    _add_positive_count(metadata_values, "otel.trace.exception_escaped_count", summary.exception_escaped_count)
+    if summary.exception_types:
+        metadata_values["otel.trace.exception_types"] = ",".join(summary.exception_types)
+    if summary.root_span_id is not None:
+        metadata_values["otel.trace.root_span_id"] = summary.root_span_id
+    if summary.root_name is not None:
+        metadata_values["otel.trace.root_name"] = summary.root_name
+    if summary.root_kind is not None:
+        metadata_values["otel.trace.root_kind"] = summary.root_kind
+    metadata = _instrumentation.compact_metadata(metadata_values)
     return cast(
         SpanAttributes,
         {
@@ -832,10 +912,14 @@ def _open_telemetry_span_name(span: Any) -> str:
     return _string_or_none(getattr(span, "name", None)) or "opentelemetry.span"
 
 
-def _open_telemetry_span_status(status: Any) -> str:
+def _open_telemetry_span_status(status: Any, exception_summary: _OpenTelemetryExceptionSummary | None) -> str:
     status_code = _first_attr(status, "status_code", "code")
     status_name = _status_code_name(status_code)
     if status_name == "ERROR" or status_code == 2:
+        return "error"
+    if status_name == "OK" or status_code == 1:
+        return "ok"
+    if exception_summary is not None and exception_summary.escaped_count > 0:
         return "error"
     return "ok"
 
@@ -893,6 +977,19 @@ def _string_or_none(value: Any) -> str | None:
         return None
     normalized = " ".join(value.split())
     return normalized or None
+
+
+def _safe_open_telemetry_exception_type(value: Any) -> str | None:
+    exception_type = _string_or_none(value)
+    if exception_type is None or OPEN_TELEMETRY_EXCEPTION_TYPE_PATTERN.fullmatch(exception_type) is None:
+        return None
+    return exception_type
+
+
+def _open_telemetry_exception_escaped(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return isinstance(value, str) and value.strip().lower() == "true"
 
 
 def _require_client(client: Any) -> None:
