@@ -2,6 +2,7 @@ use logbrew::{
     DependencyOperationSpan, LogBrewClient, MetadataValue, OpenTelemetrySpanContext, Traceparent,
 };
 use serde_json::Value;
+use std::panic::{self, AssertUnwindSafe};
 
 fn sample_client() -> LogBrewClient {
     LogBrewClient::builder("logbrew-rust", "0.1.0")
@@ -121,4 +122,81 @@ fn dependency_operation_span_accepts_opentelemetry_parent_and_error_type() {
     assert_eq!(cache_attributes["metadata"]["cache.system"], "redis");
     assert_eq!(cache_attributes["metadata"]["cache.operation"], "get");
     assert_eq!(cache_attributes["metadata"]["cache.target"], "sessions");
+}
+
+#[test]
+fn dependency_operation_capture_panic_records_success_span_and_returns_value() {
+    let context =
+        Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").unwrap();
+    let mut client = sample_client();
+
+    let order_count = DependencyOperationSpan::database("checkout lookup", "abcdef1234567890")
+        .with_system("postgres")
+        .with_operation("select")
+        .with_target("orders")
+        .capture_panic(
+            &mut client,
+            "evt_dependency_success_001",
+            "2026-06-02T10:00:23Z",
+            &context,
+            || 3,
+        );
+
+    assert_eq!(order_count, 3);
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let attributes = &payload["events"][0]["attributes"];
+    assert_eq!(attributes["name"], "database.operation:checkout lookup");
+    assert_eq!(attributes["status"], "ok");
+    assert_eq!(attributes["metadata"]["source"], "database.operation");
+    assert_eq!(attributes["metadata"]["db.system"], "postgres");
+    assert!(attributes["metadata"].get("panic").is_none());
+    assert!(attributes["metadata"].get("panicType").is_none());
+}
+
+#[test]
+fn dependency_operation_capture_panic_records_failed_span_and_resumes_unwind() {
+    let context =
+        Traceparent::parse("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").unwrap();
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "pool".to_string(),
+        MetadataValue::String("primary".to_string()),
+    );
+    metadata.insert(
+        "sql.statement".to_string(),
+        MetadataValue::String("select * from users".to_string()),
+    );
+    let mut client = sample_client();
+
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        DependencyOperationSpan::database("checkout lookup", "abcdef1234567890")
+            .with_system("postgres")
+            .with_operation("select")
+            .with_target("orders")
+            .with_metadata(metadata)
+            .capture_panic(
+                &mut client,
+                "evt_dependency_panic_001",
+                "2026-06-02T10:00:24Z",
+                &context,
+                || panic::panic_any(String::from("do not capture this panic message")),
+            );
+    }));
+
+    assert!(result.is_err());
+    let payload: Value = serde_json::from_str(&client.preview_json().unwrap()).unwrap();
+    let attributes = &payload["events"][0]["attributes"];
+    assert_eq!(attributes["name"], "database.operation:checkout lookup");
+    assert_eq!(attributes["status"], "error");
+    assert_eq!(attributes["metadata"]["source"], "database.operation");
+    assert_eq!(attributes["metadata"]["db.system"], "postgres");
+    assert_eq!(attributes["metadata"]["exception.type"], "panic");
+    assert_eq!(attributes["metadata"]["panic"], true);
+    assert_eq!(attributes["metadata"]["panicType"], "String");
+    assert_eq!(attributes["metadata"]["pool"], "primary");
+
+    let preview = client.preview_json().unwrap();
+    assert!(!preview.contains("do not capture this panic message"));
+    assert!(!preview.contains("sql.statement"));
+    assert!(!preview.contains("select * from users"));
 }

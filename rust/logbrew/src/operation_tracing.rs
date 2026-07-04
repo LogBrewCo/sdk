@@ -3,6 +3,9 @@ use crate::{
     Metadata, OpenTelemetrySpanContext, SdkError, SpanEvent, Traceparent, TraceparentContext,
 };
 use serde_json::{Map, Value};
+use std::any::Any;
+use std::panic::{UnwindSafe, catch_unwind, resume_unwind};
+use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Dependency operation category used for low-cardinality span metadata.
@@ -151,6 +154,73 @@ impl DependencyOperationSpan {
         self.from_traceparent_context(&trace_context)
     }
 
+    /// Run app-owned dependency work, queue one span, and resume the original unwind on panic.
+    pub fn capture_panic<F, R>(
+        self,
+        client: &mut crate::LogBrewClient,
+        event_id: impl AsRef<str>,
+        timestamp: impl AsRef<str>,
+        context: &TraceparentContext,
+        operation: F,
+    ) -> R
+    where
+        F: FnOnce() -> R + UnwindSafe,
+    {
+        let started = Instant::now();
+        let result = catch_unwind(operation);
+        let duration_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+        match result {
+            Ok(value) => {
+                self.queue_capture_span(
+                    client,
+                    event_id.as_ref(),
+                    timestamp.as_ref(),
+                    context,
+                    duration_ms,
+                    None,
+                );
+                value
+            }
+            Err(payload) => {
+                let panic_type = panic_payload_type(payload.as_ref());
+                self.queue_capture_span(
+                    client,
+                    event_id.as_ref(),
+                    timestamp.as_ref(),
+                    context,
+                    duration_ms,
+                    Some(panic_type),
+                );
+                resume_unwind(payload);
+            }
+        }
+    }
+
+    fn queue_capture_span(
+        mut self,
+        client: &mut crate::LogBrewClient,
+        event_id: &str,
+        timestamp: &str,
+        context: &TraceparentContext,
+        duration_ms: f64,
+        panic_type: Option<&'static str>,
+    ) {
+        self.duration_ms = Some(duration_ms);
+        if let Some(panic_type) = panic_type {
+            self.status = "error".to_string();
+            self.error_type = Some("panic".to_string());
+            self.metadata.insert("panic".to_string(), Value::Bool(true));
+            self.metadata.insert(
+                "panicType".to_string(),
+                Value::String(panic_type.to_string()),
+            );
+        }
+        if let Ok(span) = self.from_traceparent_context(context) {
+            let _ = client.span(event_id, timestamp, span);
+        }
+    }
+
     fn span_name(&self) -> String {
         format!("{}:{}", self.kind.source(), self.name.trim())
     }
@@ -188,5 +258,15 @@ fn insert_string(metadata: &mut Metadata, key: impl Into<String>, value: &Option
         .filter(|value| !value.is_empty())
     {
         metadata.insert(key.into(), Value::String(value.to_string()));
+    }
+}
+
+fn panic_payload_type(payload: &(dyn Any + Send)) -> &'static str {
+    if payload.is::<&'static str>() {
+        "&str"
+    } else if payload.is::<String>() {
+        "String"
+    } else {
+        "unknown"
     }
 }

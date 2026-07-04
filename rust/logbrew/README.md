@@ -773,6 +773,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 The helper intentionally avoids global SQL/cache/queue patching and does not capture statements, commands, payloads, headers, raw URLs, query strings, or user-specific identifiers. Metadata uses sources such as `database.operation`, `cache.operation`, and `queue.operation`; unsafe key names and non-primitive values are dropped before the span is built. Use `with_error_type(...)` to mark a dependency span as failed without recording exception messages or stacks.
 
+For dependency work where a panic would otherwise hide the failed span, use the explicit `capture_panic(...)` helper around app-owned work. It queues an ok span on success, queues an error span with only `exception.type=panic`, `panic=true`, and a type-level `panicType` on panic, then resumes the original unwind. It does not install a global panic hook and does not record panic messages, stacks, SQL, cache keys, payloads, headers, baggage, or tracestate.
+
 ## Metrics
 
 Use `MetricEvent` for explicit app-owned measurements such as counters, gauges, and histograms. Metrics are not captured automatically; keep metadata primitive and low-cardinality, and avoid raw URLs, query strings, user IDs, request or response payloads, headers, and free-form text.
