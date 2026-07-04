@@ -1,5 +1,30 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: Python OpenTelemetry high-load proof added after source reads
+  from Sentry Python
+  `getsentry/sentry-python@1bd120f41780bfd5fd4d4b7c65aae395e425adab`
+  (`Batcher`, transport retry/rate-limit/client-report paths, span end flow),
+  OpenTelemetry Python
+  `open-telemetry/opentelemetry-python@322c602c87f38933986a757db918591ade441bd3`
+  (`SpanExporter`, `BatchSpanProcessor`, shared `BatchProcessor` queue/worker
+  lifecycle), Datadog Python
+  `DataDog/dd-trace-py@c12bb9dfb723bb96a662b7b90f36c805c4af43fb`
+  (`HTTPWriter`, retry/drop/flush paths), and PostHog Python
+  `PostHog/posthog-python@6f75afe77ff059e4f3b0b6b7b30912612a7b5ff1`
+  (`PostHogSpanProcessor`, `PostHogTraceExporter`, background consumer).
+  Added `scripts/real_user_python_opentelemetry_high_load_smoke.sh`: it builds
+  the Python wheel, installs current `opentelemetry-sdk`, drives 1,500 spans
+  through a real `BatchSpanProcessor`, proves a 1,000-event LogBrew queue plus
+  500 visible drops, flushes to a local fake intake with HTTP 503-to-202 retry,
+  verifies shutdown/export failure after close, and asserts no ingest key,
+  unsafe account-like value, DB statement, full URL/query marker, exception
+  message, or stack leaks. Evidence: RED focused high-load OTel smoke gate
+  failed on missing script; GREEN focused gate and GREEN installed-artifact
+  smoke. Research:
+  `docs/competitor-research/python-opentelemetry-high-load-2026-07-04.md`.
+  Honest gap: Sentry/Datadog/OTel still lead on background workers,
+  rate-limit/client-report accounting, adaptive batching, exported drop
+  metrics, hosted trace UI, and deeper automatic instrumentation.
 - 2026-07-04: Ruby span-exception-event comparison tightened after source
   reads from Sentry Ruby
   `getsentry/sentry-ruby@a8a34e3ccf31839ac84dfba7f06a46862944c8bd`
