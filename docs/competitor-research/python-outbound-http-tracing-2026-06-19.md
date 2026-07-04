@@ -68,3 +68,32 @@ Reduce the Python server-side outbound HTTP tracing gap after Node gained explic
 
 - RED before implementation: focused Python tests failed because failed `urllib`, `requests`, sync `httpx`, and async `httpx` spans contained `errorMessage`.
 - GREEN after implementation: focused tests pass and verify original exception identity, status code, source, route privacy, and absence of private exception text in serialized event JSON.
+
+## 2026-07-04 Per-Client Auto Instrumentation Pass
+
+### Sources Re-read
+
+- Sentry Python SDK, [`getsentry/sentry-python`](https://github.com/getsentry/sentry-python/tree/1bd120f41780bfd5fd4d4b7c65aae395e425adab) at commit `1bd120f41780bfd5fd4d4b7c65aae395e425adab`.
+- Sentry files/functions: `sentry_sdk/integrations/httpx.py` (`HttpxIntegration.setup_once`, `_install_httpx_client`, `_install_httpx_async_client`) and `sentry_sdk/integrations/stdlib.py` (`StdlibIntegration.setup_once`, `_install_httplib`, `_complete_span`). No separate `requests.py` integration is present in `sentry_sdk/integrations`; requests traffic is covered through lower-level stdlib/HTTP behavior where applicable.
+- OpenTelemetry Python Contrib, [`open-telemetry/opentelemetry-python-contrib`](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/2359804163c7c2426858453d647d20d1b5d93782) at commit `2359804163c7c2426858453d647d20d1b5d93782`.
+- OpenTelemetry files/functions: `opentelemetry-instrumentation-requests` `_instrument`, `instrumented_send`, `_uninstrument`, `RequestsInstrumentor._instrument`; `opentelemetry-instrumentation-httpx` `HTTPXClientInstrumentor.instrument_client`, `uninstrument_client`, `SyncOpenTelemetryTransport.handle_request`, `AsyncOpenTelemetryTransport.handle_async_request`, `_inject_propagation_headers`.
+- Datadog `dd-trace-py`, [`DataDog/dd-trace-py`](https://github.com/DataDog/dd-trace-py/tree/c12bb9dfb723bb96a662b7b90f36c805c4af43fb) at commit `c12bb9dfb723bb96a662b7b90f36c805c4af43fb`.
+- Datadog files/functions: `ddtrace/contrib/internal/requests/patch.py` `patch`/`unpatch`, `ddtrace/contrib/internal/requests/connection.py` `_wrap_send`, and `ddtrace/contrib/internal/httpx/patch.py` `_wrapped_sync_send`, `_wrapped_async_send`, `_wrapped_sync_send_single_request`, `_wrapped_async_send_single_request`, `patch`, `unpatch`.
+- PostHog Python, [`PostHog/posthog-python`](https://github.com/PostHog/posthog-python/tree/6f75afe77ff059e4f3b0b6b7b30912612a7b5ff1) at commit `6f75afe77ff059e4f3b0b6b7b30912612a7b5ff1`; searched public tree paths for `requests`, `httpx`, and `urllib` and found only request type stubs, not a comparable outbound HTTP tracing integration.
+
+### Pattern and Tradeoff
+
+- Sentry, Datadog, and OpenTelemetry remain ahead on broad zero-touch HTTP coverage. Their integrations patch global classes or transport methods, inject propagation before send, finish spans on response or exception, and expose some unpatch/uninstrument controls.
+- OpenTelemetry's `HTTPXClientInstrumentor.instrument_client(...)` is the safer pattern for LogBrew to adapt first because it instruments caller-selected clients instead of forcing process-wide behavior.
+- LogBrew should avoid copying broad URL/header/body capture surfaces. A narrower LogBrew-native version should instrument only app-owned client instances, preserve original responses/errors, and keep query strings, payloads, headers, exception messages, baggage, and tracestate out of payloads by default.
+
+### LogBrew Change
+
+- Added `instrument_requests_session_with_logbrew_spans(...)` for app-owned `requests.Session`-style objects and `instrument_httpx_client_with_logbrew_spans(...)` for app-owned sync or async `httpx` client-style objects.
+- Each helper wraps one instance's `request` method, returns a handle with `installed` and `uninstall()`, returns the existing handle on duplicate installation, uses an event ID factory for per-call spans, supports optional route-template resolution, and delegates span capture to the already verified explicit helpers.
+- The helpers do not patch global `requests`, global `httpx.Client`, global `httpx.AsyncClient`, lower-level transports, request/response hooks, or stdlib networking. They do not add runtime dependencies, create hidden sessions, capture payloads, headers, full URLs, query strings, exception messages, baggage, tracestate, or raw propagation metadata.
+
+### Verification
+
+- RED before implementation: `PYTHONPATH=python/logbrew_py/src python3 -m unittest python.logbrew_py.tests.test_http_client -v` failed because `instrument_httpx_client_with_logbrew_spans` and `instrument_requests_session_with_logbrew_spans` were not exported.
+- GREEN focused proof now covers requests session instrumentation, duplicate install, uninstall, sync httpx instrumentation, async httpx instrumentation, normalized traceparent injection, event ID factories, route-template resolver use, original error preservation, type-only failure metadata, and omission of query/header/payload/error-message data.

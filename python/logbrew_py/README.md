@@ -437,6 +437,36 @@ response = requests_request_with_logbrew_span(
 
 The `requests` helper clones caller headers, replaces any caller-supplied `traceparent` with one normalized child header, runs the request under that child trace context, queues one sanitized dependency span, and returns the original `requests.Response` or re-raises the original exception. It records method, route template, status code, duration, sampled flag, primitive metadata, and type-only failure metadata. It does not capture payloads, response bodies, headers, cookies, full URLs, query strings, fragments, exception messages, baggage, tracestate, or raw propagation values.
 
+If most calls go through one app-owned `requests.Session`, install reversible per-session instrumentation once instead of wrapping every call:
+
+```python
+import requests
+
+from logbrew_sdk import LogBrewClient, instrument_requests_session_with_logbrew_spans
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+session = requests.Session()
+instrumentation = instrument_requests_session_with_logbrew_spans(
+    session,
+    client=client,
+    route_template_resolver=lambda method, url: "/payments/:payment_id",
+    metadata={"service": "checkout-api"},
+)
+
+response = session.post(
+    "https://api.example.com/payments/123?coupon=summer",
+    timeout=3.5,
+    json={"amount": 42},
+)
+instrumentation.uninstall()
+```
+
+The session helper returns a `LogBrewRequestsSessionInstrumentation` handle. It wraps only the session instance you pass, returns the existing handle on duplicate install, restores the original `request` method with `uninstall()`, generates safe event IDs by default, and preserves the same traceparent injection, failure, and privacy behavior as `requests_request_with_logbrew_span()`. It does not patch the global `requests` module, create sessions, install dependencies, capture payloads, capture headers, capture full URLs or queries, or open support tickets.
+
 For apps that use `httpx`, use `httpx_request_with_logbrew_span()` for sync calls or `async_httpx_request_with_logbrew_span()` for async calls. LogBrew does not add `httpx` as a dependency and does not patch `httpx.Client`, `httpx.AsyncClient`, or transports:
 
 ```python
@@ -484,6 +514,36 @@ async def submit_payment(async_session: httpx.AsyncClient) -> httpx.Response:
 ```
 
 The `httpx` helpers follow the same privacy and failure behavior as the `requests` helper: cloned caller headers, exactly one normalized child `traceparent`, active child trace context during the call or awaited call, sanitized dependency span capture, original response/error preservation, type-only failure metadata, and optional `on_capture_error` reporting for telemetry failures. They do not capture payloads, response bodies, headers, cookies, full URLs, query strings, fragments, exception messages, baggage, tracestate, or raw propagation values.
+
+For shared app-owned `httpx.Client` or `httpx.AsyncClient` instances, use the reversible client instrumentation:
+
+```python
+import httpx
+
+from logbrew_sdk import LogBrewClient, instrument_httpx_client_with_logbrew_spans
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
+)
+
+with httpx.Client() as session:
+    instrumentation = instrument_httpx_client_with_logbrew_spans(
+        session,
+        client=client,
+        route_template_resolver=lambda method, url: "/payments/:payment_id",
+        metadata={"service": "checkout-api"},
+    )
+    response = session.post(
+        "https://api.example.com/payments/123?coupon=summer",
+        timeout=3.5,
+        json={"amount": 42},
+    )
+    instrumentation.uninstall()
+```
+
+The `httpx` helper returns a `LogBrewHttpxClientInstrumentation` handle. It wraps only the provided sync or async client instance, puts the original `request` method back with `uninstall()`, and keeps the same type-only failure metadata and sanitized route/status/duration span behavior as the explicit helpers. It does not patch `httpx.Client`, `httpx.AsyncClient`, transports, request hooks, response hooks, payloads, headers, full URLs, query strings, baggage, tracestate, or raw propagation metadata.
 
 ## Database Operation Spans
 

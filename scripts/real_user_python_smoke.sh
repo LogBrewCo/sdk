@@ -305,8 +305,14 @@ run_requests_span_smoke() {
     python "$tmp_dir/requests_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"status": 201' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 2' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 3' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"activeSpan": "b7ad6b7169203334"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoActiveSpan": "b7ad6b7169203340"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoInstalled": false' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoMethod": "PATCH"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoRouteTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoStatus": 201' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203340-01"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203334-01"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"method": "POST"' "$tmp_dir/$output_prefix.stdout.json"
@@ -323,9 +329,20 @@ run_httpx_span_smoke() {
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"status": 202' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"asyncStatus": 204' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 6' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"activeSpan": "b7ad6b7169203336"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"asyncActiveSpan": "b7ad6b7169203337"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoActiveSpan": "b7ad6b7169203340"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoAsyncActiveSpan": "b7ad6b7169203341"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoAsyncMethod": "DELETE"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoAsyncRouteTemplate": "/refunds/:refund_id"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoAsyncStatus": 207' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoAsyncTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203341-01"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoInstalled": false' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoMethod": "PATCH"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoRouteTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoStatus": 206' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"autoTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203340-01"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203336-01"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"asyncTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203337-01"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
@@ -725,7 +742,9 @@ for needle in (
     "LOGBREW_API_KEY",
     "preview_json()",
     "HttpTransport",
+    "LogBrewHttpxClientInstrumentation",
     "LogBrewLoggingHandler",
+    "LogBrewRequestsSessionInstrumentation",
     "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
@@ -736,6 +755,7 @@ for needle in (
     "create_celery_trace_headers",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_httpx_client_with_logbrew_spans",
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
     "LogBrewDjangoCacheInstrumentation",
@@ -744,6 +764,7 @@ for needle in (
     "instrument_pymemcache_client_with_logbrew_spans",
     "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
+    "instrument_requests_session_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "logbrew_trace_context_from_celery_headers",
     "queue_operation_with_logbrew_span",
@@ -826,7 +847,9 @@ for needle in (
     "LOGBREW_API_KEY",
     "preview_json()",
     "HttpTransport",
+    "LogBrewHttpxClientInstrumentation",
     "LogBrewLoggingHandler",
+    "LogBrewRequestsSessionInstrumentation",
     "async_cache_operation_with_logbrew_span",
     "async_database_operation_with_logbrew_span",
     "async_httpx_request_with_logbrew_span",
@@ -837,6 +860,7 @@ for needle in (
     "create_celery_trace_headers",
     "database_operation_with_logbrew_span",
     "httpx_request_with_logbrew_span",
+    "instrument_httpx_client_with_logbrew_spans",
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
     "LogBrewDjangoCacheInstrumentation",
@@ -845,6 +869,7 @@ for needle in (
     "instrument_pymemcache_client_with_logbrew_spans",
     "LogBrewPymemcacheInstrumentation",
     "instrument_redis_client_with_logbrew_spans",
+    "instrument_requests_session_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "logbrew_trace_context_from_celery_headers",
     "queue_operation_with_logbrew_span",
@@ -1133,9 +1158,11 @@ from logbrew_sdk import (
     LogBrewDbapiConnection,
     LogBrewDbapiCursor,
     LogBrewFlaskCacheInstrumentation,
+    LogBrewHttpxClientInstrumentation,
     LogBrewLoggingHandler,
     LogBrewPymemcacheInstrumentation,
     LogBrewRedisInstrumentation,
+    LogBrewRequestsSessionInstrumentation,
     MetricAttributes,
     RecordingTransport,
     ReleaseAttributes,
@@ -1160,8 +1187,10 @@ from logbrew_sdk import (
     httpx_request_with_logbrew_span,
     instrument_dbapi_connection_with_logbrew_spans,
     instrument_flask_cache_with_logbrew_spans,
+    instrument_httpx_client_with_logbrew_spans,
     instrument_pymemcache_client_with_logbrew_spans,
     instrument_redis_client_with_logbrew_spans,
+    instrument_requests_session_with_logbrew_spans,
     logbrew_trace_context_from_celery_headers,
     parse_traceparent,
     queue_operation_with_logbrew_span,
@@ -1335,6 +1364,28 @@ async def run_async_httpx_typecheck() -> None:
 
 
 asyncio.run(run_async_httpx_typecheck())
+
+
+class TypecheckRequestsSession:
+    def request(self, _method: str, _url: str, **_kwargs: object) -> object:
+        return type("Response", (), {"status_code": 204})()
+
+
+class TypecheckHttpxClient:
+    def request(self, _method: str, _url: str, **_kwargs: object) -> object:
+        return type("Response", (), {"status_code": 204})()
+
+
+requests_instrumentation: LogBrewRequestsSessionInstrumentation = instrument_requests_session_with_logbrew_spans(
+    TypecheckRequestsSession(),
+    client=client,
+)
+httpx_instrumentation: LogBrewHttpxClientInstrumentation = instrument_httpx_client_with_logbrew_spans(
+    TypecheckHttpxClient(),
+    client=client,
+)
+requests_instrumentation.uninstall()
+httpx_instrumentation.uninstall()
 
 
 class TypecheckRows:
@@ -2069,6 +2120,7 @@ from logbrew_sdk import (
     LogBrewClient,
     LogBrewTraceContext,
     get_active_logbrew_trace,
+    instrument_requests_session_with_logbrew_spans,
     requests_request_with_logbrew_span,
     use_logbrew_trace,
 )
@@ -2144,6 +2196,35 @@ if caller_headers["Traceparent"] != "spoofed":
 if "coupon=summer" in client.preview_json() or "traceparent" in client.preview_json() or "card" in client.preview_json():
     raise SystemExit("requests span leaked query, propagation, or payload data")
 
+auto_session = StubRequestsSession()
+auto_instrumentation = instrument_requests_session_with_logbrew_spans(
+    auto_session,
+    client=client,
+    event_id_factory=lambda: "evt_python_requests_auto_client",
+    timestamp="2026-07-04T09:00:00Z",
+    trace=parent_trace,
+    route_template_resolver=lambda _method, _url: "/payments/:payment_id",
+    span_id_factory=lambda: "b7ad6b7169203340",
+    clock=iter([45.0, 45.031]).__next__,
+    metadata={"service": "checkout", "headers": {"authorization": "private"}},
+)
+auto_response = auto_session.request(
+    "PATCH",
+    "https://api.example.test/payments/123?coupon=summer#receipt",
+    headers={"Traceparent": "spoofed", "x-caller": "checkout-auto"},
+    json={"card": "private"},
+)
+auto_captured = dict(auto_session.captured)
+auto_instrumentation.uninstall()
+auto_session.request(
+    "GET",
+    "https://api.example.test/after-uninstall",
+    headers={"x-caller": "after-uninstall"},
+)
+payload = json.loads(client.preview_json())
+if len(payload["events"]) != 2:
+    raise SystemExit("requests auto instrumentation did not uninstall cleanly")
+
 original_error = StubRequestsError()
 try:
     requests_request_with_logbrew_span(
@@ -2163,7 +2244,8 @@ else:
     raise SystemExit("requests helper swallowed original failure")
 
 payload = json.loads(client.preview_json())
-failure_metadata = payload["events"][1]["attributes"]["metadata"]
+auto_metadata = payload["events"][1]["attributes"]["metadata"]
+failure_metadata = payload["events"][2]["attributes"]["metadata"]
 if failure_metadata.get("errorType") != "StubRequestsError":
     raise SystemExit("requests failure span lost error type")
 if failure_metadata.get("statusCode") != 503:
@@ -2193,6 +2275,12 @@ print(
     json.dumps(
         {
             "activeSpan": session.captured["activeSpan"],
+            "autoActiveSpan": auto_captured["activeSpan"],
+            "autoInstalled": auto_instrumentation.installed,
+            "autoMethod": auto_metadata["method"],
+            "autoRouteTemplate": auto_metadata["routeTemplate"],
+            "autoStatus": auto_response.status_code,
+            "autoTraceparent": auto_captured["traceparent"],
             "callerHeader": session.captured["callerHeader"],
             "captureErrors": len(capture_errors),
             "failureErrorType": failure_metadata["errorType"],
@@ -2223,6 +2311,7 @@ from logbrew_sdk import (
     async_httpx_request_with_logbrew_span,
     get_active_logbrew_trace,
     httpx_request_with_logbrew_span,
+    instrument_httpx_client_with_logbrew_spans,
     use_logbrew_trace,
 )
 
@@ -2335,6 +2424,66 @@ async def run_async_request() -> StubHttpxResponse:
 
 
 async_response = asyncio.run(run_async_request())
+auto_session = StubHttpxSession(206)
+auto_async_session = StubAsyncHttpxSession(207)
+auto_instrumentation = instrument_httpx_client_with_logbrew_spans(
+    auto_session,
+    client=client,
+    event_id_factory=lambda: "evt_python_httpx_auto_client",
+    timestamp="2026-07-04T09:00:01Z",
+    trace=parent_trace,
+    route_template_resolver=lambda _method, _url: "/payments/:payment_id",
+    span_id_factory=lambda: "b7ad6b7169203340",
+    clock=iter([75.0, 75.041]).__next__,
+    metadata={"service": "checkout", "headers": {"authorization": "private"}},
+)
+auto_response = auto_session.request(
+    "PATCH",
+    "https://api.example.test/payments/123?coupon=summer#receipt",
+    headers={"Traceparent": "spoofed", "x-caller": "checkout-auto"},
+    json={"card": "private"},
+)
+auto_captured = dict(auto_session.captured)
+auto_instrumentation.uninstall()
+auto_session.request(
+    "GET",
+    "https://api.example.test/after-uninstall",
+    headers={"x-caller": "after-uninstall"},
+)
+
+
+async def run_auto_async_request() -> tuple[StubHttpxResponse, dict[str, object]]:
+    auto_async_instrumentation = instrument_httpx_client_with_logbrew_spans(
+        auto_async_session,
+        client=client,
+        event_id_factory=lambda: "evt_python_httpx_auto_async_client",
+        timestamp="2026-07-04T09:00:02Z",
+        trace=parent_trace,
+        route_template_resolver=lambda _method, _url: "/refunds/:refund_id",
+        span_id_factory=lambda: "b7ad6b7169203341",
+        clock=iter([76.0, 76.044]).__next__,
+        metadata={"service": "checkout", "payload": {"private": True}},
+    )
+    response = await auto_async_session.request(
+        "DELETE",
+        "https://api.example.test/refunds/456?coupon=summer#receipt",
+        headers={"Traceparent": "spoofed", "x-caller": "checkout-auto-async"},
+        json={"card": "private"},
+    )
+    captured = dict(auto_async_session.captured)
+    auto_async_instrumentation.uninstall()
+    await auto_async_session.request(
+        "GET",
+        "https://api.example.test/after-async-uninstall",
+        headers={"x-caller": "after-async-uninstall"},
+    )
+    return response, captured
+
+
+auto_async_response, auto_async_captured = asyncio.run(run_auto_async_request())
+payload = json.loads(client.preview_json())
+if len(payload["events"]) != 4:
+    raise SystemExit("httpx auto instrumentation did not uninstall cleanly")
 sync_error = StubHttpxError("connection failed for redacted-url", 502)
 try:
     httpx_request_with_logbrew_span(
@@ -2382,10 +2531,14 @@ asyncio.run(run_async_failure())
 payload = json.loads(client.preview_json())
 sync_event = payload["events"][0]
 async_event = payload["events"][1]
-sync_failure_event = payload["events"][2]
-async_failure_event = payload["events"][3]
+auto_event = payload["events"][2]
+auto_async_event = payload["events"][3]
+sync_failure_event = payload["events"][4]
+async_failure_event = payload["events"][5]
 sync_metadata = sync_event["attributes"]["metadata"]
 async_metadata = async_event["attributes"]["metadata"]
+auto_metadata = auto_event["attributes"]["metadata"]
+auto_async_metadata = auto_async_event["attributes"]["metadata"]
 sync_failure_metadata = sync_failure_event["attributes"]["metadata"]
 async_failure_metadata = async_failure_event["attributes"]["metadata"]
 serialized = client.preview_json()
@@ -2431,6 +2584,17 @@ print(
         {
             "activeSpan": session.captured["activeSpan"],
             "asyncActiveSpan": async_session.captured["activeSpan"],
+            "autoActiveSpan": auto_captured["activeSpan"],
+            "autoAsyncActiveSpan": auto_async_captured["activeSpan"],
+            "autoAsyncMethod": auto_async_metadata["method"],
+            "autoAsyncRouteTemplate": auto_async_metadata["routeTemplate"],
+            "autoAsyncStatus": auto_async_response.status_code,
+            "autoAsyncTraceparent": auto_async_captured["traceparent"],
+            "autoInstalled": auto_instrumentation.installed,
+            "autoMethod": auto_metadata["method"],
+            "autoRouteTemplate": auto_metadata["routeTemplate"],
+            "autoStatus": auto_response.status_code,
+            "autoTraceparent": auto_captured["traceparent"],
             "asyncCallerHeader": async_session.captured["callerHeader"],
             "asyncMethod": async_metadata["method"],
             "asyncRouteTemplate": async_metadata["routeTemplate"],

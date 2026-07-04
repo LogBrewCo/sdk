@@ -10,6 +10,8 @@ from logbrew_sdk import (
     async_httpx_request_with_logbrew_span,
     get_active_logbrew_trace,
     httpx_request_with_logbrew_span,
+    instrument_httpx_client_with_logbrew_spans,
+    instrument_requests_session_with_logbrew_spans,
     use_logbrew_trace,
 )
 
@@ -224,6 +226,219 @@ class HttpxSpanTests(unittest.TestCase):
             self.assertNotIn("traceparent", serialized)
 
         asyncio.run(run())
+
+
+class HttpClientInstrumentationTests(unittest.TestCase):
+    def test_requests_session_instrumentation_traces_requests_and_uninstalls(self) -> None:
+        client = sample_client()
+        caller_headers = {"Traceparent": "spoofed", "x-caller": "checkout"}
+        calls: list[dict[str, object]] = []
+        event_ids = iter(["evt_python_requests_auto_get", "evt_python_requests_after_uninstall"])
+        span_ids = iter(["b7ad6b7169203342", "b7ad6b7169203343"])
+        clock_values = iter([90.0, 90.035])
+
+        class StubResponse:
+            status_code = 201
+
+        class StubRequestsSession:
+            def request(self, method: str, url: str, **kwargs: object) -> StubResponse:
+                calls.append({"method": method, "url": url, **kwargs})
+                return StubResponse()
+
+            def get(self, url: str, **kwargs: object) -> StubResponse:
+                return self.request("GET", url, **kwargs)
+
+        session = StubRequestsSession()
+        parent_trace = LogBrewTraceContext(
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="00f067aa0ba902b7",
+            sampled=True,
+        )
+
+        instrumentation = instrument_requests_session_with_logbrew_spans(
+            session,
+            client=client,
+            event_id_factory=lambda: next(event_ids),
+            timestamp="2026-07-04T09:00:00Z",
+            trace=parent_trace,
+            metadata={"service": "checkout", "headers": {"authorization": "private"}},
+            route_template_resolver=lambda _method, _url: "/payments/:payment_id",
+            span_id_factory=lambda: next(span_ids),
+            clock=lambda: next(clock_values),
+        )
+        duplicate = instrument_requests_session_with_logbrew_spans(session, client=client)
+
+        response = session.get(
+            "https://api.example.test/payments/123?coupon=summer#receipt",
+            timeout=2.0,
+            headers=caller_headers,
+            json={"card": "private"},
+        )
+
+        self.assertIs(duplicate, instrumentation)
+        self.assertTrue(instrumentation.installed)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(caller_headers["Traceparent"], "spoofed")
+        sent_headers = calls[0]["headers"]
+        self.assertIsInstance(sent_headers, dict)
+        assert isinstance(sent_headers, dict)
+        self.assertEqual(sent_headers["x-caller"], "checkout")
+        self.assertEqual(
+            sent_headers["traceparent"],
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203342-01",
+        )
+        event = json.loads(client.preview_json())["events"][0]
+        self.assertEqual(event["id"], "evt_python_requests_auto_get")
+        self.assertEqual(event["attributes"]["name"], "GET /payments/:payment_id")
+        self.assertEqual(event["attributes"]["durationMs"], 35.0)
+        metadata = event["attributes"]["metadata"]
+        self.assertEqual(metadata["source"], "requests")
+        self.assertEqual(metadata["method"], "GET")
+        self.assertEqual(metadata["statusCode"], 201)
+        serialized = client.preview_json()
+        self.assertNotIn("coupon=summer", serialized)
+        self.assertNotIn("authorization", serialized)
+        self.assertNotIn("traceparent", serialized)
+        self.assertNotIn("card", serialized)
+
+        instrumentation.uninstall()
+        self.assertFalse(instrumentation.installed)
+        session.get("https://api.example.test/after-uninstall")
+        self.assertEqual(len(json.loads(client.preview_json())["events"]), 1)
+        self.assertNotIn("headers", calls[-1])
+
+    def test_requests_session_instrumentation_preserves_errors_without_message_metadata(self) -> None:
+        client = sample_client()
+
+        class StubResponse:
+            status_code = 503
+
+        class StubRequestsError(RuntimeError):
+            def __init__(self) -> None:
+                super().__init__("network failed with sensitive-auth-value")
+                self.response = StubResponse()
+
+        class StubRequestsSession:
+            def request(self, _method: str, _url: str, **_kwargs: object) -> object:
+                raise original_error
+
+        original_error = StubRequestsError()
+        session = StubRequestsSession()
+        instrument_requests_session_with_logbrew_spans(
+            session,
+            client=client,
+            event_id_factory=lambda: "evt_python_requests_auto_failure",
+            timestamp="2026-07-04T09:00:01Z",
+            span_id_factory=lambda: "b7ad6b7169203344",
+            clock=lambda: 100.0,
+        )
+
+        with self.assertRaises(StubRequestsError) as raised:
+            session.request("GET", "https://api.example.test/payments/123?auth=hidden")
+
+        self.assertIs(raised.exception, original_error)
+        event = json.loads(client.preview_json())["events"][0]
+        metadata = event["attributes"]["metadata"]
+        self.assertEqual(event["attributes"]["status"], "error")
+        self.assertEqual(metadata["source"], "requests")
+        self.assertEqual(metadata["statusCode"], 503)
+        self.assertEqual(metadata["errorType"], "StubRequestsError")
+        serialized = client.preview_json()
+        self.assertNotIn("errorMessage", metadata)
+        self.assertNotIn("network failed with sensitive-auth-value", serialized)
+        self.assertNotIn("auth=hidden", serialized)
+
+    def test_httpx_client_instrumentation_traces_sync_and_async_clients(self) -> None:
+        client = sample_client()
+        event_ids = iter(["evt_python_httpx_auto_sync", "evt_python_httpx_auto_async"])
+        span_ids = iter(["b7ad6b7169203345", "b7ad6b7169203346"])
+        clock_values = iter([110.0, 110.046, 111.0, 111.052])
+        parent_trace = LogBrewTraceContext(
+            trace_id="4bf92f3577b34da6a3ce929d0e0e4736",
+            span_id="00f067aa0ba902b7",
+            sampled=False,
+        )
+
+        class StubResponse:
+            status_code = 202
+
+        class StubHttpxClient:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def request(self, method: str, url: str, **kwargs: object) -> StubResponse:
+                self.calls.append({"method": method, "url": url, **kwargs})
+                return StubResponse()
+
+        class StubAsyncHttpxClient:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            async def request(self, method: str, url: str, **kwargs: object) -> StubResponse:
+                self.calls.append({"method": method, "url": url, **kwargs})
+                return StubResponse()
+
+        async def run() -> None:
+            sync_client = StubHttpxClient()
+            async_client = StubAsyncHttpxClient()
+            instrument_httpx_client_with_logbrew_spans(
+                sync_client,
+                client=client,
+                event_id_factory=lambda: next(event_ids),
+                timestamp="2026-07-04T09:00:02Z",
+                trace=parent_trace,
+                route_template_resolver=lambda method, _url: f"/{method.lower()}/:id",
+                span_id_factory=lambda: next(span_ids),
+                clock=lambda: next(clock_values),
+            )
+            async_instrumentation = instrument_httpx_client_with_logbrew_spans(
+                async_client,
+                client=client,
+                event_id_factory=lambda: next(event_ids),
+                timestamp="2026-07-04T09:00:03Z",
+                trace=parent_trace,
+                route_template_resolver=lambda method, _url: f"/{method.lower()}/:id",
+                span_id_factory=lambda: next(span_ids),
+                clock=lambda: next(clock_values),
+            )
+
+            sync_response = sync_client.request(
+                "POST",
+                "https://api.example.test/payments/123?coupon=summer",
+                headers={"traceparent": "spoofed"},
+            )
+            async_response = await async_client.request(
+                "DELETE",
+                "https://api.example.test/refunds/456?coupon=summer",
+                headers={"x-caller": "checkout"},
+            )
+
+            self.assertTrue(async_instrumentation.installed)
+            self.assertEqual(sync_response.status_code, 202)
+            self.assertEqual(async_response.status_code, 202)
+            self.assertEqual(
+                sync_client.calls[0]["headers"]["traceparent"],  # type: ignore[index]
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203345-00",
+            )
+            self.assertEqual(
+                async_client.calls[0]["headers"]["traceparent"],  # type: ignore[index]
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203346-00",
+            )
+
+        asyncio.run(run())
+
+        events = json.loads(client.preview_json())["events"]
+        self.assertEqual(
+            [event["id"] for event in events],
+            ["evt_python_httpx_auto_sync", "evt_python_httpx_auto_async"],
+        )
+        self.assertEqual(events[0]["attributes"]["name"], "POST /post/:id")
+        self.assertEqual(events[1]["attributes"]["name"], "DELETE /delete/:id")
+        self.assertEqual(events[0]["attributes"]["metadata"]["source"], "httpx")
+        self.assertEqual(events[1]["attributes"]["metadata"]["source"], "httpx.async")
+        serialized = client.preview_json()
+        self.assertNotIn("coupon=summer", serialized)
+        self.assertNotIn("spoofed", serialized)
 
     def test_async_httpx_request_with_logbrew_span_preserves_errors_without_message_metadata(self) -> None:
         async def run() -> None:

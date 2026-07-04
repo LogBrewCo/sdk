@@ -1,5 +1,37 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: Python outbound HTTP now has opt-in reversible per-client
+  instrumentation after source reads from Sentry Python
+  `getsentry/sentry-python@1bd120f41780bfd5fd4d4b7c65aae395e425adab`
+  (`httpx.py`, `stdlib.py`, `aiohttp.py` HTTP client/server tracing paths),
+  OpenTelemetry Python Contrib
+  `open-telemetry/opentelemetry-python-contrib@2359804163c7c2426858453d647d20d1b5d93782`
+  (`requests` and `httpx` instrumentors, including per-client HTTPX
+  instrumentation), Datadog Python
+  `DataDog/dd-trace-py@c12bb9dfb723bb96a662b7b90f36c805c4af43fb`
+  (`requests`/`httpx` patch and unpatch paths), and PostHog Python
+  `PostHog/posthog-python@6f75afe77ff059e4f3b0b6b7b30912612a7b5ff1`
+  (no comparable general outbound HTTP tracing integration found).
+  LogBrew added `instrument_requests_session_with_logbrew_spans(...)` for one
+  app-owned requests-style session and
+  `instrument_httpx_client_with_logbrew_spans(...)` for one app-owned sync or
+  async httpx-style client. Handles expose `installed` and `uninstall()`,
+  duplicate installs return the existing handle, route-template resolvers and
+  event-id factories are supported, and spans reuse the existing sanitized
+  request helpers. LogBrew stays lighter than broad competitor monkeypatching:
+  no global requests/httpx/stdlib patching, hidden sessions, payload/header/full
+  URL/query/exception-message/baggage/tracestate capture, or response/error
+  replacement. Evidence: RED focused import failure before implementation;
+  GREEN 117 Python tests; GREEN installed-artifact Python smoke with
+  wheel/sdist install/reinstall and auto sync/async client spans; GREEN Python
+  static, ShellCheck 0.11.0, markdown links, backend reports, release metadata,
+  confidentiality scan, generated-artifact hygiene, and diff check. Research:
+  `docs/competitor-research/python-outbound-http-tracing-2026-06-19.md`.
+  Honest gap: Sentry/Datadog/OpenTelemetry still lead on process-wide automatic
+  HTTP/stdlib/aiohttp coverage and hosted trace-to-error workflows. Next
+  Python trace slice should target optional broader auto instrumentation or
+  aiohttp/stdlib coverage only when reversible, privacy-bounded, and
+  installed-artifact verified.
 - 2026-07-04: Python outbound HTTP failure-span privacy tightened after
   source reads from Sentry Python
   `getsentry/sentry-python@1bd120f41780bfd5fd4d4b7c65aae395e425adab`

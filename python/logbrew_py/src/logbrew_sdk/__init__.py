@@ -1021,6 +1021,7 @@ from logbrew_sdk._http_client import (  # noqa: E402, I001
     requests_request_with_logbrew_span,
     urlopen_with_logbrew_span,
 )
+from logbrew_sdk._http_instrumentation import LogBrewHttpxClientInstrumentation, LogBrewRequestsSessionInstrumentation, instrument_httpx_client_with_logbrew_spans, instrument_requests_session_with_logbrew_spans  # noqa: E402, E501
 from logbrew_sdk._db_client import async_database_operation_with_logbrew_span, database_operation_with_logbrew_span  # noqa: E402
 from logbrew_sdk._dbapi_client import LogBrewDbapiConnection, LogBrewDbapiCursor, connect_dbapi_connection_with_logbrew_spans, instrument_dbapi_connection_with_logbrew_spans  # noqa: E402, E501
 from logbrew_sdk._sqlalchemy_client import LogBrewSqlAlchemyInstrumentation, instrument_sqlalchemy_engine_with_logbrew_spans  # noqa: E402, E501
@@ -1060,11 +1061,13 @@ __all__ = [
     "LogBrewDbapiCursor",
     "LogBrewDjangoCacheInstrumentation",
     "LogBrewFlaskCacheInstrumentation",
+    "LogBrewHttpxClientInstrumentation",
     "LogBrewLoggingHandler",
     "LogBrewOpenTelemetrySpanExporter",
     "LogBrewOpenTelemetrySpanProcessor",
     "LogBrewPymemcacheInstrumentation",
     "LogBrewRedisInstrumentation",
+    "LogBrewRequestsSessionInstrumentation",
     "LogBrewSqlAlchemyInstrumentation",
     "LogBrewTraceContext",
     "Metadata",
@@ -1106,8 +1109,10 @@ __all__ = [
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
     "instrument_flask_cache_with_logbrew_spans",
+    "instrument_httpx_client_with_logbrew_spans",
     "instrument_pymemcache_client_with_logbrew_spans",
     "instrument_redis_client_with_logbrew_spans",
+    "instrument_requests_session_with_logbrew_spans",
     "instrument_sqlalchemy_engine_with_logbrew_spans",
     "log_attributes_from_record",
     "logbrew_trace_context_from_celery_headers",
