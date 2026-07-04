@@ -43,6 +43,25 @@ By default, browser metadata keeps the current path without query string or hash
 
 Set `flushOnOnline: false`, `flushOnPageHide: false`, or `flushOnVisibilityHidden: false` if your app wants to own lifecycle or connectivity delivery itself.
 
+## Browser Error Source-Map Hints
+
+If your frontend build injects JavaScript source-map Debug IDs, pass the app-owned map into browser setup so captured `error` and `unhandledrejection` issues carry release-artifact metadata alongside release, environment, service, and trace correlation:
+
+```js
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY",
+  release: "web@2026.07.04",
+  environment: "production",
+  service: "checkout-web",
+  runtime: "browser",
+  debugIdMap: {
+    "/assets/app.js": "11111111-2222-4333-8444-555555555555"
+  }
+});
+```
+
+Browser error metadata records the error type/message, path-only first frame, line, column, optional Debug ID, release, environment, service, runtime, and active trace/span IDs. It keeps raw stack text out by default; set `includeErrorStack: true` only if your app has a clear redaction policy. Debug ID code files are normalized to paths, so full URLs, hosts, query strings, hash fragments, headers, payloads, cookies, screenshots, replay data, baggage, and tracestate are not captured.
+
 ## Structured Actions
 
 Use `captureBrowserAction()` for the product steps your app already understands, such as clicks, form submits, route changes, retry decisions, or funnel steps. Use `captureBrowserNetwork()` for important API milestones that should be correlated with the same session or trace. These action events give LogBrew and AI agents a session timeline that can be analyzed across many users without requiring a person to watch individual recordings.

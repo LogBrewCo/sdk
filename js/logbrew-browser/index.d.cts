@@ -361,6 +361,20 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
   flushOnOnline?: boolean;
   flushOnPageHide?: boolean;
   flushOnVisibilityHidden?: boolean;
+  /** Map of sanitized browser frame paths or minified URLs to release-artifact Debug IDs. */
+  debugIdMap?: Record<string, string>;
+  /** Release name associated with browser errors. */
+  release?: string;
+  /** Environment associated with browser errors. */
+  environment?: string;
+  /** Service name associated with browser errors. */
+  service?: string;
+  /** Runtime label such as `browser`. */
+  runtime?: string;
+  /** Platform label such as `web`. */
+  platform?: string;
+  /** Include raw error stack text only when the app has explicitly approved it. Defaults to false. */
+  includeErrorStack?: boolean;
   includeDocumentTitle?: boolean;
   includeHash?: boolean;
   includeQueryString?: boolean;

@@ -4,7 +4,8 @@ const {
   LogBrewClient,
   RecordingTransport,
   SdkError,
-  TransportError
+  TransportError,
+  createIssueAttributesFromError
 } = require("@logbrew/sdk");
 const { createBeaconTransport } = require("./beacon-transport.cjs");
 const {
@@ -474,14 +475,21 @@ function createBrowserNetworkEvent(request, browserWindow = defaultWindow(), {
 }
 
 function createBrowserErrorEvent(error, browserWindow = defaultWindow(), {
+  debugIdMap,
+  environment,
   idFactory = defaultErrorEventId,
+  includeErrorStack = false,
   includeDocumentTitle = false,
   includeHash = false,
   includeQueryString = false,
   includeUserAgent = false,
   metadata,
   now = () => new Date().toISOString(),
+  platform,
+  release,
   sanitizeMetadata = defaultSanitizeMetadata,
+  runtime,
+  service,
   traceContext
 } = {}) {
   const details = errorDetails(error);
@@ -497,31 +505,46 @@ function createBrowserErrorEvent(error, browserWindow = defaultWindow(), {
     source: "browser.error",
     sourcePath: sanitizeSourcePath(details.source)
   });
+  const attributes = browserIssueAttributes(details.candidate, details.message, {
+    debugIdMap,
+    environment,
+    includeErrorStack,
+    metadata: mergeMetadata(baseMetadata, metadata),
+    platform,
+    release,
+    runtime,
+    service,
+    source: "browser.error",
+    title: `Browser error: ${details.message}`,
+    traceContext: browserTraceContext
+  });
   const safeMetadata = sanitizeMetadata(
-    mergeMetadata(mergeMetadata(baseMetadata, metadata), browserTraceMetadata(browserTraceContext)),
+    sanitizeBrowserIssueMetadata(attributes.metadata),
     "error"
   );
   return {
     id: idFactory({ error, message: details.message, path, source: "error" }),
     timestamp: now(),
-    attributes: {
-      level: "error",
-      message: details.message,
-      metadata: safeMetadata,
-      title: `Browser error: ${details.message}`
-    }
+    attributes: { ...attributes, metadata: safeMetadata }
   };
 }
 
 function createUnhandledRejectionEvent(rejection, browserWindow = defaultWindow(), {
+  debugIdMap,
+  environment,
   idFactory = defaultErrorEventId,
+  includeErrorStack = false,
   includeDocumentTitle = false,
   includeHash = false,
   includeQueryString = false,
   includeUserAgent = false,
   metadata,
   now = () => new Date().toISOString(),
+  platform,
+  release,
   sanitizeMetadata = defaultSanitizeMetadata,
+  runtime,
+  service,
   traceContext
 } = {}) {
   const reason = rejectionReason(rejection);
@@ -534,19 +557,27 @@ function createUnhandledRejectionEvent(rejection, browserWindow = defaultWindow(
     path,
     source: "browser.unhandledrejection"
   });
+  const attributes = browserIssueAttributes(reason.candidate, reason.message, {
+    debugIdMap,
+    environment,
+    includeErrorStack,
+    metadata: mergeMetadata(baseMetadata, metadata),
+    platform,
+    release,
+    runtime,
+    service,
+    source: "browser.unhandledrejection",
+    title: `Unhandled promise rejection: ${reason.message}`,
+    traceContext: browserTraceContext
+  });
   const safeMetadata = sanitizeMetadata(
-    mergeMetadata(mergeMetadata(baseMetadata, metadata), browserTraceMetadata(browserTraceContext)),
+    sanitizeBrowserIssueMetadata(attributes.metadata),
     "unhandledrejection"
   );
   return {
     id: idFactory({ error: rejection, message: reason.message, path, source: "unhandledrejection" }),
     timestamp: now(),
-    attributes: {
-      level: "error",
-      message: reason.message,
-      metadata: safeMetadata,
-      title: `Unhandled promise rejection: ${reason.message}`
-    }
+    attributes: { ...attributes, metadata: safeMetadata }
   };
 }
 
@@ -708,6 +739,76 @@ function defaultSanitizeMetadata(metadata) {
   return safeMetadata(metadata);
 }
 
+function browserIssueAttributes(candidate, message, {
+  debugIdMap,
+  environment,
+  includeErrorStack,
+  metadata,
+  platform,
+  release,
+  runtime,
+  service,
+  source,
+  title,
+  traceContext
+}) {
+  return createIssueAttributesFromError(candidate, {
+    debugIdMap,
+    environment,
+    includeErrorStack,
+    level: "error",
+    message,
+    metadata,
+    platform,
+    release,
+    runtime,
+    service,
+    source,
+    title,
+    trace: traceContext ? {
+      sampled: traceContext.sampled,
+      spanId: traceContext.spanId,
+      traceId: traceContext.traceId
+    } : undefined
+  });
+}
+
+function sanitizeBrowserIssueMetadata(metadata) {
+  const sanitized = { ...safeMetadata(metadata) };
+  const frameFile = browserCodePath(sanitized.errorFrameFile);
+  if (frameFile) {
+    sanitized.errorFrameFile = frameFile;
+  }
+  const codeFile = browserCodePath(sanitized.releaseArtifactCodeFile);
+  if (codeFile) {
+    sanitized.releaseArtifactCodeFile = codeFile;
+  }
+  return compactMetadata(sanitized);
+}
+
+function browserCodePath(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (/^[a-z][a-z0-9+.-]*:/iu.test(trimmed)) {
+    try {
+      return new URL(trimmed).pathname || undefined;
+    } catch {
+      return pathBasename(trimmed);
+    }
+  }
+  const path = trimmed.split(/[?#]/u, 1)[0].replace(/\\/gu, "/");
+  if (/^[A-Za-z]:\//u.test(path) || /^\/(?:Users|home|private|tmp|var)\//u.test(path)) {
+    return pathBasename(path);
+  }
+  return path || undefined;
+}
+
+function pathBasename(path) {
+  return path.split("/").filter(Boolean).pop();
+}
+
 function resolveBrowserTraceContext(options) {
   if (options.traceContext === false) {
     return undefined;
@@ -776,6 +877,7 @@ function errorDetails(error) {
   const candidate = error?.error ?? error;
   const message = error?.message ?? errorMessage(candidate);
   return {
+    candidate,
     columnNumber: numberOrUndefined(error?.colno ?? error?.columnNumber),
     lineNumber: numberOrUndefined(error?.lineno ?? error?.lineNumber),
     message,
@@ -787,6 +889,7 @@ function errorDetails(error) {
 function rejectionReason(rejection) {
   const reason = rejection?.reason ?? rejection;
   return {
+    candidate: reason,
     message: errorMessage(reason),
     name: reason instanceof Error ? reason.name : undefined
   };

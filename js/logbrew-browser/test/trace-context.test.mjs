@@ -132,6 +132,81 @@ test("installed browser capture uses one explicit W3C trace context across page 
   }
 });
 
+test("installed browser errors attach release artifact Debug ID metadata without URL or stack leakage", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const {
+    captureBrowserError,
+    createBrowserTraceContext,
+    installLogBrewBrowser
+  } = imported;
+  const browserWindow = createFakeBrowserWindow("https://app.example.test/checkout?email=dev@example.test#step2");
+  try {
+    const context = installLogBrewBrowser({
+      browserWindow,
+      clientKey: CLIENT_KEY,
+      flushOnCapture: false,
+      traceContext: createBrowserTraceContext({
+        sampled: true,
+        spanId: SPAN_ID,
+        traceId: TRACE_ID
+      }),
+      transport: {
+        async send() {
+          return { statusCode: 202 };
+        }
+      }
+    });
+    const error = new TypeError("Checkout exploded");
+    error.stack = [
+      "TypeError: Checkout exploded",
+      "    at checkout (https://cdn.example/assets/app.js?debug=true#section:12:34)",
+      "    at ignored (https://cdn.example/assets/vendor.js?debug=true#section:1:2)"
+    ].join("\n");
+
+    await captureBrowserError(error, context, {
+      debugIdMap: {
+        "/assets/app.js": "11111111-2222-4333-8444-555555555555"
+      },
+      environment: "production",
+      flushOnCapture: false,
+      metadata: {
+        routeTemplate: "/checkout",
+        nestedDropped: { private: true }
+      },
+      now: () => "2026-07-04T10:02:00Z",
+      release: "web@2026.07.04",
+      runtime: "browser",
+      service: "checkout-web"
+    });
+
+    const payload = JSON.parse(context.previewJson());
+    const issue = payload.events.find((event) => event.type === "issue");
+
+    assert.equal(issue.attributes.title, "Browser error: Checkout exploded");
+    assert.equal(issue.attributes.message, "Checkout exploded");
+    assert.equal(issue.attributes.metadata.source, "browser.error");
+    assert.equal(issue.attributes.metadata.path, "/checkout");
+    assert.equal(issue.attributes.metadata.errorName, "TypeError");
+    assert.equal(issue.attributes.metadata.errorFrameFile, "/assets/app.js");
+    assert.equal(issue.attributes.metadata.errorFrameLine, 12);
+    assert.equal(issue.attributes.metadata.errorFrameColumn, 34);
+    assert.equal(issue.attributes.metadata.release, "web@2026.07.04");
+    assert.equal(issue.attributes.metadata.environment, "production");
+    assert.equal(issue.attributes.metadata.service, "checkout-web");
+    assert.equal(issue.attributes.metadata.runtime, "browser");
+    assert.equal(issue.attributes.metadata.traceId, TRACE_ID);
+    assert.equal(issue.attributes.metadata.spanId, SPAN_ID);
+    assert.equal(issue.attributes.metadata.releaseArtifactType, "sourcemap");
+    assert.equal(issue.attributes.metadata.releaseArtifactCodeFile, "/assets/app.js");
+    assert.equal(issue.attributes.metadata.releaseArtifactDebugId, "11111111-2222-4333-8444-555555555555");
+
+    const serialized = JSON.stringify(issue);
+    assert.doesNotMatch(serialized, /cdn\.example|debug=true|section|vendor\.js|errorStack|nestedDropped|private/u);
+  } finally {
+    await removeTempDir();
+  }
+});
+
 test("installed browser navigation instrumentation renews trace context for SPA route changes", async () => {
   const { imported, removeTempDir } = await importBrowserPackage();
   const {

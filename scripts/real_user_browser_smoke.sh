@@ -105,6 +105,9 @@ grep -q 'createBrowserTraceContext' "$tmp_dir/browser-readme.md"
 grep -q 'tracePropagationTargets' "$tmp_dir/browser-readme.md"
 grep -q 'traceContext: () => logbrew.traceContext' "$tmp_dir/browser-readme.md"
 grep -q 'history.pushState' "$tmp_dir/browser-readme.md"
+grep -q 'Browser Error Source-Map Hints' "$tmp_dir/browser-readme.md"
+grep -q 'debugIdMap' "$tmp_dir/browser-readme.md"
+grep -q 'includeErrorStack: true' "$tmp_dir/browser-readme.md"
 
 app_dir="$tmp_dir/browser-smoke-app"
 mkdir -p "$app_dir"
@@ -192,10 +195,17 @@ const traceContext = createBrowserTraceContext({
 const logbrew = installLogBrewBrowser({
   clientKey: "LOGBREW_BROWSER_KEY",
   browserWindow,
+  debugIdMap: {
+    "/assets/app.js": "11111111-2222-4333-8444-555555555555"
+  },
+  environment: "production",
   now: nextTimestamp,
   onFlush(response) {
     flushed.push(response);
   },
+  release: "web@2026.07.04",
+  runtime: "browser",
+  service: "checkout-web",
   traceContext,
   transport
 });
@@ -279,9 +289,15 @@ if (networkPayload.events[0].attributes.metadata.ignoredNested !== undefined) {
   throw new Error(`nested network metadata should be dropped: ${transport.sentBodies[2]}`);
 }
 
+const syncError = new Error("Checkout exploded");
+syncError.stack = [
+  "Error: Checkout exploded",
+  "    at checkout (https://cdn.example/assets/app.js?debug=true#section:12:34)",
+  "    at ignored (https://cdn.example/assets/vendor.js?debug=true#section:1:2)"
+].join("\n");
 const syncEvent = new browserWindow.ErrorEvent("error", {
   colno: 8,
-  error: new Error("Checkout exploded"),
+  error: syncError,
   filename: "https://cdn.example.test/assets/app.js?debug=1",
   lineno: 42,
   message: "Checkout exploded"
@@ -292,6 +308,21 @@ const syncPayload = JSON.parse(transport.sentBodies[3]);
 assertPathOnly(syncPayload, "/dashboard");
 if (syncPayload.events[0].attributes.metadata.sourcePath !== "/assets/app.js") {
   throw new Error(`source path should be sanitized: ${transport.sentBodies[3]}`);
+}
+if (syncPayload.events[0].attributes.metadata.errorFrameFile !== "/assets/app.js") {
+  throw new Error(`source-map frame should be path-only: ${transport.sentBodies[3]}`);
+}
+if (syncPayload.events[0].attributes.metadata.releaseArtifactCodeFile !== "/assets/app.js") {
+  throw new Error(`release artifact code file should be path-only: ${transport.sentBodies[3]}`);
+}
+if (syncPayload.events[0].attributes.metadata.releaseArtifactDebugId !== "11111111-2222-4333-8444-555555555555") {
+  throw new Error(`release artifact Debug ID missing: ${transport.sentBodies[3]}`);
+}
+if (syncPayload.events[0].attributes.metadata.release !== "web@2026.07.04" || syncPayload.events[0].attributes.metadata.environment !== "production") {
+  throw new Error(`release/environment missing from browser issue: ${transport.sentBodies[3]}`);
+}
+if (JSON.stringify(syncPayload).includes("cdn.example") || JSON.stringify(syncPayload).includes("vendor.js") || JSON.stringify(syncPayload).includes("errorStack")) {
+  throw new Error(`browser issue leaked URL detail or stack text: ${transport.sentBodies[3]}`);
 }
 if (syncEvent.defaultPrevented) {
   throw new Error("browser error default handling should remain enabled by default");
@@ -1681,7 +1712,19 @@ const page = createPageViewEvent(window, {
   includeQueryString: false,
   now: () => "2026-06-02T10:00:00Z"
 });
-const issue = createBrowserErrorEvent(new Error("typed browser error"), window);
+const typedError = new Error("typed browser error");
+typedError.stack = "Error: typed browser error\n    at typed (https://cdn.example/assets/app.js?debug=true#section:12:34)";
+const issue = createBrowserErrorEvent(typedError, window, {
+  debugIdMap: {
+    "/assets/app.js": "11111111-2222-4333-8444-555555555555"
+  },
+  environment: "production",
+  includeErrorStack: false,
+  platform: "web",
+  release: "web@2026.07.04",
+  runtime: "browser",
+  service: "checkout-web"
+});
 const action = createBrowserActionEvent({
   name: "checkout.clicked",
   status: "success",

@@ -1,5 +1,34 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: Browser runtime error source-map hint gap reduced after source
+  reads from Sentry JS
+  `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
+  (`exceptionFromError`, `GlobalHandlers`, `getFilenameToDebugIdMap`,
+  `applyDebugIds`, `applyDebugMeta`), Datadog Browser SDK
+  `DataDog/browser-sdk@d2c7e303e4533f40e93d447042a67571f7ba97ff`
+  (`trackRuntimeError`, `computeRawError`, `getErrorDebugIds`,
+  `processError`), PostHog JS
+  `PostHog/posthog-js@e480a3e23ecff45d2f9cf50332f6f59c54a7c736`
+  (`ExceptionObserver`, `PostHogExceptions`, `ErrorPropertiesBuilder`,
+  `getFilenameToChunkIdMap`), and OpenTelemetry JS
+  `open-telemetry/opentelemetry-js@d9c170c94884e345dff6d67322794e85e6e07f18`
+  (`Exception`, `recordException`, `setSpanWithError`). `@logbrew/browser`
+  now routes browser `error` and `unhandledrejection` issue attributes through
+  core `createIssueAttributesFromError(...)`, accepts `debugIdMap`, release,
+  environment, service, runtime, platform, and opt-in `includeErrorStack`, and
+  emits path-only first-frame/source-map Debug ID metadata plus active
+  trace/span correlation. It avoids full URLs, hosts, query/hash, raw stack
+  text by default, headers, payloads, cookies, replay, baggage, and tracestate.
+  Evidence: RED `node --test js/logbrew-browser/test/trace-context.test.mjs`
+  failed on missing `errorFrameFile`; GREEN `npm test --prefix
+  js/logbrew-browser` (25 tests) and `bash scripts/real_user_browser_smoke.sh`
+  with packed `@logbrew/sdk`, packed `@logbrew/browser`, TypeScript/CJS proof,
+  global ErrorEvent source-map Debug ID metadata, and path-only privacy
+  assertions. Research:
+  `docs/competitor-research/browser-error-debug-id-source-maps-2026-07-04.md`.
+  Honest gap: Sentry/Datadog still lead on hosted source-map upload/lookup/
+  symbolicated stack presentation, grouping, cause chains, suppression rules,
+  and source-context UI.
 - 2026-07-04: React browser timing bridge gap reduced after source reads from
   Sentry JS
   `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
