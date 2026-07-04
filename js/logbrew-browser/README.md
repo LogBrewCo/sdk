@@ -226,9 +226,9 @@ webVitalSpans.uninstall();
 
 Web Vital spans keep the active trace ID, create a child span ID, record metric name, value, unit, rating, navigation type, delta, and safe timing subparts such as time to first byte or resource load duration when the metric provides them. They do not include DOM selectors, interaction targets, raw attribution entries, full URLs, hosts, query strings, hash fragments, headers, request or response bodies, cookies, user text, baggage, or tracestate.
 
-## Interaction and Long-Task Timing Spans
+## Interaction, Long-Task, and Long-Animation-Frame Timing Spans
 
-Use `captureBrowserInteractionTiming()` when your app already receives `PerformanceEventTiming`, `first-input`, or `longtask` entries and wants click/input/long-task latency next to the active route trace. Pass `interactionPathTemplate` so high-cardinality paths group under a stable route name.
+Use `captureBrowserInteractionTiming()` when your app already receives `PerformanceEventTiming`, `first-input`, `longtask`, or `long-animation-frame` entries and wants click/input/main-thread latency next to the active route trace. Pass `interactionPathTemplate` so high-cardinality paths group under a stable route name.
 
 ```js
 import {
@@ -270,7 +270,9 @@ const interactions = installLogBrewBrowserInteractionTimingInstrumentation(logbr
 interactions.uninstall();
 ```
 
-Interaction timing spans keep the active trace ID, create a child span ID, and record entry type, interaction type, interaction ID, input delay, processing duration, presentation delay, start time, task name, and route template when available. They do not include DOM targets, selectors, element text, attribution script URLs, full URLs, hosts, query strings, hash fragments, headers, request or response bodies, cookies, user text, baggage, or tracestate.
+When the browser reports `PerformanceObserver.supportedEntryTypes` with `long-animation-frame`, the default observer captures `event` plus `long-animation-frame`; older browsers keep the `event` plus `longtask` fallback. You can pass `entryTypes` explicitly if your app owns a different policy.
+
+Interaction timing spans keep the active trace ID, create a child span ID, and record entry type, interaction type, interaction ID, input delay, processing duration, presentation delay, start time, task name, long-animation-frame blocking/render/style timing, aggregate script duration/count, and route template when available. They do not include DOM targets, selectors, element text, script URLs, script function names, script invokers, attribution script URLs, full URLs, hosts, query strings, hash fragments, headers, request or response bodies, cookies, user text, baggage, or tracestate.
 
 ## Fetch Spans
 

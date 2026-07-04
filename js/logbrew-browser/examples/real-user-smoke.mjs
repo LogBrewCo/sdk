@@ -106,9 +106,15 @@ await captureBrowserInteractionTiming(createLongTaskEntry(), logbrew, {
   now: nextTimestamp,
   randomValues: () => fillBytes(8, 0x88)
 });
+await captureBrowserInteractionTiming(createLongAnimationFrameEntry(), logbrew, {
+  flushOnCapture: false,
+  interactionPathTemplate: "/settings",
+  now: nextTimestamp,
+  randomValues: () => fillBytes(8, 0x99)
+});
 
-if (logbrew.client.pendingEvents() !== 10) {
-  throw new Error(`expected 10 captured events, got ${logbrew.client.pendingEvents()}`);
+if (logbrew.client.pendingEvents() !== 11) {
+  throw new Error(`expected 11 captured events, got ${logbrew.client.pendingEvents()}`);
 }
 
 logbrew.client.log("evt_browser_pagehide_001", nextTimestamp(), {
@@ -227,7 +233,17 @@ if (longTaskSpan?.attributes.name !== "browser.long_task /settings") {
 if (longTaskSpan.attributes.traceId !== traceContext.traceId || longTaskSpan.attributes.parentSpanId !== traceContext.spanId) {
   throw new Error(`expected long-task child span trace correlation, got ${payload}`);
 }
-if (payload.includes("https://cdn.example.test/app.js") || payload.includes("iframe-private")) {
+const longAnimationFrameSpan = parsed.events.find((event) => event.type === "span" && event.attributes.metadata?.entryType === "long-animation-frame");
+if (longAnimationFrameSpan?.attributes.name !== "browser.long_animation_frame /settings") {
+  throw new Error(`expected long-animation-frame span, got ${payload}`);
+}
+if (longAnimationFrameSpan.attributes.traceId !== traceContext.traceId || longAnimationFrameSpan.attributes.parentSpanId !== traceContext.spanId) {
+  throw new Error(`expected long-animation-frame child span trace correlation, got ${payload}`);
+}
+if (longAnimationFrameSpan.attributes.metadata.blockingDurationMs !== 45 || longAnimationFrameSpan.attributes.metadata.scriptCount !== 2) {
+  throw new Error(`expected long-animation-frame timing metadata, got ${payload}`);
+}
+if (payload.includes("https://cdn.example.test/app.js") || payload.includes("iframe-private") || payload.includes("renderCheckout")) {
   throw new Error(`interaction timing metadata leaked attribution details: ${payload}`);
 }
 const visibilityPayload = JSON.parse(transport.sentBodies[1]);
@@ -282,6 +298,7 @@ console.error(JSON.stringify({
   fetchSpan: fetchSpan.attributes.name,
   hiddenFlushEvents: visibilityPayload.events.length,
   interactionSpan: interactionSpan.attributes.name,
+  longAnimationFrameSpan: longAnimationFrameSpan.attributes.name,
   longTaskSpan: longTaskSpan.attributes.name,
   networkAction: network.attributes.metadata.routeTemplate,
   pageView: parsed.events[0].attributes.name,
@@ -389,6 +406,40 @@ function createLongTaskEntry() {
     entryType: "longtask",
     name: "self",
     startTime: 500
+  };
+}
+
+function createLongAnimationFrameEntry() {
+  return {
+    blockingDuration: 45,
+    duration: 120,
+    entryType: "long-animation-frame",
+    firstUIEventTimestamp: 640,
+    name: "long-animation-frame",
+    renderStart: 650,
+    scripts: [
+      {
+        duration: 40,
+        forcedStyleAndLayoutDuration: 6,
+        invoker: "DOMWindow.onclick",
+        invokerType: "event-listener",
+        pauseDuration: 3,
+        sourceFunctionName: "renderCheckout",
+        sourceURL: "https://cdn.example.test/app.js?sample=masked",
+        startTime: 615
+      },
+      {
+        duration: 13,
+        forcedStyleAndLayoutDuration: 2,
+        invoker: "timer",
+        pauseDuration: 2,
+        sourceFunctionName: "hydratePrivateWidget",
+        sourceURL: "https://cdn.example.test/vendor.js?sample=masked",
+        startTime: 655
+      }
+    ],
+    startTime: 600,
+    styleAndLayoutStart: 675
   };
 }
 

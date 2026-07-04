@@ -6,7 +6,8 @@ const {
 
 const DEFAULT_EVENT_DURATION_THRESHOLD_MS = 40;
 const DEFAULT_MAX_DURATION_MS = 60_000;
-const OBSERVED_ENTRY_TYPES = ["event", "longtask"];
+const DEFAULT_OBSERVED_ENTRY_TYPES = ["event", "longtask"];
+const DEFAULT_OBSERVED_ENTRY_TYPES_WITH_LONG_ANIMATION_FRAME = ["event", "long-animation-frame"];
 
 async function captureBrowserInteractionTiming(entry, context, options = {}) {
   assertBrowserContext(context, "captureBrowserInteractionTiming");
@@ -35,7 +36,7 @@ function installLogBrewBrowserInteractionTimingInstrumentation(context, options 
   let installed = true;
   const isInstalled = () => installed;
   const observers = [];
-  for (const entryType of observedEntryTypes(options)) {
+  for (const entryType of observedEntryTypes(options, PerformanceObserverConstructor)) {
     const observer = createInteractionTimingObserver(
       PerformanceObserverConstructor,
       entryType,
@@ -108,14 +109,23 @@ function createBrowserInteractionTimingEvent(entry, browserWindow = defaultWindo
     source: "browser.interaction"
   });
   const timingMetadata = compactMetadata({
+    blockingDurationMs: details.blockingDurationMs,
     entryType: details.entryType,
+    firstUIEventTimestampMs: details.firstUIEventTimestampMs,
     inputDelayMs: details.inputDelayMs,
     interactionId: details.interactionId,
     interactionPath: details.interactionPath,
     interactionType: details.interactionType,
     presentationDelayMs: details.presentationDelayMs,
     processingDurationMs: details.processingDurationMs,
+    renderStartMs: details.renderStartMs,
+    scriptCount: details.scriptCount,
+    scriptMaxDurationMs: details.scriptMaxDurationMs,
+    scriptTotalDurationMs: details.scriptTotalDurationMs,
+    scriptTotalForcedStyleAndLayoutDurationMs: details.scriptTotalForcedStyleAndLayoutDurationMs,
+    scriptTotalPauseDurationMs: details.scriptTotalPauseDurationMs,
     startTimeMs: details.startTimeMs,
+    styleAndLayoutStartMs: details.styleAndLayoutStartMs,
     taskName: details.taskName
   });
   const safeMetadata = sanitizeMetadata(
@@ -178,6 +188,22 @@ function interactionTimingDetails(entry, interactionPathTemplate, maxDurationMs,
       startTimeMs: roundedNumber(nonNegativeNumberOrUndefined(entry.startTime))
     };
   }
+  if (entryType === "long-animation-frame") {
+    const scriptSummary = longAnimationFrameScriptSummary(entry.scripts);
+    return {
+      ...scriptSummary,
+      blockingDurationMs: roundedNumber(nonNegativeNumberOrUndefined(entry.blockingDuration)),
+      durationMs,
+      entryType,
+      firstUIEventTimestampMs: roundedNumber(nonNegativeNumberOrUndefined(entry.firstUIEventTimestamp)),
+      interactionPath,
+      message: interactionPath,
+      name: `browser.long_animation_frame ${interactionPath}`,
+      renderStartMs: roundedNumber(nonNegativeNumberOrUndefined(entry.renderStart)),
+      startTimeMs: roundedNumber(nonNegativeNumberOrUndefined(entry.startTime)),
+      styleAndLayoutStartMs: roundedNumber(nonNegativeNumberOrUndefined(entry.styleAndLayoutStart))
+    };
+  }
   return {
     durationMs,
     entryType,
@@ -238,13 +264,16 @@ function interactionTimingEntries(entryList) {
   }
   return entryList.getEntries().filter((entry) => {
     const entryType = entry?.entryType;
-    return entryType === "event" || entryType === "first-input" || entryType === "longtask";
+    return entryType === "event"
+      || entryType === "first-input"
+      || entryType === "long-animation-frame"
+      || entryType === "longtask";
   });
 }
 
-function observedEntryTypes(options) {
+function observedEntryTypes(options, PerformanceObserverConstructor) {
   if (options.entryTypes === undefined) {
-    return OBSERVED_ENTRY_TYPES;
+    return defaultObservedEntryTypes(PerformanceObserverConstructor);
   }
   if (!Array.isArray(options.entryTypes)) {
     throw new SdkError("configuration_error", "entryTypes must be an array");
@@ -259,6 +288,14 @@ function observedEntryTypes(options) {
   return unique;
 }
 
+function defaultObservedEntryTypes(PerformanceObserverConstructor) {
+  const supportedEntryTypes = PerformanceObserverConstructor?.supportedEntryTypes;
+  if (Array.isArray(supportedEntryTypes) && supportedEntryTypes.includes("long-animation-frame")) {
+    return DEFAULT_OBSERVED_ENTRY_TYPES_WITH_LONG_ANIMATION_FRAME;
+  }
+  return DEFAULT_OBSERVED_ENTRY_TYPES;
+}
+
 function interactionDurationThreshold(options) {
   const threshold = options.interactionDurationThresholdMs ?? DEFAULT_EVENT_DURATION_THRESHOLD_MS;
   return finiteNonNegativeNumber("interactionDurationThresholdMs", threshold);
@@ -266,10 +303,58 @@ function interactionDurationThreshold(options) {
 
 function timingEntryType(entryType) {
   const normalized = stringOrUndefined(entryType);
-  if (normalized === "event" || normalized === "first-input" || normalized === "longtask") {
+  if (
+    normalized === "event"
+    || normalized === "first-input"
+    || normalized === "long-animation-frame"
+    || normalized === "longtask"
+  ) {
     return normalized;
   }
-  throw new SdkError("configuration_error", "performance timing entryType must be event, first-input, or longtask");
+  throw new SdkError(
+    "configuration_error",
+    "performance timing entryType must be event, first-input, long-animation-frame, or longtask"
+  );
+}
+
+function longAnimationFrameScriptSummary(scripts) {
+  if (!Array.isArray(scripts)) {
+    return {
+      scriptCount: 0
+    };
+  }
+  const safeScripts = scripts.filter((script) => script && typeof script === "object" && !Array.isArray(script));
+  return {
+    scriptCount: safeScripts.length,
+    scriptMaxDurationMs: maxScriptNumber(safeScripts, "duration"),
+    scriptTotalDurationMs: sumScriptNumbers(safeScripts, "duration"),
+    scriptTotalForcedStyleAndLayoutDurationMs: sumScriptNumbers(safeScripts, "forcedStyleAndLayoutDuration"),
+    scriptTotalPauseDurationMs: sumScriptNumbers(safeScripts, "pauseDuration")
+  };
+}
+
+function sumScriptNumbers(scripts, propertyName) {
+  let total = 0;
+  let found = false;
+  for (const script of scripts) {
+    const value = nonNegativeNumberOrUndefined(script[propertyName]);
+    if (value !== undefined) {
+      total += value;
+      found = true;
+    }
+  }
+  return found ? roundedNumber(total) : undefined;
+}
+
+function maxScriptNumber(scripts, propertyName) {
+  let max;
+  for (const script of scripts) {
+    const value = nonNegativeNumberOrUndefined(script[propertyName]);
+    if (value !== undefined && (max === undefined || value > max)) {
+      max = value;
+    }
+  }
+  return roundedNumber(max);
 }
 
 function templatePath(entry, interactionPathTemplate, path) {

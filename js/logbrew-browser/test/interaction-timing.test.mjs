@@ -77,10 +77,18 @@ test("installed browser interaction timing capture emits sanitized trace-linked 
         fillBytes(8, 0x44)
       ])
     });
+    await captureBrowserInteractionTiming(createLongAnimationFrameEntry(), context, {
+      flushOnCapture: false,
+      interactionPathTemplate: "/products/:id",
+      now: () => "2026-07-04T16:00:02.000Z",
+      randomValues: sequenceRandomValues([
+        fillBytes(8, 0x55)
+      ])
+    });
 
     const payload = JSON.parse(context.previewJson());
-    assert.equal(payload.events.length, 2);
-    const [interactionSpan, longTaskSpan] = payload.events;
+    assert.equal(payload.events.length, 3);
+    const [interactionSpan, longTaskSpan, longAnimationFrameSpan] = payload.events;
     assert.equal(interactionSpan.type, "span");
     assert.equal(interactionSpan.attributes.name, "browser.interaction click /products/:id");
     assert.equal(interactionSpan.attributes.traceId, TRACE_ID);
@@ -113,10 +121,84 @@ test("installed browser interaction timing capture emits sanitized trace-linked 
     assert.equal(longTaskSpan.attributes.metadata.taskName, "self");
     assert.equal(longTaskSpan.attributes.metadata.attribution, undefined);
     assert.equal(longTaskSpan.attributes.metadata.scripts, undefined);
+    assert.equal(longAnimationFrameSpan.attributes.name, "browser.long_animation_frame /products/:id");
+    assert.equal(longAnimationFrameSpan.attributes.traceId, TRACE_ID);
+    assert.equal(longAnimationFrameSpan.attributes.parentSpanId, PARENT_SPAN_ID);
+    assert.equal(longAnimationFrameSpan.attributes.spanId, "5555555555555555");
+    assert.equal(longAnimationFrameSpan.attributes.durationMs, 120);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.entryType, "long-animation-frame");
+    assert.equal(longAnimationFrameSpan.attributes.metadata.blockingDurationMs, 45);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.firstUIEventTimestampMs, 640);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.renderStartMs, 650);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.styleAndLayoutStartMs, 675);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.scriptCount, 2);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.scriptTotalDurationMs, 53);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.scriptMaxDurationMs, 40);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.scriptTotalPauseDurationMs, 5);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.scriptTotalForcedStyleAndLayoutDurationMs, 8);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.sourceURL, undefined);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.sourceFunctionName, undefined);
+    assert.equal(longAnimationFrameSpan.attributes.metadata.invoker, undefined);
+    assert.equal(JSON.stringify(longAnimationFrameSpan).includes("https://cdn.example.test/app.js"), false);
+    assert.equal(JSON.stringify(longAnimationFrameSpan).includes("renderCheckout"), false);
     assert.equal(JSON.stringify(payload).includes("app.example.test"), false);
     assert.equal(JSON.stringify(payload).includes("email=dev@example.test"), false);
     assert.equal(JSON.stringify(payload).includes("#reviews"), false);
     assert.equal(JSON.stringify(payload).includes("https://cdn.example.test/app.js"), false);
+  } finally {
+    await removeTempDir();
+  }
+});
+
+test("installed browser interaction timing instrumentation prefers long animation frames when supported", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const {
+    installLogBrewBrowser,
+    installLogBrewBrowserInteractionTimingInstrumentation
+  } = imported;
+  try {
+    const browserWindow = createFakeBrowserWindow("https://app.example.test/editor?sample=private#timeline");
+    const context = installLogBrewBrowser({
+      browserWindow,
+      capturePageViews: false,
+      clientKey: CLIENT_KEY,
+      flushOnCapture: false,
+      transport: {
+        async send() {
+          return { statusCode: 202 };
+        }
+      }
+    });
+    const fakeObserver = createFakePerformanceObserver(["event", "long-animation-frame", "longtask"]);
+
+    const instrumentation = installLogBrewBrowserInteractionTimingInstrumentation(context, {
+      flushOnCapture: false,
+      interactionPathTemplate: "/editor",
+      now: () => "2026-07-04T16:02:00.000Z",
+      performanceObserver: fakeObserver.PerformanceObserver,
+      randomValues: sequenceRandomValues([
+        fillBytes(8, 0xaa),
+        fillBytes(8, 0xbb)
+      ])
+    });
+
+    assert.deepEqual(fakeObserver.observedOptions(), [
+      { buffered: true, durationThreshold: 40, type: "event" },
+      { buffered: true, type: "long-animation-frame" }
+    ]);
+    fakeObserver.emit([createClickEventTimingEntry(), createLongAnimationFrameEntry(), createLongTaskEntry()]);
+    instrumentation.uninstall();
+
+    const payload = JSON.parse(context.previewJson());
+    const spans = payload.events.filter((event) => event.type === "span");
+    assert.equal(spans.length, 2);
+    assert.equal(spans[0].attributes.name, "browser.interaction click /editor");
+    assert.equal(spans[0].attributes.spanId, "aaaaaaaaaaaaaaaa");
+    assert.equal(spans[1].attributes.name, "browser.long_animation_frame /editor");
+    assert.equal(spans[1].attributes.spanId, "bbbbbbbbbbbbbbbb");
+    assert.equal(spans[1].attributes.metadata.entryType, "long-animation-frame");
+    assert.equal(JSON.stringify(payload).includes("sample=private"), false);
+    assert.equal(JSON.stringify(payload).includes("renderCheckout"), false);
   } finally {
     await removeTempDir();
   }
@@ -209,6 +291,43 @@ function createLongTaskEntry() {
   };
 }
 
+function createLongAnimationFrameEntry() {
+  return {
+    blockingDuration: 45,
+    duration: 120,
+    entryType: "long-animation-frame",
+    firstUIEventTimestamp: 640,
+    name: "long-animation-frame",
+    renderStart: 650,
+    scripts: [
+      {
+        duration: 40,
+        executionStart: 620,
+        forcedStyleAndLayoutDuration: 6,
+        invoker: "DOMWindow.onclick",
+        invokerType: "event-listener",
+        pauseDuration: 3,
+        sourceCharPosition: 120,
+        sourceFunctionName: "renderCheckout",
+        sourceURL: "https://cdn.example.test/app.js?sample=masked",
+        startTime: 615,
+        windowAttribution: "self"
+      },
+      {
+        duration: 13,
+        forcedStyleAndLayoutDuration: 2,
+        invoker: "timer",
+        pauseDuration: 2,
+        sourceFunctionName: "hydratePrivateWidget",
+        sourceURL: "https://cdn.example.test/vendor.js?sample=masked",
+        startTime: 655
+      }
+    ],
+    startTime: 600,
+    styleAndLayoutStart: 675
+  };
+}
+
 function createFakeBrowserWindow(href) {
   const currentUrl = new URL(href);
   return {
@@ -232,25 +351,30 @@ function createFakeBrowserWindow(href) {
   };
 }
 
-function createFakePerformanceObserver() {
+function createFakePerformanceObserver(supportedEntryTypes) {
   const callbacks = [];
   const observers = [];
   const observed = [];
+  const supported = supportedEntryTypes;
+  class FakePerformanceObserver {
+    static supportedEntryTypes = supported;
+
+    constructor(callback) {
+      callbacks.push(callback);
+      observers.push(this);
+    }
+
+    disconnect() {
+      this.disconnected = true;
+    }
+
+    observe(nextObservedOptions) {
+      observed.push(nextObservedOptions);
+    }
+  }
+
   return {
-    PerformanceObserver: class FakePerformanceObserver {
-      constructor(callback) {
-        callbacks.push(callback);
-        observers.push(this);
-      }
-
-      disconnect() {
-        this.disconnected = true;
-      }
-
-      observe(nextObservedOptions) {
-        observed.push(nextObservedOptions);
-      }
-    },
+    PerformanceObserver: FakePerformanceObserver,
     disconnectedCount() {
       return observers.filter((observer) => observer.disconnected).length;
     },

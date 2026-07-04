@@ -305,14 +305,18 @@ export type BrowserWebVitalPathTemplate =
 
 export type BrowserInteractionTimingInput = PerformanceEntry | {
   attribution?: unknown;
+  blockingDuration?: number;
   duration: number;
   entryType?: string;
+  firstUIEventTimestamp?: number;
   interactionId?: number;
   name?: string;
   processingEnd?: number;
   processingStart?: number;
+  renderStart?: number;
   scripts?: unknown;
   startTime?: number;
+  styleAndLayoutStart?: number;
   target?: unknown;
 };
 
@@ -474,13 +478,17 @@ export type BrowserWebVitalsInstrumentation = {
   uninstall(): void;
 };
 
-export type BrowserInteractionTimingObserverEntryType = "event" | "first-input" | "longtask";
+export type BrowserInteractionTimingObserverEntryType =
+  | "event"
+  | "first-input"
+  | "long-animation-frame"
+  | "longtask";
 
 export type BrowserInteractionTimingObserver = {
   observe(
     options:
       | { buffered?: boolean; durationThreshold?: number; type: "event" | "first-input" }
-      | { buffered?: boolean; type: "longtask" }
+      | { buffered?: boolean; type: "long-animation-frame" | "longtask" }
       | { entryTypes: string[] }
   ): void;
   disconnect(): void;

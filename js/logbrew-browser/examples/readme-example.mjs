@@ -82,6 +82,21 @@ await captureBrowserInteractionTiming({
   interactionPathTemplate: "/dashboard"
 });
 
+await captureBrowserInteractionTiming({
+  blockingDuration: 45,
+  duration: 120,
+  entryType: "long-animation-frame",
+  renderStart: 650,
+  scripts: [
+    { duration: 40, forcedStyleAndLayoutDuration: 6, pauseDuration: 3 }
+  ],
+  startTime: 600,
+  styleAndLayoutStart: 675
+}, logbrew, {
+  flushOnCapture: false,
+  interactionPathTemplate: "/dashboard"
+});
+
 const payload = logbrew.previewJson();
 const response = await logbrew.flush();
 console.log(payload);

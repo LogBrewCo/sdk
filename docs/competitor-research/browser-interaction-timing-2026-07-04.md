@@ -11,17 +11,17 @@ Goal: improve browser trace usefulness where real users compare LogBrew against 
 
 ## LogBrew Implementation
 
-- Added `captureBrowserInteractionTiming()` and `createBrowserInteractionTimingEvent()` in `@logbrew/browser` for app-owned `PerformanceEventTiming`, `first-input`, and `longtask` entries.
-- Added `installLogBrewBrowserInteractionTimingInstrumentation()` for explicit `PerformanceObserver` capture of `event` and `longtask` entries. It returns `uninstall()` and is not enabled by default.
-- Interaction spans use the active browser trace, create child span IDs, and keep bounded primitive metadata: entry type, interaction type, interaction ID, input delay, processing duration, presentation delay, start time, task name, path, and route template.
-- Privacy boundary: no DOM target, selector, element text, long-task attribution script URL, full URL, host, query string, hash, header, body, cookie, replay, baggage, or tracestate capture.
+- Added `captureBrowserInteractionTiming()` and `createBrowserInteractionTimingEvent()` in `@logbrew/browser` for app-owned `PerformanceEventTiming`, `first-input`, `longtask`, and `long-animation-frame` entries.
+- Added `installLogBrewBrowserInteractionTimingInstrumentation()` for explicit `PerformanceObserver` capture. It prefers `event` plus `long-animation-frame` when the browser reports support, falls back to `event` plus `longtask`, accepts explicit `entryTypes`, returns `uninstall()`, and is not enabled by default.
+- Interaction and main-thread spans use the active browser trace, create child span IDs, and keep bounded primitive metadata: entry type, interaction type, interaction ID, input delay, processing duration, presentation delay, blocking duration, render/style-and-layout milestones, aggregate long-animation-frame script counts/timings, start time, task name, path, and route template.
+- Privacy boundary: no DOM target, selector, element text, long-task attribution script URL, long-animation-frame script URL, function name, invoker, full URL, host, query string, hash, header, body, cookie, replay, baggage, or tracestate capture.
 
 ## Verification
 
-- `node --test js/logbrew-browser/test/interaction-timing.test.mjs`: 2 tests passed, including installed temp-app capture and opt-in observer teardown.
-- `npm test --prefix js/logbrew-browser`: 22 tests passed, including syntax checks, ESM/CJS package imports, interaction timing spans, and browser regression tests.
-- `bash scripts/real_user_browser_smoke.sh`: passed with `happy-dom@20.10.1`; packs `@logbrew/sdk` and `@logbrew/browser`, installs them into a temp npm app, verifies tarball files, README contents, TypeScript declarations, CommonJS exports, direct and observed interaction/long-task spans, trace correlation, teardown behavior, and privacy constraints.
+- `node --test js/logbrew-browser/test/interaction-timing.test.mjs`: 3 tests passed, including direct long-animation-frame capture, support-based observer preference, fallback long-task observation, and teardown.
+- `npm test --prefix js/logbrew-browser`: 23 tests passed, including syntax checks, ESM/CJS package imports, interaction timing spans, long-animation-frame metadata, and browser regression tests.
+- `bash scripts/real_user_browser_smoke.sh`: passed with `happy-dom@20.10.1`; packs `@logbrew/sdk` and `@logbrew/browser`, installs them into a temp npm app, verifies tarball files, README contents, TypeScript declarations, CommonJS exports, direct and observed interaction/long-task/long-animation-frame spans, trace correlation, teardown behavior, and privacy constraints.
 
 ## Honest Comparison
 
-LogBrew is now stronger for teams that want explicit, small, dependency-free browser interaction timing spans with installed-artifact proof and strict privacy defaults. Sentry and Datadog remain stronger for automatic interaction-to-view lifecycle ownership, INP ranking, long-animation-frame detail, rich UI/component attribution, and hosted performance views. The next browser gaps are richer INP/interaction aggregation, optional framework-owned automatic instrumentation, real minified-error/source-map proof, and backend release-artifact upload/symbolication support.
+LogBrew is now stronger for teams that want explicit, small, dependency-free browser interaction and main-thread timing spans with installed-artifact proof and strict privacy defaults. Sentry and Datadog remain stronger for automatic interaction-to-view lifecycle ownership, INP ranking, richer UI/component attribution, hosted performance views, replay, and production source-map/symbolication. The next browser gaps are richer INP/interaction aggregation, optional framework-owned automatic instrumentation, real minified-error/source-map proof, and backend release-artifact upload/symbolication support.
