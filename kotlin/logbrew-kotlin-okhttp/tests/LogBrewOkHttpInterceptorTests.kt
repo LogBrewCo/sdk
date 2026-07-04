@@ -27,12 +27,13 @@ fun main() {
     run("okhttp_interceptor_injects_traceparent_and_captures_response_span", ::okHttpInterceptorCapturesResponse)
     run("okhttp_interceptor_rethrows_original_failure_and_captures_error_span", ::okHttpInterceptorCapturesFailure)
     run("okhttp_interceptor_prefers_request_route_template_tag", ::okHttpInterceptorPrefersRequestRouteTemplateTag)
+    run("okhttp_interceptor_summarizes_prior_redirect_responses", ::okHttpInterceptorSummarizesPriorRedirectResponses)
     run("okhttp_interceptor_reports_capture_failure_without_breaking_request", ::okHttpInterceptorReportsCaptureFailure)
     run("okhttp_callback_wrapper_reactivates_registration_trace", ::okHttpCallbackWrapperReactivatesTrace)
     run("okhttp_call_factory_carries_trace_into_async_request_and_callback", ::okHttpCallFactoryCarriesTrace)
     run("okhttp_call_factory_preserves_request_route_template_tag", ::okHttpCallFactoryPreservesRouteTemplateTag)
     run("okhttp_phase_timings_add_bounded_phase_metadata", ::okHttpPhaseTimingsAddBoundedPhaseMetadata)
-    println("kotlin okhttp package tests ok (8 tests)")
+    println("kotlin okhttp package tests ok (9 tests)")
 }
 
 private fun run(
@@ -178,6 +179,66 @@ private fun okHttpInterceptorPrefersRequestRouteTemplateTag() {
     check("/interceptor/default" !in body)
     check("ord_123" !in body)
     check("cart=123" !in body)
+    check("#pay" !in body)
+    check("traceparent" !in body)
+}
+
+private fun okHttpInterceptorSummarizesPriorRedirectResponses() {
+    val parent =
+        LogBrewTrace.continueOrCreate(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+        )
+    val client = newClient()
+    val originalRequest =
+        LogBrewOkHttpRouteTemplates.tag(
+            Request
+                .Builder()
+                .url("https://mobile.example.test/api/checkout?cart=123#pay")
+                .build(),
+            "/api/checkout",
+        )
+    val redirectRequest =
+        Request
+            .Builder()
+            .url("https://mobile.example.test/redirect/private?token=secret#follow")
+            .build()
+    val priorRedirect =
+        Response
+            .Builder()
+            .request(redirectRequest)
+            .protocol(Protocol.HTTP_1_1)
+            .code(302)
+            .message("Found")
+            .header("Location", "https://mobile.example.test/api/checkout?token=secret")
+            .build()
+    val chain =
+        FakeChain(
+            originalRequest,
+            code = 200,
+            priorResponse = priorRedirect,
+        )
+    val interceptor =
+        LogBrewOkHttpInterceptor(
+            client = client,
+            eventIdProvider = LogBrewOkHttpEventIdProvider { "evt_okhttp_redirect_001" },
+            timestampProvider = LogBrewOkHttpTimestampProvider { "2026-06-02T10:00:39Z" },
+        )
+
+    LogBrewTrace.use(parent).use {
+        check(interceptor.intercept(chain).code == 200)
+    }
+
+    val body = client.previewJson()
+    check("\"id\": \"evt_okhttp_redirect_001\"" in body)
+    check("\"name\": \"GET /api/checkout\"" in body)
+    check("\"okhttp.priorResponseCount\": 1" in body)
+    check("\"okhttp.redirectCount\": 1" in body)
+    check("\"okhttp.retryCount\": 0" in body)
+    check("Location" !in body)
+    check("redirect/private" !in body)
+    check("token=secret" !in body)
+    check("cart=123" !in body)
+    check("#follow" !in body)
     check("#pay" !in body)
     check("traceparent" !in body)
 }
@@ -434,6 +495,7 @@ private class FakeChain(
     private val initialRequest: Request,
     private val code: Int = 200,
     private val failure: IOException? = null,
+    private val priorResponse: Response? = null,
     private val call: Call? = null,
     private val assertion: (Request) -> Unit = {},
 ) : Interceptor.Chain {
@@ -451,6 +513,7 @@ private class FakeChain(
             .protocol(Protocol.HTTP_1_1)
             .code(code)
             .message("OK")
+            .priorResponse(priorResponse)
             .build()
     }
 

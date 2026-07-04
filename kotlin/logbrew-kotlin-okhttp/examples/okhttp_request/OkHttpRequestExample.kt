@@ -30,6 +30,11 @@ fun main() {
         exchange.sendResponseHeaders(202, 0)
         exchange.responseBody.close()
     }
+    server.createContext("/api/redirect") { exchange ->
+        exchange.responseHeaders.add("Location", "/api/orders?redirect_token=secret")
+        exchange.sendResponseHeaders(302, -1)
+        exchange.close()
+    }
     server.start()
 
     try {
@@ -61,6 +66,18 @@ fun main() {
                             .url("http://127.0.0.1:$port/api/orders?cart=123#pay")
                             .build(),
                         "/api/orders/{order_id}",
+                    ),
+                ).execute()
+                .use { response -> check(response.code == 202) }
+
+            tracedCalls
+                .newCall(
+                    LogBrewOkHttpRouteTemplates.tag(
+                        Request
+                            .Builder()
+                            .url("http://127.0.0.1:$port/api/redirect?redirect_token=secret#jump")
+                            .build(),
+                        "/api/redirect",
                     ),
                 ).execute()
                 .use { response -> check(response.code == 202) }
@@ -108,16 +125,24 @@ fun main() {
     check(callbackTraceSpanId.get() == parent.spanId)
     check("\"id\": \"evt_okhttp_installed_001\"" in body)
     check("\"id\": \"evt_okhttp_installed_002\"" in body)
+    check("\"id\": \"evt_okhttp_installed_003\"" in body)
     check("\"name\": \"GET /api/orders/{order_id}\"" in body)
+    check("\"name\": \"GET /api/redirect\"" in body)
     check("\"statusCode\": 202" in body)
     check("\"durationMs\"" in body)
     check("\"okhttp.phase.recorded\": true" in body)
     check("\"okhttp.phase.requestHeadersMs\"" in body)
     check("\"okhttp.phase.responseHeadersMs\"" in body)
+    check("\"okhttp.priorResponseCount\": 1" in body)
+    check("\"okhttp.redirectCount\": 1" in body)
+    check("\"okhttp.retryCount\": 0" in body)
     check("\"traceId\": \"${parent.traceId}\"" in body)
     check("\"parentSpanId\": \"${parent.spanId}\"" in body)
     check("cart=123" !in body)
     check("cart=456" !in body)
+    check("redirect_token=secret" !in body)
+    check("Location" !in body)
+    check("#jump" !in body)
     check("#pay" !in body)
     check("#async" !in body)
     check("traceparent" !in body)

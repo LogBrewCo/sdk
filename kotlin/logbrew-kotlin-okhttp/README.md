@@ -61,6 +61,8 @@ LogBrewTrace.use(LogBrewTrace.continueOrCreate(incomingTraceparent)).use {
 
 The interceptor does not capture request or response bodies, arbitrary headers, full URLs, query strings, fragments, cookies, baggage, tracestate, visual replay, RUM resources, support tickets, backend usage/quota state, or symbolication data. Telemetry capture failures are reported to an optional `LogBrewOkHttpCaptureFailureHandler` and do not break the app-owned HTTP call.
 
+When OkHttp returns a final response with a `priorResponse` chain, the interceptor adds bounded counts for `okhttp.priorResponseCount`, `okhttp.redirectCount`, and `okhttp.retryCount`. These help explain redirect/retry-heavy calls without recording prior response URLs, `Location` headers, arbitrary headers, bodies, query strings, fragments, trace headers, baggage, or tracestate.
+
 `LogBrewOkHttpPhaseTimings.eventListenerFactory()` is optional. Add it when you want privacy-bounded request phase durations on the same request span, such as DNS, connect, request headers, and response headers. It records only bounded duration numbers and a boolean marker; it does not capture DNS names, IPs, proxies, protocols, TLS details, headers, bodies, URLs, query strings, fragments, redirects, baggage, or tracestate. If your app already owns an OkHttp `EventListener.Factory`, pass it to `eventListenerFactory(delegate)` so LogBrew wraps and preserves your listener.
 
 For asynchronous `enqueue(...)` calls, wrap the app-owned `OkHttpClient` as a `Call.Factory` when you want the active trace to survive OkHttp dispatcher threads. This lets the interceptor create the request child span under the trace that was active when `newCall(...)` was created and reactivates that trace for app callback code:

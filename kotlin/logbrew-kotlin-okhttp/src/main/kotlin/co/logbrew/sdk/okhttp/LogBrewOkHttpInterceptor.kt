@@ -71,9 +71,10 @@ class LogBrewOkHttpInterceptor
             val startedAtMs = monotonicTimeMs()
             var statusCode: Int? = null
             var error: Throwable? = null
+            var response: Response? = null
 
             try {
-                val response = requestSpan.withTrace { chain.proceed(tracedRequest) }
+                response = requestSpan.withTrace { chain.proceed(tracedRequest) }
                 statusCode = response.code
                 return response
             } catch (thrown: Throwable) {
@@ -89,12 +90,32 @@ class LogBrewOkHttpInterceptor
                         statusCode = statusCode,
                         durationMs = (monotonicTimeMs() - startedAtMs).coerceAtLeast(0.0),
                         error = error,
-                        metadata = phaseTimingMetadata(chain),
+                        metadata = phaseTimingMetadata(chain) + priorResponseMetadata(response),
                     )
                 } catch (captureError: Throwable) {
                     reportCaptureFailure(captureError)
                 }
             }
+        }
+
+        private fun priorResponseMetadata(response: Response?): Map<String, Any?> {
+            var prior = response?.priorResponse ?: return emptyMap()
+            var priorResponseCount = 0
+            var redirectCount = 0
+
+            while (priorResponseCount < MAX_PRIOR_RESPONSE_SUMMARY_COUNT) {
+                priorResponseCount += 1
+                if (prior.code in 300..399) {
+                    redirectCount += 1
+                }
+                prior = prior.priorResponse ?: break
+            }
+
+            return linkedMapOf(
+                "okhttp.priorResponseCount" to priorResponseCount,
+                "okhttp.redirectCount" to redirectCount,
+                "okhttp.retryCount" to (priorResponseCount - redirectCount),
+            )
         }
 
         private fun phaseTimingMetadata(chain: Interceptor.Chain): Map<String, Any?> =
@@ -131,6 +152,7 @@ class LogBrewOkHttpInterceptor
         private fun monotonicTimeMs(): Double = System.nanoTime().toDouble() / 1_000_000.0
 
         companion object {
+            private const val MAX_PRIOR_RESPONSE_SUMMARY_COUNT = 20
             private val nextEventId = AtomicLong(1)
             private val defaultEventIdProvider =
                 LogBrewOkHttpEventIdProvider {
