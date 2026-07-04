@@ -108,6 +108,7 @@ else
 end
 queue_attributes = JSON.parse(client.preview_json).fetch("events")[0].fetch("attributes")
 queue_metadata = queue_attributes.fetch("metadata")
+queue_span_events = queue_attributes.fetch("events")
 operation_assert(queue_attributes.fetch("status") == "error", "expected queue error status")
 operation_assert(queue_metadata.fetch("source") == "queue.operation", "expected queue source")
 operation_assert(queue_metadata.fetch("queue.system") == "sidekiq", "expected queue system")
@@ -115,9 +116,16 @@ operation_assert(queue_metadata.fetch("queue.operation") == "process", "expected
 operation_assert(queue_metadata.fetch("queue.target") == "checkout", "expected queue target")
 operation_assert(queue_metadata.fetch("attempt") == 2, "expected queue primitive metadata")
 operation_assert(queue_metadata.fetch("exceptionType") == "ArgumentError", "expected exception type only")
+operation_assert(queue_span_events.length == 1, "expected one queue exception span event")
+operation_assert(queue_span_events[0].fetch("name") == "exception", "expected exception span event")
+queue_event_metadata = queue_span_events[0].fetch("metadata")
+operation_assert(queue_event_metadata.fetch("exceptionType") == "ArgumentError", "expected exception event type only")
+operation_assert(queue_event_metadata.fetch("exceptionEscaped") == true, "expected escaped exception event")
 %w[messageBody jid headerTrace exceptionMessage exceptionBacktrace].each do |key|
   operation_assert(!queue_metadata.key?(key), "expected queue #{key} to be omitted")
+  operation_assert(!queue_event_metadata.key?(key), "expected queue exception event #{key} to be omitted")
 end
+operation_assert(!JSON.generate(queue_attributes).include?("private job failure"), "expected private exception message to be omitted")
 operation_tests += 1
 
 client = operation_sample_client

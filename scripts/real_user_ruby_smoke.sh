@@ -32,6 +32,7 @@ test -f "$unpacked_dir/lib/logbrew.rb"
 test -f "$unpacked_dir/lib/logbrew/product_timeline.rb"
 test -f "$unpacked_dir/lib/logbrew/traceparent.rb"
 test -f "$unpacked_dir/lib/logbrew/trace.rb"
+test -f "$unpacked_dir/lib/logbrew/span_events.rb"
 test -f "$unpacked_dir/lib/logbrew/operation_tracing.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
@@ -59,6 +60,7 @@ grep -q 'LogBrew::RackMiddleware' "$unpacked_dir/README.md"
 grep -q 'Rack And Rails Middleware' "$unpacked_dir/README.md"
 grep -q 'LogBrew::OperationTracing' "$unpacked_dir/README.md"
 grep -q 'Dependency Operation Spans' "$unpacked_dir/README.md"
+grep -q 'exceptionEscaped' "$unpacked_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$unpacked_dir/README.md"
 grep -q 'Rails Error Subscriber' "$unpacked_dir/README.md"
 grep -q 'Rails.error.subscribe' "$unpacked_dir/README.md"
@@ -111,6 +113,7 @@ test -f "$gem_dir/README.md"
 test -f "$gem_dir/lib/logbrew/product_timeline.rb"
 test -f "$gem_dir/lib/logbrew/traceparent.rb"
 test -f "$gem_dir/lib/logbrew/trace.rb"
+test -f "$gem_dir/lib/logbrew/span_events.rb"
 test -f "$gem_dir/lib/logbrew/operation_tracing.rb"
 test -f "$gem_dir/lib/logbrew/support_ticket.rb"
 test -f "$gem_dir/examples/readme_example.rb"
@@ -135,6 +138,7 @@ grep -q 'Support Ticket Draft Diagnostics' "$gem_dir/README.md"
 grep -q 'LogBrew::SupportTicketDraft.create' "$gem_dir/README.md"
 grep -q 'support-ticket routes' "$gem_dir/README.md"
 grep -q 'Dependency Operation Spans' "$gem_dir/README.md"
+grep -q 'exceptionEscaped' "$gem_dir/README.md"
 grep -q 'LogBrew::RailsErrorSubscriber' "$gem_dir/README.md"
 grep -q 'Rails Error Subscriber' "$gem_dir/README.md"
 grep -q 'Rails.error.subscribe' "$gem_dir/README.md"
@@ -188,6 +192,44 @@ raise "parent mismatch" unless span.fetch("parentSpanId") == parent.span_id
 raise "source mismatch" unless metadata.fetch("source") == "database.operation"
 raise "safe metadata missing" unless metadata.fetch("service") == "api" && metadata.fetch("rowCount") == 1
 raise "unsafe metadata leaked" if metadata.key?("sql") || metadata.key?("connectionString")
+
+begin
+  LogBrew::OperationTracing.queue_operation(
+    client,
+    "checkout.process",
+    event_id: "evt_installed_queue_span",
+    timestamp: "2026-06-02T10:00:14Z",
+    duration_ms: 8.75,
+    system: "sidekiq",
+    operation: "process",
+    target: "checkout",
+    metadata: {
+      attempt: 2,
+      messageBody: "private payload",
+      jobId: "job_123",
+      headerTrace: "redacted"
+    }
+  ) { raise ArgumentError, "private queue failure" }
+rescue ArgumentError => error
+  raise "exception mismatch" unless error.message == "private queue failure"
+else
+  raise "expected queue exception"
+end
+queue_span = JSON.parse(client.preview_json).fetch("events").last.fetch("attributes")
+queue_metadata = queue_span.fetch("metadata")
+span_events = queue_span.fetch("events")
+raise "queue span status mismatch" unless queue_span.fetch("status") == "error"
+raise "queue source mismatch" unless queue_metadata.fetch("source") == "queue.operation"
+raise "exception metadata mismatch" unless queue_metadata.fetch("exceptionType") == "ArgumentError"
+raise "safe queue metadata missing" unless queue_metadata.fetch("attempt") == 2
+raise "queue event count mismatch" unless span_events.length == 1
+raise "queue event name mismatch" unless span_events[0].fetch("name") == "exception"
+event_metadata = span_events[0].fetch("metadata")
+raise "queue event exception type mismatch" unless event_metadata.fetch("exceptionType") == "ArgumentError"
+raise "queue event escaped mismatch" unless event_metadata.fetch("exceptionEscaped") == true
+serialized_queue_span = JSON.generate(queue_span)
+raise "unsafe queue metadata leaked" if queue_metadata.key?("messageBody") || queue_metadata.key?("jobId") || queue_metadata.key?("headerTrace")
+raise "unsafe exception leaked" if serialized_queue_span.include?("private queue failure") || serialized_queue_span.include?("private payload") || serialized_queue_span.include?("job_123")
 puts "installed operation tracing ok"
 RUBY
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$tmp_dir/installed-operation-tracing.rb" > "$tmp_dir/installed-operation-tracing-smoke.out"

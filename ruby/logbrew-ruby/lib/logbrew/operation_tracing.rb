@@ -80,7 +80,8 @@ module LogBrew
           parentSpanId: context.parent_span_id,
           status: error ? "error" : "ok",
           durationMs: duration_ms(started_at, options),
-          metadata: span_metadata(kind, options, error)
+          metadata: span_metadata(kind, options, error),
+          events: span_events(error)
         }
       )
     rescue StandardError => capture_error
@@ -112,6 +113,20 @@ module LogBrew
         add_option(metadata, "#{kind}.target", read_option(options, :target))
         metadata["exceptionType"] = error.class.name if error
       end
+    end
+
+    def span_events(error)
+      return nil unless error
+
+      [
+        {
+          name: "exception",
+          metadata: {
+            exceptionType: error.class.name,
+            exceptionEscaped: true
+          }
+        }
+      ]
     end
 
     def sanitized_metadata(metadata)

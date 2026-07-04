@@ -937,6 +937,7 @@ module LogBrew
       if !duration_ms.nil? && (!duration_ms.is_a?(Numeric) || duration_ms.negative?)
         raise SdkError.new("validation_error", "span durationMs must be non-negative")
       end
+      span_events = SpanEvents.validate(Validation.read(attributes, "events"))
 
       with_metadata(
         {
@@ -947,6 +948,7 @@ module LogBrew
           payload["parentSpanId"] = parent_span_id unless parent_span_id.nil?
           payload["status"] = status
           payload["durationMs"] = duration_ms unless duration_ms.nil?
+          payload["events"] = span_events unless span_events.nil?
         end,
         attributes
       )
@@ -993,7 +995,6 @@ module LogBrew
     end
   end
 end
-
-%w[product_timeline traceparent trace operation_tracing support_ticket].each do |path|
+%w[product_timeline traceparent trace span_events operation_tracing support_ticket].each do |path|
   require_relative "logbrew/#{path}"
 end
