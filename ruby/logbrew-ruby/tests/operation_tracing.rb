@@ -97,12 +97,12 @@ begin
     system: "sidekiq",
     operation: "process",
     target: "checkout",
-    metadata: { attempt: 2, messageBody: "private", jid: "job_123", headerTrace: "redacted" }
+    metadata: { attempt: 2, messageBody: "sensitive payload", jid: "job_123", headerTrace: "redacted" }
   ) do
-    raise ArgumentError, "private job failure"
+    raise ArgumentError, "sensitive job failure"
   end
 rescue ArgumentError => error
-  operation_assert(error.message == "private job failure", "expected original queue exception")
+  operation_assert(error.message == "sensitive job failure", "expected original queue exception")
 else
   raise "expected queue exception"
 end
@@ -125,7 +125,7 @@ operation_assert(queue_event_metadata.fetch("exceptionEscaped") == true, "expect
   operation_assert(!queue_metadata.key?(key), "expected queue #{key} to be omitted")
   operation_assert(!queue_event_metadata.key?(key), "expected queue exception event #{key} to be omitted")
 end
-operation_assert(!JSON.generate(queue_attributes).include?("private job failure"), "expected private exception message to be omitted")
+operation_assert(!JSON.generate(queue_attributes).include?("sensitive job failure"), "expected sensitive exception message to be omitted")
 operation_tests += 1
 
 client = operation_sample_client

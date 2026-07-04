@@ -1,5 +1,29 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: Ruby span-exception-event comparison tightened after source
+  reads from Sentry Ruby
+  `getsentry/sentry-ruby@a8a34e3ccf31839ac84dfba7f06a46862944c8bd`
+  (`Span#with_child_span`, `Span#set_status`, exception interfaces,
+  `Client#event_from_exception`, Rack/Sidekiq capture paths), Datadog Ruby
+  `DataDog/dd-trace-rb@04f710c7af3d249615bb3381e734d0e9c9c1712f`
+  (`SpanOperation#record_exception`, `SpanEvent`, native/tag span-event
+  serialization, error metadata), OpenTelemetry Ruby
+  `open-telemetry/opentelemetry-ruby@30fb4fca60983094bad9281afdd0a1d5f9aa99ae`
+  (`Span#add_event`, `Span#record_exception`), and PostHog Ruby
+  `PostHog/posthog-ruby@3a090d7fc896eb3ad24f4c0344c4c508c6f8b64a`
+  (core/Rails/ActiveJob exception capture). `ca2f6e8e` already added bounded
+  Ruby `Client#span` events and one sanitized `exception` event on failed
+  app-owned database/cache/queue spans. Follow-up public docs/tests now state
+  the real-user comparison clearly: LogBrew is safer by default in this helper
+  path, but still behind Sentry/Datadog on automatic framework breadth, rich
+  error-to-span navigation, stack/source context, baggage/tracestate, links,
+  and exporter/processor ecosystem. Evidence: RED focused operation test failed
+  on missing span `events`; GREEN Ruby syntax checks, operation/trace/full Ruby
+  tests, `bash scripts/check_ruby_package.sh`, `bash scripts/real_user_ruby_smoke.sh`,
+  ShellCheck 0.11.0, markdown links, confidentiality scan, backend reports,
+  release metadata, generated-artifact hygiene, and `git diff --check`.
+  Research:
+  `docs/competitor-research/ruby-span-exception-events-2026-07-04.md`.
 - 2026-07-04: JavaScript OTel exception-trace discoverability gap reduced
   after source reads from Sentry JS
   `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`

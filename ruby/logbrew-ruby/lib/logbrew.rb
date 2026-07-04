@@ -995,6 +995,7 @@ module LogBrew
     end
   end
 end
+
 %w[product_timeline traceparent trace span_events operation_tracing support_ticket].each do |path|
   require_relative "logbrew/#{path}"
 end

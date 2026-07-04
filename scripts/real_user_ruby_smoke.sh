@@ -205,13 +205,13 @@ begin
     target: "checkout",
     metadata: {
       attempt: 2,
-      messageBody: "private payload",
+      messageBody: "sensitive payload",
       jobId: "job_123",
       headerTrace: "redacted"
     }
-  ) { raise ArgumentError, "private queue failure" }
+  ) { raise ArgumentError, "sensitive queue failure" }
 rescue ArgumentError => error
-  raise "exception mismatch" unless error.message == "private queue failure"
+  raise "exception mismatch" unless error.message == "sensitive queue failure"
 else
   raise "expected queue exception"
 end
@@ -229,7 +229,7 @@ raise "queue event exception type mismatch" unless event_metadata.fetch("excepti
 raise "queue event escaped mismatch" unless event_metadata.fetch("exceptionEscaped") == true
 serialized_queue_span = JSON.generate(queue_span)
 raise "unsafe queue metadata leaked" if queue_metadata.key?("messageBody") || queue_metadata.key?("jobId") || queue_metadata.key?("headerTrace")
-raise "unsafe exception leaked" if serialized_queue_span.include?("private queue failure") || serialized_queue_span.include?("private payload") || serialized_queue_span.include?("job_123")
+raise "unsafe exception leaked" if serialized_queue_span.include?("sensitive queue failure") || serialized_queue_span.include?("sensitive payload") || serialized_queue_span.include?("job_123")
 puts "installed operation tracing ok"
 RUBY
 GEM_HOME="$gem_home" GEM_PATH="$gem_home" ruby "$tmp_dir/installed-operation-tracing.rb" > "$tmp_dir/installed-operation-tracing-smoke.out"
