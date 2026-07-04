@@ -404,7 +404,7 @@ response = urlopen_with_logbrew_span(
 )
 ```
 
-The helper clones the caller request, writes exactly one normalized W3C `traceparent`, runs the opener under a child `LogBrewTraceContext`, queues one span with method, query-free route, status, duration, and primitive metadata, then returns the original response or re-raises the original HTTP/network error. Telemetry capture failures are reportable through `on_capture_error` and do not replace the app-owned HTTP result. It does not patch `urllib`, does not capture request or response payloads, does not store headers, cookies, query strings, fragments, baggage, tracestate, or raw propagation values.
+The helper clones the caller request, writes exactly one normalized W3C `traceparent`, runs the opener under a child `LogBrewTraceContext`, queues one span with method, query-free route, status, duration, primitive metadata, and type-only failure metadata, then returns the original response or re-raises the original HTTP/network error. Telemetry capture failures are reportable through `on_capture_error` and do not replace the app-owned HTTP result. It does not patch `urllib`, does not capture request or response payloads, and does not store headers, cookies, query strings, fragments, exception messages, baggage, tracestate, or raw propagation values.
 
 For apps that use `requests`, use `requests_request_with_logbrew_span()` with your own `requests.Session` or request callable. LogBrew does not add `requests` as a dependency and does not monkeypatch the library:
 
@@ -435,7 +435,7 @@ response = requests_request_with_logbrew_span(
 )
 ```
 
-The `requests` helper clones caller headers, replaces any caller-supplied `traceparent` with one normalized child header, runs the request under that child trace context, queues one sanitized dependency span, and returns the original `requests.Response` or re-raises the original exception. It records method, route template, status code, duration, sampled flag, and primitive metadata only. It does not capture payloads, response bodies, headers, cookies, full URLs, query strings, fragments, baggage, tracestate, or raw propagation values.
+The `requests` helper clones caller headers, replaces any caller-supplied `traceparent` with one normalized child header, runs the request under that child trace context, queues one sanitized dependency span, and returns the original `requests.Response` or re-raises the original exception. It records method, route template, status code, duration, sampled flag, primitive metadata, and type-only failure metadata. It does not capture payloads, response bodies, headers, cookies, full URLs, query strings, fragments, exception messages, baggage, tracestate, or raw propagation values.
 
 For apps that use `httpx`, use `httpx_request_with_logbrew_span()` for sync calls or `async_httpx_request_with_logbrew_span()` for async calls. LogBrew does not add `httpx` as a dependency and does not patch `httpx.Client`, `httpx.AsyncClient`, or transports:
 
@@ -483,7 +483,7 @@ async def submit_payment(async_session: httpx.AsyncClient) -> httpx.Response:
     )
 ```
 
-The `httpx` helpers follow the same privacy and failure behavior as the `requests` helper: cloned caller headers, exactly one normalized child `traceparent`, active child trace context during the call or awaited call, sanitized dependency span capture, original response/error preservation, and optional `on_capture_error` reporting for telemetry failures. They do not capture payloads, response bodies, headers, cookies, full URLs, query strings, fragments, baggage, tracestate, or raw propagation values.
+The `httpx` helpers follow the same privacy and failure behavior as the `requests` helper: cloned caller headers, exactly one normalized child `traceparent`, active child trace context during the call or awaited call, sanitized dependency span capture, original response/error preservation, type-only failure metadata, and optional `on_capture_error` reporting for telemetry failures. They do not capture payloads, response bodies, headers, cookies, full URLs, query strings, fragments, exception messages, baggage, tracestate, or raw propagation values.
 
 ## Database Operation Spans
 

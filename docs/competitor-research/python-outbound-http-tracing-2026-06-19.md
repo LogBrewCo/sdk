@@ -40,3 +40,31 @@ Reduce the Python server-side outbound HTTP tracing gap after Node gained explic
 
 - Optional `requests`/`httpx` integration packages could provide one-line adoption for teams that explicitly want those dependencies.
 - Python still lacks DB/cache/queue spans, richer span events/exceptions, baggage/tracestate, and automatic HTTP client patching; keep those out of core unless the integration package owns the dependency and broader capture surface.
+
+## 2026-07-04 Failure Metadata Privacy Pass
+
+### Sources Re-read
+
+- Sentry Python SDK, [`getsentry/sentry-python`](https://github.com/getsentry/sentry-python/tree/1bd120f41780bfd5fd4d4b7c65aae395e425adab) at commit `1bd120f41780bfd5fd4d4b7c65aae395e425adab`.
+- Sentry files/functions: `sentry_sdk/integrations/httpx.py` (`HttpxIntegration`, `_install_httpx_client`, `_install_httpx_async_client`), `sentry_sdk/integrations/stdlib.py` (`StdlibIntegration`, `_install_httplib`, `_complete_span`), and `sentry_sdk/integrations/aiohttp.py` (`AioHttpIntegration`, `create_trace_config`, `_capture_exception`).
+- OpenTelemetry Python Contrib, [`open-telemetry/opentelemetry-python-contrib`](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/2359804163c7c2426858453d647d20d1b5d93782) at commit `2359804163c7c2426858453d647d20d1b5d93782`.
+- OpenTelemetry files/functions: `opentelemetry-instrumentation-requests` `instrumented_send`, `opentelemetry-instrumentation-urllib` `_instrumented_open_call`, `opentelemetry-instrumentation-httpx` `SyncOpenTelemetryTransport.handle_request`/`AsyncOpenTelemetryTransport.handle_async_request`, and `opentelemetry-instrumentation-aiohttp-client` `create_trace_config`/`on_request_exception`.
+- Datadog `dd-trace-py`, [`DataDog/dd-trace-py`](https://github.com/DataDog/dd-trace-py/tree/c12bb9dfb723bb96a662b7b90f36c805c4af43fb) at commit `c12bb9dfb723bb96a662b7b90f36c805c4af43fb`.
+- Datadog files/functions: `ddtrace/contrib/internal/requests/connection.py` `_wrap_send`, `ddtrace/contrib/internal/requests/patch.py` `patch`/`unpatch`, `ddtrace/contrib/internal/httpx/patch.py` `_wrapped_sync_send`/`_wrapped_async_send`, and `ddtrace/contrib/_events/http_client.py`/`http.py` response metadata events.
+- PostHog Python, [`PostHog/posthog-python`](https://github.com/PostHog/posthog-python/tree/6f75afe77ff059e4f3b0b6b7b30912612a7b5ff1) at commit `6f75afe77ff059e4f3b0b6b7b30912612a7b5ff1`; no comparable general-purpose outbound HTTP client tracing integration was found in the searched public source.
+
+### Pattern and Tradeoff
+
+- Sentry, Datadog, and OpenTelemetry are still stronger for broad automatic HTTP client coverage, especially zero-touch `http.client`/`requests`/`httpx`/`aiohttp` paths.
+- OpenTelemetry's current HTTP client instrumentation records exception type through `ERROR_TYPE` on failure paths while keeping request/response header capture opt-in and sanitizable. Sentry and Datadog carry richer automatic instrumentation but also broader patching and URL/header/body capture surfaces depending on options.
+- LogBrew's core Python SDK should keep the lighter explicit-helper model until an optional integration package owns the heavier auto-patching surface.
+
+### LogBrew Change
+
+- Tightened Python outbound HTTP failure spans so `urlopen_with_logbrew_span(...)`, `requests_request_with_logbrew_span(...)`, `httpx_request_with_logbrew_span(...)`, and `async_httpx_request_with_logbrew_span(...)` record `errorType` and status code when available, but never serialize exception messages into span metadata.
+- This preserves first-debugging utility for status/type/route/duration/trace correlation while avoiding accidental leakage of user-specific request details or service response text from exception messages.
+
+### Verification
+
+- RED before implementation: focused Python tests failed because failed `urllib`, `requests`, sync `httpx`, and async `httpx` spans contained `errorMessage`.
+- GREEN after implementation: focused tests pass and verify original exception identity, status code, source, route privacy, and absence of private exception text in serialized event JSON.

@@ -381,7 +381,7 @@ def _capture_failed_http_span(
         method,
         route,
         "error",
-                _instrumentation.duration_ms(start, clock),
+        _instrumentation.duration_ms(start, clock),
         metadata,
         _status_from_error(error),
         error,
@@ -527,7 +527,6 @@ def _span_metadata(
         span_metadata["statusCode"] = status_code
     if error is not None:
         span_metadata["errorType"] = type(error).__name__
-        span_metadata["errorMessage"] = str(error)
     return span_metadata
 
 

@@ -109,7 +109,7 @@ class HttpxSpanTests(unittest.TestCase):
 
         class StubHttpxError(RuntimeError):
             def __init__(self) -> None:
-                super().__init__("connection failed for private-url")
+                super().__init__("connection failed for redacted-url")
                 self.response = StubHttpxResponse()
 
         original_error = StubHttpxError()
@@ -132,7 +132,10 @@ class HttpxSpanTests(unittest.TestCase):
         self.assertEqual(event["attributes"]["metadata"]["source"], "httpx")
         self.assertEqual(event["attributes"]["metadata"]["statusCode"], 502)
         self.assertEqual(event["attributes"]["metadata"]["errorType"], "StubHttpxError")
-        self.assertNotIn("coupon=summer", client.preview_json())
+        serialized_failure = client.preview_json()
+        self.assertNotIn("errorMessage", event["attributes"]["metadata"])
+        self.assertNotIn("connection failed for redacted-url", serialized_failure)
+        self.assertNotIn("coupon=summer", serialized_failure)
 
         closed_client = sample_client()
         closed_client.closed = True
@@ -219,5 +222,48 @@ class HttpxSpanTests(unittest.TestCase):
             self.assertNotIn("coupon=summer", serialized)
             self.assertNotIn("authorization", serialized)
             self.assertNotIn("traceparent", serialized)
+
+        asyncio.run(run())
+
+    def test_async_httpx_request_with_logbrew_span_preserves_errors_without_message_metadata(self) -> None:
+        async def run() -> None:
+            client = sample_client()
+
+            class StubHttpxResponse:
+                status_code = 504
+
+            class StubHttpxError(RuntimeError):
+                def __init__(self) -> None:
+                    super().__init__("async connection failed for redacted-url")
+                    self.response = StubHttpxResponse()
+
+            original_error = StubHttpxError()
+
+            async def request(_method: str, _url: str, **_kwargs: object) -> object:
+                raise original_error
+
+            with self.assertRaises(StubHttpxError) as raised:
+                await async_httpx_request_with_logbrew_span(
+                    "GET",
+                    "https://api.example.test/payments/123?coupon=summer",
+                    client=client,
+                    event_id="evt_python_httpx_async_failure",
+                    timestamp="2026-06-19T09:00:06Z",
+                    request=request,
+                    span_id_factory=lambda: "b7ad6b7169203341",
+                    clock=lambda: 80.0,
+                )
+
+            self.assertIs(raised.exception, original_error)
+            event = json.loads(client.preview_json())["events"][0]
+            metadata = event["attributes"]["metadata"]
+            self.assertEqual(event["attributes"]["status"], "error")
+            self.assertEqual(metadata["source"], "httpx.async")
+            self.assertEqual(metadata["statusCode"], 504)
+            self.assertEqual(metadata["errorType"], "StubHttpxError")
+            serialized_failure = client.preview_json()
+            self.assertNotIn("errorMessage", metadata)
+            self.assertNotIn("async connection failed for redacted-url", serialized_failure)
+            self.assertNotIn("coupon=summer", serialized_failure)
 
         asyncio.run(run())

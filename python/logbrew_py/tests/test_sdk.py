@@ -871,7 +871,10 @@ class LogBrewSdkTests(unittest.TestCase):
         self.assertEqual(event["attributes"]["status"], "error")
         self.assertEqual(event["attributes"]["metadata"]["statusCode"], 503)
         self.assertEqual(event["attributes"]["metadata"]["errorType"], "HTTPError")
-        self.assertNotIn("coupon=summer", client.preview_json())
+        serialized_failure = client.preview_json()
+        self.assertNotIn("errorMessage", event["attributes"]["metadata"])
+        self.assertNotIn("retry later", serialized_failure)
+        self.assertNotIn("coupon=summer", serialized_failure)
 
         closed_client = sample_client()
         closed_client.closed = True
@@ -985,7 +988,7 @@ class LogBrewSdkTests(unittest.TestCase):
 
         class StubRequestsError(RuntimeError):
             def __init__(self) -> None:
-                super().__init__("connection failed for private-url")
+                super().__init__("connection failed for redacted-url")
                 self.response = StubRequestsResponse()
 
         original_error = StubRequestsError()
@@ -1008,7 +1011,10 @@ class LogBrewSdkTests(unittest.TestCase):
         self.assertEqual(event["attributes"]["metadata"]["source"], "requests")
         self.assertEqual(event["attributes"]["metadata"]["statusCode"], 503)
         self.assertEqual(event["attributes"]["metadata"]["errorType"], "StubRequestsError")
-        self.assertNotIn("coupon=summer", client.preview_json())
+        serialized_failure = client.preview_json()
+        self.assertNotIn("errorMessage", event["attributes"]["metadata"])
+        self.assertNotIn("connection failed for redacted-url", serialized_failure)
+        self.assertNotIn("coupon=summer", serialized_failure)
 
         closed_client = sample_client()
         closed_client.closed = True

@@ -1,5 +1,31 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: Python outbound HTTP failure-span privacy tightened after
+  source reads from Sentry Python
+  `getsentry/sentry-python@1bd120f41780bfd5fd4d4b7c65aae395e425adab`
+  (`httpx.py`, `stdlib.py`, `aiohttp.py` HTTP client/server span/error
+  paths), OpenTelemetry Python Contrib
+  `open-telemetry/opentelemetry-python-contrib@2359804163c7c2426858453d647d20d1b5d93782`
+  (`requests`, `urllib`, `httpx`, `aiohttp_client` instrumentation failure
+  paths with `ERROR_TYPE`), Datadog Python
+  `DataDog/dd-trace-py@c12bb9dfb723bb96a662b7b90f36c805c4af43fb`
+  (`requests`/`httpx` patch/event paths), and PostHog Python
+  `PostHog/posthog-python@6f75afe77ff059e4f3b0b6b7b30912612a7b5ff1`
+  (no comparable general outbound HTTP tracing integration found).
+  LogBrew Python `urlopen`, `requests`, sync `httpx`, and async `httpx`
+  helpers now keep useful failure spans with `errorType` plus status code when
+  available, but omit exception messages from span metadata. README and the
+  installed-artifact Python smoke now prove the same privacy contract from
+  wheel/sdist install and reinstall paths. Evidence: RED focused Python tests
+  failed on `errorMessage` leakage; GREEN 114 Python unit tests, GREEN
+  `bash scripts/real_user_python_smoke.sh`, Python static, ShellCheck 0.11.0,
+  markdown links, backend reports, release metadata, confidentiality scan,
+  generated-artifact hygiene, and `git diff --check`. Research:
+  `docs/competitor-research/python-outbound-http-tracing-2026-06-19.md`.
+  Honest gap: Sentry/Datadog/OpenTelemetry still lead on automatic
+  HTTP-client coverage for `http.client`/`requests`/`httpx`/`aiohttp`; any
+  heavier LogBrew auto instrumentation should be optional, reversible, and
+  separately verified.
 - 2026-07-04: Python OpenTelemetry exception trace-summary gap reduced after
   source reads from Sentry Python
   `getsentry/sentry-python@1bd120f41780bfd5fd4d4b7c65aae395e425adab`

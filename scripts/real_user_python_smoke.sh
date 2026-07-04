@@ -288,12 +288,14 @@ run_urlopen_span_smoke() {
     python "$tmp_dir/urlopen_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"status": 202' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 2' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"activeSpan": "b7ad6b7169203331"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"routeTemplate": "/payments/123"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"method": "GET"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"callerHeader": "checkout"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"failureErrorType": "StubUrlopenError"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"failureStatusCode": 503' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
@@ -303,12 +305,14 @@ run_requests_span_smoke() {
     python "$tmp_dir/requests_span_smoke.py" > "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"status": 201' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 1' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 2' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"activeSpan": "b7ad6b7169203334"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203334-01"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"routeTemplate": "/payments/:payment_id"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"method": "POST"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"callerHeader": "checkout"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"failureErrorType": "StubRequestsError"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"failureStatusCode": 503' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
@@ -319,7 +323,7 @@ run_httpx_span_smoke() {
     grep -q '"ok": true' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"status": 202' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"asyncStatus": 204' "$tmp_dir/$output_prefix.stdout.json"
-    grep -q '"events": 2' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"events": 4' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"activeSpan": "b7ad6b7169203336"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"asyncActiveSpan": "b7ad6b7169203337"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203336-01"' "$tmp_dir/$output_prefix.stdout.json"
@@ -330,6 +334,10 @@ run_httpx_span_smoke() {
     grep -q '"asyncMethod": "DELETE"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"callerHeader": "checkout"' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"asyncCallerHeader": "checkout-async"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"failureErrorType": "StubHttpxError"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"failureStatusCode": 502' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncFailureErrorType": "StubHttpxError"' "$tmp_dir/$output_prefix.stdout.json"
+    grep -q '"asyncFailureStatusCode": 504' "$tmp_dir/$output_prefix.stdout.json"
     grep -q '"captureErrors": 1' "$tmp_dir/$output_prefix.stdout.json"
 }
 
@@ -1960,6 +1968,12 @@ def open_url(outbound: Request, *, timeout: float | None = None) -> StubHttpResp
     return StubHttpResponse(202)
 
 
+class StubUrlopenError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("connection failed for redacted-url")
+        self.response = StubHttpResponse(503)
+
+
 with use_logbrew_trace(parent_trace):
     response = urlopen_with_logbrew_span(
         request,
@@ -1981,6 +1995,32 @@ if request.get_header("Traceparent") != "spoofed":
 if "coupon=summer" in client.preview_json() or "traceparent" in client.preview_json() or "card" in client.preview_json():
     raise SystemExit("urlopen span leaked query, propagation, or payload data")
 
+original_error = StubUrlopenError()
+try:
+    urlopen_with_logbrew_span(
+        "https://api.example.test/failures/123?debug=redacted",
+        client=client,
+        event_id="evt_python_urlopen_failure",
+        timestamp="2026-06-19T08:00:01Z",
+        open_url=lambda _request, *, timeout=None: (_ for _ in ()).throw(original_error),
+        span_id_factory=lambda: "b7ad6b7169203332",
+        clock=iter([20.0, 20.011]).__next__,
+    )
+except StubUrlopenError as error:
+    if error is not original_error:
+        raise SystemExit("urlopen helper replaced original failure")
+else:
+    raise SystemExit("urlopen helper swallowed original failure")
+
+payload = json.loads(client.preview_json())
+failure_metadata = payload["events"][1]["attributes"]["metadata"]
+if failure_metadata.get("errorType") != "StubUrlopenError":
+    raise SystemExit("urlopen failure span lost error type")
+if failure_metadata.get("statusCode") != 503:
+    raise SystemExit("urlopen failure span lost status code")
+if "errorMessage" in failure_metadata or "redacted-url" in client.preview_json() or "debug=redacted" in client.preview_json():
+    raise SystemExit("urlopen failure span leaked exception text or query")
+
 closed_client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
     sdk_name="smoke-app-urlopen",
@@ -1994,7 +2034,7 @@ urlopen_with_logbrew_span(
     event_id="evt_python_urlopen_capture_failure",
     timestamp="2026-06-19T08:00:01Z",
     open_url=lambda _request, *, timeout=None: StubHttpResponse(204),
-    span_id_factory=lambda: "b7ad6b7169203332",
+    span_id_factory=lambda: "b7ad6b7169203333",
     on_capture_error=lambda error: capture_errors.append(str(error)),
 )
 
@@ -2004,6 +2044,8 @@ print(
             "activeSpan": captured["activeSpan"],
             "callerHeader": captured["callerHeader"],
             "captureErrors": len(capture_errors),
+            "failureErrorType": failure_metadata["errorType"],
+            "failureStatusCode": failure_metadata["statusCode"],
             "events": len(payload["events"]),
             "method": metadata["method"],
             "ok": True,
@@ -2035,6 +2077,12 @@ from logbrew_sdk import (
 class StubRequestsResponse:
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
+
+
+class StubRequestsError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("connection failed for redacted-url")
+        self.response = StubRequestsResponse(503)
 
 
 class StubRequestsSession:
@@ -2096,6 +2144,33 @@ if caller_headers["Traceparent"] != "spoofed":
 if "coupon=summer" in client.preview_json() or "traceparent" in client.preview_json() or "card" in client.preview_json():
     raise SystemExit("requests span leaked query, propagation, or payload data")
 
+original_error = StubRequestsError()
+try:
+    requests_request_with_logbrew_span(
+        "GET",
+        "https://api.example.test/failures/123?debug=redacted",
+        client=client,
+        event_id="evt_python_requests_failure",
+        timestamp="2026-06-19T08:00:04Z",
+        request=lambda _method, _url, **_kwargs: (_ for _ in ()).throw(original_error),
+        span_id_factory=lambda: "b7ad6b7169203335",
+        clock=iter([40.0, 40.012]).__next__,
+    )
+except StubRequestsError as error:
+    if error is not original_error:
+        raise SystemExit("requests helper replaced original failure")
+else:
+    raise SystemExit("requests helper swallowed original failure")
+
+payload = json.loads(client.preview_json())
+failure_metadata = payload["events"][1]["attributes"]["metadata"]
+if failure_metadata.get("errorType") != "StubRequestsError":
+    raise SystemExit("requests failure span lost error type")
+if failure_metadata.get("statusCode") != 503:
+    raise SystemExit("requests failure span lost status code")
+if "errorMessage" in failure_metadata or "redacted-url" in client.preview_json() or "debug=redacted" in client.preview_json():
+    raise SystemExit("requests failure span leaked exception text or query")
+
 closed_client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
     sdk_name="smoke-app-requests",
@@ -2110,7 +2185,7 @@ requests_request_with_logbrew_span(
     event_id="evt_python_requests_capture_failure",
     timestamp="2026-06-19T08:00:04Z",
     request=lambda _method, _url, **_kwargs: StubRequestsResponse(204),
-    span_id_factory=lambda: "b7ad6b7169203335",
+    span_id_factory=lambda: "b7ad6b7169203339",
     on_capture_error=lambda error: capture_errors.append(str(error)),
 )
 
@@ -2120,6 +2195,8 @@ print(
             "activeSpan": session.captured["activeSpan"],
             "callerHeader": session.captured["callerHeader"],
             "captureErrors": len(capture_errors),
+            "failureErrorType": failure_metadata["errorType"],
+            "failureStatusCode": failure_metadata["statusCode"],
             "events": len(payload["events"]),
             "method": metadata["method"],
             "ok": True,
@@ -2153,6 +2230,12 @@ from logbrew_sdk import (
 class StubHttpxResponse:
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
+
+
+class StubHttpxError(RuntimeError):
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.response = StubHttpxResponse(status_code)
 
 
 class StubHttpxSession:
@@ -2252,17 +2335,78 @@ async def run_async_request() -> StubHttpxResponse:
 
 
 async_response = asyncio.run(run_async_request())
+sync_error = StubHttpxError("connection failed for redacted-url", 502)
+try:
+    httpx_request_with_logbrew_span(
+        "GET",
+        "https://api.example.test/failures/123?debug=redacted",
+        client=client,
+        event_id="evt_python_httpx_failure",
+        timestamp="2026-06-19T09:00:05Z",
+        request=lambda _method, _url, **_kwargs: (_ for _ in ()).throw(sync_error),
+        span_id_factory=lambda: "b7ad6b7169203338",
+        clock=iter([60.0, 60.013]).__next__,
+    )
+except StubHttpxError as error:
+    if error is not sync_error:
+        raise SystemExit("httpx helper replaced original failure")
+else:
+    raise SystemExit("httpx helper swallowed original failure")
+
+
+async def run_async_failure() -> None:
+    async_error = StubHttpxError("async connection failed for redacted-url", 504)
+
+    async def request(_method: str, _url: str, **_kwargs: object) -> object:
+        raise async_error
+
+    try:
+        await async_httpx_request_with_logbrew_span(
+            "GET",
+            "https://api.example.test/async-failures/123?debug=redacted",
+            client=client,
+            event_id="evt_python_httpx_async_failure",
+            timestamp="2026-06-19T09:00:06Z",
+            request=request,
+            span_id_factory=lambda: "b7ad6b7169203339",
+            clock=iter([70.0, 70.014]).__next__,
+        )
+    except StubHttpxError as error:
+        if error is not async_error:
+            raise SystemExit("async httpx helper replaced original failure")
+    else:
+        raise SystemExit("async httpx helper swallowed original failure")
+
+
+asyncio.run(run_async_failure())
 payload = json.loads(client.preview_json())
 sync_event = payload["events"][0]
 async_event = payload["events"][1]
+sync_failure_event = payload["events"][2]
+async_failure_event = payload["events"][3]
 sync_metadata = sync_event["attributes"]["metadata"]
 async_metadata = async_event["attributes"]["metadata"]
+sync_failure_metadata = sync_failure_event["attributes"]["metadata"]
+async_failure_metadata = async_failure_event["attributes"]["metadata"]
 serialized = client.preview_json()
 if caller_headers["Traceparent"] != "spoofed" or async_caller_headers["Traceparent"] != "spoofed":
     raise SystemExit("caller headers were mutated")
 for forbidden in ("coupon=summer", "traceparent", "card", "authorization"):
     if forbidden in serialized:
         raise SystemExit(f"httpx span leaked private data: {forbidden}")
+if sync_failure_metadata.get("errorType") != "StubHttpxError":
+    raise SystemExit("httpx failure span lost error type")
+if sync_failure_metadata.get("statusCode") != 502:
+    raise SystemExit("httpx failure span lost status code")
+if async_failure_metadata.get("errorType") != "StubHttpxError":
+    raise SystemExit("async httpx failure span lost error type")
+if async_failure_metadata.get("statusCode") != 504:
+    raise SystemExit("async httpx failure span lost status code")
+if "errorMessage" in sync_failure_metadata or "errorMessage" in async_failure_metadata:
+    raise SystemExit("httpx failure span leaked errorMessage metadata")
+for forbidden in ("redacted-url", "debug=redacted"):
+    if forbidden in serialized:
+        raise SystemExit(f"httpx failure span leaked private failure data: {forbidden}")
 
 closed_client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
@@ -2278,7 +2422,7 @@ httpx_request_with_logbrew_span(
     event_id="evt_python_httpx_capture_failure",
     timestamp="2026-06-19T09:00:05Z",
     request=lambda _method, _url, **_kwargs: StubHttpxResponse(204),
-    span_id_factory=lambda: "b7ad6b7169203338",
+    span_id_factory=lambda: "b7ad6b7169203348",
     on_capture_error=lambda error: capture_errors.append(str(error)),
 )
 
@@ -2296,7 +2440,11 @@ print(
             "asyncTraceparent": async_session.captured["traceparent"],
             "callerHeader": session.captured["callerHeader"],
             "captureErrors": len(capture_errors),
+            "asyncFailureErrorType": async_failure_metadata["errorType"],
+            "asyncFailureStatusCode": async_failure_metadata["statusCode"],
             "events": len(payload["events"]),
+            "failureErrorType": sync_failure_metadata["errorType"],
+            "failureStatusCode": sync_failure_metadata["statusCode"],
             "method": sync_metadata["method"],
             "ok": True,
             "routeTemplate": sync_metadata["routeTemplate"],
