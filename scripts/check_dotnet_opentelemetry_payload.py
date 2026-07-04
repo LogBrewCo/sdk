@@ -85,7 +85,7 @@ def main() -> None:
     exporter_attrs = exporter_event.get("attributes")
     require(isinstance(exporter_attrs, dict), "expected exporter span attributes")
     require(exporter_attrs.get("name") == "POST /jobs/{id}", "expected exporter span name")
-    require(exporter_attrs.get("status") == "ok", "expected exporter span status")
+    require(exporter_attrs.get("status") == "error", "expected exporter span status")
     exporter_metadata = exporter_attrs.get("metadata")
     require(isinstance(exporter_metadata, dict), "expected exporter span metadata")
     for key, value in {
@@ -99,8 +99,18 @@ def main() -> None:
         "serviceName": "checkout-worker",
         "serviceVersion": "1.0.0",
         "deploymentEnvironment": "staging",
+        "otel.exception_event_count": 1,
+        "otel.exception_escaped_count": 1,
+        "otel.exception_types": "System.TimeoutException",
     }.items():
         require(exporter_metadata.get(key) == value, f"expected exporter metadata {key}={value!r}")
+    exporter_events = exporter_attrs.get("events")
+    require(isinstance(exporter_events, list) and len(exporter_events) == 1, "expected one exporter span event")
+    require(exporter_events[0].get("name") == "exception", "expected exporter exception event")
+    exporter_event_metadata = exporter_events[0].get("metadata")
+    require(isinstance(exporter_event_metadata, dict), "expected exporter event metadata")
+    require(exporter_event_metadata.get("exceptionType") == "System.TimeoutException", "expected exporter exception type")
+    require(exporter_event_metadata.get("exceptionEscaped") is True, "expected exporter escaped exception flag")
     exporter_links = exporter_attrs.get("links")
     require(isinstance(exporter_links, list) and len(exporter_links) == 1, "expected one exporter span link")
     exporter_link_metadata = exporter_links[0].get("metadata")
@@ -119,6 +129,9 @@ def main() -> None:
         "service.instance.id",
         "url.full",
         "exception.message",
+        "exception.stacktrace",
+        "timeout opaque marker",
+        "private stack",
     ):
         require(blocked not in text, f"expected OpenTelemetry payload to omit {blocked!r}")
 

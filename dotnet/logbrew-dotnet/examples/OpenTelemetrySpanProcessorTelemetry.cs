@@ -53,6 +53,15 @@ using (Sdk.CreateTracerProviderBuilder()
     activity?.SetTag("messaging.operation", "publish");
     activity?.SetTag("messaging.message.id", "message-id-omitted");
     activity?.SetTag("url.full", "https://example.test/jobs/123?debug=omitted");
+    activity?.AddEvent(new ActivityEvent(
+        "exception",
+        tags: new ActivityTagsCollection
+        {
+            ["exception.type"] = "System.TimeoutException",
+            ["exception.escaped"] = true,
+            ["exception.message"] = "timeout opaque marker",
+            ["exception.stacktrace"] = "at private stack"
+        }));
     activity?.AddLink(new ActivityLink(
         new ActivityContext(
             ActivityTraceId.CreateFromString("4bf92f3577b34da6a3ce929d0e0e4736".AsSpan()),

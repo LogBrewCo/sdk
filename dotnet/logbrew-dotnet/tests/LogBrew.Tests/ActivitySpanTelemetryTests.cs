@@ -15,6 +15,10 @@ internal static class ActivitySpanTelemetryTests
         tests++;
         CaptureCopiesActivityEventsAndLinksSafely();
         tests++;
+        CaptureSummarizesEscapedExceptionEventsAsError();
+        tests++;
+        CaptureKeepsExplicitOtelOkStatusWithExceptionEvents();
+        tests++;
         CaptureCopiesExplicitResourceContextSafely();
         tests++;
         CaptureCopiesSafeResourceConventionTags();
@@ -170,6 +174,114 @@ internal static class ActivitySpanTelemetryTests
         {
             Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected unsafe rich Activity data to be omitted: " + blocked);
         }
+    }
+
+    private static void CaptureSummarizesEscapedExceptionEventsAsError()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "activity-tests", "0.1.0");
+        using var activity = new Activity("checkout.activity.exceptions");
+        activity.SetIdFormat(ActivityIdFormat.W3C);
+        activity.SetParentId(
+            ActivityTraceId.CreateFromString(IncomingTraceId.AsSpan()),
+            ActivitySpanId.CreateFromString(IncomingParentSpanId.AsSpan()),
+            ActivityTraceFlags.Recorded);
+        activity.ActivityTraceFlags = ActivityTraceFlags.Recorded;
+        activity.Start();
+        activity.AddEvent(new ActivityEvent(
+            "exception",
+            new DateTimeOffset(2026, 06, 02, 10, 00, 18, TimeSpan.Zero),
+            new ActivityTagsCollection
+            {
+                { "exception.type", "System.InvalidOperationException" },
+                { "exception.escaped", true },
+                { "exception.message", "card=sample" },
+                { "exception.stacktrace", "at private stack" }
+            }));
+        activity.AddEvent(new ActivityEvent(
+            "exception",
+            new DateTimeOffset(2026, 06, 02, 10, 00, 19, TimeSpan.Zero),
+            new ActivityTagsCollection
+            {
+                { "exception.type", "System.TimeoutException" },
+                { "exception.escaped", false },
+                { "exception.message", "timeout opaque marker" }
+            }));
+        activity.Stop();
+
+        var captured = LogBrewActivitySpanTelemetry.Capture(
+            client,
+            activity,
+            LogBrewActivitySpanOptions.Create()
+                .WithEventIdPrefix("dotnet_activity_exception_summary")
+                .WithTimestampProvider(() => "2026-06-02T10:00:18Z"));
+
+        Require(captured, "expected Activity with exception events to be captured");
+        var payload = client.PreviewJson();
+        foreach (var expected in new[]
+        {
+            "\"id\": \"dotnet_activity_exception_summary_span_" + activity.SpanId.ToHexString() + "\"",
+            "\"status\": \"error\"",
+            "\"otel.exception_event_count\": 2",
+            "\"otel.exception_escaped_count\": 1",
+            "\"otel.exception_types\": \"System.InvalidOperationException,System.TimeoutException\"",
+            "\"exceptionType\": \"System.InvalidOperationException\"",
+            "\"exceptionEscaped\": true"
+        })
+        {
+            Require(payload.Contains(expected, StringComparison.Ordinal), "missing Activity exception summary: " + expected);
+        }
+
+        foreach (var blocked in new[] { "card=sample", "private stack", "timeout opaque marker", "exception.message", "exception.stacktrace" })
+        {
+            Require(!payload.Contains(blocked, StringComparison.Ordinal), "expected unsafe exception detail to be omitted: " + blocked);
+        }
+    }
+
+    private static void CaptureKeepsExplicitOtelOkStatusWithExceptionEvents()
+    {
+        var client = LogBrewClient.Create("LOGBREW_API_KEY", "activity-tests", "0.1.0");
+        using var activity = new Activity("checkout.activity.exception.ok");
+        activity.SetIdFormat(ActivityIdFormat.W3C);
+        activity.SetParentId(
+            ActivityTraceId.CreateFromString(IncomingTraceId.AsSpan()),
+            ActivitySpanId.CreateFromString(IncomingParentSpanId.AsSpan()),
+            ActivityTraceFlags.Recorded);
+        activity.ActivityTraceFlags = ActivityTraceFlags.Recorded;
+        activity.SetTag("otel.status_code", "OK");
+        activity.Start();
+        activity.AddEvent(new ActivityEvent(
+            "exception",
+            new DateTimeOffset(2026, 06, 02, 10, 00, 20, TimeSpan.Zero),
+            new ActivityTagsCollection
+            {
+                { "exception.type", "System.InvalidOperationException" },
+                { "exception.escaped", true },
+                { "exception.message", "card=sample" }
+            }));
+        activity.Stop();
+
+        var captured = LogBrewActivitySpanTelemetry.Capture(
+            client,
+            activity,
+            LogBrewActivitySpanOptions.Create()
+                .WithEventIdPrefix("dotnet_activity_exception_ok")
+                .WithTimestampProvider(() => "2026-06-02T10:00:20Z"));
+
+        Require(captured, "expected explicit OK Activity with exception events to be captured");
+        var payload = client.PreviewJson();
+        foreach (var expected in new[]
+        {
+            "\"id\": \"dotnet_activity_exception_ok_span_" + activity.SpanId.ToHexString() + "\"",
+            "\"status\": \"ok\"",
+            "\"otel.exception_event_count\": 1",
+            "\"otel.exception_escaped_count\": 1",
+            "\"otel.exception_types\": \"System.InvalidOperationException\""
+        })
+        {
+            Require(payload.Contains(expected, StringComparison.Ordinal), "missing explicit OK exception summary: " + expected);
+        }
+
+        Require(!payload.Contains("card=sample", StringComparison.Ordinal), "expected explicit OK exception detail to be omitted");
     }
 
     private static void CaptureCopiesExplicitResourceContextSafely()

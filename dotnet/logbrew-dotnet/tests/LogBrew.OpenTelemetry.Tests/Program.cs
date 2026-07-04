@@ -84,6 +84,8 @@ static void OpenTelemetryProcessorCapturesEndedActivity()
         "\"serviceName\": \"checkout-api\"",
         "\"serviceVersion\": \"2.3.4\"",
         "\"deploymentEnvironment\": \"staging\"",
+        "\"otel.exception_event_count\": 1",
+        "\"otel.exception_types\": \"System.TimeoutException\"",
         "\"exceptionType\": \"System.TimeoutException\""
     })
     {

@@ -153,7 +153,9 @@ namespace LogBrew
             var safeOptions = options ?? LogBrewActivitySpanOptions.Create();
             var activityName = ActivityName(capturedActivity, safeOptions);
             var metadata = ActivityMetadata(capturedActivity, context, safeOptions);
-            var attributes = SpanAttributes.Create(activityName, context.TraceId, context.SpanId, StatusFromActivity(capturedActivity))
+            var eventSummaries = ActivityEventSummaries(capturedActivity, metadata);
+            var linkSummaries = ActivityLinkSummaries(capturedActivity, metadata);
+            var attributes = SpanAttributes.Create(activityName, context.TraceId, context.SpanId, StatusFromActivity(capturedActivity, metadata))
                 .WithDurationMs(Math.Max(0, capturedActivity.Duration.TotalMilliseconds))
                 .WithMetadata(metadata);
             if (context.ParentSpanId != null)
@@ -161,13 +163,11 @@ namespace LogBrew
                 attributes.WithParentSpanId(context.ParentSpanId);
             }
 
-            var eventSummaries = ActivityEventSummaries(capturedActivity, metadata);
             if (eventSummaries.Count > 0)
             {
                 attributes.WithEvents(eventSummaries);
             }
 
-            var linkSummaries = ActivityLinkSummaries(capturedActivity, metadata);
             if (linkSummaries.Count > 0)
             {
                 attributes.WithLinks(linkSummaries);
@@ -216,9 +216,24 @@ namespace LogBrew
         private static IReadOnlyList<SpanEventSummary> ActivityEventSummaries(Activity activity, IDictionary<string, object?> spanMetadata)
         {
             var summaries = new List<SpanEventSummary>();
+            var exceptionTypes = new List<string>();
+            var exceptionEventCount = 0;
+            var exceptionEscapedCount = 0;
             var dropped = 0;
             foreach (var activityEvent in activity.Events)
             {
+                var metadata = ActivityEventMetadata(activityEvent);
+                if (IsExceptionEvent(activityEvent))
+                {
+                    exceptionEventCount++;
+                    if (TryExceptionEscaped(metadata, out var escaped) && escaped)
+                    {
+                        exceptionEscapedCount++;
+                    }
+
+                    AddExceptionType(exceptionTypes, metadata);
+                }
+
                 if (summaries.Count >= SpanEventSummary.MaxEvents)
                 {
                     dropped++;
@@ -227,7 +242,6 @@ namespace LogBrew
 
                 var summary = SpanEventSummary.Create(SafeSummaryName(activityEvent.Name, "activity.event"))
                     .WithTimestamp(activityEvent.Timestamp.ToString("O", CultureInfo.InvariantCulture));
-                var metadata = ActivityEventMetadata(activityEvent);
                 if (metadata.Count > 0)
                 {
                     summary.WithMetadata(metadata);
@@ -239,6 +253,20 @@ namespace LogBrew
             if (dropped > 0)
             {
                 spanMetadata["activityEventDroppedCount"] = dropped;
+            }
+
+            if (exceptionEventCount > 0)
+            {
+                spanMetadata["otel.exception_event_count"] = exceptionEventCount;
+                if (exceptionEscapedCount > 0)
+                {
+                    spanMetadata["otel.exception_escaped_count"] = exceptionEscapedCount;
+                }
+
+                if (exceptionTypes.Count > 0)
+                {
+                    spanMetadata["otel.exception_types"] = string.Join(",", exceptionTypes);
+                }
             }
 
             return summaries;
@@ -398,6 +426,16 @@ namespace LogBrew
                 return;
             }
 
+            if (string.Equals(key, "exception.escaped", StringComparison.Ordinal))
+            {
+                if (TryBoolean(value, out var escaped))
+                {
+                    metadata["exceptionEscaped"] = escaped;
+                }
+
+                return;
+            }
+
             CopyKnownSafeTag(metadata, key, value);
         }
 
@@ -423,14 +461,86 @@ namespace LogBrew
                     : fallback;
         }
 
-        private static string StatusFromActivity(Activity activity)
+        private static bool IsExceptionEvent(ActivityEvent activityEvent)
         {
+            return string.Equals(activityEvent.Name, "exception", StringComparison.Ordinal);
+        }
+
+        private static void AddExceptionType(ICollection<string> exceptionTypes, IDictionary<string, object?> metadata)
+        {
+            if (exceptionTypes.Count >= SpanEventSummary.MaxEvents)
+            {
+                return;
+            }
+
+            if (!metadata.TryGetValue("exceptionType", out var value))
+            {
+                return;
+            }
+
+            var text = Convert.ToString(value, CultureInfo.InvariantCulture);
+            if (string.IsNullOrWhiteSpace(text) || exceptionTypes.Contains(text))
+            {
+                return;
+            }
+
+            exceptionTypes.Add(text);
+        }
+
+        private static bool TryExceptionEscaped(IDictionary<string, object?> metadata, out bool escaped)
+        {
+            escaped = false;
+            return metadata.TryGetValue("exceptionEscaped", out var value) && TryBoolean(value, out escaped);
+        }
+
+        private static bool TryBoolean(object? value, out bool parsed)
+        {
+            if (value is bool boolValue)
+            {
+                parsed = boolValue;
+                return true;
+            }
+
+            var text = Convert.ToString(value, CultureInfo.InvariantCulture);
+            if (bool.TryParse(text, out parsed))
+            {
+                return true;
+            }
+
+            parsed = false;
+            return false;
+        }
+
+        private static string StatusFromActivity(Activity activity, IDictionary<string, object?> spanMetadata)
+        {
+            var explicitOtelOk = false;
             foreach (var tag in activity.TagObjects)
             {
-                if (string.Equals(tag.Key, "otel.status_code", StringComparison.Ordinal)
-                    && string.Equals(Convert.ToString(tag.Value, CultureInfo.InvariantCulture), "ERROR", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(tag.Key, "otel.status_code", StringComparison.Ordinal))
                 {
-                    return "error";
+                    var statusCode = Convert.ToString(tag.Value, CultureInfo.InvariantCulture);
+                    if (string.Equals(statusCode, "ERROR", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return "error";
+                    }
+
+                    if (string.Equals(statusCode, "OK", StringComparison.OrdinalIgnoreCase))
+                    {
+                        explicitOtelOk = true;
+                    }
+                }
+            }
+
+            if (explicitOtelOk)
+            {
+                return "ok";
+            }
+
+            foreach (var tag in activity.TagObjects)
+            {
+                if (string.Equals(tag.Key, "otel.status_code", StringComparison.Ordinal))
+                {
+                    continue;
                 }
 
                 if ((string.Equals(tag.Key, "http.response.status_code", StringComparison.Ordinal)
@@ -440,6 +550,13 @@ namespace LogBrew
                 {
                     return "error";
                 }
+            }
+
+            if (spanMetadata.TryGetValue("otel.exception_escaped_count", out var escapedCount)
+                && TryStatusCode(escapedCount, out var count)
+                && count > 0)
+            {
+                return "error";
             }
 
             return "ok";
