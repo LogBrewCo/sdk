@@ -1,5 +1,38 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: React browser timing bridge gap reduced after source reads from
+  Sentry JS
+  `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
+  (`createReactRouterV6CompatibleTracingIntegration`,
+  `browserTracingIntegration`, `Profiler`), Datadog Browser SDK
+  `DataDog/browser-sdk@d2c7e303e4533f40e93d447042a67571f7ba97ff`
+  (`trackInteractionToNextPaint`, view timing collection), OpenTelemetry JS
+  Contrib
+  `open-telemetry/opentelemetry-js-contrib@04d6f6af917d2858cc732cffbd1308caad5a33`
+  (`UserInteractionInstrumentation`, `getWebAutoInstrumentations`), and
+  PostHog JS `PostHog/posthog-js@e480a3e23ecff45d2f9cf50332f6f59c54a7c736`
+  (`PostHogProvider`, `WebVitalsAutocapture`). `@logbrew/react` now ships the
+  optional `@logbrew/react/browser` subpath with
+  `useLogBrewBrowserInstrumentation(...)` and
+  `createLogBrewReactBrowserContext(...)`: React apps explicitly install
+  `@logbrew/browser`, keep the default React import path light, run browser
+  timing observers from React effect lifecycle, and unregister observers on
+  unmount. The hook delegates Web Vitals and interaction timing to
+  `@logbrew/browser`, defaults `flushOnCapture` to `false`, preserves active
+  W3C trace correlation, and avoids global fetch/XHR patching, element
+  selectors, full URLs, query/hash, headers, payloads, screenshots, replay,
+  baggage, and tracestate. Evidence: RED packed React smoke failed on missing
+  `package/browser.js`, GREEN `npm test --prefix js/logbrew-react`,
+  `bash scripts/real_user_react_smoke.sh` with packed `@logbrew/sdk`,
+  `@logbrew/browser`, `@logbrew/react`, React 19.2.7, React DOM 19.2.7, and
+  React Test Renderer 19.2.7, plus TypeScript/CJS/subpath proof, Web
+  Vitals/interaction child-span proof, teardown proof, route/privacy assertions,
+  80-entry browser interaction burst with `maxQueueSize: 25` / 55 drop
+  callbacks, and 503-to-202 shutdown retry. Research:
+  `docs/competitor-research/react-browser-instrumentation-2026-07-04.md`.
+  Honest gap: Sentry/Datadog still lead on deeper automatic frontend lifecycle,
+  hosted performance views, replay, grouping, and hosted source-map/symbolicated
+  runtime issue proof.
 - 2026-07-04: Browser interaction timing, INP-style summary, and
   long-animation-frame gaps reduced after source
   reads from Sentry JS

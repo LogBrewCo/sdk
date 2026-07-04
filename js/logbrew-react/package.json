@@ -16,9 +16,24 @@
         "default": "./index.cjs"
       },
       "default": "./index.js"
+    },
+    "./browser": {
+      "import": {
+        "types": "./browser.d.ts",
+        "default": "./browser.js"
+      },
+      "require": {
+        "types": "./browser.d.cts",
+        "default": "./browser.cjs"
+      },
+      "default": "./browser.js"
     }
   },
   "files": [
+    "browser.cjs",
+    "browser.js",
+    "browser.d.ts",
+    "browser.d.cts",
     "index.cjs",
     "index.js",
     "index.d.ts",
@@ -44,10 +59,16 @@
     "url": "git+https://github.com/LogBrewCo/sdk.git"
   },
   "peerDependencies": {
+    "@logbrew/browser": "^0.1.0",
     "@logbrew/sdk": "^0.1.0",
     "react": ">=18"
   },
+  "peerDependenciesMeta": {
+    "@logbrew/browser": {
+      "optional": true
+    }
+  },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check examples/index.mjs && node --check examples/react-router-route-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check browser.js && node --check browser.cjs && node --check examples/index.mjs && node --check examples/react-router-route-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
   }
 }

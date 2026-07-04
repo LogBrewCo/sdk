@@ -15,6 +15,13 @@ pnpm add @logbrew/sdk @logbrew/react react
 
 The package ships plain ESM and CommonJS entrypoints, `.d.ts` and `.d.cts` declarations, a `LogBrewProvider`, `LogBrewErrorBoundary`, `useLogBrew`, `useLogBrewActions`, `useLogBrewAction`, `useLogBrewNetwork`, `useLogBrewReactRouterNavigation`, `createReactRouterRouteTemplate`, `createLogBrewReactClient`, handled React error helpers, and explicit W3C trace propagation helpers for frontend-to-backend fetch calls. It keeps `@logbrew/sdk` and `react` as peer dependencies so app owners control their React/runtime versions.
 
+If a React browser app also wants Web Vitals or interaction timing spans, install the browser package and import the optional subpath:
+
+```bash
+npm install @logbrew/sdk @logbrew/browser @logbrew/react react
+pnpm add @logbrew/sdk @logbrew/browser @logbrew/react react
+```
+
 ## Example
 
 ```js
@@ -80,6 +87,51 @@ For browser React apps, prefer a browser-scoped public key through `clientKey`. 
 Use `useLogBrewAction()` for product steps your React app already understands, such as route changes, clicks, form submits, retry decisions, and funnel steps. Use `useLogBrewNetwork()` for important API milestones that should be correlated with the same session or trace. Both helpers enqueue LogBrew `action` events, which gives LogBrew and AI agents a structured timeline across many app sessions without requiring visual replay.
 
 Keep metadata low-cardinality and privacy-safe. Prefer route templates such as `/checkout` or `/api/orders/:id`; avoid raw selectors, full URLs, query strings, user-entered text, headers, request bodies, response bodies, screenshots, and replay payloads unless your application owns an explicit opt-in and redaction policy. `useLogBrewNetwork()` strips query strings and hashes from `routeTemplate`, records method/status/duration/session/trace metadata, and does not patch `fetch` automatically.
+
+## Browser Timing Spans
+
+Use `useLogBrewBrowserInstrumentation()` from `@logbrew/react/browser` when a React browser app wants the provider's LogBrew client to capture browser timing spans. This subpath is opt-in: it requires `@logbrew/browser`, runs from a React effect, unregisters observers on unmount, and does not change the default `@logbrew/react` import path.
+
+```js
+import React from "react";
+import { LogBrewProvider, createLogBrewReactClient } from "@logbrew/react";
+import { useLogBrewBrowserInstrumentation } from "@logbrew/react/browser";
+
+const client = createLogBrewReactClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "checkout-web",
+  sdkVersion: "0.1.0"
+});
+
+function BrowserTimingObserver({ webVitals }) {
+  useLogBrewBrowserInstrumentation({
+    interactionTiming: {
+      interactionPathTemplate: "/checkout"
+    },
+    traceContext: {
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      spanId: "b7ad6b7169203331"
+    },
+    webVitals: {
+      metricNames: ["LCP", "CLS", "INP"],
+      webVitals,
+      webVitalPathTemplate: "/checkout"
+    }
+  });
+
+  return null;
+}
+
+export function App({ webVitals }) {
+  return React.createElement(
+    LogBrewProvider,
+    { client },
+    React.createElement(BrowserTimingObserver, { webVitals })
+  );
+}
+```
+
+The hook delegates to `@logbrew/browser` for the actual Web Vitals and PerformanceObserver logic. It defaults `flushOnCapture` to `false`, so timing spans join the in-memory SDK queue and are sent only when your app flushes through an app-owned transport. It records route templates and timing fields, not raw element selectors, full URLs, query strings, hashes, headers, payloads, screenshots, or replay data. Pass a stable options object when possible to avoid reinstalling observers during React rerenders.
 
 ## React Router Route Spans
 
