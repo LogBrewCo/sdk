@@ -235,10 +235,56 @@ export type BrowserResourcePathTemplate =
   | string
   | ((context: BrowserResourceTimingTemplateContext) => string | undefined);
 
+export type BrowserNavigationTimingInput = PerformanceNavigationTiming | {
+  activationStart?: number;
+  connectEnd?: number;
+  connectStart?: number;
+  decodedBodySize?: number;
+  domComplete?: number;
+  domContentLoadedEventEnd?: number;
+  domContentLoadedEventStart?: number;
+  domInteractive?: number;
+  domainLookupEnd?: number;
+  domainLookupStart?: number;
+  duration?: number;
+  encodedBodySize?: number;
+  entryType?: string;
+  fetchStart?: number;
+  initiatorType?: string;
+  loadEventEnd?: number;
+  loadEventStart?: number;
+  name?: string;
+  navigationType?: string;
+  redirectCount?: number;
+  redirectEnd?: number;
+  redirectStart?: number;
+  requestStart?: number;
+  responseEnd?: number;
+  responseStart?: number;
+  responseStatus?: number;
+  secureConnectionStart?: number;
+  startTime?: number;
+  statusCode?: number;
+  transferSize?: number;
+  type?: string;
+  workerStart?: number;
+};
+
+export type BrowserNavigationTimingTemplateContext = {
+  entry: BrowserNavigationTimingInput;
+  navigationType: string;
+  path: string;
+};
+
+export type BrowserNavigationPathTemplate =
+  | string
+  | ((context: BrowserNavigationTimingTemplateContext) => string | undefined);
+
 export type BrowserMetadataKind =
   | "page_view"
   | "action"
   | "network"
+  | "document"
   | "resource"
   | "fetch"
   | "xhr"
@@ -346,6 +392,18 @@ export type BrowserResourceTimingInstrumentation = {
   uninstall(): void;
 };
 
+export type BrowserNavigationTimingOptions = LogBrewBrowserOptions & {
+  captureInitial?: boolean;
+  deferAfterLoad?: boolean;
+  entry?: BrowserNavigationTimingInput;
+  navigationPathTemplate?: BrowserNavigationPathTemplate;
+  setTimeout?: (callback: () => void, delay?: number) => unknown;
+};
+
+export type BrowserNavigationTimingInstrumentation = {
+  uninstall(): void;
+};
+
 export type BrowserFetchOptions = LogBrewBrowserOptions & {
   captureTargets?: TracePropagationTarget[];
   fetchImpl?: typeof fetch;
@@ -422,6 +480,11 @@ export declare function installLogBrewBrowserResourceTimingInstrumentation(
   options?: BrowserResourceTimingOptions
 ): BrowserResourceTimingInstrumentation;
 
+export declare function installLogBrewBrowserNavigationTimingInstrumentation(
+  context: LogBrewBrowserContext,
+  options?: BrowserNavigationTimingOptions
+): BrowserNavigationTimingInstrumentation;
+
 export declare function installLogBrewBrowserFetchInstrumentation(
   context: LogBrewBrowserContext,
   options?: BrowserFetchOptions
@@ -475,6 +538,12 @@ export declare function captureBrowserResourceTiming(
   options?: BrowserResourceTimingOptions
 ): Promise<TransportResponse | undefined>;
 
+export declare function captureBrowserNavigationTiming(
+  entry: BrowserNavigationTimingInput,
+  context: LogBrewBrowserContext,
+  options?: BrowserNavigationTimingOptions
+): Promise<TransportResponse | undefined>;
+
 export declare function captureBrowserFetchSpan(
   request: BrowserFetchInput,
   context: LogBrewBrowserContext,
@@ -510,6 +579,12 @@ export declare function createBrowserResourceTimingEvent(
   options?: BrowserResourceTimingOptions
 ): LogBrewBrowserEvent<SpanAttributes>;
 
+export declare function createBrowserNavigationTimingEvent(
+  entry: BrowserNavigationTimingInput,
+  browserWindow?: Window,
+  options?: BrowserNavigationTimingOptions
+): LogBrewBrowserEvent<SpanAttributes>;
+
 export declare function createBrowserFetchSpanEvent(
   request: BrowserFetchInput,
   browserWindow?: Window,
@@ -539,6 +614,7 @@ declare const defaultExport: {
   captureBrowserError: typeof captureBrowserError;
   captureBrowserFetchSpan: typeof captureBrowserFetchSpan;
   captureBrowserNetwork: typeof captureBrowserNetwork;
+  captureBrowserNavigationTiming: typeof captureBrowserNavigationTiming;
   captureBrowserResourceTiming: typeof captureBrowserResourceTiming;
   captureBrowserXhrSpan: typeof captureBrowserXhrSpan;
   capturePageView: typeof capturePageView;
@@ -548,6 +624,7 @@ declare const defaultExport: {
   createBrowserActionEvent: typeof createBrowserActionEvent;
   createBrowserErrorEvent: typeof createBrowserErrorEvent;
   createBrowserFetchSpanEvent: typeof createBrowserFetchSpanEvent;
+  createBrowserNavigationTimingEvent: typeof createBrowserNavigationTimingEvent;
   createBrowserResourceTimingEvent: typeof createBrowserResourceTimingEvent;
   createBrowserXhrSpanEvent: typeof createBrowserXhrSpanEvent;
   createFetchTransport: typeof createFetchTransport;
@@ -561,6 +638,7 @@ declare const defaultExport: {
   createUnhandledRejectionEvent: typeof createUnhandledRejectionEvent;
   installLogBrewBrowserFetchInstrumentation: typeof installLogBrewBrowserFetchInstrumentation;
   installLogBrewBrowserNavigationInstrumentation: typeof installLogBrewBrowserNavigationInstrumentation;
+  installLogBrewBrowserNavigationTimingInstrumentation: typeof installLogBrewBrowserNavigationTimingInstrumentation;
   installLogBrewBrowserResourceTimingInstrumentation: typeof installLogBrewBrowserResourceTimingInstrumentation;
   installLogBrewBrowserXhrInstrumentation: typeof installLogBrewBrowserXhrInstrumentation;
   installLogBrewBrowser: typeof installLogBrewBrowser;

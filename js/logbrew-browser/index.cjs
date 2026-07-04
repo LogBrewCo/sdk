@@ -13,6 +13,11 @@ const {
   createLogBrewBrowserFetch,
   installLogBrewBrowserFetchInstrumentation
 } = require("./fetch-spans.cjs");
+const {
+  captureBrowserNavigationTiming,
+  createBrowserNavigationTimingEvent,
+  installLogBrewBrowserNavigationTimingInstrumentation
+} = require("./navigation-timing.cjs");
 const { createPersistentBrowserTransport } = require("./persistence.cjs");
 const {
   captureBrowserResourceTiming,
@@ -926,6 +931,7 @@ module.exports = {
   captureBrowserError,
   captureBrowserFetchSpan,
   captureBrowserNetwork,
+  captureBrowserNavigationTiming,
   captureBrowserResourceTiming,
   captureBrowserXhrSpan,
   capturePageView,
@@ -935,6 +941,7 @@ module.exports = {
   createBrowserActionEvent,
   createBrowserErrorEvent,
   createBrowserFetchSpanEvent,
+  createBrowserNavigationTimingEvent,
   createBrowserResourceTimingEvent,
   createBrowserXhrSpanEvent,
   createBeaconTransport,
@@ -952,6 +959,7 @@ module.exports = {
     captureBrowserError,
     captureBrowserFetchSpan,
     captureBrowserNetwork,
+    captureBrowserNavigationTiming,
     captureBrowserResourceTiming,
     captureBrowserXhrSpan,
     capturePageView,
@@ -961,6 +969,7 @@ module.exports = {
     createBrowserActionEvent,
     createBrowserErrorEvent,
     createBrowserFetchSpanEvent,
+    createBrowserNavigationTimingEvent,
     createBrowserResourceTimingEvent,
     createBrowserXhrSpanEvent,
     createBeaconTransport,
@@ -975,6 +984,7 @@ module.exports = {
     createUnhandledRejectionEvent,
     installLogBrewBrowserNavigationInstrumentation,
     installLogBrewBrowserFetchInstrumentation,
+    installLogBrewBrowserNavigationTimingInstrumentation,
     installLogBrewBrowserResourceTimingInstrumentation,
     installLogBrewBrowserXhrInstrumentation,
     installLogBrewBrowser,
@@ -982,6 +992,7 @@ module.exports = {
   },
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserFetchInstrumentation,
+  installLogBrewBrowserNavigationTimingInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
   installLogBrewBrowserXhrInstrumentation,
   installLogBrewBrowser,

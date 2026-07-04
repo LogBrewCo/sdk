@@ -1,6 +1,7 @@
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
+  captureBrowserNavigationTiming,
   captureBrowserNetwork,
   createBrowserTraceContext,
   createLogBrewBrowserFetch,
@@ -79,9 +80,15 @@ await logbrewFetch("https://api.example.test/api/checkout/123?email=dev@example.
   headers: { accept: "application/json" },
   method: "POST"
 });
+await captureBrowserNavigationTiming(createNavigationTimingEntry(), logbrew, {
+  flushOnCapture: false,
+  navigationPathTemplate: "/settings",
+  now: nextTimestamp,
+  randomValues: () => fillBytes(8, 0x55)
+});
 
-if (logbrew.client.pendingEvents() !== 6) {
-  throw new Error(`expected 6 captured events, got ${logbrew.client.pendingEvents()}`);
+if (logbrew.client.pendingEvents() !== 7) {
+  throw new Error(`expected 7 captured events, got ${logbrew.client.pendingEvents()}`);
 }
 
 logbrew.client.log("evt_browser_pagehide_001", nextTimestamp(), {
@@ -160,6 +167,16 @@ if (fetchCalls[0].init.headers.traceparent !== `00-${traceContext.traceId}-44444
 if (payload.includes("api.example.test") || payload.includes("email=dev@example.test") || payload.includes("#retry") || payload.includes("private body") || payload.includes("application/json")) {
   throw new Error(`fetch span metadata leaked request details: ${payload}`);
 }
+const documentSpan = parsed.events.find((event) => event.type === "span" && event.attributes.metadata?.source === "browser.document");
+if (documentSpan?.attributes.name !== "browser.document /settings") {
+  throw new Error(`expected document timing span, got ${payload}`);
+}
+if (documentSpan.attributes.traceId !== traceContext.traceId || documentSpan.attributes.parentSpanId !== traceContext.spanId) {
+  throw new Error(`expected document timing child span trace correlation, got ${payload}`);
+}
+if (documentSpan.attributes.metadata.firstByteMs !== 120 || documentSpan.attributes.metadata.loadEventMs !== 384.123) {
+  throw new Error(`expected document timing phase metadata, got ${payload}`);
+}
 const visibilityPayload = JSON.parse(transport.sentBodies[1]);
 if (visibilityPayload.events[0].id !== "evt_browser_hidden_001") {
   throw new Error(`expected hidden visibility flush, got ${transport.sentBodies[1]}`);
@@ -207,6 +224,7 @@ if (propagatedRequests[2].init.headers.traceparent !== firstTraceparent) {
 console.log(payload);
 console.error(JSON.stringify({
   ok: true,
+  documentSpan: documentSpan.attributes.name,
   events: parsed.events.length,
   fetchSpan: fetchSpan.attributes.name,
   hiddenFlushEvents: visibilityPayload.events.length,
@@ -230,6 +248,39 @@ function fillBytes(length, value) {
 function sequenceNumbers(values) {
   let index = 0;
   return () => values[index++] ?? values.at(-1);
+}
+
+function createNavigationTimingEntry() {
+  return {
+    activationStart: 7,
+    connectEnd: 70,
+    connectStart: 40,
+    decodedBodySize: 8192,
+    domComplete: 360,
+    domContentLoadedEventEnd: 310,
+    domContentLoadedEventStart: 302,
+    domInteractive: 270,
+    domainLookupEnd: 40,
+    domainLookupStart: 20,
+    duration: 384.123,
+    encodedBodySize: 2048,
+    entryType: "navigation",
+    fetchStart: 10,
+    loadEventEnd: 384.123,
+    loadEventStart: 380,
+    name: "https://app.example.test/settings?email=dev@example.test#profile",
+    redirectEnd: 10,
+    redirectStart: 0,
+    requestStart: 80,
+    responseEnd: 270,
+    responseStart: 120,
+    responseStatus: 200,
+    secureConnectionStart: 50,
+    startTime: 0,
+    transferSize: 4096,
+    type: "navigate",
+    workerStart: 5
+  };
 }
 
 function createErrorEvent(message, filename, lineno, colno) {

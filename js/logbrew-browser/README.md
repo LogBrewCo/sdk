@@ -132,6 +132,53 @@ resources.uninstall();
 
 Resource timing spans keep the active trace ID, create a child span ID, record duration, status code when the browser exposes it, initiator type, size fields, and bounded phase timings such as lookup, connect, TLS, request, and response time. They store only path/template metadata; full URLs, hosts, query strings, hash fragments, headers, request or response bodies, cookies, baggage, and tracestate are not captured.
 
+## Document Load Timing Spans
+
+Use `captureBrowserNavigationTiming()` when your app wants a browser `PerformanceNavigationTiming` entry to explain the initial document load under the current page or route trace. This gives one `browser.document <path>` child span with first-byte, name lookup, connect, TLS, request, response, DOM, and load-event timings without adopting hidden global tracing.
+
+```js
+import {
+  captureBrowserNavigationTiming,
+  installLogBrewBrowser
+} from "@logbrew/browser";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+
+const [entry] = performance.getEntriesByType("navigation");
+
+if (entry) {
+  await captureBrowserNavigationTiming(entry, logbrew, {
+    navigationPathTemplate: "/checkout"
+  });
+}
+```
+
+For app-owned one-shot capture after the browser load event, opt in with `installLogBrewBrowserNavigationTimingInstrumentation()`. It reads the current navigation entry once, waits until `load` has completed when needed, can be removed with `uninstall()`, and is not enabled by default.
+
+```js
+import {
+  installLogBrewBrowser,
+  installLogBrewBrowserNavigationTimingInstrumentation
+} from "@logbrew/browser";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+
+const documentLoad = installLogBrewBrowserNavigationTimingInstrumentation(logbrew, {
+  navigationPathTemplate({ path }) {
+    return path.replace(/\/\d+$/u, "/:id");
+  }
+});
+
+// Later, if your app owns teardown.
+documentLoad.uninstall();
+```
+
+Document load timing spans keep the active trace ID, create a child span ID, record status, transfer sizes, first byte, DOM milestones, load-event timing, and bounded phase durations. They store only path/template metadata; full URLs, hosts, query strings, hash fragments, server timing records, headers, request or response bodies, cookies, baggage, and tracestate are not captured.
+
 ## Fetch Spans
 
 Use `createLogBrewBrowserFetch()` when browser API calls should become trace spans and optionally propagate W3C `traceparent` to your own backend. This wraps an app-owned `fetch` function and is separate from the lower-level `createTraceparentFetch()` header helper.

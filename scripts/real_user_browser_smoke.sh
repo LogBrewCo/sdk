@@ -47,6 +47,8 @@ grep -q '^package/fetch-spans.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/fetch-spans.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/navigation-timing.js$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/navigation-timing.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/persistence.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/persistence.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/resource-timing.js$' "$tmp_dir/browser-tarball.txt"
@@ -76,6 +78,9 @@ grep -q 'captureBrowserNetwork' "$tmp_dir/browser-readme.md"
 grep -q 'captureBrowserResourceTiming' "$tmp_dir/browser-readme.md"
 grep -q 'installLogBrewBrowserResourceTimingInstrumentation' "$tmp_dir/browser-readme.md"
 grep -q 'PerformanceObserver' "$tmp_dir/browser-readme.md"
+grep -q 'captureBrowserNavigationTiming' "$tmp_dir/browser-readme.md"
+grep -q 'installLogBrewBrowserNavigationTimingInstrumentation' "$tmp_dir/browser-readme.md"
+grep -q 'PerformanceNavigationTiming' "$tmp_dir/browser-readme.md"
 grep -q 'createBeaconTransport' "$tmp_dir/browser-readme.md"
 grep -q 'createPersistentBrowserTransport' "$tmp_dir/browser-readme.md"
 grep -q 'persistOffline' "$tmp_dir/browser-readme.md"
@@ -134,10 +139,12 @@ import { Window } from "happy-dom";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
+  captureBrowserNavigationTiming,
   captureBrowserXhrSpan,
   createLogBrewBrowserFetch,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
+  createBrowserNavigationTimingEvent,
   createBrowserTraceContext,
   createBrowserXhrSpanEvent,
   createBeaconTransport,
@@ -148,6 +155,7 @@ import {
   installLogBrewBrowser,
   installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserNavigationInstrumentation,
+  installLogBrewBrowserNavigationTimingInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
   installLogBrewBrowserXhrInstrumentation,
   shouldPropagateTraceparent
@@ -589,7 +597,7 @@ const browserFetch = createLogBrewBrowserFetch(browserFetchContext, {
   tracePropagationTargets: [/^https:\/\/api\.example\.test\/api\//u]
 });
 await browserFetch("https://api.example.test/api/orders/123?email=dev@example.test#fragment", {
-  body: "private body",
+  body: "masked body",
   headers: { accept: "application/json" },
   method: "POST"
 });
@@ -611,7 +619,7 @@ if (browserFetchSpan.attributes.status !== "error" || browserFetchSpan.attribute
 if (browserFetchSpan.attributes.metadata.responseBodySize !== 456 || browserFetchSpan.attributes.durationMs !== 88.5) {
   throw new Error(`expected bounded fetch timing and size metadata, got ${browserFetchBody}`);
 }
-if (browserFetchBody.includes("api.example.test") || browserFetchBody.includes("email=dev@example.test") || browserFetchBody.includes("#fragment") || browserFetchBody.includes("private body") || browserFetchBody.includes("application/json")) {
+if (browserFetchBody.includes("api.example.test") || browserFetchBody.includes("email=dev@example.test") || browserFetchBody.includes("#fragment") || browserFetchBody.includes("masked body") || browserFetchBody.includes("application/json")) {
   throw new Error(`fetch span metadata leaked request details: ${browserFetchBody}`);
 }
 
@@ -693,7 +701,7 @@ const browserXhrInstrumentation = installLogBrewBrowserXhrInstrumentation(browse
 const browserXhr = new browserXhrWindow.XMLHttpRequest();
 browserXhr.open("POST", "https://api.example.test/api/orders/123?email=dev@example.test#fragment");
 browserXhr.setRequestHeader("accept", "application/json");
-browserXhr.send("private body");
+browserXhr.send("masked body");
 browserXhr.status = 503;
 browserXhr.setResponseHeader("content-length", "456");
 browserXhr.dispatchEvent({ type: "load" });
@@ -715,7 +723,7 @@ if (browserXhrSpan.attributes.status !== "error" || browserXhrSpan.attributes.me
 if (browserXhrSpan.attributes.metadata.responseBodySize !== 456 || browserXhrSpan.attributes.durationMs !== 14.5) {
   throw new Error(`expected bounded XHR timing and size metadata, got ${browserXhrBody}`);
 }
-if (browserXhrBody.includes("api.example.test") || browserXhrBody.includes("email=dev@example.test") || browserXhrBody.includes("#fragment") || browserXhrBody.includes("private body") || browserXhrBody.includes("application/json")) {
+if (browserXhrBody.includes("api.example.test") || browserXhrBody.includes("email=dev@example.test") || browserXhrBody.includes("#fragment") || browserXhrBody.includes("masked body") || browserXhrBody.includes("application/json")) {
   throw new Error(`XHR span metadata leaked request details: ${browserXhrBody}`);
 }
 const browserXhrFailure = new browserXhrWindow.XMLHttpRequest();
@@ -794,7 +802,7 @@ if (resourceSpans.length !== 2) {
 if (fakeResourceObserver.observedOptions().type !== "resource" || fakeResourceObserver.disconnected() !== true) {
   throw new Error("resource timing observer should be opt-in and reversible");
 }
-if (resourceBody.includes("api.example.test") || resourceBody.includes("sample=private") || resourceBody.includes("#fragment")) {
+if (resourceBody.includes("api.example.test") || resourceBody.includes("sample=masked") || resourceBody.includes("#fragment")) {
   throw new Error(`resource timing metadata leaked URL details: ${resourceBody}`);
 }
 if (resourceSpans[0].attributes.name !== "browser.resource fetch /api/orders/:id") {
@@ -808,6 +816,68 @@ if (resourceSpans[0].attributes.status !== "error" || resourceSpans[0].attribute
 }
 if (resourceSpans[0].attributes.metadata.lookupMs !== 5 || resourceSpans[0].attributes.metadata.responseMs !== 50) {
   throw new Error(`expected bounded resource phase timings, got ${resourceBody}`);
+}
+
+const documentTimingWindow = new Window({
+  url: "https://app.example.test/products/42?email=dev@example.test#reviews"
+});
+Object.defineProperty(documentTimingWindow.document, "readyState", {
+  configurable: true,
+  value: "complete"
+});
+const documentTimingTraceContext = createBrowserTraceContext({
+  spanId: "00f067aa0ba902b7",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+});
+const documentTimingContext = installLogBrewBrowser({
+  browserWindow: documentTimingWindow,
+  capturePageViews: false,
+  clientKey: "LOGBREW_BROWSER_KEY",
+  flushOnCapture: false,
+  traceContext: documentTimingTraceContext,
+  transport: RecordingTransport.alwaysAccept()
+});
+const documentTimingEvent = createBrowserNavigationTimingEvent(createNavigationTimingEntry(), documentTimingWindow, {
+  navigationPathTemplate: "/products/:id",
+  randomValues: () => fillBytes(8, 0x33),
+  traceContext: documentTimingTraceContext
+});
+if (documentTimingEvent.attributes.name !== "browser.document /products/:id") {
+  throw new Error(`unexpected document timing event name: ${JSON.stringify(documentTimingEvent)}`);
+}
+await captureBrowserNavigationTiming(createNavigationTimingEntry(), documentTimingContext, {
+  flushOnCapture: false,
+  navigationPathTemplate: "/products/:id",
+  now: () => "2026-06-02T10:00:13Z",
+  randomValues: () => fillBytes(8, 0x33)
+});
+const documentTimingInstrumentation = installLogBrewBrowserNavigationTimingInstrumentation(documentTimingContext, {
+  deferAfterLoad: false,
+  entry: createNavigationTimingEntry({
+    name: "https://app.example.test/products/99?sample=masked#details"
+  }),
+  flushOnCapture: false,
+  navigationPathTemplate({ path }) {
+    return path.replace(/\/\d+$/u, "/:id");
+  },
+  now: () => "2026-06-02T10:00:14Z",
+  randomValues: () => fillBytes(8, 0x44)
+});
+documentTimingInstrumentation.uninstall();
+const documentTimingPayload = JSON.parse(documentTimingContext.previewJson());
+const documentTimingBody = JSON.stringify(documentTimingPayload);
+const documentTimingSpans = documentTimingPayload.events.filter((event) => event.type === "span");
+if (documentTimingSpans.length !== 2) {
+  throw new Error(`expected direct and installed document timing spans, got ${documentTimingBody}`);
+}
+if (documentTimingBody.includes("app.example.test") || documentTimingBody.includes("email=dev@example.test") || documentTimingBody.includes("sample=masked") || documentTimingBody.includes("#reviews")) {
+  throw new Error(`document timing metadata leaked URL details: ${documentTimingBody}`);
+}
+if (documentTimingSpans[0].attributes.traceId !== documentTimingTraceContext.traceId || documentTimingSpans[0].attributes.parentSpanId !== documentTimingTraceContext.spanId) {
+  throw new Error(`expected document timing child span correlation, got ${documentTimingBody}`);
+}
+if (documentTimingSpans[0].attributes.metadata.firstByteMs !== 120 || documentTimingSpans[0].attributes.metadata.loadEventMs !== 384.123) {
+  throw new Error(`expected document timing phase metadata, got ${documentTimingBody}`);
 }
 
 const navigationWindow = new Window({
@@ -900,6 +970,7 @@ console.error(JSON.stringify({
   ok: true,
   beaconEnvelope: beaconPayload.envelope.events[0].id,
   browserDeliveries: transport.sentBodies.length,
+  documentTimingSpan: documentTimingSpans[0].attributes.name,
   events: JSON.parse(preview).events.length,
   fetchSpan: browserFetchSpan.attributes.name,
   fetchStatus: fetchResponse.statusCode,
@@ -983,7 +1054,7 @@ function createResourceTimingEntry() {
     entryType: "resource",
     fetchStart: 10,
     initiatorType: "fetch",
-    name: "https://api.example.test/api/orders/123?sample=private#fragment",
+    name: "https://api.example.test/api/orders/123?sample=masked#fragment",
     redirectEnd: 10,
     redirectStart: 5,
     requestStart: 40,
@@ -993,6 +1064,42 @@ function createResourceTimingEntry() {
     secureConnectionStart: 25,
     startTime: 10,
     transferSize: 1024
+  };
+}
+
+function createNavigationTimingEntry(overrides = {}) {
+  return {
+    activationStart: 7,
+    connectEnd: 70,
+    connectStart: 40,
+    decodedBodySize: 8192,
+    domComplete: 360,
+    domContentLoadedEventEnd: 310,
+    domContentLoadedEventStart: 302,
+    domInteractive: 270,
+    domainLookupEnd: 40,
+    domainLookupStart: 20,
+    duration: 384.123,
+    encodedBodySize: 2048,
+    entryType: "navigation",
+    fetchStart: 10,
+    loadEventEnd: 384.123,
+    loadEventStart: 380,
+    name: "https://app.example.test/products/42?email=dev@example.test#reviews",
+    redirectCount: 2,
+    redirectEnd: 10,
+    redirectStart: 0,
+    requestStart: 80,
+    responseEnd: 270,
+    responseStart: 120,
+    responseStatus: 200,
+    secureConnectionStart: 50,
+    startTime: 0,
+    transferSize: 4096,
+    type: "navigate",
+    workerStart: 5,
+    ...overrides,
+    serverTiming: [{ name: "sensitive", duration: 123 }]
   };
 }
 
@@ -1146,6 +1253,7 @@ python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batc
 grep -q '"ok":true' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"beaconEnvelope":"evt_beacon_log_001"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"browserDeliveries":8' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"documentTimingSpan":"browser.document /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"fullAttempts":2' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"hiddenFlush":"evt_browser_hidden_001"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"networkRoute":"/api/checkout"' "$tmp_dir/browser-smoke.stderr.json"
@@ -1165,12 +1273,14 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserFetchSpan,
+  captureBrowserNavigationTiming,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
   captureBrowserXhrSpan,
   createBrowserTraceContext,
   createBrowserActionEvent,
   createBrowserFetchSpanEvent,
+  createBrowserNavigationTimingEvent,
   createBrowserNetworkEvent,
   createBrowserResourceTimingEvent,
   createBrowserXhrSpanEvent,
@@ -1185,9 +1295,12 @@ import {
   installLogBrewBrowser,
   installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserNavigationInstrumentation,
+  installLogBrewBrowserNavigationTimingInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
   installLogBrewBrowserXhrInstrumentation,
   type BrowserNavigationInstrumentation,
+  type BrowserNavigationTimingInput,
+  type BrowserNavigationTimingInstrumentation,
   type BrowserFetchInput,
   type BrowserFetchInstrumentation,
   type BrowserMetadataKind,
@@ -1247,12 +1360,25 @@ const resourceEntry: BrowserResourceTimingInput = {
   duration: 12,
   entryType: "resource",
   initiatorType: "fetch",
-  name: "https://api.example.test/api/checkout?sample=private",
+  name: "https://api.example.test/api/checkout?sample=masked",
   responseStatus: 202,
   startTime: 0
 };
 const resource = createBrowserResourceTimingEvent(resourceEntry, window, {
   resourcePathTemplate: "/api/checkout"
+});
+const navigationEntry: BrowserNavigationTimingInput = {
+  duration: 123,
+  entryType: "navigation",
+  loadEventEnd: 123,
+  name: "https://app.example.test/checkout?sample=masked",
+  responseStart: 42,
+  responseStatus: 200,
+  startTime: 0,
+  type: "navigate"
+};
+const documentLoad = createBrowserNavigationTimingEvent(navigationEntry, window, {
+  navigationPathTemplate: "/checkout"
 });
 const fetchEntry: BrowserFetchInput = {
   durationMs: 18,
@@ -1260,7 +1386,7 @@ const fetchEntry: BrowserFetchInput = {
   responseBodySize: 456,
   statusCode: 202,
   tracePropagated: true,
-  url: "https://api.example.test/api/checkout?sample=private"
+  url: "https://api.example.test/api/checkout?sample=masked"
 };
 const fetchSpan = createBrowserFetchSpanEvent(fetchEntry, window, {
   resourcePathTemplate: "/api/checkout"
@@ -1271,13 +1397,14 @@ const xhrEntry: BrowserXhrInput = {
   responseBodySize: 123,
   statusCode: 202,
   tracePropagated: true,
-  url: "https://api.example.test/api/checkout?sample=private"
+  url: "https://api.example.test/api/checkout?sample=masked"
 };
 const xhrSpan = createBrowserXhrSpanEvent(xhrEntry, window, {
   resourcePathTemplate: "/api/checkout"
 });
 client.span(page.id, page.timestamp, page.attributes);
 client.span(fetchSpan.id, fetchSpan.timestamp, fetchSpan.attributes);
+client.span(documentLoad.id, documentLoad.timestamp, documentLoad.attributes);
 client.span(resource.id, resource.timestamp, resource.attributes);
 client.span(xhrSpan.id, xhrSpan.timestamp, xhrSpan.attributes);
 client.action(action.id, action.timestamp, action.attributes);
@@ -1287,6 +1414,9 @@ void captureBrowserAction("checkout.submitted", context);
 void captureBrowserNetwork("/api/checkout", context);
 void captureBrowserFetchSpan(fetchEntry, context, {
   resourcePathTemplate: "/api/checkout"
+});
+void captureBrowserNavigationTiming(navigationEntry, context, {
+  navigationPathTemplate: "/checkout"
 });
 void captureBrowserXhrSpan(xhrEntry, context, {
   resourcePathTemplate: "/api/checkout"
@@ -1328,6 +1458,11 @@ const resourceTimingInstrumentation: BrowserResourceTimingInstrumentation =
     performanceObserver: window.PerformanceObserver,
     resourcePathTemplate: ({ path }) => path
   });
+const navigationTimingInstrumentation: BrowserNavigationTimingInstrumentation =
+  installLogBrewBrowserNavigationTimingInstrumentation(context, {
+    captureInitial: false,
+    navigationPathTemplate: ({ path }) => path
+  });
 const browserFetch = createLogBrewBrowserFetch(context, {
   fetchImpl: fetch,
   resourcePathTemplate: "/api/checkout",
@@ -1359,6 +1494,7 @@ void browserFetch("/internal/ping");
 fetchInstrumentation.uninstall();
 xhrInstrumentation.uninstall();
 navigation.uninstall();
+navigationTimingInstrumentation.uninstall();
 resourceTimingInstrumentation.uninstall();
 context.uninstall();
 EOF
@@ -1402,6 +1538,12 @@ if (typeof browser.captureBrowserResourceTiming !== "function" || typeof browser
 }
 if (typeof browser.installLogBrewBrowserResourceTimingInstrumentation !== "function") {
   throw new Error("missing CommonJS browser resource timing instrumentation helper");
+}
+if (typeof browser.captureBrowserNavigationTiming !== "function" || typeof browser.createBrowserNavigationTimingEvent !== "function") {
+  throw new Error("missing CommonJS browser navigation timing helpers");
+}
+if (typeof browser.installLogBrewBrowserNavigationTimingInstrumentation !== "function") {
+  throw new Error("missing CommonJS browser navigation timing instrumentation helper");
 }
 if (typeof browser.createLogBrewBrowserFetch !== "function" || typeof browser.captureBrowserFetchSpan !== "function") {
   throw new Error("missing CommonJS browser fetch span helpers");
@@ -1449,7 +1591,8 @@ grep -q '"ok":true' "$tmp_dir/example-readme.stderr.json"
 grep -q '"path":"/dashboard"' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/browser/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":7' "$tmp_dir/example-default.stderr.json"
+grep -q '"pagehideFlushEvents":8' "$tmp_dir/example-default.stderr.json"
+grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/example-default.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/browser/examples run list > "$tmp_dir/npm-helper-list.txt"
@@ -1458,7 +1601,8 @@ npm --prefix node_modules/@logbrew/browser/examples run help > "$tmp_dir/npm-hel
 grep -q 'Default example: real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/browser/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":7' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"pagehideFlushEvents":8' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/npm-helper-smoke.stderr.json"
 
