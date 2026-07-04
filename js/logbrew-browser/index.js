@@ -12,6 +12,11 @@ import {
   installLogBrewBrowserFetchInstrumentation
 } from "./fetch-spans.js";
 import {
+  captureBrowserInteractionTiming,
+  createBrowserInteractionTimingEvent,
+  installLogBrewBrowserInteractionTimingInstrumentation
+} from "./interaction-timing.js";
+import {
   captureBrowserNavigationTiming,
   createBrowserNavigationTimingEvent,
   installLogBrewBrowserNavigationTimingInstrumentation
@@ -44,11 +49,13 @@ import {
 export {
   createBeaconTransport,
   captureBrowserFetchSpan,
+  captureBrowserInteractionTiming,
   captureBrowserNavigationTiming,
   captureBrowserResourceTiming,
   captureBrowserWebVital,
   captureBrowserXhrSpan,
   createBrowserFetchSpanEvent,
+  createBrowserInteractionTimingEvent,
   createBrowserNavigationTimingEvent,
   createBrowserResourceTimingEvent,
   createBrowserWebVitalEvent,
@@ -58,6 +65,7 @@ export {
   createLogBrewBrowserFetch,
   createTraceparentFetch,
   installLogBrewBrowserFetchInstrumentation,
+  installLogBrewBrowserInteractionTimingInstrumentation,
   installLogBrewBrowserNavigationTimingInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
   installLogBrewBrowserWebVitalsInstrumentation,
@@ -958,9 +966,11 @@ export default {
   captureBrowserAction,
   captureBrowserError,
   captureBrowserFetchSpan,
+  captureBrowserInteractionTiming,
   captureBrowserNetwork,
   captureBrowserNavigationTiming,
   captureBrowserResourceTiming,
+  captureBrowserWebVital,
   captureBrowserXhrSpan,
   capturePageView,
   captureUnhandledRejection,
@@ -969,8 +979,10 @@ export default {
   createBrowserActionEvent,
   createBrowserErrorEvent,
   createBrowserFetchSpanEvent,
+  createBrowserInteractionTimingEvent,
   createBrowserNavigationTimingEvent,
   createBrowserResourceTimingEvent,
+  createBrowserWebVitalEvent,
   createBrowserXhrSpanEvent,
   createBeaconTransport,
   createFetchTransport,
@@ -984,8 +996,10 @@ export default {
   createUnhandledRejectionEvent,
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserFetchInstrumentation,
+  installLogBrewBrowserInteractionTimingInstrumentation,
   installLogBrewBrowserNavigationTimingInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
+  installLogBrewBrowserWebVitalsInstrumentation,
   installLogBrewBrowserXhrInstrumentation,
   installLogBrewBrowser,
   shouldPropagateTraceparent

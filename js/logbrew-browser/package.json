@@ -23,6 +23,8 @@
     "beacon-transport.js",
     "fetch-spans.cjs",
     "fetch-spans.js",
+    "interaction-timing.cjs",
+    "interaction-timing.js",
     "index.cjs",
     "index.js",
     "navigation-timing.cjs",
@@ -65,6 +67,6 @@
     "@logbrew/sdk": "^0.1.0"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check beacon-transport.js && node --check beacon-transport.cjs && node --check fetch-spans.js && node --check fetch-spans.cjs && node --check navigation-timing.js && node --check navigation-timing.cjs && node --check persistence.js && node --check persistence.cjs && node --check resource-timing.js && node --check resource-timing.cjs && node --check trace-context.js && node --check trace-context.cjs && node --check web-vitals.js && node --check web-vitals.cjs && node --check xhr-spans.js && node --check xhr-spans.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --test test/*.test.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check beacon-transport.js && node --check beacon-transport.cjs && node --check fetch-spans.js && node --check fetch-spans.cjs && node --check interaction-timing.js && node --check interaction-timing.cjs && node --check navigation-timing.js && node --check navigation-timing.cjs && node --check persistence.js && node --check persistence.cjs && node --check resource-timing.js && node --check resource-timing.cjs && node --check trace-context.js && node --check trace-context.cjs && node --check web-vitals.js && node --check web-vitals.cjs && node --check xhr-spans.js && node --check xhr-spans.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --test test/*.test.mjs"
   }
 }

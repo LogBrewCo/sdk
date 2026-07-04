@@ -1,6 +1,7 @@
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
+  captureBrowserInteractionTiming,
   captureBrowserNetwork,
   captureBrowserWebVital,
   createBrowserTraceContext,
@@ -66,6 +67,19 @@ await captureBrowserWebVital({
 }, logbrew, {
   flushOnCapture: false,
   webVitalPathTemplate: "/dashboard"
+});
+
+await captureBrowserInteractionTiming({
+  duration: 128,
+  entryType: "event",
+  interactionId: 91,
+  name: "click",
+  processingEnd: 275,
+  processingStart: 220,
+  startTime: 200
+}, logbrew, {
+  flushOnCapture: false,
+  interactionPathTemplate: "/dashboard"
 });
 
 const payload = logbrew.previewJson();

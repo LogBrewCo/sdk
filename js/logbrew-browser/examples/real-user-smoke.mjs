@@ -1,6 +1,7 @@
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
+  captureBrowserInteractionTiming,
   captureBrowserNavigationTiming,
   captureBrowserNetwork,
   captureBrowserWebVital,
@@ -93,9 +94,21 @@ await captureBrowserWebVital(createWebVitalMetric(), logbrew, {
   randomValues: () => fillBytes(8, 0x66),
   webVitalPathTemplate: "/settings"
 });
+await captureBrowserInteractionTiming(createInteractionTimingEntry(), logbrew, {
+  flushOnCapture: false,
+  interactionPathTemplate: "/settings",
+  now: nextTimestamp,
+  randomValues: () => fillBytes(8, 0x77)
+});
+await captureBrowserInteractionTiming(createLongTaskEntry(), logbrew, {
+  flushOnCapture: false,
+  interactionPathTemplate: "/settings",
+  now: nextTimestamp,
+  randomValues: () => fillBytes(8, 0x88)
+});
 
-if (logbrew.client.pendingEvents() !== 8) {
-  throw new Error(`expected 8 captured events, got ${logbrew.client.pendingEvents()}`);
+if (logbrew.client.pendingEvents() !== 10) {
+  throw new Error(`expected 10 captured events, got ${logbrew.client.pendingEvents()}`);
 }
 
 logbrew.client.log("evt_browser_pagehide_001", nextTimestamp(), {
@@ -197,6 +210,26 @@ if (webVitalSpan.attributes.metadata.metricName !== "LCP" || webVitalSpan.attrib
 if (payload.includes("hero.jpg") || payload.includes("button.checkout")) {
   throw new Error(`Web Vital metadata leaked attribution details: ${payload}`);
 }
+const interactionSpan = parsed.events.find((event) => event.type === "span" && event.attributes.metadata?.entryType === "event");
+if (interactionSpan?.attributes.name !== "browser.interaction click /settings") {
+  throw new Error(`expected interaction timing span, got ${payload}`);
+}
+if (interactionSpan.attributes.traceId !== traceContext.traceId || interactionSpan.attributes.parentSpanId !== traceContext.spanId) {
+  throw new Error(`expected interaction child span trace correlation, got ${payload}`);
+}
+if (interactionSpan.attributes.metadata.interactionId !== 91 || interactionSpan.attributes.metadata.processingDurationMs !== 55) {
+  throw new Error(`expected interaction timing metadata, got ${payload}`);
+}
+const longTaskSpan = parsed.events.find((event) => event.type === "span" && event.attributes.metadata?.entryType === "longtask");
+if (longTaskSpan?.attributes.name !== "browser.long_task /settings") {
+  throw new Error(`expected long-task span, got ${payload}`);
+}
+if (longTaskSpan.attributes.traceId !== traceContext.traceId || longTaskSpan.attributes.parentSpanId !== traceContext.spanId) {
+  throw new Error(`expected long-task child span trace correlation, got ${payload}`);
+}
+if (payload.includes("https://cdn.example.test/app.js") || payload.includes("iframe-private")) {
+  throw new Error(`interaction timing metadata leaked attribution details: ${payload}`);
+}
 const visibilityPayload = JSON.parse(transport.sentBodies[1]);
 if (visibilityPayload.events[0].id !== "evt_browser_hidden_001") {
   throw new Error(`expected hidden visibility flush, got ${transport.sentBodies[1]}`);
@@ -248,6 +281,8 @@ console.error(JSON.stringify({
   events: parsed.events.length,
   fetchSpan: fetchSpan.attributes.name,
   hiddenFlushEvents: visibilityPayload.events.length,
+  interactionSpan: interactionSpan.attributes.name,
+  longTaskSpan: longTaskSpan.attributes.name,
   networkAction: network.attributes.metadata.routeTemplate,
   pageView: parsed.events[0].attributes.name,
   pagehideFlushEvents: parsed.events.length,
@@ -322,6 +357,38 @@ function createWebVitalMetric() {
     navigationType: "navigate",
     rating: "needs-improvement",
     value: 2480.456
+  };
+}
+
+function createInteractionTimingEntry() {
+  return {
+    duration: 128,
+    entryType: "event",
+    interactionId: 91,
+    name: "click",
+    processingEnd: 275,
+    processingStart: 220,
+    startTime: 200,
+    target: {
+      id: "checkout",
+      tagName: "BUTTON",
+      textContent: "button.checkout"
+    }
+  };
+}
+
+function createLongTaskEntry() {
+  return {
+    attribution: [{
+      containerName: "iframe-private",
+      containerSrc: "https://cdn.example.test/app.js?sample=masked",
+      entryType: "taskattribution",
+      name: "script"
+    }],
+    duration: 72.5,
+    entryType: "longtask",
+    name: "self",
+    startTime: 500
   };
 }
 

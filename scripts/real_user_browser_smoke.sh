@@ -45,6 +45,8 @@ grep -q '^package/beacon-transport.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/beacon-transport.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/fetch-spans.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/fetch-spans.cjs$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/interaction-timing.js$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/interaction-timing.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/navigation-timing.js$' "$tmp_dir/browser-tarball.txt"
@@ -86,6 +88,9 @@ grep -q 'PerformanceNavigationTiming' "$tmp_dir/browser-readme.md"
 grep -q 'captureBrowserWebVital' "$tmp_dir/browser-readme.md"
 grep -q 'installLogBrewBrowserWebVitalsInstrumentation' "$tmp_dir/browser-readme.md"
 grep -q 'web-vitals' "$tmp_dir/browser-readme.md"
+grep -q 'captureBrowserInteractionTiming' "$tmp_dir/browser-readme.md"
+grep -q 'installLogBrewBrowserInteractionTimingInstrumentation' "$tmp_dir/browser-readme.md"
+grep -q 'Interaction and Long-Task Timing Spans' "$tmp_dir/browser-readme.md"
 grep -q 'createBeaconTransport' "$tmp_dir/browser-readme.md"
 grep -q 'createPersistentBrowserTransport' "$tmp_dir/browser-readme.md"
 grep -q 'persistOffline' "$tmp_dir/browser-readme.md"
@@ -144,6 +149,7 @@ import { Window } from "happy-dom";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
+  captureBrowserInteractionTiming,
   captureBrowserNavigationTiming,
   captureBrowserXhrSpan,
   createLogBrewBrowserFetch,
@@ -160,6 +166,7 @@ import {
   createTraceparentFetch,
   installLogBrewBrowser,
   installLogBrewBrowserFetchInstrumentation,
+  installLogBrewBrowserInteractionTimingInstrumentation,
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserNavigationTimingInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
@@ -969,6 +976,70 @@ if (webVitalBody.includes("cdn.example.test") || webVitalBody.includes("email=de
   throw new Error(`Web Vital metadata leaked private attribution details: ${webVitalBody}`);
 }
 
+const interactionWindow = new Window({
+  url: "https://app.example.test/products/42?email=dev@example.test#reviews"
+});
+const interactionTraceContext = createBrowserTraceContext({
+  spanId: "00f067aa0ba902b7",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+});
+const interactionContext = installLogBrewBrowser({
+  browserWindow: interactionWindow,
+  capturePageViews: false,
+  clientKey: "LOGBREW_BROWSER_KEY",
+  flushOnCapture: false,
+  traceContext: interactionTraceContext,
+  transport: RecordingTransport.alwaysAccept()
+});
+await captureBrowserInteractionTiming(createInteractionTimingEntry(), interactionContext, {
+  flushOnCapture: false,
+  interactionPathTemplate: "/products/:id",
+  now: () => "2026-06-02T10:00:17Z",
+  randomValues: () => fillBytes(8, 0x88)
+});
+const fakeInteractionObserver = createFakePerformanceObserver();
+const interactionInstrumentation = installLogBrewBrowserInteractionTimingInstrumentation(interactionContext, {
+  flushOnCapture: false,
+  interactionPathTemplate: "/products/:id",
+  now: () => "2026-06-02T10:00:18Z",
+  performanceObserver: fakeInteractionObserver.PerformanceObserver,
+  randomValues: sequenceRandomValues([
+    fillBytes(8, 0x99),
+    fillBytes(8, 0xaa)
+  ])
+});
+const interactionObservedOptions = fakeInteractionObserver.observedOptionsList();
+if (interactionObservedOptions.length !== 2 || interactionObservedOptions[0].type !== "event" || interactionObservedOptions[0].durationThreshold !== 40 || interactionObservedOptions[1].type !== "longtask") {
+  throw new Error(`unexpected interaction timing observer options: ${JSON.stringify(interactionObservedOptions)}`);
+}
+fakeInteractionObserver.emit([createInteractionTimingEntry(), createLongTaskEntry(), { entryType: "resource", name: "ignore-me" }]);
+interactionInstrumentation.uninstall();
+fakeInteractionObserver.emit([createInteractionTimingEntry()]);
+if (fakeInteractionObserver.disconnectedCount() !== 2) {
+  throw new Error("interaction timing instrumentation should disconnect both observers");
+}
+const interactionPayload = JSON.parse(interactionContext.previewJson());
+const interactionBody = JSON.stringify(interactionPayload);
+const interactionSpans = interactionPayload.events.filter((event) => event.type === "span");
+if (interactionSpans.length !== 3) {
+  throw new Error(`expected direct interaction plus observed interaction and long-task spans, got ${interactionBody}`);
+}
+if (interactionSpans[0].attributes.name !== "browser.interaction click /products/:id") {
+  throw new Error(`unexpected direct interaction span name: ${interactionBody}`);
+}
+if (interactionSpans[0].attributes.traceId !== interactionTraceContext.traceId || interactionSpans[0].attributes.parentSpanId !== interactionTraceContext.spanId) {
+  throw new Error(`expected direct interaction child span correlation, got ${interactionBody}`);
+}
+if (interactionSpans[0].attributes.metadata.interactionId !== 91 || interactionSpans[0].attributes.metadata.inputDelayMs !== 20) {
+  throw new Error(`expected interaction timing metadata, got ${interactionBody}`);
+}
+if (interactionSpans[2].attributes.name !== "browser.long_task /products/:id" || interactionSpans[2].attributes.metadata.taskName !== "self") {
+  throw new Error(`expected long-task timing metadata, got ${interactionBody}`);
+}
+if (interactionBody.includes("button.checkout") || interactionBody.includes("cdn.example.test") || interactionBody.includes("iframe-private") || interactionBody.includes("email=dev@example.test") || interactionBody.includes("#reviews")) {
+  throw new Error(`interaction timing metadata leaked private attribution details: ${interactionBody}`);
+}
+
 const navigationWindow = new Window({
   url: "https://app.example.test/start?sample=1#hash"
 });
@@ -1065,6 +1136,8 @@ console.error(JSON.stringify({
   fetchStatus: fetchResponse.statusCode,
   fullAttempts: fullResponse.attempts,
   hiddenFlush: hiddenPayload.events[0].id,
+  interactionSpan: interactionSpans[0].attributes.name,
+  longTaskSpan: interactionSpans[2].attributes.name,
   networkRoute: networkPayload.events[0].attributes.metadata.routeTemplate,
   navigationPath: navigationSpan.attributes.metadata.path,
   navigationTraceparent,
@@ -1213,36 +1286,77 @@ function createWebVitalMetric() {
   };
 }
 
+function createInteractionTimingEntry() {
+  return {
+    duration: 128,
+    entryType: "event",
+    interactionId: 91,
+    name: "click",
+    processingEnd: 275,
+    processingStart: 220,
+    startTime: 200,
+    target: {
+      id: "checkout",
+      tagName: "BUTTON",
+      textContent: "button.checkout"
+    }
+  };
+}
+
+function createLongTaskEntry() {
+  return {
+    attribution: [{
+      containerName: "iframe-private",
+      containerSrc: "https://cdn.example.test/app.js?sample=masked",
+      entryType: "taskattribution",
+      name: "script"
+    }],
+    duration: 72.5,
+    entryType: "longtask",
+    name: "self",
+    startTime: 500
+  };
+}
+
 function createFakePerformanceObserver() {
-  let callback;
-  let disconnected = false;
-  let observedOptions;
+  const callbacks = [];
+  const observers = [];
+  const observedOptions = [];
   return {
     PerformanceObserver: class FakePerformanceObserver {
       constructor(nextCallback) {
-        callback = nextCallback;
+        callbacks.push(nextCallback);
+        observers.push(this);
       }
 
       disconnect() {
-        disconnected = true;
+        this.disconnected = true;
       }
 
       observe(nextObservedOptions) {
-        observedOptions = nextObservedOptions;
+        observedOptions.push(nextObservedOptions);
       }
     },
     disconnected() {
-      return disconnected;
+      return observers.length > 0 && observers.every((observer) => observer.disconnected === true);
+    },
+    disconnectedCount() {
+      return observers.filter((observer) => observer.disconnected === true).length;
     },
     emit(entries) {
-      callback?.({
-        getEntries() {
-          return entries;
-        }
-      });
+      for (const callback of callbacks) {
+        callback({
+          getEntries() {
+            return entries;
+          }
+        });
+      }
+    },
+    observedOptionsList() {
+      return observedOptions;
     },
     observedOptions() {
-      return observedOptions;
+      return observedOptions[observedOptions.length - 1];
     }
   };
 }
@@ -1366,6 +1480,8 @@ grep -q '"browserDeliveries":8' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"documentTimingSpan":"browser.document /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"fullAttempts":2' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"hiddenFlush":"evt_browser_hidden_001"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"interactionSpan":"browser.interaction click /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"longTaskSpan":"browser.long_task /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"networkRoute":"/api/checkout"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"navigationPath":"/account"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"navigationTraceparent":"00-11111111111111111111111111111111-2222222222222222-01"' "$tmp_dir/browser-smoke.stderr.json"
@@ -1383,6 +1499,7 @@ import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
   captureBrowserFetchSpan,
+  captureBrowserInteractionTiming,
   captureBrowserNavigationTiming,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
@@ -1390,6 +1507,7 @@ import {
   createBrowserTraceContext,
   createBrowserActionEvent,
   createBrowserFetchSpanEvent,
+  createBrowserInteractionTimingEvent,
   createBrowserNavigationTimingEvent,
   createBrowserNetworkEvent,
   createBrowserResourceTimingEvent,
@@ -1404,6 +1522,7 @@ import {
   createTraceparentFetch,
   installLogBrewBrowser,
   installLogBrewBrowserFetchInstrumentation,
+  installLogBrewBrowserInteractionTimingInstrumentation,
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserNavigationTimingInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
@@ -1413,6 +1532,8 @@ import {
   type BrowserNavigationTimingInstrumentation,
   type BrowserFetchInput,
   type BrowserFetchInstrumentation,
+  type BrowserInteractionTimingInput,
+  type BrowserInteractionTimingInstrumentation,
   type BrowserMetadataKind,
   type BrowserPersistedReplay,
   type BrowserPersistentStorage,
@@ -1501,6 +1622,18 @@ const fetchEntry: BrowserFetchInput = {
 const fetchSpan = createBrowserFetchSpanEvent(fetchEntry, window, {
   resourcePathTemplate: "/api/checkout"
 });
+const interactionEntry: BrowserInteractionTimingInput = {
+  duration: 128,
+  entryType: "event",
+  interactionId: 91,
+  name: "click",
+  processingEnd: 275,
+  processingStart: 220,
+  startTime: 200
+};
+const interactionSpan = createBrowserInteractionTimingEvent(interactionEntry, window, {
+  interactionPathTemplate: "/checkout"
+});
 const xhrEntry: BrowserXhrInput = {
   durationMs: 21,
   method: "POST",
@@ -1514,6 +1647,7 @@ const xhrSpan = createBrowserXhrSpanEvent(xhrEntry, window, {
 });
 client.span(page.id, page.timestamp, page.attributes);
 client.span(fetchSpan.id, fetchSpan.timestamp, fetchSpan.attributes);
+client.span(interactionSpan.id, interactionSpan.timestamp, interactionSpan.attributes);
 client.span(documentLoad.id, documentLoad.timestamp, documentLoad.attributes);
 client.span(resource.id, resource.timestamp, resource.attributes);
 client.span(xhrSpan.id, xhrSpan.timestamp, xhrSpan.attributes);
@@ -1524,6 +1658,9 @@ void captureBrowserAction("checkout.submitted", context);
 void captureBrowserNetwork("/api/checkout", context);
 void captureBrowserFetchSpan(fetchEntry, context, {
   resourcePathTemplate: "/api/checkout"
+});
+void captureBrowserInteractionTiming(interactionEntry, context, {
+  interactionPathTemplate: "/checkout"
 });
 void captureBrowserNavigationTiming(navigationEntry, context, {
   navigationPathTemplate: "/checkout"
@@ -1582,6 +1719,12 @@ const fetchInstrumentation: BrowserFetchInstrumentation = installLogBrewBrowserF
   browserWindow: window,
   resourcePathTemplate: ({ path }) => path
 });
+const interactionTimingInstrumentation: BrowserInteractionTimingInstrumentation =
+  installLogBrewBrowserInteractionTimingInstrumentation(context, {
+    entryTypes: ["event"],
+    interactionPathTemplate: ({ path }) => path,
+    performanceObserver: window.PerformanceObserver
+  });
 const xhrInstrumentation: BrowserXhrInstrumentation = installLogBrewBrowserXhrInstrumentation(context, {
   browserWindow: window,
   resourcePathTemplate: ({ path }) => path,
@@ -1602,6 +1745,7 @@ void tracedFetch("/internal/ping");
 void dynamicTraceFetch("/internal/ping");
 void browserFetch("/internal/ping");
 fetchInstrumentation.uninstall();
+interactionTimingInstrumentation.uninstall();
 xhrInstrumentation.uninstall();
 navigation.uninstall();
 navigationTimingInstrumentation.uninstall();
@@ -1661,6 +1805,12 @@ if (typeof browser.captureBrowserWebVital !== "function" || typeof browser.creat
 if (typeof browser.installLogBrewBrowserWebVitalsInstrumentation !== "function") {
   throw new Error("missing CommonJS browser Web Vitals instrumentation helper");
 }
+if (typeof browser.captureBrowserInteractionTiming !== "function" || typeof browser.createBrowserInteractionTimingEvent !== "function") {
+  throw new Error("missing CommonJS browser interaction timing helpers");
+}
+if (typeof browser.installLogBrewBrowserInteractionTimingInstrumentation !== "function") {
+  throw new Error("missing CommonJS browser interaction timing instrumentation helper");
+}
 if (typeof browser.createLogBrewBrowserFetch !== "function" || typeof browser.captureBrowserFetchSpan !== "function") {
   throw new Error("missing CommonJS browser fetch span helpers");
 }
@@ -1707,9 +1857,11 @@ grep -q '"ok":true' "$tmp_dir/example-readme.stderr.json"
 grep -q '"path":"/dashboard"' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/browser/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":9' "$tmp_dir/example-default.stderr.json"
+grep -q '"pagehideFlushEvents":11' "$tmp_dir/example-default.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/example-default.stderr.json"
+grep -q '"interactionSpan":"browser.interaction click /settings"' "$tmp_dir/example-default.stderr.json"
+grep -q '"longTaskSpan":"browser.long_task /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"webVitalSpan":"browser.web_vital LCP /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/example-default.stderr.json"
 npm --prefix node_modules/@logbrew/browser/examples run list > "$tmp_dir/npm-helper-list.txt"
@@ -1718,9 +1870,11 @@ npm --prefix node_modules/@logbrew/browser/examples run help > "$tmp_dir/npm-hel
 grep -q 'Default example: real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/browser/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":9' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"pagehideFlushEvents":11' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"interactionSpan":"browser.interaction click /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"longTaskSpan":"browser.long_task /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"webVitalSpan":"browser.web_vital LCP /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/npm-helper-smoke.stderr.json"
 

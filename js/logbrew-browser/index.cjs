@@ -14,6 +14,11 @@ const {
   installLogBrewBrowserFetchInstrumentation
 } = require("./fetch-spans.cjs");
 const {
+  captureBrowserInteractionTiming,
+  createBrowserInteractionTimingEvent,
+  installLogBrewBrowserInteractionTimingInstrumentation
+} = require("./interaction-timing.cjs");
+const {
   captureBrowserNavigationTiming,
   createBrowserNavigationTimingEvent,
   installLogBrewBrowserNavigationTimingInstrumentation
@@ -935,6 +940,7 @@ module.exports = {
   captureBrowserAction,
   captureBrowserError,
   captureBrowserFetchSpan,
+  captureBrowserInteractionTiming,
   captureBrowserNetwork,
   captureBrowserNavigationTiming,
   captureBrowserResourceTiming,
@@ -947,6 +953,7 @@ module.exports = {
   createBrowserActionEvent,
   createBrowserErrorEvent,
   createBrowserFetchSpanEvent,
+  createBrowserInteractionTimingEvent,
   createBrowserNavigationTimingEvent,
   createBrowserResourceTimingEvent,
   createBrowserWebVitalEvent,
@@ -965,6 +972,7 @@ module.exports = {
     captureBrowserAction,
     captureBrowserError,
     captureBrowserFetchSpan,
+    captureBrowserInteractionTiming,
     captureBrowserNetwork,
     captureBrowserNavigationTiming,
     captureBrowserResourceTiming,
@@ -977,6 +985,7 @@ module.exports = {
     createBrowserActionEvent,
     createBrowserErrorEvent,
     createBrowserFetchSpanEvent,
+    createBrowserInteractionTimingEvent,
     createBrowserNavigationTimingEvent,
     createBrowserResourceTimingEvent,
     createBrowserWebVitalEvent,
@@ -993,6 +1002,7 @@ module.exports = {
     createUnhandledRejectionEvent,
     installLogBrewBrowserNavigationInstrumentation,
     installLogBrewBrowserFetchInstrumentation,
+    installLogBrewBrowserInteractionTimingInstrumentation,
     installLogBrewBrowserNavigationTimingInstrumentation,
     installLogBrewBrowserResourceTimingInstrumentation,
     installLogBrewBrowserWebVitalsInstrumentation,
@@ -1002,6 +1012,7 @@ module.exports = {
   },
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserFetchInstrumentation,
+  installLogBrewBrowserInteractionTimingInstrumentation,
   installLogBrewBrowserNavigationTimingInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
   installLogBrewBrowserWebVitalsInstrumentation,

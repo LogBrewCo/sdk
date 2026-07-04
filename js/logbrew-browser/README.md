@@ -6,7 +6,7 @@
 
 Browser helpers for the public LogBrew JavaScript SDK.
 
-This package captures page views, synchronous browser errors, unhandled Promise rejections, product actions, and app-owned network milestones while keeping validation, buffering, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+This package captures page views, synchronous browser errors, unhandled Promise rejections, product actions, app-owned network milestones, and opt-in browser timing spans while keeping validation, buffering, retry, flush, and shutdown behavior in `@logbrew/sdk`.
 
 ## Install
 
@@ -225,6 +225,52 @@ webVitalSpans.uninstall();
 ```
 
 Web Vital spans keep the active trace ID, create a child span ID, record metric name, value, unit, rating, navigation type, delta, and safe timing subparts such as time to first byte or resource load duration when the metric provides them. They do not include DOM selectors, interaction targets, raw attribution entries, full URLs, hosts, query strings, hash fragments, headers, request or response bodies, cookies, user text, baggage, or tracestate.
+
+## Interaction and Long-Task Timing Spans
+
+Use `captureBrowserInteractionTiming()` when your app already receives `PerformanceEventTiming`, `first-input`, or `longtask` entries and wants click/input/long-task latency next to the active route trace. Pass `interactionPathTemplate` so high-cardinality paths group under a stable route name.
+
+```js
+import {
+  captureBrowserInteractionTiming,
+  installLogBrewBrowser
+} from "@logbrew/browser";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+
+for (const entry of performance.getEntriesByType("event")) {
+  await captureBrowserInteractionTiming(entry, logbrew, {
+    interactionPathTemplate: "/checkout"
+  });
+}
+```
+
+For app-owned automatic capture, opt in with `installLogBrewBrowserInteractionTimingInstrumentation()`. It uses `PerformanceObserver` for `event` and `longtask` entries, can be removed with `uninstall()`, and is not enabled by default.
+
+```js
+import {
+  installLogBrewBrowser,
+  installLogBrewBrowserInteractionTimingInstrumentation
+} from "@logbrew/browser";
+
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY"
+});
+
+const interactions = installLogBrewBrowserInteractionTimingInstrumentation(logbrew, {
+  interactionDurationThresholdMs: 40,
+  interactionPathTemplate({ path }) {
+    return path.replace(/\/\d+$/u, "/:id");
+  }
+});
+
+// Later, if your app owns teardown.
+interactions.uninstall();
+```
+
+Interaction timing spans keep the active trace ID, create a child span ID, and record entry type, interaction type, interaction ID, input delay, processing duration, presentation delay, start time, task name, and route template when available. They do not include DOM targets, selectors, element text, attribution script URLs, full URLs, hosts, query strings, hash fragments, headers, request or response bodies, cookies, user text, baggage, or tracestate.
 
 ## Fetch Spans
 

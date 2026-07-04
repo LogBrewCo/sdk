@@ -303,6 +303,30 @@ export type BrowserWebVitalPathTemplate =
   | string
   | ((context: BrowserWebVitalTemplateContext) => string | undefined);
 
+export type BrowserInteractionTimingInput = PerformanceEntry | {
+  attribution?: unknown;
+  duration: number;
+  entryType?: string;
+  interactionId?: number;
+  name?: string;
+  processingEnd?: number;
+  processingStart?: number;
+  scripts?: unknown;
+  startTime?: number;
+  target?: unknown;
+};
+
+export type BrowserInteractionTimingTemplateContext = {
+  entry: BrowserInteractionTimingInput;
+  entryType?: string;
+  name?: string;
+  path: string;
+};
+
+export type BrowserInteractionTimingPathTemplate =
+  | string
+  | ((context: BrowserInteractionTimingTemplateContext) => string | undefined);
+
 export type BrowserMetadataKind =
   | "page_view"
   | "action"
@@ -310,6 +334,7 @@ export type BrowserMetadataKind =
   | "document"
   | "resource"
   | "web_vital"
+  | "interaction"
   | "fetch"
   | "xhr"
   | "error"
@@ -449,6 +474,35 @@ export type BrowserWebVitalsInstrumentation = {
   uninstall(): void;
 };
 
+export type BrowserInteractionTimingObserverEntryType = "event" | "first-input" | "longtask";
+
+export type BrowserInteractionTimingObserver = {
+  observe(
+    options:
+      | { buffered?: boolean; durationThreshold?: number; type: "event" | "first-input" }
+      | { buffered?: boolean; type: "longtask" }
+      | { entryTypes: string[] }
+  ): void;
+  disconnect(): void;
+};
+
+export type BrowserInteractionTimingObserverConstructor = new (
+  callback: (entryList: { getEntries(): BrowserInteractionTimingInput[] }) => void
+) => BrowserInteractionTimingObserver;
+
+export type BrowserInteractionTimingOptions = LogBrewBrowserOptions & {
+  buffered?: boolean;
+  entryTypes?: BrowserInteractionTimingObserverEntryType[];
+  interactionDurationThresholdMs?: number;
+  interactionPathTemplate?: BrowserInteractionTimingPathTemplate;
+  maxDurationMs?: number;
+  performanceObserver?: BrowserInteractionTimingObserverConstructor;
+};
+
+export type BrowserInteractionTimingInstrumentation = {
+  uninstall(): void;
+};
+
 export type BrowserFetchOptions = LogBrewBrowserOptions & {
   captureTargets?: TracePropagationTarget[];
   fetchImpl?: typeof fetch;
@@ -540,6 +594,11 @@ export declare function installLogBrewBrowserFetchInstrumentation(
   options?: BrowserFetchOptions
 ): BrowserFetchInstrumentation;
 
+export declare function installLogBrewBrowserInteractionTimingInstrumentation(
+  context: LogBrewBrowserContext,
+  options?: BrowserInteractionTimingOptions
+): BrowserInteractionTimingInstrumentation;
+
 export declare function installLogBrewBrowserXhrInstrumentation(
   context: LogBrewBrowserContext,
   options?: BrowserXhrOptions
@@ -600,6 +659,12 @@ export declare function captureBrowserWebVital(
   options?: BrowserWebVitalsOptions
 ): Promise<TransportResponse | undefined>;
 
+export declare function captureBrowserInteractionTiming(
+  entry: BrowserInteractionTimingInput,
+  context: LogBrewBrowserContext,
+  options?: BrowserInteractionTimingOptions
+): Promise<TransportResponse | undefined>;
+
 export declare function captureBrowserFetchSpan(
   request: BrowserFetchInput,
   context: LogBrewBrowserContext,
@@ -647,6 +712,12 @@ export declare function createBrowserWebVitalEvent(
   options?: BrowserWebVitalsOptions
 ): LogBrewBrowserEvent<SpanAttributes>;
 
+export declare function createBrowserInteractionTimingEvent(
+  entry: BrowserInteractionTimingInput,
+  browserWindow?: Window,
+  options?: BrowserInteractionTimingOptions
+): LogBrewBrowserEvent<SpanAttributes>;
+
 export declare function createBrowserFetchSpanEvent(
   request: BrowserFetchInput,
   browserWindow?: Window,
@@ -675,6 +746,7 @@ declare const defaultExport: {
   captureBrowserAction: typeof captureBrowserAction;
   captureBrowserError: typeof captureBrowserError;
   captureBrowserFetchSpan: typeof captureBrowserFetchSpan;
+  captureBrowserInteractionTiming: typeof captureBrowserInteractionTiming;
   captureBrowserNetwork: typeof captureBrowserNetwork;
   captureBrowserNavigationTiming: typeof captureBrowserNavigationTiming;
   captureBrowserResourceTiming: typeof captureBrowserResourceTiming;
@@ -687,6 +759,7 @@ declare const defaultExport: {
   createBrowserActionEvent: typeof createBrowserActionEvent;
   createBrowserErrorEvent: typeof createBrowserErrorEvent;
   createBrowserFetchSpanEvent: typeof createBrowserFetchSpanEvent;
+  createBrowserInteractionTimingEvent: typeof createBrowserInteractionTimingEvent;
   createBrowserNavigationTimingEvent: typeof createBrowserNavigationTimingEvent;
   createBrowserResourceTimingEvent: typeof createBrowserResourceTimingEvent;
   createBrowserWebVitalEvent: typeof createBrowserWebVitalEvent;
@@ -701,6 +774,7 @@ declare const defaultExport: {
   createTraceparentFetch: typeof createTraceparentFetch;
   createUnhandledRejectionEvent: typeof createUnhandledRejectionEvent;
   installLogBrewBrowserFetchInstrumentation: typeof installLogBrewBrowserFetchInstrumentation;
+  installLogBrewBrowserInteractionTimingInstrumentation: typeof installLogBrewBrowserInteractionTimingInstrumentation;
   installLogBrewBrowserNavigationInstrumentation: typeof installLogBrewBrowserNavigationInstrumentation;
   installLogBrewBrowserNavigationTimingInstrumentation: typeof installLogBrewBrowserNavigationTimingInstrumentation;
   installLogBrewBrowserResourceTimingInstrumentation: typeof installLogBrewBrowserResourceTimingInstrumentation;
