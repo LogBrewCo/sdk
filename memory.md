@@ -1,5 +1,31 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-04: Vite/browser runtime source-map proof gap reduced after source
+  reads from Sentry JS
+  `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`
+  (`eventFromError`, `GlobalHandlers`, `getFilenameToDebugIdMap`,
+  `applyDebugIds`, `applyDebugMeta`), Sentry bundler plugins
+  `getsentry/sentry-javascript-bundler-plugins@988efd30691e08c059eb577e499d0b4346434f3c`
+  (`prepareBundleForDebugIdUpload`, Debug ID source-map upload flow), and
+  Datadog CI
+  `DataDog/datadog-ci@3bac12402541936f16532104884240b3f3a5ad64`
+  (`SourcemapsUploadCommand`, `validatePayload`, upload/retry helpers).
+  `scripts/real_user_vite_release_artifact_smoke.sh` now installs packed
+  `@logbrew/sdk` plus packed `@logbrew/browser`, builds a real `vite@8.0.16`
+  minified app, proves manifest/source-map Debug ID readiness and local
+  symbolication, then creates a browser runtime issue payload from the built
+  asset URL and the manifest Debug ID map. Evidence: RED
+  `python3 -m unittest tests/test_release_artifact_smoke_gates.py` failed on
+  missing browser runtime linkage; GREEN same gate, GREEN
+  `bash scripts/real_user_vite_release_artifact_smoke.sh` with runtime
+  `releaseArtifactDebugId`, path-only `releaseArtifactCodeFile`/
+  `errorFrameFile`, release/environment/service/runtime, trace/span IDs,
+  no CDN host/query/hash/temp-path/source-sentinel/user-like URL data, and
+  existing loopback fake-intake 503-to-202 upload retry. Research:
+  `docs/competitor-research/browser-error-debug-id-source-maps-2026-07-04.md`.
+  Honest gap: hosted upload/lookup/symbolicated runtime error proof, grouping,
+  source context, cause chains, and suppression rules still trail Sentry/
+  Datadog.
 - 2026-07-04: Browser runtime error source-map hint gap reduced after source
   reads from Sentry JS
   `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`

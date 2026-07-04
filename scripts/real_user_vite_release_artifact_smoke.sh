@@ -47,6 +47,31 @@ PY
 )"
 sdk_tgz="$repo_root/js/logbrew-js/$sdk_tgz"
 
+browser_pack_json="$tmp_dir/browser-pack.json"
+(
+  cd "$repo_root/js/logbrew-browser"
+  npm pack --silent --json > "$browser_pack_json"
+)
+browser_tgz="$(
+  python3 - "$browser_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
+files = {entry["path"] for entry in pack["files"]}
+for expected in {
+    "index.js",
+    "index.cjs",
+    "index.d.ts",
+    "index.d.cts",
+}:
+    assert expected in files, f"missing packed browser runtime helper: {expected}"
+print(pack["filename"])
+PY
+)"
+browser_tgz="$repo_root/js/logbrew-browser/$browser_tgz"
+
 cat > "$app_dir/package.json" <<'JSON'
 {
   "private": true,
@@ -55,6 +80,7 @@ cat > "$app_dir/package.json" <<'JSON'
     "build": "vite build"
   },
   "devDependencies": {
+    "@logbrew/browser": "file:../logbrew-browser.tgz",
     "@logbrew/sdk": "file:../logbrew-sdk.tgz",
     "esbuild": "0.28.1",
     "vite": "8.0.16"
@@ -62,6 +88,7 @@ cat > "$app_dir/package.json" <<'JSON'
 }
 JSON
 
+cp "$browser_tgz" "$tmp_dir/logbrew-browser.tgz"
 cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
 
 cat > "$app_dir/index.html" <<'HTML'
@@ -253,6 +280,118 @@ assert "checkout exploded" not in serialized_manifest
 assert "checkout exploded" not in serialized_symbolication
 assert tmp_dir not in serialized_manifest
 assert tmp_dir not in serialized_symbolication
+PY
+
+runtime_issue_payload="$tmp_dir/vite-runtime-browser-issue.json"
+(
+  cd "$app_dir"
+  node --input-type=module - "$js_file" "$ready_manifest" > "$runtime_issue_payload" <<'JS'
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+import {
+  createBrowserErrorEvent,
+  createBrowserTraceContext,
+  createLogBrewBrowserClient
+} from "@logbrew/browser";
+
+const [, , jsPath, manifestPath] = process.argv;
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+const artifact = manifest.artifacts[0];
+const runtimeUrl = `${artifact.minifiedSource.minifiedUrl}?cache=placeholder#fragment`;
+const runtimePath = new URL(runtimeUrl).pathname;
+const jsSource = readFileSync(jsPath, "utf8");
+const sandbox = {
+  document: {
+    createElement() {
+      return {
+        relList: {
+          supports() {
+            return true;
+          },
+        },
+      };
+    },
+    querySelector() {
+      return {};
+    },
+  },
+  window: {},
+};
+
+vm.runInNewContext(jsSource, sandbox, { filename: jsPath });
+try {
+  sandbox.window.__logbrewViteProbe.checkoutFailureSignal();
+} catch (error) {
+  error.stack = String(error.stack || "").replaceAll(jsPath, runtimeUrl);
+
+  const traceContext = createBrowserTraceContext({
+    sampled: true,
+    spanId: "1111222233334444",
+    traceId: "00112233445566778899aabbccddeeff"
+  });
+  const browserWindow = {
+    document: { visibilityState: "visible" },
+    location: {
+      href: "https://app.example.test/checkout?email=hidden@example.test#payment"
+    }
+  };
+  const runtimeEvent = createBrowserErrorEvent(error, browserWindow, {
+    debugIdMap: {
+      [artifact.minifiedSource.minifiedUrl]: artifact.debugId,
+      [runtimeUrl]: artifact.debugId,
+      [runtimePath]: artifact.debugId
+    },
+    environment: manifest.environment,
+    release: manifest.release,
+    runtime: "browser",
+    service: manifest.service,
+    traceContext
+  });
+  const client = createLogBrewBrowserClient({
+    clientKey: "lbw_ingest_fake_vite_browser_runtime_key",
+    sdkVersion: "0.1.0"
+  });
+  client.issue(runtimeEvent.id, runtimeEvent.timestamp, runtimeEvent.attributes);
+  process.stdout.write(JSON.stringify({
+    debugId: artifact.debugId,
+    runtimePath,
+    payload: JSON.parse(client.previewJson())
+  }));
+  process.exit(0);
+}
+throw new Error("expected Vite checkout probe to throw");
+JS
+)
+
+python3 - "$runtime_issue_payload" "$tmp_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[2]
+debug_id = report["debugId"]
+runtime_path = report["runtimePath"]
+payload = report["payload"]
+runtime_issue = payload["events"][0]["attributes"]
+serialized_runtime_issue = json.dumps(runtime_issue)
+
+assert payload["events"][0]["type"] == "issue"
+assert runtime_issue["metadata"]["releaseArtifactDebugId"] == debug_id
+assert runtime_issue["metadata"]["releaseArtifactCodeFile"] == runtime_path
+assert runtime_issue["metadata"]["errorFrameFile"] == runtime_path
+assert runtime_issue["metadata"]["release"] == "2026.06.18-vite"
+assert runtime_issue["metadata"]["environment"] == "production"
+assert runtime_issue["metadata"]["service"] == "checkout-web"
+assert runtime_issue["metadata"]["runtime"] == "browser"
+assert runtime_issue["metadata"]["traceId"] == "00112233445566778899aabbccddeeff"
+assert runtime_issue["metadata"]["spanId"] == "1111222233334444"
+assert "cdn.example" not in serialized_runtime_issue
+assert "cache=placeholder" not in serialized_runtime_issue
+assert "fragment" not in serialized_runtime_issue
+assert "hidden@example.test" not in serialized_runtime_issue
+assert "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_runtime_issue
+assert tmp_dir not in serialized_runtime_issue
 PY
 
 port_file="$tmp_dir/fake-intake-port"

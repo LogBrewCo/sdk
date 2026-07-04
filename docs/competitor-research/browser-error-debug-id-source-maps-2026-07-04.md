@@ -43,14 +43,34 @@ Frontend users need a production browser error to point at the right release, en
 - Browser issue metadata records error type/message, path-only first frame, line, column, release, environment, service, runtime, trace/span IDs, and optional `{ releaseArtifactType: "sourcemap", releaseArtifactCodeFile, releaseArtifactDebugId }`.
 - Browser `releaseArtifactCodeFile` and `errorFrameFile` are normalized to paths, so full URLs, hosts, query strings, hash fragments, raw stack text, headers, payloads, cookies, replay, baggage, and tracestate remain out by default.
 
+## Follow-Up: Real Vite Runtime Proof
+
+- Sentry bundler plugins `988efd30691e08c059eb577e499d0b4346434f3c`
+- `packages/bundler-plugins/src/core/debug-id-upload.ts`: `prepareBundleForDebugIdUpload`, `determineDebugIdFromBundleSource`, `prepareSourceMapForDebugIdUpload`
+- `packages/bundler-plugins/src/core/build-plugin-manager.ts`: debug-ID injection and source-map upload write-bundle flow
+- Pattern: build plugin injects Debug IDs, prepares matching bundle/source-map pairs, and uploads them with release context so runtime frames can match `debug_meta.images`.
+
+- Datadog CI `3bac12402541936f16532104884240b3f3a5ad64`
+- `packages/base/src/commands/sourcemaps/upload.ts`: `execute`, `getMatchingSourcemaps`, `upload`
+- `packages/base/src/commands/sourcemaps/validation.ts`: `validatePayload`
+- `packages/base/src/helpers/upload.ts` and `packages/base/src/helpers/retry.ts`: multipart upload and retry behavior
+- Pattern: CI tooling pairs source maps with minified URLs, requires release/service context, validates local files before upload, and retries transient upload failures.
+
+- LogBrew now proves the connected local path with `scripts/real_user_vite_release_artifact_smoke.sh`: a temporary Vite app installs packed `@logbrew/sdk` and `@logbrew/browser`, builds a minified bundle/source map, creates a release-artifact manifest, resolves an actual thrown minified stack frame, then creates a browser runtime issue payload from the built asset URL and the manifest Debug ID map.
+- The proof asserts the runtime issue includes the same `releaseArtifactDebugId`, path-only `releaseArtifactCodeFile`/`errorFrameFile`, release, environment, service, runtime, and trace/span IDs while omitting the CDN host, query/hash, temp paths, raw source sentinel, and user-like URL data.
+- The same smoke still uploads the real manifest, source map, and minified bundle to a loopback fake intake with 503-to-202 retry proof.
+
 ## Verification
 
 - RED: `node --test js/logbrew-browser/test/trace-context.test.mjs` failed because browser issue metadata had no `errorFrameFile` or release-artifact Debug ID fields.
 - GREEN: `npm test --prefix js/logbrew-browser` passed 25 browser tests, including the new installed browser error Debug ID metadata test.
 - GREEN: `bash scripts/real_user_browser_smoke.sh` passed with packed `@logbrew/sdk`, packed `@logbrew/browser`, `happy-dom@20.10.1`, package README assertions, ESM/CJS/types proof, global `ErrorEvent` source-map Debug ID metadata, path-only privacy assertions, and existing transport/retry/lifecycle/timing checks.
+- RED: `python3 -m unittest tests/test_release_artifact_smoke_gates.py` failed because the Vite release-artifact smoke did not install `@logbrew/browser` or prove runtime issue Debug ID linkage.
+- GREEN: `python3 -m unittest tests/test_release_artifact_smoke_gates.py` passed 7 release-artifact smoke gate tests.
+- GREEN: `bash scripts/real_user_vite_release_artifact_smoke.sh` passed with packed `@logbrew/sdk`, packed `@logbrew/browser`, `vite@8.0.16`, real minified build, manifest/source-map Debug ID proof, runtime browser issue payload proof, local symbolication proof, and loopback upload retry proof.
 
 ## Remaining Gaps
 
-- LogBrew still does not claim hosted source-map upload/lookup/symbolication parity in this package.
+- LogBrew still does not claim hosted source-map upload/lookup/symbolication parity from this local proof.
 - LogBrew still trails Sentry/Datadog on automatic exception grouping, source context UI, cause chains, frame modifiers, suppression rules, and hosted symbolicated stack presentation.
-- Next high-impact frontend work should prove a real Vite/Next minified browser error through local fake-intake and prepared release artifacts, then keep backend contract blockers explicit if hosted symbolication is not ready.
+- Next high-impact frontend/source-map work should prove hosted release-artifact upload/lookup/symbolicated runtime errors when the public backend contract is available, then improve grouping and source-context ergonomics.
