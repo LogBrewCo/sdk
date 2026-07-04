@@ -53,6 +53,8 @@ grep -q '^package/resource-timing.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/resource-timing.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/trace-context.js$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/trace-context.cjs$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/xhr-spans.js$' "$tmp_dir/browser-tarball.txt"
+grep -q '^package/xhr-spans.cjs$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.d.ts$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/index.d.cts$' "$tmp_dir/browser-tarball.txt"
 grep -q '^package/examples/index.mjs$' "$tmp_dir/browser-tarball.txt"
@@ -81,6 +83,8 @@ grep -q 'sessionId' "$tmp_dir/browser-readme.md"
 grep -q 'createTraceparentFetch' "$tmp_dir/browser-readme.md"
 grep -q 'createLogBrewBrowserFetch' "$tmp_dir/browser-readme.md"
 grep -q 'installLogBrewBrowserFetchInstrumentation' "$tmp_dir/browser-readme.md"
+grep -q 'captureBrowserXhrSpan' "$tmp_dir/browser-readme.md"
+grep -q 'installLogBrewBrowserXhrInstrumentation' "$tmp_dir/browser-readme.md"
 grep -q 'createBrowserTraceContext' "$tmp_dir/browser-readme.md"
 grep -q 'tracePropagationTargets' "$tmp_dir/browser-readme.md"
 grep -q 'traceContext: () => logbrew.traceContext' "$tmp_dir/browser-readme.md"
@@ -130,10 +134,12 @@ import { Window } from "happy-dom";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
+  captureBrowserXhrSpan,
   createLogBrewBrowserFetch,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
   createBrowserTraceContext,
+  createBrowserXhrSpanEvent,
   createBeaconTransport,
   createFetchTransport,
   createLogBrewBrowserClient,
@@ -143,6 +149,7 @@ import {
   installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
+  installLogBrewBrowserXhrInstrumentation,
   shouldPropagateTraceparent
 } from "@logbrew/browser";
 
@@ -655,6 +662,98 @@ if (!JSON.stringify(JSON.parse(browserFetchContext.previewJson()).events.at(-1))
   throw new Error("fetch instrumentation did not capture the route-templated fetch span");
 }
 
+const browserXhrWindow = new Window({
+  url: "https://app.example.test/xhr?email=dev@example.test#panel"
+});
+const BrowserSmokeXhr = createFakeXMLHttpRequestClass();
+browserXhrWindow.XMLHttpRequest = BrowserSmokeXhr;
+const browserXhrTraceContext = createBrowserTraceContext({
+  spanId: "00f067aa0ba902b7",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736"
+});
+const browserXhrContext = installLogBrewBrowser({
+  browserWindow: browserXhrWindow,
+  capturePageViews: false,
+  clientKey: "LOGBREW_BROWSER_KEY",
+  flushOnCapture: false,
+  traceContext: browserXhrTraceContext,
+  transport: RecordingTransport.alwaysAccept()
+});
+const originalXhrOpen = BrowserSmokeXhr.prototype.open;
+const originalXhrSend = BrowserSmokeXhr.prototype.send;
+const browserXhrInstrumentation = installLogBrewBrowserXhrInstrumentation(browserXhrContext, {
+  flushOnCapture: false,
+  now: () => "2026-06-02T10:00:14Z",
+  nowMs: sequenceNumbers([4000, 4014.5]),
+  randomValues: () => fillBytes(8, 0x96),
+  resourcePathTemplate: "/api/orders/:id",
+  tracePropagationTargets: [/^https:\/\/api\.example\.test\/api\//u],
+  XMLHttpRequest: BrowserSmokeXhr
+});
+const browserXhr = new browserXhrWindow.XMLHttpRequest();
+browserXhr.open("POST", "https://api.example.test/api/orders/123?email=dev@example.test#fragment");
+browserXhr.setRequestHeader("accept", "application/json");
+browserXhr.send("private body");
+browserXhr.status = 503;
+browserXhr.setResponseHeader("content-length", "456");
+browserXhr.dispatchEvent({ type: "load" });
+const browserXhrPayload = JSON.parse(browserXhrContext.previewJson());
+const browserXhrBody = JSON.stringify(browserXhrPayload);
+const browserXhrSpan = browserXhrPayload.events[0];
+if (browserXhr.requestHeaders.traceparent !== `00-${browserXhrTraceContext.traceId}-9696969696969696-01`) {
+  throw new Error(`expected XHR span traceparent, got ${browserXhr.requestHeaders.traceparent}`);
+}
+if (browserXhrSpan.attributes.name !== "browser.xhr POST /api/orders/:id") {
+  throw new Error(`unexpected XHR span name: ${browserXhrBody}`);
+}
+if (browserXhrSpan.attributes.traceId !== browserXhrTraceContext.traceId || browserXhrSpan.attributes.parentSpanId !== browserXhrTraceContext.spanId) {
+  throw new Error(`expected XHR child span correlation, got ${browserXhrBody}`);
+}
+if (browserXhrSpan.attributes.status !== "error" || browserXhrSpan.attributes.metadata.statusCode !== 503) {
+  throw new Error(`expected failed XHR status metadata, got ${browserXhrBody}`);
+}
+if (browserXhrSpan.attributes.metadata.responseBodySize !== 456 || browserXhrSpan.attributes.durationMs !== 14.5) {
+  throw new Error(`expected bounded XHR timing and size metadata, got ${browserXhrBody}`);
+}
+if (browserXhrBody.includes("api.example.test") || browserXhrBody.includes("email=dev@example.test") || browserXhrBody.includes("#fragment") || browserXhrBody.includes("private body") || browserXhrBody.includes("application/json")) {
+  throw new Error(`XHR span metadata leaked request details: ${browserXhrBody}`);
+}
+const browserXhrFailure = new browserXhrWindow.XMLHttpRequest();
+browserXhrFailure.open("PATCH", "/api/profile/42?sample=hidden");
+browserXhrFailure.send("hidden body");
+browserXhrFailure.dispatchEvent({ type: "timeout" });
+const browserXhrFailureBody = JSON.stringify(JSON.parse(browserXhrContext.previewJson()).events.at(-1));
+if (!browserXhrFailureBody.includes('"errorType":"timeout"') || browserXhrFailureBody.includes("sample=hidden") || browserXhrFailureBody.includes("hidden body")) {
+  throw new Error(`XHR failure span should keep only the event type: ${browserXhrFailureBody}`);
+}
+browserXhrInstrumentation.uninstall();
+if (BrowserSmokeXhr.prototype.open !== originalXhrOpen || BrowserSmokeXhr.prototype.send !== originalXhrSend) {
+  throw new Error("XHR instrumentation should restore the original methods");
+}
+const browserXhrDirect = createBrowserXhrSpanEvent({
+  durationMs: 11,
+  method: "GET",
+  statusCode: 202,
+  url: "https://api.example.test/api/accounts/123?sample=hidden"
+}, browserXhrWindow, {
+  resourcePathTemplate: "/api/accounts/:id"
+});
+if (browserXhrDirect.attributes.name !== "browser.xhr GET /api/accounts/:id") {
+  throw new Error(`unexpected direct XHR span: ${JSON.stringify(browserXhrDirect)}`);
+}
+await captureBrowserXhrSpan({
+  durationMs: 9,
+  method: "DELETE",
+  statusCode: 204,
+  url: "/api/accounts/123?sample=hidden"
+}, browserXhrContext, {
+  flushOnCapture: false,
+  resourcePathTemplate: ({ path }) => path.replace(/\/\d+$/u, "/:id")
+});
+if (!JSON.stringify(JSON.parse(browserXhrContext.previewJson()).events.at(-1)).includes("browser.xhr DELETE /api/accounts/:id")) {
+  throw new Error("direct XHR capture did not capture the route-templated span");
+}
+
 const resourceWindow = new Window({
   url: "https://app.example.test/resources?email=dev@example.test#panel"
 });
@@ -817,7 +916,8 @@ console.error(JSON.stringify({
   rejectionTitle: rejectionPayload.events[0].attributes.title,
   resourceSpan: resourceSpans[0].attributes.name,
   sessionAction: actionPayload.events[0].attributes.metadata.sessionId,
-  syncTitle: syncPayload.events[0].attributes.title
+  syncTitle: syncPayload.events[0].attributes.title,
+  xhrSpan: browserXhrSpan.attributes.name
 }));
 
 async function readBeaconPayload(payload) {
@@ -930,6 +1030,52 @@ function createFakePerformanceObserver() {
   };
 }
 
+function createFakeXMLHttpRequestClass() {
+  return class FakeXMLHttpRequest {
+    constructor() {
+      this.listeners = new Map();
+      this.requestHeaders = {};
+      this.responseHeaders = {};
+      this.status = 0;
+    }
+
+    addEventListener(type, listener) {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+    }
+
+    dispatchEvent(event) {
+      for (const listener of this.listeners.get(event.type) ?? []) {
+        listener.call(this, event);
+      }
+    }
+
+    getResponseHeader(name) {
+      return this.responseHeaders[String(name).toLowerCase()] ?? null;
+    }
+
+    open(method, url) {
+      this.method = method;
+      this.url = String(url);
+    }
+
+    removeEventListener(type, listener) {
+      this.listeners.set(type, (this.listeners.get(type) ?? []).filter((candidate) => candidate !== listener));
+    }
+
+    send(body) {
+      this.body = body;
+    }
+
+    setRequestHeader(name, value) {
+      this.requestHeaders[name] = value;
+    }
+
+    setResponseHeader(name, value) {
+      this.responseHeaders[String(name).toLowerCase()] = String(value);
+    }
+  };
+}
+
 function nextTimestamp() {
   tick += 1;
   return `2026-06-02T10:00:0${tick}Z`;
@@ -1012,6 +1158,7 @@ grep -q '"persistedOnlineSends":3' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"resourceSpan":"browser.resource fetch /api/orders/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"sessionAction":"sess_browser_001"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"xhrSpan":"browser.xhr POST /api/orders/:id"' "$tmp_dir/browser-smoke.stderr.json"
 
 cat > consumer.ts <<'EOF'
 import { RecordingTransport } from "@logbrew/sdk";
@@ -1020,11 +1167,13 @@ import {
   captureBrowserFetchSpan,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
+  captureBrowserXhrSpan,
   createBrowserTraceContext,
   createBrowserActionEvent,
   createBrowserFetchSpanEvent,
   createBrowserNetworkEvent,
   createBrowserResourceTimingEvent,
+  createBrowserXhrSpanEvent,
   createBrowserErrorEvent,
   createBeaconTransport,
   createFetchTransport,
@@ -1037,6 +1186,7 @@ import {
   installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
+  installLogBrewBrowserXhrInstrumentation,
   type BrowserNavigationInstrumentation,
   type BrowserFetchInput,
   type BrowserFetchInstrumentation,
@@ -1045,6 +1195,8 @@ import {
   type BrowserPersistentStorage,
   type BrowserResourceTimingInput,
   type BrowserResourceTimingInstrumentation,
+  type BrowserXhrInput,
+  type BrowserXhrInstrumentation,
   type LogBrewBrowserContext,
   type PersistentBrowserTransport,
   type TracePropagationTarget
@@ -1113,15 +1265,30 @@ const fetchEntry: BrowserFetchInput = {
 const fetchSpan = createBrowserFetchSpanEvent(fetchEntry, window, {
   resourcePathTemplate: "/api/checkout"
 });
+const xhrEntry: BrowserXhrInput = {
+  durationMs: 21,
+  method: "POST",
+  responseBodySize: 123,
+  statusCode: 202,
+  tracePropagated: true,
+  url: "https://api.example.test/api/checkout?sample=private"
+};
+const xhrSpan = createBrowserXhrSpanEvent(xhrEntry, window, {
+  resourcePathTemplate: "/api/checkout"
+});
 client.span(page.id, page.timestamp, page.attributes);
 client.span(fetchSpan.id, fetchSpan.timestamp, fetchSpan.attributes);
 client.span(resource.id, resource.timestamp, resource.attributes);
+client.span(xhrSpan.id, xhrSpan.timestamp, xhrSpan.attributes);
 client.action(action.id, action.timestamp, action.attributes);
 client.action(network.id, network.timestamp, network.attributes);
 client.issue(issue.id, issue.timestamp, issue.attributes);
 void captureBrowserAction("checkout.submitted", context);
 void captureBrowserNetwork("/api/checkout", context);
 void captureBrowserFetchSpan(fetchEntry, context, {
+  resourcePathTemplate: "/api/checkout"
+});
+void captureBrowserXhrSpan(xhrEntry, context, {
   resourcePathTemplate: "/api/checkout"
 });
 void captureBrowserResourceTiming(resourceEntry, context, {
@@ -1170,6 +1337,12 @@ const fetchInstrumentation: BrowserFetchInstrumentation = installLogBrewBrowserF
   browserWindow: window,
   resourcePathTemplate: ({ path }) => path
 });
+const xhrInstrumentation: BrowserXhrInstrumentation = installLogBrewBrowserXhrInstrumentation(context, {
+  browserWindow: window,
+  resourcePathTemplate: ({ path }) => path,
+  tracePropagationTargets: traceTargets,
+  XMLHttpRequest: window.XMLHttpRequest
+});
 const tracedFetch = createTraceparentFetch({
   fetchImpl: fetch,
   traceContext,
@@ -1184,6 +1357,7 @@ void tracedFetch("/internal/ping");
 void dynamicTraceFetch("/internal/ping");
 void browserFetch("/internal/ping");
 fetchInstrumentation.uninstall();
+xhrInstrumentation.uninstall();
 navigation.uninstall();
 resourceTimingInstrumentation.uninstall();
 context.uninstall();
@@ -1234,6 +1408,12 @@ if (typeof browser.createLogBrewBrowserFetch !== "function" || typeof browser.ca
 }
 if (typeof browser.installLogBrewBrowserFetchInstrumentation !== "function") {
   throw new Error("missing CommonJS browser fetch instrumentation helper");
+}
+if (typeof browser.createBrowserXhrSpanEvent !== "function" || typeof browser.captureBrowserXhrSpan !== "function") {
+  throw new Error("missing CommonJS browser XHR span helpers");
+}
+if (typeof browser.installLogBrewBrowserXhrInstrumentation !== "function") {
+  throw new Error("missing CommonJS browser XHR instrumentation helper");
 }
 if (typeof browser.createPersistentBrowserTransport !== "function") {
   throw new Error("missing CommonJS persistent browser transport helper");

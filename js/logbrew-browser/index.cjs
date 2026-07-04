@@ -27,6 +27,11 @@ const {
   optionalBrowserTraceContext,
   shouldPropagateTraceparent
 } = require("./trace-context.cjs");
+const {
+  captureBrowserXhrSpan,
+  createBrowserXhrSpanEvent,
+  installLogBrewBrowserXhrInstrumentation
+} = require("./xhr-spans.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
 const DEFAULT_SDK_VERSION = "0.1.0";
@@ -922,6 +927,7 @@ module.exports = {
   captureBrowserFetchSpan,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
+  captureBrowserXhrSpan,
   capturePageView,
   captureUnhandledRejection,
   createBrowserTraceContext,
@@ -930,6 +936,7 @@ module.exports = {
   createBrowserErrorEvent,
   createBrowserFetchSpanEvent,
   createBrowserResourceTimingEvent,
+  createBrowserXhrSpanEvent,
   createBeaconTransport,
   createFetchTransport,
   createLogBrewBrowserFetch,
@@ -946,6 +953,7 @@ module.exports = {
     captureBrowserFetchSpan,
     captureBrowserNetwork,
     captureBrowserResourceTiming,
+    captureBrowserXhrSpan,
     capturePageView,
     captureUnhandledRejection,
     createBrowserTraceContext,
@@ -954,6 +962,7 @@ module.exports = {
     createBrowserErrorEvent,
     createBrowserFetchSpanEvent,
     createBrowserResourceTimingEvent,
+    createBrowserXhrSpanEvent,
     createBeaconTransport,
     createFetchTransport,
     createLogBrewBrowserFetch,
@@ -967,12 +976,14 @@ module.exports = {
     installLogBrewBrowserNavigationInstrumentation,
     installLogBrewBrowserFetchInstrumentation,
     installLogBrewBrowserResourceTimingInstrumentation,
+    installLogBrewBrowserXhrInstrumentation,
     installLogBrewBrowser,
     shouldPropagateTraceparent
   },
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
+  installLogBrewBrowserXhrInstrumentation,
   installLogBrewBrowser,
   shouldPropagateTraceparent
 };

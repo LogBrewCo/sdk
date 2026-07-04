@@ -25,19 +25,27 @@ import {
   optionalBrowserTraceContext,
   shouldPropagateTraceparent
 } from "./trace-context.js";
+import {
+  captureBrowserXhrSpan,
+  createBrowserXhrSpanEvent,
+  installLogBrewBrowserXhrInstrumentation
+} from "./xhr-spans.js";
 
 export {
   createBeaconTransport,
   captureBrowserFetchSpan,
   captureBrowserResourceTiming,
+  captureBrowserXhrSpan,
   createBrowserFetchSpanEvent,
   createBrowserResourceTimingEvent,
+  createBrowserXhrSpanEvent,
   createBrowserTraceContext,
   createBrowserTraceparent,
   createLogBrewBrowserFetch,
   createTraceparentFetch,
   installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
+  installLogBrewBrowserXhrInstrumentation,
   shouldPropagateTraceparent
 };
 
@@ -936,6 +944,7 @@ export default {
   captureBrowserFetchSpan,
   captureBrowserNetwork,
   captureBrowserResourceTiming,
+  captureBrowserXhrSpan,
   capturePageView,
   captureUnhandledRejection,
   createBrowserTraceContext,
@@ -944,6 +953,7 @@ export default {
   createBrowserErrorEvent,
   createBrowserFetchSpanEvent,
   createBrowserResourceTimingEvent,
+  createBrowserXhrSpanEvent,
   createBeaconTransport,
   createFetchTransport,
   createLogBrewBrowserFetch,
@@ -957,6 +967,7 @@ export default {
   installLogBrewBrowserNavigationInstrumentation,
   installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserResourceTimingInstrumentation,
+  installLogBrewBrowserXhrInstrumentation,
   installLogBrewBrowser,
   shouldPropagateTraceparent
 };

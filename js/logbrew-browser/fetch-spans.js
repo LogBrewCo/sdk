@@ -112,7 +112,7 @@ export function createBrowserFetchSpanEvent(request, browserWindow = defaultWind
   const path = browserPath(browserWindow, { includeHash, includeQueryString });
   const details = fetchDetails(request, resourcePathTemplate);
   const parentTraceContext = optionalBrowserTraceContext(traceContext);
-  const childTraceContext = optionalBrowserTraceContext(spanTraceContext ?? createBrowserTraceContext({
+  const childTraceContext = optionalBrowserTraceContext(spanTraceContext ?? request.spanTraceContext ?? createBrowserTraceContext({
     randomValues,
     sampled: parentTraceContext?.sampled ?? sampled,
     traceFlags: parentTraceContext?.traceFlags ?? traceFlags,

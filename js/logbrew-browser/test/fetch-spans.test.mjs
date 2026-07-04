@@ -68,7 +68,7 @@ test("installed browser fetch wrapper emits a sanitized child span and scoped tr
       flushOnCapture: false,
       now: () => "2026-07-04T10:00:00.000Z",
       nowMs: createNowMs([1000, 1123.456]),
-      randomValues: () => fillBytes(8, 0x88),
+      randomValues: sequenceBytes([0x88, 0x55]),
       resourcePathTemplate: "/api/orders/:id",
       tracePropagationTargets: [/^https:\/\/api\.example\.test\/api\//u]
     });
@@ -253,4 +253,9 @@ function createNowMs(values) {
 
 function fillBytes(length, value) {
   return Array.from({ length }, () => value);
+}
+
+function sequenceBytes(values) {
+  let index = 0;
+  return (length) => fillBytes(length, values[index++] ?? values.at(-1));
 }

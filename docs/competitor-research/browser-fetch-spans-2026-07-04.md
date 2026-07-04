@@ -42,5 +42,5 @@ LogBrew is now stronger for privacy-bounded, app-owned fetch tracing because it 
 ## Local Evidence
 
 - TDD RED: `npm --prefix js/logbrew-browser test -- --test-reporter=spec test/fetch-spans.test.mjs` failed on missing fetch-span exports.
-- GREEN: `npm --prefix js/logbrew-browser test` passed 13 browser tests including installed-artifact fetch wrapper, failure, and explicit instrumentation coverage.
+- GREEN: `npm --prefix js/logbrew-browser test` passed browser tests including installed-artifact fetch wrapper, failure, explicit instrumentation coverage, and a non-deterministic child-span guard proving the emitted span ID matches the injected `traceparent` span ID.
 - Installed-artifact proof: `scripts/real_user_browser_smoke.sh` installed packed `@logbrew/sdk` and `@logbrew/browser` into a temporary app and verified tarball contents, README snippets, ESM/CJS/types, explicit fetch spans, traceparent injection, failure rethrow, reversible patching, and no full URL/query/hash/body/header leakage.

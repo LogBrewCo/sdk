@@ -127,6 +127,7 @@ export type BrowserFetchInput = {
   durationMs?: number;
   responseBodySize?: number;
   errorType?: string;
+  spanTraceContext?: BrowserTraceContextInput;
   tracePropagated?: boolean;
 };
 
@@ -140,6 +141,26 @@ export type BrowserFetchTemplateContext = {
 export type BrowserFetchPathTemplate =
   | string
   | ((context: BrowserFetchTemplateContext) => string | undefined);
+
+export type BrowserXhrInput = {
+  method?: string;
+  url?: string;
+  statusCode?: number;
+  durationMs?: number;
+  responseBodySize?: number;
+  errorType?: string;
+  spanTraceContext?: BrowserTraceContextInput;
+  tracePropagated?: boolean;
+};
+
+export type BrowserXhrTemplateContext = {
+  method: string;
+  path: string;
+};
+
+export type BrowserXhrPathTemplate =
+  | string
+  | ((context: BrowserXhrTemplateContext) => string | undefined);
 
 export type LogBrewBrowserContext = {
   browserWindow?: Window;
@@ -214,7 +235,15 @@ export type BrowserResourcePathTemplate =
   | string
   | ((context: BrowserResourceTimingTemplateContext) => string | undefined);
 
-export type BrowserMetadataKind = "page_view" | "action" | "network" | "resource" | "fetch" | "error" | "unhandledrejection";
+export type BrowserMetadataKind =
+  | "page_view"
+  | "action"
+  | "network"
+  | "resource"
+  | "fetch"
+  | "xhr"
+  | "error"
+  | "unhandledrejection";
 
 export type BrowserFlushReason = "capture" | "online" | "pagehide" | "visibility_hidden";
 
@@ -329,6 +358,18 @@ export type BrowserFetchInstrumentation = {
   uninstall(): void;
 };
 
+export type BrowserXhrOptions = LogBrewBrowserOptions & {
+  captureTargets?: TracePropagationTarget[];
+  nowMs?: () => number;
+  resourcePathTemplate?: BrowserXhrPathTemplate;
+  tracePropagationTargets?: TracePropagationTarget[];
+  XMLHttpRequest?: typeof XMLHttpRequest;
+};
+
+export type BrowserXhrInstrumentation = {
+  uninstall(): void;
+};
+
 export declare function createLogBrewBrowserClient(
   config?: CreateLogBrewBrowserClientConfig
 ): LogBrewClient;
@@ -386,6 +427,11 @@ export declare function installLogBrewBrowserFetchInstrumentation(
   options?: BrowserFetchOptions
 ): BrowserFetchInstrumentation;
 
+export declare function installLogBrewBrowserXhrInstrumentation(
+  context: LogBrewBrowserContext,
+  options?: BrowserXhrOptions
+): BrowserXhrInstrumentation;
+
 export declare function createLogBrewBrowserContext(
   client: LogBrewClient,
   transport: Transport,
@@ -435,6 +481,12 @@ export declare function captureBrowserFetchSpan(
   options?: BrowserFetchOptions
 ): Promise<TransportResponse | undefined>;
 
+export declare function captureBrowserXhrSpan(
+  request: BrowserXhrInput,
+  context: LogBrewBrowserContext,
+  options?: BrowserXhrOptions
+): Promise<TransportResponse | undefined>;
+
 export declare function createPageViewEvent(
   browserWindow?: Window,
   options?: LogBrewBrowserOptions
@@ -464,6 +516,12 @@ export declare function createBrowserFetchSpanEvent(
   options?: BrowserFetchOptions
 ): LogBrewBrowserEvent<SpanAttributes>;
 
+export declare function createBrowserXhrSpanEvent(
+  request: BrowserXhrInput,
+  browserWindow?: Window,
+  options?: BrowserXhrOptions
+): LogBrewBrowserEvent<SpanAttributes>;
+
 export declare function createBrowserErrorEvent(
   error: unknown,
   browserWindow?: Window,
@@ -482,6 +540,7 @@ declare const defaultExport: {
   captureBrowserFetchSpan: typeof captureBrowserFetchSpan;
   captureBrowserNetwork: typeof captureBrowserNetwork;
   captureBrowserResourceTiming: typeof captureBrowserResourceTiming;
+  captureBrowserXhrSpan: typeof captureBrowserXhrSpan;
   capturePageView: typeof capturePageView;
   captureUnhandledRejection: typeof captureUnhandledRejection;
   createBrowserTraceContext: typeof createBrowserTraceContext;
@@ -490,6 +549,7 @@ declare const defaultExport: {
   createBrowserErrorEvent: typeof createBrowserErrorEvent;
   createBrowserFetchSpanEvent: typeof createBrowserFetchSpanEvent;
   createBrowserResourceTimingEvent: typeof createBrowserResourceTimingEvent;
+  createBrowserXhrSpanEvent: typeof createBrowserXhrSpanEvent;
   createFetchTransport: typeof createFetchTransport;
   createLogBrewBrowserFetch: typeof createLogBrewBrowserFetch;
   createLogBrewBrowserClient: typeof createLogBrewBrowserClient;
@@ -502,6 +562,7 @@ declare const defaultExport: {
   installLogBrewBrowserFetchInstrumentation: typeof installLogBrewBrowserFetchInstrumentation;
   installLogBrewBrowserNavigationInstrumentation: typeof installLogBrewBrowserNavigationInstrumentation;
   installLogBrewBrowserResourceTimingInstrumentation: typeof installLogBrewBrowserResourceTimingInstrumentation;
+  installLogBrewBrowserXhrInstrumentation: typeof installLogBrewBrowserXhrInstrumentation;
   installLogBrewBrowser: typeof installLogBrewBrowser;
   shouldPropagateTraceparent: typeof shouldPropagateTraceparent;
 };

@@ -31,6 +31,8 @@
     "resource-timing.js",
     "trace-context.cjs",
     "trace-context.js",
+    "xhr-spans.cjs",
+    "xhr-spans.js",
     "index.d.ts",
     "index.d.cts",
     "README.md",
@@ -59,6 +61,6 @@
     "@logbrew/sdk": "^0.1.0"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check beacon-transport.js && node --check beacon-transport.cjs && node --check fetch-spans.js && node --check fetch-spans.cjs && node --check persistence.js && node --check persistence.cjs && node --check resource-timing.js && node --check resource-timing.cjs && node --check trace-context.js && node --check trace-context.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --test test/*.test.mjs"
+    "test": "node --check index.js && node --check index.cjs && node --check beacon-transport.js && node --check beacon-transport.cjs && node --check fetch-spans.js && node --check fetch-spans.cjs && node --check persistence.js && node --check persistence.cjs && node --check resource-timing.js && node --check resource-timing.cjs && node --check trace-context.js && node --check trace-context.cjs && node --check xhr-spans.js && node --check xhr-spans.cjs && node --check examples/index.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --test test/*.test.mjs"
   }
 }
