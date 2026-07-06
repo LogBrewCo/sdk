@@ -28,15 +28,21 @@
   python3 scripts/check_js_sources.py && bash scripts/check_js_lint.sh`; GREEN
   `bash scripts/real_user_node_smoke.sh` with packed package pipeline/multi
   success/error proof, type declarations, privacy assertions, and existing
-  retry/flush/shutdown coverage; GREEN `bash scripts/check_js_package.sh`;
-  GREEN `bash scripts/check_shell_static.sh`; GREEN
+  retry/flush/shutdown coverage; GREEN
+  `bash scripts/real_user_node_redis_packages_smoke.sh` with packed LogBrew
+  packages, `redis@6.1.0`, `ioredis@5.11.1`, real pipeline object chains,
+  local no-service execution seams, success/error aggregate spans, uninstall
+  checks, and privacy assertions; GREEN `bash scripts/check_js_package.sh`;
+  GREEN `bash scripts/check_shell_static.sh`; GREEN workflow YAML parse; GREEN
   `python3 scripts/check_markdown_links.py &&
   python3 scripts/check_confidentiality_scan.py &&
   python3 scripts/check_generated_artifacts.py && git diff --check`. Research:
   `docs/competitor-research/node-redis-pipeline-tracing-2026-07-06.md`. Honest
   gap: Sentry/Datadog/OTel still lead on hidden automatic per-command pipeline
   spans, clusters, command obfuscation controls, connection metadata, and hosted
-  trace UI.
+  trace UI. Durable verifier lesson: for driver API-shape gaps, add real
+  package-manager smokes with local no-service execution seams when a live
+  dependency would make CI slower or flaky.
 - 2026-07-06: Node Prisma rich-trace gap reduced after source reads from
   Sentry JavaScript
   `getsentry/sentry-javascript@96cbf5ec8c420c6b6a8dba4e2fe245cad4333edb`

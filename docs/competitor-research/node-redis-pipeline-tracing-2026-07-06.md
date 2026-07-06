@@ -35,10 +35,11 @@ Captured metadata is intentionally smaller than competitors: `framework=node:red
 
 ## Honest Comparison
 
-LogBrew is better for teams that want safe, explicit Redis batch visibility without global Redis/ioredis module patching or command/key capture. Sentry, Datadog, and OpenTelemetry remain stronger for hidden automatic Redis coverage, per-command spans inside a pipeline, cluster coverage, richer semantic conventions, connection metadata, command filtering/obfuscation controls, and hosted trace UI. The next Node Redis step should be real `redis` and `ioredis` temp-app proof when the added instance wrapper can be tested against current packages without requiring a live Redis server.
+LogBrew is better for teams that want safe, explicit Redis batch visibility without global Redis/ioredis module patching or command/key capture. It now also has installed-artifact proof against current `redis` and `ioredis` package object shapes without requiring a live Redis server. Sentry, Datadog, and OpenTelemetry remain stronger for hidden automatic Redis coverage, per-command spans inside a pipeline, cluster coverage, richer semantic conventions, connection metadata, command filtering/obfuscation controls, and hosted trace UI.
 
 ## Verification
 
 - RED: `bash scripts/real_user_node_smoke.sh` failed on missing `evt_node_redis_pipeline` span from packed `@logbrew/node`.
 - GREEN: `npm --prefix js/logbrew-node test`.
 - GREEN: `bash scripts/real_user_node_smoke.sh` passed with packed `@logbrew/sdk` and `@logbrew/node`, aggregate Redis pipeline/multi span proof, type declaration proof, privacy assertions, retry/flush/shutdown behavior, and existing Node helper coverage.
+- GREEN: `bash scripts/real_user_node_redis_packages_smoke.sh` passed with packed `@logbrew/sdk` and `@logbrew/node`, `redis@6.1.0`, `ioredis@5.11.1`, real pipeline object chains, local no-service execution seams, success/error aggregate spans, uninstall checks, and privacy assertions.
