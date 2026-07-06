@@ -313,6 +313,32 @@
   Honest gap: hosted upload/lookup/symbolicated runtime error proof, grouping,
   source context, cause chains, and suppression rules still trail Sentry/
   Datadog.
+- 2026-07-06: Next.js/browser runtime source-map proof gap reduced after
+  refreshing Sentry JS
+  `getsentry/sentry-javascript@9d53b0cd8ccd894d7ce24530cb1b289f2607eb97`
+  (`getFilenameToDebugIdMap`, `getDebugImagesForResources`, `applyDebugIds`,
+  `applyDebugMeta`, `nextjsClientStackFrameNormalizationIntegration`,
+  `handleRunAfterProductionCompile`, browser stack parsing) and Datadog CI
+  `DataDog/datadog-ci@3bac12402541936f16532104884240b3f3a5ad64`
+  (`Sourcemap.asMultipartPayload`, `SourcemapsUploadCommand.upload`,
+  `validatePayload`). `scripts/real_user_next_release_artifact_smoke.sh` now
+  installs packed `@logbrew/sdk`, packed `@logbrew/next`, and packed
+  `@logbrew/browser`, builds real `next@16.2.9` App Router output, proves
+  manifest/source-map Debug ID readiness and local symbolication, then creates
+  a browser runtime issue payload from the built Next chunk URL and manifest
+  Debug ID map. Evidence: RED
+  `python3 -m unittest tests.test_release_artifact_smoke_gates` failed on
+  missing Next browser runtime linkage; GREEN same gate with 8 tests; GREEN
+  `bash scripts/real_user_next_release_artifact_smoke.sh` with runtime
+  `releaseArtifactDebugId`, path-only `releaseArtifactCodeFile`/
+  `errorFrameFile`, release/environment/service/runtime, trace/span IDs, no
+  static asset host/query/hash/temp-path/source-sentinel/user-like URL data,
+  and existing loopback fake-intake 503-to-202 upload retry. Research:
+  `docs/competitor-research/browser-error-debug-id-source-maps-2026-07-04.md`
+  and `docs/competitor-research/source-maps-debug-symbols-2026-06-13.md`.
+  Honest gap: hosted upload/lookup/symbolicated runtime error proof, grouping,
+  source context, cause chains, and suppression rules still trail Sentry/
+  Datadog.
 - 2026-07-04: Browser runtime error source-map hint gap reduced after source
   reads from Sentry JS
   `getsentry/sentry-javascript@68fe9e8fbcf70f1a92468410a1686787d4f724a6`

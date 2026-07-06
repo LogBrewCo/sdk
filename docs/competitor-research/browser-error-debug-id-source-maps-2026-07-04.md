@@ -60,6 +60,25 @@ Frontend users need a production browser error to point at the right release, en
 - The proof asserts the runtime issue includes the same `releaseArtifactDebugId`, path-only `releaseArtifactCodeFile`/`errorFrameFile`, release, environment, service, runtime, and trace/span IDs while omitting the CDN host, query/hash, temp paths, raw source sentinel, and user-like URL data.
 - The same smoke still uploads the real manifest, source map, and minified bundle to a loopback fake intake with 503-to-202 retry proof.
 
+## Follow-Up: Real Next.js Runtime Proof
+
+- Sentry JavaScript `9d53b0cd8ccd894d7ce24530cb1b289f2607eb97`
+- `packages/core/src/utils/debug-ids.ts`: `getFilenameToDebugIdMap`, `getDebugImagesForResources`
+- `packages/core/src/utils/prepareEvent.ts`: `applyDebugIds`, `applyDebugMeta`
+- `packages/nextjs/src/client/clientNormalizationIntegration.ts`: `nextjsClientStackFrameNormalizationIntegration`
+- `packages/nextjs/src/config/handleRunAfterProductionCompile.ts`: `handleRunAfterProductionCompile`
+- Pattern: Next client frames are normalized to `app:///_next/...`, runtime filenames are connected to Debug IDs, and event preparation moves frame Debug IDs into source-map debug images.
+
+- Datadog CI `3bac12402541936f16532104884240b3f3a5ad64`
+- `packages/base/src/commands/sourcemaps/interfaces.ts`: `Sourcemap.asMultipartPayload`
+- `packages/base/src/commands/sourcemaps/upload.ts`: `SourcemapsUploadCommand.upload`
+- `packages/base/src/commands/sourcemaps/validation.ts`: `validatePayload`
+- Pattern: uploaded artifacts keep release, service, minified URL, source map, and minified file identity explicit before network upload.
+
+- LogBrew now extends `scripts/real_user_next_release_artifact_smoke.sh`: a temporary Next app installs packed `@logbrew/sdk`, `@logbrew/next`, and `@logbrew/browser`, builds real `.next/static/chunks` output, proves local symbolication, then creates a browser runtime issue payload from the built Next chunk URL and manifest Debug ID map.
+- The proof asserts the issue includes the same `releaseArtifactDebugId`, path-only `releaseArtifactCodeFile`/`errorFrameFile`, release, environment, service, runtime, and trace/span IDs while omitting the static asset host, query/hash placeholders, temp paths, raw source sentinel, and user-like URL data.
+- The same smoke still proves loopback upload retry for the real Next manifest, source map, and minified chunk.
+
 ## Verification
 
 - RED: `node --test js/logbrew-browser/test/trace-context.test.mjs` failed because browser issue metadata had no `errorFrameFile` or release-artifact Debug ID fields.
@@ -68,6 +87,9 @@ Frontend users need a production browser error to point at the right release, en
 - RED: `python3 -m unittest tests/test_release_artifact_smoke_gates.py` failed because the Vite release-artifact smoke did not install `@logbrew/browser` or prove runtime issue Debug ID linkage.
 - GREEN: `python3 -m unittest tests/test_release_artifact_smoke_gates.py` passed 7 release-artifact smoke gate tests.
 - GREEN: `bash scripts/real_user_vite_release_artifact_smoke.sh` passed with packed `@logbrew/sdk`, packed `@logbrew/browser`, `vite@8.0.16`, real minified build, manifest/source-map Debug ID proof, runtime browser issue payload proof, local symbolication proof, and loopback upload retry proof.
+- RED: `python3 -m unittest tests.test_release_artifact_smoke_gates` failed because the Next.js release-artifact smoke did not install `@logbrew/browser` or prove runtime issue Debug ID linkage.
+- GREEN: `python3 -m unittest tests.test_release_artifact_smoke_gates` passed 8 release-artifact smoke gate tests.
+- GREEN: `bash scripts/real_user_next_release_artifact_smoke.sh` passed with packed `@logbrew/sdk`, packed `@logbrew/next`, packed `@logbrew/browser`, `next@16.2.9`, real `.next/static/chunks` output, manifest/source-map Debug ID proof, runtime browser issue payload proof, local symbolication proof, and loopback upload retry proof.
 
 ## Remaining Gaps
 

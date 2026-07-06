@@ -24,6 +24,7 @@ mkdir -p "$app_dir/app" "$app_dir/components"
 
 sdk_pack_json="$tmp_dir/sdk-pack.json"
 next_pack_json="$tmp_dir/next-pack.json"
+browser_pack_json="$tmp_dir/browser-pack.json"
 (
   cd "$repo_root/js/logbrew-js"
   npm pack --silent --json > "$sdk_pack_json"
@@ -31,6 +32,10 @@ next_pack_json="$tmp_dir/next-pack.json"
 (
   cd "$repo_root/js/logbrew-next"
   npm pack --silent --json > "$next_pack_json"
+)
+(
+  cd "$repo_root/js/logbrew-browser"
+  npm pack --silent --json > "$browser_pack_json"
 )
 sdk_tgz="$(
   python3 - "$sdk_pack_json" <<'PY'
@@ -68,10 +73,30 @@ for expected in {
 print(pack["filename"])
 PY
 )"
+browser_tgz="$(
+  python3 - "$browser_pack_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
+files = {entry["path"] for entry in pack["files"]}
+for expected in {
+    "index.js",
+    "index.cjs",
+    "index.d.ts",
+    "index.d.cts",
+}:
+    assert expected in files, f"missing packed browser runtime helper: {expected}"
+print(pack["filename"])
+PY
+)"
 sdk_tgz="$repo_root/js/logbrew-js/$sdk_tgz"
 next_tgz="$repo_root/js/logbrew-next/$next_tgz"
+browser_tgz="$repo_root/js/logbrew-browser/$browser_tgz"
 cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
 cp "$next_tgz" "$tmp_dir/logbrew-next.tgz"
+cp "$browser_tgz" "$tmp_dir/logbrew-browser.tgz"
 
 cat > "$app_dir/package.json" <<'JSON'
 {
@@ -81,6 +106,7 @@ cat > "$app_dir/package.json" <<'JSON'
     "build": "next build"
   },
   "dependencies": {
+    "@logbrew/browser": "file:../logbrew-browser.tgz",
     "@logbrew/sdk": "file:../logbrew-sdk.tgz",
     "@logbrew/next": "file:../logbrew-next.tgz",
     "next": "16.2.9",
@@ -283,6 +309,120 @@ assert "logbrew_next_hash_placeholder" not in serialized_manifest
 assert "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_manifest
 assert "next checkout exploded" not in serialized_manifest
 assert "next checkout exploded" not in serialized_symbolication
+PY
+
+runtime_issue_payload="$tmp_dir/next-runtime-issue.json"
+(
+  cd "$app_dir"
+  node --input-type=module - \
+    "$ready_manifest" \
+    "$target_js" \
+    "$chunks_dir" \
+    "$runtime_issue_payload" \
+    <<'JS'
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import {
+  createBrowserErrorEvent,
+  createBrowserTraceContext,
+  createLogBrewBrowserClient
+} from "@logbrew/browser";
+
+const [manifestPath, targetJsPath, chunksDir, outputPath] = process.argv.slice(2);
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+const targetRel = path.relative(chunksDir, targetJsPath).split(path.sep).join("/");
+const artifact = manifest.artifacts.find((candidate) => candidate.minifiedSource.path === targetRel);
+if (!artifact) {
+  throw new Error("expected matching Next release artifact for runtime issue proof");
+}
+
+const source = readFileSync(targetJsPath, "utf8");
+const needle = "next checkout exploded";
+const index = source.indexOf(needle);
+if (index < 0) {
+  throw new Error("expected minified Next chunk to contain the checkout error marker");
+}
+const before = source.slice(0, index);
+const line = before.split("\n").length;
+const column = index - before.lastIndexOf("\n");
+const runtimePath = `/_next/static/chunks/${targetRel}`;
+const runtimeUrl = `https://static.example.test${runtimePath}?logbrew_next_cache_placeholder=1#logbrew_next_hash_placeholder`;
+
+const error = new Error("next checkout exploded 84");
+error.stack = `Error: next checkout exploded 84\n    at checkoutFailureSignal (${runtimeUrl}:${line}:${column})`;
+error.cause = new TypeError("next payment marker hidden-user-marker");
+
+const traceContext = createBrowserTraceContext({
+  sampled: true,
+  spanId: "9999aaaabbbbcccc",
+  traceId: "ffeeddccbbaa99887766554433221100"
+});
+const browserWindow = {
+  document: { visibilityState: "visible" },
+  location: {
+    href: "https://app.example.test/checkout?email=hidden@example.test#payment"
+  }
+};
+const runtimeEvent = createBrowserErrorEvent(error, browserWindow, {
+  debugIdMap: {
+    [artifact.minifiedSource.minifiedUrl]: artifact.debugId,
+    [runtimeUrl]: artifact.debugId,
+    [runtimePath]: artifact.debugId
+  },
+  environment: manifest.environment,
+  release: manifest.release,
+  runtime: "browser",
+  service: manifest.service,
+  traceContext
+});
+const client = createLogBrewBrowserClient({
+  clientKey: "lbw_ingest_fake_next_browser_runtime_key",
+  sdkVersion: "0.1.0"
+});
+client.issue(runtimeEvent.id, runtimeEvent.timestamp, runtimeEvent.attributes);
+writeFileSync(outputPath, JSON.stringify({
+  debugId: artifact.debugId,
+  runtimePath,
+  payload: JSON.parse(client.previewJson())
+}));
+JS
+)
+
+python3 - "$runtime_issue_payload" "$tmp_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[2]
+debug_id = report["debugId"]
+runtime_path = report["runtimePath"]
+payload = report["payload"]
+runtime_issue = payload["events"][0]["attributes"]
+serialized_runtime_issue = json.dumps(runtime_issue)
+
+assert payload["events"][0]["type"] == "issue"
+assert runtime_issue["metadata"]["releaseArtifactDebugId"] == debug_id
+assert runtime_issue["metadata"]["releaseArtifactCodeFile"] == runtime_path
+assert runtime_issue["metadata"]["errorFrameFile"] == runtime_path
+assert runtime_issue["metadata"]["issueGroupingKey"] == f"browser.error:Error:{runtime_path}"
+assert runtime_issue["metadata"]["issueGroupingSource"] == "error_type_and_frame"
+assert runtime_issue["metadata"]["errorCauseCount"] == 1
+assert runtime_issue["metadata"]["errorCauseTypes"] == "TypeError"
+assert runtime_issue["metadata"]["errorCauseSources"] == "cause"
+assert runtime_issue["metadata"]["release"] == "2026.06.18-next"
+assert runtime_issue["metadata"]["environment"] == "production"
+assert runtime_issue["metadata"]["service"] == "checkout-next-web"
+assert runtime_issue["metadata"]["runtime"] == "browser"
+assert runtime_issue["metadata"]["traceId"] == "ffeeddccbbaa99887766554433221100"
+assert runtime_issue["metadata"]["spanId"] == "9999aaaabbbbcccc"
+assert "static.example" not in serialized_runtime_issue
+assert "logbrew_next_cache_placeholder" not in serialized_runtime_issue
+assert "logbrew_next_hash_placeholder" not in serialized_runtime_issue
+assert "hidden@example.test" not in serialized_runtime_issue
+assert "next payment marker" not in serialized_runtime_issue
+assert "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_runtime_issue
+assert tmp_dir not in serialized_runtime_issue
 PY
 
 port_file="$tmp_dir/fake-intake-port"
