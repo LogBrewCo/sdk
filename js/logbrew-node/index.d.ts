@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
+  DroppedEvent,
   IssueAttributes,
   LogAttributes,
   LogBrewClient,
@@ -16,6 +17,8 @@ export type CreateLogBrewNodeClientConfig = {
   sdkName?: string;
   sdkVersion?: string;
   maxRetries?: number;
+  maxQueueSize?: number;
+  onEventDropped?: (drop: DroppedEvent) => void;
 };
 
 export type NodeFetchTransportConfig = {
@@ -198,6 +201,89 @@ export type LogBrewFetchInstrumentationTarget =
 export type LogBrewFetchInstrumentationHandle = {
   isInstalled(): boolean;
   uninstall(): void;
+};
+
+export type LogBrewAxiosRequestConfig = {
+  baseURL?: string;
+  data?: unknown;
+  headers?: unknown;
+  method?: string;
+  url?: string;
+  [key: string]: unknown;
+};
+
+export type LogBrewAxiosInstanceLike = {
+  request: (config: any) => unknown;
+  delete?: (url: string, config?: any) => unknown;
+  get?: (url: string, config?: any) => unknown;
+  head?: (url: string, config?: any) => unknown;
+  options?: (url: string, config?: any) => unknown;
+  patch?: (url: string, data?: unknown, config?: any) => unknown;
+  post?: (url: string, data?: unknown, config?: any) => unknown;
+  put?: (url: string, data?: unknown, config?: any) => unknown;
+};
+
+export type LogBrewAxiosInstrumentableInstance = LogBrewAxiosInstanceLike & {
+  interceptors: {
+    request: {
+      use: (onFulfilled: (config: any) => any) => number;
+      eject: (id: number) => void;
+    };
+    response: {
+      use: (
+        onFulfilled: (response: unknown) => unknown | Promise<unknown>,
+        onRejected: (error: unknown) => unknown | Promise<unknown>
+      ) => number;
+      eject: (id: number) => void;
+    };
+  };
+};
+
+export type LogBrewAxiosInstrumentationContext = {
+  config: LogBrewAxiosRequestConfig;
+  method: string;
+  path: string;
+  routeTemplate?: string;
+  url: string;
+};
+
+export type LogBrewAxiosInstrumentationTarget =
+  | string
+  | RegExp
+  | ((context: LogBrewAxiosInstrumentationContext) => boolean);
+
+export type LogBrewAxiosInstrumentation = {
+  isInstalled(): boolean;
+  uninstall(): void;
+};
+
+export type LogBrewAxiosSpanOptions = {
+  client: LogBrewClient;
+  trace?: LogBrewTraceContext;
+  id?: string;
+  routeTemplate?: string;
+  events?: SpanEventSummary[];
+  links?: SpanLinkSummary[];
+  metadata?: Record<string, string | number | boolean | null>;
+  now?: () => string;
+  nowMs?: () => number;
+  spanIdFactory?: () => string;
+  traceIdFactory?: () => string;
+  onCaptureError?: (
+    error: unknown,
+    context: {
+      client: LogBrewClient;
+      error?: unknown;
+      response?: unknown;
+      trace: LogBrewTraceContext;
+    }
+  ) => void | Promise<void>;
+};
+
+export type LogBrewAxiosInstrumentationOptions = LogBrewAxiosSpanOptions & {
+  captureTargets?: LogBrewAxiosInstrumentationTarget | LogBrewAxiosInstrumentationTarget[];
+  routeTemplateFactory?: (context: LogBrewAxiosInstrumentationContext) => string;
+  tracePropagationTargets?: LogBrewAxiosInstrumentationTarget | LogBrewAxiosInstrumentationTarget[];
 };
 
 export type LogBrewUndiciInstrumentationContext = {
@@ -519,6 +605,17 @@ export declare function fetchWithLogBrewSpan(
   options: FetchWithLogBrewSpanOptions
 ): Promise<Response>;
 
+export declare function axiosRequestWithLogBrewSpan<Instance extends LogBrewAxiosInstanceLike>(
+  axiosInstance: Instance,
+  config: Parameters<Instance["request"]>[0],
+  options: LogBrewAxiosSpanOptions
+): Promise<Awaited<ReturnType<Instance["request"]>>>;
+
+export declare function instrumentLogBrewAxiosInstance<Instance extends LogBrewAxiosInstrumentableInstance>(
+  axiosInstance: Instance,
+  options: LogBrewAxiosInstrumentationOptions
+): LogBrewAxiosInstrumentation;
+
 export declare function installLogBrewFetchInstrumentation(
   options: LogBrewFetchInstrumentationOptions
 ): LogBrewFetchInstrumentationHandle;
@@ -599,6 +696,7 @@ declare module "node:http" {
 }
 
 declare const defaultExport: {
+  axiosRequestWithLogBrewSpan: typeof axiosRequestWithLogBrewSpan;
   cacheOperationWithLogBrewSpan: typeof cacheOperationWithLogBrewSpan;
   captureHttpError: typeof captureHttpError;
   createNodeFetchTransport: typeof createNodeFetchTransport;
@@ -613,6 +711,7 @@ declare const defaultExport: {
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   installLogBrewFetchInstrumentation: typeof installLogBrewFetchInstrumentation;
   installLogBrewUndiciInstrumentation: typeof installLogBrewUndiciInstrumentation;
+  instrumentLogBrewAxiosInstance: typeof instrumentLogBrewAxiosInstance;
   instrumentLogBrewMongoCollection: typeof instrumentLogBrewMongoCollection;
   instrumentLogBrewPgClient: typeof instrumentLogBrewPgClient;
   instrumentLogBrewRedisClient: typeof instrumentLogBrewRedisClient;

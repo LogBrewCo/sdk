@@ -255,6 +255,55 @@ undiciInstrumentation.uninstall();
 
 This installer subscribes to Node's public Undici diagnostic channels and captures matching `fetch`, `undici.request`, `undici.stream`, and other Undici-backed requests without adding an Undici dependency. It writes one normalized `traceparent`, creates one `node:undici` client span, records status, total duration, safe phase timings (`http.phase.request_ms`, `http.phase.wait_ms`, `http.phase.response_ms`), and `content-length` as `http.response_content_length` when available. It is off by default, target-gated, reversible, and one installation per process to avoid duplicate spans. It does not capture arbitrary headers, request or response payloads, query strings, fragments, hosts, socket addresses, error messages, baggage, tracestate, or raw propagation metadata.
 
+## Outbound Axios Spans
+
+If your service already uses Axios, install LogBrew on the Axios instance your app owns. The helper uses Axios interceptors, injects one normalized W3C `traceparent`, captures one client span per matching request, and returns an `uninstall()` handle:
+
+```js
+import axios from "axios";
+import { instrumentLogBrewAxiosInstance } from "@logbrew/node";
+
+const payments = axios.create({
+  baseURL: "https://payments.example"
+});
+
+const axiosInstrumentation = instrumentLogBrewAxiosInstance(payments, {
+  client: logbrew.client,
+  trace: logbrew.trace,
+  tracePropagationTargets: ["https://payments.example/"],
+  routeTemplateFactory({ path }) {
+    return path.replace(/\/\d+/g, "/:id");
+  },
+  metadata: {
+    service: "checkout-api",
+    release: "checkout-api@1.4.0"
+  }
+});
+
+await payments.post("/payments/123?coupon=hidden", {
+  cartId: "cart_123"
+});
+
+axiosInstrumentation.uninstall();
+```
+
+For one important call, wrap the request explicitly instead of installing interceptors:
+
+```js
+import { axiosRequestWithLogBrewSpan } from "@logbrew/node";
+
+const response = await axiosRequestWithLogBrewSpan(payments, {
+  method: "GET",
+  url: "/payments/123?coupon=hidden"
+}, {
+  client: logbrew.client,
+  trace: logbrew.trace,
+  routeTemplate: "/payments/:paymentId"
+});
+```
+
+Axios spans use `framework: "node:axios"` with method, route or query-free path, status code, duration, sampled flag, and W3C trace IDs. `tracePropagationTargets` and `captureTargets` accept the same string, regular expression, and predicate matchers as fetch instrumentation. LogBrew does not install Axios for you, patch all Node HTTP clients globally, capture request or response bodies, keep query strings/fragments, serialize arbitrary headers, store raw `traceparent`, infer baggage/tracestate, or include exception messages. If an Axios instance is already instrumented, do not wrap the same call with `axiosRequestWithLogBrewSpan()` or you will intentionally create two spans.
+
 ## Database Operation Spans
 
 Use `databaseOperationWithLogBrewSpan()` around important app-owned database calls when you want request, log, error, and DB timing correlation without installing driver instrumentation:

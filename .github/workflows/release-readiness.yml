@@ -275,6 +275,9 @@ jobs:
       - name: Run Node Redis real-package smoke test
         run: bash scripts/real_user_node_redis_packages_smoke.sh
 
+      - name: Run Node Axios real-package smoke test
+        run: bash scripts/real_user_node_axios_smoke.sh
+
       - name: Run Node queue high-load fake-intake smoke test
         run: bash scripts/real_user_node_queue_high_load_smoke.sh
 

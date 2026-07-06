@@ -38,14 +38,18 @@ const FETCH_TIMING_METADATA_KEYS = Object.freeze({
   waitMs: "http.phase.wait_ms"
 });
 const LOGBREW_FETCH_INSTRUMENTATION = Symbol.for("@logbrew/node.fetchInstrumentation");
+const LOGBREW_AXIOS_STATE = Symbol("@logbrew/node.axiosState");
 const activeTraceContext = new AsyncLocalStorage();
+const axiosInstrumentationHandles = new WeakMap();
 
 export function createLogBrewNodeClient({
   serverApiKey,
   apiKey,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
-  maxRetries = 2
+  maxRetries = 2,
+  maxQueueSize,
+  onEventDropped
 } = {}) {
   const authKey = serverApiKey ?? apiKey ?? readEnvServerApiKey() ?? readEnvApiKey();
   if (!authKey) {
@@ -54,7 +58,14 @@ export function createLogBrewNodeClient({
       "createLogBrewNodeClient requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({ apiKey: authKey, sdkName, sdkVersion, maxRetries });
+  return LogBrewClient.create({
+    apiKey: authKey,
+    sdkName,
+    sdkVersion,
+    maxRetries,
+    ...(maxQueueSize !== undefined ? { maxQueueSize } : {}),
+    ...(onEventDropped !== undefined ? { onEventDropped } : {})
+  });
 }
 
 export function createNodeFetchTransport({
@@ -219,6 +230,131 @@ export async function fetchWithLogBrewSpan(input, init = {}, options = {}) {
       path,
       trace
     });
+    throw error;
+  }
+}
+
+export async function axiosRequestWithLogBrewSpan(axiosInstance, config = {}, options = {}) {
+  if (!axiosInstance || typeof axiosInstance.request !== "function") {
+    throw new SdkError("configuration_error", "axiosRequestWithLogBrewSpan requires an Axios instance");
+  }
+  return axiosRequestWithLogBrewSpanInternal(
+    (requestConfig) => axiosInstance.request(requestConfig),
+    normalizeAxiosRequestConfig(config),
+    {
+      ...options,
+      captureSpan: true,
+      propagateTrace: true
+    }
+  );
+}
+
+export function instrumentLogBrewAxiosInstance(axiosInstance, options = {}) {
+  if (!axiosInstance || (typeof axiosInstance !== "object" && typeof axiosInstance !== "function")) {
+    throw new SdkError("configuration_error", "instrumentLogBrewAxiosInstance requires an Axios instance");
+  }
+  if (typeof axiosInstance.request !== "function") {
+    throw new SdkError("configuration_error", "instrumentLogBrewAxiosInstance requires axios.request");
+  }
+  if (
+    typeof axiosInstance.interceptors?.request?.use !== "function" ||
+    typeof axiosInstance.interceptors?.response?.use !== "function" ||
+    typeof axiosInstance.interceptors?.request?.eject !== "function" ||
+    typeof axiosInstance.interceptors?.response?.eject !== "function"
+  ) {
+    throw new SdkError("configuration_error", "instrumentLogBrewAxiosInstance requires Axios interceptors");
+  }
+  if (!options.client) {
+    throw new SdkError("configuration_error", "instrumentLogBrewAxiosInstance requires client");
+  }
+
+  const existing = axiosInstrumentationHandles.get(axiosInstance);
+  if (existing?.isInstalled()) {
+    return existing;
+  }
+
+  let installed = true;
+  const captureMatchers = normalizeFetchTargetMatchers(options.captureTargets);
+  const propagationMatchers = normalizeFetchTargetMatchers(options.tracePropagationTargets);
+
+  const requestInterceptorId = axiosInstance.interceptors.request.use((config) => {
+    return prepareAxiosRequestConfig(config, options, captureMatchers, propagationMatchers);
+  });
+  const responseInterceptorId = axiosInstance.interceptors.response.use(
+    async (response) => {
+      await captureAxiosInterceptorSpan(options, response?.config?.[LOGBREW_AXIOS_STATE], { response });
+      return response;
+    },
+    async (error) => {
+      await captureAxiosInterceptorSpan(options, (error?.config ?? error?.response?.config)?.[LOGBREW_AXIOS_STATE], {
+        error,
+        response: error?.response
+      });
+      throw error;
+    }
+  );
+
+  const handle = {
+    isInstalled() {
+      return installed;
+    },
+    uninstall() {
+      if (!installed) {
+        return;
+      }
+      axiosInstance.interceptors.request.eject(requestInterceptorId);
+      axiosInstance.interceptors.response.eject(responseInterceptorId);
+      installed = false;
+      axiosInstrumentationHandles.delete(axiosInstance);
+    }
+  };
+
+  axiosInstrumentationHandles.set(axiosInstance, handle);
+  return handle;
+}
+
+async function axiosRequestWithLogBrewSpanInternal(requester, config, options = {}) {
+  if (!options.client) {
+    throw new SdkError("configuration_error", "axiosRequestWithLogBrewSpan requires client");
+  }
+  const method = getAxiosMethod(config);
+  const path = pathOnly(options.routeTemplate ?? getAxiosPath(config));
+  const startedAt = nowMs(options);
+  const trace = createChildTraceContext("axiosRequestWithLogBrewSpan", options.trace ?? getActiveLogBrewTrace(), options);
+  const traceFlags = trace.sampled ? "01" : "00";
+  const traceparent = createTraceparentHeaders({
+    traceId: trace.traceId,
+    spanId: trace.spanId,
+    traceFlags
+  }).traceparent;
+  const requestConfig = options.propagateTrace === false ? { ...config } : withAxiosTraceparent(config, traceparent);
+  const id = options.id ?? defaultAxiosSpanId({ method, path });
+
+  try {
+    const response = await activeTraceContext.run(trace, () => requester(requestConfig));
+    if (options.captureSpan !== false) {
+      await captureAxiosSpan(options, {
+        durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
+        id,
+        method,
+        path,
+        response,
+        trace
+      });
+    }
+    return response;
+  } catch (error) {
+    if (options.captureSpan !== false) {
+      await captureAxiosSpan(options, {
+        durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
+        error,
+        id,
+        method,
+        path,
+        response: error?.response,
+        trace
+      });
+    }
     throw error;
   }
 }
@@ -550,6 +686,50 @@ async function captureFetchSpan(options, {
   }
 }
 
+async function captureAxiosSpan(options, {
+  durationMs,
+  error,
+  id,
+  method,
+  path,
+  response,
+  trace
+}) {
+  const statusCode = response?.status;
+  const metadata = {
+    ...fetchInstrumentationMetadata(options.metadata),
+    framework: "node:axios",
+    "http.request.method": method,
+    "http.route": path,
+    method,
+    path,
+    sampled: trace.sampled,
+    "url.path": path,
+    ...(statusCode !== undefined ? { "http.response.status_code": statusCode, statusCode } : {}),
+    ...(error !== undefined ? { errorType: errorType(error) } : {})
+  };
+  const events = spanEvents(options.events, error);
+  try {
+    options.client.span(id, typeof options.now === "function" ? options.now() : new Date().toISOString(), {
+      name: `${method} ${path}`,
+      traceId: trace.traceId,
+      spanId: trace.spanId,
+      ...(trace.parentSpanId !== undefined ? { parentSpanId: trace.parentSpanId } : {}),
+      status: error !== undefined || Number(statusCode ?? 0) >= 400 ? "error" : "ok",
+      durationMs,
+      ...(events !== undefined ? { events } : {}),
+      ...(options.links !== undefined ? { links: options.links } : {}),
+      metadata
+    });
+  } catch (captureError) {
+    try {
+      await notifyFailure(options, captureError, { client: options.client, error, response, trace });
+    } catch {
+      // Axios ownership stays with the app; telemetry callbacks must not replace HTTP outcomes.
+    }
+  }
+}
+
 async function captureDatabaseSpan(options, {
   durationMs,
   error,
@@ -732,6 +912,139 @@ function withFetchTraceparent(input, init = {}, traceparent) {
   };
 }
 
+function normalizeAxiosRequestConfig(config) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    throw new SdkError("configuration_error", "axiosRequestWithLogBrewSpan requires an Axios request config");
+  }
+  return { ...config };
+}
+
+function createAxiosInstrumentationContext(config, options) {
+  const method = getAxiosMethod(config);
+  const url = getAxiosUrl(config);
+  const path = pathOnly(getAxiosPath(config));
+  return {
+    config,
+    method,
+    path,
+    url,
+    routeTemplate: resolveAxiosRouteTemplate(options, { config, method, path, url })
+  };
+}
+
+function prepareAxiosRequestConfig(config, options, captureMatchers, propagationMatchers) {
+  const requestConfig = normalizeAxiosRequestConfig(config);
+  const context = createAxiosInstrumentationContext(requestConfig, options);
+  const captureSpan = captureMatchers.length === 0 || matchesFetchTarget(context, captureMatchers);
+  const propagateTrace = propagationMatchers.length === 0 || matchesFetchTarget(context, propagationMatchers);
+  if (!captureSpan && !propagateTrace) {
+    return requestConfig;
+  }
+  const trace = createChildTraceContext("instrumentLogBrewAxiosInstance", options.trace ?? getActiveLogBrewTrace(), options);
+  const traceFlags = trace.sampled ? "01" : "00";
+  const traceparent = createTraceparentHeaders({
+    traceId: trace.traceId,
+    spanId: trace.spanId,
+    traceFlags
+  }).traceparent;
+  const nextConfig = propagateTrace ? withAxiosTraceparent(requestConfig, traceparent) : requestConfig;
+  Object.defineProperty(nextConfig, LOGBREW_AXIOS_STATE, {
+    configurable: true,
+    enumerable: false,
+    value: {
+      captureSpan,
+      id: options.id ?? defaultAxiosSpanId({ method: context.method, path: context.routeTemplate ?? context.path }),
+      method: context.method,
+      path: pathOnly(context.routeTemplate ?? context.path),
+      startedAt: nowMs(options),
+      trace
+    }
+  });
+  return nextConfig;
+}
+
+async function captureAxiosInterceptorSpan(options, state, { error, response }) {
+  if (!state?.captureSpan) {
+    return;
+  }
+  await captureAxiosSpan(options, {
+    durationMs: Math.max(0, Math.round(nowMs(options) - state.startedAt)),
+    error,
+    id: state.id,
+    method: state.method,
+    path: state.path,
+    response,
+    trace: state.trace
+  });
+}
+
+function resolveAxiosRouteTemplate(options, context) {
+  if (typeof options.routeTemplate === "string" && options.routeTemplate.trim() !== "") {
+    return options.routeTemplate;
+  }
+  if (typeof options.routeTemplateFactory === "function") {
+    const value = options.routeTemplateFactory(context);
+    if (typeof value === "string" && value.trim() !== "") {
+      return value;
+    }
+  }
+  return context.path;
+}
+
+function getAxiosMethod(config) {
+  return String(config.method ?? "GET").toUpperCase();
+}
+
+function getAxiosPath(config) {
+  return pathOnly(getAxiosUrl(config));
+}
+
+function getAxiosUrl(config) {
+  const rawUrl = config.url === undefined || config.url === null ? "/" : String(config.url);
+  const baseURL = typeof config.baseURL === "string" && config.baseURL.trim() !== "" ? config.baseURL : undefined;
+  if (baseURL && !/^[a-z][a-z0-9+.-]*:/iu.test(rawUrl)) {
+    try {
+      return new URL(rawUrl, baseURL).toString();
+    } catch {
+      return rawUrl;
+    }
+  }
+  return rawUrl;
+}
+
+function withAxiosTraceparent(config, traceparent) {
+  return {
+    ...config,
+    headers: axiosHeadersWithTraceparent(config.headers, traceparent)
+  };
+}
+
+function axiosHeadersWithTraceparent(headers, traceparent) {
+  if (Array.isArray(headers)) {
+    return [
+      ...headers.filter(([key]) => String(key).toLowerCase() !== "traceparent"),
+      ["traceparent", traceparent]
+    ];
+  }
+  if (headers && typeof headers.set === "function") {
+    try {
+      if (typeof headers.constructor === "function") {
+        const nextHeaders = new headers.constructor(headers);
+        if (nextHeaders && typeof nextHeaders.set === "function") {
+          nextHeaders.set("traceparent", traceparent);
+          return nextHeaders;
+        }
+      }
+    } catch {
+      // Fall back to a plain clone rather than mutating the caller's header owner.
+    }
+  }
+  return {
+    ...(headers ?? {}),
+    traceparent
+  };
+}
+
 function fetchHeadersWithTraceparent(headers, traceparent) {
   if (typeof globalThis.Headers === "function") {
     const nextHeaders = new globalThis.Headers(headers ?? undefined);
@@ -757,6 +1070,10 @@ function getFetchInputHeaders(input) {
 function getFetchMethod(input, init = {}) {
   const method = init?.method ?? (isRequest(input) ? input.method : "GET");
   return String(method).toUpperCase();
+}
+
+function defaultAxiosSpanId({ method, path }) {
+  return `evt_node_axios_${slugify(`${method}_${path}`)}`;
 }
 
 function getFetchUrl(input) {
@@ -1217,6 +1534,7 @@ function slugify(value) {
 }
 
 export default {
+  axiosRequestWithLogBrewSpan,
   cacheOperationWithLogBrewSpan,
   captureHttpError,
   createNodeFetchTransport,
@@ -1231,6 +1549,7 @@ export default {
   getActiveLogBrewTrace,
   installLogBrewFetchInstrumentation,
   installLogBrewUndiciInstrumentation,
+  instrumentLogBrewAxiosInstance,
   instrumentLogBrewMongoCollection,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,
