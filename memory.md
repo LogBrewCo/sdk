@@ -1,5 +1,36 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-06: Go outbound HTTP phase-timing gap reduced after source-reading
+  Sentry Go
+  `getsentry/sentry-go@8fbb80b557494db92d09b396bc2d79ecb24c64db`
+  (`httpclient/sentryhttpclient.go` `NewSentryRoundTripper` and
+  `SentryRoundTripper.RoundTrip`), OpenTelemetry Go Contrib
+  `open-telemetry/opentelemetry-go-contrib@7155189f62b7a9d27c319603fbd94fb0a97c274b`
+  (`otelhttp.Transport.RoundTrip` and `otelhttptrace.NewClientTrace` phase
+  callbacks), Datadog
+  `DataDog/dd-trace-go@cc84f993c7eba2b7a90bdde215aa2c545708266e`
+  (`WithClientTimings`, `httpTraceTimings`, and `newClientTrace`), and
+  PostHog Go
+  `PostHog/posthog-go@67f00c8548126e190723e3755479bb71900fd95c` no
+  comparable outbound phase trace evidence. `HTTPClientTransportConfig` now
+  has opt-in `CapturePhaseTimings`; the app-owned transport composes
+  `net/http/httptrace` callbacks on the cloned outbound request, preserves
+  caller-installed `httptrace` hooks, and records only low-cardinality
+  `dnsMs`, `connectMs`, `tlsMs`, `wroteRequestMs`, `timeToFirstByteMs`,
+  `connectionReused`, and `connectionWasIdle` on the existing child span. It
+  avoids global client patching, hosts, IPs, full URLs, query/hash, headers,
+  cookies, payloads, baggage, tracestate, raw propagation, idle time, and
+  phase error messages. Evidence: RED focused Go test failed on missing
+  `CapturePhaseTimings`; GREEN focused transport tests; GREEN
+  `bash scripts/check_go_tests.sh`; GREEN `bash scripts/check_go_static.sh`;
+  GREEN `bash scripts/real_user_go_smoke.sh` with packaged module README proof
+  and installed example phase metadata; GREEN ShellCheck, markdown links,
+  confidentiality scan, release metadata, backend reports, generated-artifact
+  hygiene, and diff check. Research:
+  `docs/competitor-research/go-outbound-http-tracing-2026-06-19.md`. Honest
+  gap: Sentry/Datadog/OTel still lead on richer automatic framework/client
+  coverage, response-body completion timing, rich span events/exceptions,
+  baggage/tracestate, and hosted trace UI.
 - 2026-07-06: Browser issue suppression gap reduced after source-reading
   Sentry JavaScript
   `getsentry/sentry-javascript@5abfc34cb4681ad90f32ab3ed865741955279778`

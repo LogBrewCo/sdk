@@ -1,10 +1,13 @@
 package logbrew
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -16,9 +19,11 @@ type HTTPClientTransportConfig struct {
 	RouteTemplate string
 	EventIDPrefix string
 	Metadata      map[string]any
-	SpanIDFactory func() string
-	Now           func() time.Time
-	OnError       func(error)
+	// CapturePhaseTimings records DNS/connect/TLS/write/first-byte durations using net/http/httptrace.
+	CapturePhaseTimings bool
+	SpanIDFactory       func() string
+	Now                 func() time.Time
+	OnError             func(error)
 }
 
 // NewHTTPClientTransport wraps an app-owned RoundTripper with privacy-safe outbound spans.
@@ -72,9 +77,14 @@ func (t *httpClientTraceTransport) RoundTrip(request *http.Request) (*http.Respo
 	}
 
 	start := t.now()
+	var phaseTimings *httpClientPhaseTimings
+	if t.config.CapturePhaseTimings {
+		phaseTimings = newHTTPClientPhaseTimings(start, t.now)
+		tracedRequest = phaseTimings.attach(tracedRequest)
+	}
 	response, roundTripErr := t.base.RoundTrip(tracedRequest)
 	finished := t.now()
-	t.captureSpan(tracedRequest, trace, response, roundTripErr, finished.Sub(start), finished)
+	t.captureSpan(tracedRequest, trace, response, roundTripErr, finished.Sub(start), finished, phaseTimings)
 	return response, roundTripErr
 }
 
@@ -157,6 +167,7 @@ func (t *httpClientTraceTransport) captureSpan(
 	roundTripErr error,
 	duration time.Duration,
 	finished time.Time,
+	phaseTimings *httpClientPhaseTimings,
 ) {
 	statusCode := 0
 	if response != nil {
@@ -164,7 +175,13 @@ func (t *httpClientTraceTransport) captureSpan(
 	}
 	routeTemplate := t.routeTemplate(request)
 	durationMs := float64(duration.Microseconds()) / 1000
-	metadata := mergeMetadata(t.config.Metadata, t.spanMetadata(request, routeTemplate, trace, statusCode, roundTripErr))
+	spanMetadata := t.spanMetadata(request, routeTemplate, trace, statusCode, roundTripErr)
+	if phaseTimings != nil {
+		for key, value := range phaseTimings.metadata() {
+			spanMetadata[key] = value
+		}
+	}
+	metadata := mergeMetadata(t.config.Metadata, spanMetadata)
 	span, err := SpanAttributesFromTraceContext(TraceContextSpanInput{
 		Trace:      trace,
 		Name:       fmt.Sprintf("%s %s", strings.ToUpper(request.Method), routeTemplate),
@@ -221,6 +238,118 @@ func (t *httpClientTraceTransport) routeTemplate(request *http.Request) string {
 
 func (t *httpClientTraceTransport) eventID() string {
 	return fmt.Sprintf("%s_span_%d", t.prefix, t.counter.Add(1))
+}
+
+type httpClientPhaseTimings struct {
+	mu sync.Mutex
+
+	now          func() time.Time
+	requestStart time.Time
+
+	dnsStart     time.Time
+	connectStart time.Time
+	tlsStart     time.Time
+
+	dnsMs             *float64
+	connectMs         *float64
+	tlsMs             *float64
+	wroteRequestMs    *float64
+	timeToFirstByteMs *float64
+
+	gotConn           bool
+	connectionReused  bool
+	connectionWasIdle bool
+}
+
+func newHTTPClientPhaseTimings(requestStart time.Time, now func() time.Time) *httpClientPhaseTimings {
+	return &httpClientPhaseTimings{
+		now:          now,
+		requestStart: requestStart,
+	}
+}
+
+func (t *httpClientPhaseTimings) attach(request *http.Request) *http.Request {
+	trace := &httptrace.ClientTrace{
+		DNSStart: func(httptrace.DNSStartInfo) {
+			t.mu.Lock()
+			t.dnsStart = t.now()
+			t.mu.Unlock()
+		},
+		DNSDone: func(httptrace.DNSDoneInfo) {
+			t.mu.Lock()
+			t.dnsMs = durationMilliseconds(t.dnsStart, t.now())
+			t.mu.Unlock()
+		},
+		ConnectStart: func(_, _ string) {
+			t.mu.Lock()
+			t.connectStart = t.now()
+			t.mu.Unlock()
+		},
+		ConnectDone: func(_, _ string, _ error) {
+			t.mu.Lock()
+			t.connectMs = durationMilliseconds(t.connectStart, t.now())
+			t.mu.Unlock()
+		},
+		TLSHandshakeStart: func() {
+			t.mu.Lock()
+			t.tlsStart = t.now()
+			t.mu.Unlock()
+		},
+		TLSHandshakeDone: func(_ tls.ConnectionState, _ error) {
+			t.mu.Lock()
+			t.tlsMs = durationMilliseconds(t.tlsStart, t.now())
+			t.mu.Unlock()
+		},
+		GotConn: func(info httptrace.GotConnInfo) {
+			t.mu.Lock()
+			t.gotConn = true
+			t.connectionReused = info.Reused
+			t.connectionWasIdle = info.WasIdle
+			t.mu.Unlock()
+		},
+		WroteRequest: func(httptrace.WroteRequestInfo) {
+			t.mu.Lock()
+			t.wroteRequestMs = durationMilliseconds(t.requestStart, t.now())
+			t.mu.Unlock()
+		},
+		GotFirstResponseByte: func() {
+			t.mu.Lock()
+			t.timeToFirstByteMs = durationMilliseconds(t.requestStart, t.now())
+			t.mu.Unlock()
+		},
+	}
+	return request.WithContext(httptrace.WithClientTrace(request.Context(), trace))
+}
+
+func (t *httpClientPhaseTimings) metadata() map[string]any {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	metadata := map[string]any{}
+	addFloat64Metadata(metadata, "dnsMs", t.dnsMs)
+	addFloat64Metadata(metadata, "connectMs", t.connectMs)
+	addFloat64Metadata(metadata, "tlsMs", t.tlsMs)
+	addFloat64Metadata(metadata, "wroteRequestMs", t.wroteRequestMs)
+	addFloat64Metadata(metadata, "timeToFirstByteMs", t.timeToFirstByteMs)
+	if t.gotConn {
+		metadata["connectionReused"] = t.connectionReused
+		metadata["connectionWasIdle"] = t.connectionWasIdle
+	}
+	return metadata
+}
+
+func durationMilliseconds(start, end time.Time) *float64 {
+	if start.IsZero() || end.IsZero() || end.Before(start) {
+		return nil
+	}
+	value := float64(end.Sub(start).Microseconds()) / 1000
+	return &value
+}
+
+func addFloat64Metadata(metadata map[string]any, key string, value *float64) {
+	if value != nil {
+		metadata[key] = *value
+	}
 }
 
 func (t *httpClientTraceTransport) report(err error) {

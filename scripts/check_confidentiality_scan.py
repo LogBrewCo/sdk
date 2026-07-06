@@ -198,6 +198,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_kotlin_okhttp_phase_timing_reference(relative_text, line, terms):
         return True
 
+    if is_go_http_phase_timing_reference(relative_text, line, terms):
+        return True
+
     if is_kotlin_coroutine_context_reference(relative_text, line, terms):
         return True
 
@@ -856,6 +859,39 @@ def is_kotlin_okhttp_phase_timing_reference(
 
     if relative_text == "kotlin/logbrew-kotlin-okhttp/tests/LogBrewOkHttpInterceptorTests.kt":
         return "dns" in lower_line or "okhttp.phase.dnsms" in lower_line
+
+    return False
+
+
+def is_go_http_phase_timing_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    if "dns" not in terms:
+        return False
+
+    lower_line = line.lower()
+    go_phase_paths = {
+        "docs/competitor-research/go-outbound-http-tracing-2026-06-19.md",
+        "go/logbrew/README.md",
+        "memory.md",
+    }
+    if relative_text in go_phase_paths:
+        allowed_fragments = (
+            "dnsstart",
+            "dnsdone",
+            "dns/connect",
+            "dns, connect",
+            "dnsms",
+        )
+        return any(fragment in lower_line for fragment in allowed_fragments)
+
+    if relative_text in {
+        "go/logbrew/http_client_trace.go",
+        "go/logbrew/trace_correlation_test.go",
+    }:
+        return "dns" in lower_line
 
     return False
 

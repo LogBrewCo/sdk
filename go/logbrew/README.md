@@ -296,6 +296,9 @@ transport, err := logbrew.NewHTTPClientTransport(logbrew.HTTPClientTransportConf
   RouteTemplate: "/payments/:payment_id",
   EventIDPrefix: "checkout_http",
   Metadata:      map[string]any{"service": "checkout-api"},
+  // Optional: records DNS/connect/TLS/write/first-byte durations without
+  // storing hosts, IPs, URLs, headers, cookies, payloads, baggage, or tracestate.
+  CapturePhaseTimings: true,
 })
 if err != nil {
   panic(err)
@@ -314,7 +317,7 @@ if err != nil {
 response, err := httpClient.Do(request)
 ```
 
-The transport clones the request before writing exactly one W3C `traceparent`, scopes the downstream call under a child `TraceContext`, queues one span with method, query-free route, status, duration, sampled flag, and primitive metadata, then returns the original response or error. HTTP 4xx/5xx responses and transport errors are marked as failed dependency spans. Malformed active trace state falls back to a local trace and reports through `OnError`; telemetry capture failures also report through `OnError` and do not replace the app-owned HTTP result. It does not patch global clients, does not capture request or response payloads, does not store headers, cookies, full URLs, query strings, fragments, baggage, tracestate, or raw propagation values. Run `go run ./examples/http_client_trace` for a local example of downstream propagation and span capture.
+The transport clones the request before writing exactly one W3C `traceparent`, scopes the downstream call under a child `TraceContext`, queues one span with method, query-free route, status, duration, sampled flag, and primitive metadata, then returns the original response or error. HTTP 4xx/5xx responses and transport errors are marked as failed dependency spans. Malformed active trace state falls back to a local trace and reports through `OnError`; telemetry capture failures also report through `OnError` and do not replace the app-owned HTTP result. `CapturePhaseTimings` adds low-cardinality `dnsMs`, `connectMs`, `tlsMs`, `wroteRequestMs`, `timeToFirstByteMs`, `connectionReused`, and `connectionWasIdle` metadata when Go's `net/http/httptrace` reports those phases, while preserving caller-installed `httptrace` callbacks. It does not patch global clients, does not capture request or response payloads, does not store headers, cookies, hosts, IPs, full URLs, query strings, fragments, baggage, tracestate, raw propagation values, or phase error messages. Run `go run ./examples/http_client_trace` for a local example of downstream propagation, phase timing metadata, and span capture.
 
 ## Dependency Spans
 

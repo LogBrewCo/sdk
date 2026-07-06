@@ -3,12 +3,14 @@ package logbrew
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"reflect"
 	"strings"
 	"testing"
@@ -425,6 +427,133 @@ func TestHTTPClientTransportInjectsChildTraceAndQueuesSpan(t *testing.T) {
 	for _, unsafe := range []string{"coupon=summer", "receipt", "authorization", "traceparent", "spoofed"} {
 		if strings.Contains(payload, unsafe) {
 			t.Fatalf("outbound span payload leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
+func TestHTTPClientTransportRecordsSafePhaseTimingsAndPreservesCallerTrace(t *testing.T) {
+	client := sampleClient(t)
+	baseTime := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
+	timestamps := []time.Time{
+		baseTime,
+		baseTime.Add(2 * time.Millisecond),
+		baseTime.Add(7 * time.Millisecond),
+		baseTime.Add(11 * time.Millisecond),
+		baseTime.Add(18 * time.Millisecond),
+		baseTime.Add(20 * time.Millisecond),
+		baseTime.Add(24 * time.Millisecond),
+		baseTime.Add(31 * time.Millisecond),
+		baseTime.Add(46 * time.Millisecond),
+		baseTime.Add(52 * time.Millisecond),
+	}
+	now := func() time.Time {
+		if len(timestamps) == 0 {
+			t.Fatal("unexpected extra timestamp read")
+		}
+		current := timestamps[0]
+		timestamps = timestamps[1:]
+		return current
+	}
+	parentTrace, err := NewTraceContext(TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var callerTraceCalls []string
+	callerTrace := &httptrace.ClientTrace{
+		DNSStart: func(info httptrace.DNSStartInfo) {
+			callerTraceCalls = append(callerTraceCalls, "dns:"+info.Host)
+		},
+		WroteRequest: func(httptrace.WroteRequestInfo) {
+			callerTraceCalls = append(callerTraceCalls, "wrote")
+		},
+		GotFirstResponseByte: func() {
+			callerTraceCalls = append(callerTraceCalls, "first-byte")
+		},
+	}
+	ctx := httptrace.WithClientTrace(ContextWithLogBrewTrace(context.Background(), parentTrace), callerTrace)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.example.test/payments/123?coupon=summer#receipt", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("traceparent", "spoofed")
+	request.Header.Set("authorization", "Bearer private")
+
+	transport, err := NewHTTPClientTransport(HTTPClientTransportConfig{
+		Client: client,
+		Base: roundTripFunc(func(cloned *http.Request) (*http.Response, error) {
+			trace := httptrace.ContextClientTrace(cloned.Context())
+			if trace == nil {
+				t.Fatal("expected outbound transport to attach httptrace callbacks")
+			}
+			trace.DNSStart(httptrace.DNSStartInfo{Host: "api.example.test"})
+			trace.DNSDone(httptrace.DNSDoneInfo{})
+			trace.ConnectStart("tcp", "203.0.113.10:443")
+			trace.ConnectDone("tcp", "203.0.113.10:443", nil)
+			trace.TLSHandshakeStart()
+			trace.TLSHandshakeDone(tls.ConnectionState{}, nil)
+			trace.GotConn(httptrace.GotConnInfo{Reused: true, WasIdle: true, IdleTime: 4 * time.Second})
+			trace.WroteRequest(httptrace.WroteRequestInfo{})
+			trace.GotFirstResponseByte()
+			return &http.Response{
+				StatusCode: http.StatusCreated,
+				Body:       io.NopCloser(strings.NewReader("created")),
+				Request:    cloned,
+			}, nil
+		}),
+		RouteTemplate:       "/payments/:payment_id",
+		EventIDPrefix:       "go_http_client_phase",
+		CapturePhaseTimings: true,
+		SpanIDFactory: func() string {
+			return "b7ad6b7169203331"
+		},
+		Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if got := strings.Join(callerTraceCalls, ","); got != "dns:api.example.test,wrote,first-byte" {
+		t.Fatalf("caller httptrace hooks were not preserved: %#v", callerTraceCalls)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Events []struct {
+			Attributes map[string]any `json:"attributes"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(parsed.Events), 1; got != want {
+		t.Fatalf("unexpected event count: got %d want %d\n%s", got, want, payload)
+	}
+	attributes := parsed.Events[0].Attributes
+	metadata := attributes["metadata"].(map[string]any)
+	if attributes["durationMs"] != float64(52) ||
+		metadata["dnsMs"] != float64(5) ||
+		metadata["connectMs"] != float64(7) ||
+		metadata["tlsMs"] != float64(4) ||
+		metadata["wroteRequestMs"] != float64(31) ||
+		metadata["timeToFirstByteMs"] != float64(46) ||
+		metadata["connectionReused"] != true ||
+		metadata["connectionWasIdle"] != true {
+		t.Fatalf("unexpected phase timing metadata: attributes=%#v metadata=%#v", attributes, metadata)
+	}
+	for _, unsafe := range []string{"api.example.test", "203.0.113.10", "coupon=summer", "receipt", "authorization", "Bearer private", "traceparent", "spoofed"} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("phase timing span leaked %q: %s", unsafe, payload)
 		}
 	}
 }
