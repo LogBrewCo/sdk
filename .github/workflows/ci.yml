@@ -199,6 +199,10 @@ jobs:
         if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
         run: bash scripts/real_user_node_axios_smoke.sh
 
+      - name: Run Node HTTP client real-package smoke test
+        if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
+        run: bash scripts/real_user_node_http_client_smoke.sh
+
       - name: Run Node queue high-load fake-intake smoke test
         if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
         run: bash scripts/real_user_node_queue_high_load_smoke.sh

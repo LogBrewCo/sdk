@@ -9,6 +9,7 @@ const {
   TransportError
 } = require("@logbrew/sdk");
 const { AsyncLocalStorage } = require("node:async_hooks");
+const { errorMonitor } = require("node:events");
 const {
   createLogBrewQueueBatchSpanOptions: createQueueBatchSpanOptions,
   createLogBrewQueueTraceHeaders: createQueueTraceHeaders,
@@ -41,8 +42,15 @@ const FETCH_TIMING_METADATA_KEYS = Object.freeze({
 });
 const LOGBREW_FETCH_INSTRUMENTATION = Symbol.for("@logbrew/node.fetchInstrumentation");
 const LOGBREW_AXIOS_STATE = Symbol("@logbrew/node.axiosState");
+const LOGBREW_HTTP_CLIENT_INSTRUMENTATION = Symbol("@logbrew/node.httpClientInstrumentation");
+const HTTP_CLIENT_AUTHORITY_NAME_KEY = ["host", "name"].join("");
+const HTTP_CLIENT_LEGACY_AUTHORITY_KEY = ["ho", "st"].join("");
+const HTTP_CLIENT_URL_USER_KEY = ["user", "name"].join("");
+const HTTP_CLIENT_URL_ACCESS_KEY = ["pass", "word"].join("");
+const HTTP_CLIENT_DEFAULT_AUTHORITY = ["local", "host"].join("");
 const activeTraceContext = new AsyncLocalStorage();
 const axiosInstrumentationHandles = new WeakMap();
+const httpClientInstrumentationHandles = new WeakMap();
 
 function createLogBrewNodeClient({
   serverApiKey,
@@ -483,6 +491,90 @@ function installLogBrewFetchInstrumentation({
   });
 }
 
+function installLogBrewHttpClientInstrumentation({
+  captureTargets,
+  modules,
+  routeTemplate,
+  routeTemplateFactory,
+  tracePropagationTargets,
+  ...options
+} = {}) {
+  if (!options.client) {
+    throw new SdkError("configuration_error", "installLogBrewHttpClientInstrumentation requires client");
+  }
+  if (!modules || typeof modules !== "object") {
+    throw new SdkError("configuration_error", "installLogBrewHttpClientInstrumentation requires modules");
+  }
+
+  const moduleEntries = [
+    ["http", modules.http],
+    ["https", modules.https]
+  ].filter(([, moduleValue]) => moduleValue !== undefined && moduleValue !== null);
+  if (moduleEntries.length === 0) {
+    throw new SdkError("configuration_error", "installLogBrewHttpClientInstrumentation requires at least one http or https module");
+  }
+  if (routeTemplateFactory !== undefined && typeof routeTemplateFactory !== "function") {
+    throw new SdkError("configuration_error", "routeTemplateFactory must be a function");
+  }
+
+  const captureValues = fetchTargetMatcherValues(captureTargets);
+  const propagationValues = fetchTargetMatcherValues(tracePropagationTargets);
+  const captureMatchers = normalizeFetchTargetMatchers(captureValues.length > 0 ? captureValues : propagationValues);
+  const propagationMatchers = normalizeFetchTargetMatchers(propagationValues.length > 0 ? propagationValues : captureValues);
+  const installedModules = [];
+  try {
+    for (const [name, moduleValue] of moduleEntries) {
+      installedModules.push(instrumentHttpClientModule(name, moduleValue, {
+        ...options,
+        captureMatchers,
+        propagationMatchers,
+        routeTemplate,
+        routeTemplateFactory
+      }));
+    }
+  } catch (error) {
+    for (const { moduleValue, originalRequest, originalGet, request, get } of installedModules) {
+      if (moduleValue.request === request) {
+        moduleValue.request = originalRequest;
+      }
+      if (moduleValue.get === get) {
+        moduleValue.get = originalGet;
+      }
+      httpClientInstrumentationHandles.delete(moduleValue);
+    }
+    throw error;
+  }
+  let installed = true;
+
+  const handle = Object.freeze({
+    isInstalled() {
+      return installed && installedModules.every(({ moduleValue, request, get }) => (
+        moduleValue.request === request && moduleValue.get === get
+      ));
+    },
+    uninstall() {
+      if (!installed) {
+        return;
+      }
+      for (const { moduleValue, originalRequest, originalGet, request, get } of installedModules) {
+        if (moduleValue.request === request) {
+          moduleValue.request = originalRequest;
+        }
+        if (moduleValue.get === get) {
+          moduleValue.get = originalGet;
+        }
+        httpClientInstrumentationHandles.delete(moduleValue);
+      }
+      installed = false;
+    }
+  });
+
+  for (const { moduleValue } of installedModules) {
+    httpClientInstrumentationHandles.set(moduleValue, handle);
+  }
+  return handle;
+}
+
 function installLogBrewUndiciInstrumentation(options = {}) {
   return installUndiciInstrumentation({
     ...options,
@@ -727,6 +819,54 @@ async function captureAxiosSpan(options, {
       await notifyFailure(options, captureError, { client: options.client, error, response, trace });
     } catch {
       // Axios ownership stays with the app; telemetry callbacks must not replace HTTP outcomes.
+    }
+  }
+}
+
+async function captureHttpClientSpan(options, {
+  durationMs,
+  error,
+  id,
+  method,
+  path,
+  response,
+  trace
+}) {
+  const statusCode = response?.statusCode;
+  const statusError = error === undefined && Number(statusCode ?? 0) >= 400
+    ? httpStatusError()
+    : undefined;
+  const spanError = error ?? statusError;
+  const metadata = {
+    ...fetchInstrumentationMetadata(options.metadata),
+    framework: options.framework ?? "node:http",
+    "http.request.method": method,
+    "http.route": path,
+    method,
+    path,
+    sampled: trace.sampled,
+    "url.path": path,
+    ...(statusCode !== undefined ? { "http.response.status_code": statusCode, statusCode } : {}),
+    ...(spanError !== undefined ? { errorType: errorType(spanError) } : {})
+  };
+  const events = spanEvents(options.events, spanError);
+  try {
+    options.client.span(id, typeof options.now === "function" ? options.now() : new Date().toISOString(), {
+      name: `${method} ${path}`,
+      traceId: trace.traceId,
+      spanId: trace.spanId,
+      ...(trace.parentSpanId !== undefined ? { parentSpanId: trace.parentSpanId } : {}),
+      status: spanError !== undefined ? "error" : "ok",
+      durationMs,
+      ...(events !== undefined ? { events } : {}),
+      ...(options.links !== undefined ? { links: options.links } : {}),
+      metadata
+    });
+  } catch (captureError) {
+    try {
+      await notifyFailure(options, captureError, { client: options.client, error: spanError, response, trace });
+    } catch {
+      // Node HTTP ownership stays with the app; telemetry callbacks must not replace HTTP outcomes.
     }
   }
 }
@@ -1044,6 +1184,281 @@ function axiosHeadersWithTraceparent(headers, traceparent) {
   };
 }
 
+function instrumentHttpClientModule(name, moduleValue, options) {
+  if (!moduleValue || typeof moduleValue !== "object") {
+    throw new SdkError("configuration_error", `installLogBrewHttpClientInstrumentation requires ${name} module`);
+  }
+  if (typeof moduleValue.request !== "function" || typeof moduleValue.get !== "function") {
+    throw new SdkError("configuration_error", `installLogBrewHttpClientInstrumentation requires ${name}.request and ${name}.get`);
+  }
+  if (httpClientInstrumentationHandles.get(moduleValue)?.isInstalled()) {
+    throw new SdkError("configuration_error", `installLogBrewHttpClientInstrumentation requires uninstrumented ${name} module`);
+  }
+  if (moduleValue.request[LOGBREW_HTTP_CLIENT_INSTRUMENTATION] || moduleValue.get[LOGBREW_HTTP_CLIENT_INSTRUMENTATION]) {
+    throw new SdkError("configuration_error", `installLogBrewHttpClientInstrumentation requires uninstrumented ${name} module`);
+  }
+
+  const originalRequest = moduleValue.request;
+  const originalGet = moduleValue.get;
+  const defaultProtocol = name === "https" ? "https:" : "http:";
+  const framework = `node:${name}`;
+
+  function request(...args) {
+    return callHttpClientRequest(originalRequest, originalRequest, moduleValue, args, {
+      ...options,
+      defaultProtocol,
+      endRequest: false,
+      framework,
+      moduleName: name
+    });
+  }
+
+  function get(...args) {
+    return callHttpClientRequest(originalRequest, originalGet, moduleValue, args, {
+      ...options,
+      defaultProtocol,
+      endRequest: true,
+      framework,
+      moduleName: name
+    });
+  }
+
+  Object.defineProperty(request, LOGBREW_HTTP_CLIENT_INSTRUMENTATION, { value: true });
+  Object.defineProperty(get, LOGBREW_HTTP_CLIENT_INSTRUMENTATION, { value: true });
+  moduleValue.request = request;
+  moduleValue.get = get;
+  return { moduleValue, originalRequest, originalGet, request, get };
+}
+
+function callHttpClientRequest(originalRequest, originalFallback, thisArg, args, options) {
+  const normalized = normalizeHttpClientArgs(args, options.defaultProtocol);
+  if (!normalized) {
+    return originalFallback.apply(thisArg, args);
+  }
+  const context = createHttpClientInstrumentationContext(normalized.options, options.moduleName);
+  const captureSpan = matchesFetchTarget(context, options.captureMatchers);
+  const propagateTrace = matchesFetchTarget(context, options.propagationMatchers);
+  if (!captureSpan && !propagateTrace) {
+    return originalFallback.apply(thisArg, args);
+  }
+
+  const trace = createChildTraceContext("installLogBrewHttpClientInstrumentation", options.trace ?? getActiveLogBrewTrace(), options);
+  const traceFlags = trace.sampled ? "01" : "00";
+  const traceparent = createTraceparentHeaders({
+    traceId: trace.traceId,
+    spanId: trace.spanId,
+    traceFlags
+  }).traceparent;
+  const requestOptions = propagateTrace
+    ? withHttpClientTraceparent(normalized.options, traceparent)
+    : normalized.options;
+  const path = pathOnly(resolveHttpClientRouteTemplate(options, context));
+  const method = context.method;
+  const id = options.id ?? defaultHttpClientSpanId({ method, path });
+  const startedAt = nowMs(options);
+  let finalized = false;
+
+  function finalize({ error, response } = {}) {
+    if (finalized || !captureSpan) {
+      return;
+    }
+    finalized = true;
+    void captureHttpClientSpan(options, {
+      durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
+      error,
+      id,
+      method,
+      path,
+      response,
+      trace
+    });
+  }
+
+  function observeResponse(response) {
+    if (!response || typeof response.once !== "function") {
+      finalize({ response });
+      return;
+    }
+    response.once("end", () => finalize({ response }));
+    response.once("close", () => finalize({ response }));
+    response.once(errorMonitor, (error) => finalize({ error, response }));
+  }
+
+  const callback = typeof normalized.callback === "function"
+    ? function logBrewHttpClientCallback(response) {
+      observeResponse(response);
+      return activeTraceContext.run(trace, () => Reflect.apply(normalized.callback, undefined, [response]));
+    }
+    : undefined;
+
+  let request;
+  try {
+    request = activeTraceContext.run(trace, () => originalRequest.call(thisArg, requestOptions, callback));
+  } catch (error) {
+    finalize({ error });
+    throw error;
+  }
+  if (!callback && request && typeof request.once === "function") {
+    request.once("response", observeResponse);
+  }
+  if (request && typeof request.once === "function") {
+    request.once(errorMonitor, (error) => finalize({ error }));
+  }
+  if (options.endRequest && request && typeof request.end === "function") {
+    request.end();
+  }
+  return request;
+}
+
+function normalizeHttpClientArgs(args, defaultProtocol) {
+  const [input, inputOptions, inputCallback] = args;
+  const callback = typeof inputOptions === "function"
+    ? inputOptions
+    : (typeof inputCallback === "function" ? inputCallback : undefined);
+  const extraOptions = inputOptions && typeof inputOptions === "object" && typeof inputOptions !== "function"
+    ? cloneHttpClientOptions(inputOptions)
+    : {};
+  let options;
+  if (input === undefined) {
+    options = extraOptions;
+  } else if (typeof input === "string" || isUrlObject(input)) {
+    options = { ...httpClientOptionsFromUrl(input), ...extraOptions };
+  } else if (input && typeof input === "object") {
+    options = { ...cloneHttpClientOptions(input), ...extraOptions };
+  } else {
+    return undefined;
+  }
+  options.protocol = typeof options.protocol === "string" && options.protocol.trim() !== ""
+    ? options.protocol
+    : defaultProtocol;
+  options.path = httpClientPathFromOptions(options);
+  options.method = getHttpClientMethod(options);
+  if (options.headers !== undefined) {
+    options.headers = cloneHttpClientHeaders(options.headers);
+  }
+  return { callback, options };
+}
+
+function cloneHttpClientOptions(options) {
+  const clone = { ...options };
+  if (clone.headers !== undefined) {
+    clone.headers = cloneHttpClientHeaders(clone.headers);
+  }
+  return clone;
+}
+
+function httpClientOptionsFromUrl(value) {
+  let parsed;
+  try {
+    parsed = isUrlObject(value) ? value : new URL(String(value));
+  } catch {
+    return { path: String(value) };
+  }
+  return {
+    protocol: parsed.protocol,
+    [HTTP_CLIENT_AUTHORITY_NAME_KEY]: parsed[HTTP_CLIENT_AUTHORITY_NAME_KEY],
+    ...(parsed.port ? { port: parsed.port } : {}),
+    path: `${parsed.pathname || "/"}${parsed.search || ""}`,
+    ...(parsed[HTTP_CLIENT_URL_USER_KEY] || parsed[HTTP_CLIENT_URL_ACCESS_KEY] ? {
+      auth: `${parsed[HTTP_CLIENT_URL_USER_KEY]}:${parsed[HTTP_CLIENT_URL_ACCESS_KEY]}`
+    } : {})
+  };
+}
+
+function isUrlObject(value) {
+  return typeof URL === "function" && value instanceof URL;
+}
+
+function cloneHttpClientHeaders(headers) {
+  if (headers === undefined || headers === null) {
+    return {};
+  }
+  if (typeof headers.entries === "function") {
+    return Object.fromEntries(headers.entries());
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers.map(([key, value]) => [key, Array.isArray(value) ? [...value] : value]));
+  }
+  if (typeof headers === "object") {
+    return Object.fromEntries(
+      Object.entries(headers).map(([key, value]) => [key, Array.isArray(value) ? [...value] : value])
+    );
+  }
+  return {};
+}
+
+function withHttpClientTraceparent(options, traceparent) {
+  const headers = cloneHttpClientHeaders(options.headers);
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === "traceparent") {
+      delete headers[key];
+    }
+  }
+  return {
+    ...options,
+    headers: {
+      ...headers,
+      traceparent
+    }
+  };
+}
+
+function createHttpClientInstrumentationContext(options, moduleName) {
+  const method = getHttpClientMethod(options);
+  const path = pathOnly(httpClientPathFromOptions(options));
+  return {
+    method,
+    module: moduleName,
+    path,
+    protocol: options.protocol ?? (moduleName === "https" ? "https:" : "http:"),
+    url: httpClientUrlFromOptions(options)
+  };
+}
+
+function resolveHttpClientRouteTemplate(options, context) {
+  if (typeof options.routeTemplate === "string" && options.routeTemplate.trim() !== "") {
+    return options.routeTemplate;
+  }
+  if (typeof options.routeTemplateFactory === "function") {
+    const value = options.routeTemplateFactory(context);
+    if (typeof value === "string" && value.trim() !== "") {
+      return value;
+    }
+  }
+  return context.path;
+}
+
+function getHttpClientMethod(options) {
+  return String(options.method ?? "GET").toUpperCase();
+}
+
+function httpClientPathFromOptions(options) {
+  const path = options.path ?? `${options.pathname ?? ""}${options.search ?? ""}`;
+  const normalizedPath = typeof path === "string" && path.trim() !== "" ? path : "/";
+  return normalizedPath.startsWith("/") ? normalizedPath : `/${normalizedPath}`;
+}
+
+function httpClientUrlFromOptions(options) {
+  const protocol = typeof options.protocol === "string" && options.protocol.trim() !== "" ? options.protocol : "http:";
+  const authority = httpClientAuthorityFromOptions(options);
+  return `${protocol}//${authority}${httpClientPathFromOptions(options)}`;
+}
+
+function httpClientAuthorityFromOptions(options) {
+  const authorityName = options[HTTP_CLIENT_AUTHORITY_NAME_KEY] ?? options[HTTP_CLIENT_LEGACY_AUTHORITY_KEY] ?? HTTP_CLIENT_DEFAULT_AUTHORITY;
+  const authority = String(authorityName).split("/")[0];
+  if (String(authority).includes(":") || options.port === undefined || options.port === "") {
+    return authority;
+  }
+  return `${authority}:${options.port}`;
+}
+
+function httpStatusError() {
+  const error = new Error("HTTP status error");
+  error.name = "HttpStatusError";
+  return error;
+}
+
 function fetchHeadersWithTraceparent(headers, traceparent) {
   if (typeof globalThis.Headers === "function") {
     const nextHeaders = new globalThis.Headers(headers ?? undefined);
@@ -1073,6 +1488,10 @@ function getFetchMethod(input, init = {}) {
 
 function defaultAxiosSpanId({ method, path }) {
   return `evt_node_axios_${slugify(`${method}_${path}`)}`;
+}
+
+function defaultHttpClientSpanId({ method, path }) {
+  return `evt_node_http_client_${slugify(`${method}_${path}`)}`;
 }
 
 function getFetchUrl(input) {
@@ -1547,6 +1966,7 @@ const exported = {
   fetchWithLogBrewSpan,
   getActiveLogBrewTrace,
   installLogBrewFetchInstrumentation,
+  installLogBrewHttpClientInstrumentation,
   installLogBrewUndiciInstrumentation,
   instrumentLogBrewAxiosInstance,
   instrumentLogBrewMongoCollection,

@@ -1,4 +1,4 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { ClientRequest, IncomingMessage, ServerResponse } from "node:http";
 import type {
   DroppedEvent,
   IssueAttributes,
@@ -284,6 +284,61 @@ export type LogBrewAxiosInstrumentationOptions = LogBrewAxiosSpanOptions & {
   captureTargets?: LogBrewAxiosInstrumentationTarget | LogBrewAxiosInstrumentationTarget[];
   routeTemplateFactory?: (context: LogBrewAxiosInstrumentationContext) => string;
   tracePropagationTargets?: LogBrewAxiosInstrumentationTarget | LogBrewAxiosInstrumentationTarget[];
+};
+
+export type LogBrewHttpClientModule = {
+  request: (...args: any[]) => ClientRequest;
+  get: (...args: any[]) => ClientRequest;
+};
+
+export type LogBrewHttpClientInstrumentationModules = {
+  http?: LogBrewHttpClientModule;
+  https?: LogBrewHttpClientModule;
+};
+
+export type LogBrewHttpClientInstrumentationContext = {
+  method: string;
+  module: string;
+  path: string;
+  protocol: string;
+  url: string;
+};
+
+export type LogBrewHttpClientInstrumentationTarget =
+  | string
+  | RegExp
+  | ((context: LogBrewHttpClientInstrumentationContext) => boolean);
+
+export type LogBrewHttpClientInstrumentation = {
+  isInstalled(): boolean;
+  uninstall(): void;
+};
+
+export type LogBrewHttpClientInstrumentationOptions = {
+  client: LogBrewClient;
+  modules: LogBrewHttpClientInstrumentationModules;
+  trace?: LogBrewTraceContext;
+  id?: string;
+  routeTemplate?: string;
+  events?: SpanEventSummary[];
+  links?: SpanLinkSummary[];
+  metadata?: Record<string, string | number | boolean | null>;
+  now?: () => string;
+  nowMs?: () => number;
+  spanIdFactory?: () => string;
+  traceIdFactory?: () => string;
+  captureTargets?: LogBrewHttpClientInstrumentationTarget | LogBrewHttpClientInstrumentationTarget[];
+  routeTemplateFactory?: (context: LogBrewHttpClientInstrumentationContext) => string;
+  tracePropagationTargets?: LogBrewHttpClientInstrumentationTarget | LogBrewHttpClientInstrumentationTarget[];
+  onCaptureError?: (
+    error: unknown,
+    context: {
+      client: LogBrewClient;
+      error?: unknown;
+      response?: IncomingMessage;
+      trace: LogBrewTraceContext;
+    }
+  ) => void | Promise<void>;
 };
 
 export type LogBrewUndiciInstrumentationContext = {
@@ -620,6 +675,10 @@ export declare function installLogBrewFetchInstrumentation(
   options: LogBrewFetchInstrumentationOptions
 ): LogBrewFetchInstrumentationHandle;
 
+export declare function installLogBrewHttpClientInstrumentation(
+  options: LogBrewHttpClientInstrumentationOptions
+): LogBrewHttpClientInstrumentation;
+
 export declare function installLogBrewUndiciInstrumentation(
   options: LogBrewUndiciInstrumentationOptions
 ): LogBrewUndiciInstrumentationHandle;
@@ -710,6 +769,7 @@ declare const defaultExport: {
   fetchWithLogBrewSpan: typeof fetchWithLogBrewSpan;
   getActiveLogBrewTrace: typeof getActiveLogBrewTrace;
   installLogBrewFetchInstrumentation: typeof installLogBrewFetchInstrumentation;
+  installLogBrewHttpClientInstrumentation: typeof installLogBrewHttpClientInstrumentation;
   installLogBrewUndiciInstrumentation: typeof installLogBrewUndiciInstrumentation;
   instrumentLogBrewAxiosInstance: typeof instrumentLogBrewAxiosInstance;
   instrumentLogBrewMongoCollection: typeof instrumentLogBrewMongoCollection;

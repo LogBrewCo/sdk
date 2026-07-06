@@ -255,6 +255,47 @@ undiciInstrumentation.uninstall();
 
 This installer subscribes to Node's public Undici diagnostic channels and captures matching `fetch`, `undici.request`, `undici.stream`, and other Undici-backed requests without adding an Undici dependency. It writes one normalized `traceparent`, creates one `node:undici` client span, records status, total duration, safe phase timings (`http.phase.request_ms`, `http.phase.wait_ms`, `http.phase.response_ms`), and `content-length` as `http.response_content_length` when available. It is off by default, target-gated, reversible, and one installation per process to avoid duplicate spans. It does not capture arbitrary headers, request or response payloads, query strings, fragments, hosts, socket addresses, error messages, baggage, tracestate, or raw propagation metadata.
 
+## Node HTTP Client Spans
+
+For libraries or app code that still use Node core `http` or `https` modules directly, install target-scoped module instrumentation explicitly. LogBrew wraps only the module objects you pass, puts them back on `uninstall()`, and leaves unmatched requests untouched:
+
+```js
+import http from "node:http";
+import https from "node:https";
+import { installLogBrewHttpClientInstrumentation } from "@logbrew/node";
+
+const httpInstrumentation = installLogBrewHttpClientInstrumentation({
+  client: logbrew.client,
+  trace: logbrew.trace,
+  modules: { http, https },
+  captureTargets({ path }) {
+    return path.startsWith("/payments/");
+  },
+  tracePropagationTargets({ path }) {
+    return path.startsWith("/payments/");
+  },
+  routeTemplateFactory({ path }) {
+    return path.replace(/\/\d+/g, "/:id");
+  },
+  metadata: {
+    service: "checkout-api",
+    release: "checkout-api@1.4.0"
+  }
+});
+
+const req = http.request("http://payments.example/payments/123?coupon=hidden", {
+  method: "POST",
+  headers: { accept: "application/json" }
+}, (res) => {
+  res.resume();
+});
+req.end();
+
+httpInstrumentation.uninstall();
+```
+
+Captured spans use `framework: "node:http"` or `framework: "node:https"` with method, route or query-free path, status code, duration, sampled flag, and W3C trace IDs. LogBrew clones request options before writing one normalized `traceparent`, so caller-owned header objects are not mutated. HTTP 4xx/5xx responses become error-status spans with a type-only `HttpStatusError` event, but the original response is still delivered normally. LogBrew does not patch modules you do not pass, capture request or response bodies, keep query strings/fragments, serialize arbitrary headers, store raw `traceparent`, include network addresses/socket details in telemetry, infer baggage/tracestate, or include exception messages/stacks.
+
 ## Outbound Axios Spans
 
 If your service already uses Axios, install LogBrew on the Axios instance your app owns. The helper uses Axios interceptors, injects one normalized W3C `traceparent`, captures one client span per matching request, and returns an `uninstall()` handle:

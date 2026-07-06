@@ -211,6 +211,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
 
         self.assertIn('"Node Redis real-package smoke"', script)
         self.assertIn('"Node Axios real-package smoke"', script)
+        self.assertIn('"Node HTTP client real-package smoke"', script)
         self.assertIn('"Node queue high-load fake-intake smoke"', script)
         self.assertRegex(
             script,
@@ -222,6 +223,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete\n\n"
             r'begin_next_step "Node Axios real-package smoke"\n'
             r'run_shell_step "bash scripts/real_user_node_axios_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Node HTTP client real-package smoke"\n'
+            r'run_shell_step "bash scripts/real_user_node_http_client_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Node queue high-load fake-intake smoke"\n'
             r'run_shell_step "bash scripts/real_user_node_queue_high_load_smoke\.sh"\n'
