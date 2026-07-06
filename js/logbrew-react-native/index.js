@@ -1,10 +1,12 @@
 import React from "react";
 import {
+  createIssueAttributesFromError,
   createTraceparent,
   LogBrewClient,
   parseTraceparent,
   SdkError
 } from "@logbrew/sdk";
+import { sanitizeReactNativeIssueMetadata } from "./metadata.js";
 
 const DEFAULT_SDK_NAME = "logbrew-react-native";
 const DEFAULT_SDK_VERSION = "0.1.0";
@@ -493,6 +495,9 @@ export function createReactNavigationSpanListener(client, navigationContainer, {
 }
 
 export function createReactNativeErrorEvent(error, {
+  debugIdMap,
+  environment,
+  fingerprint,
   id,
   idFactory = defaultErrorEventId,
   includeStack = false,
@@ -501,29 +506,41 @@ export function createReactNativeErrorEvent(error, {
   now = () => new Date().toISOString(),
   platform,
   appState,
+  release,
+  runtime,
   screen,
+  service,
   timestamp,
   trace
 } = {}) {
-  const details = errorDetails(error, includeStack);
-  const eventMetadata = compactMetadata({
-    ...getReactNativeContext({ platform, appState }),
-    errorName: details.name,
-    errorValueType: details.valueType,
+  const details = errorDetails(error);
+  const traceContext = resolveTraceContext(trace ?? getActiveLogBrewTrace());
+  const attributes = createIssueAttributesFromError(error?.reason ?? error?.error ?? error, {
+    debugIdMap,
+    environment,
+    fingerprint,
+    includeErrorStack: includeStack,
+    level,
+    metadata: {
+      ...getReactNativeContext({ platform, appState }),
+      errorValueType: details.valueType,
+      screen,
+      ...metadata
+    },
+    release,
+    runtime,
+    service,
     source: "react-native.error",
-    screen,
-    ...(includeStack ? { errorStack: details.stack } : {}),
-    ...metadata,
-    ...getReactNativeTraceMetadata(trace ?? getActiveLogBrewTrace())
+    trace: traceContext
   });
   return {
     id: id ?? idFactory({ error, message: details.message, screen }),
     timestamp: timestamp ?? now(),
     attributes: {
+      ...attributes,
       title: `React Native error: ${details.message}`,
-      level,
       message: details.message,
-      metadata: eventMetadata
+      metadata: sanitizeReactNativeIssueMetadata(attributes.metadata, compactMetadata)
     }
   };
 }
@@ -644,25 +661,12 @@ function attributesWithTrace(attributes, trace) {
   };
 }
 
-function errorDetails(error, includeStack) {
+function errorDetails(error) {
   const candidate = error?.reason ?? error?.error ?? error;
-  const message = errorMessage(candidate);
   return {
-    message,
-    name: errorName(candidate),
-    stack: includeStack && typeof candidate?.stack === "string" ? candidate.stack : undefined,
+    message: errorMessage(candidate),
     valueType: candidate === null ? "null" : typeof candidate
   };
-}
-
-function errorName(error) {
-  if (error instanceof Error && typeof error.name === "string" && error.name.trim() !== "") {
-    return error.name;
-  }
-  if (typeof error?.name === "string" && error.name.trim() !== "") {
-    return error.name;
-  }
-  return undefined;
 }
 
 function errorMessage(error) {

@@ -241,12 +241,18 @@ export type ReactNativeErrorIdFactoryContext = {
 };
 
 export type CaptureReactNativeErrorOptions = ReactNativeContextOptions & {
+  debugIdMap?: Record<string, string>;
+  environment?: string;
+  fingerprint?: string;
   id?: string;
   idFactory?: (context: ReactNativeErrorIdFactoryContext) => string;
   includeStack?: boolean;
   level?: IssueAttributes["level"];
   now?: () => string;
+  release?: string;
+  runtime?: string;
   screen?: string;
+  service?: string;
   timestamp?: string;
 };
 

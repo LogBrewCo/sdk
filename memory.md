@@ -1,5 +1,33 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-06: React Native runtime source-map issue metadata gap reduced after
+  source-reading Sentry React Native
+  `getsentry/sentry-react-native@b5288f646ce32ce1859dcf7e1285d7cd43b14fea`
+  Metro Debug ID serializer/snippet, Debug ID copy/check scripts, Expo
+  source-map upload, DebugSymbolicator, and profiling Debug ID paths, plus
+  Datadog React Native
+  `DataDog/dd-sdk-reactnative@fbaedbbd043d123017c7ef90f2e77d3fb272644e`
+  CodePush/RUM/navigation/error configuration paths. Sentry remains stronger
+  on automatic Metro build integration and runtime Debug ID globals; Datadog
+  is stronger on CodePush/version/source-map upload workflow. LogBrew now
+  extends `@logbrew/react-native` `createReactNativeErrorEvent()` and
+  `captureReactNativeError()` with explicit `debugIdMap`,
+  release/environment/service/runtime/fingerprint inputs, reuses
+  `@logbrew/sdk` issue metadata construction, keeps stack text opt-in, and
+  normalizes React Native frame/source-map metadata to path-only values so
+  hosts, query strings, fragments, and local absolute paths are not serialized.
+  Evidence: RED smoke-gate test failed on missing RN runtime source-map issue
+  proof; GREEN focused RN error test; GREEN `npm --prefix
+  js/logbrew-react-native test`; GREEN focused smoke gate; GREEN `bash
+  scripts/real_user_react_native_release_artifact_smoke.sh` with packed local
+  packages, `react-native@0.86.0`, `react@19.2.7`, Metro bundle/source map,
+  runtime issue `releaseArtifactDebugId`, path-only frame/code file metadata,
+  trace/span IDs, privacy assertions, and existing 503-to-202 loopback upload
+  retry. Research:
+  `docs/competitor-research/react-native-runtime-source-map-errors-2026-07-06.md`.
+  Honest gap: Sentry still leads on hosted source-map lookup, runtime Debug ID
+  globals, source-context rendering, native crash symbolication, and
+  end-to-end symbolicated issue UI.
 - 2026-07-06: Node Redis pipeline/multi trace gap reduced after source reads
   from Sentry JavaScript
   `getsentry/sentry-javascript@9d53b0cd8ccd894d7ce24530cb1b289f2607eb97`

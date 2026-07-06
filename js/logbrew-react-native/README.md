@@ -106,6 +106,25 @@ try {
 
 Set `includeStack: true` only when your app has decided stack text is safe to send. Non-`Error` thrown values are accepted and converted into issue messages so app error handlers do not need custom guards.
 
+When you also prepare React Native release artifacts, pass the same release identity and an app-owned Debug ID map so issue metadata can point at the matching source map without sending stack text by default:
+
+```js
+captureReactNativeError(client, error, {
+  platform: Platform,
+  appState: AppState,
+  screen: "Checkout",
+  release: "2026.06.18",
+  environment: "production",
+  service: "checkout-mobile",
+  runtime: "react-native",
+  debugIdMap: {
+    "app:///react-native/android/index.android.bundle": "11111111-2222-4333-8444-555555555555"
+  }
+});
+```
+
+`debugIdMap` values are matched against the first parsed JavaScript stack frame. LogBrew records `releaseArtifactDebugId`, path-only frame metadata, release/environment/service/runtime, and active trace IDs when available. It strips query strings, hashes, and local absolute paths from frame metadata; raw stack text is still opt-in with `includeStack: true`. This is local issue metadata for source-map lookup. Hosted source-map upload, lookup, and symbolicated issue rendering require backend support before you can claim end-to-end production symbolication.
+
 ## Provider And Hooks
 
 ```js

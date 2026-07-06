@@ -392,6 +392,113 @@ assert app_dir not in serialized_manifest
 assert app_dir not in serialized_symbolication
 PY
 
+runtime_issue_payload="$tmp_dir/react-native-runtime-issue.json"
+(
+  cd "$app_dir"
+  node --input-type=module - "$ready_manifest" "$bundle_file" "$runtime_issue_payload" <<'JS'
+import fs from "node:fs";
+import {
+  createLogBrewReactNativeClient,
+  createReactNativeErrorEvent,
+  createReactNativeTraceContext
+} from "@logbrew/react-native";
+
+const [, , manifestPath, bundlePath, outputPath] = process.argv;
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const artifact = manifest.artifacts[0];
+const source = fs.readFileSync(bundlePath, "utf8");
+const needle = "react native checkout exploded";
+const index = source.indexOf(needle);
+if (index < 0) {
+  throw new Error("expected minified React Native bundle to contain the checkout error marker");
+}
+const before = source.slice(0, index);
+const line = before.split("\n").length;
+const column = index - before.lastIndexOf("\n");
+const debugId = artifact.debugId;
+const runtimePath = `/react-native/${artifact.minifiedSource.path}`;
+const runtimeUrl = `https://mobile.example.test${runtimePath}?logbrew_rn_query_placeholder=1#logbrew_rn_hash_placeholder`;
+const trace = createReactNativeTraceContext({
+  traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  spanId: "b7ad6b7169203331"
+});
+const error = new Error("react native checkout exploded 47");
+error.stack = `Error: react native checkout exploded 47\n    at checkoutFailureSignal (${runtimeUrl}:${line}:${column})`;
+
+const event = createReactNativeErrorEvent(error, {
+  appState: { currentState: "active" },
+  debugIdMap: {
+    [runtimeUrl]: debugId,
+    [runtimePath]: debugId,
+    [artifact.minifiedSource.minifiedUrl]: debugId
+  },
+  environment: manifest.environment,
+  platform: { OS: "android" },
+  release: manifest.release,
+  runtime: "react-native",
+  screen: "Checkout",
+  service: manifest.service,
+  trace
+});
+const client = createLogBrewReactNativeClient({
+  clientKey: "lbw_ingest_fake_react_native_runtime_key",
+  sdkName: "react-native-release-artifact-smoke",
+  sdkVersion: "0.1.0"
+});
+client.issue(event.id, event.timestamp, event.attributes);
+const payload = JSON.parse(client.previewJson()).events[0];
+fs.writeFileSync(outputPath, JSON.stringify({
+  debugId,
+  runtimeIssue: payload.attributes,
+  runtimePath
+}, null, 2));
+JS
+)
+
+python3 - "$runtime_issue_payload" "$tmp_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[2]
+debug_id = payload["debugId"]
+runtime_issue = payload["runtimeIssue"]
+runtime_path = payload["runtimePath"]
+serialized_runtime_issue = json.dumps(runtime_issue)
+
+assert runtime_issue["title"] == "React Native error: react native checkout exploded 47"
+assert runtime_issue["message"] == "react native checkout exploded 47"
+assert runtime_issue["level"] == "error"
+assert runtime_issue["metadata"]["source"] == "react-native.error"
+assert runtime_issue["metadata"]["release"] == "2026.06.18-react-native"
+assert runtime_issue["metadata"]["environment"] == "production"
+assert runtime_issue["metadata"]["service"] == "checkout-react-native"
+assert runtime_issue["metadata"]["runtime"] == "react-native"
+assert runtime_issue["metadata"]["platform"] == "android"
+assert runtime_issue["metadata"]["appState"] == "active"
+assert runtime_issue["metadata"]["screen"] == "Checkout"
+assert runtime_issue["metadata"]["errorName"] == "Error"
+assert runtime_issue["metadata"]["errorValueType"] == "object"
+assert runtime_issue["metadata"]["releaseArtifactType"] == "sourcemap"
+assert runtime_issue["metadata"]["releaseArtifactDebugId"] == debug_id
+assert runtime_issue["metadata"]["releaseArtifactCodeFile"] == runtime_path
+assert runtime_issue["metadata"]["errorFrameFile"] == runtime_path
+assert runtime_issue["metadata"]["errorFrameLine"] > 0
+assert runtime_issue["metadata"]["errorFrameColumn"] > 0
+assert runtime_issue["metadata"]["issueGroupingKey"] == f"react-native.error:Error:{runtime_path}"
+assert runtime_issue["metadata"]["issueGroupingSource"] == "error_type_and_frame"
+assert runtime_issue["metadata"]["traceId"] == "4bf92f3577b34da6a3ce929d0e0e4736"
+assert runtime_issue["metadata"]["parentSpanId"] == "00f067aa0ba902b7"
+assert runtime_issue["metadata"]["spanId"] == "b7ad6b7169203331"
+assert "mobile.example" not in serialized_runtime_issue
+assert "logbrew_rn_query_placeholder" not in serialized_runtime_issue
+assert "logbrew_rn_hash_placeholder" not in serialized_runtime_issue
+assert "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_runtime_issue
+assert "errorStack" not in serialized_runtime_issue
+assert tmp_dir not in serialized_runtime_issue
+PY
+
 port_file="$tmp_dir/fake-intake-port"
 state_file="$tmp_dir/fake-intake-state.json"
 expected_bearer="fake-react-native-release-artifact-auth-value"

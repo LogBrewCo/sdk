@@ -135,6 +135,22 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn('assert "logbrew_next_hash_placeholder" not in serialized_runtime_issue', smoke)
         self.assertIn("assert tmp_dir not in serialized_runtime_issue", smoke)
 
+    def test_react_native_smoke_links_runtime_error_to_release_artifact_debug_id(self) -> None:
+        smoke = (ROOT / "scripts" / "real_user_react_native_release_artifact_smoke.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('"@logbrew/react-native": "file:../logbrew-react-native.tgz"', smoke)
+        self.assertIn("createReactNativeErrorEvent", smoke)
+        self.assertIn("debugIdMap", smoke)
+        self.assertIn('assert runtime_issue["metadata"]["releaseArtifactDebugId"] == debug_id', smoke)
+        self.assertIn('assert runtime_issue["metadata"]["releaseArtifactCodeFile"] == runtime_path', smoke)
+        self.assertIn('assert runtime_issue["metadata"]["errorFrameFile"] == runtime_path', smoke)
+        self.assertIn('assert "mobile.example" not in serialized_runtime_issue', smoke)
+        self.assertIn('assert "logbrew_rn_query_placeholder" not in serialized_runtime_issue', smoke)
+        self.assertIn('assert "logbrew_rn_hash_placeholder" not in serialized_runtime_issue', smoke)
+        self.assertIn("assert tmp_dir not in serialized_runtime_issue", smoke)
+
 
 if __name__ == "__main__":
     unittest.main()
