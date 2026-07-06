@@ -1,5 +1,33 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-06: Node Prisma rich-trace gap reduced after source reads from
+  Sentry JavaScript
+  `getsentry/sentry-javascript@96cbf5ec8c420c6b6a8dba4e2fe245cad4333edb`
+  (`packages/node/src/integrations/tracing/prisma/index.ts`, vendored
+  `active-tracing-helper.ts`, `instrumentation.ts`, constants, and v6 helper),
+  Datadog JS
+  `DataDog/dd-trace-js@02cb1a1fc744c4589385d91c674a6c5720a5d747`
+  (`datadog-plugin-prisma` plugin/helper/tests and
+  `datadog-instrumentations/src/prisma.js` hook), OpenTelemetry JS Contrib
+  `07607d0adab59f87c0e517075fa1fbd41c18f99e` (no Prisma package found), and
+  PostHog Node `fe534177f0257f1f8400bf8189d9bdd6c3e20aea` (no comparable
+  Prisma tracing integration found). Added `@logbrew/prisma` with explicit
+  Prisma Client extension helpers: `instrumentLogBrewPrismaClient(...)`,
+  `createLogBrewPrismaExtension(...)`, and
+  `prismaOperationWithLogBrewSpan(...)`. LogBrew reuses
+  `@logbrew/node` database spans, captures model/action/row-count/error-type
+  context, exposes uninstall, and avoids global Prisma runtime patching, engine
+  helper injection, SQL text, args/results, connection strings, hosts/users,
+  headers, exception messages/stacks, baggage, and tracestate. Evidence: RED
+  missing-package smoke; GREEN `bash scripts/real_user_prisma_smoke.sh` with
+  packed local packages, real Prisma generate/SQLite client operations,
+  TypeScript/CJS checks, uninstall, privacy assertions, 1,500-operation
+  high-load queue proof, 500 visible drops, and 503-to-202 fake-intake retry;
+  GREEN `npm --prefix js/logbrew-prisma test`, release metadata, targeted
+  public verifier tests, and JS publint. Research:
+  `docs/competitor-research/node-prisma-tracing-2026-07-06.md`. Honest gap:
+  Sentry/Datadog still lead on automatic Prisma runtime/engine spans,
+  multi-version internals, DBM-style trace handoff, and hosted trace UI.
 - 2026-07-04: Python outbound HTTP now has opt-in reversible per-client
   instrumentation after source reads from Sentry Python
   `getsentry/sentry-python@1bd120f41780bfd5fd4d4b7c65aae395e425adab`

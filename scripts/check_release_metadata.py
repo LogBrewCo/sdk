@@ -45,6 +45,7 @@ JS_PACKAGES = {
     "js/logbrew-nestjs": "@logbrew/nestjs",
     "js/logbrew-next": "@logbrew/next",
     "js/logbrew-node": "@logbrew/node",
+    "js/logbrew-prisma": "@logbrew/prisma",
     "js/logbrew-react": "@logbrew/react",
     "js/logbrew-react-native": "@logbrew/react-native",
     "js/logbrew-svelte": "@logbrew/svelte",

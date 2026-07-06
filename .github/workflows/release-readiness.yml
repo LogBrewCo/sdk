@@ -275,6 +275,9 @@ jobs:
       - name: Run Node queue high-load fake-intake smoke test
         run: bash scripts/real_user_node_queue_high_load_smoke.sh
 
+      - name: Run Prisma real-user smoke test
+        run: bash scripts/real_user_prisma_smoke.sh
+
       - name: Run BullMQ real-user smoke test
         run: bash scripts/real_user_bullmq_smoke.sh
 

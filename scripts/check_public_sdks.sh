@@ -52,6 +52,7 @@ STEP_LABELS=(
   "Browser installed-artifact fake-intake smoke"
   "Node.js real-user smoke"
   "Node queue high-load fake-intake smoke"
+  "Prisma real-user smoke"
   "BullMQ real-user smoke"
   "KafkaJS real-user smoke"
   "AMQP/RabbitMQ real-user smoke"
@@ -420,11 +421,11 @@ run_shell_step "cd rust/logbrew && cargo publish --dry-run --allow-dirty"
 mark_step_complete
 
 begin_next_step "JavaScript tests"
-run_shell_step "python3 scripts/check_js_sources.py && bash scripts/check_js_lint.sh && cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test"
+run_shell_step "python3 scripts/check_js_sources.py && bash scripts/check_js_lint.sh && cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-prisma && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test"
 mark_step_complete
 
 begin_next_step "JavaScript package dry-run"
-run_shell_step "bash scripts/check_js_package.sh && cd js/logbrew-js && npm pack --dry-run >/dev/null && cd ../logbrew-browser && npm pack --dry-run >/dev/null && cd ../logbrew-node && npm pack --dry-run >/dev/null && cd ../logbrew-bullmq && npm pack --dry-run >/dev/null && cd ../logbrew-kafkajs && npm pack --dry-run >/dev/null && cd ../logbrew-amqplib && npm pack --dry-run >/dev/null && cd ../logbrew-aws-sqs && npm pack --dry-run >/dev/null && cd ../logbrew-express && npm pack --dry-run >/dev/null && cd ../logbrew-fastify && npm pack --dry-run >/dev/null && cd ../logbrew-nestjs && npm pack --dry-run >/dev/null && cd ../logbrew-angular && npm pack --dry-run >/dev/null && cd ../logbrew-vue && npm pack --dry-run >/dev/null && cd ../logbrew-svelte && npm pack --dry-run >/dev/null && cd ../logbrew-react && npm pack --dry-run >/dev/null && cd ../logbrew-react-native && npm pack --dry-run >/dev/null && cd ../logbrew-next && npm pack --dry-run >/dev/null"
+run_shell_step "bash scripts/check_js_package.sh && cd js/logbrew-js && npm pack --dry-run >/dev/null && cd ../logbrew-browser && npm pack --dry-run >/dev/null && cd ../logbrew-node && npm pack --dry-run >/dev/null && cd ../logbrew-prisma && npm pack --dry-run >/dev/null && cd ../logbrew-bullmq && npm pack --dry-run >/dev/null && cd ../logbrew-kafkajs && npm pack --dry-run >/dev/null && cd ../logbrew-amqplib && npm pack --dry-run >/dev/null && cd ../logbrew-aws-sqs && npm pack --dry-run >/dev/null && cd ../logbrew-express && npm pack --dry-run >/dev/null && cd ../logbrew-fastify && npm pack --dry-run >/dev/null && cd ../logbrew-nestjs && npm pack --dry-run >/dev/null && cd ../logbrew-angular && npm pack --dry-run >/dev/null && cd ../logbrew-vue && npm pack --dry-run >/dev/null && cd ../logbrew-svelte && npm pack --dry-run >/dev/null && cd ../logbrew-react && npm pack --dry-run >/dev/null && cd ../logbrew-react-native && npm pack --dry-run >/dev/null && cd ../logbrew-next && npm pack --dry-run >/dev/null"
 mark_step_complete
 
 begin_next_step "Python tests"
@@ -533,6 +534,10 @@ mark_step_complete
 
 begin_next_step "Node queue high-load fake-intake smoke"
 run_shell_step "bash scripts/real_user_node_queue_high_load_smoke.sh"
+mark_step_complete
+
+begin_next_step "Prisma real-user smoke"
+run_shell_step "bash scripts/real_user_prisma_smoke.sh"
 mark_step_complete
 
 begin_next_step "BullMQ real-user smoke"

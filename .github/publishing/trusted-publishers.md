@@ -42,6 +42,7 @@ Configure each npm package with GitHub Actions trusted publishing and allowed ac
 - `@logbrew/sdk`
 - `@logbrew/browser`
 - `@logbrew/node`
+- `@logbrew/prisma`
 - `@logbrew/bullmq`
 - `@logbrew/kafkajs`
 - `@logbrew/amqplib`

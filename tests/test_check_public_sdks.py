@@ -218,6 +218,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "Node queue high-load fake-intake smoke"\n'
             r'run_shell_step "bash scripts/real_user_node_queue_high_load_smoke\.sh"\n'
             r"mark_step_complete\n\n"
+            r'begin_next_step "Prisma real-user smoke"\n'
+            r'run_shell_step "bash scripts/real_user_prisma_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
             r'begin_next_step "BullMQ real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_bullmq_smoke\.sh"\n'
             r"mark_step_complete\n\n"
@@ -240,6 +243,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         script = SCRIPT.read_text()
 
         self.assertIn('"npm public registry install smoke"', script)
+        self.assertIn('"Prisma real-user smoke"', script)
         self.assertRegex(
             script,
             r'begin_next_step "AWS SQS real-user smoke"\n'

@@ -151,6 +151,7 @@ jobs:
             js/logbrew-js
             js/logbrew-browser
             js/logbrew-node
+            js/logbrew-prisma
             js/logbrew-bullmq
             js/logbrew-kafkajs
             js/logbrew-amqplib
