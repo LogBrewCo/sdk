@@ -15,7 +15,7 @@ import {
   stableJson
 } from "./release-artifacts-common.js";
 import { runUploadJs } from "./release-artifacts-upload.js";
-import { verifyJavaScriptSymbolication } from "./release-artifacts-symbolication.js";
+import { verifyJavaScriptIssueSymbolication, verifyJavaScriptSymbolication } from "./release-artifacts-symbolication.js";
 
 const DEBUG_ID_NAMESPACE = "16f4a837-7e0b-4d7c-97d9-8a7af1fd2768";
 const DEBUG_ID_RE = /(?:\/\/#|\/\*#)\s*debugId=([A-Za-z0-9._:-]+)/giu;
@@ -30,7 +30,7 @@ function usage() {
     "Usage:",
     "  logbrew-release-artifacts prepare-js --build-dir <dir> [--write] [--strip-sources-content] [--strip-source-prefix <path>...]",
     "  logbrew-release-artifacts manifest-js --build-dir <dir> --release <id> --environment <env> --service <name> --minified-path-prefix <url-or-path> [--repository-url <url>] [--commit-sha <sha>] [--allow-sources-content]",
-    "  logbrew-release-artifacts symbolicate-js --build-dir <dir> --manifest <file> --stack-frame <frame>",
+    "  logbrew-release-artifacts symbolicate-js --build-dir <dir> --manifest <file> (--stack-frame <frame> | --issue-event <file>)",
     "  logbrew-release-artifacts upload-js --build-dir <dir> --manifest <file> --endpoint <url> [--allow-hosted] [--token-env <env>] [--dry-run] [--max-retries <n>] [--retry-delay <seconds>] [--timeout <seconds>]",
     "",
     "This installed-package helper prepares, validates, resolves, and uploads JavaScript source-map artifacts.",
@@ -657,7 +657,8 @@ function runSymbolicateJs(args) {
   const options = parseOptions(args, {
     "build-dir": "string",
     manifest: "string",
-    "stack-frame": "string"
+    "stack-frame": "string",
+    "issue-event": "string"
   });
   try {
     const buildDir = requireBuildDir(requireOption(options, "build-dir"));
@@ -665,9 +666,28 @@ function runSymbolicateJs(args) {
     if (!fs.existsSync(manifestPath)) {
       throw new Error(`manifest file does not exist: ${options.manifest}`);
     }
+    const stackFrame = typeof options["stack-frame"] === "string" && options["stack-frame"].trim() !== "";
+    const issueEvent = typeof options["issue-event"] === "string" && options["issue-event"].trim() !== "";
+    if (stackFrame === issueEvent) {
+      throw new Error("provide exactly one of --stack-frame or --issue-event");
+    }
+    const manifest = readJsonObject(manifestPath, "manifest");
+    if (issueEvent) {
+      const issueEventPath = path.resolve(requireOption(options, "issue-event"));
+      if (!fs.existsSync(issueEventPath)) {
+        throw new Error(`issue event file does not exist: ${options["issue-event"]}`);
+      }
+      const report = verifyJavaScriptIssueSymbolication({
+        buildDir,
+        manifest,
+        issueEvent: readJsonObject(issueEventPath, "issue event")
+      });
+      printJson(report);
+      return 0;
+    }
     const report = verifyJavaScriptSymbolication({
       buildDir,
-      manifest: readJsonObject(manifestPath, "manifest"),
+      manifest,
       stackFrame: requireOption(options, "stack-frame")
     });
     printJson(report);

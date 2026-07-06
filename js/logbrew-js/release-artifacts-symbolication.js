@@ -287,6 +287,77 @@ function originalPositionFor(payload, generatedLine, generatedColumn) {
   return original;
 }
 
+function isJsonObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringOrNull(value) {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+function metadataFromIssueEvent(issueEvent) {
+  if (!isJsonObject(issueEvent)) {
+    throw new Error("issue event must be a JSON object");
+  }
+  if (isJsonObject(issueEvent.attributes) && isJsonObject(issueEvent.attributes.metadata)) {
+    return {
+      metadata: issueEvent.attributes.metadata,
+      input: {
+        type: "sdk_issue_event",
+        ...(stringOrNull(issueEvent.id) ? { issueId: stringOrNull(issueEvent.id) } : {}),
+        metadataSource: "attributes.metadata"
+      }
+    };
+  }
+  if (isJsonObject(issueEvent.metadata)) {
+    return {
+      metadata: issueEvent.metadata,
+      input: {
+        type: "issue_attributes",
+        metadataSource: "metadata"
+      }
+    };
+  }
+  throw new Error("issue event must contain attributes.metadata or metadata");
+}
+
+function requireMetadataString(metadata, name) {
+  const value = stringOrNull(metadata[name]);
+  if (!value) {
+    throw new Error(`issue event metadata is missing ${name}`);
+  }
+  return value;
+}
+
+function requireMetadataPositiveInteger(metadata, name) {
+  const value = metadata[name];
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`issue event metadata ${name} must be a one-based positive integer`);
+  }
+  return value;
+}
+
+function requireMetadataMatchesManifest(metadata, manifest, name) {
+  const value = requireMetadataString(metadata, name);
+  if (manifest[name] !== value) {
+    throw new Error(`issue event metadata ${name} does not match the manifest`);
+  }
+}
+
+function stackFrameFromIssueMetadata(metadata) {
+  const releaseArtifactType = requireMetadataString(metadata, "releaseArtifactType");
+  if (releaseArtifactType !== "sourcemap") {
+    throw new Error("issue event releaseArtifactType must be sourcemap");
+  }
+  const codeFile = stringOrNull(metadata.releaseArtifactCodeFile) ?? stringOrNull(metadata.errorFrameFile);
+  if (!codeFile) {
+    throw new Error("issue event metadata is missing releaseArtifactCodeFile");
+  }
+  const line = requireMetadataPositiveInteger(metadata, "errorFrameLine");
+  const column = requireMetadataPositiveInteger(metadata, "errorFrameColumn");
+  return `${codeFile}:${line}:${column}`;
+}
+
 export function verifyJavaScriptSymbolication({ buildDir, manifest, stackFrame }) {
   const frame = parseStackFrame(stackFrame);
   const artifact = findMatchingArtifact(manifest, frame, buildDir);
@@ -311,5 +382,26 @@ export function verifyJavaScriptSymbolication({ buildDir, manifest, stackFrame }
       hasSourcesContent: false
     },
     original
+  };
+}
+
+export function verifyJavaScriptIssueSymbolication({ buildDir, manifest, issueEvent }) {
+  const { metadata, input } = metadataFromIssueEvent(issueEvent);
+  requireMetadataMatchesManifest(metadata, manifest, "release");
+  requireMetadataMatchesManifest(metadata, manifest, "environment");
+  requireMetadataMatchesManifest(metadata, manifest, "service");
+
+  const expectedDebugId = requireMetadataString(metadata, "releaseArtifactDebugId").toLowerCase();
+  const report = verifyJavaScriptSymbolication({
+    buildDir,
+    manifest,
+    stackFrame: stackFrameFromIssueMetadata(metadata)
+  });
+  if (typeof report.debugId !== "string" || report.debugId.toLowerCase() !== expectedDebugId) {
+    throw new Error("issue event releaseArtifactDebugId does not match the resolved artifact");
+  }
+  return {
+    ...report,
+    input
   };
 }

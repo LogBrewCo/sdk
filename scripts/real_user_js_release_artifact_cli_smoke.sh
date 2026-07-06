@@ -62,6 +62,7 @@ grep -q '^Usage:$' "$tmp_dir/cli-help.txt"
 grep -q 'prepare-js --build-dir <dir>' "$tmp_dir/cli-help.txt"
 grep -q 'manifest-js --build-dir <dir>' "$tmp_dir/cli-help.txt"
 grep -q 'symbolicate-js --build-dir <dir>' "$tmp_dir/cli-help.txt"
+grep -q -- '--issue-event <file>' "$tmp_dir/cli-help.txt"
 grep -q 'upload-js --build-dir <dir>' "$tmp_dir/cli-help.txt"
 
 app_root="$tmp_dir/checkout-app"
@@ -107,12 +108,51 @@ node_modules/.bin/logbrew-release-artifacts \
   --commit-sha abc123 \
   > "$tmp_dir/manifest.json"
 
+node - "$tmp_dir/manifest.json" "$tmp_dir/issue-event.json" <<'EOF'
+const fs = require("node:fs");
+
+const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const artifact = manifest.artifacts[0];
+fs.writeFileSync(
+  process.argv[3],
+  `${JSON.stringify({
+    type: "issue",
+    id: "evt_js_error_001",
+    timestamp: "2026-07-06T10:00:00Z",
+    attributes: {
+      title: "Error",
+      level: "error",
+      metadata: {
+        release: manifest.release,
+        environment: manifest.environment,
+        service: manifest.service,
+        runtime: "browser",
+        errorFrameFile: `${artifact.minifiedSource.minifiedUrl}?flag=debug#fragment`,
+        errorFrameLine: 1,
+        errorFrameColumn: 1,
+        releaseArtifactType: "sourcemap",
+        releaseArtifactCodeFile: `${artifact.minifiedSource.minifiedUrl}?flag=debug#fragment`,
+        releaseArtifactDebugId: artifact.debugId
+      }
+    }
+  })}\n`,
+  "utf8"
+);
+EOF
+
 node_modules/.bin/logbrew-release-artifacts \
   symbolicate-js \
   --build-dir "$build_dir" \
   --manifest "$tmp_dir/manifest.json" \
   --stack-frame "at checkout (https://cdn.example/assets/assets/app.js:1:1)" \
   > "$tmp_dir/symbolicated-frame.json"
+
+node_modules/.bin/logbrew-release-artifacts \
+  symbolicate-js \
+  --build-dir "$build_dir" \
+  --manifest "$tmp_dir/manifest.json" \
+  --issue-event "$tmp_dir/issue-event.json" \
+  > "$tmp_dir/symbolicated-issue-event.json"
 
 node_modules/.bin/logbrew-release-artifacts \
   upload-js \
@@ -131,10 +171,11 @@ const buildDir = process.argv[3];
 const prepareReport = JSON.parse(fs.readFileSync(path.join(tmpDir, "prepare-report.json"), "utf8"));
 const manifest = JSON.parse(fs.readFileSync(path.join(tmpDir, "manifest.json"), "utf8"));
 const symbolicatedFrame = JSON.parse(fs.readFileSync(path.join(tmpDir, "symbolicated-frame.json"), "utf8"));
+const symbolicatedIssueEvent = JSON.parse(fs.readFileSync(path.join(tmpDir, "symbolicated-issue-event.json"), "utf8"));
 const uploadDryRun = JSON.parse(fs.readFileSync(path.join(tmpDir, "upload-dry-run.json"), "utf8"));
 const minified = fs.readFileSync(path.join(buildDir, "assets", "app.js"), "utf8");
 const sourceMap = JSON.parse(fs.readFileSync(path.join(buildDir, "assets", "app.js.map"), "utf8"));
-const serialized = `${JSON.stringify(prepareReport)}\n${JSON.stringify(manifest)}\n${JSON.stringify(symbolicatedFrame)}\n${JSON.stringify(uploadDryRun)}`;
+const serialized = `${JSON.stringify(prepareReport)}\n${JSON.stringify(manifest)}\n${JSON.stringify(symbolicatedFrame)}\n${JSON.stringify(symbolicatedIssueEvent)}\n${JSON.stringify(uploadDryRun)}`;
 
 if (prepareReport.validation.status !== "ready") {
   throw new Error(`prepare-js was not ready: ${JSON.stringify(prepareReport.validation)}`);
@@ -170,6 +211,18 @@ if (symbolicatedFrame.generated.path !== "assets/app.js" || symbolicatedFrame.or
 }
 if (symbolicatedFrame.original.line !== 1 || symbolicatedFrame.original.column !== 1) {
   throw new Error(`unexpected original position: ${JSON.stringify(symbolicatedFrame.original)}`);
+}
+if (symbolicatedIssueEvent.status !== "resolved") {
+  throw new Error(`issue-event symbolication failed: ${JSON.stringify(symbolicatedIssueEvent)}`);
+}
+if (symbolicatedIssueEvent.input?.type !== "sdk_issue_event" || symbolicatedIssueEvent.input?.issueId !== "evt_js_error_001") {
+  throw new Error(`unexpected issue-event input report: ${JSON.stringify(symbolicatedIssueEvent.input)}`);
+}
+if (symbolicatedIssueEvent.debugId !== debugId || symbolicatedIssueEvent.generated.path !== "assets/app.js") {
+  throw new Error(`issue-event symbolication did not resolve the prepared artifact: ${JSON.stringify(symbolicatedIssueEvent)}`);
+}
+if (symbolicatedIssueEvent.original.source !== "src/main.js") {
+  throw new Error(`issue-event symbolication did not resolve the original source: ${JSON.stringify(symbolicatedIssueEvent)}`);
 }
 if (sourceMap.sourcesContent !== undefined || artifact.sourceMap.hasSourcesContent !== false) {
   throw new Error("sourcesContent was not stripped");

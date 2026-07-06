@@ -197,6 +197,96 @@ test("symbolicate-js resolves a sanitized minified frame through a ready manifes
   }
 });
 
+test("symbolicate-js resolves a sanitized SDK issue event through a ready manifest", () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const prep = runCli([
+      "prepare-js",
+      "--build-dir",
+      buildDir,
+      "--strip-sources-content",
+      "--strip-source-prefix",
+      appRoot,
+      "--write"
+    ]);
+    assert.equal(prep.status, 0, prep.stderr);
+
+    const manifestResult = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets?flag=debug#fragment"
+    ]);
+    assert.equal(manifestResult.status, 0, manifestResult.stderr);
+    const manifest = jsonFromStdout(manifestResult);
+    const manifestPath = path.join(root, "manifest.json");
+    fs.writeFileSync(manifestPath, manifestResult.stdout, "utf8");
+
+    const issuePath = path.join(root, "issue-event.json");
+    fs.writeFileSync(
+      issuePath,
+      `${JSON.stringify({
+        type: "issue",
+        id: "evt_issue_001",
+        timestamp: "2026-07-06T10:00:00Z",
+        attributes: {
+          title: "TypeError",
+          level: "error",
+          metadata: {
+            release: "web@1.2.3",
+            environment: "production",
+            service: "checkout-web",
+            runtime: "browser",
+            errorFrameFile: "https://cdn.example/assets/assets/app.js?flag=debug#fragment",
+            errorFrameLine: 1,
+            errorFrameColumn: 1,
+            releaseArtifactType: "sourcemap",
+            releaseArtifactCodeFile: "https://cdn.example/assets/assets/app.js?flag=debug#fragment",
+            releaseArtifactDebugId: manifest.artifacts[0].debugId
+          }
+        }
+      })}\n`,
+      "utf8"
+    );
+
+    const result = runCli([
+      "symbolicate-js",
+      "--build-dir",
+      buildDir,
+      "--manifest",
+      manifestPath,
+      "--issue-event",
+      issuePath
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const report = jsonFromStdout(result);
+    assert.equal(report.status, "resolved");
+    assert.deepEqual(report.input, {
+      type: "sdk_issue_event",
+      issueId: "evt_issue_001",
+      metadataSource: "attributes.metadata"
+    });
+    assert.equal(report.debugId, manifest.artifacts[0].debugId);
+    assert.equal(report.generated.path, "assets/app.js");
+    assert.equal(report.generated.minifiedUrl, "https://cdn.example/assets/assets/app.js");
+    assert.equal(report.generated.line, 1);
+    assert.equal(report.generated.column, 1);
+    assert.equal(report.original.source, "src/main.js");
+    assert.doesNotMatch(result.stdout, /flag=debug|#fragment|source-fixture-marker/);
+    assert.doesNotMatch(result.stdout, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("upload-js validates a ready manifest and prints a dry-run upload plan", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {

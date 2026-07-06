@@ -1,5 +1,30 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-06: JavaScript issue-event symbolication proof reduced the
+  source-map debugging gap after source-reading Sentry JavaScript
+  `getsentry/sentry-javascript@989396c8f4e390b02dd62bc1ad2c271c449bd79c`
+  (`packages/browser/src/eventbuilder.ts`,
+  `packages/core/src/utils/debug-ids.ts`,
+  `packages/core/src/utils/prepareEvent.ts`, and prepare-event tests) and
+  Datadog Browser SDK
+  `DataDog/browser-sdk@c2829e3dbf3e7e489508f2c1ea5a66035b1f7b55`
+  (`computeStackTrace`, `computeRawError`, RUM error collection, and
+  source-code context Debug ID tests). Sentry moves frame Debug IDs into
+  `debug_meta.images`; Datadog carries `_dd.debug_ids` on RUM errors.
+  LogBrew now lets installed `logbrew-release-artifacts symbolicate-js` accept
+  `--issue-event <file>` in addition to `--stack-frame`: it validates real SDK
+  issue shapes with `attributes.metadata`, requires matching release,
+  environment, service, sourcemap type, Debug ID, code file, line, and column,
+  then resolves the issue through the prepared manifest without raw stack text,
+  source content, query/hash, or local path leakage. Evidence: RED JS package
+  test failed on unknown `--issue-event`; GREEN `npm --prefix js/logbrew-js
+  test -- test/release-artifacts-cli.test.js`; GREEN `bash
+  scripts/real_user_js_release_artifact_cli_smoke.sh` from a packed
+  `@logbrew/sdk` install. Research:
+  `docs/competitor-research/js-issue-event-symbolication-proof-2026-07-06.md`.
+  Honest gap: hosted upload/lookup/rendered symbolicated issue UI, source
+  context, automatic build/runtime Debug ID integration, and native crash
+  symbolication remain stronger in Sentry/Datadog.
 - 2026-07-06: React Native runtime source-map issue metadata gap reduced after
   source-reading Sentry React Native
   `getsentry/sentry-react-native@b5288f646ce32ce1859dcf7e1285d7cd43b14fea`
