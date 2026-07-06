@@ -706,6 +706,13 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      - name: Check Maven Central auth preflight
+        if: ${{ ! inputs.dry_run }}
+        env:
+          CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}
+          CENTRAL_PORTAL_PASSWORD: ${{ secrets.CENTRAL_PORTAL_PASSWORD }}
+        run: bash scripts/check_maven_central_auth_preflight.sh
+
       - name: Set up Java
         uses: actions/setup-java@v5
         with:

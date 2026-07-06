@@ -100,6 +100,36 @@ class ConfidentialityScanTests(unittest.TestCase):
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
+    def test_allows_maven_central_preflight_secret_names_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = root / ".github" / "workflows"
+            workflow_dir.mkdir(parents=True)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir()
+            tests_dir = root / "tests"
+            tests_dir.mkdir()
+            (workflow_dir / "publish-packages.yml").write_text(
+                "CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}\n"
+                "CENTRAL_PORTAL_PASSWORD: ${{ secrets.CENTRAL_PORTAL_PASSWORD }}\n",
+                encoding="utf-8",
+            )
+            (scripts_dir / "check_maven_central_auth_preflight.sh").write_text(
+                '${CENTRAL_PORTAL_PASSWORD:-}\n'
+                "os.environ['CENTRAL_PORTAL_USERNAME']\n"
+                "os.environ['CENTRAL_PORTAL_PASSWORD']\n"
+                "generated Central Portal publishing values\n",
+                encoding="utf-8",
+            )
+            (tests_dir / "test_maven_central_auth_preflight.py").write_text(
+                '"CENTRAL_PORTAL_PASSWORD": password\n'
+                '"fixture-user-token"\n'
+                '"fixture-secret-token"\n',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
     def test_reports_unexpected_sensitive_terms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -165,6 +165,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_npm_first_publish_placeholder(relative_text, line):
         return True
 
+    if is_maven_central_preflight_secret_name_reference(relative_text, line):
+        return True
+
     if is_github_actions_oidc_or_secret_placeholder(relative_text, line):
         return True
 
@@ -287,6 +290,42 @@ def is_npm_first_publish_placeholder(relative_text: str, line: str) -> bool:
             or "central portal publishing credentials" in lower_line
             or "central portal credentials" in lower_line
         )
+    return False
+
+
+def is_maven_central_preflight_secret_name_reference(relative_text: str, line: str) -> bool:
+    lower_line = line.lower()
+    if relative_text == "scripts/check_maven_central_auth_preflight.sh":
+        allowed_fragments = (
+            "central_portal_username",
+            "central_portal_password",
+            "generated central portal publishing values",
+        )
+        return any(fragment in lower_line for fragment in allowed_fragments)
+    if relative_text == "tests/test_maven_central_auth_preflight.py":
+        allowed_fragments = (
+            "central_portal_username",
+            "central_portal_password",
+            "secret_values",
+            "generated_token_hint",
+            "requires_secret_env_names",
+            "user-token",
+            "secret-token",
+        )
+        return any(fragment in lower_line for fragment in allowed_fragments)
+    if relative_text in {
+        "tests/test_confidentiality_scan.py",
+        "tests/test_release_metadata.py",
+    }:
+        allowed_fragments = (
+            "central_portal_username",
+            "central_portal_password",
+            "user-token",
+            "secret-token",
+            "secret names only",
+            "secret_names_only",
+        )
+        return any(fragment in lower_line for fragment in allowed_fragments)
     return False
 
 

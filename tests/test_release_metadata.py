@@ -135,6 +135,22 @@ jobs:
         run: echo "version=$(python3 scripts/read_rust_crate_version.py rust/logbrew/Cargo.toml)" >> "$GITHUB_OUTPUT"
       - name: Verify public crates.io package
         run: python3 scripts/check_registry_publication.py --target crates --version "${{ steps.crate-version.outputs.version }}"
+  maven:
+    steps:
+      - name: Check Maven Central auth preflight
+        if: ${{ ! inputs.dry_run }}
+        env:
+          CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}
+          CENTRAL_PORTAL_PASSWORD: ${{ secrets.CENTRAL_PORTAL_PASSWORD }}
+        run: bash scripts/check_maven_central_auth_preflight.sh
+      - name: Build Maven Central deployment bundle
+        run: bash scripts/build_maven_central_bundle.sh
+      - name: Upload Maven Central deployment bundle
+        run: echo "generated Central Portal publishing values"
+      - name: Verify Maven Central publication
+        run: python3 scripts/check_registry_publication.py --target maven --retries 20 --retry-delay 30
+      - name: Verify public Maven Central install
+        run: bash scripts/real_user_maven_central_public_smoke.sh
   verify:
     name: Public registry verification
     if: ${{ inputs.target == 'verify' }}
@@ -370,6 +386,29 @@ jobs:
             check_release_metadata.validate_release_workflows(root, failures)
 
         self.assertTrue(any("Maven Central generated publishing-values hint" in failure for failure in failures))
+
+    def test_publish_packages_workflow_requires_maven_auth_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
+            workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(encoding="utf-8")
+            workflow = workflow.replace(
+                """
+      - name: Check Maven Central auth preflight
+        if: ${{ ! inputs.dry_run }}
+        env:
+          CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}
+          CENTRAL_PORTAL_PASSWORD: ${{ secrets.CENTRAL_PORTAL_PASSWORD }}
+        run: bash scripts/check_maven_central_auth_preflight.sh
+""",
+                "",
+            )
+            (workflow_dir / "publish-packages.yml").write_text(workflow, encoding="utf-8")
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("Maven Central auth preflight" in failure for failure in failures))
 
     def test_publish_packages_verify_target_requires_exact_version_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

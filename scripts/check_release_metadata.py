@@ -932,6 +932,7 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             ),
             "Maven Central public install smoke": "bash scripts/real_user_maven_central_public_smoke.sh",
             "Maven Central generated publishing-values hint": "generated Central Portal publishing values",
+            "Maven Central auth preflight": "bash scripts/check_maven_central_auth_preflight.sh",
         }
         nuget_output_versions = (
             ("exact", "LogBrew", "core_version"),
