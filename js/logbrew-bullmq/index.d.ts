@@ -1,4 +1,4 @@
-import type { BulkJobOptions, Job, JobsOptions, Queue } from "bullmq";
+import type { BulkJobOptions, FlowJob, FlowProducer, Job, JobsOptions, Queue } from "bullmq";
 import type { LogBrewClient, SpanEventSummary, SpanLinkSummary } from "@logbrew/sdk";
 import type { LogBrewTraceContext } from "@logbrew/node";
 
@@ -25,6 +25,8 @@ export type LogBrewBullMqInstrumentableQueueLike<Data = unknown, Result = unknow
 
 export type LogBrewBullMqBulkQueueLike<Data = unknown, Result = unknown, Name extends string = string> =
   Pick<Queue<Data, Result, Name>, "addBulk" | "name">;
+
+export type LogBrewBullMqFlowProducerLike = Pick<FlowProducer, "add">;
 
 export type LogBrewBullMqBulkJob<Data = unknown, Name extends string = string> = {
   name: Name;
@@ -93,6 +95,13 @@ export declare function bullMqQueueAddBulkWithLogBrewSpan<
   options: LogBrewBullMqSpanOptions
 ): Promise<Array<Job<Data, Result, Name>>>;
 
+export declare function bullMqFlowProducerAddWithLogBrewSpan(
+  flowProducer: LogBrewBullMqFlowProducerLike,
+  flow: FlowJob,
+  flowOptions: Parameters<FlowProducer["add"]>[1] | undefined,
+  options: LogBrewBullMqSpanOptions
+): ReturnType<FlowProducer["add"]>;
+
 export declare function withLogBrewBullMqProcessor<
   Result = unknown,
   Data = unknown,
@@ -118,6 +127,11 @@ export declare function instrumentLogBrewBullMqProcessor<
   options: LogBrewBullMqSpanOptions
 ): LogBrewBullMqInstrumentation;
 
+export declare function instrumentLogBrewBullMqFlowProducer(
+  flowProducer: LogBrewBullMqFlowProducerLike,
+  options: LogBrewBullMqSpanOptions
+): LogBrewBullMqInstrumentation;
+
 export declare function instrumentLogBrewBullMqQueue<
   Data = unknown,
   Result = unknown,
@@ -126,6 +140,11 @@ export declare function instrumentLogBrewBullMqQueue<
   queue: LogBrewBullMqInstrumentableQueueLike<Data, Result, Name>,
   options: LogBrewBullMqSpanOptions
 ): LogBrewBullMqInstrumentation;
+
+export declare function createLogBrewBullMqFlowJob(
+  flow: FlowJob,
+  traceparent?: string
+): FlowJob;
 
 export declare function createLogBrewBullMqJobOptions(
   jobOptions?: LogBrewBullMqJobOptions,
@@ -137,10 +156,13 @@ export declare function extractLogBrewBullMqTraceparent(job: {
 }): string | undefined;
 
 declare const defaultExport: {
+  bullMqFlowProducerAddWithLogBrewSpan: typeof bullMqFlowProducerAddWithLogBrewSpan;
   bullMqQueueAddBulkWithLogBrewSpan: typeof bullMqQueueAddBulkWithLogBrewSpan;
   bullMqQueueAddWithLogBrewSpan: typeof bullMqQueueAddWithLogBrewSpan;
+  createLogBrewBullMqFlowJob: typeof createLogBrewBullMqFlowJob;
   createLogBrewBullMqJobOptions: typeof createLogBrewBullMqJobOptions;
   extractLogBrewBullMqTraceparent: typeof extractLogBrewBullMqTraceparent;
+  instrumentLogBrewBullMqFlowProducer: typeof instrumentLogBrewBullMqFlowProducer;
   instrumentLogBrewBullMqProcessor: typeof instrumentLogBrewBullMqProcessor;
   instrumentLogBrewBullMqQueue: typeof instrumentLogBrewBullMqQueue;
   withLogBrewBullMqProcessor: typeof withLogBrewBullMqProcessor;

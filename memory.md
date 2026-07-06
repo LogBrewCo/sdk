@@ -1,5 +1,29 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-06: BullMQ FlowProducer rich-trace gap reduced after source-reading
+  Sentry JavaScript
+  `getsentry/sentry-javascript@989396c8f4e390b02dd62bc1ad2c271c449bd79c`
+  NestJS BullMQ processor instrumentation, Datadog dd-trace-js
+  `DataDog/dd-trace-js@02cb1a1fc744c4589385d91c674a6c5720a5d747`
+  `FlowProducerAddPlugin`/producer tests/integration smoke, OpenTelemetry JS
+  Contrib `07607d0adab59f87c0e517075fa1fbd41c18f99e` no-BullMQ evidence, and
+  PostHog JS `26b92fea20b9cf4c64ce251857aead8e859ed66c` no-BullMQ evidence.
+  `@logbrew/bullmq` now exports `bullMqFlowProducerAddWithLogBrewSpan(...)`,
+  `instrumentLogBrewBullMqFlowProducer(...)`, and
+  `createLogBrewBullMqFlowJob(...)`. Apps pass an owned FlowProducer; LogBrew
+  emits one privacy-bounded producer span, recursively injects the same
+  normalized LogBrew `traceparent` into root and child flow jobs, preserves
+  app `this`/options/extra args, rejects duplicate install, and uninstalls
+  cleanly. Evidence: RED `bash scripts/real_user_bullmq_smoke.sh` failed on
+  missing installed TypeScript exports; RED follow-up caught `add(flow)` being
+  called as `add(flow, undefined)`; GREEN same installed smoke with packed
+  `@logbrew/sdk`, `@logbrew/node`, `@logbrew/bullmq`, `bullmq@5.79.1`,
+  TypeScript/CJS/ESM exports, root/child flow propagation, malformed metadata
+  fallback, local 503-to-202 retry/flush, and no flow payload leakage. Research:
+  `docs/competitor-research/node-bullmq-tracing-2026-06-25.md`. Honest gap:
+  Datadog still leads on hidden automatic FlowProducer/worker hooks,
+  data-stream monitoring, producer filters, and hosted trace UI; Sentry still
+  leads on NestJS decorator automation.
 - 2026-07-06: JavaScript issue-event symbolication proof reduced the
   source-map debugging gap after source-reading Sentry JavaScript
   `getsentry/sentry-javascript@989396c8f4e390b02dd62bc1ad2c271c449bd79c`

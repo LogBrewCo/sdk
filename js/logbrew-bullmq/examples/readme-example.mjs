@@ -1,6 +1,8 @@
 import { LogBrewClient } from "@logbrew/sdk";
 import {
+  bullMqFlowProducerAddWithLogBrewSpan,
   bullMqQueueAddWithLogBrewSpan,
+  instrumentLogBrewBullMqFlowProducer,
   instrumentLogBrewBullMqQueue,
   withLogBrewBullMqProcessor
 } from "@logbrew/bullmq";
@@ -25,6 +27,29 @@ const job = await bullMqQueueAddWithLogBrewSpan(queue, "charge-card", { orderId:
 const queueInstrumentation = instrumentLogBrewBullMqQueue(queue, { client });
 await queue.add("send-receipt", { orderId: "ord_123" }, {});
 queueInstrumentation.uninstall();
+
+const flowProducer = {
+  async add(flow, options) {
+    return { flow, options };
+  }
+};
+await bullMqFlowProducerAddWithLogBrewSpan(flowProducer, {
+  name: "checkout-flow",
+  queueName: "orders",
+  data: { orderId: "ord_123" },
+  children: [
+    { name: "send-receipt", queueName: "orders", data: { orderId: "ord_123" } }
+  ]
+}, undefined, {
+  client
+});
+const flowInstrumentation = instrumentLogBrewBullMqFlowProducer(flowProducer, { client });
+await flowProducer.add({
+  name: "post-checkout-flow",
+  queueName: "orders",
+  data: { orderId: "ord_124" }
+});
+flowInstrumentation.uninstall();
 
 const processor = withLogBrewBullMqProcessor(async (currentJob) => ({
   processed: currentJob.name

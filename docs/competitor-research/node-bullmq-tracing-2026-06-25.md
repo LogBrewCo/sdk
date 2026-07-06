@@ -17,12 +17,16 @@
 - 2026-06-28 refresh: Datadog dd-trace-js `DataDog/dd-trace-js@27dcc31908d9a6264b1536a2118534c8bc4da0f6`; re-read `packages/datadog-plugin-bullmq/src/producer.js` (`QueueAddPlugin`, `QueueAddBulkPlugin`, `_injectIntoOpts(...)`, `setProducerCheckpoint(...)`) and `packages/datadog-plugin-bullmq/src/consumer.js` (`BullmqConsumerPlugin`, `_extractDatadog(...)`, `setConsumerCheckpoint(...)`).
 - 2026-06-28 refresh: OpenTelemetry JS contrib `open-telemetry/opentelemetry-js-contrib@eb98ccc85069304a1f0c2e6b33be1b2ca961b4be`; `git grep -i bullmq` still found no first-party BullMQ instrumentation.
 - 2026-06-28 processor-method follow-up: re-read the same Sentry NestJS BullMQ decorator wrapper and Datadog worker consumer plugin before adding LogBrew's explicit processor-object method instrumentation.
+- 2026-07-06 FlowProducer refresh: Sentry JavaScript `getsentry/sentry-javascript@989396c8f4e390b02dd62bc1ad2c271c449bd79c`; re-read `packages/nestjs/src/integrations/sentry-nest-bullmq-instrumentation.ts` (`SentryNestBullMQInstrumentation`, `_createWrapProcessor()`) and `packages/nestjs/src/integrations/helpers.ts` (`getBullMQProcessSpanOptions(...)`).
+- 2026-07-06 FlowProducer refresh: Datadog dd-trace-js `DataDog/dd-trace-js@02cb1a1fc744c4589385d91c674a6c5720a5d747`; read `packages/datadog-plugin-bullmq/src/producer.js` (`BaseBullmqProducerPlugin`, `QueueAddPlugin`, `QueueAddBulkPlugin`, `FlowProducerAddPlugin`, `_injectIntoOpts(...)`, `setProducerCheckpoint(...)`), `packages/datadog-plugin-bullmq/test/index.spec.js` (`FlowProducer.add()` span assertions), `packages/datadog-plugin-bullmq/test/producer-inject.spec.js` (`FlowProducerAdd.shouldInstrument(...)` filter cases), and `packages/datadog-plugin-bullmq/test/integration-test/server-flow-producer-add.mjs`.
+- 2026-07-06 FlowProducer refresh: OpenTelemetry JS contrib `open-telemetry/opentelemetry-js-contrib@07607d0adab59f87c0e517075fa1fbd41c18f99e`; scoped search found no first-party BullMQ instrumentation.
+- 2026-07-06 FlowProducer refresh: PostHog JS `PostHog/posthog-js@26b92fea20b9cf4c64ce251857aead8e859ed66c`; scoped search found no BullMQ or FlowProducer instrumentation.
 
 ## Competitor Pattern
 
 Sentry supports BullMQ through NestJS instrumentation. It wraps the `@Processor` decorator, replaces the class `process` method, forks isolation scope per job, creates a `queue.process` span with `messaging.system = bullmq`, and captures thrown errors.
 
-Datadog has a first-class BullMQ plugin. It instruments `Queue.add`, `Queue.addBulk`, and worker processing, creates producer/consumer spans, records safe messaging tags, injects trace context into BullMQ `opts.telemetry.metadata`, extracts it on the worker side, and adds data-stream checkpoints. Its tests cover happy and error paths for add, addBulk, and processing.
+Datadog has a first-class BullMQ plugin. It instruments `Queue.add`, `Queue.addBulk`, `FlowProducer.add`, and worker processing, creates producer/consumer spans, records safe messaging tags, injects trace context into BullMQ `opts.telemetry.metadata`, extracts it on the worker side, and adds data-stream checkpoints. Its tests cover happy and error paths for add, addBulk, FlowProducer add, and processing.
 
 The tradeoff is heavier hidden behavior: module patching, hook-prefix coupling, metadata mutation, data-stream metadata, and broader error payload behavior. OpenTelemetry JS contrib did not show a current BullMQ package in the public source checked.
 
@@ -34,6 +38,9 @@ LogBrew now adds `@logbrew/bullmq` as a small explicit integration package.
 - `bullMqQueueAddBulkWithLogBrewSpan(...)` wraps app-owned `queue.addBulk(...)`.
 - `withLogBrewBullMqProcessor(...)` wraps app-owned worker processors.
 - `instrumentLogBrewBullMqProcessor(...)` optionally wraps one app-owned processor object's method, including NestJS-style `WorkerHost.process`, preserves `this` and extra method arguments, rejects duplicate LogBrew instrumentation, and supports clean `uninstall()`.
+- `bullMqFlowProducerAddWithLogBrewSpan(...)` wraps app-owned `FlowProducer.add(...)` calls, emits one producer span, and recursively merges the same normalized LogBrew `traceparent` into the root flow job and child jobs.
+- `instrumentLogBrewBullMqFlowProducer(...)` optionally wraps only one app-owned FlowProducer instance's `add()` method, preserves call options and extra arguments, rejects duplicate LogBrew instrumentation, and supports clean `uninstall()`.
+- `createLogBrewBullMqFlowJob(...)` clones a flow tree before adding LogBrew trace metadata so application-owned flow objects are not mutated.
 - `createLogBrewBullMqJobOptions(...)` merges one normalized LogBrew `traceparent` into BullMQ `opts.telemetry.metadata` when metadata is valid JSON.
 - `extractLogBrewBullMqTraceparent(...)` reads only that LogBrew trace context for consumer spans.
 - `instrumentLogBrewBullMqQueue(...)` optionally wraps only an app-owned queue instance's `add()` and `addBulk()` methods, rejects duplicate LogBrew instrumentation, and supports clean `uninstall()`.
@@ -52,9 +59,11 @@ LogBrew now adds `@logbrew/bullmq` as a small explicit integration package.
 - 2026-06-28 GREEN: the same installed smoke passed after adding queue-instance instrumentation. It now proves TypeScript/CJS/ESM exports, app-owned `this` binding preservation, `add()` and `addBulk()` traceparent injection, duplicate-install rejection, clean uninstall, local fake-intake flush, and no instrumented job payload leakage.
 - 2026-06-28 RED: `bash scripts/real_user_bullmq_smoke.sh` failed in installed TypeScript because `instrumentLogBrewBullMqProcessor` was not exported.
 - 2026-06-28 GREEN: the same installed smoke passed after adding processor-method instrumentation. It now proves TypeScript/CJS/ESM exports, NestJS-style processor object wrapping, `this` and extra argument preservation, parent-child trace correlation from BullMQ job metadata, duplicate-install rejection, clean uninstall, local fake-intake flush, and no job payload or error-message leakage.
+- 2026-07-06 RED: `bash scripts/real_user_bullmq_smoke.sh` failed in installed TypeScript because `bullMqFlowProducerAddWithLogBrewSpan`, `createLogBrewBullMqFlowJob`, and `instrumentLogBrewBullMqFlowProducer` were not exported.
+- 2026-07-06 GREEN: the same installed smoke passed after adding FlowProducer support. It now proves TypeScript/CJS/ESM exports, direct FlowProducer helper use, root and child flow traceparent propagation, existing flow metadata preservation, malformed flow metadata fallback, app-owned `this`/options/extra-argument preservation, duplicate-install rejection, clean uninstall, local fake-intake 503-to-202 retry/flush, and no flow job payload leakage.
 
 ## Remaining Gaps
 
 - Sentry remains stronger for hidden automatic NestJS BullMQ decorator instrumentation.
 - Datadog remains stronger for hidden automatic BullMQ worker and FlowProducer instrumentation, data-stream monitoring, producer filters, and deeper runtime hooks.
-- LogBrew is now stronger for explicit app-owned processor method wrapping with clean uninstall and bounded telemetry, but still weaker for zero-code setup. Consider optional framework-owned NestJS decorators only if real-user evidence says the ergonomics outweigh the privacy and hidden-patching cost.
+- LogBrew is now stronger for explicit app-owned queue, processor, and FlowProducer wrapping with clean uninstall, recursive child-flow propagation, and bounded telemetry, but still weaker for zero-code setup. Consider optional framework-owned NestJS decorators only if real-user evidence says the ergonomics outweigh the privacy and hidden-patching cost.

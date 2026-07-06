@@ -10,6 +10,7 @@ const {
 const DEFAULT_SYSTEM = "bullmq";
 const DEFAULT_QUEUE_NAME = "bullmq";
 const LOGBREW_METADATA_KEY = "logbrew";
+const INSTRUMENTED_FLOW_ADD = Symbol.for("@logbrew/bullmq.instrumentedFlowAdd");
 const INSTRUMENTED_PROCESSOR_METHOD = Symbol.for("@logbrew/bullmq.instrumentedProcessorMethod");
 const INSTRUMENTED_QUEUE_ADD = Symbol.for("@logbrew/bullmq.instrumentedQueueAdd");
 
@@ -44,6 +45,24 @@ async function bullMqQueueAddBulkWithLogBrewSpan(queue, jobs, options = {}) {
     operationKind: "publish",
     queueName,
     system: DEFAULT_SYSTEM
+  });
+}
+
+async function bullMqFlowProducerAddWithLogBrewSpan(flowProducer, flow, flowOptions = undefined, options = {}) {
+  if (!flowProducer || typeof flowProducer.add !== "function") {
+    throw new SdkError("configuration_error", "bullMqFlowProducerAddWithLogBrewSpan requires a BullMQ FlowProducer");
+  }
+  const taskName = normalizeName(flow?.name, "flow");
+  const queueName = resolveQueueName({ name: flow?.queueName }, options.queueName);
+
+  return queueBatchOperationWithLogBrewSpan("add", {
+    ...options,
+    messageCount: countBullMqFlowJobs(flow),
+    operation: () => callBullMqFlowProducerAdd(flowProducer.add, flowProducer, createLogBrewBullMqFlowJob(flow), flowOptions),
+    operationKind: "publish",
+    queueName,
+    system: DEFAULT_SYSTEM,
+    taskName
   });
 }
 
@@ -105,6 +124,58 @@ function instrumentLogBrewBullMqProcessor(target, methodNameOrOptions = "process
         } else {
           delete target[methodName];
         }
+      }
+    }
+  };
+}
+
+function instrumentLogBrewBullMqFlowProducer(flowProducer, options = {}) {
+  if (!flowProducer || typeof flowProducer.add !== "function") {
+    throw new SdkError("configuration_error", "instrumentLogBrewBullMqFlowProducer requires a BullMQ FlowProducer");
+  }
+  const originalAdd = flowProducer.add;
+  if (originalAdd?.[INSTRUMENTED_FLOW_ADD] === true) {
+    throw new SdkError(
+      "configuration_error",
+      "instrumentLogBrewBullMqFlowProducer requires an uninstrumented BullMQ FlowProducer; uninstall the existing LogBrew instrumentation first"
+    );
+  }
+
+  let installed = true;
+  function logBrewInstrumentedBullMqFlowAdd(flow, flowOptions, ...args) {
+    if (!installed) {
+      return callBullMqFlowProducerAdd(originalAdd, flowProducer, flow, flowOptions, args);
+    }
+    return queueBatchOperationWithLogBrewSpan("add", {
+      ...options,
+      messageCount: countBullMqFlowJobs(flow),
+      operation: () => callBullMqFlowProducerAdd(
+        originalAdd,
+        flowProducer,
+        createLogBrewBullMqFlowJob(flow),
+        flowOptions,
+        args
+      ),
+      operationKind: "publish",
+      queueName: resolveQueueName({ name: flow?.queueName }, options.queueName),
+      system: DEFAULT_SYSTEM,
+      taskName: normalizeName(flow?.name, "flow")
+    });
+  }
+
+  Object.defineProperty(logBrewInstrumentedBullMqFlowAdd, INSTRUMENTED_FLOW_ADD, {
+    value: true
+  });
+  flowProducer.add = logBrewInstrumentedBullMqFlowAdd;
+
+  return {
+    isInstalled() {
+      return installed && flowProducer.add === logBrewInstrumentedBullMqFlowAdd;
+    },
+    uninstall() {
+      installed = false;
+      if (flowProducer.add === logBrewInstrumentedBullMqFlowAdd) {
+        flowProducer.add = originalAdd;
       }
     }
   };
@@ -173,6 +244,18 @@ function instrumentLogBrewBullMqQueue(queue, options = {}) {
   };
 }
 
+function createLogBrewBullMqFlowJob(flow, traceparent = undefined) {
+  const source = cloneObject(flow);
+  const children = Array.isArray(source.children)
+    ? source.children.map((child) => createLogBrewBullMqFlowJob(child, traceparent))
+    : source.children;
+  return {
+    ...source,
+    ...(children !== undefined ? { children } : {}),
+    opts: createLogBrewBullMqJobOptions(source.opts, traceparent)
+  };
+}
+
 function createLogBrewBullMqJobOptions(jobOptions = {}, traceparent = undefined) {
   const nextOptions = cloneObject(jobOptions);
   const normalizedTraceparent = normalizeTraceparent(traceparent ?? createLogBrewQueueTraceHeaders().traceparent);
@@ -207,6 +290,21 @@ function createLogBrewBullMqBulkJob(job) {
     ...source,
     opts: createLogBrewBullMqJobOptions(source.opts)
   };
+}
+
+function countBullMqFlowJobs(flow) {
+  if (!isObject(flow)) {
+    return 0;
+  }
+  const children = Array.isArray(flow.children) ? flow.children : [];
+  return 1 + children.reduce((count, child) => count + countBullMqFlowJobs(child), 0);
+}
+
+function callBullMqFlowProducerAdd(add, receiver, flow, flowOptions, args = []) {
+  if (flowOptions === undefined && args.length === 0) {
+    return add.call(receiver, flow);
+  }
+  return add.call(receiver, flow, flowOptions, ...args);
 }
 
 function processWithLogBrewBullMqSpan(job, operation, options = {}) {
@@ -295,10 +393,13 @@ function isObject(value) {
 }
 
 const exported = {
+  bullMqFlowProducerAddWithLogBrewSpan,
   bullMqQueueAddBulkWithLogBrewSpan,
   bullMqQueueAddWithLogBrewSpan,
+  createLogBrewBullMqFlowJob,
   createLogBrewBullMqJobOptions,
   extractLogBrewBullMqTraceparent,
+  instrumentLogBrewBullMqFlowProducer,
   instrumentLogBrewBullMqProcessor,
   instrumentLogBrewBullMqQueue,
   withLogBrewBullMqProcessor

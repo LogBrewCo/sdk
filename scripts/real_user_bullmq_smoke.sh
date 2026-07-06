@@ -53,6 +53,8 @@ grep -q 'npm install @logbrew/sdk @logbrew/node @logbrew/bullmq bullmq' "$tmp_di
 grep -q 'pnpm add @logbrew/sdk @logbrew/node @logbrew/bullmq bullmq' "$tmp_dir/bullmq-readme.md"
 grep -q 'LOGBREW_SERVER_API_KEY' "$tmp_dir/bullmq-readme.md"
 grep -q 'project-scoped server ingest key' "$tmp_dir/bullmq-readme.md"
+grep -q 'bullMqFlowProducerAddWithLogBrewSpan' "$tmp_dir/bullmq-readme.md"
+grep -q 'instrumentLogBrewBullMqFlowProducer' "$tmp_dir/bullmq-readme.md"
 grep -q 'instrumentLogBrewBullMqProcessor' "$tmp_dir/bullmq-readme.md"
 grep -q 'withLogBrewBullMqProcessor' "$tmp_dir/bullmq-readme.md"
 
@@ -104,13 +106,16 @@ cat > tsconfig.json <<'EOF'
 EOF
 
 cat > types.ts <<'EOF'
-import type { Job, Queue } from "bullmq";
+import type { FlowJob, FlowProducer, Job, Queue } from "bullmq";
 import { LogBrewClient } from "@logbrew/sdk";
 import {
+  bullMqFlowProducerAddWithLogBrewSpan,
+  createLogBrewBullMqFlowJob,
   bullMqQueueAddBulkWithLogBrewSpan,
   bullMqQueueAddWithLogBrewSpan,
   createLogBrewBullMqJobOptions,
   extractLogBrewBullMqTraceparent,
+  instrumentLogBrewBullMqFlowProducer,
   instrumentLogBrewBullMqProcessor,
   instrumentLogBrewBullMqQueue,
   withLogBrewBullMqProcessor
@@ -122,10 +127,18 @@ const client = LogBrewClient.create({
   sdkVersion: "0.1.0"
 });
 declare const queue: Pick<Queue<{ orderId: string }, string, "charge-card">, "add" | "addBulk" | "name">;
+declare const flowProducer: Pick<FlowProducer, "add">;
 declare const job: Job<{ orderId: string }, string, "charge-card">;
 
 const addJob = bullMqQueueAddWithLogBrewSpan(queue, "charge-card", { orderId: "ord_123" }, {}, { client });
 const bulkJobs = bullMqQueueAddBulkWithLogBrewSpan(queue, [{ name: "charge-card", data: { orderId: "ord_124" } }], { client });
+const flow: FlowJob = {
+  name: "charge-card-flow",
+  queueName: "orders",
+  data: { orderId: "ord_125" },
+  children: [{ name: "send-receipt", queueName: "orders", data: { orderId: "ord_125" } }]
+};
+const flowJob = bullMqFlowProducerAddWithLogBrewSpan(flowProducer, flow, undefined, { client });
 const processor = withLogBrewBullMqProcessor(async (currentJob: Job<{ orderId: string }, string, "charge-card">) => currentJob.data.orderId, { client });
 class NestWorkerHostStyleProcessor {
   calls: string[] = [];
@@ -138,17 +151,22 @@ class NestWorkerHostStyleProcessor {
 const nestProcessor = new NestWorkerHostStyleProcessor();
 const processorMethodInstrumentation = instrumentLogBrewBullMqProcessor(nestProcessor, { client });
 const instrumentation = instrumentLogBrewBullMqQueue(queue, { client });
+const flowInstrumentation = instrumentLogBrewBullMqFlowProducer(flowProducer, { client });
 const traceparent = extractLogBrewBullMqTraceparent(job);
 const options = createLogBrewBullMqJobOptions({}, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+const flowOptions = createLogBrewBullMqFlowJob(flow, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
 
 void addJob;
 void bulkJobs;
+void flowJob;
 void instrumentation;
+void flowInstrumentation;
 void nestProcessor;
 void processor;
 void processorMethodInstrumentation;
 void traceparent;
 void options;
+void flowOptions;
 EOF
 
 npx tsc --noEmit
@@ -156,6 +174,15 @@ npx tsc --noEmit
 cat > cjs-smoke.cjs <<'EOF'
 const logbrewBullMq = require("@logbrew/bullmq");
 
+if (typeof logbrewBullMq.bullMqFlowProducerAddWithLogBrewSpan !== "function") {
+  throw new Error("missing CommonJS FlowProducer helper export");
+}
+if (typeof logbrewBullMq.instrumentLogBrewBullMqFlowProducer !== "function") {
+  throw new Error("missing CommonJS FlowProducer instrumentation export");
+}
+if (typeof logbrewBullMq.createLogBrewBullMqFlowJob !== "function") {
+  throw new Error("missing CommonJS flow job helper export");
+}
 if (typeof logbrewBullMq.withLogBrewBullMqProcessor !== "function") {
   throw new Error("missing CommonJS processor export");
 }
@@ -168,6 +195,9 @@ if (typeof logbrewBullMq.instrumentLogBrewBullMqQueue !== "function") {
 if (typeof logbrewBullMq.default.bullMqQueueAddWithLogBrewSpan !== "function") {
   throw new Error("missing CommonJS default export");
 }
+if (typeof logbrewBullMq.default.bullMqFlowProducerAddWithLogBrewSpan !== "function") {
+  throw new Error("missing CommonJS default FlowProducer export");
+}
 EOF
 
 node cjs-smoke.cjs
@@ -178,10 +208,13 @@ import { once } from "node:events";
 import { LogBrewClient } from "@logbrew/sdk";
 import { createNodeFetchTransport } from "@logbrew/node";
 import {
+  bullMqFlowProducerAddWithLogBrewSpan,
+  createLogBrewBullMqFlowJob,
   bullMqQueueAddBulkWithLogBrewSpan,
   bullMqQueueAddWithLogBrewSpan,
   createLogBrewBullMqJobOptions,
   extractLogBrewBullMqTraceparent,
+  instrumentLogBrewBullMqFlowProducer,
   instrumentLogBrewBullMqProcessor,
   instrumentLogBrewBullMqQueue,
   withLogBrewBullMqProcessor
@@ -204,6 +237,13 @@ const queue = {
   async addBulk(jobs) {
     queueCalls.push({ jobs, type: "addBulk" });
     return jobs.map((job) => ({ ...job, queue: { name: "email" }, queueName: "email" }));
+  }
+};
+const flowProducerCalls = [];
+const flowProducer = {
+  async add(flow, options, ...args) {
+    flowProducerCalls.push({ args, argumentCount: arguments.length, flow, options, thisValue: this });
+    return { flow, id: "flow-1" };
   }
 };
 
@@ -335,10 +375,57 @@ if (!extractLogBrewBullMqTraceparent({ opts: bulkCall.jobs[0].opts })) {
 }
 assertEqual(JSON.parse(bulkCall.jobs[1].opts.telemetry.metadata).batch, true, "bulk metadata preserved");
 
+const flow = await bullMqFlowProducerAddWithLogBrewSpan(flowProducer, {
+  name: "welcome-flow",
+  queueName: "email",
+  data: { body: "flow-root-body" },
+  opts: { telemetry: { metadata: JSON.stringify({ flow: "root" }) } },
+  children: [
+    {
+      name: "welcome-child",
+      queueName: "email",
+      data: { body: "flow-child-body" },
+      opts: { telemetry: { metadata: JSON.stringify({ flow: "child" }) } }
+    }
+  ]
+}, undefined, {
+  client,
+  id: "evt_bullmq_flow_add_001",
+  now: () => "2026-06-25T10:00:04.500Z",
+  nowMs: () => 80,
+  spanIdFactory: () => "8888888888888888",
+  traceIdFactory: () => "99999999999999999999999999999999"
+});
+assertEqual(flow.id, "flow-1", "flow producer result");
+assertEqual(flowProducerCalls[0].thisValue, flowProducer, "flow producer this");
+assertEqual(flowProducerCalls[0].argumentCount, 1, "flow producer argument count");
+assertEqual(flowProducerCalls[0].flow.name, "welcome-flow", "flow root name");
+assertEqual(flowProducerCalls[0].flow.children[0].name, "welcome-child", "flow child name");
+assertEqual(JSON.parse(flowProducerCalls[0].flow.opts.telemetry.metadata).flow, "root", "flow root metadata preserved");
+assertEqual(JSON.parse(flowProducerCalls[0].flow.children[0].opts.telemetry.metadata).flow, "child", "flow child metadata preserved");
+assertEqual(
+  extractLogBrewBullMqTraceparent({ opts: flowProducerCalls[0].flow.opts }),
+  "00-99999999999999999999999999999999-8888888888888888-01",
+  "flow root traceparent"
+);
+assertEqual(
+  extractLogBrewBullMqTraceparent({ opts: flowProducerCalls[0].flow.children[0].opts }),
+  "00-99999999999999999999999999999999-8888888888888888-01",
+  "flow child traceparent"
+);
+
 const invalidStandalone = createLogBrewBullMqJobOptions({
   telemetry: { metadata: "{not-json" }
 }, "00-99999999999999999999999999999999-aaaaaaaaaaaaaaaa-01");
 assertEqual(invalidStandalone.telemetry.metadata, "{not-json", "invalid standalone metadata preserved");
+
+const invalidFlowStandalone = createLogBrewBullMqFlowJob({
+  name: "invalid-flow",
+  queueName: "email",
+  opts: { telemetry: { metadata: "{not-json" } },
+  children: [{ name: "child", queueName: "email" }]
+}, "00-99999999999999999999999999999999-aaaaaaaaaaaaaaaa-01");
+assertEqual(invalidFlowStandalone.opts.telemetry.metadata, "{not-json", "invalid flow metadata preserved");
 
 const intakeRequests = [];
 const intakeServer = http.createServer((req, res) => {
@@ -368,7 +455,7 @@ assertEqual(intakeRequests[1].url, "/v1/events", "path-only fake intake");
 
 const payload = JSON.parse(intakeRequests.at(-1).body);
 assertEqual(payload.sdk.name, "bullmq-smoke-app", "sdk name");
-assertEqual(payload.events.length, 6, "span event count");
+assertEqual(payload.events.length, 7, "span event count");
 const producerSpan = payload.events.find((event) => event.id === "evt_bullmq_add_001").attributes;
 assertEqual(producerSpan.name, "bullmq publish add", "producer span name");
 assertEqual(producerSpan.metadata.framework, "node:queue", "producer framework");
@@ -406,7 +493,17 @@ if (JSON.stringify(errorSpan).includes("processor failure sample detail")) {
 const bulkSpan = payload.events.find((event) => event.id === "evt_bullmq_add_bulk_001").attributes;
 assertEqual(bulkSpan.metadata["messaging.batch.message_count"], 2, "bulk semantic count");
 assertEqual(bulkSpan.metadata.messageCount, 2, "bulk metadata count");
-if (JSON.stringify(payload).includes("example-bulk") || JSON.stringify(payload).includes("example-body")) {
+const flowSpan = payload.events.find((event) => event.id === "evt_bullmq_flow_add_001").attributes;
+assertEqual(flowSpan.name, "bullmq publish add", "flow producer span name");
+assertEqual(flowSpan.metadata["messaging.destination.name"], "email", "flow producer destination");
+assertEqual(flowSpan.metadata.taskName, "welcome-flow", "flow producer task name");
+assertEqual(flowSpan.metadata.messageCount, 2, "flow node count");
+if (
+  JSON.stringify(payload).includes("example-bulk") ||
+  JSON.stringify(payload).includes("example-body") ||
+  JSON.stringify(payload).includes("flow-root-body") ||
+  JSON.stringify(payload).includes("flow-child-body")
+) {
   throw new Error("job payload leaked into telemetry body");
 }
 
@@ -465,6 +562,54 @@ if (instrumentedQueueCalls.at(-1).opts?.telemetry?.metadata) {
   throw new Error("BullMQ instrumentation kept modifying jobs after uninstall");
 }
 
+const instrumentedFlowProducerCalls = [];
+const instrumentedFlowProducer = {
+  async add(flow, options, ...args) {
+    instrumentedFlowProducerCalls.push({ args, argumentCount: arguments.length, flow, options, thisValue: this });
+    return { flow, id: "instrumented-flow" };
+  }
+};
+const priorInstrumentedFlowAdd = instrumentedFlowProducer.add;
+const flowInstrumentation = instrumentLogBrewBullMqFlowProducer(instrumentedFlowProducer, {
+  client,
+  now: () => "2026-06-25T10:00:05.500Z",
+  nowMs: () => 95,
+  spanIdFactory: () => "abababababababab",
+  traceIdFactory: () => "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+});
+assertEqual(flowInstrumentation.isInstalled(), true, "flow instrumentation installed");
+const instrumentedFlow = await instrumentedFlowProducer.add({
+  name: "receipt-flow",
+  queueName: "notifications",
+  data: { body: "instrumented-flow-payload" },
+  children: [{ name: "receipt-child", queueName: "notifications", data: { body: "instrumented-flow-child" } }]
+}, { appOption: true }, "extra-flow-arg");
+assertEqual(instrumentedFlow.id, "instrumented-flow", "instrumented flow result");
+assertEqual(instrumentedFlowProducerCalls[0].thisValue, instrumentedFlowProducer, "instrumented flow this");
+assertEqual(instrumentedFlowProducerCalls[0].argumentCount, 3, "instrumented flow argument count");
+assertEqual(instrumentedFlowProducerCalls[0].options.appOption, true, "instrumented flow options");
+assertEqual(instrumentedFlowProducerCalls[0].args[0], "extra-flow-arg", "instrumented flow extra arg");
+assertEqual(
+  extractLogBrewBullMqTraceparent({ opts: instrumentedFlowProducerCalls[0].flow.opts }),
+  "00-cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd-abababababababab-01",
+  "instrumented flow traceparent"
+);
+
+try {
+  instrumentLogBrewBullMqFlowProducer(instrumentedFlowProducer, { client });
+  throw new Error("expected duplicate BullMQ FlowProducer instrumentation to fail");
+} catch (error) {
+  assertEqual(error.code, "configuration_error", "duplicate flow instrumentation code");
+}
+
+flowInstrumentation.uninstall();
+assertEqual(flowInstrumentation.isInstalled(), false, "flow instrumentation uninstalled");
+assertEqual(instrumentedFlowProducer.add, priorInstrumentedFlowAdd, "prior flow add active after uninstall");
+await instrumentedFlowProducer.add({ name: "after-flow-uninstall", queueName: "notifications" });
+if (instrumentedFlowProducerCalls.at(-1).flow?.opts?.telemetry?.metadata) {
+  throw new Error("BullMQ FlowProducer instrumentation kept modifying flow after uninstall");
+}
+
 const restartIntakeRequests = [];
 const restartIntakeServer = http.createServer((req, res) => {
   let body = "";
@@ -489,12 +634,20 @@ assertEqual(postInstrumentationResponse.statusCode, 202, "post-instrumentation f
 assertEqual(postInstrumentationResponse.attempts, 1, "post-instrumentation attempts");
 assertEqual(restartIntakeRequests.length, 1, "post-instrumentation request count");
 const instrumentationPayload = JSON.parse(restartIntakeRequests.at(-1).body);
-assertEqual(instrumentationPayload.events.length, 2, "instrumented queue span count");
+assertEqual(instrumentationPayload.events.length, 3, "instrumented queue span count");
 const instrumentedAddSpan = instrumentationPayload.events.find((event) => event.attributes.name === "bullmq publish add").attributes;
 assertEqual(instrumentedAddSpan.metadata["messaging.destination.name"], "notifications", "instrumented queue destination");
 const instrumentedBulkSpan = instrumentationPayload.events.find((event) => event.attributes.name === "bullmq publish addBulk").attributes;
 assertEqual(instrumentedBulkSpan.metadata.messageCount, 1, "instrumented bulk count");
-if (JSON.stringify(instrumentationPayload).includes("instrumented-payload") || JSON.stringify(instrumentationPayload).includes("instrumented-bulk")) {
+const instrumentedFlowSpan = instrumentationPayload.events.find((event) => event.attributes.name === "bullmq publish add" && event.attributes.metadata.taskName === "receipt-flow").attributes;
+assertEqual(instrumentedFlowSpan.metadata["messaging.destination.name"], "notifications", "instrumented flow destination");
+assertEqual(instrumentedFlowSpan.metadata.messageCount, 2, "instrumented flow count");
+if (
+  JSON.stringify(instrumentationPayload).includes("instrumented-payload") ||
+  JSON.stringify(instrumentationPayload).includes("instrumented-bulk") ||
+  JSON.stringify(instrumentationPayload).includes("instrumented-flow-payload") ||
+  JSON.stringify(instrumentationPayload).includes("instrumented-flow-child")
+) {
   throw new Error("instrumented queue payload leaked into telemetry body");
 }
 
