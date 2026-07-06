@@ -108,6 +108,10 @@ grep -q 'history.pushState' "$tmp_dir/browser-readme.md"
 grep -q 'Browser Error Source-Map Hints' "$tmp_dir/browser-readme.md"
 grep -q 'debugIdMap' "$tmp_dir/browser-readme.md"
 grep -q 'includeErrorStack: true' "$tmp_dir/browser-readme.md"
+grep -q 'Browser Error Suppression' "$tmp_dir/browser-readme.md"
+grep -q 'errorSuppressionRules' "$tmp_dir/browser-readme.md"
+grep -q 'shouldCaptureError' "$tmp_dir/browser-readme.md"
+grep -q 'onIssueSuppressed' "$tmp_dir/browser-readme.md"
 
 app_dir="$tmp_dir/browser-smoke-app"
 mkdir -p "$app_dir"
@@ -153,6 +157,7 @@ import { Window } from "happy-dom";
 import { RecordingTransport } from "@logbrew/sdk";
 import {
   captureBrowserAction,
+  captureBrowserError,
   captureBrowserInteractionTiming,
   captureBrowserInteractionToNextPaint,
   captureBrowserNavigationTiming,
@@ -342,6 +347,93 @@ if (!rejectionPayload.events[0].attributes.title.includes("Unhandled promise rej
 if (rejectionEvent.defaultPrevented) {
   throw new Error("unhandled rejection default handling should remain enabled by default");
 }
+
+const suppressedIssues = [];
+const noisyResizeObserverError = new Error("ResizeObserver loop failed for hidden@example.test order 12345");
+noisyResizeObserverError.name = "ResizeObserverError";
+noisyResizeObserverError.stack = [
+  "ResizeObserverError: ResizeObserver loop failed for hidden@example.test order 12345",
+  "    at resize (https://cdn.example/assets/ads.js?email=hidden@example.test#widget:7:8)"
+].join("\n");
+const deliveriesBeforeSuppression = transport.sentBodies.length;
+const suppressedResult = await captureBrowserError(noisyResizeObserverError, logbrew, {
+  errorSuppressionRules: [{
+    errorName: "ResizeObserverError",
+    frameFile: /\/assets\/ads\.js$/u,
+    reason: "third_party_resize_observer"
+  }],
+  flushOnCapture: true,
+  onIssueSuppressed(summary) {
+    suppressedIssues.push(summary);
+  }
+});
+if (suppressedResult?.suppressed !== true || suppressedResult.reason !== "third_party_resize_observer") {
+  throw new Error(`expected suppressed browser issue result, got ${JSON.stringify(suppressedResult)}`);
+}
+if (transport.sentBodies.length !== deliveriesBeforeSuppression) {
+  throw new Error("suppressed browser issue should not flush a delivery");
+}
+if (logbrew.client.pendingEvents() !== 0) {
+  throw new Error("suppressed browser issue should not queue telemetry");
+}
+if (suppressedIssues.length !== 1) {
+  throw new Error(`expected one suppressed issue summary, got ${JSON.stringify(suppressedIssues)}`);
+}
+if (
+  suppressedIssues[0].source !== "browser.error" ||
+  suppressedIssues[0].errorName !== "ResizeObserverError" ||
+  suppressedIssues[0].errorFrameFile !== "/assets/ads.js" ||
+  suppressedIssues[0].issueGroupingKey !== "browser.error:ResizeObserverError:/assets/ads.js"
+) {
+  throw new Error(`unexpected suppression summary: ${JSON.stringify(suppressedIssues[0])}`);
+}
+if (JSON.stringify(suppressedIssues[0]).match(/hidden@example|12345|cdn\.example|email=|widget|ResizeObserver loop failed/u)) {
+  throw new Error(`suppression summary leaked browser details: ${JSON.stringify(suppressedIssues[0])}`);
+}
+
+const autoSuppressionWindow = new Window({
+  url: "https://app.example.test/noisy?email=dev@example.test#widget"
+});
+const autoSuppressionTransport = RecordingTransport.alwaysAccept();
+const autoSuppressedIssues = [];
+const autoSuppressionLogbrew = installLogBrewBrowser({
+  browserWindow: autoSuppressionWindow,
+  capturePageViews: false,
+  clientKey: "LOGBREW_BROWSER_KEY",
+  errorSuppressionRules: [{
+    errorName: "WidgetNoiseError",
+    frameFile: /\/assets\/widget\.js$/u,
+    reason: "known_widget_noise"
+  }],
+  onIssueSuppressed(summary) {
+    autoSuppressedIssues.push(summary);
+  },
+  transport: autoSuppressionTransport
+});
+const autoSuppressionError = new Error("Widget failed for hidden@example.test order 12345");
+autoSuppressionError.name = "WidgetNoiseError";
+autoSuppressionError.stack = [
+  "WidgetNoiseError: Widget failed for hidden@example.test order 12345",
+  "    at widget (https://cdn.example/assets/widget.js?email=hidden@example.test#panel:11:12)"
+].join("\n");
+autoSuppressionWindow.dispatchEvent(new autoSuppressionWindow.ErrorEvent("error", {
+  error: autoSuppressionError,
+  message: "Widget failed for hidden@example.test order 12345"
+}));
+await waitFor(() => autoSuppressedIssues.length === 1);
+if (autoSuppressionTransport.sentBodies.length !== 0) {
+  throw new Error("installed suppression should not flush a delivery");
+}
+if (autoSuppressionLogbrew.client.pendingEvents() !== 0) {
+  throw new Error("installed suppression should not queue telemetry");
+}
+if (autoSuppressedIssues[0].reason !== "known_widget_noise" || autoSuppressedIssues[0].errorFrameFile !== "/assets/widget.js") {
+  throw new Error(`unexpected installed suppression summary: ${JSON.stringify(autoSuppressedIssues[0])}`);
+}
+if (JSON.stringify(autoSuppressedIssues[0]).match(/hidden@example|12345|cdn\.example|email=|panel|Widget failed/u)) {
+  throw new Error(`installed suppression summary leaked browser details: ${JSON.stringify(autoSuppressedIssues[0])}`);
+}
+autoSuppressionLogbrew.uninstall();
 
 logbrew.client.log("evt_browser_pagehide_001", "2026-06-02T10:00:04Z", {
   message: "queued before pagehide",
@@ -1212,6 +1304,9 @@ console.error(JSON.stringify({
   rejectionTitle: rejectionPayload.events[0].attributes.title,
   resourceSpan: resourceSpans[0].attributes.name,
   sessionAction: actionPayload.events[0].attributes.metadata.sessionId,
+  autoSuppressedReason: autoSuppressedIssues[0].reason,
+  suppressedFrame: suppressedIssues[0].errorFrameFile,
+  suppressedReason: suppressedResult.reason,
   syncTitle: syncPayload.events[0].attributes.title,
   xhrSpan: browserXhrSpan.attributes.name
 }));
@@ -1630,11 +1725,15 @@ grep -q '"persistedOnlineSends":3' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"resourceSpan":"browser.resource fetch /api/orders/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"sessionAction":"sess_browser_001"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"autoSuppressedReason":"known_widget_noise"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"suppressedFrame":"/assets/ads.js"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"suppressedReason":"third_party_resize_observer"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"xhrSpan":"browser.xhr POST /api/orders/:id"' "$tmp_dir/browser-smoke.stderr.json"
 
 cat > consumer.ts <<'EOF'
 import { RecordingTransport } from "@logbrew/sdk";
 import {
+  captureBrowserError,
   captureBrowserAction,
   captureBrowserFetchSpan,
   captureBrowserInteractionTiming,
@@ -1670,6 +1769,9 @@ import {
   type BrowserNavigationInstrumentation,
   type BrowserNavigationTimingInput,
   type BrowserNavigationTimingInstrumentation,
+  type BrowserIssueSuppressedResult,
+  type BrowserIssueSuppressionRule,
+  type BrowserIssueSuppressionSummary,
   type BrowserFetchInput,
   type BrowserFetchInstrumentation,
   type BrowserInteractionTimingInput,
@@ -1724,6 +1826,24 @@ const issue = createBrowserErrorEvent(typedError, window, {
   release: "web@2026.07.04",
   runtime: "browser",
   service: "checkout-web"
+});
+const suppressionRules: BrowserIssueSuppressionRule[] = [{
+  errorName: "SuppressedError",
+  frameFile: /\/assets\/suppressed\.js$/u,
+  reason: "typed_suppression"
+}];
+void captureBrowserError(typedError, context, {
+  errorSuppressionRules: suppressionRules,
+  shouldCaptureError(_event, summary: BrowserIssueSuppressionSummary) {
+    return summary.errorName !== "SuppressedError";
+  },
+  onIssueSuppressed(summary: BrowserIssueSuppressionSummary) {
+    const suppressed: BrowserIssueSuppressedResult = {
+      reason: summary.reason,
+      suppressed: true
+    };
+    void suppressed;
+  }
 });
 const action = createBrowserActionEvent({
   name: "checkout.clicked",

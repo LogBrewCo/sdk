@@ -1,5 +1,35 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-06: Browser issue suppression gap reduced after source-reading
+  Sentry JavaScript
+  `getsentry/sentry-javascript@5abfc34cb4681ad90f32ab3ed865741955279778`
+  (`eventFiltersIntegration`, `_shouldDropEvent`, `ignoreErrors`,
+  `allowUrls`, `denyUrls`, and `processBeforeSend`), Datadog Browser SDK
+  `DataDog/browser-sdk@c2829e3dbf3e7e489508f2c1ea5a66035b1f7b55` RUM
+  `shouldSend`/`beforeSend`, and PostHog JS
+  `PostHog/posthog-js@26b92fea20b9cf4c64ce251857aead8e859ed66c`
+  `sendExceptionEvent`, `_matchesSuppressionRule`, and `before_send`.
+  `@logbrew/browser` now supports explicit `errorSuppressionRules`,
+  `shouldCaptureError(event, summary)`, and `onIssueSuppressed(...)` for
+  browser errors and unhandled rejections. Suppressed issues return
+  `{ suppressed: true, reason }`, are not queued, and do not flush; summaries
+  contain only source, error type, current path, path-only frame file, grouping
+  key, optional fingerprint, and reason. They omit raw messages, stacks, full
+  URLs, hosts, query/hash, headers, payloads, cookies, replay data, baggage,
+  and tracestate. Regex matchers reset `lastIndex` for deterministic reused
+  global regex rules, and suppression hook failures report through
+  `onCaptureError` without enqueueing by default. Evidence: RED suppression
+  tests failed before implementation; GREEN focused suppression tests; GREEN
+  `npm test --prefix js/logbrew-browser`; GREEN `python3
+  scripts/check_js_sources.py js/logbrew-browser`; GREEN `bash
+  scripts/real_user_browser_smoke.sh` with packed local packages, npm temp app
+  install, README/type proof, manual and installed-listener suppression, no
+  delivery, no queued issue, and safe summary assertions; GREEN JS lint, JS
+  package publint, ShellCheck, markdown links, confidentiality scan, release metadata, backend reports,
+  generated-artifact hygiene, and diff check. Research:
+  `docs/competitor-research/browser-error-grouping-2026-07-04.md`. Honest gap:
+  Sentry/Datadog still lead on hosted grouping/source context/symbolicated UI,
+  suppression previews, and broader automatic frontend workflows.
 - 2026-07-06: BullMQ FlowProducer rich-trace gap reduced after source-reading
   Sentry JavaScript
   `getsentry/sentry-javascript@989396c8f4e390b02dd62bc1ad2c271c449bd79c`

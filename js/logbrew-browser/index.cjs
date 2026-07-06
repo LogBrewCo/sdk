@@ -283,6 +283,11 @@ async function captureBrowserError(error, context, options = {}) {
   const event = typeof options.errorEvent === "function"
     ? options.errorEvent(error, eventCallbackContext(context))
     : createBrowserErrorEvent(error, context.browserWindow, eventOptions);
+  const suppression = await suppressBrowserIssue(event, context, eventOptions);
+  if (suppression) {
+    maybePreventDefault(error, options);
+    return suppression;
+  }
 
   context.client.issue(event.id, event.timestamp, event.attributes);
   maybePreventDefault(error, options);
@@ -294,6 +299,11 @@ async function captureUnhandledRejection(rejection, context, options = {}) {
   const event = typeof options.rejectionEvent === "function"
     ? options.rejectionEvent(rejection, eventCallbackContext(context))
     : createUnhandledRejectionEvent(rejection, context.browserWindow, eventOptions);
+  const suppression = await suppressBrowserIssue(event, context, eventOptions);
+  if (suppression) {
+    maybePreventDefault(rejection, options);
+    return suppression;
+  }
 
   context.client.issue(event.id, event.timestamp, event.attributes);
   maybePreventDefault(rejection, options);
@@ -668,6 +678,134 @@ function eventCallbackContext(context) {
     client: context.client,
     traceContext: context.traceContext
   };
+}
+
+async function suppressBrowserIssue(event, context, options) {
+  const summary = browserIssueSuppressionSummary(event);
+  const ruleReason = matchedSuppressionRuleReason(options.errorSuppressionRules, event, summary);
+  if (ruleReason) {
+    return notifyBrowserIssueSuppressed(summary, context, options, ruleReason);
+  }
+  if (typeof options.shouldCaptureError !== "function") {
+    return undefined;
+  }
+  try {
+    if (options.shouldCaptureError(event, summary) === false) {
+      return notifyBrowserIssueSuppressed(summary, context, options, "should_capture_error");
+    }
+  } catch (error) {
+    if (typeof options.onCaptureError === "function") {
+      await options.onCaptureError(error, context, { reason: "capture" });
+    }
+    if (options.raiseCaptureErrors === true) {
+      throw error;
+    }
+  }
+  return undefined;
+}
+
+async function notifyBrowserIssueSuppressed(summary, context, options, reason) {
+  const safeSummary = { ...summary, reason: safeSuppressionReason(reason) };
+  try {
+    if (typeof options.onIssueSuppressed === "function") {
+      await options.onIssueSuppressed(safeSummary, context, { reason: "capture" });
+    }
+  } catch (error) {
+    if (typeof options.onCaptureError === "function") {
+      await options.onCaptureError(error, context, { reason: "capture" });
+    }
+    if (options.raiseCaptureErrors === true) {
+      throw error;
+    }
+  }
+  return Object.freeze({ reason: safeSummary.reason, suppressed: true });
+}
+
+function browserIssueSuppressionSummary(event) {
+  const metadata = safeMetadata(event?.attributes?.metadata);
+  return compactMetadata({
+    errorName: metadata.errorName,
+    errorFrameFile: metadata.errorFrameFile,
+    issueFingerprint: metadata.issueFingerprint,
+    issueGroupingKey: metadata.issueGroupingKey,
+    path: metadata.path,
+    reason: "matched_rule",
+    source: metadata.source
+  });
+}
+
+function matchedSuppressionRuleReason(rules, event, summary) {
+  if (rules === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(rules)) {
+    throw new SdkError("configuration_error", "errorSuppressionRules must be an array");
+  }
+  for (const rule of rules) {
+    if (matchesSuppressionRule(rule, event, summary)) {
+      return typeof rule.reason === "string" && rule.reason.trim() !== "" ? rule.reason : "matched_rule";
+    }
+  }
+  return undefined;
+}
+
+function matchesSuppressionRule(rule, event, summary) {
+  if (!rule || Array.isArray(rule) || typeof rule !== "object") {
+    return false;
+  }
+  const matchers = [
+    ["source", summary.source],
+    ["errorName", summary.errorName],
+    ["path", summary.path],
+    ["frameFile", summary.errorFrameFile],
+    ["groupingKey", summary.issueGroupingKey],
+    ["fingerprint", summary.issueFingerprint]
+  ];
+  let hasMatcher = false;
+  for (const [field, value] of matchers) {
+    if (rule[field] === undefined) {
+      continue;
+    }
+    hasMatcher = true;
+    if (!matchesSuppressionMatcher(value, rule[field])) {
+      return false;
+    }
+  }
+  if (rule.message !== undefined) {
+    hasMatcher = true;
+    if (!matchesSuppressionMatcher(event?.attributes?.message, rule.message)) {
+      return false;
+    }
+  }
+  return hasMatcher;
+}
+
+function matchesSuppressionMatcher(value, matcher) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return false;
+  }
+  if (typeof matcher === "string") {
+    return value === matcher;
+  }
+  if (matcher instanceof RegExp) {
+    matcher.lastIndex = 0;
+    const matched = matcher.test(value);
+    matcher.lastIndex = 0;
+    return matched;
+  }
+  if (Array.isArray(matcher)) {
+    return matcher.some((entry) => matchesSuppressionMatcher(value, entry));
+  }
+  return false;
+}
+
+function safeSuppressionReason(reason) {
+  const value = typeof reason === "string" && reason.trim() !== "" ? reason.trim() : "matched_rule";
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9_.:-]+/gu, "_")
+    .replace(/^_+|_+$/gu, "")
+    .slice(0, 80) || "matched_rule";
 }
 
 function createBrowserTransport(options, browserWindow) {

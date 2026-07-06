@@ -50,3 +50,42 @@ Frontend users need low-noise issue grouping so repeated production browser erro
 - Sentry and Datadog still lead on hosted grouping engines, source-context UI, cause chains, suppression rules, grouping previews, and symbolicated stack presentation.
 - PostHog still has useful exception suppression/rate-limiting ergonomics that LogBrew has not matched yet.
 - Next highest-impact work should either unblock backend-hosted symbolication/grouping contracts or add safe SDK-side cause-chain and suppression-rule hints without capturing stack text by default.
+
+## Follow-Up: Browser Error Suppression - 2026-07-06
+
+### Additional Source Reading
+
+- Sentry JavaScript `5abfc34cb4681ad90f32ab3ed865741955279778`
+- `packages/core/src/integrations/eventFilters.ts`: `eventFiltersIntegration(...)`, `_mergeOptions(...)`, `_shouldDropEvent(...)`, `_isIgnoredError(...)`, `_isDeniedUrl(...)`, `_isAllowedUrl(...)`
+- `packages/core/src/types/options.ts`: `ignoreErrors`, `allowUrls`, and `denyUrls` options
+- `packages/core/src/client.ts`: `processBeforeSend(...)` handles `beforeSend` returning `null`
+- Pattern: Sentry filters noisy errors in the client pipeline through option-driven matchers and `beforeSend`. The strong side is mature low-noise control; the tradeoff is a broader event pipeline with many integration defaults.
+
+- Datadog Browser SDK `c2829e3dbf3e7e489508f2c1ea5a66035b1f7b55`
+- `packages/browser-rum-core/src/domain/assembly.ts`: `shouldSend(...)`
+- `packages/browser-rum-core/src/domain/configuration/configuration.ts`: `beforeSend` and `RumBeforeSend`
+- Pattern: Datadog lets `beforeSend` return `false` to discard RUM events before delivery. The strong side is a simple user hook; the tradeoff is that apps must be careful not to inspect or forward sensitive event detail.
+
+- PostHog JS `26b92fea20b9cf4c64ce251857aead8e859ed66c`
+- `packages/browser/src/posthog-exceptions.ts`: `sendExceptionEvent(...)`, `_matchesSuppressionRule(...)`
+- `packages/core/src/types.ts`: `before_send` returning `null`
+- Pattern: PostHog combines exception-specific suppression rules with a generic pre-send hook. The useful lesson is explicit local noise control before hosted grouping.
+
+### LogBrew Follow-Up Change
+
+- `@logbrew/browser` now supports explicit `errorSuppressionRules` for browser errors and unhandled rejections. Rules can match source, error name, current path, path-only frame file, grouping key, fingerprint, or local message.
+- `shouldCaptureError(event, summary)` can return `false` for app-owned suppression logic.
+- Suppressed issues return `{ suppressed: true, reason }`, are not queued, and do not flush the transport.
+- `onIssueSuppressed(summary, context, details)` receives a safe summary with source, error type, path, path-only frame file, grouping key, optional fingerprint, and reason.
+
+### Privacy Boundary
+
+- LogBrew suppression summaries omit raw messages, stacks, full URLs, hosts, query strings, hashes, headers, payloads, cookies, replay data, baggage, and tracestate.
+- Rule reasons are normalized to stable low-cardinality strings.
+- This is SDK-side noise control only; it does not claim hosted grouping, source context, issue merging, or symbolicated stack presentation parity.
+
+### Additional Verification
+
+- RED: `node --test --test-name-pattern "suppression|shouldCaptureError" js/logbrew-browser/test/trace-context.test.mjs` failed before implementation because noisy browser issues still queued/flushed.
+- GREEN: the same focused browser tests pass with rule suppression, callback suppression, safe summaries, and no queued telemetry.
+- Installed-artifact smoke now proves packaged README guidance, typed API exports, local suppression result, no transport delivery, no queued issue, and no leaked full URL/message/stack detail in suppression summaries.

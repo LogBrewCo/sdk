@@ -181,6 +181,36 @@ export type LogBrewBrowserEvent<TAttributes> = {
   attributes: TAttributes;
 };
 
+export type BrowserIssueSuppressionMatcher = string | RegExp | Array<string | RegExp>;
+
+export type BrowserIssueSuppressionRule = {
+  /** Stable, non-sensitive reason reported when this rule suppresses an issue. */
+  reason?: string;
+  source?: BrowserIssueSuppressionMatcher;
+  errorName?: BrowserIssueSuppressionMatcher;
+  path?: BrowserIssueSuppressionMatcher;
+  frameFile?: BrowserIssueSuppressionMatcher;
+  groupingKey?: BrowserIssueSuppressionMatcher;
+  fingerprint?: BrowserIssueSuppressionMatcher;
+  /** Optional local-only message matcher. Matched message text is never included in suppression summaries. */
+  message?: BrowserIssueSuppressionMatcher;
+};
+
+export type BrowserIssueSuppressionSummary = {
+  source?: string;
+  errorName?: string;
+  path?: string;
+  errorFrameFile?: string;
+  issueGroupingKey?: string;
+  issueFingerprint?: string;
+  reason: string;
+};
+
+export type BrowserIssueSuppressedResult = {
+  suppressed: true;
+  reason: string;
+};
+
 export type BrowserActionInput = string | {
   name: string;
   status?: ActionAttributes["status"];
@@ -375,6 +405,19 @@ export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTran
   platform?: string;
   /** Optional stable app-owned grouping fingerprint for explicit error capture. Keep it safe and low-cardinality. */
   fingerprint?: string;
+  /** Declarative local-only browser issue suppression rules. Matching issues are not queued or flushed. */
+  errorSuppressionRules?: BrowserIssueSuppressionRule[];
+  /** Return false to suppress one sanitized browser issue before enqueueing. */
+  shouldCaptureError?: (
+    event: LogBrewBrowserEvent<IssueAttributes>,
+    summary: BrowserIssueSuppressionSummary
+  ) => boolean;
+  /** Called after an issue is suppressed. Summary fields are path/type/grouping-only and omit message/stack text. */
+  onIssueSuppressed?: (
+    summary: BrowserIssueSuppressionSummary,
+    context: LogBrewBrowserContext,
+    details: BrowserFlushDetails
+  ) => void | Promise<void>;
   /** Include raw error stack text only when the app has explicitly approved it. Defaults to false. */
   includeErrorStack?: boolean;
   includeDocumentTitle?: boolean;
@@ -650,13 +693,13 @@ export declare function captureBrowserError(
   error: unknown,
   context: LogBrewBrowserContext,
   options?: LogBrewBrowserOptions
-): Promise<TransportResponse | undefined>;
+): Promise<TransportResponse | BrowserIssueSuppressedResult | undefined>;
 
 export declare function captureUnhandledRejection(
   rejection: unknown,
   context: LogBrewBrowserContext,
   options?: LogBrewBrowserOptions
-): Promise<TransportResponse | undefined>;
+): Promise<TransportResponse | BrowserIssueSuppressedResult | undefined>;
 
 export declare function captureBrowserAction(
   action: BrowserActionInput,

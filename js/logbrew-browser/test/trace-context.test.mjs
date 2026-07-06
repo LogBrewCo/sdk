@@ -251,6 +251,248 @@ test("installed browser error events support explicit low-cardinality grouping f
   }
 });
 
+test("installed browser error suppression rules drop noisy issues with safe summaries", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const {
+    captureBrowserError,
+    createBrowserTraceContext,
+    installLogBrewBrowser
+  } = imported;
+  const browserWindow = createFakeBrowserWindow("https://app.example.test/checkout?email=dev@example.test#step2");
+  const suppressed = [];
+  let flushed = false;
+  try {
+    const context = installLogBrewBrowser({
+      browserWindow,
+      capturePageViews: false,
+      clientKey: CLIENT_KEY,
+      errorSuppressionRules: [{
+        errorName: "ResizeObserverError",
+        frameFile: /\/assets\/ads\.js$/u,
+        reason: "third_party_resize_observer"
+      }],
+      flushOnCapture: true,
+      onFlush() {
+        flushed = true;
+      },
+      onIssueSuppressed(summary) {
+        suppressed.push(summary);
+      },
+      traceContext: createBrowserTraceContext({
+        sampled: true,
+        spanId: SPAN_ID,
+        traceId: TRACE_ID
+      }),
+      transport: {
+        async send() {
+          return { statusCode: 202 };
+        }
+      }
+    });
+    const error = new Error("ResizeObserver loop failed for hidden@example.test order 12345");
+    error.name = "ResizeObserverError";
+    error.stack = [
+      "ResizeObserverError: ResizeObserver loop failed for hidden@example.test order 12345",
+      "    at resize (https://cdn.example/assets/ads.js?email=hidden@example.test#widget:7:8)"
+    ].join("\n");
+
+    const result = await captureBrowserError(error, context, {
+      errorSuppressionRules: [{
+        errorName: "ResizeObserverError",
+        frameFile: /\/assets\/ads\.js$/u,
+        reason: "third_party_resize_observer"
+      }],
+      flushOnCapture: true,
+      onIssueSuppressed(summary) {
+        suppressed.push(summary);
+      }
+    });
+
+    assert.deepEqual(result, {
+      reason: "third_party_resize_observer",
+      suppressed: true
+    });
+    assert.equal(flushed, false);
+    assert.equal(JSON.parse(context.previewJson()).events.length, 0);
+    assert.equal(suppressed.length, 1);
+    assert.deepEqual(suppressed[0], {
+      errorName: "ResizeObserverError",
+      errorFrameFile: "/assets/ads.js",
+      issueGroupingKey: "browser.error:ResizeObserverError:/assets/ads.js",
+      path: "/checkout",
+      reason: "third_party_resize_observer",
+      source: "browser.error"
+    });
+    assert.doesNotMatch(JSON.stringify(suppressed[0]), /hidden@example|12345|cdn\.example|email=|widget|ResizeObserver loop failed/u);
+  } finally {
+    await removeTempDir();
+  }
+});
+
+test("installed browser shouldCaptureError callback can suppress sanitized issues", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const {
+    captureUnhandledRejection,
+    createBrowserTraceContext,
+    installLogBrewBrowser
+  } = imported;
+  const browserWindow = createFakeBrowserWindow("https://app.example.test/checkout?email=dev@example.test#step2");
+  const seen = [];
+  try {
+    const context = installLogBrewBrowser({
+      browserWindow,
+      capturePageViews: false,
+      clientKey: CLIENT_KEY,
+      flushOnCapture: false,
+      traceContext: createBrowserTraceContext({
+        sampled: true,
+        spanId: SPAN_ID,
+        traceId: TRACE_ID
+      }),
+      transport: {
+        async send() {
+          return { statusCode: 202 };
+        }
+      }
+    });
+    const reason = new TypeError("vendor failed for hidden@example.test");
+    reason.stack = [
+      "TypeError: vendor failed for hidden@example.test",
+      "    at vendor (https://cdn.example/assets/vendor.js?email=hidden@example.test#widget:3:4)"
+    ].join("\n");
+
+    const result = await captureUnhandledRejection({ reason }, context, {
+      flushOnCapture: false,
+      shouldCaptureError(event, summary) {
+        seen.push({ event, summary });
+        return summary.issueGroupingKey !== "browser.unhandledrejection:TypeError:/assets/vendor.js";
+      }
+    });
+
+    assert.deepEqual(result, {
+      reason: "should_capture_error",
+      suppressed: true
+    });
+    assert.equal(JSON.parse(context.previewJson()).events.length, 0);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].summary.source, "browser.unhandledrejection");
+    assert.equal(seen[0].summary.errorName, "TypeError");
+    assert.equal(seen[0].summary.errorFrameFile, "/assets/vendor.js");
+    assert.equal(seen[0].event.attributes.metadata.errorMessage, "vendor failed for hidden@example.test");
+    assert.doesNotMatch(JSON.stringify(seen[0].summary), /hidden@example|cdn\.example|email=|widget/u);
+  } finally {
+    await removeTempDir();
+  }
+});
+
+test("installed browser suppression rules keep global regular expressions deterministic", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const {
+    captureBrowserError,
+    installLogBrewBrowser
+  } = imported;
+  const browserWindow = createFakeBrowserWindow("https://app.example.test/checkout");
+  try {
+    const context = installLogBrewBrowser({
+      browserWindow,
+      capturePageViews: false,
+      clientKey: CLIENT_KEY,
+      flushOnCapture: false,
+      transport: {
+        async send() {
+          throw new Error("suppressed issues should not flush");
+        }
+      }
+    });
+    const globalFrameMatcher = /\/assets\/vendor\.js$/gu;
+    const createVendorError = () => {
+      const error = new Error("vendor failed");
+      error.name = "VendorError";
+      error.stack = [
+        "VendorError: vendor failed",
+        "    at vendor (https://cdn.example/assets/vendor.js:3:4)"
+      ].join("\n");
+      return error;
+    };
+    const options = {
+      errorSuppressionRules: [{
+        errorName: "VendorError",
+        frameFile: globalFrameMatcher,
+        reason: "known_vendor_error"
+      }],
+      flushOnCapture: true
+    };
+
+    const first = await captureBrowserError(createVendorError(), context, options);
+    const second = await captureBrowserError(createVendorError(), context, options);
+
+    assert.deepEqual(first, {
+      reason: "known_vendor_error",
+      suppressed: true
+    });
+    assert.deepEqual(second, {
+      reason: "known_vendor_error",
+      suppressed: true
+    });
+    assert.equal(JSON.parse(context.previewJson()).events.length, 0);
+  } finally {
+    await removeTempDir();
+  }
+});
+
+test("installed browser suppression callback failures report without enqueueing by default", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const {
+    captureBrowserError,
+    installLogBrewBrowser
+  } = imported;
+  const browserWindow = createFakeBrowserWindow("https://app.example.test/checkout");
+  const reported = [];
+  try {
+    const context = installLogBrewBrowser({
+      browserWindow,
+      capturePageViews: false,
+      clientKey: CLIENT_KEY,
+      flushOnCapture: false,
+      transport: {
+        async send() {
+          throw new Error("suppressed issues should not flush");
+        }
+      }
+    });
+    const error = new Error("callback failed path");
+    error.name = "CallbackNoiseError";
+    error.stack = [
+      "CallbackNoiseError: callback failed path",
+      "    at callback (https://cdn.example/assets/callback.js:3:4)"
+    ].join("\n");
+
+    const result = await captureBrowserError(error, context, {
+      errorSuppressionRules: [{
+        errorName: "CallbackNoiseError",
+        frameFile: "/assets/callback.js",
+        reason: "callback_noise"
+      }],
+      onCaptureError(error) {
+        reported.push(error);
+      },
+      onIssueSuppressed() {
+        throw new Error("suppression hook failed");
+      }
+    });
+
+    assert.deepEqual(result, {
+      reason: "callback_noise",
+      suppressed: true
+    });
+    assert.equal(reported.length, 1);
+    assert.equal(reported[0].message, "suppression hook failed");
+    assert.equal(JSON.parse(context.previewJson()).events.length, 0);
+  } finally {
+    await removeTempDir();
+  }
+});
+
 test("installed browser navigation instrumentation renews trace context for SPA route changes", async () => {
   const { imported, removeTempDir } = await importBrowserPackage();
   const {

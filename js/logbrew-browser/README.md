@@ -62,6 +62,28 @@ const logbrew = installLogBrewBrowser({
 
 Browser error metadata records the error type/message, path-only first frame, line, column, low-cardinality grouping key, bounded cause-chain type/source summaries, optional Debug ID, release, environment, service, runtime, and active trace/span IDs. It keeps raw stack text and nested cause messages out by default; set `includeErrorStack: true` only if your app has a clear redaction policy. Debug ID code files and browser grouping keys are normalized to paths, so full URLs, hosts, query strings, hash fragments, headers, payloads, cookies, screenshots, replay data, baggage, and tracestate are not captured.
 
+## Browser Error Suppression
+
+Use `errorSuppressionRules` for known noisy browser issues that should not be queued or flushed, such as third-party widget errors your team has already triaged. Rules match only local event fields and report a safe summary through `onIssueSuppressed`:
+
+```js
+const logbrew = installLogBrewBrowser({
+  clientKey: "LOGBREW_BROWSER_KEY",
+  errorSuppressionRules: [{
+    errorName: "ResizeObserverError",
+    frameFile: /\/assets\/vendor-widget\.js$/u,
+    reason: "third_party_resize_observer"
+  }],
+  onIssueSuppressed(summary) {
+    console.debug("LogBrew issue suppressed", summary.reason);
+  }
+});
+```
+
+Rules can match `source`, `errorName`, `path`, `frameFile`, `groupingKey`, `fingerprint`, or `message` with strings, regular expressions, or arrays of either. When a rule matches, the returned value is `{ suppressed: true, reason }`; LogBrew does not enqueue the issue and does not flush the transport. Suppression summaries include only source, error type, current path, path-only frame file, grouping key, optional fingerprint, and reason. They do not include the raw message, stack text, full URL, host, query string, hash, headers, payloads, cookies, replay data, baggage, or tracestate.
+
+For app-owned logic, pass `shouldCaptureError(event, summary)` and return `false` to suppress. The callback receives the full local issue event plus the safe summary, so keep the callback inside your own app boundary and do not forward raw events to logs or diagnostics.
+
 ## Structured Actions
 
 Use `captureBrowserAction()` for the product steps your app already understands, such as clicks, form submits, route changes, retry decisions, or funnel steps. Use `captureBrowserNetwork()` for important API milestones that should be correlated with the same session or trace. These action events give LogBrew and AI agents a session timeline that can be analyzed across many users without requiring a person to watch individual recordings.
