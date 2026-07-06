@@ -344,16 +344,21 @@ const redis = createClient({ url: process.env.REDIS_URL });
 const redisInstrumentation = instrumentLogBrewRedisClient(redis, {
   client,
   cacheName: "profiles",
-  metadata: { feature: "profile-cache" }
+  metadata: { feature: "profile-cache" },
+  tracePipelines: true
 });
 
 await redis.connect();
 const profile = await redis.sendCommand(["GET", profileKey]);
+const pipelineResult = await redis.multi()
+  .set(profileKey, JSON.stringify({ cached: true }))
+  .get(profileKey)
+  .execAsPipeline();
 
 redisInstrumentation.uninstall();
 ```
 
-The wrapper records one child span per `sendCommand()` call and one optional `connect()` span when the client exposes `connect()`. It preserves command results, rethrows Redis driver errors, supports node-redis array commands and ioredis-style `{ name, args }` command objects, and uses the active LogBrew request trace when one exists. Metadata includes `framework: "node:redis"`, `db.system.name: "redis"`, operation kind, optional cache name, cache-hit boolean for read commands when the result is available, duration, sampled flag, and W3C trace IDs. Failed commands add a type-only `exception` event. It does not patch Redis modules globally, capture command arguments, serialize keys or values, record host/port/URLs/connection strings, store connection access values, infer baggage/tracestate, or store raw propagation headers.
+The wrapper records one child span per `sendCommand()` call and one optional `connect()` span when the client exposes `connect()`. With `tracePipelines: true`, it also wraps only pipeline objects returned by that owned client instance and records one aggregate `redis.pipeline` or `redis.multi` span around `exec()` / `execAsPipeline()`. Pipeline metadata is limited to command count and capped command verbs such as `SET,GET`; keys, values, command arguments, raw command text, connection details, and replies are never serialized. It preserves command and pipeline results, rethrows Redis driver errors, supports node-redis array commands and ioredis-style `{ name, args }` command objects, and uses the active LogBrew request trace when one exists. Metadata includes `framework: "node:redis"`, `db.system.name: "redis"`, operation kind, optional cache name, cache-hit boolean for read commands when the result is available, duration, sampled flag, and W3C trace IDs. Failed commands and pipelines add a type-only `exception` event. It does not patch Redis modules globally, capture command arguments, serialize keys or values, record host/port/URLs/connection strings, store connection access values, infer baggage/tracestate, or store raw propagation headers.
 
 ## Cache Operation Spans
 

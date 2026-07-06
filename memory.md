@@ -1,5 +1,42 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-06: Node Redis pipeline/multi trace gap reduced after source reads
+  from Sentry JavaScript
+  `getsentry/sentry-javascript@9d53b0cd8ccd894d7ce24530cb1b289f2607eb97`
+  (`packages/node/src/integrations/tracing/redis/index.ts`, vendored
+  `redis-instrumentation.ts` multi/exec/addCommand helpers, and `cache.ts`),
+  Datadog JS
+  `DataDog/dd-trace-js@02cb1a1fc744c4589385d91c674a6c5720a5d747`
+  (`datadog-instrumentations/src/redis.js`,
+  `datadog-plugin-redis/src/index.js`, and ioredis subclass), OpenTelemetry JS
+  Contrib `07607d0adab59f87c0e517075fa1fbd41c18f99e`
+  (`instrumentation-redis/src/v4-v5/instrumentation.ts`, Redis pipeline tests,
+  ioredis pipeline tests, and `redis-common` serializer), and PostHog Node
+  `fe534177f0257f1f8400bf8189d9bdd6c3e20aea` (no comparable Redis tracing path
+  found). `@logbrew/node` now supports `tracePipelines: true` on
+  `instrumentLogBrewRedisClient(...)`: apps pass one owned Redis-like client,
+  LogBrew wraps only that instance's returned `multi`/`MULTI`/`pipeline` object,
+  records one aggregate `redis.multi` or `redis.pipeline` span around `exec()` /
+  `execAsPipeline()`, returns the same driver values or failures, and puts
+  methods back on `uninstall()`. Metadata is limited to command count, capped command verbs,
+  Redis DB semantic keys, optional cache name, sampled state, trace IDs, and
+  type-only errors; it avoids global Redis/ioredis patching, command args, keys,
+  values, raw command text, replies, connection details, headers, baggage,
+  tracestate, messages, and stacks. Evidence: RED packed Node smoke failed on
+  missing `evt_node_redis_pipeline`; GREEN `npm --prefix js/logbrew-node test`;
+  GREEN `node --check js/logbrew-node/redis.cjs &&
+  python3 scripts/check_js_sources.py && bash scripts/check_js_lint.sh`; GREEN
+  `bash scripts/real_user_node_smoke.sh` with packed package pipeline/multi
+  success/error proof, type declarations, privacy assertions, and existing
+  retry/flush/shutdown coverage; GREEN `bash scripts/check_js_package.sh`;
+  GREEN `bash scripts/check_shell_static.sh`; GREEN
+  `python3 scripts/check_markdown_links.py &&
+  python3 scripts/check_confidentiality_scan.py &&
+  python3 scripts/check_generated_artifacts.py && git diff --check`. Research:
+  `docs/competitor-research/node-redis-pipeline-tracing-2026-07-06.md`. Honest
+  gap: Sentry/Datadog/OTel still lead on hidden automatic per-command pipeline
+  spans, clusters, command obfuscation controls, connection metadata, and hosted
+  trace UI.
 - 2026-07-06: Node Prisma rich-trace gap reduced after source reads from
   Sentry JavaScript
   `getsentry/sentry-javascript@96cbf5ec8c420c6b6a8dba4e2fe245cad4333edb`

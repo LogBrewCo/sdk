@@ -321,6 +321,16 @@ export type LogBrewRedisCommand =
 export type LogBrewRedisCommandClient = {
   sendCommand: (command: LogBrewRedisCommand, ...args: unknown[]) => unknown;
   connect?: (...args: unknown[]) => unknown;
+  multi?: (...args: unknown[]) => LogBrewRedisPipeline;
+  MULTI?: (...args: unknown[]) => LogBrewRedisPipeline;
+  pipeline?: (...args: unknown[]) => LogBrewRedisPipeline;
+};
+
+export type LogBrewRedisPipeline = {
+  addCommand?: (command: LogBrewRedisCommand, ...args: unknown[]) => LogBrewRedisPipeline | unknown;
+  exec?: (...args: unknown[]) => unknown;
+  execAsPipeline?: (...args: unknown[]) => unknown;
+  [commandName: string]: unknown;
 };
 
 export type LogBrewRedisClientInstrumentation = {
@@ -339,6 +349,7 @@ export type LogBrewRedisClientInstrumentationOptions = {
   now?: () => string;
   nowMs?: () => number;
   spanIdFactory?: () => string;
+  tracePipelines?: boolean;
   traceIdFactory?: () => string;
   onCaptureError?: (
     error: unknown,

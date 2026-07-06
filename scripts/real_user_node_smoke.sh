@@ -847,6 +847,32 @@ const fakeRedisClient = {
     this.connected = true;
     return "connected";
   },
+  multi() {
+    const commands = [];
+    return {
+      addCommand(command) {
+        commands.push(command);
+        return this;
+      },
+      get(key) {
+        commands.push(["GET", key]);
+        return this;
+      },
+      set(key, value) {
+        commands.push(["SET", key, value]);
+        return this;
+      },
+      async exec() {
+        if (commands.some((command) => String(Array.isArray(command) ? command[0] : command?.name).toUpperCase() === "FAIL")) {
+          throw new RangeError("redis pipeline failed");
+        }
+        return commands.map((command) => String(Array.isArray(command) ? command[0] : command?.name).toUpperCase() === "GET" ? "Ada" : "OK");
+      },
+      async execAsPipeline() {
+        return this.exec();
+      }
+    };
+  },
   async sendCommand(command) {
     const name = Array.isArray(command) ? command[0] : command?.name;
     if (String(name).toUpperCase() === "FAIL") {
@@ -858,8 +884,15 @@ const fakeRedisClient = {
     return "OK";
   }
 };
-const redisClock = [500, 509, 510, 522, 530, 536, 540, 547];
-const redisSpanIds = ["d7ad6b7169203331", "d7ad6b7169203332", "d7ad6b7169203333", "d7ad6b7169203334"];
+const redisClock = [500, 509, 510, 522, 530, 536, 540, 547, 550, 563, 570, 581];
+const redisSpanIds = [
+  "d7ad6b7169203331",
+  "d7ad6b7169203332",
+  "d7ad6b7169203333",
+  "d7ad6b7169203334",
+  "d7ad6b7169203335",
+  "d7ad6b7169203336"
+];
 const redisInstrumentation = instrumentLogBrewRedisClient(fakeRedisClient, {
   cacheName: "profiles",
   client: redisClient,
@@ -870,7 +903,8 @@ const redisInstrumentation = instrumentLogBrewRedisClient(fakeRedisClient, {
   now: () => "2026-06-02T10:00:16Z",
   nowMs: () => redisClock.shift() ?? 547,
   spanIdFactory: () => redisSpanIds.shift() ?? "d7ad6b7169203334",
-  trace: operationTrace
+  trace: operationTrace,
+  tracePipelines: true
 });
 if (!redisInstrumentation.isInstalled()) {
   throw new Error("expected redis instrumentation to report installed");
@@ -894,6 +928,20 @@ await fakeRedisClient.sendCommand(["FAIL", "fixture-private-value"]).catch((erro
 if (!redisErrorRethrown) {
   throw new Error("redis instrumentation should rethrow command errors");
 }
+const redisPipelineResult = await fakeRedisClient.multi()
+  .set("profile:private", "Ada")
+  .get("profile:42")
+  .execAsPipeline();
+if (JSON.stringify(redisPipelineResult) !== JSON.stringify(["OK", "Ada"])) {
+  throw new Error(`redis instrumentation changed pipeline result: ${JSON.stringify(redisPipelineResult)}`);
+}
+let redisPipelineErrorRethrown = false;
+await fakeRedisClient.multi().addCommand(["FAIL", "fixture-private-value"]).exec().catch((error) => {
+  redisPipelineErrorRethrown = error instanceof RangeError;
+});
+if (!redisPipelineErrorRethrown) {
+  throw new Error("redis instrumentation should rethrow pipeline errors");
+}
 let duplicateRedisRejected = false;
 try {
   instrumentLogBrewRedisClient(fakeRedisClient, { client: redisClient });
@@ -912,6 +960,8 @@ const redisConnectSpanEvent = redisPayload.events.find((event) => event.id === "
 const redisGetSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_get_redis_command");
 const redisSetSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_set_redis_command");
 const redisErrorSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_fail_error");
+const redisPipelineSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_pipeline");
+const redisPipelineErrorSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_multi_error");
 if (!redisConnectSpanEvent || redisConnectSpanEvent.attributes.name !== "redis CONNECT redis.connect") {
   throw new Error(`missing redis connect span payload: ${redisClient.previewJson()}`);
 }
@@ -947,6 +997,41 @@ if (redisErrorSpanEvent.attributes.metadata.errorType !== "RangeError") {
   throw new Error(`redis error span should include error type only: ${redisClient.previewJson()}`);
 }
 assertJsonEqual(redisErrorSpanEvent.attributes.events, exceptionEvents("RangeError"), "redis error span should include a bounded exception span event", redisClient.previewJson());
+if (!redisPipelineSpanEvent || redisPipelineSpanEvent.attributes.name !== "redis PIPELINE redis.pipeline") {
+  throw new Error(`missing redis pipeline span payload: ${redisClient.previewJson()}`);
+}
+assertMetadata(redisPipelineSpanEvent.attributes.metadata, {
+  "db.namespace": "profiles",
+  "db.operation.name": "PIPELINE",
+  "db.system.name": "redis",
+  dbName: "profiles",
+  dbOperation: "redis.pipeline",
+  dbOperationKind: "PIPELINE",
+  dbSystem: "redis",
+  framework: "node:redis",
+  redisPipelineCommandCount: 2,
+  redisPipelineCommands: "SET,GET",
+  safeFeature: "profile"
+}, "redis pipeline span missing useful aggregate metadata", redisClient.previewJson());
+if (
+  redisPipelineSpanEvent.attributes.traceId !== operationTrace.traceId ||
+  redisPipelineSpanEvent.attributes.parentSpanId !== operationTrace.spanId ||
+  redisPipelineSpanEvent.attributes.spanId !== "d7ad6b7169203335"
+) {
+  throw new Error(`redis pipeline span did not correlate with active trace: ${redisClient.previewJson()}`);
+}
+if (!redisPipelineErrorSpanEvent || redisPipelineErrorSpanEvent.attributes.status !== "error") {
+  throw new Error(`missing redis pipeline error span payload: ${redisClient.previewJson()}`);
+}
+assertMetadata(redisPipelineErrorSpanEvent.attributes.metadata, {
+  "db.operation.name": "MULTI",
+  dbOperation: "redis.multi",
+  dbOperationKind: "MULTI",
+  errorType: "RangeError",
+  redisPipelineCommandCount: 1,
+  redisPipelineCommands: "FAIL"
+}, "redis pipeline error span missing type-only failure metadata", redisClient.previewJson());
+assertJsonEqual(redisPipelineErrorSpanEvent.attributes.events, exceptionEvents("RangeError"), "redis pipeline error span should include a bounded exception span event", redisClient.previewJson());
 const redisPayloadJson = JSON.stringify(redisPayload);
 if (
   redisPayloadJson.includes("profile:42") ||
@@ -954,6 +1039,7 @@ if (
   redisPayloadJson.includes("Ada") ||
   redisPayloadJson.includes("example.invalid") ||
   redisPayloadJson.includes("fixture-private-value") ||
+  redisPayloadJson.includes("redis pipeline failed") ||
   redisPayloadJson.includes("FAIL fixture-private-value")
 ) {
   throw new Error(`redis instrumentation leaked command, key, value, endpoint, or sensitive details: ${redisClient.previewJson()}`);
@@ -1646,7 +1732,8 @@ const typedRedisInstrumentation: LogBrewRedisClientInstrumentation = instrumentL
   cacheName: "profiles",
   client,
   metadata: { feature: "profile" },
-  trace
+  trace,
+  tracePipelines: true
 });
 typedRedisInstrumentation.uninstall();
 const typedMongoCollection: LogBrewMongoCollection = {

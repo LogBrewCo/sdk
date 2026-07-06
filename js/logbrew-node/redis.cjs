@@ -5,7 +5,47 @@ const { normalizeSpanId, normalizeTraceId } = require("./trace-context.cjs");
 
 const INSTRUMENTED_REDIS_SEND_COMMAND = Symbol.for("@logbrew/node.instrumentedRedisSendCommand");
 const INSTRUMENTED_REDIS_CONNECT = Symbol.for("@logbrew/node.instrumentedRedisConnect");
+const INSTRUMENTED_REDIS_PIPELINE_METHOD = Symbol.for("@logbrew/node.instrumentedRedisPipelineMethod");
+const INSTRUMENTED_REDIS_PIPELINE_EXEC = Symbol.for("@logbrew/node.instrumentedRedisPipelineExec");
+const INSTRUMENTED_REDIS_PIPELINE_COMMAND = Symbol.for("@logbrew/node.instrumentedRedisPipelineCommand");
 const DEFAULT_SYSTEM = "redis";
+const REDIS_PIPELINE_COMMAND_METHODS = Object.freeze([
+  "append",
+  "decr",
+  "decrBy",
+  "del",
+  "delete",
+  "exists",
+  "expire",
+  "get",
+  "getDel",
+  "getEx",
+  "getSet",
+  "hDel",
+  "hGet",
+  "hGetAll",
+  "hMGet",
+  "hSet",
+  "incr",
+  "incrBy",
+  "lPop",
+  "lPush",
+  "mGet",
+  "mSet",
+  "publish",
+  "rPop",
+  "rPush",
+  "sAdd",
+  "sRem",
+  "set",
+  "setEx",
+  "ttl",
+  "unlink",
+  "xAdd",
+  "zAdd",
+  "zRange",
+  "zRem"
+]);
 
 function instrumentLogBrewRedisClient(redisClient, options = {}) {
   if (!redisClient || typeof redisClient.sendCommand !== "function") {
@@ -14,9 +54,11 @@ function instrumentLogBrewRedisClient(redisClient, options = {}) {
 
   const originalSendCommand = redisClient.sendCommand;
   const originalConnect = typeof redisClient.connect === "function" ? redisClient.connect : undefined;
+  const originalPipelineMethods = redisPipelineMethodEntries(redisClient);
   if (
     originalSendCommand?.[INSTRUMENTED_REDIS_SEND_COMMAND] === true ||
-    originalConnect?.[INSTRUMENTED_REDIS_CONNECT] === true
+    originalConnect?.[INSTRUMENTED_REDIS_CONNECT] === true ||
+    originalPipelineMethods.some(([, method]) => method?.[INSTRUMENTED_REDIS_PIPELINE_METHOD] === true)
   ) {
     throw new SdkError(
       "configuration_error",
@@ -53,6 +95,18 @@ function instrumentLogBrewRedisClient(redisClient, options = {}) {
     redisClient.connect = logBrewInstrumentedRedisConnect;
   }
 
+  if (options.tracePipelines === true) {
+    const isRedisInstrumentationInstalled = () => installed;
+    for (const [methodName, originalMethod] of originalPipelineMethods) {
+      redisClient[methodName] = createInstrumentedRedisPipelineMethod(
+        originalMethod,
+        methodName,
+        options,
+        isRedisInstrumentationInstalled
+      );
+    }
+  }
+
   return {
     isInstalled() {
       return installed && redisClient.sendCommand === logBrewInstrumentedRedisSendCommand;
@@ -64,6 +118,11 @@ function instrumentLogBrewRedisClient(redisClient, options = {}) {
       }
       if (originalConnect && redisClient.connect === logBrewInstrumentedRedisConnect) {
         redisClient.connect = originalConnect;
+      }
+      for (const [methodName, originalMethod] of originalPipelineMethods) {
+        if (redisClient[methodName]?.[INSTRUMENTED_REDIS_PIPELINE_METHOD] === true) {
+          redisClient[methodName] = originalMethod;
+        }
       }
     }
   };
@@ -176,11 +235,186 @@ function traceRedisConnect(receiver, originalConnect, args, options) {
   }
 }
 
+function redisPipelineMethodEntries(redisClient) {
+  return ["multi", "MULTI", "pipeline"]
+    .filter((methodName) => typeof redisClient[methodName] === "function")
+    .map((methodName) => [methodName, redisClient[methodName]]);
+}
+
+function createInstrumentedRedisPipelineMethod(originalMethod, methodName, options, isInstalled) {
+  /* eslint-disable no-invalid-this */
+  function logBrewInstrumentedRedisPipelineMethod(...args) {
+    const pipeline = originalMethod.apply(this, args);
+    if (!isInstalled() || !pipeline || typeof pipeline !== "object") {
+      return pipeline;
+    }
+    return instrumentRedisPipeline(pipeline, {
+      defaultOperationKind: methodName === "pipeline" ? "PIPELINE" : "MULTI",
+      options
+    });
+  }
+  /* eslint-enable no-invalid-this */
+
+  Object.defineProperty(logBrewInstrumentedRedisPipelineMethod, INSTRUMENTED_REDIS_PIPELINE_METHOD, {
+    value: true
+  });
+  return logBrewInstrumentedRedisPipelineMethod;
+}
+
+function instrumentRedisPipeline(pipeline, { defaultOperationKind, options }) {
+  const commandNames = [];
+  wrapRedisPipelineAddCommand(pipeline, commandNames);
+  for (const methodName of REDIS_PIPELINE_COMMAND_METHODS) {
+    wrapRedisPipelineCommandMethod(pipeline, methodName, commandNames);
+  }
+  wrapRedisPipelineExec(pipeline, "exec", defaultOperationKind, commandNames, options);
+  wrapRedisPipelineExec(pipeline, "execAsPipeline", "PIPELINE", commandNames, options);
+  return pipeline;
+}
+
+function wrapRedisPipelineAddCommand(pipeline, commandNames) {
+  if (typeof pipeline.addCommand !== "function" || pipeline.addCommand[INSTRUMENTED_REDIS_PIPELINE_COMMAND] === true) {
+    return;
+  }
+  const originalAddCommand = pipeline.addCommand;
+  /* eslint-disable no-invalid-this */
+  function logBrewInstrumentedRedisPipelineAddCommand(...args) {
+    recordRedisPipelineCommand(commandNames, redisPipelineCommandNameFromAddCommandArgs(args));
+    return originalAddCommand.apply(this, args);
+  }
+  /* eslint-enable no-invalid-this */
+  Object.defineProperty(logBrewInstrumentedRedisPipelineAddCommand, INSTRUMENTED_REDIS_PIPELINE_COMMAND, {
+    value: true
+  });
+  pipeline.addCommand = logBrewInstrumentedRedisPipelineAddCommand;
+}
+
+function wrapRedisPipelineCommandMethod(pipeline, methodName, commandNames) {
+  if (typeof pipeline[methodName] !== "function" || pipeline[methodName][INSTRUMENTED_REDIS_PIPELINE_COMMAND] === true) {
+    return;
+  }
+  const originalMethod = pipeline[methodName];
+  /* eslint-disable no-invalid-this */
+  function logBrewInstrumentedRedisPipelineCommand(...args) {
+    const countBefore = commandNames.length;
+    const result = originalMethod.apply(this, args);
+    if (commandNames.length === countBefore) {
+      recordRedisPipelineCommand(commandNames, methodName);
+    }
+    return result;
+  }
+  /* eslint-enable no-invalid-this */
+  Object.defineProperty(logBrewInstrumentedRedisPipelineCommand, INSTRUMENTED_REDIS_PIPELINE_COMMAND, {
+    value: true
+  });
+  pipeline[methodName] = logBrewInstrumentedRedisPipelineCommand;
+}
+
+function wrapRedisPipelineExec(pipeline, methodName, defaultOperationKind, commandNames, options) {
+  if (typeof pipeline[methodName] !== "function" || pipeline[methodName][INSTRUMENTED_REDIS_PIPELINE_EXEC] === true) {
+    return;
+  }
+  const originalExec = pipeline[methodName];
+  const operationKind = defaultOperationKind === "PIPELINE" || methodName === "execAsPipeline" ? "PIPELINE" : "MULTI";
+  const operationName = operationKind === "PIPELINE" ? "redis.pipeline" : "redis.multi";
+
+  /* eslint-disable no-invalid-this */
+  function logBrewInstrumentedRedisPipelineExec(...args) {
+    if (!options.client) {
+      throw new SdkError("configuration_error", "instrumentLogBrewRedisClient requires client");
+    }
+
+    const startedAt = nowMs(options);
+    const trace = createRedisTraceContext(options.trace ?? options.activeTraceProvider?.(), options);
+    const pipeline = redisPipelineSummary(commandNames);
+    let captured = false;
+    const captureOnce = (error, result) => {
+      if (captured) {
+        return;
+      }
+      captured = true;
+      void captureRedisSpan(options, {
+        durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
+        error,
+        operationKind,
+        operationName,
+        pipeline,
+        result,
+        trace
+      });
+    };
+    const execArgs = wrapRedisPipelineCallback(args, captureOnce);
+
+    try {
+      const result = runWithTrace(options, trace, () => originalExec.apply(this, execArgs));
+      if (isPromiseLike(result)) {
+        return result.then((value) => {
+          captureOnce(undefined, value);
+          return value;
+        }).catch((error) => {
+          captureOnce(error);
+          throw error;
+        });
+      }
+      captureOnce(undefined, result);
+      return result;
+    } catch (error) {
+      captureOnce(error);
+      throw error;
+    }
+  }
+  /* eslint-enable no-invalid-this */
+
+  Object.defineProperty(logBrewInstrumentedRedisPipelineExec, INSTRUMENTED_REDIS_PIPELINE_EXEC, {
+    value: true
+  });
+  pipeline[methodName] = logBrewInstrumentedRedisPipelineExec;
+}
+
+function wrapRedisPipelineCallback(args, captureOnce) {
+  const callbackIndex = args.findIndex((arg) => typeof arg === "function");
+  if (callbackIndex === -1) {
+    return args;
+  }
+  const nextArgs = [...args];
+  const callback = args[callbackIndex];
+  nextArgs[callbackIndex] = function logBrewRedisPipelineCallback(error, result, ...rest) {
+    captureOnce(error || undefined, result);
+    return callback.apply(this, [error, result, ...rest]);
+  };
+  return nextArgs;
+}
+
+function redisPipelineCommandNameFromAddCommandArgs(args) {
+  const arrayCommand = args.find((arg) => Array.isArray(arg) && arg.length > 0);
+  if (arrayCommand) {
+    return redisCommandName(arrayCommand[0]);
+  }
+  return redisCommandName(args[0]);
+}
+
+function recordRedisPipelineCommand(commandNames, commandName) {
+  const name = redisCommandName(commandName);
+  if (name !== "COMMAND") {
+    commandNames.push(name);
+  }
+}
+
+function redisPipelineSummary(commandNames) {
+  const names = commandNames.filter((name) => name !== "COMMAND");
+  const capped = names.slice(0, 12);
+  return {
+    commandCount: names.length,
+    commands: capped.length === names.length ? capped.join(",") : `${capped.join(",")},...`
+  };
+}
+
 async function captureRedisSpan(options, {
   durationMs,
   error,
   operationKind,
   operationName,
+  pipeline,
   result,
   trace
 }) {
@@ -199,6 +433,7 @@ async function captureRedisSpan(options, {
       dbName: options.cacheName.trim()
     } : {}),
     ...cacheResultMetadata(operationKind, result),
+    ...redisPipelineMetadata(pipeline),
     ...(error !== undefined && error !== null ? { errorType: errorType(error) } : {})
   };
 
@@ -222,6 +457,16 @@ async function captureRedisSpan(options, {
       }
     }
   }
+}
+
+function redisPipelineMetadata(pipeline) {
+  if (!pipeline || typeof pipeline !== "object") {
+    return {};
+  }
+  return {
+    redisPipelineCommandCount: pipeline.commandCount,
+    ...(pipeline.commands ? { redisPipelineCommands: pipeline.commands } : {})
+  };
 }
 
 function redisCommandInfo(args) {
@@ -362,6 +607,12 @@ function isSafeRedisMetadataKey(key) {
 function defaultRedisSpanId({ error, operationKind, operationName }) {
   if (operationName === "redis.connect") {
     return error !== undefined && error !== null ? "evt_node_redis_connect_error" : "evt_node_redis_connect";
+  }
+  if (operationName === "redis.pipeline") {
+    return error !== undefined && error !== null ? "evt_node_redis_pipeline_error" : "evt_node_redis_pipeline";
+  }
+  if (operationName === "redis.multi") {
+    return error !== undefined && error !== null ? "evt_node_redis_multi_error" : "evt_node_redis_multi";
   }
   if (error !== undefined && error !== null) {
     return `evt_node_redis_${slugify(operationKind)}_error`;
