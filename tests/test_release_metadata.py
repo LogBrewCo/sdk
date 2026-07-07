@@ -458,6 +458,19 @@ jobs:
 
         self.assertTrue(any("npm package dir js/logbrew-bullmq" in failure for failure in failures))
 
+    def test_publish_packages_workflow_lists_every_python_package_for_pypi_extras(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = write_release_workflow_fixture(root)
+            workflow = minimal_publish_packages_workflow(list(check_release_metadata.JS_PACKAGES))
+            workflow += "\npython/logbrew_py python/logbrew_fastapi python/logbrew_django\n"
+            (workflow_dir / "publish-packages.yml").write_text(workflow, encoding="utf-8")
+
+            failures: list[str] = []
+            check_release_metadata.validate_release_workflows(root, failures)
+
+        self.assertTrue(any("PyPI package dir python/logbrew_flask" in failure for failure in failures))
+
     def test_trusted_publisher_docs_list_every_npm_package(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

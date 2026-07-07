@@ -17,7 +17,12 @@
   `traceparent` headers are continued with fresh child span IDs; malformed
   propagation falls back without echoing raw headers. It avoids global
   Flask/WSGI monkeypatching, request/response bodies, cookies, arbitrary
-  headers, query/hash text, raw propagation, baggage, and tracestate. Evidence:
+  headers, query/hash text, raw propagation, baggage, and tracestate. This
+  cycle also wired `logbrew-flask` into the guarded PyPI extras release path:
+  `publish-packages.yml` builds/checks `python/logbrew_flask`, can publish it
+  only with `include_pypi_extras=true`, verifies `logbrew-flask` after guarded
+  extras releases, and the registry/trusted-publisher checks now require Flask
+  to stay aligned. No package was published in this cycle. Evidence:
   `bash scripts/check_flask_package.sh`, `bash scripts/real_user_flask_smoke.sh`
   with Flask 3.1.3 installed temp app, focused Flask unit suite, Python static,
   source syntax, ShellCheck 0.11.0, markdown links, release metadata,

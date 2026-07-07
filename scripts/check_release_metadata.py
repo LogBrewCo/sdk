@@ -961,6 +961,12 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
                 failures,
                 f"{PUBLISH_PACKAGES_WORKFLOW}: missing npm package dir {relative_dir}",
             )
+        for relative_dir in PYTHON_PACKAGES:
+            require(
+                relative_dir in publish_packages_text,
+                failures,
+                f"{PUBLISH_PACKAGES_WORKFLOW}: missing PyPI package dir {relative_dir}",
+            )
     for relative_path in RELEASE_SAFETY_DOCS:
         docs_path = require_path(root, relative_path, failures)
         if not docs_path.exists():
@@ -979,6 +985,13 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
                     package_name in docs,
                     failures,
                     f"{relative_path}: missing trusted publisher npm package {package_name}",
+                )
+            for package in PYTHON_PACKAGES.values():
+                package_name = package["name"]
+                require(
+                    package_name in docs,
+                    failures,
+                    f"{relative_path}: missing trusted publisher PyPI package {package_name}",
                 )
 
 

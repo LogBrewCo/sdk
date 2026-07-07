@@ -48,7 +48,7 @@ on:
         type: boolean
         default: false
       include_pypi_extras:
-        description: "Publish FastAPI/Django PyPI packages after their publishers are configured"
+        description: "Publish FastAPI, Flask, and Django PyPI packages after their publishers are configured"
         required: true
         type: boolean
         default: false
@@ -374,11 +374,13 @@ jobs:
           source scripts/python_package_version.sh
           core_version="$(python_package_version python/logbrew_py/pyproject.toml)"
           fastapi_version="$(python_package_version python/logbrew_fastapi/pyproject.toml)"
+          flask_version="$(python_package_version python/logbrew_flask/pyproject.toml)"
           django_version="$(python_package_version python/logbrew_django/pyproject.toml)"
           {
             echo "version=$core_version"
             echo "core_version=$core_version"
             echo "fastapi_version=$fastapi_version"
+            echo "flask_version=$flask_version"
             echo "django_version=$django_version"
           } >> "$GITHUB_OUTPUT"
 
@@ -387,7 +389,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           python -m pip install --upgrade build twine
-          for package_dir in python/logbrew_py python/logbrew_fastapi python/logbrew_django; do
+          for package_dir in python/logbrew_py python/logbrew_fastapi python/logbrew_flask python/logbrew_django; do
             output_dir="dist/pypi/$(basename "$package_dir")"
             python -m build --sdist --wheel --outdir "$output_dir" "$package_dir"
             python -m twine check "$output_dir"/*
@@ -407,6 +409,13 @@ jobs:
           packages-dir: dist/pypi/logbrew_fastapi
           skip-existing: true
 
+      - name: Publish logbrew-flask to PyPI
+        if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/pypi/logbrew_flask
+          skip-existing: true
+
       - name: Publish logbrew-django to PyPI
         if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -418,7 +427,7 @@ jobs:
         if: ${{ ! inputs.dry_run && ! inputs.include_pypi_extras }}
         run: |
           echo "Published core logbrew-sdk only."
-          echo "Set include_pypi_extras=true after logbrew-fastapi and logbrew-django PyPI publishers are configured."
+          echo "Set include_pypi_extras=true after logbrew-fastapi, logbrew-flask, and logbrew-django PyPI publishers are configured."
 
       - name: Verify public PyPI packages
         if: ${{ ! inputs.dry_run }}
@@ -429,6 +438,7 @@ jobs:
           if [[ "${{ inputs.include_pypi_extras }}" == "true" ]]; then
             verify_args+=(--include-pypi-extras)
             verify_args+=(--pypi-version "logbrew-fastapi=${{ steps.pypi-version.outputs.fastapi_version }}")
+            verify_args+=(--pypi-version "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}")
             verify_args+=(--pypi-version "logbrew-django=${{ steps.pypi-version.outputs.django_version }}")
           fi
           verify_args+=(--version "${{ steps.pypi-version.outputs.version }}")

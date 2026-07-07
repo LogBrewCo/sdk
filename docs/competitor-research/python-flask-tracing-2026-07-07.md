@@ -7,13 +7,13 @@ Evaluate Flask request tracing patterns in public competitor SDKs before adding 
 ## Sources Read
 
 - Sentry Python, `getsentry/sentry-python@85ba59f707654719bc5edbb224c01884103d9c8b`
-- Sentry paths: `sentry_sdk/integrations/flask.py`, `sentry_sdk/integrations/wsgi.py`, `sentry_sdk/integrations/_wsgi_common.py`, `tests/integrations/flask/test_flask.py`
+- Sentry paths: `setup.py`, `sentry_sdk/integrations/flask.py`, `sentry_sdk/integrations/wsgi.py`, `sentry_sdk/integrations/_wsgi_common.py`, `tests/integrations/flask/test_flask.py`
 - Sentry functions/classes read: `FlaskIntegration.setup_once`, `_request_started`, `_set_transaction_name_and_source`, `FlaskRequestExtractor`, `_capture_exception`, `SentryWsgiMiddleware.__call__`
 - Datadog Python, `DataDog/dd-trace-py@c3e1f08d9b39b2984827eea4249c3f0370579199`
 - Datadog paths: `ddtrace/contrib/internal/flask/patch.py`, `ddtrace/contrib/internal/flask/wrappers.py`, `tests/contrib/flask`
 - Datadog functions/classes read: `patch`, `_FlaskWSGIMiddleware`, `patched_wsgi_app`, `_collect_flask_routes`, `_walk_wsgi_mounts`, `patched_add_url_rule`, `wrap_view`, `_wrap_call`, `_wrap_call_with_tracing_check`
 - OpenTelemetry Python Contrib, `open-telemetry/opentelemetry-python-contrib@6b55f8290d30ae4cbf04aef4ccf8fd9215d9f95e`
-- OpenTelemetry path: `instrumentation/opentelemetry-instrumentation-flask/src/opentelemetry/instrumentation/flask/__init__.py`
+- OpenTelemetry paths: `instrumentation/opentelemetry-instrumentation-flask/pyproject.toml`, `instrumentation/opentelemetry-instrumentation-flask/src/opentelemetry/instrumentation/flask/__init__.py`
 - OpenTelemetry functions/classes read: `get_default_span_name`, `_rewrapped_app`, `_wrapped_before_request`, `_wrapped_teardown_request`, `_InstrumentedFlask`, `FlaskInstrumentor.instrument_app`
 - PostHog Python, `PostHog/posthog-python@b4056cbe057085480027258645afe693e13fd15e`
 - PostHog paths checked: `posthog/client.py` plus repository search for Flask instrumentation. No comparable source-level Flask trace middleware was found in that package.
@@ -28,6 +28,12 @@ OpenTelemetry's Flask instrumentation wraps the WSGI app and request lifecycle h
 
 PostHog's Python package did not expose a comparable Flask tracing middleware in the public source checked for this cycle.
 
+## Packaging Pattern
+
+Sentry ships Flask support as a `sentry-sdk` extra in `setup.py`, while Datadog keeps Flask instrumentation under the main `ddtrace` package. OpenTelemetry ships a separate `opentelemetry-instrumentation-flask` distribution with a `FlaskInstrumentor` entry point. PostHog's checked Python source did not expose a Flask tracing package.
+
+LogBrew follows the OpenTelemetry-style optional package boundary for Flask: `logbrew-flask` depends on `logbrew-sdk` and Flask, so core Python users do not install Flask dependencies by default. The release workflow now builds and checks `python/logbrew_flask` with the other Python distributions and can publish/verify `logbrew-flask` only when `include_pypi_extras=true` and the PyPI trusted publisher is configured. No real PyPI release was made in this cycle.
+
 ## LogBrew Design
 
 LogBrew adds `logbrew-flask` as a separate typed package rather than hiding Flask behavior in the core Python SDK. Apps call `add_logbrew_middleware(app, ...)`, which registers app-owned Flask hooks without monkeypatching `Flask.__call__` or patching Flask globally.
@@ -41,6 +47,7 @@ Privacy defaults are stricter than the richer automatic competitors: no request 
 - `python/logbrew_flask/tests/test_flask_integration.py`
 - `scripts/check_flask_package.sh`
 - `scripts/real_user_flask_smoke.sh`
+- `.github/workflows/publish-packages.yml` guarded `logbrew-flask` PyPI extras path
 
 The installed-artifact proofs build local `logbrew-sdk` and `logbrew-flask` wheels/sdists, install them into fresh virtual environments, run Flask test-client flows, prove log/span/issue correlation, validate trace/span IDs, validate typed consumer usage, and exercise packaged examples.
 

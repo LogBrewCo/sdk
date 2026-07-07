@@ -31,7 +31,7 @@ from check_release_metadata import (
 NPM_PACKAGES = tuple(sorted(JS_PACKAGES.values()))
 NPM_VERSION_PACKAGES = NPM_PACKAGES + ("co.logbrew.unity",)
 PYPI_PACKAGES = ("logbrew-sdk",)
-PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-django")
+PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-flask", "logbrew-django")
 RUBYGEMS_PACKAGES = ("logbrew-sdk",)
 PACKAGIST_PACKAGES = ("logbrew/sdk",)
 CRATES = ("logbrew",)

@@ -41,7 +41,7 @@ on:
         type: string
         default: ""
       include_pypi_extras:
-        description: "Include FastAPI and Django PyPI packages"
+        description: "Include FastAPI, Flask, and Django PyPI packages"
         required: true
         type: boolean
         default: true

@@ -121,6 +121,7 @@ class RegistryPublicationTests(unittest.TestCase):
 
         self.assertIn("co.logbrew.unity", labels)
         self.assertIn("logbrew-fastapi", labels)
+        self.assertIn("logbrew-flask", labels)
         self.assertIn("logbrew-django", labels)
         self.assertIn("logbrew", labels)
         self.assertIn("logbrew/sdk", labels)
@@ -291,7 +292,11 @@ class RegistryPublicationTests(unittest.TestCase):
             target=["pypi"],
             version="0.1.1",
             npm_versions={},
-            pypi_versions={"logbrew-fastapi": "0.1.2", "logbrew-django": "0.1.2"},
+            pypi_versions={
+                "logbrew-fastapi": "0.1.2",
+                "logbrew-flask": "0.1.0",
+                "logbrew-django": "0.1.2",
+            },
             nuget_versions={},
         )
 
@@ -299,6 +304,7 @@ class RegistryPublicationTests(unittest.TestCase):
 
         self.assertIn("public registry versions ok for pypi at 0.1.1", summary)
         self.assertIn("logbrew-fastapi@0.1.2", summary)
+        self.assertIn("logbrew-flask@0.1.0", summary)
         self.assertIn("logbrew-django@0.1.2", summary)
 
     def test_success_summary_reports_nuget_version_overrides(self) -> None:
