@@ -3,6 +3,7 @@ package logbrew
 import (
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptrace"
 	"reflect"
@@ -21,9 +22,11 @@ type HTTPClientTransportConfig struct {
 	Metadata      map[string]any
 	// CapturePhaseTimings records DNS/connect/TLS/write/first-byte durations using net/http/httptrace.
 	CapturePhaseTimings bool
-	SpanIDFactory       func() string
-	Now                 func() time.Time
-	OnError             func(error)
+	// FinishSpanOnResponseBodyClose defers successful span capture until the response body is read to EOF or closed.
+	FinishSpanOnResponseBodyClose bool
+	SpanIDFactory                 func() string
+	Now                           func() time.Time
+	OnError                       func(error)
 }
 
 // NewHTTPClientTransport wraps an app-owned RoundTripper with privacy-safe outbound spans.
@@ -83,9 +86,86 @@ func (t *httpClientTraceTransport) RoundTrip(request *http.Request) (*http.Respo
 		tracedRequest = phaseTimings.attach(tracedRequest)
 	}
 	response, roundTripErr := t.base.RoundTrip(tracedRequest)
+	if t.shouldFinishOnResponseBody(response, roundTripErr) {
+		response.Body = newHTTPClientTraceResponseBody(response.Body, func(completion string, bodyErr error) {
+			finished := t.now()
+			t.captureSpan(tracedRequest, trace, response, bodyErr, finished.Sub(start), finished, phaseTimings, map[string]any{
+				"responseBodyCompletion": completion,
+			})
+		})
+		return response, nil
+	}
 	finished := t.now()
-	t.captureSpan(tracedRequest, trace, response, roundTripErr, finished.Sub(start), finished, phaseTimings)
+	t.captureSpan(tracedRequest, trace, response, roundTripErr, finished.Sub(start), finished, phaseTimings, nil)
 	return response, roundTripErr
+}
+
+func (t *httpClientTraceTransport) shouldFinishOnResponseBody(response *http.Response, roundTripErr error) bool {
+	return t.config.FinishSpanOnResponseBodyClose &&
+		roundTripErr == nil &&
+		response != nil &&
+		response.Body != nil &&
+		response.Body != http.NoBody
+}
+
+func newHTTPClientTraceResponseBody(body io.ReadCloser, finish func(string, error)) io.ReadCloser {
+	wrapped := &httpClientTraceResponseBody{
+		body:   body,
+		finish: finish,
+	}
+	if writer, ok := body.(io.Writer); ok {
+		return &httpClientTraceReadWriteCloser{
+			httpClientTraceResponseBody: wrapped,
+			writer:                      writer,
+		}
+	}
+	return wrapped
+}
+
+type httpClientTraceResponseBody struct {
+	body   io.ReadCloser
+	finish func(string, error)
+	once   sync.Once
+}
+
+func (b *httpClientTraceResponseBody) Read(p []byte) (int, error) {
+	n, err := b.body.Read(p)
+	switch {
+	case err == io.EOF:
+		b.finishOnce("eof", nil)
+	case err != nil:
+		b.finishOnce("error", err)
+	}
+	return n, err
+}
+
+func (b *httpClientTraceResponseBody) Close() error {
+	err := b.body.Close()
+	if err != nil {
+		b.finishOnce("error", err)
+	} else {
+		b.finishOnce("close", nil)
+	}
+	return err
+}
+
+func (b *httpClientTraceResponseBody) finishOnce(completion string, err error) {
+	b.once.Do(func() {
+		b.finish(completion, err)
+	})
+}
+
+type httpClientTraceReadWriteCloser struct {
+	*httpClientTraceResponseBody
+	writer io.Writer
+}
+
+func (b *httpClientTraceReadWriteCloser) Write(p []byte) (int, error) {
+	n, err := b.writer.Write(p)
+	if err != nil {
+		b.finishOnce("error", err)
+	}
+	return n, err
 }
 
 func (t *httpClientTraceTransport) childTrace(request *http.Request) (TraceContext, error) {
@@ -168,6 +248,7 @@ func (t *httpClientTraceTransport) captureSpan(
 	duration time.Duration,
 	finished time.Time,
 	phaseTimings *httpClientPhaseTimings,
+	extraMetadata map[string]any,
 ) {
 	statusCode := 0
 	if response != nil {
@@ -176,6 +257,9 @@ func (t *httpClientTraceTransport) captureSpan(
 	routeTemplate := t.routeTemplate(request)
 	durationMs := float64(duration.Microseconds()) / 1000
 	spanMetadata := t.spanMetadata(request, routeTemplate, trace, statusCode, roundTripErr)
+	for key, value := range compactMetadata(extraMetadata) {
+		spanMetadata[key] = value
+	}
 	if phaseTimings != nil {
 		for key, value := range phaseTimings.metadata() {
 			spanMetadata[key] = value

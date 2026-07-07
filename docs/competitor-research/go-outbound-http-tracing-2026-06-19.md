@@ -73,7 +73,42 @@ Reduce the Go server-side outbound HTTP tracing gap. LogBrew already had inbound
 - `examples/http_client_trace` now opts into phase timings against a local `httptest` server.
 - `scripts/real_user_go_smoke.sh` now verifies the packaged module README mentions `CapturePhaseTimings` and the installed-artifact HTTP client example emits `connectMs`, `wroteRequestMs`, `timeToFirstByteMs`, and connection reuse booleans without unsafe route or propagation values.
 
+## Response Body Completion Follow-Up - 2026-07-07
+
+### Additional Source Read
+
+- Sentry Go SDK, [`getsentry/sentry-go`](https://github.com/getsentry/sentry-go/tree/8fbb80b557494db92d09b396bc2d79ecb24c64db) at commit `8fbb80b557494db92d09b396bc2d79ecb24c64db`.
+  - `httpclient/sentryhttpclient.go`: `SentryRoundTripper.RoundTrip` creates a child span and finishes it with `defer span.Finish()` around the base `RoundTrip` call.
+- OpenTelemetry Go contrib, [`open-telemetry/opentelemetry-go-contrib`](https://github.com/open-telemetry/opentelemetry-go-contrib/tree/f4dd11abe6fe00c083a3405ed4a707108948cafb) at commit `f4dd11abe6fe00c083a3405ed4a707108948cafb`.
+  - `instrumentation/net/http/otelhttp/transport.go`: `Transport.RoundTrip`, `ensureResponseBody`, `newWrappedBody`, `wrappedBody.Read`, `wrappedBody.Close`, and `wrappedBody.Write`.
+- Datadog `dd-trace-go`, [`DataDog/dd-trace-go`](https://github.com/DataDog/dd-trace-go/tree/333c243a98b318686ecfdc8a743433bf047ff767) at commit `333c243a98b318686ecfdc8a743433bf047ff767`.
+  - `contrib/net/http/roundtripper.go`: `roundTripper.RoundTrip`.
+  - `contrib/net/http/internal/wrap/roundtrip.go`: `ObserveRoundTrip` and its returned `after` function.
+- PostHog Go, [`PostHog/posthog-go`](https://github.com/PostHog/posthog-go/tree/67f00c8548126e190723e3755479bb71900fd95c) at commit `67f00c8548126e190723e3755479bb71900fd95c`.
+  - Searched `traceparent`, `OpenTelemetry`, `otel`, `Span`, `httptrace`, and `RoundTripper`; found app-owned delivery transports and tests, but no comparable outbound trace span lifecycle instrumentation.
+
+### Competitor Pattern
+
+- OpenTelemetry's Go HTTP client instrumentation is strongest for body lifecycle accuracy: successful spans end when the wrapped response body reaches `io.EOF` or is closed, and protocol-switch bodies keep read/write behavior.
+- Sentry and Datadog finish the client span when the base `RoundTrip` returns. That is simpler and avoids waiting on application body handling, but it can understate downstream work when users stream or slowly read a response.
+- The useful user-facing behavior is optional body-aware timing on an app-owned transport, with no body-byte capture and no global client patching.
+
+### LogBrew Adaptation
+
+- Added `FinishSpanOnResponseBodyClose` to `HTTPClientTransportConfig`.
+- When enabled, successful responses with a real body are wrapped so the outbound child span is queued once on body `io.EOF`, `Close`, or body read/write/close error. The span duration includes application body reading/closing time.
+- The wrapper preserves the original response body bytes and close/read errors. Protocol-switch-style bodies that implement `io.Writer` still expose write behavior.
+- Metadata adds only `responseBodyCompletion` (`eof`, `close`, or `error`) plus existing type-only error metadata for body failures. It intentionally omits body bytes, body error messages, headers, cookies, hosts, IPs, full URLs, query strings, fragments, baggage, tracestate, raw propagation values, and phase error messages.
+- The option is not default yet: apps that do not reliably close response bodies can keep the previous `RoundTrip`-return timing behavior.
+
+### Updated Proof
+
+- RED focused test: `cd go/logbrew && go test ./... -run 'TestHTTPClientTransportCanFinishSpanOnResponseBody' -count=1` failed on missing `FinishSpanOnResponseBodyClose`.
+- GREEN focused tests prove no span is queued before body completion, EOF and Close both queue exactly one span, response bytes are preserved, duration includes body lifecycle time, and body/query/header/propagation values are not captured.
+- `examples/http_client_trace` now opts into both phase timing and body completion timing.
+- `scripts/real_user_go_smoke.sh` verifies the packaged module README mentions `FinishSpanOnResponseBodyClose` and the installed HTTP client example emits `responseBodyCompletion: "eof"` without response payload bytes.
+
 ## Remaining Gaps
 
-- Go still lacks richer span events/exceptions, baggage/tracestate support, automatic transport patching, response-body completion timing, and first-party framework/client integrations for common HTTP/router/database/cache/queue libraries.
+- Go still lacks richer span events/exceptions, baggage/tracestate support, automatic transport patching, and first-party framework/client integrations for common HTTP/router/database/cache/queue libraries.
 - Keep those out of the core helper unless a focused integration package owns the broader dependency and capture surface.

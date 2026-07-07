@@ -59,7 +59,8 @@ func main() {
 		Metadata: map[string]any{
 			"service": "checkout-api",
 		},
-		CapturePhaseTimings: true,
+		CapturePhaseTimings:           true,
+		FinishSpanOnResponseBodyClose: true,
 		SpanIDFactory: func() string {
 			return "b7ad6b7169203331"
 		},

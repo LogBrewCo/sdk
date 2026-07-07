@@ -1,5 +1,35 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-07: Go outbound HTTP response-body completion timing gap reduced
+  after source-reading Sentry Go
+  `getsentry/sentry-go@8fbb80b557494db92d09b396bc2d79ecb24c64db`
+  (`httpclient/sentryhttpclient.go` `SentryRoundTripper.RoundTrip`),
+  OpenTelemetry Go Contrib
+  `open-telemetry/opentelemetry-go-contrib@f4dd11abe6fe00c083a3405ed4a707108948cafb`
+  (`otelhttp.Transport.RoundTrip`, `ensureResponseBody`, `newWrappedBody`,
+  `wrappedBody.Read`, `wrappedBody.Close`, and `wrappedBody.Write`), Datadog
+  `DataDog/dd-trace-go@333c243a98b318686ecfdc8a743433bf047ff767`
+  (`roundTripper.RoundTrip` and `ObserveRoundTrip`), and PostHog Go
+  `PostHog/posthog-go@67f00c8548126e190723e3755479bb71900fd95c` no
+  comparable outbound trace lifecycle evidence. `HTTPClientTransportConfig`
+  now has opt-in `FinishSpanOnResponseBodyClose`; successful responses with a
+  real body queue the outbound child span once on body `io.EOF`, `Close`, or
+  body read/write/close error so duration can include app body handling time.
+  Metadata adds only `responseBodyCompletion` (`eof`, `close`, or `error`) plus
+  existing type-only error metadata. It preserves response bytes and body
+  errors while omitting body bytes, body error messages, hosts, IPs, full URLs,
+  query/hash, headers, cookies, baggage, tracestate, raw propagation, and phase
+  error messages. Evidence: RED focused Go test failed on missing
+  `FinishSpanOnResponseBodyClose`; GREEN focused transport tests; GREEN
+  `bash scripts/check_go_tests.sh`; GREEN `bash scripts/check_go_static.sh`;
+  GREEN `bash scripts/real_user_go_smoke.sh` with packaged README proof and
+  installed example `responseBodyCompletion: "eof"`; GREEN ShellCheck,
+  markdown links, confidentiality scan, release metadata, backend reports,
+  generated-artifact hygiene, and diff check. Research:
+  `docs/competitor-research/go-outbound-http-tracing-2026-06-19.md`. Honest
+  gap: Sentry/Datadog/OTel still lead on broader automatic framework/client
+  coverage, rich span events/exceptions, baggage/tracestate, and hosted trace
+  UI.
 - 2026-07-06: Go outbound HTTP phase-timing gap reduced after source-reading
   Sentry Go
   `getsentry/sentry-go@8fbb80b557494db92d09b396bc2d79ecb24c64db`

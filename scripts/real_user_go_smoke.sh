@@ -141,6 +141,7 @@ for needle in (
     "type-only panic metadata",
     "NewHTTPClientTransport",
     "CapturePhaseTimings",
+    "FinishSpanOnResponseBodyClose",
     "NewSlogHandler",
     "DatabaseOperationWithLogBrewSpan",
     "SQLTransactionWithLogBrewSpan",
@@ -269,10 +270,11 @@ grep -q '"wroteRequestMs":' "$tmp_dir/packaged-http-client-trace.stdout.json"
 grep -q '"timeToFirstByteMs":' "$tmp_dir/packaged-http-client-trace.stdout.json"
 grep -q '"connectionReused": false' "$tmp_dir/packaged-http-client-trace.stdout.json"
 grep -q '"connectionWasIdle": false' "$tmp_dir/packaged-http-client-trace.stdout.json"
+grep -q '"responseBodyCompletion": "eof"' "$tmp_dir/packaged-http-client-trace.stdout.json"
 grep -q '"downstreamTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"' "$tmp_dir/packaged-http-client-trace.stderr.json"
 grep -q '"callerTraceparent":"spoofed"' "$tmp_dir/packaged-http-client-trace.stderr.json"
 grep -q '"events":1' "$tmp_dir/packaged-http-client-trace.stderr.json"
-if grep -Eq '127\.0\.0\.1|localhost|coupon=summer|receipt|traceparent|spoofed|authorization' "$tmp_dir/packaged-http-client-trace.stdout.json"; then
+if grep -Eq '127\.0\.0\.1|localhost|coupon=summer|receipt|traceparent|spoofed|authorization|accepted' "$tmp_dir/packaged-http-client-trace.stdout.json"; then
 	echo "packaged HTTP client trace leaked unsafe route or propagation values" >&2
 	exit 1
 fi

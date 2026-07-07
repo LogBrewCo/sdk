@@ -558,6 +558,168 @@ func TestHTTPClientTransportRecordsSafePhaseTimingsAndPreservesCallerTrace(t *te
 	}
 }
 
+func TestHTTPClientTransportCanFinishSpanOnResponseBodyEOF(t *testing.T) {
+	client := sampleClient(t)
+	baseTime := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
+	nowCalls := 0
+	now := func() time.Time {
+		nowCalls++
+		switch nowCalls {
+		case 1:
+			return baseTime
+		default:
+			return baseTime.Add(80 * time.Millisecond)
+		}
+	}
+
+	parentTrace, err := NewTraceContext(TraceContextInput{
+		Traceparent: "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+		SpanID:      "A7AD6B7169203330",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := ContextWithLogBrewTrace(context.Background(), parentTrace)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.example.test/payments/123?coupon=summer#receipt", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("traceparent", "spoofed")
+	request.Header.Set("authorization", "Bearer private")
+
+	transport, err := NewHTTPClientTransport(HTTPClientTransportConfig{
+		Client: client,
+		Base: roundTripFunc(func(cloned *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("private response body")),
+				Request:    cloned,
+			}, nil
+		}),
+		RouteTemplate:                 "/payments/:payment_id",
+		EventIDPrefix:                 "go_http_client_body",
+		FinishSpanOnResponseBodyClose: true,
+		SpanIDFactory: func() string {
+			return "b7ad6b7169203331"
+		},
+		Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := client.PendingEvents(); got != 0 {
+		t.Fatalf("expected body completion to defer span capture, queued %d events", got)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "private response body" {
+		t.Fatalf("response body was not preserved: %q", body)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Events []struct {
+			Attributes map[string]any `json:"attributes"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(parsed.Events), 1; got != want {
+		t.Fatalf("unexpected event count: got %d want %d\n%s", got, want, payload)
+	}
+	attributes := parsed.Events[0].Attributes
+	metadata := attributes["metadata"].(map[string]any)
+	if attributes["durationMs"] != float64(80) ||
+		attributes["status"] != "ok" ||
+		metadata["responseBodyCompletion"] != "eof" ||
+		metadata["statusCode"] != float64(http.StatusOK) {
+		t.Fatalf("unexpected body completion span: attributes=%#v metadata=%#v", attributes, metadata)
+	}
+	for _, unsafe := range []string{"private response body", "coupon=summer", "receipt", "authorization", "Bearer private", "traceparent", "spoofed"} {
+		if strings.Contains(payload, unsafe) {
+			t.Fatalf("body completion span leaked %q: %s", unsafe, payload)
+		}
+	}
+}
+
+func TestHTTPClientTransportCanFinishSpanOnResponseBodyClose(t *testing.T) {
+	client := sampleClient(t)
+	baseTime := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
+	nowCalls := 0
+	now := func() time.Time {
+		nowCalls++
+		switch nowCalls {
+		case 1:
+			return baseTime
+		default:
+			return baseTime.Add(35 * time.Millisecond)
+		}
+	}
+
+	request, err := http.NewRequest(http.MethodGet, "https://api.example.test/payments/123", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport, err := NewHTTPClientTransport(HTTPClientTransportConfig{
+		Client: client,
+		Base: roundTripFunc(func(cloned *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNoContent,
+				Body:       io.NopCloser(strings.NewReader("body not read")),
+				Request:    cloned,
+			}, nil
+		}),
+		RouteTemplate:                 "/payments/:payment_id",
+		EventIDPrefix:                 "go_http_client_body_close",
+		FinishSpanOnResponseBodyClose: true,
+		SpanIDFactory: func() string {
+			return "b7ad6b7169203332"
+		},
+		Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := client.PendingEvents(); got != 0 {
+		t.Fatalf("expected body close to defer span capture, queued %d events", got)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.PendingEvents(); got != 1 {
+		t.Fatalf("expected one span after close, queued %d events", got)
+	}
+
+	payload, err := client.PreviewJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload, `"responseBodyCompletion": "close"`) ||
+		!strings.Contains(payload, `"durationMs": 35`) ||
+		strings.Contains(payload, "body not read") {
+		t.Fatalf("unexpected close-completion span payload: %s", payload)
+	}
+}
+
 func TestHTTPClientTransportPreservesHTTPFailuresAndCaptureFailures(t *testing.T) {
 	client := sampleClient(t)
 	originalError := errors.New("temporary outage")
