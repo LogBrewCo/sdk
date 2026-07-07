@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const SCRIPT_VERSION = "0.1.0";
+const MAX_SOURCE_CONTEXT_FILE_BYTES = 1024 * 1024;
 const SOURCE_MAP_DEBUG_ID_KEYS = ["debug_id", "debugId", "debugID", "x_debug_id"];
 const VLQ_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const VLQ_VALUES = new Map([...VLQ_CHARS].map((char, index) => [char, index]));
@@ -169,7 +170,7 @@ function loadManifestSourceMap(artifact, buildDir) {
   if (typeof payload.mappings !== "string" || payload.mappings === "") {
     throw new Error("source map mappings must be a non-empty string");
   }
-  return payload;
+  return { path: sourceMapPath, payload };
 }
 
 function decodeVlqValues(segment) {
@@ -287,6 +288,72 @@ function originalPositionFor(payload, generatedLine, generatedColumn) {
   return original;
 }
 
+function requireContextLineCount(value) {
+  if (value === undefined || value === null) {
+    return 2;
+  }
+  if (!Number.isInteger(value) || value < 0 || value > 10) {
+    throw new Error("source context line count must be an integer from 0 to 10");
+  }
+  return value;
+}
+
+function sourceContextPathCandidates(source, sourceRoot, sourceMapPath) {
+  const candidates = [];
+  if (sourceMapPath) {
+    candidates.push(path.resolve(path.dirname(sourceMapPath), source));
+  }
+  candidates.push(path.join(sourceRoot, source));
+  return [...new Set(candidates)];
+}
+
+function sourceContextForOriginalPosition(original, options = {}) {
+  if (!options.sourceRoot) {
+    return null;
+  }
+  if (typeof options.sourceRoot !== "string" || options.sourceRoot.trim() === "") {
+    throw new Error("source context root must be a non-empty directory path");
+  }
+  const requestedSourceRoot = path.resolve(options.sourceRoot);
+  if (!fs.existsSync(requestedSourceRoot) || !fs.statSync(requestedSourceRoot).isDirectory()) {
+    throw new Error("source context root must resolve to an existing directory");
+  }
+  const sourceRoot = fs.realpathSync(requestedSourceRoot);
+  let sourcePath = null;
+  for (const candidate of sourceContextPathCandidates(original.source, sourceRoot, options.sourceMapPath)) {
+    const resolved = safeResolve(candidate, sourceRoot);
+    if (resolved && fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+      sourcePath = resolved;
+      break;
+    }
+  }
+  if (!sourcePath) {
+    throw new Error("original source file is not readable under the source context root");
+  }
+
+  const contextLines = requireContextLineCount(options.contextLines);
+  if (fs.statSync(sourcePath).size > MAX_SOURCE_CONTEXT_FILE_BYTES) {
+    throw new Error("source context file is too large for local report output");
+  }
+  const sourceLines = fs.readFileSync(sourcePath, "utf8").split(/\r?\n/u);
+  const startLine = Math.max(1, original.line - contextLines);
+  const endLine = Math.min(sourceLines.length, original.line + contextLines);
+  const lines = [];
+  for (let lineNumber = startLine; lineNumber <= endLine; lineNumber += 1) {
+    lines.push({
+      line: lineNumber,
+      text: sourceLines[lineNumber - 1] ?? "",
+      highlighted: lineNumber === original.line
+    });
+  }
+
+  return {
+    source: relativeTo(sourceRoot, sourcePath),
+    startLine,
+    lines
+  };
+}
+
 function isJsonObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -358,11 +425,15 @@ function stackFrameFromIssueMetadata(metadata) {
   return `${codeFile}:${line}:${column}`;
 }
 
-export function verifyJavaScriptSymbolication({ buildDir, manifest, stackFrame }) {
+export function verifyJavaScriptSymbolication({ buildDir, manifest, stackFrame, sourceContext }) {
   const frame = parseStackFrame(stackFrame);
   const artifact = findMatchingArtifact(manifest, frame, buildDir);
   const sourceMap = loadManifestSourceMap(artifact, buildDir);
-  const original = originalPositionFor(sourceMap, frame.line, frame.column);
+  const original = originalPositionFor(sourceMap.payload, frame.line, frame.column);
+  const resolvedSourceContext = sourceContextForOriginalPosition(original, {
+    ...sourceContext,
+    sourceMapPath: sourceMap.path
+  });
   return {
     status: "resolved",
     verifier: { name: "logbrew-js-release-artifact-symbolication-verifier", version: SCRIPT_VERSION },
@@ -381,11 +452,12 @@ export function verifyJavaScriptSymbolication({ buildDir, manifest, stackFrame }
       path: artifact.sourceMap.path,
       hasSourcesContent: false
     },
-    original
+    original,
+    ...(resolvedSourceContext ? { sourceContext: resolvedSourceContext } : {})
   };
 }
 
-export function verifyJavaScriptIssueSymbolication({ buildDir, manifest, issueEvent }) {
+export function verifyJavaScriptIssueSymbolication({ buildDir, manifest, issueEvent, sourceContext }) {
   const { metadata, input } = metadataFromIssueEvent(issueEvent);
   requireMetadataMatchesManifest(metadata, manifest, "release");
   requireMetadataMatchesManifest(metadata, manifest, "environment");
@@ -395,7 +467,8 @@ export function verifyJavaScriptIssueSymbolication({ buildDir, manifest, issueEv
   const report = verifyJavaScriptSymbolication({
     buildDir,
     manifest,
-    stackFrame: stackFrameFromIssueMetadata(metadata)
+    stackFrame: stackFrameFromIssueMetadata(metadata),
+    sourceContext
   });
   if (typeof report.debugId !== "string" || report.debugId.toLowerCase() !== expectedDebugId) {
     throw new Error("issue event releaseArtifactDebugId does not match the resolved artifact");

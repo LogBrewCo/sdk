@@ -287,6 +287,71 @@ test("symbolicate-js resolves a sanitized SDK issue event through a ready manife
   }
 });
 
+test("symbolicate-js can include explicit local source context without local paths", () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const prep = runCli([
+      "prepare-js",
+      "--build-dir",
+      buildDir,
+      "--strip-sources-content",
+      "--strip-source-prefix",
+      appRoot,
+      "--write"
+    ]);
+    assert.equal(prep.status, 0, prep.stderr);
+
+    const manifestResult = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets"
+    ]);
+    assert.equal(manifestResult.status, 0, manifestResult.stderr);
+    const manifestPath = path.join(root, "manifest.json");
+    fs.writeFileSync(manifestPath, manifestResult.stdout, "utf8");
+
+    const result = runCli([
+      "symbolicate-js",
+      "--build-dir",
+      buildDir,
+      "--manifest",
+      manifestPath,
+      "--stack-frame",
+      "at checkout (https://cdn.example/assets/assets/app.js:1:1)",
+      "--source-root",
+      appRoot,
+      "--context-lines",
+      "0"
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const report = jsonFromStdout(result);
+    assert.equal(report.status, "resolved");
+    assert.equal(report.original.source, "src/main.js");
+    assert.equal(report.sourceContext.source, "src/main.js");
+    assert.equal(report.sourceContext.startLine, 1);
+    assert.deepEqual(report.sourceContext.lines, [
+      {
+        line: 1,
+        text: "export function checkout() { return 'source-fixture-marker'; }",
+        highlighted: true
+      }
+    ]);
+    assert.match(result.stdout, /source-fixture-marker/u);
+    assert.doesNotMatch(result.stdout, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("upload-js validates a ready manifest and prints a dry-run upload plan", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {

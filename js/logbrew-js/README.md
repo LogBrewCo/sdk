@@ -69,7 +69,9 @@ npx logbrew-release-artifacts symbolicate-js \
 npx logbrew-release-artifacts symbolicate-js \
   --build-dir dist \
   --manifest logbrew-release-artifacts.json \
-  --issue-event ./captured-logbrew-issue.json
+  --issue-event ./captured-logbrew-issue.json \
+  --source-root "$PWD" \
+  --context-lines 1
 
 npx logbrew-release-artifacts upload-js \
   --build-dir dist \
@@ -78,7 +80,7 @@ npx logbrew-release-artifacts upload-js \
   --dry-run
 ```
 
-The `symbolicate-js` command resolves either one generated stack frame or a captured LogBrew issue event with `attributes.metadata.releaseArtifactDebugId`, `releaseArtifactCodeFile`, `errorFrameLine`, and `errorFrameColumn` through the prepared manifest. Use it to catch bad path prefixes, mismatched release/environment/service values, embedded source content, and local source-path leaks before deploy. The `upload-js` command revalidates the manifest and can post the manifest/minified/source-map parts to a local loopback intake. For a hosted release-artifact endpoint, opt in explicitly and keep the release-artifact auth value in an environment variable:
+The `symbolicate-js` command resolves either one generated stack frame or a captured LogBrew issue event with `attributes.metadata.releaseArtifactDebugId`, `releaseArtifactCodeFile`, `errorFrameLine`, and `errorFrameColumn` through the prepared manifest. Use it to catch bad path prefixes, mismatched release/environment/service values, embedded source content, and local source-path leaks before deploy. Add `--source-root` only when you want the local report to include bounded app-owned source context; the source lines stay in the local command output and are not added to runtime SDK events or upload payloads. The `upload-js` command revalidates the manifest and can post the manifest/minified/source-map parts to a local loopback intake. For a hosted release-artifact endpoint, opt in explicitly and keep the release-artifact auth value in an environment variable:
 
 ```bash
 export LOGBREW_RELEASE_ARTIFACT_AUTH="<release-artifact-auth>"

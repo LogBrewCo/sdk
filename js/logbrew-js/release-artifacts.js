@@ -30,7 +30,7 @@ function usage() {
     "Usage:",
     "  logbrew-release-artifacts prepare-js --build-dir <dir> [--write] [--strip-sources-content] [--strip-source-prefix <path>...]",
     "  logbrew-release-artifacts manifest-js --build-dir <dir> --release <id> --environment <env> --service <name> --minified-path-prefix <url-or-path> [--repository-url <url>] [--commit-sha <sha>] [--allow-sources-content]",
-    "  logbrew-release-artifacts symbolicate-js --build-dir <dir> --manifest <file> (--stack-frame <frame> | --issue-event <file>)",
+    "  logbrew-release-artifacts symbolicate-js --build-dir <dir> --manifest <file> (--stack-frame <frame> | --issue-event <file>) [--source-root <dir>] [--context-lines <n>]",
     "  logbrew-release-artifacts upload-js --build-dir <dir> --manifest <file> --endpoint <url> [--allow-hosted] [--token-env <env>] [--dry-run] [--max-retries <n>] [--retry-delay <seconds>] [--timeout <seconds>]",
     "",
     "This installed-package helper prepares, validates, resolves, and uploads JavaScript source-map artifacts.",
@@ -79,6 +79,32 @@ function requireOption(options, name) {
     throw new Error(`--${name} is required`);
   }
   return value.trim();
+}
+
+function optionalSourceContextOptions(options) {
+  const hasSourceRoot = typeof options["source-root"] === "string" && options["source-root"].trim() !== "";
+  const hasContextLines = typeof options["context-lines"] === "string" && options["context-lines"].trim() !== "";
+  if (!hasSourceRoot && !hasContextLines) {
+    return undefined;
+  }
+  if (!hasSourceRoot) {
+    throw new Error("--source-root is required when --context-lines is provided");
+  }
+  let contextLines = 2;
+  if (hasContextLines) {
+    const value = options["context-lines"].trim();
+    if (!/^\d+$/u.test(value)) {
+      throw new Error("--context-lines must be an integer from 0 to 10");
+    }
+    contextLines = Number.parseInt(value, 10);
+    if (contextLines < 0 || contextLines > 10) {
+      throw new Error("--context-lines must be an integer from 0 to 10");
+    }
+  }
+  return {
+    sourceRoot: path.resolve(requireOption(options, "source-root")),
+    contextLines
+  };
 }
 
 function toPosix(value) {
@@ -658,7 +684,9 @@ function runSymbolicateJs(args) {
     "build-dir": "string",
     manifest: "string",
     "stack-frame": "string",
-    "issue-event": "string"
+    "issue-event": "string",
+    "source-root": "string",
+    "context-lines": "string"
   });
   try {
     const buildDir = requireBuildDir(requireOption(options, "build-dir"));
@@ -672,6 +700,7 @@ function runSymbolicateJs(args) {
       throw new Error("provide exactly one of --stack-frame or --issue-event");
     }
     const manifest = readJsonObject(manifestPath, "manifest");
+    const sourceContext = optionalSourceContextOptions(options);
     if (issueEvent) {
       const issueEventPath = path.resolve(requireOption(options, "issue-event"));
       if (!fs.existsSync(issueEventPath)) {
@@ -680,7 +709,8 @@ function runSymbolicateJs(args) {
       const report = verifyJavaScriptIssueSymbolication({
         buildDir,
         manifest,
-        issueEvent: readJsonObject(issueEventPath, "issue event")
+        issueEvent: readJsonObject(issueEventPath, "issue event"),
+        sourceContext
       });
       printJson(report);
       return 0;
@@ -688,7 +718,8 @@ function runSymbolicateJs(args) {
     const report = verifyJavaScriptSymbolication({
       buildDir,
       manifest,
-      stackFrame: requireOption(options, "stack-frame")
+      stackFrame: requireOption(options, "stack-frame"),
+      sourceContext
     });
     printJson(report);
     return 0;

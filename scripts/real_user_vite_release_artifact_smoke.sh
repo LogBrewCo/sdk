@@ -472,6 +472,8 @@ JS
   --build-dir "$dist_dir" \
   --manifest "$ready_manifest" \
   --issue-event "$sdk_issue_event_payload" \
+  --source-root "$app_dir" \
+  --context-lines 0 \
   > "$sdk_issue_symbolication_report"
 
 python3 - "$sdk_issue_event_payload" "$sdk_issue_symbolication_report" "$tmp_dir" <<'PY'
@@ -501,6 +503,12 @@ assert sdk_issue_symbolication["input"]["issueId"] == "evt_vite_sdk_issue_001"
 assert sdk_issue_symbolication["status"] == "resolved"
 assert sdk_issue_symbolication["generated"]["path"].endswith(Path(metadata["releaseArtifactCodeFile"]).name)
 assert sdk_issue_symbolication["original"]["source"].endswith("src/main.js")
+source_context = sdk_issue_symbolication["sourceContext"]
+assert source_context["source"].endswith("src/main.js")
+assert source_context["startLine"] >= 1
+assert len(source_context["lines"]) == 1
+assert source_context["lines"][0]["highlighted"] is True
+assert "checkout exploded" in source_context["lines"][0]["text"]
 assert "cache=placeholder" not in serialized_issue_event
 assert "cache=placeholder" not in serialized_symbolication
 assert "fragment" not in serialized_issue_event
