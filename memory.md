@@ -1,5 +1,28 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-07: Vite source-map issue-event proof now covers a real SDK issue
+  payload from installed artifacts. Reused the existing Sentry JavaScript
+  Debug ID/runtime-event and Datadog source-map upload validation reads in
+  `docs/competitor-research/source-maps-debug-symbols-2026-06-13.md`.
+  `scripts/real_user_vite_release_artifact_smoke.sh` now builds a temporary
+  Vite 8.0.16 app from packed `@logbrew/sdk` and `@logbrew/browser`, triggers
+  the built minified probe, converts the thrown error with
+  `createIssueAttributesFromError(...)`, queues it through
+  `LogBrewClient.issue(...)`, and feeds the resulting full SDK issue payload
+  to installed `logbrew-release-artifacts symbolicate-js --issue-event`. The
+  smoke proves `input.type=sdk_issue_event`, matching release/environment/
+  service/runtime, trace/span IDs, Debug ID, generated bundle identity, and
+  original `src/main.js` resolution while keeping query/hash placeholders,
+  cause markers, source sentinels, and temp paths out of the issue event and
+  symbolication report. Evidence: RED focused unittest failed before the
+  script contained `createIssueAttributesFromError`; GREEN `python3 -m
+  unittest tests.test_release_artifact_smoke_gates`, GREEN `bash
+  scripts/real_user_vite_release_artifact_smoke.sh`, GREEN ShellCheck 0.11.0
+  for the touched smoke, and GREEN generated-artifact hygiene after removing
+  disposable caches and local pack tarballs. Honest gap: Sentry/Datadog still
+  lead on hosted artifact
+  upload/lookup, rendered symbolicated issue UI, source context, release
+  health-style workflows, and broader automatic build/runtime integration.
 - 2026-07-07: Flask high-load installed-artifact behavior is now proven from
   local wheels. Reused the source-backed batching/failure evidence from
   `docs/competitor-research/python-opentelemetry-high-load-2026-07-04.md`

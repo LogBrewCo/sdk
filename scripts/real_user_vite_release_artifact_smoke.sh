@@ -401,6 +401,118 @@ assert "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_runti
 assert tmp_dir not in serialized_runtime_issue
 PY
 
+sdk_issue_event_payload="$tmp_dir/vite-sdk-issue-event.json"
+sdk_issue_symbolication_report="$tmp_dir/vite-sdk-issue-symbolication-report.json"
+(
+  cd "$app_dir"
+  node --input-type=module - "$js_file" "$ready_manifest" "$sdk_issue_event_payload" <<'JS'
+import { writeFileSync, readFileSync } from "node:fs";
+import vm from "node:vm";
+import { createIssueAttributesFromError, LogBrewClient } from "@logbrew/sdk";
+
+const [, , jsPath, manifestPath, issueEventPath] = process.argv;
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+const artifact = manifest.artifacts[0];
+const runtimeUrl = `${artifact.minifiedSource.minifiedUrl}?cache=placeholder#fragment`;
+const jsSource = readFileSync(jsPath, "utf8");
+const sandbox = {
+  document: {
+    createElement() {
+      return {
+        relList: {
+          supports() {
+            return true;
+          },
+        },
+      };
+    },
+    querySelector() {
+      return {};
+    },
+  },
+  window: {},
+};
+
+vm.runInNewContext(jsSource, sandbox, { filename: jsPath });
+try {
+  sandbox.window.__logbrewViteProbe.checkoutFailureSignal();
+} catch (error) {
+  error.stack = String(error.stack || "").replaceAll(jsPath, runtimeUrl);
+  error.cause = new TypeError("payment gateway marker hidden-user-marker");
+  const attributes = createIssueAttributesFromError(error, {
+    debugIdMap: {
+      [artifact.minifiedSource.minifiedUrl]: artifact.debugId,
+      [runtimeUrl]: artifact.debugId
+    },
+    environment: manifest.environment,
+    release: manifest.release,
+    runtime: "browser",
+    service: manifest.service,
+    trace: {
+      sampled: true,
+      spanId: "2222333344445555",
+      traceId: "00112233445566778899aabbccddeeff"
+    }
+  });
+  const client = LogBrewClient.create({
+    apiKey: "lbw_ingest_fake_vite_sdk_issue_key",
+    sdkName: "@logbrew/sdk",
+    sdkVersion: "0.1.0"
+  });
+  client.issue("evt_vite_sdk_issue_001", "2026-07-07T10:00:00Z", attributes);
+  const issueEvent = JSON.parse(client.previewJson()).events[0];
+  writeFileSync(issueEventPath, `${JSON.stringify(issueEvent, null, 2)}\n`, "utf8");
+  process.exit(0);
+}
+throw new Error("expected Vite checkout probe to throw");
+JS
+)
+
+"$release_artifacts_cli" symbolicate-js \
+  --build-dir "$dist_dir" \
+  --manifest "$ready_manifest" \
+  --issue-event "$sdk_issue_event_payload" \
+  > "$sdk_issue_symbolication_report"
+
+python3 - "$sdk_issue_event_payload" "$sdk_issue_symbolication_report" "$tmp_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+sdk_issue_event = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+sdk_issue_symbolication = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[3]
+metadata = sdk_issue_event["attributes"]["metadata"]
+serialized_issue_event = json.dumps(sdk_issue_event)
+serialized_symbolication = json.dumps(sdk_issue_symbolication)
+
+assert sdk_issue_event["type"] == "issue"
+assert sdk_issue_event["id"] == "evt_vite_sdk_issue_001"
+assert metadata["releaseArtifactType"] == "sourcemap"
+assert metadata["releaseArtifactDebugId"] == sdk_issue_symbolication["debugId"]
+assert metadata["release"] == "2026.06.18-vite"
+assert metadata["environment"] == "production"
+assert metadata["service"] == "checkout-web"
+assert metadata["runtime"] == "browser"
+assert metadata["traceId"] == "00112233445566778899aabbccddeeff"
+assert metadata["spanId"] == "2222333344445555"
+assert sdk_issue_symbolication["input"]["type"] == "sdk_issue_event"
+assert sdk_issue_symbolication["input"]["issueId"] == "evt_vite_sdk_issue_001"
+assert sdk_issue_symbolication["status"] == "resolved"
+assert sdk_issue_symbolication["generated"]["path"].endswith(Path(metadata["releaseArtifactCodeFile"]).name)
+assert sdk_issue_symbolication["original"]["source"].endswith("src/main.js")
+assert "cache=placeholder" not in serialized_issue_event
+assert "cache=placeholder" not in serialized_symbolication
+assert "fragment" not in serialized_issue_event
+assert "fragment" not in serialized_symbolication
+assert "hidden-user-marker" not in serialized_issue_event
+assert "hidden-user-marker" not in serialized_symbolication
+assert "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_issue_event
+assert "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_symbolication
+assert tmp_dir not in serialized_issue_event
+assert tmp_dir not in serialized_symbolication
+PY
+
 port_file="$tmp_dir/fake-intake-port"
 state_file="$tmp_dir/fake-intake-state.json"
 expected_bearer="fake-vite-release-artifact-auth-value"
