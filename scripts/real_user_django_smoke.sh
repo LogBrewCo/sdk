@@ -228,8 +228,9 @@ TOML
 "$tmp_dir/app/bin/python" -m logbrew_django.examples --list > "$tmp_dir/examples-list.txt"
 grep -qx 'readme-example -> python -m logbrew_django.examples readme-example' <(sed -n '1p' "$tmp_dir/examples-list.txt")
 grep -qx 'outbound-http -> python -m logbrew_django.examples outbound-http' <(sed -n '2p' "$tmp_dir/examples-list.txt")
-grep -qx 'real-user-smoke -> python -m logbrew_django.examples real-user-smoke' <(sed -n '3p' "$tmp_dir/examples-list.txt")
-grep -qx 'default (real-user-smoke) -> python -m logbrew_django.examples' <(sed -n '4p' "$tmp_dir/examples-list.txt")
+grep -qx 'dependency-spans -> python -m logbrew_django.examples dependency-spans' <(sed -n '3p' "$tmp_dir/examples-list.txt")
+grep -qx 'real-user-smoke -> python -m logbrew_django.examples real-user-smoke' <(sed -n '4p' "$tmp_dir/examples-list.txt")
+grep -qx 'default (real-user-smoke) -> python -m logbrew_django.examples' <(sed -n '5p' "$tmp_dir/examples-list.txt")
 "$tmp_dir/app/bin/python" -m logbrew_django.examples readme-example > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 grep -q '"type": "span"' "$tmp_dir/readme.stdout.json"
 "$tmp_dir/app/bin/python" -m logbrew_django.examples outbound-http > "$tmp_dir/outbound.stdout.json" 2> "$tmp_dir/outbound.stderr.json"
@@ -238,6 +239,15 @@ grep -q '"requestSpanId": "b7ad6b7169203331"' "$tmp_dir/outbound.stderr.json"
 grep -q '"outboundParentSpanId": "b7ad6b7169203331"' "$tmp_dir/outbound.stderr.json"
 grep -q '"outboundSpanId": "c8ad6b7169203332"' "$tmp_dir/outbound.stderr.json"
 grep -q '"traceparentMatchesSpan": true' "$tmp_dir/outbound.stderr.json"
+"$tmp_dir/app/bin/python" -m logbrew_django.examples dependency-spans > "$tmp_dir/dependency.stdout.json" 2> "$tmp_dir/dependency.stderr.json"
+grep -q '"type": "span"' "$tmp_dir/dependency.stdout.json"
+grep -q '"requestSpanId": "b7ad6b7169203331"' "$tmp_dir/dependency.stderr.json"
+grep -q '"databaseParentSpanId": "b7ad6b7169203331"' "$tmp_dir/dependency.stderr.json"
+grep -q '"databaseSpanId": "c8ad6b7169203332"' "$tmp_dir/dependency.stderr.json"
+grep -q '"cacheParentSpanId": "b7ad6b7169203331"' "$tmp_dir/dependency.stderr.json"
+grep -q '"cacheSpanId": "d9ad6b7169203333"' "$tmp_dir/dependency.stderr.json"
+grep -q '"queueParentSpanId": "b7ad6b7169203331"' "$tmp_dir/dependency.stderr.json"
+grep -q '"queueSpanId": "e0ad6b7169203334"' "$tmp_dir/dependency.stderr.json"
 "$tmp_dir/app/bin/python" -m logbrew_django.examples real-user-smoke > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 grep -q '"type": "issue"' "$tmp_dir/smoke.stdout.json"
 grep -q '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/smoke.stderr.json"

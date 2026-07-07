@@ -4,6 +4,7 @@ import argparse
 import runpy
 
 EXAMPLES = {
+    "dependency-spans": "logbrew_fastapi.examples.dependency_spans",
     "outbound-http": "logbrew_fastapi.examples.outbound_http",
     "readme-example": "logbrew_fastapi.examples.readme_example",
     "real-user-smoke": "logbrew_fastapi.examples.real_user_smoke",
@@ -19,6 +20,7 @@ def main() -> int:
     if args.list:
         print("readme-example -> python -m logbrew_fastapi.examples readme-example")
         print("outbound-http -> python -m logbrew_fastapi.examples outbound-http")
+        print("dependency-spans -> python -m logbrew_fastapi.examples dependency-spans")
         print("real-user-smoke -> python -m logbrew_fastapi.examples real-user-smoke")
         print("default (real-user-smoke) -> python -m logbrew_fastapi.examples")
         return 0

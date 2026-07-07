@@ -77,6 +77,55 @@ def checkout(order_id: str) -> dict[str, object]:
 
 Run `python -m logbrew_fastapi.examples outbound-http` to see the same local flow from an installed package. The example shows the outgoing `traceparent` span id matching the emitted outbound span id, and the outbound span's parent is the active FastAPI request span. LogBrew does not globally patch `requests`, create sessions, capture request or response bodies, serialize headers, store full URLs, or keep query strings.
 
+## Database, cache, and queue child spans
+
+FastAPI handlers can also wrap app-owned dependency work with the core Python helpers. The active FastAPI request trace becomes the parent for each dependency span:
+
+```python
+from logbrew_sdk import (
+    cache_operation_with_logbrew_span,
+    database_operation_with_logbrew_span,
+    queue_operation_with_logbrew_span,
+)
+
+
+@app.post("/checkout/{order_id}")
+def checkout(order_id: str) -> dict[str, object]:
+    inventory = database_operation_with_logbrew_span(
+        "SELECT inventory",
+        client=client,
+        event_id="evt_fastapi_dependency_database",
+        operation=select_inventory,
+        system="sqlite",
+        db_name="checkout",
+        statement_template="SELECT inventory WHERE sku = ?",
+        row_count=1,
+    )
+    cached_count = cache_operation_with_logbrew_span(
+        "GET inventory",
+        client=client,
+        event_id="evt_fastapi_dependency_cache",
+        operation=read_inventory_cache,
+        system="memory-cache",
+        cache_name="inventory-cache",
+        cache_hit=True,
+    )
+    queue_operation_with_logbrew_span(
+        "PUBLISH checkout.completed",
+        client=client,
+        event_id="evt_fastapi_dependency_queue",
+        operation=publish_checkout_event,
+        system="memory-queue",
+        operation_kind="publish",
+        queue_name="checkout-events",
+        task_name="checkout.completed",
+        message_count=1,
+    )
+    return {"ok": inventory is not None and cached_count >= 0, "orderId": order_id}
+```
+
+Run `python -m logbrew_fastapi.examples dependency-spans` to see a local request span parenting SQLite, cache, and queue child spans from an installed package. LogBrew does not patch database drivers, cache clients, queue frameworks, or broker metadata globally, and the helpers avoid SQL values, cache keys/values, queue bodies, headers, baggage, and tracestate.
+
 Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests:
 
 ```python

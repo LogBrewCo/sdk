@@ -96,3 +96,33 @@ Verifier evidence:
 
 - Focused TDD red failed because FastAPI/Django dynamic request spans still used concrete paths.
 - Focused green: `PYTHONPATH=python/logbrew_py/src:python/logbrew_fastapi/src:python/logbrew_django/src python3 -m unittest python/logbrew_fastapi/tests/test_fastapi_integration.py python/logbrew_django/tests/test_django_integration.py` ran 16 tests in a temporary dependency venv.
+
+## FastAPI/Django Request-to-Dependency Proof - 2026-07-07
+
+### Sources Reused
+
+- Sentry Python SDK source already read for this dependency-span gap: `getsentry/sentry-python@907dd48f1a118d75ddb2f2178e879bdc5fa71283` `sentry_sdk/integrations/sqlalchemy.py`, `sentry_sdk/integrations/aiomysql.py`, `sentry_sdk/integrations/rq.py`, `sentry_sdk/integrations/arq.py`, and `sentry_sdk/integrations/dramatiq.py`; plus `getsentry/sentry-python@883e585baf564ff650e2292b70262aef852adec0` `sentry_sdk/integrations/celery/__init__.py` and `sentry_sdk/integrations/rq.py`.
+- Datadog `dd-trace-py` source already read: `DataDog/dd-trace-py@90d3cc64f59ff10213396b37bf83c49a260afab8` `ddtrace/contrib/dbapi.py`, SQLAlchemy patch/engine paths, and RQ/Celery integration paths; later refreshes for DB-API, cache, and Celery/RQ behavior are recorded in the database/cache/queue research notes.
+- OpenTelemetry Python Contrib source already read: `open-telemetry/opentelemetry-python-contrib@a5081cddcd6ca7f529abb2dbdebce6d2a4f062fb` DB-API, SQLAlchemy, and Celery instrumentation paths, plus FastAPI/Django/ASGI framework tracing paths from this note.
+- PostHog Python source was previously searched for comparable general dependency tracing and did not provide a matching FastAPI/Django DB/cache/queue trace integration in the checked paths.
+
+### Pattern and Tradeoff
+
+- Sentry, Datadog, and OpenTelemetry are stronger for automatic framework-to-dependency composition: a FastAPI/Django request span remains active while DB, cache, queue, and outbound integrations create child spans.
+- That breadth is useful for time-to-answer, but the mature competitor path often relies on framework/driver patching, richer semantic capture, broker/header propagation, or heavier runtime dependencies.
+- LogBrew's current public SDK path stays explicit and app-owned: the framework integration owns only the request span and active context; DB/cache/queue helpers wrap the specific operation the app chooses.
+
+### LogBrew Change
+
+- Added packaged `python -m logbrew_fastapi.examples dependency-spans` and `python -m logbrew_django.examples dependency-spans`.
+- Each example runs a local framework test client, accepts an incoming W3C `traceparent`, then creates SQLite, in-memory cache, and in-memory queue child spans under the active framework request span.
+- The installed examples assert deterministic parent/child span IDs for the request, database, cache, and queue spans. They do not capture SQL values, cache keys/values, queue bodies, headers, full URLs, raw propagation metadata, baggage, or tracestate.
+
+### Verification
+
+- RED before implementation: `bash scripts/check_fastapi_package.sh` and `bash scripts/check_django_package.sh` failed because the packaged `dependency-spans` example and sdist files were absent.
+- GREEN package proof: `bash scripts/check_fastapi_package.sh` and `bash scripts/check_django_package.sh` build local wheels/sdists, install them into fresh virtual environments, run package metadata/type/unit checks, and execute the dependency examples from installed packages.
+
+### Remaining Gap
+
+- Sentry, Datadog, and OpenTelemetry still lead on automatic FastAPI/Django DB/cache/queue breadth, driver/framework patching, richer DB/cache/queue semantics, baggage/tracestate, request phase timings, and hosted trace UI. LogBrew is now clearer and safer for explicit request-to-dependency composition from installed artifacts, but it is not yet zero-touch dependency instrumentation.

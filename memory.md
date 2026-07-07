@@ -1,5 +1,30 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-07: FastAPI and Django request-to-dependency trace proof improved
+  using existing source-backed Python framework/dependency research. Reused
+  Sentry Python database/cache/queue/framework integration evidence
+  (`sentry_sdk/integrations/sqlalchemy.py`, `aiomysql.py`, RQ/Dramatiq/Celery
+  paths), Datadog `dd-trace-py` DB-API/SQLAlchemy/cache/RQ/Celery paths,
+  OpenTelemetry Python Contrib DB-API/SQLAlchemy/Celery/FastAPI/Django/ASGI
+  instrumentors, and PostHog Python no-comparable-general-dependency-tracing
+  evidence from the checked paths. `logbrew-fastapi` and `logbrew-django` now
+  ship `python -m logbrew_fastapi.examples dependency-spans` and
+  `python -m logbrew_django.examples dependency-spans`, proving an active
+  framework request span can parent explicit core Python SQLite, cache, and
+  queue child spans with deterministic request/database/cache/queue span IDs.
+  The pattern stays app-owned and privacy-bounded: no database/cache/queue
+  global patching, no SQL values, cache keys/values, queue bodies, arbitrary
+  headers, raw propagation metadata, baggage, or tracestate. Evidence: RED
+  `bash scripts/check_fastapi_package.sh` and `bash
+  scripts/check_django_package.sh` failed on missing packaged example/sdist
+  files; GREEN `bash scripts/check_fastapi_package.sh`, `bash
+  scripts/check_django_package.sh`, `bash scripts/real_user_fastapi_smoke.sh`
+  with `fastapi@0.139.0`, and `bash scripts/real_user_django_smoke.sh` with
+  `django@6.0.6`. Research:
+  `docs/competitor-research/python-trace-correlation-2026-06-16.md`.
+  Honest gap: Sentry/Datadog/OpenTelemetry still lead on automatic
+  FastAPI/Django DB/cache/queue breadth, richer semantic conventions,
+  baggage/tracestate, request phase timings, and hosted trace UI.
 - 2026-07-07: Python Flask request tracing gap reduced after source-reading
   Sentry Python
   `getsentry/sentry-python@85ba59f707654719bc5edbb224c01884103d9c8b`
