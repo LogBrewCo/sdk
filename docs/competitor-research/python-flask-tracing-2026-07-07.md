@@ -36,6 +36,14 @@ OpenTelemetry uses separate instrumentor packages for Flask and HTTP clients. Th
 
 LogBrew keeps the Flask package app-owned and uses the existing core Python HTTP helper inside the active Flask request. The helper creates a child span under the Flask request span, injects one W3C `traceparent`, and records only method, route template, status, trace ids, span ids, source, and primitive metadata. It does not capture full URLs, query strings, request/response bodies, arbitrary headers, cookies, baggage, or tracestate.
 
+## Dependency Span Composition Pattern
+
+Sentry and Datadog connect Flask request traces to database, cache, and queue spans through separate automatic integrations for SQL/database clients, cache clients, and background-job libraries. That gives broad out-of-the-box trace trees when users enable the matching integrations, but it also increases hidden patching surface and requires careful review of SQL, cache, queue, header, and payload metadata.
+
+OpenTelemetry follows a modular approach: Flask instrumentation can be combined with DB, cache, queue, and HTTP client instrumentors under the same provider/context. This is portable, but users need more setup and must understand exporter/provider configuration and semantic-convention choices.
+
+LogBrew now uses the active Flask request trace with explicit core dependency helpers. The packaged `dependency-spans` example proves one Flask request span can parent SQLite, in-memory cache, and in-memory queue child spans with stable request/database/cache/queue span IDs. The helper path stays call-site owned and records operation name, system, status, trace ids, span ids, parent span ids, and primitive metadata only. It does not capture SQL bind values, result rows, cache keys or values, queue message bodies, arbitrary headers, baggage, or tracestate.
+
 ## Packaging Pattern
 
 Sentry ships Flask support as a `sentry-sdk` extra in `setup.py`, while Datadog keeps Flask instrumentation under the main `ddtrace` package. OpenTelemetry ships a separate `opentelemetry-instrumentation-flask` distribution with a `FlaskInstrumentor` entry point. PostHog's checked Python source did not expose a Flask tracing package.
@@ -57,9 +65,10 @@ Privacy defaults are stricter than the richer automatic competitors: no request 
 - `scripts/real_user_flask_smoke.sh`
 - `.github/workflows/publish-packages.yml` guarded `logbrew-flask` PyPI extras path
 - `python -m logbrew_flask.examples outbound-http` packaged example
+- `python -m logbrew_flask.examples dependency-spans` packaged example
 
-The installed-artifact proofs build local `logbrew-sdk` and `logbrew-flask` wheels/sdists, install them into fresh virtual environments, run Flask test-client flows, prove log/span/issue correlation, prove Flask request span to outbound HTTP child span correlation, validate the injected `traceparent` span id against the emitted outbound span id, validate typed consumer usage, and exercise packaged examples.
+The installed-artifact proofs build local `logbrew-sdk` and `logbrew-flask` wheels/sdists, install them into fresh virtual environments, run Flask test-client flows, prove log/span/issue correlation, prove Flask request span to outbound HTTP child span correlation, validate the injected `traceparent` span id against the emitted outbound span id, prove Flask request span to database/cache/queue child span correlation, validate typed consumer usage, and exercise packaged examples.
 
 ## Remaining Gap
 
-LogBrew is still intentionally lighter than Sentry, Datadog, and OpenTelemetry for automatic Flask view/template/database/outbound instrumentation. The next Flask-related improvements should come from concrete user demand or source-backed proof that narrower explicit helpers can improve time-to-answer without adopting broad hidden patching.
+LogBrew is still intentionally lighter than Sentry, Datadog, and OpenTelemetry for automatic Flask view/template/database/cache/queue/outbound instrumentation. The next Flask-related improvements should come from concrete user demand or source-backed proof that narrower explicit helpers can improve time-to-answer without adopting broad hidden patching.

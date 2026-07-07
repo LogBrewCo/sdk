@@ -210,7 +210,8 @@ TOML
 grep -qx 'readme-example -> python -m logbrew_flask.examples readme-example' <(sed -n '1p' "$tmp_dir/examples-list.txt")
 grep -qx 'real-user-smoke -> python -m logbrew_flask.examples real-user-smoke' <(sed -n '2p' "$tmp_dir/examples-list.txt")
 grep -qx 'outbound-http -> python -m logbrew_flask.examples outbound-http' <(sed -n '3p' "$tmp_dir/examples-list.txt")
-grep -qx 'default (real-user-smoke) -> python -m logbrew_flask.examples' <(sed -n '4p' "$tmp_dir/examples-list.txt")
+grep -qx 'dependency-spans -> python -m logbrew_flask.examples dependency-spans' <(sed -n '4p' "$tmp_dir/examples-list.txt")
+grep -qx 'default (real-user-smoke) -> python -m logbrew_flask.examples' <(sed -n '5p' "$tmp_dir/examples-list.txt")
 "$tmp_dir/app/bin/python" -m logbrew_flask.examples readme-example > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 grep -q '"type": "span"' "$tmp_dir/readme.stdout.json"
 "$tmp_dir/app/bin/python" -m logbrew_flask.examples real-user-smoke > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
@@ -263,6 +264,18 @@ if outbound_metadata["source"] != "requests":
 Path(sys.argv[3]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 PY
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/outbound-body.json" >/dev/null
+
+"$tmp_dir/app/bin/python" -m logbrew_flask.examples dependency-spans > "$tmp_dir/dependency.stdout.json" 2> "$tmp_dir/dependency.stderr.json"
+grep -q '"name": "sqlite SELECT inventory"' "$tmp_dir/dependency.stdout.json"
+grep -q '"name": "memory-cache GET inventory"' "$tmp_dir/dependency.stdout.json"
+grep -q '"name": "memory-queue PUBLISH checkout.completed"' "$tmp_dir/dependency.stdout.json"
+grep -q '"databaseParentSpanId": "b7ad6b7169203331"' "$tmp_dir/dependency.stderr.json"
+grep -q '"databaseSpanId": "c8ad6b7169203332"' "$tmp_dir/dependency.stderr.json"
+grep -q '"cacheParentSpanId": "b7ad6b7169203331"' "$tmp_dir/dependency.stderr.json"
+grep -q '"cacheSpanId": "d9ad6b7169203333"' "$tmp_dir/dependency.stderr.json"
+grep -q '"queueParentSpanId": "b7ad6b7169203331"' "$tmp_dir/dependency.stderr.json"
+grep -q '"queueSpanId": "e0ad6b7169203334"' "$tmp_dir/dependency.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/dependency.stdout.json" >/dev/null
 
 printf 'flask real-user smoke passed with %s\n' "$("$tmp_dir/app/bin/python" - <<'PY'
 from importlib.metadata import version

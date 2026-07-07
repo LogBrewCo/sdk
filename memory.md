@@ -1,5 +1,22 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-07: Flask request-to-dependency trace proof improved using the
+  existing source-backed Flask/dependency research. Sentry/Datadog/OpenTelemetry
+  still lead on automatic Flask + DB/cache/queue breadth through broader
+  integration patching/instrumentors, but `logbrew-flask` now ships
+  `python -m logbrew_flask.examples dependency-spans`, proving an active Flask
+  request span can parent explicit core Python SQLite, cache, and queue child
+  spans with deterministic request/database/cache/queue span IDs. The pattern
+  stays app-owned and privacy-bounded: no Flask/DB/cache/queue global patching,
+  no SQL values, result rows, cache keys/values, queue bodies, arbitrary
+  headers, raw propagation metadata, baggage, or tracestate. Evidence: RED
+  `bash scripts/check_flask_package.sh` failed on missing packaged
+  dependency-span example/sdist file; GREEN `bash scripts/check_flask_package.sh`
+  and `bash scripts/real_user_flask_smoke.sh` with `flask@3.1.3`.
+  Research: `docs/competitor-research/python-flask-tracing-2026-07-07.md`.
+  Honest gap: Sentry/Datadog/OTel still lead on automatic Flask
+  view/template/DB/cache/queue/outbound breadth, richer semantic conventions,
+  baggage/tracestate, request phase timings, and hosted trace UI.
 - 2026-07-07: FastAPI and Django request-to-dependency trace proof improved
   using existing source-backed Python framework/dependency research. Reused
   Sentry Python database/cache/queue/framework integration evidence

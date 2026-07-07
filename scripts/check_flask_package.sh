@@ -41,6 +41,7 @@ grep -q "^logbrew_flask-${flask_package_version}/src/logbrew_flask/py.typed$" "$
 grep -q "^logbrew_flask-${flask_package_version}/src/logbrew_flask/examples/readme_example.py$" "$tmp_dir/sdist-contents.txt"
 grep -q "^logbrew_flask-${flask_package_version}/src/logbrew_flask/examples/real_user_smoke.py$" "$tmp_dir/sdist-contents.txt"
 grep -q "^logbrew_flask-${flask_package_version}/src/logbrew_flask/examples/outbound_http.py$" "$tmp_dir/sdist-contents.txt"
+grep -q "^logbrew_flask-${flask_package_version}/src/logbrew_flask/examples/dependency_spans.py$" "$tmp_dir/sdist-contents.txt"
 tar -xOf "$flask_sdist" "logbrew_flask-${flask_package_version}/README.md" > "$tmp_dir/sdist-README.md"
 grep -q 'traceparent' "$tmp_dir/sdist-README.md"
 grep -q 'span_id_factory' "$tmp_dir/sdist-README.md"
@@ -68,7 +69,8 @@ PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_flask.examples --list > "$tm
 grep -qx 'readme-example -> python -m logbrew_flask.examples readme-example' <(sed -n '1p' "$tmp_dir/examples-list.txt")
 grep -qx 'real-user-smoke -> python -m logbrew_flask.examples real-user-smoke' <(sed -n '2p' "$tmp_dir/examples-list.txt")
 grep -qx 'outbound-http -> python -m logbrew_flask.examples outbound-http' <(sed -n '3p' "$tmp_dir/examples-list.txt")
-grep -qx 'default (real-user-smoke) -> python -m logbrew_flask.examples' <(sed -n '4p' "$tmp_dir/examples-list.txt")
+grep -qx 'dependency-spans -> python -m logbrew_flask.examples dependency-spans' <(sed -n '4p' "$tmp_dir/examples-list.txt")
+grep -qx 'default (real-user-smoke) -> python -m logbrew_flask.examples' <(sed -n '5p' "$tmp_dir/examples-list.txt")
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_flask.examples readme-example > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-readme.stdout.json"
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_flask.examples real-user-smoke > "$tmp_dir/packaged-smoke.stdout.json" 2> "$tmp_dir/packaged-smoke.stderr.json"
@@ -91,5 +93,17 @@ if grep -q 'debug_marker=drop' "$tmp_dir/packaged-outbound.stdout.json" "$tmp_di
   exit 1
 fi
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-outbound.stdout.json" >/dev/null
+
+PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_flask.examples dependency-spans > "$tmp_dir/packaged-dependency.stdout.json" 2> "$tmp_dir/packaged-dependency.stderr.json"
+grep -q '"name": "sqlite SELECT inventory"' "$tmp_dir/packaged-dependency.stdout.json"
+grep -q '"name": "memory-cache GET inventory"' "$tmp_dir/packaged-dependency.stdout.json"
+grep -q '"name": "memory-queue PUBLISH checkout.completed"' "$tmp_dir/packaged-dependency.stdout.json"
+grep -q '"databaseParentSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-dependency.stderr.json"
+grep -q '"databaseSpanId": "c8ad6b7169203332"' "$tmp_dir/packaged-dependency.stderr.json"
+grep -q '"cacheParentSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-dependency.stderr.json"
+grep -q '"cacheSpanId": "d9ad6b7169203333"' "$tmp_dir/packaged-dependency.stderr.json"
+grep -q '"queueParentSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-dependency.stderr.json"
+grep -q '"queueSpanId": "e0ad6b7169203334"' "$tmp_dir/packaged-dependency.stderr.json"
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-dependency.stdout.json" >/dev/null
 
 printf '%s\n' "flask package checks passed"

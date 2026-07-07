@@ -78,6 +78,49 @@ def checkout(order_id: str) -> dict[str, bool]:
 
 The helper does not patch `requests` globally. It records method, low-cardinality route template, status code, trace id, span id, and parent span id. It does not capture full URLs, query strings, request bodies, response bodies, arbitrary headers, cookies, baggage, or tracestate.
 
+## Database, Cache, And Queue Child Spans
+
+Use the core dependency helpers inside a Flask handler to connect database, cache, and queue work to the active request trace.
+
+```python
+from logbrew_sdk import (
+    cache_operation_with_logbrew_span,
+    database_operation_with_logbrew_span,
+    queue_operation_with_logbrew_span,
+)
+
+
+@app.post("/checkout/<order_id>")
+def checkout(order_id: str) -> dict[str, bool]:
+    inventory = database_operation_with_logbrew_span(
+        "SELECT inventory",
+        client=client,
+        operation=lambda: database.execute("SELECT quantity FROM inventory WHERE sku = ?", ("sku_123",)).fetchone(),
+        system="sqlite",
+        statement_template="SELECT inventory WHERE sku = ?",
+    )
+    cached_inventory = cache_operation_with_logbrew_span(
+        "GET inventory",
+        client=client,
+        operation=lambda: cache["sku_123"],
+        system="memory-cache",
+        cache_name="inventory-cache",
+        cache_hit=True,
+    )
+    published = queue_operation_with_logbrew_span(
+        "PUBLISH checkout.completed",
+        client=client,
+        operation=lambda: queue.append("checkout.completed") or len(queue),
+        system="memory-queue",
+        operation_kind="publish",
+        queue_name="checkout-events",
+        task_name="checkout.completed",
+    )
+    return {"ok": inventory is not None and cached_inventory > 0 and published == 1}
+```
+
+Run `python -m logbrew_flask.examples dependency-spans` to see a request span with database, cache, and queue child spans under the same trace. These helpers record operation names, systems, status, trace ids, span ids, parent span ids, and primitive metadata. They do not capture SQL bind values, result payloads, queue message payloads, cache values, arbitrary headers, baggage, or tracestate.
+
 ## Privacy Defaults
 
 LogBrew does not capture request bodies, response bodies, cookies, arbitrary headers, query strings, raw `traceparent` values, baggage, or tracestate. Exception issues include the exception type and message but not stack frames.
@@ -88,4 +131,4 @@ By default, transport failures do not break the Flask response path. Set `raise_
 
 ## Tradeoff
 
-Sentry, Datadog, and OpenTelemetry provide broader automatic Flask and outbound HTTP instrumentation, including global patching and deeper view/template/client hooks. LogBrew starts with explicit app-owned Flask and outbound HTTP helpers because that keeps setup reversible, simple to reason about, and safer for privacy-sensitive services.
+Sentry, Datadog, and OpenTelemetry provide broader automatic Flask, outbound HTTP, and dependency instrumentation, including global patching and deeper view/template/client hooks. LogBrew starts with explicit app-owned Flask and dependency helpers because that keeps setup reversible, simple to reason about, and safer for privacy-sensitive services.
