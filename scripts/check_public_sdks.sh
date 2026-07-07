@@ -52,6 +52,7 @@ STEP_LABELS=(
   "Browser installed-artifact fake-intake smoke"
   "Node.js real-user smoke"
   "Node Redis real-package smoke"
+  "Node Mongoose real-package smoke"
   "Node Axios real-package smoke"
   "Node HTTP client real-package smoke"
   "Node queue high-load fake-intake smoke"
@@ -537,6 +538,10 @@ mark_step_complete
 
 begin_next_step "Node Redis real-package smoke"
 run_shell_step "bash scripts/real_user_node_redis_packages_smoke.sh"
+mark_step_complete
+
+begin_next_step "Node Mongoose real-package smoke"
+run_shell_step "bash scripts/real_user_node_mongoose_smoke.sh"
 mark_step_complete
 
 begin_next_step "Node Axios real-package smoke"

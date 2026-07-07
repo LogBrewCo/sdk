@@ -563,6 +563,72 @@ export type LogBrewMongoCollectionInstrumentationOptions = {
   ) => void | Promise<void>;
 };
 
+export type LogBrewMongooseExecutable = {
+  exec?: (...args: unknown[]) => unknown;
+  [key: string]: unknown;
+};
+
+export type LogBrewMongooseModel = {
+  modelName?: string;
+  collection?: {
+    collectionName?: string;
+    name?: string;
+    [key: string]: unknown;
+  };
+  aggregate?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  bulkWrite?: (...args: unknown[]) => unknown;
+  count?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  countDocuments?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  create?: (...args: unknown[]) => unknown;
+  deleteMany?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  deleteOne?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  distinct?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  estimatedDocumentCount?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  find?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  findById?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  findByIdAndDelete?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  findByIdAndRemove?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  findByIdAndUpdate?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  findOne?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  findOneAndDelete?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  findOneAndRemove?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  findOneAndReplace?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  findOneAndUpdate?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  insertMany?: (...args: unknown[]) => unknown;
+  replaceOne?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  updateMany?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  updateOne?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  where?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  [key: string]: unknown;
+};
+
+export type LogBrewMongooseModelInstrumentation = {
+  isInstalled(): boolean;
+  uninstall(): void;
+};
+
+export type LogBrewMongooseModelInstrumentationOptions = {
+  client: LogBrewClient;
+  databaseName?: string;
+  collectionName?: string;
+  modelName?: string;
+  trace?: LogBrewTraceContext;
+  id?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  now?: () => string;
+  nowMs?: () => number;
+  spanIdFactory?: () => string;
+  traceIdFactory?: () => string;
+  onCaptureError?: (
+    error: unknown,
+    context: {
+      client: LogBrewClient;
+      error?: unknown;
+      trace: LogBrewTraceContext;
+    }
+  ) => void | Promise<void>;
+};
+
 export type CacheOperationWithLogBrewSpanOptions<Result = unknown> = {
   client: LogBrewClient;
   operation: () => Result | Promise<Result>;
@@ -703,6 +769,11 @@ export declare function instrumentLogBrewMongoCollection(
   options: LogBrewMongoCollectionInstrumentationOptions
 ): LogBrewMongoCollectionInstrumentation;
 
+export declare function instrumentLogBrewMongooseModel(
+  mongooseModel: LogBrewMongooseModel,
+  options: LogBrewMongooseModelInstrumentationOptions
+): LogBrewMongooseModelInstrumentation;
+
 export declare function cacheOperationWithLogBrewSpan<Result>(
   operationName: string,
   options: CacheOperationWithLogBrewSpanOptions<Result>
@@ -773,6 +844,7 @@ declare const defaultExport: {
   installLogBrewUndiciInstrumentation: typeof installLogBrewUndiciInstrumentation;
   instrumentLogBrewAxiosInstance: typeof instrumentLogBrewAxiosInstance;
   instrumentLogBrewMongoCollection: typeof instrumentLogBrewMongoCollection;
+  instrumentLogBrewMongooseModel: typeof instrumentLogBrewMongooseModel;
   instrumentLogBrewPgClient: typeof instrumentLogBrewPgClient;
   instrumentLogBrewRedisClient: typeof instrumentLogBrewRedisClient;
   queueBatchOperationWithLogBrewSpan: typeof queueBatchOperationWithLogBrewSpan;

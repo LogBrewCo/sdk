@@ -420,6 +420,32 @@ mongoInstrumentation.uninstall();
 
 The wrapper records one child span per supported collection operation and per wrapped cursor materialization method such as `toArray()` or `next()`. It preserves operation and cursor results, rethrows MongoDB driver errors, and uses the active LogBrew request trace when one exists. Metadata includes `framework: "node:mongodb"`, `db.system.name: "mongodb"`, operation kind, optional database and collection names, duration, sampled flag, and W3C trace IDs. Failed operations add a type-only `exception` event. It does not patch MongoDB modules globally, capture filters, serialize documents, store update specs, record aggregation pipelines, include connection strings or endpoint details, infer baggage/tracestate, or store raw propagation headers.
 
+### Mongoose Model Spans
+
+Use `instrumentLogBrewMongooseModel()` when your app already uses Mongoose and wants model/query spans without global Mongoose or MongoDB driver patching. Pass each app-owned model you want to observe, keep `mongoose` as your own dependency, and uninstall when that model should return to its original behavior:
+
+```js
+import { createLogBrewNodeClient, instrumentLogBrewMongooseModel } from "@logbrew/node";
+import mongoose from "mongoose";
+
+const client = createLogBrewNodeClient({ sdkName: "checkout-api", sdkVersion: "1.4.0" });
+const profileSchema = new mongoose.Schema({ email: String, name: String }, { collection: "profiles" });
+const Profile = mongoose.model("Profile", profileSchema);
+
+const mongooseInstrumentation = instrumentLogBrewMongooseModel(Profile, {
+  client,
+  databaseName: "checkout",
+  metadata: { feature: "checkout" }
+});
+
+const profile = await Profile.findOne({ email }).exec();
+await Profile.updateOne({ email }, { $set: { name } }).exec();
+
+mongooseInstrumentation.uninstall();
+```
+
+The wrapper records one child span around Query or Aggregate `exec()` calls and supported direct model methods such as `create()` or `insertMany()`. It preserves results, rethrows Mongoose errors, and uses the active LogBrew request trace when one exists. Metadata includes `framework: "node:mongoose"`, `db.system.name: "mongoose"`, operation kind, safe model/collection/database names when known, result count when safe, duration, sampled flag, and W3C trace IDs. Failed operations add a type-only `exception` event. It does not patch Mongoose prototypes globally, capture filters, serialize documents, store update specs, record aggregation pipelines, include connection strings or endpoint details, infer baggage/tracestate, or store raw propagation headers.
+
 ### Redis Command Spans
 
 Use `instrumentLogBrewRedisClient()` when your app already uses `redis` or `ioredis` and wants command spans without global module patching. Pass the app-owned client, keep the Redis package as your own dependency, and uninstall when the wrapped instance should return to its original behavior:

@@ -19,6 +19,7 @@ const {
   resolveOperationTrace
 } = require("./trace-context.cjs");
 const { instrumentLogBrewMongoCollection: instrumentMongoCollection } = require("./mongo.cjs");
+const { instrumentLogBrewMongooseModel: instrumentMongooseModel } = require("./mongoose.cjs");
 const { instrumentLogBrewPgClient: instrumentPgClient } = require("./pg.cjs");
 const { instrumentLogBrewRedisClient: instrumentRedisClient } = require("./redis.cjs");
 const { installLogBrewUndiciInstrumentation: installUndiciInstrumentation } = require("./undici.cjs");
@@ -192,6 +193,14 @@ function instrumentLogBrewRedisClient(redisClient, options = {}) {
 
 function instrumentLogBrewMongoCollection(mongoCollection, options = {}) {
   return instrumentMongoCollection(mongoCollection, {
+    ...options,
+    activeTraceProvider: getActiveLogBrewTrace,
+    runWithTrace: (trace, callback) => activeTraceContext.run(trace, callback)
+  });
+}
+
+function instrumentLogBrewMongooseModel(mongooseModel, options = {}) {
+  return instrumentMongooseModel(mongooseModel, {
     ...options,
     activeTraceProvider: getActiveLogBrewTrace,
     runWithTrace: (trace, callback) => activeTraceContext.run(trace, callback)
@@ -1970,6 +1979,7 @@ const exported = {
   installLogBrewUndiciInstrumentation,
   instrumentLogBrewAxiosInstance,
   instrumentLogBrewMongoCollection,
+  instrumentLogBrewMongooseModel,
   instrumentLogBrewPgClient,
   instrumentLogBrewRedisClient,
   queueBatchOperationWithLogBrewSpan,
