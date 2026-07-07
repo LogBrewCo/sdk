@@ -65,6 +65,19 @@ When OkHttp returns a final response with a `priorResponse` chain, the intercept
 
 `LogBrewOkHttpPhaseTimings.eventListenerFactory()` is optional. Add it when you want privacy-bounded request phase durations on the same request span, such as DNS, connect, request headers, and response headers. It records only bounded duration numbers and a boolean marker; it does not capture DNS names, IPs, proxies, protocols, TLS details, headers, bodies, URLs, query strings, fragments, redirects, baggage, or tracestate. If your app already owns an OkHttp `EventListener.Factory`, pass it to `eventListenerFactory(delegate)` so LogBrew wraps and preserves your listener.
 
+When you also want the span duration and phase metadata to include response-body download/consumption, opt in to delayed completion:
+
+```kotlin
+val okHttp =
+    OkHttpClient
+        .Builder()
+        .addInterceptor(LogBrewOkHttpInterceptor(client, finishSpanOnResponseBodyClose = true))
+        .eventListenerFactory(LogBrewOkHttpPhaseTimings.eventListenerFactory())
+        .build()
+```
+
+With `finishSpanOnResponseBodyClose = true`, LogBrew wraps only the returned `ResponseBody` and queues the span once the app reaches body EOF or closes the body. This can add `okhttp.responseBodyCompletion` and `okhttp.phase.responseBodyMs` to the same request span. The wrapper does not read, buffer, log, or alter body bytes. If the app never consumes or closes the body, the span remains unfinished, matching OkHttp's owned response lifecycle.
+
 For asynchronous `enqueue(...)` calls, wrap the app-owned `OkHttpClient` as a `Call.Factory` when you want the active trace to survive OkHttp dispatcher threads. This lets the interceptor create the request child span under the trace that was active when `newCall(...)` was created and reactivates that trace for app callback code:
 
 ```kotlin

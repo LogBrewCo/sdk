@@ -300,6 +300,8 @@ grep -qx 'okhttp bridge ok' "$tmp_dir/okhttp-app.out"
 grep -q 'LogBrewOkHttpPhaseTimings' "$okhttp_package_dir/README.md"
 grep -q 'eventListenerFactory' "$okhttp_package_dir/README.md"
 grep -q 'request phase durations' "$okhttp_package_dir/README.md"
+grep -q 'finishSpanOnResponseBodyClose' "$okhttp_package_dir/README.md"
+grep -q 'response-body download' "$okhttp_package_dir/README.md"
 
 otel_app="$tmp_dir/otel-gradle-app"
 mkdir -p "$otel_app/src/main/java/app"

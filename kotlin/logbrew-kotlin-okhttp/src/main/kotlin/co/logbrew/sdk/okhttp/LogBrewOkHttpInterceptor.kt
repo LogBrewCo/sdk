@@ -6,9 +6,17 @@ import co.logbrew.sdk.LogBrewClient
 import co.logbrew.sdk.LogBrewTrace
 import co.logbrew.sdk.LogBrewTraceContext
 import okhttp3.Interceptor
+import okhttp3.MediaType
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody
+import okio.Buffer
+import okio.BufferedSource
+import okio.ForwardingSource
+import okio.Source
+import okio.buffer
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 fun interface LogBrewOkHttpEventIdProvider {
@@ -33,6 +41,7 @@ class LogBrewOkHttpInterceptor
         private val eventIdProvider: LogBrewOkHttpEventIdProvider = defaultEventIdProvider,
         private val timestampProvider: LogBrewOkHttpTimestampProvider = defaultTimestampProvider,
         private val captureFailureHandler: LogBrewOkHttpCaptureFailureHandler = LogBrewOkHttpCaptureFailureHandler {},
+        private val finishSpanOnResponseBodyClose: Boolean = false,
     ) : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
             val originalRequest = chain.request()
@@ -72,28 +81,62 @@ class LogBrewOkHttpInterceptor
             var statusCode: Int? = null
             var error: Throwable? = null
             var response: Response? = null
+            var deferCaptureUntilBodyClose = false
+
+            fun captureSpan(
+                bodyCompletion: String? = null,
+                bodyError: Throwable? = null,
+            ) {
+                val completionMetadata =
+                    linkedMapOf<String, Any?>()
+                        .also { metadata ->
+                            bodyCompletion?.let { metadata["okhttp.responseBodyCompletion"] = it }
+                            bodyError?.let { metadata["errorType"] = throwableTitle(it) }
+                        }
+                LogBrewAndroid.captureRequestSpan(
+                    client = client,
+                    id = eventIdProvider.eventId(originalRequest),
+                    timestamp = timestampProvider.timestamp(originalRequest),
+                    requestSpan = requestSpan,
+                    statusCode = statusCode,
+                    durationMs = (monotonicTimeMs() - startedAtMs).coerceAtLeast(0.0),
+                    error = if (bodyError == null) error else null,
+                    status = if (bodyError == null) null else "error",
+                    metadata = phaseTimingMetadata(chain) + priorResponseMetadata(response) + completionMetadata,
+                )
+            }
 
             try {
                 response = requestSpan.withTrace { chain.proceed(tracedRequest) }
                 statusCode = response.code
+                val responseBody = response.body
+                if (finishSpanOnResponseBodyClose && responseBody != null) {
+                    val returnedResponse =
+                        response
+                            .newBuilder()
+                            .body(
+                                CompletingResponseBody(responseBody) { completion, bodyError ->
+                                    try {
+                                        captureSpan(completion, bodyError)
+                                    } catch (captureError: Throwable) {
+                                        reportCaptureFailure(captureError)
+                                    }
+                                },
+                            ).build()
+                    deferCaptureUntilBodyClose = true
+                    return returnedResponse
+                }
                 return response
             } catch (thrown: Throwable) {
                 error = thrown
                 throw thrown
             } finally {
-                try {
-                    LogBrewAndroid.captureRequestSpan(
-                        client = client,
-                        id = eventIdProvider.eventId(originalRequest),
-                        timestamp = timestampProvider.timestamp(originalRequest),
-                        requestSpan = requestSpan,
-                        statusCode = statusCode,
-                        durationMs = (monotonicTimeMs() - startedAtMs).coerceAtLeast(0.0),
-                        error = error,
-                        metadata = phaseTimingMetadata(chain) + priorResponseMetadata(response),
-                    )
-                } catch (captureError: Throwable) {
-                    reportCaptureFailure(captureError)
+                if (!deferCaptureUntilBodyClose) {
+                    try {
+                        captureSpan()
+                    } catch (captureError: Throwable) {
+                        reportCaptureFailure(captureError)
+                    }
                 }
             }
         }
@@ -151,6 +194,9 @@ class LogBrewOkHttpInterceptor
 
         private fun monotonicTimeMs(): Double = System.nanoTime().toDouble() / 1_000_000.0
 
+        private fun throwableTitle(throwable: Throwable): String =
+            throwable::class.java.simpleName.takeIf { it.isNotBlank() } ?: throwable::class.java.name
+
         companion object {
             private const val MAX_PRIOR_RESPONSE_SUMMARY_COUNT = 20
             private val nextEventId = AtomicLong(1)
@@ -164,3 +210,78 @@ class LogBrewOkHttpInterceptor
                 }
         }
     }
+
+private class CompletingResponseBody(
+    private val delegate: ResponseBody,
+    private val onComplete: (String, Throwable?) -> Unit,
+) : ResponseBody() {
+    private val completed = AtomicBoolean(false)
+    private val completingSource by lazy {
+        CompletingSource(delegate.source(), completed, onComplete).buffer()
+    }
+
+    override fun contentType(): MediaType? = delegate.contentType()
+
+    override fun contentLength(): Long = delegate.contentLength()
+
+    override fun source(): BufferedSource = completingSource
+
+    override fun close() {
+        try {
+            delegate.close()
+            complete("close", null)
+        } catch (error: Throwable) {
+            complete("close", error)
+            throw error
+        }
+    }
+
+    private fun complete(
+        completion: String,
+        error: Throwable?,
+    ) {
+        if (completed.compareAndSet(false, true)) {
+            onComplete(completion, error)
+        }
+    }
+}
+
+private class CompletingSource(
+    delegate: Source,
+    private val completed: AtomicBoolean,
+    private val onComplete: (String, Throwable?) -> Unit,
+) : ForwardingSource(delegate) {
+    override fun read(
+        sink: Buffer,
+        byteCount: Long,
+    ): Long =
+        try {
+            val read = super.read(sink, byteCount)
+            if (read == -1L) {
+                complete("eof", null)
+            }
+            read
+        } catch (error: Throwable) {
+            complete("read_error", error)
+            throw error
+        }
+
+    override fun close() {
+        try {
+            super.close()
+            complete("close", null)
+        } catch (error: Throwable) {
+            complete("close_error", error)
+            throw error
+        }
+    }
+
+    private fun complete(
+        completion: String,
+        error: Throwable?,
+    ) {
+        if (completed.compareAndSet(false, true)) {
+            onComplete(completion, error)
+        }
+    }
+}

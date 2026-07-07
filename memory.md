@@ -1,5 +1,39 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-07: Kotlin OkHttp response-body completion timing gap reduced after
+  source-reading Sentry Java/Android
+  `getsentry/sentry-java@61ba1d557461f830dfe2e117465190144ae487c1`
+  (`SentryOkHttpInterceptor.intercept`/`finishSpan` and
+  `SentryOkHttpEventListener.responseBodyStart`/`responseBodyEnd`/`callEnd`),
+  OpenTelemetry Java Instrumentation
+  `open-telemetry/opentelemetry-java-instrumentation@82511f09cc3fac0c30484001d35ecb800842016e`
+  (`TracingInterceptor.intercept`/`instrumenter.end`), Datadog Android
+  `DataDog/dd-sdk-android@ed5ce03e26861835bc0c03fbe4476c31cab29059`
+  (`TracingInterceptor.interceptAndTrace`/`handleResponse` plus
+  `DatadogEventListener` and `RumInstrumentationTimingsCounter` body/download
+  timing paths), and PostHog Android
+  `PostHog/posthog-android@47eca08cccf002c576b5cf5e87aafa0ed3fe96aa`
+  (`PostHogOkHttpInterceptor` network telemetry/tracing-header path).
+  `LogBrewOkHttpInterceptor` now has opt-in
+  `finishSpanOnResponseBodyClose`; default behavior still captures when
+  `chain.proceed(...)` returns, while opt-in wraps only the returned
+  `ResponseBody` and queues the same sanitized request span once on EOF, close,
+  read error, or close error. Delayed capture can add
+  `okhttp.responseBodyCompletion` and `okhttp.phase.responseBodyMs` while
+  preserving app response bytes/errors and omitting body text, hosts, IPs,
+  full URLs, query/hash, arbitrary headers, cookies, raw propagation, baggage,
+  tracestate, replay data, and network-location details. Evidence: RED
+  Kotlin package gate failed on missing `finishSpanOnResponseBodyClose`; GREEN
+  `bash scripts/check_kotlin_package.sh`; GREEN
+  `bash scripts/real_user_kotlin_smoke.sh` with packed local Maven artifacts,
+  temporary Gradle consumers, real OkHttp sync/redirect/async loopback calls,
+  body consumption, response-body phase timing, trace correlation, and privacy
+  assertions. Research:
+  `docs/competitor-research/kotlin-android-trace-correlation-2026-06-16.md`.
+  Honest gap: Sentry/Datadog/OpenTelemetry still lead on hidden/global
+  instrumentation, richer retry/redirect span trees, baggage/tracestate,
+  automatic DB/cache/queue spans, hosted trace UI, and native
+  crash/symbolication parity.
 - 2026-07-07: Go outbound HTTP response-body completion timing gap reduced
   after source-reading Sentry Go
   `getsentry/sentry-go@8fbb80b557494db92d09b396bc2d79ecb24c64db`

@@ -27,8 +27,9 @@ fun main() {
     val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     server.createContext("/api/orders") { exchange ->
         capturedTraceparent.set(exchange.requestHeaders.getFirst("traceparent"))
-        exchange.sendResponseHeaders(202, 0)
-        exchange.responseBody.close()
+        val body = "accepted".toByteArray(Charsets.UTF_8)
+        exchange.sendResponseHeaders(202, body.size.toLong())
+        exchange.responseBody.use { it.write(body) }
     }
     server.createContext("/api/redirect") { exchange ->
         exchange.responseHeaders.add("Location", "/api/orders?redirect_marker=opaque")
@@ -46,6 +47,7 @@ fun main() {
                 .addInterceptor(
                     LogBrewOkHttpInterceptor(
                         client = client,
+                        finishSpanOnResponseBodyClose = true,
                         eventIdProvider =
                             LogBrewOkHttpEventIdProvider {
                                 "evt_okhttp_installed_%03d".format(nextEventId.getAndIncrement())
@@ -68,7 +70,10 @@ fun main() {
                         "/api/orders/{order_id}",
                     ),
                 ).execute()
-                .use { response -> check(response.code == 202) }
+                .use { response ->
+                    check(response.code == 202)
+                    check(response.body?.string() == "accepted")
+                }
 
             tracedCalls
                 .newCall(
@@ -80,7 +85,10 @@ fun main() {
                         "/api/redirect",
                     ),
                 ).execute()
-                .use { response -> check(response.code == 202) }
+                .use { response ->
+                    check(response.code == 202)
+                    check(response.body?.string() == "accepted")
+                }
 
             tracedCalls
                 .newCall(
@@ -107,6 +115,7 @@ fun main() {
                         ) {
                             response.use {
                                 check(it.code == 202)
+                                check(it.body?.string() == "accepted")
                                 callbackTraceSpanId.set(LogBrewTrace.currentTraceContext()?.spanId)
                             }
                             latch.countDown()
@@ -133,6 +142,8 @@ fun main() {
     check("\"okhttp.phase.recorded\": true" in body)
     check("\"okhttp.phase.requestHeadersMs\"" in body)
     check("\"okhttp.phase.responseHeadersMs\"" in body)
+    check("\"okhttp.phase.responseBodyMs\"" in body)
+    check("\"okhttp.responseBodyCompletion\": \"eof\"" in body)
     check("\"okhttp.priorResponseCount\": 1" in body)
     check("\"okhttp.redirectCount\": 1" in body)
     check("\"okhttp.retryCount\": 0" in body)

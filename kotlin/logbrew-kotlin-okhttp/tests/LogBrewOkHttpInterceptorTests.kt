@@ -14,9 +14,12 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Connection
 import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.ResponseBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Timeout
 import java.io.IOException
 import java.net.InetSocketAddress
@@ -33,7 +36,8 @@ fun main() {
     run("okhttp_call_factory_carries_trace_into_async_request_and_callback", ::okHttpCallFactoryCarriesTrace)
     run("okhttp_call_factory_preserves_request_route_template_tag", ::okHttpCallFactoryPreservesRouteTemplateTag)
     run("okhttp_phase_timings_add_bounded_phase_metadata", ::okHttpPhaseTimingsAddBoundedPhaseMetadata)
-    println("kotlin okhttp package tests ok (9 tests)")
+    run("okhttp_interceptor_can_finish_span_on_response_body_close", ::okHttpInterceptorCanFinishSpanOnResponseBodyClose)
+    println("kotlin okhttp package tests ok (10 tests)")
 }
 
 private fun run(
@@ -484,6 +488,65 @@ private fun okHttpPhaseTimingsAddBoundedPhaseMetadata() {
     check("HTTP_1_1" !in body)
 }
 
+private fun okHttpInterceptorCanFinishSpanOnResponseBodyClose() {
+    val parent =
+        LogBrewTrace.continueOrCreate(
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01",
+        )
+    val client = newClient()
+    val request =
+        Request
+            .Builder()
+            .url("https://body.example.test/api/orders?cart=redacted#debug")
+            .build()
+    val call = FakeCall(request)
+    val listener = LogBrewOkHttpPhaseTimings.eventListenerFactory().create(call)
+    listener.callStart(call)
+    listener.responseHeadersStart(call)
+    listener.responseHeadersEnd(call, fakeResponse(request, 200))
+    listener.responseBodyStart(call)
+    val chain =
+        FakeChain(
+            request,
+            code = 200,
+            call = call,
+            responseBody = "body contents".toResponseBody("text/plain".toMediaType()),
+        )
+    val interceptor =
+        LogBrewOkHttpInterceptor(
+            client = client,
+            finishSpanOnResponseBodyClose = true,
+            eventIdProvider = LogBrewOkHttpEventIdProvider { "evt_okhttp_body_close_001" },
+            timestampProvider = LogBrewOkHttpTimestampProvider { "2026-06-02T10:00:40Z" },
+        )
+
+    val response =
+        LogBrewTrace.use(parent).use {
+            val received = interceptor.intercept(chain)
+            check(received.code == 200)
+            check("evt_okhttp_body_close_001" !in client.previewJson())
+            received
+        }
+
+    listener.responseBodyEnd(call, 13L)
+    listener.callEnd(call)
+    response.close()
+
+    val body = client.previewJson()
+    check("\"id\": \"evt_okhttp_body_close_001\"" in body)
+    check("\"name\": \"GET /api/orders\"" in body)
+    check("\"okhttp.responseBodyCompletion\": \"close\"" in body)
+    check("\"okhttp.phase.responseBodyMs\"" in body)
+    check("\"statusCode\": 200" in body)
+    check("\"traceId\": \"${parent.traceId}\"" in body)
+    check("\"parentSpanId\": \"${parent.spanId}\"" in body)
+    check("body contents" !in body)
+    check("cart=redacted" !in body)
+    check("#debug" !in body)
+    check("body.example.test" !in body)
+    check("traceparent" !in body)
+}
+
 private fun newClient(): LogBrewClient =
     LogBrewClient.create(
         apiKey = "LOGBREW_API_KEY",
@@ -497,6 +560,7 @@ private class FakeChain(
     private val failure: IOException? = null,
     private val priorResponse: Response? = null,
     private val call: Call? = null,
+    private val responseBody: ResponseBody? = null,
     private val assertion: (Request) -> Unit = {},
 ) : Interceptor.Chain {
     var proceededRequest: Request? = null
@@ -514,6 +578,7 @@ private class FakeChain(
             .code(code)
             .message("OK")
             .priorResponse(priorResponse)
+            .body(responseBody)
             .build()
     }
 

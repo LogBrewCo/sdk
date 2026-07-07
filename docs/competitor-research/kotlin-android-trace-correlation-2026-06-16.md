@@ -553,3 +553,88 @@ LogBrew Kotlin already had a dependency-light JVM client, Android activity/log/t
   instrumentation, redirects/retries as separate spans, baggage/tracestate,
   richer automatic exception/span events, DB/cache/queue automatic spans,
   profiling, and native crash/symbolication parity.
+
+## 2026-07-07 OkHttp Response-Body Completion Follow-Up
+
+### Source Re-Read
+
+- Read Sentry Java/Android `getsentry/sentry-java@61ba1d557461f830dfe2e117465190144ae487c1`
+  `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpInterceptor.kt`:
+  `intercept(...)`, `finishSpan(...)`, response/error span finish behavior,
+  and the comment that its event listener waits until a response is closed.
+- Read Sentry
+  `sentry-okhttp/src/main/java/io/sentry/okhttp/SentryOkHttpEventListener.kt`:
+  `responseBodyStart(...)`, `responseBodyEnd(...)`, `responseFailed(...)`,
+  `callEnd(...)`, and `callFailed(...)` for response-body phase spans and
+  call completion.
+- Read OpenTelemetry Java Instrumentation
+  `open-telemetry/opentelemetry-java-instrumentation@82511f09cc3fac0c30484001d35ecb800842016e`
+  `instrumentation/okhttp/okhttp-3.0/library/src/main/java/io/opentelemetry/instrumentation/okhttp/v3_0/internal/TracingInterceptor.java`:
+  `intercept(...)`, immutable request propagation, scoped `chain.proceed(...)`,
+  and `instrumenter.end(...)` immediately after response return.
+- Read Datadog Android `DataDog/dd-sdk-android@ed5ce03e26861835bc0c03fbe4476c31cab29059`
+  `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/trace/TracingInterceptor.kt`:
+  `interceptAndTrace(...)`, `handleResponse(...)`, `handleThrowable(...)`,
+  and `finishRumAware(...)`.
+- Read Datadog
+  `integrations/dd-sdk-android-okhttp/src/main/kotlin/com/datadog/android/okhttp/DatadogEventListener.kt`
+  and `.../internal/RumInstrumentationTimingsCounter.kt`: `responseBodyStart`,
+  `responseBodyEnd`, `callEnd`, `sendTiming`, and `buildTiming` for download
+  timing/resource metadata.
+- Read PostHog Android `PostHog/posthog-android@47eca08cccf002c576b5cf5e87aafa0ed3fe96aa`
+  `posthog/src/main/java/com/posthog/PostHogOkHttpInterceptor.kt` and
+  `PostHogConfig.kt`: `intercept(...)`, `captureNetworkEvent(...)`, and
+  `tracingHeaders` inject PostHog-specific session/distinct-id headers and
+  session-replay network telemetry, not W3C request spans.
+
+### Pattern And Tradeoffs
+
+- Mature OkHttp integrations often finish the main trace span when
+  `chain.proceed(...)` returns. Sentry and Datadog use separate event-listener
+  paths for lower-level network/body phases; Datadog's RUM timing path includes
+  download duration after `responseBodyEnd`.
+- Sentry and PostHog can capture broader network details for replay-style
+  products. That is useful for debugging but too broad for LogBrew's default
+  SDK privacy posture.
+- LogBrew's safer improvement is an opt-in body-completion mode on the
+  existing app-owned interceptor: wrap only the returned `ResponseBody`, queue
+  the same sanitized span once at body EOF/close/error, and attach bounded
+  phase timing metadata when the app also installs the existing event listener.
+
+### LogBrew Implementation
+
+- Added `finishSpanOnResponseBodyClose` to `LogBrewOkHttpInterceptor`.
+- The default remains immediate span capture when `chain.proceed(...)` returns.
+- When `finishSpanOnResponseBodyClose = true` and a response body exists,
+  LogBrew returns a wrapped `ResponseBody` that captures exactly once on EOF,
+  close, read error, or close error.
+- Delayed capture can add `okhttp.responseBodyCompletion` and
+  `okhttp.phase.responseBodyMs` to the existing request span while making
+  `durationMs` include app body consumption time.
+- The wrapper preserves app response bytes/errors and does not read, buffer,
+  log, or mutate body bytes. It also avoids DNS names, IPs, hosts, full URLs,
+  query strings, fragments, arbitrary headers, cookies, payloads, raw
+  propagation, baggage, tracestate, replay data, and network-location details.
+
+### Verification
+
+- TDD red: `bash scripts/check_kotlin_package.sh` failed on missing
+  `finishSpanOnResponseBodyClose`.
+- Green package gate: `bash scripts/check_kotlin_package.sh` passed with 32
+  core Kotlin tests, 10 OkHttp tests, package metadata checks, source/javadoc/
+  binary jar inspection, README checks, packaged example checks, and the
+  core-jar isolation guard.
+- Installed-artifact proof: `bash scripts/real_user_kotlin_smoke.sh` passed
+  after packing local Maven artifacts into a temporary Gradle app. The app ran
+  real OkHttp sync, redirect, and async calls against a loopback server,
+  consumed response bodies, and verified `okhttp.responseBodyCompletion`,
+  `okhttp.phase.responseBodyMs`, trace correlation, redirect counts, and
+  privacy constraints without leaking body text, host, query, fragment,
+  protocol, IP, traceparent, or headers.
+
+### Remaining Gaps After Response-Body Completion
+
+- Kotlin Android still trails Sentry/Datadog/OpenTelemetry on hidden/global
+  instrumentation, richer retry/redirect span trees, baggage/tracestate,
+  automatic DB/cache/queue spans, richer hosted trace UI, and native
+  crash/symbolication parity.
