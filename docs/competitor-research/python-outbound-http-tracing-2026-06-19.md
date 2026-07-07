@@ -133,3 +133,33 @@ Reduce the Python server-side outbound HTTP tracing gap after Node gained explic
 ### Remaining Gap
 
 - Sentry, Datadog, and OpenTelemetry still lead on automatic aiohttp lifecycle coverage, TraceConfig ownership, connector/request phase timings, metrics, baggage/tracestate, and broader automatic HTTP client patching. Keep LogBrew core explicit and app-owned unless a separate integration package owns the heavier dependency, privacy, uninstall, and high-load behavior.
+
+## 2026-07-07 FastAPI/Django Request-to-Outbound Proof
+
+### Sources Reused
+
+- Sentry Python source already read for this gap: `sentry_sdk/integrations/asgi.py`, `sentry_sdk/integrations/django/__init__.py`, `sentry_sdk/integrations/httpx.py`, `sentry_sdk/integrations/stdlib.py`, and `sentry_sdk/integrations/aiohttp.py`.
+- Datadog Python source already read for this gap: `ddtrace/contrib/internal/fastapi/patch.py`, `ddtrace/contrib/internal/django/*`, `ddtrace/contrib/internal/requests/patch.py`, `ddtrace/contrib/internal/requests/connection.py`, and `ddtrace/contrib/internal/httpx/patch.py`.
+- OpenTelemetry Python Contrib source already read for this gap: `opentelemetry-instrumentation-fastapi`, `opentelemetry-instrumentation-django`, `opentelemetry-instrumentation-asgi`, `opentelemetry-instrumentation-requests`, and `opentelemetry-instrumentation-httpx`.
+- PostHog Python public source previously searched for comparable HTTP/client tracing and still has no source-level equivalent in the checked paths.
+
+### Pattern and Tradeoff
+
+- Sentry, Datadog, and OpenTelemetry are stronger for broad automatic composition: a framework request span remains active while patched HTTP clients create outbound child spans and inject propagation headers.
+- That is convenient for users, but the competitor pattern typically depends on process-wide or library-level patching and requires careful policy for URLs, headers, payloads, baggage, tracestate, and lifecycle hooks.
+- LogBrew's lighter path should keep framework packages explicit and app-owned until a concrete integration can prove richer automation without hidden mutation or broader capture.
+
+### LogBrew Change
+
+- Added packaged `python -m logbrew_fastapi.examples outbound-http` and `python -m logbrew_django.examples outbound-http` examples.
+- Each example runs a framework test client, accepts an incoming W3C `traceparent`, uses the active request trace inside the handler/view, wraps a caller-owned `requests`-style request seam with `requests_request_with_logbrew_span(...)`, and emits one outbound child span plus one framework request span.
+- The proofs validate that the outgoing `traceparent` span id matches the emitted outbound span id and that the outbound span parent is the framework request span. Events keep only route/status/duration/source and primitive metadata; they do not capture payloads, headers, cookies, full URLs, query strings, exception messages, baggage, tracestate, raw propagation metadata, or global HTTP client patches.
+
+### Verification
+
+- RED before implementation: installed-artifact FastAPI and Django smokes failed after typecheck because the packaged `outbound-http` example was absent from the example list.
+- GREEN proof runs through `scripts/check_fastapi_package.sh`, `scripts/check_django_package.sh`, `scripts/real_user_fastapi_smoke.sh`, and `scripts/real_user_django_smoke.sh`, which build local wheels/sdists, install into fresh virtual environments, run package metadata checks, run framework test-client flows, and execute the outbound examples from installed packages.
+
+### Remaining Gap
+
+- Sentry, Datadog, and OpenTelemetry still lead on automatic FastAPI/Django outbound coverage, DB/cache/queue spans, baggage/tracestate, request phase timings, and richer span event/link models. LogBrew is now stronger for agent-readable installed proof and privacy-bounded explicit composition, but not yet for zero-touch breadth.

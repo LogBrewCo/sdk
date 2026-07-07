@@ -38,6 +38,7 @@ grep -q "^logbrew_django-${django_package_version}/README.md$" "$tmp_dir/sdist-c
 grep -q "^logbrew_django-${django_package_version}/pyproject.toml$" "$tmp_dir/sdist-contents.txt"
 grep -q "^logbrew_django-${django_package_version}/src/logbrew_django/__init__.py$" "$tmp_dir/sdist-contents.txt"
 grep -q "^logbrew_django-${django_package_version}/src/logbrew_django/py.typed$" "$tmp_dir/sdist-contents.txt"
+grep -q "^logbrew_django-${django_package_version}/src/logbrew_django/examples/outbound_http.py$" "$tmp_dir/sdist-contents.txt"
 grep -q "^logbrew_django-${django_package_version}/src/logbrew_django/examples/readme_example.py$" "$tmp_dir/sdist-contents.txt"
 grep -q "^logbrew_django-${django_package_version}/src/logbrew_django/examples/real_user_smoke.py$" "$tmp_dir/sdist-contents.txt"
 tar -xOf "$django_sdist" "logbrew_django-${django_package_version}/README.md" > "$tmp_dir/sdist-README.md"
@@ -65,10 +66,17 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >
 
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_django.examples --list > "$tmp_dir/examples-list.txt"
 grep -qx 'readme-example -> python -m logbrew_django.examples readme-example' <(sed -n '1p' "$tmp_dir/examples-list.txt")
-grep -qx 'real-user-smoke -> python -m logbrew_django.examples real-user-smoke' <(sed -n '2p' "$tmp_dir/examples-list.txt")
-grep -qx 'default (real-user-smoke) -> python -m logbrew_django.examples' <(sed -n '3p' "$tmp_dir/examples-list.txt")
+grep -qx 'outbound-http -> python -m logbrew_django.examples outbound-http' <(sed -n '2p' "$tmp_dir/examples-list.txt")
+grep -qx 'real-user-smoke -> python -m logbrew_django.examples real-user-smoke' <(sed -n '3p' "$tmp_dir/examples-list.txt")
+grep -qx 'default (real-user-smoke) -> python -m logbrew_django.examples' <(sed -n '4p' "$tmp_dir/examples-list.txt")
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_django.examples readme-example > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-readme.stdout.json"
+PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_django.examples outbound-http > "$tmp_dir/packaged-outbound.stdout.json" 2> "$tmp_dir/packaged-outbound.stderr.json"
+grep -q '"type": "span"' "$tmp_dir/packaged-outbound.stdout.json"
+grep -q '"requestSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-outbound.stderr.json"
+grep -q '"outboundParentSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-outbound.stderr.json"
+grep -q '"outboundSpanId": "c8ad6b7169203332"' "$tmp_dir/packaged-outbound.stderr.json"
+grep -q '"traceparentMatchesSpan": true' "$tmp_dir/packaged-outbound.stderr.json"
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_django.examples real-user-smoke > "$tmp_dir/packaged-smoke.stdout.json" 2> "$tmp_dir/packaged-smoke.stderr.json"
 grep -q '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/packaged-smoke.stderr.json"
 grep -q '"parentSpanId": "00f067aa0ba902b7"' "$tmp_dir/packaged-smoke.stderr.json"

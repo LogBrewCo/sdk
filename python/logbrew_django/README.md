@@ -61,6 +61,30 @@ Missing or malformed `traceparent` headers start a fresh W3C-shaped local trace 
 
 Request spans use the Django resolver route template, such as `GET /orders/<int:order_id>/`, for low-noise grouping. Span metadata includes `routeTemplate`; concrete dynamic paths are not emitted when a route template is available. The trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
 
+## Outbound HTTP child spans
+
+Django views can wrap a caller-owned HTTP request seam with `requests_request_with_logbrew_span(...)` to create an outbound child span under the active Django request trace and inject a normalized W3C `traceparent` header:
+
+```python
+from django.http import JsonResponse
+from logbrew_sdk import requests_request_with_logbrew_span
+
+
+def checkout_view(request, order_id):
+    response = requests_request_with_logbrew_span(
+        "POST",
+        "https://payments.example.com/payments/authorize",
+        client=client,
+        event_id="evt_django_outbound_payment",
+        request=fake_payment_request,
+        route_template="/payments/authorize",
+        metadata={"dependency": "payments", "operation": "authorize"},
+    )
+    return JsonResponse({"ok": response.status_code == 202, "orderId": order_id})
+```
+
+Run `python -m logbrew_django.examples outbound-http` to see the same local flow from an installed package. The example shows the outgoing `traceparent` span id matching the emitted outbound span id, and the outbound span's parent is the active Django request span. LogBrew does not globally patch `requests`, create sessions, capture request or response bodies, serialize headers, store full URLs, or keep query strings.
+
 Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests:
 
 ```python
