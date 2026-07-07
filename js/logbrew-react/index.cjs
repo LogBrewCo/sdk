@@ -324,6 +324,39 @@ function useLogBrewReactRouterNavigation(options = {}) {
   });
 }
 
+function createLogBrewReactRouterNavigationObserver({
+  useLocation,
+  useNavigationType,
+  ...defaults
+} = {}) {
+  if (typeof useLocation !== "function") {
+    throw new SdkError(
+      "configuration_error",
+      "createLogBrewReactRouterNavigationObserver requires useLocation"
+    );
+  }
+  if (useNavigationType !== undefined && typeof useNavigationType !== "function") {
+    throw new SdkError(
+      "configuration_error",
+      "useNavigationType must be a function"
+    );
+  }
+
+  return function LogBrewReactRouterNavigationObserver(props = {}) {
+    const location = useLocation();
+    const navigationType = typeof useNavigationType === "function"
+      ? useNavigationType()
+      : undefined;
+    useLogBrewReactRouterNavigation({
+      ...defaults,
+      ...props,
+      location: props.location ?? location,
+      navigationType: props.navigationType ?? navigationType ?? defaults.navigationType
+    });
+    return null;
+  };
+}
+
 function createReactErrorEvent(error, {
   componentStack,
   id,
@@ -725,6 +758,7 @@ module.exports = {
   captureReactError,
   captureReactNetwork,
   captureReactRouterNavigation,
+  createLogBrewReactRouterNavigationObserver,
   createLogBrewReactClient,
   createReactActionEvent,
   createReactErrorEvent,
@@ -746,6 +780,7 @@ module.exports = {
     captureReactError,
     captureReactNetwork,
     captureReactRouterNavigation,
+    createLogBrewReactRouterNavigationObserver,
     createLogBrewReactClient,
     createReactActionEvent,
     createReactErrorEvent,

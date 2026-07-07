@@ -1,5 +1,31 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-07: React Router wrapper ergonomics improved after source-reading
+  Sentry JavaScript
+  `getsentry/sentry-javascript@851edb35850813e1ee2528783daec9c15eefe2b0`
+  (`createReactRouterV6CompatibleTracingIntegration`, router/useRoutes
+  wrappers, `SentryRoutes`, `updateNavigationSpan`, lazy-route updates),
+  Datadog Browser SDK
+  `DataDog/browser-sdk@413d568400d18ff73b0e0deecfaa3ea452af9abd`
+  (`wrapUseRoutes`, `startReactRouterView`, `computeViewName`), PostHog JS
+  `PostHog/posthog-js@7a3538277af8302cbe82061ec9340eea5a557443`
+  history/pageview capture, and OpenTelemetry JS Contrib
+  `open-telemetry/opentelemetry-js-contrib@3ae8a1be43ba7cd0c5e2a5955bafb65e78df6312`
+  user-interaction/history instrumentation. `@logbrew/react` now exports
+  `createLogBrewReactRouterNavigationObserver(...)`, a dependency-free
+  observer factory that apps wire to their own `useLocation`, optional
+  `useNavigationType`, `matchRoutes`, and routes. It delegates to the existing
+  route-navigation hook, records stable route-template spans, and returns
+  `null` without importing/patching React Router, router objects, or browser
+  history. Evidence: RED installed React smoke failed on the missing packaged
+  observer API; GREEN `bash scripts/real_user_react_smoke.sh` with packed
+  `@logbrew/react`, React/React DOM/React Test Renderer `19.2.7`, ESM/CJS/type
+  declaration proof, observer dynamic-route spans, app-owned navigation type,
+  queue/drop behavior, 503-to-202 retry, and privacy assertions. Research:
+  `docs/competitor-research/react-router-route-pattern-tracing-2026-07-04.md`.
+  Honest gap: Sentry/Datadog still lead on automatic router wrapping,
+  lazy-route span-name upgrades, full hosted route trace UI, visual replay,
+  and hosted source-map/symbolication rendering.
 - 2026-07-07: Kotlin OkHttp response-body completion timing gap reduced after
   source-reading Sentry Java/Android
   `getsentry/sentry-java@61ba1d557461f830dfe2e117465190144ae487c1`

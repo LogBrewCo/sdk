@@ -13,7 +13,7 @@ npm install @logbrew/sdk @logbrew/react react
 pnpm add @logbrew/sdk @logbrew/react react
 ```
 
-The package ships plain ESM and CommonJS entrypoints, `.d.ts` and `.d.cts` declarations, a `LogBrewProvider`, `LogBrewErrorBoundary`, `useLogBrew`, `useLogBrewActions`, `useLogBrewAction`, `useLogBrewNetwork`, `useLogBrewReactRouterNavigation`, `createReactRouterRouteTemplate`, `createLogBrewReactClient`, handled React error helpers, and explicit W3C trace propagation helpers for frontend-to-backend fetch calls. It keeps `@logbrew/sdk` and `react` as peer dependencies so app owners control their React/runtime versions.
+The package ships plain ESM and CommonJS entrypoints, `.d.ts` and `.d.cts` declarations, a `LogBrewProvider`, `LogBrewErrorBoundary`, `useLogBrew`, `useLogBrewActions`, `useLogBrewAction`, `useLogBrewNetwork`, `useLogBrewReactRouterNavigation`, `createLogBrewReactRouterNavigationObserver`, `createReactRouterRouteTemplate`, `createLogBrewReactClient`, handled React error helpers, and explicit W3C trace propagation helpers for frontend-to-backend fetch calls. It keeps `@logbrew/sdk` and `react` as peer dependencies so app owners control their React/runtime versions.
 
 If a React browser app also wants Web Vitals or interaction timing spans, install the browser package and import the optional subpath:
 
@@ -145,6 +145,7 @@ import {
   useNavigationType
 } from "react-router";
 import {
+  createLogBrewReactRouterNavigationObserver,
   useLogBrewReactRouterNavigation
 } from "@logbrew/react";
 
@@ -168,6 +169,26 @@ function LogBrewRouteObserver() {
   });
 
   return null;
+}
+```
+
+For a component-style setup, create an observer once from the React Router hooks your app already owns:
+
+```js
+const LogBrewRouteObserver = createLogBrewReactRouterNavigationObserver({
+  matchRoutes,
+  routes,
+  traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01",
+  useLocation,
+  useNavigationType
+});
+
+export function AppRoutes() {
+  return React.createElement(
+    LogBrewProvider,
+    { client },
+    React.createElement(React.Fragment, null, React.createElement(LogBrewRouteObserver), React.createElement(App))
+  );
 }
 ```
 

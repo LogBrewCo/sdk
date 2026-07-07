@@ -30,3 +30,18 @@ This pass focused on a real-user frontend debugging gap left after browser SPA n
 - Better than competitors in this slice: the LogBrew helper is smaller, explicit, dependency-free, reversible by normal React unmounting, queue-bounded under burst load, and privacy-bounded by default.
 - Still worse than Sentry/Datadog: no first-party React Router wrapper entrypoints, no lazy-route name upgrade, no automatic route object wrapping, no Next.js client route-pattern helper, no browser resource/fetch timing spans, no visual replay, and no backend source-map/symbolication proof.
 - Next high-impact frontend work: add source-backed Next.js client route-pattern spans and then safe browser resource/fetch timing spans, while keeping route/query/header/payload capture opt-in and privacy-bounded.
+
+## 2026-07-07 Observer Wrapper Follow-Up
+
+- Re-read current Sentry JavaScript `getsentry/sentry-javascript@851edb35850813e1ee2528783daec9c15eefe2b0` `packages/react/src/reactrouter-compat-utils/instrumentation.tsx`: `createReactRouterV6CompatibleTracingIntegration`, router creation wrappers, `SentryRoutes`, wrapped `useRoutes`, `updateNavigationSpan`, and lazy-route update paths. Sentry remains stronger for automatic router creation/useRoutes wrapping and lazy-route span-name upgrades.
+- Re-read current Datadog Browser SDK `DataDog/browser-sdk@413d568400d18ff73b0e0deecfaa3ea452af9abd` `packages/browser-rum-react/src/domain/reactRouter/useRoutes.ts` and `startReactRouterView.ts`: `wrapUseRoutes`, `startReactRouterView`, and `computeViewName`. Datadog remains stronger for a dedicated wrapper entrypoint that computes route view names directly from matched routes.
+- Re-read PostHog JS `PostHog/posthog-js@7a3538277af8302cbe82061ec9340eea5a557443` `packages/web/src/posthog-web.ts`: history patching and pathname-only pageview capture. PostHog stays generic and does not provide React Router route-template trace spans in this checked path.
+- Re-read OpenTelemetry JS Contrib `open-telemetry/opentelemetry-js-contrib@3ae8a1be43ba7cd0c5e2a5955bafb65e78df6312` user-interaction instrumentation: history API patching and interaction span naming. OTel stays generic rather than React Router-specific in this checked path.
+
+LogBrew now adds `createLogBrewReactRouterNavigationObserver(...)` to `@logbrew/react`. Apps pass their own `useLocation`, optional `useNavigationType`, `matchRoutes`, and route objects once; the returned observer component uses the existing `useLogBrewReactRouterNavigation(...)` hook under `LogBrewProvider`, captures stable route-template spans, and returns `null`.
+
+The wrapper is deliberately lighter than Sentry/Datadog: no React Router import, no global router or history patching, no route object mutation, no lazy-route promises, no route params, no history state, no query/hash, no headers, no payloads, no browser storage, no baggage, no tracestate, no screenshots, and no replay data.
+
+Evidence: RED installed React smoke failed on the missing packaged observer API; GREEN `bash scripts/real_user_react_smoke.sh` with packed `@logbrew/react`, React/React DOM/React Test Renderer `19.2.7`, ESM/CJS/type declaration proof, observer-derived dynamic route spans, app-owned navigation type, queue/drop behavior, 503-to-202 retry, and privacy assertions.
+
+Honest comparison: LogBrew is now closer to Datadog/Sentry wrapper ergonomics while keeping stricter privacy and dependency boundaries. It remains worse than Sentry/Datadog for automatic router wrapping, lazy route-name upgrades, full hosted route trace UI, visual replay, and backend source-map/symbolication rendering.

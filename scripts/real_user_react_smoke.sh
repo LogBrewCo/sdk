@@ -78,6 +78,7 @@ grep -q 'createTraceparentFetch' "$tmp_dir/react-readme.md"
 grep -q 'createReactTraceparent' "$tmp_dir/react-readme.md"
 grep -q 'useLogBrewReactRouterNavigation' "$tmp_dir/react-readme.md"
 grep -q 'createReactRouterRouteTemplate' "$tmp_dir/react-readme.md"
+grep -q 'createLogBrewReactRouterNavigationObserver' "$tmp_dir/react-readme.md"
 grep -q 'tracePropagationTargets' "$tmp_dir/react-readme.md"
 
 app_dir="$tmp_dir/react-smoke-app"
@@ -140,6 +141,7 @@ import {
   captureReactError,
   captureReactNetwork,
   captureReactRouterNavigation,
+  createLogBrewReactRouterNavigationObserver,
   createLogBrewReactClient,
   createReactActionEvent,
   createReactErrorEvent,
@@ -415,6 +417,107 @@ if (
   routerBody.includes("#panel")
 ) {
   throw new Error(`React Router hook leaked concrete route data: ${routerBody}`);
+}
+
+const observerClient = createLogBrewReactClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-router-observer-smoke-app",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+const observerRoutes = [
+  {
+    path: "/teams/:teamId/projects/:projectId",
+    element: React.createElement("span", null, "team project")
+  }
+];
+let observerLocation = {
+  pathname: "/teams/private-team-123/projects/private-project-123",
+  search: "?email=hidden@example.test",
+  hash: "#debug"
+};
+let observerNavigationType = "PUSH";
+function useStubLocation() {
+  return observerLocation;
+}
+function useStubNavigationType() {
+  return observerNavigationType;
+}
+function stubMatchRoutes(routes, location) {
+  if (routes !== observerRoutes) {
+    throw new Error("observer did not preserve app-owned routes");
+  }
+  if (String(location).startsWith("/teams/")) {
+    return [
+      {
+        route: { path: "/teams/:teamId/projects/:projectId" },
+        params: {
+          projectId: "private-project-123",
+          teamId: "private-team-123"
+        }
+      }
+    ];
+  }
+  return null;
+}
+const Observer = createLogBrewReactRouterNavigationObserver({
+  idFactory: ({ routeTemplate }) => `evt_observer_${routeTemplate.replace(/[^a-z0-9]+/gi, "_")}`,
+  matchRoutes: stubMatchRoutes,
+  metadata: {
+    ignoredNested: { private: true },
+    owner: "app-router"
+  },
+  routes: observerRoutes,
+  timestamp: "2026-06-02T10:00:16Z",
+  traceparent: routerTraceparent,
+  useLocation: useStubLocation,
+  useNavigationType: useStubNavigationType
+});
+let observerRenderer;
+await act(async () => {
+  observerRenderer = TestRenderer.create(
+    React.createElement(
+      LogBrewProvider,
+      { client: observerClient },
+      React.createElement(Observer)
+    )
+  );
+});
+observerLocation = {
+  pathname: "/teams/private-team-456/projects/private-project-456",
+  search: "?email=hidden-again@example.test",
+  hash: "#debug-again"
+};
+observerNavigationType = "POP";
+await act(async () => {
+  observerRenderer.update(
+    React.createElement(
+      LogBrewProvider,
+      { client: observerClient },
+      React.createElement(Observer)
+    )
+  );
+});
+observerRenderer.unmount();
+const observerPayload = JSON.parse(observerClient.previewJson());
+if (observerPayload.events.length !== 2) {
+  throw new Error(`expected observer to capture two dynamic route navigations, got ${observerPayload.events.length}`);
+}
+if (observerPayload.events[0].attributes.metadata.routeTemplate !== "/teams/:teamId/projects/:projectId") {
+  throw new Error(`observer did not derive route template: ${observerClient.previewJson()}`);
+}
+if (observerPayload.events[1].attributes.metadata.navigationType !== "POP") {
+  throw new Error(`observer did not use app-owned navigation type hook: ${observerClient.previewJson()}`);
+}
+const observerPreview = observerClient.previewJson();
+if (
+  observerPreview.includes("private-team-") ||
+  observerPreview.includes("private-project-") ||
+  observerPreview.includes("hidden") ||
+  observerPreview.includes("#debug") ||
+  observerPreview.includes("ignoredNested")
+) {
+  throw new Error(`React Router observer leaked concrete route values: ${observerPreview}`);
 }
 
 const routerLoadDrops = [];
@@ -940,6 +1043,7 @@ import {
   captureReactError,
   captureReactNetwork,
   captureReactRouterNavigation,
+  createLogBrewReactRouterNavigationObserver,
   createLogBrewReactClient,
   createReactActionEvent,
   createReactErrorEvent,
@@ -1021,6 +1125,17 @@ const typedRouteTemplate: string | undefined = createReactRouterRouteTemplate([
   { route: { path: "/typed" } },
   { route: { path: ":id" } }
 ]);
+const TypedObserver = createLogBrewReactRouterNavigationObserver({
+  matchRoutes: (_routes, location) => [
+    { route: { path: "/typed" } },
+    { route: { path: ":id" }, params: { id: String(location).split("/").pop() } }
+  ],
+  routes: [{ path: "/typed/:id" }],
+  spanId: "b7ad6b7169203331",
+  traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+  useLocation: () => ({ pathname: "/typed/private-id" }),
+  useNavigationType: () => "PUSH"
+});
 captureReactRouterNavigation(typedLoadClient, typedRouterSpan);
 captureReactError(client, new Error("typed handled error"), {
   componentStack: "\n    at Component"
@@ -1085,7 +1200,7 @@ export const app = React.createElement(
   React.createElement(
     LogBrewErrorBoundary,
     { fallback: React.createElement("span", null, "typed fallback") },
-    React.createElement(Component)
+    React.createElement(React.Fragment, null, React.createElement(Component), React.createElement(TypedObserver))
   )
 );
 EOF
@@ -1132,6 +1247,9 @@ if (typeof react.createReactRouterRouteTemplate !== "function" || typeof react.c
 }
 if (typeof react.captureReactRouterNavigation !== "function") {
   throw new Error("missing CommonJS React Router capture helper");
+}
+if (typeof react.createLogBrewReactRouterNavigationObserver !== "function") {
+  throw new Error("missing CommonJS React Router observer factory");
 }
 if (typeof reactBrowser.useLogBrewBrowserInstrumentation !== "function") {
   throw new Error("missing CommonJS React browser instrumentation helper");

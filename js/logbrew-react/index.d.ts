@@ -162,6 +162,13 @@ export type ReactRouterNavigationInput = {
   traceparent?: string;
 };
 
+export type ReactRouterNavigationObserverConfig = ReactRouterNavigationInput & {
+  useLocation: () => ReactRouterLocationLike;
+  useNavigationType?: () => string | undefined;
+};
+
+export type ReactRouterNavigationObserverProps = Partial<ReactRouterNavigationInput>;
+
 export type ReactActionEvent = {
   id: string;
   timestamp: string;
@@ -243,6 +250,9 @@ export declare function captureReactRouterNavigation(
 export declare function useLogBrewReactRouterNavigation(
   options?: ReactRouterNavigationInput
 ): void;
+export declare function createLogBrewReactRouterNavigationObserver(
+  config: ReactRouterNavigationObserverConfig
+): React.ComponentType<ReactRouterNavigationObserverProps>;
 export declare function useLogBrew(): LogBrewClient;
 export declare function useLogBrewActions(): LogBrewActions;
 
@@ -253,6 +263,7 @@ declare const defaultExport: {
   captureReactError: typeof captureReactError;
   captureReactNetwork: typeof captureReactNetwork;
   captureReactRouterNavigation: typeof captureReactRouterNavigation;
+  createLogBrewReactRouterNavigationObserver: typeof createLogBrewReactRouterNavigationObserver;
   createLogBrewReactClient: typeof createLogBrewReactClient;
   createReactActionEvent: typeof createReactActionEvent;
   createReactErrorEvent: typeof createReactErrorEvent;
