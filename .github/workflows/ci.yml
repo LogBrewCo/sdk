@@ -275,6 +275,10 @@ jobs:
         if: ${{ hashFiles('python/logbrew_fastapi/pyproject.toml') != '' }}
         run: bash scripts/check_fastapi_package.sh
 
+      - name: Run Flask package checks
+        if: ${{ hashFiles('python/logbrew_flask/pyproject.toml') != '' }}
+        run: bash scripts/check_flask_package.sh
+
       - name: Run Django package checks
         if: ${{ hashFiles('python/logbrew_django/pyproject.toml') != '' }}
         run: bash scripts/check_django_package.sh
@@ -298,6 +302,10 @@ jobs:
       - name: Run FastAPI real-user smoke test
         if: ${{ hashFiles('python/logbrew_fastapi/pyproject.toml') != '' }}
         run: bash scripts/real_user_fastapi_smoke.sh
+
+      - name: Run Flask real-user smoke test
+        if: ${{ hashFiles('python/logbrew_flask/pyproject.toml') != '' }}
+        run: bash scripts/real_user_flask_smoke.sh
 
       - name: Run Django real-user smoke test
         if: ${{ hashFiles('python/logbrew_django/pyproject.toml') != '' }}

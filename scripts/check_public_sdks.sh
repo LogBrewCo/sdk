@@ -357,6 +357,9 @@ cleanup_build_artifacts() {
     python/logbrew_fastapi/build \
     python/logbrew_fastapi/dist \
     python/logbrew_fastapi/src/logbrew_fastapi.egg-info \
+    python/logbrew_flask/build \
+    python/logbrew_flask/dist \
+    python/logbrew_flask/src/logbrew_flask.egg-info \
     python/logbrew_django/build \
     python/logbrew_django/dist \
     python/logbrew_django/src/logbrew_django.egg-info \
@@ -364,7 +367,7 @@ cleanup_build_artifacts() {
   rm -rf c/logbrew-c/build c/logbrew-c/examples/build
   rm -rf cpp/logbrew-cpp/build cpp/logbrew-cpp/examples/build
   rm -rf objc/logbrew-objc/build objc/logbrew-objc/examples/build
-  find scripts tests python/logbrew_py python/logbrew_fastapi python/logbrew_django -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+  find scripts tests python/logbrew_py python/logbrew_fastapi python/logbrew_flask python/logbrew_django -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
   find js -maxdepth 2 -type f -path 'js/logbrew-*/*.tgz' -delete 2>/dev/null || true
   find dotnet/logbrew-dotnet -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
   find unity/logbrew-unity -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
@@ -765,7 +768,7 @@ run_shell_step "bash scripts/real_user_packagist_public_smoke.sh"
 mark_step_complete
 
 begin_next_step "Python package build checks"
-run_shell_step "cd python/logbrew_py && python3 -m build && python3 -m twine check 'dist/*' && cd ../logbrew_fastapi && python3 -m build && python3 -m twine check 'dist/*' && cd ../logbrew_django && python3 -m build && python3 -m twine check 'dist/*'"
+run_shell_step "cd python/logbrew_py && python3 -m build && python3 -m twine check 'dist/*' && cd ../logbrew_fastapi && python3 -m build && python3 -m twine check 'dist/*' && cd ../logbrew_flask && python3 -m build && python3 -m twine check 'dist/*' && cd ../logbrew_django && python3 -m build && python3 -m twine check 'dist/*'"
 mark_step_complete
 
 begin_next_step "Objective-C package checks"

@@ -24,6 +24,7 @@ python3 -m venv "$tmp_dir/venv"
   django==6.0.6 \
   django-stubs==6.0.5 \
   fastapi==0.136.3 \
+  Flask==3.1.2 \
   httpx2==2.3.0 \
   >/dev/null
 
@@ -41,12 +42,15 @@ RUFF_CACHE_DIR="$tmp_dir/ruff-cache" "$tmp_dir/venv/bin/ruff" check \
   python/logbrew_fastapi/src \
   python/logbrew_fastapi/examples \
   python/logbrew_fastapi/tests \
+  python/logbrew_flask/src \
+  python/logbrew_flask/examples \
+  python/logbrew_flask/tests \
   python/logbrew_django/src \
   python/logbrew_django/examples \
   python/logbrew_django/tests \
   scripts/check_python_sources.py
 
-MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_fastapi/src:$repo_root/python/logbrew_django/src" "$tmp_dir/venv/bin/mypy" \
+MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_fastapi/src:$repo_root/python/logbrew_flask/src:$repo_root/python/logbrew_django/src" "$tmp_dir/venv/bin/mypy" \
   --strict \
   --python-version 3.11 \
   --explicit-package-bases \
@@ -57,6 +61,9 @@ MYPYPATH="$repo_root/python/logbrew_py/src:$repo_root/python/logbrew_fastapi/src
   python/logbrew_fastapi/src \
   python/logbrew_fastapi/examples \
   python/logbrew_fastapi/tests \
+  python/logbrew_flask/src \
+  python/logbrew_flask/examples \
+  python/logbrew_flask/tests \
   python/logbrew_django/src \
   python/logbrew_django/examples \
   python/logbrew_django/tests \

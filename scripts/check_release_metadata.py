@@ -82,6 +82,13 @@ PYTHON_PACKAGES = {
         "package": "logbrew_fastapi",
         "version": "0.1.2",
     },
+    "python/logbrew_flask": {
+        "name": "logbrew-flask",
+        "description": "Flask integration",
+        "dependencies": {"Flask>=3.1", "logbrew-sdk>=0.1.1,<0.2.0"},
+        "package": "logbrew_flask",
+        "version": "0.1.0",
+    },
     "python/logbrew_py": {
         "name": "logbrew-sdk",
         "description": "Public LogBrew Python SDK",

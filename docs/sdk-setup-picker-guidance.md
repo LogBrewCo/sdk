@@ -37,7 +37,7 @@ Suggested grouping:
 - Web Browser: Angular, Vue, Svelte, and browser React.
 - Node.js: Express, Fastify, and NestJS.
 - React: Next.js can be shown as a high-demand top-level shortcut and also documented as a React/web framework variant.
-- Python: FastAPI and Django.
+- Python: FastAPI, Flask, and Django.
 - .NET: ASP.NET Core.
 - Android / Kotlin: OkHttp and Kotlin/JVM request helpers.
 - iOS / Swift: Objective-C and mixed Swift/Objective-C advanced setup.
@@ -57,6 +57,6 @@ ASP.NET Core is a .NET framework integration, not a separate first-step SDK prod
 - Prefer runtime and platform labels over package names.
 - Use package names only on the install-command screen.
 - Avoid showing both `JavaScript` and `Web Browser (JavaScript)` as equal first-step choices unless the product explains the difference.
-- Keep Objective-C, OkHttp, ASP.NET Core, FastAPI, Django, Express, Fastify, NestJS, Angular, Vue, and Svelte as variants unless the UI is explicitly showing framework shortcuts.
+- Keep Objective-C, OkHttp, ASP.NET Core, FastAPI, Flask, Django, Express, Fastify, NestJS, Angular, Vue, and Svelte as variants unless the UI is explicitly showing framework shortcuts.
 - Use placeholder SDK keys only in examples.
 - Do not show backend routes or API contracts as live setup behavior unless the SDK docs say that path is ready.

@@ -1,5 +1,32 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-07: Python Flask request tracing gap reduced after source-reading
+  Sentry Python
+  `getsentry/sentry-python@85ba59f707654719bc5edbb224c01884103d9c8b`
+  Flask/WSGI integration paths, Datadog Python
+  `DataDog/dd-trace-py@c3e1f08d9b39b2984827eea4249c3f0370579199`
+  Flask patch/wrapper paths, OpenTelemetry Python Contrib
+  `open-telemetry/opentelemetry-python-contrib@6b55f8290d30ae4cbf04aef4ccf8fd9215d9f95e`
+  Flask instrumentation, and PostHog Python
+  `PostHog/posthog-python@b4056cbe057085480027258645afe693e13fd15e`
+  source with no comparable Flask trace middleware found. Added source-only
+  `logbrew-flask`: apps call `add_logbrew_middleware(app, ...)` to register
+  explicit Flask hooks that capture low-cardinality request spans, exception
+  issues plus error spans, optional request duration metrics, active request
+  trace access, and `LogBrewLoggingHandler` correlation. Valid W3C
+  `traceparent` headers are continued with fresh child span IDs; malformed
+  propagation falls back without echoing raw headers. It avoids global
+  Flask/WSGI monkeypatching, request/response bodies, cookies, arbitrary
+  headers, query/hash text, raw propagation, baggage, and tracestate. Evidence:
+  `bash scripts/check_flask_package.sh`, `bash scripts/real_user_flask_smoke.sh`
+  with Flask 3.1.3 installed temp app, focused Flask unit suite, Python static,
+  source syntax, ShellCheck 0.11.0, markdown links, release metadata,
+  confidentiality scan, workflow YAML parse, generated-artifact hygiene, and
+  diff check passed locally. Research:
+  `docs/competitor-research/python-flask-tracing-2026-07-07.md`. Honest gap:
+  Sentry/Datadog/OTel still lead on automatic Flask view/template/DB/outbound
+  breadth and hosted trace UI; `logbrew-flask` is source-only until first PyPI
+  publication evidence exists.
 - 2026-07-07: React Router wrapper ergonomics improved after source-reading
   Sentry JavaScript
   `getsentry/sentry-javascript@851edb35850813e1ee2528783daec9c15eefe2b0`

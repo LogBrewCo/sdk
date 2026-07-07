@@ -375,6 +375,7 @@ jobs:
         run: |
           PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
           bash scripts/check_fastapi_package.sh
+          bash scripts/check_flask_package.sh
           bash scripts/check_django_package.sh
 
       - name: Run Python real-user smoke test
@@ -385,6 +386,9 @@ jobs:
 
       - name: Run FastAPI real-user smoke test
         run: bash scripts/real_user_fastapi_smoke.sh
+
+      - name: Run Flask real-user smoke test
+        run: bash scripts/real_user_flask_smoke.sh
 
       - name: Run Django real-user smoke test
         run: bash scripts/real_user_django_smoke.sh

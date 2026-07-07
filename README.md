@@ -24,7 +24,7 @@ User-facing severity categories are `info`, `warning`, `error`, and `critical`. 
 Install only the package your application needs. The package names below are registry-specific entry points, not a bundle to install together:
 
 - Use the core package for your runtime first, such as `@logbrew/sdk`, `logbrew-sdk`, `LogBrew`, or `co.logbrew:logbrew-sdk`.
-- Add framework packages only when your app uses that framework, such as `@logbrew/react`, `@logbrew/express`, `logbrew-fastapi`, or `logbrew-django`.
+- Add framework packages only when your app uses that framework, such as `@logbrew/react`, `@logbrew/express`, `logbrew-fastapi`, `logbrew-flask`, or `logbrew-django`.
 - Frontend and mobile packages use public `clientKey` setup. Server packages should use server-side keys from app configuration.
 - A change to one ecosystem package should not require developers in other ecosystems to update unless their package also changed.
 - Apple app setup should start from the Swift/SwiftPM path. Objective-C remains available as an advanced source/header variant for mixed or Objective-C-only apps, not a separate first-step platform choice.
@@ -55,6 +55,7 @@ library your app already uses.
 | Next.js | [`@logbrew/next`](js/logbrew-next) | App Router Route Handler capture |
 | Python | [`logbrew-sdk`](python/logbrew_py) | Core Python client, HTTP delivery, logging handler |
 | FastAPI | [`logbrew-fastapi`](python/logbrew_fastapi) | FastAPI middleware |
+| Flask | [`logbrew-flask`](python/logbrew_flask) | Flask request/exception middleware |
 | Django | [`logbrew-django`](python/logbrew_django) | Django middleware |
 | Go | [`github.com/LogBrewCo/sdk/go/logbrew`](go/logbrew) | Core Go client, HTTP delivery, trace helpers |
 | Java | [`co.logbrew:logbrew-sdk`](java/logbrew-java) | Core Java client, HTTP delivery, JUL and Logback support |
