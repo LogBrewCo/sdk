@@ -46,31 +46,32 @@ Reduce a high-impact Node rich-trace gap: Sentry, OpenTelemetry, and Datadog all
 
 - Sentry JavaScript SDK: `https://github.com/getsentry/sentry-javascript.git` at `851edb35850813e1ee2528783daec9c15eefe2b0`.
 - Sentry files/functions: `packages/node/src/integrations/tracing/mongoose/vendored/mongoose.ts` (`MongooseInstrumentation`, `patch`, `unpatch`, `patchQueryExec`, `patchAggregateExec`, `patchOnModelMethods`, `_patchDocumentUpdateMethods`, `patchModelStatic`, `_startSpan`, `_handleResponse`); MongoDB companion files `packages/node/src/integrations/tracing/mongo/index.ts`, `packages/node/src/integrations/tracing/mongo/vendored/instrumentation.ts`, and `packages/node/src/integrations/tracing/mongo/vendored/patches.ts`.
-- Datadog dd-trace-js: `https://github.com/DataDog/dd-trace-js.git` at `37a5069d701fa351b506710cfd68440d5ed4d269`.
-- Datadog files/functions: `packages/datadog-plugin-mongoose/src/index.js` (`MongoosePlugin.bindStart`, `bindFinish`); `packages/datadog-plugin-mongodb-core/src/index.js` (`MongodbCorePlugin.bindStart`, query obfuscation/resource/meta, DBM comment injection).
+- Datadog dd-trace-js: `https://github.com/DataDog/dd-trace-js.git` at `872f1a8373dd520d7f2fc3937bbd9a33f4265c50`.
+- Datadog files/functions: `packages/datadog-plugin-mongoose/src/index.js` (`MongoosePlugin.bindStart`, `bindFinish`); `packages/datadog-plugin-mongoose/test/index.spec.js` (document `save()` context propagation); `packages/datadog-plugin-mongodb-core/src/index.js` (`MongodbCorePlugin.bindStart`, query obfuscation/resource/meta, DBM comment injection).
 - OpenTelemetry JS Contrib: `https://github.com/open-telemetry/opentelemetry-js-contrib.git` at `3ae8a1be43ba7cd0c5e2a5955bafb65e78df6312`.
 - OpenTelemetry files/functions: `packages/instrumentation-mongodb/src/instrumentation.ts` (`MongoDBInstrumentation`, module-version patches, connect/session/pool metrics, v3/v4 command/find/cursor patches, `requireParentSpan`).
 - PostHog JavaScript SDK: `https://github.com/PostHog/posthog-js.git` at `7a3538277af8302cbe82061ec9340eea5a557443`; no MongoDB or Mongoose instrumentation source was found in the public SDK tree.
 
 ### Competitor Pattern
 
-- Sentry and Datadog both favor automatic Mongoose coverage by patching query, aggregate, model static, and document methods, then parenting spans to their active scope or store. This gives broad coverage but couples instrumentation to Mongoose internals and raises privacy defaults that need obfuscation/redaction choices.
+- Sentry and Datadog both favor automatic Mongoose coverage by patching query, aggregate, model static, and document methods, then parenting spans to their active scope or store. Sentry has special handling for document `updateOne()`/`deleteOne()` to avoid generic Query spans when newer Mongoose versions defer query construction. This gives broad coverage but couples instrumentation to Mongoose internals and raises privacy defaults that need obfuscation/redaction choices.
 - OpenTelemetry covers MongoDB driver internals rather than a first-party Mongoose wrapper in the JS contrib source read here. That gives portability at the driver layer, but apps still need OpenTelemetry setup and accept global instrumentation behavior.
 - PostHog does not appear to compete on server-side MongoDB/Mongoose tracing in the source read here.
 
 ### LogBrew Implementation
 
 - Added `instrumentLogBrewMongooseModel(...)` to `@logbrew/node` for app-owned Mongoose models.
-- The helper wraps only the supplied model, returns `isInstalled()`/`uninstall()`, records one child span around Query/Aggregate `exec()` and supported direct model methods, preserves results, and rethrows original errors.
+- The helper wraps only the supplied model, returns `isInstalled()`/`uninstall()`, records one child span around Query/Aggregate `exec()`, supported direct model methods, and model instance `save()`/`updateOne()`/`deleteOne()`, preserves results, and rethrows original errors.
 - Spans use the active LogBrew request trace when present and include `framework=node:mongoose`, `db.system.name=mongoose`, operation kind, safe model/collection/database names, sampled flag, W3C trace IDs, type-only exception events, and bounded result counts when safe.
-- It deliberately avoids global Mongoose prototype/module patching, hidden MongoDB driver patching, filter/document/update/pipeline serialization, query text, endpoint/connection data, error messages/stacks, baggage, tracestate, and raw propagation metadata.
+- It deliberately avoids global Mongoose module patching, hidden MongoDB driver patching, filter/document/update/pipeline serialization, query text, endpoint/connection data, error messages/stacks, baggage, tracestate, and raw propagation metadata.
 
 ### Verification
 
 - RED installed proof: `bash scripts/real_user_node_mongoose_smoke.sh` failed before implementation because the packed `@logbrew/node` artifact had no `mongoose.js`/`mongoose.cjs` helper files or root API.
 - GREEN installed proof: `bash scripts/real_user_node_mongoose_smoke.sh` passed with `mongoose@9.7.4`, proving packed ESM/CJS/type exports, install/remove/reinstall, real Mongoose model query/update execution through stubbed collection methods, trace correlation, duplicate-install rejection, clean uninstall, error rethrow, type-only exception event, and no query/update/error-message leakage.
+- Document-method follow-up proof: RED failed because document `save()` emitted no LogBrew span and document `updateOne()`/`deleteOne()` were only generic `mongoose.query` spans. GREEN passed after adding app-owned model prototype wrapping for `save()`, `$save`, `updateOne()`, and `deleteOne()`, with document-scoped spans, duplicate-query-span suppression for document query execution, uninstall restoration, and privacy assertions for saved document values and update specs.
 
 ## Remaining Gaps
 
-- LogBrew still lacks Sentry/OTel/Datadog-style automatic MongoDB driver instrumentation, wire-protocol coverage, pool/connect/session spans, document instance save/update method coverage, DBM comments, query obfuscation modes, response hooks, heartbeat controls, and broader semantic-convention depth.
+- LogBrew still lacks Sentry/OTel/Datadog-style automatic MongoDB driver instrumentation, wire-protocol coverage, pool/connect/session spans, DBM comments, query obfuscation modes, response hooks, heartbeat controls, and broader semantic-convention depth.
 - LogBrew intentionally does not collect MongoDB filters, raw commands, documents, or pipelines by default, so teams that want query-level diagnostics need a future explicit API with strong redaction and installed-artifact proof.

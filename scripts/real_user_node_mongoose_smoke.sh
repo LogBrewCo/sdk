@@ -127,6 +127,9 @@ const Profile = mongoose.model(`LogBrewMongooseSmoke${Date.now()}`, schema);
 const originalFindOne = Profile.findOne;
 const originalInsertMany = Profile.insertMany;
 const originalUpdateOne = Profile.updateOne;
+const originalDocumentSave = Profile.prototype.save;
+const originalDocumentUpdateOne = Profile.prototype.updateOne;
+const originalDocumentDeleteOne = Profile.prototype.deleteOne;
 
 Profile.collection.findOne = async function logBrewMongooseSmokeFindOne(filter, options) {
   assert(this === Profile.collection, "Mongoose collection receiver was not preserved");
@@ -136,9 +139,13 @@ Profile.collection.findOne = async function logBrewMongooseSmokeFindOne(filter, 
 };
 Profile.collection.updateOne = async function logBrewMongooseSmokeUpdateOne(filter, update) {
   assert(this === Profile.collection, "Mongoose update receiver was not preserved");
-  assert(filter.email === "fail@example.com", "Mongoose update filter did not reach collection");
-  assert(update.$set.name === "Private Profile", "Mongoose update document did not reach collection");
-  throw new TypeError("mongoose private profile update failed");
+  if (filter.email === "fail@example.com") {
+    assert(update.$set.name === "Private Profile", "Mongoose update document did not reach collection");
+    throw new TypeError("mongoose private profile update failed");
+  }
+  assert(filter._id, "Mongoose document update filter did not include document id");
+  assert(update.$set.name === "Document Private Profile", "Mongoose document update did not reach collection");
+  return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
 };
 Profile.collection.insertMany = async function logBrewMongooseSmokeInsertMany(docs) {
   assert(this === Profile.collection, "Mongoose insert receiver was not preserved");
@@ -146,8 +153,25 @@ Profile.collection.insertMany = async function logBrewMongooseSmokeInsertMany(do
   assert(docs[0].email === "direct@example.com", "Mongoose insert document content did not reach collection");
   return { acknowledged: true, insertedCount: docs.length, insertedIds: { 0: docs[0]._id } };
 };
+Profile.collection.insertOne = async function logBrewMongooseSmokeInsertOne(doc) {
+  assert(this === Profile.collection, "Mongoose document save receiver was not preserved");
+  assert(doc.email === "saved@example.com", "Mongoose document save content did not reach collection");
+  return { acknowledged: true, insertedId: doc._id };
+};
+Profile.collection.deleteOne = async function logBrewMongooseSmokeDeleteOne(filter) {
+  assert(this === Profile.collection, "Mongoose document delete receiver was not preserved");
+  assert(filter._id, "Mongoose document delete filter did not include document id");
+  return { acknowledged: true, deletedCount: 1 };
+};
 
-const spanIds = ["a7ad6b7169204301", "a7ad6b7169204302", "a7ad6b7169204303", "a7ad6b7169204304"];
+const spanIds = [
+  "a7ad6b7169204301",
+  "a7ad6b7169204302",
+  "a7ad6b7169204303",
+  "a7ad6b7169204304",
+  "a7ad6b7169204305",
+  "a7ad6b7169204306"
+];
 let nowMs = 1000;
 const client = createLogBrewNodeClient({
   serverApiKey: "LOGBREW_SERVER_API_KEY",
@@ -183,6 +207,12 @@ await Profile.updateOne(
   updateErrorRethrown = error instanceof TypeError;
 });
 assert(updateErrorRethrown, "Mongoose update error should be rethrown unchanged");
+const savedProfile = await new Profile({ email: "saved@example.com", name: "Document Save" }).save();
+assert(savedProfile.email === "saved@example.com", "Mongoose document save result changed");
+const documentUpdateResult = await savedProfile.updateOne({ $set: { name: "Document Private Profile" } }).exec();
+assertEqual(documentUpdateResult.modifiedCount, 1, "Mongoose document update result changed");
+const documentDeleteResult = await savedProfile.deleteOne().exec();
+assertEqual(documentDeleteResult.deletedCount, 1, "Mongoose document delete result changed");
 
 let duplicateRejected = false;
 try {
@@ -197,15 +227,24 @@ assert(!instrumentation.isInstalled(), "Mongoose instrumentation should uninstal
 assert(Profile.findOne === originalFindOne, "Mongoose findOne was not restored");
 assert(Profile.insertMany === originalInsertMany, "Mongoose insertMany was not restored");
 assert(Profile.updateOne === originalUpdateOne, "Mongoose updateOne was not restored");
+assert(Profile.prototype.save === originalDocumentSave, "Mongoose document save was not restored");
+assert(Profile.prototype.updateOne === originalDocumentUpdateOne, "Mongoose document updateOne was not restored");
+assert(Profile.prototype.deleteOne === originalDocumentDeleteOne, "Mongoose document deleteOne was not restored");
 
 const payload = JSON.parse(client.previewJson());
 const findOneSpan = payload.events.find((event) => event.id === "evt_node_mongoose_findone_mongoose_query");
 const insertManySpan = payload.events.find((event) => event.id === "evt_node_mongoose_insertmany_mongoose_model");
 const updateErrorSpan = payload.events.find((event) => event.id === "evt_node_mongoose_updateone_error");
+const documentSaveSpan = payload.events.find((event) => event.id === "evt_node_mongoose_save_mongoose_document");
+const documentUpdateSpan = payload.events.find((event) => event.id === "evt_node_mongoose_updateone_mongoose_document");
+const documentDeleteSpan = payload.events.find((event) => event.id === "evt_node_mongoose_deleteone_mongoose_document");
 const preview = client.previewJson();
 assert(findOneSpan?.type === "span", `missing Mongoose findOne span: ${preview}`);
 assert(insertManySpan?.type === "span", `missing Mongoose insertMany span: ${preview}`);
 assert(updateErrorSpan?.attributes?.status === "error", `missing Mongoose update error span: ${preview}`);
+assert(documentSaveSpan?.type === "span", `missing Mongoose document save span: ${preview}`);
+assert(documentUpdateSpan?.type === "span", `missing Mongoose document update span: ${preview}`);
+assert(documentDeleteSpan?.type === "span", `missing Mongoose document delete span: ${preview}`);
 assertEqual(findOneSpan.attributes.traceId, operationTrace.traceId, "Mongoose trace id");
 assertEqual(findOneSpan.attributes.parentSpanId, operationTrace.spanId, "Mongoose parent span id");
 assertEqual(findOneSpan.attributes.spanId, "a7ad6b7169204301", "Mongoose span id");
@@ -234,12 +273,38 @@ assertMetadata(insertManySpan.attributes.metadata, {
 }, "Mongoose insertMany span metadata", preview);
 assertEqual(updateErrorSpan.attributes.metadata.errorType, "TypeError", "Mongoose error type");
 assertJsonEqual(updateErrorSpan.attributes.events, exceptionEvents("TypeError"), "Mongoose error span events", preview);
+assertMetadata(documentSaveSpan.attributes.metadata, {
+  "db.operation.name": "save",
+  dbOperation: "mongoose.document",
+  dbOperationKind: "save",
+  framework: "node:mongoose",
+  safeFeature: "mongoose-real-package"
+}, "Mongoose document save span metadata", preview);
+assertMetadata(documentUpdateSpan.attributes.metadata, {
+  "db.operation.name": "updateOne",
+  dbOperation: "mongoose.document",
+  dbOperationKind: "updateOne",
+  framework: "node:mongoose",
+  resultCount: 1,
+  safeFeature: "mongoose-real-package"
+}, "Mongoose document update span metadata", preview);
+assertMetadata(documentDeleteSpan.attributes.metadata, {
+  "db.operation.name": "deleteOne",
+  dbOperation: "mongoose.document",
+  dbOperationKind: "deleteOne",
+  framework: "node:mongoose",
+  resultCount: 1,
+  safeFeature: "mongoose-real-package"
+}, "Mongoose document delete span metadata", preview);
 
 for (const forbidden of [
   "ada@example.com",
   "direct@example.com",
   "fail@example.com",
+  "saved@example.com",
   "Private Profile",
+  "Document Save",
+  "Document Private Profile",
   "$set",
   "mongoose private profile update failed",
   "unsafeNested",

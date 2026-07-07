@@ -4,6 +4,8 @@ const { SdkError } = require("@logbrew/sdk");
 const { normalizeSpanId, normalizeTraceId } = require("./trace-context.cjs");
 
 const INSTRUMENTED_MONGOOSE_MODEL = Symbol.for("@logbrew/node.instrumentedMongooseModel");
+const INSTRUMENTED_MONGOOSE_DOCUMENT_EXEC = Symbol.for("@logbrew/node.instrumentedMongooseDocumentExec");
+const SKIP_MONGOOSE_EXEC_SPAN = Symbol.for("@logbrew/node.skipMongooseExecSpan");
 const QUERY_METHODS = [
   "count",
   "countDocuments",
@@ -28,6 +30,7 @@ const QUERY_METHODS = [
 ];
 const DIRECT_METHODS = ["bulkWrite", "create", "insertMany"];
 const AGGREGATE_METHODS = ["aggregate"];
+const DOCUMENT_METHODS = ["save", "$save", "updateOne", "deleteOne"];
 const DEFAULT_SYSTEM = "mongoose";
 
 function instrumentLogBrewMongooseModel(mongooseModel, options = {}) {
@@ -42,6 +45,7 @@ function instrumentLogBrewMongooseModel(mongooseModel, options = {}) {
   }
 
   const originals = new Map();
+  const documentOriginals = new Map();
   let installed = true;
   function isInstalled() {
     return installed;
@@ -62,6 +66,24 @@ function instrumentLogBrewMongooseModel(mongooseModel, options = {}) {
     );
   }
 
+  const documentPrototype = mongooseModel.prototype;
+  if (documentPrototype && typeof documentPrototype === "object") {
+    for (const methodName of DOCUMENT_METHODS) {
+      if (typeof documentPrototype[methodName] !== "function" || documentOriginals.has(methodName)) {
+        continue;
+      }
+      const originalMethod = documentPrototype[methodName];
+      documentOriginals.set(methodName, originalMethod);
+      documentPrototype[methodName] = createMongooseDocumentMethodWrapper(
+        mongooseModel,
+        originalMethod,
+        methodName,
+        options,
+        isInstalled
+      );
+    }
+  }
+
   Object.defineProperty(mongooseModel, INSTRUMENTED_MONGOOSE_MODEL, {
     configurable: true,
     value: true
@@ -75,6 +97,9 @@ function instrumentLogBrewMongooseModel(mongooseModel, options = {}) {
       installed = false;
       for (const [methodName, originalMethod] of originals.entries()) {
         mongooseModel[methodName] = originalMethod;
+      }
+      for (const [methodName, originalMethod] of documentOriginals.entries()) {
+        documentPrototype[methodName] = originalMethod;
       }
       delete mongooseModel[INSTRUMENTED_MONGOOSE_MODEL];
     }
@@ -112,15 +137,72 @@ function createMongooseModelMethodWrapper(mongooseModel, originalMethod, methodN
   };
 }
 
+function createMongooseDocumentMethodWrapper(mongooseModel, originalMethod, methodName, options, isInstalled) {
+  /* eslint-disable no-invalid-this */
+  return function logBrewMongooseDocumentMethod(...args) {
+    if (!isInstalled()) {
+      return originalMethod.apply(this, args);
+    }
+    if (!options.client) {
+      throw new SdkError("configuration_error", "instrumentLogBrewMongooseModel requires client");
+    }
+
+    const operationKind = normalizeMongooseDocumentOperationKind(methodName);
+    if (operationKind === "save") {
+      return traceMongooseDirectOperation(
+        mongooseModel,
+        () => originalMethod.apply(this, args),
+        options,
+        operationKind,
+        "mongoose.document"
+      );
+    }
+
+    const result = originalMethod.apply(this, args);
+    if (result && typeof result === "object" && typeof result.exec === "function") {
+      instrumentMongooseDocumentExecutable(result, options, {
+        model: mongooseModel,
+        operationKind,
+        operationName: "mongoose.document"
+      });
+      return result;
+    }
+    return traceMongooseDirectOperation(mongooseModel, () => result, options, operationKind, "mongoose.document");
+  };
+  /* eslint-enable no-invalid-this */
+}
+
 function instrumentMongooseExecutable(executable, options, span) {
   if (executable[INSTRUMENTED_MONGOOSE_MODEL] === true) {
     return executable;
   }
   const originalExec = executable.exec;
   executable.exec = function logBrewMongooseExec(...args) {
+    if (executable[SKIP_MONGOOSE_EXEC_SPAN] === true) {
+      return originalExec.apply(executable, args);
+    }
     return traceMongooseExecOperation(executable, originalExec, args, options, span);
   };
   Object.defineProperty(executable, INSTRUMENTED_MONGOOSE_MODEL, {
+    configurable: true,
+    value: true
+  });
+  return executable;
+}
+
+function instrumentMongooseDocumentExecutable(executable, options, span) {
+  if (executable[INSTRUMENTED_MONGOOSE_DOCUMENT_EXEC] === true) {
+    return executable;
+  }
+  const originalExec = executable.exec;
+  Object.defineProperty(executable, SKIP_MONGOOSE_EXEC_SPAN, {
+    configurable: true,
+    value: true
+  });
+  executable.exec = function logBrewMongooseDocumentExec(...args) {
+    return traceMongooseExecOperation(executable, originalExec, args, options, span);
+  };
+  Object.defineProperty(executable, INSTRUMENTED_MONGOOSE_DOCUMENT_EXEC, {
     configurable: true,
     value: true
   });
@@ -181,7 +263,7 @@ function traceMongooseExecOperation(receiver, originalExec, args, options, {
   }
 }
 
-function traceMongooseDirectOperation(model, operation, options, operationKind) {
+function traceMongooseDirectOperation(model, operation, options, operationKind, operationName = "mongoose.model") {
   const trace = createMongooseTraceContext(options.trace ?? options.activeTraceProvider?.(), options);
   const startedAt = nowMs(options);
   try {
@@ -192,7 +274,7 @@ function traceMongooseDirectOperation(model, operation, options, operationKind) 
           durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
           model,
           operationKind,
-          operationName: "mongoose.model",
+          operationName,
           result: value,
           trace
         });
@@ -203,7 +285,7 @@ function traceMongooseDirectOperation(model, operation, options, operationKind) 
           error,
           model,
           operationKind,
-          operationName: "mongoose.model",
+          operationName,
           trace
         });
         throw error;
@@ -213,7 +295,7 @@ function traceMongooseDirectOperation(model, operation, options, operationKind) 
       durationMs: Math.max(0, Math.round(nowMs(options) - startedAt)),
       model,
       operationKind,
-      operationName: "mongoose.model",
+      operationName,
       result,
       trace
     });
@@ -224,11 +306,15 @@ function traceMongooseDirectOperation(model, operation, options, operationKind) 
       error,
       model,
       operationKind,
-      operationName: "mongoose.model",
+      operationName,
       trace
     });
     throw error;
   }
+}
+
+function normalizeMongooseDocumentOperationKind(methodName) {
+  return methodName === "$save" ? "save" : methodName;
 }
 
 async function captureMongooseSpan(options, {

@@ -568,6 +568,14 @@ export type LogBrewMongooseExecutable = {
   [key: string]: unknown;
 };
 
+export type LogBrewMongooseDocumentPrototype = {
+  save?: (...args: unknown[]) => unknown;
+  $save?: (...args: unknown[]) => unknown;
+  updateOne?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  deleteOne?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
+  [key: string]: unknown;
+};
+
 export type LogBrewMongooseModel = {
   modelName?: string;
   collection?: {
@@ -575,6 +583,7 @@ export type LogBrewMongooseModel = {
     name?: string;
     [key: string]: unknown;
   };
+  prototype?: LogBrewMongooseDocumentPrototype;
   aggregate?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
   bulkWrite?: (...args: unknown[]) => unknown;
   count?: (...args: unknown[]) => LogBrewMongooseExecutable | unknown;
