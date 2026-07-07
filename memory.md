@@ -1,5 +1,29 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-07: Flask high-load installed-artifact behavior is now proven from
+  local wheels. Reused the source-backed batching/failure evidence from
+  `docs/competitor-research/python-opentelemetry-high-load-2026-07-04.md`
+  plus the Flask tracing source reads in
+  `docs/competitor-research/python-flask-tracing-2026-07-07.md`. Added
+  `scripts/real_user_flask_high_load_smoke.sh`: it builds `logbrew-sdk` and
+  `logbrew-flask`, installs them into a fresh Flask temp app, sends 600 Flask
+  test-client requests with valid W3C `traceparent`, queues request logs,
+  request spans, and `http.server.duration` metrics with
+  `flush_on_response=False`, proves the 1,000-event bounded queue drops 800
+  later events through `dropped_events()`, flushes to a local `127.0.0.1` fake
+  intake that returns 503 then 202, validates `retryAttempts=2`, validates the
+  flushed fixture, proves 401 auth failure preserves queued data, checks config
+  validation, and proves shutdown blocks later writes. Privacy assertions reject
+  ingest keys, query strings, dynamic route values, arbitrary headers,
+  non-primitive metadata, baggage, tracestate, and raw propagation values.
+  Evidence: RED focused unittest failed on missing Flask high-load smoke;
+  GREEN `python3 -m unittest tests.test_python_high_load_smoke`, GREEN `bash
+  scripts/real_user_flask_high_load_smoke.sh` with Flask 3.1.3, GREEN `bash
+  scripts/check_flask_package.sh`, GREEN `bash scripts/real_user_flask_smoke.sh`,
+  GREEN Python source syntax, and GREEN ShellCheck 0.11.0. Honest gap:
+  Sentry/Datadog/OpenTelemetry still lead on background workers, lost-event/
+  rate-limit reporting, adaptive batching, broader automatic Flask dependency
+  spans, baggage/tracestate, and hosted trace UI.
 - 2026-07-07: Flask request-to-dependency trace proof improved using the
   existing source-backed Flask/dependency research. Sentry/Datadog/OpenTelemetry
   still lead on automatic Flask + DB/cache/queue breadth through broader

@@ -50,6 +50,16 @@ Sentry ships Flask support as a `sentry-sdk` extra in `setup.py`, while Datadog 
 
 LogBrew follows the OpenTelemetry-style optional package boundary for Flask: `logbrew-flask` depends on `logbrew-sdk` and Flask, so core Python users do not install Flask dependencies by default. The release workflow now builds and checks `python/logbrew_flask` with the other Python distributions and can publish/verify `logbrew-flask` only when `include_pypi_extras=true` and the PyPI trusted publisher is configured. No real PyPI release was made in this cycle.
 
+## High-Load And Failure Pattern
+
+For delivery behavior, this cycle reused the public source reads captured in `docs/competitor-research/python-opentelemetry-high-load-2026-07-04.md`: Sentry Python `getsentry/sentry-python@1bd120f41780bfd5fd4d4b7c65aae395e425adab` (`sentry_sdk/_batcher.py`, `sentry_sdk/transport.py`, `sentry_sdk/traces.py`), OpenTelemetry Python `open-telemetry/opentelemetry-python@322c602c87f38933986a757db918591ade441bd3` (`BatchSpanProcessor`, `BatchProcessor`, `shutdown`, `force_flush`), Datadog Python `DataDog/dd-trace-py@c12bb9dfb723bb96a662b7b90f36c805c4af43fb` (`ddtrace/internal/writer/writer.py`), and PostHog Python `PostHog/posthog-python@6f75afe77ff059e4f3b0b6b7b30912612a7b5ff1` (`posthog/consumer.py`, OTel processor/exporter paths).
+
+Sentry, Datadog, and OpenTelemetry remain stronger for background batching, drop/lost-event reporting, writer lifecycle ownership, rate-limit handling, and adaptive delivery behavior. LogBrew is intentionally lighter: the Flask package does not own a background worker or global patcher, but it now has an installed-artifact proof for what happens under queue pressure and temporary intake failure.
+
+`scripts/real_user_flask_high_load_smoke.sh` builds local `logbrew-sdk` and `logbrew-flask` wheels, installs them into a fresh Flask temp app, sends 600 Flask test-client requests with valid W3C `traceparent`, and disables response-path flushing so request logs, spans, and `http.server.duration` metrics fill a 1,000-event queue. The proof verifies 800 dropped events through `dropped_events()`, flushes the retained 1,000 events to a local `127.0.0.1` fake intake that returns HTTP 503 then 202, checks retry count, proves 401 auth failure preserves queued data, checks configuration validation, and verifies shutdown prevents later writes.
+
+The payload assertions preserve LogBrew's privacy stance under load: no ingest key, query string, dynamic route value, arbitrary header, non-primitive logging metadata, request body, response body, baggage, tracestate, or raw propagation value appears in the flushed fixture.
+
 ## LogBrew Design
 
 LogBrew adds `logbrew-flask` as a separate typed package rather than hiding Flask behavior in the core Python SDK. Apps call `add_logbrew_middleware(app, ...)`, which registers app-owned Flask hooks without monkeypatching `Flask.__call__` or patching Flask globally.
@@ -63,11 +73,14 @@ Privacy defaults are stricter than the richer automatic competitors: no request 
 - `python/logbrew_flask/tests/test_flask_integration.py`
 - `scripts/check_flask_package.sh`
 - `scripts/real_user_flask_smoke.sh`
+- `scripts/real_user_flask_high_load_smoke.sh`
 - `.github/workflows/publish-packages.yml` guarded `logbrew-flask` PyPI extras path
 - `python -m logbrew_flask.examples outbound-http` packaged example
 - `python -m logbrew_flask.examples dependency-spans` packaged example
 
 The installed-artifact proofs build local `logbrew-sdk` and `logbrew-flask` wheels/sdists, install them into fresh virtual environments, run Flask test-client flows, prove log/span/issue correlation, prove Flask request span to outbound HTTP child span correlation, validate the injected `traceparent` span id against the emitted outbound span id, prove Flask request span to database/cache/queue child span correlation, validate typed consumer usage, and exercise packaged examples.
+
+The high-load proof also validates the flushed fixture with `scripts/validate_fixtures.py`, proving the retained queue remains public-payload compatible after local retry.
 
 ## Remaining Gap
 
