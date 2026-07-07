@@ -56,6 +56,28 @@ def order_detail(order_id: int) -> dict[str, str | None]:
 
 Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for each request. Apps can pass `span_id_factory` when deterministic child span ids are useful for controlled diagnostics; production apps usually let LogBrew generate span ids.
 
+## Outbound HTTP Child Spans
+
+When a handler calls another service, use the core Python HTTP helpers inside the Flask request. They automatically reuse the active Flask request trace, create a child span, and inject one W3C `traceparent` header whose span id matches the emitted outbound span.
+
+```python
+from logbrew_sdk import requests_request_with_logbrew_span
+
+
+@app.post("/checkout/<order_id>")
+def checkout(order_id: str) -> dict[str, bool]:
+    response = requests_request_with_logbrew_span(
+        "POST",
+        "https://payments.example.com/payments/authorize",
+        client=client,
+        event_id="evt_checkout_payment",
+        route_template="/payments/authorize",
+    )
+    return {"accepted": response.status_code == 202}
+```
+
+The helper does not patch `requests` globally. It records method, low-cardinality route template, status code, trace id, span id, and parent span id. It does not capture full URLs, query strings, request bodies, response bodies, arbitrary headers, cookies, baggage, or tracestate.
+
 ## Privacy Defaults
 
 LogBrew does not capture request bodies, response bodies, cookies, arbitrary headers, query strings, raw `traceparent` values, baggage, or tracestate. Exception issues include the exception type and message but not stack frames.
@@ -66,4 +88,4 @@ By default, transport failures do not break the Flask response path. Set `raise_
 
 ## Tradeoff
 
-Sentry, Datadog, and OpenTelemetry provide broader automatic Flask instrumentation, including global patching and deeper view/template hooks. LogBrew starts with explicit app-owned Flask hooks because that keeps setup reversible, simple to reason about, and safer for privacy-sensitive services.
+Sentry, Datadog, and OpenTelemetry provide broader automatic Flask and outbound HTTP instrumentation, including global patching and deeper view/template/client hooks. LogBrew starts with explicit app-owned Flask and outbound HTTP helpers because that keeps setup reversible, simple to reason about, and safer for privacy-sensitive services.

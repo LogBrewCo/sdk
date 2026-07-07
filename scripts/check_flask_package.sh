@@ -40,6 +40,7 @@ grep -q "^logbrew_flask-${flask_package_version}/src/logbrew_flask/__init__.py$"
 grep -q "^logbrew_flask-${flask_package_version}/src/logbrew_flask/py.typed$" "$tmp_dir/sdist-contents.txt"
 grep -q "^logbrew_flask-${flask_package_version}/src/logbrew_flask/examples/readme_example.py$" "$tmp_dir/sdist-contents.txt"
 grep -q "^logbrew_flask-${flask_package_version}/src/logbrew_flask/examples/real_user_smoke.py$" "$tmp_dir/sdist-contents.txt"
+grep -q "^logbrew_flask-${flask_package_version}/src/logbrew_flask/examples/outbound_http.py$" "$tmp_dir/sdist-contents.txt"
 tar -xOf "$flask_sdist" "logbrew_flask-${flask_package_version}/README.md" > "$tmp_dir/sdist-README.md"
 grep -q 'traceparent' "$tmp_dir/sdist-README.md"
 grep -q 'span_id_factory' "$tmp_dir/sdist-README.md"
@@ -66,7 +67,8 @@ python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_flask.examples --list > "$tmp_dir/examples-list.txt"
 grep -qx 'readme-example -> python -m logbrew_flask.examples readme-example' <(sed -n '1p' "$tmp_dir/examples-list.txt")
 grep -qx 'real-user-smoke -> python -m logbrew_flask.examples real-user-smoke' <(sed -n '2p' "$tmp_dir/examples-list.txt")
-grep -qx 'default (real-user-smoke) -> python -m logbrew_flask.examples' <(sed -n '3p' "$tmp_dir/examples-list.txt")
+grep -qx 'outbound-http -> python -m logbrew_flask.examples outbound-http' <(sed -n '3p' "$tmp_dir/examples-list.txt")
+grep -qx 'default (real-user-smoke) -> python -m logbrew_flask.examples' <(sed -n '4p' "$tmp_dir/examples-list.txt")
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_flask.examples readme-example > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
 grep -q '"type": "span"' "$tmp_dir/packaged-readme.stdout.json"
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_flask.examples real-user-smoke > "$tmp_dir/packaged-smoke.stdout.json" 2> "$tmp_dir/packaged-smoke.stderr.json"
@@ -75,5 +77,19 @@ grep -q '"parentSpanId": "00f067aa0ba902b7"' "$tmp_dir/packaged-smoke.stderr.jso
 grep -q '"spanId": "b7ad6b7169203331"' "$tmp_dir/packaged-smoke.stderr.json"
 grep -q '"path": "/health"' "$tmp_dir/packaged-smoke.stderr.json"
 grep -q '"events": 4' "$tmp_dir/packaged-smoke.stderr.json"
+PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_flask.examples outbound-http > "$tmp_dir/packaged-outbound.stdout.json" 2> "$tmp_dir/packaged-outbound.stderr.json"
+grep -q '"name": "POST /payments/authorize"' "$tmp_dir/packaged-outbound.stdout.json"
+grep -q '"outboundParentSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-outbound.stderr.json"
+grep -q '"outboundSpanId": "c8ad6b7169203332"' "$tmp_dir/packaged-outbound.stderr.json"
+grep -q '"outboundTraceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-c8ad6b7169203332-01"' "$tmp_dir/packaged-outbound.stderr.json"
+if grep -q 'payments.example.test' "$tmp_dir/packaged-outbound.stdout.json" "$tmp_dir/packaged-outbound.stderr.json"; then
+  echo "packaged outbound example leaked the full outbound host" >&2
+  exit 1
+fi
+if grep -q 'debug_marker=drop' "$tmp_dir/packaged-outbound.stdout.json" "$tmp_dir/packaged-outbound.stderr.json"; then
+  echo "packaged outbound example leaked the outbound query string" >&2
+  exit 1
+fi
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/packaged-outbound.stdout.json" >/dev/null
 
 printf '%s\n' "flask package checks passed"

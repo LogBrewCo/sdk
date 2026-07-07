@@ -6,6 +6,7 @@ import runpy
 EXAMPLES = {
     "readme-example": "logbrew_flask.examples.readme_example",
     "real-user-smoke": "logbrew_flask.examples.real_user_smoke",
+    "outbound-http": "logbrew_flask.examples.outbound_http",
 }
 
 
@@ -18,6 +19,7 @@ def main() -> None:
     if args.list:
         print("readme-example -> python -m logbrew_flask.examples readme-example")
         print("real-user-smoke -> python -m logbrew_flask.examples real-user-smoke")
+        print("outbound-http -> python -m logbrew_flask.examples outbound-http")
         print("default (real-user-smoke) -> python -m logbrew_flask.examples")
         return
 

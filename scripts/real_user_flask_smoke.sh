@@ -209,7 +209,8 @@ TOML
 "$tmp_dir/app/bin/python" -m logbrew_flask.examples --list > "$tmp_dir/examples-list.txt"
 grep -qx 'readme-example -> python -m logbrew_flask.examples readme-example' <(sed -n '1p' "$tmp_dir/examples-list.txt")
 grep -qx 'real-user-smoke -> python -m logbrew_flask.examples real-user-smoke' <(sed -n '2p' "$tmp_dir/examples-list.txt")
-grep -qx 'default (real-user-smoke) -> python -m logbrew_flask.examples' <(sed -n '3p' "$tmp_dir/examples-list.txt")
+grep -qx 'outbound-http -> python -m logbrew_flask.examples outbound-http' <(sed -n '3p' "$tmp_dir/examples-list.txt")
+grep -qx 'default (real-user-smoke) -> python -m logbrew_flask.examples' <(sed -n '4p' "$tmp_dir/examples-list.txt")
 "$tmp_dir/app/bin/python" -m logbrew_flask.examples readme-example > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 grep -q '"type": "span"' "$tmp_dir/readme.stdout.json"
 "$tmp_dir/app/bin/python" -m logbrew_flask.examples real-user-smoke > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
@@ -219,6 +220,49 @@ grep -q '"parentSpanId": "00f067aa0ba902b7"' "$tmp_dir/smoke.stderr.json"
 grep -q '"spanId": "b7ad6b7169203331"' "$tmp_dir/smoke.stderr.json"
 grep -q '"path": "/health"' "$tmp_dir/smoke.stderr.json"
 grep -q '"events": 4' "$tmp_dir/smoke.stderr.json"
+"$tmp_dir/app/bin/python" -m logbrew_flask.examples outbound-http > "$tmp_dir/outbound.stdout.json" 2> "$tmp_dir/outbound.stderr.json"
+python3 - "$tmp_dir/outbound.stdout.json" "$tmp_dir/outbound.stderr.json" "$tmp_dir/outbound-body.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+stdout = Path(sys.argv[1]).read_text()
+stderr = Path(sys.argv[2]).read_text()
+if "payments.example.test" in stdout or "payments.example.test" in stderr:
+    raise SystemExit("outbound example leaked the full outbound host")
+if "debug_marker=drop" in stdout or "debug_marker=drop" in stderr:
+    raise SystemExit("outbound example leaked the outbound query string")
+
+payload = json.loads(stdout)
+summary = json.loads(stderr)
+events = payload["events"]
+spans = {event["attributes"]["name"]: event["attributes"] for event in events if event["type"] == "span"}
+request_span = spans["POST /checkout/<order_id>"]
+outbound_span = spans["POST /payments/authorize"]
+outbound_metadata = outbound_span["metadata"]
+
+if summary["events"] != 2:
+    raise SystemExit(f"expected two span events, got {summary['events']}")
+if summary["requestSpanId"] != "b7ad6b7169203331":
+    raise SystemExit(f"unexpected request span id: {summary}")
+if summary["outboundParentSpanId"] != summary["requestSpanId"]:
+    raise SystemExit(f"outbound span did not inherit Flask request span: {summary}")
+if summary["outboundSpanId"] != "c8ad6b7169203332":
+    raise SystemExit(f"unexpected outbound span id: {summary}")
+expected_traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-c8ad6b7169203332-01"
+if summary["outboundTraceparent"] != expected_traceparent:
+    raise SystemExit(f"traceparent did not use the outbound child span id: {summary}")
+if request_span["traceId"] != outbound_span["traceId"]:
+    raise SystemExit("request and outbound spans did not share a trace id")
+if outbound_span["parentSpanId"] != request_span["spanId"]:
+    raise SystemExit("outbound span parent did not match Flask request span")
+if outbound_metadata["routeTemplate"] != "/payments/authorize":
+    raise SystemExit(f"unexpected outbound route template: {outbound_metadata}")
+if outbound_metadata["source"] != "requests":
+    raise SystemExit(f"unexpected outbound source: {outbound_metadata}")
+Path(sys.argv[3]).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+PY
+python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/outbound-body.json" >/dev/null
 
 printf 'flask real-user smoke passed with %s\n' "$("$tmp_dir/app/bin/python" - <<'PY'
 from importlib.metadata import version
