@@ -14,8 +14,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changed-areas:
+    name: Detect changed SDK areas
+    runs-on: ubuntu-latest
+    outputs:
+      release_artifacts: ${{ steps.areas.outputs.release_artifacts }}
+      rust: ${{ steps.areas.outputs.rust }}
+      javascript: ${{ steps.areas.outputs.javascript }}
+      python: ${{ steps.areas.outputs.python }}
+      go: ${{ steps.areas.outputs.go }}
+      c: ${{ steps.areas.outputs.c }}
+      cpp: ${{ steps.areas.outputs.cpp }}
+      java: ${{ steps.areas.outputs.java }}
+      dotnet: ${{ steps.areas.outputs.dotnet }}
+      unity: ${{ steps.areas.outputs.unity }}
+      ruby: ${{ steps.areas.outputs.ruby }}
+      php: ${{ steps.areas.outputs.php }}
+      swift: ${{ steps.areas.outputs.swift }}
+      objc: ${{ steps.areas.outputs.objc }}
+      kotlin: ${{ steps.areas.outputs.kotlin }}
+      maven: ${{ steps.areas.outputs.maven }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Classify changed paths
+        id: areas
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: python3 scripts/ci_changed_areas.py --github-output
+
   contract-checks:
     name: Contract checks
+    needs: changed-areas
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -29,21 +68,21 @@ jobs:
           python-version: "3.13"
 
       - name: Set up Node.js
-        if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' || needs.changed-areas.outputs.release_artifacts == 'true' }}
         uses: actions/setup-node@v5
         with:
           node-version: "22"
 
       - name: Enable Corepack
-        if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' || needs.changed-areas.outputs.release_artifacts == 'true' }}
         run: corepack enable
 
       - name: Set up Rust
-        if: ${{ hashFiles('Cargo.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         uses: dtolnay/rust-toolchain@stable
 
       - name: Set up Go
-        if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
         uses: actions/setup-go@v6
         with:
           go-version: "1.24"
@@ -53,33 +92,33 @@ jobs:
             go/logbrew/otel/go.sum
 
       - name: Set up Java
-        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        if: ${{ needs.changed-areas.outputs.java == 'true' || needs.changed-areas.outputs.kotlin == 'true' || needs.changed-areas.outputs.maven == 'true' }}
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Gradle for Java smoke tests
-        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        if: ${{ needs.changed-areas.outputs.java == 'true' || needs.changed-areas.outputs.kotlin == 'true' || needs.changed-areas.outputs.maven == 'true' }}
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: current
           cache-disabled: true
 
       - name: Set up .NET
-        if: ${{ hashFiles('dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj') != '' || hashFiles('unity/logbrew-unity/tests/LogBrew.Unity.Tests/LogBrew.Unity.Tests.csproj') != '' }}
+        if: ${{ needs.changed-areas.outputs.dotnet == 'true' || needs.changed-areas.outputs.unity == 'true' }}
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
 
       - name: Set up Ruby
-        if: ${{ hashFiles('ruby/logbrew-ruby/*.gemspec') != '' }}
+        if: ${{ needs.changed-areas.outputs.ruby == 'true' }}
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
 
       - name: Set up PHP
-        if: ${{ hashFiles('php/logbrew-php/composer.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.php == 'true' }}
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4"
@@ -108,295 +147,308 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/check_github_release_safety.py --allow-public-branch-summary
 
+      - name: Run Maven Central public install smoke
+        if: ${{ needs.changed-areas.outputs.maven == 'true' }}
+        run: bash scripts/real_user_maven_central_public_smoke.sh
+
       - name: Run JavaScript release artifact smoke
+        if: ${{ needs.changed-areas.outputs.release_artifacts == 'true' }}
         run: bash scripts/real_user_js_release_artifact_smoke.sh
 
       - name: Run JavaScript release artifact installed CLI smoke
+        if: ${{ needs.changed-areas.outputs.release_artifacts == 'true' }}
         run: bash scripts/real_user_js_release_artifact_cli_smoke.sh
 
       - name: Run Vite release artifact smoke
+        if: ${{ needs.changed-areas.outputs.release_artifacts == 'true' }}
         run: bash scripts/real_user_vite_release_artifact_smoke.sh
 
       - name: Run Next.js release artifact smoke
+        if: ${{ needs.changed-areas.outputs.release_artifacts == 'true' }}
         run: bash scripts/real_user_next_release_artifact_smoke.sh
 
       - name: Run React Native release artifact smoke
+        if: ${{ needs.changed-areas.outputs.release_artifacts == 'true' }}
         run: bash scripts/real_user_react_native_release_artifact_smoke.sh
 
       - name: Run React Native native release artifact smoke
+        if: ${{ needs.changed-areas.outputs.release_artifacts == 'true' }}
         run: bash scripts/real_user_react_native_native_release_artifact_smoke.sh
 
       - name: Run JavaScript release artifact upload smoke
+        if: ${{ needs.changed-areas.outputs.release_artifacts == 'true' }}
         run: bash scripts/real_user_js_release_artifact_upload_smoke.sh
 
       - name: Run native release artifact smoke
+        if: ${{ needs.changed-areas.outputs.release_artifacts == 'true' }}
         run: bash scripts/real_user_native_release_artifact_smoke.sh
 
       - name: Run native release artifact upload smoke
+        if: ${{ needs.changed-areas.outputs.release_artifacts == 'true' }}
         run: bash scripts/real_user_native_release_artifact_upload_smoke.sh
 
       - name: Run Rust SDK tests
-        if: ${{ hashFiles('Cargo.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         run: cd rust/logbrew && cargo test
 
       - name: Run Rust real-user smoke test
-        if: ${{ hashFiles('Cargo.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         run: bash scripts/real_user_rust_smoke.sh
 
       - name: Run Rust http-client real-user smoke test
-        if: ${{ hashFiles('Cargo.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         run: bash scripts/real_user_rust_http_client_smoke.sh
 
       - name: Run Rust dependency-span real-user smoke test
-        if: ${{ hashFiles('Cargo.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         run: bash scripts/real_user_rust_dependency_smoke.sh
 
       - name: Run Rust Axum real-user smoke test
-        if: ${{ hashFiles('Cargo.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         run: bash scripts/real_user_rust_axum_smoke.sh
 
       - name: Run Rust Actix real-user smoke test
-        if: ${{ hashFiles('Cargo.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         run: bash scripts/real_user_rust_actix_smoke.sh
 
       - name: Run Rust Rocket real-user smoke test
-        if: ${{ hashFiles('Cargo.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         run: bash scripts/real_user_rust_rocket_smoke.sh
 
       - name: Run Rust tracing real-user smoke test
-        if: ${{ hashFiles('Cargo.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         run: bash scripts/real_user_rust_tracing_smoke.sh
 
       - name: Run JavaScript SDK tests
-        if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: cd js/logbrew-js && npm test && cd ../logbrew-browser && npm test && cd ../logbrew-node && npm test && cd ../logbrew-prisma && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test
 
       - name: Run JavaScript real-user smoke test
-        if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_js_smoke.sh
 
       - name: Run JavaScript high-load installed-artifact smoke test
-        if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_js_high_load_smoke.sh
 
       - name: Run JavaScript OpenTelemetry installed-artifact smoke test
-        if: ${{ hashFiles('js/logbrew-js/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_js_opentelemetry_smoke.sh
 
       - name: Run Browser real-user smoke test
-        if: ${{ hashFiles('js/logbrew-browser/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_browser_smoke.sh
 
       - name: Run Node.js real-user smoke test
-        if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_node_smoke.sh
 
       - name: Run Node Redis real-package smoke test
-        if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_node_redis_packages_smoke.sh
 
       - name: Run Node Mongoose real-package smoke test
-        if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_node_mongoose_smoke.sh
 
       - name: Run Node Axios real-package smoke test
-        if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_node_axios_smoke.sh
 
       - name: Run Node HTTP client real-package smoke test
-        if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_node_http_client_smoke.sh
 
       - name: Run Node queue high-load fake-intake smoke test
-        if: ${{ hashFiles('js/logbrew-node/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_node_queue_high_load_smoke.sh
 
       - name: Run Prisma real-user smoke test
-        if: ${{ hashFiles('js/logbrew-prisma/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_prisma_smoke.sh
 
       - name: Run BullMQ real-user smoke test
-        if: ${{ hashFiles('js/logbrew-bullmq/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_bullmq_smoke.sh
 
       - name: Run KafkaJS real-user smoke test
-        if: ${{ hashFiles('js/logbrew-kafkajs/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_kafkajs_smoke.sh
 
       - name: Run AMQP/RabbitMQ real-user smoke test
-        if: ${{ hashFiles('js/logbrew-amqplib/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_amqplib_smoke.sh
 
       - name: Run AWS SQS real-user smoke test
-        if: ${{ hashFiles('js/logbrew-aws-sqs/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_aws_sqs_smoke.sh
 
       - name: Run Express real-user smoke test
-        if: ${{ hashFiles('js/logbrew-express/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_express_smoke.sh
 
       - name: Run Fastify real-user smoke test
-        if: ${{ hashFiles('js/logbrew-fastify/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_fastify_smoke.sh
 
       - name: Run NestJS real-user smoke test
-        if: ${{ hashFiles('js/logbrew-nestjs/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_nestjs_smoke.sh
 
       - name: Run Angular real-user smoke test
-        if: ${{ hashFiles('js/logbrew-angular/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_angular_smoke.sh
 
       - name: Run Vue real-user smoke test
-        if: ${{ hashFiles('js/logbrew-vue/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_vue_smoke.sh
 
       - name: Run Svelte real-user smoke test
-        if: ${{ hashFiles('js/logbrew-svelte/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_svelte_smoke.sh
 
       - name: Run React real-user smoke test
-        if: ${{ hashFiles('js/logbrew-react/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_react_smoke.sh
 
       - name: Run React Native real-user smoke test
-        if: ${{ hashFiles('js/logbrew-react-native/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_react_native_smoke.sh
 
       - name: Run Next.js real-user smoke test
-        if: ${{ hashFiles('js/logbrew-next/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_next_smoke.sh
 
       - name: Run Python SDK tests
-        if: ${{ hashFiles('python/logbrew_py/pyproject.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
 
       - name: Run FastAPI package checks
-        if: ${{ hashFiles('python/logbrew_fastapi/pyproject.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/check_fastapi_package.sh
 
       - name: Run Flask package checks
-        if: ${{ hashFiles('python/logbrew_flask/pyproject.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/check_flask_package.sh
 
       - name: Run Django package checks
-        if: ${{ hashFiles('python/logbrew_django/pyproject.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/check_django_package.sh
 
       - name: Run Python real-user smoke test
-        if: ${{ hashFiles('python/logbrew_py/pyproject.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/real_user_python_smoke.sh
 
       - name: Run Python high-load installed-artifact smoke test
-        if: ${{ hashFiles('python/logbrew_py/pyproject.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/real_user_python_high_load_smoke.sh
 
       - name: Run Python OpenTelemetry installed-artifact smoke test
-        if: ${{ hashFiles('python/logbrew_py/pyproject.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/real_user_python_opentelemetry_smoke.sh
 
       - name: Run Python Celery real-user smoke test
-        if: ${{ hashFiles('python/logbrew_py/pyproject.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/real_user_python_celery_smoke.sh
 
       - name: Run FastAPI real-user smoke test
-        if: ${{ hashFiles('python/logbrew_fastapi/pyproject.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/real_user_fastapi_smoke.sh
 
       - name: Run Flask real-user smoke test
-        if: ${{ hashFiles('python/logbrew_flask/pyproject.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/real_user_flask_smoke.sh
 
       - name: Run Django real-user smoke test
-        if: ${{ hashFiles('python/logbrew_django/pyproject.toml') != '' }}
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/real_user_django_smoke.sh
 
       - name: Run Go SDK tests
-        if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
         run: bash scripts/check_go_tests.sh
 
       - name: Run Go real-user smoke test
-        if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
         run: bash scripts/real_user_go_smoke.sh
 
       - name: Run Go OpenTelemetry installed-artifact smoke test
-        if: ${{ hashFiles('go/logbrew/otel/go.mod') != '' }}
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
         run: bash scripts/real_user_go_opentelemetry_smoke.sh
 
       - name: Run Go high-load installed-artifact smoke test
-        if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
         run: bash scripts/real_user_go_high_load_smoke.sh
 
       - name: Run Go support-ticket real-user smoke test
-        if: ${{ hashFiles('go/logbrew/go.mod') != '' }}
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
         run: bash scripts/real_user_go_support_ticket_smoke.sh
 
       - name: Run C SDK tests
-        if: ${{ hashFiles('c/logbrew-c/include/logbrew.h') != '' }}
+        if: ${{ needs.changed-areas.outputs.c == 'true' }}
         run: bash scripts/check_c_package.sh
 
       - name: Run C real-user smoke test
-        if: ${{ hashFiles('c/logbrew-c/include/logbrew.h') != '' }}
+        if: ${{ needs.changed-areas.outputs.c == 'true' }}
         run: bash scripts/real_user_c_smoke.sh
 
       - name: Run C++ SDK tests
-        if: ${{ hashFiles('cpp/logbrew-cpp/include/logbrew.hpp') != '' }}
+        if: ${{ needs.changed-areas.outputs.cpp == 'true' }}
         run: bash scripts/check_cpp_package.sh
 
       - name: Run C++ real-user smoke test
-        if: ${{ hashFiles('cpp/logbrew-cpp/include/logbrew.hpp') != '' }}
+        if: ${{ needs.changed-areas.outputs.cpp == 'true' }}
         run: bash scripts/real_user_cpp_smoke.sh
 
       - name: Run Java SDK tests
-        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        if: ${{ needs.changed-areas.outputs.java == 'true' }}
         run: bash scripts/check_java_package.sh
 
       - name: Run Java real-user smoke test
-        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        if: ${{ needs.changed-areas.outputs.java == 'true' }}
         run: bash scripts/real_user_java_smoke.sh
 
       - name: Run Java Spring Kafka installed-artifact smoke test
-        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        if: ${{ needs.changed-areas.outputs.java == 'true' }}
         run: bash scripts/real_user_java_spring_kafka_smoke.sh
 
       - name: Run Spring Boot real-user smoke test
-        if: ${{ hashFiles('java/logbrew-java/pom.xml') != '' }}
+        if: ${{ needs.changed-areas.outputs.java == 'true' }}
         run: bash scripts/real_user_spring_boot_smoke.sh
 
       - name: Run .NET SDK tests
-        if: ${{ hashFiles('dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj') != '' }}
+        if: ${{ needs.changed-areas.outputs.dotnet == 'true' }}
         run: bash scripts/check_dotnet_package.sh
 
       - name: Run .NET real-user smoke test
-        if: ${{ hashFiles('dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj') != '' }}
+        if: ${{ needs.changed-areas.outputs.dotnet == 'true' }}
         run: bash scripts/real_user_dotnet_smoke.sh
 
       - name: Run Unity SDK tests
-        if: ${{ hashFiles('unity/logbrew-unity/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.unity == 'true' }}
         run: bash scripts/check_unity_package.sh
 
       - name: Run Unity real-user smoke test
-        if: ${{ hashFiles('unity/logbrew-unity/package.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.unity == 'true' }}
         run: bash scripts/real_user_unity_smoke.sh
 
       - name: Run Ruby SDK tests
-        if: ${{ hashFiles('ruby/logbrew-ruby/*.gemspec') != '' }}
+        if: ${{ needs.changed-areas.outputs.ruby == 'true' }}
         run: bash scripts/check_ruby_package.sh
 
       - name: Run Ruby real-user smoke test
-        if: ${{ hashFiles('ruby/logbrew-ruby/*.gemspec') != '' }}
+        if: ${{ needs.changed-areas.outputs.ruby == 'true' }}
         run: bash scripts/real_user_ruby_smoke.sh
 
       - name: Install PHP SDK dependencies
-        if: ${{ hashFiles('php/logbrew-php/composer.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.php == 'true' }}
         run: cd php/logbrew-php && composer update --no-interaction
 
       - name: Run PHP SDK tests
-        if: ${{ hashFiles('php/logbrew-php/composer.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.php == 'true' }}
         run: cd php/logbrew-php && php tests/run.php
 
       - name: Run PHP real-user smoke test
-        if: ${{ hashFiles('php/logbrew-php/composer.json') != '' }}
+        if: ${{ needs.changed-areas.outputs.php == 'true' }}
         run: bash scripts/real_user_php_smoke.sh
 
       - name: Leak scan
@@ -404,6 +456,8 @@ jobs:
 
   swift-checks:
     name: Swift SDK checks
+    needs: changed-areas
+    if: ${{ needs.changed-areas.outputs.swift == 'true' }}
     runs-on: macos-latest
     timeout-minutes: 15
 
@@ -424,6 +478,8 @@ jobs:
 
   objc-checks:
     name: Objective-C SDK checks
+    needs: changed-areas
+    if: ${{ needs.changed-areas.outputs.objc == 'true' }}
     runs-on: macos-latest
     timeout-minutes: 15
 
@@ -444,6 +500,8 @@ jobs:
 
   kotlin-checks:
     name: Kotlin SDK checks
+    needs: changed-areas
+    if: ${{ needs.changed-areas.outputs.kotlin == 'true' }}
     runs-on: macos-latest
     timeout-minutes: 15
 
