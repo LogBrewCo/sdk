@@ -147,7 +147,9 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
     areas = {name: False for name in AREA_NAMES}
     enabled: set[str] = set()
     for raw_path in paths:
-        path = raw_path.strip().lstrip("./")
+        path = raw_path.strip()
+        if path.startswith("./"):
+            path = path[2:]
         if not path:
             continue
         add_script_areas(path, enabled)

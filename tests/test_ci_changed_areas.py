@@ -28,6 +28,12 @@ class CiChangedAreasTests(unittest.TestCase):
             with self.subTest(area=area):
                 self.assertFalse(areas[area])
 
+    def test_maven_publish_workflow_change_keeps_dotfile_path(self) -> None:
+        areas = ci_changed_areas.classify([".github/workflows/publish-packages.yml"])
+
+        self.assertTrue(areas["maven"])
+        self.assertFalse(areas["javascript"])
+
     def test_language_owned_paths_enable_only_that_language_area(self) -> None:
         cases = {
             "rust/logbrew/src/lib.rs": "rust",
@@ -61,6 +67,10 @@ class CiChangedAreasTests(unittest.TestCase):
 
         self.assertIn("name: Detect changed SDK areas", workflow)
         self.assertIn("needs: changed-areas", workflow)
+        self.assertIn("unit_test_run_all", workflow)
+        self.assertIn("unit_test_modules", workflow)
+        self.assertIn("Run focused unit tests", workflow)
+        self.assertIn("Run full unit tests", workflow)
         self.assertIn("needs.changed-areas.outputs.maven == 'true'", workflow)
         self.assertIn("Run Maven Central public install smoke", workflow)
         self.assertIn("needs.changed-areas.outputs.rust == 'true'", workflow)

@@ -34,6 +34,8 @@ jobs:
       objc: ${{ steps.areas.outputs.objc }}
       kotlin: ${{ steps.areas.outputs.kotlin }}
       maven: ${{ steps.areas.outputs.maven }}
+      unit_test_run_all: ${{ steps.unit-tests.outputs.run_all }}
+      unit_test_modules: ${{ steps.unit-tests.outputs.modules }}
 
     steps:
       - name: Check out repository
@@ -51,6 +53,12 @@ jobs:
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: python3 scripts/ci_changed_areas.py --github-output
+
+      - name: Select Python unit test targets
+        id: unit-tests
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: python3 scripts/ci_unit_test_targets.py --github-output
 
   contract-checks:
     name: Contract checks
@@ -124,7 +132,12 @@ jobs:
           php-version: "8.4"
           tools: composer
 
-      - name: Run unit tests
+      - name: Run focused unit tests
+        if: ${{ needs.changed-areas.outputs.unit_test_run_all != 'true' }}
+        run: python3 -m unittest ${{ needs.changed-areas.outputs.unit_test_modules }}
+
+      - name: Run full unit tests
+        if: ${{ needs.changed-areas.outputs.unit_test_run_all == 'true' }}
         run: python3 -m unittest discover -s tests -p 'test_*.py'
 
       - name: Check backend contract reports
