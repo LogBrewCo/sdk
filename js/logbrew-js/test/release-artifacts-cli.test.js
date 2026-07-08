@@ -352,6 +352,68 @@ test("symbolicate-js can include explicit local source context without local pat
   }
 });
 
+test("symbolicate-js resolves bundler-style source context under an explicit source root", () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const prep = runCli([
+      "prepare-js",
+      "--build-dir",
+      buildDir,
+      "--strip-sources-content",
+      "--strip-source-prefix",
+      appRoot,
+      "--write"
+    ]);
+    assert.equal(prep.status, 0, prep.stderr);
+
+    const mapPath = path.join(buildDir, "assets", "app.js.map");
+    const sourceMap = JSON.parse(fs.readFileSync(mapPath, "utf8"));
+    sourceMap.sources = ["turbopack:///[project]/src/main.js"];
+    fs.writeFileSync(mapPath, `${JSON.stringify(sourceMap)}\n`, "utf8");
+
+    const manifestResult = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets"
+    ]);
+    assert.equal(manifestResult.status, 0, manifestResult.stderr);
+    const manifestPath = path.join(root, "manifest.json");
+    fs.writeFileSync(manifestPath, manifestResult.stdout, "utf8");
+
+    const result = runCli([
+      "symbolicate-js",
+      "--build-dir",
+      buildDir,
+      "--manifest",
+      manifestPath,
+      "--stack-frame",
+      "at checkout (https://cdn.example/assets/assets/app.js:1:1)",
+      "--source-root",
+      appRoot,
+      "--context-lines",
+      "0"
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const report = jsonFromStdout(result);
+    assert.equal(report.status, "resolved");
+    assert.equal(report.original.source, "turbopack:///[project]/src/main.js");
+    assert.equal(report.sourceContext.source, "src/main.js");
+    assert.equal(report.sourceContext.lines[0].text, "export function checkout() { return 'source-fixture-marker'; }");
+    assert.doesNotMatch(result.stdout, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("upload-js validates a ready manifest and prints a dry-run upload plan", () => {
   const { root, appRoot, buildDir } = makeBuild();
   try {

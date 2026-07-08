@@ -298,12 +298,56 @@ function requireContextLineCount(value) {
   return value;
 }
 
+function sourceRootRelativeCandidates(source) {
+  const values = [];
+  const add = (candidate) => {
+    const cleaned = fileReference(String(candidate ?? "").trim()).replace(/\\/gu, "/");
+    if (!cleaned || cleaned.startsWith("file://") || /^[A-Za-z]:[\\/]/u.test(cleaned)) {
+      return;
+    }
+    const normalized = path.posix.normalize(cleaned.replace(/^\/+/u, ""));
+    if (!normalized || normalized === "." || normalized.startsWith("../") || normalized === "..") {
+      return;
+    }
+    values.push(normalized);
+  };
+  const addBundlerSuffixes = (candidate) => {
+    const cleaned = fileReference(String(candidate ?? "").trim()).replace(/\\/gu, "/");
+    for (const marker of ["/./", "!./"]) {
+      const markerIndex = cleaned.lastIndexOf(marker);
+      if (markerIndex >= 0) {
+        add(cleaned.slice(markerIndex + marker.length));
+      }
+    }
+    const parts = cleaned.replace(/^\/+/u, "").split("/");
+    if (parts.length > 1 && /^\[[^\]/]+\]$/u.test(parts[0])) {
+      add(parts.slice(1).join("/"));
+    }
+  };
+
+  add(source);
+  addBundlerSuffixes(source);
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(source)) {
+    try {
+      const url = new URL(source);
+      add(url.pathname);
+      addBundlerSuffixes(url.pathname);
+    } catch {
+      // Non-standard bundler schemes should still use the direct candidate.
+    }
+  }
+  return [...new Set(values)];
+}
+
 function sourceContextPathCandidates(source, sourceRoot, sourceMapPath) {
   const candidates = [];
   if (sourceMapPath) {
     candidates.push(path.resolve(path.dirname(sourceMapPath), source));
   }
   candidates.push(path.join(sourceRoot, source));
+  for (const relativeSource of sourceRootRelativeCandidates(source)) {
+    candidates.push(path.join(sourceRoot, relativeSource));
+  }
   return [...new Set(candidates)];
 }
 

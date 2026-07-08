@@ -267,12 +267,26 @@ release_artifacts_cli="$app_dir/node_modules/.bin/logbrew-release-artifacts"
 symbolication_report="$tmp_dir/next-symbolication-report.json"
 (
   cd "$app_dir"
-  "$release_artifacts_cli" \
+  if ! "$release_artifacts_cli" \
     symbolicate-js \
     --build-dir "$chunks_dir" \
     --manifest "$ready_manifest" \
     --stack-frame "$(cat "$generated_stack_frame")" \
-    > "$symbolication_report"
+    --source-root "$app_dir" \
+    --context-lines 0 \
+    > "$symbolication_report"; then
+    cat "$symbolication_report" >&2
+    python3 - "$target_map" <<'PY' >&2 || true
+import json
+import sys
+from pathlib import Path
+
+source_map = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+sources = [source for source in source_map.get("sources", []) if "CheckoutProbe" in str(source)]
+print(json.dumps({"targetSourceMapSources": sources[:10]}, indent=2))
+PY
+    exit 1
+  fi
 )
 
 python3 - "$ready_manifest" "$target_js" "$target_map" "$chunks_dir" "$symbolication_report" "$js_count" <<'PY'
@@ -304,11 +318,16 @@ assert symbolication_report["status"] == "resolved"
 assert symbolication_report["debugId"] == debug_id
 assert symbolication_report["generated"]["path"] == target_rel
 assert symbolication_report["original"]["source"].endswith("components/CheckoutProbe.jsx")
+source_context = symbolication_report["sourceContext"]
+assert source_context["source"].endswith("components/CheckoutProbe.jsx")
+assert len(source_context["lines"]) == 1
+assert source_context["lines"][0]["highlighted"] is True
+assert "next checkout exploded" in source_context["lines"][0]["text"]
 assert "logbrew_next_cache_placeholder" not in serialized_manifest
 assert "logbrew_next_hash_placeholder" not in serialized_manifest
 assert "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_manifest
 assert "next checkout exploded" not in serialized_manifest
-assert "next checkout exploded" not in serialized_symbolication
+assert "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_symbolication
 PY
 
 runtime_issue_payload="$tmp_dir/next-runtime-issue.json"

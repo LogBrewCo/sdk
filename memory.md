@@ -1,5 +1,30 @@
 # LogBrew SDK Readiness Memory
 
+- 2026-07-08: Next.js/Turbopack source-context proof now works from installed
+  artifacts. Reused the existing Sentry JavaScript Debug ID/runtime-event and
+  Datadog source-map validation reads in
+  `docs/competitor-research/source-maps-debug-symbols-2026-06-13.md`.
+  The installed `symbolicate-js --source-root <app-root> --context-lines 0`
+  resolver now handles non-file bundler source schemes, `/./` and `!./`
+  suffix markers, and bracketed virtual roots such as Turbopack `[project]`,
+  while still rejecting `file://`, drive paths, traversal, and reads outside
+  the explicit source root. `scripts/real_user_next_release_artifact_smoke.sh`
+  now builds a temporary Next 16.2.9 App Router app from packed
+  `@logbrew/sdk`, `@logbrew/next`, and `@logbrew/browser`, resolves the
+  generated minified frame back to `components/CheckoutProbe.jsx`, includes
+  one highlighted `next checkout exploded` local source line only in the
+  local report, keeps source lines out of runtime issue/upload payloads, and
+  still proves 503-to-202 loopback upload retry. Evidence: RED focused JS test
+  failed on Turbopack `[project]` source context; GREEN
+  `npm --prefix js/logbrew-js test`, GREEN `python3 -m unittest
+  tests.test_release_artifact_smoke_gates`, GREEN `bash
+  scripts/real_user_next_release_artifact_smoke.sh`, GREEN ShellCheck 0.11.0
+  for the touched smoke, GREEN `python3 scripts/check_js_sources.py
+  js/logbrew-js`, and GREEN confidentiality/release-metadata/backend-report/
+  generated-artifact/markdown-link/diff hygiene. Honest gap: Sentry/Datadog
+  still lead on hosted source-context issue UI, backend-symbolicated runtime
+  issues, and broader build/runtime integration.
+
 - 2026-07-07: Vite source-map issue-event proof now covers a real SDK issue
   payload from installed artifacts. Reused the existing Sentry JavaScript
   Debug ID/runtime-event and Datadog source-map upload validation reads in
