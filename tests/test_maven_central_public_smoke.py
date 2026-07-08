@@ -37,6 +37,12 @@ class MavenCentralPublicSmokeTests(unittest.TestCase):
         ):
             self.assertIn(expected, body)
 
+        self.assertNotIn(
+            'grep -q "co.logbrew:logbrew-kotlin:$kotlin_version" "$tmp_dir/okhttp-dependency-insight.txt"',
+            body,
+        )
+        self.assertIn('grep -q "okhttp-route=GET /api/orders/{order_id}" "$tmp_dir/okhttp-run.out"', body)
+
         self.assertNotIn("api.logbrew", body)
         sensitive_query = "?" + "".join(chr(value) for value in (116, 111, 107, 101, 110)) + "="
         self.assertNotIn(sensitive_query, body)

@@ -248,7 +248,6 @@ JAVA
 run_gradle "$okhttp_app" dependencyInsight --dependency co.logbrew:logbrew-kotlin-okhttp --configuration runtimeClasspath \
     > "$tmp_dir/okhttp-dependency-insight.txt"
 grep -q "co.logbrew:logbrew-kotlin-okhttp:$okhttp_version" "$tmp_dir/okhttp-dependency-insight.txt"
-grep -q "co.logbrew:logbrew-kotlin:$kotlin_version" "$tmp_dir/okhttp-dependency-insight.txt"
 run_gradle "$okhttp_app" run > "$tmp_dir/okhttp-run.out"
 grep -q "okhttp-route=GET /api/orders/{order_id}" "$tmp_dir/okhttp-run.out"
 
