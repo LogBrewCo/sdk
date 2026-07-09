@@ -4,8 +4,14 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
 sdk_package_tgz="logbrew-sdk-${sdk_package_version}.tgz"
+smoke_typescript_version="6.0.3"
+smoke_pino_version="10.3.1"
+smoke_winston_version="3.19.0"
 export LOGBREW_JS_PACKAGE_TGZ="$sdk_package_tgz"
 export LOGBREW_JS_PACKAGE_VERSION="$sdk_package_version"
+export LOGBREW_JS_SMOKE_TYPESCRIPT_VERSION="$smoke_typescript_version"
+export LOGBREW_JS_SMOKE_PINO_VERSION="$smoke_pino_version"
+export LOGBREW_JS_SMOKE_WINSTON_VERSION="$smoke_winston_version"
 
 run_installed_package_example() {
 local example_path="$1"
@@ -893,13 +899,13 @@ const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
 if (manifest.dependencies?.["@logbrew/sdk"] !== undefined) {
   throw new Error(`expected ${packageManager} manifest to remove @logbrew/sdk`);
 }
-if (manifest.dependencies?.typescript !== "^6.0.3") {
+if (manifest.dependencies?.typescript !== process.env.LOGBREW_JS_SMOKE_TYPESCRIPT_VERSION) {
   throw new Error(`unexpected ${packageManager} manifest typescript dependency: ${manifest.dependencies?.typescript}`);
 }
-if (manifest.dependencies?.pino !== "^10.3.1") {
+if (manifest.dependencies?.pino !== process.env.LOGBREW_JS_SMOKE_PINO_VERSION) {
   throw new Error(`unexpected ${packageManager} manifest pino dependency: ${manifest.dependencies?.pino}`);
 }
-if (manifest.dependencies?.winston !== "^3.19.0") {
+if (manifest.dependencies?.winston !== process.env.LOGBREW_JS_SMOKE_WINSTON_VERSION) {
   throw new Error(`unexpected ${packageManager} manifest winston dependency: ${manifest.dependencies?.winston}`);
 }
 
@@ -1427,7 +1433,11 @@ EOF
 
 case "$package_manager" in
   npm)
-    npm install "$package_tgz" typescript pino winston >/dev/null
+    npm install --save-exact \
+      "$package_tgz" \
+      "typescript@$smoke_typescript_version" \
+      "pino@$smoke_pino_version" \
+      "winston@$smoke_winston_version" >/dev/null
     test -f package-lock.json
     node - "$package_tgz" <<'EOF'
 const fs = require("node:fs");
@@ -1473,13 +1483,13 @@ const expectedSdkVersion = process.env.LOGBREW_JS_PACKAGE_VERSION;
 if (!manifestDeps["@logbrew/sdk"].endsWith(expectedSdkTarball)) {
   throw new Error(`unexpected npm manifest tarball target: ${manifestDeps["@logbrew/sdk"]}`);
 }
-if (manifestDeps.typescript !== "^6.0.3") {
+if (manifestDeps.typescript !== process.env.LOGBREW_JS_SMOKE_TYPESCRIPT_VERSION) {
   throw new Error(`unexpected npm manifest typescript specifier: ${manifestDeps.typescript}`);
 }
-if (manifestDeps.pino !== "^10.3.1") {
+if (manifestDeps.pino !== process.env.LOGBREW_JS_SMOKE_PINO_VERSION) {
   throw new Error(`unexpected npm manifest pino specifier: ${manifestDeps.pino}`);
 }
-if (manifestDeps.winston !== "^3.19.0") {
+if (manifestDeps.winston !== process.env.LOGBREW_JS_SMOKE_WINSTON_VERSION) {
   throw new Error(`unexpected npm manifest winston specifier: ${manifestDeps.winston}`);
 }
 
@@ -1524,7 +1534,11 @@ EOF
     write_package_tree "$package_manager" package-tree.json
     ;;
   pnpm)
-    pnpm add "$package_tgz" typescript pino winston >/dev/null
+    pnpm add --save-exact \
+      "$package_tgz" \
+      "typescript@$smoke_typescript_version" \
+      "pino@$smoke_pino_version" \
+      "winston@$smoke_winston_version" >/dev/null
     test -f pnpm-lock.yaml
     node <<'EOF'
 const fs = require("node:fs");
@@ -1569,13 +1583,13 @@ const expectedSdkTarball = process.env.LOGBREW_JS_PACKAGE_TGZ;
 if (!manifestDeps["@logbrew/sdk"].endsWith(expectedSdkTarball)) {
   throw new Error(`unexpected pnpm manifest tarball target: ${manifestDeps["@logbrew/sdk"]}`);
 }
-if (manifestDeps.typescript !== "^6.0.3") {
+if (manifestDeps.typescript !== process.env.LOGBREW_JS_SMOKE_TYPESCRIPT_VERSION) {
   throw new Error(`unexpected pnpm manifest typescript specifier: ${manifestDeps.typescript}`);
 }
-if (manifestDeps.pino !== "^10.3.1") {
+if (manifestDeps.pino !== process.env.LOGBREW_JS_SMOKE_PINO_VERSION) {
   throw new Error(`unexpected pnpm manifest pino specifier: ${manifestDeps.pino}`);
 }
-if (manifestDeps.winston !== "^3.19.0") {
+if (manifestDeps.winston !== process.env.LOGBREW_JS_SMOKE_WINSTON_VERSION) {
   throw new Error(`unexpected pnpm manifest winston specifier: ${manifestDeps.winston}`);
 }
 
