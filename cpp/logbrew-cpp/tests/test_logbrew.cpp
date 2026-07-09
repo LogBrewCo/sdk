@@ -593,7 +593,7 @@ void http_transport_validates_configuration() {
       {{"x-logbrew-source", "cpp-test"}},
       1000L);
   (void)transport;
-  EXPECT_TRUE(std::string(logbrew::http_transport_default_endpoint) == "https://api.logbrew.com/v1/events");
+  EXPECT_TRUE(std::string(logbrew::http_transport_default_endpoint) == "https://api.logbrew.co/v1/events");
 }
 #endif
 

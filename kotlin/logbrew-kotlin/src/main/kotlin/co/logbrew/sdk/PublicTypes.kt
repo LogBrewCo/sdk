@@ -110,7 +110,7 @@ class HttpTransport(
     }
 
     companion object {
-        const val DEFAULT_ENDPOINT: String = "https://api.logbrew.com/v1/events"
+        const val DEFAULT_ENDPOINT: String = "https://api.logbrew.co/v1/events"
         const val DEFAULT_TIMEOUT_MILLIS: Int = 10_000
 
         private fun parseEndpoint(endpoint: String): URL {

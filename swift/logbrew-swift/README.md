@@ -263,7 +263,7 @@ Use `HTTPTransport` when the app is ready to send queued batches to LogBrew. It 
 
 ```swift
 let transport = try HTTPTransport(
-    endpoint: URL(string: "https://api.logbrew.com/v1/events")!,
+    endpoint: URL(string: "https://api.logbrew.co/v1/events")!,
     headers: ["x-logbrew-source": "checkout-ios"],
     timeout: 10
 )

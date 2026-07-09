@@ -54,7 +54,7 @@ public protocol Transport: AnyObject {
 public typealias HTTPTransportRequester = (URLRequest) throws -> Int
 
 public final class HTTPTransport: Transport {
-    public static let defaultEndpoint = URL(string: "https://api.logbrew.com/v1/events")!
+    public static let defaultEndpoint = URL(string: "https://api.logbrew.co/v1/events")!
     public static let defaultTimeout: TimeInterval = 10
 
     public let endpoint: URL

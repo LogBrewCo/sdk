@@ -489,7 +489,7 @@ if (flushed.length !== 5) {
 
 const fetchRequests = [];
 const fetchTransport = createFetchTransport({
-  endpoint: "https://api.logbrew.com/v1/events",
+  endpoint: "https://api.logbrew.co/v1/events",
   fetchImpl: async (endpoint, init) => {
     fetchRequests.push({ endpoint, init });
     return { status: 202 };
@@ -1988,7 +1988,7 @@ void captureBrowserResourceTiming(resourceEntry, context, {
 });
 void context.flush();
 createFetchTransport({
-  endpoint: "https://api.logbrew.com/v1/events",
+  endpoint: "https://api.logbrew.co/v1/events",
   fetchImpl: fetch
 });
 createBeaconTransport({

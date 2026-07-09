@@ -44,6 +44,18 @@ class CiUnitTestTargetsTests(unittest.TestCase):
         self.assertTrue(targets.run_all)
         self.assertEqual(targets.modules, ())
 
+    def test_ingest_contract_changes_select_only_the_endpoint_contract(self) -> None:
+        targets = ci_unit_test_targets.select_targets(
+            [
+                "js/logbrew-node/index.js",
+                "scripts/real_user_node_ingest_contract_smoke.sh",
+                "tests/test_default_ingest_endpoints.py",
+            ]
+        )
+
+        self.assertFalse(targets.run_all)
+        self.assertEqual(targets.modules, ("tests.test_default_ingest_endpoints",))
+
 
 if __name__ == "__main__":
     unittest.main()

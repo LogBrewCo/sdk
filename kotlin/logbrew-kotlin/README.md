@@ -259,7 +259,7 @@ Use `HttpTransport` when a JVM or Android app is ready to send queued batches to
 
 ```kotlin
 val transport = HttpTransport(
-    endpoint = "https://api.logbrew.com/v1/events",
+    endpoint = "https://api.logbrew.co/v1/events",
     headers = mapOf("x-logbrew-source" to "checkout-android"),
     connectTimeoutMillis = 10_000,
     readTimeoutMillis = 10_000,

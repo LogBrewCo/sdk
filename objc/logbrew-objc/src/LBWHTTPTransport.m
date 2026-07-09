@@ -3,7 +3,7 @@
 #import <dispatch/dispatch.h>
 #import <math.h>
 
-NSString *const LBWHTTPTransportDefaultEndpoint = @"https://api.logbrew.com/v1/events";
+NSString *const LBWHTTPTransportDefaultEndpoint = @"https://api.logbrew.co/v1/events";
 
 @interface LBWHTTPTransport ()
 

@@ -141,7 +141,7 @@ pub trait Transport {
 
 #[cfg(feature = "http")]
 /// Default LogBrew HTTP intake endpoint used by `HttpTransportConfig`.
-pub const DEFAULT_HTTP_ENDPOINT: &str = "https://api.logbrew.com/v1/events";
+pub const DEFAULT_HTTP_ENDPOINT: &str = "https://api.logbrew.co/v1/events";
 
 #[cfg(feature = "http")]
 #[derive(Clone, Debug)]

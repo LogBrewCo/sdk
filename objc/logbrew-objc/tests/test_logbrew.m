@@ -872,7 +872,7 @@ static void LBWExerciseHTTPTransportValidation(void) {
                                                  timeout:1.0
                                                    error:&error];
   LBWAssert(transport != nil, @"valid HTTP transport failed");
-  LBWAssert([LBWHTTPTransportDefaultEndpoint isEqualToString:@"https://api.logbrew.com/v1/events"],
+  LBWAssert([LBWHTTPTransportDefaultEndpoint isEqualToString:@"https://api.logbrew.co/v1/events"],
             @"default endpoint failed");
 }
 

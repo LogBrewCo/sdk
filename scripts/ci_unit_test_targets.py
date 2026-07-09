@@ -45,6 +45,9 @@ PATH_TARGETS = {
     "scripts/check_release_metadata.py": ("tests.test_release_metadata",),
     "scripts/validate_fixtures.py": ("tests.test_validate_fixtures",),
     "scripts/check_confidentiality_scan.py": ("tests.test_confidentiality_scan",),
+    "scripts/real_user_node_ingest_contract_smoke.sh": (
+        "tests.test_default_ingest_endpoints",
+    ),
 }
 
 

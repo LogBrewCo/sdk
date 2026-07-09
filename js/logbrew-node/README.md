@@ -569,7 +569,7 @@ Metadata records the queue system, operation name, operation kind, optional queu
 import { createNodeFetchTransport } from "@logbrew/node";
 
 const transport = createNodeFetchTransport({
-  endpoint: "https://api.logbrew.com/v1/events",
+  endpoint: "https://api.logbrew.co/v1/events",
   headers: {
     "x-logbrew-source": "checkout-api"
   }

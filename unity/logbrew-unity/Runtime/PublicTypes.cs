@@ -118,7 +118,7 @@ namespace LogBrew.Unity
 
     public sealed class HttpTransport : ITransport, IDisposable
     {
-        public static readonly Uri DefaultEndpoint = new Uri("https://api.logbrew.com/v1/events", UriKind.Absolute);
+        public static readonly Uri DefaultEndpoint = new Uri("https://api.logbrew.co/v1/events", UriKind.Absolute);
 
         public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
 

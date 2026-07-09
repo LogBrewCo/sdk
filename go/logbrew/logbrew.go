@@ -41,7 +41,7 @@ var (
 const (
 	// DefaultHTTPEndpoint is the production LogBrew event intake URL used by
 	// NewHTTPTransport when no endpoint is supplied.
-	DefaultHTTPEndpoint = "https://api.logbrew.com/v1/events"
+	DefaultHTTPEndpoint = "https://api.logbrew.co/v1/events"
 
 	defaultHTTPTimeout = 10 * time.Second
 

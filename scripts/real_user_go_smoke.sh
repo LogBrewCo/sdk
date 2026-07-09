@@ -1865,7 +1865,7 @@ grep -q '^func NetworkError(message string) \*TransportError$' network-error-doc
 grep -q 'NetworkError creates a retryable network failure that preserves queued' network-error-doc.txt
 grep -q 'events' network-error-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.DefaultHTTPEndpoint > http-endpoint-doc.txt
-grep -Fq 'DefaultHTTPEndpoint = "https://api.logbrew.com/v1/events"' http-endpoint-doc.txt
+grep -Fq 'DefaultHTTPEndpoint = "https://api.logbrew.co/v1/events"' http-endpoint-doc.txt
 grep -q 'DefaultHTTPEndpoint is the production LogBrew event intake URL used by' http-endpoint-doc.txt
 grep -q 'NewHTTPTransport when no endpoint is supplied' http-endpoint-doc.txt
 GOFLAGS=-mod=readonly go doc github.com/LogBrewCo/sdk/go/logbrew.HTTPTransportConfig > http-config-doc.txt

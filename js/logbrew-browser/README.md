@@ -409,7 +409,7 @@ import { createFetchTransport, installLogBrewBrowser } from "@logbrew/browser";
 installLogBrewBrowser({
   clientKey: "LOGBREW_BROWSER_KEY",
   transport: createFetchTransport({
-    endpoint: "https://api.logbrew.com/v1/events",
+    endpoint: "https://api.logbrew.co/v1/events",
     maxKeepaliveBodyBytes: 64 * 1024
   })
 });

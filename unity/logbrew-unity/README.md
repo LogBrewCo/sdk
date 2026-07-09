@@ -51,7 +51,7 @@ Use `HttpTransport` when the game or realtime app is ready to send queued batche
 
 ```csharp
 var transport = new HttpTransport(
-    new Uri("https://api.logbrew.com/v1/events"),
+    new Uri("https://api.logbrew.co/v1/events"),
     new Dictionary<string, string> { ["x-logbrew-source"] = "unity-client" },
     TimeSpan.FromSeconds(10));
 
