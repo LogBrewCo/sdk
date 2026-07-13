@@ -39,6 +39,9 @@ module LogBrew
     end
   end
 
+  require_relative "logbrew/event_batcher"
+  require_relative "logbrew/bounded_event_queue"
+
   class TransportError < StandardError
     attr_reader :code, :retryable
 
@@ -54,11 +57,12 @@ module LogBrew
   end
 
   class TransportResponse
-    attr_reader :status_code, :attempts
+    attr_reader :status_code, :attempts, :batches
 
-    def initialize(status_code, attempts)
+    def initialize(status_code, attempts, batches = 1)
       @status_code = status_code
       @attempts = attempts
+      @batches = batches
     end
   end
 
@@ -668,7 +672,7 @@ module LogBrew
     module_function
 
     def require_non_empty(label, value)
-      return if value.is_a?(String) && !value.strip.empty?
+      return if value.is_a?(String) && value.valid_encoding? && !value.strip.empty?
 
       raise SdkError.new("validation_error", "#{label} must be non-empty")
     end
@@ -739,7 +743,17 @@ module LogBrew
   end
 
   class Client
-    def self.create(api_key:, sdk_name:, sdk_version:, max_retries: 2)
+    def self.create(
+      api_key:,
+      sdk_name:,
+      sdk_version:,
+      max_retries: 2,
+      max_queue_size: BoundedEventQueue::DEFAULT_MAX_SIZE,
+      max_queue_bytes: BoundedEventQueue::DEFAULT_MAX_BYTES,
+      on_event_dropped: nil,
+      max_batch_size: EventBatcher::DEFAULT_MAX_SIZE,
+      max_batch_bytes: EventBatcher::DEFAULT_MAX_BYTES
+    )
       Validation.require_non_empty("api_key", api_key)
       Validation.require_non_empty("sdk_name", sdk_name)
       Validation.require_non_empty("sdk_version", sdk_version)
@@ -747,25 +761,62 @@ module LogBrew
 
       new(
         api_key: api_key,
-        sdk: { "name" => sdk_name, "language" => "ruby", "version" => sdk_version },
-        max_retries: max_retries
+        sdk: {
+          "name" => sdk_name.dup.freeze,
+          "language" => "ruby",
+          "version" => sdk_version.dup.freeze
+        }.freeze,
+        max_retries: max_retries,
+        max_queue_size: max_queue_size,
+        max_queue_bytes: max_queue_bytes,
+        on_event_dropped: on_event_dropped,
+        max_batch_size: max_batch_size,
+        max_batch_bytes: max_batch_bytes
       )
     end
 
-    def initialize(api_key:, sdk:, max_retries:)
+    def initialize(
+      api_key:,
+      sdk:,
+      max_retries:,
+      max_queue_size: BoundedEventQueue::DEFAULT_MAX_SIZE,
+      max_queue_bytes: BoundedEventQueue::DEFAULT_MAX_BYTES,
+      on_event_dropped: nil,
+      max_batch_size: EventBatcher::DEFAULT_MAX_SIZE,
+      max_batch_bytes: EventBatcher::DEFAULT_MAX_BYTES
+    )
       @api_key = api_key
       @sdk = sdk
       @max_retries = max_retries
-      @events = []
+      @event_batcher = EventBatcher.new(sdk: sdk, max_size: max_batch_size, max_bytes: max_batch_bytes)
+      @event_queue = BoundedEventQueue.new(
+        max_size: max_queue_size,
+        max_bytes: max_queue_bytes,
+        max_event_bytes: @event_batcher.max_event_bytes,
+        on_event_dropped: on_event_dropped
+      )
+      @state_mutex = Mutex.new
+      @flush_mutex = Mutex.new
       @closed = false
+      @closing = false
+      @retry_batch = nil
     end
 
     def pending_events
-      @events.length
+      @event_queue.length
+    end
+
+    def pending_event_bytes
+      @event_queue.pending_bytes
+    end
+
+    def dropped_events
+      @event_queue.dropped_events
     end
 
     def preview_json
-      JSON.pretty_generate("sdk" => @sdk, "events" => @events)
+      snapshot = @event_queue.snapshot
+      JSON.pretty_generate("sdk" => @sdk, "events" => snapshot.events)
     end
 
     def release(id, timestamp, attributes)
@@ -797,38 +848,81 @@ module LogBrew
     end
 
     def flush(transport)
-      raise SdkError.new("shutdown_error", "client is already shut down") if @closed
-
-      flush_internal(transport)
+      ensure_not_reentrant_flush
+      @flush_mutex.synchronize do
+        @state_mutex.synchronize { ensure_open }
+        flush_internal(transport)
+      end
     end
 
     def shutdown(transport)
-      raise SdkError.new("shutdown_error", "client is already shut down") if @closed
+      ensure_not_reentrant_flush
+      @flush_mutex.synchronize do
+        @state_mutex.synchronize do
+          ensure_open
+          @closing = true
+        end
 
-      response = flush_internal(transport)
-      @closed = true
-      response
+        succeeded = false
+        begin
+          response = flush_internal(transport)
+          succeeded = true
+          response
+        ensure
+          @state_mutex.synchronize do
+            @closed = true if succeeded
+            @closing = false
+          end
+        end
+      end
     end
 
     private
 
     def push_event(type, id, timestamp, attributes)
-      raise SdkError.new("shutdown_error", "client is already shut down") if @closed
-
       Validation.require_non_empty("event id", id)
       Validation.require_timestamp(timestamp)
-      @events << {
+      event = {
         "type" => type,
         "timestamp" => timestamp,
         "id" => id,
         "attributes" => attributes
       }
+      notice = @state_mutex.synchronize do
+        ensure_open
+        @event_queue.enqueue(event_id: id, event_type: type, event: event)
+      end
+      @event_queue.notify_drop(notice)
     end
 
     def flush_internal(transport)
-      return TransportResponse.new(204, 0) if @events.empty?
+      snapshot = @event_queue.snapshot
+      return TransportResponse.new(204, 0, 0) if snapshot.event_count.zero?
 
-      body = preview_json
+      remaining_events = snapshot.event_count
+      attempts = 0
+      batches = 0
+      status_code = 204
+
+      while remaining_events.positive?
+        batch = @retry_batch || @event_batcher.next_batch(
+          @event_queue.snapshot.serialized_events,
+          limit: remaining_events
+        )
+        @retry_batch = batch
+        response = send_batch(transport, batch.body)
+        @event_queue.acknowledge(batch)
+        @retry_batch = nil
+        remaining_events -= batch.event_count
+        attempts += response.attempts
+        batches += 1
+        status_code = response.status_code
+      end
+
+      TransportResponse.new(status_code, attempts, batches)
+    end
+
+    def send_batch(transport, body)
       max_attempts = @max_retries + 1
       (1..max_attempts).each do |attempt|
         begin
@@ -836,7 +930,6 @@ module LogBrew
           raise SdkError.new("unauthenticated", "transport rejected the API key") if response.status_code == 401
 
           if response.status_code >= 200 && response.status_code < 300
-            @events.clear
             return TransportResponse.new(response.status_code, attempt)
           end
           next if response.status_code >= 500 && attempt < max_attempts
@@ -849,6 +942,17 @@ module LogBrew
         end
       end
       raise SdkError.new("transport_error", "exhausted retries")
+    end
+
+    def ensure_not_reentrant_flush
+      return unless @flush_mutex.owned?
+
+      raise SdkError.new("flush_error", "flush is already in progress")
+    end
+
+    def ensure_open
+      raise SdkError.new("shutdown_error", "client is already shut down") if @closed
+      raise SdkError.new("shutdown_error", "client is shutting down") if @closing
     end
 
     def validate_release(attributes)
