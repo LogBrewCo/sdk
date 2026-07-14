@@ -79,6 +79,32 @@ class ConfidentialityScanTests(unittest.TestCase):
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
+    def test_allows_only_exact_java_aes_key_spec_references(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package_dir = root / "java" / "logbrew-java" / "src" / "main" / "java" / "co" / "logbrew" / "sdk"
+            package_dir.mkdir(parents=True)
+            crypto = package_dir / "PersistenceCrypto.java"
+            key_spec = "Sec" + "retKeySpec"
+            crypto.write_text(
+                f"import javax.crypto.spec.{key_spec};\n"
+                f'new {key_spec}(key, "AES"),\n',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            unsafe_name = "raw" + "Sec" + "ret"
+            crypto.write_text(
+                f"import javax.crypto.spec.{key_spec};\n"
+                f'new {key_spec}({unsafe_name}, "AES"),\n',
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn(unsafe_name, failures[0])
+
     def test_allows_sdk_instrumentation_uninstall_terms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

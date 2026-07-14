@@ -5,6 +5,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,12 +28,14 @@ public final class LogBrewClient {
     private final Deque<QueuedEvent> events;
     private final Object stateLock;
     private final Object deliveryLock;
+    private final EncryptedEventStore eventStore;
     private long pendingEventBytes;
     private long droppedEventBytes;
     private int droppedEvents;
     private boolean closing;
     private boolean closed;
     private Thread deliveryOwner;
+    private boolean persistenceRecovered;
 
     private LogBrewClient(
         String apiKey,
@@ -45,11 +48,16 @@ public final class LogBrewClient {
         this.events = new ArrayDeque<>();
         this.stateLock = new Object();
         this.deliveryLock = new Object();
+        this.eventStore = deliveryOptions.encryptedEventStore();
         Map<String, Object> sdkValue = new LinkedHashMap<>();
         sdkValue.put("name", sdkName);
         sdkValue.put("language", "java");
         sdkValue.put("version", sdkVersion);
         this.sdk = Collections.unmodifiableMap(sdkValue);
+        this.persistenceRecovered = eventStore == null;
+        if (eventStore != null) {
+            eventStore.attach();
+        }
     }
 
     /**
@@ -188,6 +196,57 @@ public final class LogBrewClient {
     }
 
     /**
+     * Recovers authenticated persisted events in oldest-first order before capture or delivery.
+     */
+    public PersistenceStatus recoverPersistedEvents() {
+        return recoverPersistence(false);
+    }
+
+    /**
+     * Verifies and finalizes one durable interrupted transaction, then recovers persisted events.
+     *
+     * <p>This method never guesses about orphaned writes. If the durable intent cannot prove the
+     * target bytes, callers must explicitly purge instead.</p>
+     */
+    public PersistenceStatus finalizePersistedTransactionAndRecover() {
+        return recoverPersistence(true);
+    }
+
+    /** Returns content-free persisted queue accounting without changing recovery state. */
+    public PersistenceStatus persistenceStatus() {
+        synchronized (deliveryLock) {
+            synchronized (stateLock) {
+                EncryptedEventStore store = requireEventStore();
+                return store.status(
+                    deliveryOptions.maxQueueEvents(),
+                    deliveryOptions.maxQueueBytes(),
+                    !persistenceRecovered
+                );
+            }
+        }
+    }
+
+    /** Explicitly removes all recognized persisted work and enables capture on an empty queue. */
+    public PersistenceStatus purgePersistedEvents() {
+        synchronized (deliveryLock) {
+            rejectDeliveryReentrancy();
+            synchronized (stateLock) {
+                ensureNotClosedOrClosing();
+                EncryptedEventStore store = requireEventStore();
+                store.purge();
+                events.clear();
+                pendingEventBytes = 0L;
+                persistenceRecovered = true;
+                return store.status(
+                    deliveryOptions.maxQueueEvents(),
+                    deliveryOptions.maxQueueBytes(),
+                    false
+                );
+            }
+        }
+    }
+
+    /**
      * Adds a release event to the queue.
      */
     public void release(String id, String timestamp, ReleaseAttributes attributes) {
@@ -260,8 +319,9 @@ public final class LogBrewClient {
         Validation.requireTimestamp(timestamp);
         Event event = new Event(type, timestamp, id, attributes);
         Map<String, Object> eventValue = Collections.unmodifiableMap(event.toMap());
-        long eventBytes = utf8Bytes(Json.write(eventValue));
-        QueuedEvent queuedEvent = new QueuedEvent(eventValue, eventBytes);
+        String eventJson = Json.write(eventValue);
+        long eventBytes = utf8Bytes(eventJson);
+        QueuedEvent queuedEvent = new QueuedEvent(id, eventJson, eventBytes, null);
         EventDrop drop = null;
 
         synchronized (stateLock) {
@@ -274,6 +334,15 @@ public final class LogBrewClient {
                 || eventBytes > deliveryOptions.maxQueueBytes() - pendingEventBytes) {
                 drop = recordDrop(id, type, "queue_overflow", eventBytes);
             } else {
+                if (eventStore != null) {
+                    EncryptedEventStore.Record record = eventStore.admit(
+                        id,
+                        eventJson,
+                        deliveryOptions.maxQueueEvents(),
+                        deliveryOptions.maxQueueBytes()
+                    );
+                    queuedEvent = new QueuedEvent(id, eventJson, eventBytes, record);
+                }
                 events.addLast(queuedEvent);
                 pendingEventBytes += eventBytes;
             }
@@ -302,6 +371,58 @@ public final class LogBrewClient {
         }
     }
 
+    private PersistenceStatus recoverPersistence(boolean finalizeAmbiguous) {
+        synchronized (deliveryLock) {
+            rejectDeliveryReentrancy();
+            synchronized (stateLock) {
+                ensureNotClosedOrClosing();
+                EncryptedEventStore store = requireEventStore();
+                if (!events.isEmpty() || pendingEventBytes != 0L) {
+                    throw new SdkException(
+                        "persistence_state_error",
+                        "persistence recovery requires an empty in-memory queue"
+                    );
+                }
+                EncryptedEventStore.Snapshot snapshot = store.recover(
+                    deliveryOptions.maxQueueEvents(),
+                    deliveryOptions.maxQueueBytes(),
+                    finalizeAmbiguous
+                );
+                for (EncryptedEventStore.Record record : snapshot.records()) {
+                    QueuedEvent event = new QueuedEvent(
+                        record.eventId(),
+                        record.eventJson(),
+                        record.eventBytes(),
+                        record
+                    );
+                    events.addLast(event);
+                    pendingEventBytes += event.serializedBytes;
+                }
+                persistenceRecovered = true;
+                return snapshot.status(false);
+            }
+        }
+    }
+
+    private EncryptedEventStore requireEventStore() {
+        if (eventStore == null) {
+            throw new SdkException(
+                "persistence_disabled",
+                "encrypted restart persistence is not enabled for this client"
+            );
+        }
+        return eventStore;
+    }
+
+    private void rejectDeliveryReentrancy() {
+        if (deliveryOwner == Thread.currentThread()) {
+            throw new SdkException(
+                "reentrancy_error",
+                "persistence recovery cannot run from the active transport callback"
+            );
+        }
+    }
+
     private TransportResponse deliver(Transport transport, boolean shutdown) {
         synchronized (deliveryLock) {
             if (deliveryOwner == Thread.currentThread()) {
@@ -317,6 +438,7 @@ public final class LogBrewClient {
                     if (closed) {
                         throw new SdkException("shutdown_error", "client is already shut down");
                     }
+                    ensurePersistenceRecovered();
                     if (shutdown) {
                         closing = true;
                     }
@@ -420,6 +542,23 @@ public final class LogBrewClient {
 
     private void acknowledgePrefix(List<QueuedEvent> accepted) {
         synchronized (stateLock) {
+            List<EncryptedEventStore.Record> persisted = new ArrayList<>();
+            Iterator<QueuedEvent> queued = events.iterator();
+            for (QueuedEvent expected : accepted) {
+                QueuedEvent actual = queued.hasNext() ? queued.next() : null;
+                if (actual != expected) {
+                    throw new SdkException("delivery_error", "queued event ownership changed during delivery");
+                }
+                if (eventStore != null) {
+                    if (actual.persistedRecord == null) {
+                        throw new SdkException("delivery_error", "persisted event ownership is missing");
+                    }
+                    persisted.add(actual.persistedRecord);
+                }
+            }
+            if (eventStore != null) {
+                eventStore.acknowledge(persisted);
+            }
             for (QueuedEvent expected : accepted) {
                 QueuedEvent actual = events.peekFirst();
                 if (actual != expected) {
@@ -432,6 +571,11 @@ public final class LogBrewClient {
     }
 
     private void ensureWritable() {
+        ensureNotClosedOrClosing();
+        ensurePersistenceRecovered();
+    }
+
+    private void ensureNotClosedOrClosing() {
         if (closed) {
             throw new SdkException("shutdown_error", "client is already shut down");
         }
@@ -440,21 +584,50 @@ public final class LogBrewClient {
         }
     }
 
+    private void ensurePersistenceRecovered() {
+        if (!persistenceRecovered) {
+            throw new SdkException(
+                "persistence_recovery_required",
+                "recover or purge persistence before capture or delivery"
+            );
+        }
+    }
+
     private List<QueuedEvent> snapshotEvents() {
         synchronized (stateLock) {
+            ensurePersistenceRecovered();
             return new ArrayList<>(events);
         }
     }
 
     private String serializeBatch(List<QueuedEvent> batchEvents) {
-        Map<String, Object> batch = new LinkedHashMap<>();
-        batch.put("sdk", sdk);
-        List<Map<String, Object>> mappedEvents = new ArrayList<>();
-        for (QueuedEvent event : batchEvents) {
-            mappedEvents.add(event.value);
+        StringBuilder builder = new StringBuilder();
+        builder.append("{\n  \"sdk\": ");
+        appendIndented(builder, Json.write(sdk), "  ");
+        builder.append(",\n  \"events\": [");
+        if (!batchEvents.isEmpty()) {
+            builder.append('\n');
+            for (int index = 0; index < batchEvents.size(); index++) {
+                builder.append("    ");
+                appendIndented(builder, batchEvents.get(index).eventJson, "    ");
+                if (index + 1 < batchEvents.size()) {
+                    builder.append(',');
+                }
+                builder.append('\n');
+            }
+            builder.append("  ");
         }
-        batch.put("events", mappedEvents);
-        return Json.write(batch);
+        return builder.append("]\n}").toString();
+    }
+
+    private static void appendIndented(StringBuilder builder, String value, String indentation) {
+        int start = 0;
+        int newline;
+        while ((newline = value.indexOf('\n', start)) >= 0) {
+            builder.append(value, start, newline + 1).append(indentation);
+            start = newline + 1;
+        }
+        builder.append(value, start, value.length());
     }
 
     private static int utf8Bytes(String value) {
@@ -517,12 +690,21 @@ public final class LogBrewClient {
     }
 
     private static final class QueuedEvent {
-        private final Map<String, Object> value;
+        private final String eventId;
+        private final String eventJson;
         private final long serializedBytes;
+        private final EncryptedEventStore.Record persistedRecord;
 
-        private QueuedEvent(Map<String, Object> value, long serializedBytes) {
-            this.value = value;
+        private QueuedEvent(
+            String eventId,
+            String eventJson,
+            long serializedBytes,
+            EncryptedEventStore.Record persistedRecord
+        ) {
+            this.eventId = eventId;
+            this.eventJson = eventJson;
             this.serializedBytes = serializedBytes;
+            this.persistedRecord = persistedRecord;
         }
     }
 

@@ -791,7 +791,44 @@ Defaults retain at most 1,000 events and 4 MiB of serialized event JSON, then se
 
 `flush(...)` freezes only the events present when that call starts, retries each serialized request without rebuilding it, and acknowledges each accepted prefix before moving to the next request. A failed request and all later work remain queued, including events captured while transport I/O is active. Concurrent flush and shutdown calls run serially without background workers; a transport callback that recursively calls flush or shutdown receives `reentrancy_error` instead of recursing. A failed shutdown leaves the client open with unaccepted work intact, while a successful shutdown rejects later writes.
 
-Migration note: custom `Transport` implementations may now receive multiple sequential `send(...)` calls from one flush when queue contents exceed a request bound. Responses returned by `LogBrewClient` contain aggregate attempts, accepted batches, and accepted events. A direct two-argument `TransportResponse` reports one accepted batch only for a 2xx status and leaves `acceptedEvents()` at zero because the transport does not know the batch's event count. Delivery is still caller-driven and in-memory only: the SDK creates no timer or thread and does not claim durability across process termination.
+Migration note: custom `Transport` implementations may now receive multiple sequential `send(...)` calls from one flush when queue contents exceed a request bound. Responses returned by `LogBrewClient` contain aggregate attempts, accepted batches, and accepted events. A direct two-argument `TransportResponse` reports one accepted batch only for a 2xx status and leaves `acceptedEvents()` at zero because the transport does not know the batch's event count. Delivery is still caller-driven and defaults to memory only: the SDK creates no timer or thread.
+
+### Encrypted restart delivery
+
+Server processes on a POSIX filesystem can opt into authenticated restart persistence without changing their `Transport` or endpoint:
+
+```java
+import co.logbrew.sdk.DeliveryOptions;
+import co.logbrew.sdk.EncryptedEventStore;
+import co.logbrew.sdk.LogBrewClient;
+import java.nio.file.Path;
+import java.util.Arrays;
+
+byte[] persistenceKey = loadPersistenceKey(); // 16, 24, or 32 bytes
+try (EncryptedEventStore store = EncryptedEventStore.open(
+    Path.of("/var/lib/checkout/logbrew"),
+    persistenceKey
+)) {
+    LogBrewClient client = LogBrewClient.create(
+        "LOGBREW_INGEST_KEY",
+        "checkout-api",
+        "1.0.0",
+        DeliveryOptions.builder().encryptedEventStore(store).build()
+    );
+
+    client.recoverPersistedEvents();
+    // Capture and flush normally. Admission is durable before the event enters memory.
+    client.shutdown(transport);
+} finally {
+    Arrays.fill(persistenceKey, (byte) 0);
+}
+```
+
+Persistence is disabled by default and adds no thread, timer, process hook, or dependency. The store encrypts canonical event bytes and stable event IDs with standard-library AES-GCM before memory admission, preserves the same count and UTF-8 byte bounds as the client, recovers contiguous records oldest first, and checkpoints only accepted prefixes. Each admission atomically advances an authenticated high-water boundary with its event record, so recovery rejects missing sole, interior, or trailing records instead of trusting a shorter queue. Retry bodies remain byte-identical after restart. A failed shutdown leaves encrypted work available to the next process.
+
+The caller owns the key and the store lifetime. Key bytes are copied only into process memory and are never written to the store. `recoverPersistedEvents()` or `purgePersistedEvents()` is required before capture. If a crash leaves a durable transaction intent, normal recovery fails closed; call `finalizePersistedTransactionAndRecover()` to authenticate its encrypted targets and digests, or explicitly purge. Only one process may own a store. Directory replacement, lock replacement, symbolic links, unknown files, record gaps, tampering, unsafe permissions, and ambiguous writes are rejected. Hard links are also rejected when the supported provider exposes `unix:nlink`.
+
+The current implementation requires a filesystem that exposes atomic moves, stable file identity, directory syncing, link counts when available, and atomically created POSIX `0700` directories plus `0600` files. It returns `persistence_unsupported` instead of relying on umask or default ACLs when owner-only permissions cannot be proven. Encrypted filenames, file sizes, counts, and update timing remain observable to the local filesystem owner. There is no automatic key rotation, cross-host sharing, background upload, or `atexit` durability claim. See `examples/EncryptedRestartDelivery.java` for environment-driven key and directory setup.
 
 ## Standard Java Logging
 
@@ -881,12 +918,13 @@ appender.stop();
 
 From `java/logbrew-java`:
 
-The `examples` directory contains copyable snippets for creating a client, configuring bounded delivery, producing a first useful telemetry payload, sending through `HttpTransport`, attaching `java.util.logging`, and configuring the optional Logback appender in your own Java service.
+The `examples` directory contains copyable snippets for creating a client, configuring bounded or encrypted restart delivery, producing a first useful telemetry payload, sending through `HttpTransport`, attaching `java.util.logging`, and configuring the optional Logback appender in your own Java service.
 
 ## Behavior
 
 - `previewJson()` returns the queued batch as pretty JSON.
 - `LogBrewClient` keeps a bounded in-memory queue of 1,000 events and 4 MiB of serialized event JSON by default; use `DeliveryOptions` to tune count, byte, request, retry, and advisory drop bounds. When either queue bound is full, the newest event is dropped, content-free counters increment, and drop-callback failures do not interrupt application logging. The older `create(..., maxRetries, maxQueueSize, drop)` overload remains supported with the new default byte and request bounds.
+- `EncryptedEventStore` adds explicit caller-owned AES-GCM restart persistence on supported POSIX filesystems without changing default memory delivery.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
 - `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when only OpenTelemetry API jars are present; `LogBrewOpenTelemetrySdk` exposes an app-owned `spanExporter` or `spanProcessor` when the app also uses `opentelemetry-sdk-trace`.

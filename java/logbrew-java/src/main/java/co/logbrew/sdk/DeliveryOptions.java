@@ -1,10 +1,12 @@
 package co.logbrew.sdk;
 
+import java.util.Objects;
+
 /**
  * Immutable in-memory delivery bounds for {@link LogBrewClient}.
  *
- * <p>Delivery remains caller-driven: these options do not create timers, threads, or persistent
- * storage.</p>
+ * <p>Delivery remains caller-driven: these options do not create timers or threads. Restart
+ * persistence is disabled unless a caller-owned {@link EncryptedEventStore} is supplied.</p>
  */
 public final class DeliveryOptions {
     /** Default retry count after the first transport attempt. */
@@ -24,6 +26,7 @@ public final class DeliveryOptions {
     private final int maxBatchEvents;
     private final int maxBatchBytes;
     private final LogBrewClient.EventDroppedHandler eventDroppedHandler;
+    private final EncryptedEventStore encryptedEventStore;
 
     private DeliveryOptions(Builder builder) {
         this.maxRetries = builder.maxRetries;
@@ -32,6 +35,7 @@ public final class DeliveryOptions {
         this.maxBatchEvents = builder.maxBatchEvents;
         this.maxBatchBytes = builder.maxBatchBytes;
         this.eventDroppedHandler = builder.eventDroppedHandler;
+        this.encryptedEventStore = builder.encryptedEventStore;
     }
 
     /**
@@ -70,6 +74,10 @@ public final class DeliveryOptions {
         return eventDroppedHandler;
     }
 
+    EncryptedEventStore encryptedEventStore() {
+        return encryptedEventStore;
+    }
+
     /**
      * Builder for explicit delivery bounds.
      */
@@ -80,6 +88,7 @@ public final class DeliveryOptions {
         private int maxBatchEvents = DEFAULT_MAX_BATCH_EVENTS;
         private int maxBatchBytes = DEFAULT_MAX_BATCH_BYTES;
         private LogBrewClient.EventDroppedHandler eventDroppedHandler;
+        private EncryptedEventStore encryptedEventStore;
 
         private Builder() {
         }
@@ -117,6 +126,17 @@ public final class DeliveryOptions {
         /** Sets an advisory callback for events rejected before queueing. */
         public Builder onEventDropped(LogBrewClient.EventDroppedHandler value) {
             this.eventDroppedHandler = value;
+            return this;
+        }
+
+        /**
+         * Enables explicit caller-owned encrypted restart persistence.
+         *
+         * <p>The client requires recovery or purge before capture. The caller remains responsible
+         * for closing the store after the client finishes delivery.</p>
+         */
+        public Builder encryptedEventStore(EncryptedEventStore value) {
+            this.encryptedEventStore = Objects.requireNonNull(value, "encryptedEventStore");
             return this;
         }
 

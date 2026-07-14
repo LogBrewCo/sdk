@@ -183,6 +183,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_java_jdbc_metadata_denylist_literal(relative_text, line):
         return True
 
+    if is_java_aes_key_spec_reference(relative_text, line):
+        return True
+
     if is_js_opentelemetry_privacy_denylist_literal(relative_text, line):
         return True
 
@@ -223,6 +226,17 @@ def is_allowed_match(relative: Path, line: str) -> bool:
         return True
 
     return False
+
+
+def is_java_aes_key_spec_reference(relative_text: str, line: str) -> bool:
+    if relative_text != (
+        "java/logbrew-java/src/main/java/co/logbrew/sdk/PersistenceCrypto.java"
+    ):
+        return False
+    return line.strip() in {
+        "import javax.crypto.spec.SecretKeySpec;",
+        'new SecretKeySpec(key, "AES"),',
+    }
 
 
 def is_brand_svg_asset(relative: Path) -> bool:
