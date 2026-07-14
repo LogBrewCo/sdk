@@ -47,6 +47,7 @@ public final class EncryptedEventStoreTest {
         testMissingFirstAndInteriorRecordsFailClosed();
         testMissingSoleAndTrailingRecordsFailClosed();
         testAcknowledgedDeletionLeftoversRemainRecoverable();
+        testAcknowledgedDeletionRetriesWithoutDuplicateRecovery();
         testInterruptedPurgeRequiresExplicitRetry();
         System.out.println("encrypted event-store tests ok (" + testsRun + " tests)");
     }
@@ -753,6 +754,100 @@ public final class EncryptedEventStoreTest {
         } finally {
             Arrays.fill(key, (byte) 0);
             deleteTree(directory);
+        }
+        testsRun++;
+    }
+
+    private void testAcknowledgedDeletionRetriesWithoutDuplicateRecovery() throws Exception {
+        Path subsequentDirectory = createRealTempDirectory("logbrew-java-deletion-retry-ack");
+        byte[] subsequentKey = key(91);
+        AtomicBoolean failFirstDelete = new AtomicBoolean(true);
+        try (EncryptedEventStore store = EncryptedEventStore.open(
+            subsequentDirectory,
+            subsequentKey,
+            point -> {
+                if (point == EncryptedEventStore.FailurePoint.BEFORE_ACKNOWLEDGED_PRUNE
+                    && failFirstDelete.compareAndSet(true, false)) {
+                    throw new IOException("injected delete failure");
+                }
+            }
+        )) {
+            store.attach();
+            store.recover(10, 4096L, false);
+            EncryptedEventStore.Record first = store.admit(
+                "evt_retry_delete_1",
+                "{\"id\":\"evt_retry_delete_1\"}",
+                10,
+                4096L
+            );
+            EncryptedEventStore.Record second = store.admit(
+                "evt_retry_delete_2",
+                "{\"id\":\"evt_retry_delete_2\"}",
+                10,
+                4096L
+            );
+            store.acknowledge(Collections.singletonList(first));
+            assertEquals(2, recordPaths(subsequentDirectory).size(), "accepted record retained after delete failure");
+            store.acknowledge(Collections.singletonList(second));
+            assertEquals(0, recordPaths(subsequentDirectory).size(), "later acknowledgement retries deletion");
+        } finally {
+            Arrays.fill(subsequentKey, (byte) 0);
+            deleteTree(subsequentDirectory);
+        }
+
+        Path recoveryDirectory = createRealTempDirectory("logbrew-java-deletion-retry-recovery");
+        byte[] recoveryKey = key(93);
+        try {
+            try (EncryptedEventStore store = failingStore(
+                recoveryDirectory,
+                recoveryKey,
+                EncryptedEventStore.FailurePoint.BEFORE_ACKNOWLEDGED_PRUNE
+            )) {
+                store.attach();
+                store.recover(10, 4096L, false);
+                EncryptedEventStore.Record first = store.admit(
+                    "evt_recovery_delete_1",
+                    "{\"id\":\"evt_recovery_delete_1\"}",
+                    10,
+                    4096L
+                );
+                store.admit(
+                    "evt_recovery_delete_2",
+                    "{\"id\":\"evt_recovery_delete_2\"}",
+                    10,
+                    4096L
+                );
+                store.acknowledge(Collections.singletonList(first));
+                assertEquals(2, recordPaths(recoveryDirectory).size(), "checkpoint remains authoritative");
+            }
+
+            try (EncryptedEventStore store = failingStore(
+                recoveryDirectory,
+                recoveryKey,
+                EncryptedEventStore.FailurePoint.BEFORE_ACKNOWLEDGED_PRUNE
+            )) {
+                store.attach();
+                assertEquals(
+                    "persistence_prune_error",
+                    expectSdkException(() -> store.recover(10, 4096L, false)).code(),
+                    "explicit recovery pruning failure"
+                );
+            }
+
+            try (EncryptedEventStore store = EncryptedEventStore.open(recoveryDirectory, recoveryKey)) {
+                store.attach();
+                EncryptedEventStore.Snapshot snapshot = store.recover(10, 4096L, false);
+                assertEquals(1, snapshot.records().size(), "accepted event stays hidden");
+                assertEquals(
+                    "evt_recovery_delete_2",
+                    snapshot.records().get(0).eventId(),
+                    "only unaccepted event recovers"
+                );
+                assertEquals(1, recordPaths(recoveryDirectory).size(), "reopen pruning removes accepted record");
+            }
+        } finally {
+            Arrays.fill(recoveryKey, (byte) 0);
+            deleteTree(recoveryDirectory);
         }
         testsRun++;
     }

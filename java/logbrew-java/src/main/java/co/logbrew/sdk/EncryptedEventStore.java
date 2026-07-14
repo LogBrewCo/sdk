@@ -4,8 +4,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -26,6 +24,7 @@ public final class EncryptedEventStore implements AutoCloseable {
     private final PersistenceCrypto crypto;
     private final PersistenceTransaction transaction;
     private final PersistenceRecordCodec recordCodec;
+    private final FailureInjector failureInjector;
     private final byte[] storeId;
     private List<Record> activeRecords = new ArrayList<>();
     private long checkpointSequence;
@@ -117,6 +116,7 @@ public final class EncryptedEventStore implements AutoCloseable {
         this.files = files;
         this.crypto = crypto;
         this.storeId = storeId;
+        this.failureInjector = failureInjector;
         this.transaction = new PersistenceTransaction(files, crypto, storeId, failureInjector);
         this.recordCodec = new PersistenceRecordCodec(files, crypto, storeId);
     }
@@ -145,6 +145,7 @@ public final class EncryptedEventStore implements AutoCloseable {
             );
         }
         Snapshot snapshot = inspect(maxEvents, maxBytes);
+        pruneCheckpointedRecords(snapshot.checkpointSequence, true);
         activeRecords = new ArrayList<>(snapshot.records);
         checkpointSequence = snapshot.checkpointSequence;
         nextSequence = snapshot.nextSequence;
@@ -261,7 +262,7 @@ public final class EncryptedEventStore implements AutoCloseable {
             activeRecords = new ArrayList<>(
                 activeRecords.subList(records.size(), activeRecords.size())
             );
-            deleteAcknowledgedRecords(records);
+            pruneCheckpointedRecords(checkpointSequence, false);
         } catch (SdkException error) {
             if ("persistence_ambiguous".equals(error.code())) {
                 failed = true;
@@ -359,20 +360,27 @@ public final class EncryptedEventStore implements AutoCloseable {
         );
     }
 
-    private void deleteAcknowledgedRecords(List<Record> records) {
-        boolean deleted = false;
+    private void pruneCheckpointedRecords(long checkpoint, boolean strict) {
+        if (checkpoint <= 0L) {
+            return;
+        }
         try {
-            for (Record record : records) {
-                if (Files.exists(record.path, LinkOption.NOFOLLOW_LINKS)) {
-                    files.delete(record.path);
-                    deleted = true;
+            PersistenceFiles.Layout layout = files.layout();
+            for (Path path : layout.recordFiles) {
+                if (PersistenceFiles.recordSequence(path) <= checkpoint) {
+                    failureInjector.fail(FailurePoint.BEFORE_ACKNOWLEDGED_PRUNE);
+                    files.delete(path);
                 }
             }
-            if (deleted) {
-                files.syncDirectory();
-            }
+            files.syncDirectory();
         } catch (IOException | SdkException error) {
-            // The durable checkpoint remains authoritative if encrypted-record deletion is delayed.
+            if (strict) {
+                throw new SdkException(
+                    "persistence_prune_error",
+                    "checkpointed persistence could not be pruned safely"
+                );
+            }
+            // The durable checkpoint stays authoritative; later acknowledgement/recovery retries.
         }
     }
 
@@ -428,6 +436,7 @@ public final class EncryptedEventStore implements AutoCloseable {
         AFTER_HIGH_WATER_RENAME,
         BEFORE_CHECKPOINT_RENAME,
         AFTER_CHECKPOINT_RENAME,
+        BEFORE_ACKNOWLEDGED_PRUNE,
         BEFORE_PURGE_SYNC
     }
 
