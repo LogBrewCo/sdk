@@ -761,6 +761,38 @@ System.err.println(response.statusCode());
 
 `HttpTransport` uses Java 11's standard `java.net.http.HttpClient`, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint/header/client/timeout settings, discards response bodies, and maps client delivery failures into retryable `TransportException.network(...)` values so `LogBrewClient.flush(...)` can preserve queued events and retry. Inject a custom `HttpClient` when a service already owns proxy, TLS, timeout, executor, or transport settings.
 
+### Bounded delivery
+
+Use `DeliveryOptions` when a service needs explicit memory and request bounds:
+
+```java
+import co.logbrew.sdk.DeliveryOptions;
+import co.logbrew.sdk.LogBrewClient;
+
+DeliveryOptions delivery = DeliveryOptions.builder()
+    .maxRetries(2)
+    .maxQueueEvents(2_000)
+    .maxQueueBytes(8L * 1024L * 1024L)
+    .maxBatchEvents(100)
+    .maxBatchBytes(512 * 1024)
+    .onEventDropped(drop -> System.err.println(
+        "dropped=" + drop.reason() + " bytes=" + drop.serializedBytes()))
+    .build();
+
+LogBrewClient client = LogBrewClient.create(
+    "LOGBREW_INGEST_KEY",
+    "checkout-api",
+    "1.0.0",
+    delivery
+);
+```
+
+Defaults retain at most 1,000 events and 4 MiB of serialized event JSON, then send requests containing at most 100 events and 512 KiB of UTF-8 JSON. Queue-byte accounting excludes the repeated SDK envelope and JSON collection separators; request-byte accounting includes the complete body. An event that cannot fit one bounded request is rejected before queueing. `pendingEvents()`, `pendingEventBytes()`, `droppedEvents()`, `droppedEventBytes()`, `TransportResponse.batches()`, `TransportResponse.acceptedEvents()`, and `EventDrop.serializedBytes()` expose numeric accounting without event messages, attributes, headers, URLs, or response bodies.
+
+`flush(...)` freezes only the events present when that call starts, retries each serialized request without rebuilding it, and acknowledges each accepted prefix before moving to the next request. A failed request and all later work remain queued, including events captured while transport I/O is active. Concurrent flush and shutdown calls run serially without background workers; a transport callback that recursively calls flush or shutdown receives `reentrancy_error` instead of recursing. A failed shutdown leaves the client open with unaccepted work intact, while a successful shutdown rejects later writes.
+
+Migration note: custom `Transport` implementations may now receive multiple sequential `send(...)` calls from one flush when queue contents exceed a request bound. Responses returned by `LogBrewClient` contain aggregate attempts, accepted batches, and accepted events. A direct two-argument `TransportResponse` reports one accepted batch only for a 2xx status and leaves `acceptedEvents()` at zero because the transport does not know the batch's event count. Delivery is still caller-driven and in-memory only: the SDK creates no timer or thread and does not claim durability across process termination.
+
 ## Standard Java Logging
 
 For apps that already use `java.util.logging`, attach `LogBrewJulHandler` to the logger you own:
@@ -849,12 +881,12 @@ appender.stop();
 
 From `java/logbrew-java`:
 
-The `examples` directory contains copyable snippets for creating a client, producing a first useful telemetry payload, sending through `HttpTransport`, attaching `java.util.logging`, and configuring the optional Logback appender in your own Java service.
+The `examples` directory contains copyable snippets for creating a client, configuring bounded delivery, producing a first useful telemetry payload, sending through `HttpTransport`, attaching `java.util.logging`, and configuring the optional Logback appender in your own Java service.
 
 ## Behavior
 
 - `previewJson()` returns the queued batch as pretty JSON.
-- `LogBrewClient` keeps a bounded in-memory queue of 1,000 events by default; use `LogBrewClient.create(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, drop -> ...)` to tune the cap and receive redacted advisory drop summaries. When the queue is full, the newest event is dropped, `droppedEvents()` increments, and drop-callback failures do not interrupt application logging.
+- `LogBrewClient` keeps a bounded in-memory queue of 1,000 events and 4 MiB of serialized event JSON by default; use `DeliveryOptions` to tune count, byte, request, retry, and advisory drop bounds. When either queue bound is full, the newest event is dropped, content-free counters increment, and drop-callback failures do not interrupt application logging. The older `create(..., maxRetries, maxQueueSize, drop)` overload remains supported with the new default byte and request bounds.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
 - `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when only OpenTelemetry API jars are present; `LogBrewOpenTelemetrySdk` exposes an app-owned `spanExporter` or `spanProcessor` when the app also uses `opentelemetry-sdk-trace`.
@@ -866,8 +898,8 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `LogBrewSpringBootJdbcAutoConfiguration` wraps app-owned Spring `DataSource` beans with privacy-bounded JDBC statement spans when Spring Boot, `DataSource`, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans with bounded `SpanEventSummary` markers, without adding driver dependencies or automatic client patching.
 - `LogBrewJmsTracing` traces app-owned JMS-style `send`, `receive`, `process`, and `processBatch` calls through app-owned callbacks and `setStringProperty` / `getStringProperty` without adding a JMS dependency or patching broker clients.
-- `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
-- `shutdown(transport)` flushes queued events and rejects later writes.
+- `flush(transport)` sends a bounded start snapshot, retries immutable request bodies, acknowledges accepted prefixes, and retains failed or later work.
+- `shutdown(transport)` serializes with active flushes, closes only after success, and reopens with unaccepted work after failure.
 - `isClosed()` returns whether `shutdown(transport)` has closed the client.
 - `HttpTransport` sends queued batches through dependency-free `java.net.http` delivery for server-side apps.
 - `RecordingTransport.alwaysAccept()` is useful when you want to inspect queued JSON before network delivery.

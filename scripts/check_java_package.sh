@@ -55,6 +55,7 @@ if [ -d "$package_dir/src/main/resources" ]; then
 fi
 javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/classes:$java_optional_classpath" -d "$tmp_dir/test-classes" @"$test_sources"
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewClientTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewDeliveryTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewTraceTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewServletFilterTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.SpanEventSummaryTest
@@ -77,6 +78,7 @@ python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
 
 javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$java_optional_classpath" -d "$tmp_dir/javadoc" @"$main_sources"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewClient.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/DeliveryOptions.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/HttpTransport.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/MetricAttributes.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/ProductTimeline.html"
@@ -112,6 +114,7 @@ if [ -d "$package_dir/src/main/resources" ]; then
 fi
 jar --list --file "$tmp_dir/logbrew-sdk-$package_version-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryOptions.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline.java$' "$tmp_dir/sources-jar-contents.txt"
@@ -146,6 +149,7 @@ jar --create --file "$tmp_dir/logbrew-sdk-$package_version-javadoc.jar" -C "$tmp
 jar --list --file "$tmp_dir/logbrew-sdk-$package_version-javadoc.jar" > "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^index.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryOptions.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline.html$' "$tmp_dir/javadoc-jar-contents.txt"
@@ -181,6 +185,8 @@ fi
 jar --create --file "$tmp_dir/logbrew-sdk-$package_version.jar" -C "$tmp_dir/jar-stage" .
 jar --list --file "$tmp_dir/logbrew-sdk-$package_version.jar" > "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryOptions.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryOptions\$Builder.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDrop.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDroppedHandler.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
@@ -274,6 +280,8 @@ grep -q 'LogBrewJdbcTracing' "$package_dir/README.md"
 grep -q 'SupportTicketDraft' "$package_dir/README.md"
 grep -q 'droppedEvents()' "$package_dir/README.md"
 grep -q 'maxQueueSize' "$package_dir/README.md"
+grep -q 'DeliveryOptions' "$package_dir/README.md"
+grep -q 'pendingEventBytes()' "$package_dir/README.md"
 grep -q 'first useful LogBrew payload' "$package_dir/README.md"
 grep -q 'without visual replay, HTTP client patching, request/response payload capture, or header capture' "$package_dir/README.md"
 grep -q 'This SDK does not automatically collect JVM, runtime, or framework metrics yet.' "$package_dir/README.md"
@@ -303,6 +311,7 @@ make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/examples-help.txt"
+grep -qx 'run-delivery-reliability -> make run-delivery-reliability' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 
