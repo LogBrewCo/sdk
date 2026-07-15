@@ -170,6 +170,46 @@ server.listen(3000);
 
 The wrapper keeps app response ownership, records URL path without query text, and adds portable HTTP semantic metadata such as `http.request.method`, `http.response.status_code`, and `url.path`. It does not collect request bodies, response bodies, arbitrary headers, or outgoing calls automatically. Use the explicit action, network milestone, and outbound fetch helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
 
+## Delivery Bounds
+
+`createLogBrewNodeClient()` accepts the core delivery controls directly. Defaults retain at most 1,000 events and 4 MiB of compact event data, then split each explicit flush into at most 100 events or 256 KiB of UTF-8 JSON per request.
+
+```js
+const client = createLogBrewNodeClient({
+  maxQueueSize: 1000,
+  maxQueueBytes: 4 * 1024 * 1024,
+  maxBatchEvents: 100,
+  maxBatchBytes: 256 * 1024
+});
+```
+
+Concurrent flush calls are serialized. Events captured during network I/O remain queued for the next flush, retries reuse one stable body, and only acknowledged prefixes leave memory. `shutdown()` blocks new capture while draining and reopens the retained remainder if delivery fails.
+
+### Encrypted restart recovery
+
+Node services can opt into an app-scoped disk queue. The default remains memory-only. Supply a canonical absolute directory and an app-managed 32-byte key:
+
+```js
+import fs from "node:fs";
+import { createLogBrewNodeClient } from "@logbrew/node";
+
+const client = createLogBrewNodeClient({
+  persistentQueue: {
+    directory: process.env.LOGBREW_QUEUE_DIRECTORY,
+    encryptionKey: fs.readFileSync(process.env.LOGBREW_QUEUE_KEY_FILE),
+    onWarning({ code }) {
+      console.warn("LogBrew persistent queue warning", code);
+    }
+  }
+});
+```
+
+The POSIX-only adapter writes one AES-256-GCM record per event before volatile admission, replays oldest-first after restart, and advances an accepted-sequence marker before deleting acknowledged files. Failed batches retain their exact compact event JSON and stable event IDs, so backend deduplication can make at-least-once replay safe. A successful `shutdown()` drains and releases the queue; a failed shutdown leaves the encrypted remainder recoverable. If a rename completes but its directory sync cannot be confirmed, the adapter raises `persistence_commit_error` and blocks further queue use until restart rather than guessing whether the record or marker committed. Call `client.purgePendingEvents()` only when no delivery operation is active to explicitly remove pending data.
+
+The directory must be normalized, below the filesystem root, owned by the current user, mode `0700`, and contain no symbolic-link component. Queue files are mode `0600`, regular, single-linked files. One live process owns a queue at a time; a later process can recover a lock whose recorded PID no longer exists. The adapter encrypts event content and does not add the encryption key, transport API key, endpoint, headers, or local path to queue files or the content-free manifest. Keep the key outside the queue, provision it with your normal key-management system, and retain it across restarts or the encrypted records intentionally fail closed.
+
+Persistence uses synchronous filesystem operations so capture returns only after the event is durable. Use a dedicated local filesystem directory, keep normal queue bounds, and do not place it on a shared or network filesystem. The adapter does not start timers, retry in the background, intercept process exits, or promise durability after `process.exit()`/`os._exit`; your app still owns flush cadence and graceful shutdown.
+
 ## Outbound Fetch Spans
 
 Use `fetchWithLogBrewSpan()` for important downstream calls you want linked to the active request trace. It wraps one app-owned `fetch` call, clones caller headers, writes one normalized W3C `traceparent`, queues one client span, and leaves flushing/shutdown to your existing `LogBrewClient` lifecycle:

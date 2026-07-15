@@ -21,10 +21,15 @@ import { instrumentLogBrewMongooseModel as instrumentMongooseModel } from "./mon
 import { instrumentLogBrewPgClient as instrumentPgClient } from "./pg.js";
 import { instrumentLogBrewRedisClient as instrumentRedisClient } from "./redis.js";
 import { installLogBrewUndiciInstrumentation as installUndiciInstrumentation } from "./undici.js";
+import { buildNodePersistentEventStore } from "./persistent-event-store.js";
 
 const DEFAULT_SDK_NAME = "logbrew-node";
 const DEFAULT_SDK_VERSION = "0.1.0";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
+const DEFAULT_MAX_QUEUE_SIZE = 1000;
+const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_BATCH_EVENTS = 100;
+const DEFAULT_MAX_BATCH_BYTES = 256 * 1024;
 const MAX_SPAN_EVENTS = 8;
 const FETCH_TIMING_METADATA_KEYS = Object.freeze({
   connectMs: "http.phase.connect_ms",
@@ -56,9 +61,13 @@ export function createLogBrewNodeClient({
   apiKey,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
+  maxBatchBytes,
+  maxBatchEvents,
   maxRetries = 2,
+  maxQueueBytes,
   maxQueueSize,
-  onEventDropped
+  onEventDropped,
+  persistentQueue
 } = {}) {
   const authKey = serverApiKey ?? apiKey ?? readEnvServerApiKey() ?? readEnvApiKey();
   if (!authKey) {
@@ -67,14 +76,43 @@ export function createLogBrewNodeClient({
       "createLogBrewNodeClient requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({
-    apiKey: authKey,
-    sdkName,
-    sdkVersion,
-    maxRetries,
-    ...(maxQueueSize !== undefined ? { maxQueueSize } : {}),
-    ...(onEventDropped !== undefined ? { onEventDropped } : {})
-  });
+  if (persistentQueue !== undefined && (!persistentQueue || Array.isArray(persistentQueue) || typeof persistentQueue !== "object")) {
+    throw new SdkError("configuration_error", "persistentQueue must be an object");
+  }
+  const limits = {
+    maxBatchBytes: maxBatchBytes ?? DEFAULT_MAX_BATCH_BYTES,
+    maxBatchEvents: maxBatchEvents ?? DEFAULT_MAX_BATCH_EVENTS,
+    maxQueueBytes: maxQueueBytes ?? DEFAULT_MAX_QUEUE_BYTES,
+    maxQueueSize: maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE
+  };
+  const eventStore = persistentQueue === undefined
+    ? undefined
+    : buildNodePersistentEventStore({
+      SdkError,
+      directory: persistentQueue.directory,
+      encryptionKey: persistentQueue.encryptionKey,
+      limits,
+      onWarning: persistentQueue.onWarning,
+      sdkName
+    });
+  try {
+    return LogBrewClient.create({
+      apiKey: authKey,
+      eventStore,
+      sdkName,
+      sdkVersion,
+      maxRetries,
+      ...limits,
+      ...(onEventDropped !== undefined ? { onEventDropped } : {})
+    });
+  } catch (error) {
+    try {
+      eventStore?.close();
+    } catch {
+      // Preserve the client configuration or recovery failure.
+    }
+    throw error;
+  }
 }
 
 export function createNodeFetchTransport({
