@@ -607,7 +607,7 @@ Metadata records the queue system, operation name, operation kind, optional queu
 
 ## HTTP Delivery
 
-`createNodeFetchTransport()` sends batches with Node's built-in `fetch`, sets `content-type: application/json`, and passes the SDK key through the `authorization` header. Override `endpoint`, `headers`, or `fetchImpl` when you need a proxy, local collector, or custom fetch implementation:
+`createNodeFetchTransport()` sends batches with Node's built-in `fetch`, sets `content-type: application/json`, passes the SDK key through the `authorization` header, and preserves a valid standard `Retry-After` seconds/date value as `retryAfterMs`. Override `endpoint`, `headers`, or `fetchImpl` when you need a proxy, local collector, or custom fetch implementation:
 
 ```js
 import { createNodeFetchTransport } from "@logbrew/node";

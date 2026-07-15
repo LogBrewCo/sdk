@@ -70,6 +70,9 @@ class SdkError extends Error {
     if (retryAfterMs !== undefined) {
       this.retryAfterMs = retryAfterMs;
     }
+    if (details?.retryable === true) {
+      this.retryable = true;
+    }
   }
 }
 
@@ -246,10 +249,14 @@ class LogBrewClient {
     this.automaticFlushPending = false;
     this.deliveryInFlight = false;
     this.lastDeliveryOutcome = "idle";
+    this.automaticPauseReason = "none";
+    this.consecutiveDeliveryFailures = 0;
+    this.retryDelayMs = 0;
     this.successfulFlushCount = 0;
     this.failedFlushCount = 0;
     this.deliveryAttemptCount = 0;
     this.acceptedBatchCount = 0;
+    this.failedBatch = undefined;
     this.#scheduleAutomaticDelivery();
   }
 
@@ -276,6 +283,9 @@ class LogBrewClient {
       inFlight: this.deliveryInFlight,
       coalesced: this.automaticFlushPending,
       lastOutcome: this.lastDeliveryOutcome,
+      pausedReason: this.automaticPauseReason,
+      consecutiveFailures: this.consecutiveDeliveryFailures,
+      retryDelayMs: this.retryDelayMs,
       flushes: this.successfulFlushCount,
       failures: this.failedFlushCount,
       attempts: this.deliveryAttemptCount,
@@ -303,6 +313,7 @@ class LogBrewClient {
     }
     this.#clearDeliveryTimer();
     this.automaticFlushPending = false;
+    this.failedBatch = undefined;
     this.events.splice(0, this.events.length);
     this.serializedEvents.splice(0, this.serializedEvents.length);
     this.serializedEventBytes.splice(0, this.serializedEventBytes.length);
@@ -346,8 +357,27 @@ class LogBrewClient {
       throw new SdkError("shutdown_error", "client is shutting down");
     }
     const resolvedTransport = this.#resolveTransport(transport);
+    const controlsAutomaticDelivery = this.automaticDelivery && resolvedTransport === this.transport;
     this.#clearDeliveryTimer();
-    return this.#runSerialized(() => this.#flushWithHealth(resolvedTransport));
+    return this.#runSerialized(async () => {
+      this.#clearDeliveryTimer();
+      try {
+        const response = await this.#flushWithHealth(resolvedTransport);
+        if (controlsAutomaticDelivery) {
+          this.#recordAutomaticSuccess();
+        }
+        return response;
+      } catch (error) {
+        if (controlsAutomaticDelivery) {
+          this.#recordAutomaticFailure(error);
+        }
+        throw error;
+      } finally {
+        if (this.automaticDelivery && !this.closed && !this.closing) {
+          this.#resumeAutomaticDelivery();
+        }
+      }
+    });
   }
 
   async shutdown(transport) {
@@ -358,11 +388,15 @@ class LogBrewClient {
       throw new SdkError("shutdown_error", "client is shutting down");
     }
     const resolvedTransport = this.#resolveTransport(transport);
+    const controlsAutomaticDelivery = this.automaticDelivery && resolvedTransport === this.transport;
     this.#clearDeliveryTimer();
     this.automaticFlushPending = false;
     this.closing = true;
     try {
       const response = await this.#runSerialized(() => this.#flushWithHealth(resolvedTransport));
+      if (controlsAutomaticDelivery) {
+        this.#recordAutomaticSuccess();
+      }
       if (this.eventStore) {
         try {
           requireSynchronousStoreResult("close", this.eventStore.close());
@@ -376,7 +410,10 @@ class LogBrewClient {
     } catch (error) {
       if (!this.closed) {
         this.closing = false;
-        this.#scheduleAutomaticDelivery();
+        if (controlsAutomaticDelivery) {
+          this.#recordAutomaticFailure(error);
+        }
+        this.#resumeAutomaticDelivery();
       }
       throw error;
     }
@@ -478,11 +515,15 @@ class LogBrewClient {
   }
 
   #scheduleAutomaticDelivery() {
-    if (!this.automaticDelivery || this.closed || this.closing || this.events.length === 0) {
+    if (!this.automaticDelivery || this.closed || this.closing || this.events.length === 0 || this.automaticPauseReason !== "none") {
       return;
     }
     if (this.automaticFlushActive) {
       this.automaticFlushPending = true;
+      return;
+    }
+    if (this.retryDelayMs > 0) {
+      this.#armAutomaticDeliveryTimer(this.retryDelayMs);
       return;
     }
     if (this.events.length >= this.deliveryQueueThreshold) {
@@ -492,8 +533,8 @@ class LogBrewClient {
     this.#armAutomaticDeliveryTimer();
   }
 
-  #armAutomaticDeliveryTimer() {
-    if (!this.automaticDelivery || this.closed || this.closing || this.events.length === 0) {
+  #armAutomaticDeliveryTimer(delayMs = this.deliveryIntervalMs) {
+    if (!this.automaticDelivery || this.closed || this.closing || this.events.length === 0 || this.automaticPauseReason !== "none") {
       return;
     }
     if (this.deliveryTimer !== undefined) {
@@ -504,8 +545,9 @@ class LogBrewClient {
         return;
       }
       this.deliveryTimer = undefined;
+      this.retryDelayMs = 0;
       this.#requestAutomaticFlush();
-    }, this.deliveryIntervalMs);
+    }, delayMs);
     this.deliveryTimer = timer;
     if (timer && typeof timer === "object" && typeof timer.unref === "function") {
       timer.unref();
@@ -521,7 +563,7 @@ class LogBrewClient {
   }
 
   #requestAutomaticFlush() {
-    if (!this.automaticDelivery || this.closed || this.closing || this.events.length === 0) {
+    if (!this.automaticDelivery || this.closed || this.closing || this.events.length === 0 || this.automaticPauseReason !== "none") {
       return;
     }
     this.#clearDeliveryTimer();
@@ -542,9 +584,10 @@ class LogBrewClient {
     let succeeded = false;
     try {
       await this.#runSerialized(() => this.#flushWithHealth(this.transport));
+      this.#recordAutomaticSuccess();
       succeeded = true;
-    } catch {
-      // Health is content-free and retained work is retried on the next interval.
+    } catch (error) {
+      this.#recordAutomaticFailure(error);
     } finally {
       this.automaticFlushActive = false;
       if (this.closed || this.closing) {
@@ -555,7 +598,7 @@ class LogBrewClient {
         if (drainCoalesced) {
           this.#requestAutomaticFlush();
         } else if (!succeeded) {
-          this.#armAutomaticDeliveryTimer();
+          this.#resumeAutomaticDelivery();
         } else {
           this.#scheduleAutomaticDelivery();
         }
@@ -573,8 +616,15 @@ class LogBrewClient {
     let batches = 0;
     let statusCode = 204;
     while (remainingEvents > 0) {
-      const batch = this.#nextBatch(Math.min(remainingEvents, this.maxBatchEvents));
-      const response = await this.#sendBatch(transport, batch.body);
+      const batch = this.failedBatch ?? this.#nextBatch(Math.min(remainingEvents, this.maxBatchEvents));
+      let response;
+      try {
+        response = await this.#sendBatch(transport, batch.body);
+      } catch (error) {
+        this.failedBatch ??= Object.freeze({ body: batch.body, eventsCount: batch.eventsCount });
+        throw error;
+      }
+      this.failedBatch = undefined;
       this.#acknowledge(batch.eventsCount);
       this.acceptedBatchCount = incrementBounded(this.acceptedBatchCount);
       remainingEvents -= batch.eventsCount;
@@ -621,6 +671,42 @@ class LogBrewClient {
     this.queuedEventBytes -= acknowledgedBytes;
   }
 
+  #recordAutomaticSuccess() {
+    this.automaticPauseReason = "none";
+    this.consecutiveDeliveryFailures = 0;
+    this.retryDelayMs = 0;
+  }
+
+  #recordAutomaticFailure(error) {
+    this.consecutiveDeliveryFailures = incrementBounded(this.consecutiveDeliveryFailures);
+    this.retryDelayMs = 0;
+    if (error instanceof SdkError && error.code === "unauthenticated") {
+      this.automaticPauseReason = "authentication";
+      return;
+    }
+    if (error instanceof SdkError && error.code === "rate_limited") {
+      this.automaticPauseReason = "rate_limit";
+      return;
+    }
+    if (error instanceof SdkError && error.retryable === true) {
+      this.automaticPauseReason = "none";
+      this.retryDelayMs = automaticRetryDelayMs(this.deliveryIntervalMs, this.consecutiveDeliveryFailures);
+      return;
+    }
+    this.automaticPauseReason = "non_retryable";
+  }
+
+  #resumeAutomaticDelivery() {
+    if (this.automaticPauseReason !== "none") {
+      return;
+    }
+    if (this.retryDelayMs > 0) {
+      this.#armAutomaticDeliveryTimer(this.retryDelayMs);
+      return;
+    }
+    this.#scheduleAutomaticDelivery();
+  }
+
   async #sendBatch(transport, body) {
     const maxAttempts = this.maxRetries + 1;
     let attempts = 0;
@@ -641,10 +727,13 @@ class LogBrewClient {
         if (response.statusCode >= 200 && response.statusCode < 300) {
           return { statusCode: response.statusCode, attempts };
         }
-        if (response.statusCode >= 500 && attempts < maxAttempts) {
+        const retryableStatus = response.statusCode === 408 || response.statusCode >= 500;
+        if (retryableStatus && attempts < maxAttempts) {
           continue;
         }
-        throw new SdkError("transport_error", `unexpected transport status ${response.statusCode}`);
+        throw new SdkError("transport_error", `unexpected transport status ${response.statusCode}`, {
+          retryable: retryableStatus
+        });
       } catch (error) {
         if (error instanceof SdkError) {
           throw error;
@@ -653,7 +742,7 @@ class LogBrewClient {
           continue;
         }
         if (error instanceof TransportError) {
-          throw new SdkError(error.code, error.message);
+          throw new SdkError(error.code, error.message, { retryable: error.retryable });
         }
         throw error;
       }
@@ -661,6 +750,13 @@ class LogBrewClient {
 
     throw new SdkError("transport_error", "exhausted retries");
   }
+}
+
+function automaticRetryDelayMs(deliveryIntervalMs, consecutiveFailures) {
+  const exponent = Math.min(consecutiveFailures - 1, 30);
+  const maximumDelay = Math.min(MAX_DELIVERY_INTERVAL_MS, deliveryIntervalMs * (2 ** exponent));
+  const minimumDelay = Math.ceil(maximumDelay / 2);
+  return minimumDelay + Math.floor(Math.random() * (maximumDelay - minimumDelay + 1));
 }
 
 function utf8ByteLength(value) {

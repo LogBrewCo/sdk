@@ -30,6 +30,8 @@ tar -xOf "$core_tgz" package/index.d.ts > "$tmp_dir/core-types.d.ts"
 tar -xOf "$node_tgz" package/index.d.ts > "$tmp_dir/node-types.d.ts"
 grep -q 'deliveryHealth(): DeliveryHealthSnapshot' "$tmp_dir/core-types.d.ts"
 grep -q 'automaticDelivery?: boolean' "$tmp_dir/core-types.d.ts"
+grep -q 'pausedReason: "none" | "authentication" | "rate_limit" | "non_retryable"' "$tmp_dir/core-types.d.ts"
+grep -q 'retryDelayMs: number' "$tmp_dir/core-types.d.ts"
 grep -q 'automaticDelivery?: boolean' "$tmp_dir/node-types.d.ts"
 
 app_dir="$tmp_dir/app"
@@ -75,6 +77,8 @@ const core = LogBrewClient.create({
 });
 const health: DeliveryHealthSnapshot = core.deliveryHealth();
 void health.lifecycle;
+void health.pausedReason;
+void health.retryDelayMs;
 void core.flush();
 
 const node = createLogBrewNodeClient({
@@ -99,6 +103,8 @@ const client = nodeSdk.createLogBrewNodeClient({
 });
 const health: sdk.DeliveryHealthSnapshot = client.deliveryHealth();
 void health.automaticDelivery;
+void health.pausedReason;
+void health.retryDelayMs;
 void client.shutdown();
 EOF
 
@@ -107,7 +113,7 @@ EOF
 cat > esm-proof.mjs <<'EOF'
 import http from "node:http";
 import { once } from "node:events";
-import { createLogBrewNodeClient } from "@logbrew/node";
+import { createLogBrewNodeClient, createNodeFetchTransport } from "@logbrew/node";
 
 const requests = [];
 const server = http.createServer(async (request, response) => {
@@ -120,7 +126,15 @@ const server = http.createServer(async (request, response) => {
     method: request.method,
     path: request.url
   });
-  response.statusCode = requests.length === 1 ? 503 : 202;
+  const pathRequests = requests.filter((entry) => entry.path === request.url).length;
+  if (request.url === "/v1/events") {
+    response.statusCode = pathRequests === 1 ? 503 : 202;
+  } else if (request.url === "/v1/direct-rate-limit" || request.url === "/v1/automatic-rate-limit") {
+    response.statusCode = 429;
+    response.setHeader("retry-after", "2");
+  } else {
+    response.statusCode = 404;
+  }
   response.end();
 });
 server.listen(0, "127.0.0.1");
@@ -147,14 +161,17 @@ assertExactKeys(activeHealth, [
   "automaticDelivery",
   "batches",
   "coalesced",
+  "consecutiveFailures",
   "droppedEvents",
   "failures",
   "flushes",
   "inFlight",
   "lastOutcome",
   "lifecycle",
+  "pausedReason",
   "queueBytes",
   "queueEvents",
+  "retryDelayMs",
   "scheduled"
 ]);
 assert(activeHealth.automaticDelivery === true, "automatic delivery disabled");
@@ -173,6 +190,41 @@ assert(JSON.parse(requests[0].body).events[0].id === "evt_auto_esm_001", "wrong 
 const shutdown = await client.shutdown();
 assert(shutdown.statusCode === 204 && shutdown.attempts === 0, "shutdown did extra I/O");
 assert(client.deliveryHealth().lifecycle === "closed", "client did not close");
+
+const directRateLimit = createNodeFetchTransport({
+  endpoint: `http://127.0.0.1:${server.address().port}/v1/direct-rate-limit`
+});
+const directRateLimitResponse = await directRateLimit.send("LOGBREW_SERVER_API_KEY", '{"events":[]}');
+assert(directRateLimitResponse.statusCode === 429, "direct rate-limit status changed");
+assert(directRateLimitResponse.retryAfterMs === 2000, "Node transport did not preserve Retry-After");
+
+const rateLimitedClient = createLogBrewNodeClient({
+  deliveryIntervalMs: 20,
+  deliveryQueueThreshold: 1,
+  endpoint: `http://127.0.0.1:${server.address().port}/v1/automatic-rate-limit`,
+  maxRetries: 0,
+  sdkName: "installed-auto-rate-limit",
+  sdkVersion: "0.1.0",
+  serverApiKey: "LOGBREW_SERVER_API_KEY"
+});
+rateLimitedClient.log("evt_auto_rate_limit_001", "2026-07-15T10:00:02Z", {
+  level: "warning",
+  message: "automatic rate limit"
+});
+await waitFor(() => rateLimitedClient.deliveryHealth().pausedReason === "rate_limit");
+await new Promise((resolve) => setTimeout(resolve, 75));
+const automaticRateLimitRequests = requests.filter((request) => request.path === "/v1/automatic-rate-limit");
+assert(automaticRateLimitRequests.length === 1, "automatic rate limit entered a retry loop");
+assert(rateLimitedClient.pendingEvents() === 1, "rate-limited event was not retained");
+assert(rateLimitedClient.deliveryHealth().scheduled === false, "rate-limited delivery remained scheduled");
+assert(rateLimitedClient.deliveryHealth().retryDelayMs === 0, "rate limit exposed a misleading retry delay");
+const rateLimitHealthJson = JSON.stringify(rateLimitedClient.deliveryHealth());
+for (const forbidden of ["LOGBREW_SERVER_API_KEY", "evt_auto_rate_limit_001", "automatic rate limit", "127.0.0.1", "/v1/automatic-rate-limit", "429"]) {
+  assert(!rateLimitHealthJson.includes(forbidden), "rate-limit health leaked private delivery input");
+}
+rateLimitedClient.purgePendingEvents();
+await rateLimitedClient.shutdown();
+
 server.close();
 await once(server, "close");
 
@@ -180,7 +232,12 @@ const healthJson = JSON.stringify(client.deliveryHealth());
 for (const forbidden of ["LOGBREW_SERVER_API_KEY", "evt_auto_esm_001", "automatic installed delivery", "127.0.0.1", "/v1/events"]) {
   assert(!healthJson.includes(forbidden), "health leaked private delivery input");
 }
-console.log(JSON.stringify({ attempts: requests.length, stableRetry: requests[0].body === requests[1].body }));
+console.log(JSON.stringify({
+  attempts: requests.filter((request) => request.path === "/v1/events").length,
+  rateLimitRequests: automaticRateLimitRequests.length,
+  retryAfterMs: directRateLimitResponse.retryAfterMs,
+  stableRetry: requests[0].body === requests[1].body
+}));
 
 async function waitFor(predicate) {
   const deadline = Date.now() + 3000;
@@ -247,11 +304,11 @@ from pathlib import Path
 
 esm = json.loads(Path(sys.argv[1]).read_text())
 cjs = json.loads(Path(sys.argv[2]).read_text())
-if esm != {"attempts": 2, "stableRetry": True}:
+if esm != {"attempts": 2, "rateLimitRequests": 1, "retryAfterMs": 2000, "stableRetry": True}:
     raise SystemExit(f"unexpected ESM proof: {esm}")
 if cjs != {"accepted": 1, "lifecycle": "closed"}:
     raise SystemExit(f"unexpected CommonJS proof: {cjs}")
 PY
 
-printf '{"automatic_attempts":2,"cjs_accepted":1,"core_digest":"%s","core_version":"%s","node_digest":"%s","node_version":"%s","stable_retry":true}\n' \
+printf '{"automatic_attempts":2,"cjs_accepted":1,"core_digest":"%s","core_version":"%s","node_digest":"%s","node_version":"%s","rate_limit_requests":1,"retry_after_ms":2000,"stable_retry":true}\n' \
   "$core_digest" "$core_version" "$node_digest" "$node_version"

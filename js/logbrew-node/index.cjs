@@ -154,7 +154,10 @@ function createNodeFetchTransport({
           },
           method: "POST"
         });
-        return { statusCode: response.status, attempts: 1 };
+        const retryAfterMs = retryAfterMsFromHeaders(response.headers);
+        return retryAfterMs === undefined
+          ? { statusCode: response.status, attempts: 1 }
+          : { statusCode: response.status, attempts: 1, retryAfterMs };
       } catch (error) {
         throw TransportError.network(`fetch failed: ${errorMessage(error)}`);
       }
@@ -2001,6 +2004,23 @@ function nowMs(options) {
 
 function defaultFetch() {
   return typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
+}
+
+function retryAfterMsFromHeaders(headers) {
+  if (!headers || typeof headers.get !== "function") {
+    return undefined;
+  }
+  const value = headers.get("retry-after");
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (/^\d+$/u.test(trimmed)) {
+    const milliseconds = Number(trimmed) * 1000;
+    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
+  }
+  const timestamp = Date.parse(trimmed);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
 }
 
 function readEnvApiKey() {

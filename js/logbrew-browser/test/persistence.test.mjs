@@ -175,10 +175,11 @@ test("online recovery skips same-session persisted copies while the live queue s
       message: "same session live queue"
     });
     browserWindow.dispatchEvent("online");
-    await waitFor(() => sentBodies.length === 2);
+    await waitFor(() => sentBodies.length === 3);
 
-    const recoveredIds = JSON.parse(sentBodies[1]).events.map((event) => event.id);
-    assert.deepEqual(recoveredIds, ["evt_same_session_failed_001", "evt_same_session_live_001"]);
+    assert.equal(sentBodies[0], sentBodies[1]);
+    assert.deepEqual(JSON.parse(sentBodies[1]).events.map((event) => event.id), ["evt_same_session_failed_001"]);
+    assert.deepEqual(JSON.parse(sentBodies[2]).events.map((event) => event.id), ["evt_same_session_live_001"]);
     assert.equal(storage.getItem("logbrew:browser:persisted-batches"), null);
     context.uninstall();
   } finally {

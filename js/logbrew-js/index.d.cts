@@ -575,6 +575,10 @@ export type DeliveryHealthSnapshot = Readonly<{
   inFlight: boolean;
   coalesced: boolean;
   lastOutcome: "idle" | "empty" | "accepted" | "failed";
+  pausedReason: "none" | "authentication" | "rate_limit" | "non_retryable";
+  consecutiveFailures: number;
+  /** Bounded transient retry delay; zero when no automatic retry is scheduled. */
+  retryDelayMs: number;
   flushes: number;
   failures: number;
   attempts: number;
@@ -585,7 +589,8 @@ export type DeliveryHealthSnapshot = Readonly<{
 export declare class SdkError extends Error {
   code: string;
   retryAfterMs?: number;
-  constructor(code: string, message: string, details?: { retryAfterMs?: number });
+  retryable?: boolean;
+  constructor(code: string, message: string, details?: { retryAfterMs?: number; retryable?: boolean });
 }
 
 /** Transport error that can optionally be marked retryable by the caller. */
