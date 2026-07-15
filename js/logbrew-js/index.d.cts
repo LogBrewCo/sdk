@@ -564,6 +564,23 @@ export type Transport = {
   send(apiKey: string, body: string): TransportResponse | Promise<TransportResponse>;
 };
 
+/** Content-free bounded delivery state with no event or sensitive transport fields. */
+export type DeliveryHealthSnapshot = Readonly<{
+  automaticDelivery: boolean;
+  lifecycle: "active" | "shutting_down" | "closed";
+  queueEvents: number;
+  queueBytes: number;
+  droppedEvents: number;
+  scheduled: boolean;
+  inFlight: boolean;
+  coalesced: boolean;
+  lastOutcome: "idle" | "empty" | "accepted" | "failed";
+  flushes: number;
+  failures: number;
+  attempts: number;
+  batches: number;
+}>;
+
 /** Stable public SDK error with parseable code and message fields. */
 export declare class SdkError extends Error {
   code: string;
@@ -612,6 +629,14 @@ export declare class LogBrewClient {
     onEventDropped?: (drop: DroppedEvent) => void;
     /** Optional app-scoped persistence adapter. Methods must complete synchronously. */
     eventStore?: EventStore;
+    /** Client-owned transport used by automatic delivery and by flush/shutdown when no argument is supplied. */
+    transport?: Transport;
+    /** Enable interval and queue-threshold delivery. Defaults to true when transport is supplied. */
+    automaticDelivery?: boolean;
+    /** One-shot delivery interval in milliseconds. Defaults to 5000 and must not exceed 60000. */
+    deliveryIntervalMs?: number;
+    /** Queue count that triggers delivery without waiting for the interval. Defaults to min(50, maxQueueSize). */
+    deliveryQueueThreshold?: number;
   }): LogBrewClient;
   /** Return the queued event count currently buffered in memory. */
   pendingEvents(): number;
@@ -619,6 +644,8 @@ export declare class LogBrewClient {
   pendingBytes(): number;
   /** Return the number of events dropped because the bounded in-memory queue was full. */
   droppedEvents(): number;
+  /** Return a frozen, content-free snapshot of queue and delivery lifecycle health. */
+  deliveryHealth(): DeliveryHealthSnapshot;
   /** Return the queued event batch as stable, pretty-printed JSON. */
   previewJson(): string;
   /** Purge queued events from memory and persistence while no delivery operation is active. */
@@ -631,9 +658,9 @@ export declare class LogBrewClient {
   action(id: string, timestamp: string, attributes: ActionAttributes): void;
   metric(id: string, timestamp: string, attributes: MetricAttributes): void;
   /** Flush one queue snapshot in bounded batches while preserving concurrent captures and retry bodies. */
-  flush(transport: Transport): Promise<TransportResponse>;
+  flush(transport?: Transport): Promise<TransportResponse>;
   /** Reject new capture, flush queued events, then close; a failed flush reopens the intact remainder. */
-  shutdown(transport: Transport): Promise<TransportResponse>;
+  shutdown(transport?: Transport): Promise<TransportResponse>;
 }
 
 /** Install explicit console capture while preserving the target console's normal output behavior. */

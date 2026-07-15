@@ -93,7 +93,7 @@ For a Node.js API, start with the signals that make incidents and product flows 
 - Wrap important database calls with safe operation names and statement templates.
 - Wrap important cache and queue calls with safe operation names and bounded metadata.
 - Add low-cardinality metrics for request or workflow duration.
-- Flush on completion or shutdown so queued events are not left in memory.
+- Let the client deliver automatically, then call `shutdown()` at the app-owned graceful lifecycle boundary.
 
 ```js
 import { createServer } from "node:http";
@@ -111,8 +111,6 @@ const client = createLogBrewNodeClient({
   sdkName: "checkout-api",
   sdkVersion: "1.4.0"
 });
-const transport = createNodeFetchTransport();
-
 client.release("evt_release_checkout_api", new Date().toISOString(), {
   version: "1.4.0",
   commit: "abc123def456",
@@ -122,7 +120,9 @@ client.environment("evt_environment_checkout_api", new Date().toISOString(), {
   name: "production",
   region: "us-east-1"
 });
-await client.flush(transport);
+console.log(client.deliveryHealth());
+
+const requestTransport = createNodeFetchTransport();
 
 const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
   const routeTemplate = "/checkout/:cartId";
@@ -164,7 +164,7 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
 }, {
   sdkName: "checkout-api",
   sdkVersion: "1.4.0",
-  transport
+  transport: requestTransport
 }));
 
 server.listen(3000);
@@ -174,18 +174,20 @@ The wrapper keeps app response ownership, records URL path without query text, a
 
 ## Delivery Bounds
 
-`createLogBrewNodeClient()` accepts the core delivery controls directly. Defaults retain at most 1,000 events and 4 MiB of compact event data, then split each explicit flush into at most 100 events or 256 KiB of UTF-8 JSON per request.
+`createLogBrewNodeClient()` owns a fetch transport by default and accepts the core delivery controls directly. It sends after 5 seconds or 50 queued events by default, retains at most 1,000 events and 4 MiB of compact event data, then splits each flush into at most 100 events or 256 KiB of UTF-8 JSON per request.
 
 ```js
 const client = createLogBrewNodeClient({
   maxQueueSize: 1000,
   maxQueueBytes: 4 * 1024 * 1024,
   maxBatchEvents: 100,
-  maxBatchBytes: 256 * 1024
+  maxBatchBytes: 256 * 1024,
+  deliveryIntervalMs: 5000,
+  deliveryQueueThreshold: 50
 });
 ```
 
-Concurrent flush calls are serialized. Events captured during network I/O remain queued for the next flush, retries reuse one stable body, and only acknowledged prefixes leave memory. `shutdown()` blocks new capture while draining and reopens the retained remainder if delivery fails.
+The automatic timer is client-owned, `unref()`'d, and installs no process, signal, or exit hooks. Set `automaticDelivery: false` for manual-only operation, or pass a custom `transport` to keep the same automatic lifecycle with app-owned I/O. Concurrent flush calls are serialized. Events captured during network I/O form at most one coalesced trailing cohort, retries reuse one stable body, and only acknowledged prefixes leave memory. `shutdown()` cancels scheduling, blocks new capture while draining once, and reopens the retained remainder if delivery fails. `deliveryHealth()` is content-free and exposes only lifecycle, queue, drop, in-flight/coalesced, outcome, and bounded counter fields.
 
 ### Encrypted restart recovery
 
@@ -210,7 +212,7 @@ The POSIX-only adapter writes one AES-256-GCM record per event before volatile a
 
 The directory must be normalized, below the filesystem root, owned by the current user, mode `0700`, and contain no symbolic-link component. Queue files are mode `0600`, regular, single-linked files. One live process owns a queue at a time; a later process can recover a lock whose recorded PID no longer exists. The adapter encrypts event content and does not add the encryption key, transport API key, endpoint, headers, or local path to queue files or the content-free manifest. Keep the key outside the queue, provision it with your normal key-management system, and retain it across restarts or the encrypted records intentionally fail closed.
 
-Persistence uses synchronous filesystem operations so capture returns only after the event is durable. Use a dedicated local filesystem directory, keep normal queue bounds, and do not place it on a shared or network filesystem. The adapter does not start timers, retry in the background, intercept process exits, or promise durability after `process.exit()`/`os._exit`; your app still owns flush cadence and graceful shutdown.
+Persistence uses synchronous filesystem operations so capture returns only after the event is durable. Use a dedicated local filesystem directory, keep normal queue bounds, and do not place it on a shared or network filesystem. The adapter itself does not start timers, intercept process exits, or promise durability after `process.exit()`/`os._exit`; the client-owned scheduler handles normal delivery and your app still owns graceful shutdown.
 
 ## Outbound Fetch Spans
 

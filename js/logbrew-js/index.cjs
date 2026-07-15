@@ -34,6 +34,9 @@ const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAX_BATCH_EVENTS = 100;
 const DEFAULT_MAX_BATCH_BYTES = 256 * 1024;
+const DEFAULT_DELIVERY_INTERVAL_MS = 5000;
+const MAX_DELIVERY_INTERVAL_MS = 60 * 1000;
+const DEFAULT_DELIVERY_QUEUE_THRESHOLD = 50;
 const MAX_ERROR_CAUSES = 5;
 const BUILTIN_ERROR_NAMES = new Set([
   "AggregateError",
@@ -128,7 +131,11 @@ class LogBrewClient {
     maxBatchEvents = DEFAULT_MAX_BATCH_EVENTS,
     maxBatchBytes = DEFAULT_MAX_BATCH_BYTES,
     onEventDropped,
-    eventStore
+    eventStore,
+    transport,
+    automaticDelivery = transport !== undefined,
+    deliveryIntervalMs = DEFAULT_DELIVERY_INTERVAL_MS,
+    deliveryQueueThreshold = Math.min(DEFAULT_DELIVERY_QUEUE_THRESHOLD, maxQueueSize)
   }) {
     requireNonEmpty("apiKey", apiKey);
     requireNonEmpty("sdkName", sdkName);
@@ -145,9 +152,27 @@ class LogBrewClient {
       throw new SdkError("validation_error", "onEventDropped must be a function");
     }
     validateEventStore(eventStore);
+    validateTransport(transport);
+    if (typeof automaticDelivery !== "boolean") {
+      throw new SdkError("validation_error", "automaticDelivery must be a boolean");
+    }
+    if (automaticDelivery && transport === undefined) {
+      throw new SdkError("validation_error", "automaticDelivery requires transport");
+    }
+    requirePositiveInteger("deliveryIntervalMs", deliveryIntervalMs);
+    if (deliveryIntervalMs > MAX_DELIVERY_INTERVAL_MS) {
+      throw new SdkError("validation_error", `deliveryIntervalMs must be at most ${MAX_DELIVERY_INTERVAL_MS}`);
+    }
+    requirePositiveInteger("deliveryQueueThreshold", deliveryQueueThreshold);
+    if (deliveryQueueThreshold > maxQueueSize) {
+      throw new SdkError("validation_error", "deliveryQueueThreshold must not exceed maxQueueSize");
+    }
 
     return new LogBrewClient({
       apiKey,
+      automaticDelivery,
+      deliveryIntervalMs,
+      deliveryQueueThreshold,
       eventStore,
       eventFilter,
       maxBatchBytes,
@@ -160,7 +185,8 @@ class LogBrewClient {
         language: "javascript",
         version: sdkVersion
       },
-      maxRetries
+      maxRetries,
+      transport
     });
   }
 
@@ -174,9 +200,16 @@ class LogBrewClient {
     maxQueueBytes,
     maxQueueSize,
     onEventDropped,
-    eventStore
+    eventStore,
+    transport,
+    automaticDelivery,
+    deliveryIntervalMs,
+    deliveryQueueThreshold
   }) {
     this.apiKey = apiKey;
+    this.automaticDelivery = automaticDelivery;
+    this.deliveryIntervalMs = deliveryIntervalMs;
+    this.deliveryQueueThreshold = deliveryQueueThreshold;
     this.eventFilter = eventFilter;
     this.maxBatchBytes = maxBatchBytes;
     this.maxBatchEvents = maxBatchEvents;
@@ -184,6 +217,7 @@ class LogBrewClient {
     this.maxQueueSize = maxQueueSize;
     this.onEventDropped = onEventDropped;
     this.eventStore = eventStore;
+    this.transport = transport;
     this.sdk = sdk;
     this.maxRetries = maxRetries;
     this.batchPrefix = `{"sdk":${JSON.stringify(this.sdk)},"events":[`;
@@ -207,6 +241,16 @@ class LogBrewClient {
     this.closing = false;
     this.closed = false;
     this.droppedEventCount = 0;
+    this.deliveryTimer = undefined;
+    this.automaticFlushActive = false;
+    this.automaticFlushPending = false;
+    this.deliveryInFlight = false;
+    this.lastDeliveryOutcome = "idle";
+    this.successfulFlushCount = 0;
+    this.failedFlushCount = 0;
+    this.deliveryAttemptCount = 0;
+    this.acceptedBatchCount = 0;
+    this.#scheduleAutomaticDelivery();
   }
 
   pendingEvents() {
@@ -221,6 +265,24 @@ class LogBrewClient {
     return this.droppedEventCount;
   }
 
+  deliveryHealth() {
+    return Object.freeze({
+      automaticDelivery: this.automaticDelivery,
+      lifecycle: this.closed ? "closed" : this.closing ? "shutting_down" : "active",
+      queueEvents: this.events.length,
+      queueBytes: this.queuedEventBytes,
+      droppedEvents: this.droppedEventCount,
+      scheduled: this.deliveryTimer !== undefined,
+      inFlight: this.deliveryInFlight,
+      coalesced: this.automaticFlushPending,
+      lastOutcome: this.lastDeliveryOutcome,
+      flushes: this.successfulFlushCount,
+      failures: this.failedFlushCount,
+      attempts: this.deliveryAttemptCount,
+      batches: this.acceptedBatchCount
+    });
+  }
+
   previewJson() {
     return JSON.stringify({ sdk: this.sdk, events: this.events }, null, 2);
   }
@@ -232,13 +294,15 @@ class LogBrewClient {
     if (this.closing) {
       throw new SdkError("shutdown_error", "client is shutting down");
     }
-    if (this.pendingOperations > 0) {
+    if (this.pendingOperations > 0 || this.automaticFlushActive) {
       throw new SdkError("persistence_error", "cannot purge while a delivery operation is active");
     }
     const purgedEvents = this.events.length;
     if (this.eventStore) {
       requireSynchronousStoreResult("purge", this.eventStore.purge());
     }
+    this.#clearDeliveryTimer();
+    this.automaticFlushPending = false;
     this.events.splice(0, this.events.length);
     this.serializedEvents.splice(0, this.serializedEvents.length);
     this.serializedEventBytes.splice(0, this.serializedEventBytes.length);
@@ -281,7 +345,9 @@ class LogBrewClient {
     if (this.closing) {
       throw new SdkError("shutdown_error", "client is shutting down");
     }
-    return this.#runSerialized(() => this.#flushSnapshot(transport));
+    const resolvedTransport = this.#resolveTransport(transport);
+    this.#clearDeliveryTimer();
+    return this.#runSerialized(() => this.#flushWithHealth(resolvedTransport));
   }
 
   async shutdown(transport) {
@@ -291,9 +357,12 @@ class LogBrewClient {
     if (this.closing) {
       throw new SdkError("shutdown_error", "client is shutting down");
     }
+    const resolvedTransport = this.#resolveTransport(transport);
+    this.#clearDeliveryTimer();
+    this.automaticFlushPending = false;
     this.closing = true;
     try {
-      const response = await this.#runSerialized(() => this.#flushSnapshot(transport));
+      const response = await this.#runSerialized(() => this.#flushWithHealth(resolvedTransport));
       if (this.eventStore) {
         try {
           requireSynchronousStoreResult("close", this.eventStore.close());
@@ -307,6 +376,7 @@ class LogBrewClient {
     } catch (error) {
       if (!this.closed) {
         this.closing = false;
+        this.#scheduleAutomaticDelivery();
       }
       throw error;
     }
@@ -350,10 +420,11 @@ class LogBrewClient {
     this.serializedEvents.push(serializedEvent);
     this.serializedEventBytes.push(eventBytes);
     this.queuedEventBytes += eventBytes;
+    this.#scheduleAutomaticDelivery();
   }
 
   #recordDroppedEvent(event, reason) {
-    this.droppedEventCount += 1;
+    this.droppedEventCount = incrementBounded(this.droppedEventCount);
     if (!this.onEventDropped) {
       return;
     }
@@ -381,6 +452,117 @@ class LogBrewClient {
     return result;
   }
 
+  #resolveTransport(transport) {
+    const resolved = transport ?? this.transport;
+    if (resolved === undefined) {
+      throw new SdkError("validation_error", "flush and shutdown require transport");
+    }
+    validateTransport(resolved);
+    return resolved;
+  }
+
+  async #flushWithHealth(transport) {
+    this.deliveryInFlight = true;
+    try {
+      const response = await this.#flushSnapshot(transport);
+      this.successfulFlushCount = incrementBounded(this.successfulFlushCount);
+      this.lastDeliveryOutcome = response.batches === 0 ? "empty" : "accepted";
+      return response;
+    } catch (error) {
+      this.failedFlushCount = incrementBounded(this.failedFlushCount);
+      this.lastDeliveryOutcome = "failed";
+      throw error;
+    } finally {
+      this.deliveryInFlight = false;
+    }
+  }
+
+  #scheduleAutomaticDelivery() {
+    if (!this.automaticDelivery || this.closed || this.closing || this.events.length === 0) {
+      return;
+    }
+    if (this.automaticFlushActive) {
+      this.automaticFlushPending = true;
+      return;
+    }
+    if (this.events.length >= this.deliveryQueueThreshold) {
+      this.#requestAutomaticFlush();
+      return;
+    }
+    this.#armAutomaticDeliveryTimer();
+  }
+
+  #armAutomaticDeliveryTimer() {
+    if (!this.automaticDelivery || this.closed || this.closing || this.events.length === 0) {
+      return;
+    }
+    if (this.deliveryTimer !== undefined) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (this.deliveryTimer !== timer) {
+        return;
+      }
+      this.deliveryTimer = undefined;
+      this.#requestAutomaticFlush();
+    }, this.deliveryIntervalMs);
+    this.deliveryTimer = timer;
+    if (timer && typeof timer === "object" && typeof timer.unref === "function") {
+      timer.unref();
+    }
+  }
+
+  #clearDeliveryTimer() {
+    if (this.deliveryTimer === undefined) {
+      return;
+    }
+    globalThis.clearTimeout(this.deliveryTimer);
+    this.deliveryTimer = undefined;
+  }
+
+  #requestAutomaticFlush() {
+    if (!this.automaticDelivery || this.closed || this.closing || this.events.length === 0) {
+      return;
+    }
+    this.#clearDeliveryTimer();
+    if (this.automaticFlushActive) {
+      this.automaticFlushPending = true;
+      return;
+    }
+    this.automaticFlushActive = true;
+    void Promise.resolve().then(() => this.#runAutomaticFlush());
+  }
+
+  async #runAutomaticFlush() {
+    if (this.closed || this.closing) {
+      this.automaticFlushActive = false;
+      this.automaticFlushPending = false;
+      return;
+    }
+    let succeeded = false;
+    try {
+      await this.#runSerialized(() => this.#flushWithHealth(this.transport));
+      succeeded = true;
+    } catch {
+      // Health is content-free and retained work is retried on the next interval.
+    } finally {
+      this.automaticFlushActive = false;
+      if (this.closed || this.closing) {
+        this.automaticFlushPending = false;
+      } else {
+        const drainCoalesced = succeeded && this.automaticFlushPending && this.events.length > 0;
+        this.automaticFlushPending = false;
+        if (drainCoalesced) {
+          this.#requestAutomaticFlush();
+        } else if (!succeeded) {
+          this.#armAutomaticDeliveryTimer();
+        } else {
+          this.#scheduleAutomaticDelivery();
+        }
+      }
+    }
+  }
+
   async #flushSnapshot(transport) {
     let remainingEvents = this.events.length;
     if (remainingEvents === 0) {
@@ -394,6 +576,7 @@ class LogBrewClient {
       const batch = this.#nextBatch(Math.min(remainingEvents, this.maxBatchEvents));
       const response = await this.#sendBatch(transport, batch.body);
       this.#acknowledge(batch.eventsCount);
+      this.acceptedBatchCount = incrementBounded(this.acceptedBatchCount);
       remainingEvents -= batch.eventsCount;
       attempts += response.attempts;
       batches += 1;
@@ -444,6 +627,7 @@ class LogBrewClient {
 
     while (attempts < maxAttempts) {
       attempts += 1;
+      this.deliveryAttemptCount = incrementBounded(this.deliveryAttemptCount);
       try {
         const response = await transport.send(this.apiKey, body);
         if (response.statusCode === 401) {
@@ -500,6 +684,19 @@ function utf8ByteLength(value) {
     }
   }
   return bytes;
+}
+
+function incrementBounded(value) {
+  return value >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : value + 1;
+}
+
+function validateTransport(transport) {
+  if (transport === undefined) {
+    return;
+  }
+  if (!transport || Array.isArray(transport) || typeof transport !== "object" || typeof transport.send !== "function") {
+    throw new SdkError("validation_error", "transport.send must be a function");
+  }
 }
 
 function validateEventStore(eventStore) {

@@ -33,6 +33,7 @@ const nodeGlobals = {
   process: "readonly",
   Request: "readonly",
   Response: "readonly",
+  setImmediate: "readonly",
   setTimeout: "readonly",
   structuredClone: "readonly",
   URL: "readonly"

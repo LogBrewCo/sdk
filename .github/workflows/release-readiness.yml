@@ -263,6 +263,9 @@ jobs:
       - name: Run JavaScript high-load installed-artifact smoke test
         run: bash scripts/real_user_js_high_load_smoke.sh
 
+      - name: Run Node automatic delivery installed-artifact smoke test
+        run: bash scripts/real_user_node_automatic_delivery_smoke.sh
+
       - name: Run JavaScript OpenTelemetry installed-artifact smoke test
         run: bash scripts/real_user_js_opentelemetry_smoke.sh
 

@@ -167,6 +167,7 @@ throw new Error("unknown smoke mode");
 
 function makeClient() {
   return createLogBrewNodeClient({
+    automaticDelivery: false,
     serverApiKey: apiKey,
     maxBatchEvents: 100,
     maxRetries: mode === "c" ? 1 : 0,
@@ -348,6 +349,7 @@ const { createLogBrewNodeClient } = require("@logbrew/node");
 void (async () => {
   const root = fs.realpathSync(process.env.SMOKE_ROOT);
   const client = createLogBrewNodeClient({
+    automaticDelivery: false,
     serverApiKey: "LOGBREW_SERVER_API_KEY",
     persistentQueue: {
       directory: path.join(root, "cjs-queue"),

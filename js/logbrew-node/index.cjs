@@ -62,6 +62,12 @@ const httpClientInstrumentationHandles = new WeakMap();
 function createLogBrewNodeClient({
   serverApiKey,
   apiKey,
+  automaticDelivery,
+  deliveryIntervalMs,
+  deliveryQueueThreshold,
+  endpoint,
+  fetchImpl,
+  headers,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
   maxBatchBytes,
@@ -70,7 +76,8 @@ function createLogBrewNodeClient({
   maxQueueBytes,
   maxQueueSize,
   onEventDropped,
-  persistentQueue
+  persistentQueue,
+  transport
 } = {}) {
   const authKey = serverApiKey ?? apiKey ?? readEnvServerApiKey() ?? readEnvApiKey();
   if (!authKey) {
@@ -98,13 +105,18 @@ function createLogBrewNodeClient({
       onWarning: persistentQueue.onWarning,
       sdkName
     });
+  const ownedTransport = transport ?? createNodeFetchTransport({ endpoint, fetchImpl, headers });
   try {
     return LogBrewClient.create({
       apiKey: authKey,
+      automaticDelivery,
+      deliveryIntervalMs,
+      deliveryQueueThreshold,
       eventStore,
       sdkName,
       sdkVersion,
       maxRetries,
+      transport: ownedTransport,
       ...limits,
       ...(onEventDropped !== undefined ? { onEventDropped } : {})
     });
@@ -757,7 +769,14 @@ function resolveClient(options, req, res) {
   if (options.client) {
     return options.client;
   }
-  return createLogBrewNodeClient(options);
+  const transport = typeof options.transport === "function"
+    ? undefined
+    : options.transport ?? RecordingTransport.alwaysAccept();
+  return createLogBrewNodeClient({
+    ...options,
+    automaticDelivery: false,
+    transport
+  });
 }
 
 function resolveTransport(options, req, res, client) {

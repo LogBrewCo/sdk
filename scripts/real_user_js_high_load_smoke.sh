@@ -101,6 +101,7 @@ const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
 const drops = [];
 const intakeRequests = [];
 const client = createLogBrewNodeClient({
+  automaticDelivery: false,
   serverApiKey,
   maxBatchBytes,
   maxBatchEvents,
@@ -225,6 +226,7 @@ await once(intakeServer, "listening");
 const intakePort = intakeServer.address().port;
 
 const raceClient = createLogBrewNodeClient({
+  automaticDelivery: false,
   serverApiKey,
   sdkName: "js-race-smoke",
   sdkVersion: "0.1.0"

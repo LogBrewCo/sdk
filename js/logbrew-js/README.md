@@ -379,6 +379,32 @@ const client = LogBrewClient.create({
 
 Prefer removing sensitive values at the source before calling LogBrew. `eventFilter` is intentionally drop-only: it avoids broad mutable event processing, global scopes, and hidden context that can make observability payloads harder to reason about.
 
+## Automatic Delivery
+
+When a client owns a `transport`, it automatically sends queued work after 5 seconds or when 50 events are waiting, whichever happens first. The one-shot timer starts only after capture, is `unref()`'d on Node.js, and is cancelled by manual flush, purge, or shutdown. Automatic sends reuse the same serialized flush path, immutable retry body, accepted-prefix acknowledgement, and persistent queue as manual calls. They do not install process, signal, page, or exit hooks.
+
+```js
+const transport = RecordingTransport.alwaysAccept();
+const client = LogBrewClient.create({
+  apiKey: "LOGBREW_API_KEY",
+  sdkName: "checkout-api",
+  sdkVersion: "1.0.0",
+  transport,
+  deliveryIntervalMs: 5000,
+  deliveryQueueThreshold: 50
+});
+
+client.log("evt_checkout_ready", new Date().toISOString(), {
+  level: "info",
+  message: "checkout ready"
+});
+
+console.log(client.deliveryHealth());
+await client.shutdown();
+```
+
+Set `automaticDelivery: false` for explicit manual-only operation; the owned transport still lets you call `flush()` and `shutdown()` without passing it again. Lower-level clients without an owned transport remain manual and continue to accept `flush(transport)` and `shutdown(transport)`. `deliveryHealth()` returns only fixed booleans, enum states, queue counts/bytes, drops, and saturating delivery counters. It never includes event content or IDs, authentication material, transport destinations, arbitrary metadata, or raw transport errors.
+
 ## Queue Bounds
 
 `LogBrewClient` keeps a count-and-byte-bounded in-memory queue so heavy logging bursts cannot grow without limit before the next flush. The defaults are 1000 events and 4 MiB of compact serialized event data. `pendingEvents()` and `pendingBytes()` expose the retained amount without exposing event content.
@@ -398,7 +424,7 @@ const client = LogBrewClient.create({
 });
 ```
 
-When either queue limit is full, LogBrew drops the incoming event and keeps earlier context unchanged. `queue_overflow` means the event-count limit was reached, `queue_bytes_overflow` means the compact event-byte limit was reached, and `event_too_large` means one event could not fit a request body by itself. Drop callbacks are advisory and must not interrupt application logging. The default queue remains memory-only; flush regularly and use app-owned retry/shutdown handling for production delivery.
+When either queue limit is full, LogBrew drops the incoming event and keeps earlier context unchanged. `queue_overflow` means the event-count limit was reached, `queue_bytes_overflow` means the compact event-byte limit was reached, and `event_too_large` means one event could not fit a request body by itself. Drop callbacks are advisory and must not interrupt application logging. The default queue remains memory-only; automatic delivery reduces normal flush work, while the app still calls `shutdown()` at its owned graceful-lifecycle boundary.
 
 Server runtimes can supply an explicit synchronous `eventStore` when they need restart recovery. The core loads and revalidates compact records during client creation, persists each accepted event before adding it to memory, persists an accepted prefix before removing it from memory, and closes the store only after successful shutdown. `purgePendingEvents()` clears both layers only while no flush or shutdown is queued or active. Implementations must provide synchronous `load`, `append`, `acknowledge`, `purge`, and `close` methods; use the encrypted `persistentQueue` adapter in `@logbrew/node` instead of writing a filesystem adapter from scratch.
 
@@ -408,7 +434,7 @@ Flush requests are also bounded. Core and Node default to 100 events and 256 KiB
 
 `flush()` calls are serialized so concurrent callers cannot send the same queue prefix. Each call owns the events present when its turn starts. Events captured while its transport is awaiting remain queued for the next flush. A 2xx response removes only that acknowledged prefix; if a later batch fails, the failed batch and every later event remain in their original order. Retries reuse the exact same request body.
 
-A `401` transport response raises `SdkError` with code `unauthenticated`; a `429` response raises code `rate_limited` and includes `retryAfterMs` when the transport exposes a `Retry-After` delay. `maxRetries` is the number of retries after the first attempt and must be a non-negative integer. `shutdown()` rejects new capture while it drains the serialized queue, closes only after success, and reopens the intact unsent remainder after failure. LogBrew does not derive account usage locally, sleep between retries, start a background timer, or drop queued events on rate limits; the app owns retry timing and can ask backend-owned usage/quota APIs for current account state.
+A `401` transport response raises `SdkError` with code `unauthenticated`; a `429` response raises code `rate_limited` and includes `retryAfterMs` when the transport exposes a `Retry-After` delay. `maxRetries` is the number of retries after the first attempt and must be a non-negative integer. `shutdown()` cancels automatic scheduling, rejects new capture while it drains once, closes only after success, and reopens the intact unsent remainder after failure. After an exhausted automatic failure, retained work waits for the next bounded interval rather than entering an immediate retry loop. LogBrew does not derive account usage locally, sleep inside transport retries, or drop queued events on rate limits.
 
 ## Support Ticket Drafts
 
