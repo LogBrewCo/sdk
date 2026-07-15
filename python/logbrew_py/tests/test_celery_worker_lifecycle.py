@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import sys
@@ -19,6 +20,8 @@ from logbrew_sdk import (
     TransportError,
     TransportResponse,
 )
+
+HAS_PERSISTENCE_CRYPTO = importlib.util.find_spec("cryptography") is not None
 
 
 def sample_client(*, max_retries: int = 1, max_queue_size: int = 1000) -> LogBrewClient:
@@ -178,6 +181,7 @@ def persistent_worker_directory(root: Path) -> Path:
 
 
 class CeleryWorkerLifecycleTests(unittest.TestCase):
+    @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
     def test_persistent_queue_directory_is_stable_per_celery_worker_slot(self) -> None:
         with fake_celery_module() as signals, tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve() / "queues"

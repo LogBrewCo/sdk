@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import sqlite3
 import tempfile
@@ -12,6 +13,7 @@ from logbrew_sdk import LogBrewClient, SdkError, TransportResponse
 
 PERSISTENCE_KEY = bytes(range(32))
 OTHER_PERSISTENCE_KEY = bytes(reversed(range(32)))
+HAS_PERSISTENCE_CRYPTO = importlib.util.find_spec("cryptography") is not None
 
 
 class ScriptedTransport:
@@ -87,6 +89,7 @@ class EncryptedPersistentQueueContractTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, "configuration_error")
                 self.assertNotIn(str(directory), str(raised.exception))
 
+    @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
     def test_store_contains_only_ciphertext_with_unique_nonces(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary).resolve() / "queue"
@@ -129,6 +132,7 @@ class EncryptedPersistentQueueContractTests(unittest.TestCase):
             self.assertTrue(state[1])
             client.shutdown(ScriptedTransport(202))
 
+    @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
     def test_wrong_key_and_ciphertext_tamper_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary).resolve() / "queue"
@@ -158,6 +162,7 @@ class EncryptedPersistentQueueContractTests(unittest.TestCase):
                 create_encrypted_client(directory)
             self.assertEqual(tampered.exception.code, "persistence_integrity_error")
 
+    @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
     def test_authenticated_state_tamper_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary).resolve() / "queue"
@@ -182,6 +187,7 @@ class EncryptedPersistentQueueContractTests(unittest.TestCase):
                 create_encrypted_client(directory)
             self.assertEqual(raised.exception.code, "persistence_integrity_error")
 
+    @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
     def test_authenticated_high_water_detects_missing_records(self) -> None:
         scenarios = {
             "sole": (1, (1,)),
@@ -212,6 +218,7 @@ class EncryptedPersistentQueueContractTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, "persistence_integrity_error")
 
     @unittest.skipUnless(hasattr(os, "link"), "hard links are unavailable")
+    @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
     def test_database_hardlink_and_live_lock_replacement_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -243,6 +250,7 @@ class EncryptedPersistentQueueContractTests(unittest.TestCase):
             self.assertEqual([event["id"] for event in recovered.events], ["evt_before"])
             recovered.shutdown(ScriptedTransport(202))
 
+    @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
     def test_explicit_recovery_revalidates_without_reordering_or_exposing_content(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary).resolve() / "queue"
@@ -254,6 +262,7 @@ class EncryptedPersistentQueueContractTests(unittest.TestCase):
             self.assertEqual([event["id"] for event in client.events], ["evt_one", "evt_two"])
             client.shutdown(ScriptedTransport(202))
 
+    @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
     def test_runtime_database_read_failure_uses_a_content_free_sdk_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             client = create_encrypted_client(Path(temporary).resolve() / "queue")

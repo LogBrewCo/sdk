@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import sqlite3
@@ -15,6 +16,7 @@ from unittest.mock import patch
 from logbrew_sdk import LogBrewClient, SdkError, TransportResponse
 
 PERSISTENCE_KEY = bytes(range(32))
+HAS_PERSISTENCE_CRYPTO = importlib.util.find_spec("cryptography") is not None
 
 
 class ScriptedTransport:
@@ -73,6 +75,7 @@ class CommitThenFailConnection:
         self._connection.close()
 
 
+@unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
 class PersistentQueueSafetyTests(unittest.TestCase):
     def test_path_must_be_normalized_absolute_and_parent_must_exist(self) -> None:
         with self.assertRaisesRegex(SdkError, "persistent queue directory must be a normalized absolute path"):
@@ -177,6 +180,7 @@ class PersistentQueueSafetyTests(unittest.TestCase):
             close_queue_for_reopen(client)
 
 
+@unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
 class PersistentQueueRecoveryTests(unittest.TestCase):
     def test_ambiguous_append_commit_is_confirmed_before_later_admission(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
