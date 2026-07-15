@@ -322,8 +322,10 @@ shutdownClient.log("evt_js_shutdown_001", timestamp(3000), {
   logger: "checkout.high-load",
   message: "shutdown flush"
 });
+let failedShutdownBody;
 const failedShutdown = await captureError(() => shutdownClient.shutdown({
-  async send() {
+  async send(_apiKey, body) {
+    failedShutdownBody = body;
     return { statusCode: 500 };
   }
 }));
@@ -337,16 +339,21 @@ shutdownClient.log("evt_js_shutdown_retry_001", timestamp(3001), {
   logger: "checkout.high-load",
   message: "shutdown retry"
 });
-let shutdownBody;
+const shutdownBodies = [];
 const shutdownResponse = await shutdownClient.shutdown({
   async send(_apiKey, body) {
-    shutdownBody = body;
+    shutdownBodies.push(body);
     return { statusCode: 202 };
   }
 });
 assertEqual(shutdownResponse.statusCode, 202, "shutdown status");
-assertEqual(shutdownResponse.batches, 1, "shutdown batch count");
-assertEqual(JSON.parse(shutdownBody).events.length, 2, "shutdown retained event count");
+assertEqual(shutdownResponse.batches, 2, "shutdown batch count");
+assertEqual(shutdownBodies.length, 2, "shutdown request count");
+assertEqual(shutdownBodies[0], failedShutdownBody, "shutdown stable retry body");
+assertEqual(JSON.parse(shutdownBodies[0]).events.length, 1, "shutdown retried event count");
+assertEqual(JSON.parse(shutdownBodies[0]).events[0].id, "evt_js_shutdown_001", "shutdown retried event");
+assertEqual(JSON.parse(shutdownBodies[1]).events.length, 1, "shutdown later event count");
+assertEqual(JSON.parse(shutdownBodies[1]).events[0].id, "evt_js_shutdown_retry_001", "shutdown later event");
 const shutdownError = await captureError(() => Promise.resolve().then(() => {
   shutdownClient.log("evt_js_shutdown_after_001", timestamp(3002), {
     level: "info",
