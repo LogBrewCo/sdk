@@ -42,6 +42,8 @@ server.listen(3000);
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request and error metadata records the path without query text by default.
 
+Automatic event IDs keep a readable operation prefix and use a fresh random suffix for each capture, so repeated identical operations remain distinct. Once captured, an event keeps that same ID across delivery retries. Explicit `id` and `idFactory` values are preserved exactly.
+
 When an incoming request has a valid W3C `traceparent` header, the wrapper attaches `logbrew.trace` and the default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous work started by the wrapped handler. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your server. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
 
 ```js

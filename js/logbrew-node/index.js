@@ -8,6 +8,7 @@ import {
 } from "@logbrew/sdk";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { errorMonitor } from "node:events";
+import { createAutomaticEventId } from "./automatic-event-id.js";
 import {
   createLogBrewQueueBatchSpanOptions as createQueueBatchSpanOptions,
   createLogBrewQueueTraceHeaders as createQueueTraceHeaders,
@@ -985,7 +986,10 @@ async function operationWithLogBrewSpan(kind, operationName, options = {}) {
   const operationKind = normalizeDatabaseOperationKind(options.operationKind);
   const startedAt = nowMs(options);
   const trace = createChildTraceContext(helperName, resolveOperationTrace(options, getActiveLogBrewTrace()), options);
-  const id = options.id ?? `evt_node_${kind}_${slugify(`${system}_${operationKind}_${operationName}`)}`;
+  const id = options.id ?? createAutomaticEventId(
+    `evt_node_${kind}`,
+    slugify(`${system}_${operationKind}_${operationName}`)
+  );
 
   try {
     const result = await activeTraceContext.run(trace, options.operation);
@@ -1535,11 +1539,11 @@ function getFetchMethod(input, init = {}) {
 }
 
 function defaultAxiosSpanId({ method, path }) {
-  return `evt_node_axios_${slugify(`${method}_${path}`)}`;
+  return createAutomaticEventId("evt_node_axios", slugify(`${method}_${path}`));
 }
 
 function defaultHttpClientSpanId({ method, path }) {
-  return `evt_node_http_client_${slugify(`${method}_${path}`)}`;
+  return createAutomaticEventId("evt_node_http_client", slugify(`${method}_${path}`));
 }
 
 function getFetchUrl(input) {
@@ -1557,11 +1561,14 @@ function isRequest(input) {
 }
 
 function defaultFetchSpanId({ method, path }) {
-  return `evt_node_fetch_${slugify(`${method}_${path}`)}`;
+  return createAutomaticEventId("evt_node_fetch", slugify(`${method}_${path}`));
 }
 
 function defaultDatabaseSpanId({ operationKind, operationName, system }) {
-  return `evt_node_database_${slugify(`${system}_${operationKind}_${operationName}`)}`;
+  return createAutomaticEventId(
+    "evt_node_database",
+    slugify(`${system}_${operationKind}_${operationName}`)
+  );
 }
 
 function defaultTraceIdFactory() {
@@ -1765,7 +1772,10 @@ function normalizeDatabaseOperationKind(value) {
 }
 
 function defaultRequestEventId(req, res) {
-  return `evt_node_request_${slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${res.statusCode ?? 0}`)}`;
+  return createAutomaticEventId(
+    "evt_node_request",
+    slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${res.statusCode ?? 0}`)
+  );
 }
 
 function defaultSpanIdFactory() {
@@ -1774,7 +1784,10 @@ function defaultSpanIdFactory() {
 
 function defaultErrorEventId(error, req) {
   const message = error instanceof Error ? error.message : String(error);
-  return `evt_node_error_${slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${message}`)}`;
+  return createAutomaticEventId(
+    "evt_node_error",
+    slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${message}`)
+  );
 }
 
 function getRequestPath(req) {

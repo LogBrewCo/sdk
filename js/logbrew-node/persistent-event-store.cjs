@@ -84,7 +84,7 @@ function buildNodePersistentEventStore({
         if (records.length >= limits.maxQueueSize || pendingBytes + normalized.eventBytes > limits.maxQueueBytes) {
           throw fail("persistent queue limits were exceeded");
         }
-        if (!Number.isSafeInteger(nextSequence) || nextSequence <= 0 || nextSequence > 9999999999999999) {
+        if (!Number.isSafeInteger(nextSequence) || nextSequence <= 0) {
           throw fail("persistent queue sequence was exhausted");
         }
         const sequence = nextSequence;
