@@ -15,6 +15,10 @@ remove_tmp_dir() {
   rm -rf "$tmp_dir"
 }
 
+check_json() {
+  "$tmp_dir/venv/bin/python" "$repo_root/scripts/check_fastapi_package_json.py" "$@"
+}
+
 trap remove_tmp_dir EXIT
 
 python3 -m venv "$tmp_dir/venv"
@@ -52,17 +56,18 @@ grep -q 'capture_request_metrics' "$tmp_dir/sdist-README.md"
 
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m unittest discover -s "$package_dir/tests" -p 'test_*.py'
 PYTHONPATH="" "$tmp_dir/venv/bin/python" "$package_dir/examples/readme_example.py" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
-grep -q '"type": "span"' "$tmp_dir/readme.stdout.json"
-grep -q '"status": 200' "$tmp_dir/readme.stderr.json"
+check_json event-kinds span "$tmp_dir/readme.stdout.json"
+check_json fields 'ok=true' 'status=200' "$tmp_dir/readme.stderr.json"
 
 PYTHONPATH="" "$tmp_dir/venv/bin/python" "$package_dir/examples/real_user_smoke.py" > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
-grep -q '"type": "span"' "$tmp_dir/smoke.stdout.json"
-grep -q '"type": "issue"' "$tmp_dir/smoke.stdout.json"
-grep -q '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/smoke.stderr.json"
-grep -q '"parentSpanId": "00f067aa0ba902b7"' "$tmp_dir/smoke.stderr.json"
-grep -q '"spanId": "b7ad6b7169203331"' "$tmp_dir/smoke.stderr.json"
-grep -q '"path": "/health"' "$tmp_dir/smoke.stderr.json"
-grep -q '"events": 3' "$tmp_dir/smoke.stderr.json"
+check_json event-kinds span issue "$tmp_dir/smoke.stdout.json"
+check_json fields \
+  'traceId="4bf92f3577b34da6a3ce929d0e0e4736"' \
+  'parentSpanId="00f067aa0ba902b7"' \
+  'spanId="b7ad6b7169203331"' \
+  'path="/health"' \
+  'events=3' \
+  "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
 
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_fastapi.examples --list > "$tmp_dir/examples-list.txt"
@@ -72,27 +77,33 @@ grep -qx 'dependency-spans -> python -m logbrew_fastapi.examples dependency-span
 grep -qx 'real-user-smoke -> python -m logbrew_fastapi.examples real-user-smoke' <(sed -n '4p' "$tmp_dir/examples-list.txt")
 grep -qx 'default (real-user-smoke) -> python -m logbrew_fastapi.examples' <(sed -n '5p' "$tmp_dir/examples-list.txt")
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_fastapi.examples readme-example > "$tmp_dir/packaged-readme.stdout.json" 2> "$tmp_dir/packaged-readme.stderr.json"
-grep -q '"type": "span"' "$tmp_dir/packaged-readme.stdout.json"
+check_json event-kinds span "$tmp_dir/packaged-readme.stdout.json"
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_fastapi.examples outbound-http > "$tmp_dir/packaged-outbound.stdout.json" 2> "$tmp_dir/packaged-outbound.stderr.json"
-grep -q '"type": "span"' "$tmp_dir/packaged-outbound.stdout.json"
-grep -q '"requestSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-outbound.stderr.json"
-grep -q '"outboundParentSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-outbound.stderr.json"
-grep -q '"outboundSpanId": "c8ad6b7169203332"' "$tmp_dir/packaged-outbound.stderr.json"
-grep -q '"traceparentMatchesSpan": true' "$tmp_dir/packaged-outbound.stderr.json"
+check_json event-kinds span "$tmp_dir/packaged-outbound.stdout.json"
+check_json fields \
+  'requestSpanId="b7ad6b7169203331"' \
+  'outboundParentSpanId="b7ad6b7169203331"' \
+  'outboundSpanId="c8ad6b7169203332"' \
+  'traceparentMatchesSpan=true' \
+  "$tmp_dir/packaged-outbound.stderr.json"
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_fastapi.examples dependency-spans > "$tmp_dir/packaged-dependency.stdout.json" 2> "$tmp_dir/packaged-dependency.stderr.json"
-grep -q '"type": "span"' "$tmp_dir/packaged-dependency.stdout.json"
-grep -q '"requestSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-dependency.stderr.json"
-grep -q '"databaseParentSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-dependency.stderr.json"
-grep -q '"databaseSpanId": "c8ad6b7169203332"' "$tmp_dir/packaged-dependency.stderr.json"
-grep -q '"cacheParentSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-dependency.stderr.json"
-grep -q '"cacheSpanId": "d9ad6b7169203333"' "$tmp_dir/packaged-dependency.stderr.json"
-grep -q '"queueParentSpanId": "b7ad6b7169203331"' "$tmp_dir/packaged-dependency.stderr.json"
-grep -q '"queueSpanId": "e0ad6b7169203334"' "$tmp_dir/packaged-dependency.stderr.json"
+check_json event-kinds span "$tmp_dir/packaged-dependency.stdout.json"
+check_json fields \
+  'requestSpanId="b7ad6b7169203331"' \
+  'databaseParentSpanId="b7ad6b7169203331"' \
+  'databaseSpanId="c8ad6b7169203332"' \
+  'cacheParentSpanId="b7ad6b7169203331"' \
+  'cacheSpanId="d9ad6b7169203333"' \
+  'queueParentSpanId="b7ad6b7169203331"' \
+  'queueSpanId="e0ad6b7169203334"' \
+  "$tmp_dir/packaged-dependency.stderr.json"
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m logbrew_fastapi.examples real-user-smoke > "$tmp_dir/packaged-smoke.stdout.json" 2> "$tmp_dir/packaged-smoke.stderr.json"
-grep -q '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/packaged-smoke.stderr.json"
-grep -q '"parentSpanId": "00f067aa0ba902b7"' "$tmp_dir/packaged-smoke.stderr.json"
-grep -q '"spanId": "b7ad6b7169203331"' "$tmp_dir/packaged-smoke.stderr.json"
-grep -q '"path": "/health"' "$tmp_dir/packaged-smoke.stderr.json"
-grep -q '"events": 3' "$tmp_dir/packaged-smoke.stderr.json"
+check_json fields \
+  'traceId="4bf92f3577b34da6a3ce929d0e0e4736"' \
+  'parentSpanId="00f067aa0ba902b7"' \
+  'spanId="b7ad6b7169203331"' \
+  'path="/health"' \
+  'events=3' \
+  "$tmp_dir/packaged-smoke.stderr.json"
 
 printf '%s\n' "fastapi package checks passed"
