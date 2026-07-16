@@ -134,7 +134,7 @@ func TestHTTPHandlerCorrelatesRequestLogsIssuesSpansAndMetrics(t *testing.T) {
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "/checkout/cart_123?coupon=sale", nil)
-	request.Header.Set("traceparent", "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
+	request.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusBadGateway {
@@ -270,7 +270,7 @@ func TestHTTPHandlerCapturesPanicSpanAndRepanicsWithoutLeakingValue(t *testing.T
 
 	recovered := capturePanic(func() {
 		request := httptest.NewRequest(http.MethodGet, "/checkout/cart_123?coupon=sale", nil)
-		request.Header.Set("traceparent", "00-4BF92F3577B34DA6A3CE929D0E0E4736-00F067AA0BA902B7-01")
+		request.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 		handler.ServeHTTP(httptest.NewRecorder(), request)
 	})
 	if recovered != "private checkout panic value" {

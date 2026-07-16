@@ -315,7 +315,7 @@ _ = provider
 
 `TraceContextFromContext` and `TraceContextFromSpanContext` copy only valid OTel trace ID, span ID, and sampled flags into LogBrew child trace context. `NewSpanExporter` queues ended OTel spans as LogBrew span events with safe method/route/status, database, messaging, RPC, exception-type, span-kind, instrumentation-scope, and span-link summaries. It does not install global providers, own exporters/processors, retry, flush, capture full URLs, headers, payloads, SQL statements, exception messages, stacks, baggage, tracestate, or raw propagation values. Keep using `client.Flush` or `client.Shutdown` with your app-owned transport.
 
-`NewHTTPHandler` wraps an app-owned `net/http` handler, reads only W3C `traceparent`, creates one request span, optionally emits `http.server.duration`, and passes the active `TraceContext` to downstream code through `context.Context`. If the handler panics, LogBrew records one failed request span with type-only panic metadata, then re-panics with the original value. `NewSlogHandler` wraps an app-owned `slog.Handler`, queues a LogBrew log, and adds `traceId` / `spanId` fields to the wrapped app log when the context contains a LogBrew trace:
+`NewHTTPHandler` wraps an app-owned `net/http` handler, accepts exactly one valid W3C `traceparent`, creates one request span, optionally emits `http.server.duration`, and passes the active `TraceContext` to downstream code through `context.Context`. It uses the matched `http.ServeMux` pattern or an explicit `RouteTemplate`; when neither is available it records `/` instead of the raw request path. The outermost LogBrew wrapper owns nested instrumentation so the same request is emitted once. If the handler panics, LogBrew records one failed request span and one generic correlated issue with type-only panic metadata, then re-panics with the original value. Ordinary 5xx responses remain span-only unless `NewHTTPHandlerWithOptions` receives `WithHTTPServerErrorIssues()`. `NewSlogHandler` wraps an app-owned `slog.Handler`, queues a LogBrew log, and adds `traceId` / `spanId` fields to the wrapped app log when the context contains a LogBrew trace:
 
 ```go
 slogHandler, err := logbrew.NewSlogHandler(logbrew.SlogHandlerConfig{
@@ -328,21 +328,21 @@ if err != nil {
 }
 logger := slog.New(slogHandler)
 
-handler, err := logbrew.NewHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+handler, err := logbrew.NewHTTPHandlerWithOptions(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
   logger.InfoContext(r.Context(), "checkout handler reached", slog.String("cartTier", "standard"))
   w.WriteHeader(http.StatusNoContent)
 }), logbrew.HTTPHandlerConfig{
   Client:               client,
   RouteTemplate:        "/checkout/:cart_id",
   CaptureRequestMetric: true,
-})
+}, logbrew.WithHTTPServerErrorIssues())
 if err != nil {
   panic(err)
 }
 http.Handle("/checkout/", handler)
 ```
 
-The HTTP and slog helpers are dependency-free and explicit. They do not patch global HTTP clients, do not capture request or response bodies, do not capture arbitrary headers, do not capture panic messages or stacks, and strip query/hash text from route metadata. Run `go run ./examples/http_trace_correlation` for a copyable local example where release, environment, slog, issue, request span, and request-duration metric events share the same W3C trace.
+The HTTP and slog helpers are dependency-free and explicit. The HTTP wrapper preserves cancellation/deadlines, `http.Flusher`, `http.Hijacker`, `http.Pusher`, `io.ReaderFrom`, and `http.ResponseController` unwrapping when the app writer supports them. It does not patch globals, add workers, buffer bodies, capture request or response bodies, capture arbitrary headers, capture panic messages or stacks, or use raw URLs, query strings, fragments, cookies, authentication values, IPs, user identity, hosts, or local paths. Custom or unknown HTTP methods are recorded as `OTHER`. Run `go run ./examples/http_trace_correlation` for a copyable local example where release, environment, slog, issue, request span, and request-duration metric events share the same W3C trace.
 
 ## Outbound `net/http` Client Spans
 

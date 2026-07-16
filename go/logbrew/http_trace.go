@@ -1,9 +1,11 @@
 package logbrew
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -20,9 +22,51 @@ type HTTPHandlerConfig struct {
 	OnError              func(error)
 }
 
+// HTTPHandlerOption adds explicit behavior without changing the stable
+// HTTPHandlerConfig layout.
+type HTTPHandlerOption interface {
+	applyHTTPHandlerOption(*httpHandlerOptions)
+}
+
+type httpHandlerOptionFunc func(*httpHandlerOptions)
+
+func (option httpHandlerOptionFunc) applyHTTPHandlerOption(options *httpHandlerOptions) {
+	option(options)
+}
+
+type httpHandlerOptions struct {
+	captureServerErrorIssue bool
+}
+
+// WithHTTPServerErrorIssues adds one generic correlated issue for ordinary
+// 5xx responses. Panics always add a generic issue before being re-panicked.
+func WithHTTPServerErrorIssues() HTTPHandlerOption {
+	return httpHandlerOptionFunc(func(options *httpHandlerOptions) {
+		options.captureServerErrorIssue = true
+	})
+}
+
 // NewHTTPHandler wraps an app-owned net/http handler with privacy-safe request
 // span telemetry and request-local trace context.
 func NewHTTPHandler(next http.Handler, config HTTPHandlerConfig) (http.Handler, error) {
+	return newHTTPHandler(next, config, nil)
+}
+
+// NewHTTPHandlerWithOptions wraps an app-owned handler with explicit additive
+// behavior while preserving the stable HTTPHandlerConfig layout.
+func NewHTTPHandlerWithOptions(
+	next http.Handler,
+	config HTTPHandlerConfig,
+	options ...HTTPHandlerOption,
+) (http.Handler, error) {
+	return newHTTPHandler(next, config, options)
+}
+
+func newHTTPHandler(
+	next http.Handler,
+	config HTTPHandlerConfig,
+	options []HTTPHandlerOption,
+) (http.Handler, error) {
 	if next == nil {
 		return nil, &SdkError{Code: "configuration_error", Message: "HTTP handler must be non-nil"}
 	}
@@ -37,11 +81,23 @@ func NewHTTPHandler(next http.Handler, config HTTPHandlerConfig) (http.Handler, 
 	if now == nil {
 		now = time.Now
 	}
+	config.Metadata = safeOperationMetadata(config.Metadata)
+	if strings.TrimSpace(config.RouteTemplate) != "" {
+		config.RouteTemplate = safeHTTPRoutePattern(config.RouteTemplate)
+	}
+	appliedOptions := httpHandlerOptions{}
+	for _, option := range options {
+		if option == nil {
+			return nil, &SdkError{Code: "configuration_error", Message: "HTTP handler option must be non-nil"}
+		}
+		option.applyHTTPHandlerOption(&appliedOptions)
+	}
 	handler := &httpTraceHandler{
-		next:   next,
-		config: config,
-		prefix: prefix,
-		now:    now,
+		next:                    next,
+		config:                  config,
+		captureServerErrorIssue: appliedOptions.captureServerErrorIssue,
+		prefix:                  prefix,
+		now:                     now,
 	}
 	return handler, nil
 }
@@ -54,36 +110,90 @@ func NewHTTPHandlerFunc(next http.HandlerFunc, config HTTPHandlerConfig) (http.H
 	return NewHTTPHandler(http.HandlerFunc(next), config)
 }
 
-type httpTraceHandler struct {
-	next    http.Handler
-	config  HTTPHandlerConfig
-	prefix  string
-	now     func() time.Time
-	counter atomic.Uint64
+// NewHTTPHandlerFuncWithOptions wraps an app-owned handler function with
+// explicit additive behavior.
+func NewHTTPHandlerFuncWithOptions(
+	next http.HandlerFunc,
+	config HTTPHandlerConfig,
+	options ...HTTPHandlerOption,
+) (http.Handler, error) {
+	if next == nil {
+		return nil, &SdkError{Code: "configuration_error", Message: "HTTP handler must be non-nil"}
+	}
+	return NewHTTPHandlerWithOptions(http.HandlerFunc(next), config, options...)
 }
 
+type httpTraceHandler struct {
+	next                    http.Handler
+	config                  HTTPHandlerConfig
+	captureServerErrorIssue bool
+	prefix                  string
+	now                     func() time.Time
+	counter                 atomic.Uint64
+}
+
+type httpTraceOwnerContextKey struct{}
+
 func (h *httpTraceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	start := h.now()
-	trace, traceErr := h.requestTrace(r)
+	if r.Context().Value(httpTraceOwnerContextKey{}) != nil {
+		h.next.ServeHTTP(w, r)
+		return
+	}
+	start, trace, traceErr := h.initializeRequestTelemetry(r)
 	if traceErr != nil {
 		h.report(traceErr)
 	}
-	if traceErr != nil {
+	if trace.TraceID == "" {
 		h.next.ServeHTTP(w, r)
 		return
 	}
 
-	recorder := &statusRecordingResponseWriter{ResponseWriter: w}
-	requestWithTrace := r.WithContext(ContextWithLogBrewTrace(r.Context(), trace))
+	recorder := newStatusRecordingResponseWriter(w)
+	wrappedWriter := wrapStatusRecordingResponseWriter(w, recorder)
+	requestContext := context.WithValue(r.Context(), httpTraceOwnerContextKey{}, struct{}{})
+	requestWithTrace := r.WithContext(ContextWithLogBrewTrace(requestContext, trace))
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			h.captureRequestTelemetry(requestWithTrace, trace, start, recorder.StatusForPanic(), panicMetadata(recovered))
+			h.captureRequestTelemetrySafely(requestWithTrace, trace, start, recorder.StatusForPanic(), httpServerPanicMetadata(recovered), true)
 			panic(recovered)
 		}
 	}()
-	h.next.ServeHTTP(recorder, requestWithTrace)
+	h.next.ServeHTTP(wrappedWriter, requestWithTrace)
 
-	h.captureRequestTelemetry(requestWithTrace, trace, start, recorder.Status(), nil)
+	h.captureRequestTelemetrySafely(requestWithTrace, trace, start, recorder.Status(), nil, false)
+}
+
+func (h *httpTraceHandler) initializeRequestTelemetry(r *http.Request) (
+	start time.Time,
+	trace TraceContext,
+	err error,
+) {
+	defer func() {
+		if recover() != nil {
+			start = time.Time{}
+			trace = TraceContext{}
+			err = &SdkError{Code: "capture_error", Message: "HTTP request telemetry skipped"}
+		}
+	}()
+	start = h.now()
+	trace, err = h.requestTrace(r)
+	return start, trace, err
+}
+
+func (h *httpTraceHandler) captureRequestTelemetrySafely(
+	request *http.Request,
+	trace TraceContext,
+	start time.Time,
+	statusCode int,
+	extraMetadata map[string]any,
+	panicked bool,
+) {
+	defer func() {
+		if recover() != nil {
+			h.report(&SdkError{Code: "capture_error", Message: "HTTP request telemetry skipped"})
+		}
+	}()
+	h.captureRequestTelemetry(request, trace, start, statusCode, extraMetadata, panicked)
 }
 
 func (h *httpTraceHandler) captureRequestTelemetry(
@@ -92,21 +202,31 @@ func (h *httpTraceHandler) captureRequestTelemetry(
 	start time.Time,
 	statusCode int,
 	extraMetadata map[string]any,
+	panicked bool,
 ) {
-	durationMs := float64(h.now().Sub(start).Microseconds()) / 1000
+	finished := h.now()
+	durationMs := float64(finished.Sub(start).Microseconds()) / 1000
+	if durationMs < 0 {
+		durationMs = 0
+	}
+	method := safeHTTPServerMethod(request.Method)
 	routeTemplate := h.routeTemplate(request)
 	metadata := mergeMetadata(safeOperationMetadata(h.config.Metadata), map[string]any{
-		"method":        request.Method,
+		"method":        method,
 		"routeTemplate": routeTemplate,
 		"sampled":       trace.Sampled,
 		"statusCode":    statusCode,
 	})
 	metadata = mergeMetadata(metadata, extraMetadata)
 	metricMetadata := mergeMetadata(metadata, trace.Metadata())
+	spanStatus := spanStatusFromHTTPStatus(statusCode)
+	if panicked {
+		spanStatus = "error"
+	}
 	span, err := SpanAttributesFromTraceContext(TraceContextSpanInput{
 		Trace:      trace,
-		Name:       fmt.Sprintf("%s %s", request.Method, routeTemplate),
-		Status:     spanStatusFromHTTPStatus(statusCode),
+		Name:       fmt.Sprintf("%s %s", method, routeTemplate),
+		Status:     spanStatus,
 		DurationMs: &durationMs,
 		Metadata:   metadata,
 	})
@@ -114,11 +234,26 @@ func (h *httpTraceHandler) captureRequestTelemetry(
 		h.report(err)
 		return
 	}
-	if err := h.config.Client.Span(h.eventID("span"), h.timestamp(), span); err != nil {
+	timestamp := finished.UTC().Format(time.RFC3339Nano)
+	if err := h.config.Client.Span(h.eventID("span"), timestamp, span); err != nil {
 		h.report(err)
 	}
+	if panicked || (statusCode >= http.StatusInternalServerError && h.captureServerErrorIssue) {
+		title := "HTTP server error response"
+		if panicked {
+			title = "HTTP server panic"
+		}
+		issue := IssueAttributesWithTrace(request.Context(), IssueAttributes{
+			Title:    title,
+			Level:    "error",
+			Metadata: metadata,
+		})
+		if err := h.config.Client.Issue(h.eventID("issue"), timestamp, issue); err != nil {
+			h.report(err)
+		}
+	}
 	if h.config.CaptureRequestMetric {
-		if err := h.config.Client.Metric(h.eventID("metric"), h.timestamp(), MetricAttributes{
+		if err := h.config.Client.Metric(h.eventID("metric"), timestamp, MetricAttributes{
 			Name:        "http.server.duration",
 			Kind:        "histogram",
 			Value:       durationMs,
@@ -131,6 +266,19 @@ func (h *httpTraceHandler) captureRequestTelemetry(
 	}
 }
 
+func httpServerPanicMetadata(recovered any) map[string]any {
+	metadata := map[string]any{"panic": true}
+	switch recovered.(type) {
+	case error:
+		metadata["panicType"] = "error"
+	case string:
+		metadata["panicType"] = "string"
+	default:
+		metadata["panicType"] = "other"
+	}
+	return metadata
+}
+
 func panicMetadata(recovered any) map[string]any {
 	metadata := map[string]any{"panic": true}
 	if recovered != nil {
@@ -140,37 +288,76 @@ func panicMetadata(recovered any) map[string]any {
 }
 
 func (h *httpTraceHandler) requestTrace(r *http.Request) (TraceContext, error) {
-	spanID := ""
-	if h.config.SpanIDFactory != nil {
-		spanID = h.config.SpanIDFactory()
+	spanID, err := operationSpanID(h.config.SpanIDFactory)
+	if err != nil {
+		return TraceContext{}, err
 	}
-	trace, err := NewTraceContext(TraceContextInput{
-		Traceparent: r.Header.Get("traceparent"),
-		SpanID:      spanID,
-	})
-	if err == nil {
-		return trace, nil
+	traceparents := r.Header.Values("traceparent")
+	if len(traceparents) == 0 {
+		return operationChildTraceWithSpanID(r.Context(), spanID)
 	}
-	return NewTraceContext(TraceContextInput{SpanID: spanID})
+	if len(traceparents) == 1 {
+		if parent, ok := strictHTTPTraceparent(traceparents[0]); ok {
+			return TraceContext{
+				TraceID:      parent.TraceID,
+				SpanID:       spanID,
+				ParentSpanID: parent.ParentSpanID,
+				TraceFlags:   parent.TraceFlags,
+				Sampled:      parent.Sampled,
+			}, nil
+		}
+	}
+	fallback, fallbackErr := NewTraceContext(TraceContextInput{SpanID: spanID})
+	if fallbackErr != nil {
+		return TraceContext{}, fallbackErr
+	}
+	return fallback, &SdkError{Code: "capture_error", Message: "HTTP traceparent skipped"}
+}
+
+func strictHTTPTraceparent(value string) (TraceparentContext, bool) {
+	if len(value) < 55 || strings.TrimSpace(value) != value || strings.Contains(value, ",") ||
+		value[2] != '-' || value[35] != '-' || value[52] != '-' {
+		return TraceparentContext{}, false
+	}
+	base := value[:55]
+	if !isLowerHexASCII(base[0:2]) ||
+		!isLowerHexASCII(base[3:35]) ||
+		!isLowerHexASCII(base[36:52]) ||
+		!isLowerHexASCII(base[53:55]) {
+		return TraceparentContext{}, false
+	}
+	if base[0:2] == "00" {
+		if len(value) != len(base) {
+			return TraceparentContext{}, false
+		}
+	} else if len(value) > len(base) {
+		if value[len(base)] != '-' || len(value) == len(base)+1 {
+			return TraceparentContext{}, false
+		}
+		for _, char := range value[len(base)+1:] {
+			if char <= ' ' || char > '~' || char == ',' {
+				return TraceparentContext{}, false
+			}
+		}
+	}
+	parsed, err := ParseTraceparent(base)
+	return parsed, err == nil
+}
+
+func isLowerHexASCII(value string) bool {
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *httpTraceHandler) routeTemplate(r *http.Request) string {
-	routeTemplate := "/"
 	if h.config.RouteTemplate != "" {
-		routeTemplate = sanitizeRouteTemplate(h.config.RouteTemplate)
-	} else if r.Pattern != "" {
-		routeTemplate = sanitizeRouteTemplate(r.Pattern)
-	} else if r.URL != nil {
-		routeTemplate = sanitizeRouteTemplate(r.URL.Path)
+		return h.config.RouteTemplate
 	}
-	if routeTemplate == "" {
-		return "/"
-	}
-	return routeTemplate
-}
-
-func (h *httpTraceHandler) timestamp() string {
-	return h.now().UTC().Format(time.RFC3339Nano)
+	return safeHTTPRoutePattern(r.Pattern)
 }
 
 func (h *httpTraceHandler) eventID(kind string) string {
@@ -179,52 +366,34 @@ func (h *httpTraceHandler) eventID(kind string) string {
 
 func (h *httpTraceHandler) report(err error) {
 	if err != nil && h.config.OnError != nil {
-		h.config.OnError(err)
+		func() {
+			defer func() {
+				_ = recover()
+			}()
+			h.config.OnError(err)
+		}()
 	}
 }
 
-type statusRecordingResponseWriter struct {
-	http.ResponseWriter
-	status int
-}
-
-func (w *statusRecordingResponseWriter) Status() int {
-	if w.status == 0 {
-		return http.StatusOK
-	}
-	return w.status
-}
-
-func (w *statusRecordingResponseWriter) StatusForPanic() int {
-	if w.status == 0 {
-		return http.StatusInternalServerError
-	}
-	return w.status
-}
-
-func (w *statusRecordingResponseWriter) WriteHeader(status int) {
-	if w.status != 0 {
-		return
-	}
-	w.status = status
-	w.ResponseWriter.WriteHeader(status)
-}
-
-func (w *statusRecordingResponseWriter) Write(data []byte) (int, error) {
-	if w.status == 0 {
-		w.WriteHeader(http.StatusOK)
-	}
-	return w.ResponseWriter.Write(data)
-}
-
-func (w *statusRecordingResponseWriter) Flush() {
-	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
-		flusher.Flush()
+func safeHTTPServerMethod(method string) string {
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case http.MethodConnect, http.MethodDelete, http.MethodGet, http.MethodHead,
+		http.MethodOptions, http.MethodPatch, http.MethodPost, http.MethodPut, http.MethodTrace:
+		return strings.ToUpper(strings.TrimSpace(method))
+	default:
+		return "OTHER"
 	}
 }
 
-func (w *statusRecordingResponseWriter) Unwrap() http.ResponseWriter {
-	return w.ResponseWriter
+func safeHTTPRoutePattern(pattern string) string {
+	sanitized := sanitizeRouteTemplate(pattern)
+	if strings.HasPrefix(sanitized, "/") {
+		return sanitized
+	}
+	if slash := strings.Index(sanitized, "/"); slash >= 0 {
+		return sanitizeRouteTemplate(sanitized[slash:])
+	}
+	return "/"
 }
 
 func spanStatusFromHTTPStatus(statusCode int) string {
