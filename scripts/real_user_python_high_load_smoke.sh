@@ -174,7 +174,7 @@ def main() -> None:
     preview_ids = [event["id"] for event in preview["events"]]
     assert_equal(len(preview_ids), MAX_QUEUE_SIZE, "preview event count")
     assert_equal(
-        [event["id"] for event in preview["events"][:4]],
+        preview_ids[:4],
         [
             "evt_python_high_load_release",
             "evt_python_high_load_environment",
@@ -183,7 +183,7 @@ def main() -> None:
         ],
         "context event order",
     )
-    assert_equal(count_events(preview, "log"), MAX_QUEUE_SIZE - 4, "queued log count")
+    assert_equal(count_events(preview["events"], "log"), MAX_QUEUE_SIZE - 4, "queued log count")
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeIntakeHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -251,15 +251,14 @@ def main() -> None:
     assert_equal(accepted_events, preview["events"], "accepted event sequence")
     accepted_ids = [event["id"] for event in accepted_events]
     assert_equal(accepted_ids, preview_ids, "accepted event order")
+    assert_equal(len(set(accepted_ids)), MAX_QUEUE_SIZE, "unique accepted event IDs")
 
-    payload = {"sdk": successful_payloads[0]["sdk"], "events": accepted_events}
-    assert_equal(payload["sdk"]["name"], "python-high-load-smoke", "sdk name")
-    assert_equal(len(payload["events"]), MAX_QUEUE_SIZE, "flushed event count")
-    assert_equal(count_events(payload, "log"), MAX_QUEUE_SIZE - 4, "flushed log count")
-    assert_equal(payload["events"][0]["type"], "release", "first event type")
-    assert_equal(payload["events"][1]["type"], "environment", "second event type")
-    assert_equal(payload["events"][2]["attributes"]["traceId"], TRACE_ID, "span trace id")
-    first_log = next(event for event in payload["events"] if event["type"] == "log")
+    assert_equal(len(accepted_events), MAX_QUEUE_SIZE, "flushed event count")
+    assert_equal(count_events(accepted_events, "log"), MAX_QUEUE_SIZE - 4, "flushed log count")
+    assert_equal(accepted_events[0]["type"], "release", "first event type")
+    assert_equal(accepted_events[1]["type"], "environment", "second event type")
+    assert_equal(accepted_events[2]["attributes"]["traceId"], TRACE_ID, "span trace id")
+    first_log = next(event for event in accepted_events if event["type"] == "log")
     log_metadata = first_log["attributes"]["metadata"]
     assert_equal(first_log["attributes"]["level"], "warning", "canonical warning level")
     assert_equal(log_metadata["traceId"], TRACE_ID, "log trace id")
@@ -296,9 +295,10 @@ def main() -> None:
     print(
         json.dumps(
             {
+                "acceptedBatches": response.batches,
                 "ok": True,
                 "droppedEvents": client.dropped_events(),
-                "flushedEvents": len(payload["events"]),
+                "flushedEvents": len(accepted_events),
                 "highVolumeLogs": HIGH_VOLUME_LOGS,
                 "pendingEvents": client.pending_events(),
                 "retryAttempts": response.attempts,
@@ -309,8 +309,8 @@ def main() -> None:
     )
 
 
-def count_events(payload: dict[str, Any], event_type: str) -> int:
-    return sum(1 for event in payload["events"] if event["type"] == event_type)
+def count_events(events: list[dict[str, Any]], event_type: str) -> int:
+    return sum(1 for event in events if event["type"] == event_type)
 
 
 def assert_equal(actual: Any, expected: Any, label: str) -> None:
@@ -327,6 +327,7 @@ grep -q '"ok": true' "$tmp_dir/high-load.stdout.json"
 grep -q '"highVolumeLogs": 1500' "$tmp_dir/high-load.stdout.json"
 grep -q '"flushedEvents": 1000' "$tmp_dir/high-load.stdout.json"
 grep -q '"droppedEvents": 504' "$tmp_dir/high-load.stdout.json"
+grep -q '"acceptedBatches": 10' "$tmp_dir/high-load.stdout.json"
 grep -q '"retryAttempts": 11' "$tmp_dir/high-load.stdout.json"
 grep -q '"shutdownStatus": 202' "$tmp_dir/high-load.stdout.json"
 cat "$tmp_dir/high-load.stdout.json"

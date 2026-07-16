@@ -1077,6 +1077,29 @@ class LogBrewSdkTests(unittest.TestCase):
         self.assertNotIn("pathname", metadata)
         self.assertNotIn("non_primitive", metadata)
 
+    def test_logging_handler_assigns_unique_ids_to_same_millisecond_records(self) -> None:
+        client = sample_client()
+        handler = LogBrewLoggingHandler(client)
+        records = [
+            logging.LogRecord(
+                name="checkout.burst",
+                level=logging.INFO,
+                pathname="/private/app.py",
+                lineno=42,
+                msg="checkout queued",
+                args=(),
+                exc_info=None,
+            )
+            for _ in range(2)
+        ]
+        for record in records:
+            record.created = 1_700_000_000.0
+            handler.emit(record)
+
+        event_ids = [event["id"] for event in json.loads(client.preview_json())["events"]]
+        self.assertEqual(len(set(event_ids)), 2)
+        self.assertTrue(all(event_id.startswith("evt_log_") for event_id in event_ids))
+
     def test_logging_handler_maps_exception_metadata_without_traceback_by_default(self) -> None:
         client = sample_client()
         handler = LogBrewLoggingHandler(client)

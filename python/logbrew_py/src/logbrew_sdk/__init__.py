@@ -987,10 +987,9 @@ def timestamp_from_log_record(record: logging.LogRecord) -> str:
     return datetime.fromtimestamp(record.created, tz=UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def default_log_record_event_id(record: logging.LogRecord) -> str:
-    """Return a stable event id for a standard-library log record."""
-    millis = int(record.created * 1000)
-    return f"evt_log_{slugify(record.name)}_{millis}_{record.lineno}"
+def default_log_record_event_id(_record: logging.LogRecord) -> str:
+    """Return a unique event id for a standard-library log record."""
+    return f"evt_log_{uuid4().hex}"
 
 
 def logbrew_level(level_number: int) -> str:
