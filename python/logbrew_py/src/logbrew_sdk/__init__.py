@@ -16,6 +16,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
+from logbrew_sdk._delivery_lifecycle import DeliveryHealthSnapshot, _DeliveryFailure, _DeliveryLifecycle
 from logbrew_sdk._errors import SdkError
 from logbrew_sdk._event_queue import EventQueue, MemoryEventQueue, QueuedEvent
 from logbrew_sdk._persistent_event_queue import PersistentEventQueue
@@ -135,6 +136,7 @@ DEFAULT_MAX_QUEUE_SIZE = 10_000
 DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024
 DEFAULT_MAX_BATCH_EVENTS = 100
 DEFAULT_MAX_BATCH_BYTES = 256 * 1024
+DEFAULT_DELIVERY_QUEUE_THRESHOLD = 50
 TRACEPARENT_PATTERN = re.compile(r"^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$")
 ZERO_TRACE_ID = "00000000000000000000000000000000"
 ZERO_SPAN_ID = "0000000000000000"
@@ -176,6 +178,10 @@ class TransportResponse:
     batches: Annotated[int, "Number of accepted request batches."] = field(default=0, compare=False)
     accepted_events: Annotated[int, "Number of events accepted across request batches."] = field(
         default=0,
+        compare=False,
+    )
+    retry_after_ms: Annotated[int | None, "Bounded transport retry delay hint in milliseconds."] = field(
+        default=None,
         compare=False,
     )
 
@@ -263,13 +269,21 @@ class HttpTransport:
                 status = getattr(response, "status", None)
                 if status is None:
                     status = response.getcode()
-                return TransportResponse(status_code=int(status), attempts=1)
+                return TransportResponse(
+                    status_code=int(status),
+                    attempts=1,
+                    retry_after_ms=_parse_retry_after_ms(getattr(response, "headers", None)),
+                )
             finally:
                 close_response = getattr(response, "close", None)
                 if callable(close_response):
                     close_response()
         except HTTPError as error:
-            return TransportResponse(status_code=int(error.code), attempts=1)
+            return TransportResponse(
+                status_code=int(error.code),
+                attempts=1,
+                retry_after_ms=_parse_retry_after_ms(error.headers),
+            )
         except OSError as error:
             raise TransportError.network(f"http transport failed: {error}") from error
 
@@ -289,6 +303,10 @@ class LogBrewClient:
         max_queue_bytes: int = DEFAULT_MAX_QUEUE_BYTES,
         max_batch_events: int = DEFAULT_MAX_BATCH_EVENTS,
         max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
+        transport: Transport | None = None,
+        automatic_delivery: bool | None = None,
+        delivery_interval_seconds: float = 5.0,
+        delivery_queue_threshold: int | None = None,
         persistent_queue_directory: str | os.PathLike[str] | None = None,
         persistent_queue_encryption_key: bytes | bytearray | memoryview | None = None,
     ) -> LogBrewClient:
@@ -304,6 +322,10 @@ class LogBrewClient:
             max_queue_bytes=max_queue_bytes,
             max_batch_events=max_batch_events,
             max_batch_bytes=max_batch_bytes,
+            transport=transport,
+            automatic_delivery=automatic_delivery,
+            delivery_interval_seconds=delivery_interval_seconds,
+            delivery_queue_threshold=delivery_queue_threshold,
             persistent_queue_directory=persistent_queue_directory,
             persistent_queue_encryption_key=persistent_queue_encryption_key,
         )
@@ -318,6 +340,10 @@ class LogBrewClient:
         max_queue_bytes: int = DEFAULT_MAX_QUEUE_BYTES,
         max_batch_events: int = DEFAULT_MAX_BATCH_EVENTS,
         max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
+        transport: Transport | None = None,
+        automatic_delivery: bool | None = None,
+        delivery_interval_seconds: float = 5.0,
+        delivery_queue_threshold: int | None = None,
         persistent_queue_directory: str | os.PathLike[str] | None = None,
         persistent_queue_encryption_key: bytes | bytearray | memoryview | None = None,
     ) -> None:
@@ -325,6 +351,31 @@ class LogBrewClient:
         _require_positive_integer("max_queue_bytes", max_queue_bytes)
         _require_positive_integer("max_batch_events", max_batch_events)
         _require_positive_integer("max_batch_bytes", max_batch_bytes)
+        if (
+            isinstance(delivery_interval_seconds, bool)
+            or not isinstance(delivery_interval_seconds, (int, float))
+            or not math.isfinite(delivery_interval_seconds)
+            or not 0.01 <= delivery_interval_seconds <= 3600
+        ):
+            raise SdkError(
+                "configuration_error",
+                "delivery_interval_seconds must be between 0.01 and 3600 seconds",
+            )
+        if delivery_queue_threshold is None:
+            effective_delivery_queue_threshold = min(DEFAULT_DELIVERY_QUEUE_THRESHOLD, max_queue_size)
+        else:
+            _require_positive_integer("delivery_queue_threshold", delivery_queue_threshold)
+            effective_delivery_queue_threshold = delivery_queue_threshold
+        if effective_delivery_queue_threshold > max_queue_size:
+            raise SdkError(
+                "configuration_error",
+                "delivery_queue_threshold cannot exceed max_queue_size",
+            )
+        if automatic_delivery is not None and not isinstance(automatic_delivery, bool):
+            raise SdkError("configuration_error", "automatic_delivery must be a boolean")
+        automatic_delivery_enabled = transport is not None if automatic_delivery is None else automatic_delivery
+        if automatic_delivery_enabled and transport is None:
+            raise SdkError("configuration_error", "automatic_delivery requires an owned transport")
         if persistent_queue_directory is None and persistent_queue_encryption_key is not None:
             raise SdkError(
                 "configuration_error",
@@ -348,8 +399,10 @@ class LogBrewClient:
         self._state_lock = RLock()
         self._flush_lock = Lock()
         self._flush_owner_thread_id: int | None = None
+        self._failed_batch: tuple[int, str, int] | None = None
         self._closing = False
         self.closed = False
+        self._owned_transport = transport
         if persistent_queue_directory is None:
             queue: EventQueue = MemoryEventQueue()
         else:
@@ -363,6 +416,15 @@ class LogBrewClient:
                 encryption_key=persistent_queue_encryption_key,
             )
         self._queue = queue
+        self._delivery_lifecycle = _DeliveryLifecycle(
+            automatic_delivery=automatic_delivery_enabled,
+            interval_seconds=float(delivery_interval_seconds),
+            queue_threshold=effective_delivery_queue_threshold,
+            owner_pid=self._owner_pid,
+            deliver=self._flush_owned_automatically,
+            pending_count=self.pending_events,
+        )
+        self._delivery_lifecycle.event_accepted(self._queue.count)
 
     @property
     def events(self) -> list[dict[str, Any]]:
@@ -395,6 +457,16 @@ class LogBrewClient:
         with self._state_lock:
             return self._dropped_events
 
+    def delivery_health(self) -> DeliveryHealthSnapshot:
+        """Return fixed content-free delivery state for safe diagnostics."""
+        self._assert_owner()
+        with self._state_lock:
+            return self._delivery_lifecycle.health(
+                queue_events=0 if self.closed else self._queue.count,
+                queue_bytes=0 if self.closed else self._queue.byte_count,
+                dropped_events=self._dropped_events,
+            )
+
     def purge_pending_events(self) -> int:
         """Explicitly and durably remove all locally queued events."""
         self._assert_owner()
@@ -403,7 +475,10 @@ class LogBrewClient:
                 raise SdkError("shutdown_error", "client is already shut down")
             if self._flush_owner_thread_id is not None:
                 raise SdkError("queue_busy_error", "pending events cannot be purged during delivery")
-            return self._queue.purge()
+            purged = self._queue.purge()
+            self._failed_batch = None
+        self._delivery_lifecycle.record_purge()
+        return purged
 
     def recover_pending_events(self) -> int:
         """Revalidate local queue durability and return the pending event count."""
@@ -441,49 +516,55 @@ class LogBrewClient:
     def metric(self, event_id: str, timestamp: str, attributes: MetricAttributes) -> None:
         self._push_event("metric", event_id, timestamp, validate_metric(attributes))
 
-    def flush(self, transport: Transport) -> TransportResponse:
+    def flush(self, transport: Transport | None = None) -> TransportResponse:
         """Flush queued events through a transport while preserving retry semantics."""
-        self._assert_owner()
-        thread_id = get_ident()
-        with self._state_lock:
-            self._require_open_for_delivery(thread_id)
+        resolved_transport = self._resolve_transport(transport)
+        return self._flush_with_resolved_transport(
+            resolved_transport,
+            record_lifecycle_outcome=True,
+        )
 
-        with self._flush_lock:
-            with self._state_lock:
-                self._require_open_for_delivery(thread_id)
-                self._flush_owner_thread_id = thread_id
-            try:
-                return self._flush_internal(transport)
-            finally:
-                with self._state_lock:
-                    self._flush_owner_thread_id = None
-
-    def shutdown(self, transport: Transport) -> TransportResponse:
+    def shutdown(self, transport: Transport | None = None) -> TransportResponse:
         """Flush queued events, then mark the client closed so later writes fail."""
         self._assert_owner()
+        resolved_transport = self._resolve_transport(transport)
         thread_id = get_ident()
         with self._state_lock:
             self._require_open_for_delivery(thread_id)
             self._closing = True
+
+        self._delivery_lifecycle.stop_for_shutdown()
+        with self._state_lock:
+            shutdown_snapshot_end = self._queue.last_sequence()
 
         try:
             with self._flush_lock:
                 with self._state_lock:
                     self._flush_owner_thread_id = thread_id
                 try:
-                    response = self._flush_internal(transport)
+                    response = self._flush_internal(
+                        resolved_transport,
+                        through_sequence=shutdown_snapshot_end,
+                    )
+                    if self._tracks_lifecycle_outcome(resolved_transport):
+                        self._delivery_lifecycle.record_manual_success(response)
+                        self._delivery_lifecycle.event_accepted(self.pending_events())
                     self._queue.close()
                 finally:
                     with self._state_lock:
                         self._flush_owner_thread_id = None
-        except Exception:
+        except Exception as error:
             with self._state_lock:
                 self._closing = False
+                pending = self._queue.count
+            failure = self._shutdown_failure_for_lifecycle(error, resolved_transport)
+            self._delivery_lifecycle.reopen_after_failed_shutdown(pending, failure)
             raise
 
         with self._state_lock:
             self._closing = False
             self.closed = True
+        self._delivery_lifecycle.close()
         return response
 
     def _push_event(
@@ -509,6 +590,7 @@ class LogBrewClient:
         event_bytes = len(event_json.encode("utf-8"))
         request_bytes = len(f'{{"sdk":{self._sdk_json},"events":[{event_json}]}}'.encode())
 
+        accepted_queue_count: int | None = None
         with self._state_lock:
             if self.closed or self._closing:
                 raise SdkError("shutdown_error", "client is already shut down")
@@ -524,11 +606,97 @@ class LogBrewClient:
                 event_json=event_json,
                 byte_count=event_bytes,
             )
+            accepted_queue_count = self._queue.count
+        assert accepted_queue_count is not None
+        self._delivery_lifecycle.event_accepted(accepted_queue_count)
 
-    def _flush_internal(self, transport: Transport) -> TransportResponse:
+    def _flush_owned_automatically(self) -> TransportResponse:
+        transport = self._owned_transport
+        if transport is None:
+            raise SdkError("configuration_error", "automatic delivery requires an owned transport")
+        return self._flush_with_resolved_transport(
+            transport,
+            record_lifecycle_outcome=False,
+        )
+
+    def _flush_with_resolved_transport(
+        self,
+        transport: Transport,
+        *,
+        record_lifecycle_outcome: bool,
+    ) -> TransportResponse:
+        self._assert_owner()
+        thread_id = get_ident()
+        with self._state_lock:
+            self._require_open_for_delivery(thread_id)
+
+        with self._flush_lock:
+            with self._state_lock:
+                self._require_open_for_delivery(thread_id)
+                self._flush_owner_thread_id = thread_id
+            try:
+                response = self._flush_internal(transport)
+            except _DeliveryFailure as error:
+                if record_lifecycle_outcome and self._tracks_lifecycle_outcome(transport):
+                    self._delivery_lifecycle.record_manual_failure(error)
+                raise
+            else:
+                if record_lifecycle_outcome and self._tracks_lifecycle_outcome(transport):
+                    self._delivery_lifecycle.record_manual_success(response)
+                    self._delivery_lifecycle.event_accepted(self.pending_events())
+                return response
+            finally:
+                with self._state_lock:
+                    self._flush_owner_thread_id = None
+
+    def _resolve_transport(self, transport: Transport | None) -> Transport:
+        resolved = transport if transport is not None else self._owned_transport
+        if resolved is None:
+            raise SdkError("configuration_error", "transport is required when the client does not own one")
+        return resolved
+
+    def _tracks_lifecycle_outcome(self, transport: Transport) -> bool:
+        return self._owned_transport is None or transport is self._owned_transport
+
+    def _shutdown_failure_for_lifecycle(
+        self,
+        error: Exception,
+        transport: Transport,
+    ) -> _DeliveryFailure:
+        if isinstance(error, _DeliveryFailure) and self._tracks_lifecycle_outcome(transport):
+            return error
+        if isinstance(error, _DeliveryFailure) and self._owned_transport is not None:
+            return _DeliveryFailure(
+                code="transport_error",
+                message="external shutdown transport failed",
+                retryable=True,
+                attempts=error.attempts,
+                batches=error.batches,
+                accepted_events=error.accepted_events,
+            )
+        return _DeliveryFailure(
+            code="delivery_state_error",
+            message="shutdown delivery state requires explicit recovery",
+            retryable=False,
+            pause_reason="non_retryable",
+        )
+
+    def _flush_internal(
+        self,
+        transport: Transport,
+        *,
+        through_sequence: int | None = None,
+    ) -> TransportResponse:
         self._assert_owner()
         with self._state_lock:
-            snapshot_end = self._queue.last_sequence()
+            failed_batch = self._failed_batch
+            snapshot_end = (
+                through_sequence
+                if through_sequence is not None
+                else failed_batch[0]
+                if failed_batch is not None
+                else self._queue.last_sequence()
+            )
         if snapshot_end is None:
             return TransportResponse(status_code=204, attempts=0, batches=0, accepted_events=0)
 
@@ -539,6 +707,7 @@ class LogBrewClient:
         while True:
             with self._state_lock:
                 records = self._queue.snapshot(through_sequence=snapshot_end)
+                failed_batch = self._failed_batch
             if not records:
                 return TransportResponse(
                     status_code=final_status,
@@ -547,12 +716,34 @@ class LogBrewClient:
                     accepted_events=accepted_events,
                 )
 
-            batch, body = self._build_batch(records)
-            response = self._send_body(transport, body)
+            if failed_batch is None:
+                batch, body = self._build_batch(records)
+            else:
+                failed_sequence, body, failed_count = failed_batch
+                batch = records[:failed_count]
+                if len(batch) != failed_count or batch[-1].sequence != failed_sequence:
+                    raise SdkError("queue_state_error", "failed event prefix changed before retry")
+            try:
+                response = self._send_body(transport, body)
+            except _DeliveryFailure as error:
+                with self._state_lock:
+                    if self._failed_batch is None:
+                        self._failed_batch = (batch[-1].sequence, body, len(batch))
+                error.attempts += total_attempts
+                error.batches += accepted_batches
+                error.accepted_events += accepted_events
+                raise
+            except Exception:
+                with self._state_lock:
+                    if self._failed_batch is None:
+                        self._failed_batch = (batch[-1].sequence, body, len(batch))
+                raise
             total_attempts += response.attempts
             final_status = response.status_code
             with self._state_lock:
                 acknowledged = self._queue.acknowledge(batch[-1].sequence)
+                if self._failed_batch is not None and self._failed_batch[0] == batch[-1].sequence:
+                    self._failed_batch = None
             if acknowledged != len(batch):
                 raise SdkError("queue_state_error", "accepted event prefix changed during delivery")
             accepted_batches += 1
@@ -583,7 +774,13 @@ class LogBrewClient:
             try:
                 response = transport.send(self.api_key, body)
                 if response.status_code == 401:
-                    raise SdkError("unauthenticated", "transport rejected the API key")
+                    raise _DeliveryFailure(
+                        code="unauthenticated",
+                        message="transport rejected the API key",
+                        retryable=False,
+                        pause_reason="authentication",
+                        attempts=attempts,
+                    )
                 if 200 <= response.status_code < 300:
                     return TransportResponse(
                         status_code=response.status_code,
@@ -591,18 +788,37 @@ class LogBrewClient:
                         batches=1,
                         accepted_events=0,
                     )
-                if response.status_code >= 500 and attempts < max_attempts:
+                retryable_status = response.status_code == 408 or response.status_code >= 500
+                if retryable_status and attempts < max_attempts:
                     continue
-                raise SdkError(
-                    "transport_error",
-                    f"unexpected transport status {response.status_code}",
+                raise _DeliveryFailure(
+                    code="transport_error",
+                    message=f"unexpected transport status {response.status_code}",
+                    retryable=retryable_status,
+                    pause_reason=(
+                        "rate_limit"
+                        if response.status_code == 429
+                        else "none"
+                        if retryable_status
+                        else "non_retryable"
+                    ),
+                    retry_after_ms=response.retry_after_ms,
+                    attempts=attempts,
                 )
+            except _DeliveryFailure:
+                raise
             except SdkError:
                 raise
             except TransportError as error:
                 if error.retryable and attempts < max_attempts:
                     continue
-                raise SdkError(error.code, error.message) from error
+                raise _DeliveryFailure(
+                    code=error.code,
+                    message=error.message,
+                    retryable=error.retryable,
+                    pause_reason="none" if error.retryable else "non_retryable",
+                    attempts=attempts,
+                ) from error
 
         raise SdkError("transport_error", "exhausted retries")
 
@@ -622,6 +838,24 @@ class LogBrewClient:
 
 def _compact_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+
+
+def _parse_retry_after_ms(headers: object) -> int | None:
+    if headers is None:
+        return None
+    get_header = getattr(headers, "get", None)
+    if not callable(get_header):
+        return None
+    value = get_header("Retry-After")
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return min(3_600_000, round(seconds * 1000))
 
 
 def _require_positive_integer(name: str, value: Any) -> None:
@@ -1282,6 +1516,7 @@ from logbrew_sdk._opentelemetry_processor import (  # noqa: E402
 
 __all__ = [
     "ActionAttributes",
+    "DeliveryHealthSnapshot",
     "EnvironmentAttributes",
     "HttpTransport",
     "IssueAttributes",

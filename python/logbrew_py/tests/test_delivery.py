@@ -300,6 +300,8 @@ class LogBrewDeliveryFlushTests(unittest.TestCase):
         capture_log(retryable, "evt_retry", "retry")
         with self.assertRaisesRegex(SdkError, "unexpected transport status 400"):
             retryable.shutdown(ScriptedTransport(400))
+        self.assertEqual(retryable.delivery_health()["lifecycle"], "active")
+        self.assertEqual(retryable.delivery_health()["failures"], 1)
         capture_log(retryable, "evt_after_failure", "capture remains open")
         self.assertEqual(retryable.pending_events(), 2)
 

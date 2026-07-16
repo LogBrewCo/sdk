@@ -85,7 +85,7 @@ print(
 )
 ```
 
-Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush()` or `shutdown()` to send queued events through a transport, and use `preview_json()` when you want a stable local JSON preview before sending anything.
+Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Give the client an owned transport for automatic delivery, or keep the transport separate when your application owns every flush boundary. Use `preview_json()` when you want a stable local JSON preview before sending anything.
 
 ## Queue Pressure
 
@@ -1092,7 +1092,7 @@ python -m logbrew_sdk.examples agent-timeline
 
 ## HTTP Delivery
 
-Use `HttpTransport` for real outbound delivery from server-side Python apps:
+Use an owned `HttpTransport` for automatic outbound delivery from server-side Python apps:
 
 ```python
 from logbrew_sdk import HttpTransport, LogBrewClient
@@ -1101,10 +1101,12 @@ client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
     sdk_name="logbrew-python",
     sdk_version="0.1.0",
-)
-transport = HttpTransport(
-    endpoint="https://api.logbrew.co/v1/events",
-    headers={"x-logbrew-source": "python-worker"},
+    transport=HttpTransport(
+        endpoint="https://api.logbrew.co/v1/events",
+        headers={"x-logbrew-source": "python-worker"},
+    ),
+    delivery_interval_seconds=5,
+    delivery_queue_threshold=50,
 )
 
 client.log(
@@ -1112,10 +1114,16 @@ client.log(
     "2026-06-02T10:00:06Z",
     {"message": "worker started", "level": "info", "logger": "worker"},
 )
-client.flush(transport)
+client.shutdown()
 ```
 
-`HttpTransport` uses Python's standard-library HTTP stack, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint/header/timeout settings, and maps connection failures into retryable `TransportError.network(...)` failures so `LogBrewClient.flush()` can preserve queued events and retry.
+The client starts one daemon scheduler lazily after the first retained event. It sends at the queue threshold or interval, serializes all sends through the existing flush path, and coalesces overlapping wakeups. Retryable exhaustion uses capped equal-jitter backoff while preserving the exact failed request bytes and later work. Authentication, rate-limit, and other nonretryable responses pause automatic sends until a successful explicit `flush()` or an explicit purge removes the retained work. `shutdown()` stops the scheduler, drains its starting snapshot once, and rejects later capture. The client installs no signal, `atexit`, or global fork hooks.
+
+Pass `automatic_delivery=False` to keep an owned transport fully manual. Existing `flush(transport)` and `shutdown(transport)` calls remain supported for clients that do not own a transport.
+
+`delivery_health()` returns one fixed `DeliveryHealthSnapshot` mapping with lifecycle, queue count/bytes, drops, bounded scheduling state, outcome, pause reason, retry delay, and saturating counters. It never includes event content or IDs, API keys, endpoints, headers, paths, hosts, status codes, server text, exception text, or arbitrary metadata.
+
+`HttpTransport` uses Python's standard-library HTTP stack, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint/header/timeout settings, and maps connection failures into retryable `TransportError.network(...)` failures. A bounded numeric `Retry-After` hint can lengthen automatic backoff; raw response headers and text never enter delivery health.
 
 ## Standard Logging
 
