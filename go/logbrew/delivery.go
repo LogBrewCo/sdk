@@ -176,8 +176,9 @@ func (c *Client) ResumeDelivery() error {
 	return nil
 }
 
-// Flush sends one immutable snapshot through the supplied transport. When
-// transport is nil, an owned automatic transport is used if configured.
+// Flush sends queued events through a transport while preserving retry
+// semantics. It freezes one snapshot, and a nil transport uses an owned
+// automatic transport when configured.
 func (c *Client) Flush(transport Transport) (*TransportResponse, error) {
 	c.mu.Lock()
 	if c.closed || c.shuttingDown && !c.shutdownFailed {
@@ -190,8 +191,9 @@ func (c *Client) Flush(transport Transport) (*TransportResponse, error) {
 	return response, err
 }
 
-// Shutdown stops automatic scheduling, drains once, and rejects later events.
-// A nil transport uses the owned automatic transport when configured.
+// Shutdown flushes queued events, then marks the client closed so later writes
+// fail. It first stops automatic scheduling, and a nil transport uses the owned
+// automatic transport when configured.
 func (c *Client) Shutdown(transport Transport) (*TransportResponse, error) {
 	c.mu.Lock()
 	if c.closed || c.shuttingDown && !c.shutdownFailed {
