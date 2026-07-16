@@ -58,6 +58,14 @@ type DeliveryHealth struct {
 	AcceptedEvents uint64 `json:"acceptedEvents"`
 	FailedFlushes  uint64 `json:"failedFlushes"`
 	RetrySchedules uint64 `json:"retrySchedules"`
+	// BackoffSource and BackoffOutcome use the fixed DeliveryBackoff vocabulary.
+	BackoffSource  string `json:"backoffSource"`
+	BackoffOutcome string `json:"backoffOutcome"`
+	// BackoffDelayMillis is the bounded delay selected for the latest retry.
+	BackoffDelayMillis    uint64 `json:"backoffDelayMillis"`
+	ServerBackoffs        uint64 `json:"serverBackoffs"`
+	ClientBackoffs        uint64 `json:"clientBackoffs"`
+	InvalidServerBackoffs uint64 `json:"invalidServerBackoffs"`
 }
 
 type automaticDelivery struct {
@@ -72,24 +80,34 @@ type automaticDelivery struct {
 	jitter         func(time.Duration) time.Duration
 	started        bool
 	stopped        bool
+	generation     uint64
 }
 
 type deliveryHealthState struct {
-	state          string
-	inFlight       bool
-	wakePending    bool
-	lastOutcome    string
-	flushes        uint64
-	attempts       uint64
-	acceptedEvents uint64
-	failedFlushes  uint64
-	retrySchedules uint64
+	state                 string
+	inFlight              bool
+	wakePending           bool
+	lastOutcome           string
+	flushes               uint64
+	attempts              uint64
+	acceptedEvents        uint64
+	failedFlushes         uint64
+	retrySchedules        uint64
+	backoffSource         string
+	backoffOutcome        string
+	backoffDelayMillis    uint64
+	serverBackoffs        uint64
+	clientBackoffs        uint64
+	invalidServerBackoffs uint64
 }
 
 type flushResult struct {
-	attempts  int
-	retryable bool
-	pause     string
+	attempts   int
+	retryable  bool
+	pause      string
+	retryAfter retryAfterDirective
+	generation uint64
+	stale      bool
 }
 
 func configureAutomaticDelivery(config *AutomaticDeliveryConfig, maxQueueSize int) (*automaticDelivery, error) {
@@ -143,17 +161,23 @@ func (c *Client) DeliveryHealth() DeliveryHealth {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return DeliveryHealth{
-		State:          c.health.state,
-		PendingEvents:  len(c.events),
-		DroppedEvents:  c.droppedEvents,
-		InFlight:       c.health.inFlight,
-		WakePending:    c.health.wakePending,
-		LastOutcome:    c.health.lastOutcome,
-		Flushes:        c.health.flushes,
-		Attempts:       c.health.attempts,
-		AcceptedEvents: c.health.acceptedEvents,
-		FailedFlushes:  c.health.failedFlushes,
-		RetrySchedules: c.health.retrySchedules,
+		State:                 c.health.state,
+		PendingEvents:         len(c.events),
+		DroppedEvents:         c.droppedEvents,
+		InFlight:              c.health.inFlight,
+		WakePending:           c.health.wakePending,
+		LastOutcome:           c.health.lastOutcome,
+		Flushes:               c.health.flushes,
+		Attempts:              c.health.attempts,
+		AcceptedEvents:        c.health.acceptedEvents,
+		FailedFlushes:         c.health.failedFlushes,
+		RetrySchedules:        c.health.retrySchedules,
+		BackoffSource:         c.health.backoffSource,
+		BackoffOutcome:        c.health.backoffOutcome,
+		BackoffDelayMillis:    c.health.backoffDelayMillis,
+		ServerBackoffs:        c.health.serverBackoffs,
+		ClientBackoffs:        c.health.clientBackoffs,
+		InvalidServerBackoffs: c.health.invalidServerBackoffs,
 	}
 }
 
@@ -173,8 +197,12 @@ func (c *Client) ResumeDelivery() error {
 			return err
 		}
 	}
+	c.automatic.generation++
 	c.health.state = DeliveryStateRunning
 	c.health.lastOutcome = DeliveryOutcomeNone
+	c.health.backoffSource = DeliveryBackoffSourceNone
+	c.health.backoffOutcome = DeliveryBackoffOutcomeNone
+	c.health.backoffDelayMillis = 0
 	if len(c.events) > 0 {
 		c.startAutomaticLocked()
 		c.signalAutomaticLocked()
@@ -207,6 +235,9 @@ func (c *Client) Shutdown(transport Transport) (*TransportResponse, error) {
 		return nil, &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
 	}
 	wasAutomatic := c.automatic != nil
+	if c.automatic != nil {
+		c.automatic.generation++
+	}
 	c.shuttingDown = true
 	c.shutdownFailed = false
 	c.health.state = DeliveryStateShuttingDown
@@ -292,6 +323,9 @@ func (c *Client) deliveryLoop() {
 	defer timer.Stop()
 	retrying := false
 	retryStreak := uint64(0)
+	c.mu.Lock()
+	generation := c.automatic.generation
+	c.mu.Unlock()
 
 	for {
 		c.mu.Lock()
@@ -305,6 +339,7 @@ func (c *Client) deliveryLoop() {
 			case <-c.automatic.wake:
 				c.mu.Lock()
 				c.health.wakePending = false
+				generation = c.automatic.generation
 				c.mu.Unlock()
 				retrying = false
 				retryStreak = 0
@@ -315,6 +350,15 @@ func (c *Client) deliveryLoop() {
 				return
 			case <-c.automatic.wake:
 				c.mu.Lock()
+				currentGeneration := c.automatic.generation
+				if currentGeneration != generation {
+					generation = currentGeneration
+					retrying = false
+					retryStreak = 0
+					c.health.wakePending = false
+					c.mu.Unlock()
+					break
+				}
 				if retrying {
 					c.health.wakePending = true
 					c.mu.Unlock()
@@ -324,6 +368,13 @@ func (c *Client) deliveryLoop() {
 				c.mu.Unlock()
 			case <-timer.C:
 				c.mu.Lock()
+				if c.automatic.generation != generation {
+					generation = c.automatic.generation
+					retrying = false
+					retryStreak = 0
+					c.mu.Unlock()
+					continue
+				}
 				c.health.wakePending = false
 				c.mu.Unlock()
 			}
@@ -340,6 +391,12 @@ func (c *Client) deliveryLoop() {
 			continue
 		}
 		_, result, _ := c.flushSnapshot(c.automatic.transport)
+		if result.stale {
+			retrying = false
+			retryStreak = 0
+			resetTimer(timer, c.automatic.flushInterval)
+			continue
+		}
 		c.mu.Lock()
 		paused = c.health.state == DeliveryStatePaused
 		c.mu.Unlock()
@@ -350,7 +407,13 @@ func (c *Client) deliveryLoop() {
 		delay := c.automatic.flushInterval
 		if retrying {
 			retryStreak++
-			delay = c.retryDelay(retryStreak)
+			var scheduled bool
+			delay, scheduled = c.scheduleRetryDelay(result, retryStreak)
+			if !scheduled {
+				resetTimer(timer, c.automatic.flushInterval)
+				continue
+			}
+			generation = result.generation
 		} else {
 			retryStreak = 0
 		}
@@ -358,11 +421,7 @@ func (c *Client) deliveryLoop() {
 	}
 }
 
-func (c *Client) retryDelay(retryStreak uint64) time.Duration {
-	c.mu.Lock()
-	c.health.retrySchedules++
-	c.mu.Unlock()
-
+func (c *Client) scheduleRetryDelay(result flushResult, retryStreak uint64) (time.Duration, bool) {
 	delay := c.automatic.retryBaseDelay
 	for current := uint64(1); current < retryStreak && delay < c.automatic.retryMaxDelay; current++ {
 		if delay > c.automatic.retryMaxDelay/2 {
@@ -374,7 +433,27 @@ func (c *Client) retryDelay(retryStreak uint64) time.Duration {
 	if delay > c.automatic.retryMaxDelay {
 		delay = c.automatic.retryMaxDelay
 	}
-	return c.automatic.jitter(delay)
+	clientDelay := c.automatic.jitter(delay)
+	selected, source, outcome := selectBackoff(clientDelay, result.retryAfter)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.automatic == nil || c.automatic.stopped || c.health.state != DeliveryStateRunning || c.automatic.generation != result.generation {
+		return 0, false
+	}
+	c.health.retrySchedules = incrementCounter(c.health.retrySchedules)
+	c.health.backoffSource = source
+	c.health.backoffOutcome = outcome
+	c.health.backoffDelayMillis = durationMillis(selected)
+	if source == DeliveryBackoffSourceServer {
+		c.health.serverBackoffs = incrementCounter(c.health.serverBackoffs)
+	} else {
+		c.health.clientBackoffs = incrementCounter(c.health.clientBackoffs)
+	}
+	if result.retryAfter.present && !result.retryAfter.valid {
+		c.health.invalidServerBackoffs = incrementCounter(c.health.invalidServerBackoffs)
+	}
+	return selected, true
 }
 
 func equalJitter(delay time.Duration) time.Duration {
@@ -404,19 +483,23 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 	defer c.flushMu.Unlock()
 
 	c.mu.Lock()
+	generation := uint64(0)
+	if c.automatic != nil {
+		generation = c.automatic.generation
+	}
 	if c.persistent != nil {
 		if err := c.persistent.ensureUsable(); err != nil {
 			c.mu.Unlock()
-			return nil, flushResult{}, err
+			return nil, flushResult{generation: generation}, err
 		}
 	}
 	if len(c.events) == 0 {
 		c.mu.Unlock()
-		return &TransportResponse{StatusCode: http.StatusNoContent, Attempts: 0}, flushResult{}, nil
+		return &TransportResponse{StatusCode: http.StatusNoContent, Attempts: 0}, flushResult{generation: generation}, nil
 	}
 	if transport == nil {
 		c.mu.Unlock()
-		return nil, flushResult{}, &SdkError{Code: "configuration_error", Message: "transport must be configured"}
+		return nil, flushResult{generation: generation}, &SdkError{Code: "configuration_error", Message: "transport must be configured"}
 	}
 	prefixLength := c.pendingPrefix
 	body := c.pendingBody
@@ -426,7 +509,7 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 		body, err = json.MarshalIndent(eventBatch{SDK: c.sdk, Events: c.events[:prefixLength]}, "", "  ")
 		if err != nil {
 			c.mu.Unlock()
-			return nil, flushResult{}, &SdkError{Code: "serialization_error", Message: err.Error()}
+			return nil, flushResult{generation: generation}, &SdkError{Code: "serialization_error", Message: err.Error()}
 		}
 		if c.persistent != nil {
 			if err := c.persistent.retainPending(body, prefixLength); err != nil {
@@ -435,7 +518,7 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 				c.health.lastOutcome = DeliveryOutcomePersistencePause
 				c.health.wakePending = false
 				c.mu.Unlock()
-				return nil, flushResult{pause: DeliveryOutcomePersistencePause}, err
+				return nil, flushResult{pause: DeliveryOutcomePersistencePause, generation: generation}, err
 			}
 			c.pendingBody = body
 			c.pendingPrefix = prefixLength
@@ -448,6 +531,8 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 	response, result, sendErr := c.sendBody(transport, body)
 
 	c.mu.Lock()
+	result.generation = generation
+	result.stale = c.automatic != nil && c.automatic.generation != generation
 	c.health.inFlight = false
 	c.health.attempts += uint64(result.attempts)
 	if sendErr == nil {
@@ -469,7 +554,9 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 		c.pendingBody = nil
 		c.pendingPrefix = 0
 		c.health.acceptedEvents += uint64(prefixLength)
-		c.health.lastOutcome = DeliveryOutcomeAccepted
+		if !result.stale {
+			c.health.lastOutcome = DeliveryOutcomeAccepted
+		}
 		if c.automatic != nil && len(c.events) >= c.automatic.flushThreshold {
 			c.signalAutomaticLocked()
 		}
@@ -479,8 +566,10 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 			c.pendingPrefix = prefixLength
 		}
 		c.health.failedFlushes++
-		c.health.lastOutcome = DeliveryOutcomeRetryableFailure
-		if result.pause != "" && c.automatic != nil {
+		if !result.stale {
+			c.health.lastOutcome = DeliveryOutcomeRetryableFailure
+		}
+		if !result.stale && result.pause != "" && c.automatic != nil {
 			c.health.state = DeliveryStatePaused
 			c.health.lastOutcome = result.pause
 			c.health.wakePending = false
@@ -499,7 +588,8 @@ func (c *Client) sendBody(transport Transport, body []byte) (*TransportResponse,
 	result := flushResult{}
 	for attempts := 1; attempts <= maxAttempts; attempts++ {
 		result.attempts = attempts
-		response, sendErr := transport.Send(c.apiKey, append([]byte(nil), body...))
+		requestBody := append([]byte(nil), body...)
+		response, directive, sendErr := c.sendTransport(transport, requestBody)
 		if sendErr != nil {
 			var transportErr *TransportError
 			if !AsTransportError(sendErr, &transportErr) {
@@ -531,6 +621,10 @@ func (c *Client) sendBody(transport Transport, body []byte) (*TransportResponse,
 			return nil, result, &SdkError{Code: "quota_exceeded", Message: "transport paused delivery for quota"}
 		case statusCode == http.StatusRequestTimeout || statusCode >= 500:
 			result.retryable = true
+			result.retryAfter = directive
+			if directive.present {
+				return nil, result, &SdkError{Code: "transport_error", Message: fmt.Sprintf("unexpected transport status %d", statusCode)}
+			}
 			if attempts < maxAttempts {
 				continue
 			}
@@ -541,4 +635,14 @@ func (c *Client) sendBody(transport Transport, body []byte) (*TransportResponse,
 		}
 	}
 	return nil, result, &SdkError{Code: "transport_error", Message: "exhausted retries"}
+}
+
+func (c *Client) sendTransport(transport Transport, body []byte) (*TransportResponse, retryAfterDirective, error) {
+	if c.automatic != nil {
+		if retryTransport, ok := transport.(retryAfterTransport); ok {
+			return retryTransport.sendWithRetryAfter(c.apiKey, body, c.automatic.retryMaxDelay)
+		}
+	}
+	response, err := transport.Send(c.apiKey, body)
+	return response, retryAfterDirective{}, err
 }

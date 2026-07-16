@@ -200,8 +200,13 @@ func NewHTTPTransport(config HTTPTransportConfig) (*HTTPTransport, error) {
 
 // Send posts one serialized event batch and returns the HTTP status.
 func (t *HTTPTransport) Send(apiKey string, body []byte) (*TransportResponse, error) {
+	response, _, err := t.sendWithRetryAfter(apiKey, body, defaultRetryMaxDelay)
+	return response, err
+}
+
+func (t *HTTPTransport) sendWithRetryAfter(apiKey string, body []byte, maximum time.Duration) (*TransportResponse, retryAfterDirective, error) {
 	if err := requireNonEmpty("api_key", apiKey); err != nil {
-		return nil, err
+		return nil, retryAfterDirective{}, err
 	}
 	endpoint := t.Endpoint
 	if strings.TrimSpace(endpoint) == "" {
@@ -209,13 +214,13 @@ func (t *HTTPTransport) Send(apiKey string, body []byte) (*TransportResponse, er
 	}
 	request, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, &SdkError{Code: "configuration_error", Message: fmt.Sprintf("invalid HTTP transport endpoint: %v", err)}
+		return nil, retryAfterDirective{}, &SdkError{Code: "configuration_error", Message: fmt.Sprintf("invalid HTTP transport endpoint: %v", err)}
 	}
 	request.Header.Set("content-type", "application/json")
 	request.Header.Set("authorization", "Bearer "+apiKey)
 	for name, value := range t.Headers {
 		if strings.TrimSpace(name) == "" {
-			return nil, &SdkError{Code: "configuration_error", Message: "HTTP transport header name must be non-empty"}
+			return nil, retryAfterDirective{}, &SdkError{Code: "configuration_error", Message: "HTTP transport header name must be non-empty"}
 		}
 		request.Header.Set(name, value)
 	}
@@ -225,11 +230,12 @@ func (t *HTTPTransport) Send(apiKey string, body []byte) (*TransportResponse, er
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, NetworkError(fmt.Sprintf("http transport failed: %v", err))
+		return nil, retryAfterDirective{}, NetworkError(fmt.Sprintf("http transport failed: %v", err))
 	}
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, response.Body)
-	return &TransportResponse{StatusCode: response.StatusCode, Attempts: 1}, nil
+	directive := parseRetryAfter(response.Header.Values("Retry-After"), time.Now(), maximum)
+	return &TransportResponse{StatusCode: response.StatusCode, Attempts: 1}, directive, nil
 }
 
 // Config describes the public SDK identity, API key, and retry behavior for a
@@ -359,8 +365,10 @@ func newClient(config Config, delivery *AutomaticDeliveryConfig) (*Client, error
 		onEventDropped: config.OnEventDropped,
 		automatic:      automatic,
 		health: deliveryHealthState{
-			state:       state,
-			lastOutcome: DeliveryOutcomeNone,
+			state:          state,
+			lastOutcome:    DeliveryOutcomeNone,
+			backoffSource:  DeliveryBackoffSourceNone,
+			backoffOutcome: DeliveryBackoffOutcomeNone,
 		},
 	}, nil
 }

@@ -502,7 +502,7 @@ func TestDeliveryHealthJSONIsFixedAndContentFree(t *testing.T) {
 	if err := json.Unmarshal(encoded, &fields); err != nil {
 		t.Fatal(err)
 	}
-	if len(fields) != 11 {
+	if len(fields) != 17 {
 		t.Fatalf("unexpected health field set: %#v", fields)
 	}
 }
