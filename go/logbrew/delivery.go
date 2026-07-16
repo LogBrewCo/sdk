@@ -31,6 +31,7 @@ const (
 	DeliveryOutcomeAuthenticationPause = "authentication_paused"
 	DeliveryOutcomeQuotaPause          = "quota_paused"
 	DeliveryOutcomeNonRetryablePause   = "nonretryable_paused"
+	DeliveryOutcomePersistencePause    = "persistence_paused"
 	DeliveryOutcomeShutdownFailed      = "shutdown_failed"
 )
 
@@ -167,6 +168,11 @@ func (c *Client) ResumeDelivery() error {
 	if c.closed || c.shuttingDown {
 		return &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
 	}
+	if c.persistent != nil {
+		if err := c.persistent.ensureUsable(); err != nil {
+			return err
+		}
+	}
 	c.health.state = DeliveryStateRunning
 	c.health.lastOutcome = DeliveryOutcomeNone
 	if len(c.events) > 0 {
@@ -212,27 +218,36 @@ func (c *Client) Shutdown(transport Transport) (*TransportResponse, error) {
 		<-c.automatic.done
 	}
 	response, _, err := c.flushSnapshot(transport)
-	c.finishShutdown(err, wasAutomatic)
+	err = c.finishShutdown(err, wasAutomatic)
 	return response, err
 }
 
-func (c *Client) finishShutdown(err error, wasAutomatic bool) {
+func (c *Client) finishShutdown(err error, wasAutomatic bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err == nil {
+		if c.persistent != nil {
+			if closeErr := c.persistent.close(); closeErr != nil {
+				c.shutdownFailed = true
+				c.health.state = DeliveryStateShutdownFailed
+				c.health.lastOutcome = DeliveryOutcomeShutdownFailed
+				return closeErr
+			}
+		}
 		c.closed = true
 		c.shuttingDown = false
 		c.health.state = DeliveryStateShutdown
-		return
+		return nil
 	}
 	if wasAutomatic {
 		c.shutdownFailed = true
 		c.health.state = DeliveryStateShutdownFailed
 		c.health.lastOutcome = DeliveryOutcomeShutdownFailed
-		return
+		return err
 	}
 	c.shuttingDown = false
 	c.health.state = DeliveryStateManual
+	return err
 }
 
 func (c *Client) resolveTransportLocked(transport Transport) Transport {
@@ -389,6 +404,12 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 	defer c.flushMu.Unlock()
 
 	c.mu.Lock()
+	if c.persistent != nil {
+		if err := c.persistent.ensureUsable(); err != nil {
+			c.mu.Unlock()
+			return nil, flushResult{}, err
+		}
+	}
 	if len(c.events) == 0 {
 		c.mu.Unlock()
 		return &TransportResponse{StatusCode: http.StatusNoContent, Attempts: 0}, flushResult{}, nil
@@ -407,6 +428,18 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 			c.mu.Unlock()
 			return nil, flushResult{}, &SdkError{Code: "serialization_error", Message: err.Error()}
 		}
+		if c.persistent != nil {
+			if err := c.persistent.retainPending(body, prefixLength); err != nil {
+				c.health.failedFlushes++
+				c.health.state = DeliveryStatePaused
+				c.health.lastOutcome = DeliveryOutcomePersistencePause
+				c.health.wakePending = false
+				c.mu.Unlock()
+				return nil, flushResult{pause: DeliveryOutcomePersistencePause}, err
+			}
+			c.pendingBody = body
+			c.pendingPrefix = prefixLength
+		}
 	}
 	c.health.inFlight = true
 	c.health.flushes++
@@ -418,6 +451,18 @@ func (c *Client) flushSnapshot(transport Transport) (*TransportResponse, flushRe
 	c.health.inFlight = false
 	c.health.attempts += uint64(result.attempts)
 	if sendErr == nil {
+		if c.persistent != nil {
+			if err := c.persistent.acknowledge(prefixLength); err != nil {
+				c.health.failedFlushes++
+				c.health.state = DeliveryStatePaused
+				c.health.lastOutcome = DeliveryOutcomePersistencePause
+				c.health.wakePending = false
+				result.retryable = false
+				result.pause = DeliveryOutcomePersistencePause
+				c.mu.Unlock()
+				return response, result, err
+			}
+		}
 		remaining := copy(c.events, c.events[prefixLength:])
 		clear(c.events[remaining:])
 		c.events = c.events[:remaining]

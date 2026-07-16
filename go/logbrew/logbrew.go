@@ -298,6 +298,7 @@ type Client struct {
 	droppedEvents  int
 	onEventDropped func(EventDrop)
 	automatic      *automaticDelivery
+	persistent     *persistentStore
 	health         deliveryHealthState
 	shuttingDown   bool
 	shutdownFailed bool
@@ -583,9 +584,16 @@ func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[strin
 		notifyEventDropped(droppedHandler, dropped)
 		return nil
 	}
-	c.events = append(c.events, Event{
+	event := Event{
 		Type: eventType, ID: id, Timestamp: timestamp, Attributes: attributes,
-	})
+	}
+	if c.persistent != nil {
+		if err := c.persistent.admit(event); err != nil {
+			c.mu.Unlock()
+			return err
+		}
+	}
+	c.events = append(c.events, event)
 	if c.automatic != nil {
 		c.startAutomaticLocked()
 		if len(c.events) >= c.automatic.flushThreshold {

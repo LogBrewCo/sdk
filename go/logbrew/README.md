@@ -135,6 +135,40 @@ Automatic delivery starts lazily after the first accepted event. It flushes ever
 
 `DeliveryHealth()` returns only fixed lifecycle state, queue/drop counts, in-flight/coalesced state, bounded outcome vocabulary, and counters. It never contains event content or identifiers, API keys, endpoints, headers, paths, hosts, response text, or arbitrary metadata. `Shutdown(nil)` stops scheduling and drains through the owned transport. If that final send fails, queued work remains available for a later explicit `Shutdown(nil)` retry, while new captures stay rejected. The client installs no signal, process, or exit hooks; the application remains responsible for calling shutdown and for configuring an HTTP timeout appropriate to its runtime.
 
+### Encrypted restart persistence
+
+`NewPersistentAutomaticClient` is an opt-in extension of the same automatic client. It durably encrypts the existing queue before capture returns, recovers events oldest first after restart, and stores the exact failed request prefix so a retry after restart uses byte-identical request data. Ordinary `NewClient` and `NewAutomaticClient` behavior remains memory-only.
+
+```go
+// Load the same 32-byte key from your application's secure configuration on every
+// restart. Do not generate a new key for an existing directory.
+persistenceKey := loadApplicationPersistenceKey()
+
+client, err := logbrew.NewPersistentAutomaticClient(logbrew.Config{
+  APIKey:       "LOGBREW_API_KEY",
+  SDKName:      "checkout-api",
+  SDKVersion:   "0.1.0",
+  MaxQueueSize: 1000,
+}, logbrew.AutomaticDeliveryConfig{
+  Transport: transport,
+}, logbrew.PersistentDeliveryConfig{
+  Directory:      "/var/lib/checkout-api/logbrew",
+  EncryptionKey:  persistenceKey,
+  MaxStoredBytes: 4 * 1024 * 1024,
+})
+must(err)
+```
+
+Persistence uses standard-library AES-256-GCM with a fresh nonce for every rewrite. The 32-byte key stays caller-owned and is never persisted or logged. Event count remains bounded by `Config.MaxQueueSize`; serialized event bytes default to 4 MiB and can be configured up to 16 MiB. Queue state, failed request bytes, event IDs, and the SDK identity inside a frozen request are authenticated, encrypted, and bound to the dedicated store's ownership marker. Outside that ciphertext, only fixed filenames, the content-free ownership marker, and a content-free transaction digest remain visible. API keys, transport authentication values, endpoints, headers, PIDs, hosts, and configured paths are not stored.
+
+The configured directory is canonicalized to a dedicated leaf and must support verifiable owner-only POSIX modes, regular-file identity, single-link checks, advisory exclusive locking, file sync, and directory sync. Unsupported filesystems fail with `persistence_unsupported`; there is no plaintext or weak-permission fallback. Symlinked store leaves, unexpected files, unsafe links, unauthenticated corruption, the wrong key, concurrent ownership, inherited post-fork ownership, and file replacement while a process owns the store fail closed before delivery. A clean `Shutdown(nil)` releases ownership. The client adds no process hooks, shutdown hooks, or extra delivery queue.
+
+Event content remains application-controlled sensitive data even when encrypted. Keep the directory private, protect and rotate the key using an app-owned migration, and use a different dedicated directory per logical client. `PurgePersistentDelivery` is an explicit destructive recovery operation: it acquires exclusive ownership, rejects unknown paths, removes only recognized persistence files, resets the content-free ownership marker, and synchronizes the directory. It accepts any valid 32-byte key value because purge must remain possible after the old key is lost.
+
+An accepted prefix is removed from restart recovery only after its replacement queue snapshot and parent directory are durable. A crash after the remote service accepts a request but before that local acknowledgement completes can still resend the encrypted prefix after restart; transports and event processing should therefore remain idempotent. No local design can atomically commit a remote response and a filesystem update.
+
+The app and its local filesystem owner remain inside the trust boundary. Without an external monotonic authority, the SDK cannot distinguish restoration of an entire older but internally valid persistence directory from a normal restart. Protect or back up the directory as one unit, and purge it if owner-driven rollback is suspected.
+
 ## First Useful Telemetry
 
 For a production Go service, the first useful LogBrew payload is usually a release marker, environment marker, one service log, one product action, one network milestone, one request duration metric, and one W3C-linked request span. That gives developers and AI assistants enough context to answer "what changed?", "where did this happen?", "what did the user do?", "which API call mattered?", and "which trace links the signals?" without installing a large instrumentation stack.

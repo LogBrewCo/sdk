@@ -396,6 +396,10 @@ jobs:
         if: ${{ needs.changed-areas.outputs.go == 'true' }}
         run: bash scripts/real_user_go_delivery_lifecycle_smoke.sh
 
+      - name: Run Go encrypted persistence installed-artifact smoke test
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
+        run: bash scripts/real_user_go_persistence_smoke.sh
+
       - name: Run Go support-ticket real-user smoke test
         if: ${{ needs.changed-areas.outputs.go == 'true' }}
         run: bash scripts/real_user_go_support_ticket_smoke.sh
