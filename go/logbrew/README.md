@@ -110,6 +110,31 @@ must(err)
 
 `EventDrop` contains only `eventId`, `eventType`, `reason`, and the cumulative dropped count; it never includes event attributes, payloads, API keys, headers, or transport details. The advisory callback is panic-safe and cannot interrupt capture. `Flush` and `Shutdown` still preserve accepted events across retryable transport failures, and `DroppedEvents()` is not reset by a successful flush.
 
+## Automatic Delivery
+
+Keep the existing manual behavior by using `NewClient`. To let a client own delivery, use `NewAutomaticClient` with one app-scoped transport:
+
+```go
+transport, err := logbrew.NewHTTPTransport(logbrew.HTTPTransportConfig{})
+must(err)
+
+client, err := logbrew.NewAutomaticClient(logbrew.Config{
+  APIKey:     "LOGBREW_API_KEY",
+  SDKName:    "checkout-api",
+  SDKVersion: "0.1.0",
+}, logbrew.AutomaticDeliveryConfig{
+  Transport: transport,
+})
+must(err)
+defer func() {
+  _, _ = client.Shutdown(nil)
+}()
+```
+
+Automatic delivery starts lazily after the first accepted event. It flushes every two seconds or at 100 queued events by default, whichever happens first, while reusing the same bounded queue and serialized flush path. Override `FlushInterval` and `FlushThreshold` when needed. Retryable failures preserve one immutable failed prefix; after the existing immediate retry budget is exhausted, automatic delivery uses capped equal-jitter scheduling from 100 milliseconds to five seconds. Later captures remain queued separately. Authentication (`401`/`403`), quota (`402`/`429`), and other non-retryable responses pause automatic delivery until the application fixes the cause and calls `ResumeDelivery`.
+
+`DeliveryHealth()` returns only fixed lifecycle state, queue/drop counts, in-flight/coalesced state, bounded outcome vocabulary, and counters. It never contains event content or identifiers, API keys, endpoints, headers, paths, hosts, response text, or arbitrary metadata. `Shutdown(nil)` stops scheduling and drains through the owned transport. If that final send fails, queued work remains available for a later explicit `Shutdown(nil)` retry, while new captures stay rejected. The client installs no signal, process, or exit hooks; the application remains responsible for calling shutdown and for configuring an HTTP timeout appropriate to its runtime.
+
 ## First Useful Telemetry
 
 For a production Go service, the first useful LogBrew payload is usually a release marker, environment marker, one service log, one product action, one network milestone, one request duration metric, and one W3C-linked request span. That gives developers and AI assistants enough context to answer "what changed?", "where did this happen?", "what did the user do?", "which API call mattered?", and "which trace links the signals?" without installing a large instrumentation stack.

@@ -287,19 +287,36 @@ type eventBatch struct {
 // or shut down through a transport.
 type Client struct {
 	mu             sync.Mutex
+	flushMu        sync.Mutex
 	apiKey         string
 	sdk            sdkInfo
 	maxRetries     int
 	maxQueueSize   int
 	events         []Event
+	pendingBody    []byte
+	pendingPrefix  int
 	droppedEvents  int
 	onEventDropped func(EventDrop)
+	automatic      *automaticDelivery
+	health         deliveryHealthState
+	shuttingDown   bool
+	shutdownFailed bool
 	closed         bool
 }
 
 // NewClient creates a public LogBrew client from user-supplied SDK identity
 // and API key configuration.
 func NewClient(config Config) (*Client, error) {
+	return newClient(config, nil)
+}
+
+// NewAutomaticClient creates a client that owns interval and threshold
+// delivery through the supplied app-scoped transport.
+func NewAutomaticClient(config Config, delivery AutomaticDeliveryConfig) (*Client, error) {
+	return newClient(config, &delivery)
+}
+
+func newClient(config Config, delivery *AutomaticDeliveryConfig) (*Client, error) {
 	if err := requireNonEmpty("api_key", config.APIKey); err != nil {
 		return nil, err
 	}
@@ -320,6 +337,14 @@ func NewClient(config Config) (*Client, error) {
 	if maxQueueSize == 0 {
 		maxQueueSize = defaultMaxQueueSize
 	}
+	automatic, err := configureAutomaticDelivery(delivery, maxQueueSize)
+	if err != nil {
+		return nil, err
+	}
+	state := DeliveryStateManual
+	if automatic != nil {
+		state = DeliveryStateRunning
+	}
 	return &Client{
 		apiKey: config.APIKey,
 		sdk: sdkInfo{
@@ -331,6 +356,11 @@ func NewClient(config Config) (*Client, error) {
 		maxQueueSize:   maxQueueSize,
 		events:         make([]Event, 0),
 		onEventDropped: config.OnEventDropped,
+		automatic:      automatic,
+		health: deliveryHealthState{
+			state:       state,
+			lastOutcome: DeliveryOutcomeNone,
+		},
 	}, nil
 }
 
@@ -363,33 +393,6 @@ func (c *Client) previewJSONLocked() (string, error) {
 		return "", &SdkError{Code: "serialization_error", Message: err.Error()}
 	}
 	return string(payload), nil
-}
-
-// Flush sends queued events through a transport while preserving retry
-// semantics.
-func (c *Client) Flush(transport Transport) (*TransportResponse, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return nil, &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
-	}
-	return c.flushInternalLocked(transport)
-}
-
-// Shutdown flushes queued events, then marks the client closed so later writes
-// fail.
-func (c *Client) Shutdown(transport Transport) (*TransportResponse, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return nil, &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
-	}
-	response, err := c.flushInternalLocked(transport)
-	if err != nil {
-		return nil, err
-	}
-	c.closed = true
-	return response, nil
 }
 
 // ReleaseAttributes describes the public payload fields for a release event.
@@ -563,7 +566,7 @@ func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[strin
 	var dropped EventDrop
 	var droppedHandler func(EventDrop)
 	c.mu.Lock()
-	if c.closed {
+	if c.closed || c.shuttingDown {
 		c.mu.Unlock()
 		return &SdkError{Code: "shutdown_error", Message: "client is already shut down"}
 	}
@@ -583,6 +586,12 @@ func (c *Client) pushEvent(eventType, id, timestamp string, attributes map[strin
 	c.events = append(c.events, Event{
 		Type: eventType, ID: id, Timestamp: timestamp, Attributes: attributes,
 	})
+	if c.automatic != nil {
+		c.startAutomaticLocked()
+		if len(c.events) >= c.automatic.flushThreshold {
+			c.signalAutomaticLocked()
+		}
+	}
 	c.mu.Unlock()
 	return nil
 }
@@ -595,42 +604,6 @@ func notifyEventDropped(handler func(EventDrop), drop EventDrop) {
 		_ = recover()
 	}()
 	handler(drop)
-}
-
-func (c *Client) flushInternalLocked(transport Transport) (*TransportResponse, error) {
-	if len(c.events) == 0 {
-		return &TransportResponse{StatusCode: 204, Attempts: 0}, nil
-	}
-	body, err := c.previewJSONLocked()
-	if err != nil {
-		return nil, err
-	}
-	maxAttempts := c.maxRetries + 1
-	for attempts := 1; attempts <= maxAttempts; attempts++ {
-		response, sendErr := transport.Send(c.apiKey, []byte(body))
-		if sendErr == nil {
-			if response.StatusCode == 401 {
-				return nil, &SdkError{Code: "unauthenticated", Message: "transport rejected the API key"}
-			}
-			if response.StatusCode >= 200 && response.StatusCode < 300 {
-				c.events = c.events[:0]
-				return &TransportResponse{StatusCode: response.StatusCode, Attempts: attempts}, nil
-			}
-			if response.StatusCode >= 500 && attempts < maxAttempts {
-				continue
-			}
-			return nil, &SdkError{Code: "transport_error", Message: fmt.Sprintf("unexpected transport status %d", response.StatusCode)}
-		}
-		var transportErr *TransportError
-		if ok := AsTransportError(sendErr, &transportErr); ok {
-			if transportErr.Retryable && attempts < maxAttempts {
-				continue
-			}
-			return nil, &SdkError{Code: transportErr.Code, Message: transportErr.Message}
-		}
-		return nil, sendErr
-	}
-	return nil, &SdkError{Code: "transport_error", Message: "exhausted retries"}
 }
 
 // AsTransportError extracts a public transport failure for retry-aware callers.
