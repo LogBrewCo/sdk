@@ -33,6 +33,8 @@ core_tgz="$tmp_dir/$core_tgz"
 node_tgz="$tmp_dir/$node_tgz"
 test -f "$core_tgz"
 test -f "$node_tgz"
+core_digest="$(shasum -a 256 "$core_tgz" | awk '{print $1}')"
+node_digest="$(shasum -a 256 "$node_tgz" | awk '{print $1}')"
 
 tar -tzf "$node_tgz" > "$tmp_dir/node-files.txt"
 grep -q '^package/persistent-event-store.cjs$' "$tmp_dir/node-files.txt"
@@ -79,6 +81,13 @@ if (mode === "a") {
 if (mode === "b") {
   const client = makeClient();
   assertEqual(client.pendingEvents(), 900, "process B recovered events");
+  const hydratedHealth = client.deliveryHealth();
+  assertEqual(hydratedHealth.schemaVersion, 1, "process B health schema");
+  assertEqual(hydratedHealth.storage, "persistent", "process B health storage");
+  assertEqual(hydratedHealth.hydratedEvents, 900, "process B hydrated events");
+  assertEqual(hydratedHealth.queueEvents, 900, "process B health queue");
+  assertEqual(hydratedHealth.deliveryState, "queued", "process B delivery state");
+  assertHealthPrivate(hydratedHealth);
   const requests = [];
   const firstRequestStarted = deferred();
   const releaseFirstResponse = deferred();
@@ -104,6 +113,9 @@ if (mode === "b") {
   });
   const flush = client.flush(transport);
   await firstRequestStarted.promise;
+  const inFlightHealth = client.deliveryHealth();
+  assertEqual(inFlightHealth.inFlight, true, "process B in-flight health");
+  assertEqual(inFlightHealth.deliveryState, "in_flight", "process B in-flight state");
   captureRange(client, 900, 600);
   assertEqual(client.pendingEvents(), 1000, "process B bounded queue during in-flight send");
   assertEqual(client.droppedEvents(), 500, "process B dropped events");
@@ -113,10 +125,20 @@ if (mode === "b") {
   await assertRejects(client.shutdown(transport), "process B shutdown");
   assertEqual(requests.length, 3, "process B request count");
   assertEqual(requests[1], requests[2], "process B failed shutdown body");
+  const failedHealth = client.deliveryHealth();
+  assertEqual(failedHealth.lifecycle, "active", "process B failed shutdown lifecycle");
+  assertEqual(failedHealth.lastOutcome, "failed", "process B failed outcome");
+  assertEqual(failedHealth.lastStatusClass, "server_error", "process B failed status class");
+  assertEqual(failedHealth.acceptedEvents, 100, "process B accepted events");
+  assertEqual(failedHealth.droppedByReason.queue_overflow, 500, "process B health drops");
+  assertEqual(failedHealth.queueEvents, 900, "process B retained queue health");
+  assertHealthPrivate(failedHealth);
   fs.writeFileSync(resultFile, JSON.stringify({
     acceptedIds: JSON.parse(requests[0]).events.map((event) => event.id),
     drops: drops.length,
     failedBodyHash: digest(requests[1]),
+    healthSchema: failedHealth.schemaVersion,
+    hydratedEvents: hydratedHealth.hydratedEvents,
     pending: client.pendingEvents(),
     requestCount: requests.length,
     warnings: warningCodes
@@ -129,6 +151,10 @@ if (mode === "b") {
 if (mode === "c") {
   const client = makeClient();
   assertEqual(client.pendingEvents(), 900, "process C recovered events");
+  const hydratedHealth = client.deliveryHealth();
+  assertEqual(hydratedHealth.storage, "persistent", "process C health storage");
+  assertEqual(hydratedHealth.hydratedEvents, 900, "process C hydrated events");
+  assertHealthPrivate(hydratedHealth);
   const requests = [];
   const acceptedBodies = [];
   const server = http.createServer((request, response) => {
@@ -153,9 +179,20 @@ if (mode === "c") {
   assertEqual(response.batches, 9, "process C accepted batches");
   assertEqual(requests.length, 10, "process C request count");
   assertEqual(requests[0], requests[1], "process C stable retry body");
+  const closedHealth = client.deliveryHealth();
+  assertEqual(closedHealth.lifecycle, "closed", "process C closed lifecycle");
+  assertEqual(closedHealth.deliveryState, "accepted", "process C accepted delivery state");
+  assertEqual(closedHealth.lastStatusClass, "success", "process C accepted status class");
+  assertEqual(closedHealth.acceptedEvents, 900, "process C accepted event health");
+  assertEqual(closedHealth.queueEvents, 0, "process C drained health queue");
+  assertEqual(closedHealth.attempts, 10, "process C health attempts");
+  assertEqual(closedHealth.batches, 9, "process C health batches");
+  assertHealthPrivate(closedHealth);
   fs.writeFileSync(resultFile, JSON.stringify({
     acceptedIds: acceptedBodies.flatMap((body) => JSON.parse(body).events.map((event) => event.id)),
     firstBodyHash: digest(requests[0]),
+    healthSchema: closedHealth.schemaVersion,
+    hydratedEvents: hydratedHealth.hydratedEvents,
     pending: client.pendingEvents(),
     requestCount: requests.length,
     warnings: warningCodes
@@ -222,6 +259,26 @@ function digest(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
+function assertHealthPrivate(health) {
+  const serialized = JSON.stringify(health);
+  for (const forbidden of [
+    apiKey,
+    "evt_node_persistent_",
+    "delivery heartbeat",
+    "127.0.0.1",
+    "/v1/events",
+    queueDirectory,
+    key.toString("base64")
+  ]) {
+    if (serialized.includes(forbidden)) {
+      throw new Error("delivery health leaked private input");
+    }
+  }
+  if (Object.hasOwn(health, "statusCode")) {
+    throw new Error("delivery health exposed a numeric status");
+  }
+}
+
 function assertEqual(actual, expected, label) {
   if (actual !== expected) {
     throw new Error(`${label}: expected ${expected}, received ${actual}`);
@@ -266,6 +323,10 @@ assertEqual(c.pending, 0, "final queue");
 assertEqual(b.requestCount, 3, "process B requests");
 assertEqual(c.requestCount, 10, "process C requests");
 assertEqual(b.failedBodyHash, c.firstBodyHash, "cross-process stable body");
+assertEqual(b.healthSchema, 1, "process B health schema");
+assertEqual(c.healthSchema, 1, "process C health schema");
+assertEqual(b.hydratedEvents, 900, "process B hydration");
+assertEqual(c.hydratedEvents, 900, "process C hydration");
 assertEqual(b.warnings.includes("stale_lock_recovered"), true, "process B stale lock warning");
 assertEqual(c.warnings.includes("stale_lock_recovered"), true, "process C stale lock warning");
 
@@ -286,6 +347,8 @@ console.log(JSON.stringify({
   droppedEvents: b.drops,
   encryptedAtRest: true,
   failedShutdownRecovered: true,
+  healthSchema: b.healthSchema,
+  hydratedEvents: c.hydratedEvents,
   stableReplay: true
 }));
 
@@ -371,7 +434,7 @@ mkdir -p "$tmp_dir/runtime"
 SMOKE_ROOT="$tmp_dir/runtime" node cjs-smoke.cjs
 SMOKE_ROOT="$tmp_dir/runtime" node driver.mjs > "$tmp_dir/result.json"
 
-python3 - "$tmp_dir/result.json" "$sdk_package_version" "$node_package_version" <<'PY'
+python3 - "$tmp_dir/result.json" "$sdk_package_version" "$node_package_version" "$core_digest" "$node_digest" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -383,6 +446,8 @@ expected = {
     "droppedEvents": 500,
     "encryptedAtRest": True,
     "failedShutdownRecovered": True,
+    "healthSchema": 1,
+    "hydratedEvents": 900,
     "stableReplay": True,
 }
 if result != expected:
@@ -391,10 +456,14 @@ print(json.dumps({
     "accepted_batches": result["acceptedBatches"],
     "accepted_events": result["acceptedEvents"],
     "core_version": sys.argv[2],
+    "core_digest": sys.argv[4],
     "dropped_events": result["droppedEvents"],
     "encrypted_at_rest": result["encryptedAtRest"],
     "failed_shutdown_recovered": result["failedShutdownRecovered"],
     "node_version": sys.argv[3],
+    "node_digest": sys.argv[5],
+    "health_schema": result["healthSchema"],
+    "hydrated_events": result["hydratedEvents"],
     "stable_replay": result["stableReplay"],
 }, sort_keys=True))
 PY

@@ -399,11 +399,14 @@ client.log("evt_checkout_ready", new Date().toISOString(), {
   message: "checkout ready"
 });
 
-console.log(client.deliveryHealth());
+const health = client.deliveryHealth();
+console.log(JSON.stringify(health));
 await client.shutdown();
 ```
 
-Set `automaticDelivery: false` for explicit manual-only operation; the owned transport still lets you call `flush()` and `shutdown()` without passing it again. Lower-level clients without an owned transport remain manual and continue to accept `flush(transport)` and `shutdown(transport)`. Retryable automatic failures use equal-jitter exponential backoff capped at 60 seconds. Authentication, rate-limit, and other non-retryable failures pause automatic sends while retaining the exact failed batch; an explicit successful `flush()` with the owned transport clears the pause. `deliveryHealth()` returns only fixed booleans, enum states, queue counts/bytes, drops, the pause class, a bounded retry delay, and saturating delivery counters. It never includes event content or IDs, authentication material, transport destinations, arbitrary metadata, HTTP status, or raw transport errors.
+Set `automaticDelivery: false` for explicit manual-only operation; the owned transport still lets you call `flush()` and `shutdown()` without passing it again. Lower-level clients without an owned transport remain manual and continue to accept `flush(transport)` and `shutdown(transport)`. Retryable automatic failures use equal-jitter exponential backoff capped at 60 seconds. Authentication, rate-limit, and other non-retryable failures pause automatic sends while retaining the exact failed batch; an explicit successful `flush()` with the owned transport clears the pause.
+
+`deliveryHealth()` returns a frozen, JSON-serializable schema. It reports lifecycle and delivery states, memory or persistent storage, current and startup-hydrated queue counts/bytes, in-flight and coalesced work, client-lifetime accepted totals, fixed drop reasons, bounded retry state, transport status classes, and monotonic-within-client transition timestamps. Counters saturate instead of overflowing. The snapshot never includes event content or IDs, messages or attributes, authentication material, transport destinations or headers, filesystem paths, arbitrary metadata, numeric HTTP status, response text, or raw errors.
 
 ## Queue Bounds
 

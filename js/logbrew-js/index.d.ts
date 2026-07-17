@@ -566,15 +566,30 @@ export type Transport = {
 
 /** Content-free bounded delivery state with no event or sensitive transport fields. */
 export type DeliveryHealthSnapshot = Readonly<{
+  /** Stable schema discriminator for JSON consumers. */
+  schemaVersion: 1;
   automaticDelivery: boolean;
   lifecycle: "active" | "shutting_down" | "closed";
+  deliveryState: "idle" | "queued" | "scheduled" | "in_flight" | "retrying" | "paused" | "accepted" | "failed" | "dropped";
+  storage: "memory" | "persistent";
   queueEvents: number;
   queueBytes: number;
+  /** Events and compact bytes loaded from persistence when this client started. */
+  hydratedEvents: number;
+  hydratedBytes: number;
   droppedEvents: number;
+  droppedByReason: Readonly<{
+    event_too_large: number;
+    queue_bytes_overflow: number;
+    queue_overflow: number;
+  }>;
+  lastDropReason: "none" | "event_too_large" | "queue_bytes_overflow" | "queue_overflow";
   scheduled: boolean;
   inFlight: boolean;
   coalesced: boolean;
+  pendingOperations: number;
   lastOutcome: "idle" | "empty" | "accepted" | "failed";
+  lastStatusClass: "none" | "success" | "client_error" | "server_error" | "network_error" | "transport_error" | "invalid_response" | "other_status";
   pausedReason: "none" | "authentication" | "rate_limit" | "non_retryable";
   consecutiveFailures: number;
   /** Bounded transient retry delay; zero when no automatic retry is scheduled. */
@@ -583,6 +598,12 @@ export type DeliveryHealthSnapshot = Readonly<{
   failures: number;
   attempts: number;
   batches: number;
+  /** Events durably acknowledged since this client was created. */
+  acceptedEvents: number;
+  /** Bounded monotonic-within-client Unix milliseconds; zero until the transition occurs. */
+  lastAttemptAtUnixMs: number;
+  lastAcceptedAtUnixMs: number;
+  lastDroppedAtUnixMs: number;
 }>;
 
 /** Stable public SDK error with parseable code and message fields. */

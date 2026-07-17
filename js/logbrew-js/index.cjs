@@ -37,6 +37,7 @@ const DEFAULT_MAX_BATCH_BYTES = 256 * 1024;
 const DEFAULT_DELIVERY_INTERVAL_MS = 5000;
 const MAX_DELIVERY_INTERVAL_MS = 60 * 1000;
 const DEFAULT_DELIVERY_QUEUE_THRESHOLD = 50;
+const DELIVERY_HEALTH_SCHEMA_VERSION = 1;
 const MAX_ERROR_CAUSES = 5;
 const BUILTIN_ERROR_NAMES = new Set([
   "AggregateError",
@@ -244,6 +245,15 @@ class LogBrewClient {
     this.closing = false;
     this.closed = false;
     this.droppedEventCount = 0;
+    this.droppedEventsByReason = {
+      event_too_large: 0,
+      queue_bytes_overflow: 0,
+      queue_overflow: 0
+    };
+    this.lastDropReason = "none";
+    this.storage = eventStore ? "persistent" : "memory";
+    this.hydratedEventCount = recovered.events.length;
+    this.hydratedEventBytes = recovered.queuedEventBytes;
     this.deliveryTimer = undefined;
     this.automaticFlushActive = false;
     this.automaticFlushPending = false;
@@ -256,6 +266,11 @@ class LogBrewClient {
     this.failedFlushCount = 0;
     this.deliveryAttemptCount = 0;
     this.acceptedBatchCount = 0;
+    this.acceptedEventCount = 0;
+    this.lastStatusClass = "none";
+    this.lastAttemptAtUnixMs = 0;
+    this.lastAcceptedAtUnixMs = 0;
+    this.lastDroppedAtUnixMs = 0;
     this.failedBatch = undefined;
     this.#scheduleAutomaticDelivery();
   }
@@ -273,24 +288,63 @@ class LogBrewClient {
   }
 
   deliveryHealth() {
+    const droppedByReason = Object.freeze({ ...this.droppedEventsByReason });
     return Object.freeze({
+      schemaVersion: DELIVERY_HEALTH_SCHEMA_VERSION,
       automaticDelivery: this.automaticDelivery,
       lifecycle: this.closed ? "closed" : this.closing ? "shutting_down" : "active",
+      deliveryState: this.#deliveryState(),
+      storage: this.storage,
       queueEvents: this.events.length,
       queueBytes: this.queuedEventBytes,
+      hydratedEvents: this.hydratedEventCount,
+      hydratedBytes: this.hydratedEventBytes,
       droppedEvents: this.droppedEventCount,
+      droppedByReason,
+      lastDropReason: this.lastDropReason,
       scheduled: this.deliveryTimer !== undefined,
       inFlight: this.deliveryInFlight,
       coalesced: this.automaticFlushPending,
+      pendingOperations: this.pendingOperations,
       lastOutcome: this.lastDeliveryOutcome,
+      lastStatusClass: this.lastStatusClass,
       pausedReason: this.automaticPauseReason,
       consecutiveFailures: this.consecutiveDeliveryFailures,
       retryDelayMs: this.retryDelayMs,
       flushes: this.successfulFlushCount,
       failures: this.failedFlushCount,
       attempts: this.deliveryAttemptCount,
-      batches: this.acceptedBatchCount
+      batches: this.acceptedBatchCount,
+      acceptedEvents: this.acceptedEventCount,
+      lastAttemptAtUnixMs: this.lastAttemptAtUnixMs,
+      lastAcceptedAtUnixMs: this.lastAcceptedAtUnixMs,
+      lastDroppedAtUnixMs: this.lastDroppedAtUnixMs
     });
+  }
+
+  #deliveryState() {
+    if (this.deliveryInFlight) {
+      return "in_flight";
+    }
+    if (this.retryDelayMs > 0) {
+      return "retrying";
+    }
+    if (this.automaticPauseReason !== "none") {
+      return "paused";
+    }
+    if (this.events.length > 0) {
+      return this.deliveryTimer !== undefined ? "scheduled" : "queued";
+    }
+    if (this.lastDeliveryOutcome === "accepted") {
+      return "accepted";
+    }
+    if (this.lastDeliveryOutcome === "failed") {
+      return "failed";
+    }
+    if (this.droppedEventCount > 0) {
+      return "dropped";
+    }
+    return "idle";
   }
 
   previewJson() {
@@ -462,6 +516,9 @@ class LogBrewClient {
 
   #recordDroppedEvent(event, reason) {
     this.droppedEventCount = incrementBounded(this.droppedEventCount);
+    this.droppedEventsByReason[reason] = incrementBounded(this.droppedEventsByReason[reason]);
+    this.lastDropReason = reason;
+    this.lastDroppedAtUnixMs = nextBoundedTimestamp(this.lastDroppedAtUnixMs);
     if (!this.onEventDropped) {
       return;
     }
@@ -478,9 +535,9 @@ class LogBrewClient {
   }
 
   #runSerialized(operation) {
-    this.pendingOperations += 1;
+    this.pendingOperations = incrementBounded(this.pendingOperations);
     const result = this.operationTail.then(operation).finally(() => {
-      this.pendingOperations -= 1;
+      this.pendingOperations = Math.max(0, this.pendingOperations - 1);
     });
     this.operationTail = result.then(
       () => undefined,
@@ -669,6 +726,11 @@ class LogBrewClient {
     this.serializedEvents.splice(0, eventsCount);
     this.serializedEventBytes.splice(0, eventsCount);
     this.queuedEventBytes -= acknowledgedBytes;
+    this.acceptedEventCount = addBounded(this.acceptedEventCount, eventsCount);
+    this.lastAcceptedAtUnixMs = nextBoundedTimestamp(Math.max(
+      this.lastAcceptedAtUnixMs,
+      this.lastAttemptAtUnixMs
+    ));
   }
 
   #recordAutomaticSuccess() {
@@ -714,8 +776,22 @@ class LogBrewClient {
     while (attempts < maxAttempts) {
       attempts += 1;
       this.deliveryAttemptCount = incrementBounded(this.deliveryAttemptCount);
+      this.lastAttemptAtUnixMs = nextBoundedTimestamp(this.lastAttemptAtUnixMs);
+      this.lastStatusClass = "transport_error";
       try {
         const response = await transport.send(this.apiKey, body);
+        if (
+          !response
+          || Array.isArray(response)
+          || typeof response !== "object"
+          || !Number.isSafeInteger(response.statusCode)
+          || response.statusCode < 100
+          || response.statusCode > 599
+        ) {
+          this.lastStatusClass = "invalid_response";
+          throw new SdkError("transport_error", "invalid transport response");
+        }
+        this.lastStatusClass = statusClass(response.statusCode);
         if (response.statusCode === 401) {
           throw new SdkError("unauthenticated", "transport rejected the API key");
         }
@@ -739,9 +815,11 @@ class LogBrewClient {
           throw error;
         }
         if (error instanceof TransportError && error.retryable && attempts < maxAttempts) {
+          this.lastStatusClass = "network_error";
           continue;
         }
         if (error instanceof TransportError) {
+          this.lastStatusClass = "network_error";
           throw new SdkError(error.code, error.message, { retryable: error.retryable });
         }
         throw error;
@@ -757,6 +835,32 @@ function automaticRetryDelayMs(deliveryIntervalMs, consecutiveFailures) {
   const maximumDelay = Math.min(MAX_DELIVERY_INTERVAL_MS, deliveryIntervalMs * (2 ** exponent));
   const minimumDelay = Math.ceil(maximumDelay / 2);
   return minimumDelay + Math.floor(Math.random() * (maximumDelay - minimumDelay + 1));
+}
+
+function statusClass(statusCode) {
+  if (statusCode >= 200 && statusCode < 300) {
+    return "success";
+  }
+  if (statusCode >= 400 && statusCode < 500) {
+    return "client_error";
+  }
+  if (statusCode >= 500) {
+    return "server_error";
+  }
+  return "other_status";
+}
+
+function nextBoundedTimestamp(previous) {
+  const now = Date.now();
+  if (!Number.isFinite(now)) {
+    return previous;
+  }
+  const bounded = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(now)));
+  return Math.max(previous, bounded);
+}
+
+function addBounded(current, increment) {
+  return Math.min(Number.MAX_SAFE_INTEGER, current + increment);
 }
 
 function utf8ByteLength(value) {

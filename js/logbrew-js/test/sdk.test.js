@@ -356,45 +356,256 @@ test("automatic delivery arms one unref timer and flushes on its interval", asyn
   assert.equal(timers[0].delay, 2500);
   assert.equal(timers[0].unrefCalls, 1);
   assert.deepEqual(client.deliveryHealth(), {
+    schemaVersion: 1,
     automaticDelivery: true,
     lifecycle: "active",
+    deliveryState: "scheduled",
+    storage: "memory",
     queueEvents: 1,
     queueBytes: client.pendingBytes(),
+    hydratedEvents: 0,
+    hydratedBytes: 0,
     droppedEvents: 0,
+    droppedByReason: {
+      event_too_large: 0,
+      queue_bytes_overflow: 0,
+      queue_overflow: 0
+    },
+    lastDropReason: "none",
     scheduled: true,
     inFlight: false,
     coalesced: false,
+    pendingOperations: 0,
     lastOutcome: "idle",
+    lastStatusClass: "none",
     pausedReason: "none",
     consecutiveFailures: 0,
     retryDelayMs: 0,
     flushes: 0,
     failures: 0,
     attempts: 0,
-    batches: 0
+    batches: 0,
+    acceptedEvents: 0,
+    lastAttemptAtUnixMs: 0,
+    lastAcceptedAtUnixMs: 0,
+    lastDroppedAtUnixMs: 0
   });
 
   timers[0].callback();
   await waitForCondition(() => transport.sentBodies.length === 1, "interval delivery did not send");
   await waitForCondition(() => client.pendingEvents() === 0, "interval delivery did not acknowledge");
-  assert.deepEqual(client.deliveryHealth(), {
+  const acceptedHealth = client.deliveryHealth();
+  assert.deepEqual(acceptedHealth, {
+    schemaVersion: 1,
     automaticDelivery: true,
     lifecycle: "active",
+    deliveryState: "accepted",
+    storage: "memory",
     queueEvents: 0,
     queueBytes: 0,
+    hydratedEvents: 0,
+    hydratedBytes: 0,
     droppedEvents: 0,
+    droppedByReason: {
+      event_too_large: 0,
+      queue_bytes_overflow: 0,
+      queue_overflow: 0
+    },
+    lastDropReason: "none",
     scheduled: false,
     inFlight: false,
     coalesced: false,
+    pendingOperations: 0,
     lastOutcome: "accepted",
+    lastStatusClass: "success",
     pausedReason: "none",
     consecutiveFailures: 0,
     retryDelayMs: 0,
     flushes: 1,
     failures: 0,
     attempts: 1,
-    batches: 1
+    batches: 1,
+    acceptedEvents: 1,
+    lastAttemptAtUnixMs: acceptedHealth.lastAttemptAtUnixMs,
+    lastAcceptedAtUnixMs: acceptedHealth.lastAcceptedAtUnixMs,
+    lastDroppedAtUnixMs: 0
   });
+  assert.equal(acceptedHealth.lastAttemptAtUnixMs > 0, true);
+  assert.equal(acceptedHealth.lastAcceptedAtUnixMs >= acceptedHealth.lastAttemptAtUnixMs, true);
+});
+
+test("delivery health snapshot reports exact retry acceptance with stable private JSON", async () => {
+  const bodies = [];
+  const client = LogBrewClient.create({
+    apiKey: "private-key-value",
+    automaticDelivery: false,
+    maxRetries: 1,
+    sdkName: "private-sdk-name",
+    sdkVersion: "0.1.0",
+    transport: {
+      async send(_apiKey, body) {
+        bodies.push(body);
+        return { statusCode: bodies.length === 1 ? 503 : 202 };
+      }
+    }
+  });
+  client.log("private-event-id", "2026-06-02T10:00:00Z", {
+    level: "error",
+    message: "private payload text"
+  });
+
+  await client.flush();
+
+  const health = client.deliveryHealth();
+  assert.equal(health.schemaVersion, 1);
+  assert.equal(health.deliveryState, "accepted");
+  assert.equal(health.storage, "memory");
+  assert.equal(health.acceptedEvents, 1);
+  assert.equal(health.lastStatusClass, "success");
+  assert.equal(health.attempts, 2);
+  assert.equal(health.batches, 1);
+  assert.equal(health.lastAttemptAtUnixMs > 0, true);
+  assert.equal(health.lastAcceptedAtUnixMs >= health.lastAttemptAtUnixMs, true);
+  assert.equal(bodies[0], bodies[1]);
+  assert.equal(Object.isFrozen(health), true);
+  assert.equal(Object.isFrozen(health.droppedByReason), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(health)), health);
+  const serialized = JSON.stringify(health);
+  for (const forbidden of ["private-key-value", "private-sdk-name", "private-event-id", "private payload text"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+  assert.equal(Object.hasOwn(health, "statusCode"), false);
+});
+
+test("delivery health snapshot reports bounded queue drops by stable reason", () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    maxQueueSize: 1,
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0"
+  });
+  client.log("evt_kept_001", "2026-06-02T10:00:00Z", { level: "info", message: "kept" });
+  client.log("evt_dropped_001", "2026-06-02T10:00:01Z", { level: "info", message: "dropped" });
+
+  const health = client.deliveryHealth();
+  assert.equal(health.droppedEvents, 1);
+  assert.equal(health.lastDropReason, "queue_overflow");
+  assert.deepEqual(health.droppedByReason, {
+    event_too_large: 0,
+    queue_bytes_overflow: 0,
+    queue_overflow: 1
+  });
+  assert.equal(health.lastDroppedAtUnixMs > 0, true);
+});
+
+test("delivery health timestamps do not move backward when the wall clock regresses", async (t) => {
+  let now = 2000;
+  t.mock.method(Date, "now", () => now);
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    automaticDelivery: false,
+    maxQueueSize: 1,
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    transport: RecordingTransport.alwaysAccept()
+  });
+  client.log("evt_kept_clock", "2026-06-02T10:00:00Z", { level: "info", message: "kept" });
+  client.log("evt_drop_clock_1", "2026-06-02T10:00:01Z", { level: "info", message: "drop" });
+  assert.equal(client.deliveryHealth().lastDroppedAtUnixMs, 2000);
+
+  now = 1000;
+  client.log("evt_drop_clock_2", "2026-06-02T10:00:02Z", { level: "info", message: "drop again" });
+  assert.equal(client.deliveryHealth().lastDroppedAtUnixMs, 2000);
+
+  now = 3000;
+  await client.flush();
+  const accepted = client.deliveryHealth();
+  assert.equal(accepted.lastAttemptAtUnixMs, 3000);
+  assert.equal(accepted.lastAcceptedAtUnixMs, 3000);
+});
+
+test("delivery health snapshot reports persisted restart hydration without content", () => {
+  const store = recordingEventStore([storedLog("private-recovered-event")]);
+  const client = LogBrewClient.create({
+    apiKey: "private-key-value",
+    eventStore: store,
+    sdkName: "private-sdk-name",
+    sdkVersion: "0.1.0"
+  });
+
+  const health = client.deliveryHealth();
+  assert.equal(health.storage, "persistent");
+  assert.equal(health.hydratedEvents, 1);
+  assert.equal(health.hydratedBytes, store.records[0].eventBytes);
+  assert.equal(health.queueEvents, 1);
+  assert.equal(health.deliveryState, "queued");
+  const serialized = JSON.stringify(health);
+  for (const forbidden of ["private-key-value", "private-sdk-name", "private-recovered-event"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+test("delivery health snapshot stays coherent across overlapping flush and shutdown", async () => {
+  const sendStarted = deferred();
+  const sendResponse = deferred();
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    automaticDelivery: false,
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    transport: {
+      async send() {
+        sendStarted.resolve();
+        return sendResponse.promise;
+      }
+    }
+  });
+  client.log("evt_overlap_001", "2026-06-02T10:00:00Z", { level: "info", message: "overlap" });
+
+  const flush = client.flush();
+  await sendStarted.promise;
+  const shutdown = client.shutdown();
+  const overlapping = client.deliveryHealth();
+  assert.equal(overlapping.lifecycle, "shutting_down");
+  assert.equal(overlapping.deliveryState, "in_flight");
+  assert.equal(overlapping.inFlight, true);
+  assert.equal(overlapping.pendingOperations, 2);
+
+  sendResponse.resolve({ statusCode: 202 });
+  await flush;
+  await shutdown;
+  const closed = client.deliveryHealth();
+  assert.equal(closed.lifecycle, "closed");
+  assert.equal(closed.pendingOperations, 0);
+  assert.equal(closed.inFlight, false);
+  assert.equal(closed.acceptedEvents, 1);
+});
+
+test("delivery health snapshot classifies malformed transport responses without leaking them", async () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    automaticDelivery: false,
+    maxRetries: 0,
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    transport: {
+      async send() {
+        return { statusCode: "private-malformed-status", responseBody: "private-response-body" };
+      }
+    }
+  });
+  client.log("evt_malformed_001", "2026-06-02T10:00:00Z", { level: "error", message: "private event body" });
+
+  await assert.rejects(client.flush(), /invalid transport response/);
+
+  const health = client.deliveryHealth();
+  assert.equal(health.lastOutcome, "failed");
+  assert.equal(health.lastStatusClass, "invalid_response");
+  assert.equal(health.deliveryState, "queued");
+  const serialized = JSON.stringify(health);
+  for (const forbidden of ["private-malformed-status", "private-response-body", "private event body", "evt_malformed_001"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
 });
 
 test("automatic threshold coalesces capture during I/O into one trailing cohort", async (t) => {
@@ -463,13 +674,17 @@ test("automatic transient failures back off without changing failed bytes or adm
   await waitForCondition(() => client.deliveryHealth().failures === 1, "automatic failure was not recorded");
   assert.equal(client.pendingEvents(), 1);
   assert.equal(client.deliveryHealth().lastOutcome, "failed");
+  assert.equal(client.deliveryHealth().deliveryState, "retrying");
+  assert.equal(client.deliveryHealth().lastStatusClass, "server_error");
   assert.equal(client.deliveryHealth().pausedReason, "none");
   assert.equal(client.deliveryHealth().consecutiveFailures, 1);
   assert.equal(client.deliveryHealth().retryDelayMs, 1250);
-  const serializedHealth = JSON.stringify(client.deliveryHealth());
-  for (const forbidden of ["private-key-value", "private-host-name", "private-event-id", "private payload text", "503"]) {
+  const failureHealth = client.deliveryHealth();
+  const serializedHealth = JSON.stringify(failureHealth);
+  for (const forbidden of ["private-key-value", "private-host-name", "private-event-id", "private payload text"]) {
     assert.equal(serializedHealth.includes(forbidden), false);
   }
+  assert.equal(Object.hasOwn(failureHealth, "statusCode"), false);
 
   const retryTimer = timers.findLast((timer) => !timer.cleared);
   assert.ok(retryTimer);
@@ -525,6 +740,8 @@ test("automatic authentication failure pauses retained work without a retry loop
   assert.equal(transport.sentBodies.length, 1);
   assert.equal(client.pendingEvents(), 1);
   assert.equal(client.deliveryHealth().pausedReason, "authentication");
+  assert.equal(client.deliveryHealth().deliveryState, "paused");
+  assert.equal(client.deliveryHealth().lastStatusClass, "client_error");
   assert.equal(client.deliveryHealth().consecutiveFailures, 1);
   assert.equal(client.deliveryHealth().retryDelayMs, 0);
   assert.equal(client.deliveryHealth().scheduled, false);
@@ -537,10 +754,12 @@ test("automatic authentication failure pauses retained work without a retry loop
   });
   assert.equal(transport.sentBodies.length, 1);
   assert.equal(timers.some((timer) => !timer.cleared), false);
-  const healthJson = JSON.stringify(client.deliveryHealth());
-  for (const forbidden of ["private-key-value", "private-host-name", "private-event-id", "private payload text", "401"]) {
+  const authenticationHealth = client.deliveryHealth();
+  const healthJson = JSON.stringify(authenticationHealth);
+  for (const forbidden of ["private-key-value", "private-host-name", "private-event-id", "private payload text"]) {
     assert.equal(healthJson.includes(forbidden), false);
   }
+  assert.equal(Object.hasOwn(authenticationHealth, "statusCode"), false);
 });
 
 test("automatic rate limit pauses until an explicit successful flush", async (t) => {

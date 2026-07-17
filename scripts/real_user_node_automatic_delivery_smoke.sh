@@ -29,6 +29,9 @@ node_digest="$(shasum -a 256 "$node_tgz" | awk '{print $1}')"
 tar -xOf "$core_tgz" package/index.d.ts > "$tmp_dir/core-types.d.ts"
 tar -xOf "$node_tgz" package/index.d.ts > "$tmp_dir/node-types.d.ts"
 grep -q 'deliveryHealth(): DeliveryHealthSnapshot' "$tmp_dir/core-types.d.ts"
+grep -q 'schemaVersion: 1' "$tmp_dir/core-types.d.ts"
+grep -q 'lastStatusClass:' "$tmp_dir/core-types.d.ts"
+grep -q 'acceptedEvents: number' "$tmp_dir/core-types.d.ts"
 grep -q 'automaticDelivery?: boolean' "$tmp_dir/core-types.d.ts"
 grep -q 'pausedReason: "none" | "authentication" | "rate_limit" | "non_retryable"' "$tmp_dir/core-types.d.ts"
 grep -q 'retryDelayMs: number' "$tmp_dir/core-types.d.ts"
@@ -77,6 +80,9 @@ const core = LogBrewClient.create({
 });
 const health: DeliveryHealthSnapshot = core.deliveryHealth();
 void health.lifecycle;
+void health.deliveryState;
+void health.droppedByReason.queue_overflow;
+void health.lastStatusClass;
 void health.pausedReason;
 void health.retryDelayMs;
 void core.flush();
@@ -103,6 +109,8 @@ const client = nodeSdk.createLogBrewNodeClient({
 });
 const health: sdk.DeliveryHealthSnapshot = client.deliveryHealth();
 void health.automaticDelivery;
+void health.hydratedEvents;
+void health.acceptedEvents;
 void health.pausedReason;
 void health.retryDelayMs;
 void client.shutdown();
@@ -157,26 +165,43 @@ client.log("evt_auto_esm_001", "2026-07-15T10:00:00Z", {
 await waitFor(() => client.pendingEvents() === 0 && requests.length === 2);
 const activeHealth = client.deliveryHealth();
 assertExactKeys(activeHealth, [
+  "acceptedEvents",
   "attempts",
   "automaticDelivery",
   "batches",
   "coalesced",
   "consecutiveFailures",
+  "deliveryState",
+  "droppedByReason",
   "droppedEvents",
   "failures",
   "flushes",
+  "hydratedBytes",
+  "hydratedEvents",
   "inFlight",
+  "lastAcceptedAtUnixMs",
+  "lastAttemptAtUnixMs",
+  "lastDropReason",
+  "lastDroppedAtUnixMs",
   "lastOutcome",
+  "lastStatusClass",
   "lifecycle",
   "pausedReason",
+  "pendingOperations",
   "queueBytes",
   "queueEvents",
   "retryDelayMs",
-  "scheduled"
+  "scheduled",
+  "schemaVersion",
+  "storage"
 ]);
 assert(activeHealth.automaticDelivery === true, "automatic delivery disabled");
+assert(activeHealth.schemaVersion === 1, "health schema changed");
+assert(activeHealth.deliveryState === "accepted", "delivery state not accepted");
 assert(activeHealth.lastOutcome === "accepted", "automatic outcome not accepted");
+assert(activeHealth.lastStatusClass === "success", "automatic status class mismatch");
 assert(activeHealth.attempts === 2 && activeHealth.batches === 1, "automatic counters mismatch");
+assert(activeHealth.acceptedEvents === 1, "automatic accepted-event count mismatch");
 assert(activeHealth.flushes === 1 && activeHealth.failures === 0, "automatic flush counters mismatch");
 assert(requests[0].body === requests[1].body, "retry body changed");
 for (const request of requests) {
@@ -218,10 +243,12 @@ assert(automaticRateLimitRequests.length === 1, "automatic rate limit entered a 
 assert(rateLimitedClient.pendingEvents() === 1, "rate-limited event was not retained");
 assert(rateLimitedClient.deliveryHealth().scheduled === false, "rate-limited delivery remained scheduled");
 assert(rateLimitedClient.deliveryHealth().retryDelayMs === 0, "rate limit exposed a misleading retry delay");
-const rateLimitHealthJson = JSON.stringify(rateLimitedClient.deliveryHealth());
-for (const forbidden of ["LOGBREW_SERVER_API_KEY", "evt_auto_rate_limit_001", "automatic rate limit", "127.0.0.1", "/v1/automatic-rate-limit", "429"]) {
+const rateLimitHealth = rateLimitedClient.deliveryHealth();
+const rateLimitHealthJson = JSON.stringify(rateLimitHealth);
+for (const forbidden of ["LOGBREW_SERVER_API_KEY", "evt_auto_rate_limit_001", "automatic rate limit", "127.0.0.1", "/v1/automatic-rate-limit"]) {
   assert(!rateLimitHealthJson.includes(forbidden), "rate-limit health leaked private delivery input");
 }
+assert(!Object.hasOwn(rateLimitHealth, "statusCode"), "health exposed a numeric status");
 rateLimitedClient.purgePendingEvents();
 await rateLimitedClient.shutdown();
 
