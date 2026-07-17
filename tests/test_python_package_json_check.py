@@ -8,10 +8,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CHECKER = ROOT / "scripts" / "check_fastapi_package_json.py"
+CHECKER = ROOT / "scripts" / "check_python_package_json.py"
 
 
-class FastApiPackageJsonCheckTests(unittest.TestCase):
+class PythonPackageJsonCheckTests(unittest.TestCase):
     def run_checker(
         self,
         document: object,
@@ -78,6 +78,80 @@ class FastApiPackageJsonCheckTests(unittest.TestCase):
                 result = self.run_checker(document, "fields", expectation)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, "")
+
+    def test_event_fields_require_each_exact_typed_value(self) -> None:
+        document = {
+            "events": [
+                {
+                    "type": "span",
+                    "attributes": {"name": "sqlite SELECT inventory"},
+                },
+                {
+                    "type": "span",
+                    "attributes": {"name": "memory-cache GET inventory"},
+                },
+            ]
+        }
+
+        result = self.run_checker(
+            document,
+            "event-fields",
+            'attributes.name="sqlite SELECT inventory"',
+            'attributes.name="memory-cache GET inventory"',
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_event_fields_fail_closed_for_missing_wrong_value_and_type(self) -> None:
+        cases: tuple[tuple[object, str], ...] = (
+            ({}, 'attributes.name="expected"'),
+            ({"events": "not-a-list"}, 'attributes.name="expected"'),
+            ({"events": [{"attributes": {"name": "other"}}]}, 'attributes.name="expected"'),
+            ({"events": [{"attributes": {"name": 1}}]}, 'attributes.name="1"'),
+            ({"events": [{"attributes.name": "expected"}]}, 'attributes.name="expected"'),
+        )
+
+        for document, expectation in cases:
+            with self.subTest(document=document, expectation=expectation):
+                result = self.run_checker(document, "event-fields", expectation)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+
+    def test_trailing_fields_accept_log_prefix_and_pretty_json(self) -> None:
+        raw = 'request failed with brace-like text {not-json}\n' + json.dumps(
+            {
+                "status": 500,
+                "events": 4,
+                "nested": {"status": 200},
+                "message": "brace { inside a string",
+            },
+            indent=2,
+        )
+
+        result = self.run_checker(
+            None,
+            "trailing-fields",
+            "status=500",
+            "events=4",
+            raw=raw,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_trailing_fields_fail_closed_without_echoing_stream_content(self) -> None:
+        cases = (
+            "sensitive-marker without JSON",
+            'sensitive-marker\n{"status":500} trailing-data',
+            'sensitive-marker\n{"outer":\n{"status":500}',
+            'sensitive-marker\n{"status":"500"}',
+        )
+
+        for raw in cases:
+            with self.subTest(raw=raw):
+                result = self.run_checker(None, "trailing-fields", "status=500", raw=raw)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn("sensitive-marker", result.stderr)
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ remove_tmp_dir() {
 }
 
 check_json() {
-  "$tmp_dir/venv/bin/python" "$repo_root/scripts/check_fastapi_package_json.py" "$@"
+  "$tmp_dir/venv/bin/python" "$repo_root/scripts/check_python_package_json.py" "$@"
 }
 
 trap remove_tmp_dir EXIT
