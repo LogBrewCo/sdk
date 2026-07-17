@@ -447,26 +447,25 @@ const client = createLogBrewReactNativeClient({
 });
 client.issue(event.id, event.timestamp, event.attributes);
 const payload = JSON.parse(client.previewJson()).events[0];
-fs.writeFileSync(outputPath, JSON.stringify({
-  debugId,
-  runtimeIssue: payload.attributes,
-  runtimePath
-}, null, 2));
+fs.writeFileSync(outputPath, `${JSON.stringify(payload, null, 2)}\n`);
 JS
 )
 
-python3 - "$runtime_issue_payload" "$tmp_dir" <<'PY'
+python3 - "$runtime_issue_payload" "$ready_manifest" "$tmp_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-tmp_dir = sys.argv[2]
-debug_id = payload["debugId"]
-runtime_issue = payload["runtimeIssue"]
-runtime_path = payload["runtimePath"]
+runtime_issue_event = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[3]
+artifact = manifest["artifacts"][0]
+debug_id = artifact["debugId"]
+runtime_issue = runtime_issue_event["attributes"]
+runtime_path = f"/react-native/{artifact['minifiedSource']['path']}"
 serialized_runtime_issue = json.dumps(runtime_issue)
 
+assert runtime_issue_event["type"] == "issue"
 assert runtime_issue["title"] == "React Native error: react native checkout exploded 47"
 assert runtime_issue["message"] == "react native checkout exploded 47"
 assert runtime_issue["level"] == "error"
@@ -497,6 +496,51 @@ assert "logbrew_rn_hash_placeholder" not in serialized_runtime_issue
 assert "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_runtime_issue
 assert "errorStack" not in serialized_runtime_issue
 assert tmp_dir not in serialized_runtime_issue
+PY
+
+runtime_issue_symbolication_report="$tmp_dir/react-native-runtime-issue-symbolication-report.json"
+"$app_dir/node_modules/.bin/logbrew-release-artifacts" symbolicate-js \
+  --build-dir "$dist_dir" \
+  --manifest "$ready_manifest" \
+  --issue-event "$runtime_issue_payload" \
+  --source-root "$app_dir" \
+  --context-lines 0 \
+  > "$runtime_issue_symbolication_report"
+
+python3 - "$runtime_issue_payload" "$runtime_issue_symbolication_report" "$tmp_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+runtime_issue_event = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+runtime_issue_symbolication = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[3]
+metadata = runtime_issue_event["attributes"]["metadata"]
+serialized_issue_event = json.dumps(runtime_issue_event)
+serialized_symbolication = json.dumps(runtime_issue_symbolication)
+
+assert runtime_issue_symbolication["input"]["type"] == "sdk_issue_event"
+assert runtime_issue_symbolication["input"]["issueId"] == runtime_issue_event["id"]
+assert runtime_issue_symbolication["status"] == "resolved"
+assert runtime_issue_symbolication["debugId"] == metadata["releaseArtifactDebugId"]
+assert runtime_issue_symbolication["generated"]["path"] == "index.android.bundle"
+assert runtime_issue_symbolication["original"]["source"] == "index.js"
+source_context = runtime_issue_symbolication["sourceContext"]
+assert source_context["source"] == "index.js"
+assert source_context["startLine"] >= 1
+assert len(source_context["lines"]) == 1
+assert source_context["lines"][0]["highlighted"] is True
+assert "react native checkout exploded" in source_context["lines"][0]["text"]
+assert "mobile.example" not in serialized_issue_event
+assert "mobile.example" not in serialized_symbolication
+assert "logbrew_rn_query_placeholder" not in serialized_issue_event
+assert "logbrew_rn_query_placeholder" not in serialized_symbolication
+assert "logbrew_rn_hash_placeholder" not in serialized_issue_event
+assert "logbrew_rn_hash_placeholder" not in serialized_symbolication
+assert "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_issue_event
+assert "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_symbolication
+assert tmp_dir not in serialized_issue_event
+assert tmp_dir not in serialized_symbolication
 PY
 
 port_file="$tmp_dir/fake-intake-port"

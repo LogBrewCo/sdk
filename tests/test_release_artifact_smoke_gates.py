@@ -162,6 +162,19 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn('assert "logbrew_rn_hash_placeholder" not in serialized_runtime_issue', smoke)
         self.assertIn("assert tmp_dir not in serialized_runtime_issue", smoke)
 
+    def test_react_native_smoke_symbolicates_runtime_issue_with_source_context(self) -> None:
+        smoke = (ROOT / "scripts" / "real_user_react_native_release_artifact_smoke.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("--issue-event", smoke)
+        self.assertIn("$runtime_issue_payload", smoke)
+        self.assertIn("--source-root", smoke)
+        self.assertIn('source_context = runtime_issue_symbolication["sourceContext"]', smoke)
+        self.assertIn('assert source_context["source"] == "index.js"', smoke)
+        self.assertIn('assert "react native checkout exploded" in source_context["lines"][0]["text"]', smoke)
+        self.assertIn('assert "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_symbolication', smoke)
+
 
 if __name__ == "__main__":
     unittest.main()
