@@ -32,6 +32,8 @@ gem_path="$tmp_dir/logbrew-sdk-${package_version}.gem"
   gem build logbrew-sdk.gemspec --strict --output "$gem_path" >/dev/null
 )
 test -f "$gem_path"
+gem_sha256="$(ruby -rdigest -e 'print Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "$gem_path")"
+[[ "$gem_sha256" =~ ^[0-9a-f]{64}$ ]]
 
 install_gem() {
   GEM_HOME="$gem_home" GEM_PATH="$gem_home" \
@@ -366,15 +368,299 @@ wait "$server_pid"
 server_pid=""
 test -s "$tmp_dir/drain-result.json"
 
+lifecycle_intake="$tmp_dir/lifecycle-intake"
+mkdir -m 700 "$lifecycle_intake"
+installed_ruby "$tmp_dir/intake_server.rb" "$lifecycle_intake" "202,202" "false" \
+  >"$lifecycle_intake/server.stdout" 2>"$lifecycle_intake/server.stderr" &
+server_pid="$!"
+wait_for_endpoint "$lifecycle_intake"
+
+cat > "$tmp_dir/lifecycle_persistence.rb" <<'RUBY'
+# frozen_string_literal: true
+
+require "json"
+require "logbrew"
+
+root = ENV.fetch("LOGBREW_LIFECYCLE_ROOT")
+endpoint = ENV.fetch("LOGBREW_LIFECYCLE_ENDPOINT")
+parent_result_path = ENV.fetch("LOGBREW_LIFECYCLE_PARENT_RESULT")
+child_result_path = ENV.fetch("LOGBREW_LIFECYCLE_CHILD_RESULT")
+version = Gem.loaded_specs.fetch("logbrew-sdk").version.to_s
+
+write_result = lambda do |path, value|
+  File.open(path, "w", 0o600) do |file|
+    file.write(JSON.generate(value))
+    file.flush
+    file.fsync
+  end
+end
+
+assert_store_layout = lambda do |path|
+  raise "worker persistent directory permissions changed" unless (File.stat(path).mode & 0o777) == 0o700
+
+  entries = Dir.children(path).sort
+  raise "worker persistent queue retained event or temp files" unless entries == [".ack", ".lock"]
+  entries.each do |name|
+    raise "worker persistent metadata permissions changed" unless (File.stat(File.join(path, name)).mode & 0o777) == 0o600
+  end
+end
+
+parent_store = File.join(root, "parent-store")
+parent_client = LogBrew::Client.create(
+  api_key: "LOGBREW_API_KEY",
+  sdk_name: "logbrew-ruby-worker-persistence-proof",
+  sdk_version: version,
+  persistent_queue_path: parent_store,
+  max_retries: 0,
+  max_batch_size: 100
+)
+parent_client.log(
+  "evt_lifecycle_parent_before",
+  "2026-07-13T20:01:00Z",
+  message: "parent event before fork",
+  level: "info"
+)
+parent_lifecycle = LogBrew::WorkerLifecycle.create(
+  client: parent_client,
+  transport: LogBrew::HttpTransport.new(endpoint: endpoint, timeout: 5)
+)
+
+child_pid = Process.fork do
+  callback_ran = false
+  inherited_error = nil
+  begin
+    parent_lifecycle.run { callback_ran = true }
+  rescue LogBrew::SdkError => error
+    inherited_error = error.code
+  end
+
+  child_store = File.join(root, "child-store")
+  child_client = LogBrew::Client.create(
+    api_key: "LOGBREW_API_KEY",
+    sdk_name: "logbrew-ruby-worker-persistence-proof",
+    sdk_version: version,
+    persistent_queue_path: child_store,
+    max_retries: 0,
+    max_batch_size: 100
+  )
+  child_lifecycle = LogBrew::WorkerLifecycle.create(
+    client: child_client,
+    transport: LogBrew::HttpTransport.new(endpoint: endpoint, timeout: 5)
+  )
+  application_result = child_lifecycle.run do
+    child_client.log(
+      "evt_lifecycle_child",
+      "2026-07-13T20:01:01Z",
+      message: "child-owned event",
+      level: "info"
+    )
+    "child-result"
+  end
+  shutdown_response = child_lifecycle.shutdown
+  cached_shutdown = child_lifecycle.shutdown
+  assert_store_layout.call(child_store)
+  write_result.call(
+    child_result_path,
+    "inheritedError" => inherited_error,
+    "inheritedCallbackRan" => callback_ran,
+    "applicationResult" => application_result,
+    "shutdownStatus" => shutdown_response.status_code,
+    "shutdownAttempts" => shutdown_response.attempts,
+    "shutdownBatches" => shutdown_response.batches,
+    "cachedShutdown" => cached_shutdown.equal?(shutdown_response),
+    "pending" => child_client.pending_events,
+    "ownerOnly" => true
+  )
+  exit! 0
+end
+
+_, child_status = Process.wait2(child_pid)
+raise "worker child failed" unless child_status.success?
+
+application_result = parent_lifecycle.run do
+  parent_client.log(
+    "evt_lifecycle_parent_after",
+    "2026-07-13T20:01:02Z",
+    message: "parent event after fork",
+    level: "info"
+  )
+  "parent-result"
+end
+shutdown_response = parent_lifecycle.shutdown
+cached_shutdown = parent_lifecycle.shutdown
+assert_store_layout.call(parent_store)
+write_result.call(
+  parent_result_path,
+  "applicationResult" => application_result,
+  "shutdownStatus" => shutdown_response.status_code,
+  "shutdownAttempts" => shutdown_response.attempts,
+  "shutdownBatches" => shutdown_response.batches,
+  "cachedShutdown" => cached_shutdown.equal?(shutdown_response),
+  "pending" => parent_client.pending_events,
+  "ownerOnly" => true
+)
+RUBY
+
+installed_ruby -e 'Dir.mkdir(ARGV.fetch(0), 0o700)' "$tmp_dir/lifecycle-stores"
+LOGBREW_LIFECYCLE_ROOT="$tmp_dir/lifecycle-stores" \
+LOGBREW_LIFECYCLE_ENDPOINT="$(<"$lifecycle_intake/endpoint.txt")" \
+LOGBREW_LIFECYCLE_PARENT_RESULT="$tmp_dir/lifecycle-parent-result.json" \
+LOGBREW_LIFECYCLE_CHILD_RESULT="$tmp_dir/lifecycle-child-result.json" \
+installed_ruby "$tmp_dir/lifecycle_persistence.rb"
+wait "$server_pid"
+server_pid=""
+test -s "$tmp_dir/lifecycle-parent-result.json"
+test -s "$tmp_dir/lifecycle-child-result.json"
+
+cat > "$tmp_dir/persistence_safety.rb" <<'RUBY'
+# frozen_string_literal: true
+
+require "json"
+require "logbrew"
+
+root = ENV.fetch("LOGBREW_SAFETY_ROOT")
+result_path = ENV.fetch("LOGBREW_SAFETY_RESULT")
+version = Gem.loaded_specs.fetch("logbrew-sdk").version.to_s
+
+new_client = lambda do |path, on_event_dropped = nil|
+  LogBrew::Client.create(
+    api_key: "LOGBREW_API_KEY",
+    sdk_name: "logbrew-ruby-persistence-safety-proof",
+    sdk_version: version,
+    persistent_queue_path: path,
+    max_retries: 0,
+    on_event_dropped: on_event_dropped
+  )
+end
+log_event = lambda do |client, id|
+  client.log(id, "2026-07-13T20:02:00Z", message: "persistent safety event", level: "info")
+end
+write_result = lambda do |path, value|
+  File.open(path, "w", 0o600) do |file|
+    file.write(JSON.generate(value))
+    file.flush
+    file.fsync
+  end
+end
+
+corrupt_store = File.join(root, "corrupt-store")
+seed_pid = Process.fork do
+  client = new_client.call(corrupt_store)
+  log_event.call(client, "evt_corrupt")
+  exit! 0
+end
+_, seed_status = Process.wait2(seed_pid)
+raise "corruption seed failed" unless seed_status.success?
+corrupt_record = Dir.glob(File.join(corrupt_store, "*.event")).fetch(0)
+File.binwrite(corrupt_record, "{}")
+File.chmod(0o600, corrupt_record)
+corruption_code = nil
+begin
+  new_client.call(corrupt_store)
+rescue LogBrew::SdkError => error
+  corruption_code = error.code
+end
+
+purge_store = File.join(root, "purge-store")
+purge_client = new_client.call(purge_store)
+log_event.call(purge_client, "evt_purge_1")
+log_event.call(purge_client, "evt_purge_2")
+purged = purge_client.purge_pending_events
+purge_shutdown = purge_client.shutdown(LogBrew::RecordingTransport.always_accept)
+reopened_purge = new_client.call(purge_store)
+recovered_after_purge = reopened_purge.pending_events
+reopened_shutdown = reopened_purge.shutdown(LogBrew::RecordingTransport.always_accept)
+
+identity_result_path = File.join(root, "identity-result.json")
+identity_pid = Process.fork do
+  identity_store = File.join(root, "identity-store")
+  moved_store = File.join(root, "identity-store-moved")
+  identity_drops = []
+  client = new_client.call(identity_store, ->(notice) { identity_drops << notice })
+  log_event.call(client, "evt_identity_1")
+  File.rename(identity_store, moved_store)
+  Dir.mkdir(identity_store, 0o700)
+  log_event.call(client, "evt_identity_2")
+  identity_notice = identity_drops.fetch(0)
+  write_result.call(
+    identity_result_path,
+    "reason" => identity_notice.reason,
+    "dropped" => identity_notice.dropped_events,
+    "pending" => client.pending_events,
+    "replacementEntries" => Dir.children(identity_store)
+  )
+  exit! 0
+end
+_, identity_status = Process.wait2(identity_pid)
+raise "identity probe failed" unless identity_status.success?
+identity = JSON.parse(File.read(identity_result_path))
+
+lock_store = File.join(root, "lock-store")
+lock_owner = new_client.call(lock_store)
+reader, writer = IO.pipe
+lock_pid = Process.fork do
+  reader.close
+  lock_code = nil
+  begin
+    contender = new_client.call(lock_store)
+    contender.shutdown(LogBrew::RecordingTransport.always_accept)
+    lock_code = "opened"
+  rescue LogBrew::SdkError => error
+    lock_code = error.code
+  end
+  writer.write(lock_code)
+  writer.close
+  exit! 0
+end
+writer.close
+lock_code = reader.read
+reader.close
+_, lock_status = Process.wait2(lock_pid)
+raise "lock probe failed" unless lock_status.success?
+lock_shutdown = lock_owner.shutdown(LogBrew::RecordingTransport.always_accept)
+
+raise "corruption did not fail closed" unless corruption_code == "persistent_queue_error"
+unless purged == 2 && recovered_after_purge.zero? && purge_shutdown.status_code == 204 && reopened_shutdown.status_code == 204
+  raise "purge recovery changed"
+end
+unless identity == { "reason" => "persistence_failure", "dropped" => 1, "pending" => 1, "replacementEntries" => [] }
+  raise "directory replacement did not fail closed"
+end
+raise "concurrent persistent owner was accepted" unless lock_code == "persistent_queue_error"
+raise "lock owner did not close cleanly" unless lock_shutdown.status_code == 204
+raise "safety root permissions changed" unless (File.stat(root).mode & 0o777) == 0o700
+
+write_result.call(
+  result_path,
+  "corruptionCode" => corruption_code,
+  "purged" => purged,
+  "recoveredAfterPurge" => recovered_after_purge,
+  "identityReason" => identity.fetch("reason"),
+  "replacementEntries" => identity.fetch("replacementEntries"),
+  "lockCode" => lock_code
+)
+RUBY
+
+mkdir -m 700 "$tmp_dir/safety-stores"
+LOGBREW_SAFETY_ROOT="$tmp_dir/safety-stores" \
+LOGBREW_SAFETY_RESULT="$tmp_dir/safety-result.json" \
+installed_ruby "$tmp_dir/persistence_safety.rb"
+test -s "$tmp_dir/safety-result.json"
+
 cat > "$tmp_dir/verify.rb" <<'RUBY'
 # frozen_string_literal: true
 
 require "json"
 
-seed_path, failed_path, drain_path, phase_one, phase_two, store_path = ARGV
+seed_path, failed_path, drain_path, phase_one, phase_two, store_path,
+  lifecycle_parent_path, lifecycle_child_path, lifecycle_intake, safety_path,
+  package_version, package_sha256 = ARGV
 seed = JSON.parse(File.read(seed_path))
 failed = JSON.parse(File.read(failed_path))
 drain = JSON.parse(File.read(drain_path))
+lifecycle_parent = JSON.parse(File.read(lifecycle_parent_path))
+lifecycle_child = JSON.parse(File.read(lifecycle_child_path))
+safety = JSON.parse(File.read(safety_path))
 
 raise "seed counts changed" unless seed.values_at("attempted", "retained", "dropped") == [1500, 1000, 500]
 raise "seed byte bound changed" unless seed.fetch("pendingBytes").positive? && seed.fetch("pendingBytes") <= 4_194_304
@@ -394,15 +680,21 @@ raise "phase two request count changed" unless phase_two_bodies.length == 11
 raise "failed body changed across restart" unless phase_one_bodies.fetch(1) == phase_two_bodies.fetch(0)
 raise "503 retry body changed" unless phase_two_bodies.fetch(0) == phase_two_bodies.fetch(1)
 
+lifecycle_bodies = Dir.glob(File.join(lifecycle_intake, "request-*.body")).sort.map { |path| File.binread(path) }
+raise "worker lifecycle request count changed" unless lifecycle_bodies.length == 2
+
 extract_ids = lambda do |body|
   payload = JSON.parse(body)
   raise "request SDK envelope changed" unless payload.keys.sort == %w[events sdk]
   ids = payload.fetch("events").map { |event| event.fetch("id") }
   raise "request contained duplicate IDs" unless ids.uniq.length == ids.length
+  raise "request event bound changed" unless ids.length.between?(1, 100)
+  raise "request byte bound changed" unless body.bytesize <= 262_144
   ids
 end
 phase_one_ids = phase_one_bodies.map(&extract_ids)
 phase_two_ids = phase_two_bodies.map(&extract_ids)
+lifecycle_ids = lifecycle_bodies.map(&extract_ids)
 raise "accepted prefix size changed" unless phase_one_ids.fetch(0).length == 100
 raise "failed prefix size changed" unless phase_one_ids.fetch(1).length == 100
 raise "failed prefix IDs changed across restart" unless phase_one_ids.fetch(1) == phase_two_ids.fetch(0)
@@ -416,10 +708,51 @@ unless phase_two_unique_ids == remaining_seed_ids + ["evt_persistent_late"]
 end
 raise "accepted prefix replayed" unless (phase_one_ids.fetch(0) & phase_two_unique_ids).empty?
 raise "later work was not isolated to the final batch" unless phase_two_ids.last == ["evt_persistent_late"]
+unless lifecycle_ids == [
+  ["evt_lifecycle_child"],
+  ["evt_lifecycle_parent_before", "evt_lifecycle_parent_after"]
+]
+  raise "worker process delivery ownership or order changed"
+end
+
+expected_parent = {
+  "applicationResult" => "parent-result",
+  "shutdownStatus" => 204,
+  "shutdownAttempts" => 0,
+  "shutdownBatches" => 0,
+  "cachedShutdown" => true,
+  "pending" => 0,
+  "ownerOnly" => true
+}
+expected_child = {
+  "inheritedError" => "process_ownership_error",
+  "inheritedCallbackRan" => false,
+  "applicationResult" => "child-result",
+  "shutdownStatus" => 204,
+  "shutdownAttempts" => 0,
+  "shutdownBatches" => 0,
+  "cachedShutdown" => true,
+  "pending" => 0,
+  "ownerOnly" => true
+}
+raise "parent worker lifecycle result changed" unless lifecycle_parent == expected_parent
+raise "child worker lifecycle result changed" unless lifecycle_child == expected_child
+
+expected_safety = {
+  "corruptionCode" => "persistent_queue_error",
+  "purged" => 2,
+  "recoveredAfterPurge" => 0,
+  "identityReason" => "persistence_failure",
+  "replacementEntries" => [],
+  "lockCode" => "persistent_queue_error"
+}
+raise "persistent safety result changed" unless safety == expected_safety
 
 allowed_headers = %w[accept accept-encoding authorization connection content-length content-type host user-agent]
 Dir.glob(File.join(phase_one, "request-*.head")).sort.concat(
   Dir.glob(File.join(phase_two, "request-*.head")).sort
+).concat(
+  Dir.glob(File.join(lifecycle_intake, "request-*.head")).sort
 ).each do |path|
   lines = File.binread(path).split("\r\n")
   raise "request route changed" unless lines.shift == "POST /v1/events HTTP/1.1"
@@ -434,19 +767,24 @@ Dir.glob(File.join(phase_one, "request-*.head")).sort.concat(
   raise "content type changed" unless headers.fetch("content-type") == "application/json"
 end
 
-all_bodies = phase_one_bodies + phase_two_bodies
+all_bodies = phase_one_bodies + phase_two_bodies + lifecycle_bodies
 raise "request body leaked the API key" if all_bodies.any? { |body| body.include?("LOGBREW_API_KEY") }
-raise "request body leaked a local path" if all_bodies.any? { |body| body.include?(store_path) }
+proof_root = File.dirname(store_path)
+raise "request body leaked a local path" if all_bodies.any? { |body| body.include?(proof_root) }
 
 remaining_entries = Dir.children(store_path).sort
 raise "successful shutdown retained event or temp files" unless remaining_entries == [".ack", ".lock"]
 remaining_entries.each do |name|
   raise "persistent metadata permissions changed" unless (File.stat(File.join(store_path, name)).mode & 0o777) == 0o600
 end
+raise "installed package version was not bound" unless /\A\d+\.\d+\.\d+\z/.match?(package_version)
+raise "installed package digest was not bound" unless /\A[0-9a-f]{64}\z/.match?(package_sha256)
 
 puts JSON.generate(
   "ok" => true,
   "installedArtifact" => true,
+  "version" => package_version,
+  "sha256" => package_sha256,
   "attempted" => 1500,
   "retained" => 1000,
   "dropped" => 500,
@@ -454,8 +792,14 @@ puts JSON.generate(
   "recoveredSuffix" => 900,
   "retryIdentical" => true,
   "lateRetained" => 1,
-  "requests" => 13,
-  "workers" => 10
+  "requests" => 15,
+  "acceptedEvents" => 1004,
+  "workers" => 10,
+  "forkOwnership" => true,
+  "corruptionRejected" => true,
+  "identityReplacementRejected" => true,
+  "exclusiveOwner" => true,
+  "purgeRecoveredEmpty" => true
 )
 RUBY
 
@@ -465,4 +809,10 @@ installed_ruby "$tmp_dir/verify.rb" \
   "$tmp_dir/drain-result.json" \
   "$phase_one_intake" \
   "$phase_two_intake" \
-  "$store_path"
+  "$store_path" \
+  "$tmp_dir/lifecycle-parent-result.json" \
+  "$tmp_dir/lifecycle-child-result.json" \
+  "$lifecycle_intake" \
+  "$tmp_dir/safety-result.json" \
+  "$package_version" \
+  "$gem_sha256"
