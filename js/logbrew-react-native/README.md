@@ -118,7 +118,7 @@ module.exports = withLogBrewMetroConfig(
 );
 ```
 
-Then use the same release identity when capturing the error. The Metro-injected runtime registry connects the first parsed JavaScript frame to its Debug ID without another app option:
+Then use the same release identity when capturing the error. The Metro-injected runtime registry connects each matching parsed JavaScript frame to its Debug ID without another app option:
 
 ```js
 captureReactNativeError(client, error, {
@@ -132,7 +132,7 @@ captureReactNativeError(client, error, {
 });
 ```
 
-The wrapper composes an existing custom serializer, is idempotent, and adds no network behavior. A string-returning custom serializer may preserve Metro's default bundle code; a serializer that changes code must return `{ code, map }` so LogBrew cannot attach a mismatched source map. If an advanced build pipeline cannot use the wrapper, `debugIdMap` remains an explicit override and takes precedence over runtime discovery. LogBrew records `releaseArtifactDebugId`, path-only frame metadata, release/environment/service/runtime, and active trace IDs when available. It strips query strings, hashes, and local absolute paths from event metadata; raw stack text is still opt-in with `includeStack: true`. Hosted source-map lookup and rendered symbolicated issues are separate service capabilities and are not implemented by this runtime helper.
+The wrapper composes an existing custom serializer, is idempotent, and adds no network behavior. A string-returning custom serializer may preserve Metro's default bundle code; a serializer that changes code must return `{ code, map }` so LogBrew cannot attach a mismatched source map. If an advanced build pipeline cannot use the wrapper, `debugIdMap` remains an explicit override and takes precedence over runtime discovery. LogBrew records up to 32 ordered path-only generated frames with matching Debug IDs, release/environment/service/runtime, and active trace IDs when available. It strips query strings, hashes, hosts, and local absolute paths from React Native frame data; raw stack text is still opt-in with `includeStack: true`. Hosted source-map lookup remains backend-owned and requires the matching uploaded release artifact.
 
 ## Provider And Hooks
 

@@ -1,4 +1,5 @@
 const { buildCreateSupportTicketDraft } = require("./support-ticket.cjs");
+const { buildIssueStackHelpers } = require("./issue-stack.cjs");
 const { buildOpenTelemetryHelpers } = require("./opentelemetry.cjs");
 const { buildTraceContextHelpers } = require("./trace-context.cjs");
 
@@ -44,8 +45,6 @@ const BUILTIN_ERROR_NAMES = new Set([
 ]);
 const MAX_SPAN_EVENTS = 8;
 const MAX_SPAN_LINKS = 8;
-const SAFE_DEBUG_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u;
-const LOCAL_ABSOLUTE_PATH_PATTERN = /^(?:\/(?:Users|home|private|tmp|var|Volumes)\/|[A-Za-z]:[\\/])/u;
 class SdkError extends Error {
   constructor(code, message, details = {}) {
     super(message);
@@ -57,6 +56,8 @@ class SdkError extends Error {
     }
   }
 }
+
+const { javascriptStackFrames, validateIssueStackFrames } = buildIssueStackHelpers({ SdkError });
 
 class TransportError extends Error {
   constructor(code, message, retryable = false) {
@@ -430,7 +431,8 @@ function createIssueAttributesFromError(error, options = {}) {
     throw new SdkError("validation_error", "error issue options must be an object");
   }
   const details = errorDetails(error);
-  const frame = firstJavaScriptStackFrame(details.stack);
+  const stackFrames = javascriptStackFrames(details.stack, options.debugIdMap);
+  const frame = stackFrames[0] ?? null;
   const source = stringOrUndefined(options.source) ?? "javascript.error";
   const metadata = {
     ...compactMetadata(options.metadata),
@@ -450,7 +452,7 @@ function createIssueAttributesFromError(error, options = {}) {
     ...(stringOrUndefined(options.runtime) ? { runtime: options.runtime } : {}),
     ...(stringOrUndefined(options.platform) ? { platform: options.platform } : {}),
     ...traceMetadata(options.trace),
-    ...releaseArtifactMetadata(frame, options.debugIdMap),
+    ...releaseArtifactMetadata(frame),
     ...(options.includeErrorStack === true && details.stack ? { errorStack: details.stack } : {})
   };
 
@@ -458,6 +460,7 @@ function createIssueAttributesFromError(error, options = {}) {
     title: stringOrUndefined(options.title) ?? details.name,
     level: normalizeSeverity("issue level", options.level ?? "error"),
     ...(stringOrUndefined(options.message) ? { message: options.message } : details.message ? { message: details.message } : {}),
+    ...(stackFrames.length > 0 ? { stackFrames } : {}),
     metadata: compactMetadata(metadata)
   };
 }
@@ -587,72 +590,6 @@ function isObjectLike(value) {
   return value !== null && (typeof value === "object" || typeof value === "function");
 }
 
-function firstJavaScriptStackFrame(stack) {
-  if (typeof stack !== "string" || stack.trim() === "") {
-    return null;
-  }
-  for (const rawLine of stack.split(/\r?\n/u)) {
-    const parsed = parseJavaScriptStackFrame(rawLine);
-    if (parsed) {
-      return parsed;
-    }
-  }
-  return null;
-}
-
-function parseJavaScriptStackFrame(rawLine) {
-  const line = typeof rawLine === "string" ? rawLine.trim() : "";
-  if (!line) {
-    return null;
-  }
-  let location = line;
-  if (location.startsWith("at ")) {
-    location = location.slice(3).trim();
-    if (location.endsWith(")") && location.includes("(")) {
-      location = location.slice(location.lastIndexOf("(") + 1, -1);
-    }
-  } else if (location.includes("@")) {
-    location = location.slice(location.lastIndexOf("@") + 1);
-  }
-  const parts = location.split(":");
-  if (parts.length < 3) {
-    return null;
-  }
-  const column = positiveIntegerFromText(parts.pop());
-  const lineNumber = positiveIntegerFromText(parts.pop());
-  const filename = sanitizeFrameFilename(parts.join(":"));
-  if (!filename || lineNumber === null || column === null) {
-    return null;
-  }
-  return { filename, line: lineNumber, column };
-}
-
-function positiveIntegerFromText(value) {
-  const parsed = Number.parseInt(String(value), 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function sanitizeFrameFilename(value) {
-  let filename = String(value ?? "").trim();
-  if (!filename) {
-    return "";
-  }
-  filename = filename.split("?", 1)[0].split("#", 1)[0];
-  if (filename.startsWith("file://")) {
-    filename = filename.slice("file://".length);
-  }
-  if (LOCAL_ABSOLUTE_PATH_PATTERN.test(filename)) {
-    return basename(filename);
-  }
-  return filename;
-}
-
-function basename(value) {
-  const normalized = String(value).replace(/\\/gu, "/").replace(/\/+$/u, "");
-  const marker = normalized.lastIndexOf("/");
-  return marker === -1 ? normalized : normalized.slice(marker + 1);
-}
-
 function traceMetadata(trace) {
   if (trace === undefined || trace === null) {
     return {};
@@ -669,40 +606,15 @@ function traceMetadata(trace) {
   };
 }
 
-function releaseArtifactMetadata(frame, debugIdMap) {
-  if (!frame) {
-    return {};
-  }
-  const debugId = debugIdForFrame(frame.filename, debugIdMap);
-  if (!debugId) {
+function releaseArtifactMetadata(frame) {
+  if (!frame?.debugId) {
     return {};
   }
   return {
     releaseArtifactType: "sourcemap",
     releaseArtifactCodeFile: frame.filename,
-    releaseArtifactDebugId: debugId
+    releaseArtifactDebugId: frame.debugId
   };
-}
-
-function debugIdForFrame(filename, debugIdMap) {
-  if (debugIdMap === undefined || debugIdMap === null) {
-    return null;
-  }
-  if (!debugIdMap || Array.isArray(debugIdMap) || typeof debugIdMap !== "object") {
-    throw new SdkError("validation_error", "debugIdMap must be an object");
-  }
-  const normalizedFilename = sanitizeFrameFilename(filename);
-  const aliases = new Set([normalizedFilename, basename(normalizedFilename)].filter(Boolean));
-  for (const [candidate, debugId] of Object.entries(debugIdMap)) {
-    if (typeof debugId !== "string" || !SAFE_DEBUG_ID_PATTERN.test(debugId.trim())) {
-      continue;
-    }
-    const normalizedCandidate = sanitizeFrameFilename(candidate);
-    if (aliases.has(normalizedCandidate) || aliases.has(basename(normalizedCandidate))) {
-      return debugId.trim().toLowerCase();
-    }
-  }
-  return null;
 }
 
 function logbrewLevelFromConsoleMethod(method) {
@@ -1538,10 +1450,12 @@ function validateEnvironment(attributes) {
 function validateIssue(attributes) {
   requireNonEmpty("issue title", attributes.title);
   const level = normalizeSeverity("issue level", attributes.level);
+  const stackFrames = validateIssueStackFrames(attributes.stackFrames);
   return withMetadata({
     title: attributes.title,
     level,
-    ...(attributes.message !== undefined ? { message: attributes.message } : {})
+    ...(attributes.message !== undefined ? { message: attributes.message } : {}),
+    ...(stackFrames !== undefined ? { stackFrames } : {})
   }, attributes.metadata);
 }
 

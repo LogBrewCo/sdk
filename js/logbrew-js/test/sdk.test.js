@@ -249,6 +249,19 @@ test("createIssueAttributesFromError attaches privacy-bounded release artifact m
     title: "TypeError",
     level: "error",
     message: "Checkout exploded",
+    stackFrames: [
+      {
+        filename: "https://cdn.example/assets/app.js",
+        line: 12,
+        column: 34,
+        debugId: "11111111-2222-4333-8444-555555555555"
+      },
+      {
+        filename: "https://cdn.example/assets/vendor.js",
+        line: 1,
+        column: 2
+      }
+    ],
     metadata: {
       source: "javascript.error",
       routeTemplate: "/checkout",
@@ -274,8 +287,65 @@ test("createIssueAttributesFromError attaches privacy-bounded release artifact m
   });
 
   const serialized = JSON.stringify(attributes);
-  assert.doesNotMatch(serialized, /debug=true|section|vendor\.js|ignoredObject|nested/u);
+  assert.doesNotMatch(serialized, /debug=true|section|ignoredObject|nested/u);
   assert.doesNotMatch(serialized, /errorStack/u);
+
+  const client = sampleClient();
+  client.issue("evt_multi_frame", "2026-07-17T12:00:00Z", attributes);
+  const queued = JSON.parse(client.previewJson()).events[0].attributes;
+  assert.deepEqual(queued.stackFrames, attributes.stackFrames);
+});
+
+test("createIssueAttributesFromError bounds and sanitizes structured stack frames", () => {
+  const error = new Error("Bounded stack");
+  error.stack = [
+    "Error: Bounded stack",
+    ...Array.from(
+      { length: 40 },
+      (_, index) => `    at frame${index} (C:\\workspace\\app\\src\\frame-${index}.js?debug=value#fragment:${index + 1}:2)`
+    )
+  ].join("\n");
+
+  const attributes = createIssueAttributesFromError(error);
+
+  assert.equal(attributes.stackFrames.length, 32);
+  assert.deepEqual(attributes.stackFrames[0], {
+    filename: "frame-0.js",
+    line: 1,
+    column: 2
+  });
+  assert.deepEqual(attributes.stackFrames[31], {
+    filename: "frame-31.js",
+    line: 32,
+    column: 2
+  });
+  assert.equal(attributes.metadata.errorFrameFile, "frame-0.js");
+  assert.doesNotMatch(JSON.stringify(attributes), /C:\\workspace|debug=value|fragment|frame-32/u);
+});
+
+test("createIssueAttributesFromError omits non-UUID release artifact Debug IDs", () => {
+  const error = new Error("Invalid Debug ID");
+  error.stack = "Error: Invalid Debug ID\n    at checkout (app:///assets/app.js:12:34)";
+
+  const attributes = createIssueAttributesFromError(error, {
+    debugIdMap: { "app:///assets/app.js": "not-a-debug-id" }
+  });
+
+  assert.equal(attributes.stackFrames[0].debugId, undefined);
+  assert.equal(attributes.metadata.releaseArtifactDebugId, undefined);
+});
+
+test("issue stack frames reject non-string filenames", () => {
+  const client = sampleClient();
+
+  assert.throws(
+    () => client.issue("evt_invalid_stack", "2026-07-17T12:00:00Z", {
+      title: "Invalid stack",
+      level: "error",
+      stackFrames: [{ filename: { local: true }, line: 1, column: 2 }]
+    }),
+    (error) => error instanceof SdkError && error.code === "validation_error"
+  );
 });
 
 test("createIssueAttributesFromError supports explicit privacy-bounded grouping fingerprint", () => {

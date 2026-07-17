@@ -56,6 +56,16 @@ export function sanitizeReactNativeIssueMetadata(metadata, compactMetadata) {
   return compactMetadata(next);
 }
 
+export function sanitizeReactNativeIssueStackFrames(stackFrames) {
+  if (!Array.isArray(stackFrames)) {
+    return undefined;
+  }
+  return stackFrames.map((frame) => ({
+    ...frame,
+    filename: reactNativeCodePath(frame.filename) ?? frame.filename
+  }));
+}
+
 export function runtimeReactNativeDebugIdMap() {
   try {
     const registry = globalThis?.[REACT_NATIVE_DEBUG_ID_REGISTRY];

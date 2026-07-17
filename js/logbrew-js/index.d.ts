@@ -220,11 +220,25 @@ export type EnvironmentAttributes = {
   metadata?: Metadata;
 };
 
+/** Privacy-bounded generated JavaScript frame attached to an issue. */
+export type IssueStackFrame = {
+  /** Query-free generated filename or URL with local absolute prefixes removed. */
+  filename: string;
+  /** One-based generated source line. */
+  line: number;
+  /** One-based generated source column. */
+  column: number;
+  /** Optional release-artifact Debug ID matched to this generated file. */
+  debugId?: string;
+};
+
 /** Public issue event attributes. */
 export type IssueAttributes = {
   title: string;
   level: SeverityInput;
   message?: string;
+  /** Ordered privacy-bounded generated frames, capped at 32. */
+  stackFrames?: IssueStackFrame[];
   metadata?: Metadata;
 };
 

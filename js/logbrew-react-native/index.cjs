@@ -6,7 +6,11 @@ const {
   parseTraceparent,
   SdkError
 } = require("@logbrew/sdk");
-const { runtimeReactNativeDebugIdMap, sanitizeReactNativeIssueMetadata } = require("./metadata.cjs");
+const {
+  runtimeReactNativeDebugIdMap,
+  sanitizeReactNativeIssueMetadata,
+  sanitizeReactNativeIssueStackFrames
+} = require("./metadata.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-react-native";
 const DEFAULT_SDK_VERSION = "0.1.0";
@@ -544,11 +548,13 @@ function createReactNativeErrorEvent(error, {
     source: "react-native.error",
     trace: traceContext
   });
+  const stackFrames = sanitizeReactNativeIssueStackFrames(attributes.stackFrames);
   return {
     id: id ?? idFactory({ error, message: details.message, screen }),
     timestamp: timestamp ?? now(),
     attributes: {
       ...attributes,
+      ...(stackFrames ? { stackFrames } : {}),
       title: `React Native error: ${details.message}`,
       message: details.message,
       metadata: sanitizeReactNativeIssueMetadata(attributes.metadata, compactMetadata)
