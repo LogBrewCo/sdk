@@ -20,12 +20,13 @@ remove_tmp_dir() {
 trap remove_tmp_dir EXIT
 
 app_dir="$tmp_dir/vite-app"
-mkdir -p "$app_dir/src"
+pack_dir="$tmp_dir/packs"
+mkdir -p "$app_dir/src" "$pack_dir"
 
 sdk_pack_json="$tmp_dir/sdk-pack.json"
 (
   cd "$repo_root/js/logbrew-js"
-  npm pack --silent --json > "$sdk_pack_json"
+  npm pack --pack-destination "$pack_dir" --silent --json > "$sdk_pack_json"
 )
 sdk_tgz="$(
   python3 - "$sdk_pack_json" <<'PY'
@@ -36,6 +37,7 @@ from pathlib import Path
 pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
 files = {entry["path"] for entry in pack["files"]}
 for expected in {
+    "release-artifacts-build.cjs",
     "vite-release-artifacts.cjs",
     "vite-release-artifacts.js",
     "vite-release-artifacts.d.ts",
@@ -45,12 +47,12 @@ for expected in {
 print(pack["filename"])
 PY
 )"
-sdk_tgz="$repo_root/js/logbrew-js/$sdk_tgz"
+sdk_tgz="$pack_dir/$sdk_tgz"
 
 browser_pack_json="$tmp_dir/browser-pack.json"
 (
   cd "$repo_root/js/logbrew-browser"
-  npm pack --silent --json > "$browser_pack_json"
+  npm pack --pack-destination "$pack_dir" --silent --json > "$browser_pack_json"
 )
 browser_tgz="$(
   python3 - "$browser_pack_json" <<'PY'
@@ -70,7 +72,7 @@ for expected in {
 print(pack["filename"])
 PY
 )"
-browser_tgz="$repo_root/js/logbrew-browser/$browser_tgz"
+browser_tgz="$pack_dir/$browser_tgz"
 
 cat > "$app_dir/package.json" <<'JSON'
 {
@@ -90,6 +92,35 @@ JSON
 
 cp "$browser_tgz" "$tmp_dir/logbrew-browser.tgz"
 cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
+
+port_file="$tmp_dir/fake-intake-port"
+state_file="$tmp_dir/fake-intake-state.json"
+expected_bearer="fake-vite-release-artifact-auth-value"
+
+python3 "$repo_root/scripts/js_release_artifact_fake_intake.py" \
+  --port-file "$port_file" \
+  --state-file "$state_file" \
+  --expected-bearer "$expected_bearer" \
+  --source-sentinel "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" \
+  --query-placeholder "cache=placeholder" \
+  --hash-fragment "fragment" &
+server_pid=$!
+
+for _ in $(seq 1 100); do
+  if [[ -s "$port_file" ]]; then
+    break
+  fi
+  sleep 0.05
+done
+
+if [[ ! -s "$port_file" ]]; then
+  echo "fake Vite release-artifact intake did not start" >&2
+  exit 1
+fi
+
+intake_port="$(cat "$port_file")"
+export LOGBREW_RELEASE_ARTIFACT_ENDPOINT="http://127.0.0.1:${intake_port}/retry-success?ignored=query#ignored"
+export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_bearer"
 
 cat > "$app_dir/index.html" <<'HTML'
 <!doctype html>
@@ -135,8 +166,14 @@ export default {
       release: "2026.06.18-vite",
       environment: "production",
       service: "checkout-web",
+      projectId: "550e8400-e29b-41d4-a716-446655440000",
       minifiedPathPrefix: "https://cdn.example/static?cache=placeholder#fragment",
-      manifestPath: "dist/logbrew-release-artifacts.json"
+      manifestPath: "dist/logbrew-release-artifacts.json",
+      upload: {
+        endpoint: process.env.LOGBREW_RELEASE_ARTIFACT_ENDPOINT,
+        maxRetries: 2,
+        retryDelay: 0
+      }
     })
   ]
 };
@@ -159,8 +196,14 @@ if (typeof createLogBrewViteReleaseArtifactsPlugin !== "function" || defaultExpo
   throw new Error("expected CommonJS Vite release-artifact plugin export");
 }
 JS
-  npm run --silent build
+  npm run --silent build > "$tmp_dir/vite-build.log" 2>&1
 )
+
+grep -Fq "LogBrew release artifacts: uploaded (" "$tmp_dir/vite-build.log"
+if grep -Fq "$expected_bearer" "$tmp_dir/vite-build.log"; then
+  echo "Vite build output leaked the release-artifact auth value" >&2
+  exit 1
+fi
 
 dist_dir="$app_dir/dist"
 js_files=()
@@ -266,6 +309,7 @@ assert source_map["debug_id"] == debug_id
 assert "sourcesContent" not in source_map
 assert all(tmp_dir not in source for source in source_map["sources"])
 assert manifest["validation"]["status"] == "ready"
+assert manifest["projectId"] == "550e8400-e29b-41d4-a716-446655440000"
 assert artifact["debugId"] == debug_id
 assert artifact["sourceMap"]["hasSourcesContent"] is False
 assert artifact["minifiedSource"]["minifiedUrl"].startswith("https://cdn.example/static/assets/")
@@ -521,59 +565,17 @@ assert tmp_dir not in serialized_issue_event
 assert tmp_dir not in serialized_symbolication
 PY
 
-port_file="$tmp_dir/fake-intake-port"
-state_file="$tmp_dir/fake-intake-state.json"
-expected_bearer="fake-vite-release-artifact-auth-value"
-
-python3 "$repo_root/scripts/js_release_artifact_fake_intake.py" \
-  --port-file "$port_file" \
-  --state-file "$state_file" \
-  --expected-bearer "$expected_bearer" \
-  --source-sentinel "LOGBREW_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" \
-  --query-placeholder "cache=placeholder" \
-  --hash-fragment "fragment" &
-server_pid=$!
-
-for _ in $(seq 1 100); do
-  if [[ -s "$port_file" ]]; then
-    break
-  fi
-  sleep 0.05
-done
-
-if [[ ! -s "$port_file" ]]; then
-  echo "fake Vite release-artifact intake did not start" >&2
-  exit 1
-fi
-
-endpoint_base="http://127.0.0.1:$(cat "$port_file")"
-export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_bearer"
-upload_report="$tmp_dir/vite-upload-report.json"
-"$release_artifacts_cli" upload-js \
-  --build-dir "$dist_dir" \
-  --manifest "$ready_manifest" \
-  --endpoint "$endpoint_base/retry-success?ignored=query#ignored" \
-  --retry-delay 0 \
-  --max-retries 2 \
-  > "$upload_report"
-
-python3 - "$upload_report" "$state_file" "$tmp_dir" <<'PY'
+python3 - "$state_file" "$tmp_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-upload_report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-state = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-tmp_dir = sys.argv[3]
-
-assert upload_report["status"] == "uploaded"
-assert upload_report["retryCount"] == 1
-assert [attempt["httpStatus"] for attempt in upload_report["attempts"]] == [503, 202]
-assert upload_report["endpoint"].endswith("/retry-success")
-assert "ignored=query" not in json.dumps(upload_report)
+state = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[2]
 
 events = state["events"]
 assert [event["path"] for event in events].count("/retry-success") == 2
+assert all(event["authorized"] for event in events)
 assert all(event["containsManifest"] for event in events)
 assert all(event["containsSourceMapPart"] for event in events)
 assert all(event["containsMinifiedPart"] for event in events)
@@ -582,7 +584,7 @@ assert not any(event["containsAuthValue"] for event in events)
 assert not any(event["containsQueryPlaceholder"] for event in events)
 assert not any(event["containsHashFragment"] for event in events)
 assert not any(event["containsTempPath"] for event in events)
-assert tmp_dir not in json.dumps(upload_report)
+assert tmp_dir not in json.dumps(state)
 PY
 
 printf '%s\n' "real-user Vite release artifact plugin smoke ok"
