@@ -561,10 +561,11 @@ export function createBrowserErrorEvent(error, browserWindow = defaultWindow(), 
     sanitizeBrowserIssueMetadata(attributes.metadata),
     "error"
   );
+  const stackFrames = sanitizeBrowserIssueStackFrames(attributes.stackFrames);
   return {
     id: idFactory({ error, message: details.message, path, source: "error" }),
     timestamp: now(),
-    attributes: { ...attributes, metadata: safeMetadata }
+    attributes: { ...attributes, ...(stackFrames ? { stackFrames } : {}), metadata: safeMetadata }
   };
 }
 
@@ -615,10 +616,11 @@ export function createUnhandledRejectionEvent(rejection, browserWindow = default
     sanitizeBrowserIssueMetadata(attributes.metadata),
     "unhandledrejection"
   );
+  const stackFrames = sanitizeBrowserIssueStackFrames(attributes.stackFrames);
   return {
     id: idFactory({ error: rejection, message: reason.message, path, source: "unhandledrejection" }),
     timestamp: now(),
-    attributes: { ...attributes, metadata: safeMetadata }
+    attributes: { ...attributes, ...(stackFrames ? { stackFrames } : {}), metadata: safeMetadata }
   };
 }
 
@@ -959,6 +961,16 @@ function sanitizeBrowserIssueMetadata(metadata) {
     sanitized.issueGroupingKey = groupingKey;
   }
   return compactMetadata(sanitized);
+}
+
+function sanitizeBrowserIssueStackFrames(stackFrames) {
+  if (!Array.isArray(stackFrames)) {
+    return undefined;
+  }
+  return stackFrames.map((frame) => ({
+    ...frame,
+    filename: browserCodePath(frame.filename) ?? frame.filename
+  }));
 }
 
 function browserIssueGroupingKey(value) {
