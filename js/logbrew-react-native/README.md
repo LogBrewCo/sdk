@@ -106,7 +106,19 @@ try {
 
 Set `includeStack: true` only when your app has decided stack text is safe to send. Non-`Error` thrown values are accepted and converted into issue messages so app error handlers do not need custom guards.
 
-When you also prepare React Native release artifacts, pass the same release identity and an app-owned Debug ID map so issue metadata can point at the matching source map without sending stack text by default:
+When you prepare React Native release artifacts, wrap the app-owned Metro config once. Production bundles and source maps receive one matching Debug ID, while development and hot-reload serialization remain unchanged:
+
+```js
+// metro.config.js
+const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
+const { withLogBrewMetroConfig } = require("@logbrew/react-native/metro");
+
+module.exports = withLogBrewMetroConfig(
+  mergeConfig(getDefaultConfig(__dirname), {})
+);
+```
+
+Then use the same release identity when capturing the error. The Metro-injected runtime registry connects the first parsed JavaScript frame to its Debug ID without another app option:
 
 ```js
 captureReactNativeError(client, error, {
@@ -116,14 +128,11 @@ captureReactNativeError(client, error, {
   release: "2026.06.18",
   environment: "production",
   service: "checkout-mobile",
-  runtime: "react-native",
-  debugIdMap: {
-    "app:///react-native/android/index.android.bundle": "11111111-2222-4333-8444-555555555555"
-  }
+  runtime: "react-native"
 });
 ```
 
-`debugIdMap` values are matched against the first parsed JavaScript stack frame. LogBrew records `releaseArtifactDebugId`, path-only frame metadata, release/environment/service/runtime, and active trace IDs when available. It strips query strings, hashes, and local absolute paths from frame metadata; raw stack text is still opt-in with `includeStack: true`. This is local issue metadata for source-map lookup. Hosted source-map upload, lookup, and symbolicated issue rendering require backend support before you can claim end-to-end production symbolication.
+The wrapper composes an existing custom serializer, is idempotent, and adds no network behavior. A string-returning custom serializer may preserve Metro's default bundle code; a serializer that changes code must return `{ code, map }` so LogBrew cannot attach a mismatched source map. If an advanced build pipeline cannot use the wrapper, `debugIdMap` remains an explicit override and takes precedence over runtime discovery. LogBrew records `releaseArtifactDebugId`, path-only frame metadata, release/environment/service/runtime, and active trace IDs when available. It strips query strings, hashes, and local absolute paths from event metadata; raw stack text is still opt-in with `includeStack: true`. Hosted source-map lookup and rendered symbolicated issues are separate service capabilities and are not implemented by this runtime helper.
 
 ## Provider And Hooks
 
@@ -441,7 +450,7 @@ If you pass `metadataFactory: createReactNativeGraphQLMetadataFactory({ endpoint
 
 ## Release Artifact Preparation
 
-Use the release-artifacts subpath after your React Native build has emitted a Metro bundle and source map. The helper prepares local bundle artifacts with matching Debug IDs, strips embedded source content by default, writes a local manifest, and can run the installed upload path. Hosted JavaScript bundle upload is an explicit opt-in; full backend-symbolicated issue support and native crash symbolication are still separate capabilities:
+Use the release-artifacts subpath after the wrapped React Native build has emitted a Metro bundle and source map. The helper preserves the Metro-injected Debug ID, strips embedded source content by default, writes a local manifest, and can run the installed upload path. It also injects a matching ID when used without the Metro wrapper for compatibility. Hosted JavaScript bundle upload is an explicit opt-in; rendered symbolicated issues and native crash symbolication remain separate service capabilities:
 
 ```js
 import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
@@ -493,7 +502,7 @@ uploadLogBrewReactNativeReleaseArtifacts({
 });
 ```
 
-The helper requires explicit `release`, `environment`, `service`, and `platform` metadata. It defaults minified bundle URLs to `app:///react-native/<platform>/...`, removes query strings and hashes from manifest URLs, and strips source paths under `root` or `stripSourcePrefix`. Hosted endpoints must use HTTPS and must not include embedded auth values, query strings, or fragments. The helper never uses normal SDK ingest keys or account/session API auth values. When `sourcemap` points at a final Hermes-composed map, the helper makes the bundle's `sourceMappingURL` point at that explicit map before injecting Debug IDs, so stale packager-map comments do not block manifest generation. It does not patch Gradle, Xcode, Metro, global fetch/XHR, or app runtime code; it only mutates the bundle and source map files you pass in.
+The helper requires explicit `release`, `environment`, `service`, and `platform` metadata. It defaults minified bundle URLs to `app:///react-native/<platform>/...`, removes query strings and hashes from manifest URLs, and strips source paths under `root` or `stripSourcePrefix`. Hosted endpoints must use HTTPS and must not include embedded auth values, query strings, or fragments. The helper never uses normal SDK ingest keys or account/session API auth values. When `sourcemap` points at a final Hermes-composed map, the helper makes the bundle's `sourceMappingURL` point at that explicit map, so stale packager-map comments do not block manifest generation. The explicit Metro wrapper changes only app-owned serialization and one bounded runtime Debug-ID registry; neither helper patches Gradle, Xcode, global fetch/XHR, request payloads, or transport behavior.
 
 React Native native symbols are handled as release artifacts, not runtime telemetry. For local dry-run validation, use the repo release-artifact tooling against app-owned build outputs such as `ios/build/.../*.dSYM`, `android/app/build/outputs/mapping/release/mapping.txt`, and `android/app/build/intermediates/merged_native_libs/.../*.so`. The current public SDK validates metadata and privacy boundaries only; backend upload, storage, lookup, and native symbolication are still backend-owned future support, so do not rely on normal runtime error capture for native crash symbolication yet.
 

@@ -6,7 +6,7 @@ import {
   parseTraceparent,
   SdkError
 } from "@logbrew/sdk";
-import { sanitizeReactNativeIssueMetadata } from "./metadata.js";
+import { runtimeReactNativeDebugIdMap, sanitizeReactNativeIssueMetadata } from "./metadata.js";
 
 const DEFAULT_SDK_NAME = "logbrew-react-native";
 const DEFAULT_SDK_VERSION = "0.1.0";
@@ -516,7 +516,7 @@ export function createReactNativeErrorEvent(error, {
   const details = errorDetails(error);
   const traceContext = resolveTraceContext(trace ?? getActiveLogBrewTrace());
   const attributes = createIssueAttributesFromError(error?.reason ?? error?.error ?? error, {
-    debugIdMap,
+    debugIdMap: debugIdMap === undefined ? runtimeReactNativeDebugIdMap() : debugIdMap,
     environment,
     fingerprint,
     includeErrorStack: includeStack,

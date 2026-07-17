@@ -79,3 +79,143 @@ test("React Native error events attach privacy-bounded release artifact metadata
     assert.equal(serialized.includes("errorStack"), false);
   });
 });
+
+test("React Native error events discover the Metro Debug ID without an explicit map", async () => {
+  await withInstalledPackage(async ({ createReactNativeErrorEvent }) => {
+    const debugId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const runtimeUrl = "https://mobile.example.test/react-native/index.android.bundle?logbrew_query_placeholder=hidden#checkout";
+    const registrySymbol = Symbol.for("@logbrew/react-native/debug-ids");
+    const previousRegistry = globalThis[registrySymbol];
+    globalThis[registrySymbol] = {
+      [`Error\n    at __logbrew_register__ (${runtimeUrl}:1:1)`]: debugId,
+    };
+
+    try {
+      const error = new Error("react native checkout exploded");
+      error.stack = `Error: react native checkout exploded\n    at checkoutFailureSignal (${runtimeUrl}:12:34)`;
+
+      const event = createReactNativeErrorEvent(error, {
+        environment: "production",
+        platform: { OS: "android" },
+        release: "2026.07.09-rn-metro",
+        runtime: "react-native",
+        service: "checkout-mobile",
+      });
+      const metadata = event.attributes.metadata;
+      const serialized = JSON.stringify(event.attributes);
+
+      assert.equal(metadata.releaseArtifactDebugId, debugId);
+      assert.equal(metadata.releaseArtifactCodeFile, "/react-native/index.android.bundle");
+      assert.equal(metadata.errorFrameFile, "/react-native/index.android.bundle");
+      assert.equal(serialized.includes("mobile.example.test"), false);
+      assert.equal(serialized.includes("logbrew_query_placeholder"), false);
+      assert.equal(serialized.includes("__logbrew_register__"), false);
+    } finally {
+      if (previousRegistry === undefined) {
+        delete globalThis[registrySymbol];
+      } else {
+        globalThis[registrySymbol] = previousRegistry;
+      }
+    }
+  });
+});
+
+test("React Native error capture ignores malformed Metro registry state", async () => {
+  await withInstalledPackage(async ({ createReactNativeErrorEvent }) => {
+    const registrySymbol = Symbol.for("@logbrew/react-native/debug-ids");
+    const previousRegistry = globalThis[registrySymbol];
+    const registry = {};
+    Object.defineProperty(registry, "unreadable", {
+      enumerable: true,
+      get() {
+        throw new Error("registry getter must not interrupt capture");
+      },
+    });
+    globalThis[registrySymbol] = registry;
+
+    try {
+      const error = new Error("react native checkout exploded");
+      error.stack = "Error: react native checkout exploded\n    at checkoutFailureSignal (app:///index.android.bundle:12:34)";
+
+      const event = createReactNativeErrorEvent(error, {
+        environment: "production",
+        platform: { OS: "android" },
+        release: "2026.07.09-rn-metro",
+        runtime: "react-native",
+        service: "checkout-mobile",
+      });
+
+      assert.equal(event.attributes.metadata.releaseArtifactDebugId, undefined);
+      assert.equal(event.attributes.metadata.errorFrameFile, "/index.android.bundle");
+    } finally {
+      if (previousRegistry === undefined) {
+        delete globalThis[registrySymbol];
+      } else {
+        globalThis[registrySymbol] = previousRegistry;
+      }
+    }
+  });
+});
+
+test("React Native error capture rejects ambiguous Metro Debug IDs for one runtime file", async () => {
+  await withInstalledPackage(async ({ createReactNativeErrorEvent }) => {
+    const runtimeUrl = "app:///index.android.bundle";
+    const registrySymbol = Symbol.for("@logbrew/react-native/debug-ids");
+    const previousRegistry = globalThis[registrySymbol];
+    globalThis[registrySymbol] = {
+      [`Error\n    at firstRegistration (${runtimeUrl}:1:1)`]: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      [`Error\n    at secondRegistration (${runtimeUrl}:2:2)`]: "11111111-2222-4333-8444-555555555555",
+    };
+
+    try {
+      const error = new Error("react native checkout exploded");
+      error.stack = `Error: react native checkout exploded\n    at checkoutFailureSignal (${runtimeUrl}:12:34)`;
+      const event = createReactNativeErrorEvent(error, {
+        environment: "production",
+        platform: { OS: "android" },
+        release: "2026.07.09-rn-metro",
+        runtime: "react-native",
+        service: "checkout-mobile",
+      });
+
+      assert.equal(event.attributes.metadata.releaseArtifactDebugId, undefined);
+    } finally {
+      if (previousRegistry === undefined) {
+        delete globalThis[registrySymbol];
+      } else {
+        globalThis[registrySymbol] = previousRegistry;
+      }
+    }
+  });
+});
+
+test("React Native error capture rejects malformed Metro stack coordinates", async () => {
+  await withInstalledPackage(async ({ createReactNativeErrorEvent }) => {
+    const runtimeUrl = "app:///index.android.bundle";
+    const registrySymbol = Symbol.for("@logbrew/react-native/debug-ids");
+    const previousRegistry = globalThis[registrySymbol];
+    globalThis[registrySymbol] = {
+      [`Error\n    at malformedRegistration (${runtimeUrl}:1x:1)`]: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    };
+
+    try {
+      const error = new Error("react native checkout exploded");
+      error.stack = `Error: react native checkout exploded\n    at checkoutFailureSignal (${runtimeUrl}:12:34)`;
+      const event = createReactNativeErrorEvent(error, {
+        environment: "production",
+        platform: { OS: "android" },
+        release: "2026.07.09-rn-metro",
+        runtime: "react-native",
+        service: "checkout-mobile",
+      });
+
+      assert.equal(event.attributes.metadata.releaseArtifactDebugId, undefined);
+    } finally {
+      if (previousRegistry === undefined) {
+        delete globalThis[registrySymbol];
+      } else {
+        globalThis[registrySymbol] = previousRegistry;
+      }
+    }
+  });
+});
