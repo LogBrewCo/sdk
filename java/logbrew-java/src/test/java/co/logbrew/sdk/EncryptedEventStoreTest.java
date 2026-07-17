@@ -6,7 +6,9 @@ import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -1026,12 +1028,33 @@ public final class EncryptedEventStoreTest {
 
     private static void replaceWithSameBytes(Path path) throws IOException {
         byte[] bytes = Files.readAllBytes(path);
+        Path replacement = path.resolveSibling(path.getFileName() + ".replacement");
         try {
-            Files.delete(path);
-            createOwnerOnlyFile(path);
-            Files.write(path, bytes, StandardOpenOption.WRITE);
+            createOwnerOnlyFile(replacement);
+            Files.write(replacement, bytes, StandardOpenOption.WRITE);
+            Object originalKey = Files.readAttributes(
+                path,
+                BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS
+            ).fileKey();
+            Object replacementKey = Files.readAttributes(
+                replacement,
+                BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS
+            ).fileKey();
+            assertTrue(
+                originalKey != null && replacementKey != null && !originalKey.equals(replacementKey),
+                "replacement fixture uses a distinct file identity"
+            );
+            Files.move(
+                replacement,
+                path,
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING
+            );
         } finally {
             Arrays.fill(bytes, (byte) 0);
+            Files.deleteIfExists(replacement);
         }
     }
 
