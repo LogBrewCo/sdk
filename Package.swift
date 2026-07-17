@@ -12,6 +12,10 @@ let package = Package(
     ],
     products: [
         .library(name: "LogBrew", targets: ["LogBrew"]),
+        .library(name: "LogBrewCrash", targets: ["LogBrewCrash"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/kstenerud/KSCrash.git", from: "2.5.1"),
     ],
     targets: [
         .target(
@@ -22,6 +26,19 @@ let package = Package(
             name: "LogBrewTests",
             dependencies: ["LogBrew"],
             path: "swift/logbrew-swift/Tests/LogBrewTests"
+        ),
+        .target(
+            name: "LogBrewCrash",
+            dependencies: [
+                "LogBrew",
+                .product(name: "Recording", package: "KSCrash"),
+            ],
+            path: "swift/logbrew-swift/Sources/LogBrewCrash"
+        ),
+        .testTarget(
+            name: "LogBrewCrashTests",
+            dependencies: ["LogBrew", "LogBrewCrash"],
+            path: "swift/logbrew-swift/Tests/LogBrewCrashTests"
         ),
     ],
 )

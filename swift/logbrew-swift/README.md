@@ -14,7 +14,7 @@ For Apple app setup flows, choose the Swift path first. Use this SDK for iOS, ma
 .package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.1")
 ```
 
-Use the `LogBrew` product from the repository root SwiftPM package. Local contributors can also open the Swift package directly from `swift/logbrew-swift`.
+Use the `LogBrew` product from the repository root SwiftPM package. Add the separate `LogBrewCrash` product only when your Apple app explicitly opts into native fatal-crash capture. Local contributors can also open the Swift package directly from `swift/logbrew-swift`.
 
 The package ships a `LogBrew` library product plus copyable examples for creating a client, previewing queued JSON, flushing through a transport, and using the Swift logger facade in your own app. If you use an AI coding assistant, ask it to install the `LogBrew` product, create one app-owned client, wire your chosen signals, and keep personally sensitive values out of messages and metadata.
 
@@ -256,6 +256,71 @@ if let otelParent = try LogBrewTrace.openTelemetrySpanContext(from: appOwnedOpen
 Use `LogBrewLifecycleTracker` from your own SwiftUI, UIKit, AppKit, or SceneDelegate lifecycle hooks when you want app state transitions such as `active -> background` to appear as child spans on the active trace. The tracker dedupes repeated states, computes previous-state duration from app-owned timestamps, records primitive metadata only, and overwrites spoofed trace metadata with the active child span context. Use the lower-level `captureLifecycleSpan(...)` helper only when your app already owns previous/current state and duration values.
 
 The Swift SDK does not patch `URLSession`, install notification observers, swizzle SwiftUI/UIKit/AppKit lifecycle APIs, add an OpenTelemetry dependency, install OpenTelemetry exporters or processors, read baggage or tracestate, collect arbitrary headers, capture request or response bodies, serialize the raw `traceparent` value into event metadata, derive local session health, or start automatic database/network child spans. URLSession timing metadata is explicit and limited to numeric phase durations and byte counts; it does not include URLs, headers, payloads, cookies, or response text. URLSession and lifecycle spans are explicit and app-owned; keep route templates low-cardinality and query-free, and add richer framework instrumentation only in a dedicated integration package.
+
+## Native Fatal Crashes
+
+Add the opt-in `LogBrewCrash` SwiftPM product when one app-owned integration should capture fatal Apple process crashes and replay a privacy-bounded issue on the next launch. `LogBrewCrash` uses the established KSCrash recording engine; LogBrew does not implement signal or Mach exception handling itself.
+
+```swift
+import Foundation
+import LogBrew
+import LogBrewCrash
+
+let applicationSupport = try FileManager.default.url(
+    for: .applicationSupportDirectory,
+    in: .userDomainMask,
+    appropriateFor: nil,
+    create: true
+)
+let crashCapture = NativeCrashCapture(
+    configuration: try NativeCrashConfiguration(
+        storageDirectory: applicationSupport.appendingPathComponent("LogBrewCrash", isDirectory: true),
+        maxStoredReports: 5
+    )
+)
+
+try crashCapture.install()
+
+let replay = try crashCapture.replayPendingReports { record in
+    do {
+        try record.enqueue(in: client)
+        let response = try client.flush(transport: transport)
+        return (200 ..< 300).contains(response.statusCode)
+    } catch {
+        return false
+    }
+}
+print("acknowledged=\(replay.acknowledged) pending=\(replay.pending)")
+```
+
+The replay handler must return `true` only after the issue has been accepted by delivery. Returning `false` retains that report and every later report. Replay is oldest-first, uses the crash report's stable UUID as the event id, verifies the raw report did not change before acknowledgement, and fails closed on malformed, oversized, replaced, or undeletable reports. Enqueueing the same retained crash into the same in-memory client is idempotent, while a different event with that ID fails closed. `purge()` is an explicit local deletion operation; `status()` exposes only lifecycle, pending/acknowledged counts, and a fixed outcome enum. KSCrash does not expose a directory-fsync acknowledgement API, so a power loss immediately after deletion can conservatively replay the same stable event ID on a later launch rather than silently dropping a visible pending report.
+
+Capture is process-wide and intentionally single-owner because fatal signal and Mach exception handlers cannot be safely stacked. Installation is idempotent for the owning object, but ownership cannot be transferred or uninstalled until process restart, and an inherited post-fork object fails closed. Use a dedicated directory whose parent already exists. LogBrew normalizes it, rejects a symlink or non-directory target, pins its inode for the integration lifetime, and tightens it to owner-only access before engine installation. The engine keeps at most five raw reports by default; replay rejects a raw report larger than 4 MiB by default. KSCrash's raw app-local report can still contain stack, binary, system, and application details even though memory introspection, queue names, user context, and console capture are disabled. Treat that directory as app-controlled sensitive data and apply your own cloud-synchronization, data-protection, consent, and retention policy.
+
+Only fixed title, critical severity, replay marker, and allowlisted crash mechanism are added to the LogBrew issue. Raw reports, exception reasons, messages, stack memory, thread names, console logs, paths, process data, user data, headers, authentication data, and device identity are not uploaded by this integration. Native frame upload and hosted symbolication are not part of this feature, so the issue identifies a fatal native crash and mechanism but does not promise a symbolicated source location.
+
+The same product exposes Objective-C names through its generated module header for mixed and Objective-C SwiftPM targets:
+
+```objective-c
+@import LogBrewCrash;
+
+NSError *error = nil;
+LBWNativeCrashConfiguration *configuration =
+    [[LBWNativeCrashConfiguration alloc] initWithStorageDirectory:directoryURL
+                                                 maxStoredReports:5
+                                                   maxReplayBytes:4 * 1024 * 1024
+                                                              error:&error];
+LBWNativeCrashCapture *capture =
+    [[LBWNativeCrashCapture alloc] initWithConfiguration:configuration];
+[capture installAndReturnError:&error];
+
+LBWNativeCrashReplayResult *result =
+    [capture replayPendingReportsWithHandler:^BOOL(LBWNativeCrashRecord *record) {
+      // Send one fixed critical issue with record.eventID, record.timestamp, and record.mechanism.
+      // Return YES only after the app's LogBrew transport accepts it.
+      return NO;
+    } error:&error];
+```
 
 ## HTTP Delivery
 

@@ -65,6 +65,11 @@ public final class LogBrewClient {
         try pushEvent(.issue(validateIssue(attributes.withActiveTrace())), id: id, timestamp: timestamp)
     }
 
+    @_spi(CrashReplay)
+    public func issueDetached(_ id: String, timestamp: String, attributes: IssueAttributes) throws {
+        try pushEvent(.issue(validateIssue(attributes)), id: id, timestamp: timestamp)
+    }
+
     public func log(_ id: String, timestamp: String, attributes: LogAttributes) throws {
         try pushEvent(.log(validateLog(attributes.withActiveTrace())), id: id, timestamp: timestamp)
     }

@@ -100,6 +100,27 @@ class ConfidentialityScanTests(unittest.TestCase):
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
+    def test_allows_only_the_kscrash_report_deletion_policy_symbol(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "swift" / "logbrew-swift" / "Sources" / "LogBrewCrash"
+            source_dir.mkdir(parents=True)
+            policy = "reportClean" + "upPolicy"
+            (source_dir / "CrashEngine.swift").write_text(
+                f"configuration.{policy} = .never\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            (source_dir / "Other.swift").write_text(
+                f"unexpected {policy}\n",
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("Other.swift", failures[0])
+
     def test_allows_maven_central_preflight_secret_names_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -8,6 +8,8 @@ Public Objective-C SDK for Apple and mixed Swift/Objective-C apps. It ships as a
 
 Start new Apple setup flows with the Swift/SwiftPM SDK in [`swift/logbrew-swift`](../../swift/logbrew-swift) when your app can use SwiftPM. Use this Objective-C package as an advanced source/header variant for Objective-C-only targets, mixed legacy apps, or apps that intentionally vendor SDK source.
 
+Objective-C and mixed targets that use SwiftPM can add the separate `LogBrewCrash` product for explicit native fatal-crash capture and next-launch replay. It exports `LBWNativeCrashConfiguration`, `LBWNativeCrashCapture`, and `LBWNativeCrashRecord` through `@import LogBrewCrash;`. The source/header-only Objective-C SDK does not silently add a crash engine. See the Swift SDK's [Native Fatal Crashes](../../swift/logbrew-swift#native-fatal-crashes) section for ownership, privacy, retention, acknowledgement, and symbolication limits.
+
 ## Install From Source
 
 Copy `include/LogBrew.h` and the Objective-C files in `src/` into your app target, or vendor the source package and compile it with Foundation:

@@ -201,6 +201,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_go_http_phase_timing_reference(relative_text, line, terms):
         return True
 
+    if is_kscrash_report_deletion_policy_reference(relative_text, line, terms):
+        return True
+
     if is_kotlin_coroutine_context_reference(relative_text, line, terms):
         return True
 
@@ -235,6 +238,19 @@ def is_sdk_instrumentation_restore_reference(relative_text: str, terms: set[str]
     if relative_text.startswith("js/") and relative_text.endswith((".js", ".cjs", ".mjs", ".ts", ".cts")):
         return True
     return relative_text.startswith("scripts/real_user_") and relative_text.endswith(".sh")
+
+
+def is_kscrash_report_deletion_policy_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    return (
+        relative_text
+        == "swift/logbrew-swift/Sources/LogBrewCrash/CrashEngine.swift"
+        and terms == {"cleanup"}
+        and "reportCleanupPolicy" in line
+    )
 
 
 def is_public_publishing_guidance(relative_text: str, line: str) -> bool:
