@@ -43,6 +43,56 @@ response = client.shutdown(LogBrew::RecordingTransport.always_accept)
 warn response.status_code
 ```
 
+## Serialized Worker Lifecycle
+
+Use `LogBrew::WorkerLifecycle` when a prefork or long-running worker processes
+one work item at a time and needs an explicit telemetry boundary:
+
+```ruby
+client = LogBrew::Client.create(
+  api_key: "LOGBREW_API_KEY",
+  sdk_name: "checkout-worker",
+  sdk_version: "1.0.0"
+)
+transport = LogBrew::HttpTransport.new
+lifecycle = LogBrew::WorkerLifecycle.create(
+  client: client,
+  transport: transport,
+  on_delivery_failure: ->(failure) {
+    warn "LogBrew delivery #{failure.code}; #{failure.pending_events} events retained"
+  }
+)
+
+result = lifecycle.run do
+  client.log(
+    "evt_job_started",
+    Time.now.utc.iso8601,
+    message: "job started",
+    level: "info",
+    logger: "checkout-worker"
+  )
+  perform_one_job
+end
+
+lifecycle.shutdown
+```
+
+Create the client, transport, and lifecycle inside each child process after
+forking. An inherited lifecycle rejects both work and shutdown before touching
+its copied queue or transport, and ownership is checked again after application
+work so a process change cannot flush copied parent state. `run` attempts one
+bounded flush whether the application returns or raises, but always preserves
+the exact application result or original exception. Delivery diagnostics expose
+only a stable stage/code and aggregate queued/dropped counts; they never include
+event content, request bodies, authorization values, exception messages,
+process IDs, paths, or transport state.
+
+This helper is intentionally explicit and installs no background thread,
+timer, signal hook, global fork patch, destructor, or `at_exit` flush. It is for
+serialized worker loops, not concurrent Sidekiq-style job execution. Keep using
+direct `client.flush`/`client.shutdown`, or a framework-specific integration,
+when that lifecycle fits the application better.
+
 ## First Useful Service Telemetry
 
 For a service request, combine release, environment, log, product action, network milestone, metric, and span events around one shared W3C trace:

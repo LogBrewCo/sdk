@@ -1100,6 +1100,6 @@ module LogBrew
   end
 end
 
-%w[product_timeline traceparent trace span_events operation_tracing support_ticket].each do |path|
+%w[product_timeline traceparent trace span_events operation_tracing support_ticket worker_lifecycle].each do |path|
   require_relative "logbrew/#{path}"
 end

@@ -20,7 +20,7 @@ find "$package_dir" -name '*.rb' -not -path '*/.bundle/*' -print0 | while IFS= r
 done
 
 (cd "$package_dir" && ruby tests/run.rb)
-rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/support_ticket.rb"
+rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
 test -f "$tmp_dir/rdoc/LogBrew/Client.html"
 test -f "$tmp_dir/rdoc/LogBrew/Logger.html"
 test -f "$tmp_dir/rdoc/LogBrew/RackMiddleware.html"
@@ -29,6 +29,8 @@ test -f "$tmp_dir/rdoc/LogBrew/HttpTransport.html"
 test -f "$tmp_dir/rdoc/LogBrew/RecordingTransport.html"
 test -f "$tmp_dir/rdoc/LogBrew/SdkError.html"
 test -f "$tmp_dir/rdoc/LogBrew/SupportTicketDraft.html"
+test -f "$tmp_dir/rdoc/LogBrew/WorkerLifecycle.html"
+test -f "$tmp_dir/rdoc/LogBrew/WorkerDeliveryFailure.html"
 
 (cd "$package_dir" && gem build logbrew-sdk.gemspec --strict --output "$tmp_dir/logbrew-sdk-${package_version}.gem" >/dev/null)
 test -f "$tmp_dir/logbrew-sdk-${package_version}.gem"
@@ -44,6 +46,7 @@ test -f "$unpacked_dir/lib/logbrew/bounded_event_queue.rb"
 test -f "$unpacked_dir/lib/logbrew/event_batcher.rb"
 test -f "$unpacked_dir/lib/logbrew/trace.rb"
 test -f "$unpacked_dir/lib/logbrew/support_ticket.rb"
+test -f "$unpacked_dir/lib/logbrew/worker_lifecycle.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
 test -f "$unpacked_dir/examples/real_user_smoke.rb"
@@ -74,6 +77,9 @@ grep -q 'Support Ticket Draft Diagnostics' "$unpacked_dir/README.md"
 grep -q 'LogBrew::SupportTicketDraft.create' "$unpacked_dir/README.md"
 grep -q 'support-ticket routes' "$unpacked_dir/README.md"
 grep -q 'copyable snippets' "$unpacked_dir/README.md"
+grep -q 'Serialized Worker Lifecycle' "$unpacked_dir/README.md"
+grep -q 'LogBrew::WorkerLifecycle.create' "$unpacked_dir/README.md"
+grep -q 'inside each child process after' "$unpacked_dir/README.md"
 
 ruby -I "$package_dir/lib" "$package_dir/examples/readme_example.rb" > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
