@@ -458,6 +458,8 @@ const logbrew = installLogBrewBrowser({
 
 Persisted delivery stores only the already-sanitized JSON batch body. It does not store the browser key, request headers, cookies, raw payloads, full URLs, query strings, or hash fragments. Stored batches are bounded by `maxStoredBatches` and `maxStoredBytes`, deduplicated by exact batch body, replayed on install and on `online`, and cleared after a successful replay. If the same page session still has the failed events in memory, LogBrew treats that in-memory queue as the source of truth and avoids replaying its own persisted copy separately.
 
+When the browser provides the Web Locks API, automatic storage, delivery, acknowledgement, and replay are serialized per storage key so multiple tabs do not deliver the same persisted batch concurrently. Browsers without Web Locks, or runtimes that reject lock acquisition, retain the same persistence behavior without cross-tab coordination. Custom runtimes can provide a compatible `lockManager`; lock names contain neither the browser key nor telemetry data.
+
 Use `createPersistentBrowserTransport({ transport, storage })` when your app wants to wrap a custom browser transport directly. Persistence is explicit recovery for the documented header-based `fetch` delivery path; it is not a hidden background worker or `sendBeacon` fallback.
 
 Use `RecordingTransport.alwaysAccept()` from `@logbrew/sdk` when you want to inspect queued browser events before network delivery.

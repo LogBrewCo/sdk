@@ -1999,6 +1999,7 @@ createBeaconTransport({
 });
 const storage: BrowserPersistentStorage = window.localStorage;
 const persistentTransport: PersistentBrowserTransport = createPersistentBrowserTransport({
+  lockManager: navigator.locks,
   storage,
   transport
 });

@@ -72,6 +72,14 @@ export type BrowserPersistedReplayOptions = {
   skipOwnBatches?: boolean;
 };
 
+export type BrowserPersistenceLockManager = {
+  request<T>(
+    name: string,
+    options: { mode: "exclusive" },
+    callback: () => Promise<T> | T
+  ): Promise<T>;
+};
+
 export type PersistentBrowserTransport = Transport & {
   clearStoredBatches(): void;
   pendingStoredBatches(): number;
@@ -79,6 +87,7 @@ export type PersistentBrowserTransport = Transport & {
 };
 
 export type PersistentBrowserTransportConfig = {
+  lockManager?: BrowserPersistenceLockManager;
   maxStoredBatches?: number;
   maxStoredBytes?: number;
   onPersistError?: (error: BrowserPersistError) => void;
