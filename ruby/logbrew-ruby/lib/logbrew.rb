@@ -40,6 +40,7 @@ module LogBrew
   end
 
   require_relative "logbrew/event_batcher"
+  require_relative "logbrew/persistent_event_store"
   require_relative "logbrew/bounded_event_queue"
 
   class TransportError < StandardError
@@ -752,7 +753,8 @@ module LogBrew
       max_queue_bytes: BoundedEventQueue::DEFAULT_MAX_BYTES,
       on_event_dropped: nil,
       max_batch_size: EventBatcher::DEFAULT_MAX_SIZE,
-      max_batch_bytes: EventBatcher::DEFAULT_MAX_BYTES
+      max_batch_bytes: EventBatcher::DEFAULT_MAX_BYTES,
+      persistent_queue_path: nil
     )
       Validation.require_non_empty("api_key", api_key)
       Validation.require_non_empty("sdk_name", sdk_name)
@@ -771,7 +773,8 @@ module LogBrew
         max_queue_bytes: max_queue_bytes,
         on_event_dropped: on_event_dropped,
         max_batch_size: max_batch_size,
-        max_batch_bytes: max_batch_bytes
+        max_batch_bytes: max_batch_bytes,
+        persistent_queue_path: persistent_queue_path
       )
     end
 
@@ -783,18 +786,27 @@ module LogBrew
       max_queue_bytes: BoundedEventQueue::DEFAULT_MAX_BYTES,
       on_event_dropped: nil,
       max_batch_size: EventBatcher::DEFAULT_MAX_SIZE,
-      max_batch_bytes: EventBatcher::DEFAULT_MAX_BYTES
+      max_batch_bytes: EventBatcher::DEFAULT_MAX_BYTES,
+      persistent_queue_path: nil
     )
       @api_key = api_key
       @sdk = sdk
       @max_retries = max_retries
       @event_batcher = EventBatcher.new(sdk: sdk, max_size: max_batch_size, max_bytes: max_batch_bytes)
-      @event_queue = BoundedEventQueue.new(
-        max_size: max_queue_size,
-        max_bytes: max_queue_bytes,
-        max_event_bytes: @event_batcher.max_event_bytes,
-        on_event_dropped: on_event_dropped
-      )
+      event_store = nil
+      begin
+        event_store = PersistentEventStore.open(path: persistent_queue_path) unless persistent_queue_path.nil?
+        @event_queue = BoundedEventQueue.new(
+          max_size: max_queue_size,
+          max_bytes: max_queue_bytes,
+          max_event_bytes: @event_batcher.max_event_bytes,
+          on_event_dropped: on_event_dropped,
+          event_store: event_store
+        )
+      rescue StandardError
+        event_store&.close
+        raise
+      end
       @state_mutex = Mutex.new
       @flush_mutex = Mutex.new
       @closed = false
@@ -817,6 +829,15 @@ module LogBrew
     def preview_json
       snapshot = @event_queue.snapshot
       JSON.pretty_generate("sdk" => @sdk, "events" => snapshot.events)
+    end
+
+    def purge_pending_events
+      ensure_not_reentrant_flush
+      @flush_mutex.synchronize do
+        @state_mutex.synchronize { ensure_open }
+        @retry_batch = nil
+        @event_queue.purge
+      end
     end
 
     def release(id, timestamp, attributes)
@@ -866,6 +887,7 @@ module LogBrew
         succeeded = false
         begin
           response = flush_internal(transport)
+          @event_queue.close
           succeeded = true
           response
         ensure
@@ -911,8 +933,9 @@ module LogBrew
         )
         @retry_batch = batch
         response = send_batch(transport, batch.body)
-        @event_queue.acknowledge(batch)
+        compaction_error = @event_queue.acknowledge(batch)
         @retry_batch = nil
+        raise compaction_error unless compaction_error.nil?
         remaining_events -= batch.event_count
         attempts += response.attempts
         batches += 1

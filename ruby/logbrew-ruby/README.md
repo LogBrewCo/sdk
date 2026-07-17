@@ -347,13 +347,40 @@ client = LogBrew::Client.create(
 )
 ```
 
-`pending_events`, `pending_event_bytes`, and `dropped_events` expose local pressure without a network call. Events are serialized once at capture, so later mutation of caller-owned strings or metadata cannot change queued content, byte accounting, or retry bodies. `LogBrew::DroppedEvent` contains only the rejected event ID/type, the stable reason `queue_overflow` or `event_too_large`, cumulative loss, and retained count/bytes; it never includes event attributes or payload content. Callback errors are isolated from application capture.
+`pending_events`, `pending_event_bytes`, and `dropped_events` expose local pressure without a network call. Events are serialized once at capture, so later mutation of caller-owned strings or metadata cannot change queued content, byte accounting, or retry bodies. `LogBrew::DroppedEvent` contains only the rejected event ID/type, the stable reason `queue_overflow`, `event_too_large`, or opt-in `persistence_failure`, cumulative loss, and retained count/bytes; it never includes event attributes or payload content. Callback errors are isolated from application capture.
 
 Transport bodies use compact JSON and stay under both request limits. `response.attempts` aggregates every request attempt and `response.batches` reports accepted request batches. Each successful request removes only its accepted queue prefix. If a later batch fails, its events and every later event remain queued in order. The failed body is frozen across later `flush` or `shutdown` calls, so events captured after failure cannot change retry bytes. A flush drains only the events present when it started; events captured during transport I/O remain queued.
 
 Existing custom transports keep the same `send(api_key, body)` interface, but they must allow one `flush` to call `send` more than once. Treat each call as an independent compact request and use `response.batches` when application code needs the accepted request count; do not assume one transport call per flush.
 
 `shutdown` rejects new capture while its final flush is running, closes only after every start-snapshot batch is accepted, and reopens capture if delivery fails. The SDK owns no background worker or timer; applications keep explicit control over when network delivery happens.
+
+## Persistent Worker Delivery
+
+Server workers that need restart recovery can opt into an app-owned persistent queue. Create the client after forking and give every worker its own normalized absolute directory:
+
+```ruby
+queue_path = ENV.fetch("LOGBREW_PERSISTENT_QUEUE_PATH")
+
+client = LogBrew::Client.create(
+  api_key: ENV.fetch("LOGBREW_API_KEY"),
+  sdk_name: "checkout-worker",
+  sdk_version: "1.0.0",
+  persistent_queue_path: queue_path,
+  on_event_dropped: lambda do |notice|
+    warn "LogBrew delivery pressure: #{notice.reason} (#{notice.dropped_events} dropped)"
+  end
+)
+
+client.log("evt_job_started", Time.now.utc.iso8601, message: "job started", level: "info")
+client.shutdown(LogBrew::HttpTransport.new)
+```
+
+Persistence is disabled by default and adds no background thread, timer, or `at_exit` hook. Admission writes and syncs each validated event with an atomic same-directory rename. If that rename completes but directory sync cannot be confirmed, capture raises the content-free `persistence_commit_error`; the event remains pending and cannot be sent or purged until a later sync succeeds, and it is never reported as dropped. Restart reads the oldest records first, preserves the normal 1,000-event/4 MiB bounds, and keeps the same 100-event/256 KiB transport splitting. A server-accepted prefix is recorded before local compaction, so interrupted compaction does not replay it. A crash before that marker may replay a stable event ID; delivery is intentionally at-least-once, not exactly-once.
+
+The queue directory must be dedicated, owner-only, and used by one process. Symlinks, unexpected files, corrupt records, concurrent owners, and inherited pre-fork clients fail closed. Build each child client after fork with a unique path. Successful `shutdown` releases ownership; failed delivery remains restartable. Use `client.purge_pending_events` only when the application explicitly chooses to discard pending telemetry.
+
+Event files contain the same validated event JSON your application submitted, including message and metadata values. Protect the directory and do not put API keys or other sensitive values in telemetry. The SDK never adds the API key, endpoint, request headers, process ID, SDK request envelope, or queue path to stored records. Persistence failures before an event rename reject the new event with the content-free `persistence_failure` drop reason; they do not fall back to an in-memory-only event.
 
 ## Example Source
 
@@ -450,6 +477,7 @@ The subscriber implements `report(error, handled:, severity:, context:, source:,
 ## Behavior
 
 - `preview_json` returns the queued batch as pretty JSON.
+- `persistent_queue_path:` enables explicit owner-only, single-process restart recovery; `purge_pending_events` explicitly discards its pending prefix.
 - `flush(transport)` splits its queue snapshot into compact 100-event/256 KiB requests, freezes failed retry bytes, acknowledges only accepted prefixes, and leaves transport-time capture queued.
 - Queues default to 1,000 events and 4 MiB of compact serialized event data; `pending_event_bytes`, `dropped_events`, and `on_event_dropped` expose pressure locally. `TransportResponse#attempts` and `#batches` expose request work.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
