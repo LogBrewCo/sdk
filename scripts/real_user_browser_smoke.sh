@@ -326,7 +326,22 @@ if (syncPayload.events[0].attributes.metadata.releaseArtifactDebugId !== "111111
 if (syncPayload.events[0].attributes.metadata.release !== "web@2026.07.04" || syncPayload.events[0].attributes.metadata.environment !== "production") {
   throw new Error(`release/environment missing from browser issue: ${transport.sentBodies[3]}`);
 }
-if (JSON.stringify(syncPayload).includes("cdn.example") || JSON.stringify(syncPayload).includes("vendor.js") || JSON.stringify(syncPayload).includes("errorStack")) {
+if (JSON.stringify(syncPayload.events[0].attributes.stackFrames) !== JSON.stringify([
+  {
+    filename: "/assets/app.js",
+    line: 12,
+    column: 34,
+    debugId: "11111111-2222-4333-8444-555555555555"
+  },
+  {
+    filename: "/assets/vendor.js",
+    line: 1,
+    column: 2
+  }
+])) {
+  throw new Error(`browser issue stack frames should be path-only: ${transport.sentBodies[3]}`);
+}
+if (JSON.stringify(syncPayload).match(/cdn\.example|debug=true|section|errorStack/u)) {
   throw new Error(`browser issue leaked URL detail or stack text: ${transport.sentBodies[3]}`);
 }
 if (syncEvent.defaultPrevented) {
