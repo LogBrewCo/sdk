@@ -197,6 +197,7 @@ function prepareLogBrewReactNativeReleaseArtifacts(options = {}) {
   const release = requiredString(options, "release");
   const environment = requiredString(options, "environment");
   const service = requiredString(options, "service");
+  const projectId = optionalString(options, "projectId");
   const platform = normalizePlatform(options);
   const root = path.resolve(optionalString(options, "root") || process.cwd());
   const bundlePath = resolvePathFromRoot(root, requiredString(options, "bundle"));
@@ -252,6 +253,9 @@ function prepareLogBrewReactNativeReleaseArtifacts(options = {}) {
     "--minified-path-prefix",
     minifiedPathPrefix,
   ];
+  if (projectId) {
+    manifestArgs.push("--project-id", projectId);
+  }
   if (repositoryUrl) {
     manifestArgs.push("--repository-url", repositoryUrl);
   }

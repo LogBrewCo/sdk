@@ -6,6 +6,7 @@ import path from "node:path";
 
 import {
   byteSize,
+  normalizeProjectId,
   printJson,
   readJsonObject,
   requireBuildDir,
@@ -29,7 +30,7 @@ function usage() {
   return [
     "Usage:",
     "  logbrew-release-artifacts prepare-js --build-dir <dir> [--write] [--strip-sources-content] [--strip-source-prefix <path>...]",
-    "  logbrew-release-artifacts manifest-js --build-dir <dir> --release <id> --environment <env> --service <name> --minified-path-prefix <url-or-path> [--repository-url <url>] [--commit-sha <sha>] [--allow-sources-content]",
+    "  logbrew-release-artifacts manifest-js --build-dir <dir> [--project-id <uuid>] --release <id> --environment <env> --service <name> --minified-path-prefix <url-or-path> [--repository-url <url>] [--commit-sha <sha>] [--allow-sources-content]",
     "  logbrew-release-artifacts symbolicate-js --build-dir <dir> --manifest <file> (--stack-frame <frame> | --issue-event <file>) [--source-root <dir>] [--context-lines <n>]",
     "  logbrew-release-artifacts upload-js --build-dir <dir> --manifest <file> --endpoint <url> [--allow-hosted] [--token-env <env>] [--dry-run] [--max-retries <n>] [--retry-delay <seconds>] [--timeout <seconds>]",
     "",
@@ -599,7 +600,7 @@ function buildManifestArtifact(jsPath, buildDir, minifiedPathPrefix, allowSource
   };
 }
 
-function createManifest({ buildDir, release, environment, service, minifiedPathPrefix, allowSourcesContent, repositoryUrl, commitSha }) {
+function createManifest({ buildDir, projectId, release, environment, service, minifiedPathPrefix, allowSourcesContent, repositoryUrl, commitSha }) {
   const normalizedPrefix = normalizeUrlOrPath(minifiedPathPrefix.trim());
   const artifacts = iterMinifiedSourceFiles(buildDir).map((filePath) =>
     buildManifestArtifact(filePath, buildDir, normalizedPrefix, allowSourcesContent)
@@ -620,6 +621,7 @@ function createManifest({ buildDir, release, environment, service, minifiedPathP
   }
   return {
     manifestVersion: 1,
+    ...(projectId ? { projectId } : {}),
     release,
     environment,
     service,
@@ -657,6 +659,7 @@ function runPrepareJs(args) {
 function runManifestJs(args) {
   const options = parseOptions(args, {
     "build-dir": "string",
+    "project-id": "string",
     release: "string",
     environment: "string",
     service: "string",
@@ -667,6 +670,7 @@ function runManifestJs(args) {
   });
   const manifest = createManifest({
     buildDir: requireBuildDir(requireOption(options, "build-dir")),
+    projectId: normalizeProjectId(options["project-id"], "--project-id must be a UUID"),
     release: requireOption(options, "release"),
     environment: requireOption(options, "environment"),
     service: requireOption(options, "service"),

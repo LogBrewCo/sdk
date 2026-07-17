@@ -491,6 +491,7 @@ For a hosted release-artifact endpoint, keep the release-artifact auth value in 
 uploadLogBrewReactNativeReleaseArtifacts({
   bundle: "dist/index.android.bundle",
   sourcemap: "dist/index.android.bundle.map",
+  projectId: "550e8400-e29b-41d4-a716-446655440000",
   platform: "android",
   release: "2026.06.18",
   environment: "production",
@@ -502,7 +503,7 @@ uploadLogBrewReactNativeReleaseArtifacts({
 });
 ```
 
-The helper requires explicit `release`, `environment`, `service`, and `platform` metadata. It defaults minified bundle URLs to `app:///react-native/<platform>/...`, removes query strings and hashes from manifest URLs, and strips source paths under `root` or `stripSourcePrefix`. Hosted endpoints must use HTTPS and must not include embedded auth values, query strings, or fragments. The helper never uses normal SDK ingest keys or account/session API auth values. When `sourcemap` points at a final Hermes-composed map, the helper makes the bundle's `sourceMappingURL` point at that explicit map, so stale packager-map comments do not block manifest generation. The explicit Metro wrapper changes only app-owned serialization and one bounded runtime Debug-ID registry; neither helper patches Gradle, Xcode, global fetch/XHR, request payloads, or transport behavior.
+The helper requires explicit `release`, `environment`, `service`, and `platform` metadata. Hosted uploads also require a UUID `projectId`; local preparation and loopback upload remain valid without it. It defaults minified bundle URLs to `app:///react-native/<platform>/...`, removes query strings and hashes from manifest URLs, and strips source paths under `root` or `stripSourcePrefix`. Hosted endpoints must use HTTPS and must not include embedded auth values, query strings, or fragments. The helper never uses normal SDK ingest keys or account/session API auth values. When `sourcemap` points at a final Hermes-composed map, the helper makes the bundle's `sourceMappingURL` point at that explicit map, so stale packager-map comments do not block manifest generation. The explicit Metro wrapper changes only app-owned serialization and one bounded runtime Debug-ID registry; neither helper patches Gradle, Xcode, global fetch/XHR, request payloads, or transport behavior.
 
 React Native native symbols are handled as release artifacts, not runtime telemetry. For local dry-run validation, use the repo release-artifact tooling against app-owned build outputs such as `ios/build/.../*.dSYM`, `android/app/build/outputs/mapping/release/mapping.txt`, and `android/app/build/intermediates/merged_native_libs/.../*.so`. The current public SDK validates metadata and privacy boundaries only; backend upload, storage, lookup, and native symbolication are still backend-owned future support, so do not rely on normal runtime error capture for native crash symbolication yet.
 

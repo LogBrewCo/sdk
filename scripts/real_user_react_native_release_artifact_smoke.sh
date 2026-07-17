@@ -235,6 +235,7 @@ import {
   type LogBrewMetroConfig,
   type LogBrewMetroSerializer,
 } from "@logbrew/react-native/metro";
+import type { LogBrewReactNativeReleaseArtifactsOptions } from "@logbrew/react-native/release-artifacts";
 
 const appSerializer: LogBrewMetroSerializer = async () => ({
   code: "global.__typedMetroProbe=true;",
@@ -251,11 +252,20 @@ const wrappedDefault: LogBrewMetroConfig = withLogBrewMetroConfig(defaultConfig)
 const wrappedCustom: LogBrewMetroConfig = withLogBrewMetroConfig(customConfig);
 const serializer: LogBrewMetroSerializer = createLogBrewMetroSerializer(appSerializer);
 const defaultSerializer: LogBrewMetroSerializer = createLogBrewMetroSerializer(null);
+const releaseArtifacts: LogBrewReactNativeReleaseArtifactsOptions = {
+  bundle: "dist/index.android.bundle",
+  platform: "android",
+  projectId: "550e8400-e29b-41d4-a716-446655440000",
+  release: "mobile@1.0.0",
+  environment: "production",
+  service: "checkout-mobile",
+};
 
 void wrappedDefault;
 void wrappedCustom;
 void serializer;
 void defaultSerializer;
+void releaseArtifacts;
 TS
   cat > metro-tsconfig.json <<'JSON'
 {
@@ -803,6 +813,7 @@ const [, , bundle, sourcemap, root, manifestPath] = process.argv;
 const result = uploadLogBrewReactNativeReleaseArtifacts({
   bundle,
   sourcemap,
+  projectId: "550e8400-e29b-41d4-a716-446655440000",
   platform: "ios",
   release: "2026.06.18-react-native-hosted-upload",
   environment: "production",
@@ -824,15 +835,16 @@ process.stdout.write(JSON.stringify({
 JS
 )
 
-python3 - "$upload_helper_report" "$hosted_upload_helper_report" "$state_file" "$tmp_dir" <<'PY'
+python3 - "$upload_helper_report" "$hosted_upload_helper_report" "$hosted_upload_manifest" "$state_file" "$tmp_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 upload_report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 hosted_upload_report = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-state = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
-tmp_dir = sys.argv[4]
+hosted_manifest = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+state = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[5]
 
 assert upload_report["manifestStatus"] == "ready"
 assert upload_report["uploadStatus"] == "uploaded"
@@ -847,6 +859,7 @@ assert hosted_upload_report["uploadStatus"] == "dry_run"
 assert hosted_upload_report["endpoint"] == "https://api.logbrew.com/api/release-artifacts"
 assert hosted_upload_report["artifactCount"] == 1
 assert hosted_upload_report["filePartCount"] == 2
+assert hosted_manifest["projectId"] == "550e8400-e29b-41d4-a716-446655440000"
 
 events = state["events"]
 assert [event["path"] for event in events].count("/retry-success") == 2

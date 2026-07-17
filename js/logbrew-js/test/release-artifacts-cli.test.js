@@ -106,6 +106,8 @@ test("manifest-js emits a ready privacy-bounded source-map manifest", () => {
       "manifest-js",
       "--build-dir",
       buildDir,
+      "--project-id",
+      "550e8400-e29b-41d4-a716-446655440000",
       "--release",
       "web@1.2.3",
       "--environment",
@@ -124,6 +126,7 @@ test("manifest-js emits a ready privacy-bounded source-map manifest", () => {
     const manifest = jsonFromStdout(result);
     const artifact = manifest.artifacts[0];
     assert.equal(manifest.validation.status, "ready");
+    assert.equal(manifest.projectId, "550e8400-e29b-41d4-a716-446655440000");
     assert.equal(manifest.minifiedPathPrefix, "https://cdn.example/assets");
     assert.equal(artifact.minifiedSource.minifiedUrl, "https://cdn.example/assets/assets/app.js");
     assert.equal(artifact.sourceMap.hasSourcesContent, false);
@@ -133,6 +136,32 @@ test("manifest-js emits a ready privacy-bounded source-map manifest", () => {
     assert.match(artifact.minifiedSource.artifactSha256, /^[0-9a-f]{64}$/u);
     assert.match(artifact.sourceMap.artifactSha256, /^[0-9a-f]{64}$/u);
     assert.doesNotMatch(result.stdout, /source-fixture-marker|flag=debug|#fragment/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("manifest-js rejects a non-UUID project id", () => {
+  const { root, buildDir } = makeBuild();
+  try {
+    const result = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--project-id",
+      "project-not-a-uuid",
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets"
+    ]);
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /--project-id must be a UUID/u);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -488,6 +517,8 @@ test("upload-js allows an explicit hosted HTTPS dry-run without query or auth le
       "manifest-js",
       "--build-dir",
       buildDir,
+      "--project-id",
+      "550e8400-e29b-41d4-a716-446655440000",
       "--release",
       "web@1.2.3",
       "--environment",
@@ -521,6 +552,58 @@ test("upload-js allows an explicit hosted HTTPS dry-run without query or auth le
     assert.equal(report.filePartCount, 2);
     assert.doesNotMatch(result.stdout, /source-fixture-marker|release-artifact-auth/u);
     assert.doesNotMatch(result.stdout, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("upload-js rejects hosted manifests without a valid project id", () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const prep = runCli([
+      "prepare-js",
+      "--build-dir",
+      buildDir,
+      "--strip-sources-content",
+      "--strip-source-prefix",
+      appRoot,
+      "--write"
+    ]);
+    assert.equal(prep.status, 0, prep.stderr);
+
+    const manifestResult = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets"
+    ]);
+    assert.equal(manifestResult.status, 0, manifestResult.stderr);
+    const manifestPath = path.join(root, "manifest.json");
+    fs.writeFileSync(manifestPath, manifestResult.stdout, "utf8");
+
+    const result = runCli([
+      "upload-js",
+      "--build-dir",
+      buildDir,
+      "--manifest",
+      manifestPath,
+      "--endpoint",
+      "https://api.logbrew.com/api/release-artifacts",
+      "--allow-hosted",
+      "--dry-run"
+    ]);
+
+    assert.equal(result.status, 4);
+    const report = jsonFromStdout(result);
+    assert.equal(report.status, "validation_failed");
+    assert.deepEqual(report.validation.errors, ["hosted release artifact uploads require manifest projectId as a UUID"]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -6,6 +6,7 @@ export type LogBrewReactNativeReleaseArtifactsOptions = {
   release: string;
   environment: string;
   service: string;
+  projectId?: string;
   sourcemap?: string;
   root?: string;
   buildDir?: string;

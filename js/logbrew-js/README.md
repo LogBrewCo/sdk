@@ -55,6 +55,7 @@ npx logbrew-release-artifacts prepare-js \
 
 npx logbrew-release-artifacts manifest-js \
   --build-dir dist \
+  --project-id 550e8400-e29b-41d4-a716-446655440000 \
   --release web@1.2.3 \
   --environment production \
   --service checkout-web \
@@ -93,7 +94,7 @@ npx logbrew-release-artifacts upload-js \
   --allow-hosted
 ```
 
-Non-loopback endpoints require `--allow-hosted`, must use HTTPS, and must not include embedded auth values, query strings, or fragments. The upload command never uses normal SDK ingest keys or account/session API auth values. Full backend-symbolicated issue support is separate from artifact upload until your project has completed hosted symbolication for its release.
+Non-loopback endpoints require `--allow-hosted`, a UUID `projectId` created by `manifest-js --project-id`, HTTPS, and no embedded auth values, query strings, or fragments. Local loopback preparation remains valid without a project ID. The upload command never uses normal SDK ingest keys or account/session API auth values. Full backend-symbolicated issue support is separate from artifact upload until your project has completed hosted symbolication for its release.
 
 When you capture a JavaScript error, use `createIssueAttributesFromError()` to keep error metadata structured and source-map-friendly without sending raw stack text by default. Pass a Debug ID map from your app-owned build setup when you want the issue event to carry release-artifact metadata:
 
