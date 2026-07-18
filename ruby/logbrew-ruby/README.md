@@ -353,7 +353,38 @@ Transport bodies use compact JSON and stay under both request limits. `response.
 
 Existing custom transports keep the same `send(api_key, body)` interface, but they must allow one `flush` to call `send` more than once. Treat each call as an independent compact request and use `response.batches` when application code needs the accepted request count; do not assume one transport call per flush.
 
-`shutdown` rejects new capture while its final flush is running, closes only after every start-snapshot batch is accepted, and reopens capture if delivery fails. The SDK owns no background worker or timer; applications keep explicit control over when network delivery happens.
+`shutdown` rejects new capture while its final flush is running, closes only after every start-snapshot batch is accepted, and reopens capture if delivery fails. Clients created with `Client.create` own no background worker or timer; applications keep explicit control over when network delivery happens.
+
+## Automatic Delivery
+
+Applications that own their transport can opt into one lazy delivery worker. Manual clients remain the default.
+
+```ruby
+transport = LogBrew::HttpTransport.new(timeout: 10)
+client = LogBrew::Client.create_automatic(
+  api_key: ENV.fetch("LOGBREW_API_KEY"),
+  sdk_name: "checkout-worker",
+  sdk_version: "1.0.0",
+  transport: transport,
+  flush_interval: 5,
+  flush_threshold: 100,
+  retry_base_delay: 0.25,
+  retry_max_delay: 30,
+  persistent_queue_path: ENV["LOGBREW_PERSISTENT_QUEUE_PATH"]
+)
+
+client.log("evt_job_started", Time.now.utc.iso8601, message: "job started", level: "info")
+warn JSON.generate(client.delivery_health.to_h)
+client.shutdown
+```
+
+The worker starts only after accepted queue work exists, then wakes when the queue reaches `flush_threshold` or `flush_interval` expires. Restart-hydrated persistent work wakes it immediately. Automatic and manual sends share the existing serialized flush, immutable failed prefix, accepted-prefix acknowledgement, batch bounds, and persistence format; no second queue or transport path is created.
+
+Retryable network, `408`, and `5xx` failures retain the exact failed body and use capped equal-jitter backoff. Authentication (`401`/`403`), quota (`429`), validation (`400`/`422`), and other non-retryable responses pause automatic sends without dropping queued work. `recover_automatic_delivery` performs one explicit synchronous flush through the owned transport and resumes scheduling only after success. Calling `flush(transport)` directly provides the same explicit recovery boundary. `stop_automatic_delivery` joins the worker without draining or discarding work; a later manual flush remains available.
+
+`delivery_health` returns an immutable, JSON-serializable `LogBrew::DeliveryHealth` snapshot. Its fixed fields are lifecycle state, queued event/byte counts, dropped count, in-flight state, bounded outcome/failure/flush counters, pause reason, and current retry delay. It never contains event data, event IDs, API keys, endpoints, headers, response bodies, filesystem paths, process or thread IDs, exception messages, or server text.
+
+Automatic ownership is process-local. An inherited automatic client rejects capture, flush, purge, stop, and shutdown after `fork`; each child must create a fresh client, transport, and persistent queue owner. No signal handler, global fork hook, `at_exit`, or finalizer is installed. `shutdown` stops and joins the worker before its final drain, and a failed drain reopens the client with retryable failures scheduled or terminal failures paused. Application transport timeouts still bound how promptly an in-flight send can stop.
 
 ## Persistent Worker Delivery
 
@@ -478,6 +509,7 @@ The subscriber implements `report(error, handled:, severity:, context:, source:,
 
 - `preview_json` returns the queued batch as pretty JSON.
 - `persistent_queue_path:` enables explicit owner-only, single-process restart recovery; `purge_pending_events` explicitly discards its pending prefix.
+- `Client.create_automatic(...)` opts an owned transport into one lazy interval/threshold worker; `delivery_health`, `recover_automatic_delivery`, and `stop_automatic_delivery` expose fixed process-local lifecycle control.
 - `flush(transport)` splits its queue snapshot into compact 100-event/256 KiB requests, freezes failed retry bytes, acknowledges only accepted prefixes, and leaves transport-time capture queued.
 - Queues default to 1,000 events and 4 MiB of compact serialized event data; `pending_event_bytes`, `dropped_events`, and `on_event_dropped` expose pressure locally. `TransportResponse#attempts` and `#batches` expose request work.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.

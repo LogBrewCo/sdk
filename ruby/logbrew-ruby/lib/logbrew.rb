@@ -67,6 +67,21 @@ module LogBrew
     end
   end
 
+  class DeliveryFailure < SdkError
+    attr_reader :automatic_pause_reason
+
+    def initialize(code, message, automatic_retryable: false, automatic_pause_reason: nil)
+      @automatic_retryable = automatic_retryable
+      @automatic_pause_reason = automatic_pause_reason
+      super(code, message)
+    end
+
+    def automatic_retryable?
+      @automatic_retryable
+    end
+  end
+  private_constant :DeliveryFailure
+
   class RecordingTransport
     attr_reader :sent_bodies
 
@@ -744,6 +759,11 @@ module LogBrew
   end
 
   class Client
+    DEFAULT_AUTOMATIC_FLUSH_INTERVAL = 5.0
+    DEFAULT_AUTOMATIC_FLUSH_THRESHOLD = 100
+    DEFAULT_AUTOMATIC_RETRY_BASE_DELAY = 0.25
+    DEFAULT_AUTOMATIC_RETRY_MAX_DELAY = 30.0
+
     def self.create(
       api_key:,
       sdk_name:,
@@ -776,6 +796,43 @@ module LogBrew
         max_batch_bytes: max_batch_bytes,
         persistent_queue_path: persistent_queue_path
       )
+    end
+
+    def self.create_automatic(
+      api_key:,
+      sdk_name:,
+      sdk_version:,
+      transport:,
+      flush_interval: DEFAULT_AUTOMATIC_FLUSH_INTERVAL,
+      flush_threshold: DEFAULT_AUTOMATIC_FLUSH_THRESHOLD,
+      retry_base_delay: DEFAULT_AUTOMATIC_RETRY_BASE_DELAY,
+      retry_max_delay: DEFAULT_AUTOMATIC_RETRY_MAX_DELAY,
+      **options
+    )
+      max_queue_size = options.fetch(:max_queue_size, BoundedEventQueue::DEFAULT_MAX_SIZE)
+      AutomaticDelivery.validate!(
+        transport: transport,
+        flush_interval: flush_interval,
+        flush_threshold: flush_threshold,
+        retry_base_delay: retry_base_delay,
+        retry_max_delay: retry_max_delay,
+        max_queue_size: max_queue_size
+      )
+      client = create(
+        api_key: api_key,
+        sdk_name: sdk_name,
+        sdk_version: sdk_version,
+        **options
+      )
+      client.send(
+        :enable_automatic_delivery,
+        transport: transport,
+        flush_interval: flush_interval,
+        flush_threshold: flush_threshold,
+        retry_base_delay: retry_base_delay,
+        retry_max_delay: retry_max_delay
+      )
+      client
     end
 
     def initialize(
@@ -812,6 +869,7 @@ module LogBrew
       @closed = false
       @closing = false
       @retry_batch = nil
+      @automatic_delivery = nil
     end
 
     def pending_events
@@ -826,6 +884,41 @@ module LogBrew
       @event_queue.dropped_events
     end
 
+    def delivery_health
+      controller = @automatic_delivery
+      unless controller.nil?
+        controller.assert_process_ownership!
+        return controller.snapshot
+      end
+
+      metrics = queue_metrics
+      state = @state_mutex.synchronize { @closed ? "closed" : "manual" }
+      DeliveryHealth.new(
+        state: state,
+        queued_events: metrics.fetch(:queued_events),
+        queued_bytes: metrics.fetch(:queued_bytes),
+        dropped_events: metrics.fetch(:dropped_events),
+        in_flight: false,
+        last_outcome: "none",
+        consecutive_failures: 0,
+        pause_reason: nil,
+        successful_flushes: 0,
+        failed_flushes: 0,
+        retry_delay_ms: 0
+      )
+    end
+
+    def recover_automatic_delivery
+      controller = require_automatic_delivery
+      controller.assert_process_ownership!
+      flush
+    end
+
+    def stop_automatic_delivery
+      controller = require_automatic_delivery
+      controller.stop
+    end
+
     def preview_json
       snapshot = @event_queue.snapshot
       JSON.pretty_generate("sdk" => @sdk, "events" => snapshot.events)
@@ -833,10 +926,14 @@ module LogBrew
 
     def purge_pending_events
       ensure_not_reentrant_flush
+      controller = @automatic_delivery
+      controller&.assert_process_ownership!
       @flush_mutex.synchronize do
         @state_mutex.synchronize { ensure_open }
         @retry_batch = nil
-        @event_queue.purge
+        removed = @event_queue.purge
+        controller&.queue_changed
+        removed
       end
     end
 
@@ -868,16 +965,31 @@ module LogBrew
       push_event("action", id, timestamp, validate_action(attributes))
     end
 
-    def flush(transport)
+    def flush(transport = nil)
       ensure_not_reentrant_flush
+      controller = @automatic_delivery
+      controller&.assert_process_ownership!
+      resolved_transport = resolve_transport(transport)
       @flush_mutex.synchronize do
         @state_mutex.synchronize { ensure_open }
-        flush_internal(transport)
+        previous = controller&.begin_explicit_flush
+        begin
+          response = flush_internal(resolved_transport)
+          controller&.complete_explicit_flush(previous, response)
+          response
+        rescue StandardError => error
+          controller&.fail_explicit_flush(previous, error)
+          raise
+        end
       end
     end
 
-    def shutdown(transport)
+    def shutdown(transport = nil)
       ensure_not_reentrant_flush
+      controller = @automatic_delivery
+      controller&.assert_process_ownership!
+      resolved_transport = resolve_transport(transport)
+      controller&.prepare_shutdown
       @flush_mutex.synchronize do
         @state_mutex.synchronize do
           ensure_open
@@ -885,16 +997,22 @@ module LogBrew
         end
 
         succeeded = false
+        failure = nil
         begin
-          response = flush_internal(transport)
+          response = flush_internal(resolved_transport)
           @event_queue.close
           succeeded = true
+          controller&.complete_shutdown(response)
           response
+        rescue StandardError => error
+          failure = error
+          raise
         ensure
           @state_mutex.synchronize do
             @closed = true if succeeded
             @closing = false
           end
+          controller&.resume_after_failed_shutdown(failure) unless succeeded
         end
       end
     end
@@ -902,6 +1020,7 @@ module LogBrew
     private
 
     def push_event(type, id, timestamp, attributes)
+      @automatic_delivery&.assert_process_ownership!
       Validation.require_non_empty("event id", id)
       Validation.require_timestamp(timestamp)
       event = {
@@ -915,6 +1034,30 @@ module LogBrew
         @event_queue.enqueue(event_id: id, event_type: type, event: event)
       end
       @event_queue.notify_drop(notice)
+      @automatic_delivery&.notify_capture if notice.nil?
+    end
+
+    def enable_automatic_delivery(transport:, flush_interval:, flush_threshold:, retry_base_delay:, retry_max_delay:)
+      @automatic_delivery = AutomaticDelivery.new(
+        client: self,
+        transport: transport,
+        flush_interval: flush_interval,
+        flush_threshold: flush_threshold,
+        retry_base_delay: retry_base_delay,
+        retry_max_delay: retry_max_delay
+      )
+    end
+
+    def perform_automatic_flush(controller, generation, transport)
+      @flush_mutex.synchronize do
+        begin
+          @state_mutex.synchronize { ensure_open }
+          response = flush_internal(transport)
+          controller.complete_automatic_flush(generation, response)
+        rescue StandardError => error
+          controller.fail_automatic_flush(generation, error)
+        end
+      end
     end
 
     def flush_internal(transport)
@@ -950,21 +1093,69 @@ module LogBrew
       (1..max_attempts).each do |attempt|
         begin
           response = transport.send(@api_key, body)
-          raise SdkError.new("unauthenticated", "transport rejected the API key") if response.status_code == 401
+          if response.status_code == 401 || response.status_code == 403
+            raise DeliveryFailure.new(
+              "unauthenticated",
+              "transport rejected the API key",
+              automatic_pause_reason: "authentication"
+            )
+          end
 
           if response.status_code >= 200 && response.status_code < 300
             return TransportResponse.new(response.status_code, attempt)
           end
-          next if response.status_code >= 500 && attempt < max_attempts
+          retryable_status = response.status_code == 408 || response.status_code >= 500
+          next if retryable_status && attempt < max_attempts
 
-          raise SdkError.new("transport_error", "unexpected transport status #{response.status_code}")
+          if retryable_status
+            raise DeliveryFailure.new(
+              "transport_error",
+              "unexpected transport status #{response.status_code}",
+              automatic_retryable: true
+            )
+          end
+
+          pause_reason = case response.status_code
+                         when 429 then "quota"
+                         when 400, 422 then "validation"
+                         else "nonretryable"
+                         end
+
+          raise DeliveryFailure.new(
+            "transport_error",
+            "unexpected transport status #{response.status_code}",
+            automatic_pause_reason: pause_reason
+          )
         rescue TransportError => error
           next if error.retryable && attempt < max_attempts
 
-          raise SdkError.new(error.code, error.message)
+          raise DeliveryFailure.new(
+            error.code,
+            error.message,
+            automatic_retryable: error.retryable
+          )
         end
       end
-      raise SdkError.new("transport_error", "exhausted retries")
+      raise DeliveryFailure.new("transport_error", "exhausted retries", automatic_retryable: true)
+    end
+
+    def require_automatic_delivery
+      return @automatic_delivery unless @automatic_delivery.nil?
+
+      raise SdkError.new("automatic_delivery_error", "client does not own automatic delivery")
+    end
+
+    def resolve_transport(transport)
+      resolved = transport || @automatic_delivery&.transport
+      unless resolved.respond_to?(:send)
+        raise SdkError.new("validation_error", "transport must respond to send")
+      end
+
+      resolved
+    end
+
+    def queue_metrics
+      @event_queue.metrics
     end
 
     def ensure_not_reentrant_flush
@@ -1121,6 +1312,8 @@ module LogBrew
       payload
     end
   end
+
+  require_relative "logbrew/automatic_delivery"
 end
 
 %w[product_timeline traceparent trace span_events operation_tracing support_ticket worker_lifecycle].each do |path|

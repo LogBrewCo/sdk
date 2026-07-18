@@ -119,6 +119,16 @@ module LogBrew
       @mutex.synchronize { @dropped_events }
     end
 
+    def metrics
+      @mutex.synchronize do
+        {
+          queued_events: @records.length,
+          queued_bytes: @pending_bytes,
+          dropped_events: @dropped_events
+        }.freeze
+      end
+    end
+
     def snapshot
       @mutex.synchronize do
         @event_store&.prepare_delivery unless @records.empty?

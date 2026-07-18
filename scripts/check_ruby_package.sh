@@ -20,7 +20,7 @@ find "$package_dir" -name '*.rb' -not -path '*/.bundle/*' -print0 | while IFS= r
 done
 
 (cd "$package_dir" && ruby tests/run.rb)
-rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
+rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/automatic_delivery.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
 test -f "$tmp_dir/rdoc/LogBrew/Client.html"
 test -f "$tmp_dir/rdoc/LogBrew/Logger.html"
 test -f "$tmp_dir/rdoc/LogBrew/RackMiddleware.html"
@@ -31,6 +31,7 @@ test -f "$tmp_dir/rdoc/LogBrew/SdkError.html"
 test -f "$tmp_dir/rdoc/LogBrew/SupportTicketDraft.html"
 test -f "$tmp_dir/rdoc/LogBrew/WorkerLifecycle.html"
 test -f "$tmp_dir/rdoc/LogBrew/WorkerDeliveryFailure.html"
+test -f "$tmp_dir/rdoc/LogBrew/DeliveryHealth.html"
 
 (cd "$package_dir" && gem build logbrew-sdk.gemspec --strict --output "$tmp_dir/logbrew-sdk-${package_version}.gem" >/dev/null)
 test -f "$tmp_dir/logbrew-sdk-${package_version}.gem"
@@ -48,11 +49,13 @@ test -f "$unpacked_dir/lib/logbrew/persistent_event_store.rb"
 test -f "$unpacked_dir/lib/logbrew/trace.rb"
 test -f "$unpacked_dir/lib/logbrew/support_ticket.rb"
 test -f "$unpacked_dir/lib/logbrew/worker_lifecycle.rb"
+test -f "$unpacked_dir/lib/logbrew/automatic_delivery.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
 test -f "$unpacked_dir/examples/real_user_smoke.rb"
 test -f "$unpacked_dir/examples/http_trace_correlation.rb"
 test -f "$unpacked_dir/examples/persistent_worker_delivery.rb"
+test -f "$unpacked_dir/examples/automatic_delivery.rb"
 test -f "$unpacked_dir/examples/Makefile"
 grep -q 'gem install logbrew-sdk' "$unpacked_dir/README.md"
 grep -q 'LOGBREW_API_KEY' "$unpacked_dir/README.md"
@@ -86,6 +89,9 @@ grep -q 'Persistent Worker Delivery' "$unpacked_dir/README.md"
 grep -q 'persistent_queue_path' "$unpacked_dir/README.md"
 grep -q 'purge_pending_events' "$unpacked_dir/README.md"
 grep -q 'at-least-once' "$unpacked_dir/README.md"
+grep -q 'Automatic Delivery' "$unpacked_dir/README.md"
+grep -q 'LogBrew::DeliveryHealth' "$unpacked_dir/README.md"
+grep -q 'recover_automatic_delivery' "$unpacked_dir/README.md"
 
 ruby -I "$package_dir/lib" "$package_dir/examples/readme_example.rb" > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
@@ -111,6 +117,12 @@ test -f "$tmp_dir/persistent-example-queue/.ack"
 test -f "$tmp_dir/persistent-example-queue/.lock"
 test -z "$(find "$tmp_dir/persistent-example-queue" -name '*.event' -print -quit)"
 
+LOGBREW_API_KEY="package-example-key" \
+  ruby -I "$package_dir/lib" "$package_dir/examples/automatic_delivery.rb" > "$tmp_dir/automatic-example.json"
+grep -q '"ok":true' "$tmp_dir/automatic-example.json"
+grep -q '"state":"closed"' "$tmp_dir/automatic-example.json"
+grep -q '"sentBodies":1' "$tmp_dir/automatic-example.json"
+
 make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
@@ -118,5 +130,6 @@ grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-he
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/examples-help.txt"
 grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery' "$tmp_dir/examples-help.txt"
+grep -qx 'run-automatic-delivery -> make run-automatic-delivery' "$tmp_dir/examples-help.txt"
 
 echo "ruby package checks passed"
