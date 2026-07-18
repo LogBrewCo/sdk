@@ -47,6 +47,45 @@ TransportResponse response = client.Shutdown(RecordingTransport.AlwaysAccept());
 Console.Error.WriteLine(response.StatusCode);
 ```
 
+## Automatic Delivery
+
+`LogBrewClient.Create(...)` remains manual and starts no worker. Use `CreateAutomatic(...)` only when this client should own delivery scheduling through one transport:
+
+```csharp
+using System;
+using LogBrew;
+
+using var transport = new HttpTransport(new HttpTransportOptions
+{
+    Timeout = TimeSpan.FromSeconds(5)
+});
+var client = LogBrewClient.CreateAutomatic(
+    "LOGBREW_API_KEY",
+    "my-dotnet-app",
+    "1.0.0",
+    transport,
+    new AutomaticDeliveryOptions
+    {
+        FlushAtQueueSize = 100,
+        FlushInterval = TimeSpan.FromSeconds(5),
+        MaxRetries = 2
+    });
+
+client.Log(
+    "evt_log_automatic_001",
+    "2026-06-02T10:00:02Z",
+    LogAttributes.Create("automatic delivery is ready", "info"));
+
+DeliveryHealthSnapshot health = client.DeliveryHealth();
+TransportResponse shutdown = client.Shutdown();
+```
+
+The lazy client-owned worker starts on the first accepted event and coalesces interval and queue-threshold wakeups. Delivery uses one ordered queue, one in-flight request, immutable failed-prefix retries, and requests capped at 100 events and 256 KiB. Defaults retain at most 1,000 events and 4 MiB of serialized event data; `DroppedEvents()` and the optional drop callback explain local bounds without changing application outcomes.
+
+Retryable `408` and `5xx` responses use capped jitter with zero to ten configured retries. A single valid `Retry-After` delta-seconds or IMF-fixdate value from `HttpTransport` can raise that delay up to `MaxRetryDelay`; malformed or ambiguous guidance falls back to local jitter. Authentication, quota, validation, and other non-retryable outcomes pause automatic sends without removing the failed prefix. Call `RecoverAutomaticDelivery()` after correcting the cause. `Flush()` and `Shutdown()` serialize with the worker; shutdown rejects later capture and joins the owned worker. The application remains responsible for bounding custom transport calls, including timeouts.
+
+`DeliveryHealth()` returns fixed lifecycle, activity, outcome, status-class, queue, retry, accepted, and drop fields. It never includes event content, endpoint or authorization data, response text, exceptions, filesystem paths, or process metadata. Remote acceptance followed by a lost response remains an at-least-once ambiguity: retry may deliver the same immutable request again.
+
 ## Explicit Metrics
 
 Use `MetricAttributes` when your application already knows the measurement it wants to report:

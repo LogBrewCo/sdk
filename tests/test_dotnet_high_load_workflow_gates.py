@@ -16,7 +16,12 @@ class DotnetHighLoadWorkflowGateTests(unittest.TestCase):
         self.assertIn("HighVolumeLogs = 1500", smoke)
         self.assertIn('"droppedEvents":504', smoke)
         self.assertIn('"flushedEvents":1000', smoke)
-        self.assertIn('"retryAttempts":2', smoke)
+        self.assertIn('"retryAttempts":11', smoke)
+        self.assertIn('"automaticRequests":3', smoke)
+        self.assertIn('"terminalRequests":3', smoke)
+        self.assertIn("CreateAutomatic", smoke)
+        self.assertIn("DeliveryHealth", smoke)
+        self.assertIn("RecoverAutomaticDelivery", smoke)
         self.assertIn("Shutdown", smoke)
         self.assertIn("lbw_ingest_dotnet_high_load_fake", smoke)
 
