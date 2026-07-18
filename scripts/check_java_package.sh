@@ -57,6 +57,7 @@ javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/classes:$java_optional_class
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewClientTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewDeliveryTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewAutomaticDeliveryTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.RetryAfterParserTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.EncryptedEventStoreTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewPersistenceTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewTraceTest
@@ -135,6 +136,8 @@ grep -q '^co/logbrew/sdk/PersistenceKeyCheck.java$' "$tmp_dir/sources-jar-conten
 grep -q '^co/logbrew/sdk/PersistenceRecordCodec.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/PersistenceTransaction.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/RetryAfterDirective.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/RetryAfterParser.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/Traceparent.java$' "$tmp_dir/sources-jar-contents.txt"
@@ -219,6 +222,7 @@ grep -q '^co/logbrew/sdk/DeliveryHealth\$Activity.class$' "$tmp_dir/jar-contents
 grep -q '^co/logbrew/sdk/DeliveryHealth\$Outcome.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/DeliveryHealth\$PauseReason.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/DeliveryHealth\$DropReason.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$RetryDelaySource.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/DeliveryOptions.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/DeliveryOptions\$Builder.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/EncryptedEventStore.class$' "$tmp_dir/jar-contents.txt"
@@ -232,6 +236,9 @@ grep -q '^co/logbrew/sdk/LogBrewClient\$EventDrop.class$' "$tmp_dir/jar-contents
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDroppedHandler.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport\$Builder.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/RetryAfterDirective.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/RetryAfterDirective\$Outcome.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/RetryAfterParser.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline\$ProductAction.class$' "$tmp_dir/jar-contents.txt"

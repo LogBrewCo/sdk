@@ -12,6 +12,7 @@ final class AutomaticDeliveryTransport implements Transport {
 
     private final Transport delegate;
     private FailureKind failureKind = FailureKind.NON_RETRYABLE;
+    private RetryAfterDirective retryAfterDirective = RetryAfterDirective.none();
     private long attempts;
 
     AutomaticDeliveryTransport(Transport delegate) {
@@ -24,9 +25,13 @@ final class AutomaticDeliveryTransport implements Transport {
         try {
             TransportResponse response = delegate.send(apiKey, body);
             failureKind = classify(response);
+            retryAfterDirective = failureKind == FailureKind.RETRYABLE && response != null
+                ? response.retryAfterDirective()
+                : RetryAfterDirective.none();
             return response;
         } catch (TransportException error) {
             failureKind = error.retryable() ? FailureKind.RETRYABLE : FailureKind.NON_RETRYABLE;
+            retryAfterDirective = RetryAfterDirective.none();
             throw error;
         }
     }
@@ -37,6 +42,10 @@ final class AutomaticDeliveryTransport implements Transport {
 
     long attempts() {
         return attempts;
+    }
+
+    RetryAfterDirective retryAfterDirective() {
+        return retryAfterDirective;
     }
 
     private static FailureKind classify(TransportResponse response) {

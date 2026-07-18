@@ -24,12 +24,15 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
     private DeliveryHealth.Outcome lastOutcome = DeliveryHealth.Outcome.NONE;
     private DeliveryHealth.PauseReason pauseReason = DeliveryHealth.PauseReason.NONE;
     private DeliveryHealth.DropReason lastDropReason = DeliveryHealth.DropReason.NONE;
+    private DeliveryHealth.RetryDelaySource retryDelaySource = DeliveryHealth.RetryDelaySource.NONE;
     private long automaticAttempts;
     private long transportAttempts;
     private long acceptedBatches;
     private long acceptedEvents;
     private int consecutiveFailures;
     private long scheduledDelayMillis;
+    private long acceptedServerRetryHints;
+    private long rejectedServerRetryHints;
 
     AutomaticDeliveryController(
         LogBrewClient client,
@@ -102,6 +105,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             retryAttempts = 0;
             wakeCoalesced = false;
             scheduledDelayMillis = 0L;
+            retryDelaySource = DeliveryHealth.RetryDelaySource.NONE;
             if (!isPausedLocked()) {
                 activity = DeliveryHealth.Activity.IDLE;
             }
@@ -117,6 +121,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             pauseReason = DeliveryHealth.PauseReason.NONE;
             consecutiveFailures = 0;
             retryAttempts = 0;
+            retryDelaySource = DeliveryHealth.RetryDelaySource.NONE;
             generation++;
             cancelWakeLocked();
             activity = DeliveryHealth.Activity.IDLE;
@@ -141,6 +146,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
                 lastOutcome,
                 pauseReason,
                 lastDropReason,
+                retryDelaySource,
                 stopping,
                 inFlight,
                 wakeCoalesced,
@@ -149,7 +155,9 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
                 acceptedBatches,
                 acceptedEvents,
                 consecutiveFailures,
-                scheduledDelayMillis
+                scheduledDelayMillis,
+                acceptedServerRetryHints,
+                rejectedServerRetryHints
             );
         }
     }
@@ -161,6 +169,8 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
     TransportResponse flush(Transport explicitTransport) {
         AutomaticDeliveryTransport observed = new AutomaticDeliveryTransport(explicitTransport);
         LogBrewClient.DeliverySession session;
+        final long operationGeneration;
+        client.rejectDeliveryReentrancy();
         synchronized (this) {
             requireOwnedProcessLocked();
             if (stopping) {
@@ -172,11 +182,13 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             activity = DeliveryHealth.Activity.IN_FLIGHT;
             wakeCoalesced = false;
             scheduledDelayMillis = 0L;
+            retryDelaySource = DeliveryHealth.RetryDelaySource.NONE;
             automaticAttempts = saturatedAdd(automaticAttempts, 1L);
             session = retrySession;
+            operationGeneration = generation;
         }
 
-        boolean succeeded = false;
+        boolean completedCurrent = false;
         try {
             if (session == null) {
                 session = client.beginAutomaticDelivery();
@@ -189,21 +201,23 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             }
             TransportResponse response = client.deliverAutomatically(observed, false, session, this);
             synchronized (this) {
-                generation++;
-                cancelWakeLocked();
-                recordCompletedLocked(response);
-                retrySession = null;
-                retryAttempts = 0;
-                pauseReason = DeliveryHealth.PauseReason.NONE;
+                if (operationGeneration == generation && !stopping) {
+                    generation++;
+                    cancelWakeLocked();
+                    recordCompletedLocked(response);
+                    retrySession = null;
+                    retryAttempts = 0;
+                    pauseReason = DeliveryHealth.PauseReason.NONE;
+                    completedCurrent = true;
+                }
             }
-            succeeded = true;
             return response;
         } catch (RuntimeException error) {
             synchronized (this) {
                 if (stopping) {
                     recordOverlappedFailureLocked(observed.failureKind());
-                } else {
-                    handleFailureLocked(observed.failureKind());
+                } else if (operationGeneration == generation) {
+                    handleFailureLocked(observed.failureKind(), observed.retryAfterDirective());
                 }
             }
             throw stableDeliveryFailure(error);
@@ -212,12 +226,12 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             synchronized (this) {
                 transportAttempts = saturatedAdd(transportAttempts, observed.attempts());
                 endOperationLocked();
-                if (succeeded && !stopping && !isPausedLocked() && queuedEvents > 0) {
+                if (completedCurrent && !stopping && !isPausedLocked() && queuedEvents > 0) {
                     scheduleSafelyLocked(
                         queuedEvents >= options.queueThreshold() ? 0L : options.flushIntervalMillis(),
                         DeliveryHealth.Activity.SCHEDULED
                     );
-                } else if (succeeded && !stopping) {
+                } else if (completedCurrent && !stopping) {
                     activity = DeliveryHealth.Activity.IDLE;
                 }
             }
@@ -227,6 +241,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
     TransportResponse shutdown(Transport shutdownTransport) {
         AutomaticDeliveryScheduler.Scheduler current;
         AutomaticDeliveryTransport observed = new AutomaticDeliveryTransport(shutdownTransport);
+        client.rejectDeliveryReentrancy();
         synchronized (this) {
             requireOwnedProcessLocked();
             stopping = true;
@@ -236,6 +251,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             beginOperationLocked();
             wakeCoalesced = false;
             scheduledDelayMillis = 0L;
+            retryDelaySource = DeliveryHealth.RetryDelaySource.NONE;
             current = scheduler;
             automaticAttempts = saturatedAdd(automaticAttempts, 1L);
         }
@@ -281,23 +297,29 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         AutomaticDeliveryTransport observed = new AutomaticDeliveryTransport(transport);
         LogBrewClient.DeliverySession session;
         boolean needsSession;
+        final long operationGeneration;
         synchronized (this) {
             if (!ownsProcessLocked() || stopping || isPausedLocked() || scheduledGeneration != generation) {
                 return;
             }
             wake = null;
             scheduledDelayMillis = 0L;
+            retryDelaySource = DeliveryHealth.RetryDelaySource.NONE;
             beginOperationLocked();
             activity = DeliveryHealth.Activity.IN_FLIGHT;
             automaticAttempts = saturatedAdd(automaticAttempts, 1L);
             needsSession = retrySession == null;
             session = retrySession;
+            operationGeneration = generation;
         }
         boolean succeeded = false;
         try {
             if (needsSession) {
                 LogBrewClient.DeliverySession created = client.beginAutomaticDelivery();
                 synchronized (this) {
+                    if (operationGeneration != generation || stopping) {
+                        return;
+                    }
                     if (retrySession == null) {
                         retrySession = created;
                     }
@@ -306,18 +328,20 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             }
             TransportResponse response = client.deliverAutomatically(observed, false, session, this);
             synchronized (this) {
-                recordCompletedLocked(response);
-                retrySession = null;
-                retryAttempts = 0;
-                pauseReason = DeliveryHealth.PauseReason.NONE;
+                if (operationGeneration == generation && !stopping) {
+                    recordCompletedLocked(response);
+                    retrySession = null;
+                    retryAttempts = 0;
+                    pauseReason = DeliveryHealth.PauseReason.NONE;
+                    succeeded = true;
+                }
             }
-            succeeded = true;
         } catch (RuntimeException error) {
             synchronized (this) {
                 if (stopping) {
                     recordOverlappedFailureLocked(observed.failureKind());
-                } else {
-                    handleFailureLocked(observed.failureKind());
+                } else if (operationGeneration == generation) {
+                    handleFailureLocked(observed.failureKind(), observed.retryAfterDirective());
                 }
             }
         } finally {
@@ -342,14 +366,33 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         }
     }
 
-    private void handleFailureLocked(AutomaticDeliveryTransport.FailureKind failureKind) {
+    private void handleFailureLocked(
+        AutomaticDeliveryTransport.FailureKind failureKind,
+        RetryAfterDirective retryAfterDirective
+    ) {
         consecutiveFailures = saturatedIncrement(consecutiveFailures);
         if (failureKind == AutomaticDeliveryTransport.FailureKind.RETRYABLE
             && retryAttempts < options.maxRetryAttempts()) {
             retryAttempts++;
             lastOutcome = DeliveryHealth.Outcome.RETRYABLE_FAILURE;
             pauseReason = DeliveryHealth.PauseReason.NONE;
-            scheduleSafelyLocked(retryDelayLocked(), DeliveryHealth.Activity.RETRYING);
+            long clientDelayMillis = retryDelayLocked();
+            long delayMillis = clientDelayMillis;
+            retryDelaySource = DeliveryHealth.RetryDelaySource.CLIENT;
+            if (retryAfterDirective.outcome() == RetryAfterDirective.Outcome.ACCEPTED) {
+                acceptedServerRetryHints = saturatedAdd(acceptedServerRetryHints, 1L);
+                long serverDelayMillis = Math.min(
+                    retryAfterDirective.delayMillis(),
+                    options.maxRetryDelayMillis()
+                );
+                if (serverDelayMillis >= clientDelayMillis) {
+                    delayMillis = serverDelayMillis;
+                    retryDelaySource = DeliveryHealth.RetryDelaySource.SERVER;
+                }
+            } else if (retryAfterDirective.outcome() == RetryAfterDirective.Outcome.REJECTED) {
+                rejectedServerRetryHints = saturatedAdd(rejectedServerRetryHints, 1L);
+            }
+            scheduleSafelyLocked(delayMillis, DeliveryHealth.Activity.RETRYING);
             return;
         }
         pauseTerminalLocked(failureKind);
@@ -365,6 +408,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         lastOutcome = failureKind == AutomaticDeliveryTransport.FailureKind.RETRYABLE
             ? DeliveryHealth.Outcome.RETRYABLE_FAILURE
             : DeliveryHealth.Outcome.TERMINAL_FAILURE;
+        retryDelaySource = DeliveryHealth.RetryDelaySource.NONE;
         activity = DeliveryHealth.Activity.IN_FLIGHT;
     }
 
@@ -382,6 +426,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         activity = DeliveryHealth.Activity.PAUSED;
         wakeCoalesced = false;
         scheduledDelayMillis = 0L;
+        retryDelaySource = DeliveryHealth.RetryDelaySource.NONE;
         cancelWakeLocked();
     }
 
@@ -392,6 +437,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             lastOutcome = DeliveryHealth.Outcome.EMPTY;
         }
         consecutiveFailures = 0;
+        retryDelaySource = DeliveryHealth.RetryDelaySource.NONE;
     }
 
     private long retryDelayLocked() {
@@ -461,6 +507,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         lastOutcome = DeliveryHealth.Outcome.TERMINAL_FAILURE;
         activity = DeliveryHealth.Activity.PAUSED;
         scheduledDelayMillis = 0L;
+        retryDelaySource = DeliveryHealth.RetryDelaySource.NONE;
         return false;
     }
 
@@ -542,6 +589,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         final DeliveryHealth.Outcome lastOutcome;
         final DeliveryHealth.PauseReason pauseReason;
         final DeliveryHealth.DropReason lastDropReason;
+        final DeliveryHealth.RetryDelaySource retryDelaySource;
         final boolean stopping;
         final boolean inFlight;
         final boolean wakeCoalesced;
@@ -551,12 +599,15 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
         final long acceptedEvents;
         final int consecutiveFailures;
         final long scheduledDelayMillis;
+        final long acceptedServerRetryHints;
+        final long rejectedServerRetryHints;
 
         State(
             DeliveryHealth.Activity activity,
             DeliveryHealth.Outcome lastOutcome,
             DeliveryHealth.PauseReason pauseReason,
             DeliveryHealth.DropReason lastDropReason,
+            DeliveryHealth.RetryDelaySource retryDelaySource,
             boolean stopping,
             boolean inFlight,
             boolean wakeCoalesced,
@@ -565,12 +616,15 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             long acceptedBatches,
             long acceptedEvents,
             int consecutiveFailures,
-            long scheduledDelayMillis
+            long scheduledDelayMillis,
+            long acceptedServerRetryHints,
+            long rejectedServerRetryHints
         ) {
             this.activity = activity;
             this.lastOutcome = lastOutcome;
             this.pauseReason = pauseReason;
             this.lastDropReason = lastDropReason;
+            this.retryDelaySource = retryDelaySource;
             this.stopping = stopping;
             this.inFlight = inFlight;
             this.wakeCoalesced = wakeCoalesced;
@@ -580,6 +634,8 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
             this.acceptedEvents = acceptedEvents;
             this.consecutiveFailures = consecutiveFailures;
             this.scheduledDelayMillis = scheduledDelayMillis;
+            this.acceptedServerRetryHints = acceptedServerRetryHints;
+            this.rejectedServerRetryHints = rejectedServerRetryHints;
         }
 
         static State manual() {
@@ -588,6 +644,7 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
                 DeliveryHealth.Outcome.NONE,
                 DeliveryHealth.PauseReason.NONE,
                 DeliveryHealth.DropReason.NONE,
+                DeliveryHealth.RetryDelaySource.NONE,
                 false,
                 false,
                 false,
@@ -596,6 +653,8 @@ final class AutomaticDeliveryController implements LogBrewClient.DeliveryObserve
                 0L,
                 0L,
                 0,
+                0L,
+                0L,
                 0L
             );
         }

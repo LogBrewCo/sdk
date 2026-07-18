@@ -70,11 +70,22 @@ public final class DeliveryHealth {
         QUEUE_OVERFLOW
     }
 
+    /** Fixed source controlling the active bounded retry delay. */
+    public enum RetryDelaySource {
+        /** No retry wake is active. */
+        NONE,
+        /** The client equal-jitter safety delay controls the wake. */
+        CLIENT,
+        /** Valid bounded server guidance controls the wake. */
+        SERVER
+    }
+
     private final Lifecycle lifecycle;
     private final Activity activity;
     private final Outcome lastOutcome;
     private final PauseReason pauseReason;
     private final DropReason lastDropReason;
+    private final RetryDelaySource retryDelaySource;
     private final boolean automaticDelivery;
     private final boolean inFlight;
     private final boolean wakeCoalesced;
@@ -88,6 +99,8 @@ public final class DeliveryHealth {
     private final long acceptedEvents;
     private final int consecutiveFailures;
     private final long scheduledDelayMillis;
+    private final long acceptedServerRetryHints;
+    private final long rejectedServerRetryHints;
 
     DeliveryHealth(
         Lifecycle lifecycle,
@@ -95,6 +108,7 @@ public final class DeliveryHealth {
         Outcome lastOutcome,
         PauseReason pauseReason,
         DropReason lastDropReason,
+        RetryDelaySource retryDelaySource,
         boolean automaticDelivery,
         boolean inFlight,
         boolean wakeCoalesced,
@@ -107,13 +121,16 @@ public final class DeliveryHealth {
         long acceptedBatches,
         long acceptedEvents,
         int consecutiveFailures,
-        long scheduledDelayMillis
+        long scheduledDelayMillis,
+        long acceptedServerRetryHints,
+        long rejectedServerRetryHints
     ) {
         this.lifecycle = lifecycle;
         this.activity = activity;
         this.lastOutcome = lastOutcome;
         this.pauseReason = pauseReason;
         this.lastDropReason = lastDropReason;
+        this.retryDelaySource = retryDelaySource;
         this.automaticDelivery = automaticDelivery;
         this.inFlight = inFlight;
         this.wakeCoalesced = wakeCoalesced;
@@ -127,6 +144,8 @@ public final class DeliveryHealth {
         this.acceptedEvents = acceptedEvents;
         this.consecutiveFailures = consecutiveFailures;
         this.scheduledDelayMillis = scheduledDelayMillis;
+        this.acceptedServerRetryHints = acceptedServerRetryHints;
+        this.rejectedServerRetryHints = rejectedServerRetryHints;
     }
 
     /** Returns the client lifecycle state. */
@@ -152,6 +171,11 @@ public final class DeliveryHealth {
     /** Returns the fixed reason the most recent event was rejected before queueing. */
     public DropReason lastDropReason() {
         return lastDropReason;
+    }
+
+    /** Returns the fixed source controlling the active retry wake. */
+    public RetryDelaySource retryDelaySource() {
+        return retryDelaySource;
     }
 
     /** Returns whether this client explicitly owns automatic delivery. */
@@ -217,5 +241,15 @@ public final class DeliveryHealth {
     /** Returns the bounded delay of the active wake, or zero when none is scheduled. */
     public long scheduledDelayMillis() {
         return scheduledDelayMillis;
+    }
+
+    /** Returns the monotonic count of valid bounded server retry hints used by this process. */
+    public long acceptedServerRetryHints() {
+        return acceptedServerRetryHints;
+    }
+
+    /** Returns the monotonic count of rejected server retry hints observed by this process. */
+    public long rejectedServerRetryHints() {
+        return rejectedServerRetryHints;
     }
 }

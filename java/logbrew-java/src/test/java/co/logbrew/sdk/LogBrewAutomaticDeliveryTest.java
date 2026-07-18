@@ -30,6 +30,10 @@ public final class LogBrewAutomaticDeliveryTest {
         testThresholdPreemptsIntervalAndCoalescesDuringFlight();
         testRetryKeepsFrozenPrefixAndLaterWork();
         testCaptureDuringBackoffCannotPreemptRetryDelay();
+        testServerGuidanceControlsRetryWithoutChangingPrefix();
+        testRejectedAndTerminalGuidanceUseSafeFallbacks();
+        testStaleGuidanceCannotReplaceExplicitRecovery();
+        testStaleExplicitGuidanceCannotReplaceRecovery();
         testTerminalOutcomesPauseUntilExplicitRecovery();
         testMalformedTransportPausesWithoutLeakingDetails();
         testRuntimeTransportFailureIsStableAndPrivate();
@@ -229,6 +233,187 @@ public final class LogBrewAutomaticDeliveryTest {
         testsRun++;
     }
 
+    private void testServerGuidanceControlsRetryWithoutChangingPrefix() {
+        ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
+        List<String> bodies = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        LogBrewClient client = automaticClient(
+            (apiKey, body) -> {
+                bodies.add(body);
+                return calls.incrementAndGet() == 1
+                    ? new TransportResponse(503, 1, RetryAfterDirective.accepted(80L))
+                    : new TransportResponse(202, 1);
+            },
+            DeliveryOptions.builder().maxRetries(2).build(),
+            AutomaticDeliveryOptions.builder()
+                .flushInterval(Duration.ofSeconds(1))
+                .queueThreshold(1)
+                .initialRetryDelay(Duration.ofMillis(20))
+                .maxRetryDelay(Duration.ofMillis(100))
+                .maxRetryAttempts(2)
+                .build(),
+            schedulers,
+            () -> true
+        );
+
+        enqueueLog(client, "evt_java_server_retry", "server retry");
+        schedulers.scheduler().runNext();
+
+        DeliveryHealth retrying = client.deliveryHealth();
+        assertEquals(1, bodies.size(), "server guidance bypasses immediate retries");
+        assertEquals(80L, schedulers.scheduler().nextDelayMillis(), "server guidance delay");
+        assertEquals(DeliveryHealth.RetryDelaySource.SERVER, retrying.retryDelaySource(), "server source");
+        assertEquals(1L, retrying.acceptedServerRetryHints(), "accepted server hint count");
+        enqueueLog(client, "evt_java_server_later", "later");
+        assertEquals(80L, schedulers.scheduler().nextDelayMillis(), "later capture preserves server delay");
+
+        schedulers.scheduler().runNext();
+        assertEquals(bodies.get(0), bodies.get(1), "server retry body identity");
+        assertNotContains(bodies.get(1), "evt_java_server_later");
+        schedulers.scheduler().runNext();
+        assertContains(bodies.get(2), "evt_java_server_later");
+        assertEquals(DeliveryHealth.RetryDelaySource.NONE, client.deliveryHealth().retryDelaySource(), "accepted clears source");
+        client.shutdown();
+        testsRun++;
+    }
+
+    private void testRejectedAndTerminalGuidanceUseSafeFallbacks() {
+        ManualSchedulerFactory rejectedSchedulers = new ManualSchedulerFactory();
+        AtomicInteger rejectedCalls = new AtomicInteger();
+        LogBrewClient rejected = automaticClient(
+            (apiKey, body) -> rejectedCalls.incrementAndGet() == 1
+                ? new TransportResponse(503, 1, RetryAfterDirective.rejected())
+                : new TransportResponse(202, 1),
+            DeliveryOptions.builder().maxRetries(2).build(),
+            AutomaticDeliveryOptions.builder()
+                .flushInterval(Duration.ofSeconds(1))
+                .queueThreshold(1)
+                .initialRetryDelay(Duration.ofMillis(20))
+                .maxRetryDelay(Duration.ofMillis(20))
+                .maxRetryAttempts(2)
+                .build(),
+            rejectedSchedulers,
+            () -> true
+        );
+        enqueueLog(rejected, "evt_java_rejected_retry", "rejected retry");
+        rejectedSchedulers.scheduler().runNext();
+        DeliveryHealth fallback = rejected.deliveryHealth();
+        assertEquals(1, rejectedCalls.get(), "rejected guidance bypasses immediate retries");
+        assertEquals(20L, rejectedSchedulers.scheduler().nextDelayMillis(), "rejected fallback delay");
+        assertEquals(DeliveryHealth.RetryDelaySource.CLIENT, fallback.retryDelaySource(), "fallback source");
+        assertEquals(1L, fallback.rejectedServerRetryHints(), "rejected server hint count");
+        rejectedSchedulers.scheduler().runNext();
+        rejected.shutdown();
+
+        ManualSchedulerFactory terminalSchedulers = new ManualSchedulerFactory();
+        AtomicInteger terminalStatus = new AtomicInteger(401);
+        LogBrewClient terminal = automaticClient(
+            (apiKey, body) -> terminalStatus.get() == 401
+                ? new TransportResponse(401, 1, RetryAfterDirective.accepted(80L))
+                : new TransportResponse(202, 1),
+            DeliveryOptions.builder().maxRetries(2).build(),
+            automaticOptions(1),
+            terminalSchedulers,
+            () -> true
+        );
+        enqueueLog(terminal, "evt_java_terminal_retry", "terminal retry");
+        terminalSchedulers.scheduler().runNext();
+        DeliveryHealth paused = terminal.deliveryHealth();
+        assertEquals(DeliveryHealth.PauseReason.AUTHENTICATION, paused.pauseReason(), "terminal pause");
+        assertEquals(DeliveryHealth.RetryDelaySource.NONE, paused.retryDelaySource(), "terminal ignores hint");
+        assertEquals(0L, paused.acceptedServerRetryHints(), "terminal hint not accepted");
+        assertEquals(0, terminalSchedulers.scheduler().pendingTasks(), "terminal schedules no retry");
+        terminalStatus.set(202);
+        terminal.resumeAutomaticDelivery();
+        terminalSchedulers.scheduler().runNext();
+        terminal.shutdown();
+        testsRun++;
+    }
+
+    private void testStaleGuidanceCannotReplaceExplicitRecovery() throws Exception {
+        ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
+        GuidedBlockingTransport transport = new GuidedBlockingTransport();
+        LogBrewClient client = automaticClient(
+            transport,
+            DeliveryOptions.builder().maxRetries(0).build(),
+            AutomaticDeliveryOptions.builder()
+                .flushInterval(Duration.ofSeconds(1))
+                .queueThreshold(1)
+                .initialRetryDelay(Duration.ofMillis(20))
+                .maxRetryDelay(Duration.ofMillis(100))
+                .maxRetryAttempts(2)
+                .build(),
+            schedulers,
+            () -> true
+        );
+        enqueueLog(client, "evt_java_stale_retry", "stale retry");
+        AtomicReference<Throwable> workerFailure = new AtomicReference<>();
+        Thread worker = new Thread(
+            () -> schedulers.scheduler().runNext(workerFailure),
+            "automatic-stale-guidance"
+        );
+        worker.start();
+        assertTrue(transport.entered.await(5, TimeUnit.SECONDS), "stale transport entered");
+
+        client.resumeAutomaticDelivery();
+        ManualTask recoveryWake = schedulers.scheduler().nextTask();
+        assertEquals(0L, recoveryWake.delayMillis, "explicit recovery delay");
+        transport.release.countDown();
+        worker.join(5_000L);
+
+        assertEquals(null, workerFailure.get(), "stale response worker failure");
+        assertTrue(!worker.isAlive(), "stale response worker exits");
+        assertTrue(!recoveryWake.cancelled(), "stale guidance preserves recovery wake");
+        assertEquals(0L, schedulers.scheduler().nextDelayMillis(), "recovery remains immediate");
+        assertEquals(DeliveryHealth.RetryDelaySource.NONE, client.deliveryHealth().retryDelaySource(), "stale source cleared");
+        schedulers.scheduler().runNext();
+        assertEquals(2, transport.bodies.size(), "recovery performs one retry");
+        assertEquals(transport.bodies.get(0), transport.bodies.get(1), "stale retry body identity");
+        client.shutdown();
+        assertEquals(DeliveryHealth.RetryDelaySource.NONE, client.deliveryHealth().retryDelaySource(), "shutdown clears source");
+        testsRun++;
+    }
+
+    private void testStaleExplicitGuidanceCannotReplaceRecovery() throws Exception {
+        ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
+        RecordingTransport owned = RecordingTransport.alwaysAccept();
+        GuidedBlockingTransport explicit = new GuidedBlockingTransport();
+        LogBrewClient client = automaticClient(
+            owned,
+            DeliveryOptions.builder().maxRetries(0).build(),
+            automaticOptions(1),
+            schedulers,
+            () -> true
+        );
+        enqueueLog(client, "evt_java_stale_explicit", "stale explicit");
+        schedulers.scheduler().nextTask().cancel();
+        AtomicReference<Throwable> flushFailure = new AtomicReference<>();
+        Thread flush = new Thread(() -> {
+            try {
+                client.flush(explicit);
+            } catch (Throwable error) {
+                flushFailure.set(error);
+            }
+        }, "explicit-stale-guidance");
+        flush.start();
+        assertTrue(explicit.entered.await(5, TimeUnit.SECONDS), "explicit stale transport entered");
+
+        client.resumeAutomaticDelivery();
+        ManualTask recoveryWake = schedulers.scheduler().nextTask();
+        explicit.release.countDown();
+        flush.join(5_000L);
+
+        assertTrue(flushFailure.get() instanceof SdkException, "explicit stale failure remains visible");
+        assertTrue(!flush.isAlive(), "explicit stale flush exits");
+        assertTrue(!recoveryWake.cancelled(), "explicit stale guidance preserves recovery wake");
+        assertEquals(DeliveryHealth.RetryDelaySource.NONE, client.deliveryHealth().retryDelaySource(), "explicit stale source");
+        schedulers.scheduler().runNext();
+        assertEquals(1, owned.sentBodies().size(), "recovery owned send count");
+        assertEquals(explicit.bodies.get(0), owned.sentBodies().get(0), "explicit stale retry body identity");
+        client.shutdown();
+        testsRun++;
+    }
+
     private void testMalformedTransportPausesWithoutLeakingDetails() {
         ManualSchedulerFactory schedulers = new ManualSchedulerFactory();
         LogBrewClient client = automaticClient(
@@ -280,6 +465,12 @@ public final class LogBrewAutomaticDeliveryTest {
                 PersistenceStatus recovered = second.recoverPersistedEvents();
                 assertEquals(1, recovered.pendingEvents(), "hydrated persisted count");
                 assertEquals(1, second.deliveryHealth().queuedEvents(), "hydrated health count");
+                assertEquals(
+                    DeliveryHealth.RetryDelaySource.NONE,
+                    second.deliveryHealth().retryDelaySource(),
+                    "hydration has no retry guidance"
+                );
+                assertEquals(0L, second.deliveryHealth().acceptedServerRetryHints(), "hydrated hint count");
                 assertEquals(1_000L, secondSchedulers.scheduler().nextDelayMillis(), "hydrated interval");
                 secondSchedulers.scheduler().runNext();
                 assertContains(recoveredTransport.sentBodies().get(0), "evt_java_hydrated");
@@ -940,6 +1131,31 @@ public final class LogBrewAutomaticDeliveryTest {
                 throw new TransportException("transport_interrupted", "interrupted", true);
             } finally {
                 active.decrementAndGet();
+            }
+        }
+    }
+
+    private static final class GuidedBlockingTransport implements Transport {
+        private final CountDownLatch entered = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+        private final AtomicInteger calls = new AtomicInteger();
+        private final List<String> bodies = new ArrayList<>();
+
+        @Override
+        public TransportResponse send(String apiKey, String body) throws TransportException {
+            bodies.add(body);
+            if (calls.incrementAndGet() > 1) {
+                return new TransportResponse(202, 1);
+            }
+            entered.countDown();
+            try {
+                if (!release.await(5, TimeUnit.SECONDS)) {
+                    throw new TransportException("transport_timeout", "timed out", true);
+                }
+                return new TransportResponse(503, 1, RetryAfterDirective.accepted(80L));
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw new TransportException("transport_interrupted", "interrupted", true);
             }
         }
     }

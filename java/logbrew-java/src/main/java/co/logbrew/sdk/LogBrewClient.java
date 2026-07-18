@@ -308,6 +308,7 @@ public final class LogBrewClient {
                 automatic.lastOutcome,
                 automatic.pauseReason,
                 automatic.lastDropReason,
+                automatic.retryDelaySource,
                 automaticDelivery != null,
                 automatic.inFlight,
                 automatic.wakeCoalesced,
@@ -320,7 +321,9 @@ public final class LogBrewClient {
                 automatic.acceptedBatches,
                 automatic.acceptedEvents,
                 automatic.consecutiveFailures,
-                automatic.scheduledDelayMillis
+                automatic.scheduledDelayMillis,
+                automatic.acceptedServerRetryHints,
+                automatic.rejectedServerRetryHints
             );
         }
     }
@@ -606,7 +609,7 @@ public final class LogBrewClient {
         return eventStore;
     }
 
-    private void rejectDeliveryReentrancy() {
+    void rejectDeliveryReentrancy() {
         if (deliveryOwner == Thread.currentThread()) {
             throw new SdkException(
                 "reentrancy_error",
@@ -789,6 +792,13 @@ public final class LogBrewClient {
                 }
                 if (response.statusCode() >= 200 && response.statusCode() < 300) {
                     return new SendResult(response.statusCode(), attempt);
+                }
+                if (transport instanceof AutomaticDeliveryTransport
+                    && response.retryAfterDirective().outcome() != RetryAfterDirective.Outcome.NONE) {
+                    throw new SdkException(
+                        "transport_error",
+                        "unexpected transport status " + response.statusCode()
+                    );
                 }
                 if (response.statusCode() >= 500 && attempt < maxAttempts) {
                     continue;

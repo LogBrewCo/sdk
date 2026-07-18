@@ -823,9 +823,11 @@ DeliveryHealth health = client.deliveryHealth();
 client.shutdown();
 ```
 
-An automatic client creates one lazy daemon scheduler only after work is queued. Threshold and interval wakes reuse the same bounded queue, immutable request batching, accepted-prefix acknowledgement, encrypted store, and serialized flush path as the manual API. A wake that arrives during delivery is coalesced. Retryable 408, 5xx, or network exhaustion uses bounded equal-jitter delays; 401, 429, other non-retryable outcomes, exhausted retry budgets, and process-ownership changes pause automatic sends without dropping queued work. Call `resumeAutomaticDelivery()` only after the application has corrected the cause. `flush(transport)` and `shutdown(transport)` remain authoritative and cancel stale scheduled generations; `shutdown()` uses the owned transport, drains once, and terminates the scheduler.
+An automatic client creates one lazy daemon scheduler only after work is queued. Threshold and interval wakes reuse the same bounded queue, immutable request batching, accepted-prefix acknowledgement, encrypted store, and serialized flush path as the manual API. A wake that arrives during delivery is coalesced. Retryable 408, 5xx, or network exhaustion uses bounded equal-jitter delays. The built-in `HttpTransport` also accepts one strict `Retry-After` delta-seconds or IMF-fixdate value on retryable responses, clamps it to the configured maximum delay, and never lets it shorten the client safety delay. Missing, malformed, duplicate, ambiguous, or past guidance uses the equal-jitter fallback. Guidance on 401, 429, validation, or other non-retryable responses is ignored. Custom transports remain unchanged and do not receive or expose raw response headers.
 
-`deliveryHealth()` returns one immutable, content-free `DeliveryHealth` snapshot with fixed lifecycle, activity, outcome, pause, and drop enums plus saturated queue, attempt, acceptance, failure, and scheduled-delay accounting. It never contains event IDs or content, API keys, endpoints, headers, filesystem paths, thread details, exception messages, response bodies, or free-form server text. The SDK installs no signal handler, shutdown hook, process hook, watcher, callback stream, or additional delivery queue.
+Terminal outcomes, exhausted retry budgets, and process-ownership changes pause automatic sends without dropping queued work. Call `resumeAutomaticDelivery()` only after the application has corrected the cause. Recovery, restart, and shutdown clear active server guidance. `flush(transport)` and `shutdown(transport)` remain authoritative and cancel stale scheduled generations; `shutdown()` uses the owned transport, drains once, and terminates the scheduler.
+
+`deliveryHealth()` returns one immutable, content-free `DeliveryHealth` snapshot with fixed lifecycle, activity, outcome, pause, drop, and retry-delay-source enums plus saturated queue, attempt, acceptance, failure, server-guidance, and scheduled-delay accounting. It never contains event IDs or content, API keys, endpoints, headers, raw clock values, filesystem paths, thread details, exception messages, response bodies, or free-form server text. The SDK installs no signal handler, shutdown hook, process hook, watcher, callback stream, or additional delivery queue.
 
 ### Encrypted restart delivery
 
@@ -962,7 +964,7 @@ The `examples` directory contains copyable snippets for creating a client, confi
 - `LogBrewClient` keeps a bounded in-memory queue of 1,000 events and 4 MiB of serialized event JSON by default; use `DeliveryOptions` to tune count, byte, request, retry, and advisory drop bounds. When either queue bound is full, the newest event is dropped, content-free counters increment, and drop-callback failures do not interrupt application logging. The older `create(..., maxRetries, maxQueueSize, drop)` overload remains supported with the new default byte and request bounds.
 - `EncryptedEventStore` adds explicit caller-owned AES-GCM restart persistence on supported POSIX filesystems without changing default memory delivery.
 - `createAutomatic(...)` is an explicit transport-owned mode with one lazy scheduler; manual `create(...)` remains thread-free.
-- `deliveryHealth()` exposes fixed content-free lifecycle, queue, retry, pause, acceptance, and drop accounting.
+- `deliveryHealth()` exposes fixed content-free lifecycle, queue, retry-source, pause, acceptance, server-guidance, and drop accounting.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
 - `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when only OpenTelemetry API jars are present; `LogBrewOpenTelemetrySdk` exposes an app-owned `spanExporter` or `spanProcessor` when the app also uses `opentelemetry-sdk-trace`.
@@ -978,7 +980,7 @@ The `examples` directory contains copyable snippets for creating a client, confi
 - `shutdown(transport)` serializes with active flushes, closes only after success, and reopens with unaccepted work after failure.
 - `shutdown()` drains an automatic client through its owned transport and deterministically stops its scheduler.
 - `isClosed()` returns whether `shutdown(transport)` has closed the client.
-- `HttpTransport` sends queued batches through dependency-free `java.net.http` delivery for server-side apps.
+- `HttpTransport` sends queued batches through dependency-free `java.net.http` delivery and applies strict bounded `Retry-After` guidance only to retryable automatic sends.
 - `RecordingTransport.alwaysAccept()` is useful when you want to inspect queued JSON before network delivery.
 - `LogBrewJulHandler` queues standard `java.util.logging` records without mutating global logging configuration.
 - `LogBrewLogbackAppender` queues app-owned SLF4J/Logback records, including MDC and fluent key/value metadata, without changing global logger setup.
