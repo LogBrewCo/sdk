@@ -54,6 +54,8 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
+test -f "$sdk_dir/src/LBWDeliveryEngine.h"
+test -f "$sdk_dir/src/LBWDeliveryEngine.m"
 test -f "$sdk_dir/src/LogBrewTrace.m"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.h"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.m"
@@ -66,6 +68,8 @@ grep -q 'LBWOpenTelemetrySpanContext' "$sdk_dir/include/LogBrew.h"
 grep -q 'metricWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
+grep -q 'startAutomaticDeliveryWithTransport' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWDeliveryHealth' "$sdk_dir/include/LogBrew.h"
 grep -q 'LBWURLSessionTimings' "$sdk_dir/include/LogBrew.h"
 grep -q 'timingsWithTaskMetrics' "$sdk_dir/include/LogBrew.h"
 grep -q 'startURLSessionSpanForRequest' "$sdk_dir/include/LogBrew.h"
@@ -85,6 +89,8 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
+test -f "$sdk_dir/src/LBWDeliveryEngine.h"
+test -f "$sdk_dir/src/LBWDeliveryEngine.m"
 test -f "$sdk_dir/src/LogBrewTrace.m"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.h"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.m"
@@ -97,6 +103,8 @@ grep -q 'LBWOpenTelemetrySpanContext' "$sdk_dir/include/LogBrew.h"
 grep -q 'metricWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
+grep -q 'startAutomaticDeliveryWithTransport' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWDeliveryHealth' "$sdk_dir/include/LogBrew.h"
 grep -q 'LBWURLSessionTimings' "$sdk_dir/include/LogBrew.h"
 grep -q 'timingsWithTaskMetrics' "$sdk_dir/include/LogBrew.h"
 grep -q 'startURLSessionSpanForRequest' "$sdk_dir/include/LogBrew.h"
@@ -432,6 +440,7 @@ EOF
 "$objc_command" -fobjc-arc -Wall -Wextra -Wpedantic -Werror \
   -I"$sdk_dir/include" \
   "$sdk_dir/src/LogBrew.m" \
+  "$sdk_dir/src/LBWDeliveryEngine.m" \
   "$sdk_dir/src/LogBrewTrace.m" \
   "$sdk_dir/src/LogBrewNetworkValidation.m" \
   "$sdk_dir/src/LogBrewURLSession.m" \
@@ -463,6 +472,21 @@ int main(void) {
     if (client == nil) {
       LBWDie([error localizedDescription]);
     }
+    LBWHTTPTransport *transport = [[LBWHTTPTransport alloc] initWithEndpoint:endpoint
+                                                                    headers:@{@"x-logbrew-source": @"objc-consumer"}
+                                                                    timeout:5.0
+                                                                      error:&error];
+    if (transport == nil) {
+      LBWDie([error localizedDescription]);
+    }
+    LBWAutomaticDeliveryOptions *options = [[LBWAutomaticDeliveryOptions alloc] init];
+    options.interval = 30.0;
+    options.threshold = 1U;
+    options.retryBaseDelay = 0.01;
+    options.maxRetryDelay = 0.01;
+    if (![client startAutomaticDeliveryWithTransport:transport options:options error:&error]) {
+      LBWDie([error localizedDescription]);
+    }
     if (![client logWithID:@"evt_objc_http_transport"
                  timestamp:@"2026-06-02T10:00:06Z"
                 attributes:@{
@@ -473,24 +497,24 @@ int main(void) {
                      error:&error]) {
       LBWDie([error localizedDescription]);
     }
-    LBWHTTPTransport *transport = [[LBWHTTPTransport alloc] initWithEndpoint:endpoint
-                                                                    headers:@{@"x-logbrew-source": @"objc-consumer"}
-                                                                    timeout:5.0
-                                                                      error:&error];
-    if (transport == nil) {
-      LBWDie([error localizedDescription]);
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5.0];
+    while (client.pendingEvents > 0U && [[NSDate date] compare:deadline] == NSOrderedAscending) {
+      [NSThread sleepForTimeInterval:0.01];
     }
-    LBWTransportResponse *response = [client flushWithTransport:transport error:&error];
-    if (response == nil) {
-      LBWDie([error localizedDescription]);
-    }
-    if (response.statusCode != 202 || response.attempts != 2U || client.pendingEvents != 0U) {
-      LBWDie([NSString stringWithFormat:@"unexpected HTTP response status=%ld attempts=%lu pending=%lu",
-                                        (long)response.statusCode,
-                                        (unsigned long)response.attempts,
+    LBWDeliveryHealth *health = client.deliveryHealth;
+    if (client.pendingEvents != 0U || health.acceptedEvents != 1U || health.deliveryAttempts != 2U ||
+        health.lastOutcome != LBWDeliveryOutcomeAccepted) {
+      LBWDie([NSString stringWithFormat:@"unexpected automatic HTTP state attempts=%lu accepted=%lu pending=%lu",
+                                        (unsigned long)health.deliveryAttempts,
+                                        (unsigned long)health.acceptedEvents,
                                         (unsigned long)client.pendingEvents]);
     }
-    fprintf(stderr, "{\"ok\":true,\"httpAttempts\":%lu}\n", (unsigned long)response.attempts);
+    LBWTransportResponse *shutdownResponse = [client shutdownOwnedTransportWithError:&error];
+    if (shutdownResponse == nil || shutdownResponse.statusCode != 204 ||
+        client.deliveryHealth.state != LBWDeliveryStateClosed) {
+      LBWDie(error != nil ? [error localizedDescription] : @"automatic shutdown failed");
+    }
+    fprintf(stderr, "{\"ok\":true,\"httpAttempts\":%lu}\n", (unsigned long)health.deliveryAttempts);
   }
   return 0;
 }
@@ -568,6 +592,7 @@ fi
 "$objc_command" -fobjc-arc -Wall -Wextra -Wpedantic -Werror \
   -I"$sdk_dir/include" \
   "$sdk_dir/src/LogBrew.m" \
+  "$sdk_dir/src/LBWDeliveryEngine.m" \
   "$sdk_dir/src/LogBrewTrace.m" \
   "$sdk_dir/src/LogBrewNetworkValidation.m" \
   "$sdk_dir/src/LogBrewURLSession.m" \

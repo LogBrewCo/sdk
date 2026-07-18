@@ -278,7 +278,9 @@ static void LBWExerciseFailurePaths(void) {
                           timestamp:@"2026-06-02T10:00:05Z"
                          attributes:@{@"name": @"deploy", @"status": @"success"}
                               error:&error];
-  LBWAssert(!ok && [LBWStableCode(error) isEqualToString:@"shutdown_error"], @"post-shutdown code failed");
+  LBWAssert(!ok && error.code == LBWErrorKindShutdown &&
+                [LBWStableCode(error) isEqualToString:@"shutdown_error"],
+            @"post-shutdown error contract failed");
 }
 
 static void LBWExerciseTimelineHelpers(void) {

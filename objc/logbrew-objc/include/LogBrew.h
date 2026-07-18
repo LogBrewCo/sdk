@@ -74,6 +74,59 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 
 @end
 
+typedef NS_ENUM(NSInteger, LBWDeliveryState) {
+  LBWDeliveryStateManual = 0,
+  LBWDeliveryStateRunning = 1,
+  LBWDeliveryStateRetrying = 2,
+  LBWDeliveryStatePaused = 3,
+  LBWDeliveryStateShuttingDown = 4,
+  LBWDeliveryStateClosed = 5
+};
+
+typedef NS_ENUM(NSInteger, LBWDeliveryOutcome) {
+  LBWDeliveryOutcomeNone = 0,
+  LBWDeliveryOutcomeAccepted = 1,
+  LBWDeliveryOutcomeRetryableFailure = 2,
+  LBWDeliveryOutcomeTerminalFailure = 3,
+  LBWDeliveryOutcomeDropped = 4
+};
+
+typedef NS_ENUM(NSInteger, LBWDeliveryPauseReason) {
+  LBWDeliveryPauseReasonNone = 0,
+  LBWDeliveryPauseReasonAuthentication = 1,
+  LBWDeliveryPauseReasonQuota = 2,
+  LBWDeliveryPauseReasonValidation = 3,
+  LBWDeliveryPauseReasonNonRetryable = 4,
+  LBWDeliveryPauseReasonRetryExhausted = 5
+};
+
+@interface LBWAutomaticDeliveryOptions : NSObject
+
+@property(nonatomic) NSTimeInterval interval;
+@property(nonatomic) NSUInteger threshold;
+@property(nonatomic) NSTimeInterval retryBaseDelay;
+@property(nonatomic) NSTimeInterval maxRetryDelay;
+
+@end
+
+@interface LBWDeliveryHealth : NSObject
+
+@property(nonatomic, readonly) LBWDeliveryState state;
+@property(nonatomic, readonly) NSUInteger queuedEvents;
+@property(nonatomic, readonly) NSUInteger queuedBytes;
+@property(nonatomic, readonly) BOOL inFlight;
+@property(nonatomic, readonly) NSUInteger acceptedEvents;
+@property(nonatomic, readonly) NSUInteger droppedEvents;
+@property(nonatomic, readonly) NSUInteger deliveryAttempts;
+@property(nonatomic, readonly) NSUInteger consecutiveFailures;
+@property(nonatomic, readonly) LBWDeliveryOutcome lastOutcome;
+@property(nonatomic, readonly) LBWDeliveryPauseReason pauseReason;
+
+- (NSDictionary<NSString *, id> *)dictionaryValue;
+- (instancetype)init NS_UNAVAILABLE;
+
+@end
+
 @interface LBWTraceContext : NSObject
 
 @property(nonatomic, copy, readonly) NSString *traceID;
@@ -217,6 +270,7 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
 @interface LBWClient : NSObject
 
 @property(nonatomic, readonly) NSUInteger pendingEvents;
+@property(nonatomic, readonly) LBWDeliveryHealth *deliveryHealth;
 
 - (nullable instancetype)initWithConfig:(LBWConfig *)config error:(NSError *_Nullable *_Nullable)error
     NS_DESIGNATED_INITIALIZER;
@@ -227,6 +281,13 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
                                                 error:(NSError *_Nullable *_Nullable)error;
 - (nullable LBWTransportResponse *)shutdownWithTransport:(id<LBWTransport>)transport
                                                    error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)startAutomaticDeliveryWithTransport:(id<LBWTransport>)transport
+                                    options:(LBWAutomaticDeliveryOptions *)options
+                                      error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)recoverAutomaticDeliveryWithError:(NSError *_Nullable *_Nullable)error;
+- (void)stopAutomaticDelivery;
+- (nullable LBWTransportResponse *)flushOwnedTransportWithError:(NSError *_Nullable *_Nullable)error;
+- (nullable LBWTransportResponse *)shutdownOwnedTransportWithError:(NSError *_Nullable *_Nullable)error;
 
 - (BOOL)releaseWithID:(NSString *)eventID
             timestamp:(NSString *)timestamp

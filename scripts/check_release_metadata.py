@@ -610,6 +610,8 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     require_path(root, "objc/logbrew-objc/README.md", failures)
     header_path = require_path(root, "objc/logbrew-objc/include/LogBrew.h", failures)
     source_path = require_path(root, "objc/logbrew-objc/src/LogBrew.m", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDeliveryEngine.h", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDeliveryEngine.m", failures)
     require_path(root, "objc/logbrew-objc/src/LBWHTTPTransport.m", failures)
     require_path(root, "objc/logbrew-objc/Makefile", failures)
     require_path(root, "objc/logbrew-objc/examples/Makefile", failures)
@@ -631,6 +633,11 @@ def validate_objc(root: Path, failures: list[str]) -> None:
         "metricWithID",
         "captureProductActionWithID",
         "captureNetworkMilestoneWithID",
+        "LBWAutomaticDeliveryOptions",
+        "LBWDeliveryHealth",
+        "startAutomaticDeliveryWithTransport",
+        "recoverAutomaticDeliveryWithError",
+        "shutdownOwnedTransportWithError",
     ):
         require(needle in header, failures, f"{location}: missing public Objective-C SDK symbol {needle}")
     for needle in (
@@ -643,6 +650,8 @@ def validate_objc(root: Path, failures: list[str]) -> None:
         "LBWHTTPTransport",
         "flushWithTransport",
         "copyable source",
+        "startAutomaticDeliveryWithTransport",
+        "deliveryHealth",
     ):
         require(needle in readme, failures, f"objc/logbrew-objc/README.md: missing guidance {needle}")
 
@@ -844,7 +853,18 @@ def validate_php(root: Path, failures: list[str]) -> None:
 
 
 def validate_swift(root: Path, failures: list[str]) -> None:
-    require_path(root, "swift/logbrew-swift/README.md", failures)
+    readme_path = require_path(root, "swift/logbrew-swift/README.md", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngine.swift", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineAutomatic.swift", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineQueue.swift", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryLifecycle.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryTests.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryLifecycleTests.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryTestSupport.swift", failures)
+    if readme_path.exists():
+        readme = readme_path.read_text(encoding="utf-8")
+        for needle in ("startAutomaticDelivery", "AutomaticDeliveryOptions", "deliveryHealth"):
+            require(needle in readme, failures, f"swift/logbrew-swift/README.md: missing guidance {needle}")
     manifest_expectations = {
         "swift/logbrew-swift/Package.swift": (
             'name: "logbrew-swift"',

@@ -100,6 +100,31 @@ LBWHTTPTransport *transport =
 
 `LBWHTTPTransport` uses Foundation `NSURLSession`, so it does not add third-party dependencies. It validates `http://` and `https://` endpoints, sends `authorization: Bearer <api key>` and `content-type: application/json`, rejects custom overrides for those reserved headers, supports safe additional headers, and maps request failures into retryable transport errors. It does not patch global `NSURLSession` behavior, inspect application traffic, collect request or response payloads, or capture arbitrary headers from your app.
 
+## Automatic Delivery (Opt-In)
+
+Manual delivery remains the default. To let one client own delivery, provide an app-owned transport and explicit options before capturing events:
+
+```objective-c
+LBWAutomaticDeliveryOptions *options = [[LBWAutomaticDeliveryOptions alloc] init];
+options.interval = 5.0;
+options.threshold = 100U;
+
+[client startAutomaticDeliveryWithTransport:transport options:options error:&error];
+[client logWithID:@"evt_log_automatic_001"
+         timestamp:@"2026-06-02T10:00:03Z"
+        attributes:@{ @"message": @"worker started", @"level": @"info" }
+             error:&error];
+
+LBWDeliveryHealth *health = client.deliveryHealth;
+NSLog(@"state=%ld queued=%lu dropped=%lu",
+      (long)health.state,
+      (unsigned long)health.queuedEvents,
+      (unsigned long)health.droppedEvents);
+[client shutdownOwnedTransportWithError:&error];
+```
+
+Automatic delivery keeps at most 1,000 events and 4 MiB in memory, sends at most 100 events and 256 KiB per request, and retains the exact failed prefix for bounded retry. Interval and retry-delay options must not exceed 24 hours. Authentication, quota, validation, and other terminal failures pause delivery without dropping the queue; correct the condition and call `recoverAutomaticDeliveryWithError:`. `stopAutomaticDelivery` returns the client to manual mode while preserving unacknowledged events. `deliveryHealth` exposes fixed counters and enums only, never event content, identifiers, API keys, endpoints, headers, or raw transport errors. The queue is process-memory only; call `shutdownOwnedTransportWithError:` during an orderly app termination when the platform gives your app time to finish work.
+
 ## Example Source
 
 The `examples` directory contains copyable source for creating a client, previewing queued JSON, flushing through a transport, and handling SDK `NSError` values in your own Apple app.

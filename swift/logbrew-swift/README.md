@@ -78,6 +78,30 @@ print("status=\(response.statusCode) attempts=\(response.attempts)")
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush(transport:)` or `shutdown(transport:)` to send queued events through a transport, and use `previewJSON()` when you want a stable local JSON preview before sending anything.
 
+## Automatic Delivery (Opt-In)
+
+Manual capture and delivery remain the default. When the client should own delivery, start one explicit scheduler with an app-owned transport before capturing events:
+
+```swift
+let transport = try HTTPTransport(timeout: 5)
+try client.startAutomaticDelivery(
+    transport: transport,
+    options: AutomaticDeliveryOptions(interval: 5, threshold: 100)
+)
+
+try client.log(
+    "evt_log_automatic_001",
+    timestamp: "2026-06-02T10:00:03Z",
+    attributes: LogAttributes(message: "worker started", level: .info)
+)
+
+let health = client.deliveryHealth()
+print("state=\(health.state) queued=\(health.queuedEvents) dropped=\(health.droppedEvents)")
+_ = try client.shutdown()
+```
+
+Automatic delivery keeps at most 1,000 events and 4 MiB in memory, sends at most 100 events and 256 KiB per request, and retains the exact failed prefix for bounded retry. Interval and retry-delay options must not exceed 24 hours. Authentication, quota, validation, and other terminal failures pause delivery without dropping the queue; correct the condition and call `recoverAutomaticDelivery()`. `stopAutomaticDelivery()` returns the client to manual mode and preserves unacknowledged events. `deliveryHealth()` contains fixed counters and states only, never event content, identifiers, API keys, endpoints, headers, or raw transport errors. The queue is process-memory only; call `shutdown()` during an orderly app termination when the platform gives your app time to finish work.
+
 ## Metrics
 
 Use `client.metric(...)` when your app owns a numeric measurement you want to send to LogBrew:

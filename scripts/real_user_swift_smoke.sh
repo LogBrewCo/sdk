@@ -31,6 +31,10 @@ grep -q '/README.md$' "$tmp_dir/archive-contents.txt"
 grep -q '/.swiftformat$' "$tmp_dir/archive-contents.txt"
 grep -q '/.swiftlint.yml$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/EventEncoding.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/DeliveryEngine.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/DeliveryEngineAutomatic.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/DeliveryEngineQueue.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/DeliveryLifecycle.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/LifecycleTrace.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/LogBrewClient.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/LogBrewLogger.swift$' "$tmp_dir/archive-contents.txt"
@@ -46,6 +50,9 @@ grep -q '/Sources/ReadmeExample/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/RealUserSmoke/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/TraceCorrelationExample/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/LogBrewTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/AutomaticDeliveryTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/AutomaticDeliveryLifecycleTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/AutomaticDeliveryTestSupport.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/LifecycleTraceTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/OpenTelemetryTraceContextTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/ProductTimelineTests.swift$' "$tmp_dir/archive-contents.txt"
@@ -63,6 +70,8 @@ grep -q 'captureLifecycleSpan' "$tmp_dir/archive-readme.md"
 grep -q 'startURLSessionSpan' "$tmp_dir/archive-readme.md"
 grep -q 'LogBrewURLSessionTracer' "$tmp_dir/archive-readme.md"
 grep -q 'LogBrewURLSessionTimings' "$tmp_dir/archive-readme.md"
+grep -q 'startAutomaticDelivery' "$tmp_dir/archive-readme.md"
+grep -q 'deliveryHealth' "$tmp_dir/archive-readme.md"
 unzip -p "$archive_path" '*/Sources/LogBrew/LifecycleTrace.swift' > "$tmp_dir/archive-lifecycle.swift"
 grep -q 'LogBrewLifecycleTracker' "$tmp_dir/archive-lifecycle.swift"
 grep -q 'captureTransition' "$tmp_dir/archive-lifecycle.swift"
@@ -493,23 +502,41 @@ let httpClient = try LogBrewClient.create(
     sdkVersion: "0.1.0",
     maxRetries: 1
 )
-try httpClient.log(
-    "evt_swift_http_transport",
-    timestamp: "2026-06-02T10:00:06Z",
-    attributes: LogAttributes(message: "swift http transport sent", level: .info, logger: "swift-http")
-)
 let httpTransport = try HTTPTransport(
     endpoint: httpEndpoint,
     headers: ["x-logbrew-source": "swift-consumer"],
     timeout: 5
 )
-let httpResponse = try httpClient.flush(transport: httpTransport)
-precondition(httpResponse.statusCode == 202)
-precondition(httpResponse.attempts == 2)
+try httpClient.startAutomaticDelivery(
+    transport: httpTransport,
+    options: AutomaticDeliveryOptions(
+        interval: 30,
+        threshold: 1,
+        retryBaseDelay: 0.01,
+        maxRetryDelay: 0.01
+    )
+)
+try httpClient.log(
+    "evt_swift_http_transport",
+    timestamp: "2026-06-02T10:00:06Z",
+    attributes: LogAttributes(message: "swift http transport sent", level: .info, logger: "swift-http")
+)
+let automaticDeadline = Date().addingTimeInterval(5)
+while httpClient.pendingEvents() > 0, Date() < automaticDeadline {
+    try await Task.sleep(for: .milliseconds(10))
+}
+let httpHealth = httpClient.deliveryHealth()
+precondition(httpClient.pendingEvents() == 0)
+precondition(httpHealth.acceptedEvents == 1)
+precondition(httpHealth.deliveryAttempts == 2)
+precondition(httpHealth.lastOutcome == .accepted)
+let httpShutdown = try httpClient.shutdown()
+precondition(httpShutdown.statusCode == 204)
+precondition(httpClient.deliveryHealth().state == .closed)
 
 print(preview)
 let summary = """
-{"ok":true,"status":\(response.statusCode),"attempts":\(response.attempts),"events":6,"loggerEvents":1,"metricEvents":1,"timelineEvents":2,"urlSessionTraceEvents":1,"networkAction":"POST /api/checkout","httpAttempts":\(httpResponse.attempts)}
+{"ok":true,"status":\(response.statusCode),"attempts":\(response.attempts),"events":6,"loggerEvents":1,"metricEvents":1,"timelineEvents":2,"urlSessionTraceEvents":1,"networkAction":"POST /api/checkout","httpAttempts":\(httpHealth.deliveryAttempts)}
 
 """
 FileHandle.standardError.write(Data(summary.utf8))
