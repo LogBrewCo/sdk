@@ -32,6 +32,14 @@ class CiUnitTestTargetsTests(unittest.TestCase):
         self.assertFalse(targets.run_all)
         self.assertEqual(targets.modules, ("tests.test_maven_central_public_smoke",))
 
+    def test_native_release_smoke_change_runs_only_its_focused_test(self) -> None:
+        targets = ci_unit_test_targets.select_targets(
+            ["scripts/real_user_native_release_public_smoke.sh"]
+        )
+
+        self.assertFalse(targets.run_all)
+        self.assertEqual(targets.modules, ("tests.test_native_release_public_smoke",))
+
     def test_changed_test_file_runs_that_module(self) -> None:
         targets = ci_unit_test_targets.select_targets(["tests/test_ci_changed_areas.py"])
 
