@@ -5,9 +5,12 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
+export COMPOSER_HOME="$tmp_dir/composer-home"
+export COMPOSER_CACHE_DIR="$tmp_dir/composer-cache"
+
 cd "$tmp_dir"
 
-mkdir -p artifacts
+mkdir -p artifacts "$COMPOSER_HOME" "$COMPOSER_CACHE_DIR"
 archive_src="$tmp_dir/logbrew-php"
 cp -R "$repo_root/php/logbrew-php" "$archive_src"
 rm -rf "$archive_src/vendor" "$archive_src/composer.lock"
@@ -32,6 +35,8 @@ $readmeExample = null;
 $example = null;
 $firstUsefulExample = null;
 $httpTraceExample = null;
+$workerLifecycleExample = null;
+$persistentWorkerDeliveryExample = null;
 $exampleMakefile = null;
 $httpTransport = null;
 $productTimeline = null;
@@ -68,6 +73,12 @@ for ($i = 0; $i < $zip->numFiles; $i++) {
     }
     if ($name === "examples/http_trace_correlation.php" || str_ends_with($name, "/examples/http_trace_correlation.php")) {
         $httpTraceExample = $zip->getFromIndex($i);
+    }
+    if ($name === "examples/worker_lifecycle.php" || str_ends_with($name, "/examples/worker_lifecycle.php")) {
+        $workerLifecycleExample = $zip->getFromIndex($i);
+    }
+    if ($name === "examples/persistent_worker_delivery.php" || str_ends_with($name, "/examples/persistent_worker_delivery.php")) {
+        $persistentWorkerDeliveryExample = $zip->getFromIndex($i);
     }
     if ($name === "examples/Makefile" || str_ends_with($name, "/examples/Makefile")) {
         $exampleMakefile = $zip->getFromIndex($i);
@@ -135,6 +146,14 @@ if (!is_string($firstUsefulExample)) {
 }
 if (!is_string($httpTraceExample)) {
     fwrite(STDERR, "missing examples/http_trace_correlation.php in composer archive\n");
+    exit(1);
+}
+if (!is_string($workerLifecycleExample)) {
+    fwrite(STDERR, "missing examples/worker_lifecycle.php in composer archive\n");
+    exit(1);
+}
+if (!is_string($persistentWorkerDeliveryExample)) {
+    fwrite(STDERR, "missing examples/persistent_worker_delivery.php in composer archive\n");
     exit(1);
 }
 if (!is_string($exampleMakefile)) {
@@ -272,7 +291,7 @@ if (!str_contains($httpTraceExample, "../vendor/autoload.php") || !str_contains(
     fwrite(STDERR, "missing composer archive dual-context autoload support in HTTP trace example\n");
     exit(1);
 }
-if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation")
+if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation run-worker-lifecycle run-persistent-worker-delivery")
     || !str_contains($exampleMakefile, "help:")
     || !str_contains($exampleMakefile, "run: run-real-user-smoke")
     || !str_contains($exampleMakefile, "run-readme-example:")
@@ -283,11 +302,17 @@ if (!str_contains($exampleMakefile, ".PHONY: help run run-readme-example run-rea
     || !str_contains($exampleMakefile, "@php first_useful_telemetry.php")
     || !str_contains($exampleMakefile, "run-http-trace-correlation:")
     || !str_contains($exampleMakefile, "@php http_trace_correlation.php")
+    || !str_contains($exampleMakefile, "run-worker-lifecycle:")
+    || !str_contains($exampleMakefile, "@php worker_lifecycle.php")
+    || !str_contains($exampleMakefile, "run-persistent-worker-delivery:")
+    || !str_contains($exampleMakefile, "@php persistent_worker_delivery.php")
     || !str_contains($exampleMakefile, "run-readme-example -> make run-readme-example")
     || !str_contains($exampleMakefile, "run (real-user-smoke) -> make run")
     || !str_contains($exampleMakefile, "run-real-user-smoke -> make run-real-user-smoke")
     || !str_contains($exampleMakefile, "run-first-useful-telemetry -> make run-first-useful-telemetry")
-    || !str_contains($exampleMakefile, "run-http-trace-correlation -> make run-http-trace-correlation")) {
+    || !str_contains($exampleMakefile, "run-http-trace-correlation -> make run-http-trace-correlation")
+    || !str_contains($exampleMakefile, "run-worker-lifecycle -> make run-worker-lifecycle")
+    || !str_contains($exampleMakefile, "run-persistent-worker-delivery -> make run-persistent-worker-delivery")) {
     fwrite(STDERR, "missing composer archive example Makefile helper\n");
     exit(1);
 }
@@ -468,7 +493,11 @@ test -f vendor/logbrew/sdk/examples/readme_example.php
 test -f vendor/logbrew/sdk/examples/real_user_smoke.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
 test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
+test -f vendor/logbrew/sdk/examples/worker_lifecycle.php
+test -f vendor/logbrew/sdk/examples/persistent_worker_delivery.php
 test -f vendor/logbrew/sdk/examples/Makefile
+php -l vendor/logbrew/sdk/examples/worker_lifecycle.php >/dev/null
+php -l vendor/logbrew/sdk/examples/persistent_worker_delivery.php >/dev/null
 test -f vendor/composer/installed.json
 test -f vendor/composer/autoload_psr4.php
 (cd vendor/logbrew/sdk/examples && make) > vendor-example-make-help.txt
@@ -477,7 +506,9 @@ grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' vendor-example-make-h
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' vendor-example-make-help.txt)
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' vendor-example-make-help.txt)
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' <(sed -n '5p' vendor-example-make-help.txt)
-test "$(wc -l < vendor-example-make-help.txt | tr -d ' ')" = "5"
+grep -qx 'run-worker-lifecycle -> make run-worker-lifecycle' <(sed -n '6p' vendor-example-make-help.txt)
+grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery' <(sed -n '7p' vendor-example-make-help.txt)
+test "$(wc -l < vendor-example-make-help.txt | tr -d ' ')" = "7"
 php -r '
 $readme = file_get_contents($argv[1]);
 if ($readme === false) {
@@ -772,6 +803,10 @@ test -f vendor/logbrew/sdk/src/LogBrewPsrLogger.php
 test -f vendor/logbrew/sdk/src/SupportTicketDraft.php
 test -f vendor/logbrew/sdk/examples/first_useful_telemetry.php
 test -f vendor/logbrew/sdk/examples/http_trace_correlation.php
+test -f vendor/logbrew/sdk/examples/worker_lifecycle.php
+test -f vendor/logbrew/sdk/examples/persistent_worker_delivery.php
+php -l vendor/logbrew/sdk/examples/worker_lifecycle.php >/dev/null
+php -l vendor/logbrew/sdk/examples/persistent_worker_delivery.php >/dev/null
 test -f vendor/composer/installed.json
 test -f vendor/composer/autoload_psr4.php
 php -r '
@@ -1908,7 +1943,9 @@ grep -qx 'run (real-user-smoke) -> make run' <(sed -n '2p' vendor-example-make-r
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' <(sed -n '3p' vendor-example-make-reinstall-help.txt)
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' <(sed -n '4p' vendor-example-make-reinstall-help.txt)
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' <(sed -n '5p' vendor-example-make-reinstall-help.txt)
-test "$(wc -l < vendor-example-make-reinstall-help.txt | tr -d ' ')" = "5"
+grep -qx 'run-worker-lifecycle -> make run-worker-lifecycle' <(sed -n '6p' vendor-example-make-reinstall-help.txt)
+grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery' <(sed -n '7p' vendor-example-make-reinstall-help.txt)
+test "$(wc -l < vendor-example-make-reinstall-help.txt | tr -d ' ')" = "7"
 (cd vendor/logbrew/sdk/examples && make run-readme-example) > vendor-readme-example-make-reinstall.stdout.json 2> vendor-readme-example-make-reinstall.stderr.json
 grep -q '"type": "release"' vendor-readme-example-make-reinstall.stdout.json
 grep -q '"type": "environment"' vendor-readme-example-make-reinstall.stdout.json
@@ -2745,7 +2782,7 @@ EOF
 php validation.php > validation.stdout.json
 grep -q '"ok":true' validation.stdout.json
 grep -q '"code":"validation_error"' validation.stdout.json
-grep -q '"message":"timestamp must include a timezone offset: 2026-06-02T10:00:03"' validation.stdout.json
+grep -q '"message":"timestamp must be a valid RFC3339 date-time: 2026-06-02T10:00:03"' validation.stdout.json
 grep -q '"pending":0' validation.stdout.json
 
 cat > retry_budget.php <<'EOF'

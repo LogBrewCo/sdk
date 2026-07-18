@@ -334,7 +334,7 @@ assertTrue($client->pendingEvents() === 0, 'expected queue cleared');
 
 expectThrows(
     fn () => sampleClient()->log('evt_log_001', '2026-06-02T10:00:03', ['message' => 'worker started', 'level' => 'info']),
-    'timestamp must include a timezone offset'
+    'timestamp must be a valid RFC3339 date-time'
 );
 expectThrows(
     static function (): void {
@@ -429,6 +429,8 @@ expectThrows(
 
 require __DIR__ . '/operation_tracing.php';
 require __DIR__ . '/support_ticket.php';
+require __DIR__ . '/bounded_queue.php';
+require __DIR__ . '/bounded_batching.php';
 
 $client = sampleClient();
 $client->metric('evt_metric_001', '2026-06-02T10:00:06Z', [
@@ -838,6 +840,8 @@ assertTrue($helpLines === [
     'run-real-user-smoke -> make run-real-user-smoke',
     'run-first-useful-telemetry -> make run-first-useful-telemetry',
     'run-http-trace-correlation -> make run-http-trace-correlation',
+    'run-worker-lifecycle -> make run-worker-lifecycle',
+    'run-persistent-worker-delivery -> make run-persistent-worker-delivery',
 ], 'unexpected PHP examples make output');
 assertTrue($makeHelp['stderr'] === '', 'expected empty stderr from PHP examples make help');
 
@@ -886,6 +890,31 @@ $makeFirstUseful = runCommand($examplesDir, ['make', 'run-first-useful-telemetry
 assertTrue(str_contains($makeFirstUseful['stdout'], '"type":"metric"') || str_contains($makeFirstUseful['stdout'], '"type": "metric"'), 'expected metric event in PHP make run-first-useful-telemetry output');
 assertTrue(str_contains($makeFirstUseful['stderr'], '"events":7') || str_contains($makeFirstUseful['stderr'], '"events": 7'), 'expected first-useful make event count');
 
+$workerLifecycle = runCommand($packageRoot, [PHP_BINARY, 'examples/worker_lifecycle.php']);
+assertTrue(str_contains($workerLifecycle['stdout'], '"workResult":"job-result"'), 'expected worker lifecycle app result');
+assertTrue(str_contains($workerLifecycle['stdout'], '"requests":1'), 'expected worker lifecycle work-boundary request');
+assertTrue(str_contains($workerLifecycle['stdout'], '"deliveryFailureCodes":[]'), 'expected no worker lifecycle failures');
+assertTrue(str_contains($workerLifecycle['stdout'], '"shutdownStatus":204'), 'expected idempotent empty shutdown status');
+assertTrue($workerLifecycle['stderr'] === '', 'expected empty worker lifecycle stderr');
+
+$makeWorkerLifecycle = runCommand($examplesDir, ['make', 'run-worker-lifecycle']);
+assertTrue(str_contains($makeWorkerLifecycle['stdout'], '"workResult":"job-result"'), 'expected make worker lifecycle app result');
+assertTrue(str_contains($makeWorkerLifecycle['stdout'], '"requests":1'), 'expected make worker lifecycle request');
+assertTrue($makeWorkerLifecycle['stderr'] === '', 'expected empty make worker lifecycle stderr');
+
+$persistentWorkerDelivery = runCommand($packageRoot, [PHP_BINARY, 'examples/persistent_worker_delivery.php']);
+assertTrue(str_contains($persistentWorkerDelivery['stdout'], '"recoveredEvents":1'), 'expected persistent example restart recovery');
+assertTrue(str_contains($persistentWorkerDelivery['stdout'], '"deliveredEvents":1'), 'expected persistent example delivery count');
+assertTrue(str_contains($persistentWorkerDelivery['stdout'], '"pendingEvents":0'), 'expected persistent example empty queue');
+assertTrue($persistentWorkerDelivery['stderr'] === '', 'expected empty persistent example stderr');
+
+$makePersistentWorkerDelivery = runCommand($examplesDir, ['make', 'run-persistent-worker-delivery']);
+assertTrue(str_contains($makePersistentWorkerDelivery['stdout'], '"recoveredEvents":1'), 'expected make persistent example recovery');
+assertTrue(str_contains($makePersistentWorkerDelivery['stdout'], '"pendingEvents":0'), 'expected make persistent example empty queue');
+assertTrue($makePersistentWorkerDelivery['stderr'] === '', 'expected empty make persistent example stderr');
+
 require __DIR__ . '/trace_correlation.php';
+require __DIR__ . '/worker_lifecycle.php';
+require __DIR__ . '/persistent_delivery.php';
 
 fwrite(STDOUT, "php sdk checks passed\n");
