@@ -686,10 +686,10 @@ if (!declarations.includes("Return the queued event batch as stable, pretty-prin
 if (!declarations.includes("Return the queued event count currently buffered in memory.")) {
   throw new Error("missing installed pendingEvents declaration docs");
 }
-if (!declarations.includes("Flush queued events through a transport while preserving retry semantics.")) {
+if (!declarations.includes("Flush one queue snapshot in bounded batches while preserving concurrent captures and retry bodies.")) {
   throw new Error("missing installed flush declaration docs");
 }
-if (!declarations.includes("Flush queued events, then mark the client closed so later writes fail.")) {
+if (!declarations.includes("Reject new capture, flush queued events, then close; a failed flush reopens the intact remainder.")) {
   throw new Error("missing installed shutdown declaration docs");
 }
 if (!declarations.includes("Install explicit console capture while preserving the target console's normal output behavior.")) {
@@ -1361,10 +1361,10 @@ if (!declarations.includes("Return the queued event batch as stable, pretty-prin
 if (!declarations.includes("Return the queued event count currently buffered in memory.")) {
   throw new Error("missing packed pendingEvents declaration docs");
 }
-if (!declarations.includes("Flush queued events through a transport while preserving retry semantics.")) {
+if (!declarations.includes("Flush one queue snapshot in bounded batches while preserving concurrent captures and retry bodies.")) {
   throw new Error("missing packed flush declaration docs");
 }
-if (!declarations.includes("Flush queued events, then mark the client closed so later writes fail.")) {
+if (!declarations.includes("Reject new capture, flush queued events, then close; a failed flush reopens the intact remainder.")) {
   throw new Error("missing packed shutdown declaration docs");
 }
 if (!declarations.includes("Install explicit console capture while preserving the target console's normal output behavior.")) {

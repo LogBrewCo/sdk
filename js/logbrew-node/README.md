@@ -42,6 +42,8 @@ server.listen(3000);
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK. Automatic request and error metadata records the path without query text by default.
 
+Automatic event IDs keep a readable operation prefix and use a fresh random suffix for each capture, so repeated identical operations remain distinct. Once captured, an event keeps that same ID across delivery retries. Explicit `id` and `idFactory` values are preserved exactly.
+
 When an incoming request has a valid W3C `traceparent` header, the wrapper attaches `logbrew.trace` and the default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous work started by the wrapped handler. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break your server. Use `spanIdFactory` when your runtime needs app-provided child span IDs:
 
 ```js
@@ -91,7 +93,7 @@ For a Node.js API, start with the signals that make incidents and product flows 
 - Wrap important database calls with safe operation names and statement templates.
 - Wrap important cache and queue calls with safe operation names and bounded metadata.
 - Add low-cardinality metrics for request or workflow duration.
-- Flush on completion or shutdown so queued events are not left in memory.
+- Let the client deliver automatically, then call `shutdown()` at the app-owned graceful lifecycle boundary.
 
 ```js
 import { createServer } from "node:http";
@@ -109,8 +111,6 @@ const client = createLogBrewNodeClient({
   sdkName: "checkout-api",
   sdkVersion: "1.4.0"
 });
-const transport = createNodeFetchTransport();
-
 client.release("evt_release_checkout_api", new Date().toISOString(), {
   version: "1.4.0",
   commit: "abc123def456",
@@ -120,7 +120,9 @@ client.environment("evt_environment_checkout_api", new Date().toISOString(), {
   name: "production",
   region: "us-east-1"
 });
-await client.flush(transport);
+console.log(client.deliveryHealth());
+
+const requestTransport = createNodeFetchTransport();
 
 const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
   const routeTemplate = "/checkout/:cartId";
@@ -162,13 +164,55 @@ const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
 }, {
   sdkName: "checkout-api",
   sdkVersion: "1.4.0",
-  transport
+  transport: requestTransport
 }));
 
 server.listen(3000);
 ```
 
 The wrapper keeps app response ownership, records URL path without query text, and adds portable HTTP semantic metadata such as `http.request.method`, `http.response.status_code`, and `url.path`. It does not collect request bodies, response bodies, arbitrary headers, or outgoing calls automatically. Use the explicit action, network milestone, and outbound fetch helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
+
+## Delivery Bounds
+
+`createLogBrewNodeClient()` owns a fetch transport by default and accepts the core delivery controls directly. It sends after 5 seconds or 50 queued events by default, retains at most 1,000 events and 4 MiB of compact event data, then splits each flush into at most 100 events or 256 KiB of UTF-8 JSON per request.
+
+```js
+const client = createLogBrewNodeClient({
+  maxQueueSize: 1000,
+  maxQueueBytes: 4 * 1024 * 1024,
+  maxBatchEvents: 100,
+  maxBatchBytes: 256 * 1024,
+  deliveryIntervalMs: 5000,
+  deliveryQueueThreshold: 50
+});
+```
+
+The automatic timer is client-owned, `unref()`'d, and installs no process, signal, or exit hooks. Set `automaticDelivery: false` for manual-only operation, or pass a custom `transport` to keep the same automatic lifecycle with app-owned I/O. Concurrent flush calls are serialized. Events captured during network I/O form at most one coalesced trailing cohort, retries reuse one stable body, and only acknowledged prefixes leave memory. `shutdown()` cancels scheduling, blocks new capture while draining once, and reopens the retained remainder if delivery fails. `deliveryHealth()` is content-free and exposes only lifecycle, queue, drop, in-flight/coalesced, outcome, and bounded counter fields.
+
+### Encrypted restart recovery
+
+Node services can opt into an app-scoped disk queue. The default remains memory-only. Supply a canonical absolute directory and an app-managed 32-byte key:
+
+```js
+import fs from "node:fs";
+import { createLogBrewNodeClient } from "@logbrew/node";
+
+const client = createLogBrewNodeClient({
+  persistentQueue: {
+    directory: process.env.LOGBREW_QUEUE_DIRECTORY,
+    encryptionKey: fs.readFileSync(process.env.LOGBREW_QUEUE_KEY_FILE),
+    onWarning({ code }) {
+      console.warn("LogBrew persistent queue warning", code);
+    }
+  }
+});
+```
+
+The POSIX-only adapter writes one AES-256-GCM record per event before volatile admission, replays oldest-first after restart, and advances an accepted-sequence marker before deleting acknowledged files. Failed batches retain their exact compact event JSON and stable event IDs, so backend deduplication can make at-least-once replay safe. A successful `shutdown()` drains and releases the queue; a failed shutdown leaves the encrypted remainder recoverable. If a rename completes but its directory sync cannot be confirmed, the adapter raises `persistence_commit_error` and blocks further queue use until restart rather than guessing whether the record or marker committed. Call `client.purgePendingEvents()` only when no delivery operation is active to explicitly remove pending data.
+
+The directory must be normalized, below the filesystem root, owned by the current user, mode `0700`, and contain no symbolic-link component. Queue files are mode `0600`, regular, single-linked files. One live process owns a queue at a time; a later process can recover a lock whose recorded PID no longer exists. The adapter encrypts event content and does not add the encryption key, transport API key, endpoint, headers, or local path to queue files or the content-free manifest. Keep the key outside the queue, provision it with your normal key-management system, and retain it across restarts or the encrypted records intentionally fail closed.
+
+Persistence uses synchronous filesystem operations so capture returns only after the event is durable. Use a dedicated local filesystem directory, keep normal queue bounds, and do not place it on a shared or network filesystem. The adapter itself does not start timers, intercept process exits, or promise durability after `process.exit()`/`os._exit`; the client-owned scheduler handles normal delivery and your app still owns graceful shutdown.
 
 ## Outbound Fetch Spans
 
@@ -563,7 +607,7 @@ Metadata records the queue system, operation name, operation kind, optional queu
 
 ## HTTP Delivery
 
-`createNodeFetchTransport()` sends batches with Node's built-in `fetch`, sets `content-type: application/json`, and passes the SDK key through the `authorization` header. Override `endpoint`, `headers`, or `fetchImpl` when you need a proxy, local collector, or custom fetch implementation:
+`createNodeFetchTransport()` sends batches with Node's built-in `fetch`, sets `content-type: application/json`, passes the SDK key through the `authorization` header, and preserves a valid standard `Retry-After` seconds/date value as `retryAfterMs`. Override `endpoint`, `headers`, or `fetchImpl` when you need a proxy, local collector, or custom fetch implementation:
 
 ```js
 import { createNodeFetchTransport } from "@logbrew/node";

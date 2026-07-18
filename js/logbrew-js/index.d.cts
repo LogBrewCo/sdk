@@ -537,9 +537,25 @@ export type Event =
 /** Drop-only event filter called after validation and before an event is queued. */
 export type EventFilter = (event: Event) => boolean | void;
 
+/** Canonical compact event record exchanged with an app-owned synchronous persistence adapter. */
+export type StoredEvent = {
+  event: Event;
+  serializedEvent: string;
+  eventBytes: number;
+};
+
+/** Explicit synchronous persistence seam used to recover and acknowledge queued events safely. */
+export type EventStore = {
+  load(): StoredEvent[];
+  append(record: StoredEvent): void;
+  acknowledge(count: number): void;
+  purge(): void;
+  close(): void;
+};
+
 /** Queue drop notification emitted when a bounded in-memory queue is full. */
 export type DroppedEvent = {
-  reason: "queue_overflow";
+  reason: "event_too_large" | "queue_bytes_overflow" | "queue_overflow";
   eventType: Event["type"];
   eventId: string;
   droppedEvents: number;
@@ -551,6 +567,8 @@ export type TransportResponse = {
   statusCode: number;
   /** Number of transport attempts used for the flush. */
   attempts: number;
+  /** Number of distinct batches acknowledged; client flush/shutdown responses always include it. */
+  batches?: number;
   /** Optional retry delay from a rate-limit response, in milliseconds. */
   retryAfterMs?: number;
 };
@@ -560,11 +578,54 @@ export type Transport = {
   send(apiKey: string, body: string): TransportResponse | Promise<TransportResponse>;
 };
 
+/** Content-free bounded delivery state with no event or sensitive transport fields. */
+export type DeliveryHealthSnapshot = Readonly<{
+  /** Stable schema discriminator for JSON consumers. */
+  schemaVersion: 1;
+  automaticDelivery: boolean;
+  lifecycle: "active" | "shutting_down" | "closed";
+  deliveryState: "idle" | "queued" | "scheduled" | "in_flight" | "retrying" | "paused" | "accepted" | "failed" | "dropped";
+  storage: "memory" | "persistent";
+  queueEvents: number;
+  queueBytes: number;
+  /** Events and compact bytes loaded from persistence when this client started. */
+  hydratedEvents: number;
+  hydratedBytes: number;
+  droppedEvents: number;
+  droppedByReason: Readonly<{
+    event_too_large: number;
+    queue_bytes_overflow: number;
+    queue_overflow: number;
+  }>;
+  lastDropReason: "none" | "event_too_large" | "queue_bytes_overflow" | "queue_overflow";
+  scheduled: boolean;
+  inFlight: boolean;
+  coalesced: boolean;
+  pendingOperations: number;
+  lastOutcome: "idle" | "empty" | "accepted" | "failed";
+  lastStatusClass: "none" | "success" | "client_error" | "server_error" | "network_error" | "transport_error" | "invalid_response" | "other_status";
+  pausedReason: "none" | "authentication" | "rate_limit" | "non_retryable";
+  consecutiveFailures: number;
+  /** Bounded transient retry delay; zero when no automatic retry is scheduled. */
+  retryDelayMs: number;
+  flushes: number;
+  failures: number;
+  attempts: number;
+  batches: number;
+  /** Events durably acknowledged since this client was created. */
+  acceptedEvents: number;
+  /** Bounded monotonic-within-client Unix milliseconds; zero until the transition occurs. */
+  lastAttemptAtUnixMs: number;
+  lastAcceptedAtUnixMs: number;
+  lastDroppedAtUnixMs: number;
+}>;
+
 /** Stable public SDK error with parseable code and message fields. */
 export declare class SdkError extends Error {
   code: string;
   retryAfterMs?: number;
-  constructor(code: string, message: string, details?: { retryAfterMs?: number });
+  retryable?: boolean;
+  constructor(code: string, message: string, details?: { retryAfterMs?: number; retryable?: boolean });
 }
 
 /** Transport error that can optionally be marked retryable by the caller. */
@@ -595,17 +656,40 @@ export declare class LogBrewClient {
     apiKey: string;
     sdkName: string;
     sdkVersion: string;
+    /** Retry attempts after the first send. Must be a non-negative integer; defaults to 2. */
     maxRetries?: number;
     eventFilter?: EventFilter;
+    /** Maximum queued compact event bytes. Defaults to 4 MiB. */
+    maxQueueBytes?: number;
     maxQueueSize?: number;
+    /** Maximum events per request body. Defaults to 100. */
+    maxBatchEvents?: number;
+    /** Maximum UTF-8 request body bytes. Defaults to 256 KiB. */
+    maxBatchBytes?: number;
     onEventDropped?: (drop: DroppedEvent) => void;
+    /** Optional app-scoped persistence adapter. Methods must complete synchronously. */
+    eventStore?: EventStore;
+    /** Client-owned transport used by automatic delivery and by flush/shutdown when no argument is supplied. */
+    transport?: Transport;
+    /** Enable interval and queue-threshold delivery. Defaults to true when transport is supplied. */
+    automaticDelivery?: boolean;
+    /** One-shot delivery interval in milliseconds. Defaults to 5000 and must not exceed 60000. */
+    deliveryIntervalMs?: number;
+    /** Queue count that triggers delivery without waiting for the interval. Defaults to min(50, maxQueueSize). */
+    deliveryQueueThreshold?: number;
   }): LogBrewClient;
   /** Return the queued event count currently buffered in memory. */
   pendingEvents(): number;
+  /** Return compact serialized event bytes currently buffered in memory. */
+  pendingBytes(): number;
   /** Return the number of events dropped because the bounded in-memory queue was full. */
   droppedEvents(): number;
+  /** Return a frozen, content-free snapshot of queue and delivery lifecycle health. */
+  deliveryHealth(): DeliveryHealthSnapshot;
   /** Return the queued event batch as stable, pretty-printed JSON. */
   previewJson(): string;
+  /** Purge queued events from memory and persistence while no delivery operation is active. */
+  purgePendingEvents(): number;
   release(id: string, timestamp: string, attributes: ReleaseAttributes): void;
   environment(id: string, timestamp: string, attributes: EnvironmentAttributes): void;
   issue(id: string, timestamp: string, attributes: IssueAttributes): void;
@@ -613,10 +697,10 @@ export declare class LogBrewClient {
   span(id: string, timestamp: string, attributes: SpanAttributes): void;
   action(id: string, timestamp: string, attributes: ActionAttributes): void;
   metric(id: string, timestamp: string, attributes: MetricAttributes): void;
-  /** Flush queued events through a transport while preserving retry semantics. */
-  flush(transport: Transport): Promise<TransportResponse>;
-  /** Flush queued events, then mark the client closed so later writes fail. */
-  shutdown(transport: Transport): Promise<TransportResponse>;
+  /** Flush one queue snapshot in bounded batches while preserving concurrent captures and retry bodies. */
+  flush(transport?: Transport): Promise<TransportResponse>;
+  /** Reject new capture, flush queued events, then close; a failed flush reopens the intact remainder. */
+  shutdown(transport?: Transport): Promise<TransportResponse>;
 }
 
 /** Install explicit console capture while preserving the target console's normal output behavior. */

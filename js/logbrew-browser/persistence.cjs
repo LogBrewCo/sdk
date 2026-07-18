@@ -1,14 +1,17 @@
 "use strict";
 
 const { SdkError } = require("@logbrew/sdk");
+const { lifecycleTransportFor, markLifecycleTransport } = require("./lifecycle-transport.cjs");
 
 const DEFAULT_PERSISTENCE_STORAGE_KEY = "logbrew:browser:persisted-batches";
+const DEFAULT_PERSISTENCE_LOCK_NAME = "logbrew:browser:persistence";
 const DEFAULT_MAX_STORED_BATCHES = 10;
 const DEFAULT_MAX_STORED_BYTES = 256 * 1024;
 
 let persistentTransportInstance = 0;
 
 function createPersistentBrowserTransport({
+  lockManager = defaultPersistenceLockManager(),
   maxStoredBatches = DEFAULT_MAX_STORED_BATCHES,
   maxStoredBytes = DEFAULT_MAX_STORED_BYTES,
   onPersistError,
@@ -17,40 +20,41 @@ function createPersistentBrowserTransport({
   transport
 } = {}) {
   validateTransport(transport, "createPersistentBrowserTransport requires transport");
+  validateLockManager(lockManager);
   validateStorage(storage);
   validateStorageKey(storageKey);
   validatePersistenceLimit("maxStoredBatches", maxStoredBatches);
   validatePersistenceLimit("maxStoredBytes", maxStoredBytes);
+  const lockName = persistenceLockName(storageKey);
   const ownerId = nextPersistentTransportOwnerId();
 
-  return {
+  const persistentTransport = {
     async send(apiKey, body) {
-      storePersistentBatch({
+      return sendPersistentBatch({
+        apiKey,
         body,
+        lockManager,
+        lockName,
         maxStoredBatches,
         maxStoredBytes,
         onPersistError,
         ownerId,
+        send: transport.send.bind(transport),
         storage,
         storageKey
       });
-      const response = await transport.send(apiKey, body);
-      if (response?.statusCode >= 200 && response.statusCode < 300) {
-        removePersistentBatchesForOwner({ onPersistError, ownerId, storage, storageKey });
-      } else if (shouldClearPersistedBatch(response?.statusCode)) {
-        removePersistentBatch({ body, onPersistError, storage, storageKey });
-      }
-      return response;
     },
     async replayStoredBatches(apiKey, { skipOwnBatches = false } = {}) {
-      return replayPersistentBatches({
-        apiKey,
-        onPersistError,
-        ownerId: skipOwnBatches ? ownerId : undefined,
-        storage,
-        storageKey,
-        transport
-      });
+      return withPersistenceLock(lockManager, lockName, () => (
+        replayPersistentBatches({
+          apiKey,
+          onPersistError,
+          ownerId: skipOwnBatches ? ownerId : undefined,
+          storage,
+          storageKey,
+          transport
+        })
+      ));
     },
     clearStoredBatches() {
       clearPersistentBatches({ onPersistError, storage, storageKey });
@@ -59,6 +63,56 @@ function createPersistentBrowserTransport({
       return readPersistentBatches({ onPersistError, storage, storageKey }).length;
     }
   };
+  const lifecycleTransport = lifecycleTransportFor(transport);
+  if (lifecycleTransport) {
+    markLifecycleTransport(persistentTransport, (apiKey, body) => sendPersistentBatch({
+      apiKey,
+      body,
+      lockManager,
+      lockName,
+      maxStoredBatches,
+      maxStoredBytes,
+      onPersistError,
+      ownerId,
+      send: lifecycleTransport.send.bind(lifecycleTransport),
+      storage,
+      storageKey
+    }));
+  }
+  return persistentTransport;
+}
+
+async function sendPersistentBatch({
+  apiKey,
+  body,
+  lockManager,
+  lockName,
+  maxStoredBatches,
+  maxStoredBytes,
+  onPersistError,
+  ownerId,
+  send,
+  storage,
+  storageKey
+}) {
+  return withPersistenceLock(lockManager, lockName, async () => {
+    storePersistentBatch({
+      body,
+      maxStoredBatches,
+      maxStoredBytes,
+      onPersistError,
+      ownerId,
+      storage,
+      storageKey
+    });
+    const response = await send(apiKey, body);
+    if (response?.statusCode >= 200 && response.statusCode < 300) {
+      removePersistentBatchesForOwner({ onPersistError, ownerId, storage, storageKey });
+    } else if (shouldClearPersistedBatch(response?.statusCode)) {
+      removePersistentBatch({ body, onPersistError, storage, storageKey });
+    }
+    return response;
+  });
 }
 
 function storePersistentBatch({
@@ -205,6 +259,12 @@ function validateTransport(transport, message) {
   }
 }
 
+function validateLockManager(lockManager) {
+  if (lockManager !== undefined && (!lockManager || typeof lockManager.request !== "function")) {
+    throw new SdkError("configuration_error", "persistent browser delivery requires lockManager.request when configured");
+  }
+}
+
 function validateStorage(storage) {
   if (
     !storage ||
@@ -246,6 +306,44 @@ function nextPersistentTransportOwnerId() {
 
 function defaultPersistentStorage() {
   return globalThis.localStorage;
+}
+
+function defaultPersistenceLockManager() {
+  return globalThis.navigator?.locks;
+}
+
+function persistenceLockName(storageKey) {
+  if (storageKey === DEFAULT_PERSISTENCE_STORAGE_KEY) {
+    return DEFAULT_PERSISTENCE_LOCK_NAME;
+  }
+  return `${DEFAULT_PERSISTENCE_LOCK_NAME}:${stableStorageKeyHash(storageKey)}`;
+}
+
+function stableStorageKeyHash(storageKey) {
+  let hash = 2166136261;
+  for (let index = 0; index < storageKey.length; index += 1) {
+    hash ^= storageKey.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+async function withPersistenceLock(lockManager, lockName, callback) {
+  if (!lockManager) {
+    return callback();
+  }
+  let callbackStarted = false;
+  try {
+    return await lockManager.request(lockName, { mode: "exclusive" }, () => {
+      callbackStarted = true;
+      return callback();
+    });
+  } catch (error) {
+    if (callbackStarted) {
+      throw error;
+    }
+    return callback();
+  }
 }
 
 function utf8ByteLength(value) {

@@ -67,6 +67,119 @@ test("persistent browser transport stores retryable batches without auth and rep
   }
 });
 
+test("persistent browser transport coordinates replay across tabs", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const { createPersistentBrowserTransport } = imported;
+  const storage = createMemoryStorage();
+  const lockManager = createMemoryLockManager();
+  const sent = [];
+  let statusCode = 503;
+  const underlyingTransport = {
+    async send(apiKey, body) {
+      sent.push({ apiKey, body });
+      if (statusCode === 202) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 10);
+        });
+      }
+      return { statusCode };
+    }
+  };
+  const body = JSON.stringify({
+    events: [{ id: "evt_cross_tab_001", type: "log" }],
+    sdk: { name: "logbrew-browser", version: "0.1.0" }
+  });
+  try {
+    const firstTab = createPersistentBrowserTransport({
+      lockManager,
+      storage,
+      transport: underlyingTransport
+    });
+    const secondTab = createPersistentBrowserTransport({
+      lockManager,
+      storage,
+      transport: underlyingTransport
+    });
+
+    await firstTab.send(CLIENT_KEY, body);
+    statusCode = 202;
+    const replays = await Promise.all([
+      firstTab.replayStoredBatches(CLIENT_KEY),
+      secondTab.replayStoredBatches(CLIENT_KEY)
+    ]);
+
+    assert.equal(sent.length, 2);
+    assert.equal(replays.reduce((sum, replay) => sum + replay.attempted, 0), 1);
+    assert.equal(replays.reduce((sum, replay) => sum + replay.delivered, 0), 1);
+    assert.equal(replays.reduce((sum, replay) => sum + replay.retained, 0), 0);
+    assert.deepEqual(new Set(lockManager.names), new Set(["logbrew:browser:persistence"]));
+    assert.equal(lockManager.names.some((name) => name.includes(CLIENT_KEY)), false);
+    assert.equal(lockManager.names.some((name) => name.includes("evt_cross_tab_001")), false);
+  } finally {
+    await removeTempDir();
+  }
+});
+
+test("persistent browser transport falls back when lock acquisition is unavailable", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const { createPersistentBrowserTransport } = imported;
+  const storage = createMemoryStorage();
+  let sendCount = 0;
+  try {
+    const transport = createPersistentBrowserTransport({
+      lockManager: {
+        async request() {
+          throw new Error("locks unavailable");
+        }
+      },
+      storage,
+      transport: {
+        async send() {
+          sendCount += 1;
+          return { statusCode: 202 };
+        }
+      }
+    });
+
+    const response = await transport.send(CLIENT_KEY, "persisted-body");
+
+    assert.equal(response.statusCode, 202);
+    assert.equal(sendCount, 1);
+    assert.equal(transport.pendingStoredBatches(), 0);
+  } finally {
+    await removeTempDir();
+  }
+});
+
+test("persistent browser transport does not retry a transport failure outside the lock", async () => {
+  const { imported, removeTempDir } = await importBrowserPackage();
+  const { createPersistentBrowserTransport } = imported;
+  const storage = createMemoryStorage();
+  let sendCount = 0;
+  try {
+    const transport = createPersistentBrowserTransport({
+      lockManager: createMemoryLockManager(),
+      storage,
+      transport: {
+        async send() {
+          sendCount += 1;
+          throw new Error("transport failed");
+        }
+      }
+    });
+
+    await assert.rejects(
+      transport.send(CLIENT_KEY, "persisted-body"),
+      /transport failed/u
+    );
+
+    assert.equal(sendCount, 1);
+    assert.equal(transport.pendingStoredBatches(), 1);
+  } finally {
+    await removeTempDir();
+  }
+});
+
 test("installLogBrewBrowser replays persisted batches before flushing live online queue", async () => {
   const { imported, removeTempDir } = await importBrowserPackage();
   const { installLogBrewBrowser } = imported;
@@ -175,10 +288,11 @@ test("online recovery skips same-session persisted copies while the live queue s
       message: "same session live queue"
     });
     browserWindow.dispatchEvent("online");
-    await waitFor(() => sentBodies.length === 2);
+    await waitFor(() => sentBodies.length === 3);
 
-    const recoveredIds = JSON.parse(sentBodies[1]).events.map((event) => event.id);
-    assert.deepEqual(recoveredIds, ["evt_same_session_failed_001", "evt_same_session_live_001"]);
+    assert.equal(sentBodies[0], sentBodies[1]);
+    assert.deepEqual(JSON.parse(sentBodies[1]).events.map((event) => event.id), ["evt_same_session_failed_001"]);
+    assert.deepEqual(JSON.parse(sentBodies[2]).events.map((event) => event.id), ["evt_same_session_live_001"]);
     assert.equal(storage.getItem("logbrew:browser:persisted-batches"), null);
     context.uninstall();
   } finally {
@@ -197,6 +311,28 @@ function createMemoryStorage() {
     },
     setItem(key, value) {
       values.set(key, String(value));
+    }
+  };
+}
+
+function createMemoryLockManager() {
+  const tails = new Map();
+  const names = [];
+  return {
+    names,
+    async request(name, options, callback) {
+      names.push(name);
+      assert.deepEqual(options, { mode: "exclusive" });
+      const previous = tails.get(name) ?? Promise.resolve();
+      const current = previous.catch(() => undefined).then(callback);
+      tails.set(name, current);
+      try {
+        return await current;
+      } finally {
+        if (tails.get(name) === current) {
+          tails.delete(name);
+        }
+      }
     }
   };
 }
