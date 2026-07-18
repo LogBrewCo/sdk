@@ -5,11 +5,20 @@ registry="https://registry.npmjs.org"
 tmp_dir="$(mktemp -d)"
 
 sdk_version="${LOGBREW_NPM_SDK_VERSION:-0.1.3}"
+browser_version="${LOGBREW_NPM_BROWSER_VERSION:-0.1.0}"
 node_version="${LOGBREW_NPM_NODE_VERSION:-0.1.1}"
+next_version="${LOGBREW_NPM_NEXT_VERSION:-0.1.0}"
+react_native_version="${LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.0}"
 bullmq_version="${LOGBREW_NPM_BULLMQ_VERSION:-0.1.1}"
 kafkajs_version="${LOGBREW_NPM_KAFKAJS_VERSION:-0.1.1}"
 amqplib_version="${LOGBREW_NPM_AMQPLIB_VERSION:-0.1.2}"
 aws_sqs_version="${LOGBREW_NPM_AWS_SQS_VERSION:-0.1.1}"
+receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
+
+if [[ $# -ne 0 ]] || { [[ "$receipt_mode" != "0" ]] && [[ "$receipt_mode" != "1" ]]; }; then
+  echo "usage: $0" >&2
+  exit 2
+fi
 
 cleanup() {
   rm -rf "$tmp_dir"
@@ -35,8 +44,260 @@ verify_registry_version() {
   fi
 }
 
+fail_receipt_stage() {
+  echo "npm registry receipt failed at $1" >&2
+  exit 1
+}
+
+run_receipt_smoke() {
+  if [[ -z "${LOGBREW_NPM_SDK_VERSION:-}" ]] \
+    || [[ -z "${LOGBREW_NPM_BROWSER_VERSION:-}" ]] \
+    || [[ -z "${LOGBREW_NPM_NODE_VERSION:-}" ]] \
+    || [[ -z "${LOGBREW_NPM_NEXT_VERSION:-}" ]] \
+    || [[ -z "${LOGBREW_NPM_REACT_NATIVE_VERSION:-}" ]]; then
+    fail_receipt_stage "version binding"
+  fi
+  mkdir -p \
+    "$tmp_dir/artifacts" \
+    "$tmp_dir/npm-public-registry-receipt-app" \
+    >"$tmp_dir/receipt-setup.out" 2>"$tmp_dir/receipt-setup.err" \
+    || fail_receipt_stage "application setup"
+  if ! RECEIPT_ARTIFACT_DIR="$tmp_dir/artifacts" \
+    RECEIPT_METADATA_PATH="$tmp_dir/receipt-artifacts.json" \
+    node >"$tmp_dir/receipt-artifact-check.out" 2>"$tmp_dir/receipt-artifact-check.err" <<'JS'
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+const ids = [
+  "npm:@logbrew/sdk",
+  "npm:@logbrew/browser",
+  "npm:@logbrew/node",
+  "npm:@logbrew/next",
+  "npm:@logbrew/react-native"
+];
+let supplied;
+try {
+  supplied = JSON.parse(process.env.LOGBREW_RELEASE_ARTIFACT_FILES_JSON ?? "");
+} catch {
+  process.exit(1);
+}
+if (
+  !supplied
+  || Array.isArray(supplied)
+  || typeof supplied !== "object"
+  || Object.keys(supplied).length !== ids.length
+  || ids.some((id) => typeof supplied[id] !== "string" || !path.isAbsolute(supplied[id]))
+) {
+  process.exit(1);
+}
+
+const artifacts = [];
+for (const [index, id] of ids.entries()) {
+  let descriptor;
+  try {
+    const pathStat = fs.lstatSync(supplied[id]);
+    if (pathStat.isSymbolicLink() || !pathStat.isFile()) {
+      process.exit(1);
+    }
+    if (typeof fs.constants.O_NOFOLLOW !== "number") {
+      process.exit(1);
+    }
+    descriptor = fs.openSync(supplied[id], fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size <= 0 || stat.size > 64 * 1024 * 1024) {
+      process.exit(1);
+    }
+    const bytes = fs.readFileSync(descriptor);
+    const destination = path.join(process.env.RECEIPT_ARTIFACT_DIR, `${index}.tgz`);
+    fs.writeFileSync(destination, bytes, { flag: "wx", mode: 0o600 });
+    artifacts.push({
+      id,
+      digest: `sha256:${crypto.createHash("sha256").update(bytes).digest("hex")}`
+    });
+  } catch {
+    process.exit(1);
+  } finally {
+    if (descriptor !== undefined) {
+      fs.closeSync(descriptor);
+    }
+  }
+}
+fs.writeFileSync(
+  process.env.RECEIPT_METADATA_PATH,
+  JSON.stringify({ artifacts }),
+  { flag: "wx", mode: 0o600 }
+);
+JS
+  then
+    fail_receipt_stage "artifact binding"
+  fi
+
+  cd "$tmp_dir/npm-public-registry-receipt-app" 2>"$tmp_dir/receipt-cd.err" \
+    || fail_receipt_stage "application setup"
+  unset NODE_OPTIONS
+  export NPM_CONFIG_CACHE="$tmp_dir/npm-cache"
+  export NPM_CONFIG_UPDATE_NOTIFIER=false
+  if ! : >"$tmp_dir/npmrc" 2>"$tmp_dir/npmrc.err"; then
+    fail_receipt_stage "application setup"
+  fi
+  export NPM_CONFIG_USERCONFIG="$tmp_dir/npmrc"
+  npm init -y >"$tmp_dir/npm-init.out" 2>"$tmp_dir/npm-init.err" || fail_receipt_stage "application setup"
+  npm pkg set type=module >"$tmp_dir/npm-pkg.out" 2>"$tmp_dir/npm-pkg.err" || fail_receipt_stage "application setup"
+  npm install \
+    --save-exact \
+    --ignore-scripts \
+    --legacy-peer-deps \
+    --no-audit \
+    --no-fund \
+    --offline \
+    "$tmp_dir/artifacts/0.tgz" \
+    "$tmp_dir/artifacts/1.tgz" \
+    "$tmp_dir/artifacts/2.tgz" \
+    "$tmp_dir/artifacts/3.tgz" \
+    "$tmp_dir/artifacts/4.tgz" \
+    >"$tmp_dir/npm-install.out" 2>"$tmp_dir/npm-install.err" \
+    || fail_receipt_stage "artifact install"
+
+  if ! node - \
+    "$sdk_version" \
+    "$browser_version" \
+    "$node_version" \
+    "$next_version" \
+    "$react_native_version" \
+    >"$tmp_dir/receipt-package-check.out" 2>"$tmp_dir/receipt-package-check.err" <<'JS'
+const fs = require("node:fs");
+const expected = [
+  ["@logbrew/sdk", process.argv[2]],
+  ["@logbrew/browser", process.argv[3]],
+  ["@logbrew/node", process.argv[4]],
+  ["@logbrew/next", process.argv[5]],
+  ["@logbrew/react-native", process.argv[6]]
+];
+const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+for (const [name, version] of expected) {
+  const installed = JSON.parse(fs.readFileSync(`node_modules/${name}/package.json`, "utf8"));
+  const locked = lock.packages?.[`node_modules/${name}`];
+  if (installed.name !== name || installed.version !== version || locked?.version !== version) {
+    process.exit(1);
+  }
+}
+JS
+  then
+    fail_receipt_stage "installed identity"
+  fi
+
+  if ! cat >"$tmp_dir/npm-public-registry-receipt-app/receipt-runtime-check.mjs" \
+    2>"$tmp_dir/receipt-runtime-write.err" <<'JS'
+import { RecordingTransport } from "@logbrew/sdk";
+import { createLogBrewBrowserClient } from "@logbrew/browser";
+import { createLogBrewNodeClient } from "@logbrew/node";
+import { withLogBrewNextReleaseArtifacts } from "@logbrew/next/release-artifacts";
+import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
+
+for (const exportedValue of [
+  RecordingTransport,
+  createLogBrewBrowserClient,
+  createLogBrewNodeClient,
+  withLogBrewNextReleaseArtifacts,
+  prepareLogBrewReactNativeReleaseArtifacts
+]) {
+  if (typeof exportedValue !== "function") {
+    process.exit(1);
+  }
+}
+JS
+  then
+    fail_receipt_stage "installed execution"
+  fi
+  if ! RECEIPT_RUNTIME_PATH="$tmp_dir/npm-public-registry-receipt-app/receipt-runtime-check.mjs" node \
+    >"$tmp_dir/receipt-runtime-check.out" 2>"$tmp_dir/receipt-runtime-check.err" <<'JS'
+const { spawn } = require("node:child_process");
+const child = spawn(process.execPath, [process.env.RECEIPT_RUNTIME_PATH], {
+  detached: process.platform !== "win32",
+  stdio: "ignore"
+});
+let forceTimer;
+let timedOut = false;
+const terminate = (signal) => {
+  try {
+    if (process.platform === "win32") {
+      child.kill(signal);
+    } else if (child.pid !== undefined) {
+      process.kill(-child.pid, signal);
+    }
+  } catch {
+    // The process group already exited.
+  }
+};
+const timeout = setTimeout(() => {
+  timedOut = true;
+  terminate("SIGTERM");
+  forceTimer = setTimeout(() => terminate("SIGKILL"), 2_000);
+}, 10_000);
+child.once("error", () => {
+  clearTimeout(timeout);
+  if (forceTimer !== undefined) {
+    clearTimeout(forceTimer);
+  }
+  process.exit(1);
+});
+child.once("close", (code) => {
+  clearTimeout(timeout);
+  if (forceTimer !== undefined) {
+    clearTimeout(forceTimer);
+  }
+  terminate("SIGTERM");
+  process.exit(!timedOut && code === 0 ? 0 : 1);
+});
+JS
+  then
+    fail_receipt_stage "installed execution"
+  fi
+
+  if ! node - "$tmp_dir/receipt-artifacts.json" \
+    >"$tmp_dir/receipt-attestation.json" 2>"$tmp_dir/receipt-attestation.err" <<'JS'
+const fs = require("node:fs");
+const ids = [
+  "npm:@logbrew/sdk",
+  "npm:@logbrew/browser",
+  "npm:@logbrew/node",
+  "npm:@logbrew/next",
+  "npm:@logbrew/react-native"
+];
+const metadata = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (
+  !Array.isArray(metadata.artifacts)
+  || metadata.artifacts.length !== ids.length
+  || metadata.artifacts.some((artifact, index) => (
+    artifact.id !== ids[index]
+    || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest)
+  ))
+) {
+  process.exit(1);
+}
+process.stdout.write(JSON.stringify({
+  "schema_version":1,
+  "status":"passed",
+  artifacts: metadata.artifacts
+}) + "\n");
+JS
+  then
+    fail_receipt_stage "attestation"
+  fi
+  local attestation
+  if ! IFS= read -r attestation <"$tmp_dir/receipt-attestation.json"; then
+    fail_receipt_stage "attestation"
+  fi
+  printf '%s\n' "$attestation"
+}
+
 require_command node
 require_command npm
+
+if [[ "$receipt_mode" == "1" ]]; then
+  run_receipt_smoke
+  exit 0
+fi
 
 verify_registry_version "@logbrew/sdk" "$sdk_version"
 verify_registry_version "@logbrew/node" "$node_version"
