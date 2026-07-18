@@ -167,6 +167,26 @@ class ConfidentialityScanTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("production " + "pass" + "word", failures[0])
 
+    def test_sensitive_match_does_not_cross_identifier_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "java" / "logbrew-java" / "src" / "main" / "java"
+            source_dir.mkdir(parents=True)
+            source = source_dir / "AutomaticDeliveryController.java"
+            source.write_text(
+                "ProcessHandle owner = ProcessHandle.current();\n"
+                "return ProcessHandle.current().equals(owner);\n",
+                encoding="utf-8",
+            )
+            remote_term = "s" + "sh_private_key"
+            unsafe = root / "unsafe.txt"
+            unsafe.write_text(f"{remote_term}=fixture\n", encoding="utf-8")
+
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn(remote_term, failures[0])
+
     def test_reports_forbidden_public_planning_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

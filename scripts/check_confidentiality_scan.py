@@ -9,7 +9,8 @@ from pathlib import Path
 
 SENSITIVE_RE = re.compile(
     r"(secret|token|credential|password|private repo|customer|roadmap|strategy|runbook|"
-    r"launch state|cleanup|hostnames?|internal path|ssh|terraform|dns|backup|restore)",
+    r"launch state|cleanup|hostnames?|internal path|(?<![A-Za-z0-9])ssh(?![A-Za-z0-9])|"
+    r"terraform|dns|backup|restore)",
     re.IGNORECASE,
 )
 PUBLIC_README_FORBIDDEN_RE = re.compile(

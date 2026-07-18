@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 /**
  * Buffered public client for validating, previewing, and flushing LogBrew events.
@@ -29,6 +30,7 @@ public final class LogBrewClient {
     private final Object stateLock;
     private final Object deliveryLock;
     private final EncryptedEventStore eventStore;
+    private final AutomaticDeliveryController automaticDelivery;
     private long pendingEventBytes;
     private long droppedEventBytes;
     private int droppedEvents;
@@ -41,7 +43,12 @@ public final class LogBrewClient {
         String apiKey,
         String sdkName,
         String sdkVersion,
-        DeliveryOptions deliveryOptions
+        DeliveryOptions deliveryOptions,
+        Transport ownedTransport,
+        AutomaticDeliveryOptions automaticDeliveryOptions,
+        AutomaticDeliveryScheduler.Factory schedulerFactory,
+        AutomaticDeliveryScheduler.Jitter jitter,
+        BooleanSupplier processOwnership
     ) {
         this.apiKey = apiKey;
         this.deliveryOptions = deliveryOptions;
@@ -55,6 +62,24 @@ public final class LogBrewClient {
         sdkValue.put("version", sdkVersion);
         this.sdk = Collections.unmodifiableMap(sdkValue);
         this.persistenceRecovered = eventStore == null;
+        if (automaticDeliveryOptions == null) {
+            this.automaticDelivery = null;
+        } else if (schedulerFactory == null) {
+            this.automaticDelivery = new AutomaticDeliveryController(
+                this,
+                Objects.requireNonNull(ownedTransport, "ownedTransport"),
+                automaticDeliveryOptions
+            );
+        } else {
+            this.automaticDelivery = new AutomaticDeliveryController(
+                this,
+                Objects.requireNonNull(ownedTransport, "ownedTransport"),
+                automaticDeliveryOptions,
+                schedulerFactory,
+                Objects.requireNonNull(jitter, "jitter"),
+                Objects.requireNonNull(processOwnership, "processOwnership")
+            );
+        }
         if (eventStore != null) {
             eventStore.attach();
         }
@@ -137,7 +162,85 @@ public final class LogBrewClient {
             apiKey,
             sdkName,
             sdkVersion,
-            Objects.requireNonNull(deliveryOptions, "deliveryOptions")
+            Objects.requireNonNull(deliveryOptions, "deliveryOptions"),
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+    }
+
+    /**
+     * Creates an explicit automatic client that owns one transport and lazy scheduler.
+     */
+    public static LogBrewClient createAutomatic(
+        String apiKey,
+        String sdkName,
+        String sdkVersion,
+        Transport transport
+    ) {
+        return createAutomatic(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            transport,
+            DeliveryOptions.builder().build(),
+            AutomaticDeliveryOptions.builder().build()
+        );
+    }
+
+    /**
+     * Creates an explicit automatic client with custom delivery and scheduling bounds.
+     */
+    public static LogBrewClient createAutomatic(
+        String apiKey,
+        String sdkName,
+        String sdkVersion,
+        Transport transport,
+        DeliveryOptions deliveryOptions,
+        AutomaticDeliveryOptions automaticDeliveryOptions
+    ) {
+        Validation.requireNonEmpty("api_key", apiKey);
+        Validation.requireNonEmpty("sdk_name", sdkName);
+        Validation.requireNonEmpty("sdk_version", sdkVersion);
+        return new LogBrewClient(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            Objects.requireNonNull(deliveryOptions, "deliveryOptions"),
+            Objects.requireNonNull(transport, "transport"),
+            Objects.requireNonNull(automaticDeliveryOptions, "automaticDeliveryOptions"),
+            null,
+            null,
+            null
+        );
+    }
+
+    static LogBrewClient createAutomatic(
+        String apiKey,
+        String sdkName,
+        String sdkVersion,
+        Transport transport,
+        DeliveryOptions deliveryOptions,
+        AutomaticDeliveryOptions automaticDeliveryOptions,
+        AutomaticDeliveryScheduler.Factory schedulerFactory,
+        AutomaticDeliveryScheduler.Jitter jitter,
+        BooleanSupplier processOwnership
+    ) {
+        Validation.requireNonEmpty("api_key", apiKey);
+        Validation.requireNonEmpty("sdk_name", sdkName);
+        Validation.requireNonEmpty("sdk_version", sdkVersion);
+        return new LogBrewClient(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            Objects.requireNonNull(deliveryOptions, "deliveryOptions"),
+            Objects.requireNonNull(transport, "transport"),
+            Objects.requireNonNull(automaticDeliveryOptions, "automaticDeliveryOptions"),
+            Objects.requireNonNull(schedulerFactory, "schedulerFactory"),
+            Objects.requireNonNull(jitter, "jitter"),
+            Objects.requireNonNull(processOwnership, "processOwnership")
         );
     }
 
@@ -188,6 +291,40 @@ public final class LogBrewClient {
         }
     }
 
+    /** Returns a fixed, content-free snapshot of local delivery state. */
+    public DeliveryHealth deliveryHealth() {
+        synchronized (stateLock) {
+            AutomaticDeliveryController.State automatic = automaticDelivery == null
+                ? AutomaticDeliveryController.State.manual()
+                : automaticDelivery.snapshot();
+            DeliveryHealth.Lifecycle lifecycle = closed
+                ? DeliveryHealth.Lifecycle.CLOSED
+                : closing || automatic.stopping
+                    ? DeliveryHealth.Lifecycle.CLOSING
+                    : DeliveryHealth.Lifecycle.OPEN;
+            return new DeliveryHealth(
+                lifecycle,
+                automatic.activity,
+                automatic.lastOutcome,
+                automatic.pauseReason,
+                automatic.lastDropReason,
+                automaticDelivery != null,
+                automatic.inFlight,
+                automatic.wakeCoalesced,
+                events.size(),
+                pendingEventBytes,
+                droppedEvents,
+                droppedEventBytes,
+                automatic.automaticAttempts,
+                automatic.transportAttempts,
+                automatic.acceptedBatches,
+                automatic.acceptedEvents,
+                automatic.consecutiveFailures,
+                automatic.scheduledDelayMillis
+            );
+        }
+    }
+
     /**
      * Returns the queued event batch as stable, pretty-printed JSON.
      */
@@ -228,6 +365,7 @@ public final class LogBrewClient {
 
     /** Explicitly removes all recognized persisted work and enables capture on an empty queue. */
     public PersistenceStatus purgePersistedEvents() {
+        PersistenceStatus status;
         synchronized (deliveryLock) {
             rejectDeliveryReentrancy();
             synchronized (stateLock) {
@@ -237,13 +375,17 @@ public final class LogBrewClient {
                 events.clear();
                 pendingEventBytes = 0L;
                 persistenceRecovered = true;
-                return store.status(
+                status = store.status(
                     deliveryOptions.maxQueueEvents(),
                     deliveryOptions.maxQueueBytes(),
                     false
                 );
             }
         }
+        if (automaticDelivery != null) {
+            automaticDelivery.onQueueCleared();
+        }
+        return status;
     }
 
     /**
@@ -302,6 +444,9 @@ public final class LogBrewClient {
      * later flush.</p>
      */
     public TransportResponse flush(Transport transport) {
+        if (automaticDelivery != null) {
+            return automaticDelivery.flush(Objects.requireNonNull(transport, "transport"));
+        }
         return deliver(Objects.requireNonNull(transport, "transport"), false);
     }
 
@@ -311,7 +456,36 @@ public final class LogBrewClient {
      * <p>A failed shutdown retains unaccepted work and reopens the client for recovery.</p>
      */
     public TransportResponse shutdown(Transport transport) {
+        if (automaticDelivery != null) {
+            return automaticDelivery.shutdown(Objects.requireNonNull(transport, "transport"));
+        }
         return deliver(Objects.requireNonNull(transport, "transport"), true);
+    }
+
+    /** Flushes queued work once and closes an explicit automatic client. */
+    public TransportResponse shutdown() {
+        if (automaticDelivery == null) {
+            throw new SdkException(
+                "automatic_delivery_disabled",
+                "automatic delivery is not enabled for this client"
+            );
+        }
+        return automaticDelivery.shutdown();
+    }
+
+    /** Resumes a paused automatic client and requests one immediate delivery wake. */
+    public void resumeAutomaticDelivery() {
+        if (automaticDelivery == null) {
+            throw new SdkException(
+                "automatic_delivery_disabled",
+                "automatic delivery is not enabled for this client"
+            );
+        }
+        synchronized (stateLock) {
+            ensureNotClosedOrClosing();
+            ensurePersistenceRecovered();
+        }
+        automaticDelivery.resume();
     }
 
     private void pushEvent(String type, String id, String timestamp, Map<String, Object> attributes) {
@@ -323,6 +497,7 @@ public final class LogBrewClient {
         long eventBytes = utf8Bytes(eventJson);
         QueuedEvent queuedEvent = new QueuedEvent(id, eventJson, eventBytes, null);
         EventDrop drop = null;
+        boolean queued = false;
 
         synchronized (stateLock) {
             ensureWritable();
@@ -345,17 +520,27 @@ public final class LogBrewClient {
                 }
                 events.addLast(queuedEvent);
                 pendingEventBytes += eventBytes;
+                queued = true;
             }
         }
 
         if (drop != null) {
             reportDroppedEvent(drop);
+            if (automaticDelivery != null) {
+                automaticDelivery.onDropped(drop.reason());
+            }
+        } else if (queued && automaticDelivery != null) {
+            automaticDelivery.onQueueChanged(pendingEvents());
         }
     }
 
     private EventDrop recordDrop(String id, String type, String reason, long serializedBytes) {
-        droppedEvents++;
-        droppedEventBytes += serializedBytes;
+        if (droppedEvents < Integer.MAX_VALUE) {
+            droppedEvents++;
+        }
+        droppedEventBytes = serializedBytes > Long.MAX_VALUE - droppedEventBytes
+            ? Long.MAX_VALUE
+            : droppedEventBytes + serializedBytes;
         return new EventDrop(id, type, reason, serializedBytes);
     }
 
@@ -372,6 +557,8 @@ public final class LogBrewClient {
     }
 
     private PersistenceStatus recoverPersistence(boolean finalizeAmbiguous) {
+        PersistenceStatus status;
+        int recoveredEvents;
         synchronized (deliveryLock) {
             rejectDeliveryReentrancy();
             synchronized (stateLock) {
@@ -399,9 +586,14 @@ public final class LogBrewClient {
                     pendingEventBytes += event.serializedBytes;
                 }
                 persistenceRecovered = true;
-                return snapshot.status(false);
+                status = snapshot.status(false);
+                recoveredEvents = events.size();
             }
         }
+        if (automaticDelivery != null && recoveredEvents > 0) {
+            automaticDelivery.onQueueChanged(recoveredEvents);
+        }
+        return status;
     }
 
     private EncryptedEventStore requireEventStore() {
@@ -424,6 +616,37 @@ public final class LogBrewClient {
     }
 
     private TransportResponse deliver(Transport transport, boolean shutdown) {
+        return deliver(transport, shutdown, null, DeliveryObserver.NONE);
+    }
+
+    DeliverySession beginAutomaticDelivery() {
+        synchronized (stateLock) {
+            ensureNotClosedOrClosing();
+            ensurePersistenceRecovered();
+            return new DeliverySession(new ArrayList<>(events));
+        }
+    }
+
+    TransportResponse deliverAutomatically(
+        Transport transport,
+        boolean shutdown,
+        DeliverySession session,
+        DeliveryObserver observer
+    ) {
+        return deliver(
+            Objects.requireNonNull(transport, "transport"),
+            shutdown,
+            session,
+            Objects.requireNonNull(observer, "observer")
+        );
+    }
+
+    private TransportResponse deliver(
+        Transport transport,
+        boolean shutdown,
+        DeliverySession session,
+        DeliveryObserver observer
+    ) {
         synchronized (deliveryLock) {
             if (deliveryOwner == Thread.currentThread()) {
                 throw new SdkException(
@@ -442,12 +665,14 @@ public final class LogBrewClient {
                     if (shutdown) {
                         closing = true;
                     }
-                    snapshot = new ArrayList<>(events);
+                    snapshot = session == null
+                        ? new ArrayList<>(events)
+                        : remainingSessionEvents(session);
                 }
 
                 boolean shutdownCompleted = false;
                 try {
-                    TransportResponse response = flushSnapshot(transport, snapshot);
+                    TransportResponse response = flushSnapshot(transport, snapshot, observer);
                     if (shutdown) {
                         synchronized (stateLock) {
                             closing = false;
@@ -469,7 +694,11 @@ public final class LogBrewClient {
         }
     }
 
-    private TransportResponse flushSnapshot(Transport transport, List<QueuedEvent> snapshot) {
+    private TransportResponse flushSnapshot(
+        Transport transport,
+        List<QueuedEvent> snapshot,
+        DeliveryObserver observer
+    ) {
         if (snapshot.isEmpty()) {
             return new TransportResponse(204, 0, 0, 0);
         }
@@ -483,6 +712,7 @@ public final class LogBrewClient {
             FrozenBatch batch = freezeNextBatch(snapshot, offset);
             SendResult result = sendBatch(transport, batch.body);
             acknowledgePrefix(batch.events);
+            observer.onBatchAccepted(batch.events.size(), result.attempts);
             offset += batch.events.size();
             attempts += result.attempts;
             batches++;
@@ -490,6 +720,40 @@ public final class LogBrewClient {
             statusCode = result.statusCode;
         }
         return new TransportResponse(statusCode, attempts, batches, acceptedEvents);
+    }
+
+    private List<QueuedEvent> remainingSessionEvents(DeliverySession session) {
+        if (session.events.isEmpty() || events.isEmpty()) {
+            return Collections.emptyList();
+        }
+        QueuedEvent currentFirst = events.peekFirst();
+        int start = identityIndexOf(session.events, currentFirst);
+        if (start < 0) {
+            return Collections.emptyList();
+        }
+        List<QueuedEvent> remaining = new ArrayList<>();
+        Iterator<QueuedEvent> current = events.iterator();
+        for (int index = start; index < session.events.size(); index++) {
+            if (!current.hasNext()) {
+                throw new SdkException("delivery_error", "automatic delivery ownership is incomplete");
+            }
+            QueuedEvent expected = session.events.get(index);
+            QueuedEvent actual = current.next();
+            if (actual != expected) {
+                throw new SdkException("delivery_error", "automatic delivery ownership changed");
+            }
+            remaining.add(expected);
+        }
+        return remaining;
+    }
+
+    private static int identityIndexOf(List<QueuedEvent> values, QueuedEvent expected) {
+        for (int index = 0; index < values.size(); index++) {
+            if (values.get(index) == expected) {
+                return index;
+            }
+        }
+        return -1;
     }
 
     private FrozenBatch freezeNextBatch(List<QueuedEvent> snapshot, int offset) {
@@ -726,5 +990,19 @@ public final class LogBrewClient {
             this.statusCode = statusCode;
             this.attempts = attempts;
         }
+    }
+
+    static final class DeliverySession {
+        private final List<QueuedEvent> events;
+
+        private DeliverySession(List<QueuedEvent> events) {
+            this.events = Collections.unmodifiableList(events);
+        }
+    }
+
+    interface DeliveryObserver {
+        DeliveryObserver NONE = (eventCount, attempts) -> { };
+
+        void onBatchAccepted(int eventCount, int attempts);
     }
 }

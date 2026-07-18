@@ -56,6 +56,7 @@ fi
 javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/classes:$java_optional_classpath" -d "$tmp_dir/test-classes" @"$test_sources"
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewClientTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewDeliveryTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewAutomaticDeliveryTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.EncryptedEventStoreTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewPersistenceTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewTraceTest
@@ -80,6 +81,8 @@ python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
 
 javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$java_optional_classpath" -d "$tmp_dir/javadoc" @"$main_sources"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewClient.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/AutomaticDeliveryOptions.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/DeliveryHealth.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/DeliveryOptions.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/EncryptedEventStore.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/PersistenceStatus.html"
@@ -118,6 +121,11 @@ if [ -d "$package_dir/src/main/resources" ]; then
 fi
 jar --list --file "$tmp_dir/logbrew-sdk-$package_version-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryController.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryOptions.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryScheduler.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryTransport.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/DeliveryOptions.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/EncryptedEventStore.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/PersistenceStatus.java$' "$tmp_dir/sources-jar-contents.txt"
@@ -160,6 +168,8 @@ jar --create --file "$tmp_dir/logbrew-sdk-$package_version-javadoc.jar" -C "$tmp
 jar --list --file "$tmp_dir/logbrew-sdk-$package_version-javadoc.jar" > "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^index.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryOptions.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/DeliveryOptions.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/EncryptedEventStore.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/PersistenceStatus.html$' "$tmp_dir/javadoc-jar-contents.txt"
@@ -198,6 +208,17 @@ fi
 jar --create --file "$tmp_dir/logbrew-sdk-$package_version.jar" -C "$tmp_dir/jar-stage" .
 jar --list --file "$tmp_dir/logbrew-sdk-$package_version.jar" > "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryController.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryOptions.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryOptions\$Builder.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryScheduler.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryTransport.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$Lifecycle.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$Activity.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$Outcome.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$PauseReason.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$DropReason.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/DeliveryOptions.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/DeliveryOptions\$Builder.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/EncryptedEventStore.class$' "$tmp_dir/jar-contents.txt"
@@ -302,6 +323,8 @@ grep -q 'droppedEvents()' "$package_dir/README.md"
 grep -q 'maxQueueSize' "$package_dir/README.md"
 grep -q 'DeliveryOptions' "$package_dir/README.md"
 grep -q 'EncryptedEventStore' "$package_dir/README.md"
+grep -q 'AutomaticDeliveryOptions' "$package_dir/README.md"
+grep -q 'deliveryHealth()' "$package_dir/README.md"
 grep -q 'finalizePersistedTransactionAndRecover' "$package_dir/README.md"
 grep -q 'persistence_unsupported' "$package_dir/README.md"
 grep -q 'pendingEventBytes()' "$package_dir/README.md"
