@@ -131,7 +131,11 @@ logbrew.client.log("evt_browser_pagehide_001", nextTimestamp(), {
   logger: "browser.lifecycle"
 });
 browserWindow.dispatchEvent({ type: "pagehide" });
-await waitFor(() => transport.sentBodies.length === 1);
+await delay(10);
+if (transport.sentBodies.length !== 0 || logbrew.client.pendingEvents() !== 13) {
+  throw new Error("pagehide should defer app-owned transport work");
+}
+await logbrew.flush();
 
 logbrew.client.log("evt_browser_hidden_001", nextTimestamp(), {
   message: "queued before hidden visibility",
@@ -140,7 +144,11 @@ logbrew.client.log("evt_browser_hidden_001", nextTimestamp(), {
 });
 browserWindow.document.visibilityState = "hidden";
 browserWindow.document.dispatchEvent({ type: "visibilitychange" });
-await waitFor(() => transport.sentBodies.length === 2);
+await delay(10);
+if (transport.sentBodies.length !== 1 || logbrew.client.pendingEvents() !== 1) {
+  throw new Error("hidden visibility should defer app-owned transport work");
+}
+await logbrew.flush();
 
 logbrew.uninstall();
 browserWindow.dispatchEvent(createErrorEvent("After uninstall", "/assets/later.js", 2, 1));
@@ -314,14 +322,14 @@ console.error(JSON.stringify({
   documentSpan: documentSpan.attributes.name,
   events: parsed.events.length,
   fetchSpan: fetchSpan.attributes.name,
-  hiddenFlushEvents: visibilityPayload.events.length,
+  hiddenDeferredEvents: visibilityPayload.events.length,
   interactionSpan: interactionSpan.attributes.name,
   inpSpan: inpSpan.attributes.name,
   longAnimationFrameSpan: longAnimationFrameSpan.attributes.name,
   longTaskSpan: longTaskSpan.attributes.name,
   networkAction: network.attributes.metadata.routeTemplate,
   pageView: parsed.events[0].attributes.name,
-  pagehideFlushEvents: parsed.events.length,
+  pagehideDeferredEvents: parsed.events.length,
   propagatedTraceparent: firstTraceparent,
   syncError: parsed.events[1].attributes.title,
   unhandledRejection: parsed.events[2].attributes.title,
@@ -569,16 +577,6 @@ function createExampleWindow(href) {
       listeners.set(type, (listeners.get(type) ?? []).filter((candidate) => candidate !== listener));
     }
   };
-}
-
-async function waitFor(predicate) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (predicate()) {
-      return;
-    }
-    await delay(10);
-  }
-  throw new Error("timed out waiting for lifecycle flush");
 }
 
 function delay(ms) {

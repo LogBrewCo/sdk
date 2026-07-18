@@ -1,6 +1,7 @@
 "use strict";
 
 const { SdkError } = require("@logbrew/sdk");
+const { lifecycleTransportFor, markLifecycleTransport } = require("./lifecycle-transport.cjs");
 
 const DEFAULT_PERSISTENCE_STORAGE_KEY = "logbrew:browser:persisted-batches";
 const DEFAULT_PERSISTENCE_LOCK_NAME = "logbrew:browser:persistence";
@@ -27,25 +28,20 @@ function createPersistentBrowserTransport({
   const lockName = persistenceLockName(storageKey);
   const ownerId = nextPersistentTransportOwnerId();
 
-  return {
+  const persistentTransport = {
     async send(apiKey, body) {
-      return withPersistenceLock(lockManager, lockName, async () => {
-        storePersistentBatch({
-          body,
-          maxStoredBatches,
-          maxStoredBytes,
-          onPersistError,
-          ownerId,
-          storage,
-          storageKey
-        });
-        const response = await transport.send(apiKey, body);
-        if (response?.statusCode >= 200 && response.statusCode < 300) {
-          removePersistentBatchesForOwner({ onPersistError, ownerId, storage, storageKey });
-        } else if (shouldClearPersistedBatch(response?.statusCode)) {
-          removePersistentBatch({ body, onPersistError, storage, storageKey });
-        }
-        return response;
+      return sendPersistentBatch({
+        apiKey,
+        body,
+        lockManager,
+        lockName,
+        maxStoredBatches,
+        maxStoredBytes,
+        onPersistError,
+        ownerId,
+        send: transport.send.bind(transport),
+        storage,
+        storageKey
       });
     },
     async replayStoredBatches(apiKey, { skipOwnBatches = false } = {}) {
@@ -67,6 +63,56 @@ function createPersistentBrowserTransport({
       return readPersistentBatches({ onPersistError, storage, storageKey }).length;
     }
   };
+  const lifecycleTransport = lifecycleTransportFor(transport);
+  if (lifecycleTransport) {
+    markLifecycleTransport(persistentTransport, (apiKey, body) => sendPersistentBatch({
+      apiKey,
+      body,
+      lockManager,
+      lockName,
+      maxStoredBatches,
+      maxStoredBytes,
+      onPersistError,
+      ownerId,
+      send: lifecycleTransport.send.bind(lifecycleTransport),
+      storage,
+      storageKey
+    }));
+  }
+  return persistentTransport;
+}
+
+async function sendPersistentBatch({
+  apiKey,
+  body,
+  lockManager,
+  lockName,
+  maxStoredBatches,
+  maxStoredBytes,
+  onPersistError,
+  ownerId,
+  send,
+  storage,
+  storageKey
+}) {
+  return withPersistenceLock(lockManager, lockName, async () => {
+    storePersistentBatch({
+      body,
+      maxStoredBatches,
+      maxStoredBytes,
+      onPersistError,
+      ownerId,
+      storage,
+      storageKey
+    });
+    const response = await send(apiKey, body);
+    if (response?.statusCode >= 200 && response.statusCode < 300) {
+      removePersistentBatchesForOwner({ onPersistError, ownerId, storage, storageKey });
+    } else if (shouldClearPersistedBatch(response?.statusCode)) {
+      removePersistentBatch({ body, onPersistError, storage, storageKey });
+    }
+    return response;
+  });
 }
 
 function storePersistentBatch({

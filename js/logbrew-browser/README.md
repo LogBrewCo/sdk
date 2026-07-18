@@ -31,7 +31,7 @@ logbrew.client.log("evt_log_001", new Date().toISOString(), {
 });
 ```
 
-`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, creates one W3C trace context for the browser session, flushes queued events when the page becomes hidden, receives `pagehide`, or comes back `online`, and returns a handle with `client`, `traceContext`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`.
+`installLogBrewBrowser()` attaches `error` and `unhandledrejection` listeners with `addEventListener()`, captures an initial page-view span, creates one W3C trace context for the browser session, and returns a handle with `client`, `traceContext`, `flush()`, `shutdown()`, `previewJson()`, and `uninstall()`. Its built-in fetch transport owns one coalesced lifecycle delivery for `pagehide` and hidden visibility, using only an authenticated, bounded `keepalive` request. Duplicate signals do not start another exit request, and `uninstall()` removes both listeners idempotently.
 
 Route changes in single-page apps are explicit. Use `installLogBrewBrowserNavigationInstrumentation()` when your app wants LogBrew to observe `history.pushState`, `history.replaceState`, and `popstate`, create a fresh route trace context, and capture a page-view span for each path change. It is not installed by default.
 
@@ -42,6 +42,8 @@ For browser apps, prefer a browser-scoped public key through `clientKey`. `apiKe
 By default, browser metadata keeps the current path without query string or hash. It does not include document title or user agent unless `includeDocumentTitle` or `includeUserAgent` is enabled. Pass `sanitizeMetadata(metadata, kind)` to remove or rewrite metadata before events are queued.
 
 Set `flushOnOnline: false`, `flushOnPageHide: false`, or `flushOnVisibilityHidden: false` if your app wants to own lifecycle or connectivity delivery itself.
+
+Lifecycle delivery never uses `sendBeacon`, a custom transport, or a fetch transport configured with `keepalive: false`. Unsupported or oversized work remains in the existing queue; it is not silently dropped. After importing `createFetchTransport`, an app can deliver work that exceeds a deliberately lowered keepalive limit with `logbrew.client.flush(createFetchTransport({ keepalive: false }))`. Authentication, rate-limit, and nonretryable responses pause additional lifecycle sends until an explicit successful `flush()`. The client key stays in the `Authorization` header and is never added to the endpoint, query string, request body, persistence metadata, or delivery health.
 
 ## Browser Error Source-Map Hints
 

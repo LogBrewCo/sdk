@@ -28,7 +28,9 @@ export type FetchTransportConfig = {
   endpoint?: string;
   fetchImpl?: typeof fetch;
   headers?: Record<string, string>;
+  /** Use bounded fetch keepalive. Defaults to true and is required for page-exit lifecycle delivery. */
   keepalive?: boolean;
+  /** Maximum UTF-8 body bytes accepted by keepalive delivery. Defaults to 64 KiB. */
   maxKeepaliveBodyBytes?: number;
 };
 
@@ -397,13 +399,16 @@ export type BrowserFlushDetails = {
 export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTransportConfig & {
   browserWindow?: Window;
   client?: LogBrewClient;
+  /** App-owned transports remain available to explicit flush, but are not invoked by page-exit lifecycle signals. */
   transport?: Transport;
   captureGlobalErrors?: boolean;
   captureUnhandledRejections?: boolean;
   capturePageViews?: boolean;
   flushOnCapture?: boolean;
   flushOnOnline?: boolean;
+  /** Allow the built-in bounded keepalive transport to deliver on pagehide. Defaults to true. */
   flushOnPageHide?: boolean;
+  /** Allow the built-in bounded keepalive transport to deliver when visibility becomes hidden. Defaults to true. */
   flushOnVisibilityHidden?: boolean;
   /** Map of sanitized browser frame paths or minified URLs to release-artifact Debug IDs. */
   debugIdMap?: Record<string, string>;

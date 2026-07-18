@@ -441,10 +441,14 @@ logbrew.client.log("evt_browser_pagehide_001", "2026-06-02T10:00:04Z", {
   logger: "browser.lifecycle"
 });
 browserWindow.dispatchEvent(new browserWindow.Event("pagehide"));
-await waitFor(() => transport.sentBodies.length === 6);
+await delay(10);
+if (transport.sentBodies.length !== 5 || logbrew.client.pendingEvents() !== 1) {
+  throw new Error("pagehide should defer app-owned transport work for explicit flush");
+}
+await logbrew.flush();
 const pagehidePayload = JSON.parse(transport.sentBodies[5]);
 if (pagehidePayload.events[0].id !== "evt_browser_pagehide_001") {
-  throw new Error(`pagehide did not flush the queued event: ${transport.sentBodies[5]}`);
+  throw new Error(`explicit flush did not deliver pagehide-deferred work: ${transport.sentBodies[5]}`);
 }
 
 logbrew.client.log("evt_browser_hidden_001", "2026-06-02T10:00:05Z", {
@@ -454,10 +458,14 @@ logbrew.client.log("evt_browser_hidden_001", "2026-06-02T10:00:05Z", {
 });
 setVisibilityState(browserWindow.document, "hidden");
 browserWindow.document.dispatchEvent(new browserWindow.Event("visibilitychange"));
-await waitFor(() => transport.sentBodies.length === 7);
+await delay(10);
+if (transport.sentBodies.length !== 6 || logbrew.client.pendingEvents() !== 1) {
+  throw new Error("hidden visibility should defer app-owned transport work for explicit flush");
+}
+await logbrew.flush();
 const hiddenPayload = JSON.parse(transport.sentBodies[6]);
 if (hiddenPayload.events[0].id !== "evt_browser_hidden_001") {
-  throw new Error(`hidden visibility did not flush the queued event: ${transport.sentBodies[6]}`);
+  throw new Error(`explicit flush did not deliver hidden-deferred work: ${transport.sentBodies[6]}`);
 }
 
 logbrew.uninstall();
@@ -483,8 +491,8 @@ const afterUninstallResponse = await logbrew.flush();
 if (afterUninstallResponse.statusCode !== 202 || transport.sentBodies.length !== 8) {
   throw new Error("manual flush after uninstall did not deliver pending work");
 }
-if (flushed.length !== 5) {
-  throw new Error(`expected five lifecycle/capture flush callbacks, got ${flushed.length}`);
+if (flushed.length !== 3) {
+  throw new Error(`expected three capture flush callbacks, got ${flushed.length}`);
 }
 
 const fetchRequests = [];
@@ -1288,7 +1296,7 @@ console.error(JSON.stringify({
   fetchSpan: browserFetchSpan.attributes.name,
   fetchStatus: fetchResponse.statusCode,
   fullAttempts: fullResponse.attempts,
-  hiddenFlush: hiddenPayload.events[0].id,
+  hiddenDeferred: hiddenPayload.events[0].id,
   interactionSpan: interactionSpans[0].attributes.name,
   inpSpan: interactionSpans[2].attributes.name,
   longAnimationFrameSpan: interactionSpans[1].attributes.name,
@@ -1297,7 +1305,7 @@ console.error(JSON.stringify({
   navigationPath: navigationSpan.attributes.metadata.path,
   navigationTraceparent,
   pagePath: pagePayload.events[0].attributes.metadata.path,
-  pagehideFlush: pagehidePayload.events[0].id,
+  pagehideDeferred: pagehidePayload.events[0].id,
   persistedDirectReplay: directPersistentReplay.delivered,
   persistedOnlineSends: persistentSends.length,
   propagatedTraceparent,
@@ -1710,7 +1718,7 @@ grep -q '"beaconEnvelope":"evt_beacon_log_001"' "$tmp_dir/browser-smoke.stderr.j
 grep -q '"browserDeliveries":8' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"documentTimingSpan":"browser.document /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"fullAttempts":2' "$tmp_dir/browser-smoke.stderr.json"
-grep -q '"hiddenFlush":"evt_browser_hidden_001"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"hiddenDeferred":"evt_browser_hidden_001"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"interactionSpan":"browser.interaction click /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"inpSpan":"browser.interaction_to_next_paint /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"longAnimationFrameSpan":"browser.long_animation_frame /products/:id"' "$tmp_dir/browser-smoke.stderr.json"
@@ -1719,7 +1727,7 @@ grep -q '"networkRoute":"/api/checkout"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"navigationPath":"/account"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"navigationTraceparent":"00-11111111111111111111111111111111-2222222222222222-01"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"pagePath":"/dashboard"' "$tmp_dir/browser-smoke.stderr.json"
-grep -q '"pagehideFlush":"evt_browser_pagehide_001"' "$tmp_dir/browser-smoke.stderr.json"
+grep -q '"pagehideDeferred":"evt_browser_pagehide_001"' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"persistedDirectReplay":1' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"persistedOnlineSends":3' "$tmp_dir/browser-smoke.stderr.json"
 grep -q '"propagatedTraceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"' "$tmp_dir/browser-smoke.stderr.json"
@@ -2176,7 +2184,8 @@ grep -q '"ok":true' "$tmp_dir/example-readme.stderr.json"
 grep -q '"path":"/dashboard"' "$tmp_dir/example-readme.stderr.json"
 node node_modules/@logbrew/browser/examples/index.mjs > "$tmp_dir/example-default.stdout.json" 2> "$tmp_dir/example-default.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/example-default.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":13' "$tmp_dir/example-default.stderr.json"
+grep -q '"pagehideDeferredEvents":13' "$tmp_dir/example-default.stderr.json"
+grep -q '"hiddenDeferredEvents":1' "$tmp_dir/example-default.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/example-default.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/example-default.stderr.json"
 grep -q '"interactionSpan":"browser.interaction click /settings"' "$tmp_dir/example-default.stderr.json"
@@ -2191,7 +2200,8 @@ npm --prefix node_modules/@logbrew/browser/examples run help > "$tmp_dir/npm-hel
 grep -q 'Default example: real-user-smoke' "$tmp_dir/npm-helper-help.txt"
 npm --prefix node_modules/@logbrew/browser/examples run --silent real-user-smoke > "$tmp_dir/npm-helper-smoke.stdout.json" 2> "$tmp_dir/npm-helper-smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/npm-helper-smoke.stdout.json" >/dev/null
-grep -q '"pagehideFlushEvents":13' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"pagehideDeferredEvents":13' "$tmp_dir/npm-helper-smoke.stderr.json"
+grep -q '"hiddenDeferredEvents":1' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"documentSpan":"browser.document /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"fetchSpan":"browser.fetch POST /api/checkout/:id"' "$tmp_dir/npm-helper-smoke.stderr.json"
 grep -q '"interactionSpan":"browser.interaction click /settings"' "$tmp_dir/npm-helper-smoke.stderr.json"

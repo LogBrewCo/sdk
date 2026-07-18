@@ -24,6 +24,8 @@ import {
   createBrowserNavigationTimingEvent,
   installLogBrewBrowserNavigationTimingInstrumentation
 } from "./navigation-timing.js";
+import { installBrowserLifecycleDelivery } from "./lifecycle-delivery.js";
+import { markLifecycleTransport } from "./lifecycle-transport.js";
 import { createPersistentBrowserTransport } from "./persistence.js";
 import {
   captureBrowserResourceTiming,
@@ -127,7 +129,7 @@ export function createFetchTransport({
   }
   validateKeepaliveBodyLimit(maxKeepaliveBodyBytes);
 
-  return {
+  const transport = {
     async send(apiKey, body) {
       if (keepalive && utf8ByteLength(body) > maxKeepaliveBodyBytes) {
         throw new TransportError(
@@ -156,6 +158,7 @@ export function createFetchTransport({
       }
     }
   };
+  return keepalive ? markLifecycleTransport(transport) : transport;
 }
 
 export function installLogBrewBrowser(options = {}) {
@@ -174,25 +177,18 @@ export function installLogBrewBrowser(options = {}) {
     }
     installed = false;
     removeListeners(browserWindow, listeners);
+    lifecycleDelivery.destroy();
   }, traceContext);
 
   const listeners = {
     error: (event) => {
       void captureBrowserError(event, context, options);
     },
-    pagehide: () => {
-      void flushForLifecycle(context, options, "pagehide");
-    },
     online: () => {
       void replayStoredBatchesThenFlush(context, options);
     },
     rejection: (event) => {
       void captureUnhandledRejection(event, context, options);
-    },
-    visibilitychange: () => {
-      if (browserWindow.document?.visibilityState === "hidden") {
-        void flushForLifecycle(context, options, "visibility_hidden");
-      }
     }
   };
 
@@ -202,15 +198,35 @@ export function installLogBrewBrowser(options = {}) {
   if (options.captureUnhandledRejections !== false) {
     browserWindow.addEventListener("unhandledrejection", listeners.rejection);
   }
-  if (options.flushOnPageHide !== false) {
-    browserWindow.addEventListener("pagehide", listeners.pagehide);
-  }
   if (options.flushOnOnline !== false) {
     browserWindow.addEventListener("online", listeners.online);
   }
-  if (options.flushOnVisibilityHidden !== false && typeof browserWindow.document?.addEventListener === "function") {
-    browserWindow.document.addEventListener("visibilitychange", listeners.visibilitychange);
-  }
+  const lifecycleDelivery = installBrowserLifecycleDelivery({
+    browserWindow,
+    client,
+    deliver: (lifecycleTransport, reason) => deliverBrowserLifecycle(context, options, lifecycleTransport, reason),
+    flushOnPageHide: options.flushOnPageHide !== false,
+    flushOnVisibilityHidden: options.flushOnVisibilityHidden !== false,
+    transport
+  });
+  const flush = context.flush;
+  context.flush = async () => {
+    const response = await flush();
+    lifecycleDelivery.recover();
+    return response;
+  };
+  const shutdown = context.shutdown;
+  context.shutdown = async () => {
+    lifecycleDelivery.suspend();
+    try {
+      const response = await shutdown();
+      lifecycleDelivery.destroy();
+      return response;
+    } catch (error) {
+      lifecycleDelivery.resume();
+      throw error;
+    }
+  };
   if (options.replayPersistedOnInstall !== false) {
     void replayStoredBrowserBatches(context);
   }
@@ -650,6 +666,28 @@ async function flushForLifecycle(context, options, reason) {
   return flushWithCallbacks(context, options, { reason });
 }
 
+async function deliverBrowserLifecycle(context, options, transport, reason) {
+  try {
+    const response = await context.client.flush(transport);
+    await callBrowserLifecycleCallback(options.onFlush, response, context, { reason });
+    return response;
+  } catch (error) {
+    await callBrowserLifecycleCallback(options.onCaptureError, error, context, { reason });
+    throw error;
+  }
+}
+
+async function callBrowserLifecycleCallback(callback, value, context, details) {
+  if (typeof callback !== "function") {
+    return;
+  }
+  try {
+    await callback(value, context, details);
+  } catch {
+    // Lifecycle delivery and callbacks must never interrupt the host page.
+  }
+}
+
 async function replayStoredBatchesThenFlush(context, options) {
   await replayStoredBrowserBatches(context);
   return flushForLifecycle(context, options, "online");
@@ -688,11 +726,7 @@ function removeListeners(browserWindow, listeners) {
   }
   browserWindow.removeEventListener("error", listeners.error);
   browserWindow.removeEventListener("unhandledrejection", listeners.rejection);
-  browserWindow.removeEventListener("pagehide", listeners.pagehide);
   browserWindow.removeEventListener("online", listeners.online);
-  if (typeof browserWindow.document?.removeEventListener === "function") {
-    browserWindow.document.removeEventListener("visibilitychange", listeners.visibilitychange);
-  }
 }
 
 function maybePreventDefault(event, options) {
