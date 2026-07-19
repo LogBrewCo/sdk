@@ -232,16 +232,31 @@ namespace LogBrew
         {
             var temporaryName = ".tmp-" + Guid.NewGuid().ToString("N");
             using var temporary = CreateNewReplacementFile(temporaryName);
+#if LOGBREW_TEST_HOOKS
+            DurableStoreTestHooks.Reach("replace-temporary-created");
+#endif
             var temporaryIdentity = RequireSingleLinkFile(temporary.SafeFileHandle);
             temporary.Write(record, 0, record.Length);
             temporary.Flush(flushToDisk: true);
             RequireIdentity(temporary.SafeFileHandle, temporaryIdentity, requireSingleLink: true);
+#if LOGBREW_TEST_HOOKS
+            DurableStoreTestHooks.Reach("replace-temporary-written");
+#endif
             using var existing = OpenExistingRecord(recordName, allowDelete: true);
+#if LOGBREW_TEST_HOOKS
+            DurableStoreTestHooks.Reach("replace-existing-opened");
+#endif
             RequirePrivateSingleLinkFile(existing.SafeFileHandle);
             ValidateOwnership();
+#if LOGBREW_TEST_HOOKS
+            DurableStoreTestHooks.Reach("replace-existing-validated");
+#endif
             if (OperatingSystem.IsWindows())
             {
                 ReplaceWindows(temporary.SafeFileHandle, recordName);
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach("replace-renamed");
+#endif
                 temporary.Flush(flushToDisk: true);
             }
             else if (RenameAtUnix(Descriptor(childHandle), temporaryName, Descriptor(childHandle), recordName) != 0)
@@ -251,8 +266,14 @@ namespace LogBrew
 
             FlushDirectory();
             using var published = OpenExistingRecord(recordName, allowWrite: true);
+#if LOGBREW_TEST_HOOKS
+            DurableStoreTestHooks.Reach("replace-published-opened");
+#endif
             RequireIdentity(published.SafeFileHandle, temporaryIdentity, requireSingleLink: true);
             ValidateOwnership();
+#if LOGBREW_TEST_HOOKS
+            DurableStoreTestHooks.Reach("replace-published-validated");
+#endif
         }
 
         internal void Delete(string recordName, bool allowMissing)
@@ -272,11 +293,6 @@ namespace LogBrew
                 {
                     handle.Dispose();
                     var error = Marshal.GetLastPInvokeError();
-#if LOGBREW_TEST_HOOKS
-                    DurableStoreTestHooks.Reach(
-                        "delete-open-failed-win32-"
-                        + error.ToString(System.Globalization.CultureInfo.InvariantCulture));
-#endif
                     if (allowMissing && IsWindowsMissingRecordError(error))
                     {
                         return;
@@ -287,27 +303,12 @@ namespace LogBrew
 
                 using (handle)
                 {
-#if LOGBREW_TEST_HOOKS
-                    DurableStoreTestHooks.Reach("delete-handle-opened");
-#endif
                     var identity = RequirePrivateSingleLinkFile(handle);
                     RequireIdentity(handle, identity, requireSingleLink: true);
-#if LOGBREW_TEST_HOOKS
-                    DurableStoreTestHooks.Reach("delete-handle-validated");
-#endif
                     MarkWindowsRecordForDeletion(handle);
-#if LOGBREW_TEST_HOOKS
-                    DurableStoreTestHooks.Reach("delete-marked");
-#endif
                 }
 
-#if LOGBREW_TEST_HOOKS
-                DurableStoreTestHooks.Reach("delete-handle-closed");
-#endif
                 RequireWindowsRecordMissing(path);
-#if LOGBREW_TEST_HOOKS
-                DurableStoreTestHooks.Reach("delete-missing-validated");
-#endif
                 return;
             }
 

@@ -51,15 +51,8 @@ namespace LogBrew
                 WindowsOpenExisting,
                 WindowsOpenReparsePoint,
                 IntPtr.Zero);
-            var error = Marshal.GetLastPInvokeError();
-            if (!reopened.IsInvalid || !IsWindowsMissingRecordError(error))
+            if (!reopened.IsInvalid || !IsWindowsMissingRecordError(Marshal.GetLastPInvokeError()))
             {
-#if LOGBREW_TEST_HOOKS
-                DurableStoreTestHooks.Reach(
-                    reopened.IsInvalid
-                        ? "delete-reopen-failed-win32-" + error.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                        : "delete-reopen-succeeded");
-#endif
                 throw StorageUnavailable();
             }
         }
@@ -73,11 +66,6 @@ namespace LogBrew
                 ref flags,
                 checked((uint)WindowsDeleteInformationSize())))
             {
-#if LOGBREW_TEST_HOOKS
-                DurableStoreTestHooks.Reach(
-                    "delete-mark-failed-win32-"
-                    + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture));
-#endif
                 throw StorageUnavailable();
             }
         }
