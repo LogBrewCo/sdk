@@ -356,13 +356,11 @@ internal static partial class DurableDeliveryContractTests
 
             using (var recordRoot = new TemporaryDirectory())
             {
-                var client = CreateDurableClient(
-                    recordRoot.Path,
-                    transport: new RecordingTransport(new object[] { 401 }));
-                client.Log("evt_broad_record", "2026-06-02T10:00:03Z", LogAttributes.Create("broad record", "info"));
-                AssertTrue(client.Shutdown().StatusCode == 401, "record setup shutdown changed");
+                var client = CreateDurableClient(recordRoot.Path);
+                AssertTrue(client.Shutdown().StatusCode == 204, "record setup shutdown changed");
                 var recordChild = System.IO.Path.Combine(recordRoot.Path, ".logbrew-delivery-v1");
-                var record = Directory.GetFiles(recordChild, "event-*.lbd").Single();
+                var record = System.IO.Path.Combine(recordChild, "event-broad.lbd");
+                File.WriteAllText(record, "unchanged-record");
                 SetBroadWindowsAccess(record, isDirectory: false);
                 var originalSecurity = WindowsSecurityBytes(record, isDirectory: false);
                 ExpectStorageFailure(() => CreateDurableClient(recordRoot.Path));
