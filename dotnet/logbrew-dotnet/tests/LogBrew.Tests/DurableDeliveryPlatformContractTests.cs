@@ -622,6 +622,23 @@ internal static partial class DurableDeliveryContractTests
     }
 
     [SupportedOSPlatform("windows")]
+    private static void SetOwnerOnlyWindowsFileAccess(string path)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var owner = identity.User ?? throw new InvalidOperationException("Windows test owner is unavailable");
+        var security = new FileSecurity();
+        security.SetOwner(owner);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new FileSystemAccessRule(
+            owner,
+            FileSystemRights.FullControl,
+            InheritanceFlags.None,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        new FileInfo(path).SetAccessControl(security);
+    }
+
+    [SupportedOSPlatform("windows")]
     private static byte[] WindowsSecurityBytes(string path, bool isDirectory)
     {
         return isDirectory

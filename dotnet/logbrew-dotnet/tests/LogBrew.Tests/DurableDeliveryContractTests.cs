@@ -662,20 +662,7 @@ internal static partial class DurableDeliveryContractTests
 
             AssertTrue(client.DeliveryHealth().PauseReason == DeliveryPauseReason.Storage, "interrupted temp record was silently ignored");
             AssertTrue(File.Exists(temporary), "interrupted temp record was silently deleted");
-            var lastCheckpoint = "none";
-            SetStoreCheckpoint(checkpoint => lastCheckpoint = checkpoint);
-            try
-            {
-                client.PurgeDurableDelivery();
-            }
-            catch (Exception error)
-            {
-                throw new InvalidOperationException("durable purge failed after " + lastCheckpoint, error);
-            }
-            finally
-            {
-                SetStoreCheckpoint(null);
-            }
+            client.PurgeDurableDelivery();
             AssertTrue(Directory.GetFiles(child).All(path => System.IO.Path.GetFileName(path) == ".owner"), "explicit purge left durable records");
             client.RecoverAutomaticDelivery();
             AssertTrue(client.DeliveryHealth().Lifecycle == DeliveryLifecycleState.Running, "purged client did not recover explicitly");
@@ -838,10 +825,13 @@ internal static partial class DurableDeliveryContractTests
 
     private static void MakeOwnerOnly(string path)
     {
-        if (!OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows())
         {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            SetOwnerOnlyWindowsFileAccess(path);
+            return;
         }
+
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
     private static void AssertTrue(bool condition, string message)
