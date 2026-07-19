@@ -28,6 +28,15 @@ RECOVERY_WITNESS_STAGES = (
     "recovery-health-ready",
     "recovery-shutdown-complete",
 )
+RECOVERY_FAILURE_STAGES = (
+    "recovery-failed-storage",
+    "recovery-failed-terminal",
+    "recovery-failed-retry-exhausted",
+    "recovery-failed-retry-scheduled",
+    "recovery-failed-in-flight",
+    "recovery-failed-scheduled",
+    "recovery-failed-idle",
+)
 CREATION_FAILURE_CASES = (
     (
         "durable-client-failed-validation",
@@ -198,6 +207,122 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
             write_test_witness(publishing, RECOVERY_WITNESS_STAGES[:1])
             (publishing / verifier.WITNESS_TEMPORARY_NAME).write_bytes(b"obs")
             self.assertEqual(verifier.inspect_recovery_witness(publishing), "invalid")
+
+    def test_recovery_witness_reports_one_fixed_failure_after_client_creation(self) -> None:
+        self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
+        verifier = load_verifier()
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            for marker in RECOVERY_FAILURE_STAGES:
+                with self.subTest(marker=marker):
+                    witness = root / marker
+                    write_test_witness(witness, RECOVERY_WITNESS_STAGES[:2])
+                    (witness / marker).write_bytes(verifier.WITNESS_VALUE)
+                    self.assertEqual(verifier.inspect_recovery_witness(witness), marker)
+
+            missing_client = root / "missing-client"
+            write_test_witness(missing_client, RECOVERY_WITNESS_STAGES[:1])
+            (missing_client / RECOVERY_FAILURE_STAGES[0]).write_bytes(verifier.WITNESS_VALUE)
+            self.assertEqual(verifier.inspect_recovery_witness(missing_client), "invalid")
+
+            duplicate = root / "duplicate"
+            write_test_witness(duplicate, RECOVERY_WITNESS_STAGES[:2])
+            for marker in RECOVERY_FAILURE_STAGES[:2]:
+                (duplicate / marker).write_bytes(verifier.WITNESS_VALUE)
+            self.assertEqual(verifier.inspect_recovery_witness(duplicate), "invalid")
+
+            after_success = root / "after-success"
+            write_test_witness(after_success, RECOVERY_WITNESS_STAGES[:3])
+            (after_success / RECOVERY_FAILURE_STAGES[0]).write_bytes(verifier.WITNESS_VALUE)
+            self.assertEqual(verifier.inspect_recovery_witness(after_success), "invalid")
+
+            malformed = root / "malformed"
+            write_test_witness(malformed, RECOVERY_WITNESS_STAGES[:2])
+            (malformed / RECOVERY_FAILURE_STAGES[0]).write_bytes(b"unsafe")
+            self.assertEqual(verifier.inspect_recovery_witness(malformed), "invalid")
+
+    def test_installed_child_classifies_only_fixed_recovery_health(self) -> None:
+        smoke = SMOKE.read_text(encoding="utf-8")
+
+        for marker in RECOVERY_FAILURE_STAGES:
+            self.assertIn(f'"{marker}"', smoke)
+        self.assertIn("ClassifyRecoveryFailure", smoke)
+        self.assertIn("health.PauseReason", smoke)
+        self.assertIn("health.LastOutcome", smoke)
+        self.assertIn("health.InFlight", smoke)
+        self.assertIn("health.WakePending", smoke)
+        self.assertNotIn("health.ToString", smoke)
+
+    def test_recovery_storage_probe_reports_only_fixed_header_and_inventory(self) -> None:
+        self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
+        verifier = load_verifier()
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            child = root / ".logbrew-delivery-v1"
+            child.mkdir()
+            (child / ".owner").write_bytes(b"owner")
+            state = child / "delivery-state.lbd"
+            event_names = (
+                "event-00000000000000000001.lbd",
+                "event-00000000000000000002.lbd",
+            )
+            for event_name in event_names:
+                (child / event_name).write_bytes(b"encrypted")
+
+            state.write_bytes(b"LBDOTN01\x01\x02")
+            self.assertEqual(
+                verifier.inspect_recovery_storage(root),
+                "recovery-storage-prefix-two-events",
+            )
+            temporary = child / (".tmp-" + ("a" * 32))
+            temporary.write_bytes(b"LBDOTN01\x01\x03")
+            self.assertEqual(
+                verifier.inspect_recovery_storage(root),
+                "recovery-storage-acknowledgement-replacement-pending",
+            )
+            temporary.unlink()
+            state.write_bytes(b"LBDOTN01\x01\x03")
+            self.assertEqual(
+                verifier.inspect_recovery_storage(root),
+                "recovery-storage-acknowledged-two-events",
+            )
+
+            (child / event_names[0]).unlink()
+            self.assertEqual(
+                verifier.inspect_recovery_storage(root),
+                "recovery-storage-acknowledged-one-event",
+            )
+            (child / event_names[1]).unlink()
+            self.assertEqual(
+                verifier.inspect_recovery_storage(root),
+                "recovery-storage-acknowledged-no-events",
+            )
+            state.write_bytes(b"LBDOTN01\x01\x02")
+            self.assertEqual(
+                verifier.inspect_recovery_storage(root),
+                "recovery-storage-prefix-no-events",
+            )
+            state.unlink()
+            self.assertEqual(
+                verifier.inspect_recovery_storage(root),
+                "recovery-storage-no-state",
+            )
+
+            (child / "unexpected").write_bytes(b"unsafe")
+            self.assertEqual(verifier.inspect_recovery_storage(root), "invalid")
+
+            (child / "unexpected").unlink()
+            (child / ".tmp-lookalike").write_bytes(b"LBDOTN01\x01\x03")
+            self.assertEqual(verifier.inspect_recovery_storage(root), "invalid")
+
+    def test_failed_recovery_reports_fixed_storage_probe(self) -> None:
+        smoke = SMOKE.read_text(encoding="utf-8")
+
+        self.assertIn('recovery-storage-stage "$store_root"', smoke)
+        self.assertIn("installed recovery storage state %s", smoke)
+        self.assertNotIn("cat \"$store_root", smoke)
 
     def test_external_kill_classification_is_fixed_and_redacted(self) -> None:
         self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")

@@ -39,7 +39,6 @@ namespace LogBrew
         private const uint WindowsWriteThrough = 0x80000000;
         private const uint WindowsCreateNew = 1;
         private const uint WindowsMoveWriteThrough = 8;
-        private const uint WindowsMoveReplaceExisting = 1;
         private const int MaximumPurgeEntries = 4096;
         private readonly string parentPath;
         private readonly string childPath;
@@ -220,7 +219,7 @@ namespace LogBrew
         internal void Replace(string recordName, byte[] record)
         {
             var temporaryName = ".tmp-" + Guid.NewGuid().ToString("N");
-            using var temporary = CreateNewRecordFile(temporaryName);
+            using var temporary = CreateNewReplacementFile(temporaryName);
             var temporaryIdentity = RequireSingleLinkFile(temporary.SafeFileHandle);
             temporary.Write(record, 0, record.Length);
             temporary.Flush(flushToDisk: true);
@@ -230,13 +229,8 @@ namespace LogBrew
             ValidateOwnership();
             if (OperatingSystem.IsWindows())
             {
-                if (!MoveFileWindows(
-                    Path.Combine(childPath, temporaryName),
-                    Path.Combine(childPath, recordName),
-                    WindowsMoveReplaceExisting | WindowsMoveWriteThrough))
-                {
-                    throw StorageUnavailable();
-                }
+                ReplaceWindows(temporary.SafeFileHandle, recordName);
+                temporary.Flush(flushToDisk: true);
             }
             else if (RenameAtUnix(Descriptor(childHandle), temporaryName, Descriptor(childHandle), recordName) != 0)
             {
@@ -327,12 +321,17 @@ namespace LogBrew
 
         private FileStream CreateNewRecordFile(string name)
         {
+            return CreateNewRecordFile(name, WindowsRecordCreationAccess());
+        }
+
+        private FileStream CreateNewRecordFile(string name, uint windowsAccess)
+        {
             SafeFileHandle handle;
             if (OperatingSystem.IsWindows())
             {
                 handle = RequireValid(CreateFileWindows(
                     Path.Combine(childPath, name),
-                    WindowsGenericRead | WindowsGenericWrite,
+                    windowsAccess,
                     WindowsShareRead | WindowsShareDelete,
                     IntPtr.Zero,
                     WindowsCreateNew,
@@ -392,55 +391,6 @@ namespace LogBrew
             return WindowsShareRead
                 | (allowDelete ? WindowsShareDelete : 0)
                 | (allowWrite ? WindowsShareWrite : 0);
-        }
-
-        private static uint WindowsDeleteAccess()
-        {
-            return WindowsGenericRead | WindowsDelete;
-        }
-
-        private static uint WindowsDeleteFlags()
-        {
-            return WindowsOpenReparsePoint;
-        }
-
-        private static int WindowsDeleteInformationClass()
-        {
-            return 4;
-        }
-
-        private static bool IsWindowsMissingRecordError(int error)
-        {
-            return error == 2 || error == 3;
-        }
-
-        private static void RequireWindowsRecordMissing(string path)
-        {
-            using var reopened = CreateFileWindows(
-                path,
-                WindowsGenericRead,
-                WindowsShareRead | WindowsShareDelete,
-                IntPtr.Zero,
-                WindowsOpenExisting,
-                WindowsOpenReparsePoint,
-                IntPtr.Zero);
-            if (!reopened.IsInvalid || !IsWindowsMissingRecordError(Marshal.GetLastPInvokeError()))
-            {
-                throw StorageUnavailable();
-            }
-        }
-
-        private static void MarkWindowsRecordForDeletion(SafeFileHandle handle)
-        {
-            var delete = (byte)1;
-            if (!SetFileInformationByHandleWindows(
-                handle,
-                WindowsDeleteInformationClass(),
-                ref delete,
-                sizeof(byte)))
-            {
-                throw StorageUnavailable();
-            }
         }
 
         private void PublishWithoutReplacement(string temporaryName, string recordName)
@@ -827,15 +777,6 @@ namespace LogBrew
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static partial bool MoveFileWindows(string existingPath, string newPath, uint flags);
-
-        [LibraryImport("kernel32.dll", EntryPoint = "SetFileInformationByHandle", SetLastError = true)]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static partial bool SetFileInformationByHandleWindows(
-            SafeFileHandle handle,
-            int informationClass,
-            ref byte information,
-            uint bufferSize);
 
     }
 

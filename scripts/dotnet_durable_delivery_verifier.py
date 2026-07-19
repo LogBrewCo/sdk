@@ -75,6 +75,17 @@ RECOVERY_WITNESS_STAGES = (
     "recovery-health-ready",
     "recovery-shutdown-complete",
 )
+RECOVERY_FAILURE_STAGES = frozenset(
+    {
+        "recovery-failed-storage",
+        "recovery-failed-terminal",
+        "recovery-failed-retry-exhausted",
+        "recovery-failed-retry-scheduled",
+        "recovery-failed-in-flight",
+        "recovery-failed-scheduled",
+        "recovery-failed-idle",
+    }
+)
 SUPERVISOR_WITNESS_STAGES = ("external-kill-requested", "post-kill-reaped")
 CREATION_FAILURE_STAGES = {
     "durable-client-failed-validation": AdmissionOutcome.DURABLE_CLIENT_VALIDATION_FAILURE,
@@ -301,8 +312,23 @@ def inspect_recovery_witness(witness_directory: Path) -> str:
     except OSError:
         return "invalid"
 
-    if not entries.keys() <= set(RECOVERY_WITNESS_STAGES):
+    allowed_entries = set(RECOVERY_WITNESS_STAGES) | RECOVERY_FAILURE_STAGES
+    if not entries.keys() <= allowed_entries:
         return "invalid"
+
+    failure_entries = entries.keys() & RECOVERY_FAILURE_STAGES
+    if failure_entries:
+        if len(failure_entries) != 1:
+            return "invalid"
+        expected_success = set(RECOVERY_WITNESS_STAGES[:2])
+        if entries.keys() - failure_entries != expected_success:
+            return "invalid"
+        failure_stage = next(iter(failure_entries))
+        if not all(_is_valid_committed_witness(entries[stage]) for stage in expected_success):
+            return "invalid"
+        if not _is_valid_committed_witness(entries[failure_stage]):
+            return "invalid"
+        return failure_stage
 
     last_stage = "none"
     found_gap = False
@@ -315,6 +341,81 @@ def inspect_recovery_witness(witness_directory: Path) -> str:
             return "invalid"
         last_stage = stage
     return last_stage
+
+
+def _is_regular_single_link(path: Path) -> bool:
+    try:
+        details = path.stat(follow_symlinks=False)
+        if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1:
+            return False
+        with path.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            return (
+                stat.S_ISREG(opened.st_mode)
+                and opened.st_nlink == 1
+                and os.path.samestat(details, opened)
+            )
+    except OSError:
+        return False
+
+
+def _durable_record_kind(path: Path) -> int | None:
+    try:
+        with path.open("rb") as stream:
+            header = stream.read(10)
+    except OSError:
+        return None
+    if len(header) != 10 or header[:8] != b"LBDOTN01" or header[8] != 1:
+        return None
+    return header[9]
+
+
+def inspect_recovery_storage(parent_directory: Path) -> str:
+    child = parent_directory / ".logbrew-delivery-v1"
+    state_name = "delivery-state.lbd"
+    event_names = (
+        "event-00000000000000000001.lbd",
+        "event-00000000000000000002.lbd",
+    )
+    try:
+        if not child.is_dir():
+            return "invalid"
+        entries = {path.name: path for path in child.iterdir()}
+    except OSError:
+        return "invalid"
+    temporary_names = tuple(name for name in entries if name.startswith(".tmp-"))
+    if len(temporary_names) > 1:
+        return "invalid"
+    temporary_name = temporary_names[0] if temporary_names else None
+    if temporary_name is not None and (
+        len(temporary_name) != 37
+        or any(character not in "0123456789abcdef" for character in temporary_name[5:])
+    ):
+        return "invalid"
+    allowed_names = {".owner", state_name, *event_names}
+    if temporary_name is not None:
+        allowed_names.add(temporary_name)
+    if not entries.keys() <= allowed_names or ".owner" not in entries:
+        return "invalid"
+    if not all(_is_regular_single_link(path) for path in entries.values()):
+        return "invalid"
+
+    present_events = sum(event_name in entries for event_name in event_names)
+    event_count_label = ("no-events", "one-event", "two-events")[present_events]
+    state = entries.get(state_name)
+    if state is None:
+        return "recovery-storage-no-state" if present_events == 0 else "invalid"
+    state_kind = _durable_record_kind(state)
+    if temporary_name is not None:
+        if (
+            present_events == 2
+            and state_kind == 2
+            and _durable_record_kind(entries[temporary_name]) == 3
+        ):
+            return "recovery-storage-acknowledgement-replacement-pending"
+        return "invalid"
+    kind = {2: "prefix", 3: "acknowledged"}.get(state_kind)
+    return f"recovery-storage-{kind}-{event_count_label}" if kind else "invalid"
 
 
 def inspect_admission_witness(
@@ -524,6 +625,9 @@ def main(arguments: list[str]) -> int:
             return 0 if serve_intake(Path(arguments[1]), arguments[2]) else 1
         if len(arguments) == 2 and arguments[0] == "recovery-stage":
             print(inspect_recovery_witness(Path(arguments[1])))
+            return 0
+        if len(arguments) == 2 and arguments[0] == "recovery-storage-stage":
+            print(inspect_recovery_storage(Path(arguments[1])))
             return 0
         if len(arguments) >= 8 and arguments[0] == "kill-after-ready":
             separator = arguments.index("--", 6)

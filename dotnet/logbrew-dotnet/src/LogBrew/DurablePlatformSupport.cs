@@ -30,10 +30,21 @@ namespace LogBrew
                 throw new SdkException("configuration_error", "durable delivery is not supported on this platform");
             }
 
+            if (OperatingSystem.IsWindows()
+                && !OperatingSystem.IsWindowsVersionAtLeast(10, 0, WindowsMinimumBuild()))
+            {
+                throw new SdkException("configuration_error", "durable delivery is not supported on this Windows version");
+            }
+
             if (!OperatingSystem.IsWindows() && !DurableUnixNative.IsAvailable())
             {
                 throw new SdkException("storage_error", "durable delivery storage is unavailable");
             }
+        }
+
+        internal static int WindowsMinimumBuild()
+        {
+            return 16299;
         }
     }
 

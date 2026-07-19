@@ -138,6 +138,35 @@ internal static partial class DurableDeliveryContractTests
         }
     }
 
+    private static void WindowsEncryptedDeliveryVersionFloorIsExplicit()
+    {
+        var platform = typeof(LogBrewClient).Assembly.GetType("LogBrew.DurablePlatformSupport", throwOnError: true)!;
+        var minimumBuild = platform.GetMethod("WindowsMinimumBuild", BindingFlags.Static | BindingFlags.NonPublic);
+        AssertTrue(minimumBuild != null, "Windows durable version floor is missing");
+        AssertTrue((int)minimumBuild!.Invoke(null, null)! == 16299, "Windows durable version floor changed");
+    }
+
+    private static void WindowsReplacementIsHandleBoundAndPosixSafe()
+    {
+        var fileSystem = typeof(LogBrewClient).Assembly.GetType("LogBrew.DurableStoreFileSystem", throwOnError: true)!;
+        var creationAccess = fileSystem.GetMethod("WindowsRecordCreationAccess", BindingFlags.Static | BindingFlags.NonPublic);
+        var access = fileSystem.GetMethod("WindowsReplacementAccess", BindingFlags.Static | BindingFlags.NonPublic);
+        var informationClass = fileSystem.GetMethod("WindowsReplacementInformationClass", BindingFlags.Static | BindingFlags.NonPublic);
+        var flags = fileSystem.GetMethod("WindowsReplacementFlags", BindingFlags.Static | BindingFlags.NonPublic);
+        var fileNameOffset = fileSystem.GetMethod("WindowsReplacementFileNameOffset", BindingFlags.Static | BindingFlags.NonPublic);
+        AssertTrue(
+            creationAccess != null && access != null && informationClass != null && flags != null && fileNameOffset != null,
+            "Windows handle-bound replacement contract is missing");
+
+        AssertTrue((uint)creationAccess!.Invoke(null, null)! == 0xC0000000, "Windows record creation access changed");
+        AssertTrue((uint)access!.Invoke(null, null)! == 0xC0010000, "Windows replacement access changed");
+        AssertTrue((int)informationClass!.Invoke(null, null)! == 22, "Windows replacement information class changed");
+        AssertTrue((uint)flags!.Invoke(null, null)! == 3, "Windows replacement flags changed");
+        AssertTrue(
+            (int)fileNameOffset!.Invoke(null, null)! == (IntPtr.Size == 8 ? 20 : 12),
+            "Windows replacement buffer layout changed");
+    }
+
     private static void WindowsPublishedRecordValidationSharesActiveWriter()
     {
         var fileSystem = typeof(LogBrewClient).Assembly.GetType("LogBrew.DurableStoreFileSystem", throwOnError: true)!;
@@ -156,12 +185,23 @@ internal static partial class DurableDeliveryContractTests
         var access = fileSystem.GetMethod("WindowsDeleteAccess", BindingFlags.Static | BindingFlags.NonPublic);
         var flags = fileSystem.GetMethod("WindowsDeleteFlags", BindingFlags.Static | BindingFlags.NonPublic);
         var informationClass = fileSystem.GetMethod("WindowsDeleteInformationClass", BindingFlags.Static | BindingFlags.NonPublic);
+        var informationFlags = fileSystem.GetMethod("WindowsDeleteInformationFlags", BindingFlags.Static | BindingFlags.NonPublic);
+        var informationSize = fileSystem.GetMethod("WindowsDeleteInformationSize", BindingFlags.Static | BindingFlags.NonPublic);
         var isMissing = fileSystem.GetMethod("IsWindowsMissingRecordError", BindingFlags.Static | BindingFlags.NonPublic);
-        AssertTrue(access != null && flags != null && informationClass != null && isMissing != null, "Windows handle-bound deletion contract is missing");
+        AssertTrue(
+            access != null
+                && flags != null
+                && informationClass != null
+                && informationFlags != null
+                && informationSize != null
+                && isMissing != null,
+            "Windows handle-bound deletion contract is missing");
 
         AssertTrue((uint)access!.Invoke(null, null)! == 0x80010000, "Windows deletion access changed");
         AssertTrue((uint)flags!.Invoke(null, null)! == 0x00200000, "Windows deletion flags changed");
-        AssertTrue((int)informationClass!.Invoke(null, null)! == 4, "Windows deletion information class changed");
+        AssertTrue((int)informationClass!.Invoke(null, null)! == 21, "Windows deletion information class changed");
+        AssertTrue((uint)informationFlags!.Invoke(null, null)! == 3, "Windows deletion information flags changed");
+        AssertTrue((int)informationSize!.Invoke(null, null)! == 4, "Windows deletion information size changed");
         AssertTrue((bool)isMissing!.Invoke(null, new object[] { 2 })!, "missing-file deletion was not idempotent");
         AssertTrue((bool)isMissing.Invoke(null, new object[] { 3 })!, "missing-path deletion was not idempotent");
         AssertTrue(!(bool)isMissing.Invoke(null, new object[] { 5 })!, "access-denied deletion was accepted as missing");

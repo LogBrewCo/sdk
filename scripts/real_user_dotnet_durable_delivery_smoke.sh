@@ -205,7 +205,7 @@ static void Require(bool condition, string message)
     }
 }
 
-static void WaitUntil(Func<bool> condition, TimeSpan timeout, string message)
+static bool WaitUntil(Func<bool> condition, TimeSpan timeout)
 {
     var stopwatch = Stopwatch.StartNew();
     while (!condition() && stopwatch.Elapsed < timeout)
@@ -213,7 +213,7 @@ static void WaitUntil(Func<bool> condition, TimeSpan timeout, string message)
         Thread.Sleep(10);
     }
 
-    Require(condition(), message);
+    return condition();
 }
 
 static void RecordAdmissionWitness(string witnessDirectory, string stage)
@@ -251,6 +251,13 @@ static void RecordAdmissionWitness(string witnessDirectory, string stage)
         case "recovery-pending-empty":
         case "recovery-health-ready":
         case "recovery-shutdown-complete":
+        case "recovery-failed-storage":
+        case "recovery-failed-terminal":
+        case "recovery-failed-retry-exhausted":
+        case "recovery-failed-retry-scheduled":
+        case "recovery-failed-in-flight":
+        case "recovery-failed-scheduled":
+        case "recovery-failed-idle":
             break;
         default:
             throw new InvalidOperationException("invalid admission witness stage");
@@ -284,6 +291,41 @@ static string ClassifyDurableClientCreationFailure(string code)
         "state_error" => "durable-client-failed-state",
         _ => "durable-client-failed-sdk-unknown",
     };
+}
+
+static string ClassifyRecoveryFailure(DeliveryHealthSnapshot health)
+{
+    if (health.PauseReason == DeliveryPauseReason.Storage)
+    {
+        return "recovery-failed-storage";
+    }
+
+    if (health.PauseReason == DeliveryPauseReason.RetryExhausted)
+    {
+        return "recovery-failed-retry-exhausted";
+    }
+
+    if (health.PauseReason != DeliveryPauseReason.None)
+    {
+        return "recovery-failed-terminal";
+    }
+
+    if (health.LastOutcome == DeliveryOutcome.RetryScheduled)
+    {
+        return "recovery-failed-retry-scheduled";
+    }
+
+    if (health.InFlight)
+    {
+        return "recovery-failed-in-flight";
+    }
+
+    if (health.WakePending || health.Activity == DeliveryActivityState.Scheduled)
+    {
+        return "recovery-failed-scheduled";
+    }
+
+    return "recovery-failed-idle";
 }
 
 static void RequireExpectedRuntime()
@@ -448,9 +490,10 @@ if (mode == "admit")
     RecordAdmissionWitness(admissionWitnessDirectory!, "first-admission-persisted");
     client.Log(SecondId, "2026-06-02T10:00:01Z", LogAttributes.Create("durable second", "info"));
     RecordAdmissionWitness(admissionWitnessDirectory!, "second-admission-persisted");
-    WaitUntil(
-        () => client.DeliveryHealth().LastOutcome == DeliveryOutcome.RetryScheduled,
-        TimeSpan.FromSeconds(10),
+    Require(
+        WaitUntil(
+            () => client.DeliveryHealth().LastOutcome == DeliveryOutcome.RetryScheduled,
+            TimeSpan.FromSeconds(10)),
         "initial retry was not scheduled");
     RecordAdmissionWitness(admissionWitnessDirectory!, "retry-observed");
     Require(client.PendingEvents() == 2, "failed prefix was not retained");
@@ -459,10 +502,16 @@ if (mode == "admit")
 }
 
 Require(mode == "recover", "unsupported mode");
-WaitUntil(
+if (!WaitUntil(
     () => client.DeliveryHealth().AcceptedEvents == 2,
-    TimeSpan.FromSeconds(10),
-    "recovered prefix was not accepted");
+    TimeSpan.FromSeconds(10)))
+{
+    RecordAdmissionWitness(
+        recoveryWitnessDirectory!,
+        ClassifyRecoveryFailure(client.DeliveryHealth()));
+    Environment.ExitCode = 1;
+    return;
+}
 RecordAdmissionWitness(recoveryWitnessDirectory!, "recovery-accepted");
 Require(client.PendingEvents() == 0, "accepted prefix remained queued");
 RecordAdmissionWitness(recoveryWitnessDirectory!, "recovery-pending-empty");
@@ -591,7 +640,9 @@ if ! run_bounded \
   "$tmp_dir/recover.stderr" \
   dotnet "$app_dll" recover "$store_root" "$endpoint" "$package_version" "$recovery_witness_dir"; then
   recovery_stage="$(python3 "$verifier" recovery-stage "$recovery_witness_dir")"
+  recovery_storage_stage="$(python3 "$verifier" recovery-storage-stage "$store_root")"
   printf 'installed recovery failed after %s\n' "$recovery_stage" >&2
+  printf 'installed recovery storage state %s\n' "$recovery_storage_stage" >&2
   exit 1
 fi
 recovery_stage="$(python3 "$verifier" recovery-stage "$recovery_witness_dir")"

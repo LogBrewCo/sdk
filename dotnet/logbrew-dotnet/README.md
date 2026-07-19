@@ -88,7 +88,7 @@ Retryable `408` and `5xx` responses use capped jitter with zero to ten configure
 
 ### Encrypted Restart Delivery (.NET 8+)
 
-Use `CreateAutomaticDurable(...)` when one .NET 8 process should retain accepted telemetry across application restarts. The application authorizes a parent directory and supplies a 256-bit key; the SDK owns one fixed child directory and never persists the key.
+Use `CreateAutomaticDurable(...)` when one .NET 8 process should retain accepted telemetry across application restarts. The application authorizes a parent directory and supplies a 256-bit key; the SDK owns one fixed child directory and never persists the key. Windows requires Windows 10 version 1709 (build 16299) or newer.
 
 ```csharp
 using System;

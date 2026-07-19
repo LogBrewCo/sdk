@@ -25,6 +25,8 @@ internal static partial class DurableDeliveryContractTests
         UnixOpenImportsMatchVariadicArity();
         LinuxOpenFlagsMatchArchitectureAbi();
         WindowsFileInformationMatchesNativeAbi();
+        WindowsEncryptedDeliveryVersionFloorIsExplicit();
+        WindowsReplacementIsHandleBoundAndPosixSafe();
         WindowsPublishedRecordValidationSharesActiveWriter();
         WindowsDeletionIsHandleBoundAndFailsClosed();
         MacOSX64StoreIdentityUsesModernInodeAbi();
@@ -53,7 +55,7 @@ internal static partial class DurableDeliveryContractTests
         LocalAcknowledgementFailureRetainsExactPrefix();
         KeyRotationSurvivesRecordReplacementExit();
         RecoveryAdmissionIsBoundedBeforeRotation();
-        return 40;
+        return 42;
     }
 
     internal static int RunChild(string[] arguments)
