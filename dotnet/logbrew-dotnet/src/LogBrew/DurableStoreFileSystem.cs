@@ -272,6 +272,11 @@ namespace LogBrew
                 {
                     handle.Dispose();
                     var error = Marshal.GetLastPInvokeError();
+#if LOGBREW_TEST_HOOKS
+                    DurableStoreTestHooks.Reach(
+                        "delete-open-failed-win32-"
+                        + error.ToString(System.Globalization.CultureInfo.InvariantCulture));
+#endif
                     if (allowMissing && IsWindowsMissingRecordError(error))
                     {
                         return;
@@ -282,12 +287,27 @@ namespace LogBrew
 
                 using (handle)
                 {
+#if LOGBREW_TEST_HOOKS
+                    DurableStoreTestHooks.Reach("delete-handle-opened");
+#endif
                     var identity = RequirePrivateSingleLinkFile(handle);
                     RequireIdentity(handle, identity, requireSingleLink: true);
+#if LOGBREW_TEST_HOOKS
+                    DurableStoreTestHooks.Reach("delete-handle-validated");
+#endif
                     MarkWindowsRecordForDeletion(handle);
+#if LOGBREW_TEST_HOOKS
+                    DurableStoreTestHooks.Reach("delete-marked");
+#endif
                 }
 
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach("delete-handle-closed");
+#endif
                 RequireWindowsRecordMissing(path);
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach("delete-missing-validated");
+#endif
                 return;
             }
 
