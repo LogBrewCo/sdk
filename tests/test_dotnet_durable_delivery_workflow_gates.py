@@ -1,7 +1,9 @@
+import http.client
 import importlib.util
 import io
 import sys
 import tempfile
+import threading
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -113,6 +115,45 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
                 self.assertGreater(server.server_address[1], 0)
             finally:
                 server.server_close()
+
+    def test_fake_intake_closes_each_completed_response(self) -> None:
+        self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
+        verifier = load_verifier()
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            server = verifier.create_intake_server(
+                Path(temporary_directory),
+                "Bearer fixed-test-value",
+            )
+            worker = threading.Thread(target=server.handle_request)
+            worker.start()
+            connection = http.client.HTTPConnection(
+                server.server_address[0],
+                server.server_address[1],
+                timeout=5,
+            )
+            try:
+                connection.request(
+                    "POST",
+                    "/v1/events",
+                    body=b"{}",
+                    headers={
+                        "authorization": "Bearer fixed-test-value",
+                        "content-type": "application/json; charset=utf-8",
+                    },
+                )
+                response = connection.getresponse()
+                response.read()
+                closes_connection = response.will_close
+                connection_header = response.getheader("connection")
+            finally:
+                connection.close()
+                worker.join(timeout=5)
+                server.server_close()
+
+            self.assertFalse(worker.is_alive(), "fake intake kept the client connection open")
+            self.assertTrue(closes_connection)
+            self.assertEqual(connection_header, "close")
 
     def test_windows_local_feed_uses_native_file_uri(self) -> None:
         self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")

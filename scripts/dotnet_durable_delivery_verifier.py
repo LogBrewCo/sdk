@@ -176,7 +176,9 @@ def create_intake_server(root: Path, expected_auth: str) -> IntakeServer:
             self.server.request_index = index
             self.send_response(503 if index == 1 else 202)
             self.send_header("content-length", "0")
+            self.send_header("connection", "close")
             self.end_headers()
+            self.close_connection = True
 
         def log_message(self, format: str, *args: object) -> None:
             return
