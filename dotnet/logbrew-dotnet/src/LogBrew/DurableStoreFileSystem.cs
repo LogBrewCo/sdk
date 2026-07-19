@@ -77,11 +77,23 @@ namespace LogBrew
             {
                 var childPath = Path.Combine(parentPath, ChildDirectoryName);
                 parentHandle = OpenDirectory(parentPath);
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach("store-parent-opened");
+#endif
                 childHandle = OpenOrCreateChildDirectory(parentHandle, childPath);
                 RequirePrivateDirectory(childHandle);
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach("store-child-opened");
+#endif
                 ownerHandle = OpenAndLockOwner(childHandle, Path.Combine(childPath, OwnerFileName));
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach("store-owner-opened");
+#endif
                 var fileSystem = new DurableStoreFileSystem(parentPath, childPath, parentHandle, childHandle, ownerHandle);
                 fileSystem.ValidateOwnership();
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach("store-ownership-validated");
+#endif
                 ownsResources = true;
                 return fileSystem;
             }

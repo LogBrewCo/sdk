@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -10,10 +11,18 @@ using LogBrew;
 internal static partial class DurableDeliveryContractTests
 {
     private const string ApiKey = "LOGBREW_API_KEY";
+    private static readonly string[] StoreOpenCheckpoints =
+    {
+        "store-parent-opened",
+        "store-child-opened",
+        "store-owner-opened",
+        "store-ownership-validated",
+    };
 
     internal static int Run()
     {
         ManualDefaultsRemainUnchanged();
+        StoreOpenCheckpointsAreFixedAndComplete();
         DurableAutomaticDeliveryIsExplicit();
         DurableOptionsCopyCallerKeys();
         SupportedPlatformPairsAreExplicit();
@@ -55,7 +64,7 @@ internal static partial class DurableDeliveryContractTests
         LocalAcknowledgementFailureRetainsExactPrefix();
         KeyRotationSurvivesRecordReplacementExit();
         RecoveryAdmissionIsBoundedBeforeRotation();
-        return 42;
+        return 43;
     }
 
     internal static int RunChild(string[] arguments)
@@ -179,6 +188,38 @@ internal static partial class DurableDeliveryContractTests
         client.Log("evt_manual_default", "2026-06-02T10:00:03Z", LogAttributes.Create("manual", "info"));
         AssertTrue(client.PendingEvents() == 1, "manual factory stopped queueing locally");
         AssertTrue(client.Shutdown(RecordingTransport.AlwaysAccept()).StatusCode == 202, "manual shutdown changed");
+    }
+
+    private static void StoreOpenCheckpointsAreFixedAndComplete()
+    {
+        using var root = new TemporaryDirectory();
+        var checkpoints = new List<string>();
+        SetStoreCheckpoint(checkpoints.Add);
+        LogBrewClient? client = null;
+        try
+        {
+            try
+            {
+                client = CreateDurableClient(root.Path);
+            }
+            catch (Exception error)
+            {
+                var lastCheckpoint = checkpoints.Count == 0 ? "none" : checkpoints[^1];
+                throw new InvalidOperationException("store open failed after " + lastCheckpoint, error);
+            }
+
+            AssertTrue(
+                checkpoints.SequenceEqual(StoreOpenCheckpoints),
+                "store open checkpoints changed");
+        }
+        finally
+        {
+            SetStoreCheckpoint(null);
+            if (client != null)
+            {
+                AssertTrue(client.Shutdown().StatusCode == 204, "checkpoint client shutdown failed");
+            }
+        }
     }
 
     private static void DurableAutomaticDeliveryIsExplicit()
