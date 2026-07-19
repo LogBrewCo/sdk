@@ -6,7 +6,7 @@
 
 Public .NET SDK for building, validating, previewing, and flushing LogBrew event batches, with `System.Net.Http` delivery, W3C trace correlation, and opt-in `Microsoft.Extensions.Logging` provider support.
 
-The library targets `netstandard2.0`, uses `System.Net.Http` for built-in HTTP delivery, and depends on `Microsoft.Extensions.Logging` for the standard .NET logging provider surface.
+The library targets `netstandard2.0` and .NET 8, uses `System.Net.Http` for built-in HTTP delivery, and depends on `Microsoft.Extensions.Logging` for the standard .NET logging provider surface. Existing manual and memory-only APIs remain available on both targets; encrypted restart delivery is available only to .NET 8 applications.
 
 ## Install
 
@@ -85,6 +85,34 @@ The lazy client-owned worker starts on the first accepted event and coalesces in
 Retryable `408` and `5xx` responses use capped jitter with zero to ten configured retries. A single valid `Retry-After` delta-seconds or IMF-fixdate value from `HttpTransport` can raise that delay up to `MaxRetryDelay`; malformed or ambiguous guidance falls back to local jitter. Authentication, quota, validation, and other non-retryable outcomes pause automatic sends without removing the failed prefix. Call `RecoverAutomaticDelivery()` after correcting the cause. `Flush()` and `Shutdown()` serialize with the worker; shutdown rejects later capture and joins the owned worker. The application remains responsible for bounding custom transport calls, including timeouts.
 
 `DeliveryHealth()` returns fixed lifecycle, activity, outcome, status-class, queue, retry, accepted, and drop fields. It never includes event content, endpoint or authorization data, response text, exceptions, filesystem paths, or process metadata. Remote acceptance followed by a lost response remains an at-least-once ambiguity: retry may deliver the same immutable request again.
+
+### Encrypted Restart Delivery (.NET 8+)
+
+Use `CreateAutomaticDurable(...)` when one .NET 8 process should retain accepted telemetry across application restarts. The application authorizes a parent directory and supplies a 256-bit key; the SDK owns one fixed child directory and never persists the key.
+
+```csharp
+using System;
+using LogBrew;
+
+var keyBytes = Convert.FromHexString(
+    "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF");
+using var key = new DurableDeliveryKey("primary-2026", keyBytes);
+using var storage = new DurableDeliveryOptions("/app-owned/telemetry", key);
+using var transport = new HttpTransport();
+var client = LogBrewClient.CreateAutomaticDurable(
+    "LOGBREW_API_KEY",
+    "my-dotnet-app",
+    "1.0.0",
+    transport,
+    storage,
+    new AutomaticDeliveryOptions());
+```
+
+Durable admission writes one authenticated AES-256-GCM record per event before adding it to the in-memory queue. Before network delivery, the SDK also authenticates the exact immutable request prefix and its ordered record names. A successful response removes only that prefix after durable acknowledgement; interruption after remote acceptance may replay the same request, but does not discard later work. Normal shutdown retains unsent authenticated records for the next process.
+
+Only one process may own a store. Recovery fails closed for missing or wrong keys, corruption, unknown files, unsafe ownership, links, or replacement. Supply one primary key and a bounded list of previous keys to rotate records during recovery; new records always use the primary key. Key IDs identify keys but are not secret and must contain only stable letters, numbers, `.`, `_`, or `-`.
+
+Storage failures pause automatic delivery with `DeliveryPauseReason.Storage`. After correcting a transient storage problem, call `RecoverAutomaticDelivery()`. If records cannot be recovered, call `PurgeDurableDelivery()` only while the client is paused and idle, then call `RecoverAutomaticDelivery()` explicitly. Purge removes only SDK-owned durable records and retains the authorized parent and ownership marker. Keep key material available for every process that must recover pending telemetry.
 
 ## Explicit Metrics
 

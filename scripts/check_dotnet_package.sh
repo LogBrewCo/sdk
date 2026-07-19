@@ -55,6 +55,7 @@ test -f "$redis_nupkg"
 test -f "$otel_nupkg"
 
 python3 - "$nupkg" <<'PY'
+import re
 import sys
 import zipfile
 
@@ -63,6 +64,7 @@ with zipfile.ZipFile(nupkg) as archive:
     names = set(archive.namelist())
     required = {
         "lib/netstandard2.0/LogBrew.dll",
+        "lib/net8.0/LogBrew.dll",
         "README.md",
         "logbrew-logo-transparent-128.png",
         "examples/ReadmeExample.cs",
@@ -80,6 +82,24 @@ with zipfile.ZipFile(nupkg) as archive:
     missing = sorted(required - names)
     if missing:
         raise SystemExit(f"missing nupkg files: {missing}")
+    core_property_files = {
+        name
+        for name in names
+        if re.fullmatch(
+            r"package/services/metadata/core-properties/[0-9a-f]{32}\.psmdcp",
+            name,
+        )
+    }
+    if len(core_property_files) != 1:
+        raise SystemExit("expected exactly one NuGet core-properties file")
+    allowed = required | core_property_files | {
+        "_rels/.rels",
+        "LogBrew.nuspec",
+        "[Content_Types].xml",
+    }
+    unexpected = sorted(names - allowed)
+    if unexpected:
+        raise SystemExit(f"unexpected nupkg files: {unexpected}")
     readme = archive.read("README.md").decode()
     nuspec = archive.read("LogBrew.nuspec").decode()
 if 'dependency id="Microsoft.Extensions.Logging"' not in nuspec:
@@ -140,7 +160,12 @@ for needle in (
     "HttpTransport",
     "System.Net.Http",
     "CreateAutomatic",
+    "CreateAutomaticDurable",
     "AutomaticDeliveryOptions",
+    "DurableDeliveryKey",
+    "DurableDeliveryOptions",
+    "PurgeDurableDelivery()",
+    "encrypted restart delivery is available only to .NET 8 applications",
     "DeliveryHealth()",
     "RecoverAutomaticDelivery()",
     "at-least-once ambiguity",

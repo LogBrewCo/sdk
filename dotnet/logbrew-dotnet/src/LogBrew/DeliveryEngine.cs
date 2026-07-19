@@ -1,21 +1,20 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Globalization;
 using System.Threading;
 
 namespace LogBrew
 {
-    internal sealed class DeliveryEngine
+    internal sealed class DeliveryEngine : IDurableDeliveryPurgeOwner
     {
         private readonly string apiKey;
         private readonly DeliveryBatchBuilder batchBuilder;
         private readonly int maxRetries;
         private readonly int maxQueueSize;
         private readonly int maxQueueBytes;
-        private readonly Action<DroppedEvent>? onEventDropped;
+        private readonly DeliveryDropReporter dropReporter;
         private readonly ITransport? automaticTransport;
         private readonly AutomaticDeliverySettings? automaticSettings;
+        private readonly IDurableDeliverySession? durableSession;
         private readonly DeliveryRetryPolicy retryPolicy = new DeliveryRetryPolicy();
         private readonly List<Event> events = new List<Event>();
         private readonly object gate = new object();
@@ -29,7 +28,8 @@ namespace LogBrew
         private bool deliveryInFlight;
         private int deliveryOwnerThreadId;
         private int queuedBytes;
-        private int droppedEvents;
+        private int unavailableDurableRecords;
+        private long unavailableDurableBytes;
         private int retryAttempt;
         private int retryDelayMilliseconds;
         private int consecutiveFailures;
@@ -53,19 +53,54 @@ namespace LogBrew
             int maxQueueBytes,
             Action<DroppedEvent>? onEventDropped,
             ITransport? automaticTransport,
-            AutomaticDeliverySettings? automaticSettings)
+            AutomaticDeliverySettings? automaticSettings,
+            IDurableDeliverySession? durableSession = null)
         {
             this.apiKey = apiKey;
             batchBuilder = new DeliveryBatchBuilder(sdk);
             this.maxRetries = maxRetries;
             this.maxQueueSize = maxQueueSize;
             this.maxQueueBytes = maxQueueBytes;
-            this.onEventDropped = onEventDropped;
+            dropReporter = new DeliveryDropReporter(onEventDropped);
             this.automaticTransport = automaticTransport;
             this.automaticSettings = automaticSettings;
-            ownerProcessId = CurrentProcessId();
+            this.durableSession = durableSession;
+            ownerProcessId = DeliveryRuntimePolicy.CurrentProcessId();
             lifecycle = automaticSettings == null ? DeliveryLifecycleState.Manual : DeliveryLifecycleState.Running;
             activity = DeliveryActivityState.Idle;
+            if (durableSession != null)
+            {
+                var recovered = durableSession.TakeRecoveryState(maxQueueSize, maxQueueBytes);
+                if (recovered.RecoveryFailed)
+                {
+                    lifecycle = DeliveryLifecycleState.Paused;
+                    pauseReason = DeliveryPauseReason.Storage;
+                    unavailableDurableRecords = recovered.PersistedRecordCount;
+                    unavailableDurableBytes = recovered.PersistedBytes;
+                }
+                else
+                {
+                    events.AddRange(recovered.Events);
+                    foreach (var item in recovered.Events)
+                    {
+                        queuedBytes += item.SerializedByteCount;
+                    }
+
+                    frozenBatch = recovered.FrozenBatch;
+                }
+            }
+        }
+
+        internal void StartOwnedDelivery()
+        {
+            lock (gate)
+            {
+                if (automaticSettings != null && lifecycle == DeliveryLifecycleState.Running && events.Count > 0)
+                {
+                    ScheduleLiveWorkLocked();
+                    EnsureWorkerStartedLocked();
+                }
+            }
         }
 
         internal int PendingEvents()
@@ -73,7 +108,7 @@ namespace LogBrew
             lock (gate)
             {
                 RequireOwnerProcessLocked();
-                return events.Count;
+                return events.Count + unavailableDurableRecords;
             }
         }
 
@@ -82,7 +117,7 @@ namespace LogBrew
             lock (gate)
             {
                 RequireOwnerProcessLocked();
-                return droppedEvents;
+                return dropReporter.Count;
             }
         }
 
@@ -98,8 +133,8 @@ namespace LogBrew
                     pauseReason,
                     retrySource,
                     lastStatusClass,
-                    events.Count,
-                    queuedBytes,
+                    events.Count + unavailableDurableRecords,
+                    unavailableDurableBytes > int.MaxValue - queuedBytes ? int.MaxValue : queuedBytes + (int)unavailableDurableBytes,
                     deliveryInFlight,
                     wakeRequested || nextWakeTimestamp != 0,
                     retryAttempt,
@@ -107,7 +142,7 @@ namespace LogBrew
                     consecutiveFailures,
                     acceptedEvents,
                     acceptedBatches,
-                    droppedEvents,
+                    dropReporter.Count,
                     lastOutcomeAt);
             }
         }
@@ -125,22 +160,62 @@ namespace LogBrew
         {
             var singleBodyBytes = batchBuilder.SingleEventRequestBytes(item);
             DroppedEvent? drop = null;
+            if (durableSession != null)
+            {
+                durableSession.EnterOperation();
+                try
+                {
+                    lock (gate)
+                    {
+                        RequireOpenLocked();
+                        drop = AdmissionDropLocked(item, singleBodyBytes);
+                    }
+                    if (drop == null)
+                    {
+                        var recordName = string.Empty;
+                        try
+                        {
+                            recordName = durableSession.Persist(item);
+                        }
+                        catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
+                        {
+                            lock (gate)
+                            {
+                                drop = RecordDropLocked(item.Id, item.Type, "storage_unavailable");
+                                lifecycle = DeliveryLifecycleState.Paused;
+                                activity = DeliveryActivityState.Idle;
+                                pauseReason = DeliveryPauseReason.Storage;
+                                lastStatusClass = DeliveryStatusClass.None;
+                            }
+                        }
+                        if (drop == null)
+                        {
+                            lock (gate)
+                            {
+                                var wasEmpty = events.Count == 0;
+                                events.Add(item);
+                                durableSession.Track(item, recordName);
+                                queuedBytes += item.SerializedByteCount;
+                                ScheduleCaptureLocked(wasEmpty);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    durableSession.ExitOperation();
+                }
+                if (drop != null)
+                {
+                    dropReporter.Report(drop);
+                }
+                return;
+            }
             lock (gate)
             {
                 RequireOpenLocked();
-                if (singleBodyBytes > DeliveryBatchBuilder.MaxRequestBytes)
-                {
-                    drop = RecordDropLocked(item.Id, item.Type, "event_too_large");
-                }
-                else if (events.Count >= maxQueueSize)
-                {
-                    drop = RecordDropLocked(item.Id, item.Type, "queue_overflow");
-                }
-                else if (item.SerializedByteCount > maxQueueBytes - queuedBytes)
-                {
-                    drop = RecordDropLocked(item.Id, item.Type, "queue_bytes_overflow");
-                }
-                else
+                drop = AdmissionDropLocked(item, singleBodyBytes);
+                if (drop == null)
                 {
                     var wasEmpty = events.Count == 0;
                     events.Add(item);
@@ -151,11 +226,17 @@ namespace LogBrew
                     }
                 }
             }
-
             if (drop != null)
             {
-                ReportDroppedEvent(drop);
+                dropReporter.Report(drop);
             }
+        }
+
+        private DroppedEvent? AdmissionDropLocked(Event item, int singleBodyBytes)
+        {
+            var reason = DeliveryQueuePolicy.AdmissionDropReason(
+                item, singleBodyBytes, events.Count, queuedBytes, maxQueueSize, maxQueueBytes);
+            return reason == null ? null : RecordDropLocked(item.Id, item.Type, reason);
         }
 
         internal TransportResponse Flush(ITransport transport)
@@ -169,7 +250,7 @@ namespace LogBrew
             lock (gate)
             {
                 RequireOpenLocked();
-                targetEvent = LastQueuedEventLocked();
+                targetEvent = DeliveryQueuePolicy.Last(events);
             }
 
             return FlushSnapshot(transport, targetEvent, allowClosing: false);
@@ -177,7 +258,7 @@ namespace LogBrew
 
         internal TransportResponse Flush()
         {
-            return Flush(RequireAutomaticTransport());
+            return Flush(DeliveryRuntimePolicy.RequireAutomaticTransport(automaticTransport));
         }
 
         internal TransportResponse Shutdown(ITransport transport)
@@ -188,33 +269,41 @@ namespace LogBrew
             }
 
             Thread? workerToJoin;
-            lock (gate)
+            durableSession?.EnterOperation();
+            try
             {
-                RequireOpenLocked();
-                if (deliveryInFlight && deliveryOwnerThreadId == Environment.CurrentManagedThreadId)
+                lock (gate)
                 {
-                    throw new SdkException("reentrancy_error", "delivery cannot shut down from its transport callback");
-                }
+                    RequireOpenLocked();
+                    if (deliveryInFlight && deliveryOwnerThreadId == Environment.CurrentManagedThreadId)
+                    {
+                        throw new SdkException("reentrancy_error", "delivery cannot shut down from its transport callback");
+                    }
 
-                closing = true;
-                lifecycle = DeliveryLifecycleState.Closing;
-                activity = deliveryInFlight ? DeliveryActivityState.Sending : DeliveryActivityState.Idle;
-                scheduleGeneration = SaturatingIncrement(scheduleGeneration);
-                workerStopRequested = true;
-                wakeRequested = false;
-                nextWakeTimestamp = 0;
-                Monitor.PulseAll(gate);
-                workerToJoin = worker;
+                    closing = true;
+                    lifecycle = DeliveryLifecycleState.Closing;
+                    activity = deliveryInFlight ? DeliveryActivityState.Sending : DeliveryActivityState.Idle;
+                    scheduleGeneration = DeliveryRuntimePolicy.SaturatingIncrement(scheduleGeneration);
+                    workerStopRequested = true;
+                    wakeRequested = false;
+                    nextWakeTimestamp = 0;
+                    Monitor.PulseAll(gate);
+                    workerToJoin = worker;
+                }
+            }
+            finally
+            {
+                durableSession?.ExitOperation();
             }
 
-            JoinWorker(workerToJoin);
+            DeliveryRuntimePolicy.JoinWorker(workerToJoin);
 
             try
             {
                 Event? targetEvent;
                 lock (gate)
                 {
-                    targetEvent = LastQueuedEventLocked();
+                    targetEvent = DeliveryQueuePolicy.Last(events);
                 }
 
                 var response = FlushSnapshot(transport, targetEvent, allowClosing: true);
@@ -230,11 +319,11 @@ namespace LogBrew
                     nextWakeTimestamp = 0;
                 }
 
+                durableSession?.Dispose();
+
                 return response;
             }
-#pragma warning disable CA1031
-            catch (Exception error) when (!IsFatalException(error))
-#pragma warning restore CA1031
+            catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
             {
                 lock (gate)
                 {
@@ -262,7 +351,7 @@ namespace LogBrew
 
         internal TransportResponse Shutdown()
         {
-            return Shutdown(RequireAutomaticTransport());
+            return Shutdown(DeliveryRuntimePolicy.RequireAutomaticTransport(automaticTransport));
         }
 
         internal void RecoverAutomaticDelivery()
@@ -292,7 +381,7 @@ namespace LogBrew
                 retryAttempt = 0;
                 retryDelayMilliseconds = 0;
                 consecutiveFailures = 0;
-                scheduleGeneration = SaturatingIncrement(scheduleGeneration);
+                scheduleGeneration = DeliveryRuntimePolicy.SaturatingIncrement(scheduleGeneration);
                 workerStopRequested = false;
                 wakeRequested = events.Count > 0;
                 nextWakeTimestamp = 0;
@@ -305,31 +394,54 @@ namespace LogBrew
             }
         }
 
-        private DroppedEvent RecordDropLocked(string id, string type, string reason)
+        internal void PurgeDurableDelivery()
         {
-            droppedEvents = SaturatingIncrement(droppedEvents);
-            lastOutcome = DeliveryOutcome.Dropped;
-            lastOutcomeAt = DateTimeOffset.UtcNow;
-            return new DroppedEvent(id, type, reason, droppedEvents);
+            (durableSession ?? throw new SdkException("configuration_error", "client does not own durable delivery"))
+                .Purge(this);
         }
 
-        private void ReportDroppedEvent(DroppedEvent drop)
+        Thread? IDurableDeliveryPurgeOwner.BeginDurablePurge()
         {
-            if (onEventDropped == null)
+            lock (gate)
             {
-                return;
+                RequireOwnerProcessLocked();
+                if (closed || closing || deliveryInFlight || lifecycle != DeliveryLifecycleState.Paused)
+                {
+                    throw new SdkException("state_error", "durable purge requires paused idle delivery");
+                }
+                workerStopRequested = true;
+                wakeRequested = false;
+                nextWakeTimestamp = 0;
+                Monitor.PulseAll(gate);
+                return worker;
             }
+        }
+        void IDurableDeliveryPurgeOwner.CompleteDurablePurge()
+        {
+            lock (gate)
+            {
+                events.Clear();
+                frozenBatch = null;
+                queuedBytes = 0;
+                unavailableDurableRecords = 0;
+                unavailableDurableBytes = 0;
+                worker = null;
+                activity = DeliveryActivityState.Idle;
+            }
+        }
+        void IDurableDeliveryPurgeOwner.FailDurablePurge()
+        {
+            lock (gate)
+            {
+                PauseAutomaticLocked(DeliveryPauseReason.Storage, DeliveryOutcome.TerminalFailure);
+            }
+        }
 
-            try
-            {
-                onEventDropped(drop);
-            }
-#pragma warning disable CA1031
-            catch (Exception error) when (!IsFatalException(error))
-#pragma warning restore CA1031
-            {
-                // Drop callbacks are advisory and must not interrupt application telemetry.
-            }
+        private DroppedEvent RecordDropLocked(string id, string type, string reason)
+        {
+            lastOutcome = DeliveryOutcome.Dropped;
+            lastOutcomeAt = DateTimeOffset.UtcNow;
+            return dropReporter.Record(id, type, reason);
         }
 
         private TransportResponse FlushSnapshot(ITransport transport, Event? targetEvent, bool allowClosing)
@@ -341,24 +453,23 @@ namespace LogBrew
             {
                 while (true)
                 {
-                    FrozenBatch? batch;
+                    int targetEvents;
                     lock (gate)
                     {
-                        batch = GetOrCreateFrozenBatchLocked(EventsThroughTargetLocked(targetEvent));
+                        targetEvents = DeliveryQueuePolicy.EventsThrough(events, targetEvent);
                     }
+
+                    var batch = GetOrCreateFrozenBatch(targetEvents);
 
                     if (batch == null)
                     {
                         break;
                     }
 
-                    var response = SendManualBatch(transport, batch.Body);
+                    var response = DeliveryRuntimePolicy.SendManualBatch(apiKey, transport, batch.Body, maxRetries);
                     totalAttempts += response.Attempts;
                     statusCode = response.StatusCode;
-                    lock (gate)
-                    {
-                        AcknowledgeBatchLocked(batch, response.StatusCode);
-                    }
+                    AcknowledgeBatch(batch, response.StatusCode);
 
                 }
 
@@ -375,102 +486,124 @@ namespace LogBrew
             }
         }
 
-        private TransportResponse SendManualBatch(ITransport transport, string body)
-        {
-            var attempt = 0;
-            while (true)
-            {
-                attempt++;
-                try
-                {
-                    var response = transport.Send(apiKey, body);
-                    if (response.StatusCode >= 200 && response.StatusCode < 300)
-                    {
-                        return new TransportResponse(response.StatusCode, attempt);
-                    }
-
-                    if (DeliveryRetryPolicy.IsRetryableStatus(response.StatusCode) && attempt <= maxRetries)
-                    {
-                        continue;
-                    }
-
-                    throw StatusException(response.StatusCode);
-                }
-                catch (TransportException error)
-                {
-                    if (error.Retryable && attempt <= maxRetries)
-                    {
-                        continue;
-                    }
-
-                    throw new SdkException(error.Code, error.Message);
-                }
-            }
-        }
-
         private FrozenBatch? GetOrCreateFrozenBatchLocked(int targetEvents)
         {
-            if (frozenBatch != null)
-            {
-                return frozenBatch;
-            }
-
-            if (events.Count == 0 || targetEvents <= 0)
-            {
-                return null;
-            }
-
-            frozenBatch = batchBuilder.Create(events, targetEvents);
+            frozenBatch = DeliveryQueuePolicy.CreateFrozenBatch(
+                frozenBatch,
+                batchBuilder,
+                events,
+                targetEvents);
             return frozenBatch;
         }
 
-        private Event? LastQueuedEventLocked()
+        private FrozenBatch? GetOrCreateFrozenBatch(int targetEvents)
         {
-            return events.Count == 0 ? null : events[events.Count - 1];
-        }
-
-        private int EventsThroughTargetLocked(Event? targetEvent)
-        {
-            if (targetEvent == null)
+            if (durableSession == null)
             {
-                return 0;
-            }
-
-            for (var index = 0; index < events.Count; index++)
-            {
-                if (ReferenceEquals(events[index], targetEvent))
+                lock (gate)
                 {
-                    return index + 1;
+                    return GetOrCreateFrozenBatchLocked(targetEvents);
                 }
             }
 
-            return 0;
-        }
-
-        private void AcknowledgeBatchLocked(FrozenBatch batch, int statusCode)
-        {
-            if (!ReferenceEquals(frozenBatch, batch) || events.Count < batch.Events.Count)
+            durableSession.EnterOperation();
+            try
             {
-                throw new SdkException("state_error", "delivery prefix changed before acknowledgement");
-            }
-
-            for (var index = 0; index < batch.Events.Count; index++)
-            {
-                if (!ReferenceEquals(events[index], batch.Events[index]))
+                FrozenBatch candidate;
+                lock (gate)
                 {
-                    throw new SdkException("state_error", "delivery prefix order changed before acknowledgement");
+                    if (frozenBatch != null)
+                    {
+                        return frozenBatch;
+                    }
+
+                    if (events.Count == 0 || targetEvents <= 0)
+                    {
+                        return null;
+                    }
+
+                    candidate = batchBuilder.Create(events, targetEvents);
+                }
+
+                durableSession.PersistPrefix(candidate);
+                lock (gate)
+                {
+                    if (frozenBatch != null)
+                    {
+                        throw new SdkException("state_error", "delivery prefix changed before durable freeze");
+                    }
+
+                    frozenBatch = candidate;
+                    return frozenBatch;
                 }
             }
-
-            for (var index = 0; index < batch.Events.Count; index++)
+            catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
             {
-                queuedBytes -= events[index].SerializedByteCount;
+                lock (gate)
+                {
+                    PauseAutomaticLocked(DeliveryPauseReason.Storage, DeliveryOutcome.TerminalFailure);
+                }
+
+                throw error is SdkException sdkError
+                    ? sdkError
+                    : new SdkException("storage_error", "durable delivery storage is unavailable");
+            }
+            finally
+            {
+                durableSession.ExitOperation();
+            }
+        }
+
+        private void AcknowledgeBatch(FrozenBatch batch, int statusCode)
+        {
+            if (durableSession == null)
+            {
+                lock (gate)
+                {
+                    DeliveryQueuePolicy.RequireCurrentPrefix(events, frozenBatch, batch);
+                    RetireBatchLocked(batch, statusCode);
+                }
+
+                return;
             }
 
-            events.RemoveRange(0, batch.Events.Count);
+            durableSession.EnterOperation();
+            try
+            {
+                lock (gate)
+                {
+                    DeliveryQueuePolicy.RequireCurrentPrefix(events, frozenBatch, batch);
+                }
+
+                durableSession.Acknowledge(batch);
+                lock (gate)
+                {
+                    RetireBatchLocked(batch, statusCode);
+                }
+            }
+            catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
+            {
+                lock (gate)
+                {
+                    PauseAutomaticLocked(DeliveryPauseReason.Storage, DeliveryOutcome.TerminalFailure);
+                }
+
+                throw error is SdkException sdkError && sdkError.Code == "storage_error"
+                    ? sdkError
+                    : new SdkException("storage_error", "durable delivery storage is unavailable");
+            }
+            finally
+            {
+                durableSession.ExitOperation();
+            }
+        }
+
+        private void RetireBatchLocked(FrozenBatch batch, int statusCode)
+        {
+            queuedBytes -= DeliveryQueuePolicy.RemovePrefix(events, batch);
             frozenBatch = null;
-            acceptedEvents = SaturatingAdd(acceptedEvents, batch.Events.Count);
-            acceptedBatches = SaturatingIncrement(acceptedBatches);
+            acceptedEvents = DeliveryRuntimePolicy.SaturatingAdd(acceptedEvents, batch.Events.Count);
+            acceptedBatches = DeliveryRuntimePolicy.SaturatingIncrement(acceptedBatches);
             lastOutcome = DeliveryOutcome.Accepted;
             lastStatusClass = DeliveryRetryPolicy.StatusClass(statusCode);
             lastOutcomeAt = DateTimeOffset.UtcNow;
@@ -507,7 +640,7 @@ namespace LogBrew
         {
             lock (gate)
             {
-                if (CurrentProcessId() != ownerProcessId)
+                if (DeliveryRuntimePolicy.CurrentProcessId() != ownerProcessId)
                 {
                     return false;
                 }
@@ -569,7 +702,7 @@ namespace LogBrew
             }
             else if (wasEmpty && nextWakeTimestamp == 0)
             {
-                nextWakeTimestamp = AddMonotonicDelay(automaticSettings.FlushInterval);
+                nextWakeTimestamp = DeliveryRuntimePolicy.AddMonotonicDelay(automaticSettings.FlushInterval);
             }
 
             activity = DeliveryActivityState.Scheduled;
@@ -603,7 +736,7 @@ namespace LogBrew
                     {
                         while (true)
                         {
-                            if (workerStopRequested || closing || closed || CurrentProcessId() != ownerProcessId)
+                            if (workerStopRequested || closing || closed || DeliveryRuntimePolicy.CurrentProcessId() != ownerProcessId)
                             {
                                 return;
                             }
@@ -615,13 +748,13 @@ namespace LogBrew
                                 continue;
                             }
 
-                            if (wakeRequested || IsMonotonicDue(nextWakeTimestamp))
+                            if (wakeRequested || DeliveryRuntimePolicy.IsMonotonicDue(nextWakeTimestamp))
                             {
                                 break;
                             }
 
                             activity = retryAttempt > 0 ? DeliveryActivityState.Retrying : DeliveryActivityState.Scheduled;
-                            Monitor.Wait(gate, RemainingMonotonicDelay(nextWakeTimestamp));
+                            Monitor.Wait(gate, DeliveryRuntimePolicy.RemainingMonotonicDelay(nextWakeTimestamp));
                         }
 
                         wakeRequested = false;
@@ -632,15 +765,16 @@ namespace LogBrew
                     RunAutomaticDelivery(generation);
                 }
             }
-#pragma warning disable CA1031
-            catch (Exception error) when (!IsFatalException(error))
-#pragma warning restore CA1031
+            catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
             {
                 lock (gate)
                 {
-                    if (!closed && !closing && CurrentProcessId() == ownerProcessId)
+                    if (!closed
+                        && !closing
+                        && lifecycle == DeliveryLifecycleState.Running
+                        && DeliveryRuntimePolicy.CurrentProcessId() == ownerProcessId)
                     {
-                        consecutiveFailures = SaturatingIncrement(consecutiveFailures);
+                        consecutiveFailures = DeliveryRuntimePolicy.SaturatingIncrement(consecutiveFailures);
                         lastStatusClass = DeliveryStatusClass.None;
                         lastOutcomeAt = DateTimeOffset.UtcNow;
                         PauseAutomaticLocked(DeliveryPauseReason.NonRetryable, DeliveryOutcome.TerminalFailure);
@@ -680,10 +814,13 @@ namespace LogBrew
             Exception? failure = null;
             try
             {
+                int targetEvents;
                 lock (gate)
                 {
-                    batch = GetOrCreateFrozenBatchLocked(events.Count);
+                    targetEvents = events.Count;
                 }
+
+                batch = GetOrCreateFrozenBatch(targetEvents);
 
                 if (batch == null)
                 {
@@ -694,26 +831,27 @@ namespace LogBrew
                 {
                     response = automaticTransport!.Send(apiKey, batch.Body);
                 }
-#pragma warning disable CA1031
-                catch (Exception error) when (!IsFatalException(error))
-#pragma warning restore CA1031
+                catch (Exception error) when (!DeliveryExceptionPolicy.IsFatal(error))
                 {
                     failure = error;
                 }
 
-                lock (gate)
+                if (response != null && response.StatusCode >= 200 && response.StatusCode < 300)
                 {
-                    if (response != null && response.StatusCode >= 200 && response.StatusCode < 300)
+                    AcknowledgeBatch(batch, response.StatusCode);
+                    lock (gate)
                     {
-                        AcknowledgeBatchLocked(batch, response.StatusCode);
                         if (generation == scheduleGeneration && lifecycle == DeliveryLifecycleState.Running && !closing)
                         {
                             CompleteAutomaticSuccessLocked();
                         }
-
-                        return;
                     }
 
+                    return;
+                }
+
+                lock (gate)
+                {
                     if (generation != scheduleGeneration || lifecycle != DeliveryLifecycleState.Running || closing)
                     {
                         return;
@@ -748,7 +886,7 @@ namespace LogBrew
                 return;
             }
 
-            scheduleGeneration = SaturatingIncrement(scheduleGeneration);
+            scheduleGeneration = DeliveryRuntimePolicy.SaturatingIncrement(scheduleGeneration);
             retryAttempt = 0;
             retryDelayMilliseconds = 0;
             consecutiveFailures = 0;
@@ -775,7 +913,7 @@ namespace LogBrew
             else
             {
                 wakeRequested = false;
-                nextWakeTimestamp = AddMonotonicDelay(automaticSettings.FlushInterval);
+                nextWakeTimestamp = DeliveryRuntimePolicy.AddMonotonicDelay(automaticSettings.FlushInterval);
             }
 
             activity = DeliveryActivityState.Scheduled;
@@ -784,7 +922,7 @@ namespace LogBrew
 
         private void CompleteAutomaticFailureLocked(TransportResponse? response, Exception? failure)
         {
-            consecutiveFailures = SaturatingIncrement(consecutiveFailures);
+            consecutiveFailures = DeliveryRuntimePolicy.SaturatingIncrement(consecutiveFailures);
             lastOutcomeAt = DateTimeOffset.UtcNow;
             lastStatusClass = failure is TransportException
                 ? DeliveryStatusClass.Network
@@ -795,7 +933,7 @@ namespace LogBrew
                 : failure is TransportException transportFailure && transportFailure.Retryable;
             if (retryable)
             {
-                retryAttempt = SaturatingIncrement(retryAttempt);
+                retryAttempt = DeliveryRuntimePolicy.SaturatingIncrement(retryAttempt);
                 if (retryAttempt > automaticSettings!.MaxRetries)
                 {
                     PauseAutomaticLocked(DeliveryPauseReason.RetryExhausted, DeliveryOutcome.RetryExhausted);
@@ -808,7 +946,7 @@ namespace LogBrew
                 lastOutcome = DeliveryOutcome.RetryScheduled;
                 activity = DeliveryActivityState.Retrying;
                 wakeRequested = false;
-                nextWakeTimestamp = AddMonotonicDelay(delay);
+                nextWakeTimestamp = DeliveryRuntimePolicy.AddMonotonicDelay(delay);
                 Monitor.PulseAll(gate);
                 return;
             }
@@ -831,16 +969,6 @@ namespace LogBrew
             nextWakeTimestamp = 0;
         }
 
-        private ITransport RequireAutomaticTransport()
-        {
-            if (automaticTransport == null)
-            {
-                throw new SdkException("configuration_error", "client does not own automatic delivery");
-            }
-
-            return automaticTransport;
-        }
-
         private void RequireOpenLocked()
         {
             RequireOwnerProcessLocked();
@@ -852,98 +980,8 @@ namespace LogBrew
 
         private void RequireOwnerProcessLocked()
         {
-            if (CurrentProcessId() != ownerProcessId)
-            {
-                throw new SdkException("process_error", "client belongs to another process; create a fresh client after fork");
-            }
+            DeliveryRuntimePolicy.RequireOwnerProcess(ownerProcessId);
         }
 
-        private static SdkException StatusException(int statusCode)
-        {
-            if (statusCode == 401 || statusCode == 403)
-            {
-                return new SdkException("unauthenticated", "transport rejected the API key");
-            }
-
-            return new SdkException(
-                "transport_error",
-                "unexpected transport status " + statusCode.ToString(CultureInfo.InvariantCulture));
-        }
-
-        private static bool IsFatalException(Exception error)
-        {
-            return error is OutOfMemoryException
-                || error is StackOverflowException
-                || error is AccessViolationException
-                || error is AppDomainUnloadedException
-                || error is BadImageFormatException;
-        }
-
-        private static int CurrentProcessId()
-        {
-            using var process = Process.GetCurrentProcess();
-            return process.Id;
-        }
-
-        private static long AddMonotonicDelay(TimeSpan delay)
-        {
-            var delta = delay.TotalSeconds * Stopwatch.Frequency;
-            var now = Stopwatch.GetTimestamp();
-            if (delta >= long.MaxValue - now)
-            {
-                return long.MaxValue;
-            }
-
-            return now + (long)delta;
-        }
-
-        private static bool IsMonotonicDue(long timestamp)
-        {
-            return timestamp != 0 && Stopwatch.GetTimestamp() >= timestamp;
-        }
-
-        private static TimeSpan RemainingMonotonicDelay(long timestamp)
-        {
-            if (timestamp == 0)
-            {
-                return TimeSpan.FromMilliseconds(100);
-            }
-
-            var remaining = timestamp - Stopwatch.GetTimestamp();
-            if (remaining <= 0)
-            {
-                return TimeSpan.Zero;
-            }
-
-            var maximumMonitorWait = TimeSpan.FromMilliseconds(int.MaxValue - 1D);
-            var remainingSeconds = (double)remaining / Stopwatch.Frequency;
-            return remainingSeconds >= maximumMonitorWait.TotalSeconds
-                ? maximumMonitorWait
-                : TimeSpan.FromSeconds(remainingSeconds);
-        }
-
-        private static int SaturatingIncrement(int value)
-        {
-            return value == int.MaxValue ? value : value + 1;
-        }
-
-        private static long SaturatingIncrement(long value)
-        {
-            return value == long.MaxValue ? value : value + 1;
-        }
-
-        private static long SaturatingAdd(long value, int increment)
-        {
-            return value > long.MaxValue - increment ? long.MaxValue : value + increment;
-        }
-
-        private static void JoinWorker(Thread? thread)
-        {
-            if (thread != null && thread.IsAlive)
-            {
-                thread.Join();
-            }
-        }
     }
-
 }

@@ -467,6 +467,57 @@ jobs:
       - name: Leak scan
         run: python3 scripts/check_confidentiality_scan.py
 
+  dotnet-durability:
+    name: .NET durability (${{ matrix.os }}-${{ matrix.architecture }})
+    needs: changed-areas
+    if: ${{ needs.changed-areas.outputs.dotnet == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            os: linux
+            architecture: x64
+          - runner: ubuntu-24.04-arm
+            os: linux
+            architecture: arm64
+          - runner: macos-15-intel
+            os: macos
+            architecture: x64
+          - runner: macos-15
+            os: macos
+            architecture: arm64
+          - runner: windows-2025
+            os: windows
+            architecture: x64
+          - runner: windows-11-arm
+            os: windows
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Run installed encrypted restart-delivery check
+        shell: bash
+        env:
+          LOGBREW_EXPECTED_DURABLE_OS: ${{ matrix.os }}
+          LOGBREW_EXPECTED_DURABLE_ARCHITECTURE: ${{ matrix.architecture }}
+          LOGBREW_EXPECTED_DURABLE_RUNTIME_MAJOR: "8"
+        run: bash scripts/real_user_dotnet_durable_delivery_smoke.sh
+
   swift-checks:
     name: Swift SDK checks
     needs: changed-areas

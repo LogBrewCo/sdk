@@ -644,7 +644,8 @@ namespace LogBrew
             int maxQueueBytes,
             Action<DroppedEvent>? onEventDropped,
             ITransport? automaticTransport,
-            AutomaticDeliverySettings? automaticSettings)
+            AutomaticDeliverySettings? automaticSettings,
+            IDurableDeliverySession? durableSession = null)
         {
             var sdk = new OrderedJsonObject()
                 .Add("name", sdkName)
@@ -658,7 +659,9 @@ namespace LogBrew
                 maxQueueBytes,
                 onEventDropped,
                 automaticTransport,
-                automaticSettings);
+                automaticSettings,
+                durableSession);
+            delivery.StartOwnedDelivery();
         }
 
         public static LogBrewClient Create(
@@ -715,6 +718,61 @@ namespace LogBrew
                 transport,
                 settings);
         }
+
+#if NET8_0_OR_GREATER
+        public static LogBrewClient CreateAutomaticDurable(
+            string apiKey,
+            string sdkName,
+            string sdkVersion,
+            ITransport transport,
+            DurableDeliveryOptions storage,
+            AutomaticDeliveryOptions? options = null,
+            Action<DroppedEvent>? onEventDropped = null)
+        {
+            if (transport == null)
+            {
+                throw new SdkException("validation_error", "automatic transport must be non-null");
+            }
+
+            if (storage == null)
+            {
+                throw new SdkException("validation_error", "durable delivery options must be non-null");
+            }
+
+            var settings = (options ?? new AutomaticDeliveryOptions()).ValidateAndCopy();
+            ValidateClientOptions(
+                apiKey,
+                sdkName,
+                sdkVersion,
+                settings.MaxRetries,
+                settings.MaxQueueSize,
+                settings.MaxQueueBytes);
+            var durableStore = DurableEventStore.Open(
+                storage,
+                settings.MaxQueueSize,
+                settings.MaxQueueBytes);
+            var durableSession = new DurableDeliverySession(durableStore);
+            try
+            {
+                return new LogBrewClient(
+                    apiKey,
+                    sdkName,
+                    sdkVersion,
+                    settings.MaxRetries,
+                    settings.MaxQueueSize,
+                    settings.MaxQueueBytes,
+                    onEventDropped,
+                    transport,
+                    settings,
+                    durableSession);
+            }
+            catch
+            {
+                durableSession.Dispose();
+                throw;
+            }
+        }
+#endif
 
         public int PendingEvents()
         {
@@ -796,6 +854,13 @@ namespace LogBrew
             delivery.RecoverAutomaticDelivery();
         }
 
+#if NET8_0_OR_GREATER
+        public void PurgeDurableDelivery()
+        {
+            delivery.PurgeDurableDelivery();
+        }
+#endif
+
         private void PushEvent(string type, string id, string timestamp, OrderedJsonObject attributes)
         {
             Validation.RequireNonEmpty("event id", id);
@@ -857,6 +922,16 @@ namespace LogBrew
         internal string Id
         {
             get { return id; }
+        }
+
+        internal string Timestamp
+        {
+            get { return timestamp; }
+        }
+
+        internal OrderedJsonObject Attributes
+        {
+            get { return attributes; }
         }
 
         internal OrderedJsonObject ToJsonObject()

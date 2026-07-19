@@ -37,6 +37,7 @@ namespace LogBrew
         Validation = 3,
         NonRetryable = 4,
         RetryExhausted = 5,
+        Storage = 6,
     }
 
     public enum DeliveryRetrySource

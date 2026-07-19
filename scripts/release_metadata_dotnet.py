@@ -31,7 +31,7 @@ def validate_dotnet_packages(
             "assets/brand/logbrew-logo-transparent-128.png",
         ),
         expected={
-            "TargetFramework": "netstandard2.0",
+            "TargetFrameworks": "netstandard2.0;net8.0",
             "PackageId": "LogBrew",
             "Version": core_version,
             "Authors": "LogBrew",

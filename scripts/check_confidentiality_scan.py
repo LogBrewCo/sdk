@@ -213,6 +213,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if relative_text.endswith(".cs") and is_dotnet_analyzer_pragma_reference(line, terms):
         return True
 
+    if is_dotnet_durable_delivery_reference(relative_text, line, terms):
+        return True
+
     if relative_text.startswith("scripts/") and terms == {"cleanup"}:
         return True
 
@@ -926,6 +929,58 @@ def is_dotnet_cancellation_token_reference(line: str) -> bool:
 
 def is_dotnet_analyzer_pragma_reference(line: str, terms: set[str]) -> bool:
     return terms == {"restore"} and line.strip() == "#pragma warning restore CA1031"
+
+
+def is_dotnet_durable_delivery_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    if (
+        relative_text == ".github/workflows/ci.yml"
+        and terms == {"strategy"}
+        and line.strip() == "strategy:"
+    ):
+        return True
+
+    if relative_text == "dotnet/logbrew-dotnet/README.md" and terms == {"secret"}:
+        return line == (
+            "Only one process may own a store. Recovery fails closed for missing or wrong keys, "
+            "corruption, unknown files, unsafe ownership, links, or replacement. Supply one primary "
+            "key and a bounded list of previous keys to rotate records during recovery; new records "
+            "always use the primary key. Key IDs identify keys but are not secret and must contain "
+            "only stable letters, numbers, `.`, `_`, or `-`."
+        )
+
+    if relative_text == "dotnet/logbrew-dotnet/src/LogBrew/DurableEventStore.cs":
+        return terms == {"cleanup"} and "CleanupAcknowledged" in line
+
+    if relative_text == "dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs":
+        allowed_lines = {
+            "private const uint WindowsShareRead = 1;",
+            "private const uint WindowsShareWrite = 2;",
+            "private const uint WindowsShareDelete = 4;",
+            "private const uint WindowsBackupSemantics = 0x02000000;",
+            "WindowsShareRead | WindowsShareDelete,",
+            "WindowsShareRead | (allowDelete ? WindowsShareDelete : 0),",
+            "WindowsShareRead | WindowsShareWrite,",
+            "return WindowsShareRead",
+            "| (allowDelete ? WindowsShareDelete : 0)",
+            "| (allowWrite ? WindowsShareWrite : 0);",
+            "WindowsBackupSemantics | WindowsOpenReparsePoint,",
+        }
+        return line.strip() in allowed_lines
+
+    if relative_text == "dotnet/logbrew-dotnet/tests/LogBrew.Tests/DurableDeliveryContractTests.cs":
+        fixed_test_text = (
+            "AcknowledgedPrefixCleanupResumesAfterExit",
+            "acknowledgement marker was not durable before cleanup",
+            "acknowledged prefix reappeared after cleanup restart",
+            "acknowledgement cleanup restart shutdown failed",
+        )
+        return terms == {"cleanup"} and any(text in line for text in fixed_test_text)
+
+    return False
 
 
 def main() -> int:

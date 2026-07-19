@@ -105,6 +105,26 @@ static int CountOccurrences(string text, string value)
     return count;
 }
 
+if (args.Length > 0 && args[0].StartsWith("--durable-child-", StringComparison.Ordinal))
+{
+    Environment.ExitCode = DurableDeliveryContractTests.RunChild(args);
+    return;
+}
+
+if (args.Length == 1 && string.Equals(args[0], "--durable-contract", StringComparison.Ordinal))
+{
+    var durableTests = DurableDeliveryContractTests.Run();
+    Console.WriteLine("dotnet durable contract tests ok (" + durableTests.ToString(CultureInfo.InvariantCulture) + " tests)");
+    return;
+}
+
+if (args.Length == 1 && string.Equals(args[0], "--telemetry-text-search-contract", StringComparison.Ordinal))
+{
+    var telemetryTests = OperationTracingTests.Run() + ServerRequestTelemetryTests.Run();
+    Console.WriteLine("dotnet telemetry text search contract tests ok (" + telemetryTests.ToString(CultureInfo.InvariantCulture) + " tests)");
+    return;
+}
+
 var tests = 0;
 
 ExpectArgumentNullContract("client", () => LogBrewActivitySourceListener.Start(null!));
@@ -731,6 +751,7 @@ tests += HttpClientTelemetryTests.Run();
 tests += ActivitySpanTelemetryTests.Run();
 tests += ActivitySourceListenerTests.Run();
 tests += AutomaticDeliveryTests.Run();
+tests += DurableDeliveryContractTests.Run();
 
 Console.WriteLine("dotnet package tests ok (" + tests.ToString(CultureInfo.InvariantCulture) + " tests)");
 
