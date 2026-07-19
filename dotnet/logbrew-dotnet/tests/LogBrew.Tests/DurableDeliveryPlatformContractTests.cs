@@ -363,7 +363,11 @@ internal static partial class DurableDeliveryContractTests
                 File.WriteAllText(record, "unchanged-record");
                 SetBroadWindowsAccess(record, isDirectory: false);
                 var originalSecurity = WindowsSecurityBytes(record, isDirectory: false);
-                ExpectStorageFailure(() => CreateDurableClient(recordRoot.Path));
+                var rejected = CreateDurableClient(recordRoot.Path);
+                AssertTrue(
+                    rejected.DeliveryHealth().PauseReason == DeliveryPauseReason.Storage,
+                    "broad record did not pause durable recovery");
+                AssertTrue(rejected.Shutdown().StatusCode == 204, "broad record shutdown failed");
                 AssertTrue(
                     originalSecurity.SequenceEqual(WindowsSecurityBytes(record, isDirectory: false)),
                     "broad record permissions were mutated");
