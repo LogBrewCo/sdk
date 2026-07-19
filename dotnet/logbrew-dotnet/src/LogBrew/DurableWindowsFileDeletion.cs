@@ -66,6 +66,11 @@ namespace LogBrew
                 ref flags,
                 checked((uint)WindowsDeleteInformationSize())))
             {
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach(
+                    "delete-mark-failed-win32-"
+                    + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture));
+#endif
                 throw StorageUnavailable();
             }
         }

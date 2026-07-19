@@ -662,7 +662,20 @@ internal static partial class DurableDeliveryContractTests
 
             AssertTrue(client.DeliveryHealth().PauseReason == DeliveryPauseReason.Storage, "interrupted temp record was silently ignored");
             AssertTrue(File.Exists(temporary), "interrupted temp record was silently deleted");
-            client.PurgeDurableDelivery();
+            var lastCheckpoint = "none";
+            SetStoreCheckpoint(checkpoint => lastCheckpoint = checkpoint);
+            try
+            {
+                client.PurgeDurableDelivery();
+            }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException("durable purge failed after " + lastCheckpoint, error);
+            }
+            finally
+            {
+                SetStoreCheckpoint(null);
+            }
             AssertTrue(Directory.GetFiles(child).All(path => System.IO.Path.GetFileName(path) == ".owner"), "explicit purge left durable records");
             client.RecoverAutomaticDelivery();
             AssertTrue(client.DeliveryHealth().Lifecycle == DeliveryLifecycleState.Running, "purged client did not recover explicitly");
