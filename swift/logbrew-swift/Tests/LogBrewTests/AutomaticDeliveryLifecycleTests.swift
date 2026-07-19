@@ -32,7 +32,7 @@ struct AutomaticDeliveryLifecycleTests {
         let transport = ThreadSafeScriptedTransport(statuses: [202]) { requestIndex in
             if requestIndex == 0 {
                 requestStarted.signal()
-                _ = releaseRequest.wait(timeout: .now() + 2)
+                releaseRequest.wait()
             }
         }
         let client = try makeClient()
@@ -43,10 +43,11 @@ struct AutomaticDeliveryLifecycleTests {
         try captureLog(client, id: "shutdown-in-flight")
         #expect(requestStarted.wait(timeout: .now() + 2) == .success)
 
-        DispatchQueue.global().async {
+        let shutdownThread = Thread {
             _ = try? client.shutdown()
             shutdownFinished.signal()
         }
+        shutdownThread.start()
         #expect(waitUntil(timeout: 2) { client.deliveryHealth().state == .shuttingDown })
         #expect(throws: SdkError.self) {
             try captureLog(client, id: "after-shutdown-started")
@@ -66,7 +67,7 @@ struct AutomaticDeliveryLifecycleTests {
         let transport = ThreadSafeScriptedTransport(statuses: [202]) { requestIndex in
             if requestIndex == 0 {
                 requestStarted.signal()
-                _ = releaseRequest.wait(timeout: .now() + 2)
+                releaseRequest.wait()
             }
         }
         let client = try makeClient()
@@ -77,10 +78,11 @@ struct AutomaticDeliveryLifecycleTests {
         try captureLog(client, id: "stop-in-flight")
         #expect(requestStarted.wait(timeout: .now() + 2) == .success)
 
-        DispatchQueue.global().async {
+        let stopThread = Thread {
             client.stopAutomaticDelivery()
             stopFinished.signal()
         }
+        stopThread.start()
         #expect(waitUntil(timeout: 2) { client.deliveryHealth().state == .manual })
         #expect(stopFinished.wait(timeout: .now() + 0.1) == .timedOut)
         releaseRequest.signal()

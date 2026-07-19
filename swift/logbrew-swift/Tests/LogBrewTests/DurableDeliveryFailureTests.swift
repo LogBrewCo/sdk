@@ -128,10 +128,11 @@ struct DurableDeliveryFailureTests {
             try captureLog(client, id: "durable-stop-in-flight")
             #expect(requestStarted.wait(timeout: .now() + 2) == .success)
 
-            DispatchQueue.global().async {
+            let stopThread = Thread {
                 client.stopAutomaticDelivery()
                 stopFinished.signal()
             }
+            stopThread.start()
             #expect(waitUntil(timeout: 2) { client.deliveryHealth().state == .manual })
             #expect(stopFinished.wait(timeout: .now() + 0.1) == .timedOut)
             releaseRequest.signal()
