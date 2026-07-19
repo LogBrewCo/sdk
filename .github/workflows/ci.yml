@@ -505,6 +505,16 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Set up .NET for Windows native contracts
+        if: ${{ matrix.os == 'windows' }}
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Run Windows native durability contract
+        if: ${{ matrix.os == 'windows' }}
+        run: dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release -- --durable-contract
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
         with:

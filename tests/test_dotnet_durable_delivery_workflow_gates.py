@@ -1114,6 +1114,29 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
         ):
             self.assertIn(expected, workflow)
 
+    def test_ci_runs_direct_durable_contract_before_windows_installed_smoke(self) -> None:
+        workflow = CI.read_text(encoding="utf-8")
+        durability_job = workflow[
+            workflow.index("  dotnet-durability:") : workflow.index("  swift-checks:")
+        ]
+        setup = """      - name: Set up .NET for Windows native contracts
+        if: ${{ matrix.os == 'windows' }}
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+"""
+        direct_contract = """      - name: Run Windows native durability contract
+        if: ${{ matrix.os == 'windows' }}
+        run: dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release -- --durable-contract
+"""
+
+        self.assertIn(setup, durability_job)
+        self.assertIn(direct_contract, durability_job)
+        self.assertLess(
+            durability_job.index("Run Windows native durability contract"),
+            durability_job.index("Run installed encrypted restart-delivery check"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
