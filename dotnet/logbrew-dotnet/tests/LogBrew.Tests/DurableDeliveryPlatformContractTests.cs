@@ -403,20 +403,7 @@ internal static partial class DurableDeliveryContractTests
             AssertWindowsOwnerOnly(windowsChild, isDirectory: true, requireProtected: true);
             AssertWindowsOwnerOnly(System.IO.Path.Combine(windowsChild, ".owner"), isDirectory: false, requireProtected: false);
             AssertWindowsOwnerOnly(Directory.GetFiles(windowsChild, "event-*.lbd").Single(), isDirectory: false, requireProtected: false);
-            var lastCheckpoint = "none";
-            SetStoreCheckpoint(checkpoint => lastCheckpoint = checkpoint);
-            try
-            {
-                AssertTrue(windowsClient.Shutdown().StatusCode == 202, "private Windows store shutdown failed");
-            }
-            catch (Exception error)
-            {
-                throw new InvalidOperationException("Windows deletion failed after " + lastCheckpoint, error);
-            }
-            finally
-            {
-                SetStoreCheckpoint(null);
-            }
+            AssertTrue(windowsClient.Shutdown().StatusCode == 202, "private Windows store shutdown failed");
             return;
         }
 

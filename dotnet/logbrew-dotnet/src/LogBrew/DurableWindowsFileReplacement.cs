@@ -64,11 +64,6 @@ namespace LogBrew
                     pinned.AddrOfPinnedObject(),
                     checked((uint)information.Length)))
                 {
-#if LOGBREW_TEST_HOOKS
-                    DurableStoreTestHooks.Reach(
-                        "replace-failed-win32-"
-                        + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture));
-#endif
                     throw StorageUnavailable();
                 }
             }
