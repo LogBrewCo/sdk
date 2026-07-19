@@ -495,14 +495,23 @@ namespace LogBrew
         {
             if (OperatingSystem.IsWindows())
             {
-                var owner = RequireValid(CreateFileWindows(
+                var owner = CreateFileWindows(
                     ownerPath,
                     WindowsGenericRead | WindowsGenericWrite,
                     0,
                     IntPtr.Zero,
                     4,
                     WindowsOpenReparsePoint | WindowsWriteThrough,
-                    IntPtr.Zero));
+                    IntPtr.Zero);
+#if LOGBREW_TEST_HOOKS
+                if (owner.IsInvalid)
+                {
+                    DurableStoreTestHooks.Reach(
+                        "store-owner-handle-open-failed-win32-"
+                        + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+#endif
+                owner = RequireValid(owner);
                 return LockAndValidateOwner(owner);
             }
 
@@ -530,6 +539,9 @@ namespace LogBrew
         {
             try
             {
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach("store-owner-handle-opened");
+#endif
                 var identity = created ? RequireSingleLinkFile(owner) : RequirePrivateSingleLinkFile(owner);
                 if (created)
                 {
@@ -541,6 +553,9 @@ namespace LogBrew
                     RequireIdentity(owner, identity, requireSingleLink: true);
                     RequirePrivateSingleLinkFile(owner);
                 }
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach("store-owner-security-validated");
+#endif
 
                 if (!OperatingSystem.IsWindows() && LockUnix(Descriptor(owner), LockExclusiveNonBlocking) != 0)
                 {
@@ -549,6 +564,9 @@ namespace LogBrew
 
                 RequireIdentity(owner, identity, requireSingleLink: true);
                 RequirePrivateSingleLinkFile(owner);
+#if LOGBREW_TEST_HOOKS
+                DurableStoreTestHooks.Reach("store-owner-identity-revalidated");
+#endif
                 return owner;
             }
             catch

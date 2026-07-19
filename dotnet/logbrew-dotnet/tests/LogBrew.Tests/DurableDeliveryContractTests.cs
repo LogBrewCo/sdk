@@ -15,6 +15,9 @@ internal static partial class DurableDeliveryContractTests
     {
         "store-parent-opened",
         "store-child-opened",
+        "store-owner-handle-opened",
+        "store-owner-security-validated",
+        "store-owner-identity-revalidated",
         "store-owner-opened",
         "store-ownership-validated",
     };
