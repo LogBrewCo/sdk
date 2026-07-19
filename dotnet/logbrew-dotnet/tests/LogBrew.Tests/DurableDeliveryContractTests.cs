@@ -275,21 +275,23 @@ internal static partial class DurableDeliveryContractTests
             callbackCount++;
             dropped = value;
         });
-        var owner = System.IO.Path.Combine(root.Path, ".logbrew-delivery-v1", ".owner");
-        var moved = owner + ".moved";
-        File.Move(owner, moved);
-        File.WriteAllText(owner, string.Empty);
+        var repairOwner = InvalidateOwnerForAdmission(root.Path);
+        try
+        {
+            client.Log("evt_storage_sensitive", "2026-06-02T10:00:03Z", LogAttributes.Create("payload must stay private", "info"));
 
-        client.Log("evt_storage_sensitive", "2026-06-02T10:00:03Z", LogAttributes.Create("payload must stay private", "info"));
+            AssertTrue(client.PendingEvents() == 0, "failed admission entered memory");
+            AssertTrue(client.DroppedEvents() == 1, "failed admission did not increment drops");
+            AssertTrue(callbackCount == 1, "failed admission callback count changed");
+            AssertTrue(dropped != null && dropped.Reason == "storage_unavailable", "failed admission reason changed");
+            AssertTrue(!dropped!.Reason.Contains(root.Path, StringComparison.Ordinal), "drop reason exposed a path");
+            AssertTrue(!dropped.Reason.Contains("payload", StringComparison.Ordinal), "drop reason exposed event content");
+        }
+        finally
+        {
+            repairOwner();
+        }
 
-        AssertTrue(client.PendingEvents() == 0, "failed admission entered memory");
-        AssertTrue(client.DroppedEvents() == 1, "failed admission did not increment drops");
-        AssertTrue(callbackCount == 1, "failed admission callback count changed");
-        AssertTrue(dropped != null && dropped.Reason == "storage_unavailable", "failed admission reason changed");
-        AssertTrue(!dropped!.Reason.Contains(root.Path, StringComparison.Ordinal), "drop reason exposed a path");
-        AssertTrue(!dropped.Reason.Contains("payload", StringComparison.Ordinal), "drop reason exposed event content");
-        File.Delete(owner);
-        File.Move(moved, owner);
         AssertTrue(client.Shutdown().StatusCode == 204, "failed admission shutdown failed");
     }
 
@@ -311,25 +313,28 @@ internal static partial class DurableDeliveryContractTests
                 callbackRelease.Wait(TimeSpan.FromSeconds(5));
             }
         });
-        var owner = System.IO.Path.Combine(root.Path, ".logbrew-delivery-v1", ".owner");
-        var moved = owner + ".moved";
-        File.Move(owner, moved);
-        File.WriteAllText(owner, string.Empty);
+        var repairOwner = InvalidateOwnerForAdmission(root.Path);
+        try
+        {
+            var firstCapture = Task.Run(() => client.Log("evt_storage_outer", "2026-06-02T10:00:03Z", LogAttributes.Create("outer", "info")));
+            AssertTrue(callbackEntered.Wait(TimeSpan.FromSeconds(2)), "storage callback did not reach its reentrant capture");
+            var concurrentCapture = Task.Run(() => client.Log("evt_storage_concurrent", "2026-06-02T10:00:03Z", LogAttributes.Create("concurrent", "info")));
+            var completedOutsideOwnership = concurrentCapture.Wait(TimeSpan.FromSeconds(1));
+            callbackRelease.Set();
+            AssertTrue(firstCapture.Wait(TimeSpan.FromSeconds(2)), "storage callback did not return");
+            AssertTrue(concurrentCapture.Wait(TimeSpan.FromSeconds(2)), "concurrent storage capture did not return");
 
-        var firstCapture = Task.Run(() => client.Log("evt_storage_outer", "2026-06-02T10:00:03Z", LogAttributes.Create("outer", "info")));
-        AssertTrue(callbackEntered.Wait(TimeSpan.FromSeconds(2)), "storage callback did not reach its reentrant capture");
-        var concurrentCapture = Task.Run(() => client.Log("evt_storage_concurrent", "2026-06-02T10:00:03Z", LogAttributes.Create("concurrent", "info")));
-        var completedOutsideOwnership = concurrentCapture.Wait(TimeSpan.FromSeconds(1));
-        callbackRelease.Set();
-        AssertTrue(firstCapture.Wait(TimeSpan.FromSeconds(2)), "storage callback did not return");
-        AssertTrue(concurrentCapture.Wait(TimeSpan.FromSeconds(2)), "concurrent storage capture did not return");
+            AssertTrue(completedOutsideOwnership, "storage callback retained durable ownership");
+            AssertTrue(callbackCount == 2, "storage callback reentrancy was not suppressed");
+            AssertTrue(client.PendingEvents() == 0, "failed reentrant captures entered memory");
+            AssertTrue(client.DroppedEvents() == 3, "failed reentrant capture drop count changed");
+        }
+        finally
+        {
+            callbackRelease.Set();
+            repairOwner();
+        }
 
-        AssertTrue(completedOutsideOwnership, "storage callback retained durable ownership");
-        AssertTrue(callbackCount == 2, "storage callback reentrancy was not suppressed");
-        AssertTrue(client.PendingEvents() == 0, "failed reentrant captures entered memory");
-        AssertTrue(client.DroppedEvents() == 3, "failed reentrant capture drop count changed");
-        File.Delete(owner);
-        File.Move(moved, owner);
         AssertTrue(client.Shutdown().StatusCode == 204, "storage callback shutdown failed");
     }
 

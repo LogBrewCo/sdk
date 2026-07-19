@@ -510,6 +510,38 @@ internal static partial class DurableDeliveryContractTests
         throw new InvalidOperationException("Windows replacement unexpectedly succeeded");
     }
 
+    private static Action InvalidateOwnerForAdmission(string parentDirectory)
+    {
+        var owner = System.IO.Path.Combine(parentDirectory, ".logbrew-delivery-v1", ".owner");
+        if (OperatingSystem.IsWindows())
+        {
+            return InvalidateWindowsOwnerForAdmission(owner);
+        }
+
+        var moved = owner + ".moved";
+        File.Move(owner, moved);
+        File.WriteAllText(owner, string.Empty);
+        return () =>
+        {
+            File.Delete(owner);
+            File.Move(moved, owner);
+        };
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static Action InvalidateWindowsOwnerForAdmission(string owner)
+    {
+        var originalSecurity = WindowsSecurityBytes(owner, isDirectory: false);
+        SetBroadWindowsAccess(owner, isDirectory: false);
+        return () =>
+        {
+            var security = new FileSecurity();
+            security.SetSecurityDescriptorBinaryForm(originalSecurity);
+            new FileInfo(owner).SetAccessControl(security);
+            Array.Clear(originalSecurity, 0, originalSecurity.Length);
+        };
+    }
+
     private static void CaptureAfterReplacement(LogBrewClient client, string eventId)
     {
         client.Log(eventId, "2026-06-02T10:00:03Z", LogAttributes.Create("replacement", "info"));
