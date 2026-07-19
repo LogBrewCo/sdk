@@ -435,6 +435,12 @@ internal static partial class DurableDeliveryContractTests
         using var root = new TemporaryDirectory();
         var client = CreateDurableClient(root.Path);
         var moved = root.Path + "-moved";
+        if (OperatingSystem.IsWindows())
+        {
+            AssertWindowsReplacementBlocked(client, () => Directory.Move(root.Path, moved), "evt_parent_replaced");
+            return;
+        }
+
         Directory.Move(root.Path, moved);
         Directory.CreateDirectory(root.Path);
         CaptureAfterReplacement(client, "evt_parent_replaced");
@@ -450,6 +456,12 @@ internal static partial class DurableDeliveryContractTests
         var client = CreateDurableClient(root.Path);
         var child = System.IO.Path.Combine(root.Path, ".logbrew-delivery-v1");
         var moved = child + "-moved";
+        if (OperatingSystem.IsWindows())
+        {
+            AssertWindowsReplacementBlocked(client, () => Directory.Move(child, moved), "evt_child_replaced");
+            return;
+        }
+
         Directory.Move(child, moved);
         Directory.CreateDirectory(child);
         CaptureAfterReplacement(client, "evt_child_replaced");
@@ -465,6 +477,12 @@ internal static partial class DurableDeliveryContractTests
         var client = CreateDurableClient(root.Path);
         var owner = System.IO.Path.Combine(root.Path, ".logbrew-delivery-v1", ".owner");
         var moved = owner + ".moved";
+        if (OperatingSystem.IsWindows())
+        {
+            AssertWindowsReplacementBlocked(client, () => File.Move(owner, moved), "evt_owner_replaced");
+            return;
+        }
+
         File.Move(owner, moved);
         File.WriteAllText(owner, string.Empty);
         CaptureAfterReplacement(client, "evt_owner_replaced");
@@ -472,6 +490,24 @@ internal static partial class DurableDeliveryContractTests
         File.Delete(owner);
         File.Move(moved, owner);
         AssertTrue(client.Shutdown().StatusCode == 204, "owner replacement shutdown failed");
+    }
+
+    private static void AssertWindowsReplacementBlocked(LogBrewClient client, Action replacement, string eventId)
+    {
+        try
+        {
+            replacement();
+        }
+        catch (IOException)
+        {
+            client.Log(eventId, "2026-06-02T10:00:03Z", LogAttributes.Create("replacement blocked", "info"));
+            AssertTrue(client.PendingEvents() == 1, "blocked replacement prevented durable admission");
+            AssertTrue(client.DeliveryHealth().PauseReason == DeliveryPauseReason.None, "blocked replacement paused storage");
+            AssertTrue(client.Shutdown().StatusCode == 202, "blocked replacement shutdown failed");
+            return;
+        }
+
+        throw new InvalidOperationException("Windows replacement unexpectedly succeeded");
     }
 
     private static void CaptureAfterReplacement(LogBrewClient client, string eventId)
