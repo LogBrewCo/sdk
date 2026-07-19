@@ -114,7 +114,7 @@ struct DurableDeliveryFailureTests {
         let transport = ThreadSafeScriptedTransport(statuses: [202]) { requestIndex in
             if requestIndex == 0 {
                 requestStarted.signal()
-                _ = releaseRequest.wait(timeout: .now() + 2)
+                releaseRequest.wait()
             }
         }
 

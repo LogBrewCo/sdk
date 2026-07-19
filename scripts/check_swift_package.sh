@@ -7,7 +7,10 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 swift build --package-path "$package_dir" --scratch-path "$tmp_dir/build" >/dev/null
-swift test --package-path "$package_dir" --scratch-path "$tmp_dir/test" >/dev/null
+if ! swift test --package-path "$package_dir" --scratch-path "$tmp_dir/test" >"$tmp_dir/test.log" 2>&1; then
+  cat "$tmp_dir/test.log"
+  exit 1
+fi
 
 archive_path="$tmp_dir/logbrew-swift-source.zip"
 swift package --package-path "$package_dir" --scratch-path "$tmp_dir/archive" archive-source --output "$archive_path" >/dev/null
