@@ -69,50 +69,70 @@ namespace LogBrew
                 out var descriptorPointer);
             if (result != 0 || descriptorPointer == IntPtr.Zero)
             {
-                throw StorageUnavailable();
+                throw OwnerOnlyFailure("descriptor");
             }
 
             try
             {
                 if (ownerPointer == IntPtr.Zero || daclPointer == IntPtr.Zero)
                 {
-                    throw StorageUnavailable();
+                    throw OwnerOnlyFailure("security-pointer");
                 }
 
                 if (!GetSecurityDescriptorControl(descriptorPointer, out var control, out _))
                 {
-                    throw StorageUnavailable();
+                    throw OwnerOnlyFailure("control");
                 }
 
                 if (requireProtected
                     && (((ControlFlags)control & ControlFlags.DiscretionaryAclProtected) == 0))
                 {
-                    throw StorageUnavailable();
+                    throw OwnerOnlyFailure("protection");
                 }
 
                 var owner = CurrentOwner();
                 if (!owner.Equals(new SecurityIdentifier(ownerPointer)))
                 {
-                    throw StorageUnavailable();
+                    throw OwnerOnlyFailure("owner");
                 }
 
                 var aclLength = unchecked((ushort)Marshal.ReadInt16(daclPointer, 2));
                 if (aclLength == 0 || aclLength > MaximumAclBytes)
                 {
-                    throw StorageUnavailable();
+                    throw OwnerOnlyFailure("acl-length");
                 }
 
                 var aclBytes = new byte[aclLength];
                 Marshal.Copy(daclPointer, aclBytes, 0, aclBytes.Length);
                 var dacl = new RawAcl(aclBytes, 0);
-                if (dacl.Count != 1
-                    || dacl[0] is not CommonAce ace
-                    || ace.AceQualifier != AceQualifier.AccessAllowed
-                    || ace.AccessMask != FullControlAccessMask
-                    || !owner.Equals(ace.SecurityIdentifier)
-                    || (requireProtected && !HasDirectoryInheritance(ace.AceFlags)))
+                if (dacl.Count != 1)
                 {
-                    throw StorageUnavailable();
+                    throw OwnerOnlyFailure("ace-count");
+                }
+
+                if (dacl[0] is not CommonAce ace)
+                {
+                    throw OwnerOnlyFailure("ace-kind");
+                }
+
+                if (ace.AceQualifier != AceQualifier.AccessAllowed)
+                {
+                    throw OwnerOnlyFailure("ace-qualifier");
+                }
+
+                if (ace.AccessMask != FullControlAccessMask)
+                {
+                    throw OwnerOnlyFailure("access-mask");
+                }
+
+                if (!owner.Equals(ace.SecurityIdentifier))
+                {
+                    throw OwnerOnlyFailure("principal");
+                }
+
+                if (requireProtected && !HasDirectoryInheritance(ace.AceFlags))
+                {
+                    throw OwnerOnlyFailure("inheritance");
                 }
             }
             finally
@@ -152,6 +172,14 @@ namespace LogBrew
         private static SdkException StorageUnavailable()
         {
             return new SdkException("storage_error", "durable delivery storage is unavailable");
+        }
+
+        private static SdkException OwnerOnlyFailure(string reason)
+        {
+#if LOGBREW_TEST_HOOKS
+            DurableStoreTestHooks.Reach("store-owner-security-failed-" + reason);
+#endif
+            return StorageUnavailable();
         }
 
         [LibraryImport("kernel32.dll", EntryPoint = "CreateDirectoryW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]

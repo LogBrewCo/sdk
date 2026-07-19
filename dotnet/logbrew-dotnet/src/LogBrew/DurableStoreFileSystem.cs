@@ -541,6 +541,8 @@ namespace LogBrew
             {
 #if LOGBREW_TEST_HOOKS
                 DurableStoreTestHooks.Reach("store-owner-handle-opened");
+                _ = RequireSingleLinkFile(owner);
+                DurableStoreTestHooks.Reach("store-owner-identity-validated");
 #endif
                 var identity = created ? RequireSingleLinkFile(owner) : RequirePrivateSingleLinkFile(owner);
                 if (created)
