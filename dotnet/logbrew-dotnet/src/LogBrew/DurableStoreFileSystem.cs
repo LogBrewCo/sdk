@@ -341,14 +341,12 @@ namespace LogBrew
             SafeFileHandle handle;
             if (OperatingSystem.IsWindows())
             {
-                handle = RequireValid(CreateFileWindows(
+                handle = RequireValid(DurableWindowsAccessControl.CreateOwnerOnlyFile(
                     Path.Combine(childPath, name),
                     windowsAccess,
                     WindowsShareRead | WindowsShareDelete,
-                    IntPtr.Zero,
                     WindowsCreateNew,
-                    WindowsOpenReparsePoint | WindowsWriteThrough,
-                    IntPtr.Zero));
+                    WindowsOpenReparsePoint | WindowsWriteThrough));
                 try
                 {
                     RequirePrivateSingleLinkFile(handle);
@@ -495,14 +493,12 @@ namespace LogBrew
         {
             if (OperatingSystem.IsWindows())
             {
-                var owner = CreateFileWindows(
+                var owner = DurableWindowsAccessControl.CreateOwnerOnlyFile(
                     ownerPath,
                     WindowsGenericRead | WindowsGenericWrite,
                     0,
-                    IntPtr.Zero,
                     4,
-                    WindowsOpenReparsePoint | WindowsWriteThrough,
-                    IntPtr.Zero);
+                    WindowsOpenReparsePoint | WindowsWriteThrough);
 #if LOGBREW_TEST_HOOKS
                 if (owner.IsInvalid)
                 {

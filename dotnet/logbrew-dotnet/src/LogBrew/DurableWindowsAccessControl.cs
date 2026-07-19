@@ -21,17 +21,7 @@ namespace LogBrew
         internal static bool CreateDirectory(string path)
         {
             var owner = CurrentOwner();
-            var dacl = CreateOwnerOnlyDacl(owner);
-            var descriptor = new RawSecurityDescriptor(
-                ControlFlags.DiscretionaryAclPresent
-                    | ControlFlags.DiscretionaryAclProtected
-                    | ControlFlags.SelfRelative,
-                owner,
-                owner,
-                systemAcl: null,
-                dacl);
-            var descriptorBytes = new byte[descriptor.BinaryLength];
-            descriptor.GetBinaryForm(descriptorBytes, 0);
+            var descriptorBytes = CreateOwnerOnlySecurityDescriptor(owner, inheritChildren: true);
             unsafe
             {
                 fixed (byte* descriptorPointer = descriptorBytes)
@@ -54,6 +44,36 @@ namespace LogBrew
             }
 
             throw StorageUnavailable();
+        }
+
+        internal static SafeFileHandle CreateOwnerOnlyFile(
+            string path,
+            uint desiredAccess,
+            uint shareMode,
+            uint creationDisposition,
+            uint flagsAndAttributes)
+        {
+            var owner = CurrentOwner();
+            var descriptorBytes = CreateOwnerOnlySecurityDescriptor(owner, inheritChildren: false);
+            unsafe
+            {
+                fixed (byte* descriptorPointer = descriptorBytes)
+                {
+                    var attributes = new WindowsSecurityAttributes
+                    {
+                        Length = Marshal.SizeOf<WindowsSecurityAttributes>(),
+                        SecurityDescriptor = (IntPtr)descriptorPointer,
+                    };
+                    return CreateFileWindows(
+                        path,
+                        desiredAccess,
+                        shareMode,
+                        ref attributes,
+                        creationDisposition,
+                        flagsAndAttributes,
+                        IntPtr.Zero);
+                }
+            }
         }
 
         internal static void RequireOwnerOnly(SafeFileHandle handle, bool requireProtected)
@@ -147,19 +167,34 @@ namespace LogBrew
             return identity.User ?? throw StorageUnavailable();
         }
 
-        private static RawAcl CreateOwnerOnlyDacl(SecurityIdentifier owner)
+        private static RawAcl CreateOwnerOnlyDacl(SecurityIdentifier owner, bool inheritChildren)
         {
             var dacl = new RawAcl(revision: 2, capacity: 1);
             dacl.InsertAce(
                 0,
                 new CommonAce(
-                    AceFlags.ContainerInherit | AceFlags.ObjectInherit,
+                    inheritChildren ? AceFlags.ContainerInherit | AceFlags.ObjectInherit : AceFlags.None,
                     AceQualifier.AccessAllowed,
                     FullControlAccessMask,
                     owner,
                     isCallback: false,
                     opaque: null));
             return dacl;
+        }
+
+        private static byte[] CreateOwnerOnlySecurityDescriptor(SecurityIdentifier owner, bool inheritChildren)
+        {
+            var descriptor = new RawSecurityDescriptor(
+                ControlFlags.DiscretionaryAclPresent
+                    | ControlFlags.DiscretionaryAclProtected
+                    | ControlFlags.SelfRelative,
+                owner,
+                owner,
+                systemAcl: null,
+                CreateOwnerOnlyDacl(owner, inheritChildren));
+            var bytes = new byte[descriptor.BinaryLength];
+            descriptor.GetBinaryForm(bytes, 0);
+            return bytes;
         }
 
         private static bool HasDirectoryInheritance(AceFlags flags)
@@ -186,6 +221,17 @@ namespace LogBrew
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static partial bool CreateDirectoryWindows(string path, ref WindowsSecurityAttributes securityAttributes);
+
+        [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        private static partial SafeFileHandle CreateFileWindows(
+            string path,
+            uint desiredAccess,
+            uint shareMode,
+            ref WindowsSecurityAttributes securityAttributes,
+            uint creationDisposition,
+            uint flagsAndAttributes,
+            IntPtr templateFile);
 
         [LibraryImport("advapi32.dll")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
