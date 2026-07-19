@@ -35,6 +35,42 @@ static SdkException ExpectSdkError(string code, string messageFragment, Action c
     throw new InvalidOperationException("expected SdkException with code " + code);
 }
 
+static void ExpectArgumentNullContract(string parameterName, Action callback)
+{
+    try
+    {
+        callback();
+    }
+    catch (ArgumentNullException error)
+    {
+        var expected = new ArgumentNullException(parameterName);
+        AssertTrue(error.GetType() == typeof(ArgumentNullException), "expected exact ArgumentNullException type");
+        AssertTrue(error.ParamName == expected.ParamName, "unexpected ArgumentNullException parameter name");
+        AssertTrue(error.Message == expected.Message, "unexpected ArgumentNullException message");
+        return;
+    }
+
+    throw new InvalidOperationException("expected ArgumentNullException for " + parameterName);
+}
+
+static void ExpectObjectDisposedContract(string objectName, Action callback)
+{
+    try
+    {
+        callback();
+    }
+    catch (ObjectDisposedException error)
+    {
+        var expected = new ObjectDisposedException(objectName);
+        AssertTrue(error.GetType() == typeof(ObjectDisposedException), "expected exact ObjectDisposedException type");
+        AssertTrue(error.ObjectName == expected.ObjectName, "unexpected ObjectDisposedException object name");
+        AssertTrue(error.Message == expected.Message, "unexpected ObjectDisposedException message");
+        return;
+    }
+
+    throw new InvalidOperationException("expected ObjectDisposedException for " + objectName);
+}
+
 static LogBrewClient SampleClient(int maxRetries = 2)
 {
     return LogBrewClient.Create("LOGBREW_API_KEY", "logbrew-dotnet", "0.1.0", maxRetries);
@@ -70,6 +106,35 @@ static int CountOccurrences(string text, string value)
 }
 
 var tests = 0;
+
+ExpectArgumentNullContract("client", () => LogBrewActivitySourceListener.Start(null!));
+ExpectArgumentNullContract("client", () => LogBrewActivitySpanTelemetry.Capture(null!, null));
+ExpectArgumentNullContract("parent", () => LogBrewTraceContext.CreateChild(null!));
+ExpectArgumentNullContract("context", () => LogBrewTrace.Activate(null!));
+ExpectArgumentNullContract("summaries", () => SpanAttributes.Create("GET /", "trace_001", "span_001", "ok").WithEvents(null!));
+ExpectArgumentNullContract("summaries", () => SpanAttributes.Create("GET /", "trace_001", "span_001", "ok").WithLinks(null!));
+ExpectArgumentNullContract("summary", () => SpanAttributes.Create("GET /", "trace_001", "span_001", "ok").WithLink(null!));
+ExpectArgumentNullContract("summary", () => SpanAttributes.Create("GET /", "trace_001", "span_001", "ok").WithEvent(null!));
+ExpectArgumentNullContract("metadata", () => SpanEventSummary.Create("event").WithMetadata(null!));
+ExpectArgumentNullContract("client", () => LogBrewDbCommandTelemetry.ExecuteNonQuery(null!, null!));
+ExpectArgumentNullContract("command", () => LogBrewDbCommandTelemetry.ExecuteNonQuery(SampleClient(), null!));
+ExpectArgumentNullContract("client", () => LogBrewOperationTracing.DatabaseOperation<int>(null!, "select", () => 1));
+ExpectArgumentNullContract("operation", () => LogBrewOperationTracing.DatabaseOperation<int>(SampleClient(), "select", null!));
+ExpectArgumentNullContract("client", () => LogBrewOperationTracing.DatabaseOperationAsync<int>(null!, "select", () => Task.FromResult(1)).GetAwaiter().GetResult());
+ExpectArgumentNullContract("operation", () => LogBrewOperationTracing.DatabaseOperationAsync<int>(SampleClient(), "select", null!).GetAwaiter().GetResult());
+ExpectArgumentNullContract("builder", () => LogBrewLoggingBuilderExtensions.AddLogBrew(null!, SampleClient()));
+using (var provider = new LogBrewLoggerProvider(SampleClient()))
+{
+    var logger = provider.CreateLogger("contract");
+    var logState = new object();
+    ExpectArgumentNullContract("formatter", () => logger.Log<object>(LogLevel.Information, default, logState, null, null!));
+    provider.Dispose();
+    ExpectObjectDisposedContract(nameof(LogBrewLoggerProvider), () => provider.CreateLogger("closed"));
+}
+
+ExpectArgumentNullContract("client", () => LogBrewServerRequestTelemetry.CaptureAsync(null!, "GET", "/", null, _ => Task.FromResult(200)).GetAwaiter().GetResult());
+ExpectArgumentNullContract("handler", () => LogBrewServerRequestTelemetry.CaptureAsync(SampleClient(), "GET", "/", null, null!).GetAwaiter().GetResult());
+tests++;
 
 var previewClient = SampleClient();
 EnqueueAll(previewClient);

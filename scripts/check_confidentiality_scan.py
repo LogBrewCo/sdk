@@ -921,7 +921,7 @@ def is_kotlin_coroutine_context_reference(
 
 
 def is_dotnet_cancellation_token_reference(line: str) -> bool:
-    return "CancellationToken" in line or ".Token" in line
+    return "CancellationToken" in line or "cancellationToken" in line or ".Token" in line
 
 
 def is_dotnet_analyzer_pragma_reference(line: str, terms: set[str]) -> bool:

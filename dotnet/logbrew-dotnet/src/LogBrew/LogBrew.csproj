@@ -1,11 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <AnalysisMode>All</AnalysisMode>
+    <AnalysisMode Condition="'$(TargetFramework)' != 'net8.0'">All</AnalysisMode>
+    <AnalysisMode Condition="'$(TargetFramework)' == 'net8.0'">Recommended</AnalysisMode>
+    <AnalysisLevel Condition="'$(TargetFramework)' == 'net8.0'">8.0</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
     <PackageId>LogBrew</PackageId>
@@ -19,6 +21,8 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>logbrew-logo-transparent-128.png</PackageIcon>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <EnableStrictModeForCompatibleTfmsInPackage>true</EnableStrictModeForCompatibleTfmsInPackage>
   </PropertyGroup>
 
   <ItemGroup>

@@ -65,10 +65,7 @@ namespace LogBrew
 
         public static LogBrewTraceContext CreateChild(LogBrewTraceContext parent)
         {
-            if (parent == null)
-            {
-                throw new ArgumentNullException(nameof(parent));
-            }
+            ExceptionContract.ThrowIfNull(parent, nameof(parent));
 
             return new LogBrewTraceContext(parent.TraceId, GenerateSpanId(), parent.SpanId, parent.TraceFlags);
         }
@@ -254,10 +251,7 @@ namespace LogBrew
 
         public static IDisposable Activate(LogBrewTraceContext context)
         {
-            if (context == null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ExceptionContract.ThrowIfNull(context, nameof(context));
 
             var previous = ActiveTrace.Value;
             ActiveTrace.Value = context;
@@ -454,7 +448,7 @@ namespace LogBrew
             return elapsedTicks * 1000.0 / Stopwatch.Frequency;
         }
 
-        private IDictionary<string, object?> RequestMetadata(int statusCode, IDictionary<string, object?>? metadata)
+        private Dictionary<string, object?> RequestMetadata(int statusCode, IDictionary<string, object?>? metadata)
         {
             var result = Validation.CopyPrimitiveMetadata(metadata);
             result["method"] = Method;

@@ -256,7 +256,7 @@ namespace LogBrew
             return timeout;
         }
 
-        private static IReadOnlyDictionary<string, string> CopyHeaders(IDictionary<string, string>? source)
+        private static Dictionary<string, string> CopyHeaders(IDictionary<string, string>? source)
         {
             var copied = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (source == null)
@@ -904,6 +904,8 @@ namespace LogBrew
 
     internal static class Validation
     {
+        private static readonly char[] TimestampSeparator = { 'T' };
+
         internal static void RequireNonEmpty(string label, string? value)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -1005,19 +1007,19 @@ namespace LogBrew
 
         private static bool HasTimezoneOffset(string timestamp)
         {
-            if (timestamp.EndsWith("Z", StringComparison.Ordinal))
+            if (TextSearch.EndsWith(timestamp, 'Z'))
             {
                 return true;
             }
 
-            var parts = timestamp.Split(new[] { 'T' }, 2);
+            var parts = timestamp.Split(TimestampSeparator, 2);
             if (parts.Length < 2)
             {
                 return false;
             }
 
             var timePortion = parts[1];
-            return timePortion.Contains("+") || timePortion.LastIndexOf("-", StringComparison.Ordinal) > 0;
+            return TextSearch.Contains(timePortion, '+') || timePortion.LastIndexOf('-') > 0;
         }
 
         internal static bool IsMetadataValue(object? value)

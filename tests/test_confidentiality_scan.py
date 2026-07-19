@@ -48,7 +48,8 @@ class ConfidentialityScanTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "dotnet" / "logbrew-dotnet" / "src" / "LogBrew" / "LogBrew.cs").write_text(
-                "#pragma warning " + "rest" + "ore CA1031\n",
+                "#pragma warning " + "rest" + "ore CA1031\n"
+                "return SendAsync(request, cancellation" + "To" + "ken);\n",
                 encoding="utf-8",
             )
             (root / "unity" / "logbrew-unity" / "Runtime" / "PublicTypes.cs").write_text(

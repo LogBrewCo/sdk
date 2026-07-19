@@ -111,15 +111,8 @@ namespace LogBrew
             Func<LogBrewHttpRequestTelemetry, Task<int>> handler,
             LogBrewServerRequestOptions? options = null)
         {
-            if (client == null)
-            {
-                throw new ArgumentNullException(nameof(client));
-            }
-
-            if (handler == null)
-            {
-                throw new ArgumentNullException(nameof(handler));
-            }
+            ExceptionContract.ThrowIfNull(client, nameof(client));
+            ExceptionContract.ThrowIfNull(handler, nameof(handler));
 
             var safeOptions = options ?? LogBrewServerRequestOptions.Create();
             var request = LogBrewHttpRequestTelemetry.Start(client, method, routeTemplate, incomingTraceparent);
