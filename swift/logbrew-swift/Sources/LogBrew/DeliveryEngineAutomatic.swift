@@ -66,6 +66,10 @@ extension DeliveryEngine {
         prefix: FrozenPrefix,
         generation currentGeneration: UInt64,
     ) {
+        if case .accepted = result {
+            finishAcceptedAutomaticAttempt(result, prefix: prefix, generation: currentGeneration)
+            return
+        }
         stateLock.lock()
         guard generation == currentGeneration || state == .shuttingDown else {
             inFlight = false
@@ -76,6 +80,45 @@ extension DeliveryEngine {
         deliveryAttempts += result.attempts
         let shouldSchedule = applyAutomaticResultLocked(result, prefix: prefix)
         stateLock.unlock()
+        if shouldSchedule {
+            scheduleTimerUpdate()
+        }
+    }
+
+    private func finishAcceptedAutomaticAttempt(
+        _ result: AttemptResult,
+        prefix: FrozenPrefix,
+        generation currentGeneration: UInt64,
+    ) {
+        storageLock.lock()
+        stateLock.lock()
+        guard generation == currentGeneration || state == .shuttingDown else {
+            inFlight = false
+            stateLock.unlock()
+            storageLock.unlock()
+            return
+        }
+        let store = durableStore
+        stateLock.unlock()
+
+        let finalResult: AttemptResult
+        do {
+            try store?.acknowledge(body: prefix.body, eventRecordNames: prefix.durableRecordNames)
+            finalResult = result
+        } catch {
+            finalResult = .terminal(
+                reason: .storage,
+                attempts: result.attempts,
+                error: storageError(error),
+            )
+        }
+
+        stateLock.lock()
+        inFlight = false
+        deliveryAttempts += finalResult.attempts
+        let shouldSchedule = applyAutomaticResultLocked(finalResult, prefix: prefix)
+        stateLock.unlock()
+        storageLock.unlock()
         if shouldSchedule {
             scheduleTimerUpdate()
         }
@@ -191,6 +234,10 @@ extension DeliveryEngine {
             stateLock.unlock()
             throw SdkError(code: "shutdown_error", message: "client is already shut down")
         }
+        if state == .paused, pauseReason == .storage {
+            stateLock.unlock()
+            throw SdkError(code: "storage_corrupt", message: "durable delivery data requires explicit recovery")
+        }
         nextWakeNanoseconds = nil
         stateLock.unlock()
     }
@@ -221,10 +268,16 @@ extension DeliveryEngine {
     }
 
     func beginShutdown() throws -> (timer: DispatchSourceTimer?, scheduler: DispatchQueue?) {
+        storageLock.lock()
+        defer { storageLock.unlock() }
         stateLock.lock()
         guard !closed, state != .closed, state != .shuttingDown else {
             stateLock.unlock()
             throw SdkError(code: "shutdown_error", message: "client is already shut down")
+        }
+        if state == .paused, pauseReason == .storage {
+            stateLock.unlock()
+            throw SdkError(code: "storage_corrupt", message: "durable delivery data requires explicit recovery")
         }
         generation &+= 1
         state = .shuttingDown

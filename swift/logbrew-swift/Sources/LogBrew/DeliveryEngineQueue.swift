@@ -1,6 +1,61 @@
 import Foundation
 
 extension DeliveryEngine {
+    func enqueue(_ event: Event) throws {
+        let eventBytes = try encodeEvent(event).count
+        let singleRequestBytes = try encodeBatch([event]).count
+        var shouldSchedule = false
+        var admissionError: SdkError?
+        var durableRecordName: String?
+
+        storageLock.lock()
+        defer { storageLock.unlock() }
+        stateLock.lock()
+        if closed || state == .shuttingDown || state == .closed {
+            admissionError = SdkError(code: "shutdown_error", message: "client is already shut down")
+        } else if state == .paused, pauseReason == .storage {
+            admissionError = SdkError(
+                code: "storage_corrupt",
+                message: "durable delivery data requires explicit recovery",
+            )
+        } else if singleRequestBytes > Self.maxRequestBytes {
+            droppedEvents += 1
+            lastOutcome = .dropped
+            admissionError = SdkError(code: "event_too_large", message: "event exceeds the delivery request byte limit")
+        } else if queue.count >= Self.maxQueuedEvents || queuedBytes > Self.maxQueuedBytes - eventBytes {
+            droppedEvents += 1
+            lastOutcome = .dropped
+            admissionError = SdkError(code: "queue_full", message: "delivery queue capacity exceeded")
+        } else {
+            let store = durableStore
+            stateLock.unlock()
+            do {
+                durableRecordName = try store?.append(event, encodedBytes: eventBytes)
+            } catch {
+                recordStorageFailure()
+                throw storageError(error)
+            }
+            stateLock.lock()
+            queue.append(
+                QueuedEvent(
+                    event: event,
+                    encodedBytes: eventBytes,
+                    durableRecordName: durableRecordName,
+                ),
+            )
+            queuedBytes += eventBytes
+            shouldSchedule = scheduleCaptureLocked()
+        }
+        stateLock.unlock()
+
+        if shouldSchedule {
+            scheduleTimerUpdate()
+        }
+        if let admissionError {
+            throw admissionError
+        }
+    }
+
     func flushAll(transport: any Transport) throws -> TransportResponse {
         var totalAttempts = 0
         var statusCode = 204
@@ -13,7 +68,7 @@ extension DeliveryEngine {
                 recordManualAttempts(result.attempts)
                 switch result {
                 case let .accepted(status, _):
-                    acknowledge(prefix)
+                    try acknowledge(prefix)
                     statusCode = status
                     accepted = true
                 case .retryable where attemptIndex < maxRetries:
@@ -36,19 +91,38 @@ extension DeliveryEngine {
     }
 
     func freezePrefix() throws -> FrozenPrefix? {
+        storageLock.lock()
+        defer { storageLock.unlock() }
+
         stateLock.lock()
-        defer { stateLock.unlock() }
         if let frozenPrefix {
             inFlight = true
+            stateLock.unlock()
             return frozenPrefix
         }
         guard !queue.isEmpty else {
+            stateLock.unlock()
             return nil
         }
+        let queueSnapshot = queue
+        let store = durableStore
+        stateLock.unlock()
 
+        let prefix = try makePrefix(queueSnapshot: queueSnapshot, store: store)
+        stateLock.lock()
+        frozenPrefix = prefix
+        inFlight = true
+        stateLock.unlock()
+        return prefix
+    }
+
+    private func makePrefix(
+        queueSnapshot: [QueuedEvent],
+        store: DurableDeliveryStore?,
+    ) throws -> FrozenPrefix {
         var selected: [Event] = []
         var body = Data()
-        for queuedEvent in queue.prefix(Self.maxRequestEvents) {
+        for queuedEvent in queueSnapshot.prefix(Self.maxRequestEvents) {
             let candidate = selected + [queuedEvent.event]
             let candidateBody = try encodeBatch(candidate)
             if candidateBody.count > Self.maxRequestBytes {
@@ -60,20 +134,56 @@ extension DeliveryEngine {
         guard !selected.isEmpty else {
             throw SdkError(code: "event_too_large", message: "event exceeds the delivery request byte limit")
         }
-        let prefixBytes = queue.prefix(selected.count).reduce(0) { $0 + $1.encodedBytes }
-        let prefix = FrozenPrefix(count: selected.count, bytes: prefixBytes, body: body)
-        frozenPrefix = prefix
-        inFlight = true
-        return prefix
+        let selectedQueue = Array(queueSnapshot.prefix(selected.count))
+        let prefixBytes = selectedQueue.reduce(0) { $0 + $1.encodedBytes }
+        let recordNames = selectedQueue.compactMap(\.durableRecordName)
+        if let store {
+            guard recordNames.count == selected.count else {
+                recordStorageFailure()
+                throw storageError(DurableStoreFailure.corrupt)
+            }
+            do {
+                try store.persistPrefix(body: body, eventRecordNames: recordNames, encodedBytes: prefixBytes)
+            } catch {
+                recordStorageFailure()
+                throw storageError(error)
+            }
+        }
+        return FrozenPrefix(
+            count: selected.count,
+            bytes: prefixBytes,
+            body: body,
+            durableRecordNames: recordNames,
+        )
     }
 
-    func acknowledge(_ prefix: FrozenPrefix) {
+    func acknowledge(_ prefix: FrozenPrefix) throws {
+        do {
+            try acknowledgeDurableFiles(prefix)
+        } catch {
+            recordStorageFailure()
+            throw error
+        }
         stateLock.lock()
         acknowledgeLocked(prefix)
         acceptedEvents += prefix.count
         consecutiveFailures = 0
         lastOutcome = .accepted
         stateLock.unlock()
+    }
+
+    func acknowledgeDurableFiles(_ prefix: FrozenPrefix) throws {
+        storageLock.lock()
+        defer { storageLock.unlock() }
+        let store = withStateLock { durableStore }
+        guard let store else {
+            return
+        }
+        do {
+            try store.acknowledge(body: prefix.body, eventRecordNames: prefix.durableRecordNames)
+        } catch {
+            throw storageError(error)
+        }
     }
 
     func acknowledgeLocked(_ prefix: FrozenPrefix) {
@@ -173,5 +283,29 @@ extension DeliveryEngine {
         stateLock.lock()
         defer { stateLock.unlock() }
         return operation()
+    }
+
+    func recordStorageFailure() {
+        stateLock.lock()
+        inFlight = false
+        state = .paused
+        pauseReason = .storage
+        lastOutcome = .terminalFailure
+        consecutiveFailures += 1
+        nextWakeNanoseconds = nil
+        stateLock.unlock()
+    }
+
+    func storageError(_ error: Error) -> SdkError {
+        if let failure = error as? DurableStoreFailure, failure == .corrupt {
+            return SdkError(code: "storage_corrupt", message: "durable delivery data requires explicit recovery")
+        }
+        if let failure = error as? DurableStoreFailure, failure == .capacity {
+            return SdkError(code: "queue_full", message: "durable delivery capacity exceeded")
+        }
+        if let failure = error as? DurableStoreFailure, failure == .owned {
+            return SdkError(code: "storage_error", message: "durable delivery storage is already in use")
+        }
+        return SdkError(code: "storage_error", message: "durable delivery storage is unavailable")
     }
 }

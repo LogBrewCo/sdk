@@ -24,6 +24,15 @@ public enum DeliveryPauseReason: String, Codable, Sendable {
     case validation
     case nonRetryable = "non_retryable"
     case retryExhausted = "retry_exhausted"
+    case storage
+}
+
+public struct DurableDeliveryOptions: Equatable, Sendable {
+    public let directory: URL
+
+    public init(directory: URL) {
+        self.directory = directory
+    }
 }
 
 public struct AutomaticDeliveryOptions: Equatable, Sendable {

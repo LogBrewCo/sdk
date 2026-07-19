@@ -26,4 +26,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+@interface LBWDeliveryEngine (Durable)
+
+- (BOOL)enableDurableDeliveryWithOptions:(LBWDurableDeliveryOptions *)options
+                                   error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)purgeDurableDeliveryWithError:(NSError *_Nullable *_Nullable)error;
+
+@end
+
 NS_ASSUME_NONNULL_END

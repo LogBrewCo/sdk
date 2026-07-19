@@ -98,6 +98,14 @@ public final class LogBrewClient: @unchecked Sendable {
         engine.health()
     }
 
+    public func enableDurableDelivery(options: DurableDeliveryOptions) throws {
+        try engine.enableDurableDelivery(options: options)
+    }
+
+    public func purgeDurableDelivery() throws {
+        try engine.purgeDurableDelivery()
+    }
+
     public func flush() throws -> TransportResponse {
         try engine.flushOwnedTransport()
     }

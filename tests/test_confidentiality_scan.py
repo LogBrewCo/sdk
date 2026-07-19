@@ -121,6 +121,30 @@ class ConfidentialityScanTests(unittest.TestCase):
             self.assertEqual(len(failures), 1)
             self.assertIn("Other.swift", failures[0])
 
+    def test_allows_apple_durable_storage_terms_only_in_owned_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            durable_dir = root / "swift" / "logbrew-swift" / "Sources" / "LogBrew"
+            durable_dir.mkdir(parents=True)
+            allowed = durable_dir / "DurableDeliveryStoreRecovery.swift"
+            archive_label = "back" + "up"
+            cleaner_name = "clean" + "up"
+            allowed.write_text(
+                f"exclude durable files from {archive_label} and {cleaner_name} invalid records\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            unrelated = durable_dir / "DeliveryEngine.swift"
+            unrelated.write_text(
+                f"unexpected {archive_label} {cleaner_name} guidance\n",
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("DeliveryEngine.swift", failures[0])
+
     def test_allows_maven_central_preflight_secret_names_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

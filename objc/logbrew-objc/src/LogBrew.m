@@ -286,6 +286,18 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
 
 @end
 
+@implementation LBWDurableDeliveryOptions
+
+- (instancetype)initWithDirectoryURL:(NSURL *)directoryURL {
+  self = [super init];
+  if (self != nil) {
+    _directoryURL = [directoryURL copy];
+  }
+  return self;
+}
+
+@end
+
 @implementation LBWTransportResponse
 
 - (instancetype)initWithStatusCode:(NSInteger)statusCode attempts:(NSUInteger)attempts {
@@ -424,6 +436,14 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
 
 - (void)stopAutomaticDelivery {
   [self.deliveryEngine stopAutomaticDelivery];
+}
+
+- (BOOL)enableDurableDeliveryWithOptions:(LBWDurableDeliveryOptions *)options error:(NSError **)error {
+  return [self.deliveryEngine enableDurableDeliveryWithOptions:options error:error];
+}
+
+- (BOOL)purgeDurableDeliveryWithError:(NSError **)error {
+  return [self.deliveryEngine purgeDurableDeliveryWithError:error];
 }
 
 - (LBWDeliveryHealth *)deliveryHealth {

@@ -15,7 +15,8 @@ typedef NS_ENUM(NSInteger, LBWErrorKind) {
   LBWErrorKindConfig = 1,
   LBWErrorKindValidation = 2,
   LBWErrorKindTransport = 3,
-  LBWErrorKindShutdown = 4
+  LBWErrorKindShutdown = 4,
+  LBWErrorKindStorage = 5
 };
 
 @interface LBWConfig : NSObject
@@ -97,8 +98,18 @@ typedef NS_ENUM(NSInteger, LBWDeliveryPauseReason) {
   LBWDeliveryPauseReasonQuota = 2,
   LBWDeliveryPauseReasonValidation = 3,
   LBWDeliveryPauseReasonNonRetryable = 4,
-  LBWDeliveryPauseReasonRetryExhausted = 5
+  LBWDeliveryPauseReasonRetryExhausted = 5,
+  LBWDeliveryPauseReasonStorage = 6
 };
+
+@interface LBWDurableDeliveryOptions : NSObject
+
+@property(nonatomic, copy, readonly) NSURL *directoryURL;
+
+- (instancetype)initWithDirectoryURL:(NSURL *)directoryURL NS_DESIGNATED_INITIALIZER;
+- (instancetype)init NS_UNAVAILABLE;
+
+@end
 
 @interface LBWAutomaticDeliveryOptions : NSObject
 
@@ -286,6 +297,9 @@ typedef NS_ENUM(NSInteger, LBWDeliveryPauseReason) {
                                       error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)recoverAutomaticDeliveryWithError:(NSError *_Nullable *_Nullable)error;
 - (void)stopAutomaticDelivery;
+- (BOOL)enableDurableDeliveryWithOptions:(LBWDurableDeliveryOptions *)options
+                                   error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)purgeDurableDeliveryWithError:(NSError *_Nullable *_Nullable)error;
 - (nullable LBWTransportResponse *)flushOwnedTransportWithError:(NSError *_Nullable *_Nullable)error;
 - (nullable LBWTransportResponse *)shutdownOwnedTransportWithError:(NSError *_Nullable *_Nullable)error;
 

@@ -612,12 +612,18 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     source_path = require_path(root, "objc/logbrew-objc/src/LogBrew.m", failures)
     require_path(root, "objc/logbrew-objc/src/LBWDeliveryEngine.h", failures)
     require_path(root, "objc/logbrew-objc/src/LBWDeliveryEngine.m", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDeliveryEnginePrivate.h", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDeliveryEngineDurable.m", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDurableDeliveryStore.h", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDurableDeliveryStore.m", failures)
     require_path(root, "objc/logbrew-objc/src/LBWHTTPTransport.m", failures)
     require_path(root, "objc/logbrew-objc/Makefile", failures)
     require_path(root, "objc/logbrew-objc/examples/Makefile", failures)
     require_path(root, "objc/logbrew-objc/examples/readme_example.m", failures)
     require_path(root, "objc/logbrew-objc/examples/real_user_smoke.m", failures)
     require_path(root, "objc/logbrew-objc/tests/test_logbrew.m", failures)
+    require_path(root, "objc/logbrew-objc/tests/test_durable_delivery.m", failures)
+    require_path(root, "objc/logbrew-objc/tests/test_durable_delivery_recovery.m", failures)
     if not header_path.exists() or not source_path.exists():
         return
     header = header_path.read_text(encoding="utf-8")
@@ -634,8 +640,11 @@ def validate_objc(root: Path, failures: list[str]) -> None:
         "captureProductActionWithID",
         "captureNetworkMilestoneWithID",
         "LBWAutomaticDeliveryOptions",
+        "LBWDurableDeliveryOptions",
         "LBWDeliveryHealth",
         "startAutomaticDeliveryWithTransport",
+        "enableDurableDeliveryWithOptions",
+        "purgeDurableDeliveryWithError",
         "recoverAutomaticDeliveryWithError",
         "shutdownOwnedTransportWithError",
     ):
@@ -651,6 +660,8 @@ def validate_objc(root: Path, failures: list[str]) -> None:
         "flushWithTransport",
         "copyable source",
         "startAutomaticDeliveryWithTransport",
+        "Durable Delivery (Opt-In)",
+        "enableDurableDeliveryWithOptions",
         "deliveryHealth",
     ):
         require(needle in readme, failures, f"objc/logbrew-objc/README.md: missing guidance {needle}")
@@ -854,16 +865,30 @@ def validate_php(root: Path, failures: list[str]) -> None:
 
 def validate_swift(root: Path, failures: list[str]) -> None:
     readme_path = require_path(root, "swift/logbrew-swift/README.md", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStore.swift", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStoreRecovery.swift", failures)
     require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngine.swift", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineDurable.swift", failures)
     require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineAutomatic.swift", failures)
     require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineQueue.swift", failures)
     require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryLifecycle.swift", failures)
     require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryTests.swift", failures)
     require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryLifecycleTests.swift", failures)
     require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryTestSupport.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryFailureTests.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryRecoveryTests.swift", failures)
     if readme_path.exists():
         readme = readme_path.read_text(encoding="utf-8")
-        for needle in ("startAutomaticDelivery", "AutomaticDeliveryOptions", "deliveryHealth"):
+        for needle in (
+            "startAutomaticDelivery",
+            "AutomaticDeliveryOptions",
+            "Durable Delivery (Opt-In)",
+            "DurableDeliveryOptions",
+            "enableDurableDelivery",
+            "purgeDurableDelivery",
+            "deliveryHealth",
+        ):
             require(needle in readme, failures, f"swift/logbrew-swift/README.md: missing guidance {needle}")
     manifest_expectations = {
         "swift/logbrew-swift/Package.swift": (

@@ -204,6 +204,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_kscrash_report_deletion_policy_reference(relative_text, line, terms):
         return True
 
+    if is_apple_durable_storage_reference(relative_text, terms):
+        return True
+
     if is_kotlin_coroutine_context_reference(relative_text, line, terms):
         return True
 
@@ -251,6 +254,19 @@ def is_kscrash_report_deletion_policy_reference(
         and terms == {"cleanup"}
         and "reportCleanupPolicy" in line
     )
+
+
+def is_apple_durable_storage_reference(relative_text: str, terms: set[str]) -> bool:
+    durable_paths = {
+        "objc/logbrew-objc/README.md",
+        "objc/logbrew-objc/src/LBWDurableDeliveryStore.m",
+        "objc/logbrew-objc/tests/test_durable_delivery.m",
+        "objc/logbrew-objc/tests/test_durable_delivery_recovery.m",
+        "swift/logbrew-swift/README.md",
+        "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStoreRecovery.swift",
+        "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift",
+    }
+    return relative_text in durable_paths and terms.issubset({"backup", "cleanup"})
 
 
 def is_public_publishing_guidance(relative_text: str, line: str) -> bool:

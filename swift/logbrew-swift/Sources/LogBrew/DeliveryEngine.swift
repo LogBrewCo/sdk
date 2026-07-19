@@ -10,12 +10,14 @@ final class DeliveryEngine: @unchecked Sendable {
     struct QueuedEvent {
         let event: Event
         let encodedBytes: Int
+        let durableRecordName: String?
     }
 
     struct FrozenPrefix {
         let count: Int
         let bytes: Int
         let body: Data
+        let durableRecordNames: [String]
     }
 
     enum AttemptResult {
@@ -36,9 +38,12 @@ final class DeliveryEngine: @unchecked Sendable {
     let maxRetries: Int
     let stateLock = NSLock()
     let flushLock = NSLock()
+    let storageLock = NSLock()
     var queue: [QueuedEvent] = []
     var queuedBytes = 0
     var frozenPrefix: FrozenPrefix?
+    var durableStore: DurableDeliveryStore?
+    var durableParent: URL?
     var closed = false
 
     var state: DeliveryState = .manual
@@ -83,38 +88,6 @@ final class DeliveryEngine: @unchecked Sendable {
         return json
     }
 
-    func enqueue(_ event: Event) throws {
-        let eventBytes = try encodeEvent(event).count
-        let singleRequestBytes = try encodeBatch([event]).count
-        var shouldSchedule = false
-        var admissionError: SdkError?
-
-        stateLock.lock()
-        if closed || state == .shuttingDown || state == .closed {
-            admissionError = SdkError(code: "shutdown_error", message: "client is already shut down")
-        } else if singleRequestBytes > Self.maxRequestBytes {
-            droppedEvents += 1
-            lastOutcome = .dropped
-            admissionError = SdkError(code: "event_too_large", message: "event exceeds the delivery request byte limit")
-        } else if queue.count >= Self.maxQueuedEvents || queuedBytes > Self.maxQueuedBytes - eventBytes {
-            droppedEvents += 1
-            lastOutcome = .dropped
-            admissionError = SdkError(code: "queue_full", message: "delivery queue capacity exceeded")
-        } else {
-            queue.append(QueuedEvent(event: event, encodedBytes: eventBytes))
-            queuedBytes += eventBytes
-            shouldSchedule = scheduleCaptureLocked()
-        }
-        stateLock.unlock()
-
-        if shouldSchedule {
-            scheduleTimerUpdate()
-        }
-        if let admissionError {
-            throw admissionError
-        }
-    }
-
     func health() -> DeliveryHealth {
         withStateLock {
             DeliveryHealth(
@@ -135,14 +108,22 @@ final class DeliveryEngine: @unchecked Sendable {
     func startAutomaticDelivery(transport: any Transport, options: AutomaticDeliveryOptions) throws {
         try validate(options)
 
+        storageLock.lock()
         stateLock.lock()
         if closed || state == .closed || state == .shuttingDown {
             stateLock.unlock()
+            storageLock.unlock()
             throw SdkError(code: "shutdown_error", message: "client is already shut down")
         }
         if automaticTransport != nil {
             stateLock.unlock()
+            storageLock.unlock()
             throw SdkError(code: "configuration_error", message: "automatic delivery is already running")
+        }
+        if state == .paused, pauseReason == .storage {
+            stateLock.unlock()
+            storageLock.unlock()
+            throw SdkError(code: "storage_corrupt", message: "durable delivery data requires explicit recovery")
         }
         generation &+= 1
         let ownerGeneration = generation
@@ -161,6 +142,7 @@ final class DeliveryEngine: @unchecked Sendable {
         retryAttempt = 0
         let shouldSchedule = scheduleLiveQueueLocked()
         stateLock.unlock()
+        storageLock.unlock()
 
         timer.resume()
         if shouldSchedule {
@@ -178,6 +160,10 @@ final class DeliveryEngine: @unchecked Sendable {
             stateLock.unlock()
             return
         }
+        if pauseReason == .storage {
+            stateLock.unlock()
+            throw SdkError(code: "storage_corrupt", message: "durable delivery data requires explicit recovery")
+        }
         state = .running
         pauseReason = .none
         retryAttempt = 0
@@ -193,6 +179,7 @@ final class DeliveryEngine: @unchecked Sendable {
     func stopAutomaticDelivery() {
         let timer: DispatchSourceTimer?
         let scheduler: DispatchQueue?
+        storageLock.lock()
         stateLock.lock()
         generation &+= 1
         timer = schedulerTimer
@@ -208,6 +195,7 @@ final class DeliveryEngine: @unchecked Sendable {
             state = .manual
         }
         stateLock.unlock()
+        storageLock.unlock()
 
         timer?.setEventHandler {}
         timer?.cancel()
@@ -248,7 +236,7 @@ final class DeliveryEngine: @unchecked Sendable {
             return response
         } catch {
             stateLock.lock()
-            state = .manual
+            state = pauseReason == .storage ? .paused : .manual
             closed = false
             inFlight = false
             stateLock.unlock()

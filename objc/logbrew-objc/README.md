@@ -125,6 +125,31 @@ NSLog(@"state=%ld queued=%lu dropped=%lu",
 
 Automatic delivery keeps at most 1,000 events and 4 MiB in memory, sends at most 100 events and 256 KiB per request, and retains the exact failed prefix for bounded retry. Interval and retry-delay options must not exceed 24 hours. Authentication, quota, validation, and other terminal failures pause delivery without dropping the queue; correct the condition and call `recoverAutomaticDeliveryWithError:`. `stopAutomaticDelivery` returns the client to manual mode while preserving unacknowledged events. `deliveryHealth` exposes fixed counters and enums only, never event content, identifiers, API keys, endpoints, headers, or raw transport errors. The queue is process-memory only; call `shutdownOwnedTransportWithError:` during an orderly app termination when the platform gives your app time to finish work.
 
+## Durable Delivery (Opt-In)
+
+Durable delivery is separate from automatic delivery. Enable it before starting automatic delivery when accepted events must survive process termination:
+
+```objective-c
+NSURL *applicationSupport = [[[NSFileManager defaultManager]
+    URLsForDirectory:NSApplicationSupportDirectory
+           inDomains:NSUserDomainMask] firstObject];
+NSURL *logBrewDirectory = [applicationSupport URLByAppendingPathComponent:@"LogBrew"
+                                                               isDirectory:YES];
+[[NSFileManager defaultManager] createDirectoryAtURL:logBrewDirectory
+                          withIntermediateDirectories:YES
+                                           attributes:@{NSFilePosixPermissions: @0700}
+                                                error:&error];
+
+LBWDurableDeliveryOptions *durable =
+    [[LBWDurableDeliveryOptions alloc] initWithDirectoryURL:logBrewDirectory];
+[client enableDurableDeliveryWithOptions:durable error:&error];
+[client startAutomaticDeliveryWithTransport:transport options:options error:&error];
+```
+
+Pass a private Application Support directory owned by your app. The SDK creates and exclusively owns only its fixed `logbrew-delivery-v1` child. It applies owner-only permissions, Apple file protection where available, and backup exclusion. Event payloads are stored, but API keys, endpoints, headers, and raw transport errors are not. One process and one client may own the child at a time.
+
+Durable delivery preserves FIFO order and the exact failed request prefix across restart. Corrupt, unknown, or unreadable durable state pauses capture and delivery instead of silently deleting data. After inspecting the cause, call `purgeDurableDeliveryWithError:` to remove only the SDK-owned child and explicitly discard its queued events. At-least-once delivery can duplicate a request when a process stops after the server accepts it but before local acknowledgement completes. Atomic records detect incomplete or corrupt state; they do not guarantee survival when the operating system has not committed a write before sudden power loss. Manual and process-memory delivery remain the defaults.
+
 ## Example Source
 
 The `examples` directory contains copyable source for creating a client, previewing queued JSON, flushing through a transport, and handling SDK `NSError` values in your own Apple app.

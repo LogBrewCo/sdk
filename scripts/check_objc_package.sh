@@ -27,31 +27,49 @@ run_examples_make() {
 
 objcflags=(-fobjc-arc -Wall -Wextra -Wpedantic -Werror -I"$package_dir/include")
 ldflags=(-framework Foundation)
+core_sources=(
+  "$package_dir/src/LogBrew.m"
+  "$package_dir/src/LBWDeliveryEngine.m"
+  "$package_dir/src/LBWDeliveryEngineDurable.m"
+  "$package_dir/src/LBWDurableDeliveryStore.m"
+  "$package_dir/src/LogBrewTrace.m"
+  "$package_dir/src/LogBrewNetworkValidation.m"
+  "$package_dir/src/LogBrewURLSession.m"
+  "$package_dir/src/LogBrewLifecycle.m"
+)
 
 mkdir -p "$tmp_dir/build"
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LBWDeliveryEngine.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/src/LogBrewLifecycle.m" "$package_dir/src/LBWHTTPTransport.m" "$package_dir/tests/test_logbrew.m" \
+"$objc_command" "${objcflags[@]}" "${core_sources[@]}" "$package_dir/src/LBWHTTPTransport.m" "$package_dir/tests/test_logbrew.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/test_logbrew"
 "$tmp_dir/build/test_logbrew"
 
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LBWDeliveryEngine.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/src/LogBrewLifecycle.m" "$package_dir/tests/test_automatic_delivery.m" \
+"$objc_command" "${objcflags[@]}" "${core_sources[@]}" "$package_dir/tests/test_automatic_delivery.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/test_automatic_delivery"
 "$tmp_dir/build/test_automatic_delivery"
 
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LBWDeliveryEngine.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/src/LogBrewLifecycle.m" "$package_dir/examples/readme_example.m" \
+"$objc_command" "${objcflags[@]}" "${core_sources[@]}" "$package_dir/tests/test_durable_delivery.m" \
+  "${ldflags[@]}" -o "$tmp_dir/build/test_durable_delivery"
+"$tmp_dir/build/test_durable_delivery"
+
+"$objc_command" "${objcflags[@]}" "${core_sources[@]}" "$package_dir/tests/test_durable_delivery_recovery.m" \
+  "${ldflags[@]}" -o "$tmp_dir/build/test_durable_delivery_recovery"
+"$tmp_dir/build/test_durable_delivery_recovery"
+
+"$objc_command" "${objcflags[@]}" "${core_sources[@]}" "$package_dir/examples/readme_example.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/readme_example"
 "$tmp_dir/build/readme_example" > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/readme.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/readme.stderr.json"
 
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LBWDeliveryEngine.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/src/LogBrewLifecycle.m" "$package_dir/examples/real_user_smoke.m" \
+"$objc_command" "${objcflags[@]}" "${core_sources[@]}" "$package_dir/examples/real_user_smoke.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/real_user_smoke"
 "$tmp_dir/build/real_user_smoke" > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/smoke.stdout.json" >/dev/null
 grep -q '"retryAttempts":3' "$tmp_dir/smoke.stderr.json"
 
-"$objc_command" "${objcflags[@]}" "$package_dir/src/LogBrew.m" "$package_dir/src/LBWDeliveryEngine.m" "$package_dir/src/LogBrewTrace.m" "$package_dir/src/LogBrewNetworkValidation.m" "$package_dir/src/LogBrewURLSession.m" "$package_dir/src/LogBrewLifecycle.m" "$package_dir/examples/trace_correlation.m" \
+"$objc_command" "${objcflags[@]}" "${core_sources[@]}" "$package_dir/examples/trace_correlation.m" \
   "${ldflags[@]}" -o "$tmp_dir/build/trace_correlation"
 "$tmp_dir/build/trace_correlation" > "$tmp_dir/trace.stdout.json" 2> "$tmp_dir/trace.stderr.json"
 python3 "$repo_root/scripts/check_objc_trace_correlation_payload.py" "$tmp_dir/trace.stdout.json" "$tmp_dir/trace.stderr.json" >/dev/null
@@ -71,6 +89,10 @@ grep -qx 'include/LogBrew.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LogBrew.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LBWDeliveryEngine.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LBWDeliveryEngine.m' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/LBWDeliveryEnginePrivate.h' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/LBWDeliveryEngineDurable.m' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/LBWDurableDeliveryStore.h' "$tmp_dir/archive-contents.txt"
+grep -qx 'src/LBWDurableDeliveryStore.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LogBrewTrace.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LogBrewNetworkValidation.h' "$tmp_dir/archive-contents.txt"
 grep -qx 'src/LogBrewNetworkValidation.m' "$tmp_dir/archive-contents.txt"
@@ -83,6 +105,8 @@ grep -qx 'examples/trace_correlation.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'examples/Makefile' "$tmp_dir/archive-contents.txt"
 grep -qx 'tests/test_logbrew.m' "$tmp_dir/archive-contents.txt"
 grep -qx 'tests/test_automatic_delivery.m' "$tmp_dir/archive-contents.txt"
+grep -qx 'tests/test_durable_delivery.m' "$tmp_dir/archive-contents.txt"
+grep -qx 'tests/test_durable_delivery_recovery.m' "$tmp_dir/archive-contents.txt"
 
 extracted_dir="$tmp_dir/extracted"
 mkdir -p "$extracted_dir"
@@ -98,7 +122,7 @@ archive_path = Path(sys.argv[1])
 with tarfile.open(archive_path, "r:gz") as archive:
     readme = archive.extractfile("README.md").read().decode()
     header = archive.extractfile("include/LogBrew.h").read().decode()
-for needle in ("LOGBREW_API_KEY", "Sending To LogBrew", "LBWHTTPTransport", "copyable source", "flushWithTransport", "startAutomaticDeliveryWithTransport", "deliveryHealth"):
+for needle in ("LOGBREW_API_KEY", "Sending To LogBrew", "LBWHTTPTransport", "copyable source", "flushWithTransport", "startAutomaticDeliveryWithTransport", "Durable Delivery (Opt-In)", "enableDurableDeliveryWithOptions", "purgeDurableDeliveryWithError", "deliveryHealth"):
     if needle not in readme:
         raise SystemExit(f"missing README guidance: {needle}")
 for needle in (
@@ -126,8 +150,11 @@ for needle in (
     "captureProductActionWithID",
     "captureNetworkMilestoneWithID",
     "LBWAutomaticDeliveryOptions",
+    "LBWDurableDeliveryOptions",
     "LBWDeliveryHealth",
     "startAutomaticDeliveryWithTransport",
+    "enableDurableDeliveryWithOptions",
+    "purgeDurableDeliveryWithError",
     "recoverAutomaticDeliveryWithError",
     "shutdownOwnedTransportWithError",
 ):

@@ -1,4 +1,4 @@
-#import "LBWDeliveryEngine.h"
+#import "LBWDeliveryEnginePrivate.h"
 
 #import <math.h>
 
@@ -70,6 +70,7 @@ static NSString *LBWDeliveryPauseReasonValue(LBWDeliveryPauseReason reason) {
     case LBWDeliveryPauseReasonValidation: return @"validation";
     case LBWDeliveryPauseReasonNonRetryable: return @"non_retryable";
     case LBWDeliveryPauseReasonRetryExhausted: return @"retry_exhausted";
+    case LBWDeliveryPauseReasonStorage: return @"storage";
   }
 }
 
@@ -93,38 +94,6 @@ static NSString *LBWDeliveryPauseReasonValue(LBWDeliveryPauseReason reason) {
     @"pauseReason": LBWDeliveryPauseReasonValue(self.pauseReason)
   };
 }
-
-@end
-
-@interface LBWDeliveryEngine ()
-
-@property(nonatomic, copy) NSString *apiKey;
-@property(nonatomic, copy) NSDictionary<NSString *, NSString *> *sdk;
-@property(nonatomic) NSUInteger maxRetries;
-@property(nonatomic) NSLock *stateLock;
-@property(nonatomic) NSLock *flushLock;
-@property(nonatomic) NSMutableArray<NSDictionary<NSString *, id> *> *events;
-@property(nonatomic) NSMutableArray<NSNumber *> *eventBytes;
-@property(nonatomic) NSUInteger queuedBytes;
-@property(nonatomic, copy, nullable) NSString *frozenBody;
-@property(nonatomic) NSUInteger frozenCount;
-@property(nonatomic) NSUInteger frozenBytes;
-@property(nonatomic) BOOL closed;
-@property(nonatomic) LBWDeliveryState state;
-@property(nonatomic) LBWDeliveryOutcome lastOutcome;
-@property(nonatomic) LBWDeliveryPauseReason pauseReason;
-@property(nonatomic) BOOL inFlight;
-@property(nonatomic) NSUInteger acceptedEvents;
-@property(nonatomic) NSUInteger droppedEvents;
-@property(nonatomic) NSUInteger deliveryAttempts;
-@property(nonatomic) NSUInteger consecutiveFailures;
-@property(nonatomic, strong, nullable) id<LBWTransport> automaticTransport;
-@property(nonatomic, strong, nullable) LBWAutomaticDeliveryOptions *automaticOptions;
-@property(nonatomic, nullable) dispatch_queue_t schedulerQueue;
-@property(nonatomic, nullable) dispatch_source_t schedulerTimer;
-@property(nonatomic) NSTimeInterval nextWakeUptime;
-@property(nonatomic) NSUInteger generation;
-@property(nonatomic) NSUInteger retryAttempt;
 
 @end
 
@@ -161,8 +130,11 @@ static NSTimeInterval LBWDeliveryUptime(void) {
     _maxRetries = maxRetries;
     _stateLock = [[NSLock alloc] init];
     _flushLock = [[NSLock alloc] init];
+    _storageLock = [[NSLock alloc] init];
     _events = [NSMutableArray array];
     _eventBytes = [NSMutableArray array];
+    _eventRecordNames = [NSMutableArray array];
+    _frozenRecordNames = @[];
     _state = LBWDeliveryStateManual;
     _lastOutcome = LBWDeliveryOutcomeNone;
     _pauseReason = LBWDeliveryPauseReasonNone;
@@ -196,11 +168,20 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   }
 
   BOOL shouldSchedule = NO;
+  [self.storageLock lock];
   [self.stateLock lock];
   if (self.closed || self.state == LBWDeliveryStateShuttingDown || self.state == LBWDeliveryStateClosed) {
     LBWDeliverySetError(
         error, LBWDeliveryError(LBWErrorKindShutdown, @"shutdown_error", @"client is already shut down", NO));
     [self.stateLock unlock];
+    [self.storageLock unlock];
+    return NO;
+  }
+  if (self.state == LBWDeliveryStatePaused && self.pauseReason == LBWDeliveryPauseReasonStorage) {
+    LBWDeliverySetError(error, [self storageErrorForStoreError:
+        [NSError errorWithDomain:LBWDurableStoreErrorDomain code:LBWDurableStoreErrorCorrupt userInfo:nil]]);
+    [self.stateLock unlock];
+    [self.storageLock unlock];
     return NO;
   }
   if ([singleBody length] > LBWMaxRequestBytes) {
@@ -209,6 +190,7 @@ static NSTimeInterval LBWDeliveryUptime(void) {
     LBWDeliverySetError(error, LBWDeliveryError(
         LBWErrorKindValidation, @"event_too_large", @"event exceeds the delivery request byte limit", NO));
     [self.stateLock unlock];
+    [self.storageLock unlock];
     return NO;
   }
   if ([self.events count] >= LBWMaxQueuedEvents || self.queuedBytes > LBWMaxQueuedBytes - [eventData length]) {
@@ -217,13 +199,30 @@ static NSTimeInterval LBWDeliveryUptime(void) {
     LBWDeliverySetError(
         error, LBWDeliveryError(LBWErrorKindValidation, @"queue_full", @"delivery queue capacity exceeded", NO));
     [self.stateLock unlock];
+    [self.storageLock unlock];
     return NO;
   }
+  LBWDurableDeliveryStore *store = self.durableStore;
+  [self.stateLock unlock];
+  NSString *recordName = nil;
+  if (store != nil) {
+    NSError *storeError = nil;
+    recordName = [store appendEvent:event encodedBytes:eventData.length error:&storeError];
+    if (recordName == nil) {
+      [self recordStorageFailure];
+      LBWDeliverySetError(error, [self storageErrorForStoreError:storeError]);
+      [self.storageLock unlock];
+      return NO;
+    }
+  }
+  [self.stateLock lock];
   [self.events addObject:[event copy]];
   [self.eventBytes addObject:@([eventData length])];
+  [self.eventRecordNames addObject:recordName != nil ? recordName : [NSNull null]];
   self.queuedBytes += [eventData length];
   shouldSchedule = [self scheduleCaptureLocked];
   [self.stateLock unlock];
+  [self.storageLock unlock];
   if (shouldSchedule) {
     [self updateTimer];
   }
@@ -267,17 +266,29 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   dispatch_queue_set_specific(scheduler, LBWDeliverySchedulerKey, (__bridge void *)self, NULL);
   dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, scheduler);
 
+  [self.storageLock lock];
   [self.stateLock lock];
   if (self.closed || self.state == LBWDeliveryStateClosed || self.state == LBWDeliveryStateShuttingDown) {
     [self.stateLock unlock];
+    [self.storageLock unlock];
     dispatch_resume(timer);
     dispatch_source_cancel(timer);
     LBWDeliverySetError(
         error, LBWDeliveryError(LBWErrorKindShutdown, @"shutdown_error", @"client is already shut down", NO));
     return NO;
   }
+  if (self.state == LBWDeliveryStatePaused && self.pauseReason == LBWDeliveryPauseReasonStorage) {
+    [self.stateLock unlock];
+    [self.storageLock unlock];
+    dispatch_resume(timer);
+    dispatch_source_cancel(timer);
+    LBWDeliverySetError(error, [self storageErrorForStoreError:
+        [NSError errorWithDomain:LBWDurableStoreErrorDomain code:LBWDurableStoreErrorCorrupt userInfo:nil]]);
+    return NO;
+  }
   if (self.automaticTransport != nil) {
     [self.stateLock unlock];
+    [self.storageLock unlock];
     dispatch_resume(timer);
     dispatch_source_cancel(timer);
     LBWDeliverySetError(error, LBWDeliveryError(
@@ -295,6 +306,7 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   self.retryAttempt = 0U;
   BOOL shouldSchedule = [self scheduleLiveQueueLocked];
   [self.stateLock unlock];
+  [self.storageLock unlock];
 
   __weak LBWDeliveryEngine *weakSelf = self;
   dispatch_source_set_event_handler(timer, ^{
@@ -319,6 +331,12 @@ static NSTimeInterval LBWDeliveryUptime(void) {
     [self.stateLock unlock];
     return YES;
   }
+  if (self.pauseReason == LBWDeliveryPauseReasonStorage) {
+    [self.stateLock unlock];
+    LBWDeliverySetError(error, [self storageErrorForStoreError:
+        [NSError errorWithDomain:LBWDurableStoreErrorDomain code:LBWDurableStoreErrorCorrupt userInfo:nil]]);
+    return NO;
+  }
   self.state = LBWDeliveryStateRunning;
   self.pauseReason = LBWDeliveryPauseReasonNone;
   self.retryAttempt = 0U;
@@ -334,6 +352,7 @@ static NSTimeInterval LBWDeliveryUptime(void) {
 
 - (void)stopAutomaticDelivery {
   dispatch_source_t timer;
+  [self.storageLock lock];
   [self.stateLock lock];
   self.generation += 1U;
   timer = self.schedulerTimer;
@@ -343,11 +362,15 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   self.automaticOptions = nil;
   self.nextWakeUptime = 0;
   self.retryAttempt = 0U;
-  self.pauseReason = LBWDeliveryPauseReasonNone;
-  if (!self.closed && self.state != LBWDeliveryStateShuttingDown) {
+  BOOL storagePaused = self.state == LBWDeliveryStatePaused && self.pauseReason == LBWDeliveryPauseReasonStorage;
+  if (!storagePaused) {
+    self.pauseReason = LBWDeliveryPauseReasonNone;
+  }
+  if (!self.closed && self.state != LBWDeliveryStateShuttingDown && !storagePaused) {
     self.state = LBWDeliveryStateManual;
   }
   [self.stateLock unlock];
+  [self.storageLock unlock];
   if (timer != nil) {
     dispatch_source_cancel(timer);
   }
@@ -363,6 +386,12 @@ static NSTimeInterval LBWDeliveryUptime(void) {
     [self.stateLock unlock];
     LBWDeliverySetError(
         error, LBWDeliveryError(LBWErrorKindShutdown, @"shutdown_error", @"client is already shut down", NO));
+    return nil;
+  }
+  if (self.state == LBWDeliveryStatePaused && self.pauseReason == LBWDeliveryPauseReasonStorage) {
+    [self.stateLock unlock];
+    LBWDeliverySetError(error, [self storageErrorForStoreError:
+        [NSError errorWithDomain:LBWDurableStoreErrorDomain code:LBWDurableStoreErrorCorrupt userInfo:nil]]);
     return nil;
   }
   self.nextWakeUptime = 0;
@@ -389,11 +418,20 @@ static NSTimeInterval LBWDeliveryUptime(void) {
 
 - (LBWTransportResponse *)shutdownWithTransport:(id<LBWTransport>)transport error:(NSError **)error {
   dispatch_source_t timer;
+  [self.storageLock lock];
   [self.stateLock lock];
   if (self.closed || self.state == LBWDeliveryStateClosed || self.state == LBWDeliveryStateShuttingDown) {
     [self.stateLock unlock];
+    [self.storageLock unlock];
     LBWDeliverySetError(
         error, LBWDeliveryError(LBWErrorKindShutdown, @"shutdown_error", @"client is already shut down", NO));
+    return nil;
+  }
+  if (self.state == LBWDeliveryStatePaused && self.pauseReason == LBWDeliveryPauseReasonStorage) {
+    [self.stateLock unlock];
+    [self.storageLock unlock];
+    LBWDeliverySetError(error, [self storageErrorForStoreError:
+        [NSError errorWithDomain:LBWDurableStoreErrorDomain code:LBWDurableStoreErrorCorrupt userInfo:nil]]);
     return nil;
   }
   self.closed = YES;
@@ -406,6 +444,7 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   self.automaticTransport = nil;
   self.automaticOptions = nil;
   [self.stateLock unlock];
+  [self.storageLock unlock];
   if (timer != nil) {
     dispatch_source_cancel(timer);
   }
@@ -416,7 +455,8 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   self.inFlight = NO;
   if (response == nil) {
     self.closed = NO;
-    self.state = LBWDeliveryStateManual;
+    self.state = self.pauseReason == LBWDeliveryPauseReasonStorage ? LBWDeliveryStatePaused
+                                                                  : LBWDeliveryStateManual;
   } else {
     self.state = LBWDeliveryStateClosed;
   }
@@ -468,7 +508,9 @@ static NSTimeInterval LBWDeliveryUptime(void) {
       }
       if (response.statusCode >= 200 && response.statusCode < 300) {
         finalStatus = response.statusCode;
-        [self acknowledgeFrozenPrefix];
+        if (![self acknowledgeFrozenPrefixWithError:error]) {
+          return nil;
+        }
         accepted = YES;
         break;
       }
@@ -530,6 +572,55 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   NSError *transportError = nil;
   LBWTransportResponse *response = [transport sendWithAPIKey:self.apiKey body:self.frozenBody error:&transportError];
 
+  if (response != nil && response.statusCode >= 200 && response.statusCode < 300) {
+    [self.storageLock lock];
+    [self.stateLock lock];
+    if (generation != self.generation && self.state != LBWDeliveryStateShuttingDown) {
+      self.inFlight = NO;
+      [self.stateLock unlock];
+      [self.storageLock unlock];
+      [self.flushLock unlock];
+      return;
+    }
+    LBWDurableDeliveryStore *store = self.durableStore;
+    NSString *body = self.frozenBody;
+    NSArray<NSString *> *recordNames = self.frozenRecordNames;
+    [self.stateLock unlock];
+
+    NSError *storeError = nil;
+    BOOL durableAccepted = store == nil ||
+        (body != nil && [store acknowledgeBody:body eventRecordNames:recordNames error:&storeError]);
+    [self.stateLock lock];
+    self.inFlight = NO;
+    self.deliveryAttempts += 1U;
+    BOOL shouldSchedule = NO;
+    if (durableAccepted) {
+      NSUInteger acceptedCount = self.frozenCount;
+      [self acknowledgeFrozenPrefixLocked];
+      self.acceptedEvents += acceptedCount;
+      self.consecutiveFailures = 0U;
+      self.retryAttempt = 0U;
+      self.lastOutcome = LBWDeliveryOutcomeAccepted;
+      if (self.state != LBWDeliveryStateShuttingDown) {
+        self.state = LBWDeliveryStateRunning;
+        shouldSchedule = [self scheduleLiveQueueLocked];
+      }
+    } else {
+      self.state = LBWDeliveryStatePaused;
+      self.pauseReason = LBWDeliveryPauseReasonStorage;
+      self.lastOutcome = LBWDeliveryOutcomeTerminalFailure;
+      self.consecutiveFailures += 1U;
+      self.nextWakeUptime = 0;
+    }
+    [self.stateLock unlock];
+    [self.storageLock unlock];
+    [self.flushLock unlock];
+    if (shouldSchedule) {
+      [self updateTimer];
+    }
+    return;
+  }
+
   BOOL shouldSchedule = NO;
   [self.stateLock lock];
   if (generation != self.generation && self.state != LBWDeliveryStateShuttingDown) {
@@ -540,31 +631,18 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   }
   self.inFlight = NO;
   self.deliveryAttempts += 1U;
-  if (response != nil && response.statusCode >= 200 && response.statusCode < 300) {
-    NSUInteger acceptedCount = self.frozenCount;
-    [self acknowledgeFrozenPrefixLocked];
-    self.acceptedEvents += acceptedCount;
-    self.consecutiveFailures = 0U;
-    self.retryAttempt = 0U;
-    self.lastOutcome = LBWDeliveryOutcomeAccepted;
-    if (self.state != LBWDeliveryStateShuttingDown) {
-      self.state = LBWDeliveryStateRunning;
-      shouldSchedule = [self scheduleLiveQueueLocked];
-    }
-  } else {
-    BOOL retryable = response == nil ? [transportError.userInfo[LBWErrorRetryableKey] boolValue] :
-        (response.statusCode == 408 || response.statusCode >= 500);
-    self.consecutiveFailures += 1U;
-    self.lastOutcome = retryable ? LBWDeliveryOutcomeRetryableFailure : LBWDeliveryOutcomeTerminalFailure;
-    if (self.state != LBWDeliveryStateShuttingDown && retryable && self.retryAttempt < self.maxRetries) {
-      self.retryAttempt += 1U;
-      self.state = LBWDeliveryStateRetrying;
-      shouldSchedule = [self scheduleRetryLocked];
-    } else if (self.state != LBWDeliveryStateShuttingDown) {
-      self.state = LBWDeliveryStatePaused;
-      self.pauseReason = retryable ? LBWDeliveryPauseReasonRetryExhausted :
-          (response == nil ? LBWDeliveryPauseReasonNonRetryable : [self pauseReasonForStatus:response.statusCode]);
-    }
+  BOOL retryable = response == nil ? [transportError.userInfo[LBWErrorRetryableKey] boolValue] :
+      (response.statusCode == 408 || response.statusCode >= 500);
+  self.consecutiveFailures += 1U;
+  self.lastOutcome = retryable ? LBWDeliveryOutcomeRetryableFailure : LBWDeliveryOutcomeTerminalFailure;
+  if (self.state != LBWDeliveryStateShuttingDown && retryable && self.retryAttempt < self.maxRetries) {
+    self.retryAttempt += 1U;
+    self.state = LBWDeliveryStateRetrying;
+    shouldSchedule = [self scheduleRetryLocked];
+  } else if (self.state != LBWDeliveryStateShuttingDown) {
+    self.state = LBWDeliveryStatePaused;
+    self.pauseReason = retryable ? LBWDeliveryPauseReasonRetryExhausted :
+        (response == nil ? LBWDeliveryPauseReasonNonRetryable : [self pauseReasonForStatus:response.statusCode]);
   }
   [self.stateLock unlock];
   [self.flushLock unlock];
@@ -574,25 +652,34 @@ static NSTimeInterval LBWDeliveryUptime(void) {
 }
 
 - (BOOL)freezePrefixWithError:(NSError **)error {
+  [self.storageLock lock];
   [self.stateLock lock];
   if (self.frozenBody != nil) {
     self.inFlight = YES;
     [self.stateLock unlock];
+    [self.storageLock unlock];
     return YES;
   }
   if ([self.events count] == 0U) {
     [self.stateLock unlock];
+    [self.storageLock unlock];
     return NO;
   }
+  NSArray<NSDictionary<NSString *, id> *> *queueSnapshot = [self.events copy];
+  NSArray<NSNumber *> *byteSnapshot = [self.eventBytes copy];
+  NSArray<id> *recordNameSnapshot = [self.eventRecordNames copy];
+  LBWDurableDeliveryStore *store = self.durableStore;
+  [self.stateLock unlock];
+
   NSMutableArray<NSDictionary<NSString *, id> *> *selected = [NSMutableArray array];
   NSData *bodyData = nil;
-  NSUInteger eventCount = [self.events count];
+  NSUInteger eventCount = [queueSnapshot count];
   NSUInteger limit = eventCount < LBWMaxRequestEvents ? eventCount : LBWMaxRequestEvents;
   for (NSUInteger index = 0U; index < limit; index += 1U) {
-    [selected addObject:self.events[index]];
+    [selected addObject:queueSnapshot[index]];
     NSData *candidate = [self encodeEvents:selected error:error];
     if (candidate == nil) {
-      [self.stateLock unlock];
+      [self.storageLock unlock];
       return NO;
     }
     if ([candidate length] > LBWMaxRequestBytes) {
@@ -602,24 +689,72 @@ static NSTimeInterval LBWDeliveryUptime(void) {
     bodyData = candidate;
   }
   if ([selected count] == 0U || bodyData == nil) {
-    [self.stateLock unlock];
+    [self.storageLock unlock];
     LBWDeliverySetError(error, LBWDeliveryError(
         LBWErrorKindValidation, @"event_too_large", @"event exceeds the delivery request byte limit", NO));
     return NO;
   }
   NSUInteger bytes = 0U;
+  NSMutableArray<NSString *> *recordNames = [NSMutableArray array];
   for (NSUInteger index = 0U; index < [selected count]; index += 1U) {
-    bytes += [self.eventBytes[index] unsignedIntegerValue];
+    bytes += [byteSnapshot[index] unsignedIntegerValue];
+    if (store != nil) {
+      id name = recordNameSnapshot[index];
+      if (![name isKindOfClass:[NSString class]]) {
+        [self recordStorageFailure];
+        [self.storageLock unlock];
+        LBWDeliverySetError(error, [self storageErrorForStoreError:
+            [NSError errorWithDomain:LBWDurableStoreErrorDomain
+                                 code:LBWDurableStoreErrorCorrupt
+                             userInfo:nil]]);
+        return NO;
+      }
+      [recordNames addObject:name];
+    }
   }
-  self.frozenBody = [[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding];
+  NSString *body = [[NSString alloc] initWithData:bodyData encoding:NSUTF8StringEncoding];
+  if (body == nil) {
+    [self.storageLock unlock];
+    LBWDeliverySetError(error, LBWDeliveryError(
+        LBWErrorKindValidation, @"encoding_error", @"event batch was not valid UTF-8", NO));
+    return NO;
+  }
+  if (store != nil) {
+    NSError *storeError = nil;
+    if (![store persistPrefixBody:body eventRecordNames:recordNames encodedBytes:bytes error:&storeError]) {
+      [self recordStorageFailure];
+      [self.storageLock unlock];
+      LBWDeliverySetError(error, [self storageErrorForStoreError:storeError]);
+      return NO;
+    }
+  }
+  [self.stateLock lock];
+  self.frozenBody = body;
   self.frozenCount = [selected count];
   self.frozenBytes = bytes;
+  self.frozenRecordNames = recordNames;
   self.inFlight = YES;
   [self.stateLock unlock];
+  [self.storageLock unlock];
   return YES;
 }
 
-- (void)acknowledgeFrozenPrefix {
+- (BOOL)acknowledgeFrozenPrefixWithError:(NSError **)error {
+  [self.storageLock lock];
+  [self.stateLock lock];
+  NSString *body = self.frozenBody;
+  NSArray<NSString *> *recordNames = self.frozenRecordNames;
+  LBWDurableDeliveryStore *store = self.durableStore;
+  [self.stateLock unlock];
+  if (store != nil) {
+    NSError *storeError = nil;
+    if (body == nil || ![store acknowledgeBody:body eventRecordNames:recordNames error:&storeError]) {
+      [self recordStorageFailure];
+      [self.storageLock unlock];
+      LBWDeliverySetError(error, [self storageErrorForStoreError:storeError]);
+      return NO;
+    }
+  }
   [self.stateLock lock];
   NSUInteger count = self.frozenCount;
   [self acknowledgeFrozenPrefixLocked];
@@ -627,6 +762,8 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   self.consecutiveFailures = 0U;
   self.lastOutcome = LBWDeliveryOutcomeAccepted;
   [self.stateLock unlock];
+  [self.storageLock unlock];
+  return YES;
 }
 
 - (void)acknowledgeFrozenPrefixLocked {
@@ -635,10 +772,12 @@ static NSTimeInterval LBWDeliveryUptime(void) {
   }
   [self.events removeObjectsInRange:NSMakeRange(0U, self.frozenCount)];
   [self.eventBytes removeObjectsInRange:NSMakeRange(0U, self.frozenCount)];
+  [self.eventRecordNames removeObjectsInRange:NSMakeRange(0U, self.frozenCount)];
   self.queuedBytes -= self.frozenBytes;
   self.frozenBody = nil;
   self.frozenCount = 0U;
   self.frozenBytes = 0U;
+  self.frozenRecordNames = @[];
   self.inFlight = NO;
   self.retryAttempt = 0U;
 }
@@ -748,6 +887,9 @@ static NSTimeInterval LBWDeliveryUptime(void) {
       return LBWDeliveryError(LBWErrorKindTransport, @"transport_error", @"transport rejected the request", NO);
     case LBWDeliveryPauseReasonRetryExhausted:
       return LBWDeliveryError(LBWErrorKindTransport, @"transport_error", @"exhausted retries", YES);
+    case LBWDeliveryPauseReasonStorage:
+      return LBWDeliveryError(
+          LBWErrorKindStorage, @"storage_corrupt", @"durable delivery data requires explicit recovery", NO);
     case LBWDeliveryPauseReasonNonRetryable:
     case LBWDeliveryPauseReasonNone:
       return LBWDeliveryError(LBWErrorKindTransport, @"transport_error", @"unexpected transport response", NO);

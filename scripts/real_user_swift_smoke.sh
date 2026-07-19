@@ -31,7 +31,10 @@ grep -q '/README.md$' "$tmp_dir/archive-contents.txt"
 grep -q '/.swiftformat$' "$tmp_dir/archive-contents.txt"
 grep -q '/.swiftlint.yml$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/EventEncoding.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/DurableDeliveryStore.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/DurableDeliveryStoreRecovery.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/DeliveryEngine.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrew/DeliveryEngineDurable.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/DeliveryEngineAutomatic.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/DeliveryEngineQueue.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrew/DeliveryLifecycle.swift$' "$tmp_dir/archive-contents.txt"
@@ -53,6 +56,9 @@ grep -q '/Tests/LogBrewTests/LogBrewTests.swift$' "$tmp_dir/archive-contents.txt
 grep -q '/Tests/LogBrewTests/AutomaticDeliveryTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/AutomaticDeliveryLifecycleTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/AutomaticDeliveryTestSupport.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/DurableDeliveryFailureTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewTests/DurableDeliveryRecoveryTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/LifecycleTraceTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/OpenTelemetryTraceContextTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/ProductTimelineTests.swift$' "$tmp_dir/archive-contents.txt"
@@ -71,6 +77,9 @@ grep -q 'startURLSessionSpan' "$tmp_dir/archive-readme.md"
 grep -q 'LogBrewURLSessionTracer' "$tmp_dir/archive-readme.md"
 grep -q 'LogBrewURLSessionTimings' "$tmp_dir/archive-readme.md"
 grep -q 'startAutomaticDelivery' "$tmp_dir/archive-readme.md"
+grep -q 'Durable Delivery (Opt-In)' "$tmp_dir/archive-readme.md"
+grep -q 'enableDurableDelivery' "$tmp_dir/archive-readme.md"
+grep -q 'purgeDurableDelivery' "$tmp_dir/archive-readme.md"
 grep -q 'deliveryHealth' "$tmp_dir/archive-readme.md"
 unzip -p "$archive_path" '*/Sources/LogBrew/LifecycleTrace.swift' > "$tmp_dir/archive-lifecycle.swift"
 grep -q 'LogBrewLifecycleTracker' "$tmp_dir/archive-lifecycle.swift"
@@ -745,5 +754,93 @@ for request in posts:
 if "evt_swift_http_transport" not in posts[1]["body"]:
     raise SystemExit("missing HTTP transport event in final request body")
 PY
+
+echo "swift real-user smoke: installed durable restart" >&2
+durable_consumer_dir="$tmp_dir/durable-smoke-app"
+mkdir -p "$durable_consumer_dir/Sources/DurableSmoke"
+cat > "$durable_consumer_dir/Package.swift" <<EOF
+// swift-tools-version: 6.0
+
+import PackageDescription
+
+let package = Package(
+    name: "DurableSmokeApp",
+    platforms: [.macOS(.v13)],
+    dependencies: [.package(path: "$package_dir")],
+    targets: [
+        .executableTarget(
+            name: "DurableSmoke",
+            dependencies: [.product(name: "LogBrew", package: "logbrew-swift")]
+        ),
+    ]
+)
+EOF
+cat > "$durable_consumer_dir/Sources/DurableSmoke/main.swift" <<'EOF'
+import Foundation
+import LogBrew
+
+guard CommandLine.arguments.count == 3 else {
+    fatalError("expected mode and storage parent")
+}
+
+let mode = CommandLine.arguments[1]
+let parent = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
+let client = try LogBrewClient.create(
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "swift-installed-durable-smoke",
+    sdkVersion: "0.1.0",
+    maxRetries: 0
+)
+try client.enableDurableDelivery(options: DurableDeliveryOptions(directory: parent))
+
+let transport: RecordingTransport
+switch mode {
+case "write":
+    try client.log(
+        "swift-installed-durable-event",
+        timestamp: "2026-06-02T10:00:00Z",
+        attributes: LogAttributes(message: "survives restart", level: .error)
+    )
+    transport = RecordingTransport(scriptedResponses: [.status(503)])
+    var retainedForRetry = false
+    do {
+        _ = try client.flush(transport: transport)
+        fatalError("retryable durable write unexpectedly succeeded")
+    } catch let error as SdkError {
+        precondition(error.code == "transport_error")
+        retainedForRetry = true
+    }
+    precondition(retainedForRetry)
+    precondition(client.pendingEvents() == 1)
+case "recover":
+    precondition(client.pendingEvents() == 1)
+    transport = RecordingTransport.alwaysAccept()
+    let response = try client.flush(transport: transport)
+    precondition(response.statusCode == 202)
+    precondition(client.pendingEvents() == 0)
+default:
+    fatalError("unknown durable smoke mode")
+}
+
+guard let body = transport.sentBodies.first, transport.sentBodies.count == 1 else {
+    fatalError("durable smoke did not send exactly one body")
+}
+print(body)
+EOF
+
+durable_parent="$tmp_dir/swift-durable-parent"
+mkdir -m 700 "$durable_parent"
+swift run --package-path "$durable_consumer_dir" --scratch-path "$tmp_dir/durable-consumer-build" DurableSmoke \
+  write "$durable_parent" > "$tmp_dir/swift-durable-write.json" 2> "$tmp_dir/swift-durable-write.stderr"
+if grep -R -q 'LOGBREW_API_KEY' "$durable_parent/logbrew-delivery-v1"; then
+  echo "Swift durable storage contained an API key" >&2
+  exit 1
+fi
+swift run --package-path "$durable_consumer_dir" --scratch-path "$tmp_dir/durable-consumer-build" DurableSmoke \
+  recover "$durable_parent" > "$tmp_dir/swift-durable-recover.json" 2> "$tmp_dir/swift-durable-recover.stderr"
+cmp -s "$tmp_dir/swift-durable-write.json" "$tmp_dir/swift-durable-recover.json"
+grep -q 'swift-installed-durable-event' "$tmp_dir/swift-durable-recover.json"
+test ! -e "$durable_parent/logbrew-delivery-v1/frozen-prefix.json"
+test -z "$(find "$durable_parent/logbrew-delivery-v1" -name 'event-*.json' -print -quit)"
 
 echo "swift real-user smoke passed"
