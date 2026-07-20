@@ -277,6 +277,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         self.assertIn('"Java JMS installed-artifact smoke"', script)
         self.assertIn('"Java high-load installed-artifact smoke"', script)
         self.assertIn('"Java OpenTelemetry installed-artifact smoke"', script)
+        self.assertIn('"Java Spring HTTP installed-artifact smoke"', script)
         self.assertIn('"Maven Central public install smoke"', script)
         self.assertRegex(
             script,
@@ -288,6 +289,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete\n\n"
             r'begin_next_step "Java Spring Kafka installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_java_spring_kafka_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Java Spring HTTP installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_java_spring_http_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Java queue trace installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_java_queue_trace_smoke\.sh"\n'

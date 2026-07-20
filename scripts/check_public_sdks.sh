@@ -88,6 +88,7 @@ STEP_LABELS=(
   "Java real-user smoke"
   "Java OpenTelemetry installed-artifact smoke"
   "Java Spring Kafka installed-artifact smoke"
+  "Java Spring HTTP installed-artifact smoke"
   "Java queue trace installed-artifact smoke"
   "Java JMS installed-artifact smoke"
   "Java high-load installed-artifact smoke"
