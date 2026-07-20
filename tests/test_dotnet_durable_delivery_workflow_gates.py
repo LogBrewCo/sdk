@@ -993,6 +993,39 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
                     "admission witness invalid: publication",
                 )
 
+    def test_completed_publication_allows_one_bounded_visibility_resnapshot(self) -> None:
+        self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
+        verifier = load_verifier()
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            witness = root / "witness"
+            request = root / "request"
+            write_test_witness(witness)
+            request.write_bytes(b"request")
+            temporary = witness / verifier.WITNESS_TEMPORARY_NAME
+            temporary.write_bytes(verifier.WITNESS_VALUE)
+
+            def finish_publication(path: Path) -> bool:
+                self.assertEqual(path, temporary)
+                path.unlink()
+                return True
+
+            with (
+                mock.patch.object(
+                    verifier,
+                    "_temporary_witness_validity",
+                    side_effect=finish_publication,
+                ),
+                mock.patch.object(verifier.time, "sleep") as sleep,
+            ):
+                self.assertEqual(
+                    verifier.inspect_admission_witness(witness, request),
+                    (None, "pending-verified", False),
+                )
+
+            sleep.assert_called_once_with(verifier.WITNESS_PUBLICATION_RETRY_SECONDS)
+
     def test_admission_timeout_distinguishes_witness_and_request(self) -> None:
         self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
         verifier = load_verifier()

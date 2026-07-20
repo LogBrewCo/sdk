@@ -112,6 +112,7 @@ LINUX_PREFLIGHT_FAILURE_STAGES = {
 }
 WITNESS_TEMPORARY_NAME = ".stage.tmp"
 WITNESS_VALUE = b"observed"
+WITNESS_PUBLICATION_RETRY_SECONDS = 0.01
 SPONTANEOUS_EXIT_OUTCOMES = {
     None: AdmissionOutcome.SPONTANEOUS_EXIT_AFTER_NONE,
     "runtime-validated": AdmissionOutcome.SPONTANEOUS_EXIT_AFTER_RUNTIME_VALIDATED,
@@ -519,6 +520,14 @@ def inspect_admission_witness(
             )
         if not temporary_validity:
             return AdmissionOutcome.WITNESS_INVALID_PUBLICATION, None, False
+        if first_missing is None and _publication_retry_allowed:
+            time.sleep(WITNESS_PUBLICATION_RETRY_SECONDS)
+            return inspect_admission_witness(
+                witness_directory,
+                request_path,
+                _minimum_committed_stages=committed_stages,
+                _publication_retry_allowed=False,
+            )
 
     if first_missing is not None:
         return first_missing, last_stage, temporary is not None
