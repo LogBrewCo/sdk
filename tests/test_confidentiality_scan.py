@@ -141,6 +141,24 @@ class ConfidentialityScanTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("production " + "pass" + "word", failures[0])
 
+    def test_allows_only_structured_go_url_host_name_call(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "go" / "logbrew"
+            source_dir.mkdir(parents=True)
+            api_member = "Host" + "name"
+            disclosure = "host" + "name"
+            (source_dir / "http_client_trace.go").write_text(
+                f'host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(request.URL.{api_member}()), "."))\n'
+                f'note := "production {disclosure} inventory"\n',
+                encoding="utf-8",
+            )
+
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn(f"production {disclosure} inventory", failures[0])
+
     def test_reports_forbidden_public_planning_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

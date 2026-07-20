@@ -1,12 +1,12 @@
 package logbrew
 
 import (
-	"crypto/tls"
+	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"net/http/httptrace"
-	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,14 +15,17 @@ import (
 
 // HTTPClientTransportConfig configures dependency-free outbound net/http client spans.
 type HTTPClientTransportConfig struct {
-	Client        *Client
-	Base          http.RoundTripper
+	Client *Client
+	Base   http.RoundTripper
+	// RouteTemplate is retained for source compatibility. Outbound tracing does not capture routes.
 	RouteTemplate string
+	// EventIDPrefix is a bounded local label used only to identify queued span events.
 	EventIDPrefix string
-	Metadata      map[string]any
-	// CapturePhaseTimings records DNS/connect/TLS/write/first-byte durations using net/http/httptrace.
+	// Metadata is retained for source compatibility. Outbound tracing emits a fixed metadata allowlist.
+	Metadata map[string]any
+	// CapturePhaseTimings is retained for source compatibility. Transport internals are not captured.
 	CapturePhaseTimings bool
-	// FinishSpanOnResponseBodyClose defers successful span capture until the response body is read to EOF or closed.
+	// FinishSpanOnResponseBodyClose defers span capture until the response body is read to EOF or closed.
 	FinishSpanOnResponseBodyClose bool
 	SpanIDFactory                 func() string
 	Now                           func() time.Time
@@ -38,10 +41,19 @@ func NewHTTPClientTransport(config HTTPClientTransportConfig) (http.RoundTripper
 	if base == nil {
 		base = http.DefaultTransport
 	}
+	if wrapped, ok := base.(*httpClientTraceTransport); ok {
+		return wrapped, nil
+	}
 	prefix := config.EventIDPrefix
 	if prefix == "" {
 		prefix = "go_http_client"
 	}
+	if !isSafeHTTPClientLabel(prefix) {
+		return nil, &SdkError{Code: "configuration_error", Message: "HTTP client transport event ID prefix must be a bounded label"}
+	}
+	config.RouteTemplate = ""
+	config.Metadata = nil
+	config.CapturePhaseTimings = false
 	now := config.Now
 	if now == nil {
 		now = time.Now
@@ -62,42 +74,114 @@ type httpClientTraceTransport struct {
 	counter atomic.Uint64
 }
 
+type httpClientTraceContextKey uint8
+
+const (
+	httpClientTraceActiveKey httpClientTraceContextKey = iota
+	httpClientTraceSDKDeliveryKey
+)
+
+type httpClientTraceOperation struct {
+	request *http.Request
+	trace   TraceContext
+	method  string
+	host    string
+	start   time.Time
+}
+
 func (t *httpClientTraceTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request == nil {
 		return t.base.RoundTrip(request)
 	}
-	trace, traceErr := t.childTrace(request)
-	if traceErr != nil {
-		t.report(traceErr)
-		if trace.TraceID == "" {
-			return t.base.RoundTrip(request)
-		}
+	requestContext := request.Context()
+	if requestContext.Value(httpClientTraceSDKDeliveryKey) != nil || requestContext.Value(httpClientTraceActiveKey) != nil {
+		return t.base.RoundTrip(request)
 	}
-	tracedRequest, err := t.cloneRequestWithTrace(request, trace)
+	parent, ok := LogBrewTraceFromContext(requestContext)
+	if !ok || validateTraceContext(parent) != nil {
+		return t.base.RoundTrip(request)
+	}
+
+	operation, err := t.startOperation(request, parent)
 	if err != nil {
 		t.report(err)
 		return t.base.RoundTrip(request)
 	}
-
-	start := t.now()
-	var phaseTimings *httpClientPhaseTimings
-	if t.config.CapturePhaseTimings {
-		phaseTimings = newHTTPClientPhaseTimings(start, t.now)
-		tracedRequest = phaseTimings.attach(tracedRequest)
-	}
-	response, roundTripErr := t.base.RoundTrip(tracedRequest)
+	response, roundTripErr := t.base.RoundTrip(operation.request)
+	operation.request = nil
 	if t.shouldFinishOnResponseBody(response, roundTripErr) {
-		response.Body = newHTTPClientTraceResponseBody(response.Body, func(completion string, bodyErr error) {
-			finished := t.now()
-			t.captureSpan(tracedRequest, trace, response, bodyErr, finished.Sub(start), finished, phaseTimings, map[string]any{
-				"responseBodyCompletion": completion,
-			})
+		response.Body = newHTTPClientTraceResponseBody(response.Body, func(bodyErr error) {
+			t.complete(operation, response, bodyErr)
 		})
 		return response, nil
 	}
-	finished := t.now()
-	t.captureSpan(tracedRequest, trace, response, roundTripErr, finished.Sub(start), finished, phaseTimings, nil)
+	t.complete(operation, response, roundTripErr)
 	return response, roundTripErr
+}
+
+func (t *httpClientTraceTransport) startOperation(request *http.Request, parent TraceContext) (operation *httpClientTraceOperation, err error) {
+	defer func() {
+		if recover() != nil {
+			operation = nil
+			err = httpClientTraceAdvisoryError("setup")
+		}
+	}()
+
+	spanID := ""
+	if t.config.SpanIDFactory != nil {
+		spanID = t.config.SpanIDFactory()
+	}
+	spanID = strings.ToLower(strings.TrimSpace(spanID))
+	if spanID == "" {
+		spanID, err = GenerateSpanID()
+		if err != nil {
+			return nil, httpClientTraceAdvisoryError("setup")
+		}
+	}
+	if requireSpanID("span id", spanID) != nil {
+		return nil, httpClientTraceAdvisoryError("setup")
+	}
+	trace := TraceContext{
+		TraceID:      parent.TraceID,
+		SpanID:       spanID,
+		ParentSpanID: parent.SpanID,
+		TraceFlags:   normalizedTraceFlags(parent),
+		Sampled:      parent.Sampled,
+	}
+	traceparent, err := CreateTraceparent(trace.TraceID, trace.SpanID, trace.TraceFlags)
+	if err != nil {
+		return nil, httpClientTraceAdvisoryError("setup")
+	}
+	clonedContext := ContextWithLogBrewTrace(request.Context(), trace)
+	clonedContext = context.WithValue(clonedContext, httpClientTraceActiveKey, true)
+	cloned := request.Clone(clonedContext)
+	cloned.Header = request.Header.Clone()
+	if cloned.Header == nil {
+		cloned.Header = make(http.Header)
+	}
+	cloned.Header.Del("traceparent")
+	cloned.Header.Set("traceparent", traceparent)
+	return &httpClientTraceOperation{
+		request: cloned,
+		trace:   trace,
+		method:  safeHTTPServerMethod(request.Method),
+		host:    normalizedHTTPClientHost(request),
+		start:   t.now(),
+	}, nil
+}
+
+func (t *httpClientTraceTransport) complete(operation *httpClientTraceOperation, response *http.Response, roundTripErr error) {
+	defer func() {
+		if recover() != nil {
+			t.report(httpClientTraceAdvisoryError("capture"))
+		}
+	}()
+	finished := t.now()
+	duration := finished.Sub(operation.start)
+	if duration < 0 {
+		duration = 0
+	}
+	t.captureSpan(operation, response, roundTripErr, duration, finished)
 }
 
 func (t *httpClientTraceTransport) shouldFinishOnResponseBody(response *http.Response, roundTripErr error) bool {
@@ -108,51 +192,38 @@ func (t *httpClientTraceTransport) shouldFinishOnResponseBody(response *http.Res
 		response.Body != http.NoBody
 }
 
-func newHTTPClientTraceResponseBody(body io.ReadCloser, finish func(string, error)) io.ReadCloser {
-	wrapped := &httpClientTraceResponseBody{
-		body:   body,
-		finish: finish,
-	}
+func newHTTPClientTraceResponseBody(body io.ReadCloser, finish func(error)) io.ReadCloser {
+	wrapped := &httpClientTraceResponseBody{body: body, finish: finish}
 	if writer, ok := body.(io.Writer); ok {
-		return &httpClientTraceReadWriteCloser{
-			httpClientTraceResponseBody: wrapped,
-			writer:                      writer,
-		}
+		return &httpClientTraceReadWriteCloser{httpClientTraceResponseBody: wrapped, writer: writer}
 	}
 	return wrapped
 }
 
 type httpClientTraceResponseBody struct {
 	body   io.ReadCloser
-	finish func(string, error)
+	finish func(error)
 	once   sync.Once
 }
 
 func (b *httpClientTraceResponseBody) Read(p []byte) (int, error) {
 	n, err := b.body.Read(p)
-	switch {
-	case err == io.EOF:
-		b.finishOnce("eof", nil)
-	case err != nil:
-		b.finishOnce("error", err)
+	if err == io.EOF {
+		b.finishOnce(nil)
+	} else if err != nil {
+		b.finishOnce(err)
 	}
 	return n, err
 }
 
 func (b *httpClientTraceResponseBody) Close() error {
 	err := b.body.Close()
-	if err != nil {
-		b.finishOnce("error", err)
-	} else {
-		b.finishOnce("close", nil)
-	}
+	b.finishOnce(err)
 	return err
 }
 
-func (b *httpClientTraceResponseBody) finishOnce(completion string, err error) {
-	b.once.Do(func() {
-		b.finish(completion, err)
-	})
+func (b *httpClientTraceResponseBody) finishOnce(err error) {
+	b.once.Do(func() { b.finish(err) })
 }
 
 type httpClientTraceReadWriteCloser struct {
@@ -163,45 +234,114 @@ type httpClientTraceReadWriteCloser struct {
 func (b *httpClientTraceReadWriteCloser) Write(p []byte) (int, error) {
 	n, err := b.writer.Write(p)
 	if err != nil {
-		b.finishOnce("error", err)
+		b.finishOnce(err)
 	}
 	return n, err
 }
 
-func (t *httpClientTraceTransport) childTrace(request *http.Request) (TraceContext, error) {
-	spanID := ""
-	if t.config.SpanIDFactory != nil {
-		spanID = t.config.SpanIDFactory()
+func (t *httpClientTraceTransport) captureSpan(
+	operation *httpClientTraceOperation,
+	response *http.Response,
+	roundTripErr error,
+	duration time.Duration,
+	finished time.Time,
+) {
+	statusCode := 0
+	if response != nil {
+		statusCode = response.StatusCode
 	}
-	parent, ok := LogBrewTraceFromContext(request.Context())
-	if !ok {
-		return NewTraceContext(TraceContextInput{SpanID: spanID})
+	durationMs := float64(duration.Microseconds()) / 1000
+	metadata := map[string]any{
+		"source":  "net/http.client",
+		"method":  operation.method,
+		"sampled": operation.trace.Sampled,
 	}
-	spanID = strings.ToLower(strings.TrimSpace(spanID))
-	if spanID == "" {
-		generated, err := GenerateSpanID()
-		if err != nil {
-			return TraceContext{}, err
+	if operation.host != "" {
+		metadata["host"] = operation.host
+	}
+	if statusCode > 0 {
+		metadata["statusCode"] = statusCode
+	}
+	if roundTripErr != nil {
+		metadata["errorType"] = classifyHTTPClientError(roundTripErr)
+		if errors.Is(roundTripErr, context.Canceled) {
+			metadata["cancelled"] = true
 		}
-		spanID = generated
 	}
-	if err := requireSpanID("span id", spanID); err != nil {
-		return TraceContext{}, err
+	span, err := SpanAttributesFromTraceContext(TraceContextSpanInput{
+		Trace:      operation.trace,
+		Name:       "HTTP " + operation.method,
+		Status:     spanStatusFromHTTPClientResult(statusCode, roundTripErr),
+		DurationMs: &durationMs,
+		Metadata:   metadata,
+	})
+	if err != nil {
+		t.report(err)
+		return
 	}
-	if err := validateTraceContext(parent); err != nil {
-		fallback, fallbackErr := NewTraceContext(TraceContextInput{SpanID: spanID})
-		if fallbackErr != nil {
-			return TraceContext{}, fallbackErr
+	if err := t.config.Client.Span(t.eventID(), finished.UTC().Format(time.RFC3339Nano), span); err != nil {
+		t.report(err)
+	}
+}
+
+func classifyHTTPClientError(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	default:
+		var networkError net.Error
+		if errors.As(err, &networkError) {
+			return "network"
 		}
-		return fallback, err
+		return "transport"
 	}
-	return TraceContext{
-		TraceID:      parent.TraceID,
-		SpanID:       spanID,
-		ParentSpanID: parent.SpanID,
-		TraceFlags:   normalizedTraceFlags(parent),
-		Sampled:      parent.Sampled,
-	}, nil
+}
+
+func normalizedHTTPClientHost(request *http.Request) string {
+	if request.URL == nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(request.URL.Hostname()), "."))
+	if host == "" || len(host) > 253 || net.ParseIP(host) != nil || strings.Contains(host, ":") {
+		return ""
+	}
+	onlyDigitsAndDots := true
+	for _, char := range host {
+		if (char < '0' || char > '9') && char != '.' {
+			onlyDigitsAndDots = false
+		}
+		if char > 127 {
+			return ""
+		}
+	}
+	if onlyDigitsAndDots {
+		return ""
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return ""
+		}
+		for _, char := range label {
+			if !((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-') {
+				return ""
+			}
+		}
+	}
+	return host
+}
+
+func isSafeHTTPClientLabel(label string) bool {
+	if len(label) == 0 || len(label) > 64 {
+		return false
+	}
+	for _, char := range label {
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 func validateTraceContext(trace TraceContext) error {
@@ -228,218 +368,16 @@ func normalizedTraceFlags(trace TraceContext) string {
 	return flags
 }
 
-func (t *httpClientTraceTransport) cloneRequestWithTrace(request *http.Request, trace TraceContext) (*http.Request, error) {
-	traceparent, err := CreateTraceparent(trace.TraceID, trace.SpanID, trace.TraceFlags)
-	if err != nil {
-		return nil, err
-	}
-	cloned := request.Clone(ContextWithLogBrewTrace(request.Context(), trace))
-	cloned.Header = request.Header.Clone()
-	cloned.Header.Del("traceparent")
-	cloned.Header.Set("traceparent", traceparent)
-	return cloned, nil
-}
-
-func (t *httpClientTraceTransport) captureSpan(
-	request *http.Request,
-	trace TraceContext,
-	response *http.Response,
-	roundTripErr error,
-	duration time.Duration,
-	finished time.Time,
-	phaseTimings *httpClientPhaseTimings,
-	extraMetadata map[string]any,
-) {
-	statusCode := 0
-	if response != nil {
-		statusCode = response.StatusCode
-	}
-	routeTemplate := t.routeTemplate(request)
-	durationMs := float64(duration.Microseconds()) / 1000
-	spanMetadata := t.spanMetadata(request, routeTemplate, trace, statusCode, roundTripErr)
-	for key, value := range compactMetadata(extraMetadata) {
-		spanMetadata[key] = value
-	}
-	if phaseTimings != nil {
-		for key, value := range phaseTimings.metadata() {
-			spanMetadata[key] = value
-		}
-	}
-	metadata := mergeMetadata(t.config.Metadata, spanMetadata)
-	span, err := SpanAttributesFromTraceContext(TraceContextSpanInput{
-		Trace:      trace,
-		Name:       fmt.Sprintf("%s %s", strings.ToUpper(request.Method), routeTemplate),
-		Status:     spanStatusFromHTTPClientResult(statusCode, roundTripErr),
-		DurationMs: &durationMs,
-		Metadata:   metadata,
-	})
-	if err != nil {
-		t.report(err)
-		return
-	}
-	if err := t.config.Client.Span(t.eventID(), finished.UTC().Format(time.RFC3339Nano), span); err != nil {
-		t.report(err)
-	}
-}
-
-func (t *httpClientTraceTransport) spanMetadata(
-	request *http.Request,
-	routeTemplate string,
-	trace TraceContext,
-	statusCode int,
-	roundTripErr error,
-) map[string]any {
-	metadata := map[string]any{
-		"source":        "net/http.client",
-		"method":        strings.ToUpper(request.Method),
-		"routeTemplate": routeTemplate,
-		"sampled":       trace.Sampled,
-	}
-	if statusCode > 0 {
-		metadata["statusCode"] = statusCode
-	}
-	if roundTripErr != nil {
-		metadata["errorType"] = reflect.TypeOf(roundTripErr).String()
-	}
-	return metadata
-}
-
-func (t *httpClientTraceTransport) routeTemplate(request *http.Request) string {
-	if t.config.RouteTemplate != "" {
-		routeTemplate := sanitizeRouteTemplate(t.config.RouteTemplate)
-		if routeTemplate != "" {
-			return routeTemplate
-		}
-	}
-	if request.URL != nil {
-		routeTemplate := sanitizeRouteTemplate(request.URL.Path)
-		if routeTemplate != "" {
-			return routeTemplate
-		}
-	}
-	return "/"
-}
-
 func (t *httpClientTraceTransport) eventID() string {
 	return fmt.Sprintf("%s_span_%d", t.prefix, t.counter.Add(1))
 }
 
-type httpClientPhaseTimings struct {
-	mu sync.Mutex
-
-	now          func() time.Time
-	requestStart time.Time
-
-	dnsStart     time.Time
-	connectStart time.Time
-	tlsStart     time.Time
-
-	dnsMs             *float64
-	connectMs         *float64
-	tlsMs             *float64
-	wroteRequestMs    *float64
-	timeToFirstByteMs *float64
-
-	gotConn           bool
-	connectionReused  bool
-	connectionWasIdle bool
-}
-
-func newHTTPClientPhaseTimings(requestStart time.Time, now func() time.Time) *httpClientPhaseTimings {
-	return &httpClientPhaseTimings{
-		now:          now,
-		requestStart: requestStart,
-	}
-}
-
-func (t *httpClientPhaseTimings) attach(request *http.Request) *http.Request {
-	trace := &httptrace.ClientTrace{
-		DNSStart: func(httptrace.DNSStartInfo) {
-			t.mu.Lock()
-			t.dnsStart = t.now()
-			t.mu.Unlock()
-		},
-		DNSDone: func(httptrace.DNSDoneInfo) {
-			t.mu.Lock()
-			t.dnsMs = durationMilliseconds(t.dnsStart, t.now())
-			t.mu.Unlock()
-		},
-		ConnectStart: func(_, _ string) {
-			t.mu.Lock()
-			t.connectStart = t.now()
-			t.mu.Unlock()
-		},
-		ConnectDone: func(_, _ string, _ error) {
-			t.mu.Lock()
-			t.connectMs = durationMilliseconds(t.connectStart, t.now())
-			t.mu.Unlock()
-		},
-		TLSHandshakeStart: func() {
-			t.mu.Lock()
-			t.tlsStart = t.now()
-			t.mu.Unlock()
-		},
-		TLSHandshakeDone: func(_ tls.ConnectionState, _ error) {
-			t.mu.Lock()
-			t.tlsMs = durationMilliseconds(t.tlsStart, t.now())
-			t.mu.Unlock()
-		},
-		GotConn: func(info httptrace.GotConnInfo) {
-			t.mu.Lock()
-			t.gotConn = true
-			t.connectionReused = info.Reused
-			t.connectionWasIdle = info.WasIdle
-			t.mu.Unlock()
-		},
-		WroteRequest: func(httptrace.WroteRequestInfo) {
-			t.mu.Lock()
-			t.wroteRequestMs = durationMilliseconds(t.requestStart, t.now())
-			t.mu.Unlock()
-		},
-		GotFirstResponseByte: func() {
-			t.mu.Lock()
-			t.timeToFirstByteMs = durationMilliseconds(t.requestStart, t.now())
-			t.mu.Unlock()
-		},
-	}
-	return request.WithContext(httptrace.WithClientTrace(request.Context(), trace))
-}
-
-func (t *httpClientPhaseTimings) metadata() map[string]any {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	metadata := map[string]any{}
-	addFloat64Metadata(metadata, "dnsMs", t.dnsMs)
-	addFloat64Metadata(metadata, "connectMs", t.connectMs)
-	addFloat64Metadata(metadata, "tlsMs", t.tlsMs)
-	addFloat64Metadata(metadata, "wroteRequestMs", t.wroteRequestMs)
-	addFloat64Metadata(metadata, "timeToFirstByteMs", t.timeToFirstByteMs)
-	if t.gotConn {
-		metadata["connectionReused"] = t.connectionReused
-		metadata["connectionWasIdle"] = t.connectionWasIdle
-	}
-	return metadata
-}
-
-func durationMilliseconds(start, end time.Time) *float64 {
-	if start.IsZero() || end.IsZero() || end.Before(start) {
-		return nil
-	}
-	value := float64(end.Sub(start).Microseconds()) / 1000
-	return &value
-}
-
-func addFloat64Metadata(metadata map[string]any, key string, value *float64) {
-	if value != nil {
-		metadata[key] = *value
-	}
-}
-
 func (t *httpClientTraceTransport) report(err error) {
-	if err != nil && t.config.OnError != nil {
-		t.config.OnError(err)
+	if err == nil || t.config.OnError == nil {
+		return
 	}
+	defer func() { _ = recover() }()
+	t.config.OnError(err)
 }
 
 func spanStatusFromHTTPClientResult(statusCode int, err error) string {
@@ -447,4 +385,15 @@ func spanStatusFromHTTPClientResult(statusCode int, err error) string {
 		return "error"
 	}
 	return "ok"
+}
+
+func httpClientTraceAdvisoryError(stage string) error {
+	return &SdkError{Code: "capture_error", Message: "HTTP client tracing " + stage + " failed"}
+}
+
+func markLogBrewHTTPDelivery(request *http.Request) *http.Request {
+	if request == nil {
+		return nil
+	}
+	return request.WithContext(context.WithValue(request.Context(), httpClientTraceSDKDeliveryKey, true))
 }

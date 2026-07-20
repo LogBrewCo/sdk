@@ -3,7 +3,6 @@ package logbrew
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
@@ -408,7 +407,7 @@ func TestHTTPClientTransportInjectsChildTraceAndQueuesSpan(t *testing.T) {
 	metadata := event.Attributes["metadata"].(map[string]any)
 	if event.Type != "span" ||
 		event.ID != "go_http_client_test_span_1" ||
-		event.Attributes["name"] != "GET /payments/:payment_id" ||
+		event.Attributes["name"] != "HTTP GET" ||
 		event.Attributes["traceId"] != "4bf92f3577b34da6a3ce929d0e0e4736" ||
 		event.Attributes["spanId"] != "b7ad6b7169203331" ||
 		event.Attributes["parentSpanId"] != "a7ad6b7169203330" ||
@@ -417,9 +416,8 @@ func TestHTTPClientTransportInjectsChildTraceAndQueuesSpan(t *testing.T) {
 		t.Fatalf("unexpected outbound span event: %#v", event)
 	}
 	if metadata["source"] != "net/http.client" ||
-		metadata["service"] != "checkout" ||
 		metadata["method"] != "GET" ||
-		metadata["routeTemplate"] != "/payments/:payment_id" ||
+		metadata["host"] != "api.example.test" ||
 		metadata["statusCode"] != float64(http.StatusAccepted) ||
 		metadata["sampled"] != true {
 		t.Fatalf("unexpected outbound metadata: %#v", metadata)
@@ -431,7 +429,7 @@ func TestHTTPClientTransportInjectsChildTraceAndQueuesSpan(t *testing.T) {
 	}
 }
 
-func TestHTTPClientTransportRecordsSafePhaseTimingsAndPreservesCallerTrace(t *testing.T) {
+func TestHTTPClientTransportIgnoresLegacyPhaseTimingsAndPreservesCallerTrace(t *testing.T) {
 	client := sampleClient(t)
 	baseTime := time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC)
 	timestamps := []time.Time{
@@ -489,12 +487,6 @@ func TestHTTPClientTransportRecordsSafePhaseTimingsAndPreservesCallerTrace(t *te
 				t.Fatal("expected outbound transport to attach httptrace callbacks")
 			}
 			trace.DNSStart(httptrace.DNSStartInfo{Host: "api.example.test"})
-			trace.DNSDone(httptrace.DNSDoneInfo{})
-			trace.ConnectStart("tcp", "203.0.113.10:443")
-			trace.ConnectDone("tcp", "203.0.113.10:443", nil)
-			trace.TLSHandshakeStart()
-			trace.TLSHandshakeDone(tls.ConnectionState{}, nil)
-			trace.GotConn(httptrace.GotConnInfo{Reused: true, WasIdle: true, IdleTime: 4 * time.Second})
 			trace.WroteRequest(httptrace.WroteRequestInfo{})
 			trace.GotFirstResponseByte()
 			return &http.Response{
@@ -541,17 +533,10 @@ func TestHTTPClientTransportRecordsSafePhaseTimingsAndPreservesCallerTrace(t *te
 	}
 	attributes := parsed.Events[0].Attributes
 	metadata := attributes["metadata"].(map[string]any)
-	if attributes["durationMs"] != float64(52) ||
-		metadata["dnsMs"] != float64(5) ||
-		metadata["connectMs"] != float64(7) ||
-		metadata["tlsMs"] != float64(4) ||
-		metadata["wroteRequestMs"] != float64(31) ||
-		metadata["timeToFirstByteMs"] != float64(46) ||
-		metadata["connectionReused"] != true ||
-		metadata["connectionWasIdle"] != true {
+	if attributes["durationMs"] != float64(2) || metadata["host"] != "api.example.test" {
 		t.Fatalf("unexpected phase timing metadata: attributes=%#v metadata=%#v", attributes, metadata)
 	}
-	for _, unsafe := range []string{"api.example.test", "203.0.113.10", "coupon=summer", "receipt", "authorization", "Bearer private", "traceparent", "spoofed"} {
+	for _, unsafe := range []string{"dnsMs", "connectMs", "tlsMs", "wroteRequestMs", "timeToFirstByteMs", "connectionReused", "203.0.113.10", "coupon=summer", "receipt", "authorization", "Bearer private", "traceparent", "spoofed"} {
 		if strings.Contains(payload, unsafe) {
 			t.Fatalf("phase timing span leaked %q: %s", unsafe, payload)
 		}
@@ -645,7 +630,6 @@ func TestHTTPClientTransportCanFinishSpanOnResponseBodyEOF(t *testing.T) {
 	metadata := attributes["metadata"].(map[string]any)
 	if attributes["durationMs"] != float64(80) ||
 		attributes["status"] != "ok" ||
-		metadata["responseBodyCompletion"] != "eof" ||
 		metadata["statusCode"] != float64(http.StatusOK) {
 		t.Fatalf("unexpected body completion span: attributes=%#v metadata=%#v", attributes, metadata)
 	}
@@ -670,10 +654,7 @@ func TestHTTPClientTransportCanFinishSpanOnResponseBodyClose(t *testing.T) {
 		}
 	}
 
-	request, err := http.NewRequest(http.MethodGet, "https://api.example.test/payments/123", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	request := mustHTTPClientRequest(t, http.MethodGet, "https://api.example.test/payments/123", "a7ad6b7169203330")
 	transport, err := NewHTTPClientTransport(HTTPClientTransportConfig{
 		Client: client,
 		Base: roundTripFunc(func(cloned *http.Request) (*http.Response, error) {
@@ -713,7 +694,7 @@ func TestHTTPClientTransportCanFinishSpanOnResponseBodyClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(payload, `"responseBodyCompletion": "close"`) ||
+	if strings.Contains(payload, "responseBodyCompletion") ||
 		!strings.Contains(payload, `"durationMs": 35`) ||
 		strings.Contains(payload, "body not read") {
 		t.Fatalf("unexpected close-completion span payload: %s", payload)
@@ -739,10 +720,7 @@ func TestHTTPClientTransportPreservesHTTPFailuresAndCaptureFailures(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := http.NewRequest(http.MethodPost, "https://api.example.test/payments/123?coupon=summer", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	request := mustHTTPClientRequest(t, http.MethodPost, "https://api.example.test/payments/123?coupon=summer", "a7ad6b7169203330")
 
 	response, err := transport.RoundTrip(request)
 	if !errors.Is(err, originalError) || response != nil {
@@ -754,7 +732,7 @@ func TestHTTPClientTransportPreservesHTTPFailuresAndCaptureFailures(t *testing.T
 		t.Fatal(err)
 	}
 	if !strings.Contains(payload, `"status": "error"`) ||
-		!strings.Contains(payload, `"errorType": "*errors.errorString"`) ||
+		!strings.Contains(payload, `"errorType": "transport"`) ||
 		strings.Contains(payload, "coupon=summer") ||
 		strings.Contains(payload, "temporary outage") {
 		t.Fatalf("unexpected error span payload: %s", payload)
@@ -785,10 +763,7 @@ func TestHTTPClientTransportPreservesHTTPFailuresAndCaptureFailures(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	okRequest, err := http.NewRequest(http.MethodGet, "https://api.example.test/health", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	okRequest := mustHTTPClientRequest(t, http.MethodGet, "https://api.example.test/health", "a7ad6b7169203330")
 	okResponse, err := closedTransport.RoundTrip(okRequest)
 	if err != nil {
 		t.Fatal(err)
@@ -822,10 +797,7 @@ func TestHTTPClientTransportMarksHTTPClientFailureStatusAsError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := http.NewRequest(http.MethodGet, "https://api.example.test/usage?debug=true", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	request := mustHTTPClientRequest(t, http.MethodGet, "https://api.example.test/usage?debug=true", "a7ad6b7169203330")
 
 	response, err := transport.RoundTrip(request)
 	if err != nil {
@@ -845,17 +817,16 @@ func TestHTTPClientTransportMarksHTTPClientFailureStatusAsError(t *testing.T) {
 	}
 }
 
-func TestHTTPClientTransportFallsBackWhenActiveTraceIsInvalid(t *testing.T) {
+func TestHTTPClientTransportPassesThroughWhenActiveTraceIsInvalid(t *testing.T) {
 	client := sampleClient(t)
 	var sentTraceparent string
+	var sentRequest *http.Request
 	var reported []string
 	transport, err := NewHTTPClientTransport(HTTPClientTransportConfig{
 		Client: client,
 		Base: roundTripFunc(func(cloned *http.Request) (*http.Response, error) {
+			sentRequest = cloned
 			sentTraceparent = cloned.Header.Get("traceparent")
-			if _, ok := LogBrewTraceFromContext(cloned.Context()); !ok {
-				t.Fatal("expected fallback trace on cloned request context")
-			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body:       io.NopCloser(strings.NewReader("ok")),
@@ -886,34 +857,15 @@ func TestHTTPClientTransportFallsBackWhenActiveTraceIsInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	request.Header.Set("traceparent", "caller-owned")
 
 	response, err := transport.RoundTrip(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	parsed, err := ParseTraceparent(sentTraceparent)
-	if err != nil {
-		t.Fatalf("expected valid fallback traceparent, got %q: %v", sentTraceparent, err)
-	}
-	if parsed.TraceID == "not-a-trace" ||
-		parsed.ParentSpanID != "b7ad6b7169203335" ||
-		parsed.TraceFlags != "00" ||
-		parsed.Sampled {
-		t.Fatalf("unexpected fallback traceparent: %#v", parsed)
-	}
-	if len(reported) != 1 || !strings.Contains(reported[0], "trace id") {
-		t.Fatalf("expected malformed active trace report, got %#v", reported)
-	}
-	payload, err := client.PreviewJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(payload, `"type": "span"`) ||
-		!strings.Contains(payload, `"spanId": "b7ad6b7169203335"`) ||
-		strings.Contains(payload, "not-a-trace") ||
-		strings.Contains(payload, "debug=true") {
-		t.Fatalf("unexpected malformed context fallback payload: %s", payload)
+	if sentRequest != request || sentTraceparent != "caller-owned" || len(reported) != 0 || client.PendingEvents() != 0 {
+		t.Fatalf("malformed parent was not a literal pass-through: request=%p sent=%p traceparent=%q reports=%#v events=%d", request, sentRequest, sentTraceparent, reported, client.PendingEvents())
 	}
 }
 

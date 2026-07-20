@@ -201,6 +201,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_go_http_phase_timing_reference(relative_text, line, terms):
         return True
 
+    if is_go_structured_url_hostname_reference(relative_text, line, terms):
+        return True
+
     if is_kotlin_coroutine_context_reference(relative_text, line, terms):
         return True
 
@@ -894,6 +897,19 @@ def is_go_http_phase_timing_reference(
         return "dns" in lower_line
 
     return False
+
+
+def is_go_structured_url_hostname_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    return (
+        relative_text == "go/logbrew/http_client_trace.go"
+        and terms == {"hostname"}
+        and line.strip()
+        == 'host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(request.URL.Hostname()), "."))'
+    )
 
 
 def is_kotlin_coroutine_context_reference(

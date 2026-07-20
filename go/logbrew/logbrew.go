@@ -216,6 +216,7 @@ func (t *HTTPTransport) sendWithRetryAfter(apiKey string, body []byte, maximum t
 	if err != nil {
 		return nil, retryAfterDirective{}, &SdkError{Code: "configuration_error", Message: fmt.Sprintf("invalid HTTP transport endpoint: %v", err)}
 	}
+	request = markLogBrewHTTPDelivery(request)
 	request.Header.Set("content-type", "application/json")
 	request.Header.Set("authorization", "Bearer "+apiKey)
 	for name, value := range t.Headers {

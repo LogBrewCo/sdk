@@ -352,12 +352,7 @@ Use `NewHTTPClientTransport` when you want one outbound client span around app-o
 transport, err := logbrew.NewHTTPClientTransport(logbrew.HTTPClientTransportConfig{
   Client:        client,
   Base:          http.DefaultTransport,
-  RouteTemplate: "/payments/:payment_id",
   EventIDPrefix: "checkout_http",
-  Metadata:      map[string]any{"service": "checkout-api"},
-  // Optional: records DNS/connect/TLS/write/first-byte durations without
-  // storing hosts, IPs, URLs, headers, cookies, payloads, baggage, or tracestate.
-  CapturePhaseTimings: true,
   // Optional: finish successful spans when the response body reaches EOF or Close.
   // Always close response bodies in your app code.
   FinishSpanOnResponseBodyClose: true,
@@ -379,7 +374,9 @@ if err != nil {
 response, err := httpClient.Do(request)
 ```
 
-The transport clones the request before writing exactly one W3C `traceparent`, scopes the downstream call under a child `TraceContext`, queues one span with method, query-free route, status, duration, sampled flag, and primitive metadata, then returns the original response or error. HTTP 4xx/5xx responses and transport errors are marked as failed dependency spans. Malformed active trace state falls back to a local trace and reports through `OnError`; telemetry capture failures also report through `OnError` and do not replace the app-owned HTTP result. `CapturePhaseTimings` adds low-cardinality `dnsMs`, `connectMs`, `tlsMs`, `wroteRequestMs`, `timeToFirstByteMs`, `connectionReused`, and `connectionWasIdle` metadata when Go's `net/http/httptrace` reports those phases, while preserving caller-installed `httptrace` callbacks. `FinishSpanOnResponseBodyClose` defers successful span capture until the app reads the response body to EOF or closes it, adding only `responseBodyCompletion` (`eof`, `close`, or `error`) and type-only errors when reads or closes fail. It does not patch global clients, does not capture request or response payloads, does not store headers, cookies, hosts, IPs, full URLs, query strings, fragments, baggage, tracestate, raw propagation values, phase error messages, body bytes, or body error messages. Run `go run ./examples/http_client_trace` for a local example of downstream propagation, phase timing metadata, body completion timing, and span capture.
+The transport is an explicit app-owned wrapper; it never changes `http.DefaultTransport` or unrelated clients. A valid active LogBrew parent creates one child for each actual `RoundTrip`, and the request clone receives the matching W3C `traceparent`. With no valid parent, the original request goes directly to the selected transport without tracing work. Caller request headers and context remain unchanged, responses and errors keep their original identity, and capture failures are advisory. Direct duplicate registration returns the first wrapper; nested wrappers coalesce through the request context, and LogBrew delivery requests are excluded.
+
+Place retry or redirect middleware outside this wrapper when each actual attempt should have its own child span. The fixed span metadata contains only method, normalized non-IP host when safe, status, duration, source, sampled state, real cancellation, and a bounded error class. It never stores scheme, port, path, query, fragment, full URL, headers, bodies or sizes, authentication material, cookies, baggage, tracestate, IP addresses, arbitrary metadata, error messages, stacks, or transport internals. `RouteTemplate`, `Metadata`, and `CapturePhaseTimings` remain in the config for source compatibility but are ignored and not retained. `FinishSpanOnResponseBodyClose` can defer capture while preserving body reads, writes, EOF, close, and errors. Run `go run ./examples/http_client_trace` for a local propagation and span-capture example.
 
 ## Dependency Spans
 
