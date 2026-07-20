@@ -134,7 +134,9 @@ module LogBrew
       @headers.each { |name, value| request[name] = value }
       request.body = body
 
-      response = @http_client ? @http_client.request(request) : request_with_default_client(request)
+      response = HttpClientTracing.suppress do
+        @http_client ? @http_client.request(request) : request_with_default_client(request)
+      end
       TransportResponse.new(response.code.to_i, 1)
     rescue TransportError
       raise
@@ -1316,6 +1318,6 @@ module LogBrew
   require_relative "logbrew/automatic_delivery"
 end
 
-%w[product_timeline traceparent trace span_events operation_tracing support_ticket worker_lifecycle].each do |path|
+%w[product_timeline traceparent trace span_events operation_tracing http_client_tracing support_ticket worker_lifecycle].each do |path|
   require_relative "logbrew/#{path}"
 end

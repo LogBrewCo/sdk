@@ -171,7 +171,7 @@ headers = LogBrew::Traceparent.create_headers(
 )
 ```
 
-The helper accepts W3C-shaped values, rejects forbidden or all-zero IDs, normalizes uppercase hex to lowercase, exposes the sampled flag, and creates LogBrew child span attributes with a new caller-provided span ID. It does not patch Ruby HTTP clients.
+The helper accepts W3C-shaped values, rejects forbidden or all-zero IDs, normalizes uppercase hex to lowercase, exposes the sampled flag, and creates LogBrew child span attributes with a new caller-provided span ID. It does not patch Ruby HTTP clients globally.
 
 ## HTTP Request Trace Correlation
 
@@ -218,6 +218,37 @@ end
 ```
 
 `database_operation`, `cache_operation`, and `queue_operation` run your block under a child `LogBrew::Trace` context, preserve the block result or original exception, and emit exactly one span with primitive metadata. Capture failures can be observed with `on_error:` without replacing app behavior. The helpers intentionally drop SQL statements, query params, connection strings, cache keys/values, message bodies, job IDs, headers, cookies, URLs, auth-like fields, and other sensitive-looking metadata. Failed dependency spans include only the exception type in metadata plus one bounded `exception` span event with `exceptionType` and `exceptionEscaped: true`; exception messages and stacks stay out by default.
+
+## Outbound HTTP Tracing
+
+Wrap an app-owned `Net::HTTP` connection explicitly when outbound work should become a child of the active LogBrew trace:
+
+```ruby
+uri = URI("https://service.example/health")
+http = LogBrew::HttpClientTracing.wrap_net_http(
+  Net::HTTP.new(uri.host, uri.port),
+  client: client,
+  on_capture_error: ->(error) { warn(error.class.name) }
+)
+
+response = http.request(Net::HTTP::Get.new(uri.request_uri))
+```
+
+Faraday remains optional. Apps that already use Faraday can load the integration and place its middleware inside retry middleware so every actual retry receives a distinct child span:
+
+```ruby
+require "faraday"
+require "logbrew/faraday_tracing"
+
+connection = Faraday.new("https://service.example") do |builder|
+  builder.use LogBrew::FaradayTracingMiddleware, client: client
+  builder.adapter :net_http
+end
+```
+
+Both adapters are literal pass-throughs when `LogBrew::Trace.current` is absent. With an active parent, they propagate one W3C `traceparent`, return the caller-visible header and trace scope to their prior values, and capture one completion span per actual execution. Duplicate wrappers, nested LogBrew HTTP middleware, and SDK delivery are suppressed without process-wide hooks. Net::HTTP start blocks, response streaming, Faraday middleware ordering, responses, and exceptions retain their normal behavior; telemetry capture failures are advisory.
+
+Outbound HTTP spans allow only method, normalized host, status code, duration, adapter source, sampled state, and exception type. They never record scheme, port, path, query, fragment, full URL, request or response headers, bodies or sizes, exception messages or stacks, authentication material, cookies, baggage, tracestate, resolved addresses, or arbitrary request options.
 
 ## Metrics
 

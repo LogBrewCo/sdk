@@ -452,6 +452,10 @@ jobs:
         if: ${{ needs.changed-areas.outputs.ruby == 'true' }}
         run: bash scripts/real_user_ruby_smoke.sh
 
+      - name: Run Ruby HTTP client tracing installed smoke test
+        if: ${{ needs.changed-areas.outputs.ruby == 'true' }}
+        run: bash scripts/real_user_ruby_http_client_tracing_smoke.sh
+
       - name: Install PHP SDK dependencies
         if: ${{ needs.changed-areas.outputs.php == 'true' }}
         run: cd php/logbrew-php && composer update --no-interaction
