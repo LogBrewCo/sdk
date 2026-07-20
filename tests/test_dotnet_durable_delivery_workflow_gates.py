@@ -993,7 +993,7 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
                     "admission witness invalid: publication",
                 )
 
-    def test_completed_publication_allows_one_bounded_visibility_resnapshot(self) -> None:
+    def test_completed_publication_allows_bounded_visibility_resnapshots(self) -> None:
         self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
         verifier = load_verifier()
 
@@ -1005,11 +1005,23 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
             request.write_bytes(b"request")
             temporary = witness / verifier.WITNESS_TEMPORARY_NAME
             temporary.write_bytes(verifier.WITNESS_VALUE)
+            elapsed = 0.0
+            sleeps: list[float] = []
 
             def finish_publication(path: Path) -> bool:
+                nonlocal elapsed
                 self.assertEqual(path, temporary)
-                path.unlink()
+                if elapsed >= 0.03 and path.exists():
+                    path.unlink()
                 return True
+
+            def monotonic() -> float:
+                return elapsed
+
+            def sleep(seconds: float) -> None:
+                nonlocal elapsed
+                sleeps.append(seconds)
+                elapsed += seconds
 
             with (
                 mock.patch.object(
@@ -1017,14 +1029,55 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
                     "_temporary_witness_validity",
                     side_effect=finish_publication,
                 ),
-                mock.patch.object(verifier.time, "sleep") as sleep,
+                mock.patch.object(verifier.time, "monotonic", side_effect=monotonic),
+                mock.patch.object(verifier.time, "sleep", side_effect=sleep),
             ):
                 self.assertEqual(
                     verifier.inspect_admission_witness(witness, request),
                     (None, "pending-verified", False),
                 )
 
-            sleep.assert_called_once_with(verifier.WITNESS_PUBLICATION_RETRY_SECONDS)
+            self.assertGreater(sum(sleeps), verifier.WITNESS_PUBLICATION_RETRY_SECONDS)
+            self.assertLessEqual(
+                sum(sleeps),
+                verifier.WITNESS_PUBLICATION_DEADLINE_SECONDS,
+            )
+
+    def test_completed_publication_stalls_only_until_bounded_deadline(self) -> None:
+        self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
+        verifier = load_verifier()
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            witness = root / "witness"
+            request = root / "request"
+            write_test_witness(witness)
+            request.write_bytes(b"request")
+            (witness / verifier.WITNESS_TEMPORARY_NAME).write_bytes(
+                verifier.WITNESS_VALUE,
+            )
+            elapsed = 0.0
+
+            def monotonic() -> float:
+                return elapsed
+
+            def sleep(seconds: float) -> None:
+                nonlocal elapsed
+                elapsed += seconds
+
+            with (
+                mock.patch.object(verifier.time, "monotonic", side_effect=monotonic),
+                mock.patch.object(verifier.time, "sleep", side_effect=sleep),
+            ):
+                self.assertEqual(
+                    verifier.inspect_admission_readiness(witness, request),
+                    verifier.AdmissionOutcome.WITNESS_INVALID_PUBLICATION,
+                )
+
+            self.assertAlmostEqual(
+                elapsed,
+                verifier.WITNESS_PUBLICATION_DEADLINE_SECONDS,
+            )
 
     def test_admission_timeout_distinguishes_witness_and_request(self) -> None:
         self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
