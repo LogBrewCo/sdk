@@ -754,7 +754,7 @@ cargo smoke-doc
 test -f target/doc/logbrew/index.html
 grep -q 'Public Rust client for building, validating, previewing, and flushing LogBrew event batches\.' target/doc/logbrew/index.html
 test -f target/doc/logbrew/struct.LogBrewClient.html
-grep -q 'Buffered public client for validating, previewing, and flushing LogBrew events\.' target/doc/logbrew/struct.LogBrewClient.html
+grep -q 'Synchronous client with one shared bounded delivery queue across clones\.' target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Create a builder from public SDK identity values like name and version\.' target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Return the queued event count currently buffered in memory\.' target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Return the queued event batch as stable, pretty-printed JSON\.' target/doc/logbrew/struct.LogBrewClient.html
