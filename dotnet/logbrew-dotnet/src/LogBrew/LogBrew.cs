@@ -109,6 +109,8 @@ namespace LogBrew
 
     public sealed class HttpTransport : ITransport, IDisposable
     {
+        private const string SdkDeliveryRequestMarker = "LogBrew.HttpClientFactory.SdkDelivery";
+
         public static readonly Uri DefaultEndpoint = new Uri("https://api.logbrew.co/v1/events", UriKind.Absolute);
 
         public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
@@ -173,6 +175,7 @@ namespace LogBrew
             using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint);
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             request.Content = content;
+            MarkSdkDeliveryRequest(request);
             request.Headers.TryAddWithoutValidation("authorization", "Bearer " + apiKey);
             AddHeaders(request);
 
@@ -303,6 +306,15 @@ namespace LogBrew
                     throw new SdkException("configuration_error", "invalid HTTP transport header: " + pair.Key);
                 }
             }
+        }
+
+        private static void MarkSdkDeliveryRequest(HttpRequestMessage request)
+        {
+#if NET8_0_OR_GREATER
+            request.Options.Set(new HttpRequestOptionsKey<bool>(SdkDeliveryRequestMarker), true);
+#else
+            request.Properties[SdkDeliveryRequestMarker] = true;
+#endif
         }
 
         private static TimeSpan? ParseRetryAfter(HttpResponseMessage response, DateTimeOffset now)

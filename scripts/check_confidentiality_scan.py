@@ -201,6 +201,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_go_http_phase_timing_reference(relative_text, line, terms):
         return True
 
+    if is_dotnet_httpclient_host_reference(relative_text, terms):
+        return True
+
     if is_kotlin_coroutine_context_reference(relative_text, line, terms):
         return True
 
@@ -897,6 +900,24 @@ def is_go_http_phase_timing_reference(
         return "dns" in lower_line
 
     return False
+
+
+def is_dotnet_httpclient_host_reference(
+    relative_text: str,
+    terms: set[str],
+) -> bool:
+    source_path = (
+        "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/"
+        "LogBrewHttpClientFactoryCorrelation.cs"
+    )
+    if relative_text == source_path:
+        return terms in ({"dns"}, {"dns", "hostname"})
+
+    return terms == {"dns"} and relative_text in {
+        "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/README.md",
+        "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/examples/HttpClientFactoryCorrelation.cs",
+        "dotnet/logbrew-dotnet/tests/LogBrew.HttpClient.Tests/Program.cs",
+    }
 
 
 def is_kotlin_coroutine_context_reference(

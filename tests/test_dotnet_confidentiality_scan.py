@@ -16,6 +16,55 @@ SPEC.loader.exec_module(check_confidentiality_scan)
 
 
 class DotNetConfidentialityScanTests(unittest.TestCase):
+    def test_allows_dotnet_httpclient_host_terminology_at_owned_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "dotnet" / "logbrew-dotnet" / "src" / "LogBrew.HttpClient"
+            example_dir = source_dir / "examples"
+            test_dir = root / "dotnet" / "logbrew-dotnet" / "tests" / "LogBrew.HttpClient.Tests"
+            example_dir.mkdir(parents=True)
+            test_dir.mkdir(parents=True)
+            host_term = "d" + "ns"
+            host_name_type = "Host" + "NameType"
+            (source_dir / "LogBrewHttpClientFactoryCorrelation.cs").write_text(
+                f"requestUri.{host_name_type} != Uri{host_name_type}.{host_term.title()}\n",
+                encoding="utf-8",
+            )
+            (source_dir / "README.md").write_text(
+                f"Captured fields include a normalized {host_term.upper()} host.\n",
+                encoding="utf-8",
+            )
+            (example_dir / "HttpClientFactoryCorrelation.cs").write_text(
+                f"// Only the normalized {host_term.upper()} host is captured.\n",
+                encoding="utf-8",
+            )
+            (test_dir / "Program.cs").write_text(
+                f"using var {host_term}Response = await client.GetAsync(request);\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+    def test_dotnet_httpclient_host_allowance_rejects_near_misses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "dotnet" / "logbrew-dotnet" / "src" / "LogBrew.HttpClient"
+            source_dir.mkdir(parents=True)
+            host_term = "d" + "ns"
+            sensitive_term = "cre" + "dential"
+            (source_dir / "LogBrewHttpClientFactoryCorrelation.cs").write_text(
+                f"The {host_term} value contains a {sensitive_term}.\n",
+                encoding="utf-8",
+            )
+            (source_dir / "OtherHttpClientCorrelation.cs").write_text(
+                f"The {host_term} host is captured.\n",
+                encoding="utf-8",
+            )
+
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 2)
+
     def test_allows_fixed_dotnet_durability_terms_only_at_owned_syntax(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

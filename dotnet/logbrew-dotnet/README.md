@@ -19,6 +19,7 @@ Optional integration packages install only when you need their runtime:
 ```bash
 dotnet add package LogBrew.AspNetCore
 dotnet add package LogBrew.EntityFrameworkCore
+dotnet add package LogBrew.HttpClient
 dotnet add package LogBrew.StackExchangeRedis
 dotnet add package LogBrew.OpenTelemetry
 ```
@@ -431,7 +432,19 @@ var handler = new LogBrewHttpClientHandler(
 using var httpClient = new HttpClient(handler);
 ```
 
-Use `WithRequestFilter(...)` to skip noisy internal calls without modifying the request or injecting propagation headers. Use `WithRouteTemplateSelector(...)` when one typed client sends multiple route families and you want stable low-cardinality span names. Selector output is validated like `WithRouteTemplate(...)`; keep it query-free and route-shaped.
+For explicitly selected named or typed factory clients, install `LogBrew.HttpClient` and add correlation on that client's builder:
+
+```csharp
+using LogBrew.HttpClient;
+
+services
+    .AddHttpClient("catalog")
+    .AddLogBrewCorrelation(client);
+```
+
+`AddLogBrewCorrelation(...)` is idempotent per builder name, the first registration wins, and it does not install a factory-wide filter or diagnostics listener. It creates a W3C child only when `LogBrewTrace.Current` is active, returns the caller's request header and trace state before completion, and keeps responses, streaming content, exceptions, cancellation, and middleware order app-owned. Place it after retry middleware when each execution should have its own child. Fixed span metadata is limited to method, normalized non-IP host, status, duration, source, sampled state, real cancellation, and exception type; it excludes paths, query strings, fragments, ports, client names, arbitrary headers or metadata, bodies, authentication material, baggage, tracestate, and exception text. SDK delivery requests bypass the handler to prevent self-correlation.
+
+For the legacy manual `LogBrewHttpClientTelemetry` and `LogBrewHttpClientHandler` APIs above, use `WithRequestFilter(...)` to skip noisy internal calls without modifying the request or injecting propagation headers. Use `WithRouteTemplateSelector(...)` when one typed client sends multiple route families and you want stable low-cardinality span names. These options do not apply to `AddLogBrewCorrelation(...)`. Selector output is validated like `WithRouteTemplate(...)`; keep it query-free and route-shaped.
 
 For ASP.NET Core, keep the middleware app-owned and use `LogBrewServerRequestTelemetry` to wrap the request pipeline. This captures one request span, an optional `http.server.duration` metric, and an optional exception issue while preserving the original response or exception:
 
