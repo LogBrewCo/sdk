@@ -319,6 +319,48 @@ try {
 
 `databaseOperation`, `cacheOperation`, and `queueOperation` keep instrumentation explicit and dependency-free. They do not patch PDO, Doctrine, Redis, Laravel queues, or global PHP runtime hooks; they avoid SQL text, connection strings, network locations, login fields, cache identifiers, message bodies, arbitrary headers, baggage, and tracestate. Metadata is primitive-only and sensitive-looking keys are dropped before enqueue.
 
+## Outbound HTTP Tracing
+
+Use `LogBrewHttpClientTracing` when your application owns a PSR-18 or Guzzle 7 client and wants each actual HTTP send to become a child of the active LogBrew trace:
+
+```shell
+composer require logbrew/sdk guzzlehttp/guzzle
+```
+
+```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use GuzzleHttp\Client;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Psr7\Request;
+use LogBrew\LogBrewClient;
+use LogBrew\LogBrewHttpClientTracing;
+use LogBrew\LogBrewTrace;
+use LogBrew\LogBrewTraceContext;
+
+$logBrew = LogBrewClient::create('LOGBREW_API_KEY', 'checkout-php-service', '1.4.2');
+$stack = HandlerStack::create();
+$stack->push(LogBrewHttpClientTracing::guzzleMiddleware($logBrew), 'logbrew-tracing');
+$guzzle = new Client(['handler' => $stack]);
+$psr18 = LogBrewHttpClientTracing::wrapPsr18(new Client(), $logBrew);
+$parent = LogBrewTraceContext::fromIncomingTraceparentOrCreateRoot($_SERVER['HTTP_TRACEPARENT'] ?? null);
+
+$scope = LogBrewTrace::activate($parent);
+try {
+    $response = $psr18->sendRequest(new Request('GET', 'https://inventory.example/check'));
+    $promise = $guzzle->requestAsync('POST', 'https://inventory.example/check');
+} finally {
+    $scope->close();
+}
+$asyncResponse = $promise->wait();
+```
+
+When a LogBrew trace is active, both adapters replace only `traceparent` on the immutable outgoing request, reinstate the caller's active trace before returning control, and preserve the original response, exception, rejection, and cancellation behavior. Without an active LogBrew trace, they pass the original request through without propagation, span capture, or capture callbacks. Rewrapping a LogBrew PSR-18 client or installing the middleware more than once still emits one span per actual send. Capture failures are advisory and may be observed through the optional `onCaptureError` callback.
+
+Outbound spans contain only method, normalized host, status code when available, duration, fixed client source, sampled state, and exception type. They never contain the URL path, query, fragment, arbitrary headers, request or response bodies, exception messages, authorization values, baggage, or tracestate. Instrumentation is explicit and app-owned; the SDK does not patch global clients or install runtime hooks.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:
