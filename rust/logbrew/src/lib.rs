@@ -732,7 +732,9 @@ impl Transport for RecordingTransport {
     }
 }
 pub use delivery::{
-    ClientBuilder, DEFAULT_MAX_BATCH_EVENTS, DEFAULT_MAX_QUEUE_BYTES, DEFAULT_MAX_QUEUE_EVENTS,
-    DEFAULT_MAX_REQUEST_BODY_BYTES, DeliveryCodeCategory, DeliveryHealthSnapshot, DeliveryOutcome,
-    LogBrewClient,
+    AutomaticDeliveryConfig, ClientBuilder, DEFAULT_AUTOMATIC_DELIVERY_INTERVAL,
+    DEFAULT_AUTOMATIC_DELIVERY_THRESHOLD, DEFAULT_AUTOMATIC_RETRY_BASE_DELAY,
+    DEFAULT_AUTOMATIC_RETRY_MAX_DELAY, DEFAULT_MAX_BATCH_EVENTS, DEFAULT_MAX_QUEUE_BYTES,
+    DEFAULT_MAX_QUEUE_EVENTS, DEFAULT_MAX_REQUEST_BODY_BYTES, DeliveryCodeCategory,
+    DeliveryHealthSnapshot, DeliveryOutcome, DeliveryPauseReason, LogBrewClient,
 };

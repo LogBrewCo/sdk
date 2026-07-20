@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 package_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "$package_root/../.." && pwd)"
 
 assert_contains() {
   local haystack="$1"
@@ -117,5 +118,7 @@ assert_contains "$make_real_user_stdout" '"type": "span"' 'expected span event i
 assert_contains "$make_real_user_stdout" '"type": "action"' 'expected action event in Rust make run-real-user-smoke output'
 assert_contains "$make_real_user_stderr" '"ok":true' 'expected success status in Rust make run-real-user-smoke stderr'
 assert_contains "$make_real_user_stderr" '"events":6' 'expected event count in Rust make run-real-user-smoke stderr'
+
+bash "$repo_root/scripts/real_user_rust_automatic_delivery_smoke.sh"
 
 printf 'rust sdk checkout checks passed\n'

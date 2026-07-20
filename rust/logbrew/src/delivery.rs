@@ -5,15 +5,45 @@ use crate::{
 };
 use serde_json::{Map, Value};
 use std::fmt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
+mod automatic;
 mod queue;
+use automatic::{AutomaticDelivery, AutomaticHealth};
 use queue::{DeliveryQueue, FrozenPrefix, QueueAdmissionError, REQUEST_SUFFIX, serialize_bounded};
 
 pub const DEFAULT_MAX_QUEUE_EVENTS: usize = 1_000;
 pub const DEFAULT_MAX_QUEUE_BYTES: usize = 4 * 1024 * 1024;
 pub const DEFAULT_MAX_BATCH_EVENTS: usize = 100;
 pub const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 256 * 1024;
+pub const DEFAULT_AUTOMATIC_DELIVERY_INTERVAL: Duration = Duration::from_secs(5);
+pub const DEFAULT_AUTOMATIC_DELIVERY_THRESHOLD: usize = 100;
+pub const DEFAULT_AUTOMATIC_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
+pub const DEFAULT_AUTOMATIC_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Configuration for an explicit client-owned automatic delivery worker.
+pub struct AutomaticDeliveryConfig {
+    pub enabled: bool,
+    pub interval: Duration,
+    pub threshold: usize,
+    pub retry_base_delay: Duration,
+    pub retry_max_delay: Duration,
+}
+
+impl Default for AutomaticDeliveryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval: DEFAULT_AUTOMATIC_DELIVERY_INTERVAL,
+            threshold: DEFAULT_AUTOMATIC_DELIVERY_THRESHOLD,
+            retry_base_delay: DEFAULT_AUTOMATIC_RETRY_BASE_DELAY,
+            retry_max_delay: DEFAULT_AUTOMATIC_RETRY_MAX_DELAY,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Fixed delivery lifecycle outcome exposed by [`DeliveryHealthSnapshot`].
@@ -23,7 +53,19 @@ pub enum DeliveryOutcome {
     Delivered,
     Dropped,
     Failed,
+    RetryScheduled,
+    Paused,
     Closed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Fixed reason why client-owned automatic delivery is paused.
+pub enum DeliveryPauseReason {
+    None,
+    Authentication,
+    Quota,
+    Rejected,
+    State,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +95,13 @@ pub struct DeliveryHealthSnapshot {
     pub accepted_events: u64,
     pub last_outcome: DeliveryOutcome,
     pub last_code: DeliveryCodeCategory,
+    pub automatic_enabled: bool,
+    pub automatic_running: bool,
+    pub delivery_in_flight: bool,
+    pub wake_coalesced: bool,
+    pub consecutive_failures: u32,
+    pub pause_reason: DeliveryPauseReason,
+    pub next_retry_delay: Duration,
 }
 
 #[derive(Clone)]
@@ -115,6 +164,29 @@ impl ClientBuilder {
     }
 
     pub fn build(self) -> Result<LogBrewClient, SdkError> {
+        self.build_client(None)
+    }
+
+    /// Build a client with an explicit owned transport and optional automatic worker.
+    pub fn build_with_owned_transport<T>(
+        self,
+        transport: T,
+        config: AutomaticDeliveryConfig,
+    ) -> Result<LogBrewClient, SdkError>
+    where
+        T: Transport + Send + 'static,
+    {
+        validate_automatic_config(config)?;
+        self.build_client(Some(Arc::new(AutomaticDelivery::new(
+            Box::new(transport),
+            config,
+        ))))
+    }
+
+    fn build_client(
+        self,
+        automatic: Option<Arc<AutomaticDelivery>>,
+    ) -> Result<LogBrewClient, SdkError> {
         let api_key = self
             .api_key
             .ok_or_else(|| SdkError::new("config_error", "api_key is required"))?;
@@ -160,6 +232,8 @@ impl ClientBuilder {
                 max_request_body_bytes: self.max_request_body_bytes,
                 max_event_bytes,
                 request_prefix,
+                automatic,
+                client_owners: AtomicUsize::new(1),
                 state: Mutex::new(ClientState::new(
                     self.max_queue_events,
                     self.max_queue_bytes,
@@ -169,11 +243,47 @@ impl ClientBuilder {
     }
 }
 
+fn validate_automatic_config(config: AutomaticDeliveryConfig) -> Result<(), SdkError> {
+    if config.interval.is_zero() {
+        return Err(SdkError::new(
+            "config_error",
+            "automatic delivery interval must be positive",
+        ));
+    }
+    validate_deadline("automatic delivery interval", config.interval)?;
+    validate_limit("automatic delivery threshold", config.threshold)?;
+    if config.retry_base_delay.is_zero() {
+        return Err(SdkError::new(
+            "config_error",
+            "automatic retry base delay must be positive",
+        ));
+    }
+    validate_deadline("automatic retry base delay", config.retry_base_delay)?;
+    validate_deadline("automatic retry maximum delay", config.retry_max_delay)?;
+    if config.retry_max_delay < config.retry_base_delay {
+        return Err(SdkError::new(
+            "config_error",
+            "automatic retry maximum delay must not be shorter than its base delay",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_limit(name: &str, value: usize) -> Result<(), SdkError> {
     if value == 0 {
         return Err(SdkError::new(
             "config_error",
             format!("{name} must be positive"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_deadline(name: &str, value: Duration) -> Result<(), SdkError> {
+    if std::time::Instant::now().checked_add(value).is_none() {
+        return Err(SdkError::new(
+            "config_error",
+            format!("{name} exceeds the supported scheduling range"),
         ));
     }
     Ok(())
@@ -198,10 +308,28 @@ fn request_prefix(sdk_json: &[u8]) -> Result<Vec<u8>, SdkError> {
     Ok(prefix)
 }
 
-#[derive(Clone)]
 /// Synchronous client with one shared bounded delivery queue across clones.
 pub struct LogBrewClient {
     inner: Arc<ClientInner>,
+}
+
+impl Clone for LogBrewClient {
+    fn clone(&self) -> Self {
+        self.inner.client_owners.fetch_add(1, Ordering::Relaxed);
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+impl Drop for LogBrewClient {
+    fn drop(&mut self) {
+        if self.inner.client_owners.fetch_sub(1, Ordering::AcqRel) == 1
+            && let Some(automatic) = &self.inner.automatic
+        {
+            automatic.request_stop();
+        }
+    }
 }
 
 impl fmt::Debug for LogBrewClient {
@@ -233,7 +361,12 @@ impl LogBrewClient {
     }
 
     pub fn delivery_health(&self) -> DeliveryHealthSnapshot {
-        self.state_even_if_poisoned().health_snapshot()
+        let automatic = self
+            .inner
+            .automatic
+            .as_ref()
+            .map_or_else(AutomaticHealth::disabled, |automatic| automatic.health());
+        self.state_even_if_poisoned().health_snapshot(automatic)
     }
 
     pub fn preview_json(&self) -> Result<String, SdkError> {
@@ -328,14 +461,39 @@ impl LogBrewClient {
         &mut self,
         transport: &mut T,
     ) -> Result<TransportResponse, SdkError> {
-        self.deliver(transport, false)
+        if let Some(automatic) = &self.inner.automatic {
+            automatic.with_manual_delivery(&self.inner, || self.inner.deliver(transport, false))
+        } else {
+            self.inner.deliver(transport, false)
+        }
     }
 
     pub fn shutdown<T: Transport>(
         &mut self,
         transport: &mut T,
     ) -> Result<TransportResponse, SdkError> {
-        self.deliver(transport, true)
+        if let Some(automatic) = &self.inner.automatic {
+            automatic.stop_and_join()?;
+        }
+        self.inner.deliver(transport, true)
+    }
+
+    /// Flush queued work through the configured owned transport and clear any pause/backoff.
+    pub fn flush_owned(&mut self) -> Result<TransportResponse, SdkError> {
+        let automatic =
+            self.inner.automatic.as_ref().ok_or_else(|| {
+                SdkError::new("transport_error", "owned transport is not configured")
+            })?;
+        automatic.flush_owned(&self.inner)
+    }
+
+    /// Stop automatic scheduling, drain its start snapshot once, and close on success.
+    pub fn shutdown_owned(&mut self) -> Result<TransportResponse, SdkError> {
+        let automatic =
+            self.inner.automatic.as_ref().ok_or_else(|| {
+                SdkError::new("transport_error", "owned transport is not configured")
+            })?;
+        automatic.shutdown_owned(&self.inner)
     }
 
     fn push_event(
@@ -367,33 +525,73 @@ impl LogBrewClient {
             }
         };
 
-        let mut state = self.lock_state()?;
-        state.require_open_for_capture()?;
-        match state.queue.push(event_bytes) {
-            Ok(()) => {
-                state.last_outcome = DeliveryOutcome::Queued;
-                state.last_code = DeliveryCodeCategory::None;
-                Ok(())
+        let pending_events = {
+            let mut state = self.lock_state()?;
+            state.require_open_for_capture()?;
+            match state.queue.push(event_bytes) {
+                Ok(()) => {
+                    state.last_outcome = DeliveryOutcome::Queued;
+                    state.last_code = DeliveryCodeCategory::None;
+                    state.queue.len()
+                }
+                Err(QueueAdmissionError::Full) => {
+                    state.record_drop(DeliveryCodeCategory::QueueFull);
+                    return Err(SdkError::new("queue_full", "delivery queue is full"));
+                }
+                Err(QueueAdmissionError::Unavailable) => {
+                    state.record_drop(DeliveryCodeCategory::State);
+                    return Err(SdkError::new(
+                        "queue_unavailable",
+                        "delivery queue could not retain the event",
+                    ));
+                }
             }
-            Err(QueueAdmissionError::Full) => {
-                state.record_drop(DeliveryCodeCategory::QueueFull);
-                Err(SdkError::new("queue_full", "delivery queue is full"))
-            }
-            Err(QueueAdmissionError::Unavailable) => {
-                state.record_drop(DeliveryCodeCategory::State);
-                Err(SdkError::new(
-                    "queue_unavailable",
-                    "delivery queue could not retain the event",
-                ))
-            }
+        };
+        if let Some(automatic) = &self.inner.automatic
+            && let Err(error) = automatic.notify_retained(&self.inner, pending_events)
+        {
+            let mut state = self.lock_state()?;
+            state.last_outcome = DeliveryOutcome::Failed;
+            state.last_code = DeliveryCodeCategory::State;
+            let _ = error;
         }
+        Ok(())
     }
 
     fn require_open_for_capture(&self) -> Result<(), SdkError> {
         self.lock_state()?.require_open_for_capture()
     }
 
-    fn deliver<T: Transport>(
+    fn lock_state(&self) -> Result<MutexGuard<'_, ClientState>, SdkError> {
+        self.inner
+            .state
+            .lock()
+            .map_err(|_| SdkError::new("queue_state_error", "delivery state is unavailable"))
+    }
+
+    fn state_even_if_poisoned(&self) -> MutexGuard<'_, ClientState> {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+struct ClientInner {
+    sdk: SdkInfo,
+    api_key: String,
+    max_retries: u32,
+    max_batch_events: usize,
+    max_request_body_bytes: usize,
+    max_event_bytes: usize,
+    request_prefix: Vec<u8>,
+    automatic: Option<Arc<AutomaticDelivery>>,
+    client_owners: AtomicUsize,
+    state: Mutex<ClientState>,
+}
+
+impl ClientInner {
+    fn deliver<T: Transport + ?Sized>(
         &self,
         transport: &mut T,
         close_on_success: bool,
@@ -430,7 +628,7 @@ impl LogBrewClient {
         }
     }
 
-    fn deliver_snapshot<T: Transport>(
+    fn deliver_snapshot<T: Transport + ?Sized>(
         &self,
         transport: &mut T,
         snapshot_end: Option<u64>,
@@ -466,12 +664,12 @@ impl LogBrewClient {
                 }
             };
 
-            let max_attempts = self.inner.max_retries.saturating_add(1);
+            let max_attempts = self.max_retries.saturating_add(1);
             let mut batch_attempts = 0u32;
             loop {
                 batch_attempts = batch_attempts.saturating_add(1);
                 totals.attempts = totals.attempts.saturating_add(1);
-                match transport.send(&self.inner.api_key, &prefix.body) {
+                match transport.send(&self.api_key, &prefix.body) {
                     Ok(response) if (200..300).contains(&response.status_code) => {
                         if let Err(error) = self.acknowledge(&prefix) {
                             return DeliveryResult::Failed(DeliveryFailure {
@@ -496,6 +694,16 @@ impl LogBrewClient {
                             totals,
                         });
                     }
+                    Ok(response) if response.status_code == 429 => {
+                        return DeliveryResult::Failed(DeliveryFailure {
+                            error: SdkError::new(
+                                "quota_exhausted",
+                                "transport temporarily rejected delivery",
+                            ),
+                            category: DeliveryCodeCategory::Rejected,
+                            totals,
+                        });
+                    }
                     Ok(response)
                         if (response.status_code == 408 || response.status_code >= 500)
                             && batch_attempts < max_attempts => {}
@@ -509,7 +717,7 @@ impl LogBrewClient {
                         return DeliveryResult::Failed(DeliveryFailure {
                             error: SdkError::new(
                                 "transport_error",
-                                format!("unexpected transport status {}", response.status_code),
+                                "transport did not accept delivery",
                             ),
                             category,
                             totals,
@@ -540,9 +748,9 @@ impl LogBrewClient {
         }
         let prefix = state.queue.freeze(
             snapshot_end,
-            &self.inner.request_prefix,
-            self.inner.max_batch_events,
-            self.inner.max_request_body_bytes,
+            &self.request_prefix,
+            self.max_batch_events,
+            self.max_request_body_bytes,
         )?;
         state.frozen_prefix = prefix.clone();
         Ok(prefix)
@@ -567,30 +775,37 @@ impl LogBrewClient {
         Ok(())
     }
 
+    fn pending_events(&self) -> usize {
+        self.state_even_if_poisoned().queue.len()
+    }
+
+    fn delivery_in_flight(&self) -> bool {
+        self.state_even_if_poisoned().delivery_in_flight
+    }
+
+    fn last_code(&self) -> DeliveryCodeCategory {
+        self.state_even_if_poisoned().last_code
+    }
+
+    fn record_automatic_outcome(&self, outcome: DeliveryOutcome) {
+        self.state_even_if_poisoned().last_outcome = outcome;
+    }
+
+    fn record_automatic_state_failure(&self) {
+        let mut state = self.state_even_if_poisoned();
+        state.last_outcome = DeliveryOutcome::Failed;
+        state.last_code = DeliveryCodeCategory::State;
+    }
+
     fn lock_state(&self) -> Result<MutexGuard<'_, ClientState>, SdkError> {
-        self.inner
-            .state
+        self.state
             .lock()
             .map_err(|_| SdkError::new("queue_state_error", "delivery state is unavailable"))
     }
 
     fn state_even_if_poisoned(&self) -> MutexGuard<'_, ClientState> {
-        self.inner
-            .state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
-}
-
-struct ClientInner {
-    sdk: SdkInfo,
-    api_key: String,
-    max_retries: u32,
-    max_batch_events: usize,
-    max_request_body_bytes: usize,
-    max_event_bytes: usize,
-    request_prefix: Vec<u8>,
-    state: Mutex<ClientState>,
 }
 
 #[derive(Debug)]
@@ -662,7 +877,7 @@ impl ClientState {
             .saturating_add(totals.accepted_events as u64);
     }
 
-    fn health_snapshot(&self) -> DeliveryHealthSnapshot {
+    fn health_snapshot(&self, automatic: AutomaticHealth) -> DeliveryHealthSnapshot {
         DeliveryHealthSnapshot {
             pending_events: self.queue.len(),
             pending_event_bytes: self.queue.event_bytes(),
@@ -673,6 +888,13 @@ impl ClientState {
             accepted_events: self.accepted_events,
             last_outcome: self.last_outcome,
             last_code: self.last_code,
+            automatic_enabled: automatic.enabled,
+            automatic_running: automatic.running,
+            delivery_in_flight: self.delivery_in_flight,
+            wake_coalesced: automatic.wake_coalesced,
+            consecutive_failures: automatic.consecutive_failures,
+            pause_reason: automatic.pause_reason,
+            next_retry_delay: automatic.next_retry_delay,
         }
     }
 }
