@@ -18,7 +18,7 @@ cargo add logbrew --features tracing-opentelemetry
 cargo add logbrew --features opentelemetry-exporter
 ```
 
-`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `hyper` feature enabled, docs include an explicit `http::Request` async send helper for Hyper-compatible clients without adding Hyper as an SDK dependency. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry and `TowerHttpClientSpanLayer` for app-owned Tower client services. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`. With the `opentelemetry-exporter` feature enabled, docs include `LogBrewOpenTelemetrySpanExporter` for apps that already use the OpenTelemetry SDK and want finished spans queued into an app-owned LogBrew client.
+`cargo doc --package logbrew --no-deps` documents the main `LogBrewClient`, `ClientBuilder`, `DeliveryHealthSnapshot`, `SdkError`, `Transport`, `RecordingTransport`, `TransportResponse`, `TransportError`, public event builders such as `MetricEvent`, metadata aliases such as `Metadata` and `MetadataValue`, timeline builders such as `ProductTimeline`, request helpers such as `HttpRequestTelemetry`, outbound HTTP helpers such as `HttpClientSpan`, dependency span helpers such as `DependencyOperationSpan`, W3C helpers such as `Traceparent` and `OpenTelemetrySpanContext`, and lifecycle helpers such as `pending_events`, `flush`, `shutdown`, and `preview_json`. With the `http` feature enabled, docs also include `DEFAULT_HTTP_ENDPOINT`, `HttpTransportConfig`, `HttpTransport`, and the explicit `ureq` capture helper. With the `hyper` feature enabled, docs include an explicit `http::Request` async send helper for Hyper-compatible clients without adding Hyper as an SDK dependency. With the `reqwest` feature enabled, docs include the explicit `reqwest` send helper and its setup/request error type. With the `tower` feature enabled, docs include `TowerRequestTelemetryLayer` for app-owned Tower/Axum request telemetry and `TowerHttpClientSpanLayer` for app-owned Tower client services. With the `tracing` feature enabled, docs include `LogBrewTracingLayer` for app-owned `tracing` event-to-log conversion plus opt-in span conversion. With the `tracing-opentelemetry` feature enabled, docs also include helpers that copy the active `tracing-opentelemetry` span context into LogBrew's dependency-free `OpenTelemetrySpanContext`. With the `opentelemetry-exporter` feature enabled, docs include `LogBrewOpenTelemetrySpanExporter` for apps that already use the OpenTelemetry SDK and want finished spans queued into an app-owned LogBrew client.
 
 The `examples` directory contains copyable snippets for creating a client, previewing queued JSON, and sending events through the optional HTTP transport in your own Rust service.
 
@@ -83,6 +83,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples. Call `flush` or `shutdown` to send queued events through a transport, and use `preview_json` when you want a stable local JSON preview before sending anything.
+
+## Bounded Delivery
+
+Every client uses one bounded FIFO queue. The defaults retain at most 1,000 events or 4 MiB of compact event JSON and send at most 100 events or 256 KiB of exact request-body bytes per batch. Configure smaller limits when building the client:
+
+```rust
+let mut client = LogBrewClient::builder("checkout-service", "1.2.3")
+    .api_key("LOGBREW_API_KEY")
+    .max_queue_events(500)
+    .max_queue_bytes(2 * 1024 * 1024)
+    .max_batch_events(50)
+    .max_request_body_bytes(128 * 1024)
+    .build()?;
+```
+
+Admission returns `event_too_large` or `queue_full` without changing retained work. `flush` snapshots only the work present when it starts, acknowledges accepted prefixes, and keeps a failed prefix byte-identical ahead of later captures. Its `TransportResponse` reports transport attempts, accepted batches, and accepted events. `shutdown` closes the client only after its starting snapshot is accepted; a failed shutdown leaves the client open with all unaccepted queued work intact.
+
+`delivery_health()` returns a content-free `DeliveryHealthSnapshot` with bounded queue and delivery counters. It never includes event data, event identifiers, API keys, endpoints, request bytes, transport errors, or status text. Cloned clients coordinate through the same queue, so they can safely capture while another clone performs transport I/O; only one flush or shutdown may run at a time.
+
+Custom `Transport` implementations should return `TransportResponse::new(status_code)`. Constructing the response through this helper keeps custom transports compatible with client-owned delivery totals.
 
 ## First Useful Service Telemetry
 
