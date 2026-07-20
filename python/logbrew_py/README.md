@@ -109,6 +109,37 @@ if client.dropped_events() > 0:
 
 This counter is local process state only. Usage, quota, and billing remain backend-owned and must not be inferred from queue size or drop counts.
 
+## Automatic Delivery
+
+Pass an app-owned transport when you want the client to deliver retained events automatically. Automatic delivery starts lazily after the first accepted event, sends at 50 queued events or after 5 seconds by default, and uses the same bounded queue and exact-prefix acknowledgement as explicit flushes:
+
+```python
+from logbrew_sdk import HttpTransport, LogBrewClient
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.4.0",
+    transport=HttpTransport(),
+)
+
+client.log(
+    "evt_worker_ready",
+    "2026-07-20T08:00:00Z",
+    {"message": "worker ready", "level": "info", "logger": "checkout-api"},
+)
+
+health = client.delivery_health()
+print({"state": health.lifecycle, "pending": health.pending_events})
+client.shutdown()
+```
+
+Set `delivery_interval_seconds` and `delivery_queue_threshold` to tune the bounded wake policy. Set `automatic_delivery=False` to own a transport while keeping fully explicit delivery. A client created without a transport keeps the existing manual contract and still accepts `flush(transport)` and `shutdown(transport)`.
+
+Only one daemon scheduler and one flush can be active for a client. Retryable network, 408, and server failures retain an immutable request prefix and use bounded jitter or a bounded `retry-after-ms` hint. Authentication, quota, and other terminal responses pause automatic sends; a successful explicit `flush()` through the owned transport clears that pause. No process-exit, signal, fork, or framework hook is installed.
+
+`DeliveryHealthSnapshot` is immutable and contains only fixed lifecycle values, bounded counters, pending count/bytes, drop count, in-flight/coalesced state, pause class, and retry delay. It never contains event content or IDs, API keys, transport configuration, request/response data, status codes, exception text, or arbitrary metadata.
+
 ## First Useful Telemetry
 
 For a new Python service, capture a small set of signals that explain what changed, where the service ran, what the user or job attempted, which outbound dependency mattered, how long it took, and how the request links to a distributed trace:
