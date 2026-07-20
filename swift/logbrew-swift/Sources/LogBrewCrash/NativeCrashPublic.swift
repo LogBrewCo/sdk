@@ -136,6 +136,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
     public let timestamp: String
     public let mechanism: NativeCrashMechanism
 
+    private let nativeStackFrames: [NativeStackFrame]?
     let reportID: Int64
     let digest: Data
     let ownerNonce: UUID
@@ -144,6 +145,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         eventID: String,
         timestamp: String,
         mechanism: NativeCrashMechanism,
+        nativeStackFrames: [NativeStackFrame]?,
         reportID: Int64,
         digest: Data,
         ownerNonce: UUID,
@@ -151,6 +153,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         self.eventID = eventID
         self.timestamp = timestamp
         self.mechanism = mechanism
+        self.nativeStackFrames = nativeStackFrames
         self.reportID = reportID
         self.digest = digest
         self.ownerNonce = ownerNonce
@@ -185,6 +188,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
                 "crash.mechanism": .string(mechanism.name),
                 "crash.replayed": .bool(true),
             ],
+            nativeStackFrames: nativeStackFrames,
         )
     }
 
@@ -208,11 +212,28 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
               metadata as NSDictionary == [
                   "crash.mechanism": mechanism.name,
                   "crash.replayed": true,
-              ]
+              ],
+              nativeStackFramesMatch(attributes["nativeStackFrames"])
         else {
             return .collision
         }
         return .matching
+    }
+
+    private func nativeStackFramesMatch(_ value: Any?) -> Bool {
+        guard let nativeStackFrames else {
+            return value == nil
+        }
+        guard let frames = value as? [[String: Any]], frames.count == nativeStackFrames.count else {
+            return false
+        }
+        return zip(frames, nativeStackFrames).allSatisfy { frame, expected in
+            frame as NSDictionary == [
+                "imageUuid": expected.imageUuid,
+                "architecture": expected.architecture.rawValue,
+                "instructionOffset": expected.instructionOffset,
+            ] as NSDictionary
+        }
     }
 }
 

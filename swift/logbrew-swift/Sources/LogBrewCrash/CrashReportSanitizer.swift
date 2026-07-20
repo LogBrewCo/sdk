@@ -18,10 +18,12 @@ struct CrashReportSanitizer {
 
         let crash = rawReport["crash"] as? [String: Any]
         let error = crash?["error"] as? [String: Any]
+        let nativeStackFrames = NativeStackFrameSanitizer().frames(from: rawReport)
         return NativeCrashRecord(
             eventID: uuid.uuidString.lowercased(),
             timestamp: timestamp,
             mechanism: mechanism(error?["type"] as? String),
+            nativeStackFrames: nativeStackFrames,
             reportID: reportID,
             digest: Data(SHA256.hash(data: data)),
             ownerNonce: ownerNonce,

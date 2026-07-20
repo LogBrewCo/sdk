@@ -15,7 +15,18 @@ func validateEnvironment(_ attributes: EnvironmentAttributes) throws -> Environm
 
 func validateIssue(_ attributes: IssueAttributes) throws -> IssueAttributes {
     try requireNonEmpty("issue title", attributes.title)
+    if let frames = attributes.nativeStackFrames {
+        guard (1 ... 32).contains(frames.count), frames.allSatisfy(isValidNativeStackFrame) else {
+            throw SdkError(code: "validation_error", message: "issue nativeStackFrames must be canonical")
+        }
+    }
     return attributes
+}
+
+private func isValidNativeStackFrame(_ frame: NativeStackFrame) -> Bool {
+    UUID(uuidString: frame.imageUuid)?.uuidString.lowercased() == frame.imageUuid
+        && frame.instructionOffset.count == 16
+        && frame.instructionOffset.allSatisfy { ("0" ... "9").contains($0) || ("a" ... "f").contains($0) }
 }
 
 func validateLog(_ attributes: LogAttributes) throws -> LogAttributes {

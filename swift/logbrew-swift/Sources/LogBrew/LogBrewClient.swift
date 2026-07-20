@@ -128,6 +128,7 @@ private extension IssueAttributes {
             level: level,
             message: message,
             metadata: LogBrewTrace.metadataWithCurrentTrace(metadata),
+            nativeStackFrames: nativeStackFrames,
         )
     }
 }
