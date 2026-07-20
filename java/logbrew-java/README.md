@@ -6,7 +6,7 @@
 
 Public Java SDK for building, validating, previewing, and flushing LogBrew event batches.
 
-The core client, `HttpTransport`, request trace helpers, JDBC helpers, JMS-style message helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, Spring Boot, Spring Cache, Spring Kafka, and JDBC auto-configuration helpers integrate with app-owned dependencies when those libraries are already present.
+The core client, `HttpTransport`, request trace helpers, JDBC helpers, JMS-style message helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, Spring Boot, Spring HTTP clients, Spring Cache, Spring Kafka, and JDBC auto-configuration helpers integrate with app-owned dependencies when those libraries are already present.
 
 ## Install
 
@@ -333,6 +333,40 @@ HttpResponse<String> response = LogBrewHttpClientTracing.send(
 ```
 
 `send(...)` and `sendAsync(...)` copy the request, replace only one normalized W3C `traceparent` header, create a child span under the active `LogBrewTrace` when present, and record method, route template, status code, duration, sampled state, and type-only exception summaries. They preserve app-owned headers on the actual request but never put arbitrary headers, payloads, full URLs, query strings, baggage, tracestate, exception messages, or stack traces into LogBrew payloads. Pass a low-cardinality `routeTemplate(...)` when paths contain user IDs or order IDs; otherwise the helper falls back to the request path with query and fragment removed.
+
+## Spring HTTP Client Spans
+
+Spring apps can instrument only the clients they own. The same blocking interceptor works with
+`RestClient` and `RestTemplate`, while `WebClient` uses a cold filter that creates a fresh child
+span for every subscription:
+
+```java
+import co.logbrew.sdk.LogBrewSpringHttpTracing;
+import co.logbrew.sdk.LogBrewSpringWebClientTracing;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.reactive.function.client.WebClient;
+
+RestClient blocking = RestClient.builder()
+    .requestInterceptor(LogBrewSpringHttpTracing.restClientInterceptor(client))
+    .build();
+
+WebClient reactive = WebClient.builder()
+    .filter(LogBrewSpringWebClientTracing.filter(client))
+    .build();
+```
+
+The adapters inject exactly one W3C `traceparent`, preserve the original response, exception, empty
+completion, or cancellation signal, and record method, normalized host, status, duration, sampled
+state, and type-only failures. They never record paths, full URLs, query strings, arbitrary headers,
+bodies, exception messages, baggage, or tracestate. A request predicate can skip health checks or
+other app-selected traffic without modifying it; capture diagnostics stay advisory through
+`onError(...)`.
+
+Spring Boot 4 apps only need their existing `LogBrewClient` bean. When the matching Spring client
+classes are present, `LogBrewSpringBootHttpClientAutoConfiguration` instruments `RestClient.Builder`
+and `RestTemplate` beans, and `LogBrewSpringBootWebClientAutoConfiguration` instruments
+`WebClient.Builder` beans. Existing LogBrew interceptors and filters are not duplicated. Set
+`logbrew.http-client.enabled=false` to disable both paths and keep all app-owned clients unchanged.
 
 ## Jakarta Servlet and Spring Requests
 
@@ -969,6 +1003,7 @@ The `examples` directory contains copyable snippets for creating a client, confi
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
 - `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when only OpenTelemetry API jars are present; `LogBrewOpenTelemetrySdk` exposes an app-owned `spanExporter` or `spanProcessor` when the app also uses `opentelemetry-sdk-trace`.
 - `LogBrewHttpClientTracing` wraps app-owned Java 11 `HttpClient.send(...)` and `sendAsync(...)` calls with one W3C `traceparent` and one privacy-bounded `http.client` span.
+- `LogBrewSpringHttpTracing` and `LogBrewSpringWebClientTracing` add privacy-bounded outbound spans to app-owned Spring HTTP clients without global hooks; Boot auto-configuration instruments matching builder/template beans once and honors `logbrew.http-client.enabled=false`.
 - `LogBrewServletFilter` activates request-local trace context for Jakarta Servlet/Spring Boot handlers and emits one request span plus one duration metric without hidden Java-agent instrumentation.
 - `LogBrewSpringBootAutoConfiguration` registers that filter only when Spring Boot, Jakarta Servlet, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewSpringCacheTracing` wraps app-owned Spring `CacheManager` or `Cache` objects with privacy-bounded cache hit/write spans under an active trace by default.

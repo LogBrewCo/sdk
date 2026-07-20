@@ -687,6 +687,10 @@ begin_next_step "Java Spring Kafka installed-artifact smoke"
 run_shell_step "bash scripts/real_user_java_spring_kafka_smoke.sh"
 mark_step_complete
 
+begin_next_step "Java Spring HTTP installed-artifact smoke"
+run_shell_step "bash scripts/real_user_java_spring_http_smoke.sh"
+mark_step_complete
+
 begin_next_step "Java queue trace installed-artifact smoke"
 run_shell_step "bash scripts/real_user_java_queue_trace_smoke.sh"
 mark_step_complete

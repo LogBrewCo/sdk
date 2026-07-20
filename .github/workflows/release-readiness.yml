@@ -603,6 +603,9 @@ jobs:
       - name: Run Java Spring Kafka installed-artifact smoke test
         run: bash scripts/real_user_java_spring_kafka_smoke.sh
 
+      - name: Run Java Spring HTTP installed-artifact smoke test
+        run: bash scripts/real_user_java_spring_http_smoke.sh
+
       - name: Run Spring Boot real-user smoke test
         run: bash scripts/real_user_spring_boot_smoke.sh
 
