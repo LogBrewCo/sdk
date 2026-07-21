@@ -14,8 +14,13 @@ export type CreateLogBrewBrowserClientConfig = {
   clientKey?: string;
   sdkName?: string;
   sdkVersion?: string;
+  /** Retry attempts after the first send. Must be a non-negative integer. */
   maxRetries?: number;
+  maxQueueBytes?: number;
   maxQueueSize?: number;
+  maxBatchEvents?: number;
+  /** Maximum UTF-8 request bytes. Defaults to the 64 KiB keepalive transport limit. */
+  maxBatchBytes?: number;
   onEventDropped?: (drop: DroppedEvent) => void;
 };
 

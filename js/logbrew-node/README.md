@@ -170,6 +170,21 @@ server.listen(3000);
 
 The wrapper keeps app response ownership, records URL path without query text, and adds portable HTTP semantic metadata such as `http.request.method`, `http.response.status_code`, and `url.path`. It does not collect request bodies, response bodies, arbitrary headers, or outgoing calls automatically. Use the explicit action, network milestone, and outbound fetch helpers when you want AI coding assistants or teammates to inspect a workflow without replaying a full session.
 
+## Delivery Bounds
+
+`createLogBrewNodeClient()` accepts the core delivery controls directly. Defaults retain at most 1,000 events and 4 MiB of compact event data, then split each explicit flush into at most 100 events or 256 KiB of UTF-8 JSON per request.
+
+```js
+const client = createLogBrewNodeClient({
+  maxQueueSize: 1000,
+  maxQueueBytes: 4 * 1024 * 1024,
+  maxBatchEvents: 100,
+  maxBatchBytes: 256 * 1024
+});
+```
+
+Concurrent flush calls are serialized. Events captured during network I/O remain queued for the next flush, retries reuse one stable body, and only acknowledged prefixes leave memory. `shutdown()` blocks new capture while draining and reopens the retained remainder if delivery fails.
+
 ## Outbound Fetch Spans
 
 Use `fetchWithLogBrewSpan()` for important downstream calls you want linked to the active request trace. It wraps one app-owned `fetch` call, clones caller headers, writes one normalized W3C `traceparent`, queues one client span, and leaves flushing/shutdown to your existing `LogBrewClient` lifecycle:

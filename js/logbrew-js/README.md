@@ -355,7 +355,7 @@ const provider = new BasicTracerProvider({
 });
 ```
 
-The OTel processor and exporter follow normal OTel sampled-span behavior by default and summarize up to eight span events and eight links. Set `includeTraceSummary: true` when you also want one synthetic `opentelemetry.trace:<root-name>` span per trace on processor `forceFlush()`/`shutdown()` or exporter `export()`/`forceFlush()`/`shutdown()`; the summary carries the trace ID, span count, error count, root span ID/name/kind, duration, and safe service/environment/route metadata so a batch reads like one request or transaction. They copy only a small safe default set such as service, environment, route, method, status code, span kind, instrumentation scope, exception type, exception event count, escaped exception count, and dropped-count metadata. Exception counts scan the readable span's events, while emitted exception type lists stay bounded. Escaped exception events on unset-status spans mark the LogBrew span as `error`; explicit OTel `OK` status stays `ok`. Additional event/link/span/resource attributes require explicit allowlists, and high-risk keys such as full URLs, headers, query strings, payloads, cookies, private auth values, DB statements, exception messages, and stacks stay blocked. Concurrent flush calls share the same in-flight send to avoid duplicate payloads. These helpers do not add an OpenTelemetry dependency, patch clients, own tracer providers, serialize baggage or tracestate, copy raw propagation headers, or capture request/response bodies.
+The OTel processor and exporter follow normal OTel sampled-span behavior by default and summarize up to eight span events and eight links. Set `includeTraceSummary: true` when you also want one synthetic `opentelemetry.trace:<root-name>` span per trace on processor `forceFlush()`/`shutdown()` or exporter `export()`/`forceFlush()`/`shutdown()`; the summary carries the trace ID, span count, error count, root span ID/name/kind, duration, and safe service/environment/route metadata so a batch reads like one request or transaction. They copy only a small safe default set such as service, environment, route, method, status code, span kind, instrumentation scope, exception type, exception event count, escaped exception count, and dropped-count metadata. Exception counts scan the readable span's events, while emitted exception type lists stay bounded. Escaped exception events on unset-status spans mark the LogBrew span as `error`; explicit OTel `OK` status stays `ok`. Additional event/link/span/resource attributes require explicit allowlists, and high-risk keys such as full URLs, headers, query strings, payloads, cookies, private auth values, DB statements, exception messages, and stacks stay blocked. Concurrent flush calls use one active send and one coalesced trailing drain: later spans leave the queue before their caller completes, while a failed active send consumes no extra retry budget. These helpers do not add an OpenTelemetry dependency, patch clients, own tracer providers, serialize baggage or tracestate, copy raw propagation headers, or capture request/response bodies.
 
 LogBrew severity categories are `info`, `warning`, `error`, and `critical`. The JavaScript SDK accepts common runtime aliases such as `trace`, `debug`, `warn`, and `fatal` for compatibility, then serializes canonical values before queued events are sent. The shared mapping is documented in the [LogBrew severity contract](../../docs/severity-contract.md).
 
@@ -381,7 +381,7 @@ Prefer removing sensitive values at the source before calling LogBrew. `eventFil
 
 ## Queue Bounds
 
-`LogBrewClient` keeps a bounded in-memory queue so heavy logging bursts cannot grow without limit before the next flush. The default `maxQueueSize` is 1000 events. When the queue is full, LogBrew drops the incoming event, keeps already queued events unchanged, increments `droppedEvents()`, and calls `onEventDropped` if provided.
+`LogBrewClient` keeps a count-and-byte-bounded in-memory queue so heavy logging bursts cannot grow without limit before the next flush. The defaults are 1000 events and 4 MiB of compact serialized event data. `pendingEvents()` and `pendingBytes()` expose the retained amount without exposing event content.
 
 ```js
 const client = LogBrewClient.create({
@@ -389,17 +389,24 @@ const client = LogBrewClient.create({
   sdkName: "checkout-api",
   sdkVersion: "1.0.0",
   maxQueueSize: 500,
+  maxQueueBytes: 2 * 1024 * 1024,
+  maxBatchEvents: 100,
+  maxBatchBytes: 256 * 1024,
   onEventDropped(drop) {
     console.warn("LogBrew dropped telemetry", drop.reason, drop.eventType);
   }
 });
 ```
 
-Drop callbacks are advisory and must not interrupt application logging. This is not offline persistence; flush regularly and use app-owned retry/shutdown handling for production delivery.
+When either queue limit is full, LogBrew drops the incoming event and keeps earlier context unchanged. `queue_overflow` means the event-count limit was reached, `queue_bytes_overflow` means the compact event-byte limit was reached, and `event_too_large` means one event could not fit a request body by itself. Drop callbacks are advisory and must not interrupt application logging. This is not offline persistence; flush regularly and use app-owned retry/shutdown handling for production delivery.
+
+Flush requests are also bounded. Core and Node default to 100 events and 256 KiB of exact UTF-8 JSON per request. The browser factory defaults to 64 KiB so its normal request body cannot exceed the existing keepalive transport ceiling. A flush sends one queue snapshot in order, splitting it on either limit. The response reports total `attempts` and acknowledged `batches`. Existing clients that only set `maxQueueSize` keep working; the byte and batch settings are additive and are also accepted by the Node and browser client factories.
 
 ## Flush Failures
 
-`flush()` keeps queued events when delivery fails. A `401` transport response raises `SdkError` with code `unauthenticated`; a `429` response raises code `rate_limited` and includes `retryAfterMs` when the transport exposes a `Retry-After` delay. LogBrew does not derive account usage locally, sleep in the SDK, or drop queued events on rate limits; the app can decide when to retry or ask the backend-owned usage/quota APIs for current account state.
+`flush()` calls are serialized so concurrent callers cannot send the same queue prefix. Each call owns the events present when its turn starts. Events captured while its transport is awaiting remain queued for the next flush. A 2xx response removes only that acknowledged prefix; if a later batch fails, the failed batch and every later event remain in their original order. Retries reuse the exact same request body.
+
+A `401` transport response raises `SdkError` with code `unauthenticated`; a `429` response raises code `rate_limited` and includes `retryAfterMs` when the transport exposes a `Retry-After` delay. `maxRetries` is the number of retries after the first attempt and must be a non-negative integer. `shutdown()` rejects new capture while it drains the serialized queue, closes only after success, and reopens the intact unsent remainder after failure. LogBrew does not derive account usage locally, sleep between retries, start a background timer, or drop queued events on rate limits; the app owns retry timing and can ask backend-owned usage/quota APIs for current account state.
 
 ## Support Ticket Drafts
 

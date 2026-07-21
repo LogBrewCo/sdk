@@ -525,7 +525,7 @@ export type EventFilter = (event: Event) => boolean | void;
 
 /** Queue drop notification emitted when a bounded in-memory queue is full. */
 export type DroppedEvent = {
-  reason: "queue_overflow";
+  reason: "event_too_large" | "queue_bytes_overflow" | "queue_overflow";
   eventType: Event["type"];
   eventId: string;
   droppedEvents: number;
@@ -537,6 +537,8 @@ export type TransportResponse = {
   statusCode: number;
   /** Number of transport attempts used for the flush. */
   attempts: number;
+  /** Number of distinct batches acknowledged; client flush/shutdown responses always include it. */
+  batches?: number;
   /** Optional retry delay from a rate-limit response, in milliseconds. */
   retryAfterMs?: number;
 };
@@ -581,13 +583,22 @@ export declare class LogBrewClient {
     apiKey: string;
     sdkName: string;
     sdkVersion: string;
+    /** Retry attempts after the first send. Must be a non-negative integer; defaults to 2. */
     maxRetries?: number;
     eventFilter?: EventFilter;
+    /** Maximum queued compact event bytes. Defaults to 4 MiB. */
+    maxQueueBytes?: number;
     maxQueueSize?: number;
+    /** Maximum events per request body. Defaults to 100. */
+    maxBatchEvents?: number;
+    /** Maximum UTF-8 request body bytes. Defaults to 256 KiB. */
+    maxBatchBytes?: number;
     onEventDropped?: (drop: DroppedEvent) => void;
   }): LogBrewClient;
   /** Return the queued event count currently buffered in memory. */
   pendingEvents(): number;
+  /** Return compact serialized event bytes currently buffered in memory. */
+  pendingBytes(): number;
   /** Return the number of events dropped because the bounded in-memory queue was full. */
   droppedEvents(): number;
   /** Return the queued event batch as stable, pretty-printed JSON. */
@@ -599,9 +610,9 @@ export declare class LogBrewClient {
   span(id: string, timestamp: string, attributes: SpanAttributes): void;
   action(id: string, timestamp: string, attributes: ActionAttributes): void;
   metric(id: string, timestamp: string, attributes: MetricAttributes): void;
-  /** Flush queued events through a transport while preserving retry semantics. */
+  /** Flush one queue snapshot in bounded batches while preserving concurrent captures and retry bodies. */
   flush(transport: Transport): Promise<TransportResponse>;
-  /** Flush queued events, then mark the client closed so later writes fail. */
+  /** Reject new capture, flush queued events, then close; a failed flush reopens the intact remainder. */
   shutdown(transport: Transport): Promise<TransportResponse>;
 }
 

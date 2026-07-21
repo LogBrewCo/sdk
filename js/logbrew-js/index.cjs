@@ -31,6 +31,9 @@ const TRACEPARENT_PATTERN = /^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16
 const ZERO_TRACE_ID = "00000000000000000000000000000000";
 const ZERO_SPAN_ID = "0000000000000000";
 const DEFAULT_MAX_QUEUE_SIZE = 1000;
+const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_BATCH_EVENTS = 100;
+const DEFAULT_MAX_BATCH_BYTES = 256 * 1024;
 const MAX_ERROR_CAUSES = 5;
 const BUILTIN_ERROR_NAMES = new Set([
   "AggregateError",
@@ -112,15 +115,22 @@ class LogBrewClient {
     maxRetries = 2,
     eventFilter,
     maxQueueSize = DEFAULT_MAX_QUEUE_SIZE,
+    maxQueueBytes = DEFAULT_MAX_QUEUE_BYTES,
+    maxBatchEvents = DEFAULT_MAX_BATCH_EVENTS,
+    maxBatchBytes = DEFAULT_MAX_BATCH_BYTES,
     onEventDropped
   }) {
     requireNonEmpty("apiKey", apiKey);
     requireNonEmpty("sdkName", sdkName);
     requireNonEmpty("sdkVersion", sdkVersion);
+    requireNonNegativeInteger("maxRetries", maxRetries);
     if (eventFilter !== undefined && typeof eventFilter !== "function") {
       throw new SdkError("validation_error", "eventFilter must be a function");
     }
     requirePositiveInteger("maxQueueSize", maxQueueSize);
+    requirePositiveInteger("maxQueueBytes", maxQueueBytes);
+    requirePositiveInteger("maxBatchEvents", maxBatchEvents);
+    requirePositiveInteger("maxBatchBytes", maxBatchBytes);
     if (onEventDropped !== undefined && typeof onEventDropped !== "function") {
       throw new SdkError("validation_error", "onEventDropped must be a function");
     }
@@ -128,6 +138,9 @@ class LogBrewClient {
     return new LogBrewClient({
       apiKey,
       eventFilter,
+      maxBatchBytes,
+      maxBatchEvents,
+      maxQueueBytes,
       maxQueueSize,
       onEventDropped,
       sdk: {
@@ -139,20 +152,46 @@ class LogBrewClient {
     });
   }
 
-  constructor({ apiKey, sdk, maxRetries, eventFilter, maxQueueSize, onEventDropped }) {
+  constructor({
+    apiKey,
+    sdk,
+    maxRetries,
+    eventFilter,
+    maxBatchBytes,
+    maxBatchEvents,
+    maxQueueBytes,
+    maxQueueSize,
+    onEventDropped
+  }) {
     this.apiKey = apiKey;
     this.eventFilter = eventFilter;
+    this.maxBatchBytes = maxBatchBytes;
+    this.maxBatchEvents = maxBatchEvents;
+    this.maxQueueBytes = maxQueueBytes;
     this.maxQueueSize = maxQueueSize;
     this.onEventDropped = onEventDropped;
     this.sdk = sdk;
     this.maxRetries = maxRetries;
     this.events = [];
+    this.serializedEvents = [];
+    this.serializedEventBytes = [];
+    this.queuedEventBytes = 0;
+    this.batchPrefix = `{"sdk":${JSON.stringify(this.sdk)},"events":[`;
+    this.batchPrefixBytes = utf8ByteLength(this.batchPrefix);
+    this.batchSuffix = "]}";
+    this.batchSuffixBytes = utf8ByteLength(this.batchSuffix);
+    this.operationTail = Promise.resolve();
+    this.closing = false;
     this.closed = false;
     this.droppedEventCount = 0;
   }
 
   pendingEvents() {
     return this.events.length;
+  }
+
+  pendingBytes() {
+    return this.queuedEventBytes;
   }
 
   droppedEvents() {
@@ -195,21 +234,36 @@ class LogBrewClient {
     if (this.closed) {
       throw new SdkError("shutdown_error", "client is already shut down");
     }
-    return this.#flushInternal(transport);
+    if (this.closing) {
+      throw new SdkError("shutdown_error", "client is shutting down");
+    }
+    return this.#runSerialized(() => this.#flushSnapshot(transport));
   }
 
   async shutdown(transport) {
     if (this.closed) {
       throw new SdkError("shutdown_error", "client is already shut down");
     }
-    const response = await this.#flushInternal(transport);
-    this.closed = true;
-    return response;
+    if (this.closing) {
+      throw new SdkError("shutdown_error", "client is shutting down");
+    }
+    this.closing = true;
+    try {
+      const response = await this.#runSerialized(() => this.#flushSnapshot(transport));
+      this.closed = true;
+      return response;
+    } catch (error) {
+      this.closing = false;
+      throw error;
+    }
   }
 
   #pushEvent(eventType, id, timestamp, attributes) {
     if (this.closed) {
       throw new SdkError("shutdown_error", "client is already shut down");
+    }
+    if (this.closing) {
+      throw new SdkError("shutdown_error", "client is shutting down");
     }
     requireNonEmpty("event id", id);
     requireTimestamp(timestamp);
@@ -217,14 +271,27 @@ class LogBrewClient {
     if (this.eventFilter && this.eventFilter(cloneEvent(event)) === false) {
       return;
     }
+    const serializedEvent = JSON.stringify(event);
+    const eventBytes = utf8ByteLength(serializedEvent);
+    if (this.batchPrefixBytes + eventBytes + this.batchSuffixBytes > this.maxBatchBytes) {
+      this.#recordDroppedEvent(event, "event_too_large");
+      return;
+    }
     if (this.events.length >= this.maxQueueSize) {
-      this.#recordDroppedEvent(event);
+      this.#recordDroppedEvent(event, "queue_overflow");
+      return;
+    }
+    if (this.queuedEventBytes + eventBytes > this.maxQueueBytes) {
+      this.#recordDroppedEvent(event, "queue_bytes_overflow");
       return;
     }
     this.events.push(event);
+    this.serializedEvents.push(serializedEvent);
+    this.serializedEventBytes.push(eventBytes);
+    this.queuedEventBytes += eventBytes;
   }
 
-  #recordDroppedEvent(event) {
+  #recordDroppedEvent(event, reason) {
     this.droppedEventCount += 1;
     if (!this.onEventDropped) {
       return;
@@ -234,19 +301,77 @@ class LogBrewClient {
         droppedEvents: this.droppedEventCount,
         eventId: event.id,
         eventType: event.type,
-        reason: "queue_overflow"
+        reason
       });
     } catch {
       // Drop callbacks are advisory and must not interrupt application logging.
     }
   }
 
-  async #flushInternal(transport) {
-    if (this.events.length === 0) {
-      return { statusCode: 204, attempts: 0 };
+  #runSerialized(operation) {
+    const result = this.operationTail.then(operation);
+    this.operationTail = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  }
+
+  async #flushSnapshot(transport) {
+    let remainingEvents = this.events.length;
+    if (remainingEvents === 0) {
+      return { statusCode: 204, attempts: 0, batches: 0 };
     }
 
-    const body = this.previewJson();
+    let attempts = 0;
+    let batches = 0;
+    let statusCode = 204;
+    while (remainingEvents > 0) {
+      const batch = this.#nextBatch(Math.min(remainingEvents, this.maxBatchEvents));
+      const response = await this.#sendBatch(transport, batch.body);
+      this.#acknowledge(batch.eventsCount);
+      remainingEvents -= batch.eventsCount;
+      attempts += response.attempts;
+      batches += 1;
+      statusCode = response.statusCode;
+    }
+
+    return { statusCode, attempts, batches };
+  }
+
+  #nextBatch(maxEvents) {
+    let bodyBytes = this.batchPrefixBytes + this.batchSuffixBytes;
+    let eventsCount = 0;
+    for (let index = 0; index < maxEvents; index += 1) {
+      const separatorBytes = eventsCount === 0 ? 0 : 1;
+      const nextBodyBytes = bodyBytes + separatorBytes + this.serializedEventBytes[index];
+      if (nextBodyBytes > this.maxBatchBytes) {
+        break;
+      }
+      bodyBytes = nextBodyBytes;
+      eventsCount += 1;
+    }
+    if (eventsCount === 0) {
+      throw new SdkError("transport_error", "queued event cannot fit the configured batch byte limit");
+    }
+    return {
+      body: `${this.batchPrefix}${this.serializedEvents.slice(0, eventsCount).join(",")}${this.batchSuffix}`,
+      eventsCount
+    };
+  }
+
+  #acknowledge(eventsCount) {
+    let acknowledgedBytes = 0;
+    for (let index = 0; index < eventsCount; index += 1) {
+      acknowledgedBytes += this.serializedEventBytes[index];
+    }
+    this.events.splice(0, eventsCount);
+    this.serializedEvents.splice(0, eventsCount);
+    this.serializedEventBytes.splice(0, eventsCount);
+    this.queuedEventBytes -= acknowledgedBytes;
+  }
+
+  async #sendBatch(transport, body) {
     const maxAttempts = this.maxRetries + 1;
     let attempts = 0;
 
@@ -263,7 +388,6 @@ class LogBrewClient {
           });
         }
         if (response.statusCode >= 200 && response.statusCode < 300) {
-          this.events = [];
           return { statusCode: response.statusCode, attempts };
         }
         if (response.statusCode >= 500 && attempts < maxAttempts) {
@@ -286,6 +410,29 @@ class LogBrewClient {
 
     throw new SdkError("transport_error", "exhausted retries");
   }
+}
+
+function utf8ByteLength(value) {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit < 0x80) {
+      bytes += 1;
+    } else if (codeUnit < 0x800) {
+      bytes += 2;
+    } else if (codeUnit >= 0xd800 && codeUnit <= 0xdbff && index + 1 < value.length) {
+      const nextCodeUnit = value.charCodeAt(index + 1);
+      if (nextCodeUnit >= 0xdc00 && nextCodeUnit <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
 }
 
 function installLogBrewConsoleCapture(config) {
@@ -1430,6 +1577,12 @@ function requireFiniteNumber(label, value) {
 function requirePositiveInteger(label, value) {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new SdkError("validation_error", `${label} must be a positive integer`);
+  }
+}
+
+function requireNonNegativeInteger(label, value) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new SdkError("validation_error", `${label} must be a non-negative integer`);
   }
 }
 

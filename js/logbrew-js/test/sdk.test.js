@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { createRequire } from "node:module";
 
 import {
@@ -173,6 +174,14 @@ async function captureRejection(callback) {
     return error;
   }
   throw new Error("expected callback to reject");
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
 }
 
 test("previewJson contains all supported event types", () => {
@@ -775,6 +784,212 @@ test("network failure retries before succeeding", async () => {
   assert.equal(transport.sentBodies.length, 2);
 });
 
+test("flush acknowledges only its snapshot and keeps events captured during transport I/O", async () => {
+  const client = sampleClient();
+  const sendStarted = deferred();
+  const sendResponse = deferred();
+  const sentBodies = [];
+  client.log("evt_before_flush", "2026-06-02T10:00:00Z", { message: "before", level: "info" });
+
+  const flushPromise = client.flush({
+    async send(_apiKey, body) {
+      sentBodies.push(body);
+      sendStarted.resolve();
+      return sendResponse.promise;
+    }
+  });
+  await sendStarted.promise;
+  client.log("evt_during_flush", "2026-06-02T10:00:01Z", { message: "during", level: "warning" });
+  sendResponse.resolve({ statusCode: 202 });
+
+  const firstResponse = await flushPromise;
+  assert.equal(firstResponse.batches, 1);
+  assert.deepEqual(JSON.parse(sentBodies[0]).events.map((event) => event.id), ["evt_before_flush"]);
+  assert.equal(client.pendingEvents(), 1);
+  assert.deepEqual(JSON.parse(client.previewJson()).events.map((event) => event.id), ["evt_during_flush"]);
+
+  const retryTransport = RecordingTransport.alwaysAccept();
+  await client.flush(retryTransport);
+  assert.deepEqual(JSON.parse(retryTransport.lastBody()).events.map((event) => event.id), ["evt_during_flush"]);
+  assert.equal(client.pendingEvents(), 0);
+});
+
+test("concurrent flush calls serialize without duplicating a queue prefix", async () => {
+  const client = sampleClient();
+  const firstSendStarted = deferred();
+  const firstSendResponse = deferred();
+  const sentBodies = [];
+  client.log("evt_first_flush", "2026-06-02T10:00:00Z", { message: "first", level: "info" });
+  const transport = {
+    async send(_apiKey, body) {
+      sentBodies.push(body);
+      if (sentBodies.length === 1) {
+        firstSendStarted.resolve();
+        return firstSendResponse.promise;
+      }
+      return { statusCode: 202 };
+    }
+  };
+
+  const firstFlush = client.flush(transport);
+  await firstSendStarted.promise;
+  const secondFlush = client.flush(transport);
+  await Promise.resolve();
+  assert.equal(sentBodies.length, 1);
+
+  client.log("evt_second_flush", "2026-06-02T10:00:01Z", { message: "second", level: "info" });
+  firstSendResponse.resolve({ statusCode: 202 });
+  await Promise.all([firstFlush, secondFlush]);
+
+  assert.equal(sentBodies.length, 2);
+  assert.deepEqual(JSON.parse(sentBodies[0]).events.map((event) => event.id), ["evt_first_flush"]);
+  assert.deepEqual(JSON.parse(sentBodies[1]).events.map((event) => event.id), ["evt_second_flush"]);
+  assert.equal(client.pendingEvents(), 0);
+});
+
+test("flush splits by event count and retries a stable batch body", async () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    maxBatchEvents: 2,
+    maxRetries: 1
+  });
+  for (let index = 0; index < 5; index += 1) {
+    client.log(`evt_batch_${index}`, `2026-06-02T10:00:0${index}Z`, { message: "queued", level: "info" });
+  }
+  const transport = new RecordingTransport([
+    { statusCode: 503 },
+    { statusCode: 202 },
+    { statusCode: 202 },
+    { statusCode: 202 }
+  ]);
+
+  const response = await client.flush(transport);
+
+  assert.equal(response.statusCode, 202);
+  assert.equal(response.attempts, 4);
+  assert.equal(response.batches, 3);
+  assert.equal(transport.sentBodies.length, 4);
+  assert.equal(transport.sentBodies[0], transport.sentBodies[1]);
+  assert.deepEqual(
+    transport.sentBodies.map((body) => JSON.parse(body).events.map((event) => event.id)),
+    [
+      ["evt_batch_0", "evt_batch_1"],
+      ["evt_batch_0", "evt_batch_1"],
+      ["evt_batch_2", "evt_batch_3"],
+      ["evt_batch_4"]
+    ]
+  );
+  assert.equal(client.pendingEvents(), 0);
+});
+
+test("partial batch success removes only acknowledged events", async () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    maxBatchEvents: 2,
+    maxRetries: 0
+  });
+  for (let index = 0; index < 5; index += 1) {
+    client.log(`evt_partial_${index}`, `2026-06-02T10:00:0${index}Z`, { message: "queued", level: "info" });
+  }
+  const firstTransport = new RecordingTransport([{ statusCode: 202 }, { statusCode: 500 }]);
+
+  await assert.rejects(client.flush(firstTransport), /unexpected transport status 500/);
+  assert.deepEqual(
+    JSON.parse(client.previewJson()).events.map((event) => event.id),
+    ["evt_partial_2", "evt_partial_3", "evt_partial_4"]
+  );
+
+  const retryTransport = RecordingTransport.alwaysAccept();
+  const response = await client.flush(retryTransport);
+  assert.equal(response.batches, 2);
+  assert.deepEqual(
+    retryTransport.sentBodies.map((body) => JSON.parse(body).events.map((event) => event.id)),
+    [["evt_partial_2", "evt_partial_3"], ["evt_partial_4"]]
+  );
+  assert.equal(client.pendingEvents(), 0);
+});
+
+test("queue byte bound preserves earlier events and reports content-free pressure", () => {
+  const probe = sampleClient();
+  probe.log("evt_bytes_001", "2026-06-02T10:00:00Z", { message: "same-size", level: "info" });
+  const eventBytes = Buffer.byteLength(JSON.stringify(JSON.parse(probe.previewJson()).events[0]), "utf8");
+  const dropped = [];
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    maxQueueBytes: eventBytes,
+    onEventDropped(drop) {
+      dropped.push(drop);
+    }
+  });
+
+  client.log("evt_bytes_001", "2026-06-02T10:00:00Z", { message: "same-size", level: "info" });
+  client.log("evt_bytes_002", "2026-06-02T10:00:01Z", { message: "same-size", level: "info" });
+
+  assert.equal(client.pendingEvents(), 1);
+  assert.equal(client.pendingBytes(), eventBytes);
+  assert.equal(client.droppedEvents(), 1);
+  assert.deepEqual(dropped, [{
+    droppedEvents: 1,
+    eventId: "evt_bytes_002",
+    eventType: "log",
+    reason: "queue_bytes_overflow"
+  }]);
+});
+
+test("flush splits on exact UTF-8 batch bytes and reports an oversized event", async () => {
+  const sdk = { name: "logbrew-js", language: "javascript", version: "0.1.0" };
+  const firstEvent = {
+    type: "log",
+    id: "evt_utf8_001",
+    timestamp: "2026-06-02T10:00:00Z",
+    attributes: { message: "coffee \u2615", level: "info" }
+  };
+  const singleBatchBytes = Buffer.byteLength(JSON.stringify({ sdk, events: [firstEvent] }), "utf8");
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: sdk.name,
+    sdkVersion: sdk.version,
+    maxBatchBytes: singleBatchBytes
+  });
+  client.log(firstEvent.id, firstEvent.timestamp, firstEvent.attributes);
+  client.log("evt_utf8_002", "2026-06-02T10:00:01Z", firstEvent.attributes);
+  const transport = RecordingTransport.alwaysAccept();
+
+  const response = await client.flush(transport);
+
+  assert.equal(response.batches, 2);
+  assert.equal(transport.sentBodies.length, 2);
+  for (const body of transport.sentBodies) {
+    assert.ok(Buffer.byteLength(body, "utf8") <= singleBatchBytes);
+    assert.equal(JSON.parse(body).events.length, 1);
+  }
+
+  const dropped = [];
+  const oversizeClient = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: sdk.name,
+    sdkVersion: sdk.version,
+    maxBatchBytes: singleBatchBytes,
+    onEventDropped(drop) {
+      dropped.push(drop);
+    }
+  });
+  oversizeClient.log("evt_oversize", "2026-06-02T10:00:02Z", {
+    message: "x".repeat(singleBatchBytes),
+    level: "error"
+  });
+  assert.equal(oversizeClient.pendingEvents(), 0);
+  assert.equal(oversizeClient.pendingBytes(), 0);
+  assert.equal(oversizeClient.droppedEvents(), 1);
+  assert.equal(dropped[0].reason, "event_too_large");
+});
+
 test("bounded queue reports overflow without mutating queued events", () => {
   const dropped = [];
   const client = LogBrewClient.create({
@@ -813,6 +1028,32 @@ test("invalid queue bound fails client configuration", () => {
     }),
     /maxQueueSize must be a positive integer/
   );
+  for (const [name, value] of [
+    ["maxQueueBytes", 0],
+    ["maxBatchEvents", 1.5],
+    ["maxBatchBytes", -1]
+  ]) {
+    assert.throws(
+      () => LogBrewClient.create({
+        apiKey: "LOGBREW_API_KEY",
+        sdkName: "logbrew-js",
+        sdkVersion: "0.1.0",
+        [name]: value
+      }),
+      new RegExp(`${name} must be a positive integer`, "u")
+    );
+  }
+  for (const maxRetries of [-1, 1.5, Number.POSITIVE_INFINITY]) {
+    assert.throws(
+      () => LogBrewClient.create({
+        apiKey: "LOGBREW_API_KEY",
+        sdkName: "logbrew-js",
+        sdkVersion: "0.1.0",
+        maxRetries
+      }),
+      /maxRetries must be a non-negative integer/
+    );
+  }
 });
 
 test("SDK error ignores unsafe optional retry-after details", () => {
@@ -832,6 +1073,43 @@ test("shutdown flushes and prevents future events", async () => {
 
   assert.throws(
     () => client.action("evt_action_002", "2026-06-02T10:00:06Z", { name: "deploy", status: "success" }),
+    /client is already shut down/
+  );
+});
+
+test("shutdown rejects capture while closing and reopens an intact queue after failure", async () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    maxRetries: 0
+  });
+  const sendStarted = deferred();
+  const sendResponse = deferred();
+  client.log("evt_shutdown_001", "2026-06-02T10:00:00Z", { message: "queued", level: "info" });
+
+  const shutdownPromise = client.shutdown({
+    async send() {
+      sendStarted.resolve();
+      return sendResponse.promise;
+    }
+  });
+  await sendStarted.promise;
+  assert.throws(
+    () => client.log("evt_shutdown_blocked", "2026-06-02T10:00:01Z", { message: "blocked", level: "info" }),
+    /client is shutting down/
+  );
+  sendResponse.resolve({ statusCode: 500 });
+  await assert.rejects(shutdownPromise, /unexpected transport status 500/);
+  assert.equal(client.pendingEvents(), 1);
+
+  client.log("evt_shutdown_retry", "2026-06-02T10:00:02Z", { message: "retry", level: "warning" });
+  const response = await client.shutdown(RecordingTransport.alwaysAccept());
+  assert.equal(response.batches, 1);
+  assert.equal(client.pendingEvents(), 0);
+  assert.equal(client.pendingBytes(), 0);
+  assert.throws(
+    () => client.log("evt_shutdown_closed", "2026-06-02T10:00:03Z", { message: "closed", level: "info" }),
     /client is already shut down/
   );
 });
@@ -1366,7 +1644,7 @@ test("OpenTelemetry trace summary records escaped exception event summaries", as
   assert.equal(serializedPayload.includes("ignored nested marker"), false);
 });
 
-test("OpenTelemetry span processor coalesces concurrent forceFlush calls", async () => {
+test("OpenTelemetry span processor avoids a redundant request for concurrent forceFlush calls", async () => {
   const client = LogBrewClient.create({
     apiKey: "LOGBREW_API_KEY",
     sdkName: "logbrew-js",
@@ -1374,9 +1652,11 @@ test("OpenTelemetry span processor coalesces concurrent forceFlush calls", async
   });
   const sends = [];
   const resolvers = [];
+  const sendStarted = deferred();
   const transport = {
     send(_apiKey, body) {
       sends.push(body);
+      sendStarted.resolve();
       return new Promise((resolve) => {
         resolvers.push(() => resolve({ statusCode: 202 }));
       });
@@ -1390,6 +1670,7 @@ test("OpenTelemetry span processor coalesces concurrent forceFlush calls", async
   processor.onEnd(sampleOpenTelemetryReadableSpan());
   const firstFlush = processor.forceFlush();
   const secondFlush = processor.forceFlush();
+  await sendStarted.promise;
 
   try {
     assert.equal(sends.length, 1);
@@ -1401,6 +1682,124 @@ test("OpenTelemetry span processor coalesces concurrent forceFlush calls", async
   }
   assert.equal(client.pendingEvents(), 0);
   assert.equal(sends.length, 1);
+});
+
+test("OpenTelemetry span processor drains spans captured during an in-flight flush", async () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0"
+  });
+  const sends = [];
+  const firstSendStarted = deferred();
+  const releaseFirstSend = deferred();
+  const transport = {
+    send(_apiKey, body) {
+      sends.push(body);
+      if (sends.length === 1) {
+        firstSendStarted.resolve();
+        return releaseFirstSend.promise;
+      }
+      return Promise.resolve({ statusCode: 202 });
+    }
+  };
+  const processor = createLogBrewOpenTelemetrySpanProcessor({
+    client,
+    eventIdPrefix: "otel_drain",
+    transport
+  });
+
+  processor.onEnd(sampleOpenTelemetryReadableSpan());
+  const firstFlush = processor.forceFlush();
+  await firstSendStarted.promise;
+
+  processor.onEnd(sampleOpenTelemetryReadableSpan({
+    spanContext: () => ({
+      traceId: "cccccccccccccccccccccccccccccccc",
+      spanId: "dddddddddddddddd",
+      traceFlags: 1
+    })
+  }));
+  const laterFlush = processor.forceFlush();
+  releaseFirstSend.resolve({ statusCode: 202 });
+
+  await Promise.all([firstFlush, laterFlush]);
+
+  assert.equal(sends.length, 2);
+  assert.deepEqual(
+    sends.map((body) => JSON.parse(body).events.map((event) => event.id)),
+    [["otel_drain_1"], ["otel_drain_2"]]
+  );
+  assert.equal(client.pendingEvents(), 0);
+});
+
+test("OpenTelemetry span processor coalesces an in-flight failure without retry amplification", async () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    maxRetries: 0
+  });
+  const errors = [];
+  const sends = [];
+  const firstSendStarted = deferred();
+  const releaseFirstSend = deferred();
+  const transport = {
+    send(_apiKey, body) {
+      sends.push(body);
+      if (sends.length === 1) {
+        firstSendStarted.resolve();
+        return releaseFirstSend.promise;
+      }
+      return Promise.resolve({ statusCode: 500 });
+    }
+  };
+  const processor = createLogBrewOpenTelemetrySpanProcessor({
+    client,
+    onError: (error) => errors.push(error),
+    transport
+  });
+
+  processor.onEnd(sampleOpenTelemetryReadableSpan());
+  const firstFlush = processor.forceFlush();
+  await firstSendStarted.promise;
+  const secondFlush = processor.forceFlush();
+  const thirdFlush = processor.forceFlush();
+  releaseFirstSend.resolve({ statusCode: 500 });
+
+  await Promise.all([firstFlush, secondFlush, thirdFlush]);
+
+  assert.equal(sends.length, 1);
+  assert.equal(errors.length, 1);
+  assert.equal(client.pendingEvents(), 1);
+});
+
+test("OpenTelemetry span processor treats an undefined transport rejection as one failed flush", async () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    maxRetries: 0
+  });
+  const errors = [];
+  let sends = 0;
+  const processor = createLogBrewOpenTelemetrySpanProcessor({
+    client,
+    onError: (error) => errors.push(error),
+    transport: {
+      send() {
+        sends += 1;
+        return Promise.reject(undefined);
+      }
+    }
+  });
+
+  processor.onEnd(sampleOpenTelemetryReadableSpan());
+  await Promise.all([processor.forceFlush(), processor.forceFlush()]);
+
+  assert.equal(sends, 1);
+  assert.deepEqual(errors, [undefined]);
+  assert.equal(client.pendingEvents(), 1);
 });
 
 test("OpenTelemetry span exporter exports batches through standard exporter callbacks", async () => {
@@ -1447,6 +1846,107 @@ test("OpenTelemetry span exporter exports batches through standard exporter call
     exporter.export([sampleOpenTelemetryReadableSpan()], resolve);
   });
   assert.equal(closedResult.code, 1);
+});
+
+test("OpenTelemetry span exporter drains spans submitted during an in-flight export", async () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0"
+  });
+  const sends = [];
+  const firstSendStarted = deferred();
+  const releaseFirstSend = deferred();
+  const transport = {
+    send(_apiKey, body) {
+      sends.push(body);
+      if (sends.length === 1) {
+        firstSendStarted.resolve();
+        return releaseFirstSend.promise;
+      }
+      return Promise.resolve({ statusCode: 202 });
+    }
+  };
+  const exporter = createLogBrewOpenTelemetrySpanExporter({
+    client,
+    eventIdPrefix: "otel_export_drain",
+    transport
+  });
+
+  const firstResult = new Promise((resolve) => {
+    exporter.export([sampleOpenTelemetryReadableSpan()], resolve);
+  });
+  await firstSendStarted.promise;
+
+  const laterResult = new Promise((resolve) => {
+    exporter.export([sampleOpenTelemetryReadableSpan({
+      spanContext: () => ({
+        traceId: "cccccccccccccccccccccccccccccccc",
+        spanId: "dddddddddddddddd",
+        traceFlags: 1
+      })
+    })], resolve);
+  });
+  releaseFirstSend.resolve({ statusCode: 202 });
+
+  assert.deepEqual(await Promise.all([firstResult, laterResult]), [{ code: 0 }, { code: 0 }]);
+  assert.equal(sends.length, 2);
+  assert.deepEqual(
+    sends.map((body) => JSON.parse(body).events.map((event) => event.id)),
+    [["otel_export_drain_1"], ["otel_export_drain_2"]]
+  );
+  assert.equal(client.pendingEvents(), 0);
+});
+
+test("OpenTelemetry span exporter coalesces export and shutdown failure without retry amplification", async () => {
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    maxRetries: 0
+  });
+  const sends = [];
+  const firstSendStarted = deferred();
+  const releaseFirstSend = deferred();
+  const transport = {
+    send(_apiKey, body) {
+      sends.push(body);
+      if (sends.length === 1) {
+        firstSendStarted.resolve();
+        return releaseFirstSend.promise;
+      }
+      return Promise.resolve({ statusCode: 500 });
+    }
+  };
+  const exporter = createLogBrewOpenTelemetrySpanExporter({
+    client,
+    transport
+  });
+
+  const firstResult = new Promise((resolve) => {
+    exporter.export([sampleOpenTelemetryReadableSpan()], resolve);
+  });
+  await firstSendStarted.promise;
+  const secondResult = new Promise((resolve) => {
+    exporter.export([sampleOpenTelemetryReadableSpan({
+      spanContext: () => ({
+        traceId: "cccccccccccccccccccccccccccccccc",
+        spanId: "dddddddddddddddd",
+        traceFlags: 1
+      })
+    })], resolve);
+  });
+  const shutdownError = exporter.shutdown().then(
+    () => null,
+    (error) => error
+  );
+  releaseFirstSend.resolve({ statusCode: 500 });
+
+  const results = await Promise.all([firstResult, secondResult]);
+  assert.deepEqual(results.map((result) => result.code), [1, 1]);
+  assert.ok(await shutdownError instanceof Error);
+  assert.equal(sends.length, 1);
+  assert.equal(client.pendingEvents(), 2);
 });
 
 test("traceparent helpers reject malformed W3C trace context", () => {

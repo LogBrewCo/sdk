@@ -16,8 +16,12 @@ export type CreateLogBrewNodeClientConfig = {
   apiKey?: string;
   sdkName?: string;
   sdkVersion?: string;
+  /** Retry attempts after the first send. Must be a non-negative integer. */
   maxRetries?: number;
+  maxQueueBytes?: number;
   maxQueueSize?: number;
+  maxBatchEvents?: number;
+  maxBatchBytes?: number;
   onEventDropped?: (drop: DroppedEvent) => void;
 };
 

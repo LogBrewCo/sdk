@@ -58,7 +58,10 @@ function createLogBrewNodeClient({
   apiKey,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
+  maxBatchBytes,
+  maxBatchEvents,
   maxRetries = 2,
+  maxQueueBytes,
   maxQueueSize,
   onEventDropped
 } = {}) {
@@ -74,6 +77,9 @@ function createLogBrewNodeClient({
     sdkName,
     sdkVersion,
     maxRetries,
+    ...(maxBatchBytes !== undefined ? { maxBatchBytes } : {}),
+    ...(maxBatchEvents !== undefined ? { maxBatchEvents } : {}),
+    ...(maxQueueBytes !== undefined ? { maxQueueBytes } : {}),
     ...(maxQueueSize !== undefined ? { maxQueueSize } : {}),
     ...(onEventDropped !== undefined ? { onEventDropped } : {})
   });

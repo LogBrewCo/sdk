@@ -437,7 +437,7 @@ The beacon transport sends a `Blob` with `Content-Type: application/json` when t
 
 When an intake returns HTTP `429`, the browser transport reads the standard `Retry-After` header and passes it to the core SDK as `retryAfterMs`. The flush then raises `SdkError` code `rate_limited`, preserves queued events, and avoids immediate retry; use that signal for app-owned retry timing or user-facing recovery.
 
-Browser clients inherit the core SDK's bounded in-memory queue. Pass `maxQueueSize` and `onEventDropped` to `installLogBrewBrowser()` or `createLogBrewBrowserClient()` when the app wants explicit drop reporting during high-volume browser logging. LogBrew also flushes queued in-memory events on the browser `online` event by default, which helps after temporary connectivity loss.
+Browser clients inherit the core SDK's count-and-byte-bounded in-memory queue and race-safe request splitting. The browser factory uses a 64 KiB request default so normal batches fit the existing keepalive transport limit; set both `maxBatchBytes` and `maxKeepaliveBodyBytes` deliberately if the app changes that ceiling. Pass `maxQueueSize`, `maxQueueBytes`, `maxBatchEvents`, `maxBatchBytes`, and `onEventDropped` to `installLogBrewBrowser()` or `createLogBrewBrowserClient()` when the app wants explicit high-volume tuning and drop reporting. LogBrew also flushes queued in-memory events on the browser `online` event by default, which helps after temporary connectivity loss.
 
 ## Optional Persisted Delivery
 
