@@ -757,13 +757,30 @@ test -f target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Synchronous client with one shared bounded delivery queue across clones\.' target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Create a builder from public SDK identity values like name and version\.' target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Return the queued event count currently buffered in memory\.' target/doc/logbrew/struct.LogBrewClient.html
+grep -q 'Return an immutable content-free snapshot of bounded delivery state and counters\.' target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Return the queued event batch as stable, pretty-printed JSON\.' target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Flush queued events through a transport while preserving retry semantics\.' target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Flush queued events, then mark the client closed so later writes fail\.' target/doc/logbrew/struct.LogBrewClient.html
 grep -q 'Queue an explicit app-owned metric event with validated low-cardinality fields\.' target/doc/logbrew/struct.LogBrewClient.html
 test -f target/doc/logbrew/struct.ClientBuilder.html
-grep -q 'Builder for constructing a public LogBrew client from SDK identity and API key settings\.' target/doc/logbrew/struct.ClientBuilder.html
-grep -q 'Build a buffered LogBrew client from the configured public settings\.' target/doc/logbrew/struct.ClientBuilder.html
+grep -q 'Builder for constructing a bounded LogBrew client from SDK identity and delivery settings\.' target/doc/logbrew/struct.ClientBuilder.html
+grep -q 'Set the maximum number of events retained in the shared queue\.' target/doc/logbrew/struct.ClientBuilder.html
+grep -q 'Set the maximum compact UTF-8 bytes retained for queued events\.' target/doc/logbrew/struct.ClientBuilder.html
+grep -q 'Set the maximum number of events included in one delivery batch\.' target/doc/logbrew/struct.ClientBuilder.html
+grep -q 'Set the maximum exact UTF-8 request-body bytes for one delivery batch\.' target/doc/logbrew/struct.ClientBuilder.html
+grep -q 'Build a bounded LogBrew client from the configured public settings\.' target/doc/logbrew/struct.ClientBuilder.html
+test -f target/doc/logbrew/struct.DeliveryHealthSnapshot.html
+grep -q 'Immutable content-free snapshot of local queue and delivery state\.' target/doc/logbrew/struct.DeliveryHealthSnapshot.html
+grep -q 'Exact compact UTF-8 event bytes currently retained in the queue\.' target/doc/logbrew/struct.DeliveryHealthSnapshot.html
+grep -q 'Most recent content-free delivery result category\.' target/doc/logbrew/struct.DeliveryHealthSnapshot.html
+test -f target/doc/logbrew/constant.DEFAULT_MAX_QUEUE_EVENTS.html
+grep -q 'Default maximum number of events retained in the shared queue\.' target/doc/logbrew/constant.DEFAULT_MAX_QUEUE_EVENTS.html
+test -f target/doc/logbrew/constant.DEFAULT_MAX_QUEUE_BYTES.html
+grep -q 'Default maximum compact UTF-8 bytes retained for queued events\.' target/doc/logbrew/constant.DEFAULT_MAX_QUEUE_BYTES.html
+test -f target/doc/logbrew/constant.DEFAULT_MAX_BATCH_EVENTS.html
+grep -q 'Default maximum number of events included in one delivery batch\.' target/doc/logbrew/constant.DEFAULT_MAX_BATCH_EVENTS.html
+test -f target/doc/logbrew/constant.DEFAULT_MAX_REQUEST_BODY_BYTES.html
+grep -q 'Default maximum exact UTF-8 request-body bytes for one delivery batch\.' target/doc/logbrew/constant.DEFAULT_MAX_REQUEST_BODY_BYTES.html
 test -f target/doc/logbrew/struct.RecordingTransport.html
 grep -q 'Scripted in-memory transport for previewing, accepting, or failing flushes\.' target/doc/logbrew/struct.RecordingTransport.html
 grep -q 'Create a transport that accepts queued flushes with a <code>202</code> response\.' target/doc/logbrew/struct.RecordingTransport.html
@@ -1143,7 +1160,7 @@ EOF
 cargo run --quiet --locked --bin transport_status > transport-status.stdout.json
 grep -q '"ok":true' transport-status.stdout.json
 grep -q '"code":"transport_error"' transport-status.stdout.json
-grep -q '"message":"unexpected transport status 400"' transport-status.stdout.json
+grep -q '"message":"transport did not accept delivery"' transport-status.stdout.json
 grep -q '"pending":1' transport-status.stdout.json
 
 cd "$tmp_dir"

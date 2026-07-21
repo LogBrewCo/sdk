@@ -357,6 +357,24 @@ fn terminal_responses_keep_work_and_expose_only_fixed_health_categories() {
 }
 
 #[test]
+fn non_retryable_transport_status_uses_a_fixed_redacted_error() {
+    let mut client = LogBrewClient::builder("rust", "0.1.1")
+        .api_key("key")
+        .max_retries(0)
+        .build()
+        .unwrap();
+    queue_log(&mut client, "evt_retained", "retained").unwrap();
+    let mut transport = RecordingTransport::scripted(vec![Ok(400)]);
+
+    let error = client.flush(&mut transport).unwrap_err();
+
+    assert_eq!(error.code, "transport_error");
+    assert_eq!(error.message, "transport did not accept delivery");
+    assert!(!error.message.contains("400"));
+    assert_eq!(client.pending_events(), 1);
+}
+
+#[test]
 fn failed_shutdown_reopens_and_successful_shutdown_closes_after_snapshot_ack() {
     let mut client = LogBrewClient::builder("rust", "0.1.1")
         .api_key("key")
