@@ -395,6 +395,7 @@ final class LogBrewClient
 
     private function flushInternal(Transport $transport): TransportResponse
     {
+        $this->eventStore?->assertUsableByCurrentProcess();
         if ($this->events === []) {
             return new TransportResponse(204, 0, 0);
         }
@@ -641,7 +642,10 @@ final class LogBrewClient
                 if ($error->retryable && $attempt < $maxAttempts) {
                     continue;
                 }
-                throw new SdkError($error->codeName, $error->getMessage());
+                if ($error->codeName === 'network_failure') {
+                    throw new SdkError('network_failure', 'transport network request failed');
+                }
+                throw new SdkError('transport_error', 'transport request failed');
             }
         }
 

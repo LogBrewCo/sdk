@@ -148,6 +148,16 @@ final class EncryptedFileEventStore
     }
 
     /**
+     * Confirm that the current process still owns an unchanged open queue.
+     *
+     * @internal
+     */
+    public function assertUsableByCurrentProcess(): void
+    {
+        $this->assertUsable();
+    }
+
+    /**
      * Durably append one already-validated compact event and return its sequence.
      */
     public function append(string $eventJson): int
@@ -446,8 +456,11 @@ final class EncryptedFileEventStore
                 throw new SdkError('persistent_queue_error', 'persistent event storage contains unexpected entries');
             }
             self::assertSafeRegularFile($this->directory . '/' . $entry);
-            $sequence = (int) $matches['sequence'];
-            if ($sequence <= 0 || isset($files[$sequence])) {
+            $sequence = self::parsePositiveSequence(
+                $matches['sequence'],
+                'persistent event storage contains invalid records'
+            );
+            if (isset($files[$sequence])) {
                 throw new SdkError('persistent_queue_error', 'persistent event storage contains invalid records');
             }
             if ($sequence <= $this->acknowledgedSequence) {
@@ -477,12 +490,25 @@ final class EncryptedFileEventStore
         if ($value === '' || preg_match('/^[1-9][0-9]*$/D', $value) !== 1) {
             throw new SdkError('persistent_queue_error', 'persistent event storage contains an invalid acknowledgement');
         }
-        $sequence = (int) $value;
-        if ($sequence <= 0) {
-            throw new SdkError('persistent_queue_error', 'persistent event storage contains an invalid acknowledgement');
+        return self::parsePositiveSequence(
+            $value,
+            'persistent event storage contains an invalid acknowledgement'
+        );
+    }
+
+    private static function parsePositiveSequence(string $value, string $errorMessage): int
+    {
+        $normalized = ltrim($value, '0');
+        $maximum = (string) PHP_INT_MAX;
+        if (
+            $normalized === ''
+            || strlen($normalized) > strlen($maximum)
+            || (strlen($normalized) === strlen($maximum) && strcmp($normalized, $maximum) > 0)
+        ) {
+            throw new SdkError('persistent_queue_error', $errorMessage);
         }
 
-        return $sequence;
+        return (int) $normalized;
     }
 
     /**
@@ -631,42 +657,9 @@ final class EncryptedFileEventStore
             throw new SdkError('persistent_queue_error', 'persistent event storage record is too large');
         }
 
-        $temporaryName = '.tmp-' . bin2hex(random_bytes(16));
-        $temporaryPath = $this->directory . '/' . $temporaryName;
-        $handle = @fopen($temporaryPath, 'x+b');
-        if (!is_resource($handle) || !@chmod($temporaryPath, 0600)) {
-            if (is_resource($handle)) {
-                @fclose($handle);
-            }
-            @unlink($temporaryPath);
-            throw new SdkError('persistence_commit_error', 'persistent event durability is unconfirmed');
-        }
-
-        try {
-            $offset = 0;
-            while ($offset < strlen($payload)) {
-                $written = @fwrite($handle, substr($payload, $offset));
-                if (!is_int($written) || $written <= 0) {
-                    throw new SdkError('persistence_commit_error', 'persistent event durability is unconfirmed');
-                }
-                $offset += $written;
-            }
-            if (!@fflush($handle) || !@fsync($handle)) {
-                throw new SdkError('persistence_commit_error', 'persistent event durability is unconfirmed');
-            }
-        } finally {
-            @fclose($handle);
-        }
+        DurableFileCommitter::commit($this->directory, $fileName, $payload, $replace);
 
         $targetPath = $this->directory . '/' . $fileName;
-        if (!$replace && file_exists($targetPath)) {
-            @unlink($temporaryPath);
-            throw new SdkError('persistent_queue_error', 'persistent event sequence already exists');
-        }
-        if (!@rename($temporaryPath, $targetPath)) {
-            @unlink($temporaryPath);
-            throw new SdkError('persistence_commit_error', 'persistent event durability is unconfirmed');
-        }
         $this->assertUsable();
         self::assertSafeRegularFile($targetPath);
     }

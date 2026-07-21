@@ -388,7 +388,7 @@ $transport = new HttpTransport(
 $response = $client->shutdown($transport);
 ```
 
-`HttpTransport` uses PHP's standard stream context HTTP support, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint, header, timeout, and requester settings, maps HTTP statuses through the client's retry rules, and converts request failures into retryable transport errors.
+`HttpTransport` uses PHP's standard stream context HTTP support, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint, header, timeout, and requester settings, maps HTTP statuses through the client's retry rules, and converts request failures into retryable transport errors. Public transport failures contain only a stable code and generic message; callback and request details are never propagated by the SDK.
 
 ## Bounded Delivery
 
@@ -521,11 +521,13 @@ while (($job = nextJob()) !== null) {
 $lifecycle->shutdown();
 ```
 
-`EncryptedFileEventStore` requires OpenSSL AES-256-GCM support and never stores its key. Each compact event and staged retry body is authenticated and encrypted with a fresh nonce. Records use owner-only permissions, full writes, `fflush()`/`fsync()`, and atomic rename. Recovery is oldest-first and fails closed on a wrong key, tampering, unsafe links, unexpected files, a replaced directory, a copied post-fork handle, or queue bounds that no longer fit. The queue never includes the API key.
+`EncryptedFileEventStore` requires OpenSSL AES-256-GCM support and never stores its key. Each compact event and staged retry body is authenticated and encrypted with a fresh nonce. Records use owner-only permissions, full writes, file `fflush()`/`fsync()`, atomic publication, and containing-directory `fsync()`. If a new event's directory entry cannot be confirmed, admission removes it and durably syncs that rollback before returning an error. Recovery is oldest-first and fails closed on a wrong key, tampering, unsafe links, unexpected files, a replaced directory, a copied post-fork handle, or queue bounds that no longer fit. The queue never includes the API key.
 
 Before a transport call, the exact request body is staged. A later process retries those bytes before newer events. After a 2xx response, an accepted-sequence marker is committed before record removal, so interrupted compaction cannot reintroduce the accepted prefix. Backend event IDs remain the final duplicate-safety boundary if a process dies after the server accepts a request but before the local acknowledgement is durable.
 
-Persistence is explicit and synchronous: successful capture returns only after its encrypted record is fsynced. The SDK does not add a shutdown hook, destructor flush, timer, signal handler, thread, or background sender. Normal clients remain memory-only when `eventStore` is omitted. Do not share one directory between active workers; assign a stable application worker-slot directory and let the exclusive lock reject accidental overlap. Filesystem directory-entry durability still depends on the host filesystem and operating system after atomic rename.
+Persistence is explicit and synchronous: successful capture returns only after its encrypted record and directory entry are fsynced. The SDK does not add a shutdown hook, destructor flush, timer, signal handler, thread, or background sender. Normal clients remain memory-only when `eventStore` is omitted. Do not share one directory between active workers; assign a stable application worker-slot directory and let the exclusive lock reject accidental overlap.
+
+For PHP-FPM, keep the memory-only default and flush inside the request unless the application can assign a stable, serialized queue directory to each worker slot. Create and open any persistent client inside the worker process, never in a pre-fork master. A process cannot flush, purge, close, or otherwise manage another worker's queue; the SDK lock coordinates exclusive recovery after ownership ends but does not create cross-worker lifecycle control.
 
 Successful `shutdown()` drains the queue and releases the store lock. Failed shutdown leaves the exact retry body available to the same client or a later process. Use `$client->purgePersistedEvents()` only for an explicit local discard decision; it clears memory and commits the durable prefix without sending telemetry. To rotate the encryption key, drain or explicitly purge and close the old store, then switch the next client to a new empty owner-only directory with the new key. Do not reopen an existing directory under a different key.
 

@@ -641,7 +641,7 @@ try {
 } catch (TransportError $error) {
     assertTrue($error->codeName === 'network_failure', 'expected HTTP network failure code');
     assertTrue($error->retryable, 'expected HTTP network failure to be retryable');
-    assertTrue(str_starts_with($error->getMessage(), 'http transport failed:'), 'expected HTTP network failure message');
+    assertTrue($error->getMessage() === 'http transport failed', 'expected content-free HTTP network failure message');
 }
 expectThrows(fn () => new HttpTransport(endpoint: '/v1/events'), 'HTTP transport endpoint must use http or https');
 expectThrows(fn () => new HttpTransport(headers: [' ' => 'bad']), 'HTTP transport header name must be non-empty');
@@ -912,6 +912,12 @@ $makePersistentWorkerDelivery = runCommand($examplesDir, ['make', 'run-persisten
 assertTrue(str_contains($makePersistentWorkerDelivery['stdout'], '"recoveredEvents":1'), 'expected make persistent example recovery');
 assertTrue(str_contains($makePersistentWorkerDelivery['stdout'], '"pendingEvents":0'), 'expected make persistent example empty queue');
 assertTrue($makePersistentWorkerDelivery['stderr'] === '', 'expected empty make persistent example stderr');
+
+$persistentDeliveryContract = runCommand($packageRoot, [PHP_BINARY, 'tests/persistent_delivery_contract.php']);
+assertTrue(
+    str_contains($persistentDeliveryContract['stdout'], 'php persistent delivery contract checks passed (10)'),
+    'expected focused persistent delivery contract checks'
+);
 
 require __DIR__ . '/trace_correlation.php';
 require __DIR__ . '/http_client_tracing.php';

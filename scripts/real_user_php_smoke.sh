@@ -2823,7 +2823,7 @@ EOF
 php retry_budget.php > retry_budget.stdout.json
 grep -q '"ok":true' retry_budget.stdout.json
 grep -q '"code":"network_failure"' retry_budget.stdout.json
-grep -q '"message":"temporary outage"' retry_budget.stdout.json
+grep -q '"message":"transport network request failed"' retry_budget.stdout.json
 grep -q '"pending":1' retry_budget.stdout.json
 
 cat > transport_status.php <<'EOF'

@@ -58,24 +58,28 @@ final class HttpTransport implements Transport
             ],
         ]);
 
-        try {
-            if ($this->requester !== null) {
+        if ($this->requester !== null) {
+            try {
                 $result = ($this->requester)($this->endpoint, $context);
-                if ($result instanceof TransportResponse) {
-                    return $result;
-                }
-                if (!is_int($result)) {
-                    throw new SdkError('configuration_error', 'HTTP transport requester must return a status code');
-                }
-
-                return new TransportResponse($result, 1);
+            } catch (Throwable) {
+                throw TransportError::network('http transport failed');
+            }
+            if ($result instanceof TransportResponse) {
+                return $result;
+            }
+            if (!is_int($result)) {
+                throw new SdkError('configuration_error', 'HTTP transport requester must return a status code');
             }
 
+            return new TransportResponse($result, 1);
+        }
+
+        try {
             return new TransportResponse($this->sendWithStreams($context), 1);
-        } catch (TransportError|SdkError $error) {
+        } catch (TransportError $error) {
             throw $error;
-        } catch (Throwable $error) {
-            throw TransportError::network('http transport failed: ' . $error->getMessage());
+        } catch (Throwable) {
+            throw TransportError::network('http transport failed');
         }
     }
 
@@ -107,9 +111,7 @@ final class HttpTransport implements Transport
      */
     private function sendWithStreams($context): int
     {
-        error_clear_last();
         $responseBody = @file_get_contents($this->endpoint, false, $context);
-        $streamError = error_get_last();
 
         if (function_exists('http_get_last_response_headers')) {
             $headers = http_get_last_response_headers() ?? [];
@@ -125,10 +127,7 @@ final class HttpTransport implements Transport
         }
 
         if ($responseBody === false) {
-            $message = $streamError === null
-                ? 'request failed'
-                : $streamError['message'];
-            throw TransportError::network('http transport failed: ' . $message);
+            throw TransportError::network('http transport failed');
         }
 
         throw TransportError::network('http transport failed: missing HTTP status');
