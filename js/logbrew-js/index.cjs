@@ -39,6 +39,7 @@ const DEFAULT_DELIVERY_INTERVAL_MS = 5000;
 const MAX_DELIVERY_INTERVAL_MS = 60 * 1000;
 const DEFAULT_DELIVERY_QUEUE_THRESHOLD = 50;
 const DELIVERY_HEALTH_SCHEMA_VERSION = 1;
+const EVENT_QUEUE_FACTORY = Symbol.for("@logbrew/sdk.eventQueueFactory");
 const MAX_ERROR_CAUSES = 5;
 const BUILTIN_ERROR_NAMES = new Set([
   "AggregateError",
@@ -137,6 +138,7 @@ class LogBrewClient {
     maxBatchBytes = DEFAULT_MAX_BATCH_BYTES,
     onEventDropped,
     eventStore,
+    [EVENT_QUEUE_FACTORY]: eventQueueFactory,
     transport,
     automaticDelivery = transport !== undefined,
     deliveryIntervalMs = DEFAULT_DELIVERY_INTERVAL_MS,
@@ -157,6 +159,12 @@ class LogBrewClient {
       throw new SdkError("validation_error", "onEventDropped must be a function");
     }
     validateEventStore(eventStore);
+    if (eventQueueFactory !== undefined && typeof eventQueueFactory !== "function") {
+      throw new SdkError("validation_error", "event queue factory must be a function");
+    }
+    if (eventStore !== undefined && eventQueueFactory !== undefined) {
+      throw new SdkError("validation_error", "eventStore and event queue factory are mutually exclusive");
+    }
     validateTransport(transport);
     if (typeof automaticDelivery !== "boolean") {
       throw new SdkError("validation_error", "automaticDelivery must be a boolean");
@@ -179,6 +187,7 @@ class LogBrewClient {
       deliveryIntervalMs,
       deliveryQueueThreshold,
       eventStore,
+      eventQueueFactory,
       eventFilter,
       maxBatchBytes,
       maxBatchEvents,
@@ -206,6 +215,7 @@ class LogBrewClient {
     maxQueueSize,
     onEventDropped,
     eventStore,
+    eventQueueFactory,
     transport,
     automaticDelivery,
     deliveryIntervalMs,
@@ -221,7 +231,6 @@ class LogBrewClient {
     this.maxQueueBytes = maxQueueBytes;
     this.maxQueueSize = maxQueueSize;
     this.onEventDropped = onEventDropped;
-    this.eventStore = eventStore;
     this.transport = transport;
     this.sdk = sdk;
     this.maxRetries = maxRetries;
@@ -229,14 +238,37 @@ class LogBrewClient {
     this.batchPrefixBytes = utf8ByteLength(this.batchPrefix);
     this.batchSuffix = "]}";
     this.batchSuffixBytes = utf8ByteLength(this.batchSuffix);
-    const recovered = loadStoredEvents({
-      batchPrefixBytes: this.batchPrefixBytes,
-      batchSuffixBytes: this.batchSuffixBytes,
-      eventStore,
-      maxBatchBytes,
-      maxQueueBytes,
-      maxQueueSize
-    });
+    const ownsEventStore = eventQueueFactory !== undefined;
+    const resolvedEventStore = ownsEventStore
+      ? createEventStoreFromQueueFactory(eventQueueFactory, {
+          batchPrefixBytes: this.batchPrefixBytes,
+          batchSuffixBytes: this.batchSuffixBytes,
+          maxBatchBytes,
+          maxQueueBytes,
+          maxQueueSize
+        })
+      : eventStore;
+    this.eventStore = resolvedEventStore;
+    let recovered;
+    try {
+      recovered = loadStoredEvents({
+        batchPrefixBytes: this.batchPrefixBytes,
+        batchSuffixBytes: this.batchSuffixBytes,
+        eventStore: resolvedEventStore,
+        maxBatchBytes,
+        maxQueueBytes,
+        maxQueueSize
+      });
+    } catch (error) {
+      if (ownsEventStore) {
+        try {
+          requireSynchronousStoreResult("close", resolvedEventStore.close());
+        } catch {
+          // Preserve the queue construction or recovery failure.
+        }
+      }
+      throw error;
+    }
     this.events = recovered.events;
     this.serializedEvents = recovered.serializedEvents;
     this.serializedEventBytes = recovered.serializedEventBytes;
@@ -252,7 +284,7 @@ class LogBrewClient {
       queue_overflow: 0
     };
     this.lastDropReason = "none";
-    this.storage = eventStore ? "persistent" : "memory";
+    this.storage = resolvedEventStore ? "persistent" : "memory";
     this.hydratedEventCount = recovered.events.length;
     this.hydratedEventBytes = recovered.queuedEventBytes;
     this.deliveryTimer = undefined;
@@ -912,6 +944,77 @@ function validateEventStore(eventStore) {
       throw new SdkError("validation_error", `eventStore.${method} must be a function`);
     }
   }
+}
+
+function createEventStoreFromQueueFactory(eventQueueFactory, config) {
+  const queue = eventQueueFactory({
+    ...config,
+    restoreEvent: restoreStoredEvent
+  });
+  validateEventQueue(queue);
+  return {
+    load() {
+      const events = queue.events();
+      const count = queue.length();
+      if (!Array.isArray(events) || events.length !== count) {
+        throw invalidStoredRecord();
+      }
+      return events.map((event, index) => ({
+        event,
+        eventBytes: queue.eventBytesAt(index),
+        serializedEvent: queue.serializedAt(index)
+      }));
+    },
+    append(record) {
+      return queue.append({
+        event: record.event,
+        byteCount: record.eventBytes,
+        serialized: record.serializedEvent
+      });
+    },
+    acknowledge(count) {
+      return queue.acknowledge(count);
+    },
+    purge() {
+      return queue.acknowledge(queue.length());
+    },
+    close() {
+      return queue.close();
+    }
+  };
+}
+
+function validateEventQueue(queue) {
+  const methods = [
+    "acknowledge",
+    "append",
+    "byteCount",
+    "close",
+    "eventBytesAt",
+    "events",
+    "length",
+    "serializedAt"
+  ];
+  if (!queue || Array.isArray(queue) || typeof queue !== "object" || methods.some((method) => typeof queue[method] !== "function")) {
+    throw new SdkError("validation_error", "event queue factory returned an invalid queue");
+  }
+}
+
+function restoreStoredEvent(serializedEvent) {
+  if (typeof serializedEvent !== "string" || serializedEvent === "") {
+    throw invalidStoredRecord();
+  }
+  let event;
+  try {
+    event = JSON.parse(serializedEvent);
+  } catch {
+    throw invalidStoredRecord();
+  }
+  return normalizeStoredRecord({
+    event,
+    eventBytes: utf8ByteLength(serializedEvent),
+    serializedEvent
+  }).event;
 }
 
 function requireSynchronousStoreResult(operation, result) {

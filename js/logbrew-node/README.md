@@ -4,9 +4,9 @@
   <img src="https://raw.githubusercontent.com/LogBrewCo/sdk/main/assets/brand/logbrew-logo-transparent-512.png" alt="LogBrew logo" width="96" height="96">
 </p>
 
-Node.js HTTP helpers for the public LogBrew JavaScript SDK.
+Node.js runtime helpers for the public LogBrew JavaScript SDK.
 
-This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, outbound `fetch`, opt-in reversible global fetch instrumentation, database/cache/queue operation span capture, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
+This package is intentionally thin. It adds a wrapper for standard `node:http` handlers, outbound `fetch`, opt-in reversible global fetch instrumentation, optional crash-safe delivery storage, database/cache/queue operation span capture, request/error event helpers, and request-local `req.logbrew` context while keeping event validation, retry, flush, and shutdown behavior in `@logbrew/sdk`.
 
 ## Install
 
@@ -189,6 +189,8 @@ const client = createLogBrewNodeClient({
 
 The automatic timer is client-owned, `unref()`'d, and installs no process, signal, or exit hooks. Set `automaticDelivery: false` for manual-only operation, or pass a custom `transport` to keep the same automatic lifecycle with app-owned I/O. Concurrent flush calls are serialized. Events captured during network I/O form at most one coalesced trailing cohort, retries reuse one stable body, and only acknowledged prefixes leave memory. `shutdown()` cancels scheduling, blocks new capture while draining once, and reopens the retained remainder if delivery fails. `deliveryHealth()` is content-free and exposes only lifecycle, queue, drop, in-flight/coalesced, outcome, and bounded counter fields.
 
+The two persistence options below are mutually exclusive. Use `persistentQueue` when caller-managed encryption at rest is required; use `persistentQueuePath` for the crash-safe lease and atomic-record protocol. Omitting both keeps the default in-memory queue.
+
 ### Encrypted restart recovery
 
 Node services can opt into an app-scoped disk queue. The default remains memory-only. Supply a canonical absolute directory and an app-managed 32-byte key:
@@ -213,6 +215,36 @@ The POSIX-only adapter writes one AES-256-GCM record per event before volatile a
 The directory must be normalized, below the filesystem root, owned by the current user, mode `0700`, and contain no symbolic-link component. Queue files are mode `0600`, regular, single-linked files. One live process owns a queue at a time; a later process can recover a lock whose recorded PID no longer exists. The adapter encrypts event content and does not add the encryption key, transport API key, endpoint, headers, or local path to queue files or the content-free manifest. Keep the key outside the queue, provision it with your normal key-management system, and retain it across restarts or the encrypted records intentionally fail closed.
 
 Persistence uses synchronous filesystem operations so capture returns only after the event is durable. Use a dedicated local filesystem directory, keep normal queue bounds, and do not place it on a shared or network filesystem. The adapter itself does not start timers, intercept process exits, or promise durability after `process.exit()`/`os._exit`; the client-owned scheduler handles normal delivery and your app still owns graceful shutdown.
+
+### Crash-safe Node delivery
+
+The default queue remains in memory. On a POSIX filesystem where owner and mode checks are available, set `persistentQueuePath` to an existing app-owned `0700` parent directory to retain accepted captures across an abrupt process exit:
+
+```js
+import {
+  createLogBrewNodeClient,
+  purgeLogBrewNodePersistentQueue
+} from "@logbrew/node";
+
+const client = createLogBrewNodeClient({
+  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  persistentQueuePath: queueParent
+});
+
+client.log("evt_worker_started", new Date().toISOString(), {
+  level: "info",
+  message: "worker started"
+});
+
+await client.shutdown(transport);
+
+// Purge only while no client owns this queue.
+purgeLogBrewNodePersistentQueue({ persistentQueuePath: queueParent });
+```
+
+The SDK owns one fixed child directory, stores one compact event per atomic record, replays oldest first, and removes only accepted prefixes. Clean shutdown releases ownership immediately; after an abrupt exit, a new owner recovers after a short bounded lease expiry. Existing queue, UTF-8 byte, batch, and drop-new limits apply before disk admission.
+
+Persistent mode fails closed for linked, weakly permissioned, corrupt, unexpected, concurrently owned, or unsupported storage. It never falls back to memory. Records necessarily contain the captured event JSON, but the storage protocol adds no API key, endpoint, request headers, process ID, caller path, or raw storage error. Browser clients and Node clients without either persistence option keep the existing in-memory behavior.
 
 ## Outbound Fetch Spans
 

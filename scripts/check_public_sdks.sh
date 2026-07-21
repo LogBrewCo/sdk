@@ -56,6 +56,8 @@ STEP_LABELS=(
   "Node Axios real-package smoke"
   "Node HTTP client real-package smoke"
   "Node queue high-load fake-intake smoke"
+  "Node persistent delivery restart smoke"
+  "Node encrypted persistent delivery smoke"
   "Prisma real-user smoke"
   "BullMQ real-user smoke"
   "KafkaJS real-user smoke"
@@ -557,6 +559,14 @@ mark_step_complete
 
 begin_next_step "Node queue high-load fake-intake smoke"
 run_shell_step "bash scripts/real_user_node_queue_high_load_smoke.sh"
+mark_step_complete
+
+begin_next_step "Node persistent delivery restart smoke"
+run_shell_step "bash scripts/real_user_node_persistent_delivery_smoke.sh"
+mark_step_complete
+
+begin_next_step "Node encrypted persistent delivery smoke"
+run_shell_step "bash scripts/real_user_node_encrypted_persistent_delivery_smoke.sh"
 mark_step_complete
 
 begin_next_step "Prisma real-user smoke"

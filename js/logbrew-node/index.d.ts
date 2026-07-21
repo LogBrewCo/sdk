@@ -36,6 +36,8 @@ export type CreateLogBrewNodeClientConfig = {
   onEventDropped?: (drop: DroppedEvent) => void;
   /** Opt-in, app-scoped encrypted queue for POSIX Node runtimes. Default delivery remains memory-only. */
   persistentQueue?: LogBrewNodePersistentQueueConfig;
+  /** Existing app-owned 0700 parent for the crash-safe plaintext queue. Mutually exclusive with persistentQueue. */
+  persistentQueuePath?: string;
 };
 
 export type LogBrewNodePersistentQueueWarning = {
@@ -733,6 +735,10 @@ export declare function createLogBrewNodeClient(
   config?: CreateLogBrewNodeClientConfig
 ): LogBrewClient;
 
+export declare function purgeLogBrewNodePersistentQueue(
+  config: { persistentQueuePath: string }
+): boolean;
+
 export declare function createNodeFetchTransport(
   config?: NodeFetchTransportConfig
 ): Transport;
@@ -888,6 +894,7 @@ declare const defaultExport: {
   instrumentLogBrewRedisClient: typeof instrumentLogBrewRedisClient;
   queueBatchOperationWithLogBrewSpan: typeof queueBatchOperationWithLogBrewSpan;
   queueOperationWithLogBrewSpan: typeof queueOperationWithLogBrewSpan;
+  purgeLogBrewNodePersistentQueue: typeof purgeLogBrewNodePersistentQueue;
   withLogBrewHttpHandler: typeof withLogBrewHttpHandler;
 };
 

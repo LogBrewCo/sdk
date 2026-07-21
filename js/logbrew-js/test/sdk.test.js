@@ -262,6 +262,45 @@ function recordingEventStore(initialRecords = []) {
   };
 }
 
+function recordingEventQueue(initialRecords = []) {
+  const records = initialRecords.map(({ event, eventBytes, serializedEvent }) => ({
+    event: structuredClone(event),
+    byteCount: eventBytes,
+    serialized: serializedEvent
+  }));
+  const calls = [];
+  return {
+    calls,
+    records,
+    length() {
+      return records.length;
+    },
+    byteCount() {
+      return records.reduce((total, record) => total + record.byteCount, 0);
+    },
+    events() {
+      return records.map((record) => structuredClone(record.event));
+    },
+    serializedAt(index) {
+      return records[index].serialized;
+    },
+    eventBytesAt(index) {
+      return records[index].byteCount;
+    },
+    append(record) {
+      calls.push(["append", structuredClone(record)]);
+      records.push(structuredClone(record));
+    },
+    acknowledge(count) {
+      calls.push(["acknowledge", count]);
+      records.splice(0, count);
+    },
+    close() {
+      calls.push(["close"]);
+    }
+  };
+}
+
 test("previewJson contains all supported event types", () => {
   const client = sampleClient();
   enqueueAll(client);
@@ -1006,6 +1045,59 @@ test("event store recovers validated compact records before first capture", () =
   assert.equal(client.pendingBytes(), store.records[0].eventBytes);
   assert.deepEqual(JSON.parse(client.previewJson()).events.map((event) => event.id), ["evt_recovered_001"]);
   assert.deepEqual(store.calls, [["load"]]);
+});
+
+test("event queue factory composes restart recovery, health, flush, purge, and shutdown", async () => {
+  const queue = recordingEventQueue([storedLog("evt_factory_recovered_001")]);
+  let factoryConfig;
+  const client = LogBrewClient.create({
+    apiKey: "LOGBREW_API_KEY",
+    automaticDelivery: false,
+    sdkName: "logbrew-js",
+    sdkVersion: "0.1.0",
+    transport: RecordingTransport.alwaysAccept(),
+    [Symbol.for("@logbrew/sdk.eventQueueFactory")](config) {
+      factoryConfig = config;
+      return queue;
+    }
+  });
+
+  assert.equal(typeof factoryConfig.restoreEvent, "function");
+  assert.equal(client.pendingEvents(), 1);
+  assert.equal(client.deliveryHealth().storage, "persistent");
+  assert.equal(client.deliveryHealth().hydratedEvents, 1);
+  assert.equal(client.deliveryHealth().hydratedBytes, queue.records[0].byteCount);
+
+  await client.flush();
+  client.log("evt_factory_purge_001", "2026-06-02T10:00:00Z", { level: "info", message: "purge" });
+  assert.equal(client.purgePendingEvents(), 1);
+  client.log("evt_factory_shutdown_001", "2026-06-02T10:00:00Z", { level: "info", message: "shutdown" });
+  await client.shutdown();
+
+  assert.deepEqual(queue.calls.map(([operation]) => operation), [
+    "acknowledge",
+    "append",
+    "acknowledge",
+    "append",
+    "acknowledge",
+    "close"
+  ]);
+  assert.equal(client.deliveryHealth().lifecycle, "closed");
+});
+
+test("eventStore and event queue factory fail closed when both are supplied", () => {
+  assert.throws(
+    () => LogBrewClient.create({
+      apiKey: "LOGBREW_API_KEY",
+      eventStore: recordingEventStore(),
+      sdkName: "logbrew-js",
+      sdkVersion: "0.1.0",
+      [Symbol.for("@logbrew/sdk.eventQueueFactory")]() {
+        return recordingEventQueue();
+      }
+    }),
+    /eventStore and event queue factory are mutually exclusive/
+  );
 });
 
 test("event store persists a validated event before volatile admission", () => {

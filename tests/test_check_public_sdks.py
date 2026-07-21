@@ -234,6 +234,12 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "Node queue high-load fake-intake smoke"\n'
             r'run_shell_step "bash scripts/real_user_node_queue_high_load_smoke\.sh"\n'
             r"mark_step_complete\n\n"
+            r'begin_next_step "Node persistent delivery restart smoke"\n'
+            r'run_shell_step "bash scripts/real_user_node_persistent_delivery_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Node encrypted persistent delivery smoke"\n'
+            r'run_shell_step "bash scripts/real_user_node_encrypted_persistent_delivery_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
             r'begin_next_step "Prisma real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_prisma_smoke\.sh"\n'
             r"mark_step_complete\n\n"
