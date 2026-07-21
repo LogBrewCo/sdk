@@ -23,6 +23,8 @@ export type CreateLogBrewNodeClientConfig = {
   maxBatchEvents?: number;
   maxBatchBytes?: number;
   onEventDropped?: (drop: DroppedEvent) => void;
+  /** Existing POSIX owner-only parent directory for opt-in crash-safe Node delivery. */
+  persistentQueuePath?: string;
 };
 
 export type NodeFetchTransportConfig = {
@@ -832,6 +834,11 @@ export declare function captureHttpError(
   options?: LogBrewNodeOptions
 ): Promise<TransportResponse>;
 
+/** Remove the inactive SDK-owned persistent queue directory without following links. */
+export declare function purgeLogBrewNodePersistentQueue(config: {
+  persistentQueuePath: string;
+}): boolean;
+
 declare module "node:http" {
   interface IncomingMessage {
     logbrew?: LogBrewNodeContext;
@@ -862,6 +869,7 @@ declare const defaultExport: {
   instrumentLogBrewRedisClient: typeof instrumentLogBrewRedisClient;
   queueBatchOperationWithLogBrewSpan: typeof queueBatchOperationWithLogBrewSpan;
   queueOperationWithLogBrewSpan: typeof queueOperationWithLogBrewSpan;
+  purgeLogBrewNodePersistentQueue: typeof purgeLogBrewNodePersistentQueue;
   withLogBrewHttpHandler: typeof withLogBrewHttpHandler;
 };
 

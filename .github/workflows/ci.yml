@@ -276,6 +276,10 @@ jobs:
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_node_queue_high_load_smoke.sh
 
+      - name: Run Node persistent delivery restart smoke test
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
+        run: bash scripts/real_user_node_persistent_delivery_smoke.sh
+
       - name: Run Prisma real-user smoke test
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_prisma_smoke.sh

@@ -34,6 +34,7 @@ const DEFAULT_MAX_QUEUE_SIZE = 1000;
 const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAX_BATCH_EVENTS = 100;
 const DEFAULT_MAX_BATCH_BYTES = 256 * 1024;
+const EVENT_QUEUE_FACTORY = Symbol.for("@logbrew/sdk.eventQueueFactory");
 const MAX_ERROR_CAUSES = 5;
 const BUILTIN_ERROR_NAMES = new Set([
   "AggregateError",
@@ -107,6 +108,49 @@ class RecordingTransport {
   }
 }
 
+class MemoryEventQueue {
+  constructor() {
+    this.records = [];
+    this.totalBytes = 0;
+  }
+
+  length() {
+    return this.records.length;
+  }
+
+  byteCount() {
+    return this.totalBytes;
+  }
+
+  events() {
+    return this.records.map((record) => record.event);
+  }
+
+  serializedAt(index) {
+    return this.records[index].serialized;
+  }
+
+  eventBytesAt(index) {
+    return this.records[index].byteCount;
+  }
+
+  append(record) {
+    this.records.push(record);
+    this.totalBytes += record.byteCount;
+  }
+
+  acknowledge(count) {
+    let acknowledgedBytes = 0;
+    for (let index = 0; index < count; index += 1) {
+      acknowledgedBytes += this.records[index].byteCount;
+    }
+    this.records.splice(0, count);
+    this.totalBytes -= acknowledgedBytes;
+  }
+
+  close() {}
+}
+
 class LogBrewClient {
   static create({
     apiKey,
@@ -118,7 +162,8 @@ class LogBrewClient {
     maxQueueBytes = DEFAULT_MAX_QUEUE_BYTES,
     maxBatchEvents = DEFAULT_MAX_BATCH_EVENTS,
     maxBatchBytes = DEFAULT_MAX_BATCH_BYTES,
-    onEventDropped
+    onEventDropped,
+    [EVENT_QUEUE_FACTORY]: eventQueueFactory
   }) {
     requireNonEmpty("apiKey", apiKey);
     requireNonEmpty("sdkName", sdkName);
@@ -134,6 +179,9 @@ class LogBrewClient {
     if (onEventDropped !== undefined && typeof onEventDropped !== "function") {
       throw new SdkError("validation_error", "onEventDropped must be a function");
     }
+    if (eventQueueFactory !== undefined && typeof eventQueueFactory !== "function") {
+      throw new SdkError("validation_error", "event queue factory must be a function");
+    }
 
     return new LogBrewClient({
       apiKey,
@@ -143,6 +191,7 @@ class LogBrewClient {
       maxQueueBytes,
       maxQueueSize,
       onEventDropped,
+      eventQueueFactory,
       sdk: {
         name: sdkName,
         language: "javascript",
@@ -161,7 +210,8 @@ class LogBrewClient {
     maxBatchEvents,
     maxQueueBytes,
     maxQueueSize,
-    onEventDropped
+    onEventDropped,
+    eventQueueFactory
   }) {
     this.apiKey = apiKey;
     this.eventFilter = eventFilter;
@@ -172,14 +222,21 @@ class LogBrewClient {
     this.onEventDropped = onEventDropped;
     this.sdk = sdk;
     this.maxRetries = maxRetries;
-    this.events = [];
-    this.serializedEvents = [];
-    this.serializedEventBytes = [];
-    this.queuedEventBytes = 0;
     this.batchPrefix = `{"sdk":${JSON.stringify(this.sdk)},"events":[`;
     this.batchPrefixBytes = utf8ByteLength(this.batchPrefix);
     this.batchSuffix = "]}";
     this.batchSuffixBytes = utf8ByteLength(this.batchSuffix);
+    this.eventQueue = eventQueueFactory === undefined
+      ? new MemoryEventQueue()
+      : eventQueueFactory({
+          batchPrefixBytes: this.batchPrefixBytes,
+          batchSuffixBytes: this.batchSuffixBytes,
+          maxBatchBytes,
+          maxQueueBytes,
+          maxQueueSize,
+          restoreEvent: restoreStoredEvent
+        });
+    requireEventQueue(this.eventQueue);
     this.operationTail = Promise.resolve();
     this.closing = false;
     this.closed = false;
@@ -187,11 +244,11 @@ class LogBrewClient {
   }
 
   pendingEvents() {
-    return this.events.length;
+    return this.eventQueue.length();
   }
 
   pendingBytes() {
-    return this.queuedEventBytes;
+    return this.eventQueue.byteCount();
   }
 
   droppedEvents() {
@@ -199,7 +256,7 @@ class LogBrewClient {
   }
 
   previewJson() {
-    return JSON.stringify({ sdk: this.sdk, events: this.events }, null, 2);
+    return JSON.stringify({ sdk: this.sdk, events: this.eventQueue.events() }, null, 2);
   }
 
   release(id, timestamp, attributes) {
@@ -250,6 +307,7 @@ class LogBrewClient {
     this.closing = true;
     try {
       const response = await this.#runSerialized(() => this.#flushSnapshot(transport));
+      this.eventQueue.close();
       this.closed = true;
       return response;
     } catch (error) {
@@ -277,18 +335,15 @@ class LogBrewClient {
       this.#recordDroppedEvent(event, "event_too_large");
       return;
     }
-    if (this.events.length >= this.maxQueueSize) {
+    if (this.eventQueue.length() >= this.maxQueueSize) {
       this.#recordDroppedEvent(event, "queue_overflow");
       return;
     }
-    if (this.queuedEventBytes + eventBytes > this.maxQueueBytes) {
+    if (this.eventQueue.byteCount() + eventBytes > this.maxQueueBytes) {
       this.#recordDroppedEvent(event, "queue_bytes_overflow");
       return;
     }
-    this.events.push(event);
-    this.serializedEvents.push(serializedEvent);
-    this.serializedEventBytes.push(eventBytes);
-    this.queuedEventBytes += eventBytes;
+    this.eventQueue.append({ event, serialized: serializedEvent, byteCount: eventBytes });
   }
 
   #recordDroppedEvent(event, reason) {
@@ -318,7 +373,7 @@ class LogBrewClient {
   }
 
   async #flushSnapshot(transport) {
-    let remainingEvents = this.events.length;
+    let remainingEvents = this.eventQueue.length();
     if (remainingEvents === 0) {
       return { statusCode: 204, attempts: 0, batches: 0 };
     }
@@ -344,7 +399,7 @@ class LogBrewClient {
     let eventsCount = 0;
     for (let index = 0; index < maxEvents; index += 1) {
       const separatorBytes = eventsCount === 0 ? 0 : 1;
-      const nextBodyBytes = bodyBytes + separatorBytes + this.serializedEventBytes[index];
+      const nextBodyBytes = bodyBytes + separatorBytes + this.eventQueue.eventBytesAt(index);
       if (nextBodyBytes > this.maxBatchBytes) {
         break;
       }
@@ -355,20 +410,16 @@ class LogBrewClient {
       throw new SdkError("transport_error", "queued event cannot fit the configured batch byte limit");
     }
     return {
-      body: `${this.batchPrefix}${this.serializedEvents.slice(0, eventsCount).join(",")}${this.batchSuffix}`,
+      body: `${this.batchPrefix}${Array.from(
+        { length: eventsCount },
+        (_value, index) => this.eventQueue.serializedAt(index)
+      ).join(",")}${this.batchSuffix}`,
       eventsCount
     };
   }
 
   #acknowledge(eventsCount) {
-    let acknowledgedBytes = 0;
-    for (let index = 0; index < eventsCount; index += 1) {
-      acknowledgedBytes += this.serializedEventBytes[index];
-    }
-    this.events.splice(0, eventsCount);
-    this.serializedEvents.splice(0, eventsCount);
-    this.serializedEventBytes.splice(0, eventsCount);
-    this.queuedEventBytes -= acknowledgedBytes;
+    this.eventQueue.acknowledge(eventsCount);
   }
 
   async #sendBatch(transport, body) {
@@ -433,6 +484,66 @@ function utf8ByteLength(value) {
     }
   }
   return bytes;
+}
+
+function requireEventQueue(queue) {
+  const methods = [
+    "acknowledge",
+    "append",
+    "byteCount",
+    "close",
+    "eventBytesAt",
+    "events",
+    "length",
+    "serializedAt"
+  ];
+  if (!queue || methods.some((method) => typeof queue[method] !== "function")) {
+    throw new SdkError("validation_error", "event queue factory returned an invalid queue");
+  }
+}
+
+function restoreStoredEvent(serialized) {
+  if (typeof serialized !== "string" || serialized === "") {
+    throw new SdkError("validation_error", "stored event must be compact JSON");
+  }
+  let stored;
+  try {
+    stored = JSON.parse(serialized);
+  } catch {
+    throw new SdkError("validation_error", "stored event must be compact JSON");
+  }
+  if (!stored || Array.isArray(stored) || typeof stored !== "object") {
+    throw new SdkError("validation_error", "stored event must be an object");
+  }
+  requireNonEmpty("event id", stored.id);
+  requireTimestamp(stored.timestamp);
+  const attributes = restoreStoredAttributes(stored.type, stored.attributes);
+  const event = { type: stored.type, id: stored.id, timestamp: stored.timestamp, attributes };
+  if (JSON.stringify(event) !== serialized) {
+    throw new SdkError("validation_error", "stored event must use canonical encoding");
+  }
+  return event;
+}
+
+function restoreStoredAttributes(eventType, attributes) {
+  switch (eventType) {
+    case "release":
+      return validateRelease(attributes);
+    case "environment":
+      return validateEnvironment(attributes);
+    case "issue":
+      return validateIssue(attributes);
+    case "log":
+      return validateLog(attributes);
+    case "span":
+      return validateSpan(attributes);
+    case "action":
+      return validateAction(attributes);
+    case "metric":
+      return validateMetric(attributes);
+    default:
+      throw new SdkError("validation_error", "stored event type is invalid");
+  }
 }
 
 function installLogBrewConsoleCapture(config) {

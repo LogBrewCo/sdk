@@ -21,6 +21,10 @@ import { instrumentLogBrewMongooseModel as instrumentMongooseModel } from "./mon
 import { instrumentLogBrewPgClient as instrumentPgClient } from "./pg.js";
 import { instrumentLogBrewRedisClient as instrumentRedisClient } from "./redis.js";
 import { installLogBrewUndiciInstrumentation as installUndiciInstrumentation } from "./undici.js";
+import {
+  createPersistentEventQueue,
+  purgePersistentEventQueue
+} from "./persistent-queue.js";
 
 const DEFAULT_SDK_NAME = "logbrew-node";
 const DEFAULT_SDK_VERSION = "0.1.0";
@@ -47,6 +51,7 @@ const HTTP_CLIENT_LEGACY_AUTHORITY_KEY = ["ho", "st"].join("");
 const HTTP_CLIENT_URL_USER_KEY = ["user", "name"].join("");
 const HTTP_CLIENT_URL_ACCESS_KEY = ["pass", "word"].join("");
 const HTTP_CLIENT_DEFAULT_AUTHORITY = ["local", "host"].join("");
+const EVENT_QUEUE_FACTORY = Symbol.for("@logbrew/sdk.eventQueueFactory");
 const activeTraceContext = new AsyncLocalStorage();
 const axiosInstrumentationHandles = new WeakMap();
 const httpClientInstrumentationHandles = new WeakMap();
@@ -61,7 +66,8 @@ export function createLogBrewNodeClient({
   maxRetries = 2,
   maxQueueBytes,
   maxQueueSize,
-  onEventDropped
+  onEventDropped,
+  persistentQueuePath
 } = {}) {
   const authKey = serverApiKey ?? apiKey ?? readEnvServerApiKey() ?? readEnvApiKey();
   if (!authKey) {
@@ -79,8 +85,20 @@ export function createLogBrewNodeClient({
     ...(maxBatchEvents !== undefined ? { maxBatchEvents } : {}),
     ...(maxQueueBytes !== undefined ? { maxQueueBytes } : {}),
     ...(maxQueueSize !== undefined ? { maxQueueSize } : {}),
-    ...(onEventDropped !== undefined ? { onEventDropped } : {})
+    ...(onEventDropped !== undefined ? { onEventDropped } : {}),
+    ...(persistentQueuePath !== undefined
+      ? {
+          [EVENT_QUEUE_FACTORY]: (queueConfig) => createPersistentEventQueue({
+            ...queueConfig,
+            persistentQueuePath
+          })
+        }
+      : {})
   });
+}
+
+export function purgeLogBrewNodePersistentQueue({ persistentQueuePath } = {}) {
+  return purgePersistentEventQueue({ persistentQueuePath });
 }
 
 export function createNodeFetchTransport({
@@ -1991,5 +2009,6 @@ export default {
   instrumentLogBrewRedisClient,
   queueBatchOperationWithLogBrewSpan,
   queueOperationWithLogBrewSpan,
+  purgeLogBrewNodePersistentQueue,
   withLogBrewHttpHandler
 };
