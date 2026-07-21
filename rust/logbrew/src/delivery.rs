@@ -10,53 +10,82 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 mod queue;
 use queue::{DeliveryQueue, FrozenPrefix, QueueAdmissionError, REQUEST_SUFFIX, serialize_bounded};
 
+/// Default maximum number of events retained in the shared queue.
 pub const DEFAULT_MAX_QUEUE_EVENTS: usize = 1_000;
+/// Default maximum compact UTF-8 bytes retained for queued events.
 pub const DEFAULT_MAX_QUEUE_BYTES: usize = 4 * 1024 * 1024;
+/// Default maximum number of events included in one delivery batch.
 pub const DEFAULT_MAX_BATCH_EVENTS: usize = 100;
+/// Default maximum exact UTF-8 request-body bytes for one delivery batch.
 pub const DEFAULT_MAX_REQUEST_BODY_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Fixed delivery lifecycle outcome exposed by [`DeliveryHealthSnapshot`].
 pub enum DeliveryOutcome {
+    /// No delivery or admission result has been recorded.
     Idle,
+    /// An event was retained in the bounded queue.
     Queued,
+    /// One or more queued events were accepted by the transport.
     Delivered,
+    /// An event was rejected by a configured queue bound.
     Dropped,
+    /// Delivery failed and unaccepted work remains queued.
     Failed,
+    /// The client closed after acknowledging its shutdown snapshot.
     Closed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Content-free delivery result category exposed by [`DeliveryHealthSnapshot`].
 pub enum DeliveryCodeCategory {
+    /// No delivery result category has been recorded.
     None,
+    /// Queue event or byte capacity rejected an event.
     QueueFull,
+    /// One event exceeded the configured event or request-body bound.
     EventTooLarge,
+    /// The transport reported a network failure.
     Network,
+    /// Delivery was rejected for authentication.
     Authentication,
+    /// Delivery failed with a retryable server response.
     Server,
+    /// Delivery was rejected without a retryable server response.
     Rejected,
+    /// An event or delivery batch could not be serialized within its bound.
     Serialization,
+    /// The accepted prefix could not be acknowledged safely.
     Acknowledgement,
+    /// Local delivery state could not be accessed safely.
     State,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Immutable content-free snapshot of local queue and delivery state.
 pub struct DeliveryHealthSnapshot {
+    /// Number of events currently retained in the bounded queue.
     pub pending_events: usize,
+    /// Exact compact UTF-8 event bytes currently retained in the queue.
     pub pending_event_bytes: usize,
+    /// Saturating count of events rejected by queue bounds.
     pub dropped_events: u64,
+    /// Whether successful shutdown has closed the client to later captures.
     pub closed: bool,
+    /// Saturating count of transport attempts.
     pub attempts: u64,
+    /// Saturating count of accepted delivery batches.
     pub batches: u64,
+    /// Saturating count of accepted events.
     pub accepted_events: u64,
+    /// Most recent fixed delivery lifecycle outcome.
     pub last_outcome: DeliveryOutcome,
+    /// Most recent content-free delivery result category.
     pub last_code: DeliveryCodeCategory,
 }
 
 #[derive(Clone)]
-/// Builder for constructing a public LogBrew client from SDK identity and delivery limits.
+/// Builder for constructing a bounded LogBrew client from SDK identity and delivery settings.
 pub struct ClientBuilder {
     sdk_name: String,
     sdk_version: String,
@@ -84,36 +113,43 @@ impl fmt::Debug for ClientBuilder {
 }
 
 impl ClientBuilder {
+    /// Set the API key used by flush and shutdown transport calls.
     pub fn api_key(mut self, api_key: impl Into<String>) -> Self {
         self.api_key = Some(api_key.into());
         self
     }
 
+    /// Override the retry budget used for retryable transport failures.
     pub fn max_retries(mut self, max_retries: u32) -> Self {
         self.max_retries = max_retries;
         self
     }
 
+    /// Set the maximum number of events retained in the shared queue.
     pub fn max_queue_events(mut self, max_queue_events: usize) -> Self {
         self.max_queue_events = max_queue_events;
         self
     }
 
+    /// Set the maximum compact UTF-8 bytes retained for queued events.
     pub fn max_queue_bytes(mut self, max_queue_bytes: usize) -> Self {
         self.max_queue_bytes = max_queue_bytes;
         self
     }
 
+    /// Set the maximum number of events included in one delivery batch.
     pub fn max_batch_events(mut self, max_batch_events: usize) -> Self {
         self.max_batch_events = max_batch_events;
         self
     }
 
+    /// Set the maximum exact UTF-8 request-body bytes for one delivery batch.
     pub fn max_request_body_bytes(mut self, max_request_body_bytes: usize) -> Self {
         self.max_request_body_bytes = max_request_body_bytes;
         self
     }
 
+    /// Build a bounded LogBrew client from the configured public settings.
     pub fn build(self) -> Result<LogBrewClient, SdkError> {
         let api_key = self
             .api_key
@@ -215,6 +251,7 @@ impl fmt::Debug for LogBrewClient {
 }
 
 impl LogBrewClient {
+    /// Create a builder from public SDK identity values like name and version.
     pub fn builder(sdk_name: impl Into<String>, sdk_version: impl Into<String>) -> ClientBuilder {
         ClientBuilder {
             sdk_name: sdk_name.into(),
@@ -228,14 +265,17 @@ impl LogBrewClient {
         }
     }
 
+    /// Return the queued event count currently buffered in memory.
     pub fn pending_events(&self) -> usize {
         self.state_even_if_poisoned().queue.len()
     }
 
+    /// Return an immutable content-free snapshot of bounded delivery state and counters.
     pub fn delivery_health(&self) -> DeliveryHealthSnapshot {
         self.state_even_if_poisoned().health_snapshot()
     }
 
+    /// Return the queued event batch as stable, pretty-printed JSON.
     pub fn preview_json(&self) -> Result<String, SdkError> {
         let state = self.lock_state()?;
         let events = state.queue.events()?;
@@ -251,6 +291,7 @@ impl LogBrewClient {
         })
     }
 
+    /// Queue an explicit app-owned release event after validation.
     pub fn release(
         &mut self,
         id: impl Into<String>,
@@ -265,6 +306,7 @@ impl LogBrewClient {
         )
     }
 
+    /// Queue an explicit app-owned environment event after validation.
     pub fn environment(
         &mut self,
         id: impl Into<String>,
@@ -279,6 +321,7 @@ impl LogBrewClient {
         )
     }
 
+    /// Queue an explicit app-owned issue event after validation.
     pub fn issue(
         &mut self,
         id: impl Into<String>,
@@ -288,6 +331,7 @@ impl LogBrewClient {
         self.push_event("issue", id.into(), timestamp.into(), issue.attributes()?)
     }
 
+    /// Queue an explicit app-owned log event after validation.
     pub fn log(
         &mut self,
         id: impl Into<String>,
@@ -297,6 +341,7 @@ impl LogBrewClient {
         self.push_event("log", id.into(), timestamp.into(), log.attributes()?)
     }
 
+    /// Queue an explicit app-owned span event after validation.
     pub fn span(
         &mut self,
         id: impl Into<String>,
@@ -306,6 +351,7 @@ impl LogBrewClient {
         self.push_event("span", id.into(), timestamp.into(), span.attributes()?)
     }
 
+    /// Queue an explicit app-owned action event after validation.
     pub fn action(
         &mut self,
         id: impl Into<String>,
@@ -315,6 +361,7 @@ impl LogBrewClient {
         self.push_event("action", id.into(), timestamp.into(), action.attributes()?)
     }
 
+    /// Queue an explicit app-owned metric event with validated low-cardinality fields.
     pub fn metric(
         &mut self,
         id: impl Into<String>,
@@ -324,6 +371,7 @@ impl LogBrewClient {
         self.push_event("metric", id.into(), timestamp.into(), metric.attributes()?)
     }
 
+    /// Flush queued events through a transport while preserving retry semantics.
     pub fn flush<T: Transport>(
         &mut self,
         transport: &mut T,
@@ -331,6 +379,7 @@ impl LogBrewClient {
         self.deliver(transport, false)
     }
 
+    /// Flush queued events, then mark the client closed so later writes fail.
     pub fn shutdown<T: Transport>(
         &mut self,
         transport: &mut T,
