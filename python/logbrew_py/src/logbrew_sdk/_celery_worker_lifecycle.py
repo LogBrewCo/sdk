@@ -152,7 +152,9 @@ class LogBrewCeleryWorkerLifecycle:
         """Return the current child-process client after process initialization."""
 
         with self._lock:
-            return None if self._state is None else self._state.client
+            if self._state is None or not self._state.ready:
+                return None
+            return self._state.client
 
     def install(self) -> None:
         """Attach child init/shutdown receivers without constructing runtime state."""
@@ -182,12 +184,15 @@ class LogBrewCeleryWorkerLifecycle:
             if self._process_shutdown_complete:
                 return None
             if self._state is not None:
+                if not self._state.instrumentation.installed:
+                    self._state.instrumentation.install()
+                    self._state.ready = True
                 return self._state.instrumentation
 
-            client = self._client_factory()
             transport = self._transport_factory()
-            _validate_process_client(client)
             _validate_process_transport(transport)
+            client = self._client_factory()
+            _validate_process_client(client)
             instrumentation = _new_celery_instrumentation(
                 app=self.app,
                 signals=self._signals,
@@ -202,12 +207,13 @@ class LogBrewCeleryWorkerLifecycle:
                 max_in_flight_tasks=self._max_in_flight_tasks,
                 on_capture_error=self._on_capture_error,
             )
-            instrumentation.install()
             self._state = _WorkerProcessState(
                 client=client,
                 transport=transport,
                 instrumentation=instrumentation,
             )
+            instrumentation.install()
+            self._state.ready = True
             return instrumentation
 
     def shutdown_current_process(self) -> TransportResponse | None:
@@ -288,6 +294,7 @@ class _WorkerProcessState:
     client: Any
     transport: Any
     instrumentation: LogBrewCeleryInstrumentation
+    ready: bool = False
 
 
 class _CeleryWorkerLifecycleError(RuntimeError):
@@ -389,6 +396,13 @@ def _validated_persistent_queue_root(root: str | os.PathLike[str]) -> Path:
 def _validate_process_client(client: Any) -> None:
     if not callable(getattr(client, "span", None)) or not callable(getattr(client, "shutdown", None)):
         raise TypeError("client_factory must return a LogBrew client-like object")
+    delivery_health = getattr(client, "delivery_health", None)
+    if callable(delivery_health) and getattr(delivery_health(), "automatic_delivery", False):
+        client.shutdown()
+        raise SdkError(
+            "configuration_error",
+            "Celery worker lifecycle requires a client with automatic_delivery disabled",
+        )
 
 
 def _validate_process_transport(transport: Any) -> None:

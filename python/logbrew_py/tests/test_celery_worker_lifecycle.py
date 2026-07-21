@@ -23,7 +23,6 @@ from logbrew_sdk import (
 
 HAS_PERSISTENCE_CRYPTO = importlib.util.find_spec("cryptography") is not None
 
-
 def sample_client(*, max_retries: int = 1, max_queue_size: int = 1000) -> LogBrewClient:
     return LogBrewClient.create(
         api_key="LOGBREW_API_KEY",
@@ -424,6 +423,100 @@ class CeleryWorkerLifecycleTests(unittest.TestCase):
             lifecycle.shutdown_current_process()
             lifecycle.uninstall()
 
+    @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
+    def test_transport_factory_failure_does_not_strand_a_persistent_client(self) -> None:
+        with fake_celery_module() as signals, tempfile.TemporaryDirectory() as temporary:
+            app = FakeCeleryApp("checkout")
+            signals.current_app = app
+            directory = Path(temporary).resolve() / "queue"
+            persistence_key = bytes(range(32))
+            client_calls = 0
+            transport_calls = 0
+            capture_errors: list[str] = []
+
+            def client_factory() -> LogBrewClient:
+                nonlocal client_calls
+                client_calls += 1
+                return LogBrewClient.create(
+                    api_key="LOGBREW_API_KEY",
+                    sdk_name="logbrew-python-celery-worker",
+                    sdk_version="0.1.0",
+                    persistent_queue_directory=directory,
+                    persistent_queue_encryption_key=persistence_key,
+                )
+
+            def transport_factory() -> RecordingTransport:
+                nonlocal transport_calls
+                transport_calls += 1
+                if transport_calls == 1:
+                    raise RuntimeError("private transport setup")
+                return RecordingTransport.always_accept()
+
+            lifecycle = install_worker_lifecycle(
+                app,
+                client_factory=client_factory,
+                transport_factory=transport_factory,
+                on_capture_error=lambda error: capture_errors.append(str(error)),
+            )
+
+            signals.worker_process_init.send()
+            self.assertIsNone(lifecycle.current_client)
+            self.assertEqual(client_calls, 0)
+            self.assertEqual(capture_errors, ["Celery worker initialization failed; instrumentation skipped"])
+
+            signals.worker_process_init.send()
+            self.assertIsNotNone(lifecycle.current_client)
+            self.assertEqual(client_calls, 1)
+            self.assertEqual(transport_calls, 2)
+            lifecycle.shutdown_current_process()
+            lifecycle.uninstall()
+
+    @unittest.skipUnless(HAS_PERSISTENCE_CRYPTO, "persistence extra is not installed")
+    def test_signal_install_failure_reuses_the_owned_persistent_client_without_exposing_stale_state(
+        self,
+    ) -> None:
+        with fake_celery_module() as signals, tempfile.TemporaryDirectory() as temporary:
+            app = FakeCeleryApp("checkout")
+            signals.current_app = app
+            directory = Path(temporary).resolve() / "queue"
+            persistence_key = bytes(range(32))
+            clients: list[LogBrewClient] = []
+            capture_errors: list[str] = []
+
+            def client_factory() -> LogBrewClient:
+                client = LogBrewClient.create(
+                    api_key="LOGBREW_API_KEY",
+                    sdk_name="logbrew-python-celery-worker",
+                    sdk_version="0.1.0",
+                    persistent_queue_directory=directory,
+                    persistent_queue_encryption_key=persistence_key,
+                )
+                clients.append(client)
+                return client
+
+            lifecycle = install_worker_lifecycle(
+                app,
+                client_factory=client_factory,
+                transport_factory=RecordingTransport.always_accept,
+                on_capture_error=lambda error: capture_errors.append(str(error)),
+            )
+
+            with patch.object(
+                signals.task_prerun,
+                "connect",
+                side_effect=RuntimeError("private signal setup"),
+            ):
+                signals.worker_process_init.send()
+            self.assertIsNone(lifecycle.current_client)
+            self.assertEqual(len(clients), 1)
+            self.assertEqual(capture_errors, ["Celery worker initialization failed; instrumentation skipped"])
+
+            signals.worker_process_init.send()
+            self.assertIs(lifecycle.current_client, clients[0])
+            self.assertEqual(len(clients), 1)
+            lifecycle.shutdown_current_process()
+            lifecycle.uninstall()
+
     def test_process_init_only_constructs_factories_for_the_current_worker_app(self) -> None:
         with fake_celery_module() as signals:
             current_app = FakeCeleryApp("current")
@@ -505,6 +598,37 @@ class CeleryWorkerLifecycleTests(unittest.TestCase):
                     app,
                     client=sample_client(),
                 )
+            lifecycle.uninstall()
+
+    def test_automatic_delivery_client_is_rejected_before_task_capture(self) -> None:
+        with fake_celery_module() as signals:
+            app = FakeCeleryApp("checkout")
+            signals.current_app = app
+            owned_transport = RecordingTransport.always_accept()
+            client = LogBrewClient.create(
+                api_key="LOGBREW_API_KEY",
+                sdk_name="logbrew-python-celery-worker",
+                sdk_version="0.1.0",
+                transport=owned_transport,
+            )
+            capture_errors: list[str] = []
+            lifecycle = install_worker_lifecycle(
+                app,
+                client_factory=lambda: client,
+                transport_factory=RecordingTransport.always_accept,
+                on_capture_error=lambda error: capture_errors.append(str(error)),
+            )
+
+            signals.worker_process_init.send()
+
+            self.assertIsNone(lifecycle.current_client)
+            self.assertEqual(len(signals.task_prerun.receivers), 0)
+            self.assertEqual(
+                capture_errors,
+                ["Celery worker initialization failed; instrumentation skipped"],
+            )
+            self.assertTrue(client.closed)
+            self.assertEqual(owned_transport.sent_bodies, [])
             lifecycle.uninstall()
 
     def test_invalid_factories_and_missing_worker_signal_fail_before_registration(self) -> None:
