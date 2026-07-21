@@ -21,7 +21,7 @@ done
 
 (cd "$package_dir" && ruby tests/run.rb)
 test -f "$package_dir/tests/http_client_tracing_support.rb"
-rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/automatic_delivery.rb" "$package_dir/lib/logbrew/http_client_tracing.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
+rdoc --quiet --op "$tmp_dir/rdoc" "$package_dir/lib/logbrew.rb" "$package_dir/lib/logbrew/automatic_delivery.rb" "$package_dir/lib/logbrew/http_client_tracing.rb" "$package_dir/lib/logbrew/sidekiq.rb" "$package_dir/lib/logbrew/support_ticket.rb" "$package_dir/lib/logbrew/worker_lifecycle.rb"
 test -f "$tmp_dir/rdoc/LogBrew/Client.html"
 test -f "$tmp_dir/rdoc/LogBrew/Logger.html"
 test -f "$tmp_dir/rdoc/LogBrew/RackMiddleware.html"
@@ -35,6 +35,7 @@ test -f "$tmp_dir/rdoc/LogBrew/WorkerDeliveryFailure.html"
 test -f "$tmp_dir/rdoc/LogBrew/DeliveryHealth.html"
 test -f "$tmp_dir/rdoc/LogBrew/HttpClientTracing.html"
 test -f "$tmp_dir/rdoc/LogBrew/NetHttpTracingClient.html"
+test -f "$tmp_dir/rdoc/LogBrew/Sidekiq/Instrumentation.html"
 
 (cd "$package_dir" && gem build logbrew-sdk.gemspec --strict --output "$tmp_dir/logbrew-sdk-${package_version}.gem" >/dev/null)
 test -f "$tmp_dir/logbrew-sdk-${package_version}.gem"
@@ -55,12 +56,14 @@ test -f "$unpacked_dir/lib/logbrew/worker_lifecycle.rb"
 test -f "$unpacked_dir/lib/logbrew/automatic_delivery.rb"
 test -f "$unpacked_dir/lib/logbrew/http_client_tracing.rb"
 test -f "$unpacked_dir/lib/logbrew/faraday_tracing.rb"
+test -f "$unpacked_dir/lib/logbrew/sidekiq.rb"
 test -f "$unpacked_dir/README.md"
 test -f "$unpacked_dir/examples/readme_example.rb"
 test -f "$unpacked_dir/examples/real_user_smoke.rb"
 test -f "$unpacked_dir/examples/http_trace_correlation.rb"
 test -f "$unpacked_dir/examples/persistent_worker_delivery.rb"
 test -f "$unpacked_dir/examples/automatic_delivery.rb"
+test -f "$unpacked_dir/examples/sidekiq_tracing.rb"
 test -f "$unpacked_dir/examples/Makefile"
 grep -q 'gem install logbrew-sdk' "$unpacked_dir/README.md"
 grep -q 'LOGBREW_API_KEY' "$unpacked_dir/README.md"
@@ -100,6 +103,9 @@ grep -q 'recover_automatic_delivery' "$unpacked_dir/README.md"
 grep -q 'Outbound HTTP Tracing' "$unpacked_dir/README.md"
 grep -q 'LogBrew::HttpClientTracing.wrap_net_http' "$unpacked_dir/README.md"
 grep -q 'LogBrew::FaradayTracingMiddleware' "$unpacked_dir/README.md"
+grep -q 'Sidekiq Tracing' "$unpacked_dir/README.md"
+grep -q 'LogBrew::Sidekiq::Instrumentation.create' "$unpacked_dir/README.md"
+grep -q 'config.on(:quiet)' "$unpacked_dir/README.md"
 
 ruby -I "$package_dir/lib" "$package_dir/examples/readme_example.rb" > "$tmp_dir/readme-example.stdout.json" 2> "$tmp_dir/readme-example.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/readme-example.stdout.json" >/dev/null
@@ -139,5 +145,10 @@ grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_d
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/examples-help.txt"
 grep -qx 'run-persistent-worker-delivery -> make run-persistent-worker-delivery' "$tmp_dir/examples-help.txt"
 grep -qx 'run-automatic-delivery -> make run-automatic-delivery' "$tmp_dir/examples-help.txt"
+grep -qx 'run-sidekiq-tracing -> make run-sidekiq-tracing' "$tmp_dir/examples-help.txt"
+
+sidekiq_smoke_output="$(bash "$repo_root/scripts/real_user_ruby_sidekiq_smoke.sh")"
+grep -Eq '^ruby Sidekiq installed smoke ok version=[^ ]+ sidekiq=8\.1\.6 sha256:[0-9a-f]{64} requests=1 spans=5 issues=1$' <<< "$sidekiq_smoke_output"
+printf '%s\n' "$sidekiq_smoke_output"
 
 echo "ruby package checks passed"

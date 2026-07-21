@@ -417,6 +417,42 @@ Retryable network, `408`, and `5xx` failures retain the exact failed body and us
 
 Automatic ownership is process-local. An inherited automatic client rejects capture, flush, purge, stop, and shutdown after `fork`; each child must create a fresh client, transport, and persistent queue owner. No signal handler, global fork hook, `at_exit`, or finalizer is installed. `shutdown` stops and joins the worker before its final drain, and a failed drain reopens the client with retryable failures scheduled or terminal failures paused. Application transport timeouts still bound how promptly an in-flight send can stop.
 
+## Sidekiq Tracing
+
+Sidekiq integration is explicit and optional. Sidekiq is not a dependency of the base gem. Create the LogBrew client and instrumentation in the process that owns the middleware, then register the client and server sides you use:
+
+```ruby
+require "logbrew"
+require "logbrew/sidekiq"
+require "sidekiq"
+
+transport = LogBrew::HttpTransport.new(timeout: 10)
+client = LogBrew::Client.create_automatic(
+  api_key: ENV.fetch("LOGBREW_API_KEY"),
+  sdk_name: "checkout-worker",
+  sdk_version: "1.0.0",
+  transport: transport
+)
+sidekiq_tracing = LogBrew::Sidekiq::Instrumentation.create(
+  client: client,
+  max_retries: 25
+)
+
+Sidekiq.configure_client { |config| sidekiq_tracing.register_client(config) }
+Sidekiq.configure_server do |config|
+  sidekiq_tracing.register_client(config)
+  sidekiq_tracing.register_server(config)
+  config.on(:quiet) { sidekiq_tracing.quiet }
+  config.on(:shutdown) { sidekiq_tracing.shutdown }
+end
+```
+
+Registration is app-owned, idempotent, and reversible with `unregister_client` and `unregister_server`; the first instrumentation registered for each middleware class owns that entry. `disable` and `enable` provide reversible capture control. `quiet` stops new Sidekiq instrumentation while already queued LogBrew events remain under the existing delivery owner. `shutdown` is idempotent and delegates draining to the existing client; automatic clients use their owned transport, while manual clients must pass `transport:` when the instrumentation is created.
+
+The client middleware adds one bounded `logbrew` carrier containing only a version, W3C `traceparent`, and enqueue time. Valid retries keep that carrier without creating another enqueue span. The server middleware continues a valid carrier or starts a fresh trace when it is absent or malformed, returns the caller trace state after every result, and records bounded queue-wait and execution timing. Set `max_retries` to the same default retry limit used by your Sidekiq configuration; per-job integer or disabled retry settings are honored. Retryable failures keep only error spans, while the terminal escaped failure adds one deduplicated fixed-title issue and preserves the original exception.
+
+Sidekiq spans contain only fixed source, sampled state, bounded retry count, bounded queue-wait duration, execution duration, status, and real cancellation. The integration does not capture job arguments, payload fields, job identifiers, worker names, queue values, connection data, exception messages or stacks, baggage, or tracestate. Capture failures are advisory and never replace job execution or retry behavior. Create fresh clients and instrumentation after `fork`; inherited instances fail closed without changing jobs.
+
 ## Persistent Worker Delivery
 
 Server workers that need restart recovery can opt into an app-owned persistent queue. Create the client after forking and give every worker its own normalized absolute directory:
@@ -541,6 +577,7 @@ The subscriber implements `report(error, handled:, severity:, context:, source:,
 - `preview_json` returns the queued batch as pretty JSON.
 - `persistent_queue_path:` enables explicit owner-only, single-process restart recovery; `purge_pending_events` explicitly discards its pending prefix.
 - `Client.create_automatic(...)` opts an owned transport into one lazy interval/threshold worker; `delivery_health`, `recover_automatic_delivery`, and `stop_automatic_delivery` expose fixed process-local lifecycle control.
+- `LogBrew::Sidekiq::Instrumentation` explicitly installs optional client/server middleware with bounded W3C propagation, fixed telemetry, and app-owned quiet/shutdown hooks.
 - `flush(transport)` splits its queue snapshot into compact 100-event/256 KiB requests, freezes failed retry bytes, acknowledges only accepted prefixes, and leaves transport-time capture queued.
 - Queues default to 1,000 events and 4 MiB of compact serialized event data; `pending_event_bytes`, `dropped_events`, and `on_event_dropped` expose pressure locally. `TransportResponse#attempts` and `#batches` expose request work.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.

@@ -1,4 +1,4 @@
-.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation run-persistent-worker-delivery run-automatic-delivery
+.PHONY: help run run-readme-example run-real-user-smoke run-first-useful-telemetry run-http-trace-correlation run-persistent-worker-delivery run-automatic-delivery run-sidekiq-tracing
 
 help:
 	@printf '%s\n' 'run-readme-example -> make run-readme-example'
@@ -8,6 +8,7 @@ help:
 	@printf '%s\n' 'run-http-trace-correlation -> make run-http-trace-correlation'
 	@printf '%s\n' 'run-persistent-worker-delivery -> make run-persistent-worker-delivery'
 	@printf '%s\n' 'run-automatic-delivery -> make run-automatic-delivery'
+	@printf '%s\n' 'run-sidekiq-tracing -> make run-sidekiq-tracing'
 
 run: run-real-user-smoke
 
@@ -28,3 +29,6 @@ run-persistent-worker-delivery:
 
 run-automatic-delivery:
 	@ruby automatic_delivery.rb
+
+run-sidekiq-tracing:
+	@ruby sidekiq_tracing.rb
