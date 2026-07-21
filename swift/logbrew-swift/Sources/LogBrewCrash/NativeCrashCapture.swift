@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LogBrew
 
 @objc(LBWNativeCrashCapture)
 @objcMembers
@@ -17,6 +18,7 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
     private var lifecycle: NativeCrashLifecycleState = .idle
     private var lastOutcome: NativeCrashOutcome = .none
     private var acknowledged = 0
+    private var discarded = 0
     private var replaying = false
 
     public init(configuration: NativeCrashConfiguration) {
@@ -48,9 +50,12 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
         defer { lock.unlock() }
         try verifyProcessLocked()
 
-        if store != nil {
+        if store != nil, lifecycle != .stopped {
             try verifyStorageLocked()
             return
+        }
+        if lifecycle == .stopped {
+            throw NativeCrashError(.notInstalled)
         }
         if lifecycle == .failed {
             throw NativeCrashError(.engineInstallFailed)
@@ -98,46 +103,44 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
     public func replayPendingReports(
         _ handler: (NativeCrashRecord) -> Bool,
     ) throws -> NativeCrashReplayResult {
-        lock.lock()
+        try beginReplay()
         do {
-            try verifyProcessLocked()
-        } catch {
-            lock.unlock()
-            throw error
-        }
-        guard store != nil else {
-            lock.unlock()
-            throw NativeCrashError(.notInstalled)
-        }
-        guard !replaying else {
-            lock.unlock()
-            throw NativeCrashError(.replayBusy)
-        }
-        replaying = true
-        lifecycle = .replaying
-        lock.unlock()
-
-        var attempted = 0
-        var accepted = 0
-        do {
-            while let record = try nextPendingReport() {
-                attempted += 1
-                guard handler(record) else {
-                    lock.lock()
-                    lastOutcome = .retained
-                    lock.unlock()
-                    break
-                }
-                try acknowledge(record)
-                accepted += 1
-            }
-
-            let pending = try finishReplay()
-            return NativeCrashReplayResult(attempted: attempted, acknowledged: accepted, pending: pending)
+            return try performReplay(handler)
         } catch {
             failReplay()
             throw error
         }
+    }
+
+    /// Replays stored reports through the existing delivery engine and acknowledges only accepted reports.
+    @nonobjc
+    public func replayPendingReports(
+        in client: LogBrewClient,
+        transport: any Transport,
+    ) throws -> NativeCrashReplayResult {
+        try replayPendingReports { record in
+            do {
+                try record.enqueue(in: client)
+                let response = try client.flush(transport: transport)
+                return (200 ..< 300).contains(response.statusCode)
+            } catch {
+                return false
+            }
+        }
+    }
+
+    /// Stops replay through this adapter without claiming to uninstall the process-lifetime crash handler.
+    public func stopReplay() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try verifyProcessLocked()
+        guard store != nil else {
+            throw NativeCrashError(.notInstalled)
+        }
+        guard !replaying else {
+            throw NativeCrashError(.replayBusy)
+        }
+        lifecycle = .stopped
     }
 
     public func purge() throws {
@@ -169,12 +172,62 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
             lifecycle: lifecycle,
             pending: pending,
             acknowledged: acknowledged,
+            discarded: discarded,
             lastOutcome: lastOutcome,
         )
     }
 }
 
 private extension NativeCrashCapture {
+    func beginReplay() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try verifyProcessLocked()
+        guard store != nil, lifecycle != .stopped else {
+            throw NativeCrashError(.notInstalled)
+        }
+        guard !replaying else {
+            throw NativeCrashError(.replayBusy)
+        }
+        replaying = true
+        lifecycle = .replaying
+    }
+
+    func performReplay(_ handler: (NativeCrashRecord) -> Bool) throws -> NativeCrashReplayResult {
+        var attempted = 0
+        var accepted = 0
+        var discardedDuringReplay = 0
+        replayLoop: while true {
+            switch try nextReplayItem() {
+            case .none:
+                break replayLoop
+            case .discarded:
+                discardedDuringReplay += 1
+            case let .record(record):
+                attempted += 1
+                guard handler(record) else {
+                    recordRetained()
+                    break replayLoop
+                }
+                try acknowledge(record)
+                accepted += 1
+            }
+        }
+
+        return try NativeCrashReplayResult(
+            attempted: attempted,
+            acknowledged: accepted,
+            discarded: discardedDuringReplay,
+            pending: finishReplay(),
+        )
+    }
+
+    func recordRetained() {
+        lock.lock()
+        lastOutcome = .retained
+        lock.unlock()
+    }
+
     func finishReplay() throws -> Int {
         lock.lock()
         defer { lock.unlock() }
@@ -192,10 +245,47 @@ private extension NativeCrashCapture {
         lock.unlock()
     }
 
-    func nextPendingReport() throws -> NativeCrashRecord? {
+    func nextReplayItem() throws -> ReplayItem {
         lock.lock()
         defer { lock.unlock() }
-        return try pendingReportsLocked().first
+        guard let store else {
+            throw NativeCrashError(.notInstalled)
+        }
+        try verifyStorageLocked()
+        let ids = store.reportIDs.sorted()
+        guard ids.count <= configuration.maxStoredReports,
+              Set(ids).count == ids.count,
+              ids.allSatisfy({ $0 > 0 })
+        else {
+            throw NativeCrashError(.reportCorrupt)
+        }
+        guard let id = ids.first else {
+            return .none
+        }
+        guard let rawReport = store.report(for: id) else {
+            throw NativeCrashError(.reportChanged)
+        }
+
+        do {
+            let record = try sanitizer.makeRecord(reportID: id, rawReport: rawReport)
+            guard store.reportIDs.sorted() == ids else {
+                throw NativeCrashError(.reportChanged)
+            }
+            return .record(record)
+        } catch let error as NativeCrashError where error.code == .reportCorrupt {
+            guard store.reportIDs.sorted() == ids else {
+                throw NativeCrashError(.reportChanged)
+            }
+            store.deleteReport(with: id)
+            guard !store.reportIDs.contains(id) else {
+                throw NativeCrashError(.reportDeletionFailed)
+            }
+            if discarded < Int.max {
+                discarded += 1
+            }
+            lastOutcome = .discarded
+            return .discarded
+        }
     }
 
     func acknowledge(_ record: NativeCrashRecord) throws {
@@ -279,4 +369,10 @@ private extension NativeCrashCapture {
             throw NativeCrashError(.processChanged)
         }
     }
+}
+
+private enum ReplayItem {
+    case none
+    case discarded
+    case record(NativeCrashRecord)
 }

@@ -136,8 +136,8 @@ struct NativeCrashCaptureTests {
         #expect(!publicDescription.contains("user@example.invalid"))
     }
 
-    @Test("a malformed oldest report blocks replay without deleting later work")
-    func malformedReportFailsClosed() throws {
+    @Test("a malformed oldest report is discarded without blocking later work")
+    func malformedReportIsDiscarded() throws {
         let malformed: [String: Any] = [
             "report": ["id": "not-a-uuid", "timestamp": "2026-07-17T09:10:11Z"],
             "crash": ["error": ["type": "signal"]],
@@ -152,11 +152,40 @@ struct NativeCrashCaptureTests {
         let capture = try makeCapture(driver: FakeCrashEngineDriver(store: store))
         try capture.install()
 
-        #expect(throws: NativeCrashError.self) {
-            _ = try capture.replayPendingReports { _ in true }
+        var delivered: [String] = []
+        let result = try capture.replayPendingReports { record in
+            delivered.append(record.eventID)
+            return true
         }
-        #expect(store.reportIDs == [1, 2])
-        #expect(store.deletedIDs.isEmpty)
+
+        #expect(result.attempted == 1)
+        #expect(result.acknowledged == 1)
+        #expect(result.discarded == 1)
+        #expect(result.pending == 0)
+        #expect(delivered == ["067bdeca-8cd2-44b9-bf9c-8068bf8eb2c8"])
+        #expect(store.reportIDs.isEmpty)
+        #expect(store.deletedIDs == [1, 2])
+    }
+
+    @Test("a corrupt report is retained when verified discard fails")
+    func corruptReportDiscardFailureIsFailClosed() throws {
+        let malformed: [String: Any] = [
+            "report": ["id": "not-a-uuid", "timestamp": "2026-07-17T09:10:11Z"],
+            "crash": ["error": ["type": "signal"]],
+        ]
+        let store = FakeCrashReportStore(reports: [1: malformed])
+        store.ignoresDeleteReport = true
+        let capture = try makeCapture(driver: FakeCrashEngineDriver(store: store))
+        try capture.install()
+
+        do {
+            _ = try capture.replayPendingReports { _ in true }
+            Issue.record("expected discard verification to fail")
+        } catch let error as NativeCrashError {
+            #expect(error.code == .reportDeletionFailed)
+        }
+        #expect(store.reportIDs == [1])
+        #expect(try capture.status().lastOutcome == .failed)
     }
 
     @Test("report replacement before acknowledgement fails closed")

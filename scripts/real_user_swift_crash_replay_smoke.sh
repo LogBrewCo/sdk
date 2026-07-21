@@ -29,6 +29,50 @@ package_path="$(dirname "$(find "$package_extract" -mindepth 2 -maxdepth 2 -name
 test -f "$package_path/Package.swift"
 package_digest="$(shasum -a 256 "$package_archive" | awk '{print $1}')"
 
+base_app_dir="$tmp_dir/base-consumer"
+mkdir -p "$base_app_dir/Sources/BaseProbe"
+cat > "$base_app_dir/Package.swift" <<EOF
+// swift-tools-version: 6.0
+
+import PackageDescription
+
+let package = Package(
+    name: "CrashFreeConsumer",
+    platforms: [.macOS(.v13)],
+    dependencies: [
+        .package(name: "logbrew-swift", path: "$package_path"),
+    ],
+    targets: [
+        .executableTarget(
+            name: "BaseProbe",
+            dependencies: [
+                .product(name: "LogBrew", package: "logbrew-swift"),
+            ]
+        ),
+    ]
+)
+EOF
+cat > "$base_app_dir/Sources/BaseProbe/main.swift" <<'EOF'
+import LogBrew
+
+let client = try LogBrewClient.create(
+    apiKey: "LOGBREW_API_KEY",
+    sdkName: "swift-base-proof",
+    sdkVersion: "0.1.0"
+)
+guard client.pendingEvents() == 0 else {
+    fatalError("base consumer state mismatch")
+}
+print(#"{"ok":true,"crashEngine":false}"#)
+EOF
+base_scratch="$tmp_dir/base-build"
+swift build --package-path "$base_app_dir" --scratch-path "$base_scratch" --product BaseProbe >/dev/null
+"$base_scratch/debug/BaseProbe" > "$tmp_dir/base.json"
+grep -qx '{"ok":true,"crashEngine":false}' "$tmp_dir/base.json"
+if nm "$base_scratch/debug/BaseProbe" | grep -Eq 'KSCrash|kscrash_'; then
+  exit 1
+fi
+
 app_dir="$tmp_dir/consumer"
 mkdir -p "$app_dir/Sources/CrashProbe" "$app_dir/Sources/ObjCProbe"
 
@@ -64,7 +108,6 @@ let package = Package(
 EOF
 
 cat > "$app_dir/Sources/CrashProbe/main.swift" <<'EOF'
-import CryptoKit
 import Darwin
 import Foundation
 import LogBrew
@@ -84,6 +127,19 @@ let configuration = try NativeCrashConfiguration(
 )
 let capture = NativeCrashCapture(configuration: configuration)
 try capture.install()
+
+if mode == "clean" {
+    guard try capture.status().pending == 0 else {
+        exit(1)
+    }
+    try capture.stopReplay()
+    let stopped = try capture.status()
+    guard stopped.lifecycle == .stopped, stopped.pending == 0 else {
+        exit(1)
+    }
+    print(#"{"ok":true,"normalExit":true}"#)
+    exit(0)
+}
 
 if mode == "write" {
     let syntheticReport: [String: Any] = [
@@ -154,36 +210,25 @@ let client = try LogBrewClient.create(
     sdkVersion: "0.1.0",
     maxRetries: 1
 )
+let durableParent = storage.deletingLastPathComponent()
+    .appendingPathComponent("durable-parent", isDirectory: true)
+try FileManager.default.createDirectory(at: durableParent, withIntermediateDirectories: false)
+try client.enableDurableDelivery(options: DurableDeliveryOptions(directory: durableParent))
 let transport = try HTTPTransport(endpoint: endpoint, timeout: 5)
-var attempts = 0
-var bodyDigests: [String] = []
-
-let replay = try capture.replayPendingReports { record in
-    do {
-        try record.enqueue(in: client)
-        let preview = try client.previewJSON()
-        bodyDigests.append(SHA256.hash(data: Data(preview.utf8)).map { String(format: "%02x", $0) }.joined())
-        let response = try client.flush(transport: transport)
-        attempts = response.attempts
-        return (200 ..< 300).contains(response.statusCode)
-    } catch {
-        return false
-    }
-}
+let replay = try capture.replayPendingReports(in: client, transport: transport)
 let status = try capture.status()
 guard replay.attempted == 2,
       replay.acknowledged == 2,
+      replay.discarded == 0,
       replay.pending == 0,
       status.pending == 0,
-      attempts == 2,
-      bodyDigests.count == 2,
-      bodyDigests.allSatisfy({ $0.count == 64 })
+      status.acknowledged == 2,
+      status.discarded == 0
 else {
     exit(1)
 }
 
-let digestJSON = bodyDigests.map { "\"\($0)\"" }.joined(separator: ",")
-print("{\"ok\":true,\"attempts\":\(attempts),\"acknowledged\":\(replay.acknowledged),\"pending\":\(status.pending),\"bodySha256\":[\(digestJSON)]}")
+print("{\"ok\":true,\"acknowledged\":\(replay.acknowledged),\"discarded\":\(replay.discarded),\"pending\":\(status.pending)}")
 EOF
 
 cat > "$app_dir/Sources/ObjCProbe/main.m" <<'EOF'
@@ -292,7 +337,9 @@ assert actual_attributes["level"] == "critical"
 assert actual_attributes["metadata"] == {"crash.mechanism": "signal", "crash.replayed": True}
 assert actual_attributes["title"] == "Native application crash"
 assert set(actual_attributes).issubset({"level", "metadata", "nativeStackFrames", "title"})
-for frame in actual_attributes.get("nativeStackFrames", []):
+actual_frames = actual_attributes.get("nativeStackFrames")
+assert isinstance(actual_frames, list) and 1 <= len(actual_frames) <= 32
+for frame in actual_frames:
     assert set(frame) == {"architecture", "imageUuid", "instructionOffset"}
     assert frame["architecture"] in {"arm64", "arm64e", "x86_64"}
     assert len(frame["imageUuid"]) == 36 and frame["imageUuid"] == frame["imageUuid"].lower()
@@ -331,6 +378,12 @@ swift build --package-path "$app_dir" --scratch-path "$scratch" --product ObjCPr
 "$scratch/debug/ObjCProbe"
 binary_digest="$(shasum -a 256 "$scratch/debug/CrashProbe" | awk '{print $1}')"
 
+clean_storage="$tmp_dir/clean-store"
+"$scratch/debug/CrashProbe" clean "$clean_storage" > "$tmp_dir/clean-first.json"
+"$scratch/debug/CrashProbe" clean "$clean_storage" > "$tmp_dir/clean-second.json"
+grep -qx '{"ok":true,"normalExit":true}' "$tmp_dir/clean-first.json"
+grep -qx '{"ok":true,"normalExit":true}' "$tmp_dir/clean-second.json"
+
 storage="$tmp_dir/crash-store"
 if bash -c '"$1" write "$2"' _ "$scratch/debug/CrashProbe" "$storage" \
   > "$tmp_dir/writer.json" 2> "$tmp_dir/writer.stderr"; then
@@ -357,10 +410,9 @@ with open(sys.argv[2], encoding="utf-8") as handle:
 binary_digest = sys.argv[3]
 package_digest = sys.argv[4]
 assert reader["ok"] is True
-assert reader["attempts"] == 2
 assert reader["acknowledged"] == 2
+assert reader["discarded"] == 0
 assert reader["pending"] == 0
-assert reader["bodySha256"] == intake["bodySha256"]
 assert intake["requests"] == 4
 assert intake["events"] == 2
 assert intake["syntheticFrames"] == 2
@@ -369,8 +421,10 @@ assert len(package_digest) == 64
 print(json.dumps({
     "ok": True,
     "artifact": "installed-swiftpm",
+    "baseCrashEngineLinked": False,
     "processes": 2,
     "hardCrash": True,
+    "normalExitProcesses": 2,
     "syntheticEnvelope": True,
     "packageSha256": package_digest,
     "installedBinarySha256": binary_digest,
@@ -379,6 +433,7 @@ print(json.dumps({
     "events": 2,
     "syntheticFrames": 2,
     "acknowledged": 2,
+    "discarded": 0,
     "pending": 0,
     "bodySha256": intake["bodySha256"],
 }, sort_keys=True, separators=(",", ":")))

@@ -68,6 +68,7 @@ final class FakeCrashEngineDriver: CrashEngineDriving {
 final class FakeCrashReportStore: CrashReportStoring {
     var reports: [Int64: [String: Any]]
     var ignoresDeleteAll = false
+    var ignoresDeleteReport = false
     private(set) var deletedIDs: [Int64] = []
 
     init(reports: [Int64: [String: Any]] = [:]) {
@@ -84,7 +85,9 @@ final class FakeCrashReportStore: CrashReportStoring {
 
     func deleteReport(with id: Int64) {
         deletedIDs.append(id)
-        reports.removeValue(forKey: id)
+        if !ignoresDeleteReport {
+            reports.removeValue(forKey: id)
+        }
     }
 
     func deleteAllReports() {

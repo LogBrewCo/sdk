@@ -29,9 +29,14 @@ struct NativeStackFrameSanitizer {
         }
 
         let images = rawImages.compactMap(parseImage)
-        guard identitiesAreUnique(images) else {
-            return nil
-        }
+        return mapFrames(rawFrames, to: images)
+    }
+
+    private func mapFrames(_ rawFrames: [Any], to images: [BinaryImage]) -> [NativeStackFrame]? {
+        let identityCounts = Dictionary(
+            images.map { ($0.identity, 1) },
+            uniquingKeysWith: +,
+        )
 
         var result: [NativeStackFrame] = []
         result.reserveCapacity(min(rawFrames.count, Self.maxFrames))
@@ -47,6 +52,9 @@ struct NativeStackFrameSanitizer {
             }
             guard let image = matchingImages.first else {
                 continue
+            }
+            guard identityCounts[image.identity] == 1 else {
+                return nil
             }
             guard result.count < Self.maxFrames else {
                 continue
@@ -80,14 +88,6 @@ struct NativeStackFrameSanitizer {
             return nil
         }
         return BinaryImage(start: start, end: end, uuid: uuid, architecture: architecture)
-    }
-
-    private func identitiesAreUnique(_ images: [BinaryImage]) -> Bool {
-        var identities: Set<ImageIdentity> = []
-        for image in images where !identities.insert(image.identity).inserted {
-            return false
-        }
-        return true
     }
 
     private func architecture(cpuType: Int32, cpuSubtype: Int32) -> NativeStackArchitecture? {

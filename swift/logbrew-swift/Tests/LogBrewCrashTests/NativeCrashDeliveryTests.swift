@@ -116,8 +116,8 @@ struct NativeCrashDeliveryTests {
         #expect(store.reportIDs == [1])
     }
 
-    @Test("oversized reports fail closed without skipping them")
-    func oversizedReportFailsClosed() throws {
+    @Test("oversized reports are discarded without invoking delivery")
+    func oversizedReportIsDiscarded() throws {
         let store = FakeCrashReportStore(reports: [
             1: rawReport(
                 id: "8F12B746-0C79-4CC6-A077-98ED62F094B2",
@@ -138,10 +138,52 @@ struct NativeCrashDeliveryTests {
         )
         try capture.install()
 
-        #expect(throws: NativeCrashError.self) {
-            _ = try capture.pendingReports()
+        var deliveries = 0
+        let result = try capture.replayPendingReports { _ in
+            deliveries += 1
+            return true
         }
+
+        #expect(result.attempted == 0)
+        #expect(result.acknowledged == 0)
+        #expect(result.discarded == 1)
+        #expect(result.pending == 0)
+        #expect(deliveries == 0)
+        #expect(store.reportIDs.isEmpty)
+        let health = try capture.status()
+        #expect(health.discarded == 1)
+        #expect(health.lastOutcome == .discarded)
+    }
+
+    @Test("durable replay deletes a report only after accepted delivery")
+    func durableReplayAcknowledgesOnlyAcceptedDelivery() throws {
+        let store = FakeCrashReportStore(reports: [1: sampleRawReport()])
+        let capture = try makeCapture(driver: FakeCrashEngineDriver(store: store))
+        try capture.install()
+        let client = try makeClient(name: "durable-replay", maxRetries: 0)
+        let durableParent = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: durableParent, withIntermediateDirectories: false)
+        try client.enableDurableDelivery(options: DurableDeliveryOptions(directory: durableParent))
+        let transport = RecordingTransport(scriptedResponses: [.status(503), .status(202)])
+
+        let retained = try capture.replayPendingReports(in: client, transport: transport)
+
+        #expect(retained.attempted == 1)
+        #expect(retained.acknowledged == 0)
+        #expect(retained.pending == 1)
+        #expect(client.pendingEvents() == 1)
         #expect(store.reportIDs == [1])
+        let firstBody = try #require(transport.sentBodies.first)
+
+        let accepted = try capture.replayPendingReports(in: client, transport: transport)
+
+        #expect(accepted.attempted == 1)
+        #expect(accepted.acknowledged == 1)
+        #expect(accepted.pending == 0)
+        #expect(client.pendingEvents() == 0)
+        #expect(store.reportIDs.isEmpty)
+        #expect(transport.sentBodies == [firstBody, firstBody])
     }
 
     @Test("explicit purge verifies deletion and reports only fixed health")
@@ -208,11 +250,12 @@ struct NativeCrashDeliveryTests {
         #expect(store.reportIDs == [1])
     }
 
-    private func makeClient(name: String) throws -> LogBrewClient {
+    private func makeClient(name: String, maxRetries: Int = 2) throws -> LogBrewClient {
         try LogBrewClient.create(
             apiKey: "LOGBREW_API_KEY",
             sdkName: name,
             sdkVersion: "0.1.0",
+            maxRetries: maxRetries,
         )
     }
 

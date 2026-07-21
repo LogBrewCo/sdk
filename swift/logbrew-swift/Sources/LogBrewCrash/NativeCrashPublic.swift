@@ -37,6 +37,7 @@ public enum NativeCrashLifecycleState: Int, Sendable {
     case installed
     case replaying
     case failed
+    case stopped
 }
 
 @objc(LBWNativeCrashOutcome)
@@ -46,6 +47,7 @@ public enum NativeCrashOutcome: Int, Sendable {
     case retained
     case purged
     case failed
+    case discarded
 }
 
 public enum NativeCrashErrorCode: String, Sendable {
@@ -248,11 +250,13 @@ private enum ExistingEvent {
 public final class NativeCrashReplayResult: NSObject, @unchecked Sendable {
     public let attempted: Int
     public let acknowledged: Int
+    public let discarded: Int
     public let pending: Int
 
-    init(attempted: Int, acknowledged: Int, pending: Int) {
+    init(attempted: Int, acknowledged: Int, discarded: Int, pending: Int) {
         self.attempted = attempted
         self.acknowledged = acknowledged
+        self.discarded = discarded
         self.pending = pending
     }
 }
@@ -263,17 +267,20 @@ public final class NativeCrashStatus: NSObject, @unchecked Sendable {
     public let lifecycle: NativeCrashLifecycleState
     public let pending: Int
     public let acknowledged: Int
+    public let discarded: Int
     public let lastOutcome: NativeCrashOutcome
 
     init(
         lifecycle: NativeCrashLifecycleState,
         pending: Int,
         acknowledged: Int,
+        discarded: Int,
         lastOutcome: NativeCrashOutcome,
     ) {
         self.lifecycle = lifecycle
         self.pending = pending
         self.acknowledged = acknowledged
+        self.discarded = discarded
         self.lastOutcome = lastOutcome
     }
 }
