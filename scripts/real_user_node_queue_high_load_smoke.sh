@@ -189,8 +189,9 @@ const response = await client.flush(createNodeFetchTransport({
 await closeServer(intakeServer);
 
 assertEqual(response.statusCode, 202, "flush status");
-assertEqual(response.attempts, 2, "retryAttempts");
-assertEqual(intakeRequests.length, 2, "retry request count");
+assertEqual(response.attempts, 11, "retryAttempts");
+assertEqual(intakeRequests.length, 11, "bounded batch request count");
+assertEqual(intakeRequests[1].body, intakeRequests[0].body, "first batch retry body identity");
 assertEqual(client.pendingEvents(), 0, "queue after successful flush");
 for (const request of intakeRequests) {
   assertEqual(request.authorization, `Bearer ${serverApiKey}`, "authorization header");
@@ -201,16 +202,28 @@ for (const request of intakeRequests) {
   assertNoUnsafeContent(request.body);
 }
 
-const payload = JSON.parse(intakeRequests.at(-1).body);
-assertEqual(payload.sdk.name, "node-queue-high-load-smoke", "sdk name");
-assertEqual(payload.events.length, maxQueueSize, "flushed event count");
-assertEqual(payload.events[0].type, "span", "first event type");
-assertEqual(payload.events[0].id, "evt_node_queue_high_load_0000", "first flushed id");
-assertEqual(payload.events.at(-1).id, "evt_node_queue_high_load_0999", "last flushed id");
-if (payload.events.some((event) => event.id === "evt_node_queue_high_load_1000")) {
+const requestPayloads = intakeRequests.map((request) => JSON.parse(request.body));
+const acceptedPayloads = requestPayloads.slice(1);
+assertEqual(acceptedPayloads.length, 10, "accepted bounded batch count");
+for (const payload of requestPayloads) {
+  assertEqual(payload.sdk.name, "node-queue-high-load-smoke", "sdk name");
+  assertEqual(payload.events.length, 100, "bounded batch event count");
+}
+
+const acceptedEvents = acceptedPayloads.flatMap((payload) => payload.events);
+assertEqual(acceptedEvents.length, maxQueueSize, "flushed event count");
+for (let index = 0; index < acceptedEvents.length; index += 1) {
+  assertEqual(
+    acceptedEvents[index].id,
+    `evt_node_queue_high_load_${index.toString().padStart(4, "0")}`,
+    `accepted event order ${index}`
+  );
+}
+assertEqual(acceptedEvents[0].type, "span", "first event type");
+if (acceptedEvents.some((event) => event.id === "evt_node_queue_high_load_1000")) {
   throw new Error("dropped queue span leaked into flushed payload");
 }
-const firstSpan = payload.events[0].attributes;
+const firstSpan = acceptedEvents[0].attributes;
 assertEqual(firstSpan.name, "amqp process email.high_load_batch", "span name");
 assertEqual(firstSpan.status, "ok", "span status");
 assertEqual(firstSpan.metadata.framework, "node:queue", "queue framework metadata");
@@ -270,10 +283,12 @@ assertEqual(shutdownError.code, "shutdown_error", "post-shutdown error code");
 
 console.log(JSON.stringify({
   ok: true,
+  acceptedBatches: acceptedPayloads.length,
   droppedEvents: client.droppedEvents(),
-  flushedSpans: payload.events.length,
+  flushedSpans: acceptedEvents.length,
   highVolumeQueueSpans,
   pendingEvents: client.pendingEvents(),
+  requestCount: intakeRequests.length,
   retryAttempts: response.attempts,
   shutdownStatus: shutdownResponse.statusCode
 }));
@@ -340,11 +355,13 @@ from pathlib import Path
 summary = json.loads(Path(sys.argv[1]).read_text())
 expected = {
     "ok": True,
+    "acceptedBatches": 10,
     "droppedEvents": 500,
     "flushedSpans": 1000,
     "highVolumeQueueSpans": 1500,
     "pendingEvents": 0,
-    "retryAttempts": 2,
+    "requestCount": 11,
+    "retryAttempts": 11,
     "shutdownStatus": 202,
 }
 for key, value in expected.items():
