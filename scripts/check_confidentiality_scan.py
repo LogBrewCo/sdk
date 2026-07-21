@@ -201,10 +201,10 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_go_http_phase_timing_reference(relative_text, line, terms):
         return True
 
-    if is_dotnet_httpclient_host_reference(relative_text, terms):
+    if is_kotlin_coroutine_context_reference(relative_text, line, terms):
         return True
 
-    if is_kotlin_coroutine_context_reference(relative_text, line, terms):
+    if is_dotnet_httpclient_host_reference(relative_text, terms):
         return True
 
     if relative_text.endswith(".cs") and is_dotnet_cancellation_token_reference(line):
