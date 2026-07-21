@@ -195,13 +195,13 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_support_ticket_diagnostics_reference(relative_text, line):
         return True
 
+    if is_kscrash_report_deletion_policy_reference(relative_text, line, terms):
+        return True
+
     if is_kotlin_okhttp_phase_timing_reference(relative_text, line, terms):
         return True
 
     if is_go_http_phase_timing_reference(relative_text, line, terms):
-        return True
-
-    if is_kscrash_report_deletion_policy_reference(relative_text, line, terms):
         return True
 
     if is_kotlin_coroutine_context_reference(relative_text, line, terms):
