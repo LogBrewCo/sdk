@@ -1,6 +1,7 @@
 "use strict";
 
 const { SdkError } = require("@logbrew/sdk");
+const { createAutomaticEventId } = require("./automatic-event-id.cjs");
 const { normalizeSpanId, normalizeTraceId } = require("./trace-context.cjs");
 
 const INSTRUMENTED_PG_QUERY = Symbol.for("@logbrew/node.instrumentedPgQuery");
@@ -314,9 +315,9 @@ function isSafePgMetadataKey(key) {
 
 function defaultPgSpanId({ error, operationKind, operationName }) {
   if (error !== undefined && error !== null && operationName === "pg.query") {
-    return "evt_node_pg_query_error";
+    return createAutomaticEventId("evt_node_pg", "query_error");
   }
-  return `evt_node_pg_${slugify(`${operationKind}_${operationName}`)}`;
+  return createAutomaticEventId("evt_node_pg", slugify(`${operationKind}_${operationName}`));
 }
 
 function exceptionSpanEvents(error) {

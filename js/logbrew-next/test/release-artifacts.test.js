@@ -6,6 +6,8 @@ import test from "node:test";
 
 import { withLogBrewNextReleaseArtifacts } from "../release-artifacts.js";
 
+const PROJECT_ID = "550e8400-e29b-41d4-a716-446655440000";
+
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-next-release-artifacts-"));
 }
@@ -49,6 +51,7 @@ test("Next release-artifact helper wraps config and writes a ready manifest afte
       release: "2026.06.18-next-helper",
       environment: "production",
       service: "checkout-next-web",
+      projectId: PROJECT_ID,
       repositoryUrl: "https://github.com/LogBrewCo/sdk",
       commitSha: "0123456789abcdef0123456789abcdef01234567",
       stripSourcePrefix: [root],
@@ -70,6 +73,7 @@ test("Next release-artifact helper wraps config and writes a ready manifest afte
     assert.equal(manifest.release, "2026.06.18-next-helper");
     assert.equal(manifest.environment, "production");
     assert.equal(manifest.service, "checkout-next-web");
+    assert.equal(manifest.projectId, PROJECT_ID);
     assert.equal(manifest.artifacts.length, 1);
     assert.equal(manifest.artifacts[0].minifiedSource.minifiedUrl, "app:///_next/static/chunks/checkout.js");
     assert.equal(manifest.artifacts[0].sourceMap.hasSourcesContent, false);
@@ -97,4 +101,67 @@ test("Next release-artifact helper preserves explicit source-map settings and as
 
   assert.equal(config.productionBrowserSourceMaps, false);
   assert.equal(typeof config.compiler.runAfterProductionCompile, "function");
+});
+
+test("Next release-artifact helper can dry-run hosted upload after the app hook", async () => {
+  const root = tempDir();
+  const messages = [];
+  const originalInfo = console.info;
+  try {
+    const distDir = path.join(root, ".next");
+    const chunksDir = path.join(distDir, "static", "chunks");
+    writeNextChunk(chunksDir);
+    const calls = [];
+    console.info = (message) => messages.push(message);
+
+    const config = withLogBrewNextReleaseArtifacts(
+      {
+        compiler: {
+          async runAfterProductionCompile() {
+            calls.push("app");
+          },
+        },
+      },
+      {
+        release: "web@1.2.3",
+        environment: "production",
+        service: "checkout-next-web",
+        projectId: PROJECT_ID,
+        root,
+        upload: {
+          endpoint: "https://api.logbrew.com/api/release-artifacts",
+          allowHostedUpload: true,
+          dryRun: true,
+        },
+      },
+    );
+
+    await config.compiler.runAfterProductionCompile({ distDir });
+
+    assert.deepEqual(calls, ["app"]);
+    assert.deepEqual(messages, ["LogBrew release artifacts: dry_run (1 artifact)"]);
+  } finally {
+    console.info = originalInfo;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Next release-artifact upload rejects a non-callable app production hook", () => {
+  assert.throws(
+    () => withLogBrewNextReleaseArtifacts(
+      { compiler: { runAfterProductionCompile: "not-a-function" } },
+      {
+        release: "web@1.2.3",
+        environment: "production",
+        service: "checkout-next-web",
+        projectId: PROJECT_ID,
+        upload: {
+          endpoint: "https://api.logbrew.com/api/release-artifacts",
+          allowHostedUpload: true,
+          dryRun: true,
+        },
+      },
+    ),
+    /runAfterProductionCompile must be a function when upload is enabled/u,
+  );
 });

@@ -417,9 +417,9 @@ const response = await highLoadClient.flush(createNodeFetchTransport({
 await closeServer(intakeServer);
 
 assertEqual(response.statusCode, 202, "flush status");
-assertEqual(response.attempts, 11, "retry attempts");
-assertEqual(intakeRequests.length, 11, "bounded batch request count");
-assertEqual(intakeRequests[1].body, intakeRequests[0].body, "first batch retry body identity");
+assertEqual(response.batches, 10, "accepted batch count");
+assertEqual(response.attempts, response.batches + 1, "retry attempts across batches");
+assertEqual(intakeRequests.length, response.attempts, "request count");
 assertEqual(highLoadClient.pendingEvents(), 0, "high-load queue after flush");
 for (const request of intakeRequests) {
   assertEqual(request.authorization, `Bearer ${serverApiKey}`, "authorization header");
@@ -432,27 +432,33 @@ for (const request of intakeRequests) {
     }
   }
 }
-
-const requestPayloads = intakeRequests.map((request) => JSON.parse(request.body));
-const acceptedPayloads = requestPayloads.slice(1);
-assertEqual(acceptedPayloads.length, 10, "accepted bounded batch count");
-for (const payload of requestPayloads) {
-  assertEqual(payload.events.length, 100, "bounded batch event count");
+assertEqual(intakeRequests[0].body, intakeRequests[1].body, "stable retry body");
+const acceptedPayloads = intakeRequests.slice(1).map((request) => JSON.parse(request.body));
+assertEqual(acceptedPayloads.length, response.batches, "accepted payload count");
+for (let index = 0; index < acceptedPayloads.length; index += 1) {
+  if (acceptedPayloads[index].events.length > 100) {
+    throw new Error(`batch ${index} exceeded event limit`);
+  }
+  if (Buffer.byteLength(intakeRequests[index + 1].body, "utf8") > 256 * 1024) {
+    throw new Error(`batch ${index} exceeded byte limit`);
+  }
 }
-const acceptedEvents = acceptedPayloads.flatMap((payload) => payload.events);
-assertEqual(acceptedEvents.length, 1000, "flushed event count");
-for (let index = 0; index < acceptedEvents.length; index += 1) {
+const flushedEvents = acceptedPayloads.flatMap((payload) => payload.events);
+assertEqual(flushedEvents.length, 1000, "flushed event count");
+assertEqual(new Set(flushedEvents.map((event) => event.id)).size, 1000, "unique event count");
+for (let index = 0; index < flushedEvents.length; index += 1) {
   assertEqual(
-    acceptedEvents[index].attributes.spanId,
+    flushedEvents[index].attributes.spanId,
     `b${String(index + 1).padStart(15, "0")}`,
     `accepted span order ${index}`
   );
 }
 
 console.log(JSON.stringify({
+  batches: response.batches,
   capturedEvents: events.length,
   droppedEvents: highLoadClient.droppedEvents(),
-  flushedEvents: acceptedEvents.length,
+  flushedEvents: flushedEvents.length,
   ok: true,
   package: "@logbrew/prisma",
   retryAttempts: response.attempts

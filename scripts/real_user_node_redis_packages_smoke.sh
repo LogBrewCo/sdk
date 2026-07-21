@@ -78,6 +78,13 @@ function assert(condition, message) {
   }
 }
 
+function findAutomaticEvent(events, semanticPrefix) {
+  const idPattern = new RegExp(`^${semanticPrefix}_[a-f0-9]{32}$`);
+  const matches = events.filter((event) => idPattern.test(event.id));
+  assert(matches.length === 1, `expected one automatic event for ${semanticPrefix}, got ${matches.length}`);
+  return matches[0];
+}
+
 function assertMetadata(metadata, expected, message, preview) {
   for (const [key, value] of Object.entries(expected)) {
     if (metadata?.[key] !== value) {
@@ -226,8 +233,8 @@ async function runNodeRedisSmoke() {
   assert(redis.sendCommand === originalSendCommand, "node-redis sendCommand was not restored");
 
   const payload = JSON.parse(logbrewClient.previewJson());
-  const pipelineSpan = payload.events.find((event) => event.id === "evt_node_redis_pipeline");
-  const multiErrorSpan = payload.events.find((event) => event.id === "evt_node_redis_multi_error");
+  const pipelineSpan = findAutomaticEvent(payload.events, "evt_node_redis_pipeline");
+  const multiErrorSpan = findAutomaticEvent(payload.events, "evt_node_redis_multi_error");
   assert(pipelineSpan?.attributes?.name === "redis PIPELINE redis.pipeline", `missing node-redis pipeline span: ${logbrewClient.previewJson()}`);
   assertMetadata(pipelineSpan.attributes.metadata, {
     "db.namespace": "profiles",
@@ -299,8 +306,8 @@ async function runIoredisSmoke() {
   assert(redis.sendCommand === originalSendCommand, "ioredis sendCommand was not restored");
 
   const payload = JSON.parse(logbrewClient.previewJson());
-  const pipelineSpan = payload.events.find((event) => event.id === "evt_node_redis_pipeline");
-  const pipelineErrorSpan = payload.events.find((event) => event.id === "evt_node_redis_pipeline_error");
+  const pipelineSpan = findAutomaticEvent(payload.events, "evt_node_redis_pipeline");
+  const pipelineErrorSpan = findAutomaticEvent(payload.events, "evt_node_redis_pipeline_error");
   assert(pipelineSpan?.attributes?.name === "redis PIPELINE redis.pipeline", `missing ioredis pipeline span: ${logbrewClient.previewJson()}`);
   assertMetadata(pipelineSpan.attributes.metadata, {
     "db.namespace": "profiles",

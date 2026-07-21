@@ -1,6 +1,7 @@
 "use strict";
 
 const { SdkError } = require("@logbrew/sdk");
+const { createAutomaticEventId } = require("./automatic-event-id.cjs");
 const { normalizeSpanId, normalizeTraceId } = require("./trace-context.cjs");
 
 const INSTRUMENTED_REDIS_SEND_COMMAND = Symbol.for("@logbrew/node.instrumentedRedisSendCommand");
@@ -606,18 +607,27 @@ function isSafeRedisMetadataKey(key) {
 
 function defaultRedisSpanId({ error, operationKind, operationName }) {
   if (operationName === "redis.connect") {
-    return error !== undefined && error !== null ? "evt_node_redis_connect_error" : "evt_node_redis_connect";
+    return createAutomaticEventId(
+      "evt_node_redis",
+      error !== undefined && error !== null ? "connect_error" : "connect"
+    );
   }
   if (operationName === "redis.pipeline") {
-    return error !== undefined && error !== null ? "evt_node_redis_pipeline_error" : "evt_node_redis_pipeline";
+    return createAutomaticEventId(
+      "evt_node_redis",
+      error !== undefined && error !== null ? "pipeline_error" : "pipeline"
+    );
   }
   if (operationName === "redis.multi") {
-    return error !== undefined && error !== null ? "evt_node_redis_multi_error" : "evt_node_redis_multi";
+    return createAutomaticEventId(
+      "evt_node_redis",
+      error !== undefined && error !== null ? "multi_error" : "multi"
+    );
   }
   if (error !== undefined && error !== null) {
-    return `evt_node_redis_${slugify(operationKind)}_error`;
+    return createAutomaticEventId("evt_node_redis", `${slugify(operationKind)}_error`);
   }
-  return `evt_node_redis_${slugify(`${operationKind}_${operationName}`)}`;
+  return createAutomaticEventId("evt_node_redis", slugify(`${operationKind}_${operationName}`));
 }
 
 function exceptionSpanEvents(error) {

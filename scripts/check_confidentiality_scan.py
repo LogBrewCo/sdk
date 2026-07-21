@@ -477,7 +477,12 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
     if relative_text == "js/logbrew-js/README.md" and "--token-env LOGBREW_RELEASE_ARTIFACT_AUTH" in line:
         return True
     if relative_text in {
+        "js/logbrew-js/release-artifacts-build.cjs",
         "js/logbrew-js/release-artifacts-upload.js",
+        "js/logbrew-js/vite-release-artifacts.d.cts",
+        "js/logbrew-js/vite-release-artifacts.d.ts",
+        "js/logbrew-next/release-artifacts.d.cts",
+        "js/logbrew-next/release-artifacts.d.ts",
         "js/logbrew-react-native/release-artifacts.cjs",
         "js/logbrew-react-native/release-artifacts.d.cts",
         "js/logbrew-react-native/release-artifacts.d.ts",
@@ -491,6 +496,8 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
             "parsed.hostname",
             "parsed.username",
             "parsed.password",
+            "parsedEndpoint.username",
+            "parsedEndpoint.password",
             "const hostname =",
             "hostname =",
             "hostname ===",
@@ -506,6 +513,7 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
             '"token-env": "string"',
             "--token-env",
             "release-artifact token",
+            "tokenEnv",
             "const tokenEnv",
             "tokenEnv?: string",
             "if (tokenEnv",
@@ -550,10 +558,13 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
         "scripts/real_user_js_release_artifact_cli_smoke.sh",
     } and "token=placeholder" in line:
         return True
+    if relative_text == "js/logbrew-js/test/release-artifacts-cli.test.js" and "tokenEnv: authEnvName" in line:
+        return True
     if relative_text in {
         "docs/backend-contracts/release-artifact-symbolication-2026-06-13.md",
         "docs/competitor-research/source-maps-debug-symbols-2026-06-13.md",
         "js/logbrew-js/README.md",
+        "js/logbrew-next/README.md",
     }:
         lower_line = line.lower()
         return "upload" in lower_line and "artifact" in lower_line

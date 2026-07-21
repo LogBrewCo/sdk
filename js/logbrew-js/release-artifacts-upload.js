@@ -8,6 +8,7 @@ import path from "node:path";
 
 import {
   byteSize,
+  normalizeProjectId,
   printJson,
   readJsonObject,
   requireBuildDir,
@@ -119,7 +120,7 @@ function isLoopbackEndpoint(parsed) {
 function requireUploadEndpoint(endpoint, allowHosted) {
   const parsed = parseEndpoint(endpoint);
   if (isLoopbackEndpoint(parsed)) {
-    return;
+    return parsed;
   }
   if (!allowHosted) {
     throw new Error("release artifact hosted upload requires explicit --allow-hosted; use loopback endpoints for local proof");
@@ -133,6 +134,7 @@ function requireUploadEndpoint(endpoint, allowHosted) {
   if (parsed.search || parsed.hash) {
     throw new Error("hosted release artifact upload endpoints must not include query strings or fragments");
   }
+  return parsed;
 }
 
 function quoteMultipartValue(value) {
@@ -237,7 +239,7 @@ async function uploadWithRetries({ endpoint, token, body, boundary, maxRetries, 
   };
 }
 
-function requireReadyJavaScriptManifest(manifest) {
+function requireReadyJavaScriptManifest(manifest, requireProjectId) {
   if (manifest.artifactType !== "javascript_source_map_manifest") {
     throw new Error("only javascript_source_map_manifest uploads are supported by this verifier");
   }
@@ -247,6 +249,13 @@ function requireReadyJavaScriptManifest(manifest) {
   if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length === 0) {
     throw new Error("manifest must contain at least one JavaScript release artifact");
   }
+  normalizeProjectId(
+    manifest.projectId,
+    requireProjectId
+      ? "hosted release artifact uploads require manifest projectId as a UUID"
+      : "manifest projectId must be a UUID when provided",
+    requireProjectId,
+  );
 }
 
 function requireArtifactFile(artifact, buildDir, section, requiredFields) {
@@ -272,8 +281,8 @@ function requireArtifactFile(artifact, buildDir, section, requiredFields) {
   return filePath;
 }
 
-function collectUploadFiles(manifest, buildDir) {
-  requireReadyJavaScriptManifest(manifest);
+function collectUploadFiles(manifest, buildDir, requireProjectId) {
+  requireReadyJavaScriptManifest(manifest, requireProjectId);
   const files = [];
   for (const [index, artifact] of manifest.artifacts.entries()) {
     if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
@@ -319,14 +328,14 @@ export async function runUploadJs(args) {
   const options = parseOptions(args);
   try {
     const endpoint = requireOption(options, "endpoint");
-    requireUploadEndpoint(endpoint, Boolean(options["allow-hosted"]));
+    const parsedEndpoint = requireUploadEndpoint(endpoint, Boolean(options["allow-hosted"]));
     const buildDir = requireBuildDir(requireOption(options, "build-dir"));
     const manifestPath = path.resolve(requireOption(options, "manifest"));
     if (!fs.existsSync(manifestPath)) {
       throw new Error(`manifest file does not exist: ${options.manifest}`);
     }
     const manifest = readJsonObject(manifestPath, "manifest");
-    const files = collectUploadFiles(manifest, buildDir);
+    const files = collectUploadFiles(manifest, buildDir, !isLoopbackEndpoint(parsedEndpoint));
     const dryRun = Boolean(options["dry-run"]);
     const report = buildUploadReport({ endpoint, manifest, files, dryRun });
 

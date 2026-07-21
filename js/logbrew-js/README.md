@@ -25,7 +25,7 @@ node node_modules/@logbrew/sdk/examples/index.mjs agent-timeline
 npm --prefix node_modules/@logbrew/sdk/examples run agent-timeline
 ```
 
-For Vite apps, add the build-time release-artifact plugin to `vite.config.js`. It enables hidden source maps when your config has not chosen a source-map mode, injects matching Debug IDs after the build, strips embedded source text and local source prefixes, and writes a privacy-bounded manifest next to your output:
+For Vite apps, add the build-time release-artifact plugin to `vite.config.js`. It enables hidden source maps when your config has not chosen a source-map mode, injects matching Debug IDs after the build, strips embedded source text and local source prefixes, writes a privacy-bounded manifest, and can upload the prepared artifacts before the build completes:
 
 ```js
 import { createLogBrewViteReleaseArtifactsPlugin } from "@logbrew/sdk/vite-release-artifacts";
@@ -36,13 +36,19 @@ export default {
       release: "web@1.2.3",
       environment: "production",
       service: "checkout-web",
-      minifiedPathPrefix: "https://cdn.example/assets"
+      projectId: "550e8400-e29b-41d4-a716-446655440000",
+      minifiedPathPrefix: "https://cdn.example/assets",
+      upload: {
+        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        allowHostedUpload: true,
+        maxRetries: 2
+      }
     })
   ]
 };
 ```
 
-The plugin runs only during Vite builds. It does not upload source maps, open support tickets, use account/session API values, or claim backend symbolication support.
+Set `LOGBREW_RELEASE_ARTIFACT_TOKEN` in the build environment to a dedicated release-artifact token. Use `tokenEnv` when your CI uses a different environment variable name, or `dryRun: true` to prepare the complete build output without a network request. The plugin runs only during Vite builds, keeps upload disabled when `upload` is omitted, and fails the build when preparation or upload cannot complete safely. It never uses normal SDK ingest keys or account/session API values.
 
 The package also ships the dependency-free `logbrew-release-artifacts` command for JavaScript source-map preparation and upload. Use it after your frontend build to inject matching Debug IDs, strip embedded source text by default, and create a privacy-bounded manifest that can be inspected before upload:
 
@@ -55,6 +61,7 @@ npx logbrew-release-artifacts prepare-js \
 
 npx logbrew-release-artifacts manifest-js \
   --build-dir dist \
+  --project-id 550e8400-e29b-41d4-a716-446655440000 \
   --release web@1.2.3 \
   --environment production \
   --service checkout-web \
@@ -93,7 +100,7 @@ npx logbrew-release-artifacts upload-js \
   --allow-hosted
 ```
 
-Non-loopback endpoints require `--allow-hosted`, must use HTTPS, and must not include embedded auth values, query strings, or fragments. The upload command never uses normal SDK ingest keys or account/session API auth values. Full backend-symbolicated issue support is separate from artifact upload until your project has completed hosted symbolication for its release.
+Non-loopback endpoints require `--allow-hosted`, a UUID `projectId` created by `manifest-js --project-id`, HTTPS, and no embedded auth values, query strings, or fragments. Local loopback preparation remains valid without a project ID. The upload command never uses normal SDK ingest keys or account/session API auth values. Full backend-symbolicated issue support is separate from artifact upload until your project has completed hosted symbolication for its release.
 
 When you capture a JavaScript error, use `createIssueAttributesFromError()` to keep error metadata structured and source-map-friendly without sending raw stack text by default. Pass a Debug ID map from your app-owned build setup when you want the issue event to carry release-artifact metadata:
 
@@ -127,7 +134,7 @@ try {
 }
 ```
 
-The helper records the error name/message, the first parsed frame filename/line/column with query strings and hashes removed, optional trace/release/environment/service metadata, and optional `releaseArtifactDebugId` metadata. It also emits an `issueGroupingKey` based on source, error type, and the sanitized first frame, plus an optional app-owned `issueFingerprint` when you pass a stable, safe, low-cardinality `fingerprint`. Nested `Error.cause` chains and `AggregateError.errors` are summarized as bounded cause counts, types, and sources without copying nested messages or stacks. Local absolute frame paths are reduced before enqueueing. Raw stack text is included only with `includeErrorStack: true`.
+The helper records the error name/message and up to 32 ordered generated `stackFrames`, with query strings, hashes, and local absolute prefixes removed. Each frame carries only filename, positive line/column, and an optional matched Debug ID. Existing first-frame metadata remains available for compatible grouping and tooling. The helper also emits an `issueGroupingKey` based on source, error type, and the sanitized first frame, plus an optional app-owned `issueFingerprint` when you pass a stable, safe, low-cardinality `fingerprint`. Nested `Error.cause` chains and `AggregateError.errors` are summarized as bounded cause counts, types, and sources without copying nested messages or stacks. Raw stack text is included only with `includeErrorStack: true`.
 
 ## Example
 
@@ -379,6 +386,35 @@ const client = LogBrewClient.create({
 
 Prefer removing sensitive values at the source before calling LogBrew. `eventFilter` is intentionally drop-only: it avoids broad mutable event processing, global scopes, and hidden context that can make observability payloads harder to reason about.
 
+## Automatic Delivery
+
+When a client owns a `transport`, it automatically sends queued work after 5 seconds or when 50 events are waiting, whichever happens first. The one-shot timer starts only after capture, is `unref()`'d on Node.js, and is cancelled by manual flush, purge, or shutdown. Automatic sends reuse the same serialized flush path, immutable retry body, accepted-prefix acknowledgement, and persistent queue as manual calls. They do not install process, signal, page, or exit hooks.
+
+```js
+const transport = RecordingTransport.alwaysAccept();
+const client = LogBrewClient.create({
+  apiKey: "LOGBREW_API_KEY",
+  sdkName: "checkout-api",
+  sdkVersion: "1.0.0",
+  transport,
+  deliveryIntervalMs: 5000,
+  deliveryQueueThreshold: 50
+});
+
+client.log("evt_checkout_ready", new Date().toISOString(), {
+  level: "info",
+  message: "checkout ready"
+});
+
+const health = client.deliveryHealth();
+console.log(JSON.stringify(health));
+await client.shutdown();
+```
+
+Set `automaticDelivery: false` for explicit manual-only operation; the owned transport still lets you call `flush()` and `shutdown()` without passing it again. Lower-level clients without an owned transport remain manual and continue to accept `flush(transport)` and `shutdown(transport)`. Retryable automatic failures use equal-jitter exponential backoff capped at 60 seconds. Authentication, rate-limit, and other non-retryable failures pause automatic sends while retaining the exact failed batch; an explicit successful `flush()` with the owned transport clears the pause.
+
+`deliveryHealth()` returns a frozen, JSON-serializable schema. It reports lifecycle and delivery states, memory or persistent storage, current and startup-hydrated queue counts/bytes, in-flight and coalesced work, client-lifetime accepted totals, fixed drop reasons, bounded retry state, transport status classes, and monotonic-within-client transition timestamps. Counters saturate instead of overflowing. The snapshot never includes event content or IDs, messages or attributes, authentication material, transport destinations or headers, filesystem paths, arbitrary metadata, numeric HTTP status, response text, or raw errors.
+
 ## Queue Bounds
 
 `LogBrewClient` keeps a count-and-byte-bounded in-memory queue so heavy logging bursts cannot grow without limit before the next flush. The defaults are 1000 events and 4 MiB of compact serialized event data. `pendingEvents()` and `pendingBytes()` expose the retained amount without exposing event content.
@@ -398,7 +434,9 @@ const client = LogBrewClient.create({
 });
 ```
 
-When either queue limit is full, LogBrew drops the incoming event and keeps earlier context unchanged. `queue_overflow` means the event-count limit was reached, `queue_bytes_overflow` means the compact event-byte limit was reached, and `event_too_large` means one event could not fit a request body by itself. Drop callbacks are advisory and must not interrupt application logging. This is not offline persistence; flush regularly and use app-owned retry/shutdown handling for production delivery.
+When either queue limit is full, LogBrew drops the incoming event and keeps earlier context unchanged. `queue_overflow` means the event-count limit was reached, `queue_bytes_overflow` means the compact event-byte limit was reached, and `event_too_large` means one event could not fit a request body by itself. Drop callbacks are advisory and must not interrupt application logging. The default queue remains memory-only; automatic delivery reduces normal flush work, while the app still calls `shutdown()` at its owned graceful-lifecycle boundary.
+
+Server runtimes can supply an explicit synchronous `eventStore` when they need restart recovery. The core loads and revalidates compact records during client creation, persists each accepted event before adding it to memory, persists an accepted prefix before removing it from memory, and closes the store only after successful shutdown. `purgePendingEvents()` clears both layers only while no flush or shutdown is queued or active. Implementations must provide synchronous `load`, `append`, `acknowledge`, `purge`, and `close` methods; use the encrypted `persistentQueue` adapter in `@logbrew/node` instead of writing a filesystem adapter from scratch.
 
 Flush requests are also bounded. Core and Node default to 100 events and 256 KiB of exact UTF-8 JSON per request. The browser factory defaults to 64 KiB so its normal request body cannot exceed the existing keepalive transport ceiling. A flush sends one queue snapshot in order, splitting it on either limit. The response reports total `attempts` and acknowledged `batches`. Existing clients that only set `maxQueueSize` keep working; the byte and batch settings are additive and are also accepted by the Node and browser client factories.
 
@@ -406,7 +444,7 @@ Flush requests are also bounded. Core and Node default to 100 events and 256 KiB
 
 `flush()` calls are serialized so concurrent callers cannot send the same queue prefix. Each call owns the events present when its turn starts. Events captured while its transport is awaiting remain queued for the next flush. A 2xx response removes only that acknowledged prefix; if a later batch fails, the failed batch and every later event remain in their original order. Retries reuse the exact same request body.
 
-A `401` transport response raises `SdkError` with code `unauthenticated`; a `429` response raises code `rate_limited` and includes `retryAfterMs` when the transport exposes a `Retry-After` delay. `maxRetries` is the number of retries after the first attempt and must be a non-negative integer. `shutdown()` rejects new capture while it drains the serialized queue, closes only after success, and reopens the intact unsent remainder after failure. LogBrew does not derive account usage locally, sleep between retries, start a background timer, or drop queued events on rate limits; the app owns retry timing and can ask backend-owned usage/quota APIs for current account state.
+A `401` transport response raises `SdkError` with code `unauthenticated`; a `429` response raises code `rate_limited` and includes `retryAfterMs` when the transport exposes a `Retry-After` delay. Those outcomes pause automatic delivery because authentication and account usage are app/service-owned recovery states, not SDK retry loops. HTTP `408`, `5xx`, and retryable `TransportError` exhaustion retain the failed bytes and schedule bounded equal-jitter backoff. `maxRetries` is the number of immediate retries after the first attempt and must be a non-negative integer. `shutdown()` cancels automatic scheduling, rejects new capture while it drains once, closes only after success, and reopens the intact unsent remainder after failure. LogBrew does not derive account usage locally, sleep inside transport retries, or drop queued events on rate limits.
 
 ## Support Ticket Drafts
 

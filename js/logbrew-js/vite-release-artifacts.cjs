@@ -1,8 +1,15 @@
 "use strict";
 
-const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+
+const {
+  createReleaseArtifactUploadArgs,
+  formatReleaseArtifactUploadSummary,
+  normalizeReleaseArtifactProjectId,
+  normalizeReleaseArtifactUploadOptions,
+  runReleaseArtifactCli,
+} = require("./release-artifacts-build.cjs");
 
 const PACKAGE_DIR = path.dirname(require.resolve("./package.json"));
 const CLI_PATH = path.join(PACKAGE_DIR, "release-artifacts.js");
@@ -37,35 +44,6 @@ function normalizeStringArray(value, name) {
   return value.map((item) => item.trim());
 }
 
-function parseJson(stdout, command) {
-  try {
-    return JSON.parse(stdout);
-  } catch (error) {
-    throw new Error(`LogBrew release-artifact ${command} did not return JSON`, { cause: error });
-  }
-}
-
-function validationErrors(report) {
-  if (report?.validation && Array.isArray(report.validation.errors)) {
-    return report.validation.errors.filter((message) => typeof message === "string" && message.trim() !== "");
-  }
-  return [];
-}
-
-function runReleaseArtifactCli(command, args) {
-  const result = spawnSync(process.execPath, [CLI_PATH, command, ...args], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-    windowsHide: true
-  });
-  const report = result.stdout ? parseJson(result.stdout, command) : null;
-  if (result.status !== 0) {
-    const details = validationErrors(report).join("; ") || result.stderr.trim() || `exit code ${result.status}`;
-    throw new Error(`LogBrew release-artifact ${command} failed: ${details}`);
-  }
-  return { report, stdout: result.stdout };
-}
-
 function resolvePathFromRoot(root, value) {
   return path.isAbsolute(value) ? path.resolve(value) : path.resolve(root, value);
 }
@@ -88,6 +66,7 @@ function createLogBrewViteReleaseArtifactsPlugin(options) {
   const release = requiredString(options, "release");
   const environment = requiredString(options, "environment");
   const service = requiredString(options, "service");
+  const projectId = normalizeReleaseArtifactProjectId(options?.projectId, "Vite");
   const minifiedPathPrefix = requiredString(options, "minifiedPathPrefix");
   const repositoryUrl = optionalString(options, "repositoryUrl");
   const commitSha = optionalString(options, "commitSha");
@@ -96,8 +75,10 @@ function createLogBrewViteReleaseArtifactsPlugin(options) {
   const stripSourcesContent = options?.stripSourcesContent !== false;
   const enableSourceMaps = options?.enableSourceMaps !== false;
   const userSourcePrefixes = normalizeStringArray(options?.stripSourcePrefix, "stripSourcePrefix");
+  const upload = normalizeReleaseArtifactUploadOptions(options?.upload, { integration: "Vite", projectId });
   let viteRoot = process.cwd();
   let viteOutDir = "dist";
+  let viteLogger = null;
 
   return {
     name: "logbrew-vite-release-artifacts",
@@ -112,6 +93,7 @@ function createLogBrewViteReleaseArtifactsPlugin(options) {
     configResolved(config) {
       viteRoot = config?.root ? path.resolve(config.root) : process.cwd();
       viteOutDir = config?.build?.outDir || "dist";
+      viteLogger = config?.logger && typeof config.logger.info === "function" ? config.logger : null;
     },
     async closeBundle() {
       const buildDir = resolveBuildDir(viteRoot, viteOutDir, explicitBuildDir);
@@ -125,7 +107,7 @@ function createLogBrewViteReleaseArtifactsPlugin(options) {
         prepareArgs.push("--strip-source-prefix", prefix);
       }
 
-      runReleaseArtifactCli("prepare-js", prepareArgs);
+      runReleaseArtifactCli(CLI_PATH, "prepare-js", prepareArgs);
 
       const manifestArgs = [
         "--build-dir",
@@ -145,10 +127,21 @@ function createLogBrewViteReleaseArtifactsPlugin(options) {
       if (commitSha) {
         manifestArgs.push("--commit-sha", commitSha);
       }
+      if (projectId) {
+        manifestArgs.push("--project-id", projectId);
+      }
 
-      const { stdout } = runReleaseArtifactCli("manifest-js", manifestArgs);
+      const { stdout } = runReleaseArtifactCli(CLI_PATH, "manifest-js", manifestArgs);
       fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
       fs.writeFileSync(manifestPath, stdout, "utf8");
+      if (upload) {
+        const { report } = runReleaseArtifactCli(
+          CLI_PATH,
+          "upload-js",
+          createReleaseArtifactUploadArgs(buildDir, manifestPath, upload)
+        );
+        viteLogger?.info(formatReleaseArtifactUploadSummary(report));
+      }
     }
   };
 }

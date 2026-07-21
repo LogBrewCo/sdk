@@ -20,22 +20,23 @@ remove_tmp_dir() {
 trap remove_tmp_dir EXIT
 
 app_dir="$tmp_dir/next-artifact-app"
-mkdir -p "$app_dir/app" "$app_dir/components"
+pack_dir="$tmp_dir/packs"
+mkdir -p "$app_dir/app" "$app_dir/components" "$pack_dir"
 
 sdk_pack_json="$tmp_dir/sdk-pack.json"
 next_pack_json="$tmp_dir/next-pack.json"
 browser_pack_json="$tmp_dir/browser-pack.json"
 (
   cd "$repo_root/js/logbrew-js"
-  npm pack --silent --json > "$sdk_pack_json"
+  npm pack --pack-destination "$pack_dir" --silent --json > "$sdk_pack_json"
 )
 (
   cd "$repo_root/js/logbrew-next"
-  npm pack --silent --json > "$next_pack_json"
+  npm pack --pack-destination "$pack_dir" --silent --json > "$next_pack_json"
 )
 (
   cd "$repo_root/js/logbrew-browser"
-  npm pack --silent --json > "$browser_pack_json"
+  npm pack --pack-destination "$pack_dir" --silent --json > "$browser_pack_json"
 )
 sdk_tgz="$(
   python3 - "$sdk_pack_json" <<'PY'
@@ -46,6 +47,7 @@ from pathlib import Path
 pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
 files = {entry["path"] for entry in pack["files"]}
 for expected in {
+    "release-artifacts-build.cjs",
     "release-artifacts.js",
     "release-artifacts-symbolication.js",
     "vite-release-artifacts.cjs",
@@ -91,12 +93,41 @@ for expected in {
 print(pack["filename"])
 PY
 )"
-sdk_tgz="$repo_root/js/logbrew-js/$sdk_tgz"
-next_tgz="$repo_root/js/logbrew-next/$next_tgz"
-browser_tgz="$repo_root/js/logbrew-browser/$browser_tgz"
+sdk_tgz="$pack_dir/$sdk_tgz"
+next_tgz="$pack_dir/$next_tgz"
+browser_tgz="$pack_dir/$browser_tgz"
 cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
 cp "$next_tgz" "$tmp_dir/logbrew-next.tgz"
 cp "$browser_tgz" "$tmp_dir/logbrew-browser.tgz"
+
+port_file="$tmp_dir/fake-intake-port"
+state_file="$tmp_dir/fake-intake-state.json"
+expected_bearer="fake-next-release-artifact-auth-value"
+
+python3 "$repo_root/scripts/js_release_artifact_fake_intake.py" \
+  --port-file "$port_file" \
+  --state-file "$state_file" \
+  --expected-bearer "$expected_bearer" \
+  --source-sentinel "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" \
+  --query-placeholder "logbrew_next_cache_placeholder" \
+  --hash-fragment "logbrew_next_hash_placeholder" &
+server_pid=$!
+
+for _ in $(seq 1 100); do
+  if [[ -s "$port_file" ]]; then
+    break
+  fi
+  sleep 0.05
+done
+
+if [[ ! -s "$port_file" ]]; then
+  echo "fake Next.js release-artifact intake did not start" >&2
+  exit 1
+fi
+
+intake_port="$(cat "$port_file")"
+export LOGBREW_RELEASE_ARTIFACT_ENDPOINT="http://127.0.0.1:${intake_port}/retry-success?ignored=query#ignored"
+export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_bearer"
 
 cat > "$app_dir/package.json" <<'JSON'
 {
@@ -127,8 +158,14 @@ export default withLogBrewNextReleaseArtifacts(
     release: "2026.06.18-next",
     environment: "production",
     service: "checkout-next-web",
+    projectId: "550e8400-e29b-41d4-a716-446655440000",
     minifiedPathPrefix: "app:///_next/static/chunks?logbrew_next_cache_placeholder=1#logbrew_next_hash_placeholder",
-    manifestPath: ".next/logbrew-release-artifacts.json"
+    manifestPath: ".next/logbrew-release-artifacts.json",
+    upload: {
+      endpoint: process.env.LOGBREW_RELEASE_ARTIFACT_ENDPOINT,
+      maxRetries: 2,
+      retryDelay: 0
+    }
   }
 );
 JS
@@ -185,8 +222,14 @@ if (typeof withLogBrewNextReleaseArtifacts !== "function" || defaultExport !== w
   throw new Error("expected CommonJS Next release-artifact helper export");
 }
 JS
-  NEXT_TELEMETRY_DISABLED=1 npm run --silent build >/dev/null
+  NEXT_TELEMETRY_DISABLED=1 npm run --silent build > "$tmp_dir/next-build.log" 2>&1
 )
+
+grep -Fq "LogBrew release artifacts: uploaded (" "$tmp_dir/next-build.log"
+if grep -Fq "$expected_bearer" "$tmp_dir/next-build.log"; then
+  echo "Next build output leaked the release-artifact auth value" >&2
+  exit 1
+fi
 
 chunks_dir="$app_dir/.next/static/chunks"
 if [[ ! -d "$chunks_dir" ]]; then
@@ -311,6 +354,7 @@ assert "debugId=" in bundle_source
 assert source_map["debug_id"] == debug_id
 assert "sourcesContent" not in source_map
 assert manifest["validation"]["status"] == "ready"
+assert manifest["projectId"] == "550e8400-e29b-41d4-a716-446655440000"
 assert artifact["debugId"] == debug_id
 assert artifact["sourceMap"]["hasSourcesContent"] is False
 assert artifact["minifiedSource"]["minifiedUrl"].startswith("app:///_next/static/chunks/")
@@ -444,59 +488,17 @@ assert "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_
 assert tmp_dir not in serialized_runtime_issue
 PY
 
-port_file="$tmp_dir/fake-intake-port"
-state_file="$tmp_dir/fake-intake-state.json"
-expected_bearer="fake-next-release-artifact-auth-value"
-
-python3 "$repo_root/scripts/js_release_artifact_fake_intake.py" \
-  --port-file "$port_file" \
-  --state-file "$state_file" \
-  --expected-bearer "$expected_bearer" \
-  --source-sentinel "LOGBREW_NEXT_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" \
-  --query-placeholder "logbrew_next_cache_placeholder" \
-  --hash-fragment "logbrew_next_hash_placeholder" &
-server_pid=$!
-
-for _ in $(seq 1 100); do
-  if [[ -s "$port_file" ]]; then
-    break
-  fi
-  sleep 0.05
-done
-
-if [[ ! -s "$port_file" ]]; then
-  echo "fake Next.js release-artifact intake did not start" >&2
-  exit 1
-fi
-
-endpoint_base="http://127.0.0.1:$(cat "$port_file")"
-export LOGBREW_RELEASE_ARTIFACT_TOKEN="$expected_bearer"
-upload_report="$tmp_dir/next-upload-report.json"
-"$release_artifacts_cli" upload-js \
-  --build-dir "$chunks_dir" \
-  --manifest "$ready_manifest" \
-  --endpoint "$endpoint_base/retry-success?ignored=query#ignored" \
-  --retry-delay 0 \
-  --max-retries 2 \
-  > "$upload_report"
-
-python3 - "$upload_report" "$state_file" "$tmp_dir" <<'PY'
+python3 - "$state_file" "$tmp_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-upload_report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-state = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-tmp_dir = sys.argv[3]
-
-assert upload_report["status"] == "uploaded"
-assert upload_report["retryCount"] == 1
-assert [attempt["httpStatus"] for attempt in upload_report["attempts"]] == [503, 202]
-assert upload_report["endpoint"].endswith("/retry-success")
-assert "ignored=query" not in json.dumps(upload_report)
+state = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[2]
 
 events = state["events"]
 assert [event["path"] for event in events].count("/retry-success") == 2
+assert all(event["authorized"] for event in events)
 assert all(event["containsManifest"] for event in events)
 assert all(event["containsSourceMapPart"] for event in events)
 assert all(event["containsMinifiedPart"] for event in events)
@@ -505,7 +507,7 @@ assert not any(event["containsAuthValue"] for event in events)
 assert not any(event["containsQueryPlaceholder"] for event in events)
 assert not any(event["containsHashFragment"] for event in events)
 assert not any(event["containsTempPath"] for event in events)
-assert tmp_dir not in json.dumps(upload_report)
+assert tmp_dir not in json.dumps(state)
 PY
 
 printf '%s\n' "real-user Next.js release artifact smoke ok"

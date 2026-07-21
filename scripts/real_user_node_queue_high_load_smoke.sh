@@ -75,6 +75,8 @@ import {
 } from "@logbrew/node";
 
 const highVolumeQueueSpans = 1500;
+const maxBatchBytes = 256 * 1024;
+const maxBatchEvents = 100;
 const maxQueueSize = 1000;
 const serverApiKey = "LOGBREW_SERVER_API_KEY";
 const drops = [];
@@ -189,9 +191,9 @@ const response = await client.flush(createNodeFetchTransport({
 await closeServer(intakeServer);
 
 assertEqual(response.statusCode, 202, "flush status");
-assertEqual(response.attempts, 11, "retryAttempts");
-assertEqual(intakeRequests.length, 11, "bounded batch request count");
-assertEqual(intakeRequests[1].body, intakeRequests[0].body, "first batch retry body identity");
+assertEqual(response.batches, 10, "accepted batch count");
+assertEqual(response.attempts, response.batches + 1, "retry attempts across batches");
+assertEqual(intakeRequests.length, response.attempts, "request count");
 assertEqual(client.pendingEvents(), 0, "queue after successful flush");
 for (const request of intakeRequests) {
   assertEqual(request.authorization, `Bearer ${serverApiKey}`, "authorization header");
@@ -202,28 +204,35 @@ for (const request of intakeRequests) {
   assertNoUnsafeContent(request.body);
 }
 
-const requestPayloads = intakeRequests.map((request) => JSON.parse(request.body));
-const acceptedPayloads = requestPayloads.slice(1);
-assertEqual(acceptedPayloads.length, 10, "accepted bounded batch count");
-for (const payload of requestPayloads) {
+assertEqual(intakeRequests[0].body, intakeRequests[1].body, "stable retry body");
+const acceptedPayloads = intakeRequests.slice(1).map((request) => JSON.parse(request.body));
+assertEqual(acceptedPayloads.length, response.batches, "accepted payload count");
+for (let index = 0; index < acceptedPayloads.length; index += 1) {
+  const payload = acceptedPayloads[index];
   assertEqual(payload.sdk.name, "node-queue-high-load-smoke", "sdk name");
-  assertEqual(payload.events.length, 100, "bounded batch event count");
+  if (payload.events.length > maxBatchEvents) {
+    throw new Error(`batch ${index} exceeded event limit: ${payload.events.length}`);
+  }
+  if (Buffer.byteLength(intakeRequests[index + 1].body, "utf8") > maxBatchBytes) {
+    throw new Error(`batch ${index} exceeded byte limit`);
+  }
 }
-
-const acceptedEvents = acceptedPayloads.flatMap((payload) => payload.events);
-assertEqual(acceptedEvents.length, maxQueueSize, "flushed event count");
-for (let index = 0; index < acceptedEvents.length; index += 1) {
+const flushedEvents = acceptedPayloads.flatMap((payload) => payload.events);
+assertEqual(flushedEvents.length, maxQueueSize, "flushed event count");
+for (let index = 0; index < flushedEvents.length; index += 1) {
   assertEqual(
-    acceptedEvents[index].id,
+    flushedEvents[index].id,
     `evt_node_queue_high_load_${index.toString().padStart(4, "0")}`,
     `accepted event order ${index}`
   );
 }
-assertEqual(acceptedEvents[0].type, "span", "first event type");
-if (acceptedEvents.some((event) => event.id === "evt_node_queue_high_load_1000")) {
+assertEqual(flushedEvents[0].type, "span", "first event type");
+assertEqual(flushedEvents[0].id, "evt_node_queue_high_load_0000", "first flushed id");
+assertEqual(flushedEvents.at(-1).id, "evt_node_queue_high_load_0999", "last flushed id");
+if (flushedEvents.some((event) => event.id === "evt_node_queue_high_load_1000")) {
   throw new Error("dropped queue span leaked into flushed payload");
 }
-const firstSpan = acceptedEvents[0].attributes;
+const firstSpan = flushedEvents[0].attributes;
 assertEqual(firstSpan.name, "amqp process email.high_load_batch", "span name");
 assertEqual(firstSpan.status, "ok", "span status");
 assertEqual(firstSpan.metadata.framework, "node:queue", "queue framework metadata");
@@ -284,8 +293,9 @@ assertEqual(shutdownError.code, "shutdown_error", "post-shutdown error code");
 console.log(JSON.stringify({
   ok: true,
   acceptedBatches: acceptedPayloads.length,
+  batches: response.batches,
   droppedEvents: client.droppedEvents(),
-  flushedSpans: acceptedEvents.length,
+  flushedSpans: flushedEvents.length,
   highVolumeQueueSpans,
   pendingEvents: client.pendingEvents(),
   requestCount: intakeRequests.length,
@@ -356,6 +366,7 @@ summary = json.loads(Path(sys.argv[1]).read_text())
 expected = {
     "ok": True,
     "acceptedBatches": 10,
+    "batches": 10,
     "droppedEvents": 500,
     "flushedSpans": 1000,
     "highVolumeQueueSpans": 1500,

@@ -26,13 +26,16 @@ cat > eslint.config.mjs <<'EOF'
 import js from "@eslint/js";
 
 const nodeGlobals = {
+  Buffer: "readonly",
   console: "readonly",
   fetch: "readonly",
   performance: "readonly",
   process: "readonly",
   Request: "readonly",
   Response: "readonly",
+  setImmediate: "readonly",
   setTimeout: "readonly",
+  structuredClone: "readonly",
   URL: "readonly"
 };
 

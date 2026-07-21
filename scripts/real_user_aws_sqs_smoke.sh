@@ -945,28 +945,31 @@ const highVolumeResponse = await highVolumeClient.flush(highVolumeTransport);
 highVolumeServer.close();
 await once(highVolumeServer, "close");
 
-if (highVolumeEvents.length !== 11 || highVolumeResponse.statusCode !== 202 || highVolumeResponse.attempts !== 11) {
+if (highVolumeEvents.length !== highVolumeResponse.attempts || highVolumeResponse.statusCode !== 202 || highVolumeResponse.batches !== 10 || highVolumeResponse.attempts !== 11) {
   throw new Error(`expected high-volume SQS retry success, got requests=${highVolumeEvents.length} status=${highVolumeResponse.statusCode} attempts=${highVolumeResponse.attempts}`);
 }
-if (highVolumeBodies[1] !== highVolumeBodies[0]) {
-  throw new Error("high-volume SQS first retry body changed");
+if (highVolumeBodies[0] !== highVolumeBodies[1]) {
+  throw new Error("expected byte-identical high-volume SQS retry body");
 }
-for (const payload of highVolumeEvents) {
-  if (payload.events.length !== 100) {
-    throw new Error(`expected bounded SQS batch size 100, got ${payload.events.length}`);
-  }
+const acceptedSqsEvents = highVolumeEvents.slice(1).flatMap((payload) => payload.events);
+if (acceptedSqsEvents.length !== maxQueueSize) {
+  throw new Error(`expected ${maxQueueSize} high-volume SQS events, got ${acceptedSqsEvents.length}`);
 }
-const acceptedHighVolumeEvents = highVolumeEvents.slice(1).flatMap((payload) => payload.events);
-if (acceptedHighVolumeEvents.length !== maxQueueSize) {
-  throw new Error(`expected ${maxQueueSize} accepted high-volume SQS events, got ${acceptedHighVolumeEvents.length}`);
-}
-for (let index = 0; index < acceptedHighVolumeEvents.length; index += 1) {
+for (let index = 0; index < acceptedSqsEvents.length; index += 1) {
   const expectedId = `evt_sqs_high_load_${index.toString().padStart(4, "0")}`;
-  if (acceptedHighVolumeEvents[index].id !== expectedId) {
+  if (acceptedSqsEvents[index].id !== expectedId) {
     throw new Error(`high-volume SQS event order mismatch at ${index}`);
   }
 }
-const highVolumePayloadText = JSON.stringify(highVolumeEvents);
+for (let index = 1; index < highVolumeEvents.length; index += 1) {
+  if (highVolumeEvents[index].events.length > 100) {
+    throw new Error(`high-volume SQS batch ${index - 1} exceeded event limit`);
+  }
+  if (Buffer.byteLength(highVolumeBodies[index], "utf8") > 256 * 1024) {
+    throw new Error(`high-volume SQS batch ${index - 1} exceeded byte limit`);
+  }
+}
+const highVolumePayloadText = JSON.stringify(highVolumeEvents.slice(1));
 for (const forbidden of [
   "burst-body",
   "burst-msg",
@@ -1002,4 +1005,4 @@ EOF
 
 node smoke.mjs
 
-echo "aws sqs real-user smoke ok: 1200 sends, 1000 flushed, 200 dropped, acceptedBatches=10, retryAttempts=11"
+echo "aws sqs real-user smoke ok: 1200 sends, 1000 flushed, 200 dropped, batches=10, retryAttempts=11"

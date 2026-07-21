@@ -77,6 +77,8 @@ import {
 } from "@logbrew/node";
 
 const highVolumeRequests = 1500;
+const maxBatchBytes = 256 * 1024;
+const maxBatchEvents = 100;
 const maxQueueSize = 1000;
 const requestBatchSize = 100;
 const serverApiKey = "LOGBREW_SERVER_API_KEY";
@@ -209,8 +211,9 @@ const response = await client.flush(createNodeFetchTransport({
 await closeServer(intakeServer);
 
 assertEqual(response.statusCode, 202, "flush status");
-assertEqual(response.attempts, 2, "retryAttempts");
-assertEqual(intakeRequests.length, 2, "retry request count");
+assertEqual(response.batches, 10, "accepted batch count");
+assertEqual(response.attempts, response.batches + 1, "retry attempts across batches");
+assertEqual(intakeRequests.length, response.attempts, "request count");
 assertEqual(client.pendingEvents(), 0, "queue after successful flush");
 for (const request of intakeRequests) {
   assertEqual(request.authorization, `Bearer ${serverApiKey}`, "authorization header");
@@ -221,11 +224,24 @@ for (const request of intakeRequests) {
   assertNoUnsafeContent(request.body);
 }
 
-const payload = JSON.parse(intakeRequests.at(-1).body);
-assertEqual(payload.sdk.name, "node-undici-high-load-smoke", "sdk name");
-assertEqual(payload.events.length, maxQueueSize, "flushed span count");
-assertEqual(payload.events[0].type, "span", "first event type");
-const spans = payload.events.map((event) => event.attributes);
+assertEqual(intakeRequests[0].body, intakeRequests[1].body, "stable retry body");
+const acceptedPayloads = intakeRequests.slice(1).map((request) => JSON.parse(request.body));
+assertEqual(acceptedPayloads.length, response.batches, "accepted payload count");
+for (let index = 0; index < acceptedPayloads.length; index += 1) {
+  const payload = acceptedPayloads[index];
+  assertEqual(payload.sdk.name, "node-undici-high-load-smoke", "sdk name");
+  if (payload.events.length > maxBatchEvents) {
+    throw new Error(`batch ${index} exceeded event limit`);
+  }
+  if (Buffer.byteLength(intakeRequests[index + 1].body, "utf8") > maxBatchBytes) {
+    throw new Error(`batch ${index} exceeded byte limit`);
+  }
+}
+const flushedEvents = acceptedPayloads.flatMap((payload) => payload.events);
+assertEqual(flushedEvents.length, maxQueueSize, "flushed span count");
+assertEqual(new Set(flushedEvents.map((event) => event.id)).size, maxQueueSize, "unique automatic span ids");
+assertEqual(flushedEvents[0].type, "span", "first event type");
+const spans = flushedEvents.map((event) => event.attributes);
 const errorSpans = spans.filter((span) => span.status === "error");
 if (errorSpans.length < 90) {
   throw new Error(`expected many HTTP error spans, got ${errorSpans.length}`);
@@ -293,8 +309,9 @@ assertEqual(shutdownError.code, "shutdown_error", "post-shutdown error code");
 
 console.log(JSON.stringify({
   ok: true,
+  batches: response.batches,
   droppedSpans: client.droppedEvents(),
-  flushedSpans: payload.events.length,
+  flushedSpans: flushedEvents.length,
   highVolumeRequests,
   pendingEvents: client.pendingEvents(),
   retryAttempts: response.attempts,
@@ -365,7 +382,8 @@ grep -q '"ok":true' "$tmp_dir/node-undici-high-load.stdout.json"
 grep -q '"highVolumeRequests":1500' "$tmp_dir/node-undici-high-load.stdout.json"
 grep -q '"flushedSpans":1000' "$tmp_dir/node-undici-high-load.stdout.json"
 grep -q '"droppedSpans":500' "$tmp_dir/node-undici-high-load.stdout.json"
-grep -q '"retryAttempts":2' "$tmp_dir/node-undici-high-load.stdout.json"
+grep -q '"batches":10' "$tmp_dir/node-undici-high-load.stdout.json"
+grep -q '"retryAttempts":11' "$tmp_dir/node-undici-high-load.stdout.json"
 grep -q '"shutdownStatus":202' "$tmp_dir/node-undici-high-load.stdout.json"
 
 echo "node undici high-load fake-intake smoke passed with $(node --version)"

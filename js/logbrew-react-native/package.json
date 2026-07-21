@@ -85,6 +85,17 @@
         "default": "./release-artifacts.cjs"
       },
       "default": "./release-artifacts.js"
+    },
+    "./metro": {
+      "import": {
+        "types": "./metro.d.ts",
+        "default": "./metro.js"
+      },
+      "require": {
+        "types": "./metro.d.cts",
+        "default": "./metro.cjs"
+      },
+      "default": "./metro.js"
     }
   },
   "files": [
@@ -119,6 +130,10 @@
     "release-artifacts.js",
     "release-artifacts.d.ts",
     "release-artifacts.d.cts",
+    "metro.cjs",
+    "metro.js",
+    "metro.d.ts",
+    "metro.d.cts",
     "README.md",
     "examples"
   ],
@@ -126,10 +141,12 @@
     "logbrew",
     "react-native",
     "mobile",
+    "metro",
     "observability",
     "logs",
     "traces",
-    "events"
+    "events",
+    "source-maps"
   ],
   "sideEffects": false,
   "engines": {
@@ -146,6 +163,6 @@
     "react-native": ">=0.72"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check apollo.js && node --check apollo.cjs && node --check instrumentation.js && node --check instrumentation.cjs && node --check lifecycle.js && node --check lifecycle.cjs && node --check metadata.js && node --check metadata.cjs && node --check native-bridge.js && node --check native-bridge.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check examples/index.mjs && node --check examples/apollo-link-spans.mjs && node --check examples/instrumentation-kit.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/native-bridge-scope.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs && node --test"
+    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check apollo.js && node --check apollo.cjs && node --check instrumentation.js && node --check instrumentation.cjs && node --check lifecycle.js && node --check lifecycle.cjs && node --check metadata.js && node --check metadata.cjs && node --check native-bridge.js && node --check native-bridge.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check metro.js && node --check metro.cjs && node --check examples/index.mjs && node --check examples/apollo-link-spans.mjs && node --check examples/instrumentation-kit.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/native-bridge-scope.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs && node --test"
   }
 }

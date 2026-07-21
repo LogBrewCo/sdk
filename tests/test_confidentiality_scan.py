@@ -130,6 +130,25 @@ class ConfidentialityScanTests(unittest.TestCase):
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
+    def test_allows_release_artifact_build_auth_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            js_dir = root / "js" / "logbrew-js"
+            next_dir = root / "js" / "logbrew-next"
+            js_dir.mkdir(parents=True)
+            next_dir.mkdir(parents=True)
+            auth_option = "to" + "kenEnv"
+            (js_dir / "release-artifacts-build.cjs").write_text(
+                f"const {auth_option} = upload.{auth_option};\n",
+                encoding="utf-8",
+            )
+            (next_dir / "release-artifacts.d.ts").write_text(
+                f"{auth_option}?: string;\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
     def test_reports_unexpected_sensitive_terms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

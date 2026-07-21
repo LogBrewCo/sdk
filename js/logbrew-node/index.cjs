@@ -10,6 +10,7 @@ const {
 } = require("@logbrew/sdk");
 const { AsyncLocalStorage } = require("node:async_hooks");
 const { errorMonitor } = require("node:events");
+const { createAutomaticEventId } = require("./automatic-event-id.cjs");
 const {
   createLogBrewQueueBatchSpanOptions: createQueueBatchSpanOptions,
   createLogBrewQueueTraceHeaders: createQueueTraceHeaders,
@@ -23,10 +24,15 @@ const { instrumentLogBrewMongooseModel: instrumentMongooseModel } = require("./m
 const { instrumentLogBrewPgClient: instrumentPgClient } = require("./pg.cjs");
 const { instrumentLogBrewRedisClient: instrumentRedisClient } = require("./redis.cjs");
 const { installLogBrewUndiciInstrumentation: installUndiciInstrumentation } = require("./undici.cjs");
+const { buildNodePersistentEventStore } = require("./persistent-event-store.cjs");
 
 const DEFAULT_SDK_NAME = "logbrew-node";
 const DEFAULT_SDK_VERSION = "0.1.0";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
+const DEFAULT_MAX_QUEUE_SIZE = 1000;
+const DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_BATCH_EVENTS = 100;
+const DEFAULT_MAX_BATCH_BYTES = 256 * 1024;
 const MAX_SPAN_EVENTS = 8;
 const FETCH_TIMING_METADATA_KEYS = Object.freeze({
   connectMs: "http.phase.connect_ms",
@@ -56,6 +62,12 @@ const httpClientInstrumentationHandles = new WeakMap();
 function createLogBrewNodeClient({
   serverApiKey,
   apiKey,
+  automaticDelivery,
+  deliveryIntervalMs,
+  deliveryQueueThreshold,
+  endpoint,
+  fetchImpl,
+  headers,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
   maxBatchBytes,
@@ -63,7 +75,9 @@ function createLogBrewNodeClient({
   maxRetries = 2,
   maxQueueBytes,
   maxQueueSize,
-  onEventDropped
+  onEventDropped,
+  persistentQueue,
+  transport
 } = {}) {
   const authKey = serverApiKey ?? apiKey ?? readEnvServerApiKey() ?? readEnvApiKey();
   if (!authKey) {
@@ -72,17 +86,48 @@ function createLogBrewNodeClient({
       "createLogBrewNodeClient requires serverApiKey, apiKey, LOGBREW_SERVER_API_KEY, or LOGBREW_API_KEY"
     );
   }
-  return LogBrewClient.create({
-    apiKey: authKey,
-    sdkName,
-    sdkVersion,
-    maxRetries,
-    ...(maxBatchBytes !== undefined ? { maxBatchBytes } : {}),
-    ...(maxBatchEvents !== undefined ? { maxBatchEvents } : {}),
-    ...(maxQueueBytes !== undefined ? { maxQueueBytes } : {}),
-    ...(maxQueueSize !== undefined ? { maxQueueSize } : {}),
-    ...(onEventDropped !== undefined ? { onEventDropped } : {})
-  });
+  if (persistentQueue !== undefined && (!persistentQueue || Array.isArray(persistentQueue) || typeof persistentQueue !== "object")) {
+    throw new SdkError("configuration_error", "persistentQueue must be an object");
+  }
+  const limits = {
+    maxBatchBytes: maxBatchBytes ?? DEFAULT_MAX_BATCH_BYTES,
+    maxBatchEvents: maxBatchEvents ?? DEFAULT_MAX_BATCH_EVENTS,
+    maxQueueBytes: maxQueueBytes ?? DEFAULT_MAX_QUEUE_BYTES,
+    maxQueueSize: maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE
+  };
+  const eventStore = persistentQueue === undefined
+    ? undefined
+    : buildNodePersistentEventStore({
+      SdkError,
+      directory: persistentQueue.directory,
+      encryptionKey: persistentQueue.encryptionKey,
+      limits,
+      onWarning: persistentQueue.onWarning,
+      sdkName
+    });
+  const ownedTransport = transport ?? createNodeFetchTransport({ endpoint, fetchImpl, headers });
+  try {
+    return LogBrewClient.create({
+      apiKey: authKey,
+      automaticDelivery,
+      deliveryIntervalMs,
+      deliveryQueueThreshold,
+      eventStore,
+      sdkName,
+      sdkVersion,
+      maxRetries,
+      transport: ownedTransport,
+      ...limits,
+      ...(onEventDropped !== undefined ? { onEventDropped } : {})
+    });
+  } catch (error) {
+    try {
+      eventStore?.close();
+    } catch {
+      // Preserve the client configuration or recovery failure.
+    }
+    throw error;
+  }
 }
 
 function createNodeFetchTransport({
@@ -109,7 +154,10 @@ function createNodeFetchTransport({
           },
           method: "POST"
         });
-        return { statusCode: response.status, attempts: 1 };
+        const retryAfterMs = retryAfterMsFromHeaders(response.headers);
+        return retryAfterMs === undefined
+          ? { statusCode: response.status, attempts: 1 }
+          : { statusCode: response.status, attempts: 1, retryAfterMs };
       } catch (error) {
         throw TransportError.network(`fetch failed: ${errorMessage(error)}`);
       }
@@ -724,7 +772,14 @@ function resolveClient(options, req, res) {
   if (options.client) {
     return options.client;
   }
-  return createLogBrewNodeClient(options);
+  const transport = typeof options.transport === "function"
+    ? undefined
+    : options.transport ?? RecordingTransport.alwaysAccept();
+  return createLogBrewNodeClient({
+    ...options,
+    automaticDelivery: false,
+    transport
+  });
 }
 
 function resolveTransport(options, req, res, client) {
@@ -953,7 +1008,10 @@ async function operationWithLogBrewSpan(kind, operationName, options = {}) {
   const operationKind = normalizeDatabaseOperationKind(options.operationKind);
   const startedAt = nowMs(options);
   const trace = createChildTraceContext(helperName, resolveOperationTrace(options, getActiveLogBrewTrace()), options);
-  const id = options.id ?? `evt_node_${kind}_${slugify(`${system}_${operationKind}_${operationName}`)}`;
+  const id = options.id ?? createAutomaticEventId(
+    `evt_node_${kind}`,
+    slugify(`${system}_${operationKind}_${operationName}`)
+  );
 
   try {
     const result = await activeTraceContext.run(trace, options.operation);
@@ -1502,11 +1560,11 @@ function getFetchMethod(input, init = {}) {
 }
 
 function defaultAxiosSpanId({ method, path }) {
-  return `evt_node_axios_${slugify(`${method}_${path}`)}`;
+  return createAutomaticEventId("evt_node_axios", slugify(`${method}_${path}`));
 }
 
 function defaultHttpClientSpanId({ method, path }) {
-  return `evt_node_http_client_${slugify(`${method}_${path}`)}`;
+  return createAutomaticEventId("evt_node_http_client", slugify(`${method}_${path}`));
 }
 
 function getFetchUrl(input) {
@@ -1524,11 +1582,14 @@ function isRequest(input) {
 }
 
 function defaultFetchSpanId({ method, path }) {
-  return `evt_node_fetch_${slugify(`${method}_${path}`)}`;
+  return createAutomaticEventId("evt_node_fetch", slugify(`${method}_${path}`));
 }
 
 function defaultDatabaseSpanId({ operationKind, operationName, system }) {
-  return `evt_node_database_${slugify(`${system}_${operationKind}_${operationName}`)}`;
+  return createAutomaticEventId(
+    "evt_node_database",
+    slugify(`${system}_${operationKind}_${operationName}`)
+  );
 }
 
 function defaultTraceIdFactory() {
@@ -1732,7 +1793,10 @@ function normalizeDatabaseOperationKind(value) {
 }
 
 function defaultRequestEventId(req, res) {
-  return `evt_node_request_${slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${res.statusCode ?? 0}`)}`;
+  return createAutomaticEventId(
+    "evt_node_request",
+    slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${res.statusCode ?? 0}`)
+  );
 }
 
 function defaultSpanIdFactory() {
@@ -1741,7 +1805,10 @@ function defaultSpanIdFactory() {
 
 function defaultErrorEventId(error, req) {
   const message = error instanceof Error ? error.message : String(error);
-  return `evt_node_error_${slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${message}`)}`;
+  return createAutomaticEventId(
+    "evt_node_error",
+    slugify(`${req.method ?? "GET"}_${getRequestPath(req)}_${message}`)
+  );
 }
 
 function getRequestPath(req) {
@@ -1937,6 +2004,23 @@ function nowMs(options) {
 
 function defaultFetch() {
   return typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined;
+}
+
+function retryAfterMsFromHeaders(headers) {
+  if (!headers || typeof headers.get !== "function") {
+    return undefined;
+  }
+  const value = headers.get("retry-after");
+  if (typeof value !== "string" || value.trim() === "") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (/^\d+$/u.test(trimmed)) {
+    const milliseconds = Number(trimmed) * 1000;
+    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
+  }
+  const timestamp = Date.parse(trimmed);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
 }
 
 function readEnvApiKey() {

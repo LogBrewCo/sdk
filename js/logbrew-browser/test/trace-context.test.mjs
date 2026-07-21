@@ -205,9 +205,22 @@ test("installed browser errors attach release artifact Debug ID metadata without
     assert.equal(issue.attributes.metadata.releaseArtifactType, "sourcemap");
     assert.equal(issue.attributes.metadata.releaseArtifactCodeFile, "/assets/app.js");
     assert.equal(issue.attributes.metadata.releaseArtifactDebugId, "11111111-2222-4333-8444-555555555555");
+    assert.deepEqual(issue.attributes.stackFrames, [
+      {
+        filename: "/assets/app.js",
+        line: 12,
+        column: 34,
+        debugId: "11111111-2222-4333-8444-555555555555"
+      },
+      {
+        filename: "/assets/vendor.js",
+        line: 1,
+        column: 2
+      }
+    ]);
 
     const serialized = JSON.stringify(issue);
-    assert.doesNotMatch(serialized, /cdn\.example|debug=true|section|vendor\.js|errorStack|nestedDropped|dynamic-user-marker/u);
+    assert.doesNotMatch(serialized, /cdn\.example|debug=true|section|errorStack|nestedDropped|dynamic-user-marker/u);
   } finally {
     await removeTempDir();
   }

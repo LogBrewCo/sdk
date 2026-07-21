@@ -2,6 +2,7 @@
 
 const { createTraceparentHeaders, SdkError } = require("@logbrew/sdk");
 const diagnosticsChannel = require("node:diagnostics_channel");
+const { createAutomaticEventId } = require("./automatic-event-id.cjs");
 const { normalizeSpanId, normalizeTraceId } = require("./trace-context.cjs");
 
 const LOGBREW_UNDICI_INSTRUMENTATION = Symbol.for("@logbrew/node.undiciInstrumentation");
@@ -430,7 +431,7 @@ function defaultUndiciRouteTemplateFactory({ path }) {
 }
 
 function defaultUndiciSpanId({ method, path }) {
-  return `evt_node_undici_${slugify(`${method}_${path}`)}`;
+  return createAutomaticEventId("evt_node_undici", slugify(`${method}_${path}`));
 }
 
 function routePath(value, fallback) {

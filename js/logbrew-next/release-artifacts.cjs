@@ -1,6 +1,5 @@
 "use strict";
 
-const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -37,46 +36,17 @@ function normalizeStringArray(value, name) {
   return value.map((item) => item.trim());
 }
 
-function parseJson(stdout, command) {
-  try {
-    return JSON.parse(stdout);
-  } catch (error) {
-    throw new Error(`LogBrew release-artifact ${command} did not return JSON`, { cause: error });
-  }
-}
-
-function validationErrors(report) {
-  if (report?.validation && Array.isArray(report.validation.errors)) {
-    return report.validation.errors.filter((message) => typeof message === "string" && message.trim() !== "");
-  }
-  return [];
-}
-
-function resolveLogBrewReleaseArtifactsCli() {
+function resolveLogBrewSdkFile(fileName) {
   try {
     const sdkEntry = require.resolve("@logbrew/sdk", { paths: [PACKAGE_DIR, process.cwd()] });
-    return path.join(path.dirname(sdkEntry), "release-artifacts.js");
+    return path.join(path.dirname(sdkEntry), fileName);
   } catch {
-    const sourceTreeCli = path.resolve(PACKAGE_DIR, "../logbrew-js/release-artifacts.js");
-    if (fs.existsSync(sourceTreeCli)) {
-      return sourceTreeCli;
+    const sourceTreeFile = path.resolve(PACKAGE_DIR, `../logbrew-js/${fileName}`);
+    if (fs.existsSync(sourceTreeFile)) {
+      return sourceTreeFile;
     }
     throw new Error("LogBrew Next release-artifact helper requires @logbrew/sdk to be installed");
   }
-}
-
-function runReleaseArtifactCli(command, args) {
-  const result = spawnSync(process.execPath, [resolveLogBrewReleaseArtifactsCli(), command, ...args], {
-    cwd: process.cwd(),
-    encoding: "utf8",
-    windowsHide: true,
-  });
-  const report = result.stdout ? parseJson(result.stdout, command) : null;
-  if (result.status !== 0) {
-    const details = validationErrors(report).join("; ") || result.stderr.trim() || `exit code ${result.status}`;
-    throw new Error(`LogBrew release-artifact ${command} failed: ${details}`);
-  }
-  return { stdout: result.stdout };
 }
 
 function resolvePathFromRoot(root, value) {
@@ -109,9 +79,18 @@ function materializeConfig(nextConfig, args) {
 }
 
 function patchNextConfig(config, options) {
+  const {
+    createReleaseArtifactUploadArgs,
+    formatReleaseArtifactUploadSummary,
+    normalizeReleaseArtifactProjectId,
+    normalizeReleaseArtifactUploadOptions,
+    runReleaseArtifactCli,
+  } = require(resolveLogBrewSdkFile("release-artifacts-build.cjs"));
+  const releaseArtifactsCli = resolveLogBrewSdkFile("release-artifacts.js");
   const release = requiredString(options, "release");
   const environment = requiredString(options, "environment");
   const service = requiredString(options, "service");
+  const projectId = normalizeReleaseArtifactProjectId(options?.projectId, "Next");
   const minifiedPathPrefix = optionalString(options, "minifiedPathPrefix") || DEFAULT_MINIFIED_PATH_PREFIX;
   const repositoryUrl = optionalString(options, "repositoryUrl");
   const commitSha = optionalString(options, "commitSha");
@@ -120,6 +99,7 @@ function patchNextConfig(config, options) {
   const stripSourcesContent = options?.stripSourcesContent !== false;
   const enableSourceMaps = options?.enableSourceMaps !== false;
   const userSourcePrefixes = normalizeStringArray(options?.stripSourcePrefix, "stripSourcePrefix");
+  const upload = normalizeReleaseArtifactUploadOptions(options?.upload, { integration: "Next", projectId });
   const root = path.resolve(optionalString(options, "root") || process.cwd());
   const distDir = config.distDir || ".next";
   const compiler = { ...(config.compiler || {}) };
@@ -134,6 +114,11 @@ function patchNextConfig(config, options) {
   }
 
   if (existingHook !== undefined && typeof existingHook !== "function") {
+    if (upload) {
+      throw new Error(
+        "LogBrew Next release-artifact runAfterProductionCompile must be a function when upload is enabled",
+      );
+    }
     return patchedConfig;
   }
 
@@ -154,7 +139,7 @@ function patchNextConfig(config, options) {
       prepareArgs.push("--strip-source-prefix", prefix);
     }
 
-    runReleaseArtifactCli("prepare-js", prepareArgs);
+    runReleaseArtifactCli(releaseArtifactsCli, "prepare-js", prepareArgs);
 
     const manifestArgs = [
       "--build-dir",
@@ -174,10 +159,21 @@ function patchNextConfig(config, options) {
     if (commitSha) {
       manifestArgs.push("--commit-sha", commitSha);
     }
+    if (projectId) {
+      manifestArgs.push("--project-id", projectId);
+    }
 
-    const { stdout } = runReleaseArtifactCli("manifest-js", manifestArgs);
+    const { stdout } = runReleaseArtifactCli(releaseArtifactsCli, "manifest-js", manifestArgs);
     fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
     fs.writeFileSync(manifestPath, stdout, "utf8");
+    if (upload) {
+      const { report } = runReleaseArtifactCli(
+        releaseArtifactsCli,
+        "upload-js",
+        createReleaseArtifactUploadArgs(buildDir, manifestPath, upload),
+      );
+      console.info(formatReleaseArtifactUploadSummary(report));
+    }
   };
 
   return patchedConfig;

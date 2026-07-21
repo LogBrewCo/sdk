@@ -4,6 +4,7 @@
     "first-useful-telemetry": "node index.mjs first-useful-telemetry",
     "help": "node index.mjs --help",
     "list": "node index.mjs --list",
+    "persistent-delivery": "node index.mjs persistent-delivery",
     "readme-example": "node index.mjs readme-example",
     "real-user-smoke": "node index.mjs real-user-smoke"
   }
