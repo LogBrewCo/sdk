@@ -6,7 +6,7 @@
 
 Public Java SDK for building, validating, previewing, and flushing LogBrew event batches.
 
-The core client, `HttpTransport`, request trace helpers, JDBC helpers, JMS-style message helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, Spring Boot, Spring Cache, Spring Kafka, and JDBC auto-configuration helpers integrate with app-owned dependencies when those libraries are already present.
+The core client, `HttpTransport`, request trace helpers, JDBC helpers, JMS-style message helpers, and `java.util.logging` handler use only the JDK at runtime. Optional Logback, OpenTelemetry, Jakarta Servlet, Spring Boot, Spring HTTP clients, Spring Cache, Spring Kafka, and JDBC auto-configuration helpers integrate with app-owned dependencies when those libraries are already present.
 
 ## Install
 
@@ -333,6 +333,40 @@ HttpResponse<String> response = LogBrewHttpClientTracing.send(
 ```
 
 `send(...)` and `sendAsync(...)` copy the request, replace only one normalized W3C `traceparent` header, create a child span under the active `LogBrewTrace` when present, and record method, route template, status code, duration, sampled state, and type-only exception summaries. They preserve app-owned headers on the actual request but never put arbitrary headers, payloads, full URLs, query strings, baggage, tracestate, exception messages, or stack traces into LogBrew payloads. Pass a low-cardinality `routeTemplate(...)` when paths contain user IDs or order IDs; otherwise the helper falls back to the request path with query and fragment removed.
+
+## Spring HTTP Client Spans
+
+Spring apps can instrument only the clients they own. The same blocking interceptor works with
+`RestClient` and `RestTemplate`, while `WebClient` uses a cold filter that creates a fresh child
+span for every subscription:
+
+```java
+import co.logbrew.sdk.LogBrewSpringHttpTracing;
+import co.logbrew.sdk.LogBrewSpringWebClientTracing;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.reactive.function.client.WebClient;
+
+RestClient blocking = RestClient.builder()
+    .requestInterceptor(LogBrewSpringHttpTracing.restClientInterceptor(client))
+    .build();
+
+WebClient reactive = WebClient.builder()
+    .filter(LogBrewSpringWebClientTracing.filter(client))
+    .build();
+```
+
+The adapters inject exactly one W3C `traceparent`, preserve the original response, exception, empty
+completion, or cancellation signal, and record method, normalized host, status, duration, sampled
+state, and type-only failures. They never record paths, full URLs, query strings, arbitrary headers,
+bodies, exception messages, baggage, or tracestate. A request predicate can skip health checks or
+other app-selected traffic without modifying it; capture diagnostics stay advisory through
+`onError(...)`.
+
+Spring Boot 4 apps only need their existing `LogBrewClient` bean. When the matching Spring client
+classes are present, `LogBrewSpringBootHttpClientAutoConfiguration` instruments `RestClient.Builder`
+and `RestTemplate` beans, and `LogBrewSpringBootWebClientAutoConfiguration` instruments
+`WebClient.Builder` beans. Existing LogBrew interceptors and filters are not duplicated. Set
+`logbrew.http-client.enabled=false` to disable both paths and keep all app-owned clients unchanged.
 
 ## Jakarta Servlet and Spring Requests
 
@@ -761,6 +795,113 @@ System.err.println(response.statusCode());
 
 `HttpTransport` uses Java 11's standard `java.net.http.HttpClient`, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint/header/client/timeout settings, discards response bodies, and maps client delivery failures into retryable `TransportException.network(...)` values so `LogBrewClient.flush(...)` can preserve queued events and retry. Inject a custom `HttpClient` when a service already owns proxy, TLS, timeout, executor, or transport settings.
 
+### Bounded delivery
+
+Use `DeliveryOptions` when a service needs explicit memory and request bounds:
+
+```java
+import co.logbrew.sdk.DeliveryOptions;
+import co.logbrew.sdk.LogBrewClient;
+
+DeliveryOptions delivery = DeliveryOptions.builder()
+    .maxRetries(2)
+    .maxQueueEvents(2_000)
+    .maxQueueBytes(8L * 1024L * 1024L)
+    .maxBatchEvents(100)
+    .maxBatchBytes(512 * 1024)
+    .onEventDropped(drop -> System.err.println(
+        "dropped=" + drop.reason() + " bytes=" + drop.serializedBytes()))
+    .build();
+
+LogBrewClient client = LogBrewClient.create(
+    "LOGBREW_INGEST_KEY",
+    "checkout-api",
+    "1.0.0",
+    delivery
+);
+```
+
+Defaults retain at most 1,000 events and 4 MiB of serialized event JSON, then send requests containing at most 100 events and 512 KiB of UTF-8 JSON. Queue-byte accounting excludes the repeated SDK envelope and JSON collection separators; request-byte accounting includes the complete body. An event that cannot fit one bounded request is rejected before queueing. `pendingEvents()`, `pendingEventBytes()`, `droppedEvents()`, `droppedEventBytes()`, `TransportResponse.batches()`, `TransportResponse.acceptedEvents()`, and `EventDrop.serializedBytes()` expose numeric accounting without event messages, attributes, headers, URLs, or response bodies.
+
+`flush(...)` freezes only the events present when that call starts, retries each serialized request without rebuilding it, and acknowledges each accepted prefix before moving to the next request. A failed request and all later work remain queued, including events captured while transport I/O is active. Concurrent flush and shutdown calls run serially without background workers; a transport callback that recursively calls flush or shutdown receives `reentrancy_error` instead of recursing. A failed shutdown leaves the client open with unaccepted work intact, while a successful shutdown rejects later writes.
+
+Migration note: custom `Transport` implementations may now receive multiple sequential `send(...)` calls from one flush when queue contents exceed a request bound. Responses returned by `LogBrewClient` contain aggregate attempts, accepted batches, and accepted events. A direct two-argument `TransportResponse` reports one accepted batch only for a 2xx status and leaves `acceptedEvents()` at zero because the transport does not know the batch's event count. Delivery remains caller-driven by default and defaults to memory only: `LogBrewClient.create(...)` creates no timer or thread.
+
+### Automatic delivery and health
+
+Server processes that own a transport can explicitly opt into interval and queue-threshold delivery:
+
+```java
+import co.logbrew.sdk.AutomaticDeliveryOptions;
+import co.logbrew.sdk.DeliveryHealth;
+import co.logbrew.sdk.DeliveryOptions;
+import co.logbrew.sdk.HttpTransport;
+import co.logbrew.sdk.LogAttributes;
+import co.logbrew.sdk.LogBrewClient;
+import java.time.Duration;
+
+LogBrewClient client = LogBrewClient.createAutomatic(
+    "LOGBREW_INGEST_KEY",
+    "checkout-api",
+    "1.0.0",
+    HttpTransport.builder().build(),
+    DeliveryOptions.builder().build(),
+    AutomaticDeliveryOptions.builder()
+        .flushInterval(Duration.ofSeconds(5))
+        .queueThreshold(100)
+        .build()
+);
+
+client.log("evt_log_001", "2026-06-02T10:00:03Z", LogAttributes.create("started", "info"));
+DeliveryHealth health = client.deliveryHealth();
+client.shutdown();
+```
+
+An automatic client creates one lazy daemon scheduler only after work is queued. Threshold and interval wakes reuse the same bounded queue, immutable request batching, accepted-prefix acknowledgement, encrypted store, and serialized flush path as the manual API. A wake that arrives during delivery is coalesced. Retryable 408, 5xx, or network exhaustion uses bounded equal-jitter delays. The built-in `HttpTransport` also accepts one strict `Retry-After` delta-seconds or IMF-fixdate value on retryable responses, clamps it to the configured maximum delay, and never lets it shorten the client safety delay. Missing, malformed, duplicate, ambiguous, or past guidance uses the equal-jitter fallback. Guidance on 401, 429, validation, or other non-retryable responses is ignored. Custom transports remain unchanged and do not receive or expose raw response headers.
+
+Terminal outcomes, exhausted retry budgets, and process-ownership changes pause automatic sends without dropping queued work. Call `resumeAutomaticDelivery()` only after the application has corrected the cause. Recovery, restart, and shutdown clear active server guidance. `flush(transport)` and `shutdown(transport)` remain authoritative and cancel stale scheduled generations; `shutdown()` uses the owned transport, drains once, and terminates the scheduler.
+
+`deliveryHealth()` returns one immutable, content-free `DeliveryHealth` snapshot with fixed lifecycle, activity, outcome, pause, drop, and retry-delay-source enums plus saturated queue, attempt, acceptance, failure, server-guidance, and scheduled-delay accounting. It never contains event IDs or content, API keys, endpoints, headers, raw clock values, filesystem paths, thread details, exception messages, response bodies, or free-form server text. The SDK installs no signal handler, shutdown hook, process hook, watcher, callback stream, or additional delivery queue.
+
+### Encrypted restart delivery
+
+Server processes on a POSIX filesystem can opt into authenticated restart persistence without changing their `Transport` or endpoint:
+
+```java
+import co.logbrew.sdk.DeliveryOptions;
+import co.logbrew.sdk.EncryptedEventStore;
+import co.logbrew.sdk.LogBrewClient;
+import java.nio.file.Path;
+import java.util.Arrays;
+
+byte[] persistenceKey = loadPersistenceKey(); // 16, 24, or 32 bytes
+try (EncryptedEventStore store = EncryptedEventStore.open(
+    Path.of("/var/lib/checkout/logbrew"),
+    persistenceKey
+)) {
+    LogBrewClient client = LogBrewClient.create(
+        "LOGBREW_INGEST_KEY",
+        "checkout-api",
+        "1.0.0",
+        DeliveryOptions.builder().encryptedEventStore(store).build()
+    );
+
+    client.recoverPersistedEvents();
+    // Capture and flush normally. Admission is durable before the event enters memory.
+    client.shutdown(transport);
+} finally {
+    Arrays.fill(persistenceKey, (byte) 0);
+}
+```
+
+Persistence is disabled by default and adds no thread, timer, process hook, or dependency. The store encrypts canonical event bytes and stable event IDs with standard-library AES-GCM before memory admission, preserves the same count and UTF-8 byte bounds as the client, recovers contiguous records oldest first, and checkpoints only accepted prefixes. Each admission atomically advances an authenticated high-water boundary with its event record, so recovery rejects missing sole, interior, or trailing records instead of trusting a shorter queue. Retry bodies remain byte-identical after restart. A failed shutdown leaves encrypted work available to the next process.
+
+The caller owns the key and the store lifetime. Key bytes are copied only into process memory and are never written to the store. `recoverPersistedEvents()` or `purgePersistedEvents()` is required before capture. If a crash leaves a durable transaction intent, normal recovery fails closed; call `finalizePersistedTransactionAndRecover()` to authenticate its encrypted targets and digests, or explicitly purge. Only one process may own a store. Directory replacement, lock replacement, symbolic links, unknown files, record gaps, tampering, unsafe permissions, and ambiguous writes are rejected. Hard links are also rejected when the supported provider exposes `unix:nlink`.
+
+An accepted prefix is authoritative as soon as its encrypted checkpoint is durable. If physical deletion of an acknowledged encrypted record fails afterward, that record may remain observable to the local filesystem owner until the next acknowledgement or explicit recovery retries deletion and synchronizes the directory. It is never re-exposed as pending telemetry; explicit recovery fails with `persistence_prune_error` when stale encrypted records cannot be removed safely.
+
+The current implementation requires a filesystem that exposes atomic moves, stable file identity, directory syncing, link counts when available, and atomically created POSIX `0700` directories plus `0600` files. It returns `persistence_unsupported` instead of relying on umask or default ACLs when owner-only permissions cannot be proven. Encrypted filenames, file sizes, counts, and update timing remain observable to the local filesystem owner. There is no automatic key rotation, cross-host sharing, background upload, or `atexit` durability claim. See `examples/EncryptedRestartDelivery.java` for environment-driven key and directory setup.
+
 ## Standard Java Logging
 
 For apps that already use `java.util.logging`, attach `LogBrewJulHandler` to the logger you own:
@@ -849,16 +990,20 @@ appender.stop();
 
 From `java/logbrew-java`:
 
-The `examples` directory contains copyable snippets for creating a client, producing a first useful telemetry payload, sending through `HttpTransport`, attaching `java.util.logging`, and configuring the optional Logback appender in your own Java service.
+The `examples` directory contains copyable snippets for creating a client, configuring bounded or encrypted restart delivery, producing a first useful telemetry payload, sending through `HttpTransport`, attaching `java.util.logging`, and configuring the optional Logback appender in your own Java service.
 
 ## Behavior
 
 - `previewJson()` returns the queued batch as pretty JSON.
-- `LogBrewClient` keeps a bounded in-memory queue of 1,000 events by default; use `LogBrewClient.create(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, drop -> ...)` to tune the cap and receive redacted advisory drop summaries. When the queue is full, the newest event is dropped, `droppedEvents()` increments, and drop-callback failures do not interrupt application logging.
+- `LogBrewClient` keeps a bounded in-memory queue of 1,000 events and 4 MiB of serialized event JSON by default; use `DeliveryOptions` to tune count, byte, request, retry, and advisory drop bounds. When either queue bound is full, the newest event is dropped, content-free counters increment, and drop-callback failures do not interrupt application logging. The older `create(..., maxRetries, maxQueueSize, drop)` overload remains supported with the new default byte and request bounds.
+- `EncryptedEventStore` adds explicit caller-owned AES-GCM restart persistence on supported POSIX filesystems without changing default memory delivery.
+- `createAutomatic(...)` is an explicit transport-owned mode with one lazy scheduler; manual `create(...)` remains thread-free.
+- `deliveryHealth()` exposes fixed content-free lifecycle, queue, retry-source, pause, acceptance, server-guidance, and drop accounting.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `Traceparent` parses, creates, and derives span attributes from W3C `traceparent` values without adding OpenTelemetry or patching HTTP clients.
 - `LogBrewOpenTelemetry` copies valid app-owned OpenTelemetry span context into LogBrew child trace context when only OpenTelemetry API jars are present; `LogBrewOpenTelemetrySdk` exposes an app-owned `spanExporter` or `spanProcessor` when the app also uses `opentelemetry-sdk-trace`.
 - `LogBrewHttpClientTracing` wraps app-owned Java 11 `HttpClient.send(...)` and `sendAsync(...)` calls with one W3C `traceparent` and one privacy-bounded `http.client` span.
+- `LogBrewSpringHttpTracing` and `LogBrewSpringWebClientTracing` add privacy-bounded outbound spans to app-owned Spring HTTP clients without global hooks; Boot auto-configuration instruments matching builder/template beans once and honors `logbrew.http-client.enabled=false`.
 - `LogBrewServletFilter` activates request-local trace context for Jakarta Servlet/Spring Boot handlers and emits one request span plus one duration metric without hidden Java-agent instrumentation.
 - `LogBrewSpringBootAutoConfiguration` registers that filter only when Spring Boot, Jakarta Servlet, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewSpringCacheTracing` wraps app-owned Spring `CacheManager` or `Cache` objects with privacy-bounded cache hit/write spans under an active trace by default.
@@ -866,10 +1011,11 @@ The `examples` directory contains copyable snippets for creating a client, produ
 - `LogBrewSpringBootJdbcAutoConfiguration` wraps app-owned Spring `DataSource` beans with privacy-bounded JDBC statement spans when Spring Boot, `DataSource`, and an app-owned `LogBrewClient` bean are present.
 - `LogBrewOperationTracing` creates app-owned database, cache, and queue spans with bounded `SpanEventSummary` markers, without adding driver dependencies or automatic client patching.
 - `LogBrewJmsTracing` traces app-owned JMS-style `send`, `receive`, `process`, and `processBatch` calls through app-owned callbacks and `setStringProperty` / `getStringProperty` without adding a JMS dependency or patching broker clients.
-- `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
-- `shutdown(transport)` flushes queued events and rejects later writes.
+- `flush(transport)` sends a bounded start snapshot, retries immutable request bodies, acknowledges accepted prefixes, and retains failed or later work.
+- `shutdown(transport)` serializes with active flushes, closes only after success, and reopens with unaccepted work after failure.
+- `shutdown()` drains an automatic client through its owned transport and deterministically stops its scheduler.
 - `isClosed()` returns whether `shutdown(transport)` has closed the client.
-- `HttpTransport` sends queued batches through dependency-free `java.net.http` delivery for server-side apps.
+- `HttpTransport` sends queued batches through dependency-free `java.net.http` delivery and applies strict bounded `Retry-After` guidance only to retryable automatic sends.
 - `RecordingTransport.alwaysAccept()` is useful when you want to inspect queued JSON before network delivery.
 - `LogBrewJulHandler` queues standard `java.util.logging` records without mutating global logging configuration.
 - `LogBrewLogbackAppender` queues app-owned SLF4J/Logback records, including MDC and fluent key/value metadata, without changing global logger setup.

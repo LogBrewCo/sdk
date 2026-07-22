@@ -183,7 +183,7 @@ namespace LogBrew
             return false;
         }
 
-        private static IReadOnlyDictionary<string, object?> SanitizeDictionary(IDictionary values, int depth)
+        private static ReadOnlyDictionary<string, object?> SanitizeDictionary(IDictionary values, int depth)
         {
             var safe = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (DictionaryEntry entry in values)
@@ -213,7 +213,7 @@ namespace LogBrew
             return new ReadOnlyDictionary<string, object?>(safe);
         }
 
-        private static IReadOnlyList<object?> SanitizeEnumerable(IEnumerable values, int depth)
+        private static ReadOnlyCollection<object?> SanitizeEnumerable(IEnumerable values, int depth)
         {
             var safe = new List<object?>();
             foreach (var value in values)
@@ -281,14 +281,14 @@ namespace LogBrew
             sanitized = PosixPathPattern.Replace(sanitized, match =>
             {
                 var text = match.Value;
-                return text.StartsWith("/", StringComparison.Ordinal)
+                return TextSearch.StartsWith(text, '/')
                     ? RedactedPath
-                    : text.Substring(0, 1) + RedactedPath;
+                    : text.Remove(1) + RedactedPath;
             });
             sanitized = WindowsPathPattern.Replace(sanitized, RedactedPath);
             if (sanitized.Length > MaxStringLength)
             {
-                return sanitized.Substring(0, MaxStringLength - 3) + "...";
+                return sanitized.Remove(MaxStringLength - 3) + "...";
             }
 
             return sanitized;

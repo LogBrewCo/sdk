@@ -12,8 +12,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -66,6 +68,7 @@ public final class LogBrewClientTest {
         testNonRetryableStatusPreservesQueue();
         testHttpTransportPostsJsonAndMapsStatus();
         testHttpTransportStatusRetriesThroughClient();
+        testHttpTransportParsesRetryAfterOnlyForRetryableStatus();
         testHttpTransportNetworkErrorIsRetryable();
         testHttpTransportRejectsInvalidConfiguration();
         testShutdownFlushesAndPreventsFutureEvents();
@@ -597,6 +600,57 @@ public final class LogBrewClientTest {
             assertEquals(0, client.pendingEvents(), "pending after HTTP retry");
             assertContains(firstBody.get(), "evt_java_http_retry");
             assertEquals(firstBody.get(), secondBody.get(), "retry body");
+        } finally {
+            server.stop(0);
+        }
+        testsRun++;
+    }
+
+    private void testHttpTransportParsesRetryAfterOnlyForRetryableStatus() {
+        AtomicInteger requestCount = new AtomicInteger();
+        HttpServer server = startServer(exchange -> {
+            int current = requestCount.incrementAndGet();
+            if (current == 1) {
+                exchange.getResponseHeaders().add(
+                    "Retry-After",
+                    "Tue, 02 Jun 2026 10:00:05 GMT"
+                );
+                sendStatus(exchange, 503);
+            } else if (current == 2) {
+                exchange.getResponseHeaders().add("Retry-After", "1");
+                exchange.getResponseHeaders().add("Retry-After", "2");
+                sendStatus(exchange, 503);
+            } else {
+                exchange.getResponseHeaders().add("Retry-After", "120");
+                sendStatus(exchange, 401);
+            }
+        });
+        try {
+            HttpTransport transport = HttpTransport.builder()
+                .endpoint(serverUri(server))
+                .clock(Clock.fixed(Instant.parse("2026-06-02T10:00:00Z"), ZoneOffset.UTC))
+                .build();
+
+            TransportResponse dated = sendOrFail(transport, "LOGBREW_API_KEY", "{}");
+            TransportResponse duplicate = sendOrFail(transport, "LOGBREW_API_KEY", "{}");
+            TransportResponse terminal = sendOrFail(transport, "LOGBREW_API_KEY", "{}");
+
+            assertEquals(
+                RetryAfterDirective.Outcome.ACCEPTED,
+                dated.retryAfterDirective().outcome(),
+                "HTTP date guidance"
+            );
+            assertEquals(5_000L, dated.retryAfterDirective().delayMillis(), "HTTP date delay");
+            assertEquals(
+                RetryAfterDirective.Outcome.REJECTED,
+                duplicate.retryAfterDirective().outcome(),
+                "HTTP duplicate guidance"
+            );
+            assertEquals(
+                RetryAfterDirective.Outcome.NONE,
+                terminal.retryAfterDirective().outcome(),
+                "terminal response ignores guidance"
+            );
         } finally {
             server.stop(0);
         }

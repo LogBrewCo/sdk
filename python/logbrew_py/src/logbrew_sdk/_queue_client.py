@@ -150,7 +150,16 @@ class _QueueSpanRequest:
     on_capture_error: Callable[[Exception], None] | None
     start: float
 
-    def capture(self, status: str, *, error: Exception | None = None) -> None:
+    def capture(
+        self,
+        status: str,
+        *,
+        error: Exception | None = None,
+        error_type: str | None = None,
+    ) -> None:
+        normalized_error_type = (
+            type(error).__name__ if error is not None else _instrumentation.optional_label(error_type)
+        )
         _instrumentation.capture_client_span(
             client=self.client,
             event_id=self.event_id,
@@ -169,11 +178,11 @@ class _QueueSpanRequest:
                 message_count=self.message_count,
                 attempt=self.attempt,
                 sampled=self.trace.sampled,
-                error=error,
+                error_type=normalized_error_type,
             ),
-            events=_instrumentation.span_events_with_exception(
+            events=_instrumentation.span_events_with_exception_type(
                 self.span_events,
-                error,
+                normalized_error_type,
                 _QUEUE_METADATA_DENYLIST,
             ),
             on_capture_error=self.on_capture_error,
@@ -243,7 +252,7 @@ def _queue_span_metadata(
     message_count: int | None,
     attempt: int | None,
     sampled: bool,
-    error: Exception | None,
+    error_type: str | None,
 ) -> _instrumentation.Metadata:
     span_metadata = _safe_queue_metadata(metadata)
     span_metadata.update(
@@ -264,8 +273,8 @@ def _queue_span_metadata(
         span_metadata["messageCount"] = message_count
     if attempt is not None:
         span_metadata["attempt"] = attempt
-    if error is not None:
-        span_metadata["errorType"] = type(error).__name__
+    if error_type is not None:
+        span_metadata["errorType"] = error_type
     return span_metadata
 
 

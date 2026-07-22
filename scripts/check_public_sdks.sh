@@ -56,6 +56,8 @@ STEP_LABELS=(
   "Node Axios real-package smoke"
   "Node HTTP client real-package smoke"
   "Node queue high-load fake-intake smoke"
+  "Node persistent delivery restart smoke"
+  "Node encrypted persistent delivery smoke"
   "Prisma real-user smoke"
   "BullMQ real-user smoke"
   "KafkaJS real-user smoke"
@@ -81,6 +83,7 @@ STEP_LABELS=(
   "Go real-user smoke"
   "Go OpenTelemetry installed-artifact smoke"
   "Go high-load installed-artifact smoke"
+  "Go delivery lifecycle installed-artifact smoke"
   "Go support-ticket real-user smoke"
   "Go public module install smoke"
   "C real-user smoke"
@@ -88,6 +91,7 @@ STEP_LABELS=(
   "Java real-user smoke"
   "Java OpenTelemetry installed-artifact smoke"
   "Java Spring Kafka installed-artifact smoke"
+  "Java Spring HTTP installed-artifact smoke"
   "Java queue trace installed-artifact smoke"
   "Java JMS installed-artifact smoke"
   "Java high-load installed-artifact smoke"
@@ -559,6 +563,14 @@ begin_next_step "Node queue high-load fake-intake smoke"
 run_shell_step "bash scripts/real_user_node_queue_high_load_smoke.sh"
 mark_step_complete
 
+begin_next_step "Node persistent delivery restart smoke"
+run_shell_step "bash scripts/real_user_node_persistent_delivery_smoke.sh"
+mark_step_complete
+
+begin_next_step "Node encrypted persistent delivery smoke"
+run_shell_step "bash scripts/real_user_node_encrypted_persistent_delivery_smoke.sh"
+mark_step_complete
+
 begin_next_step "Prisma real-user smoke"
 run_shell_step "bash scripts/real_user_prisma_smoke.sh"
 mark_step_complete
@@ -659,6 +671,10 @@ begin_next_step "Go high-load installed-artifact smoke"
 run_shell_step "bash scripts/real_user_go_high_load_smoke.sh"
 mark_step_complete
 
+begin_next_step "Go delivery lifecycle installed-artifact smoke"
+run_shell_step "bash scripts/real_user_go_delivery_lifecycle_smoke.sh"
+mark_step_complete
+
 begin_next_step "Go support-ticket real-user smoke"
 run_shell_step "bash scripts/real_user_go_support_ticket_smoke.sh"
 mark_step_complete
@@ -685,6 +701,10 @@ mark_step_complete
 
 begin_next_step "Java Spring Kafka installed-artifact smoke"
 run_shell_step "bash scripts/real_user_java_spring_kafka_smoke.sh"
+mark_step_complete
+
+begin_next_step "Java Spring HTTP installed-artifact smoke"
+run_shell_step "bash scripts/real_user_java_spring_http_smoke.sh"
 mark_step_complete
 
 begin_next_step "Java queue trace installed-artifact smoke"

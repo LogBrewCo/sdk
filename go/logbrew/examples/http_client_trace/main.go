@@ -37,10 +37,6 @@ func main() {
 
 	timestamps := []time.Time{
 		time.Date(2026, 6, 2, 10, 0, 0, 0, time.UTC),
-		time.Date(2026, 6, 2, 10, 0, 0, int(3*time.Millisecond), time.UTC),
-		time.Date(2026, 6, 2, 10, 0, 0, int(10*time.Millisecond), time.UTC),
-		time.Date(2026, 6, 2, 10, 0, 0, int(16*time.Millisecond), time.UTC),
-		time.Date(2026, 6, 2, 10, 0, 0, int(28*time.Millisecond), time.UTC),
 		time.Date(2026, 6, 2, 10, 0, 0, int(43*time.Millisecond), time.UTC),
 	}
 	nextTimestamp := func() time.Time {
@@ -52,14 +48,9 @@ func main() {
 	}
 
 	transport, err := logbrew.NewHTTPClientTransport(logbrew.HTTPClientTransportConfig{
-		Client:        client,
-		Base:          http.DefaultTransport,
-		RouteTemplate: "/payments/:payment_id",
-		EventIDPrefix: "go_http_client_example",
-		Metadata: map[string]any{
-			"service": "checkout-api",
-		},
-		CapturePhaseTimings:           true,
+		Client:                        client,
+		Base:                          http.DefaultTransport,
+		EventIDPrefix:                 "go_http_client_example",
 		FinishSpanOnResponseBodyClose: true,
 		SpanIDFactory: func() string {
 			return "b7ad6b7169203331"

@@ -1,16 +1,21 @@
 package co.logbrew.sdk;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 /**
  * Buffered public client for validating, previewing, and flushing LogBrew events.
  */
 public final class LogBrewClient {
-    private static final int DEFAULT_MAX_QUEUE_SIZE = 1000;
     static final String[] SEVERITY_VALUES = {"trace", "debug", "info", "warn", "warning", "error", "fatal", "critical"};
     static final String[] SPAN_STATUSES = {"ok", "error"};
     static final String[] ACTION_STATUSES = {"queued", "running", "success", "failure"};
@@ -20,44 +25,83 @@ public final class LogBrewClient {
 
     private final String apiKey;
     private final Map<String, Object> sdk;
-    private final int maxRetries;
-    private final int maxQueueSize;
-    private final EventDroppedHandler eventDroppedHandler;
-    private final List<Event> events;
+    private final DeliveryOptions deliveryOptions;
+    private final Deque<QueuedEvent> events;
+    private final Object stateLock;
+    private final Object deliveryLock;
+    private final EncryptedEventStore eventStore;
+    private final AutomaticDeliveryController automaticDelivery;
+    private long pendingEventBytes;
+    private long droppedEventBytes;
     private int droppedEvents;
+    private boolean closing;
     private boolean closed;
+    private Thread deliveryOwner;
+    private boolean persistenceRecovered;
 
     private LogBrewClient(
         String apiKey,
         String sdkName,
         String sdkVersion,
-        int maxRetries,
-        int maxQueueSize,
-        EventDroppedHandler eventDroppedHandler
+        DeliveryOptions deliveryOptions,
+        Transport ownedTransport,
+        AutomaticDeliveryOptions automaticDeliveryOptions,
+        AutomaticDeliveryScheduler.Factory schedulerFactory,
+        AutomaticDeliveryScheduler.Jitter jitter,
+        BooleanSupplier processOwnership
     ) {
         this.apiKey = apiKey;
-        this.maxRetries = maxRetries;
-        this.maxQueueSize = maxQueueSize;
-        this.eventDroppedHandler = eventDroppedHandler;
-        this.events = new ArrayList<>();
-        this.sdk = new LinkedHashMap<>();
-        this.sdk.put("name", sdkName);
-        this.sdk.put("language", "java");
-        this.sdk.put("version", sdkVersion);
+        this.deliveryOptions = deliveryOptions;
+        this.events = new ArrayDeque<>();
+        this.stateLock = new Object();
+        this.deliveryLock = new Object();
+        this.eventStore = deliveryOptions.encryptedEventStore();
+        Map<String, Object> sdkValue = new LinkedHashMap<>();
+        sdkValue.put("name", sdkName);
+        sdkValue.put("language", "java");
+        sdkValue.put("version", sdkVersion);
+        this.sdk = Collections.unmodifiableMap(sdkValue);
+        this.persistenceRecovered = eventStore == null;
+        if (automaticDeliveryOptions == null) {
+            this.automaticDelivery = null;
+        } else if (schedulerFactory == null) {
+            this.automaticDelivery = new AutomaticDeliveryController(
+                this,
+                Objects.requireNonNull(ownedTransport, "ownedTransport"),
+                automaticDeliveryOptions
+            );
+        } else {
+            this.automaticDelivery = new AutomaticDeliveryController(
+                this,
+                Objects.requireNonNull(ownedTransport, "ownedTransport"),
+                automaticDeliveryOptions,
+                schedulerFactory,
+                Objects.requireNonNull(jitter, "jitter"),
+                Objects.requireNonNull(processOwnership, "processOwnership")
+            );
+        }
+        if (eventStore != null) {
+            eventStore.attach();
+        }
     }
 
     /**
      * Creates a client from public SDK identity and API key settings.
      */
     public static LogBrewClient create(String apiKey, String sdkName, String sdkVersion) {
-        return create(apiKey, sdkName, sdkVersion, 2);
+        return create(apiKey, sdkName, sdkVersion, DeliveryOptions.builder().build());
     }
 
     /**
      * Creates a client from public SDK identity, API key settings, and retry budget.
      */
     public static LogBrewClient create(String apiKey, String sdkName, String sdkVersion, int maxRetries) {
-        return create(apiKey, sdkName, sdkVersion, maxRetries, DEFAULT_MAX_QUEUE_SIZE, null);
+        return create(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            DeliveryOptions.builder().maxRetries(maxRetries).build()
+        );
     }
 
     /**
@@ -84,149 +128,659 @@ public final class LogBrewClient {
         int maxQueueSize,
         EventDroppedHandler eventDroppedHandler
     ) {
-        Validation.requireNonEmpty("api_key", apiKey);
-        Validation.requireNonEmpty("sdk_name", sdkName);
-        Validation.requireNonEmpty("sdk_version", sdkVersion);
         if (maxRetries < 0) {
             throw new SdkException("validation_error", "max_retries must be non-negative");
         }
         if (maxQueueSize <= 0) {
             throw new SdkException("validation_error", "max_queue_size must be positive");
         }
-        return new LogBrewClient(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, eventDroppedHandler);
+        return create(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            DeliveryOptions.builder()
+                .maxRetries(maxRetries)
+                .maxQueueEvents(maxQueueSize)
+                .onEventDropped(eventDroppedHandler)
+                .build()
+        );
+    }
+
+    /**
+     * Creates a client with explicit count, byte, request, retry, and drop-callback bounds.
+     */
+    public static LogBrewClient create(
+        String apiKey,
+        String sdkName,
+        String sdkVersion,
+        DeliveryOptions deliveryOptions
+    ) {
+        Validation.requireNonEmpty("api_key", apiKey);
+        Validation.requireNonEmpty("sdk_name", sdkName);
+        Validation.requireNonEmpty("sdk_version", sdkVersion);
+        return new LogBrewClient(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            Objects.requireNonNull(deliveryOptions, "deliveryOptions"),
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+    }
+
+    /**
+     * Creates an explicit automatic client that owns one transport and lazy scheduler.
+     */
+    public static LogBrewClient createAutomatic(
+        String apiKey,
+        String sdkName,
+        String sdkVersion,
+        Transport transport
+    ) {
+        return createAutomatic(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            transport,
+            DeliveryOptions.builder().build(),
+            AutomaticDeliveryOptions.builder().build()
+        );
+    }
+
+    /**
+     * Creates an explicit automatic client with custom delivery and scheduling bounds.
+     */
+    public static LogBrewClient createAutomatic(
+        String apiKey,
+        String sdkName,
+        String sdkVersion,
+        Transport transport,
+        DeliveryOptions deliveryOptions,
+        AutomaticDeliveryOptions automaticDeliveryOptions
+    ) {
+        Validation.requireNonEmpty("api_key", apiKey);
+        Validation.requireNonEmpty("sdk_name", sdkName);
+        Validation.requireNonEmpty("sdk_version", sdkVersion);
+        return new LogBrewClient(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            Objects.requireNonNull(deliveryOptions, "deliveryOptions"),
+            Objects.requireNonNull(transport, "transport"),
+            Objects.requireNonNull(automaticDeliveryOptions, "automaticDeliveryOptions"),
+            null,
+            null,
+            null
+        );
+    }
+
+    static LogBrewClient createAutomatic(
+        String apiKey,
+        String sdkName,
+        String sdkVersion,
+        Transport transport,
+        DeliveryOptions deliveryOptions,
+        AutomaticDeliveryOptions automaticDeliveryOptions,
+        AutomaticDeliveryScheduler.Factory schedulerFactory,
+        AutomaticDeliveryScheduler.Jitter jitter,
+        BooleanSupplier processOwnership
+    ) {
+        Validation.requireNonEmpty("api_key", apiKey);
+        Validation.requireNonEmpty("sdk_name", sdkName);
+        Validation.requireNonEmpty("sdk_version", sdkVersion);
+        return new LogBrewClient(
+            apiKey,
+            sdkName,
+            sdkVersion,
+            Objects.requireNonNull(deliveryOptions, "deliveryOptions"),
+            Objects.requireNonNull(transport, "transport"),
+            Objects.requireNonNull(automaticDeliveryOptions, "automaticDeliveryOptions"),
+            Objects.requireNonNull(schedulerFactory, "schedulerFactory"),
+            Objects.requireNonNull(jitter, "jitter"),
+            Objects.requireNonNull(processOwnership, "processOwnership")
+        );
     }
 
     /**
      * Returns the queued event count currently buffered in memory.
      */
-    public synchronized int pendingEvents() {
-        return events.size();
+    public int pendingEvents() {
+        synchronized (stateLock) {
+            return events.size();
+        }
     }
 
     /**
-     * Returns the number of events dropped because the in-memory queue was full.
+     * Returns the exact serialized event bytes currently retained in memory.
+     *
+     * <p>The count excludes the SDK envelope and JSON collection separators added per request.</p>
      */
-    public synchronized int droppedEvents() {
-        return droppedEvents;
+    public long pendingEventBytes() {
+        synchronized (stateLock) {
+            return pendingEventBytes;
+        }
+    }
+
+    /**
+     * Returns the number of events rejected before entering the in-memory queue.
+     */
+    public int droppedEvents() {
+        synchronized (stateLock) {
+            return droppedEvents;
+        }
+    }
+
+    /**
+     * Returns the serialized event bytes rejected before entering the in-memory queue.
+     */
+    public long droppedEventBytes() {
+        synchronized (stateLock) {
+            return droppedEventBytes;
+        }
     }
 
     /**
      * Returns whether {@link #shutdown(Transport)} has closed this client.
      */
-    public synchronized boolean isClosed() {
-        return closed;
+    public boolean isClosed() {
+        synchronized (stateLock) {
+            return closed;
+        }
+    }
+
+    /** Returns a fixed, content-free snapshot of local delivery state. */
+    public DeliveryHealth deliveryHealth() {
+        synchronized (stateLock) {
+            AutomaticDeliveryController.State automatic = automaticDelivery == null
+                ? AutomaticDeliveryController.State.manual()
+                : automaticDelivery.snapshot();
+            DeliveryHealth.Lifecycle lifecycle = closed
+                ? DeliveryHealth.Lifecycle.CLOSED
+                : closing || automatic.stopping
+                    ? DeliveryHealth.Lifecycle.CLOSING
+                    : DeliveryHealth.Lifecycle.OPEN;
+            return new DeliveryHealth(
+                lifecycle,
+                automatic.activity,
+                automatic.lastOutcome,
+                automatic.pauseReason,
+                automatic.lastDropReason,
+                automatic.retryDelaySource,
+                automaticDelivery != null,
+                automatic.inFlight,
+                automatic.wakeCoalesced,
+                events.size(),
+                pendingEventBytes,
+                droppedEvents,
+                droppedEventBytes,
+                automatic.automaticAttempts,
+                automatic.transportAttempts,
+                automatic.acceptedBatches,
+                automatic.acceptedEvents,
+                automatic.consecutiveFailures,
+                automatic.scheduledDelayMillis,
+                automatic.acceptedServerRetryHints,
+                automatic.rejectedServerRetryHints
+            );
+        }
     }
 
     /**
      * Returns the queued event batch as stable, pretty-printed JSON.
      */
-    public synchronized String previewJson() {
-        return Json.write(batchMap());
+    public String previewJson() {
+        return serializeBatch(snapshotEvents());
+    }
+
+    /**
+     * Recovers authenticated persisted events in oldest-first order before capture or delivery.
+     */
+    public PersistenceStatus recoverPersistedEvents() {
+        return recoverPersistence(false);
+    }
+
+    /**
+     * Verifies and finalizes one durable interrupted transaction, then recovers persisted events.
+     *
+     * <p>This method never guesses about orphaned writes. If the durable intent cannot prove the
+     * target bytes, callers must explicitly purge instead.</p>
+     */
+    public PersistenceStatus finalizePersistedTransactionAndRecover() {
+        return recoverPersistence(true);
+    }
+
+    /** Returns content-free persisted queue accounting without changing recovery state. */
+    public PersistenceStatus persistenceStatus() {
+        synchronized (deliveryLock) {
+            synchronized (stateLock) {
+                EncryptedEventStore store = requireEventStore();
+                return store.status(
+                    deliveryOptions.maxQueueEvents(),
+                    deliveryOptions.maxQueueBytes(),
+                    !persistenceRecovered
+                );
+            }
+        }
+    }
+
+    /** Explicitly removes all recognized persisted work and enables capture on an empty queue. */
+    public PersistenceStatus purgePersistedEvents() {
+        PersistenceStatus status;
+        synchronized (deliveryLock) {
+            rejectDeliveryReentrancy();
+            synchronized (stateLock) {
+                ensureNotClosedOrClosing();
+                EncryptedEventStore store = requireEventStore();
+                store.purge();
+                events.clear();
+                pendingEventBytes = 0L;
+                persistenceRecovered = true;
+                status = store.status(
+                    deliveryOptions.maxQueueEvents(),
+                    deliveryOptions.maxQueueBytes(),
+                    false
+                );
+            }
+        }
+        if (automaticDelivery != null) {
+            automaticDelivery.onQueueCleared();
+        }
+        return status;
     }
 
     /**
      * Adds a release event to the queue.
      */
-    public synchronized void release(String id, String timestamp, ReleaseAttributes attributes) {
+    public void release(String id, String timestamp, ReleaseAttributes attributes) {
         pushEvent("release", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds an environment event to the queue.
      */
-    public synchronized void environment(String id, String timestamp, EnvironmentAttributes attributes) {
+    public void environment(String id, String timestamp, EnvironmentAttributes attributes) {
         pushEvent("environment", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds an issue event to the queue.
      */
-    public synchronized void issue(String id, String timestamp, IssueAttributes attributes) {
+    public void issue(String id, String timestamp, IssueAttributes attributes) {
         pushEvent("issue", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds a log event to the queue.
      */
-    public synchronized void log(String id, String timestamp, LogAttributes attributes) {
+    public void log(String id, String timestamp, LogAttributes attributes) {
         pushEvent("log", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds a span event to the queue.
      */
-    public synchronized void span(String id, String timestamp, SpanAttributes attributes) {
+    public void span(String id, String timestamp, SpanAttributes attributes) {
         pushEvent("span", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds an action event to the queue.
      */
-    public synchronized void action(String id, String timestamp, ActionAttributes attributes) {
+    public void action(String id, String timestamp, ActionAttributes attributes) {
         pushEvent("action", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
      * Adds an explicit, application-owned metric event to the queue.
      */
-    public synchronized void metric(String id, String timestamp, MetricAttributes attributes) {
+    public void metric(String id, String timestamp, MetricAttributes attributes) {
         pushEvent("metric", id, timestamp, Objects.requireNonNull(attributes, "attributes").toMap());
     }
 
     /**
-     * Flushes queued events through a transport while preserving retry semantics.
+     * Flushes the events present at call start through a transport.
+     *
+     * <p>Concurrent calls are serialized. Events captured during transport I/O remain queued for a
+     * later flush.</p>
      */
-    public synchronized TransportResponse flush(Transport transport) {
-        if (closed) {
-            throw new SdkException("shutdown_error", "client is already shut down");
+    public TransportResponse flush(Transport transport) {
+        if (automaticDelivery != null) {
+            return automaticDelivery.flush(Objects.requireNonNull(transport, "transport"));
         }
-        return flushInternal(Objects.requireNonNull(transport, "transport"));
+        return deliver(Objects.requireNonNull(transport, "transport"), false);
     }
 
     /**
      * Flushes queued events, then marks the client closed so later writes fail.
+     *
+     * <p>A failed shutdown retains unaccepted work and reopens the client for recovery.</p>
      */
-    public synchronized TransportResponse shutdown(Transport transport) {
-        if (closed) {
-            throw new SdkException("shutdown_error", "client is already shut down");
+    public TransportResponse shutdown(Transport transport) {
+        if (automaticDelivery != null) {
+            return automaticDelivery.shutdown(Objects.requireNonNull(transport, "transport"));
         }
-        TransportResponse response = flushInternal(Objects.requireNonNull(transport, "transport"));
-        closed = true;
-        return response;
+        return deliver(Objects.requireNonNull(transport, "transport"), true);
+    }
+
+    /** Flushes queued work once and closes an explicit automatic client. */
+    public TransportResponse shutdown() {
+        if (automaticDelivery == null) {
+            throw new SdkException(
+                "automatic_delivery_disabled",
+                "automatic delivery is not enabled for this client"
+            );
+        }
+        return automaticDelivery.shutdown();
+    }
+
+    /** Resumes a paused automatic client and requests one immediate delivery wake. */
+    public void resumeAutomaticDelivery() {
+        if (automaticDelivery == null) {
+            throw new SdkException(
+                "automatic_delivery_disabled",
+                "automatic delivery is not enabled for this client"
+            );
+        }
+        synchronized (stateLock) {
+            ensureNotClosedOrClosing();
+            ensurePersistenceRecovered();
+        }
+        automaticDelivery.resume();
     }
 
     private void pushEvent(String type, String id, String timestamp, Map<String, Object> attributes) {
-        if (closed) {
-            throw new SdkException("shutdown_error", "client is already shut down");
-        }
         Validation.requireNonEmpty("event id", id);
         Validation.requireTimestamp(timestamp);
-        if (events.size() >= maxQueueSize) {
-            droppedEvents++;
-            reportDroppedEvent(new EventDrop(id, type, "queue_overflow"));
-            return;
+        Event event = new Event(type, timestamp, id, attributes);
+        Map<String, Object> eventValue = Collections.unmodifiableMap(event.toMap());
+        String eventJson = Json.write(eventValue);
+        long eventBytes = utf8Bytes(eventJson);
+        QueuedEvent queuedEvent = new QueuedEvent(id, eventJson, eventBytes, null);
+        EventDrop drop = null;
+        boolean queued = false;
+
+        synchronized (stateLock) {
+            ensureWritable();
+            if (eventBytes > deliveryOptions.maxQueueBytes()
+                || utf8Bytes(serializeBatch(Collections.singletonList(queuedEvent)))
+                    > deliveryOptions.maxBatchBytes()) {
+                drop = recordDrop(id, type, "event_too_large", eventBytes);
+            } else if (events.size() >= deliveryOptions.maxQueueEvents()
+                || eventBytes > deliveryOptions.maxQueueBytes() - pendingEventBytes) {
+                drop = recordDrop(id, type, "queue_overflow", eventBytes);
+            } else {
+                if (eventStore != null) {
+                    EncryptedEventStore.Record record = eventStore.admit(
+                        id,
+                        eventJson,
+                        deliveryOptions.maxQueueEvents(),
+                        deliveryOptions.maxQueueBytes()
+                    );
+                    queuedEvent = new QueuedEvent(id, eventJson, eventBytes, record);
+                }
+                events.addLast(queuedEvent);
+                pendingEventBytes += eventBytes;
+                queued = true;
+            }
         }
-        events.add(new Event(type, timestamp, id, attributes));
+
+        if (drop != null) {
+            reportDroppedEvent(drop);
+            if (automaticDelivery != null) {
+                automaticDelivery.onDropped(drop.reason());
+            }
+        } else if (queued && automaticDelivery != null) {
+            automaticDelivery.onQueueChanged(pendingEvents());
+        }
+    }
+
+    private EventDrop recordDrop(String id, String type, String reason, long serializedBytes) {
+        if (droppedEvents < Integer.MAX_VALUE) {
+            droppedEvents++;
+        }
+        droppedEventBytes = serializedBytes > Long.MAX_VALUE - droppedEventBytes
+            ? Long.MAX_VALUE
+            : droppedEventBytes + serializedBytes;
+        return new EventDrop(id, type, reason, serializedBytes);
     }
 
     private void reportDroppedEvent(EventDrop drop) {
-        if (eventDroppedHandler == null) {
+        EventDroppedHandler handler = deliveryOptions.eventDroppedHandler();
+        if (handler == null) {
             return;
         }
         try {
-            eventDroppedHandler.onEventDropped(drop);
+            handler.onEventDropped(drop);
         } catch (RuntimeException error) {
             // Drop callbacks are advisory and must never interrupt app telemetry.
         }
     }
 
-    private TransportResponse flushInternal(Transport transport) {
-        if (events.isEmpty()) {
-            return new TransportResponse(204, 0);
+    private PersistenceStatus recoverPersistence(boolean finalizeAmbiguous) {
+        PersistenceStatus status;
+        int recoveredEvents;
+        synchronized (deliveryLock) {
+            rejectDeliveryReentrancy();
+            synchronized (stateLock) {
+                ensureNotClosedOrClosing();
+                EncryptedEventStore store = requireEventStore();
+                if (!events.isEmpty() || pendingEventBytes != 0L) {
+                    throw new SdkException(
+                        "persistence_state_error",
+                        "persistence recovery requires an empty in-memory queue"
+                    );
+                }
+                EncryptedEventStore.Snapshot snapshot = store.recover(
+                    deliveryOptions.maxQueueEvents(),
+                    deliveryOptions.maxQueueBytes(),
+                    finalizeAmbiguous
+                );
+                for (EncryptedEventStore.Record record : snapshot.records()) {
+                    QueuedEvent event = new QueuedEvent(
+                        record.eventId(),
+                        record.eventJson(),
+                        record.eventBytes(),
+                        record
+                    );
+                    events.addLast(event);
+                    pendingEventBytes += event.serializedBytes;
+                }
+                persistenceRecovered = true;
+                status = snapshot.status(false);
+                recoveredEvents = events.size();
+            }
+        }
+        if (automaticDelivery != null && recoveredEvents > 0) {
+            automaticDelivery.onQueueChanged(recoveredEvents);
+        }
+        return status;
+    }
+
+    private EncryptedEventStore requireEventStore() {
+        if (eventStore == null) {
+            throw new SdkException(
+                "persistence_disabled",
+                "encrypted restart persistence is not enabled for this client"
+            );
+        }
+        return eventStore;
+    }
+
+    void rejectDeliveryReentrancy() {
+        if (deliveryOwner == Thread.currentThread()) {
+            throw new SdkException(
+                "reentrancy_error",
+                "persistence recovery cannot run from the active transport callback"
+            );
+        }
+    }
+
+    private TransportResponse deliver(Transport transport, boolean shutdown) {
+        return deliver(transport, shutdown, null, DeliveryObserver.NONE);
+    }
+
+    DeliverySession beginAutomaticDelivery() {
+        synchronized (stateLock) {
+            ensureNotClosedOrClosing();
+            ensurePersistenceRecovered();
+            return new DeliverySession(new ArrayList<>(events));
+        }
+    }
+
+    TransportResponse deliverAutomatically(
+        Transport transport,
+        boolean shutdown,
+        DeliverySession session,
+        DeliveryObserver observer
+    ) {
+        return deliver(
+            Objects.requireNonNull(transport, "transport"),
+            shutdown,
+            session,
+            Objects.requireNonNull(observer, "observer")
+        );
+    }
+
+    private TransportResponse deliver(
+        Transport transport,
+        boolean shutdown,
+        DeliverySession session,
+        DeliveryObserver observer
+    ) {
+        synchronized (deliveryLock) {
+            if (deliveryOwner == Thread.currentThread()) {
+                throw new SdkException(
+                    "reentrancy_error",
+                    "flush or shutdown cannot run from the active transport callback"
+                );
+            }
+            deliveryOwner = Thread.currentThread();
+            try {
+                List<QueuedEvent> snapshot;
+                synchronized (stateLock) {
+                    if (closed) {
+                        throw new SdkException("shutdown_error", "client is already shut down");
+                    }
+                    ensurePersistenceRecovered();
+                    if (shutdown) {
+                        closing = true;
+                    }
+                    snapshot = session == null
+                        ? new ArrayList<>(events)
+                        : remainingSessionEvents(session);
+                }
+
+                boolean shutdownCompleted = false;
+                try {
+                    TransportResponse response = flushSnapshot(transport, snapshot, observer);
+                    if (shutdown) {
+                        synchronized (stateLock) {
+                            closing = false;
+                            closed = true;
+                        }
+                    }
+                    shutdownCompleted = true;
+                    return response;
+                } finally {
+                    if (shutdown && !shutdownCompleted) {
+                        synchronized (stateLock) {
+                            closing = false;
+                        }
+                    }
+                }
+            } finally {
+                deliveryOwner = null;
+            }
+        }
+    }
+
+    private TransportResponse flushSnapshot(
+        Transport transport,
+        List<QueuedEvent> snapshot,
+        DeliveryObserver observer
+    ) {
+        if (snapshot.isEmpty()) {
+            return new TransportResponse(204, 0, 0, 0);
         }
 
-        String body = previewJson();
-        int maxAttempts = maxRetries + 1;
+        int offset = 0;
+        int attempts = 0;
+        int batches = 0;
+        int acceptedEvents = 0;
+        int statusCode = 204;
+        while (offset < snapshot.size()) {
+            FrozenBatch batch = freezeNextBatch(snapshot, offset);
+            SendResult result = sendBatch(transport, batch.body);
+            acknowledgePrefix(batch.events);
+            observer.onBatchAccepted(batch.events.size(), result.attempts);
+            offset += batch.events.size();
+            attempts += result.attempts;
+            batches++;
+            acceptedEvents += batch.events.size();
+            statusCode = result.statusCode;
+        }
+        return new TransportResponse(statusCode, attempts, batches, acceptedEvents);
+    }
+
+    private List<QueuedEvent> remainingSessionEvents(DeliverySession session) {
+        if (session.events.isEmpty() || events.isEmpty()) {
+            return Collections.emptyList();
+        }
+        QueuedEvent currentFirst = events.peekFirst();
+        int start = identityIndexOf(session.events, currentFirst);
+        if (start < 0) {
+            return Collections.emptyList();
+        }
+        List<QueuedEvent> remaining = new ArrayList<>();
+        Iterator<QueuedEvent> current = events.iterator();
+        for (int index = start; index < session.events.size(); index++) {
+            if (!current.hasNext()) {
+                throw new SdkException("delivery_error", "automatic delivery ownership is incomplete");
+            }
+            QueuedEvent expected = session.events.get(index);
+            QueuedEvent actual = current.next();
+            if (actual != expected) {
+                throw new SdkException("delivery_error", "automatic delivery ownership changed");
+            }
+            remaining.add(expected);
+        }
+        return remaining;
+    }
+
+    private static int identityIndexOf(List<QueuedEvent> values, QueuedEvent expected) {
+        for (int index = 0; index < values.size(); index++) {
+            if (values.get(index) == expected) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private FrozenBatch freezeNextBatch(List<QueuedEvent> snapshot, int offset) {
+        List<QueuedEvent> batchEvents = new ArrayList<>();
+        String body = null;
+        int limit = Math.min(snapshot.size(), offset + deliveryOptions.maxBatchEvents());
+        for (int index = offset; index < limit; index++) {
+            batchEvents.add(snapshot.get(index));
+            String candidate = serializeBatch(batchEvents);
+            if (utf8Bytes(candidate) > deliveryOptions.maxBatchBytes()) {
+                batchEvents.remove(batchEvents.size() - 1);
+                break;
+            }
+            body = candidate;
+        }
+
+        if (batchEvents.isEmpty() || body == null) {
+            throw new SdkException("delivery_error", "queued event exceeds the configured request bound");
+        }
+        return new FrozenBatch(Collections.unmodifiableList(new ArrayList<>(batchEvents)), body);
+    }
+
+    private SendResult sendBatch(Transport transport, String body) {
+        int maxAttempts = deliveryOptions.maxRetries() + 1;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 TransportResponse response = transport.send(apiKey, body);
@@ -237,8 +791,14 @@ public final class LogBrewClient {
                     throw new SdkException("unauthenticated", "transport rejected the API key");
                 }
                 if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                    events.clear();
-                    return new TransportResponse(response.statusCode(), attempt);
+                    return new SendResult(response.statusCode(), attempt);
+                }
+                if (transport instanceof AutomaticDeliveryTransport
+                    && response.retryAfterDirective().outcome() != RetryAfterDirective.Outcome.NONE) {
+                    throw new SdkException(
+                        "transport_error",
+                        "unexpected transport status " + response.statusCode()
+                    );
                 }
                 if (response.statusCode() >= 500 && attempt < maxAttempts) {
                     continue;
@@ -254,15 +814,98 @@ public final class LogBrewClient {
         throw new SdkException("transport_error", "exhausted retries");
     }
 
-    private Map<String, Object> batchMap() {
-        Map<String, Object> batch = new LinkedHashMap<>();
-        batch.put("sdk", sdk);
-        List<Map<String, Object>> mappedEvents = new ArrayList<>();
-        for (Event event : events) {
-            mappedEvents.add(event.toMap());
+    private void acknowledgePrefix(List<QueuedEvent> accepted) {
+        synchronized (stateLock) {
+            List<EncryptedEventStore.Record> persisted = new ArrayList<>();
+            Iterator<QueuedEvent> queued = events.iterator();
+            for (QueuedEvent expected : accepted) {
+                QueuedEvent actual = queued.hasNext() ? queued.next() : null;
+                if (actual != expected) {
+                    throw new SdkException("delivery_error", "queued event ownership changed during delivery");
+                }
+                if (eventStore != null) {
+                    if (actual.persistedRecord == null) {
+                        throw new SdkException("delivery_error", "persisted event ownership is missing");
+                    }
+                    persisted.add(actual.persistedRecord);
+                }
+            }
+            if (eventStore != null) {
+                eventStore.acknowledge(persisted);
+            }
+            for (QueuedEvent expected : accepted) {
+                QueuedEvent actual = events.peekFirst();
+                if (actual != expected) {
+                    throw new SdkException("delivery_error", "queued event ownership changed during delivery");
+                }
+                events.removeFirst();
+                pendingEventBytes -= actual.serializedBytes;
+            }
         }
-        batch.put("events", mappedEvents);
-        return batch;
+    }
+
+    private void ensureWritable() {
+        ensureNotClosedOrClosing();
+        ensurePersistenceRecovered();
+    }
+
+    private void ensureNotClosedOrClosing() {
+        if (closed) {
+            throw new SdkException("shutdown_error", "client is already shut down");
+        }
+        if (closing) {
+            throw new SdkException("shutdown_error", "client is shutting down");
+        }
+    }
+
+    private void ensurePersistenceRecovered() {
+        if (!persistenceRecovered) {
+            throw new SdkException(
+                "persistence_recovery_required",
+                "recover or purge persistence before capture or delivery"
+            );
+        }
+    }
+
+    private List<QueuedEvent> snapshotEvents() {
+        synchronized (stateLock) {
+            ensurePersistenceRecovered();
+            return new ArrayList<>(events);
+        }
+    }
+
+    private String serializeBatch(List<QueuedEvent> batchEvents) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("{\n  \"sdk\": ");
+        appendIndented(builder, Json.write(sdk), "  ");
+        builder.append(",\n  \"events\": [");
+        if (!batchEvents.isEmpty()) {
+            builder.append('\n');
+            for (int index = 0; index < batchEvents.size(); index++) {
+                builder.append("    ");
+                appendIndented(builder, batchEvents.get(index).eventJson, "    ");
+                if (index + 1 < batchEvents.size()) {
+                    builder.append(',');
+                }
+                builder.append('\n');
+            }
+            builder.append("  ");
+        }
+        return builder.append("]\n}").toString();
+    }
+
+    private static void appendIndented(StringBuilder builder, String value, String indentation) {
+        int start = 0;
+        int newline;
+        while ((newline = value.indexOf('\n', start)) >= 0) {
+            builder.append(value, start, newline + 1).append(indentation);
+            start = newline + 1;
+        }
+        builder.append(value, start, value.length());
+    }
+
+    private static int utf8Bytes(String value) {
+        return value.getBytes(StandardCharsets.UTF_8).length;
     }
 
     /**
@@ -282,11 +925,13 @@ public final class LogBrewClient {
         private final String eventId;
         private final String eventType;
         private final String reason;
+        private final long serializedBytes;
 
-        private EventDrop(String eventId, String eventType, String reason) {
+        private EventDrop(String eventId, String eventType, String reason, long serializedBytes) {
             this.eventId = eventId;
             this.eventType = eventType;
             this.reason = reason;
+            this.serializedBytes = serializedBytes;
         }
 
         /**
@@ -309,5 +954,65 @@ public final class LogBrewClient {
         public String reason() {
             return reason;
         }
+
+        /**
+         * Returns the dropped event's serialized UTF-8 byte count without event content.
+         */
+        public long serializedBytes() {
+            return serializedBytes;
+        }
+    }
+
+    private static final class QueuedEvent {
+        private final String eventId;
+        private final String eventJson;
+        private final long serializedBytes;
+        private final EncryptedEventStore.Record persistedRecord;
+
+        private QueuedEvent(
+            String eventId,
+            String eventJson,
+            long serializedBytes,
+            EncryptedEventStore.Record persistedRecord
+        ) {
+            this.eventId = eventId;
+            this.eventJson = eventJson;
+            this.serializedBytes = serializedBytes;
+            this.persistedRecord = persistedRecord;
+        }
+    }
+
+    private static final class FrozenBatch {
+        private final List<QueuedEvent> events;
+        private final String body;
+
+        private FrozenBatch(List<QueuedEvent> events, String body) {
+            this.events = events;
+            this.body = body;
+        }
+    }
+
+    private static final class SendResult {
+        private final int statusCode;
+        private final int attempts;
+
+        private SendResult(int statusCode, int attempts) {
+            this.statusCode = statusCode;
+            this.attempts = attempts;
+        }
+    }
+
+    static final class DeliverySession {
+        private final List<QueuedEvent> events;
+
+        private DeliverySession(List<QueuedEvent> events) {
+            this.events = Collections.unmodifiableList(events);
+        }
+    }
+
+    interface DeliveryObserver {
+        DeliveryObserver NONE = (eventCount, attempts) -> { };
+
+        void onBatchAccepted(int eventCount, int attempts);
     }
 }

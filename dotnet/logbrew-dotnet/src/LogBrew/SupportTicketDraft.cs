@@ -388,7 +388,7 @@ namespace LogBrew
             return true;
         }
 
-        private static IReadOnlyDictionary<string, object?> CopyDictionary(IReadOnlyDictionary<string, object?> source)
+        private static ReadOnlyDictionary<string, object?> CopyDictionary(IReadOnlyDictionary<string, object?> source)
         {
             var copy = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var item in source)
@@ -399,7 +399,7 @@ namespace LogBrew
             return new ReadOnlyDictionary<string, object?>(copy);
         }
 
-        private static void AddIfNotNull(IDictionary<string, object?> payload, string key, object? value)
+        private static void AddIfNotNull(Dictionary<string, object?> payload, string key, object? value)
         {
             if (value != null)
             {

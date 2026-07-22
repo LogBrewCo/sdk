@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 const CLI_PATH = new URL("../release-artifacts.js", import.meta.url);
 const VITE_PLUGIN_PATH = new URL("../vite-release-artifacts.js", import.meta.url);
+const PROJECT_ID = "550e8400-e29b-41d4-a716-446655440000";
+const require = createRequire(import.meta.url);
 
 function makeBuild() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-release-artifacts-"));
@@ -106,6 +109,8 @@ test("manifest-js emits a ready privacy-bounded source-map manifest", () => {
       "manifest-js",
       "--build-dir",
       buildDir,
+      "--project-id",
+      "550e8400-e29b-41d4-a716-446655440000",
       "--release",
       "web@1.2.3",
       "--environment",
@@ -124,6 +129,7 @@ test("manifest-js emits a ready privacy-bounded source-map manifest", () => {
     const manifest = jsonFromStdout(result);
     const artifact = manifest.artifacts[0];
     assert.equal(manifest.validation.status, "ready");
+    assert.equal(manifest.projectId, "550e8400-e29b-41d4-a716-446655440000");
     assert.equal(manifest.minifiedPathPrefix, "https://cdn.example/assets");
     assert.equal(artifact.minifiedSource.minifiedUrl, "https://cdn.example/assets/assets/app.js");
     assert.equal(artifact.sourceMap.hasSourcesContent, false);
@@ -133,6 +139,32 @@ test("manifest-js emits a ready privacy-bounded source-map manifest", () => {
     assert.match(artifact.minifiedSource.artifactSha256, /^[0-9a-f]{64}$/u);
     assert.match(artifact.sourceMap.artifactSha256, /^[0-9a-f]{64}$/u);
     assert.doesNotMatch(result.stdout, /source-fixture-marker|flag=debug|#fragment/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("manifest-js rejects a non-UUID project id", () => {
+  const { root, buildDir } = makeBuild();
+  try {
+    const result = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--project-id",
+      "project-not-a-uuid",
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets"
+    ]);
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /--project-id must be a UUID/u);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -488,6 +520,8 @@ test("upload-js allows an explicit hosted HTTPS dry-run without query or auth le
       "manifest-js",
       "--build-dir",
       buildDir,
+      "--project-id",
+      "550e8400-e29b-41d4-a716-446655440000",
       "--release",
       "web@1.2.3",
       "--environment",
@@ -521,6 +555,58 @@ test("upload-js allows an explicit hosted HTTPS dry-run without query or auth le
     assert.equal(report.filePartCount, 2);
     assert.doesNotMatch(result.stdout, /source-fixture-marker|release-artifact-auth/u);
     assert.doesNotMatch(result.stdout, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("upload-js rejects hosted manifests without a valid project id", () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const prep = runCli([
+      "prepare-js",
+      "--build-dir",
+      buildDir,
+      "--strip-sources-content",
+      "--strip-source-prefix",
+      appRoot,
+      "--write"
+    ]);
+    assert.equal(prep.status, 0, prep.stderr);
+
+    const manifestResult = runCli([
+      "manifest-js",
+      "--build-dir",
+      buildDir,
+      "--release",
+      "web@1.2.3",
+      "--environment",
+      "production",
+      "--service",
+      "checkout-web",
+      "--minified-path-prefix",
+      "https://cdn.example/assets"
+    ]);
+    assert.equal(manifestResult.status, 0, manifestResult.stderr);
+    const manifestPath = path.join(root, "manifest.json");
+    fs.writeFileSync(manifestPath, manifestResult.stdout, "utf8");
+
+    const result = runCli([
+      "upload-js",
+      "--build-dir",
+      buildDir,
+      "--manifest",
+      manifestPath,
+      "--endpoint",
+      "https://api.logbrew.com/api/release-artifacts",
+      "--allow-hosted",
+      "--dry-run"
+    ]);
+
+    assert.equal(result.status, 4);
+    const report = jsonFromStdout(result);
+    assert.equal(report.status, "validation_failed");
+    assert.deepEqual(report.validation.errors, ["hosted release artifact uploads require manifest projectId as a UUID"]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -637,6 +723,7 @@ test("Vite release-artifact plugin prepares a build output and writes a ready ma
       release: "web@1.2.3",
       environment: "production",
       service: "checkout-web",
+      projectId: PROJECT_ID,
       minifiedPathPrefix: "https://cdn.example/assets?cache=placeholder#fragment",
       manifestPath
     });
@@ -658,6 +745,7 @@ test("Vite release-artifact plugin prepares a build output and writes a ready ma
     const artifact = manifest.artifacts[0];
 
     assert.equal(manifest.validation.status, "ready");
+    assert.equal(manifest.projectId, PROJECT_ID);
     assert.equal(manifest.minifiedPathPrefix, "https://cdn.example/assets");
     assert.equal(artifact.minifiedSource.minifiedUrl, "https://cdn.example/assets/assets/app.js");
     assert.equal(artifact.sourceMap.hasSourcesContent, false);
@@ -667,6 +755,186 @@ test("Vite release-artifact plugin prepares a build output and writes a ready ma
     assert.equal(sourceMap.debug_id, artifact.debugId);
     assert.doesNotMatch(serialized, /source-fixture-marker|cache=placeholder|fragment/);
     assert.doesNotMatch(serialized, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Vite release-artifact plugin can dry-run a hosted upload after manifest creation", async () => {
+  const { root, appRoot, buildDir } = makeBuild();
+  try {
+    const { createLogBrewViteReleaseArtifactsPlugin } = await import(VITE_PLUGIN_PATH);
+    const messages = [];
+    const plugin = createLogBrewViteReleaseArtifactsPlugin({
+      release: "web@1.2.3",
+      environment: "production",
+      service: "checkout-web",
+      projectId: PROJECT_ID,
+      minifiedPathPrefix: "https://cdn.example/assets",
+      upload: {
+        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        allowHostedUpload: true,
+        dryRun: true
+      }
+    });
+
+    plugin.configResolved({
+      root: appRoot,
+      build: { outDir: "dist" },
+      logger: { info(message) { messages.push(message); } }
+    });
+    await plugin.closeBundle();
+
+    assert.deepEqual(messages, ["LogBrew release artifacts: dry_run (1 artifact)"]);
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(buildDir, "logbrew-release-artifacts.json"), "utf8")).projectId,
+      PROJECT_ID
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Vite hosted release-artifact upload requires project identity", async () => {
+  const { createLogBrewViteReleaseArtifactsPlugin } = await import(VITE_PLUGIN_PATH);
+
+  assert.throws(
+    () => createLogBrewViteReleaseArtifactsPlugin({
+      release: "web@1.2.3",
+      environment: "production",
+      service: "checkout-web",
+      minifiedPathPrefix: "https://cdn.example/assets",
+      upload: {
+        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        allowHostedUpload: true,
+        dryRun: true
+      }
+    }),
+    /hosted upload requires projectId/u
+  );
+});
+
+test("Vite release-artifact upload rejects unsafe hosted endpoints before build output changes", async () => {
+  const { createLogBrewViteReleaseArtifactsPlugin } = await import(VITE_PLUGIN_PATH);
+
+  assert.throws(
+    () => createLogBrewViteReleaseArtifactsPlugin({
+      release: "web@1.2.3",
+      environment: "production",
+      service: "checkout-web",
+      projectId: PROJECT_ID,
+      minifiedPathPrefix: "https://cdn.example/assets",
+      upload: {
+        endpoint: "https://api.logbrew.com/api/release-artifacts?marker=hidden#fragment",
+        allowHostedUpload: true,
+        dryRun: true
+      }
+    }),
+    /must not include query strings or fragments/u
+  );
+});
+
+test("Vite release-artifact upload validates bounded retry settings", async () => {
+  const { createLogBrewViteReleaseArtifactsPlugin } = await import(VITE_PLUGIN_PATH);
+
+  assert.throws(
+    () => createLogBrewViteReleaseArtifactsPlugin({
+      release: "web@1.2.3",
+      environment: "production",
+      service: "checkout-web",
+      projectId: PROJECT_ID,
+      minifiedPathPrefix: "https://cdn.example/assets",
+      upload: {
+        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        allowHostedUpload: true,
+        dryRun: true,
+        maxRetries: 11
+      }
+    }),
+    /maxRetries must be an integer from 0 to 10/u
+  );
+});
+
+test("Vite release-artifact upload rejects unknown settings", async () => {
+  const { createLogBrewViteReleaseArtifactsPlugin } = await import(VITE_PLUGIN_PATH);
+
+  assert.throws(
+    () => createLogBrewViteReleaseArtifactsPlugin({
+      release: "web@1.2.3",
+      environment: "production",
+      service: "checkout-web",
+      projectId: PROJECT_ID,
+      minifiedPathPrefix: "https://cdn.example/assets",
+      upload: {
+        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        allowHostedUpload: true,
+        dryRun: true,
+        retryDelaySeconds: 1
+      }
+    }),
+    /unknown upload option retryDelaySeconds/u
+  );
+});
+
+test("Vite release-artifact upload failure exposes only a bounded status", async () => {
+  const { root, appRoot } = makeBuild();
+  const authEnvName = "LOGBREW_TEST_RELEASE_ARTIFACT_AUTH_NAME";
+  const previous = process.env[authEnvName];
+  try {
+    delete process.env[authEnvName];
+    const { createLogBrewViteReleaseArtifactsPlugin } = await import(VITE_PLUGIN_PATH);
+    const plugin = createLogBrewViteReleaseArtifactsPlugin({
+      release: "web@1.2.3",
+      environment: "production",
+      service: "checkout-web",
+      projectId: PROJECT_ID,
+      minifiedPathPrefix: "https://cdn.example/assets",
+      upload: {
+        endpoint: "https://api.logbrew.com/api/release-artifacts",
+        allowHostedUpload: true,
+        tokenEnv: authEnvName
+      }
+    });
+    plugin.configResolved({ root: appRoot, build: { outDir: "dist" } });
+
+    await assert.rejects(plugin.closeBundle(), (error) => {
+      assert.match(error.message, /upload-js failed: auth_missing/u);
+      assert.doesNotMatch(error.message, new RegExp(authEnvName, "u"));
+      return true;
+    });
+  } finally {
+    if (previous === undefined) {
+      delete process.env[authEnvName];
+    } else {
+      process.env[authEnvName] = previous;
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("build-time release-artifact failures bound validation diagnostics", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-release-artifact-build-error-"));
+  try {
+    const fakeCli = path.join(root, "fake-release-artifacts.cjs");
+    fs.writeFileSync(fakeCli, `
+process.stdout.write(JSON.stringify({
+  status: "validation_failed",
+  validation: { errors: ["invalid\\nvalue ${"x".repeat(300)} tail-marker"] }
+}));
+process.exit(4);
+`, "utf8");
+    const { runReleaseArtifactCli } = require("../release-artifacts-build.cjs");
+
+    assert.throws(
+      () => runReleaseArtifactCli(fakeCli, "upload-js", []),
+      (error) => {
+        assert.match(error.message, /upload-js failed: invalid value/u);
+        assert.doesNotMatch(error.message, /[\r\n]/u);
+        assert.doesNotMatch(error.message, /tail-marker/u);
+        assert.ok(error.message.length <= 260);
+        return true;
+      }
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

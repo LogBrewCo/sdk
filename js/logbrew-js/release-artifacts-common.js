@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
 export function sortJson(value) {
   if (Array.isArray(value)) {
     return value.map(sortJson);
@@ -64,4 +66,17 @@ export function readJsonObject(filePath, label) {
     throw new Error(`${label} must be a JSON object`);
   }
   return payload;
+}
+
+export function normalizeProjectId(value, errorMessage, required = false) {
+  if (value === undefined || value === null) {
+    if (required) {
+      throw new Error(errorMessage);
+    }
+    return undefined;
+  }
+  if (typeof value !== "string" || UUID_RE.test(value.trim()) === false) {
+    throw new Error(errorMessage);
+  }
+  return value.trim().toLowerCase();
 }

@@ -799,7 +799,7 @@ jobs:
                 """
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
     <PackageId>LogBrew</PackageId>
     <Version>0.1.5</Version>
     <Authors>LogBrew</Authors>

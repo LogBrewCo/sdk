@@ -147,6 +147,21 @@ function findMatchingArtifact(manifest, frame, buildDir) {
   return artifact;
 }
 
+function findArtifactByDebugId(manifest, debugId) {
+  const normalizedDebugId = String(debugId).toLowerCase();
+  const matches = requireReadyArtifacts(manifest).filter((candidate) => {
+    const candidateDebugId = candidate.debugId;
+    return typeof candidateDebugId === "string" && candidateDebugId.toLowerCase() === normalizedDebugId;
+  });
+  if (matches.length === 0) {
+    throw new Error("no manifest artifact matches the issue event debug ID");
+  }
+  if (matches.length > 1) {
+    throw new Error("multiple manifest artifacts match the issue event debug ID");
+  }
+  return matches[0];
+}
+
 function loadManifestSourceMap(artifact, buildDir) {
   if (!artifact.sourceMap || typeof artifact.sourceMap !== "object" || !artifact.sourceMap.path) {
     throw new Error("matched artifact is missing source map metadata");
@@ -469,9 +484,7 @@ function stackFrameFromIssueMetadata(metadata) {
   return `${codeFile}:${line}:${column}`;
 }
 
-export function verifyJavaScriptSymbolication({ buildDir, manifest, stackFrame, sourceContext }) {
-  const frame = parseStackFrame(stackFrame);
-  const artifact = findMatchingArtifact(manifest, frame, buildDir);
+function symbolicationReportForArtifact({ buildDir, manifest, frame, artifact, sourceContext }) {
   const sourceMap = loadManifestSourceMap(artifact, buildDir);
   const original = originalPositionFor(sourceMap.payload, frame.line, frame.column);
   const resolvedSourceContext = sourceContextForOriginalPosition(original, {
@@ -501,6 +514,17 @@ export function verifyJavaScriptSymbolication({ buildDir, manifest, stackFrame, 
   };
 }
 
+export function verifyJavaScriptSymbolication({ buildDir, manifest, stackFrame, sourceContext }) {
+  const frame = parseStackFrame(stackFrame);
+  return symbolicationReportForArtifact({
+    buildDir,
+    manifest,
+    frame,
+    artifact: findMatchingArtifact(manifest, frame, buildDir),
+    sourceContext
+  });
+}
+
 export function verifyJavaScriptIssueSymbolication({ buildDir, manifest, issueEvent, sourceContext }) {
   const { metadata, input } = metadataFromIssueEvent(issueEvent);
   requireMetadataMatchesManifest(metadata, manifest, "release");
@@ -508,10 +532,12 @@ export function verifyJavaScriptIssueSymbolication({ buildDir, manifest, issueEv
   requireMetadataMatchesManifest(metadata, manifest, "service");
 
   const expectedDebugId = requireMetadataString(metadata, "releaseArtifactDebugId").toLowerCase();
-  const report = verifyJavaScriptSymbolication({
+  const artifact = findArtifactByDebugId(manifest, expectedDebugId);
+  const report = symbolicationReportForArtifact({
     buildDir,
     manifest,
-    stackFrame: stackFrameFromIssueMetadata(metadata),
+    frame: parseStackFrame(stackFrameFromIssueMetadata(metadata)),
+    artifact,
     sourceContext
   });
   if (typeof report.debugId !== "string" || report.debugId.toLowerCase() !== expectedDebugId) {

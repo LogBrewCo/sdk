@@ -59,7 +59,7 @@ namespace LogBrew
             var normalized = NormalizeMetadataKey(key);
             foreach (var blocked in BlockedDependencyMetadataKeys)
             {
-                if (normalized == blocked || normalized.Contains(blocked, StringComparison.Ordinal))
+                if (normalized == blocked || TextSearch.Contains(normalized, blocked, StringComparison.Ordinal))
                 {
                     return true;
                 }

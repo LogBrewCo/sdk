@@ -85,12 +85,13 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         smoke = (ROOT / "scripts" / "real_user_vite_release_artifact_smoke.sh").read_text(encoding="utf-8")
 
         self.assertIn("js_release_artifact_fake_intake.py", smoke)
-        self.assertIn("upload-js \\", smoke)
-        self.assertIn('--build-dir "$dist_dir"', smoke)
-        self.assertIn('--manifest "$ready_manifest"', smoke)
+        self.assertIn("createLogBrewViteReleaseArtifactsPlugin", smoke)
+        self.assertIn("upload: {", smoke)
+        self.assertIn("LOGBREW_RELEASE_ARTIFACT_ENDPOINT", smoke)
+        self.assertIn('--pack-destination "$pack_dir"', smoke)
         self.assertIn("/retry-success", smoke)
-        self.assertIn('assert upload_report["status"] == "uploaded"', smoke)
-        self.assertIn('assert upload_report["retryCount"] == 1', smoke)
+        self.assertIn('grep -Fq "LogBrew release artifacts: uploaded ("', smoke)
+        self.assertIn('assert [event["path"] for event in events].count("/retry-success") == 2', smoke)
         self.assertIn('assert not any(event["containsSourceSentinel"] for event in events)', smoke)
         self.assertIn('assert not any(event["containsAuthValue"] for event in events)', smoke)
 
@@ -120,12 +121,13 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         smoke = (ROOT / "scripts" / "real_user_next_release_artifact_smoke.sh").read_text(encoding="utf-8")
 
         self.assertIn("js_release_artifact_fake_intake.py", smoke)
-        self.assertIn("upload-js \\", smoke)
-        self.assertIn('--build-dir "$chunks_dir"', smoke)
-        self.assertIn('--manifest "$ready_manifest"', smoke)
+        self.assertIn("withLogBrewNextReleaseArtifacts", smoke)
+        self.assertIn("upload: {", smoke)
+        self.assertIn("LOGBREW_RELEASE_ARTIFACT_ENDPOINT", smoke)
+        self.assertIn('--pack-destination "$pack_dir"', smoke)
         self.assertIn("/retry-success", smoke)
-        self.assertIn('assert upload_report["status"] == "uploaded"', smoke)
-        self.assertIn('assert upload_report["retryCount"] == 1', smoke)
+        self.assertIn('grep -Fq "LogBrew release artifacts: uploaded ("', smoke)
+        self.assertIn('assert [event["path"] for event in events].count("/retry-success") == 2', smoke)
         self.assertIn('assert not any(event["containsSourceSentinel"] for event in events)', smoke)
         self.assertIn('assert not any(event["containsAuthValue"] for event in events)', smoke)
 
@@ -152,8 +154,25 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         )
 
         self.assertIn('"@logbrew/react-native": "file:../logbrew-react-native.tgz"', smoke)
+        self.assertIn('require("@logbrew/react-native/metro")', smoke)
+        self.assertIn("withLogBrewMetroConfig", smoke)
+        self.assertIn("metro-string.config.js", smoke)
+        self.assertIn("metro-mutating-string.config.js", smoke)
+        self.assertIn("custom-dist/index.android.bundle", smoke)
+        self.assertIn("string-returning custom serializer changed bundle code", smoke)
         self.assertIn("createReactNativeErrorEvent", smoke)
-        self.assertIn("debugIdMap", smoke)
+        self.assertNotIn("debugIdMap:", smoke)
+        self.assertIn('assert bundle_debug_id == source_map["debug_id"]', smoke)
+        self.assertIn('assert source_map["debugId"] == bundle_debug_id', smoke)
+        self.assertIn("metro-consumer.ts", smoke)
+        self.assertIn("npx tsc --project metro-tsconfig.json", smoke)
+        self.assertIn("metro-config-consumer.ts", smoke)
+        self.assertIn('from "@react-native/metro-config"', smoke)
+        self.assertIn("createLogBrewMetroSerializer(metroCustomSerializer)", smoke)
+        self.assertIn("npx tsc --project metro-config-tsconfig.json", smoke)
+        self.assertIn('assert.equal(developmentResult, "development-bundle")', smoke)
+        self.assertIn("assert.equal(developmentCalls, 1)", smoke)
+        self.assertIn("assert.equal(receivedPreModules, originalPreModules)", smoke)
         self.assertIn('assert runtime_issue["metadata"]["releaseArtifactDebugId"] == debug_id', smoke)
         self.assertIn('assert runtime_issue["metadata"]["releaseArtifactCodeFile"] == runtime_path', smoke)
         self.assertIn('assert runtime_issue["metadata"]["errorFrameFile"] == runtime_path', smoke)
@@ -161,6 +180,19 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn('assert "logbrew_rn_query_placeholder" not in serialized_runtime_issue', smoke)
         self.assertIn('assert "logbrew_rn_hash_placeholder" not in serialized_runtime_issue', smoke)
         self.assertIn("assert tmp_dir not in serialized_runtime_issue", smoke)
+
+    def test_react_native_smoke_symbolicates_runtime_issue_with_source_context(self) -> None:
+        smoke = (ROOT / "scripts" / "real_user_react_native_release_artifact_smoke.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("--issue-event", smoke)
+        self.assertIn("$runtime_issue_payload", smoke)
+        self.assertIn("--source-root", smoke)
+        self.assertIn('source_context = runtime_issue_symbolication["sourceContext"]', smoke)
+        self.assertIn('assert source_context["source"] == "index.js"', smoke)
+        self.assertIn('assert "react native checkout exploded" in source_context["lines"][0]["text"]', smoke)
+        self.assertIn('assert "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_symbolication', smoke)
 
 
 if __name__ == "__main__":

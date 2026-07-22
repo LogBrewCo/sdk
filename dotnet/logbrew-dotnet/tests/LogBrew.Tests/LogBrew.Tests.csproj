@@ -9,9 +9,10 @@
     <AnalysisMode>All</AnalysisMode>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/LogBrew/LogBrew.csproj" />
+    <ProjectReference Include="../../src/LogBrew/LogBrew.csproj" AdditionalProperties="LogBrewTestHooks=true" />
   </ItemGroup>
 </Project>

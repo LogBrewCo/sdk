@@ -1,6 +1,7 @@
 "use strict";
 
 const { SdkError } = require("@logbrew/sdk");
+const { createAutomaticEventId } = require("./automatic-event-id.cjs");
 const { normalizeSpanId, normalizeTraceId } = require("./trace-context.cjs");
 
 const INSTRUMENTED_MONGOOSE_MODEL = Symbol.for("@logbrew/node.instrumentedMongooseModel");
@@ -494,9 +495,9 @@ function safeMongooseLabel(value) {
 
 function defaultMongooseSpanId({ error, operationKind, operationName }) {
   if (error !== undefined && error !== null) {
-    return `evt_node_mongoose_${slugify(operationKind)}_error`;
+    return createAutomaticEventId("evt_node_mongoose", `${slugify(operationKind)}_error`);
   }
-  return `evt_node_mongoose_${slugify(`${operationKind}_${operationName}`)}`;
+  return createAutomaticEventId("evt_node_mongoose", slugify(`${operationKind}_${operationName}`));
 }
 
 function exceptionSpanEvents(error) {

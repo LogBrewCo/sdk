@@ -40,6 +40,9 @@ PATH_TARGETS = {
     "scripts/real_user_maven_central_public_smoke.sh": (
         "tests.test_maven_central_public_smoke",
     ),
+    "scripts/real_user_native_release_public_smoke.sh": (
+        "tests.test_native_release_public_smoke",
+    ),
     "scripts/check_github_release_safety.py": ("tests.test_github_release_safety",),
     "scripts/check_backend_contract_reports.py": ("tests.test_backend_contract_reports",),
     "scripts/check_release_metadata.py": ("tests.test_release_metadata",),
@@ -47,6 +50,9 @@ PATH_TARGETS = {
     "scripts/check_confidentiality_scan.py": ("tests.test_confidentiality_scan",),
     "scripts/real_user_node_ingest_contract_smoke.sh": (
         "tests.test_default_ingest_endpoints",
+    ),
+    "scripts/real_user_go_persistence_smoke.sh": (
+        "tests.test_go_persistence_smoke",
     ),
 }
 

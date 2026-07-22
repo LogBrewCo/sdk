@@ -95,19 +95,16 @@ namespace LogBrew
             this.options = options ?? LogBrewHttpClientOptions.Create();
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            if (request == null)
-            {
-                throw new ArgumentNullException(nameof(request));
-            }
+            ExceptionContract.ThrowIfNull(request, nameof(request));
 
             return LogBrewHttpClientTelemetry.SendWithTelemetryAsync(
                 client,
                 request,
                 options,
                 (message, cancellation) => base.SendAsync(message, cancellation),
-                cancellation);
+                cancellationToken);
         }
     }
 
@@ -120,20 +117,9 @@ namespace LogBrew
             LogBrewHttpClientOptions? options = null,
             CancellationToken cancellation = default)
         {
-            if (client == null)
-            {
-                throw new ArgumentNullException(nameof(client));
-            }
-
-            if (httpClient == null)
-            {
-                throw new ArgumentNullException(nameof(httpClient));
-            }
-
-            if (request == null)
-            {
-                throw new ArgumentNullException(nameof(request));
-            }
+            ExceptionContract.ThrowIfNull(client, nameof(client));
+            ExceptionContract.ThrowIfNull(httpClient, nameof(httpClient));
+            ExceptionContract.ThrowIfNull(request, nameof(request));
 
             var safeOptions = options ?? LogBrewHttpClientOptions.Create();
             return await SendWithTelemetryAsync(

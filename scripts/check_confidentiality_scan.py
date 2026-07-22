@@ -9,7 +9,8 @@ from pathlib import Path
 
 SENSITIVE_RE = re.compile(
     r"(secret|token|credential|password|private repo|customer|roadmap|strategy|runbook|"
-    r"launch state|cleanup|hostnames?|internal path|ssh|terraform|dns|backup|restore)",
+    r"launch state|cleanup|hostnames?|internal path|(?<![A-Za-z0-9])ssh(?![A-Za-z0-9])|"
+    r"terraform|dns|backup|restore)",
     re.IGNORECASE,
 )
 PUBLIC_README_FORBIDDEN_RE = re.compile(
@@ -51,7 +52,9 @@ FORBIDDEN_PUBLIC_PLANNING_PATHS = (
     Path(".agents"),
     Path("AGENTS.md"),
     Path("CLAUDE.md"),
+    Path("docs/competitor-research"),
     Path("docs/superpowers"),
+    Path("memory.md"),
     Path("plans"),
     Path("skills-lock.json"),
 )
@@ -183,6 +186,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_java_jdbc_metadata_denylist_literal(relative_text, line):
         return True
 
+    if is_java_aes_key_spec_reference(relative_text, line):
+        return True
+
     if is_js_opentelemetry_privacy_denylist_literal(relative_text, line):
         return True
 
@@ -195,13 +201,25 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_support_ticket_diagnostics_reference(relative_text, line):
         return True
 
+    if is_kscrash_report_deletion_policy_reference(relative_text, line, terms):
+        return True
+
     if is_kotlin_okhttp_phase_timing_reference(relative_text, line, terms):
         return True
 
     if is_go_http_phase_timing_reference(relative_text, line, terms):
         return True
 
+    if is_go_structured_url_hostname_reference(relative_text, line, terms):
+        return True
+
+    if is_apple_durable_storage_reference(relative_text, terms):
+        return True
+
     if is_kotlin_coroutine_context_reference(relative_text, line, terms):
+        return True
+
+    if is_dotnet_httpclient_host_reference(relative_text, terms):
         return True
 
     if relative_text.endswith(".cs") and is_dotnet_cancellation_token_reference(line):
@@ -211,6 +229,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
         return True
 
     if relative_text.endswith(".cs") and is_dotnet_analyzer_pragma_reference(line, terms):
+        return True
+
+    if is_dotnet_durable_delivery_reference(relative_text, line, terms):
         return True
 
     if relative_text.startswith("scripts/") and terms == {"cleanup"}:
@@ -225,6 +246,17 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     return False
 
 
+def is_java_aes_key_spec_reference(relative_text: str, line: str) -> bool:
+    if relative_text != (
+        "java/logbrew-java/src/main/java/co/logbrew/sdk/PersistenceCrypto.java"
+    ):
+        return False
+    return line.strip() in {
+        "import javax.crypto.spec.SecretKeySpec;",
+        'new SecretKeySpec(key, "AES"),',
+    }
+
+
 def is_brand_svg_asset(relative: Path) -> bool:
     return relative.parent.as_posix() == "assets/brand" and relative.suffix == ".svg"
 
@@ -235,6 +267,32 @@ def is_sdk_instrumentation_restore_reference(relative_text: str, terms: set[str]
     if relative_text.startswith("js/") and relative_text.endswith((".js", ".cjs", ".mjs", ".ts", ".cts")):
         return True
     return relative_text.startswith("scripts/real_user_") and relative_text.endswith(".sh")
+
+
+def is_kscrash_report_deletion_policy_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    return (
+        relative_text
+        == "swift/logbrew-swift/Sources/LogBrewCrash/CrashEngine.swift"
+        and terms == {"cleanup"}
+        and "reportCleanupPolicy" in line
+    )
+
+
+def is_apple_durable_storage_reference(relative_text: str, terms: set[str]) -> bool:
+    durable_paths = {
+        "objc/logbrew-objc/README.md",
+        "objc/logbrew-objc/src/LBWDurableDeliveryStore.m",
+        "objc/logbrew-objc/tests/test_durable_delivery.m",
+        "objc/logbrew-objc/tests/test_durable_delivery_recovery.m",
+        "swift/logbrew-swift/README.md",
+        "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStoreRecovery.swift",
+        "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift",
+    }
+    return relative_text in durable_paths and terms.issubset({"backup", "cleanup"})
 
 
 def is_public_publishing_guidance(relative_text: str, line: str) -> bool:
@@ -477,7 +535,12 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
     if relative_text == "js/logbrew-js/README.md" and "--token-env LOGBREW_RELEASE_ARTIFACT_AUTH" in line:
         return True
     if relative_text in {
+        "js/logbrew-js/release-artifacts-build.cjs",
         "js/logbrew-js/release-artifacts-upload.js",
+        "js/logbrew-js/vite-release-artifacts.d.cts",
+        "js/logbrew-js/vite-release-artifacts.d.ts",
+        "js/logbrew-next/release-artifacts.d.cts",
+        "js/logbrew-next/release-artifacts.d.ts",
         "js/logbrew-react-native/release-artifacts.cjs",
         "js/logbrew-react-native/release-artifacts.d.cts",
         "js/logbrew-react-native/release-artifacts.d.ts",
@@ -491,6 +554,8 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
             "parsed.hostname",
             "parsed.username",
             "parsed.password",
+            "parsedEndpoint.username",
+            "parsedEndpoint.password",
             "const hostname =",
             "hostname =",
             "hostname ===",
@@ -506,6 +571,7 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
             '"token-env": "string"',
             "--token-env",
             "release-artifact token",
+            "tokenEnv",
             "const tokenEnv",
             "tokenEnv?: string",
             "if (tokenEnv",
@@ -550,10 +616,13 @@ def is_release_artifact_upload_verifier_reference(relative_text: str, line: str)
         "scripts/real_user_js_release_artifact_cli_smoke.sh",
     } and "token=placeholder" in line:
         return True
+    if relative_text == "js/logbrew-js/test/release-artifacts-cli.test.js" and "tokenEnv: authEnvName" in line:
+        return True
     if relative_text in {
         "docs/backend-contracts/release-artifact-symbolication-2026-06-13.md",
         "docs/competitor-research/source-maps-debug-symbols-2026-06-13.md",
         "js/logbrew-js/README.md",
+        "js/logbrew-next/README.md",
     }:
         lower_line = line.lower()
         return "upload" in lower_line and "artifact" in lower_line
@@ -896,6 +965,19 @@ def is_go_http_phase_timing_reference(
     return False
 
 
+def is_go_structured_url_hostname_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    return (
+        relative_text == "go/logbrew/http_client_trace.go"
+        and terms == {"hostname"}
+        and line.strip()
+        == 'host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(request.URL.Hostname()), "."))'
+    )
+
+
 def is_kotlin_coroutine_context_reference(
     relative_text: str,
     line: str,
@@ -920,12 +1002,82 @@ def is_kotlin_coroutine_context_reference(
     )
 
 
+def is_dotnet_httpclient_host_reference(
+    relative_text: str,
+    terms: set[str],
+) -> bool:
+    source_path = (
+        "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/"
+        "LogBrewHttpClientFactoryCorrelation.cs"
+    )
+    if relative_text == source_path:
+        return terms in ({"dns"}, {"dns", "hostname"})
+
+    return terms == {"dns"} and relative_text in {
+        "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/README.md",
+        "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/examples/HttpClientFactoryCorrelation.cs",
+        "dotnet/logbrew-dotnet/tests/LogBrew.HttpClient.Tests/Program.cs",
+    }
+
+
 def is_dotnet_cancellation_token_reference(line: str) -> bool:
-    return "CancellationToken" in line or ".Token" in line
+    return "CancellationToken" in line or "cancellationToken" in line or ".Token" in line
 
 
 def is_dotnet_analyzer_pragma_reference(line: str, terms: set[str]) -> bool:
     return terms == {"restore"} and line.strip() == "#pragma warning restore CA1031"
+
+
+def is_dotnet_durable_delivery_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    if (
+        relative_text == ".github/workflows/ci.yml"
+        and terms == {"strategy"}
+        and line.strip() == "strategy:"
+    ):
+        return True
+
+    if relative_text == "dotnet/logbrew-dotnet/README.md" and terms == {"secret"}:
+        return line == (
+            "Only one process may own a store. Recovery fails closed for missing or wrong keys, "
+            "corruption, unknown files, unsafe ownership, links, or replacement. Supply one primary "
+            "key and a bounded list of previous keys to rotate records during recovery; new records "
+            "always use the primary key. Key IDs identify keys but are not secret and must contain "
+            "only stable letters, numbers, `.`, `_`, or `-`."
+        )
+
+    if relative_text == "dotnet/logbrew-dotnet/src/LogBrew/DurableEventStore.cs":
+        return terms == {"cleanup"} and "CleanupAcknowledged" in line
+
+    if relative_text == "dotnet/logbrew-dotnet/src/LogBrew/DurableStoreFileSystem.cs":
+        allowed_lines = {
+            "private const uint WindowsShareRead = 1;",
+            "private const uint WindowsShareWrite = 2;",
+            "private const uint WindowsShareDelete = 4;",
+            "private const uint WindowsBackupSemantics = 0x02000000;",
+            "WindowsShareRead | WindowsShareDelete,",
+            "WindowsShareRead | (allowDelete ? WindowsShareDelete : 0),",
+            "WindowsShareRead | WindowsShareWrite,",
+            "return WindowsShareRead",
+            "| (allowDelete ? WindowsShareDelete : 0)",
+            "| (allowWrite ? WindowsShareWrite : 0);",
+            "WindowsBackupSemantics | WindowsOpenReparsePoint,",
+        }
+        return line.strip() in allowed_lines
+
+    if relative_text == "dotnet/logbrew-dotnet/tests/LogBrew.Tests/DurableDeliveryContractTests.cs":
+        fixed_test_text = (
+            "AcknowledgedPrefixCleanupResumesAfterExit",
+            "acknowledgement marker was not durable before cleanup",
+            "acknowledged prefix reappeared after cleanup restart",
+            "acknowledgement cleanup restart shutdown failed",
+        )
+        return terms == {"cleanup"} and any(text in line for text in fixed_test_text)
+
+    return False
 
 
 def main() -> int:

@@ -244,6 +244,10 @@ jobs:
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_js_high_load_smoke.sh
 
+      - name: Run Node automatic delivery installed-artifact smoke test
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
+        run: bash scripts/real_user_node_automatic_delivery_smoke.sh
+
       - name: Run JavaScript OpenTelemetry installed-artifact smoke test
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_js_opentelemetry_smoke.sh
@@ -275,6 +279,14 @@ jobs:
       - name: Run Node queue high-load fake-intake smoke test
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/real_user_node_queue_high_load_smoke.sh
+
+      - name: Run Node persistent delivery restart smoke test
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
+        run: bash scripts/real_user_node_persistent_delivery_smoke.sh
+
+      - name: Run Node encrypted persistent delivery smoke test
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
+        run: bash scripts/real_user_node_encrypted_persistent_delivery_smoke.sh
 
       - name: Run Prisma real-user smoke test
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
@@ -392,6 +404,22 @@ jobs:
         if: ${{ needs.changed-areas.outputs.go == 'true' }}
         run: bash scripts/real_user_go_high_load_smoke.sh
 
+      - name: Run Go delivery lifecycle installed-artifact smoke test
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
+        run: bash scripts/real_user_go_delivery_lifecycle_smoke.sh
+
+      - name: Run Go encrypted persistence installed-artifact smoke test
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
+        run: bash scripts/real_user_go_persistence_smoke.sh
+
+      - name: Run Go Retry-After installed-artifact smoke test
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
+        run: bash scripts/real_user_go_retry_after_smoke.sh
+
+      - name: Run Go HTTP server instrumentation installed-artifact smoke test
+        if: ${{ needs.changed-areas.outputs.go == 'true' }}
+        run: bash scripts/real_user_go_http_server_smoke.sh
+
       - name: Run Go support-ticket real-user smoke test
         if: ${{ needs.changed-areas.outputs.go == 'true' }}
         run: bash scripts/real_user_go_support_ticket_smoke.sh
@@ -424,6 +452,10 @@ jobs:
         if: ${{ needs.changed-areas.outputs.java == 'true' }}
         run: bash scripts/real_user_java_spring_kafka_smoke.sh
 
+      - name: Run Java Spring HTTP installed-artifact smoke test
+        if: ${{ needs.changed-areas.outputs.java == 'true' }}
+        run: bash scripts/real_user_java_spring_http_smoke.sh
+
       - name: Run Spring Boot real-user smoke test
         if: ${{ needs.changed-areas.outputs.java == 'true' }}
         run: bash scripts/real_user_spring_boot_smoke.sh
@@ -452,6 +484,10 @@ jobs:
         if: ${{ needs.changed-areas.outputs.ruby == 'true' }}
         run: bash scripts/real_user_ruby_smoke.sh
 
+      - name: Run Ruby HTTP client tracing installed smoke test
+        if: ${{ needs.changed-areas.outputs.ruby == 'true' }}
+        run: bash scripts/real_user_ruby_http_client_tracing_smoke.sh
+
       - name: Install PHP SDK dependencies
         if: ${{ needs.changed-areas.outputs.php == 'true' }}
         run: cd php/logbrew-php && composer update --no-interaction
@@ -466,6 +502,67 @@ jobs:
 
       - name: Leak scan
         run: python3 scripts/check_confidentiality_scan.py
+
+  dotnet-durability:
+    name: .NET durability (${{ matrix.os }}-${{ matrix.architecture }})
+    needs: changed-areas
+    if: ${{ needs.changed-areas.outputs.dotnet == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            os: linux
+            architecture: x64
+          - runner: ubuntu-24.04-arm
+            os: linux
+            architecture: arm64
+          - runner: macos-15-intel
+            os: macos
+            architecture: x64
+          - runner: macos-15
+            os: macos
+            architecture: arm64
+          - runner: windows-2025
+            os: windows
+            architecture: x64
+          - runner: windows-11-arm
+            os: windows
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up .NET for Windows native contracts
+        if: ${{ matrix.os == 'windows' }}
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Run Windows native durability contract
+        if: ${{ matrix.os == 'windows' }}
+        run: dotnet run --project dotnet/logbrew-dotnet/tests/LogBrew.Tests/LogBrew.Tests.csproj --configuration Release -- --durable-contract
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Run installed encrypted restart-delivery check
+        shell: bash
+        env:
+          LOGBREW_EXPECTED_DURABLE_OS: ${{ matrix.os }}
+          LOGBREW_EXPECTED_DURABLE_ARCHITECTURE: ${{ matrix.architecture }}
+          LOGBREW_EXPECTED_DURABLE_RUNTIME_MAJOR: "8"
+        run: bash scripts/real_user_dotnet_durable_delivery_smoke.sh
 
   swift-checks:
     name: Swift SDK checks

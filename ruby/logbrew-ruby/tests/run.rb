@@ -494,7 +494,10 @@ flush_logger = LogBrew::Logger.new(
 flush_logger.error("flush me")
 assert(client.pending_events.zero?, "expected flush-on-log to clear queue")
 assert(transport.sent_bodies.length == 1, "expected flush-on-log to send one body")
-assert(transport.last_body.include?('"id": "flush_logger_1"'), "expected flushed logger event body")
+assert(
+  JSON.parse(transport.last_body).fetch("events").fetch(0).fetch("id") == "flush_logger_1",
+  "expected flushed logger event body"
+)
 tests += 1
 
 client = sample_client
@@ -605,7 +608,10 @@ rack = LogBrew::RackMiddleware.new(
 rack.call("REQUEST_METHOD" => "DELETE", "PATH_INFO" => "/cart")
 assert(client.pending_events.zero?, "expected Rack flush-on-response to clear queue")
 assert(transport.sent_bodies.length == 1, "expected Rack flush-on-response transport body")
-assert(transport.last_body.include?('"id": "rack_flush_span_1"'), "expected Rack flush body")
+assert(
+  JSON.parse(transport.last_body).fetch("events").fetch(0).fetch("id") == "rack_flush_span_1",
+  "expected Rack flush body"
+)
 tests += 1
 
 client = sample_client
@@ -673,7 +679,10 @@ subscriber = LogBrew::RailsErrorSubscriber.new(
 subscriber.report(RuntimeError.new("flush me"), handled: false, severity: :error, context: nil, source: "test")
 assert(client.pending_events.zero?, "expected Rails flush-on-report to clear queue")
 assert(transport.sent_bodies.length == 1, "expected Rails flush-on-report body")
-assert(transport.last_body.include?('"id": "rails_flush_1"'), "expected Rails flush body")
+assert(
+  JSON.parse(transport.last_body).fetch("events").fetch(0).fetch("id") == "rails_flush_1",
+  "expected Rails flush body"
+)
 tests += 1
 
 client = sample_client
@@ -803,3 +812,9 @@ tests += 1
 puts "ruby package tests ok (#{tests} tests)"
 load File.expand_path("trace_correlation.rb", __dir__)
 load File.expand_path("operation_tracing.rb", __dir__)
+load File.expand_path("bounded_queue.rb", __dir__)
+load File.expand_path("bounded_batching.rb", __dir__)
+load File.expand_path("worker_lifecycle.rb", __dir__)
+load File.expand_path("persistent_delivery.rb", __dir__)
+load File.expand_path("automatic_delivery.rb", __dir__)
+load File.expand_path("sidekiq.rb", __dir__)

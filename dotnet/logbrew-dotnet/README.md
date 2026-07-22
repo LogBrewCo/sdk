@@ -6,7 +6,7 @@
 
 Public .NET SDK for building, validating, previewing, and flushing LogBrew event batches, with `System.Net.Http` delivery, W3C trace correlation, and opt-in `Microsoft.Extensions.Logging` provider support.
 
-The library targets `netstandard2.0`, uses `System.Net.Http` for built-in HTTP delivery, and depends on `Microsoft.Extensions.Logging` for the standard .NET logging provider surface.
+The library targets `netstandard2.0` and .NET 8, uses `System.Net.Http` for built-in HTTP delivery, and depends on `Microsoft.Extensions.Logging` for the standard .NET logging provider surface. Existing manual and memory-only APIs remain available on both targets; encrypted restart delivery is available only to .NET 8 applications.
 
 ## Install
 
@@ -19,6 +19,7 @@ Optional integration packages install only when you need their runtime:
 ```bash
 dotnet add package LogBrew.AspNetCore
 dotnet add package LogBrew.EntityFrameworkCore
+dotnet add package LogBrew.HttpClient
 dotnet add package LogBrew.StackExchangeRedis
 dotnet add package LogBrew.OpenTelemetry
 ```
@@ -46,6 +47,73 @@ Console.WriteLine(client.PreviewJson());
 TransportResponse response = client.Shutdown(RecordingTransport.AlwaysAccept());
 Console.Error.WriteLine(response.StatusCode);
 ```
+
+## Automatic Delivery
+
+`LogBrewClient.Create(...)` remains manual and starts no worker. Use `CreateAutomatic(...)` only when this client should own delivery scheduling through one transport:
+
+```csharp
+using System;
+using LogBrew;
+
+using var transport = new HttpTransport(new HttpTransportOptions
+{
+    Timeout = TimeSpan.FromSeconds(5)
+});
+var client = LogBrewClient.CreateAutomatic(
+    "LOGBREW_API_KEY",
+    "my-dotnet-app",
+    "1.0.0",
+    transport,
+    new AutomaticDeliveryOptions
+    {
+        FlushAtQueueSize = 100,
+        FlushInterval = TimeSpan.FromSeconds(5),
+        MaxRetries = 2
+    });
+
+client.Log(
+    "evt_log_automatic_001",
+    "2026-06-02T10:00:02Z",
+    LogAttributes.Create("automatic delivery is ready", "info"));
+
+DeliveryHealthSnapshot health = client.DeliveryHealth();
+TransportResponse shutdown = client.Shutdown();
+```
+
+The lazy client-owned worker starts on the first accepted event and coalesces interval and queue-threshold wakeups. Delivery uses one ordered queue, one in-flight request, immutable failed-prefix retries, and requests capped at 100 events and 256 KiB. Defaults retain at most 1,000 events and 4 MiB of serialized event data; `DroppedEvents()` and the optional drop callback explain local bounds without changing application outcomes.
+
+Retryable `408` and `5xx` responses use capped jitter with zero to ten configured retries. A single valid `Retry-After` delta-seconds or IMF-fixdate value from `HttpTransport` can raise that delay up to `MaxRetryDelay`; malformed or ambiguous guidance falls back to local jitter. Authentication, quota, validation, and other non-retryable outcomes pause automatic sends without removing the failed prefix. Call `RecoverAutomaticDelivery()` after correcting the cause. `Flush()` and `Shutdown()` serialize with the worker; shutdown rejects later capture and joins the owned worker. The application remains responsible for bounding custom transport calls, including timeouts.
+
+`DeliveryHealth()` returns fixed lifecycle, activity, outcome, status-class, queue, retry, accepted, and drop fields. It never includes event content, endpoint or authorization data, response text, exceptions, filesystem paths, or process metadata. Remote acceptance followed by a lost response remains an at-least-once ambiguity: retry may deliver the same immutable request again.
+
+### Encrypted Restart Delivery (.NET 8+)
+
+Use `CreateAutomaticDurable(...)` when one .NET 8 process should retain accepted telemetry across application restarts. The application authorizes a parent directory and supplies a 256-bit key; the SDK owns one fixed child directory and never persists the key. Windows requires Windows 10 version 1709 (build 16299) or newer.
+
+```csharp
+using System;
+using LogBrew;
+
+var keyBytes = Convert.FromHexString(
+    "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF");
+using var key = new DurableDeliveryKey("primary-2026", keyBytes);
+using var storage = new DurableDeliveryOptions("/app-owned/telemetry", key);
+using var transport = new HttpTransport();
+var client = LogBrewClient.CreateAutomaticDurable(
+    "LOGBREW_API_KEY",
+    "my-dotnet-app",
+    "1.0.0",
+    transport,
+    storage,
+    new AutomaticDeliveryOptions());
+```
+
+Durable admission writes one authenticated AES-256-GCM record per event before adding it to the in-memory queue. Before network delivery, the SDK also authenticates the exact immutable request prefix and its ordered record names. A successful response removes only that prefix after durable acknowledgement; interruption after remote acceptance may replay the same request, but does not discard later work. Normal shutdown retains unsent authenticated records for the next process.
+
+Only one process may own a store. Recovery fails closed for missing or wrong keys, corruption, unknown files, unsafe ownership, links, or replacement. Supply one primary key and a bounded list of previous keys to rotate records during recovery; new records always use the primary key. Key IDs identify keys but are not secret and must contain only stable letters, numbers, `.`, `_`, or `-`.
+
+Storage failures pause automatic delivery with `DeliveryPauseReason.Storage`. After correcting a transient storage problem, call `RecoverAutomaticDelivery()`. If records cannot be recovered, call `PurgeDurableDelivery()` only while the client is paused and idle, then call `RecoverAutomaticDelivery()` explicitly. Purge removes only SDK-owned durable records and retains the authorized parent and ownership marker. Keep key material available for every process that must recover pending telemetry.
 
 ## Explicit Metrics
 
@@ -364,7 +432,19 @@ var handler = new LogBrewHttpClientHandler(
 using var httpClient = new HttpClient(handler);
 ```
 
-Use `WithRequestFilter(...)` to skip noisy internal calls without modifying the request or injecting propagation headers. Use `WithRouteTemplateSelector(...)` when one typed client sends multiple route families and you want stable low-cardinality span names. Selector output is validated like `WithRouteTemplate(...)`; keep it query-free and route-shaped.
+For explicitly selected named or typed factory clients, install `LogBrew.HttpClient` and add correlation on that client's builder:
+
+```csharp
+using LogBrew.HttpClient;
+
+services
+    .AddHttpClient("catalog")
+    .AddLogBrewCorrelation(client);
+```
+
+`AddLogBrewCorrelation(...)` is idempotent per builder name, the first registration wins, and it does not install a factory-wide filter or diagnostics listener. It creates a W3C child only when `LogBrewTrace.Current` is active, returns the caller's request header and trace state before completion, and keeps responses, streaming content, exceptions, cancellation, and middleware order app-owned. Place it after retry middleware when each execution should have its own child. Fixed span metadata is limited to method, normalized non-IP host, status, duration, source, sampled state, real cancellation, and exception type; it excludes paths, query strings, fragments, ports, client names, arbitrary headers or metadata, bodies, authentication material, baggage, tracestate, and exception text. SDK delivery requests bypass the handler to prevent self-correlation.
+
+For the legacy manual `LogBrewHttpClientTelemetry` and `LogBrewHttpClientHandler` APIs above, use `WithRequestFilter(...)` to skip noisy internal calls without modifying the request or injecting propagation headers. Use `WithRouteTemplateSelector(...)` when one typed client sends multiple route families and you want stable low-cardinality span names. These options do not apply to `AddLogBrewCorrelation(...)`. Selector output is validated like `WithRouteTemplate(...)`; keep it query-free and route-shaped.
 
 For ASP.NET Core, keep the middleware app-owned and use `LogBrewServerRequestTelemetry` to wrap the request pipeline. This captures one request span, an optional `http.server.duration` metric, and an optional exception issue while preserving the original response or exception:
 

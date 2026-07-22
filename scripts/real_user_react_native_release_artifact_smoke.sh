@@ -63,6 +63,10 @@ from pathlib import Path
 pack = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[0]
 files = {entry["path"] for entry in pack["files"]}
 for expected in {
+    "metro.cjs",
+    "metro.js",
+    "metro.d.ts",
+    "metro.d.cts",
     "release-artifacts.cjs",
     "release-artifacts.js",
     "release-artifacts.d.ts",
@@ -81,6 +85,7 @@ react_native_version="$(npm view react-native version)"
 react_version="$(npm view react version)"
 react_native_cli_version="$(npm view @react-native-community/cli version)"
 react_native_metro_config_version="$react_native_version"
+typescript_version="$(npm view typescript version)"
 
 cat > "$app_dir/package.json" <<JSON
 {
@@ -94,7 +99,8 @@ cat > "$app_dir/package.json" <<JSON
   },
   "devDependencies": {
     "@react-native-community/cli": "$react_native_cli_version",
-    "@react-native/metro-config": "$react_native_metro_config_version"
+    "@react-native/metro-config": "$react_native_metro_config_version",
+    "typescript": "$typescript_version"
   }
 }
 JSON
@@ -118,17 +124,59 @@ JS
 
 cat > "$app_dir/metro.config.js" <<'JS'
 const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
+const { withLogBrewMetroConfig } = require("@logbrew/react-native/metro");
 
-module.exports = mergeConfig(getDefaultConfig(__dirname), {});
+module.exports = withLogBrewMetroConfig(mergeConfig(getDefaultConfig(__dirname), {}));
+JS
+
+cat > "$app_dir/metro-string.config.js" <<'JS'
+const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
+const { withLogBrewMetroConfig } = require("@logbrew/react-native/metro");
+
+const baseModule = require("metro/private/DeltaBundler/Serializers/baseJSBundle");
+const bundleModule = require("metro/private/lib/bundleToString");
+const baseJSBundle = baseModule.baseJSBundle || baseModule.default || baseModule;
+const bundleToString = bundleModule.bundleToString || bundleModule.default || bundleModule;
+const config = mergeConfig(getDefaultConfig(__dirname), {
+  serializer: {
+    customSerializer(entryPoint, preModules, graph, options) {
+      return bundleToString(baseJSBundle(entryPoint, preModules, graph, options)).code;
+    },
+  },
+});
+
+module.exports = withLogBrewMetroConfig(config);
+JS
+
+cat > "$app_dir/metro-mutating-string.config.js" <<'JS'
+const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
+const { withLogBrewMetroConfig } = require("@logbrew/react-native/metro");
+
+const baseModule = require("metro/private/DeltaBundler/Serializers/baseJSBundle");
+const bundleModule = require("metro/private/lib/bundleToString");
+const baseJSBundle = baseModule.baseJSBundle || baseModule.default || baseModule;
+const bundleToString = bundleModule.bundleToString || bundleModule.default || bundleModule;
+const config = mergeConfig(getDefaultConfig(__dirname), {
+  serializer: {
+    customSerializer(entryPoint, preModules, graph, options) {
+      const code = bundleToString(baseJSBundle(entryPoint, preModules, graph, options)).code;
+      return `/* app-owned banner */\n${code}`;
+    },
+  },
+});
+
+module.exports = withLogBrewMetroConfig(config);
 JS
 
 (
   cd "$app_dir"
   npm install --silent
-  npm ls @logbrew/sdk @logbrew/react-native react react-native @react-native-community/cli @react-native/metro-config >/dev/null
+  npm ls @logbrew/sdk @logbrew/react-native react react-native @react-native-community/cli @react-native/metro-config typescript >/dev/null
   node --input-type=module - <<'JS'
+import assert from "node:assert/strict";
 import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
 import { uploadLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
+import { createLogBrewMetroSerializer, withLogBrewMetroConfig } from "@logbrew/react-native/metro";
 
 if (typeof prepareLogBrewReactNativeReleaseArtifacts !== "function") {
   throw new Error("expected React Native release-artifact helper export");
@@ -136,6 +184,27 @@ if (typeof prepareLogBrewReactNativeReleaseArtifacts !== "function") {
 if (typeof uploadLogBrewReactNativeReleaseArtifacts !== "function") {
   throw new Error("expected React Native release-artifact upload helper export");
 }
+if (typeof createLogBrewMetroSerializer !== "function" || typeof withLogBrewMetroConfig !== "function") {
+  throw new Error("expected React Native Metro helper exports");
+}
+
+const originalPreModules = [{ path: "__prelude__", output: [] }];
+let developmentCalls = 0;
+let receivedPreModules;
+const developmentSerializer = createLogBrewMetroSerializer((_entryPoint, preModules) => {
+  developmentCalls += 1;
+  receivedPreModules = preModules;
+  return "development-bundle";
+});
+const developmentResult = await developmentSerializer(
+  "index.js",
+  originalPreModules,
+  { dependencies: new Map(), transformOptions: { dev: true, hot: true } },
+  {},
+);
+assert.equal(developmentResult, "development-bundle");
+assert.equal(developmentCalls, 1);
+assert.equal(receivedPreModules, originalPreModules);
 JS
   node - <<'JS'
 const {
@@ -143,15 +212,103 @@ const {
   uploadLogBrewReactNativeReleaseArtifacts,
   default: defaultExport,
 } = require("@logbrew/react-native/release-artifacts");
+const {
+  createLogBrewMetroSerializer,
+  withLogBrewMetroConfig,
+  default: defaultMetroExport,
+} = require("@logbrew/react-native/metro");
 
 if (
   typeof prepareLogBrewReactNativeReleaseArtifacts !== "function" ||
   typeof uploadLogBrewReactNativeReleaseArtifacts !== "function" ||
-  defaultExport !== prepareLogBrewReactNativeReleaseArtifacts
+  defaultExport !== prepareLogBrewReactNativeReleaseArtifacts ||
+  typeof createLogBrewMetroSerializer !== "function" ||
+  defaultMetroExport !== withLogBrewMetroConfig
 ) {
-  throw new Error("expected CommonJS React Native release-artifact helper export");
+  throw new Error("expected CommonJS React Native release-artifact and Metro helper exports");
 }
 JS
+  cat > metro-consumer.ts <<'TS'
+import {
+  createLogBrewMetroSerializer,
+  withLogBrewMetroConfig,
+  type LogBrewMetroConfig,
+  type LogBrewMetroSerializer,
+} from "@logbrew/react-native/metro";
+import type { LogBrewReactNativeReleaseArtifactsOptions } from "@logbrew/react-native/release-artifacts";
+
+const appSerializer: LogBrewMetroSerializer = async () => ({
+  code: "global.__typedMetroProbe=true;",
+  map: JSON.stringify({ version: 3, sources: [], names: [], mappings: "" }),
+});
+const defaultConfig: LogBrewMetroConfig = {
+  serializer: { customSerializer: null, processModuleFilter: () => true },
+};
+const customConfig: LogBrewMetroConfig = {
+  serializer: { customSerializer: appSerializer },
+};
+
+const wrappedDefault: LogBrewMetroConfig = withLogBrewMetroConfig(defaultConfig);
+const wrappedCustom: LogBrewMetroConfig = withLogBrewMetroConfig(customConfig);
+const serializer: LogBrewMetroSerializer = createLogBrewMetroSerializer(appSerializer);
+const defaultSerializer: LogBrewMetroSerializer = createLogBrewMetroSerializer(null);
+const releaseArtifacts: LogBrewReactNativeReleaseArtifactsOptions = {
+  bundle: "dist/index.android.bundle",
+  platform: "android",
+  projectId: "550e8400-e29b-41d4-a716-446655440000",
+  release: "mobile@1.0.0",
+  environment: "production",
+  service: "checkout-mobile",
+};
+
+void wrappedDefault;
+void wrappedCustom;
+void serializer;
+void defaultSerializer;
+void releaseArtifacts;
+TS
+  cat > metro-tsconfig.json <<'JSON'
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "strict": true,
+    "skipLibCheck": false,
+    "noEmit": true
+  },
+  "include": ["metro-consumer.ts"]
+}
+JSON
+  npx tsc --project metro-tsconfig.json
+  cat > metro-config-consumer.ts <<'TS'
+import { getDefaultConfig, mergeConfig } from "@react-native/metro-config";
+import { createLogBrewMetroSerializer, withLogBrewMetroConfig } from "@logbrew/react-native/metro";
+
+const config = mergeConfig(getDefaultConfig("."), {});
+const wrappedConfig = withLogBrewMetroConfig(config);
+type MetroCustomSerializer = NonNullable<ReturnType<typeof getDefaultConfig>["serializer"]["customSerializer"]>;
+declare const metroCustomSerializer: MetroCustomSerializer;
+const wrappedSerializer = createLogBrewMetroSerializer(metroCustomSerializer);
+
+void wrappedConfig;
+void wrappedSerializer;
+TS
+  cat > metro-config-tsconfig.json <<'JSON'
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["metro-config-consumer.ts"]
+}
+JSON
+  npx tsc --project metro-config-tsconfig.json
   mkdir -p dist
   node node_modules/@react-native-community/cli/build/bin.js bundle \
     --platform android \
@@ -160,14 +317,37 @@ JS
     --bundle-output dist/index.android.bundle \
     --sourcemap-output dist/index.android.bundle.map \
     --assets-dest dist/assets
+  mkdir -p custom-dist
+  node node_modules/@react-native-community/cli/build/bin.js bundle \
+    --config metro-string.config.js \
+    --platform android \
+    --dev false \
+    --entry-file index.js \
+    --bundle-output custom-dist/index.android.bundle \
+    --sourcemap-output custom-dist/index.android.bundle.map \
+    --assets-dest custom-dist/assets
+  if node node_modules/@react-native-community/cli/build/bin.js bundle \
+    --config metro-mutating-string.config.js \
+    --platform android \
+    --dev false \
+    --entry-file index.js \
+    --bundle-output mutating-dist/index.android.bundle \
+    --sourcemap-output mutating-dist/index.android.bundle.map \
+    --assets-dest mutating-dist/assets >mutating-string.log 2>&1; then
+    echo "expected a string serializer that changes bundle code to fail closed" >&2
+    exit 1
+  fi
+  grep -q "string-returning custom serializer changed bundle code" mutating-string.log
 )
 
 dist_dir="$app_dir/dist"
 bundle_file="$dist_dir/index.android.bundle"
 map_file="$dist_dir/index.android.bundle.map"
 app_dir_real="$(cd "$app_dir" && pwd -P)"
+custom_bundle_file="$app_dir/custom-dist/index.android.bundle"
+custom_map_file="$app_dir/custom-dist/index.android.bundle.map"
 
-if [[ ! -s "$bundle_file" || ! -s "$map_file" ]]; then
+if [[ ! -s "$bundle_file" || ! -s "$map_file" || ! -s "$custom_bundle_file" || ! -s "$custom_map_file" ]]; then
   echo "expected React Native bundle and source map output" >&2
   exit 1
 fi
@@ -187,6 +367,25 @@ if ! grep -q "$app_dir_real" "$map_file"; then
   echo "expected Metro source map to contain absolute app paths before LogBrew prefix stripping" >&2
   exit 1
 fi
+
+python3 - "$bundle_file" "$map_file" "$custom_bundle_file" "$custom_map_file" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+for bundle_path, map_path in ((sys.argv[1], sys.argv[2]), (sys.argv[3], sys.argv[4])):
+    bundle_source = Path(bundle_path).read_text(encoding="utf-8")
+    source_map = json.loads(Path(map_path).read_text(encoding="utf-8"))
+    debug_id_match = re.search(r"//# debugId=([0-9a-f-]{36})", bundle_source)
+
+    assert debug_id_match is not None
+    bundle_debug_id = debug_id_match.group(1)
+    assert bundle_debug_id == source_map["debug_id"]
+    assert source_map["debugId"] == bundle_debug_id
+    assert "@logbrew/react-native/debug-ids" in bundle_source
+    assert "__LOGBREW_REACT_NATIVE_DEBUG_ID__" not in bundle_source
+PY
 
 hermes_dist_dir="$app_dir/hermes-dist"
 mkdir -p "$hermes_dist_dir"
@@ -424,14 +623,12 @@ const trace = createReactNativeTraceContext({
 });
 const error = new Error("react native checkout exploded 47");
 error.stack = `Error: react native checkout exploded 47\n    at checkoutFailureSignal (${runtimeUrl}:${line}:${column})`;
+globalThis[Symbol.for("@logbrew/react-native/debug-ids")] = {
+  [`Error\n    at __logbrew_register__ (${runtimeUrl}:1:1)`]: debugId
+};
 
 const event = createReactNativeErrorEvent(error, {
   appState: { currentState: "active" },
-  debugIdMap: {
-    [runtimeUrl]: debugId,
-    [runtimePath]: debugId,
-    [artifact.minifiedSource.minifiedUrl]: debugId
-  },
   environment: manifest.environment,
   platform: { OS: "android" },
   release: manifest.release,
@@ -447,26 +644,25 @@ const client = createLogBrewReactNativeClient({
 });
 client.issue(event.id, event.timestamp, event.attributes);
 const payload = JSON.parse(client.previewJson()).events[0];
-fs.writeFileSync(outputPath, JSON.stringify({
-  debugId,
-  runtimeIssue: payload.attributes,
-  runtimePath
-}, null, 2));
+fs.writeFileSync(outputPath, `${JSON.stringify(payload, null, 2)}\n`);
 JS
 )
 
-python3 - "$runtime_issue_payload" "$tmp_dir" <<'PY'
+python3 - "$runtime_issue_payload" "$ready_manifest" "$tmp_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-tmp_dir = sys.argv[2]
-debug_id = payload["debugId"]
-runtime_issue = payload["runtimeIssue"]
-runtime_path = payload["runtimePath"]
+runtime_issue_event = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[3]
+artifact = manifest["artifacts"][0]
+debug_id = artifact["debugId"]
+runtime_issue = runtime_issue_event["attributes"]
+runtime_path = f"/react-native/{artifact['minifiedSource']['path']}"
 serialized_runtime_issue = json.dumps(runtime_issue)
 
+assert runtime_issue_event["type"] == "issue"
 assert runtime_issue["title"] == "React Native error: react native checkout exploded 47"
 assert runtime_issue["message"] == "react native checkout exploded 47"
 assert runtime_issue["level"] == "error"
@@ -497,6 +693,51 @@ assert "logbrew_rn_hash_placeholder" not in serialized_runtime_issue
 assert "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_runtime_issue
 assert "errorStack" not in serialized_runtime_issue
 assert tmp_dir not in serialized_runtime_issue
+PY
+
+runtime_issue_symbolication_report="$tmp_dir/react-native-runtime-issue-symbolication-report.json"
+"$app_dir/node_modules/.bin/logbrew-release-artifacts" symbolicate-js \
+  --build-dir "$dist_dir" \
+  --manifest "$ready_manifest" \
+  --issue-event "$runtime_issue_payload" \
+  --source-root "$app_dir" \
+  --context-lines 0 \
+  > "$runtime_issue_symbolication_report"
+
+python3 - "$runtime_issue_payload" "$runtime_issue_symbolication_report" "$tmp_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+runtime_issue_event = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+runtime_issue_symbolication = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[3]
+metadata = runtime_issue_event["attributes"]["metadata"]
+serialized_issue_event = json.dumps(runtime_issue_event)
+serialized_symbolication = json.dumps(runtime_issue_symbolication)
+
+assert runtime_issue_symbolication["input"]["type"] == "sdk_issue_event"
+assert runtime_issue_symbolication["input"]["issueId"] == runtime_issue_event["id"]
+assert runtime_issue_symbolication["status"] == "resolved"
+assert runtime_issue_symbolication["debugId"] == metadata["releaseArtifactDebugId"]
+assert runtime_issue_symbolication["generated"]["path"] == "index.android.bundle"
+assert runtime_issue_symbolication["original"]["source"] == "index.js"
+source_context = runtime_issue_symbolication["sourceContext"]
+assert source_context["source"] == "index.js"
+assert source_context["startLine"] >= 1
+assert len(source_context["lines"]) == 1
+assert source_context["lines"][0]["highlighted"] is True
+assert "react native checkout exploded" in source_context["lines"][0]["text"]
+assert "mobile.example" not in serialized_issue_event
+assert "mobile.example" not in serialized_symbolication
+assert "logbrew_rn_query_placeholder" not in serialized_issue_event
+assert "logbrew_rn_query_placeholder" not in serialized_symbolication
+assert "logbrew_rn_hash_placeholder" not in serialized_issue_event
+assert "logbrew_rn_hash_placeholder" not in serialized_symbolication
+assert "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_issue_event
+assert "LOGBREW_RN_LOCAL_SOURCE_SENTINEL_SHOULD_NOT_UPLOAD" not in serialized_symbolication
+assert tmp_dir not in serialized_issue_event
+assert tmp_dir not in serialized_symbolication
 PY
 
 port_file="$tmp_dir/fake-intake-port"
@@ -572,6 +813,7 @@ const [, , bundle, sourcemap, root, manifestPath] = process.argv;
 const result = uploadLogBrewReactNativeReleaseArtifacts({
   bundle,
   sourcemap,
+  projectId: "550e8400-e29b-41d4-a716-446655440000",
   platform: "ios",
   release: "2026.06.18-react-native-hosted-upload",
   environment: "production",
@@ -593,15 +835,16 @@ process.stdout.write(JSON.stringify({
 JS
 )
 
-python3 - "$upload_helper_report" "$hosted_upload_helper_report" "$state_file" "$tmp_dir" <<'PY'
+python3 - "$upload_helper_report" "$hosted_upload_helper_report" "$hosted_upload_manifest" "$state_file" "$tmp_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 upload_report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 hosted_upload_report = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-state = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
-tmp_dir = sys.argv[4]
+hosted_manifest = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+state = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[5]
 
 assert upload_report["manifestStatus"] == "ready"
 assert upload_report["uploadStatus"] == "uploaded"
@@ -616,6 +859,7 @@ assert hosted_upload_report["uploadStatus"] == "dry_run"
 assert hosted_upload_report["endpoint"] == "https://api.logbrew.com/api/release-artifacts"
 assert hosted_upload_report["artifactCount"] == 1
 assert hosted_upload_report["filePartCount"] == 2
+assert hosted_manifest["projectId"] == "550e8400-e29b-41d4-a716-446655440000"
 
 events = state["events"]
 assert [event["path"] for event in events].count("/retry-success") == 2

@@ -35,6 +35,42 @@ static SdkException ExpectSdkError(string code, string messageFragment, Action c
     throw new InvalidOperationException("expected SdkException with code " + code);
 }
 
+static void ExpectArgumentNullContract(string parameterName, Action callback)
+{
+    try
+    {
+        callback();
+    }
+    catch (ArgumentNullException error)
+    {
+        var expected = new ArgumentNullException(parameterName);
+        AssertTrue(error.GetType() == typeof(ArgumentNullException), "expected exact ArgumentNullException type");
+        AssertTrue(error.ParamName == expected.ParamName, "unexpected ArgumentNullException parameter name");
+        AssertTrue(error.Message == expected.Message, "unexpected ArgumentNullException message");
+        return;
+    }
+
+    throw new InvalidOperationException("expected ArgumentNullException for " + parameterName);
+}
+
+static void ExpectObjectDisposedContract(string objectName, Action callback)
+{
+    try
+    {
+        callback();
+    }
+    catch (ObjectDisposedException error)
+    {
+        var expected = new ObjectDisposedException(objectName);
+        AssertTrue(error.GetType() == typeof(ObjectDisposedException), "expected exact ObjectDisposedException type");
+        AssertTrue(error.ObjectName == expected.ObjectName, "unexpected ObjectDisposedException object name");
+        AssertTrue(error.Message == expected.Message, "unexpected ObjectDisposedException message");
+        return;
+    }
+
+    throw new InvalidOperationException("expected ObjectDisposedException for " + objectName);
+}
+
 static LogBrewClient SampleClient(int maxRetries = 2)
 {
     return LogBrewClient.Create("LOGBREW_API_KEY", "logbrew-dotnet", "0.1.0", maxRetries);
@@ -69,7 +105,56 @@ static int CountOccurrences(string text, string value)
     return count;
 }
 
+if (args.Length > 0 && args[0].StartsWith("--durable-child-", StringComparison.Ordinal))
+{
+    Environment.ExitCode = DurableDeliveryContractTests.RunChild(args);
+    return;
+}
+
+if (args.Length == 1 && string.Equals(args[0], "--durable-contract", StringComparison.Ordinal))
+{
+    var durableTests = DurableDeliveryContractTests.Run();
+    Console.WriteLine("dotnet durable contract tests ok (" + durableTests.ToString(CultureInfo.InvariantCulture) + " tests)");
+    return;
+}
+
+if (args.Length == 1 && string.Equals(args[0], "--telemetry-text-search-contract", StringComparison.Ordinal))
+{
+    var telemetryTests = OperationTracingTests.Run() + ServerRequestTelemetryTests.Run();
+    Console.WriteLine("dotnet telemetry text search contract tests ok (" + telemetryTests.ToString(CultureInfo.InvariantCulture) + " tests)");
+    return;
+}
+
 var tests = 0;
+
+ExpectArgumentNullContract("client", () => LogBrewActivitySourceListener.Start(null!));
+ExpectArgumentNullContract("client", () => LogBrewActivitySpanTelemetry.Capture(null!, null));
+ExpectArgumentNullContract("parent", () => LogBrewTraceContext.CreateChild(null!));
+ExpectArgumentNullContract("context", () => LogBrewTrace.Activate(null!));
+ExpectArgumentNullContract("summaries", () => SpanAttributes.Create("GET /", "trace_001", "span_001", "ok").WithEvents(null!));
+ExpectArgumentNullContract("summaries", () => SpanAttributes.Create("GET /", "trace_001", "span_001", "ok").WithLinks(null!));
+ExpectArgumentNullContract("summary", () => SpanAttributes.Create("GET /", "trace_001", "span_001", "ok").WithLink(null!));
+ExpectArgumentNullContract("summary", () => SpanAttributes.Create("GET /", "trace_001", "span_001", "ok").WithEvent(null!));
+ExpectArgumentNullContract("metadata", () => SpanEventSummary.Create("event").WithMetadata(null!));
+ExpectArgumentNullContract("client", () => LogBrewDbCommandTelemetry.ExecuteNonQuery(null!, null!));
+ExpectArgumentNullContract("command", () => LogBrewDbCommandTelemetry.ExecuteNonQuery(SampleClient(), null!));
+ExpectArgumentNullContract("client", () => LogBrewOperationTracing.DatabaseOperation<int>(null!, "select", () => 1));
+ExpectArgumentNullContract("operation", () => LogBrewOperationTracing.DatabaseOperation<int>(SampleClient(), "select", null!));
+ExpectArgumentNullContract("client", () => LogBrewOperationTracing.DatabaseOperationAsync<int>(null!, "select", () => Task.FromResult(1)).GetAwaiter().GetResult());
+ExpectArgumentNullContract("operation", () => LogBrewOperationTracing.DatabaseOperationAsync<int>(SampleClient(), "select", null!).GetAwaiter().GetResult());
+ExpectArgumentNullContract("builder", () => LogBrewLoggingBuilderExtensions.AddLogBrew(null!, SampleClient()));
+using (var provider = new LogBrewLoggerProvider(SampleClient()))
+{
+    var logger = provider.CreateLogger("contract");
+    var logState = new object();
+    ExpectArgumentNullContract("formatter", () => logger.Log<object>(LogLevel.Information, default, logState, null, null!));
+    provider.Dispose();
+    ExpectObjectDisposedContract(nameof(LogBrewLoggerProvider), () => provider.CreateLogger("closed"));
+}
+
+ExpectArgumentNullContract("client", () => LogBrewServerRequestTelemetry.CaptureAsync(null!, "GET", "/", null, _ => Task.FromResult(200)).GetAwaiter().GetResult());
+ExpectArgumentNullContract("handler", () => LogBrewServerRequestTelemetry.CaptureAsync(SampleClient(), "GET", "/", null, null!).GetAwaiter().GetResult());
+tests++;
 
 var previewClient = SampleClient();
 EnqueueAll(previewClient);
@@ -333,6 +418,11 @@ var retryTransport = new RecordingTransport(new object[] { TransportException.Ne
 var retryResponse = retryClient.Flush(retryTransport);
 AssertTrue(retryResponse.Attempts == 2, "expected retry before success");
 AssertTrue(retryTransport.SentBodies.Count == 2, "expected two sent bodies");
+var guidedResponse = new RecordingTransport(new object[]
+{
+    new TransportResponse(503, 1, TimeSpan.FromSeconds(2))
+}).Send("LOGBREW_API_KEY", "{}");
+AssertTrue(guidedResponse.RetryAfter == TimeSpan.FromSeconds(2), "expected recording transport to preserve retry guidance");
 tests++;
 
 var retryBudgetClient = SampleClient(maxRetries: 1);
@@ -612,9 +702,19 @@ AssertTrue(CountOccurrences(heavyPreview, "\"type\": \"log\"") == 1000, "expecte
 AssertTrue(!heavyPreview.Contains("exceptionStackTrace", StringComparison.Ordinal), "expected heavy logging load not to add stack traces");
 var heavyResponse = heavyLoggingClient.Flush(heavyLoggingTransport);
 AssertTrue(heavyResponse.StatusCode == 202, "expected heavy logging flush");
+AssertTrue(heavyResponse.Attempts == 10, "expected heavy logging flush to aggregate bounded requests");
 AssertTrue(heavyLoggingClient.PendingEvents() == 0, "expected heavy logging flush to clear queue");
-AssertTrue(heavyLoggingTransport.LastBody != null, "expected heavy logging transport body");
-AssertTrue(CountOccurrences(heavyLoggingTransport.LastBody!, "\"type\": \"log\"") == 1000, "expected heavy logging body to include accepted log events");
+AssertTrue(heavyLoggingTransport.SentBodies.Count == 10, "expected ten bounded heavy logging requests");
+var heavyAcceptedLogs = 0;
+foreach (var body in heavyLoggingTransport.SentBodies)
+{
+    AssertTrue(Encoding.UTF8.GetByteCount(body) <= 256 * 1024, "expected heavy logging request byte bound");
+    var bodyLogs = CountOccurrences(body, "\"type\": \"log\"");
+    AssertTrue(bodyLogs <= 100, "expected heavy logging request event bound");
+    heavyAcceptedLogs += bodyLogs;
+}
+
+AssertTrue(heavyAcceptedLogs == 1000, "expected heavy logging requests to include accepted log events");
 tests++;
 
 var flushOnLogClient = SampleClient();
@@ -650,6 +750,8 @@ tests += ServerRequestTelemetryTests.Run();
 tests += HttpClientTelemetryTests.Run();
 tests += ActivitySpanTelemetryTests.Run();
 tests += ActivitySourceListenerTests.Run();
+tests += AutomaticDeliveryTests.Run();
+tests += DurableDeliveryContractTests.Run();
 
 Console.WriteLine("dotnet package tests ok (" + tests.ToString(CultureInfo.InvariantCulture) + " tests)");
 

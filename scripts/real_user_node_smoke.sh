@@ -37,6 +37,8 @@ test -f "$node_tgz"
 
 tar -tzf "$node_tgz" > "$tmp_dir/node-tarball.txt"
 grep -q '^package/README.md$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/automatic-event-id.cjs$' "$tmp_dir/node-tarball.txt"
+grep -q '^package/automatic-event-id.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.js$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/index.cjs$' "$tmp_dir/node-tarball.txt"
 grep -q '^package/pg.js$' "$tmp_dir/node-tarball.txt"
@@ -167,6 +169,61 @@ if (previousServerApiKey === undefined) {
 }
 if (envClient.pendingEvents() !== 0) {
   throw new Error("expected empty env fallback client");
+}
+
+const automaticEventIds = [];
+const automaticCaptureClient = {
+  span(id) {
+    automaticEventIds.push(id);
+  }
+};
+for (let index = 0; index < 2; index += 1) {
+  automaticEventIds.push(createHttpRequestEvent(
+    { method: "GET", url: "/automatic/42?ignored=1" },
+    { statusCode: 200 }
+  ).id);
+  automaticEventIds.push(createHttpErrorEvent(
+    new Error("automatic failure detail"),
+    { method: "GET", url: "/automatic/42?ignored=1" }
+  ).id);
+  await fetchWithLogBrewSpan("https://example.invalid/automatic/42?ignored=1", undefined, {
+    client: automaticCaptureClient,
+    fetchImpl: async () => new Response("accepted", { status: 202 }),
+    routeTemplate: "/automatic/:id"
+  });
+  await databaseOperationWithLogBrewSpan("automatic.find", {
+    client: automaticCaptureClient,
+    operation: async () => index,
+    operationKind: "SELECT",
+    system: "postgresql"
+  });
+  await cacheOperationWithLogBrewSpan("automatic.get", {
+    client: automaticCaptureClient,
+    operation: async () => index,
+    operationKind: "GET",
+    system: "redis"
+  });
+  await queueOperationWithLogBrewSpan("automatic.publish", {
+    client: automaticCaptureClient,
+    operation: async () => index,
+    operationKind: "publish",
+    system: "amqp"
+  });
+}
+if (automaticEventIds.length !== 12 || new Set(automaticEventIds).size !== automaticEventIds.length) {
+  throw new Error("automatic Node event ids must be unique for repeated operations");
+}
+for (const id of automaticEventIds) {
+  if (id.length > 200 || !/_[a-f0-9]{32}$/.test(id)) {
+    throw new Error("automatic Node event ids must be bounded and end in 128 random bits");
+  }
+}
+const longAutomaticId = createHttpRequestEvent(
+  { method: "GET", url: `/automatic/${"x".repeat(400)}` },
+  { statusCode: 200 }
+).id;
+if (longAutomaticId.length !== 200 || !/^evt_node_request_get_automatic_x+_[a-f0-9]{32}$/.test(longAutomaticId)) {
+  throw new Error("long automatic Node event ids must preserve their semantic prefix within the limit");
 }
 
 const server = createServer(withLogBrewHttpHandler((req, res, logbrew) => {
@@ -790,9 +847,9 @@ if (pgInstrumentation.isInstalled()) {
 }
 await pgPool.end();
 const pgPayload = JSON.parse(pgClient.previewJson());
-const pgSpanEvent = pgPayload.events.find((event) => event.id === "evt_node_pg_select_orders_select_by_id");
-const pgCallbackSpanEvent = pgPayload.events.find((event) => event.id === "evt_node_pg_select_orders_callback_select");
-const pgErrorSpanEvent = pgPayload.events.find((event) => event.id === "evt_node_pg_query_error");
+const pgSpanEvent = findAutomaticEvent(pgPayload.events, "evt_node_pg_select_orders_select_by_id");
+const pgCallbackSpanEvent = findAutomaticEvent(pgPayload.events, "evt_node_pg_select_orders_callback_select");
+const pgErrorSpanEvent = findAutomaticEvent(pgPayload.events, "evt_node_pg_query_error");
 if (!pgSpanEvent || pgSpanEvent.type !== "span") {
   throw new Error(`missing pg query span payload: ${pgClient.previewJson()}`);
 }
@@ -956,12 +1013,12 @@ if (redisInstrumentation.isInstalled()) {
   throw new Error("expected redis instrumentation to report uninstalled");
 }
 const redisPayload = JSON.parse(redisClient.previewJson());
-const redisConnectSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_connect");
-const redisGetSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_get_redis_command");
-const redisSetSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_set_redis_command");
-const redisErrorSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_fail_error");
-const redisPipelineSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_pipeline");
-const redisPipelineErrorSpanEvent = redisPayload.events.find((event) => event.id === "evt_node_redis_multi_error");
+const redisConnectSpanEvent = findAutomaticEvent(redisPayload.events, "evt_node_redis_connect");
+const redisGetSpanEvent = findAutomaticEvent(redisPayload.events, "evt_node_redis_get_redis_command");
+const redisSetSpanEvent = findAutomaticEvent(redisPayload.events, "evt_node_redis_set_redis_command");
+const redisErrorSpanEvent = findAutomaticEvent(redisPayload.events, "evt_node_redis_fail_error");
+const redisPipelineSpanEvent = findAutomaticEvent(redisPayload.events, "evt_node_redis_pipeline");
+const redisPipelineErrorSpanEvent = findAutomaticEvent(redisPayload.events, "evt_node_redis_multi_error");
 if (!redisConnectSpanEvent || redisConnectSpanEvent.attributes.name !== "redis CONNECT redis.connect") {
   throw new Error(`missing redis connect span payload: ${redisClient.previewJson()}`);
 }
@@ -1130,10 +1187,10 @@ if (mongoInstrumentation.isInstalled()) {
   throw new Error("expected mongo instrumentation to report uninstalled");
 }
 const mongoPayload = JSON.parse(mongoClient.previewJson());
-const mongoFindOneSpanEvent = mongoPayload.events.find((event) => event.id === "evt_node_mongodb_findone_mongodb_collection");
-const mongoFindSpanEvent = mongoPayload.events.find((event) => event.id === "evt_node_mongodb_find_toarray_mongodb_cursor");
-const mongoNextSpanEvent = mongoPayload.events.find((event) => event.id === "evt_node_mongodb_find_next_mongodb_cursor");
-const mongoErrorSpanEvent = mongoPayload.events.find((event) => event.id === "evt_node_mongodb_updateone_error");
+const mongoFindOneSpanEvent = findAutomaticEvent(mongoPayload.events, "evt_node_mongodb_findone_mongodb_collection");
+const mongoFindSpanEvent = findAutomaticEvent(mongoPayload.events, "evt_node_mongodb_find_toarray_mongodb_cursor");
+const mongoNextSpanEvent = findAutomaticEvent(mongoPayload.events, "evt_node_mongodb_find_next_mongodb_cursor");
+const mongoErrorSpanEvent = findAutomaticEvent(mongoPayload.events, "evt_node_mongodb_updateone_error");
 if (!mongoFindOneSpanEvent || mongoFindOneSpanEvent.type !== "span") {
   throw new Error(`missing mongo findOne span payload: ${mongoClient.previewJson()}`);
 }
@@ -1607,9 +1664,21 @@ async function closeServer(server) {
     });
   });
 }
+
+function findAutomaticEvent(events, semanticPrefix) {
+  const idPattern = new RegExp(`^${semanticPrefix}_[a-f0-9]{32}$`);
+  const matches = events.filter((event) => idPattern.test(event.id));
+  if (matches.length !== 1) {
+    throw new Error(`expected one automatic event for ${semanticPrefix}, got ${matches.length}`);
+  }
+  return matches[0];
+}
 EOF
 
-node smoke.mjs > "$tmp_dir/node-smoke.stdout.json" 2> "$tmp_dir/node-smoke.stderr.json"
+if ! node smoke.mjs > "$tmp_dir/node-smoke.stdout.json" 2> "$tmp_dir/node-smoke.stderr.json"; then
+  cat "$tmp_dir/node-smoke.stderr.json" >&2
+  exit 1
+fi
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/node-smoke.stdout.json" >/dev/null
 python3 "$repo_root/scripts/check_sdk_parity.py" "$repo_root/fixtures/valid-batch.json" "$tmp_dir/node-smoke.stdout.json" >/dev/null
 grep -q '"ok":true' "$tmp_dir/node-smoke.stderr.json"

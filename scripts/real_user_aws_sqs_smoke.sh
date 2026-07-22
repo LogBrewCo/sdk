@@ -922,6 +922,7 @@ if (sqsDrops[0].eventId !== "evt_sqs_high_load_1000" || sqsDrops[0].eventType !=
 }
 
 const highVolumeEvents = [];
+const highVolumeBodies = [];
 const highVolumeServer = http.createServer(async (req, res) => {
   const body = await new Promise((resolve) => {
     let data = "";
@@ -931,6 +932,7 @@ const highVolumeServer = http.createServer(async (req, res) => {
     });
     req.on("end", () => resolve(data));
   });
+  highVolumeBodies.push(body);
   highVolumeEvents.push(JSON.parse(body));
   res.writeHead(highVolumeEvents.length === 1 ? 503 : 202, { "content-type": "application/json" });
   res.end("{}");
@@ -943,13 +945,31 @@ const highVolumeResponse = await highVolumeClient.flush(highVolumeTransport);
 highVolumeServer.close();
 await once(highVolumeServer, "close");
 
-if (highVolumeEvents.length !== 2 || highVolumeResponse.statusCode !== 202 || highVolumeResponse.attempts !== 2) {
+if (highVolumeEvents.length !== highVolumeResponse.attempts || highVolumeResponse.statusCode !== 202 || highVolumeResponse.batches !== 10 || highVolumeResponse.attempts !== 11) {
   throw new Error(`expected high-volume SQS retry success, got requests=${highVolumeEvents.length} status=${highVolumeResponse.statusCode} attempts=${highVolumeResponse.attempts}`);
 }
-if (highVolumeEvents[0].events.length !== maxQueueSize) {
-  throw new Error(`expected ${maxQueueSize} high-volume SQS events, got ${highVolumeEvents[0].events.length}`);
+if (highVolumeBodies[0] !== highVolumeBodies[1]) {
+  throw new Error("expected byte-identical high-volume SQS retry body");
 }
-const highVolumePayloadText = JSON.stringify(highVolumeEvents);
+const acceptedSqsEvents = highVolumeEvents.slice(1).flatMap((payload) => payload.events);
+if (acceptedSqsEvents.length !== maxQueueSize) {
+  throw new Error(`expected ${maxQueueSize} high-volume SQS events, got ${acceptedSqsEvents.length}`);
+}
+for (let index = 0; index < acceptedSqsEvents.length; index += 1) {
+  const expectedId = `evt_sqs_high_load_${index.toString().padStart(4, "0")}`;
+  if (acceptedSqsEvents[index].id !== expectedId) {
+    throw new Error(`high-volume SQS event order mismatch at ${index}`);
+  }
+}
+for (let index = 1; index < highVolumeEvents.length; index += 1) {
+  if (highVolumeEvents[index].events.length > 100) {
+    throw new Error(`high-volume SQS batch ${index - 1} exceeded event limit`);
+  }
+  if (Buffer.byteLength(highVolumeBodies[index], "utf8") > 256 * 1024) {
+    throw new Error(`high-volume SQS batch ${index - 1} exceeded byte limit`);
+  }
+}
+const highVolumePayloadText = JSON.stringify(highVolumeEvents.slice(1));
 for (const forbidden of [
   "burst-body",
   "burst-msg",
@@ -985,4 +1005,4 @@ EOF
 
 node smoke.mjs
 
-echo "aws sqs real-user smoke ok: 1200 sends, 1000 flushed, 200 dropped, retryAttempts=2"
+echo "aws sqs real-user smoke ok: 1200 sends, 1000 flushed, 200 dropped, batches=10, retryAttempts=11"

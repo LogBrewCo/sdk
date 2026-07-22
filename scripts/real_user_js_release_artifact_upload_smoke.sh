@@ -66,9 +66,11 @@ PY
   > "$tmp_dir/debug-plan.json"
 
 manifest="$tmp_dir/manifest-ready.json"
+project_id="550e8400-e29b-41d4-a716-446655440000"
 "$release_artifacts_cli" \
   manifest-js \
   --build-dir "$dist_dir" \
+  --project-id "$project_id" \
   --release "2026.06.18" \
   --environment "production" \
   --service "checkout-web" \
@@ -226,7 +228,7 @@ if "$release_artifacts_cli" \
   exit 1
 fi
 
-python3 - "$tmp_dir/upload-success.json" "$tmp_dir/upload-hosted-dry-run.json" "$tmp_dir/upload-hosted-unsafe.json" "$tmp_dir/upload-auth-failure.json" "$tmp_dir/upload-validation-failure.json" "$tmp_dir/upload-local-validation-failure.json" "$state_file" "$tmp_dir" <<'PY'
+python3 - "$tmp_dir/upload-success.json" "$tmp_dir/upload-hosted-dry-run.json" "$tmp_dir/upload-hosted-unsafe.json" "$tmp_dir/upload-auth-failure.json" "$tmp_dir/upload-validation-failure.json" "$tmp_dir/upload-local-validation-failure.json" "$manifest" "$state_file" "$tmp_dir" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -237,8 +239,9 @@ hosted_unsafe = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
 auth_failure = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))
 validation_failure = json.loads(Path(sys.argv[5]).read_text(encoding="utf-8"))
 local_validation_failure = json.loads(Path(sys.argv[6]).read_text(encoding="utf-8"))
-state = json.loads(Path(sys.argv[7]).read_text(encoding="utf-8"))
-tmp_dir = sys.argv[8]
+manifest = json.loads(Path(sys.argv[7]).read_text(encoding="utf-8"))
+state = json.loads(Path(sys.argv[8]).read_text(encoding="utf-8"))
+tmp_dir = sys.argv[9]
 
 assert success["status"] == "uploaded"
 assert success["retryCount"] == 1
@@ -249,6 +252,7 @@ assert hosted_dry_run["status"] == "dry_run"
 assert hosted_dry_run["endpoint"] == "https://api.logbrew.com/api/release-artifacts"
 assert hosted_dry_run["artifactCount"] == 1
 assert hosted_dry_run["filePartCount"] == 2
+assert manifest["projectId"] == "550e8400-e29b-41d4-a716-446655440000"
 assert hosted_unsafe["status"] == "validation_failed"
 assert "query strings or fragments" in json.dumps(hosted_unsafe)
 assert "marker=placeholder" not in json.dumps(hosted_unsafe)

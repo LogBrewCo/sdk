@@ -10,7 +10,26 @@ clean_generated_artifacts() {
   find "$package_dir" -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
 }
 
+terminate_process_tree() {
+  local pid="$1"
+  local signal="$2"
+  local child
+  while IFS= read -r child; do
+    [[ -n "$child" ]] || continue
+    terminate_process_tree "$child" "$signal"
+  done < <(pgrep -P "$pid" 2>/dev/null || true)
+  kill -s "$signal" "$pid" 2>/dev/null || true
+}
+
 cleanup() {
+  if [[ -n "${watchdog_pid:-}" ]]; then
+    kill "$watchdog_pid" 2>/dev/null || true
+    wait "$watchdog_pid" 2>/dev/null || true
+  fi
+  if [[ -n "${app_pid:-}" ]]; then
+    terminate_process_tree "$app_pid" TERM
+    wait "$app_pid" 2>/dev/null || true
+  fi
   rm -rf "$tmp_dir"
   clean_generated_artifacts
   release_dotnet_verifier_lock
@@ -54,11 +73,14 @@ grep -q "PackageReference Include=\"LogBrew\" Version=\"$package_version\"" "$ap
 cat > "$app_dir/Program.cs" <<'CS'
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using LogBrew;
@@ -90,6 +112,17 @@ static int CountOccurrences(string value, string needle)
     }
 
     return count;
+}
+
+static void WaitForRequests(FakeIntake intake, int count, TimeSpan timeout, string message)
+{
+    var stopwatch = Stopwatch.StartNew();
+    while (intake.RequestCount < count && stopwatch.Elapsed < timeout)
+    {
+        Thread.Sleep(10);
+    }
+
+    Require(intake.RequestCount >= count, message);
 }
 
 static string Timestamp(int offsetSeconds)
@@ -184,6 +217,13 @@ Require(preview.Contains("evt_dotnet_high_load_request_span", StringComparison.O
 Require(preview.Contains("evt_dotnet_high_load_action", StringComparison.Ordinal), "expected action context");
 Require(CountOccurrences(preview, "\"type\": \"log\"") == MaxQueueSize - 4, "expected accepted log count");
 Require(!preview.Contains("unsafePayload", StringComparison.Ordinal), "expected unsafe metadata to be omitted");
+using var previewDocument = JsonDocument.Parse(preview);
+var previewIds = previewDocument.RootElement
+    .GetProperty("events")
+    .EnumerateArray()
+    .Select(item => item.GetProperty("id").GetString() ?? string.Empty)
+    .ToArray();
+Require(previewIds.Length == MaxQueueSize, "expected preview event ids");
 
 var advisoryClient = LogBrewClient.Create(
     ApiKey,
@@ -206,26 +246,182 @@ var response = client.Flush(new HttpTransport(new HttpTransportOptions
 }));
 
 Require(response.StatusCode == 202, "expected retry flush status");
-Require(response.Attempts == 2, "expected retry attempts");
-Require(intake.RequestCount == 2, "expected fake intake retry count");
+Require(response.Attempts == 11, "expected aggregate retry and batch attempts");
+Require(intake.RequestCount == 11, "expected fake intake retry and batch count");
 Require(client.PendingEvents() == 0, "expected queue after flush");
 Require(client.DroppedEvents() == expectedDrops, "expected drop count to survive flush");
 
-var body = intake.LastBody;
-Require(CountOccurrences(body, "\"type\": \"log\"") == MaxQueueSize - 4, "expected flushed log count");
-Require(body.Contains("\"name\": \"dotnet-high-load-smoke\"", StringComparison.Ordinal), "expected sdk name");
-Require(body.Contains("\"traceId\": \"" + TraceId + "\"", StringComparison.Ordinal), "expected trace correlation");
-Require(body.Contains("\"parentSpanId\": \"" + ParentSpanId + "\"", StringComparison.Ordinal), "expected parent span correlation");
-Require(body.Contains("\"release\": \"checkout@1.2.3\"", StringComparison.Ordinal), "expected release correlation");
-Require(body.Contains("\"environment\": \"production\"", StringComparison.Ordinal), "expected environment correlation");
-Require(body.Contains("\"level\": \"warning\"", StringComparison.Ordinal), "expected canonical warning level");
-Require(body.Contains("\"dotnetCategory\": \"CheckoutHighLoad\"", StringComparison.Ordinal), "expected logger source");
-Require(body.Contains("\"dotnetEventName\": \"HighLoad\"", StringComparison.Ordinal), "expected event name");
-Require(!body.Contains("dotnet_high_load_997", StringComparison.Ordinal), "expected first dropped log omitted");
-foreach (var unsafeText in new[] { ApiKey, "authorization", "unsafePayload", "coupon=private", "#fragment" })
+var bodies = intake.Bodies;
+Require(bodies.Count == 11, "expected all fake intake bodies");
+Require(bodies[0] == bodies[1], "expected failed body and retry body to be byte-identical");
+var acceptedIds = new List<string>();
+for (var bodyIndex = 0; bodyIndex < bodies.Count; bodyIndex++)
 {
-    Require(!body.Contains(unsafeText, StringComparison.Ordinal), "expected payload to omit " + unsafeText);
+    var requestBody = bodies[bodyIndex];
+    Require(Encoding.UTF8.GetByteCount(requestBody) <= 256 * 1024, "expected request byte bound");
+    using var requestDocument = JsonDocument.Parse(requestBody);
+    var requestEvents = requestDocument.RootElement.GetProperty("events");
+    Require(requestEvents.GetArrayLength() <= 100, "expected request event bound");
+    if (bodyIndex > 0)
+    {
+        foreach (var item in requestEvents.EnumerateArray())
+        {
+            acceptedIds.Add(item.GetProperty("id").GetString() ?? string.Empty);
+        }
+    }
+
+    foreach (var unsafeText in new[] { ApiKey, "authorization", "unsafePayload", "coupon=private", "#fragment" })
+    {
+        Require(!requestBody.Contains(unsafeText, StringComparison.Ordinal), "expected payload to omit " + unsafeText);
+    }
 }
+
+Require(acceptedIds.Count == MaxQueueSize, "expected accepted event count across batches");
+Require(acceptedIds.SequenceEqual(previewIds), "expected accepted event ids to match preview order");
+Require(acceptedIds.Distinct(StringComparer.Ordinal).Count() == MaxQueueSize, "expected no duplicate accepted events");
+
+var acceptedBody = string.Join("\n", bodies.Skip(1));
+Require(CountOccurrences(acceptedBody, "\"type\": \"log\"") == MaxQueueSize - 4, "expected flushed log count");
+Require(acceptedBody.Contains("\"name\": \"dotnet-high-load-smoke\"", StringComparison.Ordinal), "expected sdk name");
+Require(acceptedBody.Contains("\"traceId\": \"" + TraceId + "\"", StringComparison.Ordinal), "expected trace correlation");
+Require(acceptedBody.Contains("\"parentSpanId\": \"" + ParentSpanId + "\"", StringComparison.Ordinal), "expected parent span correlation");
+Require(acceptedBody.Contains("\"release\": \"checkout@1.2.3\"", StringComparison.Ordinal), "expected release correlation");
+Require(acceptedBody.Contains("\"environment\": \"production\"", StringComparison.Ordinal), "expected environment correlation");
+Require(acceptedBody.Contains("\"level\": \"warning\"", StringComparison.Ordinal), "expected canonical warning level");
+Require(acceptedBody.Contains("\"dotnetCategory\": \"CheckoutHighLoad\"", StringComparison.Ordinal), "expected logger source");
+Require(acceptedBody.Contains("\"dotnetEventName\": \"HighLoad\"", StringComparison.Ordinal), "expected event name");
+Require(!acceptedBody.Contains("dotnet_high_load_997", StringComparison.Ordinal), "expected first dropped log omitted");
+
+using var automaticIntake = FakeIntake.Start("503 Service Unavailable", "1");
+using var automaticTransport = new HttpTransport(new HttpTransportOptions
+{
+    Endpoint = automaticIntake.Endpoint,
+    Headers = new Dictionary<string, string> { ["x-logbrew-source"] = "dotnet-high-load-smoke" },
+    Timeout = TimeSpan.FromSeconds(5)
+});
+var automaticClient = LogBrewClient.CreateAutomatic(
+    ApiKey,
+    "dotnet-automatic-installed-smoke",
+    "0.1.0",
+    automaticTransport,
+    new AutomaticDeliveryOptions
+    {
+        FlushAtQueueSize = 2,
+        FlushInterval = TimeSpan.FromSeconds(10),
+        MaxRetries = 1,
+        RetryBaseDelay = TimeSpan.FromMilliseconds(30),
+        MaxRetryDelay = TimeSpan.FromMilliseconds(150)
+    });
+automaticClient.Log("evt_dotnet_automatic_001", Timestamp(2100), LogAttributes.Create("threshold one", "info"));
+automaticClient.Log("evt_dotnet_automatic_002", Timestamp(2101), LogAttributes.Create("threshold two", "info"));
+WaitForRequests(automaticIntake, 1, TimeSpan.FromSeconds(2), "expected first automatic request");
+automaticClient.Log("evt_dotnet_automatic_003", Timestamp(2102), LogAttributes.Create("captured during retry", "info"));
+Require(
+    SpinWait.SpinUntil(
+        () => automaticClient.DeliveryHealth().Activity == DeliveryActivityState.Retrying,
+        TimeSpan.FromSeconds(2)),
+    "expected automatic retry health");
+var retryHealth = automaticClient.DeliveryHealth();
+Require(retryHealth.RetrySource == DeliveryRetrySource.Server, "expected server retry source");
+Require(retryHealth.RetryDelayMilliseconds == 150, "expected server retry delay clamp");
+WaitForRequests(automaticIntake, 2, TimeSpan.FromSeconds(2), "expected automatic retry request");
+var automaticBodies = automaticIntake.Bodies;
+Require(automaticBodies[0] == automaticBodies[1], "expected automatic retry body identity");
+Require(
+    automaticIntake.RequestTimes[1] - automaticIntake.RequestTimes[0] >= TimeSpan.FromMilliseconds(120),
+    "expected bounded server retry delay");
+automaticClient.Log("evt_dotnet_automatic_004", Timestamp(2103), LogAttributes.Create("live threshold", "info"));
+WaitForRequests(automaticIntake, 3, TimeSpan.FromSeconds(2), "expected retained automatic work");
+automaticBodies = automaticIntake.Bodies;
+Require(automaticBodies[2].Contains("evt_dotnet_automatic_003", StringComparison.Ordinal), "expected retry-later event");
+Require(automaticBodies[2].Contains("evt_dotnet_automatic_004", StringComparison.Ordinal), "expected threshold-completing event");
+Require(automaticClient.PendingEvents() == 0, "expected automatic threshold queue drain");
+Require(automaticClient.DeliveryHealth().AcceptedEvents == 4, "expected automatic accepted count");
+Require(automaticClient.Shutdown().StatusCode == 204, "expected automatic shutdown status");
+try
+{
+    automaticClient.Log("evt_dotnet_automatic_late", Timestamp(2104), LogAttributes.Create("late", "info"));
+    throw new InvalidOperationException("expected automatic post-shutdown rejection");
+}
+catch (SdkException error) when (error.Code == "shutdown_error")
+{
+}
+
+using var intervalIntake = FakeIntake.Start("202 Accepted", null);
+using var intervalTransport = new HttpTransport(new HttpTransportOptions
+{
+    Endpoint = intervalIntake.Endpoint,
+    Headers = new Dictionary<string, string> { ["x-logbrew-source"] = "dotnet-high-load-smoke" },
+    Timeout = TimeSpan.FromSeconds(5)
+});
+var intervalClient = LogBrewClient.CreateAutomatic(
+    ApiKey,
+    "dotnet-automatic-interval-smoke",
+    "0.1.0",
+    intervalTransport,
+    new AutomaticDeliveryOptions
+    {
+        FlushAtQueueSize = 100,
+        FlushInterval = TimeSpan.FromMilliseconds(80),
+        RetryBaseDelay = TimeSpan.FromMilliseconds(20),
+        MaxRetryDelay = TimeSpan.FromMilliseconds(100)
+    });
+intervalClient.Log("evt_dotnet_interval_001", Timestamp(2200), LogAttributes.Create("interval delivery", "info"));
+WaitForRequests(intervalIntake, 1, TimeSpan.FromSeconds(2), "expected interval automatic request");
+Require(intervalIntake.Bodies[0].Contains("evt_dotnet_interval_001", StringComparison.Ordinal), "expected interval body");
+Require(intervalClient.Shutdown().StatusCode == 204, "expected interval shutdown status");
+
+using var terminalIntake = FakeIntake.Start("401 Unauthorized", null);
+using var terminalTransport = new HttpTransport(new HttpTransportOptions
+{
+    Endpoint = terminalIntake.Endpoint,
+    Headers = new Dictionary<string, string> { ["x-logbrew-source"] = "dotnet-high-load-smoke" },
+    Timeout = TimeSpan.FromSeconds(5)
+});
+var terminalClient = LogBrewClient.CreateAutomatic(
+    ApiKey,
+    "dotnet-automatic-terminal-smoke",
+    "0.1.0",
+    terminalTransport,
+    new AutomaticDeliveryOptions
+    {
+        FlushAtQueueSize = 1,
+        FlushInterval = TimeSpan.FromSeconds(10),
+        RetryBaseDelay = TimeSpan.FromMilliseconds(20),
+        MaxRetryDelay = TimeSpan.FromMilliseconds(100)
+    });
+terminalClient.Log("evt_dotnet_terminal_001", Timestamp(2300), LogAttributes.Create("terminal first", "info"));
+Require(
+    SpinWait.SpinUntil(
+        () => terminalClient.DeliveryHealth().Lifecycle == DeliveryLifecycleState.Paused,
+        TimeSpan.FromSeconds(2)),
+    "expected terminal automatic pause");
+Require(terminalClient.DeliveryHealth().PauseReason == DeliveryPauseReason.Authentication, "expected auth pause reason");
+terminalClient.Log("evt_dotnet_terminal_002", Timestamp(2301), LogAttributes.Create("queued while paused", "info"));
+Thread.Sleep(150);
+Require(terminalIntake.RequestCount == 1, "expected terminal pause to suppress sends");
+var healthJson = JsonSerializer.Serialize(terminalClient.DeliveryHealth());
+foreach (var forbidden in new[]
+{
+    ApiKey,
+    "evt_dotnet_terminal_001",
+    "terminal first",
+    "http",
+    "authorization",
+    "/v1/events",
+    "Exception"
+})
+{
+    Require(!healthJson.Contains(forbidden, StringComparison.OrdinalIgnoreCase), "expected health to omit " + forbidden);
+}
+
+terminalClient.RecoverAutomaticDelivery();
+WaitForRequests(terminalIntake, 3, TimeSpan.FromSeconds(2), "expected terminal recovery requests");
+var terminalBodies = terminalIntake.Bodies;
+Require(terminalBodies[0] == terminalBodies[1], "expected terminal failed-prefix identity");
+Require(!terminalBodies[1].Contains("evt_dotnet_terminal_002", StringComparison.Ordinal), "expected later event outside failed prefix");
+Require(terminalBodies[2].Contains("evt_dotnet_terminal_002", StringComparison.Ordinal), "expected terminal later event retention");
+Require(terminalClient.Shutdown().StatusCode == 204, "expected terminal shutdown status");
 
 var shutdownClient = LogBrewClient.Create(ApiKey, "dotnet-high-load-shutdown-smoke", "0.1.0");
 shutdownClient.Log("evt_dotnet_shutdown_001", Timestamp(3000), LogAttributes.Create("shutdown flush", "info"));
@@ -247,6 +443,8 @@ Console.WriteLine("{"
     + "\"highVolumeLogs\":" + HighVolumeLogs.ToString(CultureInfo.InvariantCulture) + ","
     + "\"pendingEvents\":" + client.PendingEvents().ToString(CultureInfo.InvariantCulture) + ","
     + "\"retryAttempts\":" + response.Attempts.ToString(CultureInfo.InvariantCulture) + ","
+    + "\"automaticRequests\":" + automaticIntake.RequestCount.ToString(CultureInfo.InvariantCulture) + ","
+    + "\"terminalRequests\":" + terminalIntake.RequestCount.ToString(CultureInfo.InvariantCulture) + ","
     + "\"shutdownStatus\":" + shutdownResponse.StatusCode.ToString(CultureInfo.InvariantCulture)
     + "}");
 
@@ -257,43 +455,62 @@ internal sealed class FakeIntake : IDisposable
     private readonly CancellationTokenSource cancellation = new CancellationTokenSource();
     private readonly Task loop;
     private readonly List<string> bodies = new List<string>();
+    private readonly List<TimeSpan> requestTimes = new List<TimeSpan>();
+    private readonly Stopwatch stopwatch = Stopwatch.StartNew();
+    private readonly string firstStatus;
+    private readonly string? retryAfter;
     private int requestCount;
 
-    private FakeIntake(TcpListener listener)
+    private FakeIntake(TcpListener listener, string firstStatus, string? retryAfter)
     {
         this.listener = listener;
+        this.firstStatus = firstStatus;
+        this.retryAfter = retryAfter;
         Port = ((IPEndPoint)listener.LocalEndpoint).Port;
         loop = Task.Run(ServeAsync);
     }
 
     public int Port { get; }
 
-    public int RequestCount
+    public Uri Endpoint
     {
-        get { return requestCount; }
+        get { return new Uri("http://127.0.0.1:" + Port.ToString(CultureInfo.InvariantCulture) + "/v1/events"); }
     }
 
-    public string LastBody
+    public int RequestCount
+    {
+        get { return Volatile.Read(ref requestCount); }
+    }
+
+    public IReadOnlyList<string> Bodies
     {
         get
         {
             lock (bodies)
             {
-                if (bodies.Count == 0)
-                {
-                    throw new InvalidOperationException("expected fake intake body");
-                }
-
-                return bodies[bodies.Count - 1];
+                return bodies.ToArray();
             }
         }
     }
 
-    public static FakeIntake Start()
+    public IReadOnlyList<TimeSpan> RequestTimes
+    {
+        get
+        {
+            lock (bodies)
+            {
+                return requestTimes.ToArray();
+            }
+        }
+    }
+
+    public static FakeIntake Start(
+        string firstStatus = "503 Service Unavailable",
+        string? retryAfter = "1")
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
-        return new FakeIntake(listener);
+        return new FakeIntake(listener, firstStatus, retryAfter);
     }
 
     public void Dispose()
@@ -369,13 +586,18 @@ internal sealed class FakeIntake : IDisposable
             lock (bodies)
             {
                 bodies.Add(body);
+                requestTimes.Add(stopwatch.Elapsed);
             }
 
             var count = Interlocked.Increment(ref requestCount);
-            var status = count == 1 ? "503 Service Unavailable" : "202 Accepted";
+            var status = count == 1 ? firstStatus : "202 Accepted";
+            var retryAfterHeader = count == 1 && retryAfter != null
+                ? "Retry-After: " + retryAfter + "\r\n"
+                : string.Empty;
             var payload = Encoding.UTF8.GetBytes("accepted");
             var response = Encoding.UTF8.GetBytes(
                 "HTTP/1.1 " + status + "\r\n"
+                + retryAfterHeader
                 + "Content-Length: " + payload.Length.ToString(CultureInfo.InvariantCulture) + "\r\n"
                 + "Connection: close\r\n\r\n");
             await stream.WriteAsync(response, 0, response.Length).ConfigureAwait(false);
@@ -463,7 +685,37 @@ internal sealed class FakeIntake : IDisposable
 }
 CS
 
-if ! dotnet run --project "$app_dir/DotnetHighLoadApp.csproj" --configuration Release > "$tmp_dir/high-load.stdout.json" 2> "$tmp_dir/high-load.stderr.txt"; then
+timeout_marker="$tmp_dir/high-load.timeout"
+dotnet run --project "$app_dir/DotnetHighLoadApp.csproj" --configuration Release > "$tmp_dir/high-load.stdout.json" 2> "$tmp_dir/high-load.stderr.txt" &
+app_pid=$!
+(
+  sleep 30
+  if kill -0 "$app_pid" 2>/dev/null; then
+    : > "$timeout_marker"
+    terminate_process_tree "$app_pid" TERM
+    sleep 1
+    terminate_process_tree "$app_pid" KILL
+  fi
+) &
+watchdog_pid=$!
+
+set +e
+wait "$app_pid"
+app_status=$?
+set -e
+app_pid=""
+kill "$watchdog_pid" 2>/dev/null || true
+wait "$watchdog_pid" 2>/dev/null || true
+watchdog_pid=""
+
+if [[ -f "$timeout_marker" ]]; then
+  echo "installed .NET automatic-delivery proof timed out" >&2
+  cat "$tmp_dir/high-load.stdout.json" >&2 || true
+  cat "$tmp_dir/high-load.stderr.txt" >&2 || true
+  exit 1
+fi
+
+if [[ "$app_status" -ne 0 ]]; then
   cat "$tmp_dir/high-load.stdout.json" >&2 || true
   cat "$tmp_dir/high-load.stderr.txt" >&2 || true
   exit 1
@@ -471,6 +723,8 @@ fi
 grep -q '"ok":true' "$tmp_dir/high-load.stdout.json"
 grep -q '"droppedEvents":504' "$tmp_dir/high-load.stdout.json"
 grep -q '"flushedEvents":1000' "$tmp_dir/high-load.stdout.json"
-grep -q '"retryAttempts":2' "$tmp_dir/high-load.stdout.json"
+grep -q '"retryAttempts":11' "$tmp_dir/high-load.stdout.json"
+grep -q '"automaticRequests":3' "$tmp_dir/high-load.stdout.json"
+grep -q '"terminalRequests":3' "$tmp_dir/high-load.stdout.json"
 
 echo "dotnet high-load installed-artifact smoke passed"

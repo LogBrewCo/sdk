@@ -135,15 +135,8 @@ namespace LogBrew
             IDictionary<string, object?> metadata,
             OperationTraceOptions? traceOptions = null)
         {
-            if (client == null)
-            {
-                throw new ArgumentNullException(nameof(client));
-            }
-
-            if (operation == null)
-            {
-                throw new ArgumentNullException(nameof(operation));
-            }
+            ExceptionContract.ThrowIfNull(client, nameof(client));
+            ExceptionContract.ThrowIfNull(operation, nameof(operation));
 
             var trace = CreateChildTrace(traceOptions?.IncomingTraceparent, options.OnError);
             var startedAt = Stopwatch.GetTimestamp();
@@ -178,15 +171,8 @@ namespace LogBrew
             IDictionary<string, object?> metadata,
             OperationTraceOptions? traceOptions = null)
         {
-            if (client == null)
-            {
-                throw new ArgumentNullException(nameof(client));
-            }
-
-            if (operation == null)
-            {
-                throw new ArgumentNullException(nameof(operation));
-            }
+            ExceptionContract.ThrowIfNull(client, nameof(client));
+            ExceptionContract.ThrowIfNull(operation, nameof(operation));
 
             var trace = CreateChildTrace(traceOptions?.IncomingTraceparent, options.OnError);
             var startedAt = Stopwatch.GetTimestamp();
@@ -365,7 +351,7 @@ namespace LogBrew
             return (Stopwatch.GetTimestamp() - startedAt) * 1000.0 / Stopwatch.Frequency;
         }
 
-        private static IDictionary<string, object?> DatabaseMetadata(string operationName, DatabaseOperationOptions options)
+        private static Dictionary<string, object?> DatabaseMetadata(string operationName, DatabaseOperationOptions options)
         {
             var metadata = SafeMetadata(options.Common.Metadata);
             AddString(metadata, "dbSystem", options.System);
@@ -377,7 +363,7 @@ namespace LogBrew
             return metadata;
         }
 
-        private static IDictionary<string, object?> CacheMetadata(string operationName, CacheOperationOptions options)
+        private static Dictionary<string, object?> CacheMetadata(string operationName, CacheOperationOptions options)
         {
             var metadata = SafeMetadata(options.Common.Metadata);
             AddString(metadata, "cacheSystem", options.System);
@@ -394,7 +380,7 @@ namespace LogBrew
             return metadata;
         }
 
-        private static IDictionary<string, object?> QueueMetadata(string operationName, QueueOperationOptions options)
+        private static Dictionary<string, object?> QueueMetadata(string operationName, QueueOperationOptions options)
         {
             var metadata = SafeMetadata(options.Common.Metadata);
             AddString(metadata, "queueSystem", options.System);
@@ -411,7 +397,7 @@ namespace LogBrew
             return TelemetryMetadata.CopySafeDependencyMetadata(metadata);
         }
 
-        private static void AddString(IDictionary<string, object?> metadata, string key, string? value)
+        private static void AddString(Dictionary<string, object?> metadata, string key, string? value)
         {
             if (!string.IsNullOrWhiteSpace(value))
             {
@@ -419,7 +405,7 @@ namespace LogBrew
             }
         }
 
-        private static void AddNonNegativeInt(IDictionary<string, object?> metadata, string key, int? value)
+        private static void AddNonNegativeInt(Dictionary<string, object?> metadata, string key, int? value)
         {
             if (value.HasValue)
             {

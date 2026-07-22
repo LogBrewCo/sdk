@@ -44,14 +44,32 @@ namespace LogBrew
     public sealed class TransportResponse
     {
         public TransportResponse(int statusCode, int attempts)
+            : this(statusCode, attempts, null)
         {
+        }
+
+        public TransportResponse(int statusCode, int attempts, TimeSpan? retryAfter)
+        {
+            if (attempts < 0)
+            {
+                throw new SdkException("validation_error", "transport attempts must be non-negative");
+            }
+
+            if (retryAfter < TimeSpan.Zero)
+            {
+                throw new SdkException("validation_error", "transport retry_after must be non-negative");
+            }
+
             StatusCode = statusCode;
             Attempts = attempts;
+            RetryAfter = retryAfter;
         }
 
         public int StatusCode { get; }
 
         public int Attempts { get; }
+
+        public TimeSpan? RetryAfter { get; }
     }
 
     public interface ITransport
@@ -91,6 +109,8 @@ namespace LogBrew
 
     public sealed class HttpTransport : ITransport, IDisposable
     {
+        private const string SdkDeliveryRequestMarker = "LogBrew.HttpClientFactory.SdkDelivery";
+
         public static readonly Uri DefaultEndpoint = new Uri("https://api.logbrew.co/v1/events", UriKind.Absolute);
 
         public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
@@ -155,6 +175,7 @@ namespace LogBrew
             using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint);
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             request.Content = content;
+            MarkSdkDeliveryRequest(request);
             request.Headers.TryAddWithoutValidation("authorization", "Bearer " + apiKey);
             AddHeaders(request);
 
@@ -167,7 +188,10 @@ namespace LogBrew
                 }
 
                 using var response = responseTask.GetAwaiter().GetResult();
-                return new TransportResponse((int)response.StatusCode, 1);
+                return new TransportResponse(
+                    (int)response.StatusCode,
+                    1,
+                    ParseRetryAfter(response, DateTimeOffset.UtcNow));
             }
             catch (AggregateException error) when (error.InnerException is HttpRequestException || error.InnerException is TaskCanceledException)
             {
@@ -235,7 +259,7 @@ namespace LogBrew
             return timeout;
         }
 
-        private static IReadOnlyDictionary<string, string> CopyHeaders(IDictionary<string, string>? source)
+        private static Dictionary<string, string> CopyHeaders(IDictionary<string, string>? source)
         {
             var copied = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (source == null)
@@ -282,6 +306,53 @@ namespace LogBrew
                     throw new SdkException("configuration_error", "invalid HTTP transport header: " + pair.Key);
                 }
             }
+        }
+
+        private static void MarkSdkDeliveryRequest(HttpRequestMessage request)
+        {
+#if NET8_0_OR_GREATER
+            request.Options.Set(new HttpRequestOptionsKey<bool>(SdkDeliveryRequestMarker), true);
+#else
+            request.Properties[SdkDeliveryRequestMarker] = true;
+#endif
+        }
+
+        private static TimeSpan? ParseRetryAfter(HttpResponseMessage response, DateTimeOffset now)
+        {
+            if (!response.Headers.TryGetValues("Retry-After", out var rawValues))
+            {
+                return null;
+            }
+
+            var values = rawValues.ToList();
+            if (values.Count != 1)
+            {
+                return null;
+            }
+
+            var value = values[0].Trim();
+            if (long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+            {
+                if (seconds < 0 || seconds > int.MaxValue)
+                {
+                    return null;
+                }
+
+                return TimeSpan.FromSeconds(seconds);
+            }
+
+            if (!DateTimeOffset.TryParseExact(
+                value,
+                "r",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var retryAt))
+            {
+                return null;
+            }
+
+            var delay = retryAt - now;
+            return delay > TimeSpan.Zero ? delay : null;
         }
     }
 
@@ -334,7 +405,7 @@ namespace LogBrew
 
             if (next is TransportResponse response)
             {
-                return new TransportResponse(response.StatusCode, 1);
+                return new TransportResponse(response.StatusCode, 1, response.RetryAfter);
             }
 
             if (next is int statusCode)
@@ -566,6 +637,8 @@ namespace LogBrew
     public sealed class LogBrewClient
     {
         private const int DefaultMaxQueueSize = 1000;
+        private const int DefaultMaxQueueBytes = 4 * 1024 * 1024;
+        private readonly DeliveryEngine delivery;
 
         internal static readonly string[] SeverityValues = { "trace", "debug", "info", "warn", "warning", "error", "fatal", "critical" };
         internal static readonly string[] SpanStatuses = { "ok", "error" };
@@ -574,27 +647,33 @@ namespace LogBrew
         internal static readonly string[] DeltaCumulativeTemporalities = { "delta", "cumulative" };
         internal static readonly string[] InstantTemporality = { "instant" };
 
-        private readonly string apiKey;
-        private readonly OrderedJsonObject sdk;
-        private readonly int maxRetries;
-        private readonly int maxQueueSize;
-        private readonly Action<DroppedEvent>? onEventDropped;
-        private readonly List<Event> events;
-        private readonly object gate = new object();
-        private int droppedEvents;
-        private bool closed;
-
-        private LogBrewClient(string apiKey, string sdkName, string sdkVersion, int maxRetries, int maxQueueSize, Action<DroppedEvent>? onEventDropped)
+        private LogBrewClient(
+            string apiKey,
+            string sdkName,
+            string sdkVersion,
+            int maxRetries,
+            int maxQueueSize,
+            int maxQueueBytes,
+            Action<DroppedEvent>? onEventDropped,
+            ITransport? automaticTransport,
+            AutomaticDeliverySettings? automaticSettings,
+            IDurableDeliverySession? durableSession = null)
         {
-            this.apiKey = apiKey;
-            this.maxRetries = maxRetries;
-            this.maxQueueSize = maxQueueSize;
-            this.onEventDropped = onEventDropped;
-            events = new List<Event>();
-            sdk = new OrderedJsonObject()
+            var sdk = new OrderedJsonObject()
                 .Add("name", sdkName)
                 .Add("language", "dotnet")
                 .Add("version", sdkVersion);
+            delivery = new DeliveryEngine(
+                apiKey,
+                sdk,
+                maxRetries,
+                maxQueueSize,
+                maxQueueBytes,
+                onEventDropped,
+                automaticTransport,
+                automaticSettings,
+                durableSession);
+            delivery.StartOwnedDelivery();
         }
 
         public static LogBrewClient Create(
@@ -603,46 +682,128 @@ namespace LogBrew
             string sdkVersion,
             int maxRetries = 2,
             int maxQueueSize = DefaultMaxQueueSize,
+            Action<DroppedEvent>? onEventDropped = null,
+            int maxQueueBytes = DefaultMaxQueueBytes)
+        {
+            ValidateClientOptions(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, maxQueueBytes);
+            return new LogBrewClient(
+                apiKey,
+                sdkName,
+                sdkVersion,
+                maxRetries,
+                maxQueueSize,
+                maxQueueBytes,
+                onEventDropped,
+                null,
+                null);
+        }
+
+        public static LogBrewClient CreateAutomatic(
+            string apiKey,
+            string sdkName,
+            string sdkVersion,
+            ITransport transport,
+            AutomaticDeliveryOptions? options = null,
             Action<DroppedEvent>? onEventDropped = null)
         {
-            Validation.RequireNonEmpty("api_key", apiKey);
-            Validation.RequireNonEmpty("sdk_name", sdkName);
-            Validation.RequireNonEmpty("sdk_version", sdkVersion);
-            if (maxRetries < 0)
+            if (transport == null)
             {
-                throw new SdkException("validation_error", "max_retries must be non-negative");
+                throw new SdkException("validation_error", "automatic transport must be non-null");
             }
 
-            if (maxQueueSize <= 0)
-            {
-                throw new SdkException("validation_error", "max_queue_size must be positive");
-            }
-
-            return new LogBrewClient(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, onEventDropped);
+            var settings = (options ?? new AutomaticDeliveryOptions()).ValidateAndCopy();
+            ValidateClientOptions(
+                apiKey,
+                sdkName,
+                sdkVersion,
+                settings.MaxRetries,
+                settings.MaxQueueSize,
+                settings.MaxQueueBytes);
+            return new LogBrewClient(
+                apiKey,
+                sdkName,
+                sdkVersion,
+                settings.MaxRetries,
+                settings.MaxQueueSize,
+                settings.MaxQueueBytes,
+                onEventDropped,
+                transport,
+                settings);
         }
+
+#if NET8_0_OR_GREATER
+        public static LogBrewClient CreateAutomaticDurable(
+            string apiKey,
+            string sdkName,
+            string sdkVersion,
+            ITransport transport,
+            DurableDeliveryOptions storage,
+            AutomaticDeliveryOptions? options = null,
+            Action<DroppedEvent>? onEventDropped = null)
+        {
+            if (transport == null)
+            {
+                throw new SdkException("validation_error", "automatic transport must be non-null");
+            }
+
+            if (storage == null)
+            {
+                throw new SdkException("validation_error", "durable delivery options must be non-null");
+            }
+
+            var settings = (options ?? new AutomaticDeliveryOptions()).ValidateAndCopy();
+            ValidateClientOptions(
+                apiKey,
+                sdkName,
+                sdkVersion,
+                settings.MaxRetries,
+                settings.MaxQueueSize,
+                settings.MaxQueueBytes);
+            var durableStore = DurableEventStore.Open(
+                storage,
+                settings.MaxQueueSize,
+                settings.MaxQueueBytes);
+            var durableSession = new DurableDeliverySession(durableStore);
+            try
+            {
+                return new LogBrewClient(
+                    apiKey,
+                    sdkName,
+                    sdkVersion,
+                    settings.MaxRetries,
+                    settings.MaxQueueSize,
+                    settings.MaxQueueBytes,
+                    onEventDropped,
+                    transport,
+                    settings,
+                    durableSession);
+            }
+            catch
+            {
+                durableSession.Dispose();
+                throw;
+            }
+        }
+#endif
 
         public int PendingEvents()
         {
-            lock (gate)
-            {
-                return events.Count;
-            }
+            return delivery.PendingEvents();
         }
 
         public int DroppedEvents()
         {
-            lock (gate)
-            {
-                return droppedEvents;
-            }
+            return delivery.DroppedEvents();
+        }
+
+        public DeliveryHealthSnapshot DeliveryHealth()
+        {
+            return delivery.Health();
         }
 
         public string PreviewJson()
         {
-            lock (gate)
-            {
-                return PreviewJsonLocked();
-            }
+            return delivery.PreviewJson();
         }
 
         public void Release(string id, string timestamp, ReleaseAttributes attributes)
@@ -682,124 +843,68 @@ namespace LogBrew
 
         public TransportResponse Flush(ITransport transport)
         {
-            lock (gate)
-            {
-                if (closed)
-                {
-                    throw new SdkException("shutdown_error", "client is already shut down");
-                }
+            return delivery.Flush(transport);
+        }
 
-                return FlushInternal(transport);
-            }
+        public TransportResponse Flush()
+        {
+            return delivery.Flush();
         }
 
         public TransportResponse Shutdown(ITransport transport)
         {
-            lock (gate)
-            {
-                if (closed)
-                {
-                    throw new SdkException("shutdown_error", "client is already shut down");
-                }
-
-                var response = FlushInternal(transport);
-                closed = true;
-                return response;
-            }
+            return delivery.Shutdown(transport);
         }
+
+        public TransportResponse Shutdown()
+        {
+            return delivery.Shutdown();
+        }
+
+        public void RecoverAutomaticDelivery()
+        {
+            delivery.RecoverAutomaticDelivery();
+        }
+
+#if NET8_0_OR_GREATER
+        public void PurgeDurableDelivery()
+        {
+            delivery.PurgeDurableDelivery();
+        }
+#endif
 
         private void PushEvent(string type, string id, string timestamp, OrderedJsonObject attributes)
         {
-            lock (gate)
-            {
-                if (closed)
-                {
-                    throw new SdkException("shutdown_error", "client is already shut down");
-                }
-
-                Validation.RequireNonEmpty("event id", id);
-                Validation.RequireTimestamp(timestamp);
-                if (events.Count >= maxQueueSize)
-                {
-                    droppedEvents++;
-                    ReportDroppedEvent(new DroppedEvent(id, type, "queue_overflow", droppedEvents));
-                    return;
-                }
-
-                events.Add(new Event(type, timestamp, id, attributes));
-            }
+            Validation.RequireNonEmpty("event id", id);
+            Validation.RequireTimestamp(timestamp);
+            delivery.Enqueue(new Event(type, timestamp, id, attributes));
         }
 
-        private void ReportDroppedEvent(DroppedEvent drop)
+        private static void ValidateClientOptions(
+            string apiKey,
+            string sdkName,
+            string sdkVersion,
+            int maxRetries,
+            int maxQueueSize,
+            int maxQueueBytes)
         {
-            if (onEventDropped == null)
+            Validation.RequireNonEmpty("api_key", apiKey);
+            Validation.RequireNonEmpty("sdk_name", sdkName);
+            Validation.RequireNonEmpty("sdk_version", sdkVersion);
+            if (maxRetries < 0)
             {
-                return;
+                throw new SdkException("validation_error", "max_retries must be non-negative");
             }
 
-            try
+            if (maxQueueSize <= 0)
             {
-                onEventDropped(drop);
-            }
-#pragma warning disable CA1031
-            catch (Exception)
-#pragma warning restore CA1031
-            {
-                // Drop callbacks are advisory and must not interrupt application telemetry.
-            }
-        }
-
-        private string PreviewJsonLocked()
-        {
-            return JsonWriter.Write(new OrderedJsonObject()
-                .Add("sdk", sdk)
-                .Add("events", events.Select(item => item.ToJsonObject()).ToList()));
-        }
-
-        private TransportResponse FlushInternal(ITransport transport)
-        {
-            if (events.Count == 0)
-            {
-                return new TransportResponse(204, 0);
+                throw new SdkException("validation_error", "max_queue_size must be positive");
             }
 
-            var body = PreviewJsonLocked();
-            var maxAttempts = maxRetries + 1;
-            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            if (maxQueueBytes <= 0)
             {
-                try
-                {
-                    var response = transport.Send(apiKey, body);
-                    if (response.StatusCode == 401)
-                    {
-                        throw new SdkException("unauthenticated", "transport rejected the API key");
-                    }
-
-                    if (response.StatusCode >= 200 && response.StatusCode < 300)
-                    {
-                        events.Clear();
-                        return new TransportResponse(response.StatusCode, attempt);
-                    }
-
-                    if (response.StatusCode >= 500 && attempt < maxAttempts)
-                    {
-                        continue;
-                    }
-
-                    throw new SdkException("transport_error", "unexpected transport status " + response.StatusCode.ToString(CultureInfo.InvariantCulture));
-                }
-                catch (TransportException error)
-                {
-                    if (error.Retryable && attempt < maxAttempts)
-                    {
-                        continue;
-                    }
-
-                    throw new SdkException(error.Code, error.Message);
-                }
+                throw new SdkException("validation_error", "max_queue_bytes must be positive");
             }
-
-            throw new SdkException("transport_error", "exhausted retries");
         }
     }
 
@@ -816,6 +921,29 @@ namespace LogBrew
             this.timestamp = timestamp;
             this.id = id;
             this.attributes = attributes;
+            SerializedByteCount = Encoding.UTF8.GetByteCount(JsonWriter.Write(ToJsonObject()));
+        }
+
+        internal int SerializedByteCount { get; }
+
+        internal string Type
+        {
+            get { return type; }
+        }
+
+        internal string Id
+        {
+            get { return id; }
+        }
+
+        internal string Timestamp
+        {
+            get { return timestamp; }
+        }
+
+        internal OrderedJsonObject Attributes
+        {
+            get { return attributes; }
         }
 
         internal OrderedJsonObject ToJsonObject()
@@ -863,6 +991,8 @@ namespace LogBrew
 
     internal static class Validation
     {
+        private static readonly char[] TimestampSeparator = { 'T' };
+
         internal static void RequireNonEmpty(string label, string? value)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -964,19 +1094,19 @@ namespace LogBrew
 
         private static bool HasTimezoneOffset(string timestamp)
         {
-            if (timestamp.EndsWith("Z", StringComparison.Ordinal))
+            if (TextSearch.EndsWith(timestamp, 'Z'))
             {
                 return true;
             }
 
-            var parts = timestamp.Split(new[] { 'T' }, 2);
+            var parts = timestamp.Split(TimestampSeparator, 2);
             if (parts.Length < 2)
             {
                 return false;
             }
 
             var timePortion = parts[1];
-            return timePortion.Contains("+") || timePortion.LastIndexOf("-", StringComparison.Ordinal) > 0;
+            return TextSearch.Contains(timePortion, '+') || timePortion.LastIndexOf('-') > 0;
         }
 
         internal static bool IsMetadataValue(object? value)

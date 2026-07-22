@@ -16,6 +16,7 @@ cat > "$tmp_dir/composer.json" <<'EOF'
   "version": "1.0.0",
   "type": "project",
   "require-dev": {
+    "guzzlehttp/guzzle": "7.15.1",
     "phpstan/phpstan": "2.2.1",
     "monolog/monolog": "3.9.0",
     "psr/log": "3.0.2"

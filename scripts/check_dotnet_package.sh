@@ -26,35 +26,42 @@ fi
 dotnet build "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release -warnaserror >/dev/null
 dotnet build "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release -warnaserror >/dev/null
 dotnet build "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" --configuration Release -warnaserror >/dev/null
+dotnet build "$package_dir/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj" --configuration Release -warnaserror >/dev/null
 dotnet build "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" --configuration Release -warnaserror >/dev/null
 dotnet build "$package_dir/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" --configuration Release -warnaserror >/dev/null
 dotnet run --project "$package_dir/tests/LogBrew.Tests/LogBrew.Tests.csproj" --configuration Release
 dotnet run --project "$package_dir/tests/LogBrew.AspNetCore.Tests/LogBrew.AspNetCore.Tests.csproj" --configuration Release
 dotnet run --project "$package_dir/tests/LogBrew.EntityFrameworkCore.Tests/LogBrew.EntityFrameworkCore.Tests.csproj" --configuration Release
+dotnet run --project "$package_dir/tests/LogBrew.HttpClient.Tests/LogBrew.HttpClient.Tests.csproj" --configuration Release
 dotnet run --project "$package_dir/tests/LogBrew.StackExchangeRedis.Tests/LogBrew.StackExchangeRedis.Tests.csproj" --configuration Release
 dotnet run --project "$package_dir/tests/LogBrew.OpenTelemetry.Tests/LogBrew.OpenTelemetry.Tests.csproj" --configuration Release
 dotnet pack "$package_dir/src/LogBrew/LogBrew.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
+dotnet pack "$package_dir/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 dotnet pack "$package_dir/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" --configuration Release --output "$tmp_dir/packages" >/dev/null
 package_version="$(dotnet msbuild "$package_dir/src/LogBrew/LogBrew.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 aspnetcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 efcore_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
+httpclient_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 redis_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 otel_package_version="$(dotnet msbuild "$package_dir/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj" -nologo -getProperty:Version | tail -n 1 | xargs)"
 nupkg="$tmp_dir/packages/LogBrew.${package_version}.nupkg"
 aspnetcore_nupkg="$tmp_dir/packages/LogBrew.AspNetCore.${aspnetcore_package_version}.nupkg"
 efcore_nupkg="$tmp_dir/packages/LogBrew.EntityFrameworkCore.${efcore_package_version}.nupkg"
+httpclient_nupkg="$tmp_dir/packages/LogBrew.HttpClient.${httpclient_package_version}.nupkg"
 redis_nupkg="$tmp_dir/packages/LogBrew.StackExchangeRedis.${redis_package_version}.nupkg"
 otel_nupkg="$tmp_dir/packages/LogBrew.OpenTelemetry.${otel_package_version}.nupkg"
 test -f "$nupkg"
 test -f "$aspnetcore_nupkg"
 test -f "$efcore_nupkg"
+test -f "$httpclient_nupkg"
 test -f "$redis_nupkg"
 test -f "$otel_nupkg"
 
 python3 - "$nupkg" <<'PY'
+import re
 import sys
 import zipfile
 
@@ -63,6 +70,7 @@ with zipfile.ZipFile(nupkg) as archive:
     names = set(archive.namelist())
     required = {
         "lib/netstandard2.0/LogBrew.dll",
+        "lib/net8.0/LogBrew.dll",
         "README.md",
         "logbrew-logo-transparent-128.png",
         "examples/ReadmeExample.cs",
@@ -80,6 +88,24 @@ with zipfile.ZipFile(nupkg) as archive:
     missing = sorted(required - names)
     if missing:
         raise SystemExit(f"missing nupkg files: {missing}")
+    core_property_files = {
+        name
+        for name in names
+        if re.fullmatch(
+            r"package/services/metadata/core-properties/[0-9a-f]{32}\.psmdcp",
+            name,
+        )
+    }
+    if len(core_property_files) != 1:
+        raise SystemExit("expected exactly one NuGet core-properties file")
+    allowed = required | core_property_files | {
+        "_rels/.rels",
+        "LogBrew.nuspec",
+        "[Content_Types].xml",
+    }
+    unexpected = sorted(names - allowed)
+    if unexpected:
+        raise SystemExit(f"unexpected nupkg files: {unexpected}")
     readme = archive.read("README.md").decode()
     nuspec = archive.read("LogBrew.nuspec").decode()
 if 'dependency id="Microsoft.Extensions.Logging"' not in nuspec:
@@ -139,6 +165,16 @@ for needle in (
     "first useful .NET service telemetry",
     "HttpTransport",
     "System.Net.Http",
+    "CreateAutomatic",
+    "CreateAutomaticDurable",
+    "AutomaticDeliveryOptions",
+    "DurableDeliveryKey",
+    "DurableDeliveryOptions",
+    "PurgeDurableDelivery()",
+    "encrypted restart delivery is available only to .NET 8 applications",
+    "DeliveryHealth()",
+    "RecoverAutomaticDelivery()",
+    "at-least-once ambiguity",
     "AddLogBrew(client",
     "Microsoft.Extensions.Logging",
     "IncludeExceptionStackTrace",
@@ -449,5 +485,7 @@ grep -qx 'run-stackexchange-redis-command-telemetry -> make run-stackexchange-re
 grep -qx 'run-opentelemetry-span-processor-telemetry -> make run-opentelemetry-span-processor-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-request-telemetry -> make run-aspnetcore-request-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-aspnetcore-middleware-telemetry -> make run-aspnetcore-middleware-telemetry' "$tmp_dir/examples-help.txt"
+
+LOGBREW_DOTNET_VERIFIER_LOCK_HELD=1 bash "$repo_root/scripts/real_user_dotnet_httpclient_factory_smoke.sh"
 
 echo "dotnet package checks passed"

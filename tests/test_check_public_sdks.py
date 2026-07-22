@@ -234,6 +234,12 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r'begin_next_step "Node queue high-load fake-intake smoke"\n'
             r'run_shell_step "bash scripts/real_user_node_queue_high_load_smoke\.sh"\n'
             r"mark_step_complete\n\n"
+            r'begin_next_step "Node persistent delivery restart smoke"\n'
+            r'run_shell_step "bash scripts/real_user_node_persistent_delivery_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Node encrypted persistent delivery smoke"\n'
+            r'run_shell_step "bash scripts/real_user_node_encrypted_persistent_delivery_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
             r'begin_next_step "Prisma real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_prisma_smoke\.sh"\n'
             r"mark_step_complete\n\n"
@@ -277,6 +283,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         self.assertIn('"Java JMS installed-artifact smoke"', script)
         self.assertIn('"Java high-load installed-artifact smoke"', script)
         self.assertIn('"Java OpenTelemetry installed-artifact smoke"', script)
+        self.assertIn('"Java Spring HTTP installed-artifact smoke"', script)
         self.assertIn('"Maven Central public install smoke"', script)
         self.assertRegex(
             script,
@@ -288,6 +295,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete\n\n"
             r'begin_next_step "Java Spring Kafka installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_java_spring_kafka_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Java Spring HTTP installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_java_spring_http_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Java queue trace installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_java_queue_trace_smoke\.sh"\n'
@@ -471,6 +481,7 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
         script = SCRIPT.read_text()
 
         self.assertIn('"Go high-load installed-artifact smoke"', script)
+        self.assertIn('"Go delivery lifecycle installed-artifact smoke"', script)
         self.assertIn('"Go OpenTelemetry installed-artifact smoke"', script)
         self.assertRegex(
             script,
@@ -482,6 +493,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete\n\n"
             r'begin_next_step "Go high-load installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_go_high_load_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Go delivery lifecycle installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_go_delivery_lifecycle_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Go support-ticket real-user smoke"',
         )
@@ -500,6 +514,9 @@ class CheckPublicSdksJsonContractTests(unittest.TestCase):
             r"mark_step_complete\n\n"
             r'begin_next_step "Go high-load installed-artifact smoke"\n'
             r'run_shell_step "bash scripts/real_user_go_high_load_smoke\.sh"\n'
+            r"mark_step_complete\n\n"
+            r'begin_next_step "Go delivery lifecycle installed-artifact smoke"\n'
+            r'run_shell_step "bash scripts/real_user_go_delivery_lifecycle_smoke\.sh"\n'
             r"mark_step_complete\n\n"
             r'begin_next_step "Go support-ticket real-user smoke"\n'
             r'run_shell_step "bash scripts/real_user_go_support_ticket_smoke\.sh"\n'

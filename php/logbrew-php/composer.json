@@ -8,7 +8,13 @@
     "psr/log": "^3.0"
   },
   "require-dev": {
+    "guzzlehttp/guzzle": "^7.9",
     "monolog/monolog": "^3.0"
+  },
+  "suggest": {
+    "guzzlehttp/guzzle": "Required for Guzzle 7 outbound HTTP tracing.",
+    "psr/http-client": "Required to wrap an app-owned PSR-18 client.",
+    "psr/http-message": "Required for outbound HTTP request and response interfaces."
   },
   "autoload": {
     "psr-4": {

@@ -19,12 +19,18 @@
     }
   },
   "files": [
+    "automatic-event-id.cjs",
+    "automatic-event-id.js",
     "index.cjs",
     "index.js",
     "mongo.cjs",
     "mongo.js",
     "mongoose.cjs",
     "mongoose.js",
+    "persistent-event-store.cjs",
+    "persistent-event-store.js",
+    "persistent-queue.cjs",
+    "persistent-queue.js",
     "pg.cjs",
     "pg.js",
     "redis.cjs",
@@ -35,6 +41,8 @@
     "undici.js",
     "index.d.ts",
     "index.d.cts",
+    "test/persistent-delivery.test.js",
+    "test/run.mjs",
     "README.md",
     "examples"
   ],
@@ -61,6 +69,6 @@
     "@logbrew/sdk": "^0.1.3"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check mongo.js && node --check mongo.cjs && node --check mongoose.js && node --check mongoose.cjs && node --check pg.js && node --check pg.cjs && node --check redis.js && node --check redis.cjs && node --check trace-context.js && node --check trace-context.cjs && node --check undici.js && node --check undici.cjs && node --check examples/index.mjs && node --check examples/first-useful-telemetry.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs"
+    "test": "node --check automatic-event-id.js && node --check automatic-event-id.cjs && node --check index.js && node --check index.cjs && node --check mongo.js && node --check mongo.cjs && node --check mongoose.js && node --check mongoose.cjs && node --check persistent-event-store.js && node --check persistent-event-store.cjs && node --check persistent-queue.js && node --check persistent-queue.cjs && node --check pg.js && node --check pg.cjs && node --check redis.js && node --check redis.cjs && node --check trace-context.js && node --check trace-context.cjs && node --check undici.js && node --check undici.cjs && node --check examples/index.mjs && node --check examples/first-useful-telemetry.mjs && node --check examples/persistent-delivery.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node test/run.mjs"
   }
 }

@@ -64,6 +64,7 @@ SCRIPT_AREA_PREFIXES = {
     "real_user_go_": {"go"},
     "check_go_": {"go"},
     "real_user_c_": {"c"},
+    "real_user_native_release_public_": {"c"},
     "check_c_": {"c"},
     "real_user_cpp_": {"cpp"},
     "check_cpp_": {"cpp"},

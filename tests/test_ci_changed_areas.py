@@ -60,6 +60,17 @@ class CiChangedAreasTests(unittest.TestCase):
         self.assertFalse(areas["maven"])
         self.assertFalse(areas["rust"])
 
+    def test_native_release_public_smoke_enables_only_c_area(self) -> None:
+        areas = ci_changed_areas.classify(
+            ["scripts/real_user_native_release_public_smoke.sh"]
+        )
+
+        self.assertTrue(areas["c"])
+        self.assertFalse(areas["release_artifacts"])
+        for area in ("javascript", "cpp", "swift", "objc"):
+            with self.subTest(area=area):
+                self.assertFalse(areas[area])
+
     def test_ci_workflow_uses_changed_areas_instead_of_repo_presence(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"

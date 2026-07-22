@@ -88,8 +88,22 @@ def span_events_with_exception(
     error: Exception | None,
     private_key_parts: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
+    return span_events_with_exception_type(
+        span_events,
+        type(error).__name__ if error is not None else None,
+        private_key_parts,
+    )
+
+
+def span_events_with_exception_type(
+    span_events: Sequence[SpanEventSummary] | None,
+    error_type: str | None,
+    private_key_parts: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    """Append a type-only exception event without retaining an exception object."""
+
     safe_events = compact_span_events(span_events, private_key_parts)
-    if error is None:
+    if error_type is None:
         return safe_events
     return [
         *safe_events[: SPAN_EVENT_LIMIT - 1],
@@ -97,7 +111,7 @@ def span_events_with_exception(
             "name": "exception",
             "metadata": {
                 "exceptionEscaped": True,
-                "exceptionType": type(error).__name__,
+                "exceptionType": error_type,
             },
         },
     ]

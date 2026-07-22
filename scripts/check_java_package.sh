@@ -47,7 +47,8 @@ java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-ope
 java_servlet_classpath="$(fetch_java_servlet_deps "$tmp_dir/java-servlet-deps")"
 java_spring_boot_classpath="$(fetch_java_spring_boot_deps "$tmp_dir/java-spring-boot-deps")"
 java_spring_kafka_classpath="$(fetch_java_spring_kafka_deps "$tmp_dir/java-spring-kafka-deps")"
-java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath:$java_spring_kafka_classpath"
+java_spring_web_classpath="$(fetch_java_spring_web_deps "$tmp_dir/java-spring-web-deps")"
+java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath:$java_spring_kafka_classpath:$java_spring_web_classpath"
 
 javac -Xlint:all -Werror --release 11 -cp "$java_optional_classpath" -d "$tmp_dir/classes" @"$main_sources"
 if [ -d "$package_dir/src/main/resources" ]; then
@@ -55,6 +56,11 @@ if [ -d "$package_dir/src/main/resources" ]; then
 fi
 javac -Xlint:all -Werror --release 11 -cp "$tmp_dir/classes:$java_optional_classpath" -d "$tmp_dir/test-classes" @"$test_sources"
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewClientTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewDeliveryTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewAutomaticDeliveryTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.RetryAfterParserTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.EncryptedEventStoreTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewPersistenceTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewTraceTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewServletFilterTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.SpanEventSummaryTest
@@ -67,6 +73,9 @@ java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.lo
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewSpringBootJdbcAutoConfigurationTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewSpringKafkaTracingTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewSpringBootKafkaAutoConfigurationTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewSpringHttpTracingTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewSpringWebClientTracingTest
+java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.LogBrewSpringBootHttpClientAutoConfigurationTest
 java -cp "$tmp_dir/classes:$tmp_dir/test-classes:$java_optional_classpath" co.logbrew.sdk.SupportTicketDraftTest
 
 python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
@@ -77,6 +86,11 @@ python3 "$repo_root/scripts/check_maven_pom_metadata.py" \
 
 javadoc -quiet -Xdoclint:all,-missing -Werror --release 11 -classpath "$java_optional_classpath" -d "$tmp_dir/javadoc" @"$main_sources"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewClient.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/AutomaticDeliveryOptions.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/DeliveryHealth.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/DeliveryOptions.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/EncryptedEventStore.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/PersistenceStatus.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/HttpTransport.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/MetricAttributes.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/ProductTimeline.html"
@@ -95,6 +109,10 @@ test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringBootAutoConfiguration.html
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringBootCacheAutoConfiguration.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringBootJdbcAutoConfiguration.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringBootKafkaAutoConfiguration.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringHttpTracing.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringWebClientTracing.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringBootHttpClientAutoConfiguration.html"
+test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringBootWebClientAutoConfiguration.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringCacheTracing.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewSpringKafkaTracing.html"
 test -f "$tmp_dir/javadoc/co/logbrew/sdk/LogBrewJmsTracing.html"
@@ -112,7 +130,22 @@ if [ -d "$package_dir/src/main/resources" ]; then
 fi
 jar --list --file "$tmp_dir/logbrew-sdk-$package_version-sources.jar" > "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryController.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryOptions.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryScheduler.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryTransport.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryOptions.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/EncryptedEventStore.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceStatus.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceCrypto.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceFiles.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceKeyCheck.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceRecordCodec.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceTransaction.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/RetryAfterDirective.java$' "$tmp_dir/sources-jar-contents.txt"
+grep -q '^co/logbrew/sdk/RetryAfterParser.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline.java$' "$tmp_dir/sources-jar-contents.txt"
 grep -q '^co/logbrew/sdk/Traceparent.java$' "$tmp_dir/sources-jar-contents.txt"
@@ -146,6 +179,11 @@ jar --create --file "$tmp_dir/logbrew-sdk-$package_version-javadoc.jar" -C "$tmp
 jar --list --file "$tmp_dir/logbrew-sdk-$package_version-javadoc.jar" > "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^index.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryOptions.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryOptions.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/EncryptedEventStore.html$' "$tmp_dir/javadoc-jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceStatus.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.html$' "$tmp_dir/javadoc-jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline.html$' "$tmp_dir/javadoc-jar-contents.txt"
@@ -181,10 +219,34 @@ fi
 jar --create --file "$tmp_dir/logbrew-sdk-$package_version.jar" -C "$tmp_dir/jar-stage" .
 jar --list --file "$tmp_dir/logbrew-sdk-$package_version.jar" > "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryController.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryOptions.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryOptions\$Builder.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryScheduler.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/AutomaticDeliveryTransport.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$Lifecycle.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$Activity.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$Outcome.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$PauseReason.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$DropReason.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryHealth\$RetryDelaySource.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryOptions.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/DeliveryOptions\$Builder.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/EncryptedEventStore.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceStatus.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceCrypto.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceFiles.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceKeyCheck.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceRecordCodec.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/PersistenceTransaction.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDrop.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewClient\$EventDroppedHandler.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/HttpTransport\$Builder.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/RetryAfterDirective.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/RetryAfterDirective\$Outcome.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/RetryAfterParser.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/MetricAttributes.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/ProductTimeline\$ProductAction.class$' "$tmp_dir/jar-contents.txt"
@@ -216,6 +278,14 @@ grep -q '^co/logbrew/sdk/LogBrewSpringBootKafkaAutoConfiguration.class$' "$tmp_d
 grep -q '^co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor\$LogBrewKafkaProducerPostProcessor.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringBootKafkaBeanPostProcessor\$SingleLogBrewClientProvider.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringHttpTracing.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringHttpTracing\$Options.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringWebClientTracing.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringWebClientTracing\$Options.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringBootHttpClientAutoConfiguration.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringBootHttpClientPostProcessor.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringBootWebClientAutoConfiguration.class$' "$tmp_dir/jar-contents.txt"
+grep -q '^co/logbrew/sdk/LogBrewSpringBootWebClientPostProcessor.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringKafkaTracing.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringKafkaTracing\$ConsumerConfig.class$' "$tmp_dir/jar-contents.txt"
 grep -q '^co/logbrew/sdk/LogBrewSpringKafkaTracing\$ProducerConfig.class$' "$tmp_dir/jar-contents.txt"
@@ -253,6 +323,10 @@ grep -q 'LogBrewSpringBootAutoConfiguration' "$package_dir/README.md"
 grep -q 'LogBrewSpringBootCacheAutoConfiguration' "$package_dir/README.md"
 grep -q 'LogBrewSpringBootJdbcAutoConfiguration' "$package_dir/README.md"
 grep -q 'LogBrewSpringBootKafkaAutoConfiguration' "$package_dir/README.md"
+grep -q 'LogBrewSpringHttpTracing' "$package_dir/README.md"
+grep -q 'LogBrewSpringWebClientTracing' "$package_dir/README.md"
+grep -q 'LogBrewSpringBootHttpClientAutoConfiguration' "$package_dir/README.md"
+grep -q 'LogBrewSpringBootWebClientAutoConfiguration' "$package_dir/README.md"
 grep -q 'LogBrewSpringCacheTracing' "$package_dir/README.md"
 grep -q 'LogBrewSpringKafkaTracing' "$package_dir/README.md"
 grep -q 'LogBrewJmsTracing' "$package_dir/README.md"
@@ -274,6 +348,13 @@ grep -q 'LogBrewJdbcTracing' "$package_dir/README.md"
 grep -q 'SupportTicketDraft' "$package_dir/README.md"
 grep -q 'droppedEvents()' "$package_dir/README.md"
 grep -q 'maxQueueSize' "$package_dir/README.md"
+grep -q 'DeliveryOptions' "$package_dir/README.md"
+grep -q 'EncryptedEventStore' "$package_dir/README.md"
+grep -q 'AutomaticDeliveryOptions' "$package_dir/README.md"
+grep -q 'deliveryHealth()' "$package_dir/README.md"
+grep -q 'finalizePersistedTransactionAndRecover' "$package_dir/README.md"
+grep -q 'persistence_unsupported' "$package_dir/README.md"
+grep -q 'pendingEventBytes()' "$package_dir/README.md"
 grep -q 'first useful LogBrew payload' "$package_dir/README.md"
 grep -q 'without visual replay, HTTP client patching, request/response payload capture, or header capture' "$package_dir/README.md"
 grep -q 'This SDK does not automatically collect JVM, runtime, or framework metrics yet.' "$package_dir/README.md"
@@ -303,6 +384,8 @@ make -C "$package_dir/examples" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"
 grep -qx 'run-first-useful-telemetry -> make run-first-useful-telemetry' "$tmp_dir/examples-help.txt"
 grep -qx 'run-http-trace-correlation -> make run-http-trace-correlation' "$tmp_dir/examples-help.txt"
+grep -qx 'run-delivery-reliability -> make run-delivery-reliability' "$tmp_dir/examples-help.txt"
+grep -qx 'run-encrypted-restart-delivery -> make run-encrypted-restart-delivery' "$tmp_dir/examples-help.txt"
 grep -qx 'run (real-user-smoke) -> make run' "$tmp_dir/examples-help.txt"
 grep -qx 'run-real-user-smoke -> make run-real-user-smoke' "$tmp_dir/examples-help.txt"
 

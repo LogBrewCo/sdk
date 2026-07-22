@@ -1,12 +1,13 @@
 //! Public Rust client for building, validating, previewing, and flushing LogBrew event batches.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::VecDeque;
 use std::fmt;
 #[cfg(feature = "http")]
 use std::time::Duration;
 
+mod delivery;
 mod http_client;
 mod http_fields;
 mod http_server;
@@ -83,7 +84,7 @@ pub struct EventBatch {
     pub events: Vec<Event>,
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 /// Public event shape buffered, previewed, and flushed by the client.
 pub struct Event {
     #[serde(rename = "type")]
@@ -104,6 +105,22 @@ pub struct TransportResponse {
     pub status_code: u16,
     /// Number of transport attempts used for the flush.
     pub attempts: u32,
+    /// Number of accepted request batches represented by this response.
+    pub batches: u32,
+    /// Number of queued events acknowledged by accepted request batches.
+    pub accepted_events: usize,
+}
+
+impl TransportResponse {
+    /// Create a transport response before client-owned delivery totals are applied.
+    pub const fn new(status_code: u16) -> Self {
+        Self {
+            status_code,
+            attempts: 1,
+            batches: 0,
+            accepted_events: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -229,14 +246,8 @@ impl Transport for HttpTransport {
         }
 
         match request.send(body) {
-            Ok(response) => Ok(TransportResponse {
-                status_code: response.status().as_u16(),
-                attempts: 1,
-            }),
-            Err(ureq::Error::StatusCode(status_code)) => Ok(TransportResponse {
-                status_code,
-                attempts: 1,
-            }),
+            Ok(response) => Ok(TransportResponse::new(response.status().as_u16())),
+            Err(ureq::Error::StatusCode(status_code)) => Ok(TransportResponse::new(status_code)),
             Err(error) => Err(TransportError::network(format!(
                 "http transport failed: {error}"
             ))),
@@ -305,264 +316,6 @@ impl fmt::Display for SdkError {
 }
 
 impl std::error::Error for SdkError {}
-
-#[derive(Clone, Debug)]
-/// Builder for constructing a public LogBrew client from SDK identity and API key settings.
-pub struct ClientBuilder {
-    sdk_name: String,
-    sdk_version: String,
-    api_key: Option<String>,
-    max_retries: u32,
-}
-
-impl ClientBuilder {
-    /// Set the API key used by flush and shutdown transport calls.
-    pub fn api_key(mut self, api_key: impl Into<String>) -> Self {
-        self.api_key = Some(api_key.into());
-        self
-    }
-
-    /// Override the retry budget used for retryable transport failures.
-    pub fn max_retries(mut self, max_retries: u32) -> Self {
-        self.max_retries = max_retries;
-        self
-    }
-
-    /// Build a buffered LogBrew client from the configured public settings.
-    pub fn build(self) -> Result<LogBrewClient, SdkError> {
-        let api_key = self
-            .api_key
-            .ok_or_else(|| SdkError::new("config_error", "api_key is required"))?;
-        require_non_empty("api_key", &api_key)?;
-        require_non_empty("sdk name", &self.sdk_name)?;
-        require_non_empty("sdk version", &self.sdk_version)?;
-
-        Ok(LogBrewClient {
-            sdk: SdkInfo {
-                name: self.sdk_name,
-                language: "rust".to_string(),
-                version: self.sdk_version,
-            },
-            api_key,
-            max_retries: self.max_retries,
-            events: Vec::new(),
-            closed: false,
-        })
-    }
-}
-
-#[derive(Clone, Debug)]
-/// Buffered public client for validating, previewing, and flushing LogBrew events.
-pub struct LogBrewClient {
-    sdk: SdkInfo,
-    api_key: String,
-    max_retries: u32,
-    events: Vec<Event>,
-    closed: bool,
-}
-
-impl LogBrewClient {
-    /// Create a builder from public SDK identity values like name and version.
-    pub fn builder(sdk_name: impl Into<String>, sdk_version: impl Into<String>) -> ClientBuilder {
-        ClientBuilder {
-            sdk_name: sdk_name.into(),
-            sdk_version: sdk_version.into(),
-            api_key: None,
-            max_retries: 2,
-        }
-    }
-
-    /// Return the queued event count currently buffered in memory.
-    pub fn pending_events(&self) -> usize {
-        self.events.len()
-    }
-
-    /// Return the queued event batch as stable, pretty-printed JSON.
-    pub fn preview_json(&self) -> Result<String, SdkError> {
-        let batch = EventBatch {
-            sdk: self.sdk.clone(),
-            events: self.events.clone(),
-        };
-        serde_json::to_string_pretty(&batch)
-            .map_err(|error| SdkError::new("serialization_error", error.to_string()))
-    }
-
-    pub fn release(
-        &mut self,
-        id: impl Into<String>,
-        timestamp: impl Into<String>,
-        release: ReleaseEvent,
-    ) -> Result<(), SdkError> {
-        self.push_event(
-            "release",
-            id.into(),
-            timestamp.into(),
-            release.attributes()?,
-        )
-    }
-
-    pub fn environment(
-        &mut self,
-        id: impl Into<String>,
-        timestamp: impl Into<String>,
-        environment: EnvironmentEvent,
-    ) -> Result<(), SdkError> {
-        self.push_event(
-            "environment",
-            id.into(),
-            timestamp.into(),
-            environment.attributes()?,
-        )
-    }
-
-    pub fn issue(
-        &mut self,
-        id: impl Into<String>,
-        timestamp: impl Into<String>,
-        issue: IssueEvent,
-    ) -> Result<(), SdkError> {
-        self.push_event("issue", id.into(), timestamp.into(), issue.attributes()?)
-    }
-
-    pub fn log(
-        &mut self,
-        id: impl Into<String>,
-        timestamp: impl Into<String>,
-        log: LogEvent,
-    ) -> Result<(), SdkError> {
-        self.push_event("log", id.into(), timestamp.into(), log.attributes()?)
-    }
-
-    pub fn span(
-        &mut self,
-        id: impl Into<String>,
-        timestamp: impl Into<String>,
-        span: SpanEvent,
-    ) -> Result<(), SdkError> {
-        self.push_event("span", id.into(), timestamp.into(), span.attributes()?)
-    }
-
-    pub fn action(
-        &mut self,
-        id: impl Into<String>,
-        timestamp: impl Into<String>,
-        action: ActionEvent,
-    ) -> Result<(), SdkError> {
-        self.push_event("action", id.into(), timestamp.into(), action.attributes()?)
-    }
-
-    /// Queue an explicit app-owned metric event with validated low-cardinality fields.
-    pub fn metric(
-        &mut self,
-        id: impl Into<String>,
-        timestamp: impl Into<String>,
-        metric: MetricEvent,
-    ) -> Result<(), SdkError> {
-        self.push_event("metric", id.into(), timestamp.into(), metric.attributes()?)
-    }
-
-    /// Flush queued events through a transport while preserving retry semantics.
-    pub fn flush<T: Transport>(
-        &mut self,
-        transport: &mut T,
-    ) -> Result<TransportResponse, SdkError> {
-        if self.closed {
-            return Err(SdkError::new(
-                "shutdown_error",
-                "client is already shut down",
-            ));
-        }
-        self.flush_internal(transport)
-    }
-
-    /// Flush queued events, then mark the client closed so later writes fail.
-    pub fn shutdown<T: Transport>(
-        &mut self,
-        transport: &mut T,
-    ) -> Result<TransportResponse, SdkError> {
-        if self.closed {
-            return Err(SdkError::new(
-                "shutdown_error",
-                "client is already shut down",
-            ));
-        }
-        let result = self.flush_internal(transport)?;
-        self.closed = true;
-        Ok(result)
-    }
-
-    fn push_event(
-        &mut self,
-        event_type: &str,
-        id: String,
-        timestamp: String,
-        attributes: Map<String, Value>,
-    ) -> Result<(), SdkError> {
-        if self.closed {
-            return Err(SdkError::new(
-                "shutdown_error",
-                "client is already shut down",
-            ));
-        }
-        require_non_empty("event id", &id)?;
-        require_timestamp(&timestamp)?;
-        self.events.push(Event {
-            event_type: event_type.to_string(),
-            timestamp,
-            id,
-            attributes,
-        });
-        Ok(())
-    }
-
-    fn flush_internal<T: Transport>(
-        &mut self,
-        transport: &mut T,
-    ) -> Result<TransportResponse, SdkError> {
-        if self.events.is_empty() {
-            return Ok(TransportResponse {
-                status_code: 204,
-                attempts: 0,
-            });
-        }
-
-        let body = self.preview_json()?.into_bytes();
-
-        let max_attempts = self.max_retries + 1;
-        let mut attempts = 0;
-        loop {
-            attempts += 1;
-            match transport.send(&self.api_key, &body) {
-                Ok(mut response) => {
-                    if response.status_code == 401 {
-                        return Err(SdkError::new(
-                            "unauthenticated",
-                            "transport rejected the API key",
-                        ));
-                    }
-                    if (200..300).contains(&response.status_code) {
-                        self.events.clear();
-                        response.attempts = attempts;
-                        return Ok(response);
-                    }
-                    if response.status_code >= 500 && attempts < max_attempts {
-                        continue;
-                    }
-                    return Err(SdkError::new(
-                        "transport_error",
-                        format!("unexpected transport status {}", response.status_code),
-                    ));
-                }
-                Err(error) => {
-                    if error.retryable && attempts < max_attempts {
-                        continue;
-                    }
-                    return Err(SdkError::new(error.code, error.message));
-                }
-            }
-        }
-    }
-}
 
 fn require_non_empty(label: &str, value: &str) -> Result<(), SdkError> {
     if value.trim().is_empty() {
@@ -975,9 +728,13 @@ impl Transport for RecordingTransport {
 
         self.sent_bodies.push(body.to_vec());
         let status = self.scripted.pop_front().unwrap_or(Ok(202))?;
-        Ok(TransportResponse {
-            status_code: status,
-            attempts: 1,
-        })
+        Ok(TransportResponse::new(status))
     }
 }
+pub use delivery::{
+    AutomaticDeliveryConfig, ClientBuilder, DEFAULT_AUTOMATIC_DELIVERY_INTERVAL,
+    DEFAULT_AUTOMATIC_DELIVERY_THRESHOLD, DEFAULT_AUTOMATIC_RETRY_BASE_DELAY,
+    DEFAULT_AUTOMATIC_RETRY_MAX_DELAY, DEFAULT_MAX_BATCH_EVENTS, DEFAULT_MAX_QUEUE_BYTES,
+    DEFAULT_MAX_QUEUE_EVENTS, DEFAULT_MAX_REQUEST_BODY_BYTES, DeliveryCodeCategory,
+    DeliveryHealthSnapshot, DeliveryOutcome, DeliveryPauseReason, LogBrewClient,
+};
