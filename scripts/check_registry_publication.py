@@ -268,7 +268,14 @@ def checks_for(args: argparse.Namespace) -> list[RegistryCheck]:
     if "crates" in requested:
         checks.extend(crates_check(crate_name) for crate_name in CRATES)
     if "maven" in requested:
-        maven_artifacts = tuple(args.maven_artifact) if getattr(args, "maven_artifact", []) else MAVEN_ARTIFACTS
+        if getattr(args, "maven_plan", None):
+            maven_artifacts = tuple(args.maven_artifact)
+        else:
+            maven_artifacts = (
+                tuple(args.maven_artifact)
+                if getattr(args, "maven_artifact", [])
+                else MAVEN_ARTIFACTS
+            )
         checks.extend(maven_check(artifact_id) for artifact_id in maven_artifacts)
     if "openupm" in requested:
         checks.extend(openupm_check(package_name) for package_name in OPENUPM_PACKAGES)
@@ -278,6 +285,12 @@ def checks_for(args: argparse.Namespace) -> list[RegistryCheck]:
 def expected_versions(version: str) -> set[str]:
     stripped = version.removeprefix("v")
     return {stripped, f"v{stripped}"}
+
+
+def registry_expected_versions(check: RegistryCheck, version: str) -> set[str]:
+    if check.label in MAVEN_PACKAGE_LABELS:
+        return {version}
+    return expected_versions(version)
 
 
 def fetch_payload(url: str, timeout: float, decoder: Callable[[bytes], Any]) -> Any:
@@ -420,7 +433,7 @@ def validate(args: argparse.Namespace) -> list[str]:
     for check in checks_for(args):
         default_version = DEFAULT_PACKAGE_VERSIONS.get(check.label, args.version)
         version = args.package_versions.get(check.label, default_version)
-        expected = expected_versions(version)
+        expected = registry_expected_versions(check, version)
         if getattr(args, "expect_absent", False):
             failures.extend(validate_absent_check(check, expected, args.timeout))
         else:
@@ -449,6 +462,43 @@ def parse_package_versions(
             raise argparse.ArgumentTypeError(f"unknown {package_family} package: {package_name}")
         versions[package_name] = version
     return versions
+
+
+def maven_plan_entries(plan_path: Path, scope: str) -> tuple[list[str], dict[str, str]]:
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise argparse.ArgumentTypeError(
+            f"invalid Maven release plan: {error.__class__.__name__}"
+        ) from error
+    if not isinstance(plan, dict) or plan.get("schemaVersion") != 1:
+        raise argparse.ArgumentTypeError("invalid Maven release plan schema")
+    key = "selected" if scope == "selected" else "externalDependencies"
+    raw_entries = plan.get(key)
+    if not isinstance(raw_entries, list):
+        raise argparse.ArgumentTypeError(f"invalid Maven release plan {key}")
+
+    artifacts: list[str] = []
+    versions: dict[str, str] = {}
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
+            raise argparse.ArgumentTypeError(f"invalid Maven release plan {key}")
+        artifact_id = entry.get("artifactId")
+        coordinate = entry.get("coordinate")
+        version = entry.get("version")
+        if (
+            artifact_id not in MAVEN_ARTIFACTS
+            or coordinate != f"co.logbrew:{artifact_id}"
+            or not isinstance(version, str)
+            or not version
+            or artifact_id in artifacts
+        ):
+            raise argparse.ArgumentTypeError(f"invalid Maven release plan {key}")
+        artifacts.append(artifact_id)
+        versions[coordinate] = version
+    if not artifacts and scope == "selected":
+        raise argparse.ArgumentTypeError(f"Maven release plan has no {scope} artifacts")
+    return artifacts, versions
 
 
 def format_overrides(label: str, versions: dict[str, str]) -> str | None:
@@ -547,6 +597,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="PACKAGE=VERSION",
         help="Expected version for one Maven package, for example co.logbrew:logbrew-sdk=0.1.0.",
     )
+    parser.add_argument(
+        "--maven-plan",
+        type=Path,
+        help="Use exact Maven coordinates and versions from a validated release plan.",
+    )
+    parser.add_argument(
+        "--maven-plan-scope",
+        choices=("selected", "dependencies"),
+        help="Check selected release coordinates or their external dependency closure.",
+    )
     parser.add_argument("--include-pypi-extras", action="store_true")
     parser.add_argument("--include-crates", action="store_true")
     parser.add_argument("--include-packagist", action="store_true")
@@ -570,12 +630,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--pypi-version requires --target pypi or --target all")
     if args.nuget_version and "nuget" not in args.target and "all" not in args.target:
         parser.error("--nuget-version requires --target nuget or --target all")
-    if args.expect_absent and args.target != ["nuget"]:
-        parser.error("--expect-absent requires exactly --target nuget")
+    if args.expect_absent and args.target not in (["nuget"], ["maven"]):
+        parser.error("--expect-absent requires exactly --target nuget or --target maven")
     if args.maven_artifact and "maven" not in args.target and "all" not in args.target:
         parser.error("--maven-artifact requires --target maven or --target all")
     if args.maven_version and "maven" not in args.target and "all" not in args.target:
         parser.error("--maven-version requires --target maven or --target all")
+    if args.maven_plan and "maven" not in args.target and "all" not in args.target:
+        parser.error("--maven-plan requires --target maven or --target all")
+    if bool(args.maven_plan) != bool(args.maven_plan_scope):
+        parser.error("--maven-plan and --maven-plan-scope must be used together")
+    if args.maven_plan and (args.maven_artifact or args.maven_version):
+        parser.error("--maven-plan cannot be combined with Maven artifact or version overrides")
+    if (
+        args.expect_absent
+        and args.target == ["maven"]
+        and (not args.maven_plan or args.maven_plan_scope != "selected")
+    ):
+        parser.error("Maven --expect-absent requires the selected Maven release plan")
     try:
         args.npm_versions = parse_package_versions(args.npm_version)
         args.pypi_versions = parse_package_versions(
@@ -593,6 +665,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             allowed_packages=MAVEN_PACKAGE_LABELS,
             package_family="Maven",
         )
+        if args.maven_plan:
+            args.maven_artifact, args.maven_versions = maven_plan_entries(
+                args.maven_plan,
+                args.maven_plan_scope,
+            )
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
     args.package_versions = {**args.npm_versions, **args.pypi_versions, **args.nuget_versions, **args.maven_versions}

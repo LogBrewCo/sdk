@@ -935,6 +935,8 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "repo-wide version guard": "python3 scripts/check_repo_wide_release_versions.py \"$REF\"",
             "publish dispatch output guard": "if: ${{ steps.release.outputs.publish_packages == 'true' }}",
             "scoped GitHub Release summary": "Skipped package publishing for scoped GitHub Release",
+            "Maven selected-artifact release input": "maven_artifacts:",
+            "Maven selected-artifact dispatch": '-f maven_artifacts="$MAVEN_ARTIFACTS"',
         }
         for description, needle in required_needles.items():
             require(needle in text, failures, f"{PUBLISH_RELEASE_WORKFLOW}: missing {description}")
@@ -993,6 +995,14 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "Maven Central public install smoke": "bash scripts/real_user_maven_central_public_smoke.sh",
             "Maven Central generated publishing-values hint": "generated Central Portal publishing values",
             "Maven Central auth preflight": "bash scripts/check_maven_central_auth_preflight.sh",
+            "Maven selected-artifact input": "maven_artifacts:",
+            "Maven selected-artifact plan": "maven_release_plan.py create",
+            "Maven selected-version collision preflight": "--maven-plan-scope selected",
+            "Maven exact dependency closure preflight": "--maven-plan-scope dependencies",
+            "Maven exact bundle manifest": "--manifest",
+            "Maven selected public install smoke": (
+                "real_user_maven_central_public_smoke.sh --plan"
+            ),
         }
         for package in DOTNET_RELEASE_PACKAGES:
             needle = (

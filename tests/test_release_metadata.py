@@ -452,6 +452,43 @@ jobs:
 
         self.assertTrue(any("Maven Central public install smoke" in failure for failure in failures))
 
+    def test_publish_packages_requires_selected_maven_plan_before_build_and_upload(self) -> None:
+        workflow = (ROOT / ".github/workflows/publish-packages.yml").read_text(encoding="utf-8")
+
+        plan = workflow.index("Plan selected Maven artifacts")
+        collision = workflow.index("Check selected Maven version collisions")
+        build = workflow.index("Build Maven Central deployment bundle")
+        upload = workflow.index("Upload Maven Central deployment bundle")
+
+        self.assertIn("maven_artifacts:", workflow)
+        self.assertIn("maven_release_plan.py create", workflow[plan:collision])
+        self.assertIn("--maven-plan-scope selected", workflow[collision:build])
+        self.assertIn("--expect-absent", workflow[collision:build])
+        self.assertIn("--maven-plan-scope dependencies", workflow[collision:build])
+        self.assertIn("--plan", workflow[build:upload])
+        self.assertIn("--manifest", workflow[build:upload])
+        self.assertIn(
+            "real_user_maven_central_public_smoke.sh --plan",
+            workflow[build:upload],
+        )
+        self.assertIn("--bundle", workflow[build:upload])
+        self.assertIn("real_user_maven_central_public_smoke.sh --plan", workflow[upload:])
+        self.assertLess(plan, collision)
+        self.assertLess(collision, build)
+        self.assertLess(build, upload)
+
+    def test_release_guide_documents_selected_maven_artifact_safety(self) -> None:
+        guide = (ROOT / "docs/github-actions.md").read_text(encoding="utf-8")
+
+        for expected in (
+            "`maven_artifacts`",
+            "immutable-version collision",
+            "exact dependency closure",
+            "bundle manifest",
+            "before upload",
+        ):
+            self.assertIn(expected, guide)
+
     def test_publish_packages_workflow_requires_maven_generated_publishing_values_hint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

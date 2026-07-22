@@ -67,6 +67,11 @@ on:
         required: true
         type: boolean
         default: false
+      maven_artifacts:
+        description: "Comma-separated Maven artifact ids to package and publish"
+        required: false
+        type: string
+        default: ""
       include_go_module:
         description: "Verify the Go module can be installed from public tags"
         required: true
@@ -795,6 +800,22 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      - name: Plan selected Maven artifacts
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/maven_release_plan.py create --root "$GITHUB_WORKSPACE" \
+            --artifacts "${{ inputs.maven_artifacts }}" \
+            --output "$RUNNER_TEMP/logbrew-maven-release-plan.json"
+
+      - name: Check selected Maven version collisions
+        run: |
+          set -Eeuo pipefail
+          plan="$RUNNER_TEMP/logbrew-maven-release-plan.json"
+          python3 scripts/check_registry_publication.py --target maven --maven-plan "$plan" \
+            --maven-plan-scope selected --expect-absent --retries 0
+          python3 scripts/check_registry_publication.py --target maven --maven-plan "$plan" \
+            --maven-plan-scope dependencies --retries 6 --retry-delay 10
+
       - name: Check Maven Central auth preflight
         if: ${{ ! inputs.dry_run }}
         env:
@@ -815,7 +836,9 @@ jobs:
           MAVEN_GPG_KEY_ID: ${{ secrets.MAVEN_GPG_KEY_ID }}
         run: |
           set -Eeuo pipefail
-          bundle_args=(--output "$RUNNER_TEMP/logbrew-maven-central-bundle.zip")
+          bundle_args=(--plan "$RUNNER_TEMP/logbrew-maven-release-plan.json")
+          bundle_args+=(--output "$RUNNER_TEMP/logbrew-maven-central-bundle.zip")
+          bundle_args+=(--manifest "$RUNNER_TEMP/logbrew-maven-central-manifest.json")
           if [[ "${{ inputs.dry_run }}" != "true" ]]; then
             bundle_args+=(--sign)
           fi
@@ -828,6 +851,17 @@ jobs:
               names = archive.namelist()
           print(f"maven central bundle entries ok ({len(names)} files)")
           PY
+
+      - name: Verify selected Maven bundle install
+        run: bash scripts/real_user_maven_central_public_smoke.sh --plan "$RUNNER_TEMP/logbrew-maven-release-plan.json" --bundle "$RUNNER_TEMP/logbrew-maven-central-bundle.zip"
+
+      - name: Upload Maven release manifest
+        uses: actions/upload-artifact@v6
+        with:
+          name: logbrew-maven-release-manifest
+          path: ${{ runner.temp }}/logbrew-maven-central-manifest.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload Maven Central deployment bundle
         if: ${{ ! inputs.dry_run }}
@@ -876,11 +910,14 @@ jobs:
 
       - name: Verify Maven Central publication
         if: ${{ ! inputs.dry_run }}
-        run: python3 scripts/check_registry_publication.py --target maven --retries 20 --retry-delay 30
+        run: |
+          python3 scripts/check_registry_publication.py --target maven \
+            --maven-plan "$RUNNER_TEMP/logbrew-maven-release-plan.json" \
+            --maven-plan-scope selected --retries 20 --retry-delay 30
 
       - name: Verify public Maven Central install
         if: ${{ ! inputs.dry_run }}
-        run: bash scripts/real_user_maven_central_public_smoke.sh
+        run: bash scripts/real_user_maven_central_public_smoke.sh --plan "$RUNNER_TEMP/logbrew-maven-release-plan.json"
 
   verify:
     name: Public registry verification

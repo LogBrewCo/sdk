@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
+import io
+import json
 import sys
+import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
@@ -252,6 +256,91 @@ class RegistryPublicationTests(unittest.TestCase):
         labels = {check.label for check in check_registry_publication.checks_for(args)}
 
         self.assertEqual({"co.logbrew:logbrew-sdk", "co.logbrew:logbrew-kotlin"}, labels)
+
+    def test_maven_plan_scopes_selected_and_external_dependency_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "plan.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "selected": [
+                            {
+                                "artifactId": "logbrew-kotlin-okhttp",
+                                "coordinate": "co.logbrew:logbrew-kotlin-okhttp",
+                                "packageDir": "kotlin/logbrew-kotlin-okhttp",
+                                "version": "0.1.2",
+                            }
+                        ],
+                        "externalDependencies": [
+                            {
+                                "artifactId": "logbrew-kotlin",
+                                "coordinate": "co.logbrew:logbrew-kotlin",
+                                "version": "0.1.1",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            selected = check_registry_publication.parse_args(
+                [
+                    "--target",
+                    "maven",
+                    "--maven-plan",
+                    str(plan_path),
+                    "--maven-plan-scope",
+                    "selected",
+                ]
+            )
+            dependencies = check_registry_publication.parse_args(
+                [
+                    "--target",
+                    "maven",
+                    "--maven-plan",
+                    str(plan_path),
+                    "--maven-plan-scope",
+                    "dependencies",
+                ]
+            )
+
+        self.assertEqual(selected.maven_artifact, ["logbrew-kotlin-okhttp"])
+        self.assertEqual(
+            selected.maven_versions,
+            {"co.logbrew:logbrew-kotlin-okhttp": "0.1.2"},
+        )
+        self.assertEqual(dependencies.maven_artifact, ["logbrew-kotlin"])
+        self.assertEqual(
+            dependencies.maven_versions,
+            {"co.logbrew:logbrew-kotlin": "0.1.1"},
+        )
+
+    def test_maven_registry_versions_are_exact_without_tag_prefix_aliases(self) -> None:
+        check = check_registry_publication.maven_check("logbrew-sdk")
+
+        self.assertEqual(
+            check_registry_publication.registry_expected_versions(check, "0.1.2"),
+            {"0.1.2"},
+        )
+
+    def test_maven_collision_preflight_requires_the_selected_release_plan(self) -> None:
+        for arguments in (
+            ["--target", "maven", "--expect-absent"],
+            [
+                "--target",
+                "maven",
+                "--expect-absent",
+                "--maven-plan",
+                "unused.json",
+                "--maven-plan-scope",
+                "dependencies",
+            ],
+        ):
+            with self.subTest(arguments=arguments):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        check_registry_publication.parse_args(arguments)
 
     def test_parse_npm_package_versions(self) -> None:
         self.assertEqual(
