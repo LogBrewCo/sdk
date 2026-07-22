@@ -477,6 +477,49 @@ jobs:
         self.assertLess(collision, build)
         self.assertLess(build, upload)
 
+    def test_maven_dispatch_input_is_canonicalized_before_shell_or_output_use(
+        self,
+    ) -> None:
+        publish_packages = (ROOT / ".github/workflows/publish-packages.yml").read_text(
+            encoding="utf-8"
+        )
+        plan_step = publish_packages.split("- name: Plan selected Maven artifacts", 1)[
+            1
+        ].split(
+            "- name: Check selected Maven version collisions",
+            1,
+        )[0]
+        plan_script = plan_step.split("run: |", 1)[1]
+        self.assertIn(
+            "MAVEN_ARTIFACTS_INPUT: ${{ inputs.maven_artifacts }}",
+            plan_step,
+        )
+        self.assertIn("--artifacts-env MAVEN_ARTIFACTS_INPUT", plan_script)
+        self.assertNotIn("${{ inputs.maven_artifacts }}", plan_script)
+
+        publish_release = (ROOT / ".github/workflows/publish-release.yml").read_text(
+            encoding="utf-8"
+        )
+        resolve_step = publish_release.split("name: Resolve release publish inputs", 1)[
+            1
+        ].split(
+            "- name: Guard repo-wide release package versions",
+            1,
+        )[0]
+        resolve_script = resolve_step.split("run: |", 1)[1]
+        self.assertIn(
+            "INPUT_MAVEN_ARTIFACTS: ${{ inputs.maven_artifacts }}",
+            resolve_step,
+        )
+        self.assertIn("maven_release_plan.py canonicalize", resolve_script)
+        self.assertIn("--artifacts-env INPUT_MAVEN_ARTIFACTS", resolve_script)
+        self.assertNotIn('maven_artifacts="$INPUT_MAVEN_ARTIFACTS"', resolve_script)
+        self.assertNotIn('echo "maven_artifacts=$maven_artifacts"', resolve_script)
+        self.assertIn(
+            "printf 'maven_artifacts=%s\\n' \"$maven_artifacts\"",
+            resolve_script,
+        )
+
     def test_release_guide_documents_selected_maven_artifact_safety(self) -> None:
         guide = (ROOT / "docs/github-actions.md").read_text(encoding="utf-8")
 

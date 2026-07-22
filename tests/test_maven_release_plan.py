@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts import maven_release_plan
 
@@ -103,7 +107,68 @@ class MavenReleasePlanTests(unittest.TestCase):
             ["logbrew-sdk", "logbrew-kotlin"],
         )
 
-    def test_unselected_internal_dependency_is_an_exact_external_requirement(self) -> None:
+    def test_dispatch_selection_defaults_and_canonicalizes_allowed_artifacts(
+        self,
+    ) -> None:
+        self.assertEqual(
+            maven_release_plan.canonicalize_artifact_selection(self.root, ""),
+            "logbrew-sdk,logbrew-kotlin,logbrew-kotlin-okhttp",
+        )
+        self.assertEqual(
+            maven_release_plan.canonicalize_artifact_selection(
+                self.root,
+                " logbrew-kotlin-okhttp , logbrew-sdk ",
+            ),
+            "logbrew-sdk,logbrew-kotlin-okhttp",
+        )
+
+    def test_dispatch_selection_rejects_untrusted_or_ambiguous_text(self) -> None:
+        rejected = (
+            'logbrew-sdk"$(printf unsafe)"',
+            "logbrew-sdk;printf unsafe",
+            "logbrew-sdk\rlogbrew-kotlin",
+            "logbrew-sdk\nlogbrew-kotlin",
+            "logbrew-sdk\r\nlogbrew-kotlin",
+            "logbrew-sdk,,logbrew-kotlin",
+            "logbrew-sdk,logbrew-sdk",
+            "logbrew-unknown",
+        )
+        for raw_selection in rejected:
+            with self.subTest(raw_selection=repr(raw_selection)):
+                with self.assertRaises(ValueError) as raised:
+                    maven_release_plan.canonicalize_artifact_selection(
+                        self.root,
+                        raw_selection,
+                    )
+                self.assertNotIn(raw_selection, str(raised.exception))
+
+    def test_cli_reads_dispatch_selection_from_environment_and_prints_only_canonical_ids(
+        self,
+    ) -> None:
+        output = io.StringIO()
+        with (
+            patch.dict(
+                os.environ,
+                {"MAVEN_ARTIFACT_SELECTION": "logbrew-kotlin-okhttp,logbrew-sdk"},
+            ),
+            redirect_stdout(output),
+        ):
+            status = maven_release_plan.main(
+                [
+                    "canonicalize",
+                    "--root",
+                    str(self.root),
+                    "--artifacts-env",
+                    "MAVEN_ARTIFACT_SELECTION",
+                ]
+            )
+
+        self.assertEqual(status, 0)
+        self.assertEqual(output.getvalue(), "logbrew-sdk,logbrew-kotlin-okhttp\n")
+
+    def test_unselected_internal_dependency_is_an_exact_external_requirement(
+        self,
+    ) -> None:
         plan = maven_release_plan.create_plan(self.root, ["logbrew-kotlin-okhttp"])
 
         self.assertEqual(

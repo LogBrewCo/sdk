@@ -937,9 +937,35 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "scoped GitHub Release summary": "Skipped package publishing for scoped GitHub Release",
             "Maven selected-artifact release input": "maven_artifacts:",
             "Maven selected-artifact dispatch": '-f maven_artifacts="$MAVEN_ARTIFACTS"',
+            "Maven release selector environment binding": (
+                "INPUT_MAVEN_ARTIFACTS: ${{ inputs.maven_artifacts }}"
+            ),
+            "Maven release selector canonicalization": "maven_release_plan.py canonicalize",
+            "Maven release selector environment input": (
+                "--artifacts-env INPUT_MAVEN_ARTIFACTS"
+            ),
+            "Maven release canonical output": (
+                "printf 'maven_artifacts=%s\\n' \"$maven_artifacts\""
+            ),
         }
         for description, needle in required_needles.items():
             require(needle in text, failures, f"{PUBLISH_RELEASE_WORKFLOW}: missing {description}")
+        resolve_step = text.split("name: Resolve release publish inputs", 1)[-1]
+        resolve_script = resolve_step.split(
+            "- name: Guard repo-wide release package versions",
+            1,
+        )[0].split("run: |", 1)[-1]
+        require(
+            "${{ inputs.maven_artifacts }}" not in resolve_script,
+            failures,
+            f"{PUBLISH_RELEASE_WORKFLOW}: Maven selector must not be interpolated into shell",
+        )
+        require(
+            'maven_artifacts="$INPUT_MAVEN_ARTIFACTS"' not in resolve_script
+            and 'echo "maven_artifacts=$maven_artifacts"' not in resolve_script,
+            failures,
+            f"{PUBLISH_RELEASE_WORKFLOW}: Maven selector must be canonical before output",
+        )
     publish_packages_path = require_path(root, PUBLISH_PACKAGES_WORKFLOW, failures)
     if publish_packages_path.exists():
         publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
@@ -997,6 +1023,12 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "Maven Central auth preflight": "bash scripts/check_maven_central_auth_preflight.sh",
             "Maven selected-artifact input": "maven_artifacts:",
             "Maven selected-artifact plan": "maven_release_plan.py create",
+            "Maven selected-artifact environment input": (
+                "MAVEN_ARTIFACTS_INPUT: ${{ inputs.maven_artifacts }}"
+            ),
+            "Maven selected-artifact parser input": (
+                "--artifacts-env MAVEN_ARTIFACTS_INPUT"
+            ),
             "Maven selected-version collision preflight": "--maven-plan-scope selected",
             "Maven exact dependency closure preflight": "--maven-plan-scope dependencies",
             "Maven exact bundle manifest": "--manifest",
@@ -1004,6 +1036,13 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
                 "real_user_maven_central_public_smoke.sh --plan"
             ),
         }
+        plan_step = publish_packages_text.split("- name: Plan selected Maven artifacts", 1)[-1]
+        plan_script = plan_step.split("- name: Check selected Maven version collisions", 1)[0]
+        require(
+            "${{ inputs.maven_artifacts }}" not in plan_script.split("run: |", 1)[-1],
+            failures,
+            f"{PUBLISH_PACKAGES_WORKFLOW}: Maven selector must not be interpolated into shell",
+        )
         for package in DOTNET_RELEASE_PACKAGES:
             needle = (
                 f'--nuget-version "{package.package_id}='

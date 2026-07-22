@@ -125,7 +125,6 @@ jobs:
               include_crates_publish="false"
               include_packagist_update="false"
               include_maven_publish="false"
-              maven_artifacts=""
               include_go_module="false"
             elif [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
               release_kind="repo-wide"
@@ -137,7 +136,6 @@ jobs:
               include_crates_publish="true"
               include_packagist_update="true"
               include_maven_publish="true"
-              maven_artifacts="logbrew-sdk,logbrew-kotlin,logbrew-kotlin-okhttp"
               include_go_module="false"
             else
               echo "Published GitHub Releases must use a repo-wide vMAJOR.MINOR.PATCH tag or a scoped package tag containing '/': $RELEASE_TAG" >&2
@@ -153,8 +151,15 @@ jobs:
             include_crates_publish="$INPUT_INCLUDE_CRATES_PUBLISH"
             include_packagist_update="$INPUT_INCLUDE_PACKAGIST_UPDATE"
             include_maven_publish="$INPUT_INCLUDE_MAVEN_PUBLISH"
-            maven_artifacts="$INPUT_MAVEN_ARTIFACTS"
             include_go_module="$INPUT_INCLUDE_GO_MODULE"
+          fi
+
+          if [[ "$publish_packages" == "true" ]]; then
+            maven_artifacts="$(python3 scripts/maven_release_plan.py canonicalize \
+              --root "$GITHUB_WORKSPACE" \
+              --artifacts-env INPUT_MAVEN_ARTIFACTS)"
+          else
+            maven_artifacts=""
           fi
 
           {
@@ -169,7 +174,7 @@ jobs:
             echo "include_crates_publish=$include_crates_publish"
             echo "include_packagist_update=$include_packagist_update"
             echo "include_maven_publish=$include_maven_publish"
-            echo "maven_artifacts=$maven_artifacts"
+            printf 'maven_artifacts=%s\n' "$maven_artifacts"
             echo "include_go_module=$include_go_module"
           } >> "$GITHUB_OUTPUT"
 

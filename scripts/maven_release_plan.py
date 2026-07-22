@@ -28,6 +28,7 @@ CATALOG = (
     ),
 )
 CATALOG_BY_ID = {artifact_id: (package_dir, dependencies) for artifact_id, package_dir, dependencies in CATALOG}
+DEFAULT_ARTIFACTS = tuple(artifact_id for artifact_id, _, _ in CATALOG)
 
 
 def _fail(message: str) -> NoReturn:
@@ -135,6 +136,24 @@ def create_plan(root: Path, selected_artifacts: Sequence[str]) -> dict[str, Any]
         "selected": selected,
         "externalDependencies": ordered_external,
     }
+
+
+def parse_artifact_selection(raw_selection: str) -> list[str]:
+    """Parse one bounded comma-separated dispatch selection without reflecting input."""
+    if raw_selection == "":
+        return list(DEFAULT_ARTIFACTS)
+    if "\r" in raw_selection or "\n" in raw_selection:
+        _fail("invalid Maven artifact selection")
+    selected = [artifact.strip() for artifact in raw_selection.split(",")]
+    if any(not artifact for artifact in selected):
+        _fail("invalid Maven artifact selection")
+    return selected
+
+
+def canonicalize_artifact_selection(root: Path, raw_selection: str) -> str:
+    """Return selected artifact IDs in deterministic catalog order."""
+    plan = create_plan(root, parse_artifact_selection(raw_selection))
+    return ",".join(entry["artifactId"] for entry in plan["selected"])
 
 
 def write_json(value: dict[str, Any], output: Path) -> None:
@@ -245,7 +264,14 @@ def _parser() -> argparse.ArgumentParser:
     selection = create.add_mutually_exclusive_group(required=True)
     selection.add_argument("--artifact", action="append")
     selection.add_argument("--artifacts")
+    selection.add_argument("--artifacts-env")
     create.add_argument("--output", type=Path, required=True)
+
+    canonicalize = subparsers.add_parser("canonicalize")
+    canonicalize.add_argument("--root", type=Path, required=True)
+    canonical_selection = canonicalize.add_mutually_exclusive_group(required=True)
+    canonical_selection.add_argument("--artifacts")
+    canonical_selection.add_argument("--artifacts-env")
 
     validate = subparsers.add_parser("validate")
     validate.add_argument("--root", type=Path, required=True)
@@ -266,8 +292,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "create":
             selected = args.artifact or []
             if args.artifacts is not None:
-                selected = [artifact.strip() for artifact in args.artifacts.split(",") if artifact.strip()]
+                selected = parse_artifact_selection(args.artifacts)
+            elif args.artifacts_env is not None:
+                selected = parse_artifact_selection(
+                    os.environ.get(args.artifacts_env, "")
+                )
             write_plan(create_plan(args.root, selected), args.output)
+        elif args.command == "canonicalize":
+            raw_selection = args.artifacts
+            if args.artifacts_env is not None:
+                raw_selection = os.environ.get(args.artifacts_env, "")
+            print(canonicalize_artifact_selection(args.root, raw_selection))
         elif args.command == "validate":
             validate_plan(args.root, args.plan)
         else:

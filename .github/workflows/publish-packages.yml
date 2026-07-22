@@ -801,10 +801,12 @@ jobs:
           persist-credentials: false
 
       - name: Plan selected Maven artifacts
+        env:
+          MAVEN_ARTIFACTS_INPUT: ${{ inputs.maven_artifacts }}
         run: |
           set -Eeuo pipefail
           python3 scripts/maven_release_plan.py create --root "$GITHUB_WORKSPACE" \
-            --artifacts "${{ inputs.maven_artifacts }}" \
+            --artifacts-env MAVEN_ARTIFACTS_INPUT \
             --output "$RUNNER_TEMP/logbrew-maven-release-plan.json"
 
       - name: Check selected Maven version collisions
