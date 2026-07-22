@@ -24,7 +24,7 @@ import { installLogBrewUndiciInstrumentation as installUndiciInstrumentation } f
 
 const DEFAULT_SDK_NAME = "logbrew-node";
 const DEFAULT_SDK_VERSION = "0.1.0";
-const DEFAULT_ENDPOINT = "https://api.logbrew.com/v1/events";
+const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const MAX_SPAN_EVENTS = 8;
 const FETCH_TIMING_METADATA_KEYS = Object.freeze({
   connectMs: "http.phase.connect_ms",

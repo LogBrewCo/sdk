@@ -2200,7 +2200,7 @@ if (!$httpTransport->implementsInterface(\LogBrew\Transport::class)) {
     fwrite(STDERR, "expected HttpTransport to implement transport interface\n");
     exit(1);
 }
-if ($httpTransport->getConstant('DEFAULT_ENDPOINT') !== 'https://api.logbrew.com/v1/events') {
+if ($httpTransport->getConstant('DEFAULT_ENDPOINT') !== 'https://api.logbrew.co/v1/events') {
     fwrite(STDERR, "unexpected HttpTransport default endpoint\n");
     exit(1);
 }

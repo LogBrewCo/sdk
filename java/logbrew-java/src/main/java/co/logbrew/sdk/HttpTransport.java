@@ -20,7 +20,7 @@ public final class HttpTransport implements Transport {
     /**
      * Production LogBrew event intake endpoint used when no endpoint is supplied.
      */
-    public static final URI DEFAULT_ENDPOINT = URI.create("https://api.logbrew.com/v1/events");
+    public static final URI DEFAULT_ENDPOINT = URI.create("https://api.logbrew.co/v1/events");
 
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
     private static final HttpClient DEFAULT_CLIENT = HttpClient.newBuilder()

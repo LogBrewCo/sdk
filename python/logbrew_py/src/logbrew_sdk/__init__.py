@@ -122,7 +122,7 @@ METRIC_TEMPORALITIES_BY_KIND = {
 }
 METRIC_KINDS = set(METRIC_TEMPORALITIES_BY_KIND)
 NON_NEGATIVE_METRIC_KINDS = {"counter", "histogram"}
-DEFAULT_HTTP_ENDPOINT = "https://api.logbrew.com/v1/events"
+DEFAULT_HTTP_ENDPOINT = "https://api.logbrew.co/v1/events"
 DEFAULT_MAX_QUEUE_SIZE = 10_000
 TRACEPARENT_PATTERN = re.compile(r"^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$")
 ZERO_TRACE_ID = "00000000000000000000000000000000"

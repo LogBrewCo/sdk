@@ -80,7 +80,7 @@ export {
 
 const DEFAULT_SDK_NAME = "logbrew-browser";
 const DEFAULT_SDK_VERSION = "0.1.0";
-const DEFAULT_ENDPOINT = "https://api.logbrew.com/v1/events";
+const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 
 export function createLogBrewBrowserClient({

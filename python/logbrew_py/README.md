@@ -994,7 +994,7 @@ client = LogBrewClient.create(
     sdk_version="0.1.0",
 )
 transport = HttpTransport(
-    endpoint="https://api.logbrew.com/v1/events",
+    endpoint="https://api.logbrew.co/v1/events",
     headers={"x-logbrew-source": "python-worker"},
 )
 

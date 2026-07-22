@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 #define LOGBREW_C_VERSION "0.1.0"
-#define LOGBREW_HTTP_TRANSPORT_DEFAULT_ENDPOINT "https://api.logbrew.com/v1/events"
+#define LOGBREW_HTTP_TRANSPORT_DEFAULT_ENDPOINT "https://api.logbrew.co/v1/events"
 
 typedef enum {
   LOGBREW_OK = 0,

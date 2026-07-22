@@ -92,7 +92,7 @@ module LogBrew
   end
 
   class HttpTransport
-    DEFAULT_ENDPOINT = "https://api.logbrew.com/v1/events"
+    DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events"
     DEFAULT_TIMEOUT = 10
 
     attr_reader :endpoint, :headers, :timeout, :http_client

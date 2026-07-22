@@ -268,7 +268,7 @@ with zipfile.ZipFile(jar_path) as archive:
 for needle in (
     f"co.logbrew:logbrew-kotlin:{kotlin_version}",
     "HttpTransport",
-    "https://api.logbrew.com/v1/events",
+    "https://api.logbrew.co/v1/events",
     "LOGBREW_API_KEY",
     "MetricAttributes",
     "metric(...)",

@@ -12,7 +12,7 @@ use Throwable;
  */
 final class HttpTransport implements Transport
 {
-    public const DEFAULT_ENDPOINT = 'https://api.logbrew.com/v1/events';
+    public const DEFAULT_ENDPOINT = 'https://api.logbrew.co/v1/events';
     public const DEFAULT_TIMEOUT = 10.0;
 
     /** @var array<string, string> */
