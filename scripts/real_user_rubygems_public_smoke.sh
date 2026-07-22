@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rubygems-public.XXXXXX")"
 
-version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.1}}"
+version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.2}}"
 source_url="https://rubygems.org"
+receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 
 on_error() {
   local status=$?
+  if [[ "$receipt_mode" == "1" ]]; then
+    echo "RubyGems release receipt failed" >&2
+    exit "$status"
+  fi
   echo "real_user_rubygems_public_smoke failed at line ${BASH_LINENO[0]} while running: ${BASH_COMMAND}" >&2
   for diagnostic in \
     "$tmp_dir/gem-env.txt" \
@@ -37,6 +43,36 @@ gem_home="$tmp_dir/gems"
 mkdir -p "$gem_home"
 export GEM_HOME="$gem_home"
 export GEM_PATH="$gem_home"
+
+run_receipt_smoke() {
+  local bound="$tmp_dir/receipt-artifacts"
+  local metadata="$tmp_dir/receipt-metadata.json"
+  python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+    --family "rubygems" --output-dir "$bound" --metadata "$metadata" \
+    >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
+  gem install "$bound/0.gem" --local --install-dir "$gem_home" --no-document \
+    >"$tmp_dir/receipt-install.out" 2>"$tmp_dir/receipt-install.err"
+  EXPECTED_LOGBREW_RUBYGEMS_VERSION="$version" ruby >"$tmp_dir/receipt-run.out" \
+    2>"$tmp_dir/receipt-run.err" <<'RUBY'
+require "logbrew"
+require "rubygems"
+
+version = ENV.fetch("EXPECTED_LOGBREW_RUBYGEMS_VERSION")
+spec = Gem::Specification.find_by_name("logbrew-sdk", version)
+raise "receipt identity failed" unless spec.version.to_s == version
+client = LogBrew::Client.create(api_key: "key", sdk_name: "receipt", sdk_version: "0.1.0")
+client.log("event", "2026-01-01T00:00:00Z", { message: "ok", level: "info" })
+response = client.shutdown(LogBrew::RecordingTransport.always_accept)
+raise "receipt execution failed" unless response.status_code == 202
+RUBY
+  python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+    --family "rubygems" --metadata "$metadata"
+}
+
+if [[ "$receipt_mode" == "1" ]]; then
+  run_receipt_smoke
+  exit 0
+fi
 
 gem env home > "$tmp_dir/gem-env.txt"
 gem install logbrew-sdk \

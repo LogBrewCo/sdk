@@ -12,7 +12,7 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
     <PackageId>LogBrew</PackageId>
-    <Version>0.1.4</Version>
+    <Version>0.1.5</Version>
     <PackageVersion Condition="'$(LogBrewProjectReferenceVersion)' != ''">$(LogBrewProjectReferenceVersion)</PackageVersion>
     <Authors>LogBrew</Authors>
     <Company>LogBrew</Company>

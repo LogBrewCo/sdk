@@ -81,7 +81,7 @@ class ConfidentialityScanTests(unittest.TestCase):
             dependency_action = "rest" + "ore"
             identity_member = "PublicKey" + "To" + "ken"
             identity_value = "to" + "ken"
-            (workflow_dir / "publish-packages.yml").write_text(
+            (workflow_dir / "publish-nuget.yml").write_text(
                 f"dotnet {dependency_action} dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj\n"
                 f"dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --no-{dependency_action}\n",
                 encoding="utf-8",
@@ -107,6 +107,52 @@ class ConfidentialityScanTests(unittest.TestCase):
 
         self.assertEqual(len(failures), 1)
         self.assertIn("Other.cs", failures[0])
+
+    def test_allows_only_exact_reusable_workflow_inheritance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = root / ".github" / "workflows"
+            workflow_dir.mkdir(parents=True)
+            inheritance_key = "se" + "crets"
+            (workflow_dir / "publish-packages.yml").write_text(
+                f"{inheritance_key}: inherit\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            (workflow_dir / "other.yml").write_text(
+                f"{inheritance_key}: inherit\n",
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("other.yml", failures[0])
+
+    def test_allows_only_exact_python_registry_host_property_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts_dir = root / "scripts"
+            scripts_dir.mkdir()
+            smoke = scripts_dir / "real_user_python_public_pypi_smoke.sh"
+            host_member = "host" + "name"
+            smoke.write_text(
+                f'if parsed.scheme != "https" or parsed.{host_member} != "files.pythonhosted.org":\n'
+                f'if final_url.scheme != "https" or final_url.{host_member} != "files.pythonhosted.org":\n',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            (scripts_dir / "other.py").write_text(
+                f"print(request.{host_member})\n",
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("other.py", failures[0])
 
     def test_allows_generated_brand_svg_image_carriers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

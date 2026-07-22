@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "logbrew-sdk"
-version = "0.1.3"
+version = "0.1.4"
 description = "Public LogBrew Python SDK for building, validating, and flushing event batches."
 readme = "README.md"
 license = "MIT"

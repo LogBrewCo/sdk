@@ -14,7 +14,7 @@ class GoPublicModuleSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_GO_MODULE_VERSION",
-            'requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.3}}"',
+            'requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.4}}"',
             "GOPROXY=https://proxy.golang.org,direct",
             "go get github.com/LogBrewCo/sdk/go/logbrew@",
             "go mod download -json",

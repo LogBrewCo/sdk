@@ -4,6 +4,7 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-maven-central-public.XXXXXX")"
 central_url="https://repo.maven.apache.org/maven2"
+receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 release_plan_path=""
 bundle_path=""
 legacy_args=()
@@ -35,7 +36,9 @@ if [[ -n "$release_plan_path" && ${#legacy_args[@]} -gt 0 ]]; then
     printf '%s\n' "version arguments cannot be combined with --plan" >&2
     exit 2
 fi
-if [[ -n "$release_plan_path" ]]; then
+if [[ "$receipt_mode" == "1" ]]; then
+    [[ -z "$release_plan_path" && ${#legacy_args[@]} -eq 1 ]] || exit 1
+elif [[ -n "$release_plan_path" ]]; then
     python3 "$repo_root"/scripts/maven_release_plan.py validate \
         --root "$repo_root" \
         --plan "$release_plan_path"
@@ -60,12 +63,16 @@ artifact_selected() {
     [[ -n "$(plan_version "$1")" ]]
 }
 
-if [[ -n "$release_plan_path" ]]; then
+if [[ "$receipt_mode" == "1" ]]; then
+    java_version="${legacy_args[0]}"
+    kotlin_version=""
+    okhttp_version=""
+elif [[ -n "$release_plan_path" ]]; then
     java_version="$(plan_version "logbrew-sdk")"
     kotlin_version="$(plan_version "logbrew-kotlin")"
     okhttp_version="$(plan_version "logbrew-kotlin-okhttp")"
 else
-    java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.1}}"
+    java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.2}}"
     kotlin_version="${legacy_args[1]:-${LOGBREW_MAVEN_KOTLIN_VERSION:-0.1.1}}"
     okhttp_version="${legacy_args[2]:-${LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION:-$kotlin_version}}"
 fi
@@ -78,8 +85,54 @@ for artifact in logbrew-sdk logbrew-kotlin logbrew-kotlin-okhttp; do
 done
 selected_modules_csv="$(IFS=,; printf '%s' "${selected_modules[*]}")"
 
+run_receipt_smoke() {
+    local bound="$tmp_dir/receipt-artifacts"
+    local metadata="$tmp_dir/receipt-metadata.json"
+    python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+        --family "maven" --output-dir "$bound" --metadata "$metadata" \
+        >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
+    unzip -p "$bound/0.jar" META-INF/maven/co.logbrew/logbrew-sdk/pom.properties \
+        >"$tmp_dir/receipt-pom.properties"
+    grep -qx "version=$java_version" "$tmp_dir/receipt-pom.properties"
+    mkdir -p "$tmp_dir/receipt-app/classes"
+    cat > "$tmp_dir/receipt-app/Receipt.java" <<'JAVA'
+import co.logbrew.sdk.LogAttributes;
+import co.logbrew.sdk.LogBrewClient;
+import co.logbrew.sdk.RecordingTransport;
+import co.logbrew.sdk.TransportResponse;
+
+public final class Receipt {
+    public static void main(String[] args) {
+        LogBrewClient client = LogBrewClient.create("key", "receipt", "0.1.0");
+        client.log("event", "2026-01-01T00:00:00Z", LogAttributes.create("ok", "info"));
+        TransportResponse response = client.shutdown(RecordingTransport.alwaysAccept());
+        if (response.statusCode() != 202) {
+            throw new IllegalStateException("receipt execution failed");
+        }
+    }
+}
+JAVA
+    javac -cp "$bound/0.jar" -d "$tmp_dir/receipt-app/classes" \
+        "$tmp_dir/receipt-app/Receipt.java" \
+        >"$tmp_dir/receipt-javac.out" 2>"$tmp_dir/receipt-javac.err"
+    java -cp "$bound/0.jar:$tmp_dir/receipt-app/classes" Receipt \
+        >"$tmp_dir/receipt-run.out" 2>"$tmp_dir/receipt-run.err"
+    python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+        --family "maven" --metadata "$metadata"
+}
+
+if [[ "$receipt_mode" == "1" ]]; then
+    [[ -n "$java_version" && -z "$kotlin_version" && -z "$okhttp_version" ]] || exit 1
+    run_receipt_smoke
+    exit 0
+fi
+
 on_error() {
     local status=$?
+    if [[ "$receipt_mode" == "1" ]]; then
+        echo "Maven release receipt failed" >&2
+        exit "$status"
+    fi
     echo "real_user_maven_central_public_smoke failed at line ${BASH_LINENO[0]} while running: ${BASH_COMMAND}" >&2
     for diagnostic in \
         "$tmp_dir/logbrew-sdk-metadata.xml" \

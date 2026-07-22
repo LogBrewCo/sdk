@@ -1,6 +1,6 @@
 {
   "name": "@logbrew/browser",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Browser error, page-view, action, network, and fetch transport helpers for the public LogBrew JavaScript SDK.",
   "type": "module",
   "main": "./index.cjs",

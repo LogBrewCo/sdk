@@ -40,6 +40,11 @@ on:
         required: false
         type: string
         default: ""
+      nuget_packages:
+        description: "Exact LogBrew,LogBrew.HttpClient selection passed to publish-packages.yml; empty means all"
+        required: false
+        type: string
+        default: ""
       include_pypi_extras:
         description: "Include FastAPI, Flask, and Django PyPI packages"
         required: true
@@ -70,6 +75,16 @@ on:
         required: true
         type: boolean
         default: false
+      include_swiftpm:
+        description: "Verify Swift products from the exact public SwiftPM tag"
+        required: true
+        type: boolean
+        default: false
+      verify_swiftpm_version:
+        description: "Exact public SwiftPM version passed to publish-packages.yml"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   actions: write
@@ -100,12 +115,15 @@ jobs:
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
           INPUT_INCLUDE_UNITY_NPM: ${{ inputs.include_unity_npm }}
           INPUT_NPM_PACKAGES: ${{ inputs.npm_packages }}
+          INPUT_NUGET_PACKAGES: ${{ inputs.nuget_packages }}
           INPUT_INCLUDE_PYPI_EXTRAS: ${{ inputs.include_pypi_extras }}
           INPUT_INCLUDE_CRATES_PUBLISH: ${{ inputs.include_crates_publish }}
           INPUT_INCLUDE_PACKAGIST_UPDATE: ${{ inputs.include_packagist_update }}
           INPUT_INCLUDE_MAVEN_PUBLISH: ${{ inputs.include_maven_publish }}
           INPUT_MAVEN_ARTIFACTS: ${{ inputs.maven_artifacts }}
           INPUT_INCLUDE_GO_MODULE: ${{ inputs.include_go_module }}
+          INPUT_INCLUDE_SWIFTPM: ${{ inputs.include_swiftpm }}
+          INPUT_VERIFY_SWIFTPM_VERSION: ${{ inputs.verify_swiftpm_version }}
         run: |
           set -Eeuo pipefail
 
@@ -126,6 +144,8 @@ jobs:
               include_packagist_update="false"
               include_maven_publish="false"
               include_go_module="false"
+              include_swiftpm="false"
+              verify_swiftpm_version=""
             elif [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
               release_kind="repo-wide"
               target="all"
@@ -137,6 +157,8 @@ jobs:
               include_packagist_update="true"
               include_maven_publish="true"
               include_go_module="false"
+              include_swiftpm="false"
+              verify_swiftpm_version=""
             else
               echo "Published GitHub Releases must use a repo-wide vMAJOR.MINOR.PATCH tag or a scoped package tag containing '/': $RELEASE_TAG" >&2
               exit 1
@@ -152,13 +174,18 @@ jobs:
             include_packagist_update="$INPUT_INCLUDE_PACKAGIST_UPDATE"
             include_maven_publish="$INPUT_INCLUDE_MAVEN_PUBLISH"
             include_go_module="$INPUT_INCLUDE_GO_MODULE"
+            include_swiftpm="$INPUT_INCLUDE_SWIFTPM"
+            verify_swiftpm_version="$INPUT_VERIFY_SWIFTPM_VERSION"
           fi
 
           if [[ "$publish_packages" == "true" ]]; then
+            nuget_packages="$(python3 scripts/nuget_release_plan.py canonicalize \
+              --packages-env INPUT_NUGET_PACKAGES)"
             maven_artifacts="$(python3 scripts/maven_release_plan.py canonicalize \
               --root "$GITHUB_WORKSPACE" \
               --artifacts-env INPUT_MAVEN_ARTIFACTS)"
           else
+            nuget_packages=""
             maven_artifacts=""
           fi
 
@@ -170,12 +197,15 @@ jobs:
             echo "dry_run=$dry_run"
             echo "include_unity_npm=$include_unity_npm"
             echo "npm_packages=$npm_packages"
+            printf 'nuget_packages=%s\n' "$nuget_packages"
             echo "include_pypi_extras=$include_pypi_extras"
             echo "include_crates_publish=$include_crates_publish"
             echo "include_packagist_update=$include_packagist_update"
             echo "include_maven_publish=$include_maven_publish"
             printf 'maven_artifacts=%s\n' "$maven_artifacts"
             echo "include_go_module=$include_go_module"
+            echo "include_swiftpm=$include_swiftpm"
+            printf 'verify_swiftpm_version=%s\n' "$verify_swiftpm_version"
           } >> "$GITHUB_OUTPUT"
 
       - name: Guard repo-wide release package versions
@@ -193,12 +223,15 @@ jobs:
           DRY_RUN: ${{ steps.release.outputs.dry_run }}
           INCLUDE_UNITY_NPM: ${{ steps.release.outputs.include_unity_npm }}
           NPM_PACKAGES: ${{ steps.release.outputs.npm_packages }}
+          NUGET_PACKAGES: ${{ steps.release.outputs.nuget_packages }}
           INCLUDE_PYPI_EXTRAS: ${{ steps.release.outputs.include_pypi_extras }}
           INCLUDE_CRATES_PUBLISH: ${{ steps.release.outputs.include_crates_publish }}
           INCLUDE_PACKAGIST_UPDATE: ${{ steps.release.outputs.include_packagist_update }}
           INCLUDE_MAVEN_PUBLISH: ${{ steps.release.outputs.include_maven_publish }}
           MAVEN_ARTIFACTS: ${{ steps.release.outputs.maven_artifacts }}
           INCLUDE_GO_MODULE: ${{ steps.release.outputs.include_go_module }}
+          INCLUDE_SWIFTPM: ${{ steps.release.outputs.include_swiftpm }}
+          VERIFY_SWIFTPM_VERSION: ${{ steps.release.outputs.verify_swiftpm_version }}
         run: |
           set -Eeuo pipefail
           gh workflow run publish-packages.yml \
@@ -208,12 +241,15 @@ jobs:
             -f dry_run="$DRY_RUN" \
             -f include_unity_npm="$INCLUDE_UNITY_NPM" \
             -f npm_packages="$NPM_PACKAGES" \
+            -f nuget_packages="$NUGET_PACKAGES" \
             -f include_pypi_extras="$INCLUDE_PYPI_EXTRAS" \
             -f include_crates_publish="$INCLUDE_CRATES_PUBLISH" \
             -f include_packagist_update="$INCLUDE_PACKAGIST_UPDATE" \
             -f include_maven_publish="$INCLUDE_MAVEN_PUBLISH" \
             -f maven_artifacts="$MAVEN_ARTIFACTS" \
-            -f include_go_module="$INCLUDE_GO_MODULE"
+            -f include_go_module="$INCLUDE_GO_MODULE" \
+            -f include_swiftpm="$INCLUDE_SWIFTPM" \
+            -f verify_swiftpm_version="$VERIFY_SWIFTPM_VERSION"
 
       - name: Summarize release publish decision
         env:
@@ -224,12 +260,15 @@ jobs:
           DRY_RUN: ${{ steps.release.outputs.dry_run }}
           INCLUDE_UNITY_NPM: ${{ steps.release.outputs.include_unity_npm }}
           NPM_PACKAGES: ${{ steps.release.outputs.npm_packages }}
+          NUGET_PACKAGES: ${{ steps.release.outputs.nuget_packages }}
           INCLUDE_PYPI_EXTRAS: ${{ steps.release.outputs.include_pypi_extras }}
           INCLUDE_CRATES_PUBLISH: ${{ steps.release.outputs.include_crates_publish }}
           INCLUDE_PACKAGIST_UPDATE: ${{ steps.release.outputs.include_packagist_update }}
           INCLUDE_MAVEN_PUBLISH: ${{ steps.release.outputs.include_maven_publish }}
           MAVEN_ARTIFACTS: ${{ steps.release.outputs.maven_artifacts }}
           INCLUDE_GO_MODULE: ${{ steps.release.outputs.include_go_module }}
+          INCLUDE_SWIFTPM: ${{ steps.release.outputs.include_swiftpm }}
+          VERIFY_SWIFTPM_VERSION: ${{ steps.release.outputs.verify_swiftpm_version }}
         run: |
           set -Eeuo pipefail
 
@@ -245,10 +284,13 @@ jobs:
             echo "- dry_run: \`$DRY_RUN\`"
             echo "- include_unity_npm: \`$INCLUDE_UNITY_NPM\`"
             echo "- npm_packages: \`$NPM_PACKAGES\`"
+            echo "- nuget_packages: \`$NUGET_PACKAGES\`"
             echo "- include_pypi_extras: \`$INCLUDE_PYPI_EXTRAS\`"
             echo "- include_crates_publish: \`$INCLUDE_CRATES_PUBLISH\`"
             echo "- include_packagist_update: \`$INCLUDE_PACKAGIST_UPDATE\`"
             echo "- include_maven_publish: \`$INCLUDE_MAVEN_PUBLISH\`"
             echo "- maven_artifacts: \`$MAVEN_ARTIFACTS\`"
             echo "- include_go_module: \`$INCLUDE_GO_MODULE\`"
+            echo "- include_swiftpm: \`$INCLUDE_SWIFTPM\`"
+            echo "- verify_swiftpm_version: \`$VERIFY_SWIFTPM_VERSION\`"
           } >> "$GITHUB_STEP_SUMMARY"

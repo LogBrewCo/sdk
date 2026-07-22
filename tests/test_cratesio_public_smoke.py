@@ -14,7 +14,7 @@ class CratesIoPublicSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_CRATESIO_VERSION",
-            'version="${1:-${LOGBREW_CRATESIO_VERSION:-0.1.0}}"',
+            'version="${1:-${LOGBREW_CRATESIO_VERSION:-0.1.2}}"',
             "cargo add logbrew@",
             "cargo tree",
             "cargo run --quiet",

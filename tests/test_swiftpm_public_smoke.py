@@ -15,11 +15,19 @@ class SwiftPmPublicSmokeTests(unittest.TestCase):
 
         for expected in (
             "LOGBREW_SWIFTPM_VERSION",
-            'package_version="${1:-${LOGBREW_SWIFTPM_VERSION:-0.1.1}}"',
+            'package_version="${1:-${LOGBREW_SWIFTPM_VERSION:-0.1.2}}"',
             'package_url="${LOGBREW_SWIFTPM_URL:-https://github.com/LogBrewCo/sdk.git}"',
             'package_identity="${LOGBREW_SWIFTPM_PACKAGE_IDENTITY:-sdk}"',
+            "LOGBREW_SWIFTPM_EXPECTED_REVISION",
+            "LOGBREW_SWIFTPM_EXPECTED_SOURCE_SHA256",
             ".package(url: packageURL, exact: packageVersion)",
             '.product(name: "LogBrew", package: packageIdentity)',
+            '.product(name: "LogBrewCrash", package: packageIdentity)',
+            "import LogBrewCrash",
+            "NativeCrashConfiguration",
+            "NativeCrashCapture",
+            'git -C "$package_checkout" archive',
+            '"sourceArchiveSha256"',
             'swift package --scratch-path "$tmp_dir/resolve" resolve',
             'swift package --scratch-path "$tmp_dir/describe" describe --type json',
             'swift package --scratch-path "$tmp_dir/dependencies" show-dependencies --format json',
@@ -39,8 +47,8 @@ class SwiftPmPublicSmokeTests(unittest.TestCase):
     def test_swift_readme_uses_the_current_public_swiftpm_tag(self) -> None:
         readme = SWIFT_README.read_text(encoding="utf-8")
 
-        self.assertIn('.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.1")', readme)
-        self.assertNotIn('.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.0")', readme)
+        self.assertIn('.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.2")', readme)
+        self.assertNotIn('.package(url: "https://github.com/LogBrewCo/sdk.git", from: "0.1.1")', readme)
 
 
 if __name__ == "__main__":

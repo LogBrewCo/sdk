@@ -37,6 +37,11 @@ on:
         required: false
         type: string
         default: ""
+      nuget_packages:
+        description: "Exact LogBrew,LogBrew.HttpClient selection; empty publishes all NuGet packages"
+        required: false
+        type: string
+        default: ""
       allow_initial_npm_publish:
         description: "Allow one-time authenticated first publish for npm package names whose package pages do not exist yet"
         required: true
@@ -77,6 +82,11 @@ on:
         required: true
         type: boolean
         default: false
+      include_swiftpm:
+        description: "Verify Swift products from the exact public SwiftPM tag"
+        required: true
+        type: boolean
+        default: false
       verify_version:
         description: "Default public package version expected by target=verify; empty uses verifier default"
         required: false
@@ -104,6 +114,11 @@ on:
         default: ""
       verify_maven_versions:
         description: "Comma-separated Maven PACKAGE=VERSION overrides for target=verify"
+        required: false
+        type: string
+        default: ""
+      verify_swiftpm_version:
+        description: "Exact public SwiftPM version for target=verify when include_swiftpm is enabled"
         required: false
         type: string
         default: ""
@@ -240,6 +255,7 @@ jobs:
           npm_version="$(npm --version)"
           node_version="$(node --version)"
           echo "npm ${npm_version} on ${node_version}"
+          # shellcheck disable=SC2016
           node -e '
             const version = process.argv[1].split(/[.-]/).map(Number);
             const minimum = [11, 5, 1];
@@ -400,6 +416,33 @@ jobs:
             python -m twine check "$output_dir"/*
           done
 
+      - name: Create Python release manifest
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/check_python_release_artifacts.py create \
+            --directory dist/pypi \
+            --source-commit "$(git rev-parse HEAD)" \
+            --python-version "logbrew-sdk=${{ steps.pypi-version.outputs.core_version }}" \
+            --python-version "logbrew-fastapi=${{ steps.pypi-version.outputs.fastapi_version }}" \
+            --python-version "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}" \
+            --python-version "logbrew-django=${{ steps.pypi-version.outputs.django_version }}" \
+            --manifest dist/pypi/python-release-artifacts.json
+
+      - name: Verify packed Python distributions
+        run: |
+          bash scripts/real_user_python_public_pypi_smoke.sh --manifest \
+            dist/pypi/python-release-artifacts.json \
+            --artifact-root dist/pypi
+
+      - name: Upload Python release manifest
+        uses: actions/upload-artifact@v6
+        with:
+          name: python-release-manifest
+          path: dist/pypi/python-release-artifacts.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Publish logbrew-sdk to PyPI
         if: ${{ ! inputs.dry_run }}
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -448,6 +491,12 @@ jobs:
           fi
           verify_args+=(--version "${{ steps.pypi-version.outputs.version }}")
           python3 scripts/check_registry_publication.py "${verify_args[@]}"
+
+      - name: Verify public PyPI installs
+        if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
+        run: |
+          bash scripts/real_user_python_public_pypi_smoke.sh --manifest \
+            dist/pypi/python-release-artifacts.json
 
   crates:
     name: crates.io package
@@ -564,177 +613,12 @@ jobs:
   nuget:
     name: NuGet package
     if: ${{ inputs.target == 'all' || inputs.target == 'nuget' }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    environment: release
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Check out release ref
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ inputs.ref }}
-          persist-credentials: false
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "10.0.x"
-
-      - name: Read NuGet package version
-        id: nuget-version
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          core_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
-          aspnetcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
-          efcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
-          httpclient_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
-          redis_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
-          otel_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
-          if [[ -z "$core_version" || -z "$aspnetcore_version" || -z "$efcore_version" || -z "$httpclient_version" || -z "$redis_version" || -z "$otel_version" ]]; then
-            echo "Could not read NuGet package versions from .NET package projects" >&2
-            exit 1
-          fi
-          core_dependency_range="$(python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_metadata_dotnet import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' "$core_version")"
-          core_dependency_range_msbuild="${core_dependency_range/, /%2C}"
-          echo "core_version=$core_version" >> "$GITHUB_OUTPUT"
-          echo "core_dependency_range=$core_dependency_range" >> "$GITHUB_OUTPUT"
-          echo "core_dependency_range_msbuild=$core_dependency_range_msbuild" >> "$GITHUB_OUTPUT"
-          echo "aspnetcore_version=$aspnetcore_version" >> "$GITHUB_OUTPUT"
-          echo "efcore_version=$efcore_version" >> "$GITHUB_OUTPUT"
-          echo "httpclient_version=$httpclient_version" >> "$GITHUB_OUTPUT"
-          echo "redis_version=$redis_version" >> "$GITHUB_OUTPUT"
-          echo "otel_version=$otel_version" >> "$GITHUB_OUTPUT"
-
-      - name: Validate NuGet release metadata
-        run: |
-          python3 scripts/check_release_metadata.py \
-            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
-            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
-            --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
-            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \
-            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
-            --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}"
-
-      - name: Check NuGet version collision
-        if: ${{ ! inputs.dry_run }}
-        run: |
-          python3 scripts/check_registry_publication.py --target nuget --expect-absent \
-            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
-            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
-            --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
-            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \
-            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
-            --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}"
-
-      - name: Pack NuGet package
-        id: nuget-artifacts
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          source_commit="$(git rev-parse HEAD)"
-          pack_args=(
-            --configuration Release
-            --output dist/nuget
-            --include-symbols
-            -p:SymbolPackageFormat=snupkg
-            -p:PublishRepositoryUrl=true
-            -p:EnableSourceLink=true
-            "-p:RepositoryCommit=$source_commit"
-            -p:ContinuousIntegrationBuild=true
-            -p:EmbedUntrackedSources=true
-          )
-          legacy_pack_args=("${pack_args[@]}" -p:GenerateDocumentationFile=true -p:NoWarn=1591)
-          httpclient_pack_args=(
-            "${pack_args[@]}"
-            -p:GenerateDocumentationFile=true
-            -p:BuildProjectReferences=false
-            "-p:LogBrewProjectReferenceVersion=${{ steps.nuget-version.outputs.core_dependency_range_msbuild }}"
-          )
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj "${legacy_pack_args[@]}"
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj "${legacy_pack_args[@]}"
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj "${legacy_pack_args[@]}"
-          dotnet restore dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --no-restore "${httpclient_pack_args[@]}"
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj "${legacy_pack_args[@]}"
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj "${legacy_pack_args[@]}"
-          python3 scripts/check_dotnet_release_artifacts.py \
-            --directory dist/nuget \
-            --source-commit "$source_commit" \
-            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
-            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
-            --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
-            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \
-            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
-            --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}" \
-            --dependency-range "LogBrew.HttpClient:LogBrew=${{ steps.nuget-version.outputs.core_dependency_range }}" \
-            --manifest dist/nuget/release-artifacts.json
-          httpclient_content_sha256="$(python3 -c 'import json, sys; payload = json.load(open(sys.argv[1], encoding="utf-8")); print(next(package["nupkgContentSha256"] for package in payload["packages"] if package["id"] == "LogBrew.HttpClient"))' dist/nuget/release-artifacts.json)"
-          echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
-          echo "httpclient_content_sha256=$httpclient_content_sha256" >> "$GITHUB_OUTPUT"
-
-      - name: Authenticate to NuGet
-        if: ${{ ! inputs.dry_run }}
-        id: nuget-login
-        uses: NuGet/login@v1
-        with:
-          user: ${{ secrets.NUGET_USER }}
-
-      - name: Publish NuGet package
-        if: ${{ ! inputs.dry_run }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          while IFS= read -r package_path; do
-            dotnet nuget push "$package_path" \
-              --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
-              --source https://api.nuget.org/v3/index.json \
-              --symbol-source https://api.nuget.org/v3/index.json \
-              --symbol-api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
-              --skip-duplicate
-          done < <(find dist/nuget -maxdepth 1 -type f -name '*.nupkg' -print | sort)
-
-      - name: Set up Python for registry verification
-        if: ${{ ! inputs.dry_run }}
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-
-      - name: Verify public NuGet package
-        if: ${{ ! inputs.dry_run }}
-        run: |
-          python3 scripts/check_registry_publication.py --target nuget \
-            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
-            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
-            --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
-            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \
-            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
-            --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}" \
-            --retries 20 --retry-delay 30
-
-      - name: Verify public NuGet install
-        if: ${{ ! inputs.dry_run }}
-        run: |
-          bash scripts/real_user_dotnet_public_nuget_smoke.sh \
-            "${{ steps.nuget-version.outputs.core_version }}" \
-            "${{ steps.nuget-version.outputs.aspnetcore_version }}" \
-            "${{ steps.nuget-version.outputs.efcore_version }}" \
-            "${{ steps.nuget-version.outputs.httpclient_version }}" \
-            "${{ steps.nuget-version.outputs.redis_version }}" \
-            "${{ steps.nuget-version.outputs.otel_version }}" \
-            "${{ steps.nuget-artifacts.outputs.source_commit }}" \
-            "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
-
-      - name: Verify public HttpClient package compatibility
-        if: ${{ ! inputs.dry_run }}
-        run: |
-          bash scripts/real_user_dotnet_httpclient_package_compatibility_smoke.sh \
-            "${{ steps.nuget-version.outputs.core_version }}" \
-            "${{ steps.nuget-version.outputs.httpclient_version }}" \
-            "${{ steps.nuget-artifacts.outputs.source_commit }}" \
-            "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
-
+    uses: ./.github/workflows/publish-nuget.yml
+    with:
+      ref: ${{ inputs.ref }}
+      dry_run: ${{ inputs.dry_run }}
+      nuget_packages: ${{ inputs.nuget_packages }}
+    secrets: inherit
   packagist:
     name: Packagist package
     if: ${{ inputs.target == 'packagist' || (inputs.target == 'all' && (inputs.dry_run || inputs.include_packagist_update)) }}
@@ -992,3 +876,27 @@ jobs:
             verify_args+=(--include-go)
           fi
           python3 scripts/check_registry_publication.py "${verify_args[@]}"
+
+  verify-swiftpm:
+    name: Public SwiftPM verification
+    if: ${{ inputs.target == 'verify' && inputs.include_swiftpm }}
+    runs-on: macos-15
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Verify public Swift products
+        shell: bash
+        env:
+          VERIFY_SWIFTPM_VERSION: ${{ inputs.verify_swiftpm_version }}
+        run: |
+          set -Eeuo pipefail
+          : "${VERIFY_SWIFTPM_VERSION:?verify_swiftpm_version is required when include_swiftpm is enabled}"
+          release_revision="$(git rev-parse HEAD)"
+          release_source_sha256="$(git archive HEAD | shasum -a 256 | awk '{print $1}')"
+          export LOGBREW_SWIFTPM_EXPECTED_REVISION="$release_revision"
+          export LOGBREW_SWIFTPM_EXPECTED_SOURCE_SHA256="$release_source_sha256"
+          bash scripts/real_user_swiftpm_public_smoke.sh "$VERIFY_SWIFTPM_VERSION"
