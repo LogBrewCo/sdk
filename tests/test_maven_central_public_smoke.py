@@ -17,9 +17,9 @@ class MavenCentralPublicSmokeTests(unittest.TestCase):
             "LOGBREW_MAVEN_KOTLIN_VERSION",
             "LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION",
             "LOGBREW_MAVEN_KOTLIN_STDLIB_VERSION",
-            'java_version="${1:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.1}}"',
-            'kotlin_version="${2:-${LOGBREW_MAVEN_KOTLIN_VERSION:-0.1.1}}"',
-            'okhttp_version="${3:-${LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION:-$kotlin_version}}"',
+            'java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.1}}"',
+            'kotlin_version="${legacy_args[1]:-${LOGBREW_MAVEN_KOTLIN_VERSION:-0.1.1}}"',
+            'okhttp_version="${legacy_args[2]:-${LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION:-$kotlin_version}}"',
             "https://repo.maven.apache.org/maven2",
             "mavenCentral()",
             'implementation("co.logbrew:logbrew-sdk:$javaVersion")',
@@ -49,6 +49,25 @@ class MavenCentralPublicSmokeTests(unittest.TestCase):
         prefix = "LOGBREW_"
         for suffix in ("".join(chr(value) for value in (84, 79, 75, 69, 78)), "API_URL"):
             self.assertNotIn(prefix + suffix, body)
+
+    def test_script_accepts_a_release_plan_and_executes_only_selected_consumers(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        for expected in (
+            "--plan",
+            "--bundle",
+            "maven_release_plan.py validate",
+            "LOGBREW_MAVEN_REPOSITORY_UNDER_TEST",
+            "LOGBREW_MAVEN_SELECTED_MODULES",
+            "exclusiveContent",
+            "includeModule('co.logbrew', artifact)",
+            'artifact_selected "logbrew-sdk"',
+            'artifact_selected "logbrew-kotlin"',
+            'artifact_selected "logbrew-kotlin-okhttp"',
+        ):
+            self.assertIn(expected, body)
+
+        self.assertNotIn("includeGroup('co.logbrew')", body)
 
 
 if __name__ == "__main__":

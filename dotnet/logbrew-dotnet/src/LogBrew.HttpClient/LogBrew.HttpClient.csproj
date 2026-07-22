@@ -10,6 +10,9 @@
     <AnalysisLevel Condition="'$(TargetFramework)' == 'net8.0'">8.0</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+    <IsAotCompatible Condition="'$(TargetFramework)' == 'net8.0'">true</IsAotCompatible>
+    <SignAssembly>false</SignAssembly>
+    <LogBrewCoreDependencyVersion>[0.1.4, 0.2.0)</LogBrewCoreDependencyVersion>
     <PackageId>LogBrew.HttpClient</PackageId>
     <Version>0.1.0</Version>
     <Authors>LogBrew</Authors>

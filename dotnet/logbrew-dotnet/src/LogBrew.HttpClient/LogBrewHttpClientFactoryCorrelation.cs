@@ -11,6 +11,9 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace LogBrew.HttpClient
 {
+    /// <summary>
+    /// Configures privacy-bounded correlation for one selected <see cref="IHttpClientBuilder"/>.
+    /// </summary>
     public sealed class LogBrewHttpClientFactoryOptions
     {
         internal string EventIdPrefix { get; private set; } = "dotnet_http_client_factory";
@@ -21,11 +24,21 @@ namespace LogBrew.HttpClient
 
         internal Action<SdkException>? OnErrorCallback { get; private set; }
 
+        /// <summary>
+        /// Creates options with the fixed default event identifier prefix and no request filter.
+        /// </summary>
+        /// <returns>A new mutable options instance for one registration.</returns>
         public static LogBrewHttpClientFactoryOptions Create()
         {
             return new LogBrewHttpClientFactoryOptions();
         }
 
+        /// <summary>
+        /// Sets the bounded prefix used to create completion event identifiers.
+        /// </summary>
+        /// <param name="value">A non-empty prefix. Leading and trailing whitespace is removed.</param>
+        /// <returns>This options instance.</returns>
+        /// <exception cref="SdkException">Thrown when <paramref name="value"/> is empty.</exception>
         public LogBrewHttpClientFactoryOptions WithEventIdPrefix(string value)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -37,18 +50,36 @@ namespace LogBrew.HttpClient
             return this;
         }
 
+        /// <summary>
+        /// Sets an advisory predicate that selects requests for correlation.
+        /// </summary>
+        /// <param name="value">The predicate evaluated immediately before an actual send.</param>
+        /// <returns>This options instance.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="value"/> is null.</exception>
         public LogBrewHttpClientFactoryOptions WithRequestFilter(Func<HttpRequestMessage, bool> value)
         {
             RequestFilter = value ?? throw new ArgumentNullException(nameof(value));
             return this;
         }
 
+        /// <summary>
+        /// Sets the timestamp provider used when a completion event is retained.
+        /// </summary>
+        /// <param name="value">A provider that returns an SDK timestamp string.</param>
+        /// <returns>This options instance.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="value"/> is null.</exception>
         public LogBrewHttpClientFactoryOptions WithTimestampProvider(Func<string> value)
         {
             TimestampProvider = value ?? throw new ArgumentNullException(nameof(value));
             return this;
         }
 
+        /// <summary>
+        /// Sets an advisory callback for fixed SDK correlation failures.
+        /// </summary>
+        /// <param name="value">The callback. Callback failures never replace application HTTP behavior.</param>
+        /// <returns>This options instance.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="value"/> is null.</exception>
         public LogBrewHttpClientFactoryOptions OnError(Action<SdkException> value)
         {
             OnErrorCallback = value ?? throw new ArgumentNullException(nameof(value));
@@ -61,8 +92,22 @@ namespace LogBrew.HttpClient
         }
     }
 
+    /// <summary>
+    /// Adds explicit LogBrew correlation to selected named or typed HTTP clients.
+    /// </summary>
     public static class LogBrewHttpClientBuilderExtensions
     {
+        /// <summary>
+        /// Adds one correlation handler at the caller-selected handler position.
+        /// </summary>
+        /// <param name="builder">The selected named or typed HTTP client builder.</param>
+        /// <param name="client">The LogBrew client that retains completion spans.</param>
+        /// <param name="configure">An optional options callback evaluated once during registration.</param>
+        /// <returns>The original builder so additional handlers retain caller-defined order.</returns>
+        /// <exception cref="ArgumentNullException">
+        /// Thrown when <paramref name="builder"/> or <paramref name="client"/> is null.
+        /// </exception>
+        /// <remarks>Repeated registration for the same client name is idempotent; the first registration wins.</remarks>
         public static IHttpClientBuilder AddLogBrewCorrelation(
             this IHttpClientBuilder builder,
             LogBrewClient client,

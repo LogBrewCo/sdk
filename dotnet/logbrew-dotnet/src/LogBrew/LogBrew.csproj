@@ -13,6 +13,7 @@
     <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
     <PackageId>LogBrew</PackageId>
     <Version>0.1.4</Version>
+    <PackageVersion Condition="'$(LogBrewProjectReferenceVersion)' != ''">$(LogBrewProjectReferenceVersion)</PackageVersion>
     <Authors>LogBrew</Authors>
     <Company>LogBrew</Company>
     <Description>Public LogBrew .NET SDK for building, validating, and flushing event batches.</Description>

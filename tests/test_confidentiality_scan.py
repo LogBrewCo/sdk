@@ -67,6 +67,47 @@ class ConfidentialityScanTests(unittest.TestCase):
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
+    def test_allows_only_exact_dotnet_release_compatibility_terms(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = root / ".github" / "workflows"
+            scripts_dir = root / "scripts"
+            tests_dir = root / "tests"
+            unrelated_dir = root / "dotnet"
+            workflow_dir.mkdir(parents=True)
+            scripts_dir.mkdir()
+            tests_dir.mkdir()
+            unrelated_dir.mkdir()
+            dependency_action = "rest" + "ore"
+            identity_member = "PublicKey" + "To" + "ken"
+            identity_value = "to" + "ken"
+            (workflow_dir / "publish-packages.yml").write_text(
+                f"dotnet {dependency_action} dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj\n"
+                f"dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --no-{dependency_action}\n",
+                encoding="utf-8",
+            )
+            (scripts_dir / "real_user_dotnet_httpclient_package_compatibility_smoke.sh").write_text(
+                f"Get{identity_member}()\n"
+                f'return {identity_value} == null || {identity_value}.Length == 0 ? "unsigned" '
+                f": Convert.ToHexString({identity_value}).ToLowerInvariant();\n",
+                encoding="utf-8",
+            )
+            (tests_dir / "test_dotnet_httpclient_package_compatibility_smoke.py").write_text(
+                f'"Get{identity_member}"\n',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            (unrelated_dir / "Other.cs").write_text(
+                f"Get{identity_member}()\n",
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("Other.cs", failures[0])
+
     def test_allows_generated_brand_svg_image_carriers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

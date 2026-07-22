@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
+import io
+import json
 import sys
+import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
@@ -29,6 +33,23 @@ check_registry_publication = load_module("check_registry_publication", MODULE_PA
 
 
 class RegistryPublicationTests(unittest.TestCase):
+    def test_nuget_catalog_includes_httpclient(self) -> None:
+        self.assertIn("LogBrew.HttpClient", check_registry_publication.NUGET_PACKAGES)
+        args = argparse.Namespace(
+            target=["nuget"],
+            npm_package=[],
+            include_unity_npm=False,
+            include_pypi_extras=False,
+            include_crates=False,
+            include_packagist=False,
+            include_maven=False,
+            include_openupm=False,
+        )
+
+        labels = {check.label for check in check_registry_publication.checks_for(args)}
+
+        self.assertIn("LogBrew.HttpClient", labels)
+
     def test_extracts_versions_from_supported_registry_shapes(self) -> None:
         self.assertIn("0.1.0", check_registry_publication.npm_versions({"dist-tags": {"latest": "0.1.0"}}))
         self.assertIn("0.1.0", check_registry_publication.pypi_versions({"info": {"version": "0.1.0"}}))
@@ -235,6 +256,91 @@ class RegistryPublicationTests(unittest.TestCase):
         labels = {check.label for check in check_registry_publication.checks_for(args)}
 
         self.assertEqual({"co.logbrew:logbrew-sdk", "co.logbrew:logbrew-kotlin"}, labels)
+
+    def test_maven_plan_scopes_selected_and_external_dependency_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "plan.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "selected": [
+                            {
+                                "artifactId": "logbrew-kotlin-okhttp",
+                                "coordinate": "co.logbrew:logbrew-kotlin-okhttp",
+                                "packageDir": "kotlin/logbrew-kotlin-okhttp",
+                                "version": "0.1.2",
+                            }
+                        ],
+                        "externalDependencies": [
+                            {
+                                "artifactId": "logbrew-kotlin",
+                                "coordinate": "co.logbrew:logbrew-kotlin",
+                                "version": "0.1.1",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            selected = check_registry_publication.parse_args(
+                [
+                    "--target",
+                    "maven",
+                    "--maven-plan",
+                    str(plan_path),
+                    "--maven-plan-scope",
+                    "selected",
+                ]
+            )
+            dependencies = check_registry_publication.parse_args(
+                [
+                    "--target",
+                    "maven",
+                    "--maven-plan",
+                    str(plan_path),
+                    "--maven-plan-scope",
+                    "dependencies",
+                ]
+            )
+
+        self.assertEqual(selected.maven_artifact, ["logbrew-kotlin-okhttp"])
+        self.assertEqual(
+            selected.maven_versions,
+            {"co.logbrew:logbrew-kotlin-okhttp": "0.1.2"},
+        )
+        self.assertEqual(dependencies.maven_artifact, ["logbrew-kotlin"])
+        self.assertEqual(
+            dependencies.maven_versions,
+            {"co.logbrew:logbrew-kotlin": "0.1.1"},
+        )
+
+    def test_maven_registry_versions_are_exact_without_tag_prefix_aliases(self) -> None:
+        check = check_registry_publication.maven_check("logbrew-sdk")
+
+        self.assertEqual(
+            check_registry_publication.registry_expected_versions(check, "0.1.2"),
+            {"0.1.2"},
+        )
+
+    def test_maven_collision_preflight_requires_the_selected_release_plan(self) -> None:
+        for arguments in (
+            ["--target", "maven", "--expect-absent"],
+            [
+                "--target",
+                "maven",
+                "--expect-absent",
+                "--maven-plan",
+                "unused.json",
+                "--maven-plan-scope",
+                "dependencies",
+            ],
+        ):
+            with self.subTest(arguments=arguments):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        check_registry_publication.parse_args(arguments)
 
     def test_parse_npm_package_versions(self) -> None:
         self.assertEqual(
@@ -503,6 +609,75 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertEqual(attempts, 1)
         self.assertEqual(len(failures), 1)
         self.assertIn("404", failures[0])
+
+    def test_validate_absent_check_rejects_existing_exact_version(self) -> None:
+        check = check_registry_publication.RegistryCheck(
+            "LogBrew.HttpClient",
+            "https://example.test/package",
+            check_registry_publication.nuget_versions,
+        )
+
+        failures = check_registry_publication.validate_absent_check(
+            check,
+            {"0.1.0"},
+            timeout=1.0,
+            fetcher=lambda _url, _timeout: {"versions": ["0.1.0"]},
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("already exists", failures[0])
+
+    def test_validate_absent_check_accepts_other_versions(self) -> None:
+        check = check_registry_publication.RegistryCheck(
+            "LogBrew.HttpClient",
+            "https://example.test/package",
+            check_registry_publication.nuget_versions,
+        )
+
+        failures = check_registry_publication.validate_absent_check(
+            check,
+            {"0.1.0"},
+            timeout=1.0,
+            fetcher=lambda _url, _timeout: {"versions": ["0.0.9"]},
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_validate_absent_check_accepts_missing_package_page(self) -> None:
+        check = check_registry_publication.RegistryCheck(
+            "LogBrew.HttpClient",
+            "https://example.test/package",
+            check_registry_publication.nuget_versions,
+        )
+
+        def missing_fetcher(_url: str, _timeout: float) -> Any:
+            raise urllib.error.HTTPError("https://example.test/package", 404, "not found", {}, None)
+
+        failures = check_registry_publication.validate_absent_check(
+            check,
+            {"0.1.0"},
+            timeout=1.0,
+            fetcher=missing_fetcher,
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_validate_absent_check_rejects_malformed_registry_payload(self) -> None:
+        check = check_registry_publication.RegistryCheck(
+            "LogBrew.HttpClient",
+            "https://example.test/package",
+            check_registry_publication.nuget_versions,
+        )
+
+        failures = check_registry_publication.validate_absent_check(
+            check,
+            {"0.1.0"},
+            timeout=1.0,
+            fetcher=lambda _url, _timeout: {},
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("availability check failed", failures[0])
 
     def test_go_module_version_uses_go_semver_prefix(self) -> None:
         self.assertEqual(check_registry_publication.go_module_version("0.1.0"), "v0.1.0")

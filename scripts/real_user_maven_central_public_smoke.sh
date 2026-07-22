@@ -4,11 +4,79 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-maven-central-public.XXXXXX")"
 central_url="https://repo.maven.apache.org/maven2"
+release_plan_path=""
+bundle_path=""
+legacy_args=()
 
-java_version="${1:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.1}}"
-kotlin_version="${2:-${LOGBREW_MAVEN_KOTLIN_VERSION:-0.1.1}}"
-okhttp_version="${3:-${LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION:-$kotlin_version}}"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --plan)
+            [[ $# -ge 2 ]] || { printf '%s\n' "--plan requires a path" >&2; exit 2; }
+            release_plan_path="$2"
+            shift 2
+            ;;
+        --bundle)
+            [[ $# -ge 2 ]] || { printf '%s\n' "--bundle requires a path" >&2; exit 2; }
+            bundle_path="$2"
+            shift 2
+            ;;
+        *)
+            legacy_args+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [[ -n "$bundle_path" && -z "$release_plan_path" ]]; then
+    printf '%s\n' "--bundle requires --plan" >&2
+    exit 2
+fi
+if [[ -n "$release_plan_path" && ${#legacy_args[@]} -gt 0 ]]; then
+    printf '%s\n' "version arguments cannot be combined with --plan" >&2
+    exit 2
+fi
+if [[ -n "$release_plan_path" ]]; then
+    python3 "$repo_root"/scripts/maven_release_plan.py validate \
+        --root "$repo_root" \
+        --plan "$release_plan_path"
+fi
+
+plan_version() {
+    python3 - "$release_plan_path" "$1" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+versions = {entry["artifactId"]: entry["version"] for entry in plan["selected"]}
+print(versions.get(sys.argv[2], ""))
+PY
+}
+
+artifact_selected() {
+    if [[ -z "$release_plan_path" ]]; then
+        return 0
+    fi
+    [[ -n "$(plan_version "$1")" ]]
+}
+
+if [[ -n "$release_plan_path" ]]; then
+    java_version="$(plan_version "logbrew-sdk")"
+    kotlin_version="$(plan_version "logbrew-kotlin")"
+    okhttp_version="$(plan_version "logbrew-kotlin-okhttp")"
+else
+    java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.1}}"
+    kotlin_version="${legacy_args[1]:-${LOGBREW_MAVEN_KOTLIN_VERSION:-0.1.1}}"
+    okhttp_version="${legacy_args[2]:-${LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION:-$kotlin_version}}"
+fi
 kotlin_stdlib_version="${LOGBREW_MAVEN_KOTLIN_STDLIB_VERSION:-2.4.0}"
+selected_modules=()
+for artifact in logbrew-sdk logbrew-kotlin logbrew-kotlin-okhttp; do
+    if artifact_selected "$artifact"; then
+        selected_modules+=("$artifact")
+    fi
+done
+selected_modules_csv="$(IFS=,; printf '%s' "${selected_modules[*]}")"
 
 on_error() {
     local status=$?
@@ -36,17 +104,51 @@ trap on_error ERR
 
 cd "$repo_root"
 
+repository_url="$central_url"
+if [[ -n "$bundle_path" ]]; then
+    bundle_repository="$tmp_dir/bundle-repository"
+    python3 - "$bundle_path" "$bundle_repository" <<'PY'
+import sys
+import zipfile
+from pathlib import Path, PurePosixPath
+
+bundle = Path(sys.argv[1])
+repository = Path(sys.argv[2])
+with zipfile.ZipFile(bundle) as archive:
+    for name in archive.namelist():
+        path = PurePosixPath(name)
+        if path.is_absolute() or ".." in path.parts:
+            raise SystemExit("invalid Maven bundle entry")
+    archive.extractall(repository)
+PY
+    repository_url="$(python3 - "$bundle_repository" <<'PY'
+import sys
+from pathlib import Path
+
+print(Path(sys.argv[1]).resolve().as_uri())
+PY
+)"
+fi
+
 export LOGBREW_MAVEN_JAVA_VERSION_UNDER_TEST="$java_version"
 export LOGBREW_MAVEN_KOTLIN_VERSION_UNDER_TEST="$kotlin_version"
 export LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION_UNDER_TEST="$okhttp_version"
 export LOGBREW_MAVEN_KOTLIN_STDLIB_VERSION_UNDER_TEST="$kotlin_stdlib_version"
+export LOGBREW_MAVEN_REPOSITORY_UNDER_TEST="$repository_url"
+export LOGBREW_MAVEN_SELECTED_MODULES="$selected_modules_csv"
 
-curl -fsSL "$central_url/co/logbrew/logbrew-sdk/maven-metadata.xml" > "$tmp_dir/logbrew-sdk-metadata.xml"
-curl -fsSL "$central_url/co/logbrew/logbrew-kotlin/maven-metadata.xml" > "$tmp_dir/logbrew-kotlin-metadata.xml"
-curl -fsSL "$central_url/co/logbrew/logbrew-kotlin-okhttp/maven-metadata.xml" > "$tmp_dir/logbrew-kotlin-okhttp-metadata.xml"
-grep -q "<version>$java_version</version>" "$tmp_dir/logbrew-sdk-metadata.xml"
-grep -q "<version>$kotlin_version</version>" "$tmp_dir/logbrew-kotlin-metadata.xml"
-grep -q "<version>$okhttp_version</version>" "$tmp_dir/logbrew-kotlin-okhttp-metadata.xml"
+if [[ -z "$bundle_path" ]] && artifact_selected "logbrew-sdk"; then
+    curl -fsSL "$central_url/co/logbrew/logbrew-sdk/maven-metadata.xml" > "$tmp_dir/logbrew-sdk-metadata.xml"
+    grep -q "<version>$java_version</version>" "$tmp_dir/logbrew-sdk-metadata.xml"
+fi
+if [[ -z "$bundle_path" ]] && artifact_selected "logbrew-kotlin"; then
+    curl -fsSL "$central_url/co/logbrew/logbrew-kotlin/maven-metadata.xml" > "$tmp_dir/logbrew-kotlin-metadata.xml"
+    grep -q "<version>$kotlin_version</version>" "$tmp_dir/logbrew-kotlin-metadata.xml"
+fi
+if [[ -z "$bundle_path" ]] && artifact_selected "logbrew-kotlin-okhttp"; then
+    curl -fsSL "$central_url/co/logbrew/logbrew-kotlin-okhttp/maven-metadata.xml" > "$tmp_dir/logbrew-kotlin-okhttp-metadata.xml"
+    grep -q "<version>$okhttp_version</version>" "$tmp_dir/logbrew-kotlin-okhttp-metadata.xml"
+fi
 
 run_gradle() {
     local app_dir="$1"
@@ -72,6 +174,17 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        def selectedLogBrewArtifacts = System.getenv('LOGBREW_MAVEN_SELECTED_MODULES').split(',')
+        exclusiveContent {
+            forRepository {
+                maven {
+                    url = uri(System.getenv('LOGBREW_MAVEN_REPOSITORY_UNDER_TEST'))
+                }
+            }
+            filter {
+                selectedLogBrewArtifacts.each { artifact -> includeModule('co.logbrew', artifact) }
+            }
+        }
         mavenCentral()
     }
 }
@@ -80,10 +193,11 @@ rootProject.name = '$app_name'
 EOF
 }
 
-java_app="$tmp_dir/java-public-maven-app"
-mkdir -p "$java_app/src/main/java/smoke"
-write_gradle_settings "$java_app" "logbrew-java-public-maven-smoke"
-cat > "$java_app/build.gradle" <<'EOF'
+if artifact_selected "logbrew-sdk"; then
+    java_app="$tmp_dir/java-public-maven-app"
+    mkdir -p "$java_app/src/main/java/smoke"
+    write_gradle_settings "$java_app" "logbrew-java-public-maven-smoke"
+    cat > "$java_app/build.gradle" <<'EOF'
 plugins {
     id 'application'
 }
@@ -127,16 +241,18 @@ public final class JavaMavenCentralSmoke {
 }
 JAVA
 
-run_gradle "$java_app" dependencyInsight --dependency co.logbrew:logbrew-sdk --configuration runtimeClasspath \
-    > "$tmp_dir/java-dependency-insight.txt"
-grep -q "co.logbrew:logbrew-sdk:$java_version" "$tmp_dir/java-dependency-insight.txt"
-run_gradle "$java_app" run > "$tmp_dir/java-run.out"
-grep -q "flush-status=202" "$tmp_dir/java-run.out"
+    run_gradle "$java_app" dependencyInsight --dependency co.logbrew:logbrew-sdk --configuration runtimeClasspath \
+        > "$tmp_dir/java-dependency-insight.txt"
+    grep -q "co.logbrew:logbrew-sdk:$java_version" "$tmp_dir/java-dependency-insight.txt"
+    run_gradle "$java_app" run > "$tmp_dir/java-run.out"
+    grep -q "flush-status=202" "$tmp_dir/java-run.out"
+fi
 
-kotlin_app="$tmp_dir/kotlin-public-maven-app"
-mkdir -p "$kotlin_app/src/main/java/smoke"
-write_gradle_settings "$kotlin_app" "logbrew-kotlin-public-maven-smoke"
-cat > "$kotlin_app/build.gradle" <<'EOF'
+if artifact_selected "logbrew-kotlin"; then
+    kotlin_app="$tmp_dir/kotlin-public-maven-app"
+    mkdir -p "$kotlin_app/src/main/java/smoke"
+    write_gradle_settings "$kotlin_app" "logbrew-kotlin-public-maven-smoke"
+    cat > "$kotlin_app/build.gradle" <<'EOF'
 plugins {
     id 'application'
 }
@@ -182,16 +298,18 @@ public final class KotlinMavenCentralSmoke {
 }
 JAVA
 
-run_gradle "$kotlin_app" dependencyInsight --dependency co.logbrew:logbrew-kotlin --configuration runtimeClasspath \
-    > "$tmp_dir/kotlin-dependency-insight.txt"
-grep -q "co.logbrew:logbrew-kotlin:$kotlin_version" "$tmp_dir/kotlin-dependency-insight.txt"
-run_gradle "$kotlin_app" run > "$tmp_dir/kotlin-run.out"
-grep -q "kotlin-status=202" "$tmp_dir/kotlin-run.out"
+    run_gradle "$kotlin_app" dependencyInsight --dependency co.logbrew:logbrew-kotlin --configuration runtimeClasspath \
+        > "$tmp_dir/kotlin-dependency-insight.txt"
+    grep -q "co.logbrew:logbrew-kotlin:$kotlin_version" "$tmp_dir/kotlin-dependency-insight.txt"
+    run_gradle "$kotlin_app" run > "$tmp_dir/kotlin-run.out"
+    grep -q "kotlin-status=202" "$tmp_dir/kotlin-run.out"
+fi
 
-okhttp_app="$tmp_dir/okhttp-public-maven-app"
-mkdir -p "$okhttp_app/src/main/java/smoke"
-write_gradle_settings "$okhttp_app" "logbrew-kotlin-okhttp-public-maven-smoke"
-cat > "$okhttp_app/build.gradle" <<'EOF'
+if artifact_selected "logbrew-kotlin-okhttp"; then
+    okhttp_app="$tmp_dir/okhttp-public-maven-app"
+    mkdir -p "$okhttp_app/src/main/java/smoke"
+    write_gradle_settings "$okhttp_app" "logbrew-kotlin-okhttp-public-maven-smoke"
+    cat > "$okhttp_app/build.gradle" <<'EOF'
 plugins {
     id 'application'
 }
@@ -245,10 +363,11 @@ public final class KotlinOkHttpMavenCentralSmoke {
 }
 JAVA
 
-run_gradle "$okhttp_app" dependencyInsight --dependency co.logbrew:logbrew-kotlin-okhttp --configuration runtimeClasspath \
-    > "$tmp_dir/okhttp-dependency-insight.txt"
-grep -q "co.logbrew:logbrew-kotlin-okhttp:$okhttp_version" "$tmp_dir/okhttp-dependency-insight.txt"
-run_gradle "$okhttp_app" run > "$tmp_dir/okhttp-run.out"
-grep -q "okhttp-route=GET /api/orders/{order_id}" "$tmp_dir/okhttp-run.out"
+    run_gradle "$okhttp_app" dependencyInsight --dependency co.logbrew:logbrew-kotlin-okhttp --configuration runtimeClasspath \
+        > "$tmp_dir/okhttp-dependency-insight.txt"
+    grep -q "co.logbrew:logbrew-kotlin-okhttp:$okhttp_version" "$tmp_dir/okhttp-dependency-insight.txt"
+    run_gradle "$okhttp_app" run > "$tmp_dir/okhttp-run.out"
+    grep -q "okhttp-route=GET /api/orders/{order_id}" "$tmp_dir/okhttp-run.out"
+fi
 
 echo "Maven Central public install smoke passed"

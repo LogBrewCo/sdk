@@ -222,6 +222,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_dotnet_httpclient_host_reference(relative_text, terms):
         return True
 
+    if is_dotnet_release_compatibility_reference(relative_text, line, terms):
+        return True
+
     if relative_text.endswith(".cs") and is_dotnet_cancellation_token_reference(line):
         return True
 
@@ -1018,6 +1021,34 @@ def is_dotnet_httpclient_host_reference(
         "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/examples/HttpClientFactoryCorrelation.cs",
         "dotnet/logbrew-dotnet/tests/LogBrew.HttpClient.Tests/Program.cs",
     }
+
+
+def is_dotnet_release_compatibility_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    httpclient_project = "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj"
+    if terms == {"restore"} and relative_text in {
+        ".github/workflows/publish-packages.yml",
+        "tests/test_release_metadata.py",
+    }:
+        return (
+            f"dotnet restore {httpclient_project}" in line
+            or f"dotnet pack {httpclient_project} --no-restore" in line
+        )
+
+    if terms != {"token"}:
+        return False
+    if relative_text == "scripts/real_user_dotnet_httpclient_package_compatibility_smoke.sh":
+        return "PublicKeyToken" in line or line.strip() == (
+            'return token == null || token.Length == 0 ? "unsigned" '
+            ': Convert.ToHexString(token).ToLowerInvariant();'
+        )
+    return (
+        relative_text == "tests/test_dotnet_httpclient_package_compatibility_smoke.py"
+        and '"GetPublicKeyToken"' in line
+    )
 
 
 def is_dotnet_cancellation_token_reference(line: str) -> bool:
