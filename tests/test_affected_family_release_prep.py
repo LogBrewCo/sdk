@@ -102,34 +102,40 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             },
         )
 
-    def test_tag_distributed_receipts_use_the_next_versions(self) -> None:
+    def test_tag_distributed_receipts_keep_public_baselines_until_release(self) -> None:
         go_smoke = (ROOT / "scripts/real_user_go_public_module_smoke.sh").read_text(encoding="utf-8")
         swift_smoke = (ROOT / "scripts/real_user_swiftpm_public_smoke.sh").read_text(encoding="utf-8")
         swift_readme = (ROOT / "swift/logbrew-swift/README.md").read_text(encoding="utf-8")
 
-        self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.4', go_smoke)
-        self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.2', swift_smoke)
+        self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.3', go_smoke)
+        self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.1', swift_smoke)
         self.assertIn('from: "0.1.2"', swift_readme)
 
-    def test_public_receipt_defaults_match_every_advanced_registry_version(self) -> None:
+    def test_public_receipt_defaults_match_current_registry_baselines(self) -> None:
         receipt_defaults = {
             "scripts/real_user_npm_public_registry_smoke.sh": (
-                "LOGBREW_NPM_SDK_VERSION:-0.1.4",
-                "LOGBREW_NPM_BROWSER_VERSION:-0.1.1",
-                "LOGBREW_NPM_NODE_VERSION:-0.1.2",
-                "LOGBREW_NPM_NEXT_VERSION:-0.1.1",
-                "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.1",
+                "LOGBREW_NPM_SDK_VERSION:-0.1.3",
+                "LOGBREW_NPM_BROWSER_VERSION:-0.1.0",
+                "LOGBREW_NPM_NODE_VERSION:-0.1.1",
+                "LOGBREW_NPM_NEXT_VERSION:-0.1.0",
+                "LOGBREW_NPM_REACT_NATIVE_VERSION:-0.1.0",
             ),
-            "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.2",),
-            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.2",),
-            "scripts/real_user_packagist_public_smoke.sh": ("LOGBREW_PACKAGIST_VERSION:-0.1.2",),
+            "scripts/real_user_cratesio_public_smoke.sh": ("LOGBREW_CRATESIO_VERSION:-0.1.0",),
+            "scripts/real_user_rubygems_public_smoke.sh": ("LOGBREW_RUBYGEMS_VERSION:-0.1.1",),
+            "scripts/real_user_packagist_public_smoke.sh": ("LOGBREW_PACKAGIST_VERSION:-0.1.1",),
             "scripts/real_user_maven_central_public_smoke.sh": (
-                "LOGBREW_MAVEN_JAVA_VERSION:-0.1.2",
+                "LOGBREW_MAVEN_JAVA_VERSION:-0.1.1",
                 "LOGBREW_MAVEN_KOTLIN_VERSION:-0.1.1",
             ),
             "scripts/real_user_dotnet_public_nuget_smoke.sh": (
-                "LOGBREW_DOTNET_CORE_VERSION:-0.1.5",
+                "LOGBREW_DOTNET_CORE_VERSION:-0.1.4",
                 "LOGBREW_DOTNET_HTTPCLIENT_VERSION:-0.1.0",
+            ),
+            "scripts/real_user_python_public_pypi_smoke.sh": (
+                "LOGBREW_PYPI_SDK_VERSION:-0.1.3",
+                "LOGBREW_PYPI_FASTAPI_VERSION:-0.1.2",
+                "LOGBREW_PYPI_FLASK_VERSION:-0.1.0",
+                "LOGBREW_PYPI_DJANGO_VERSION:-0.1.2",
             ),
         }
         for relative_path, expected_values in receipt_defaults.items():

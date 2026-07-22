@@ -74,7 +74,7 @@ class MavenCentralPublicSmokeTests(unittest.TestCase):
             "LOGBREW_MAVEN_KOTLIN_VERSION",
             "LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION",
             "LOGBREW_MAVEN_KOTLIN_STDLIB_VERSION",
-            'java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.2}}"',
+            'java_version="${legacy_args[0]:-${LOGBREW_MAVEN_JAVA_VERSION:-0.1.1}}"',
             'kotlin_version="${legacy_args[1]:-${LOGBREW_MAVEN_KOTLIN_VERSION:-0.1.1}}"',
             'okhttp_version="${legacy_args[2]:-${LOGBREW_MAVEN_KOTLIN_OKHTTP_VERSION:-$kotlin_version}}"',
             "https://repo.maven.apache.org/maven2",

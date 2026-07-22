@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-package_version="${1:-${LOGBREW_SWIFTPM_VERSION:-0.1.2}}"
+package_version="${1:-${LOGBREW_SWIFTPM_VERSION:-0.1.1}}"
 package_url="${LOGBREW_SWIFTPM_URL:-https://github.com/LogBrewCo/sdk.git}"
 package_identity="${LOGBREW_SWIFTPM_PACKAGE_IDENTITY:-sdk}"
 expected_revision="${LOGBREW_SWIFTPM_EXPECTED_REVISION:-}"

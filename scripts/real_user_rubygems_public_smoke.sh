@@ -4,7 +4,7 @@ set -Eeuo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rubygems-public.XXXXXX")"
 
-version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.2}}"
+version="${1:-${LOGBREW_RUBYGEMS_VERSION:-0.1.1}}"
 source_url="https://rubygems.org"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 

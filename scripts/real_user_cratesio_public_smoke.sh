@@ -13,7 +13,7 @@ receipt_failure() {
 }
 trap receipt_failure ERR
 
-version="${1:-${LOGBREW_CRATESIO_VERSION:-0.1.2}}"
+version="${1:-${LOGBREW_CRATESIO_VERSION:-0.1.0}}"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 export CARGO_HOME="$tmp_dir/cargo-home"
 mkdir -p "$CARGO_HOME"

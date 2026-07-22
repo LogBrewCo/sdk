@@ -40,10 +40,10 @@ class PythonPublicPyPISmokeTests(unittest.TestCase):
             "LOGBREW_PYPI_FASTAPI_VERSION",
             "LOGBREW_PYPI_FLASK_VERSION",
             "LOGBREW_PYPI_DJANGO_VERSION",
-            'sdk_version="${legacy_args[0]:-${LOGBREW_PYPI_SDK_VERSION:-0.1.4}}"',
-            'fastapi_version="${legacy_args[1]:-${LOGBREW_PYPI_FASTAPI_VERSION:-0.1.3}}"',
-            'django_version="${legacy_args[2]:-${LOGBREW_PYPI_DJANGO_VERSION:-0.1.3}}"',
-            'flask_version="${legacy_args[3]:-${LOGBREW_PYPI_FLASK_VERSION:-0.1.1}}"',
+            'sdk_version="${legacy_args[0]:-${LOGBREW_PYPI_SDK_VERSION:-0.1.3}}"',
+            'fastapi_version="${legacy_args[1]:-${LOGBREW_PYPI_FASTAPI_VERSION:-0.1.2}}"',
+            'django_version="${legacy_args[2]:-${LOGBREW_PYPI_DJANGO_VERSION:-0.1.2}}"',
+            'flask_version="${legacy_args[3]:-${LOGBREW_PYPI_FLASK_VERSION:-0.1.0}}"',
             "--manifest",
             "--artifact-root",
             "check_python_release_artifacts.py",
@@ -75,10 +75,10 @@ class PythonPublicPyPISmokeTests(unittest.TestCase):
         ):
             self.assertIn(expected, body)
 
-        self.assertNotIn("PYPI_SDK_VERSION:-0.1.3", body)
-        self.assertNotIn("PYPI_FASTAPI_VERSION:-0.1.2", body)
-        self.assertNotIn("PYPI_FLASK_VERSION:-0.1.0", body)
-        self.assertNotIn("PYPI_DJANGO_VERSION:-0.1.2", body)
+        self.assertNotIn("PYPI_SDK_VERSION:-0.1.4", body)
+        self.assertNotIn("PYPI_FASTAPI_VERSION:-0.1.3", body)
+        self.assertNotIn("PYPI_FLASK_VERSION:-0.1.1", body)
+        self.assertNotIn("PYPI_DJANGO_VERSION:-0.1.3", body)
 
         self.assertNotIn("api.logbrew", body)
         prefix = "LOGBREW_"

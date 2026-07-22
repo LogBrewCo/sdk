@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.2}}"
+version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.1}}"
 tmp_dir="$(mktemp -d)"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 trap 'rm -rf "$tmp_dir"' EXIT
