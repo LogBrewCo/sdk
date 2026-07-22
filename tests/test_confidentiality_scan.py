@@ -48,7 +48,8 @@ class ConfidentialityScanTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "dotnet" / "logbrew-dotnet" / "src" / "LogBrew" / "LogBrew.cs").write_text(
-                "#pragma warning " + "rest" + "ore CA1031\n",
+                "#pragma warning " + "rest" + "ore CA1031\n"
+                "return SendAsync(request, cancellation" + "To" + "ken);\n",
                 encoding="utf-8",
             )
             (root / "unity" / "logbrew-unity" / "Runtime" / "PublicTypes.cs").write_text(
@@ -66,6 +67,47 @@ class ConfidentialityScanTests(unittest.TestCase):
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
+    def test_allows_only_exact_dotnet_release_compatibility_terms(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = root / ".github" / "workflows"
+            scripts_dir = root / "scripts"
+            tests_dir = root / "tests"
+            unrelated_dir = root / "dotnet"
+            workflow_dir.mkdir(parents=True)
+            scripts_dir.mkdir()
+            tests_dir.mkdir()
+            unrelated_dir.mkdir()
+            dependency_action = "rest" + "ore"
+            identity_member = "PublicKey" + "To" + "ken"
+            identity_value = "to" + "ken"
+            (workflow_dir / "publish-packages.yml").write_text(
+                f"dotnet {dependency_action} dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj\n"
+                f"dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --no-{dependency_action}\n",
+                encoding="utf-8",
+            )
+            (scripts_dir / "real_user_dotnet_httpclient_package_compatibility_smoke.sh").write_text(
+                f"Get{identity_member}()\n"
+                f'return {identity_value} == null || {identity_value}.Length == 0 ? "unsigned" '
+                f": Convert.ToHexString({identity_value}).ToLowerInvariant();\n",
+                encoding="utf-8",
+            )
+            (tests_dir / "test_dotnet_httpclient_package_compatibility_smoke.py").write_text(
+                f'"Get{identity_member}"\n',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            (unrelated_dir / "Other.cs").write_text(
+                f"Get{identity_member}()\n",
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("Other.cs", failures[0])
+
     def test_allows_generated_brand_svg_image_carriers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -78,6 +120,32 @@ class ConfidentialityScanTests(unittest.TestCase):
             )
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+    def test_allows_only_exact_java_aes_key_spec_references(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package_dir = root / "java" / "logbrew-java" / "src" / "main" / "java" / "co" / "logbrew" / "sdk"
+            package_dir.mkdir(parents=True)
+            crypto = package_dir / "PersistenceCrypto.java"
+            key_spec = "Sec" + "retKeySpec"
+            crypto.write_text(
+                f"import javax.crypto.spec.{key_spec};\n"
+                f'new {key_spec}(key, "AES"),\n',
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            unsafe_name = "raw" + "Sec" + "ret"
+            crypto.write_text(
+                f"import javax.crypto.spec.{key_spec};\n"
+                f'new {key_spec}({unsafe_name}, "AES"),\n',
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn(unsafe_name, failures[0])
 
     def test_allows_sdk_instrumentation_uninstall_terms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -99,6 +167,51 @@ class ConfidentialityScanTests(unittest.TestCase):
             )
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+    def test_allows_only_the_kscrash_report_deletion_policy_symbol(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "swift" / "logbrew-swift" / "Sources" / "LogBrewCrash"
+            source_dir.mkdir(parents=True)
+            policy = "reportClean" + "upPolicy"
+            (source_dir / "CrashEngine.swift").write_text(
+                f"configuration.{policy} = .never\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            (source_dir / "Other.swift").write_text(
+                f"unexpected {policy}\n",
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("Other.swift", failures[0])
+
+    def test_allows_apple_durable_storage_terms_only_in_owned_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            durable_dir = root / "swift" / "logbrew-swift" / "Sources" / "LogBrew"
+            durable_dir.mkdir(parents=True)
+            allowed = durable_dir / "DurableDeliveryStoreRecovery.swift"
+            archive_label = "back" + "up"
+            cleaner_name = "clean" + "up"
+            allowed.write_text(
+                f"exclude durable files from {archive_label} and {cleaner_name} invalid records\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            unrelated = durable_dir / "DeliveryEngine.swift"
+            unrelated.write_text(
+                f"unexpected {archive_label} {cleaner_name} guidance\n",
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("DeliveryEngine.swift", failures[0])
 
     def test_allows_maven_central_preflight_secret_names_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -130,6 +243,25 @@ class ConfidentialityScanTests(unittest.TestCase):
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
+    def test_allows_release_artifact_build_auth_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            js_dir = root / "js" / "logbrew-js"
+            next_dir = root / "js" / "logbrew-next"
+            js_dir.mkdir(parents=True)
+            next_dir.mkdir(parents=True)
+            auth_option = "to" + "kenEnv"
+            (js_dir / "release-artifacts-build.cjs").write_text(
+                f"const {auth_option} = upload.{auth_option};\n",
+                encoding="utf-8",
+            )
+            (next_dir / "release-artifacts.d.ts").write_text(
+                f"{auth_option}?: string;\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
     def test_reports_unexpected_sensitive_terms(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -141,6 +273,26 @@ class ConfidentialityScanTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("production " + "pass" + "word", failures[0])
 
+    def test_sensitive_match_does_not_cross_identifier_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "java" / "logbrew-java" / "src" / "main" / "java"
+            source_dir.mkdir(parents=True)
+            source = source_dir / "AutomaticDeliveryController.java"
+            source.write_text(
+                "ProcessHandle owner = ProcessHandle.current();\n"
+                "return ProcessHandle.current().equals(owner);\n",
+                encoding="utf-8",
+            )
+            remote_term = "s" + "sh_private_key"
+            unsafe = root / "unsafe.txt"
+            unsafe.write_text(f"{remote_term}=fixture\n", encoding="utf-8")
+
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn(remote_term, failures[0])
+
     def test_reports_forbidden_public_planning_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -151,6 +303,20 @@ class ConfidentialityScanTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("skills-lock.json", failures[0])
         self.assertIn("forbidden public planning file", failures[0])
+
+    def test_reports_public_research_and_memory_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            research = root / "docs" / "competitor-research"
+            research.mkdir(parents=True)
+            (research / "transport.md").write_text("Public source notes\n", encoding="utf-8")
+            (root / "memory.md").write_text("SDK lane memory\n", encoding="utf-8")
+
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 2)
+        self.assertTrue(any("docs/competitor-research" in failure for failure in failures))
+        self.assertTrue(any("memory.md" in failure for failure in failures))
 
     def test_allows_local_ignored_agent_redirect_and_plans(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -5,15 +5,32 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal, Protocol, TypeAlias, TypedDict
+from threading import Lock, RLock, get_ident
+from typing import Annotated, Any, Literal, NotRequired, Protocol, TypeAlias, TypedDict
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
+from logbrew_sdk._automatic_delivery import (
+    DEFAULT_DELIVERY_INTERVAL_SECONDS,
+    AutomaticDeliveryController,
+    DeliveryPrefix,
+    DeliverySendError,
+    parse_retry_after_ms,
+    resolve_automatic_delivery_options,
+    send_with_retry_policy,
+)
+from logbrew_sdk._automatic_delivery import (
+    DeliveryHealthSnapshot as DeliveryHealthSnapshot,
+)
+from logbrew_sdk._errors import SdkError
+from logbrew_sdk._event_queue import EventQueue, MemoryEventQueue, QueuedEvent
+from logbrew_sdk._persistent_event_queue import PersistentEventQueue
 from logbrew_sdk._span_events import (
     SpanAttributes,
     SpanEventSummary,
@@ -37,6 +54,9 @@ from logbrew_sdk._trace_context import (
     trace_metadata,
     use_logbrew_trace,
 )
+
+# Keep the long-standing public exception identity after moving its implementation out of this module.
+SdkError.__module__ = __name__
 
 MetadataValue: TypeAlias = str | int | float | bool | None
 Metadata: TypeAlias = dict[str, MetadataValue]
@@ -92,6 +112,7 @@ class MetricAttributes(TypedDict, total=False):
 
 class ScriptedTransportResponse(TypedDict):
     status_code: int
+    retry_after_ms: NotRequired[int]
 
 
 class Transport(Protocol):
@@ -124,6 +145,9 @@ METRIC_KINDS = set(METRIC_TEMPORALITIES_BY_KIND)
 NON_NEGATIVE_METRIC_KINDS = {"counter", "histogram"}
 DEFAULT_HTTP_ENDPOINT = "https://api.logbrew.co/v1/events"
 DEFAULT_MAX_QUEUE_SIZE = 10_000
+DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024
+DEFAULT_MAX_BATCH_EVENTS = 100
+DEFAULT_MAX_BATCH_BYTES = 256 * 1024
 TRACEPARENT_PATTERN = re.compile(r"^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-([0-9a-fA-F]{2})$")
 ZERO_TRACE_ID = "00000000000000000000000000000000"
 ZERO_SPAN_ID = "0000000000000000"
@@ -139,16 +163,6 @@ LOG_RECORD_BUILTINS = frozenset(
         exc_info=None,
     ).__dict__
 ) | {"message", "asctime"}
-
-
-@dataclass(slots=True)
-class SdkError(Exception):
-    """Stable public SDK error with parseable code and message fields."""
-    code: str
-    message: str
-
-    def __str__(self) -> str:
-        return f"{self.code}: {self.message}"
 
 
 @dataclass(slots=True)
@@ -172,6 +186,15 @@ class TransportResponse:
     """Stable transport response returned from flush and shutdown operations."""
     status_code: Annotated[int, "Final HTTP-like status returned by the transport."]
     attempts: Annotated[int, "Number of transport attempts used for the flush."]
+    batches: Annotated[int, "Number of accepted request batches."] = field(default=0, compare=False)
+    accepted_events: Annotated[int, "Number of events accepted across request batches."] = field(
+        default=0,
+        compare=False,
+    )
+    retry_after_ms: Annotated[int | None, "Bounded server-directed retry delay in milliseconds."] = field(
+        default=None,
+        compare=False,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,7 +239,11 @@ class RecordingTransport:
         if isinstance(next_response, Exception):
             raise next_response
 
-        return TransportResponse(status_code=int(next_response["status_code"]), attempts=1)
+        return TransportResponse(
+            status_code=int(next_response["status_code"]),
+            attempts=1,
+            retry_after_ms=next_response.get("retry_after_ms"),
+        )
 
 
 class HttpTransport:
@@ -257,13 +284,21 @@ class HttpTransport:
                 status = getattr(response, "status", None)
                 if status is None:
                     status = response.getcode()
-                return TransportResponse(status_code=int(status), attempts=1)
+                return TransportResponse(
+                    status_code=int(status),
+                    attempts=1,
+                    retry_after_ms=parse_retry_after_ms(getattr(response, "headers", None)),
+                )
             finally:
                 close_response = getattr(response, "close", None)
                 if callable(close_response):
                     close_response()
         except HTTPError as error:
-            return TransportResponse(status_code=int(error.code), attempts=1)
+            return TransportResponse(
+                status_code=int(error.code),
+                attempts=1,
+                retry_after_ms=parse_retry_after_ms(error.headers),
+            )
         except OSError as error:
             raise TransportError.network(f"http transport failed: {error}") from error
 
@@ -278,8 +313,17 @@ class LogBrewClient:
         api_key: str,
         sdk_name: str,
         sdk_version: str,
+        transport: Transport | None = None,
+        automatic_delivery: bool | None = None,
+        delivery_interval_seconds: float = DEFAULT_DELIVERY_INTERVAL_SECONDS,
+        delivery_queue_threshold: int | None = None,
         max_retries: int = 2,
         max_queue_size: int = DEFAULT_MAX_QUEUE_SIZE,
+        max_queue_bytes: int = DEFAULT_MAX_QUEUE_BYTES,
+        max_batch_events: int = DEFAULT_MAX_BATCH_EVENTS,
+        max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
+        persistent_queue_directory: str | os.PathLike[str] | None = None,
+        persistent_queue_encryption_key: bytes | bytearray | memoryview | None = None,
     ) -> LogBrewClient:
         """Create a client from public SDK identity, retry, and API key settings."""
         require_non_empty("api_key", api_key)
@@ -288,8 +332,17 @@ class LogBrewClient:
         return cls(
             api_key=api_key,
             sdk={"name": sdk_name, "language": "python", "version": sdk_version},
+            transport=transport,
+            automatic_delivery=automatic_delivery,
+            delivery_interval_seconds=delivery_interval_seconds,
+            delivery_queue_threshold=delivery_queue_threshold,
             max_retries=max_retries,
             max_queue_size=max_queue_size,
+            max_queue_bytes=max_queue_bytes,
+            max_batch_events=max_batch_events,
+            max_batch_bytes=max_batch_bytes,
+            persistent_queue_directory=persistent_queue_directory,
+            persistent_queue_encryption_key=persistent_queue_encryption_key,
         )
 
     def __init__(
@@ -297,34 +350,154 @@ class LogBrewClient:
         *,
         api_key: str,
         sdk: dict[str, str],
+        transport: Transport | None = None,
+        automatic_delivery: bool | None = None,
+        delivery_interval_seconds: float = DEFAULT_DELIVERY_INTERVAL_SECONDS,
+        delivery_queue_threshold: int | None = None,
         max_retries: int,
         max_queue_size: int = DEFAULT_MAX_QUEUE_SIZE,
+        max_queue_bytes: int = DEFAULT_MAX_QUEUE_BYTES,
+        max_batch_events: int = DEFAULT_MAX_BATCH_EVENTS,
+        max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES,
+        persistent_queue_directory: str | os.PathLike[str] | None = None,
+        persistent_queue_encryption_key: bytes | bytearray | memoryview | None = None,
     ) -> None:
-        if (
-            isinstance(max_queue_size, bool)
-            or not isinstance(max_queue_size, int)
-            or max_queue_size <= 0
-        ):
-            raise SdkError("configuration_error", "max_queue_size must be a positive integer")
+        _require_positive_integer("max_queue_size", max_queue_size)
+        _require_positive_integer("max_queue_bytes", max_queue_bytes)
+        _require_positive_integer("max_batch_events", max_batch_events)
+        _require_positive_integer("max_batch_bytes", max_batch_bytes)
+        automatic_options = resolve_automatic_delivery_options(
+            has_owned_transport=transport is not None,
+            automatic_delivery=automatic_delivery,
+            interval_seconds=delivery_interval_seconds,
+            queue_threshold=delivery_queue_threshold,
+            max_queue_size=max_queue_size,
+        )
+        if persistent_queue_directory is None and persistent_queue_encryption_key is not None:
+            raise SdkError(
+                "configuration_error",
+                "persistent_queue_encryption_key requires persistent_queue_directory",
+            )
+        if persistent_queue_directory is not None and persistent_queue_encryption_key is None:
+            raise SdkError(
+                "configuration_error",
+                "persistent_queue_encryption_key is required when persistent_queue_directory is set",
+            )
         self.api_key = api_key
         self.sdk = sdk
+        self._sdk_json = _compact_json(sdk)
         self.max_retries = max_retries
         self.max_queue_size = max_queue_size
-        self.events: list[dict[str, Any]] = []
+        self.max_queue_bytes = max_queue_bytes
+        self.max_batch_events = max_batch_events
+        self.max_batch_bytes = max_batch_bytes
         self._dropped_events = 0
+        self._owner_pid = os.getpid()
+        self._state_lock = RLock()
+        self._flush_lock = Lock()
+        self._flush_owner_thread_id: int | None = None
+        self._frozen_prefix: DeliveryPrefix | None = None
+        self._closing = False
         self.closed = False
+        self._owned_transport = transport
+        if persistent_queue_directory is None:
+            queue: EventQueue = MemoryEventQueue()
+        else:
+            assert persistent_queue_encryption_key is not None
+            queue = PersistentEventQueue(
+                directory=persistent_queue_directory,
+                sdk_json=self._sdk_json,
+                max_queue_size=max_queue_size,
+                max_queue_bytes=max_queue_bytes,
+                max_batch_bytes=max_batch_bytes,
+                encryption_key=persistent_queue_encryption_key,
+            )
+        self._queue = queue
+        self._automatic_delivery = AutomaticDeliveryController(
+            enabled=automatic_options.enabled,
+            interval_seconds=automatic_options.interval_seconds,
+            queue_threshold=automatic_options.queue_threshold,
+            deliver=self._run_automatic_delivery,
+        )
+        if self._queue.count:
+            self._automatic_delivery.event_retained(self._queue.count)
+
+    @property
+    def events(self) -> list[dict[str, Any]]:
+        """Return a detached snapshot of queued events for read compatibility."""
+        self._assert_owner()
+        with self._state_lock:
+            if self.closed:
+                return []
+            return [json.loads(record.json) for record in self._queue.snapshot()]
 
     def pending_events(self) -> int:
-        """Return the queued event count currently buffered in memory."""
-        return len(self.events)
+        """Return the queued event count currently buffered locally."""
+        self._assert_owner()
+        with self._state_lock:
+            if self.closed:
+                return 0
+            return self._queue.count
+
+    def pending_event_bytes(self) -> int:
+        """Return exact compact event JSON bytes currently buffered locally."""
+        self._assert_owner()
+        with self._state_lock:
+            if self.closed:
+                return 0
+            return self._queue.byte_count
 
     def dropped_events(self) -> int:
-        """Return the number of events dropped because the in-memory queue was full."""
-        return self._dropped_events
+        """Return the number of events dropped because local queue bounds were reached."""
+        self._assert_owner()
+        with self._state_lock:
+            return self._dropped_events
+
+    def delivery_health(self) -> DeliveryHealthSnapshot:
+        """Return a fixed content-free snapshot of local delivery state."""
+        self._assert_owner()
+        with self._state_lock:
+            pending_events = 0 if self.closed else self._queue.count
+            pending_event_bytes = 0 if self.closed else self._queue.byte_count
+            dropped_events = self._dropped_events
+        return self._automatic_delivery.snapshot(
+            pending_events=pending_events,
+            pending_event_bytes=pending_event_bytes,
+            dropped_events=dropped_events,
+        )
+
+    def purge_pending_events(self) -> int:
+        """Explicitly and durably remove all locally queued events."""
+        self._assert_owner()
+        with self._state_lock:
+            if self.closed or self._closing:
+                raise SdkError("shutdown_error", "client is already shut down")
+            if self._flush_owner_thread_id is not None:
+                raise SdkError("queue_busy_error", "pending events cannot be purged during delivery")
+            removed = self._queue.purge()
+            self._frozen_prefix = None
+        self._automatic_delivery.queue_changed(0)
+        return removed
+
+    def recover_pending_events(self) -> int:
+        """Revalidate local queue durability and return the pending event count."""
+
+        self._assert_owner()
+        with self._state_lock:
+            if self.closed or self._closing:
+                raise SdkError("shutdown_error", "client is already shut down")
+            if self._flush_owner_thread_id is not None:
+                raise SdkError("queue_busy_error", "pending events cannot be recovered during delivery")
+            pending_events = self._queue.recover()
+        if pending_events:
+            self._automatic_delivery.event_retained(pending_events)
+        else:
+            self._automatic_delivery.queue_changed(0)
+        return pending_events
 
     def preview_json(self) -> str:
         """Return the queued event batch as stable, pretty-printed JSON."""
-        return json.dumps({"sdk": self.sdk, "events": self.events}, indent=2)
+        return json.dumps({"sdk": self.sdk, "events": self.events}, indent=2, ensure_ascii=False)
 
     def release(self, event_id: str, timestamp: str, attributes: ReleaseAttributes) -> None:
         self._push_event("release", event_id, timestamp, validate_release(attributes))
@@ -347,18 +520,96 @@ class LogBrewClient:
     def metric(self, event_id: str, timestamp: str, attributes: MetricAttributes) -> None:
         self._push_event("metric", event_id, timestamp, validate_metric(attributes))
 
-    def flush(self, transport: Transport) -> TransportResponse:
+    def flush(self, transport: Transport | None = None) -> TransportResponse:
         """Flush queued events through a transport while preserving retry semantics."""
-        if self.closed:
-            raise SdkError("shutdown_error", "client is already shut down")
-        return self._flush_internal(transport)
+        self._assert_owner()
+        selected_transport = self._resolve_transport(transport)
+        uses_owned_transport = selected_transport is self._owned_transport
+        thread_id = get_ident()
+        with self._state_lock:
+            self._require_open_for_delivery(thread_id)
 
-    def shutdown(self, transport: Transport) -> TransportResponse:
+        with self._flush_lock:
+            with self._state_lock:
+                self._require_open_for_delivery(thread_id)
+                self._flush_owner_thread_id = thread_id
+            self._automatic_delivery.manual_delivery_started()
+            try:
+                response = self._flush_internal(selected_transport)
+            except Exception as error:
+                with self._state_lock:
+                    pending_events = self._queue.count
+                self._automatic_delivery.manual_delivery_failed(
+                    error,
+                    pending_events=pending_events,
+                    owned=uses_owned_transport,
+                )
+                raise
+            else:
+                with self._state_lock:
+                    pending_events = self._queue.count
+                self._automatic_delivery.manual_delivery_succeeded(
+                    accepted_events=response.accepted_events,
+                    pending_events=pending_events,
+                    owned=uses_owned_transport,
+                )
+                return response
+            finally:
+                with self._state_lock:
+                    self._flush_owner_thread_id = None
+                self._automatic_delivery.manual_delivery_finished()
+
+    def shutdown(self, transport: Transport | None = None) -> TransportResponse:
         """Flush queued events, then mark the client closed so later writes fail."""
-        if self.closed:
-            raise SdkError("shutdown_error", "client is already shut down")
-        response = self._flush_internal(transport)
-        self.closed = True
+        self._assert_owner()
+        selected_transport = self._resolve_transport(transport)
+        uses_owned_transport = selected_transport is self._owned_transport
+        thread_id = get_ident()
+        with self._state_lock:
+            self._require_open_for_delivery(thread_id)
+            self._closing = True
+        scheduler = self._automatic_delivery.begin_shutdown()
+        if scheduler is not None and scheduler.ident != thread_id:
+            scheduler.join()
+
+        try:
+            with self._flush_lock:
+                with self._state_lock:
+                    self._flush_owner_thread_id = thread_id
+                self._automatic_delivery.manual_delivery_started()
+                try:
+                    response = self._flush_internal(selected_transport)
+                    self._queue.close()
+                except Exception as error:
+                    with self._state_lock:
+                        pending_events = self._queue.count
+                    self._automatic_delivery.manual_delivery_failed(
+                        error,
+                        pending_events=pending_events,
+                        owned=uses_owned_transport,
+                    )
+                    raise
+                else:
+                    self._automatic_delivery.manual_delivery_succeeded(
+                        accepted_events=response.accepted_events,
+                        pending_events=0,
+                        owned=uses_owned_transport,
+                    )
+                finally:
+                    with self._state_lock:
+                        self._flush_owner_thread_id = None
+                    self._automatic_delivery.manual_delivery_finished()
+        except Exception:
+            with self._state_lock:
+                self._closing = False
+                pending_events = self._queue.count
+            self._automatic_delivery.abort_shutdown(pending_events)
+            raise
+
+        with self._state_lock:
+            self._closing = False
+            self.closed = True
+        self._automatic_delivery.mark_closed()
         return response
 
     def _push_event(
@@ -368,52 +619,186 @@ class LogBrewClient:
         timestamp: str,
         attributes: dict[str, Any],
     ) -> None:
-        if self.closed:
-            raise SdkError("shutdown_error", "client is already shut down")
+        self._assert_owner()
         require_non_empty("event id", event_id)
         require_timestamp(timestamp)
-        if len(self.events) >= self.max_queue_size:
-            self._dropped_events += 1
-            return
-        self.events.append(
-            {
-                "type": event_type,
-                "id": event_id,
-                "timestamp": timestamp,
-                "attributes": attributes,
-            }
-        )
+        event = {
+            "type": event_type,
+            "id": event_id,
+            "timestamp": timestamp,
+            "attributes": attributes,
+        }
+        try:
+            event_json = _compact_json(event)
+        except (TypeError, ValueError) as error:
+            raise SdkError("validation_error", "event must contain JSON-compatible finite values") from error
+        event_bytes = len(event_json.encode("utf-8"))
+        request_bytes = len(f'{{"sdk":{self._sdk_json},"events":[{event_json}]}}'.encode())
+
+        with self._state_lock:
+            if self.closed or self._closing:
+                raise SdkError("shutdown_error", "client is already shut down")
+            if (
+                self._queue.count >= self.max_queue_size
+                or self._queue.byte_count + event_bytes > self.max_queue_bytes
+                or request_bytes > self.max_batch_bytes
+            ):
+                self._dropped_events += 1
+                return
+            self._queue.append(
+                record_id=uuid4().hex,
+                event_json=event_json,
+                byte_count=event_bytes,
+            )
+            pending_events = self._queue.count
+        self._automatic_delivery.event_retained(pending_events)
 
     def _flush_internal(self, transport: Transport) -> TransportResponse:
-        if not self.events:
-            return TransportResponse(status_code=204, attempts=0)
+        self._assert_owner()
+        with self._state_lock:
+            self._reconcile_frozen_prefix()
+            snapshot_end = self._queue.last_sequence()
+        if snapshot_end is None:
+            return TransportResponse(status_code=204, attempts=0, batches=0, accepted_events=0)
 
-        body = self.preview_json()
-        max_attempts = self.max_retries + 1
-        attempts = 0
-        while attempts < max_attempts:
-            attempts += 1
-            try:
-                response = transport.send(self.api_key, body)
-                if response.status_code == 401:
-                    raise SdkError("unauthenticated", "transport rejected the API key")
-                if 200 <= response.status_code < 300:
-                    self.events.clear()
-                    return TransportResponse(status_code=response.status_code, attempts=attempts)
-                if response.status_code >= 500 and attempts < max_attempts:
-                    continue
-                raise SdkError(
-                    "transport_error",
-                    f"unexpected transport status {response.status_code}",
+        total_attempts = 0
+        accepted_batches = 0
+        accepted_events = 0
+        final_status = 204
+        while True:
+            with self._state_lock:
+                prefix = self._frozen_prefix
+                if prefix is None:
+                    records = self._queue.snapshot(through_sequence=snapshot_end)
+                    if records:
+                        batch, body = self._build_batch(records)
+                        prefix = DeliveryPrefix(
+                            through_sequence=batch[-1].sequence,
+                            event_count=len(batch),
+                            body=body,
+                        )
+                        self._frozen_prefix = prefix
+            if prefix is None:
+                return TransportResponse(
+                    status_code=final_status,
+                    attempts=total_attempts,
+                    batches=accepted_batches,
+                    accepted_events=accepted_events,
                 )
-            except SdkError:
-                raise
-            except TransportError as error:
-                if error.retryable and attempts < max_attempts:
-                    continue
-                raise SdkError(error.code, error.message) from error
 
-        raise SdkError("transport_error", "exhausted retries")
+            response = self._send_body(transport, prefix.body)
+            self._assert_owner()
+            total_attempts += response.attempts
+            final_status = response.status_code
+            with self._state_lock:
+                if self._frozen_prefix is not prefix:
+                    raise SdkError("queue_state_error", "delivery prefix ownership changed")
+                acknowledged = self._queue.acknowledge(prefix.through_sequence)
+                if acknowledged == prefix.event_count:
+                    self._frozen_prefix = None
+            if acknowledged != prefix.event_count:
+                raise SdkError("queue_state_error", "accepted event prefix changed during delivery")
+            self._automatic_delivery.record_accepted_events(acknowledged)
+            accepted_batches += 1
+            accepted_events += acknowledged
+
+    def _reconcile_frozen_prefix(self) -> None:
+        prefix = self._frozen_prefix
+        if prefix is None:
+            return
+        retained = self._queue.snapshot(through_sequence=prefix.through_sequence)
+        if not retained:
+            self._frozen_prefix = None
+            return
+        if len(retained) != prefix.event_count:
+            raise SdkError("queue_state_error", "retained delivery prefix changed")
+
+    def _build_batch(self, records: tuple[QueuedEvent, ...]) -> tuple[tuple[QueuedEvent, ...], str]:
+        prefix = f'{{"sdk":{self._sdk_json},"events":['
+        suffix = "]}"
+        body_bytes = len(prefix.encode("utf-8")) + len(suffix.encode("utf-8"))
+        batch: list[QueuedEvent] = []
+        for record in records:
+            separator_bytes = 1 if batch else 0
+            if len(batch) >= self.max_batch_events:
+                break
+            if body_bytes + separator_bytes + record.byte_count > self.max_batch_bytes:
+                break
+            batch.append(record)
+            body_bytes += separator_bytes + record.byte_count
+        if not batch:
+            raise SdkError("queue_state_error", "queued event cannot fit the configured request limit")
+        return tuple(batch), f"{prefix}{','.join(record.json for record in batch)}{suffix}"
+
+    def _send_body(self, transport: Transport, body: str) -> TransportResponse:
+        def send_once() -> TransportResponse:
+            self._automatic_delivery.record_transport_attempt()
+            try:
+                return transport.send(self.api_key, body)
+            except TransportError as error:
+                raise DeliverySendError(
+                    error.code,
+                    error.message,
+                    retryable=error.retryable,
+                ) from error
+
+        result = send_with_retry_policy(send_once, max_retries=self.max_retries)
+        return TransportResponse(
+            status_code=result.status_code,
+            attempts=result.attempts,
+            batches=1,
+            accepted_events=0,
+        )
+
+    def _run_automatic_delivery(self) -> tuple[int, int]:
+        self._assert_owner()
+        transport = self._owned_transport
+        if transport is None:
+            raise SdkError("configuration_error", "automatic delivery requires an owned transport")
+        thread_id = get_ident()
+        with self._flush_lock:
+            with self._state_lock:
+                if self.closed or self._closing:
+                    return 0, 0 if self.closed else self._queue.count
+                self._require_open_for_delivery(thread_id)
+                self._flush_owner_thread_id = thread_id
+            try:
+                response = self._flush_internal(transport)
+                with self._state_lock:
+                    pending_events = self._queue.count
+                return response.accepted_events, pending_events
+            finally:
+                with self._state_lock:
+                    self._flush_owner_thread_id = None
+
+    def _resolve_transport(self, transport: Transport | None) -> Transport:
+        if transport is not None:
+            return transport
+        if self._owned_transport is None:
+            raise SdkError("configuration_error", "delivery requires an owned transport or explicit transport")
+        return self._owned_transport
+
+    def _require_open_for_delivery(self, thread_id: int) -> None:
+        if self.closed or self._closing:
+            raise SdkError("shutdown_error", "client is already shut down")
+        if self._flush_owner_thread_id == thread_id:
+            raise SdkError("queue_reentrant_error", "delivery cannot be reentered from the transport")
+
+    def _assert_owner(self) -> None:
+        if os.getpid() != self._owner_pid:
+            raise SdkError(
+                "process_ownership_error",
+                "client cannot be used after fork; create a new client in the child process",
+            )
+
+
+def _compact_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+
+
+def _require_positive_integer(name: str, value: Any) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise SdkError("configuration_error", f"{name} must be a positive integer")
 
 
 class LogBrewLoggingHandler(logging.Handler):
@@ -1043,6 +1428,15 @@ from logbrew_sdk._celery_client import (  # noqa: E402
     create_celery_trace_headers,
     logbrew_trace_context_from_celery_headers,
 )
+from logbrew_sdk._celery_instrumentation import (  # noqa: E402
+    LogBrewCeleryInstrumentation,
+    instrument_celery_app_with_logbrew_spans,
+)
+from logbrew_sdk._celery_worker_lifecycle import (  # noqa: E402
+    LogBrewCeleryWorkerLifecycle,
+    celery_worker_persistent_queue_directory,
+    instrument_celery_worker_processes_with_logbrew,
+)
 from logbrew_sdk._queue_client import (  # noqa: E402
     async_queue_operation_with_logbrew_span,
     queue_operation_with_logbrew_span,
@@ -1065,6 +1459,8 @@ __all__ = [
     "IssueAttributes",
     "LogAttributes",
     "LogBrewAiohttpClientSessionInstrumentation",
+    "LogBrewCeleryInstrumentation",
+    "LogBrewCeleryWorkerLifecycle",
     "LogBrewClient",
     "LogBrewDbapiConnection",
     "LogBrewDbapiCursor",
@@ -1103,6 +1499,7 @@ __all__ = [
     "async_queue_operation_with_logbrew_span",
     "cache_operation_with_logbrew_span",
     "celery_operation_with_logbrew_span",
+    "celery_worker_persistent_queue_directory",
     "connect_dbapi_connection_with_logbrew_spans",
     "create_celery_trace_headers",
     "create_logbrew_open_telemetry_span_exporter",
@@ -1117,6 +1514,8 @@ __all__ = [
     "get_active_logbrew_trace",
     "httpx_request_with_logbrew_span",
     "instrument_aiohttp_client_session_with_logbrew_spans",
+    "instrument_celery_app_with_logbrew_spans",
+    "instrument_celery_worker_processes_with_logbrew",
     "instrument_dbapi_connection_with_logbrew_spans",
     "instrument_django_cache_with_logbrew_spans",
     "instrument_flask_cache_with_logbrew_spans",

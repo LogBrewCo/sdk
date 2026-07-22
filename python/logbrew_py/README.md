@@ -109,6 +109,37 @@ if client.dropped_events() > 0:
 
 This counter is local process state only. Usage, quota, and billing remain backend-owned and must not be inferred from queue size or drop counts.
 
+## Automatic Delivery
+
+Pass an app-owned transport when you want the client to deliver retained events automatically. Automatic delivery starts lazily after the first accepted event, sends at 50 queued events or after 5 seconds by default, and uses the same bounded queue and exact-prefix acknowledgement as explicit flushes:
+
+```python
+from logbrew_sdk import HttpTransport, LogBrewClient
+
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-api",
+    sdk_version="1.4.0",
+    transport=HttpTransport(),
+)
+
+client.log(
+    "evt_worker_ready",
+    "2026-07-20T08:00:00Z",
+    {"message": "worker ready", "level": "info", "logger": "checkout-api"},
+)
+
+health = client.delivery_health()
+print({"state": health.lifecycle, "pending": health.pending_events})
+client.shutdown()
+```
+
+Set `delivery_interval_seconds` and `delivery_queue_threshold` to tune the bounded wake policy. Set `automatic_delivery=False` to own a transport while keeping fully explicit delivery. A client created without a transport keeps the existing manual contract and still accepts `flush(transport)` and `shutdown(transport)`.
+
+Only one daemon scheduler and one flush can be active for a client. Retryable network, 408, and server failures retain an immutable request prefix and use bounded jitter or a bounded `retry-after-ms` hint. Authentication, quota, and other terminal responses pause automatic sends; a successful explicit `flush()` through the owned transport clears that pause. No process-exit, signal, fork, or framework hook is installed.
+
+`DeliveryHealthSnapshot` is immutable and contains only fixed lifecycle values, bounded counters, pending count/bytes, drop count, in-flight/coalesced state, pause class, and retry delay. It never contains event content or IDs, API keys, transport configuration, request/response data, status codes, exception text, or arbitrary metadata.
+
 ## First Useful Telemetry
 
 For a new Python service, capture a small set of signals that explain what changed, where the service ran, what the user or job attempted, which outbound dependency mattered, how long it took, and how the request links to a distributed trace:
@@ -888,6 +919,115 @@ queued = rq_operation_with_logbrew_span(
 ```
 
 The RQ helper records one `rq` queue span using explicit caller control. It reads only string-like `job.func_name` and `job.origin` by default, lets you override queue/task names, accepts the same bounded `span_events` option as the generic queue helper, and still avoids job args, kwargs, descriptions, broker metadata writes, global worker patching, baggage, and tracestate.
+
+### Automatic Celery spans
+
+Install the same Python package with its Celery extra when you want producer and worker spans without wrapping each task call:
+
+```bash
+pip install "logbrew-sdk[celery]"
+```
+
+```python
+from celery import Celery
+
+from logbrew_sdk import (
+    HttpTransport,
+    LogBrewClient,
+    instrument_celery_app_with_logbrew_spans,
+)
+
+app = Celery("checkout")
+client = LogBrewClient.create(
+    api_key="LOGBREW_API_KEY",
+    sdk_name="checkout-worker",
+    sdk_version="1.0.0",
+)
+transport = HttpTransport()
+
+celery_instrumentation = instrument_celery_app_with_logbrew_spans(
+    app,
+    client=client,
+    metadata={"service": "checkout-worker"},
+)
+
+# Existing delay(), apply_async(), and app.send_task() calls keep their behavior.
+send_receipt.delay(order_id)
+
+# Flush on your normal batch/graceful-shutdown path, after worker tasks drain.
+celery_instrumentation.uninstall()
+client.shutdown(transport)
+```
+
+The integration wraps only the supplied app instance's `send_task` method and filters worker signal callbacks to tasks owned by that exact app. Duplicate installation returns the existing handle, and `uninstall()` puts the original app method back and removes only LogBrew's receivers. Uninstall fails clearly while owned tasks are still running so an active task trace is never silently detached.
+
+For a prefork worker, register child-process ownership in the module Celery imports before the pool starts:
+
+```python
+from celery import Celery
+
+from logbrew_sdk import (
+    HttpTransport,
+    LogBrewClient,
+    instrument_celery_worker_processes_with_logbrew,
+)
+
+worker_app = Celery("checkout-worker")
+
+worker_lifecycle = instrument_celery_worker_processes_with_logbrew(
+    worker_app,
+    client_factory=lambda: LogBrewClient.create(
+        api_key="LOGBREW_API_KEY",
+        sdk_name="checkout-worker",
+        sdk_version="1.0.0",
+        max_retries=2,
+    ),
+    transport_factory=HttpTransport,
+    metadata={"service": "checkout-worker"},
+)
+```
+
+For crash-safe worker delivery, install the optional crypto provider with `pip install "logbrew-sdk[celery,persistence]"`, then opt in to one encrypted local queue per Celery pool slot. Create a dedicated owner-only root before the worker starts, load a 32-byte key from your application's key-management service, and derive the slot inside `client_factory`, after Celery has forked the child:
+
+```python
+import os
+from pathlib import Path
+
+from logbrew_sdk import celery_worker_persistent_queue_directory
+
+queue_root = Path(os.environ["LOGBREW_QUEUE_ROOT"]).resolve()
+queue_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+
+def create_worker_client() -> LogBrewClient:
+    persistence_key = bytes.fromhex(os.environ["LOGBREW_PERSISTENCE_KEY_HEX"])
+    return LogBrewClient.create(
+        api_key=os.environ["LOGBREW_API_KEY"],
+        sdk_name="checkout-worker",
+        sdk_version="1.0.0",
+        max_retries=2,
+        persistent_queue_directory=celery_worker_persistent_queue_directory(queue_root),
+        persistent_queue_encryption_key=persistence_key,
+    )
+```
+
+Persistence is disabled by default, so memory-only clients do not load the optional crypto package. Encrypted persistence requires a supported POSIX filesystem with owner and link metadata. It uses AES-256-GCM with a unique nonce per write and authenticates the queue schema, SDK identity, sequence, compact event bytes, stable local record ID, accepted prefix, and admitted high-water mark. Missing sole, interior, or trailing records, a wrong key, tamper, unsafe permissions, hard links, replacement, or concurrent ownership fail closed with content-free errors.
+
+The caller owns the encryption key lifecycle. LogBrew never writes or logs the key and has no silent plaintext fallback or built-in key rotation. Keep the same key until a queue is drained or explicitly purged; rotating it while encrypted records remain makes that queue intentionally unreadable. Existing unencrypted queue directories are rejected. Drain and remove those directories with the build that created them before enabling encrypted persistence.
+
+Completed admission stores encrypted compact event JSON before returning, and replacement children for the same Celery slot replay the oldest records first. The database never retains plaintext event content, API keys, endpoints, headers, process IDs, machine identity, worker names, or local paths. Filesystem observers can still see the queue directory, encrypted file size, row count, and write timing, so keep the root on app-owned protected storage and include it in your data-retention policy.
+
+The default bounds are 10,000 events, 4 MiB of compact event JSON, 100 events per request, and 256 KiB per request. Override them with `max_queue_size`, `max_queue_bytes`, `max_batch_events`, and `max_batch_bytes`. New records are dropped when either queue bound is full; a record that cannot fit one request is also dropped. `dropped_events()`, `pending_events()`, and `pending_event_bytes()` expose local pressure without reading event content. `flush()` and `shutdown()` acknowledge only accepted prefixes, reuse an identical body for retries, and leave failed or later records for the next owner. `TransportResponse.batches` and `accepted_events` report aggregate progress when one flush requires multiple requests.
+
+Use `recover_pending_events()` to revalidate authenticated state explicitly and `purge_pending_events()` only for an explicit local data-deletion action. Both fail while delivery or shutdown is active. The `events` property remains available for compatibility but returns a detached decrypted snapshot; mutating it never changes the queue. A hard exit cannot run Python finalizers, so durability comes from each completed admission transaction, not from `atexit` or a terminal signal callback. Delivery remains at least once: the service should use stable public event IDs to make a replay harmless.
+
+The factories run once in each worker child after fork, and only when Celery's current worker app is the supplied app, so the parent never shares a client, queue, transport, or connection state with its children. On graceful `worker_process_shutdown`, LogBrew first removes that child's task receivers and then sends its retained queue through the child-owned transport. Duplicate init/shutdown signals are idempotent, active tasks defer delivery instead of losing their spans, and configured client retries reuse the exact serialized batch. Signal-path failures are reduced to generic `on_capture_error` notifications and never replace Celery task results.
+
+Use a separate producer-owned Celery app with `instrument_celery_app_with_logbrew_spans()` when the producer and prefork worker run in different processes. Direct app instrumentation and worker-process lifecycle ownership cannot be mixed on the same app instance. Without `persistent_queue_directory`, delivery is limited to retries that complete during graceful Celery process shutdown. Billiard exits prefork children without running Python `atexit`; enable the persistent queue when committed events must survive an exhausted retry, hard kill, or native process crash.
+
+Each brokered task gets a producer span and a worker span connected by one W3C `traceparent`. The worker span keeps its trace active during task code and records bounded task name, routing key, zero-based retry attempt, task state, queue wait, duration, sampled state, and exception type. The integration copies caller headers before adding `traceparent` and `logbrew-enqueued-at-ms`, so the caller's mapping is unchanged. It never captures or serializes task IDs, arguments, keyword arguments, results, message bodies, existing headers, broker URLs, exchanges, worker machine names, exception messages, stack traces, baggage, or tracestate. Instrumentation and telemetry-capture failures are reported through `on_capture_error` and do not replace Celery results or exceptions. Queue pressure still follows `LogBrewClient.max_queue_size`; inspect `dropped_events()` and flush in bounded batches instead of deriving hosted usage locally.
+
+Use the explicit helper below instead when you need per-call opt-in control, eager-mode producer spans, or custom instrumentation around a queue operation that does not pass through this app's `send_task` method.
 
 For Celery tasks, use `celery_operation_with_logbrew_span()` when you want safe task and queue metadata without registering Celery signals or patching `apply_async`. To connect producer and worker spans, create an explicit W3C carrier with `create_celery_trace_headers()` and pass it to your own `apply_async(...)` call:
 

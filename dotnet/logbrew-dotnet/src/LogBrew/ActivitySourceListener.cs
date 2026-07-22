@@ -185,10 +185,7 @@ namespace LogBrew
             LogBrewClient client,
             Action<LogBrewActivitySourceListenerOptions>? configure = null)
         {
-            if (client == null)
-            {
-                throw new ArgumentNullException(nameof(client));
-            }
+            ExceptionContract.ThrowIfNull(client, nameof(client));
 
             var options = LogBrewActivitySourceListenerOptions.Create();
             configure?.Invoke(options);
@@ -262,7 +259,7 @@ namespace LogBrew
             }
         }
 
-        private IDictionary<string, object?> DynamicMetadata(Activity activity)
+        private Dictionary<string, object?> DynamicMetadata(Activity activity)
         {
             if (options.MetadataProvider == null)
             {
@@ -343,10 +340,10 @@ namespace LogBrew
             }
 
             return value.IndexOf("://", StringComparison.Ordinal) < 0
-                && value.IndexOf("?", StringComparison.Ordinal) < 0
-                && value.IndexOf("#", StringComparison.Ordinal) < 0
-                && value.IndexOf("\r", StringComparison.Ordinal) < 0
-                && value.IndexOf("\n", StringComparison.Ordinal) < 0
+                && value.IndexOf('?') < 0
+                && value.IndexOf('#') < 0
+                && value.IndexOf('\r') < 0
+                && value.IndexOf('\n') < 0
                 && value.IndexOf("authorization", StringComparison.OrdinalIgnoreCase) < 0
                 && value.IndexOf("cookie", StringComparison.OrdinalIgnoreCase) < 0
                 && value.IndexOf("pass" + "word", StringComparison.OrdinalIgnoreCase) < 0

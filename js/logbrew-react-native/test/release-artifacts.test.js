@@ -45,6 +45,7 @@ test("React Native release-artifact helper prepares bundle output and writes a r
     const result = prepareLogBrewReactNativeReleaseArtifacts({
       bundle: bundlePath,
       sourcemap: sourcemapPath,
+      projectId: "550e8400-e29b-41d4-a716-446655440000",
       platform: "android",
       release: "2026.06.18-react-native-helper",
       environment: "production",
@@ -62,6 +63,7 @@ test("React Native release-artifact helper prepares bundle output and writes a r
     assert.equal(result.prepareReport.writeApplied, true);
     assert.equal(result.manifestReport.validation.status, "ready");
     assert.equal(manifest.validation.status, "ready");
+    assert.equal(manifest.projectId, "550e8400-e29b-41d4-a716-446655440000");
     assert.equal(manifest.release, "2026.06.18-react-native-helper");
     assert.equal(manifest.environment, "production");
     assert.equal(manifest.service, "checkout-react-native");
@@ -235,6 +237,7 @@ test("React Native release-artifact helper allows explicit hosted upload dry-run
     const result = uploadLogBrewReactNativeReleaseArtifacts({
       bundle: bundlePath,
       sourcemap: sourcemapPath,
+      projectId: "550e8400-e29b-41d4-a716-446655440000",
       platform: "ios",
       release: "2026.06.18-react-native-upload",
       environment: "production",
@@ -250,6 +253,33 @@ test("React Native release-artifact helper allows explicit hosted upload dry-run
     assert.equal(result.uploadReport.artifactCount, 1);
     assert.equal(result.uploadReport.filePartCount, 2);
     assert.equal(result.manifestReport.validation.status, "ready");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("React Native release-artifact helper rejects hosted upload without a project id", () => {
+  const root = tempDir();
+  try {
+    const buildDir = path.join(root, "dist");
+    const { appRoot, bundlePath, sourcemapPath } = writeReactNativeBundle(buildDir);
+
+    assert.throws(
+      () =>
+        uploadLogBrewReactNativeReleaseArtifacts({
+          bundle: bundlePath,
+          sourcemap: sourcemapPath,
+          platform: "ios",
+          release: "2026.06.18-react-native-upload",
+          environment: "production",
+          service: "checkout-react-native",
+          root: appRoot,
+          endpoint: "https://api.logbrew.com/api/release-artifacts",
+          allowHostedUpload: true,
+          dryRun: true,
+        }),
+      /manifest projectId as a UUID/u,
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

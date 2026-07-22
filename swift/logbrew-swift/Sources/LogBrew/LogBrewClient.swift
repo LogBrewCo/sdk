@@ -1,12 +1,7 @@
 import Foundation
 
-public final class LogBrewClient {
-    private let apiKey: String
-    private let sdk: SDKInfo
-    private let maxRetries: Int
-    private let lock = NSLock()
-    private var events: [Event] = []
-    private var closed = false
+public final class LogBrewClient: @unchecked Sendable {
+    private let engine: DeliveryEngine
 
     public static func create(
         apiKey: String,
@@ -28,29 +23,19 @@ public final class LogBrewClient {
         try requireNonEmpty("api_key", config.apiKey)
         try requireNonEmpty("sdk_name", config.sdkName)
         try requireNonEmpty("sdk_version", config.sdkVersion)
-        apiKey = config.apiKey
-        sdk = SDKInfo(name: config.sdkName, language: "swift", version: config.sdkVersion)
-        maxRetries = config.maxRetries
+        engine = DeliveryEngine(
+            apiKey: config.apiKey,
+            sdk: SDKInfo(name: config.sdkName, language: "swift", version: config.sdkVersion),
+            maxRetries: config.maxRetries,
+        )
     }
 
     public func pendingEvents() -> Int {
-        lock.lock()
-        defer {
-            lock.unlock()
-        }
-        return events.count
+        engine.pendingEvents()
     }
 
     public func previewJSON() throws -> String {
-        lock.lock()
-        let batch = EventBatch(sdk: sdk, events: events)
-        lock.unlock()
-
-        let data = try encodeBatch(batch)
-        guard let json = String(data: data, encoding: .utf8) else {
-            throw SdkError(code: "encoding_error", message: "event batch was not valid UTF-8")
-        }
-        return json
+        try engine.previewJSON()
     }
 
     public func release(_ id: String, timestamp: String, attributes: ReleaseAttributes) throws {
@@ -63,6 +48,11 @@ public final class LogBrewClient {
 
     public func issue(_ id: String, timestamp: String, attributes: IssueAttributes) throws {
         try pushEvent(.issue(validateIssue(attributes.withActiveTrace())), id: id, timestamp: timestamp)
+    }
+
+    @_spi(CrashReplay)
+    public func issueDetached(_ id: String, timestamp: String, attributes: IssueAttributes) throws {
+        try pushEvent(.issue(validateIssue(attributes)), id: id, timestamp: timestamp)
     }
 
     public func log(_ id: String, timestamp: String, attributes: LogAttributes) throws {
@@ -82,86 +72,52 @@ public final class LogBrewClient {
     }
 
     public func flush(transport: any Transport) throws -> TransportResponse {
-        lock.lock()
-        defer {
-            lock.unlock()
-        }
-        if closed {
-            throw SdkError(code: "shutdown_error", message: "client is already shut down")
-        }
-        return try flushInternalLocked(transport: transport)
+        try engine.flush(transport: transport)
     }
 
     public func shutdown(transport: any Transport) throws -> TransportResponse {
-        lock.lock()
-        defer {
-            lock.unlock()
-        }
-        if closed {
-            throw SdkError(code: "shutdown_error", message: "client is already shut down")
-        }
-        let response = try flushInternalLocked(transport: transport)
-        closed = true
-        return response
+        try engine.shutdown(transport: transport)
+    }
+
+    public func startAutomaticDelivery(
+        transport: any Transport,
+        options: AutomaticDeliveryOptions = AutomaticDeliveryOptions(),
+    ) throws {
+        try engine.startAutomaticDelivery(transport: transport, options: options)
+    }
+
+    public func recoverAutomaticDelivery() throws {
+        try engine.recoverAutomaticDelivery()
+    }
+
+    public func stopAutomaticDelivery() {
+        engine.stopAutomaticDelivery()
+    }
+
+    public func deliveryHealth() -> DeliveryHealth {
+        engine.health()
+    }
+
+    public func enableDurableDelivery(options: DurableDeliveryOptions) throws {
+        try engine.enableDurableDelivery(options: options)
+    }
+
+    public func purgeDurableDelivery() throws {
+        try engine.purgeDurableDelivery()
+    }
+
+    public func flush() throws -> TransportResponse {
+        try engine.flushOwnedTransport()
+    }
+
+    public func shutdown() throws -> TransportResponse {
+        try engine.shutdownOwnedTransport()
     }
 
     private func pushEvent(_ attributes: EventAttributes, id: String, timestamp: String) throws {
-        lock.lock()
-        defer {
-            lock.unlock()
-        }
-        if closed {
-            throw SdkError(code: "shutdown_error", message: "client is already shut down")
-        }
         try requireNonEmpty("event id", id)
         try requireTimestamp(timestamp)
-        events.append(Event(type: attributes.eventType, timestamp: timestamp, id: id, attributes: attributes))
-    }
-
-    private func flushInternalLocked(transport: any Transport) throws -> TransportResponse {
-        if events.isEmpty {
-            return TransportResponse(statusCode: 204, attempts: 0)
-        }
-
-        let body = try encodeBatch(EventBatch(sdk: sdk, events: events))
-        let maxAttempts = maxRetries + 1
-        var attempts = 0
-
-        while attempts < maxAttempts {
-            attempts += 1
-            do {
-                let response = try transport.send(apiKey: apiKey, body: body)
-                if response.statusCode == 401 {
-                    throw SdkError(code: "unauthenticated", message: "transport rejected the API key")
-                }
-                if (200 ..< 300).contains(response.statusCode) {
-                    events.removeAll()
-                    return TransportResponse(statusCode: response.statusCode, attempts: attempts)
-                }
-                if response.statusCode >= 500, attempts < maxAttempts {
-                    continue
-                }
-                throw SdkError(
-                    code: "transport_error",
-                    message: "unexpected transport status \(response.statusCode)",
-                )
-            } catch let error as SdkError {
-                throw error
-            } catch let error as TransportError {
-                if error.retryable, attempts < maxAttempts {
-                    continue
-                }
-                throw SdkError(code: error.code, message: error.message)
-            }
-        }
-
-        throw SdkError(code: "transport_error", message: "exhausted retries")
-    }
-
-    private func encodeBatch(_ batch: EventBatch) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(batch)
+        try engine.enqueue(Event(type: attributes.eventType, timestamp: timestamp, id: id, attributes: attributes))
     }
 }
 
@@ -172,6 +128,7 @@ private extension IssueAttributes {
             level: level,
             message: message,
             metadata: LogBrewTrace.metadataWithCurrentTrace(metadata),
+            nativeStackFrames: nativeStackFrames,
         )
     }
 }

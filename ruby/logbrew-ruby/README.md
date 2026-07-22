@@ -43,6 +43,56 @@ response = client.shutdown(LogBrew::RecordingTransport.always_accept)
 warn response.status_code
 ```
 
+## Serialized Worker Lifecycle
+
+Use `LogBrew::WorkerLifecycle` when a prefork or long-running worker processes
+one work item at a time and needs an explicit telemetry boundary:
+
+```ruby
+client = LogBrew::Client.create(
+  api_key: "LOGBREW_API_KEY",
+  sdk_name: "checkout-worker",
+  sdk_version: "1.0.0"
+)
+transport = LogBrew::HttpTransport.new
+lifecycle = LogBrew::WorkerLifecycle.create(
+  client: client,
+  transport: transport,
+  on_delivery_failure: ->(failure) {
+    warn "LogBrew delivery #{failure.code}; #{failure.pending_events} events retained"
+  }
+)
+
+result = lifecycle.run do
+  client.log(
+    "evt_job_started",
+    Time.now.utc.iso8601,
+    message: "job started",
+    level: "info",
+    logger: "checkout-worker"
+  )
+  perform_one_job
+end
+
+lifecycle.shutdown
+```
+
+Create the client, transport, and lifecycle inside each child process after
+forking. An inherited lifecycle rejects both work and shutdown before touching
+its copied queue or transport, and ownership is checked again after application
+work so a process change cannot flush copied parent state. `run` attempts one
+bounded flush whether the application returns or raises, but always preserves
+the exact application result or original exception. Delivery diagnostics expose
+only a stable stage/code and aggregate queued/dropped counts; they never include
+event content, request bodies, authorization values, exception messages,
+process IDs, paths, or transport state.
+
+This helper is intentionally explicit and installs no background thread,
+timer, signal hook, global fork patch, destructor, or `at_exit` flush. It is for
+serialized worker loops, not concurrent Sidekiq-style job execution. Keep using
+direct `client.flush`/`client.shutdown`, or a framework-specific integration,
+when that lifecycle fits the application better.
+
 ## First Useful Service Telemetry
 
 For a service request, combine release, environment, log, product action, network milestone, metric, and span events around one shared W3C trace:
@@ -121,7 +171,7 @@ headers = LogBrew::Traceparent.create_headers(
 )
 ```
 
-The helper accepts W3C-shaped values, rejects forbidden or all-zero IDs, normalizes uppercase hex to lowercase, exposes the sampled flag, and creates LogBrew child span attributes with a new caller-provided span ID. It does not patch Ruby HTTP clients.
+The helper accepts W3C-shaped values, rejects forbidden or all-zero IDs, normalizes uppercase hex to lowercase, exposes the sampled flag, and creates LogBrew child span attributes with a new caller-provided span ID. It does not patch Ruby HTTP clients globally.
 
 ## HTTP Request Trace Correlation
 
@@ -168,6 +218,37 @@ end
 ```
 
 `database_operation`, `cache_operation`, and `queue_operation` run your block under a child `LogBrew::Trace` context, preserve the block result or original exception, and emit exactly one span with primitive metadata. Capture failures can be observed with `on_error:` without replacing app behavior. The helpers intentionally drop SQL statements, query params, connection strings, cache keys/values, message bodies, job IDs, headers, cookies, URLs, auth-like fields, and other sensitive-looking metadata. Failed dependency spans include only the exception type in metadata plus one bounded `exception` span event with `exceptionType` and `exceptionEscaped: true`; exception messages and stacks stay out by default.
+
+## Outbound HTTP Tracing
+
+Wrap an app-owned `Net::HTTP` connection explicitly when outbound work should become a child of the active LogBrew trace:
+
+```ruby
+uri = URI("https://service.example/health")
+http = LogBrew::HttpClientTracing.wrap_net_http(
+  Net::HTTP.new(uri.host, uri.port),
+  client: client,
+  on_capture_error: ->(error) { warn(error.class.name) }
+)
+
+response = http.request(Net::HTTP::Get.new(uri.request_uri))
+```
+
+Faraday remains optional. Apps that already use Faraday can load the integration and place its middleware inside retry middleware so every actual retry receives a distinct child span:
+
+```ruby
+require "faraday"
+require "logbrew/faraday_tracing"
+
+connection = Faraday.new("https://service.example") do |builder|
+  builder.use LogBrew::FaradayTracingMiddleware, client: client
+  builder.adapter :net_http
+end
+```
+
+Both adapters are literal pass-throughs when `LogBrew::Trace.current` is absent. With an active parent, they propagate one W3C `traceparent`, return the caller-visible header and trace scope to their prior values, and capture one completion span per actual execution. Duplicate wrappers, nested LogBrew HTTP middleware, and SDK delivery are suppressed without process-wide hooks. Net::HTTP start blocks, response streaming, Faraday middleware ordering, responses, and exceptions retain their normal behavior; telemetry capture failures are advisory.
+
+Outbound HTTP spans allow only method, normalized host, status code, duration, adapter source, sampled state, and exception type. They never record scheme, port, path, query, fragment, full URL, request or response headers, bodies or sizes, exception messages or stacks, authentication material, cookies, baggage, tracestate, resolved addresses, or arbitrary request options.
 
 ## Metrics
 
@@ -276,6 +357,129 @@ warn response.status_code
 
 `HttpTransport` sends JSON with the SDK key in the `authorization` header, supports a custom endpoint, headers, timeout, and app-owned HTTP client object, maps HTTP statuses through the client's retry rules, and converts request/time-out failures into retryable transport errors.
 
+## Bounded Delivery
+
+The client bounds queued telemetry and each transport request independently. Queue defaults are 1,000 events and 4 MiB of compact event JSON. Request defaults are 100 events and 256 KiB. When a queue limit is reached, LogBrew rejects the new event so earlier release, environment, and trace context stays available for the next flush. An event that cannot fit one request is rejected before it enters the queue.
+
+```ruby
+dropped = 0
+client = LogBrew::Client.create(
+  api_key: "LOGBREW_API_KEY",
+  sdk_name: "my-ruby-app",
+  sdk_version: "1.0.0",
+  max_queue_size: 1_000,
+  max_queue_bytes: 4 * 1024 * 1024,
+  max_batch_size: 100,
+  max_batch_bytes: 256 * 1024,
+  on_event_dropped: lambda do |notice|
+    dropped = notice.dropped_events
+    warn "LogBrew queue pressure: #{notice.reason} (#{dropped} dropped)"
+  end
+)
+```
+
+`pending_events`, `pending_event_bytes`, and `dropped_events` expose local pressure without a network call. Events are serialized once at capture, so later mutation of caller-owned strings or metadata cannot change queued content, byte accounting, or retry bodies. `LogBrew::DroppedEvent` contains only the rejected event ID/type, the stable reason `queue_overflow`, `event_too_large`, or opt-in `persistence_failure`, cumulative loss, and retained count/bytes; it never includes event attributes or payload content. Callback errors are isolated from application capture.
+
+Transport bodies use compact JSON and stay under both request limits. `response.attempts` aggregates every request attempt and `response.batches` reports accepted request batches. Each successful request removes only its accepted queue prefix. If a later batch fails, its events and every later event remain queued in order. The failed body is frozen across later `flush` or `shutdown` calls, so events captured after failure cannot change retry bytes. A flush drains only the events present when it started; events captured during transport I/O remain queued.
+
+Existing custom transports keep the same `send(api_key, body)` interface, but they must allow one `flush` to call `send` more than once. Treat each call as an independent compact request and use `response.batches` when application code needs the accepted request count; do not assume one transport call per flush.
+
+`shutdown` rejects new capture while its final flush is running, closes only after every start-snapshot batch is accepted, and reopens capture if delivery fails. Clients created with `Client.create` own no background worker or timer; applications keep explicit control over when network delivery happens.
+
+## Automatic Delivery
+
+Applications that own their transport can opt into one lazy delivery worker. Manual clients remain the default.
+
+```ruby
+transport = LogBrew::HttpTransport.new(timeout: 10)
+client = LogBrew::Client.create_automatic(
+  api_key: ENV.fetch("LOGBREW_API_KEY"),
+  sdk_name: "checkout-worker",
+  sdk_version: "1.0.0",
+  transport: transport,
+  flush_interval: 5,
+  flush_threshold: 100,
+  retry_base_delay: 0.25,
+  retry_max_delay: 30,
+  persistent_queue_path: ENV["LOGBREW_PERSISTENT_QUEUE_PATH"]
+)
+
+client.log("evt_job_started", Time.now.utc.iso8601, message: "job started", level: "info")
+warn JSON.generate(client.delivery_health.to_h)
+client.shutdown
+```
+
+The worker starts only after accepted queue work exists, then wakes when the queue reaches `flush_threshold` or `flush_interval` expires. Restart-hydrated persistent work wakes it immediately. Automatic and manual sends share the existing serialized flush, immutable failed prefix, accepted-prefix acknowledgement, batch bounds, and persistence format; no second queue or transport path is created.
+
+Retryable network, `408`, and `5xx` failures retain the exact failed body and use capped equal-jitter backoff. Authentication (`401`/`403`), quota (`429`), validation (`400`/`422`), and other non-retryable responses pause automatic sends without dropping queued work. `recover_automatic_delivery` performs one explicit synchronous flush through the owned transport and resumes scheduling only after success. Calling `flush(transport)` directly provides the same explicit recovery boundary. `stop_automatic_delivery` joins the worker without draining or discarding work; a later manual flush remains available.
+
+`delivery_health` returns an immutable, JSON-serializable `LogBrew::DeliveryHealth` snapshot. Its fixed fields are lifecycle state, queued event/byte counts, dropped count, in-flight state, bounded outcome/failure/flush counters, pause reason, and current retry delay. It never contains event data, event IDs, API keys, endpoints, headers, response bodies, filesystem paths, process or thread IDs, exception messages, or server text.
+
+Automatic ownership is process-local. An inherited automatic client rejects capture, flush, purge, stop, and shutdown after `fork`; each child must create a fresh client, transport, and persistent queue owner. No signal handler, global fork hook, `at_exit`, or finalizer is installed. `shutdown` stops and joins the worker before its final drain, and a failed drain reopens the client with retryable failures scheduled or terminal failures paused. Application transport timeouts still bound how promptly an in-flight send can stop.
+
+## Sidekiq Tracing
+
+Sidekiq integration is explicit and optional. Sidekiq is not a dependency of the base gem. Create the LogBrew client and instrumentation in the process that owns the middleware, then register the client and server sides you use:
+
+```ruby
+require "logbrew"
+require "logbrew/sidekiq"
+require "sidekiq"
+
+transport = LogBrew::HttpTransport.new(timeout: 10)
+client = LogBrew::Client.create_automatic(
+  api_key: ENV.fetch("LOGBREW_API_KEY"),
+  sdk_name: "checkout-worker",
+  sdk_version: "1.0.0",
+  transport: transport
+)
+sidekiq_tracing = LogBrew::Sidekiq::Instrumentation.create(
+  client: client,
+  max_retries: 25
+)
+
+Sidekiq.configure_client { |config| sidekiq_tracing.register_client(config) }
+Sidekiq.configure_server do |config|
+  sidekiq_tracing.register_client(config)
+  sidekiq_tracing.register_server(config)
+  config.on(:quiet) { sidekiq_tracing.quiet }
+  config.on(:shutdown) { sidekiq_tracing.shutdown }
+end
+```
+
+Registration is app-owned, idempotent, and reversible with `unregister_client` and `unregister_server`; the first instrumentation registered for each middleware class owns that entry. `disable` and `enable` provide reversible capture control. `quiet` stops new Sidekiq instrumentation while already queued LogBrew events remain under the existing delivery owner. `shutdown` is idempotent and delegates draining to the existing client; automatic clients use their owned transport, while manual clients must pass `transport:` when the instrumentation is created.
+
+The client middleware adds one bounded `logbrew` carrier containing only a version, W3C `traceparent`, and enqueue time. Valid retries keep that carrier without creating another enqueue span. The server middleware continues a valid carrier or starts a fresh trace when it is absent or malformed, returns the caller trace state after every result, and records bounded queue-wait and execution timing. Set `max_retries` to the same default retry limit used by your Sidekiq configuration; per-job integer or disabled retry settings are honored. Retryable failures keep only error spans, while the terminal escaped failure adds one deduplicated fixed-title issue and preserves the original exception.
+
+Sidekiq spans contain only fixed source, sampled state, bounded retry count, bounded queue-wait duration, execution duration, status, and real cancellation. The integration does not capture job arguments, payload fields, job identifiers, worker names, queue values, connection data, exception messages or stacks, baggage, or tracestate. Capture failures are advisory and never replace job execution or retry behavior. Create fresh clients and instrumentation after `fork`; inherited instances fail closed without changing jobs.
+
+## Persistent Worker Delivery
+
+Server workers that need restart recovery can opt into an app-owned persistent queue. Create the client after forking and give every worker its own normalized absolute directory:
+
+```ruby
+queue_path = ENV.fetch("LOGBREW_PERSISTENT_QUEUE_PATH")
+
+client = LogBrew::Client.create(
+  api_key: ENV.fetch("LOGBREW_API_KEY"),
+  sdk_name: "checkout-worker",
+  sdk_version: "1.0.0",
+  persistent_queue_path: queue_path,
+  on_event_dropped: lambda do |notice|
+    warn "LogBrew delivery pressure: #{notice.reason} (#{notice.dropped_events} dropped)"
+  end
+)
+
+client.log("evt_job_started", Time.now.utc.iso8601, message: "job started", level: "info")
+client.shutdown(LogBrew::HttpTransport.new)
+```
+
+Persistence is disabled by default and adds no background thread, timer, or `at_exit` hook. Admission writes and syncs each validated event with an atomic same-directory rename. If that rename completes but directory sync cannot be confirmed, capture raises the content-free `persistence_commit_error`; the event remains pending and cannot be sent or purged until a later sync succeeds, and it is never reported as dropped. Restart reads the oldest records first, preserves the normal 1,000-event/4 MiB bounds, and keeps the same 100-event/256 KiB transport splitting. A server-accepted prefix is recorded before local compaction, so interrupted compaction does not replay it. A crash before that marker may replay a stable event ID; delivery is intentionally at-least-once, not exactly-once.
+
+The queue directory must be dedicated, owner-only, and used by one process. Symlinks, unexpected files, corrupt records, concurrent owners, and inherited pre-fork clients fail closed. Build each child client after fork with a unique path. Successful `shutdown` releases ownership; failed delivery remains restartable. Use `client.purge_pending_events` only when the application explicitly chooses to discard pending telemetry.
+
+Event files contain the same validated event JSON your application submitted, including message and metadata values. Protect the directory and do not put API keys or other sensitive values in telemetry. The SDK never adds the API key, endpoint, request headers, process ID, SDK request envelope, or queue path to stored records. Persistence failures before an event rename reject the new event with the content-free `persistence_failure` drop reason; they do not fall back to an in-memory-only event.
+
 ## Example Source
 
 The `examples` directory contains copyable snippets for creating a client, sending through `HttpTransport`, using the standard logger wrapper, attaching Rack middleware, and subscribing to Rails errors in your own Ruby app.
@@ -371,7 +575,11 @@ The subscriber implements `report(error, handled:, severity:, context:, source:,
 ## Behavior
 
 - `preview_json` returns the queued batch as pretty JSON.
-- `flush(transport)` sends queued events, retries retryable failures, and clears the queue only after a 2xx response.
+- `persistent_queue_path:` enables explicit owner-only, single-process restart recovery; `purge_pending_events` explicitly discards its pending prefix.
+- `Client.create_automatic(...)` opts an owned transport into one lazy interval/threshold worker; `delivery_health`, `recover_automatic_delivery`, and `stop_automatic_delivery` expose fixed process-local lifecycle control.
+- `LogBrew::Sidekiq::Instrumentation` explicitly installs optional client/server middleware with bounded W3C propagation, fixed telemetry, and app-owned quiet/shutdown hooks.
+- `flush(transport)` splits its queue snapshot into compact 100-event/256 KiB requests, freezes failed retry bytes, acknowledges only accepted prefixes, and leaves transport-time capture queued.
+- Queues default to 1,000 events and 4 MiB of compact serialized event data; `pending_event_bytes`, `dropped_events`, and `on_event_dropped` expose pressure locally. `TransportResponse#attempts` and `#batches` expose request work.
 - `metric(...)` queues explicit, application-owned metric events with name, kind, value, unit, temporality, and low-cardinality metadata validation.
 - `LogBrew::ProductTimeline` builds explicit, application-owned product action and network milestone timeline events with primitive metadata and query/hash-free routes.
 - `LogBrew::SupportTicketDraft.create` builds explicit, local-only support-ticket create payload drafts with redacted diagnostics and no backend route calls.

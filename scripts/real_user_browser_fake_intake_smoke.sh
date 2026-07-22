@@ -3,8 +3,15 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+browser_package_version="$(node -p "require('${repo_root}/js/logbrew-browser/package.json').version")"
+vite_version="8.0.16"
+next_version="16.2.10"
+react_version="19.2.7"
 tmp_dir="$(mktemp -d)"
 export npm_config_cache="$tmp_dir/npm-cache"
+export npm_config_update_notifier=false
+export npm_config_fund=false
+export npm_config_audit=false
 
 remove_tmp_dir() {
   rm -rf "$tmp_dir"
@@ -39,6 +46,8 @@ core_tgz="$tmp_dir/$core_tgz"
 browser_tgz="$tmp_dir/$browser_tgz"
 test -f "$core_tgz"
 test -f "$browser_tgz"
+core_sha256="$(shasum -a 256 "$core_tgz" | awk '{print $1}')"
+browser_sha256="$(shasum -a 256 "$browser_tgz" | awk '{print $1}')"
 
 app_dir="$tmp_dir/browser-fake-intake-app"
 mkdir -p "$app_dir"
@@ -51,6 +60,10 @@ npm install \
   --fund=false \
   "$core_tgz" \
   "$browser_tgz" \
+  "vite@$vite_version" \
+  "next@$next_version" \
+  "react@$react_version" \
+  "react-dom@$react_version" \
   >/dev/null
 
 grep -q '"@logbrew/sdk": "file:' package.json
@@ -59,8 +72,60 @@ grep -q '"@logbrew/sdk"' package-lock.json
 grep -q '"@logbrew/browser"' package-lock.json
 npm ls @logbrew/sdk @logbrew/browser >/dev/null
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/browser@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -q "@logbrew/browser@${browser_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
+grep -q "next@${next_version}" "$tmp_dir/npm-list-depth0.txt"
+grep -q "vite@${vite_version}" "$tmp_dir/npm-list-depth0.txt"
+
+mkdir -p vite-app/src next-app/app
+cat > vite-app/index.html <<'EOF'
+<main id="app"></main>
+<script type="module" src="/src/main.js"></script>
+EOF
+cat > vite-app/src/main.js <<'EOF'
+import { installLogBrewBrowser } from "@logbrew/browser";
+
+globalThis.__logbrewLifecycleInstaller = installLogBrewBrowser;
+document.querySelector("#app").textContent = "LogBrew lifecycle Vite smoke";
+EOF
+(
+  cd vite-app
+  ../node_modules/.bin/vite build >/dev/null
+)
+grep -R -q 'LogBrew lifecycle Vite smoke' vite-app/dist
+
+cat > next-app/package.json <<'EOF'
+{
+  "private": true,
+  "type": "module"
+}
+EOF
+cat > next-app/app/layout.jsx <<'EOF'
+export default function RootLayout({ children }) {
+  return <html lang="en"><body>{children}</body></html>;
+}
+EOF
+cat > next-app/app/page.jsx <<'EOF'
+import { LifecycleProbe } from "./probe.jsx";
+
+export default function Page() {
+  return <LifecycleProbe />;
+}
+EOF
+cat > next-app/app/probe.jsx <<'EOF'
+"use client";
+
+import { installLogBrewBrowser } from "@logbrew/browser";
+
+export function LifecycleProbe() {
+  return <button onClick={() => globalThis.__logbrewLifecycleInstaller = installLogBrewBrowser}>LogBrew lifecycle Next smoke</button>;
+}
+EOF
+(
+  cd next-app
+  NEXT_TELEMETRY_DISABLED=1 ../node_modules/.bin/next build >/dev/null
+)
+grep -R -q 'LogBrew lifecycle Next smoke' next-app/.next
 
 cat > smoke.mjs <<'EOF'
 import http from "node:http";
@@ -86,7 +151,7 @@ const retryIntake = await startFakeIntake({
 });
 const invalidIntake = await startFakeIntake({
   expectedAuthorization: `Bearer ${wrongClientKey}`,
-  statuses: [401]
+  statuses: [401, 401, 202, 202]
 });
 const rateLimitIntake = await startFakeIntake({
   expectedAuthorization: `Bearer ${clientKey}`,
@@ -97,7 +162,7 @@ const rateLimitIntake = await startFakeIntake({
 });
 const lifecycleIntake = await startFakeIntake({
   expectedAuthorization: `Bearer ${clientKey}`,
-  statuses: [202]
+  statuses: [{ delayMs: 40, status: 503 }, 202, 202, 202]
 });
 const onlineIntake = await startFakeIntake({
   expectedAuthorization: `Bearer ${clientKey}`,
@@ -132,19 +197,34 @@ try {
       })
     });
   }
+  const previewIds = parsePayload(retryClient.previewJson()).events.map((event) => event.id);
 
   const retryResponse = await retryClient.flush(createFetchTransport({
     endpoint: `${retryIntake.url}/v1/events`,
     keepalive: false
   }));
-  const retryPayload = parsePayload(retryIntake.requests.at(-1)?.body);
+  const acceptedPayloads = retryIntake.requests.slice(1).map((request) => parsePayload(request.body));
+  const acceptedEvents = acceptedPayloads.flatMap((payload) => payload.events);
+  const acceptedIds = acceptedEvents.map((event) => event.id);
   assertEqual(retryResponse.statusCode, 202, "retry flush status");
-  assertEqual(retryResponse.attempts, 2, "retry flush attempts");
-  assertEqual(retryIntake.requests.length, 2, "retry request count");
-  assertEqual(retryPayload.events.length, highVolumeLogs + 7, "retry payload event count");
+  assertEqual(retryResponse.attempts, 4, "retry flush attempts");
+  assertEqual(retryResponse.batches, 3, "retry flush batches");
+  assertEqual(retryIntake.requests.length, 4, "retry request count");
+  assertEqual(retryIntake.requests[0].body, retryIntake.requests[1].body, "retry first body identity");
+  assertEqual(acceptedEvents.length, highVolumeLogs + 7, "retry accepted event count");
+  assertEqual(new Set(acceptedIds).size, acceptedIds.length, "retry accepted event uniqueness");
+  assertEqual(JSON.stringify(acceptedIds), JSON.stringify(previewIds), "retry accepted event order");
+  for (const [index, payload] of acceptedPayloads.entries()) {
+    if (payload.events.length > 100) {
+      throw new Error(`retry batch ${index} exceeded the 100-event bound`);
+    }
+    if (Buffer.byteLength(retryIntake.requests[index + 1].body, "utf8") > 64 * 1024) {
+      throw new Error(`retry batch ${index} exceeded the 64 KiB browser request bound`);
+    }
+  }
   assertEqual(retryClient.pendingEvents(), 0, "retry client queue after flush");
   assertNoUnsafeContent(retryIntake.requests);
-  assertCorrelation(retryPayload);
+  assertCorrelation({ events: acceptedEvents });
 
   const invalidClient = createLogBrewBrowserClient({
     clientKey: wrongClientKey,
@@ -171,6 +251,10 @@ try {
   }
   assertEqual(invalidClient.pendingEvents(), 1, "invalid key keeps event queued");
 
+  const lifecycleAuthPause = await assertLifecycleTerminalPause({
+    intake: invalidIntake
+  });
+
   const rateLimitClient = createLogBrewBrowserClient({
     clientKey,
     maxRetries: 2,
@@ -194,12 +278,13 @@ try {
   assertEqual(rateLimitClient.pendingEvents(), 1, "rate limit keeps event queued");
   assertEqual(rateLimitIntake.requests.length, 1, "rate limit should not retry immediately");
 
-  const lifecycleReason = await assertBrowserEventFlush({
-    eventType: "pagehide",
+  const lifecycleProof = await assertLifecycleDelivery({
     intake: lifecycleIntake,
-    label: "pagehide",
-    reason: "pagehide",
     timestampOffset: 650
+  });
+  const lifecycleBodyDefer = await assertLifecycleBodyDefer({
+    intake: lifecycleIntake,
+    timestampOffset: 655
   });
   const onlineReason = await assertBrowserEventFlush({
     eventType: "online",
@@ -373,13 +458,19 @@ try {
     fakeIntakeBeaconEvent: beaconBody.envelope.events[0].id,
     fakeIntakeBeaconAuthHeaderless: beaconIntake.requests[0].authorization === undefined,
     fakeIntakeBeaconCjs: cjsBeaconBody.envelope.events[0].id,
-    fakeIntakeEvents: retryPayload.events.length,
+    fakeIntakeBatches: retryResponse.batches,
+    fakeIntakeEvents: acceptedEvents.length,
     fakeIntakeHighVolumeLogs: highVolumeLogs,
     fakeIntakeInvalidKey: invalidError.code,
     fakeIntakeKeepaliveBodyLimit: keepaliveBodyError.code,
     fakeIntakeKeepaliveCjs: cjsKeepaliveError.code,
     fakeIntakeQueueDrops: boundedClient.droppedEvents(),
-    fakeIntakeLifecycleReason: lifecycleReason,
+    fakeIntakeLifecycleAuthPause: lifecycleAuthPause,
+    fakeIntakeLifecycleBodyBytes: lifecycleProof.bodyBytes,
+    fakeIntakeLifecycleBodyDefer: lifecycleBodyDefer,
+    fakeIntakeLifecycleDeduplicated: lifecycleProof.deduplicated,
+    fakeIntakeLifecycleExactRetry: lifecycleProof.exactRetry,
+    fakeIntakeLifecycleReason: lifecycleProof.reason,
     fakeIntakeOnlineReason: onlineReason,
     fakeIntakeRateLimit: rateLimitError.code,
     fakeIntakeRateLimitRetryAfterMs: rateLimitError.retryAfterMs,
@@ -514,6 +605,9 @@ async function startFakeIntake({ expectedAuthorization, expectedIngestKey, path 
         return;
       }
     }
+    if (typeof statusEntry !== "number" && statusEntry.delayMs > 0) {
+      await delay(statusEntry.delayMs);
+    }
     response.writeHead(status, responseHeaders);
     response.end(JSON.stringify({ ok: status >= 200 && status < 300 }));
   });
@@ -627,6 +721,172 @@ async function assertBrowserEventFlush({ eventType, intake, label, reason, times
   return flushes[0].reason;
 }
 
+async function assertLifecycleDelivery({ intake, timestampOffset }) {
+  const browserWindow = createFakeBrowserWindow();
+  const errors = [];
+  const flushes = [];
+  const context = installLogBrewBrowser({
+    browserWindow,
+    capturePageViews: false,
+    clientKey,
+    endpoint: `${intake.url}/v1/events`,
+    flushOnCapture: false,
+    flushOnOnline: false,
+    maxRetries: 0,
+    onCaptureError(error, _browserContext, details) {
+      errors.push({ code: error.code, reason: details.reason });
+    },
+    onFlush(response, _browserContext, details) {
+      flushes.push({ reason: details.reason, statusCode: response.statusCode });
+    },
+    sdkName: "logbrew-browser-lifecycle-fake-intake-smoke",
+    sdkVersion: "0.1.0"
+  });
+
+  context.client.log("evt_browser_lifecycle_retry_001", timestamp(timestampOffset), {
+    level: "info",
+    logger: "browser.lifecycle",
+    message: "page exit retry smoke",
+    metadata: baseMetadata({ traceId })
+  });
+  browserWindow.document.visibilityState = "hidden";
+  browserWindow.dispatchDocumentEvent("visibilitychange");
+  await waitFor("first lifecycle request", () => intake.requests.length === 1);
+  browserWindow.dispatchEvent("pagehide");
+  context.client.log("evt_browser_lifecycle_later_001", timestamp(timestampOffset + 1), {
+    level: "info",
+    logger: "browser.lifecycle",
+    message: "captured during lifecycle request",
+    metadata: baseMetadata({ traceId })
+  });
+  await waitFor("failed lifecycle request", () => errors.length === 1);
+  assertEqual(intake.requests.length, 1, "hidden and pagehide coalesced request count");
+  assertEqual(errors[0].code, "transport_error", "lifecycle retry error code");
+  assertEqual(errors[0].reason, "visibility_hidden", "lifecycle retry error reason");
+  assertEqual(context.client.pendingEvents(), 2, "lifecycle failure retains failed prefix and later capture");
+  assertEqual(parsePayload(intake.requests[0].body).events.length, 1, "failed lifecycle prefix size");
+
+  await delay(10);
+  browserWindow.dispatchEvent("pagehide");
+  await waitFor("successful lifecycle retry", () => intake.requests.length === 3 && flushes.length === 1);
+  assertEqual(intake.requests[0].body, intake.requests[1].body, "lifecycle retry body identity");
+  assertEqual(context.client.pendingEvents(), 0, "successful lifecycle retry queue count");
+  assertEqual(parsePayload(intake.requests[2].body).events[0].id, "evt_browser_lifecycle_later_001", "later lifecycle event id");
+  assertLifecycleRequests(intake.requests.slice(0, 3));
+
+  context.client.log("evt_browser_lifecycle_teardown_001", timestamp(timestampOffset + 2), {
+    level: "info",
+    message: "teardown smoke"
+  });
+  context.uninstall();
+  context.uninstall();
+  browserWindow.dispatchEvent("pagehide");
+  browserWindow.dispatchDocumentEvent("visibilitychange");
+  await delay(20);
+  assertEqual(intake.requests.length, 3, "teardown lifecycle request count");
+  assertEqual(context.client.pendingEvents(), 1, "teardown leaves work for explicit owner");
+
+  return {
+    bodyBytes: Buffer.byteLength(intake.requests[0].body, "utf8"),
+    deduplicated: true,
+    exactRetry: true,
+    reason: flushes[0].reason
+  };
+}
+
+async function assertLifecycleBodyDefer({ intake, timestampOffset }) {
+  const browserWindow = createFakeBrowserWindow();
+  const errors = [];
+  const requestCount = intake.requests.length;
+  const context = installLogBrewBrowser({
+    browserWindow,
+    capturePageViews: false,
+    clientKey,
+    endpoint: `${intake.url}/v1/events`,
+    flushOnCapture: false,
+    flushOnOnline: false,
+    maxKeepaliveBodyBytes: 128,
+    maxRetries: 0,
+    onCaptureError(error) {
+      errors.push(error.code);
+    }
+  });
+  context.client.log("evt_browser_lifecycle_deferred_001", timestamp(timestampOffset), {
+    level: "info",
+    message: "x".repeat(256)
+  });
+  browserWindow.dispatchEvent("pagehide");
+  await waitFor("oversized lifecycle defer", () => errors.length === 1);
+  assertEqual(errors[0], "keepalive_body_too_large", "oversized lifecycle error code");
+  assertEqual(intake.requests.length, requestCount, "oversized lifecycle network request count");
+  assertEqual(context.client.pendingEvents(), 1, "oversized lifecycle retained queue count");
+
+  await context.client.flush(createFetchTransport({
+    endpoint: `${intake.url}/v1/events`,
+    keepalive: false
+  }));
+  assertEqual(intake.requests.length, requestCount + 1, "explicit non-keepalive request count");
+  assertEqual(context.client.pendingEvents(), 0, "explicit non-keepalive accepted queue count");
+  context.uninstall();
+  return errors[0];
+}
+
+async function assertLifecycleTerminalPause({ intake }) {
+  const browserWindow = createFakeBrowserWindow();
+  const errors = [];
+  const initialRequestCount = intake.requests.length;
+  const context = installLogBrewBrowser({
+    browserWindow,
+    capturePageViews: false,
+    clientKey: wrongClientKey,
+    endpoint: `${intake.url}/v1/events`,
+    flushOnCapture: false,
+    flushOnOnline: false,
+    maxRetries: 0,
+    onCaptureError(error) {
+      errors.push(error.code);
+    }
+  });
+  context.client.log("evt_browser_lifecycle_auth_001", timestamp(640), {
+    level: "warning",
+    message: "terminal auth pause smoke"
+  });
+  browserWindow.dispatchEvent("pagehide");
+  await waitFor("terminal lifecycle response", () => errors.length === 1);
+  assertEqual(errors[0], "unauthenticated", "terminal lifecycle error code");
+  assertEqual(context.client.pendingEvents(), 1, "terminal lifecycle retained queue count");
+  browserWindow.dispatchEvent("pagehide");
+  await delay(20);
+  assertEqual(intake.requests.length, initialRequestCount + 1, "paused lifecycle request count");
+
+  const recovered = await context.flush();
+  assertEqual(recovered.statusCode, 202, "explicit terminal recovery status");
+  context.client.log("evt_browser_lifecycle_auth_recovered_001", timestamp(641), {
+    level: "info",
+    message: "terminal auth recovery smoke"
+  });
+  browserWindow.dispatchEvent("pagehide");
+  await waitFor("recovered lifecycle response", () => intake.requests.length === initialRequestCount + 3);
+  assertEqual(context.client.pendingEvents(), 0, "recovered lifecycle queue count");
+  assertLifecycleRequests(intake.requests.slice(initialRequestCount));
+  context.uninstall();
+  return true;
+}
+
+function assertLifecycleRequests(requests) {
+  for (const request of requests) {
+    assertEqual(request.authorization === `Bearer ${clientKey}` || request.authorization === `Bearer ${wrongClientKey}`, true, "lifecycle Authorization header");
+    assertEqual(request.method, "POST", "lifecycle method");
+    assertEqual(request.url, "/v1/events", "lifecycle path");
+    if (request.body.includes(clientKey) || request.body.includes(wrongClientKey)) {
+      throw new Error("lifecycle body leaked a client key");
+    }
+    if (Buffer.byteLength(request.body, "utf8") > 64 * 1024) {
+      throw new Error("lifecycle body exceeded the default keepalive bound");
+    }
+  }
+}
+
 async function captureError(callback) {
   try {
     await callback();
@@ -715,13 +975,27 @@ grep -q '"ok":true' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeBeaconEvent":"evt_browser_beacon_001"' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeBeaconAuthHeaderless":true' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeBeaconCjs":"evt_browser_beacon_cjs_001"' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeBatches":3' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeEvents":257' "$tmp_dir/browser-fake-intake.stderr.json"
-grep -q '"fakeIntakeAttempts":2' "$tmp_dir/browser-fake-intake.stderr.json"
-grep -q '"fakeIntakeRequests":2' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeAttempts":4' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeRequests":4' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeInvalidKey":"unauthenticated"' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeLifecycleAuthPause":true' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeLifecycleBodyDefer":"keepalive_body_too_large"' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeLifecycleDeduplicated":true' "$tmp_dir/browser-fake-intake.stderr.json"
+grep -q '"fakeIntakeLifecycleExactRetry":true' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeLifecycleReason":"pagehide"' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeOnlineReason":"online"' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeRateLimit":"rate_limited"' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeRateLimitRetryAfterMs":2000' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeShutdownStatus":202' "$tmp_dir/browser-fake-intake.stderr.json"
 grep -q '"fakeIntakeHighVolumeLogs":250' "$tmp_dir/browser-fake-intake.stderr.json"
+
+printf 'Browser lifecycle installed smoke passed: @logbrew/sdk@%s sha256=%s @logbrew/browser@%s sha256=%s Vite=%s Next=%s React=%s\n' \
+  "$sdk_package_version" \
+  "$core_sha256" \
+  "$browser_package_version" \
+  "$browser_sha256" \
+  "$vite_version" \
+  "$next_version" \
+  "$react_version"

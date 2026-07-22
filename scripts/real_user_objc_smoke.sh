@@ -54,6 +54,12 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
+test -f "$sdk_dir/src/LBWDeliveryEngine.h"
+test -f "$sdk_dir/src/LBWDeliveryEngine.m"
+test -f "$sdk_dir/src/LBWDeliveryEnginePrivate.h"
+test -f "$sdk_dir/src/LBWDeliveryEngineDurable.m"
+test -f "$sdk_dir/src/LBWDurableDeliveryStore.h"
+test -f "$sdk_dir/src/LBWDurableDeliveryStore.m"
 test -f "$sdk_dir/src/LogBrewTrace.m"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.h"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.m"
@@ -66,6 +72,11 @@ grep -q 'LBWOpenTelemetrySpanContext' "$sdk_dir/include/LogBrew.h"
 grep -q 'metricWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
+grep -q 'startAutomaticDeliveryWithTransport' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWDurableDeliveryOptions' "$sdk_dir/include/LogBrew.h"
+grep -q 'enableDurableDeliveryWithOptions' "$sdk_dir/include/LogBrew.h"
+grep -q 'purgeDurableDeliveryWithError' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWDeliveryHealth' "$sdk_dir/include/LogBrew.h"
 grep -q 'LBWURLSessionTimings' "$sdk_dir/include/LogBrew.h"
 grep -q 'timingsWithTaskMetrics' "$sdk_dir/include/LogBrew.h"
 grep -q 'startURLSessionSpanForRequest' "$sdk_dir/include/LogBrew.h"
@@ -85,6 +96,12 @@ mkdir -p "$sdk_dir"
 tar -xzf "$archive" -C "$sdk_dir"
 test -f "$sdk_dir/include/LogBrew.h"
 test -f "$sdk_dir/src/LogBrew.m"
+test -f "$sdk_dir/src/LBWDeliveryEngine.h"
+test -f "$sdk_dir/src/LBWDeliveryEngine.m"
+test -f "$sdk_dir/src/LBWDeliveryEnginePrivate.h"
+test -f "$sdk_dir/src/LBWDeliveryEngineDurable.m"
+test -f "$sdk_dir/src/LBWDurableDeliveryStore.h"
+test -f "$sdk_dir/src/LBWDurableDeliveryStore.m"
 test -f "$sdk_dir/src/LogBrewTrace.m"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.h"
 test -f "$sdk_dir/src/LogBrewNetworkValidation.m"
@@ -97,6 +114,11 @@ grep -q 'LBWOpenTelemetrySpanContext' "$sdk_dir/include/LogBrew.h"
 grep -q 'metricWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureProductActionWithID' "$sdk_dir/include/LogBrew.h"
 grep -q 'captureNetworkMilestoneWithID' "$sdk_dir/include/LogBrew.h"
+grep -q 'startAutomaticDeliveryWithTransport' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWDurableDeliveryOptions' "$sdk_dir/include/LogBrew.h"
+grep -q 'enableDurableDeliveryWithOptions' "$sdk_dir/include/LogBrew.h"
+grep -q 'purgeDurableDeliveryWithError' "$sdk_dir/include/LogBrew.h"
+grep -q 'LBWDeliveryHealth' "$sdk_dir/include/LogBrew.h"
 grep -q 'LBWURLSessionTimings' "$sdk_dir/include/LogBrew.h"
 grep -q 'timingsWithTaskMetrics' "$sdk_dir/include/LogBrew.h"
 grep -q 'startURLSessionSpanForRequest' "$sdk_dir/include/LogBrew.h"
@@ -106,6 +128,17 @@ grep -q 'openTelemetrySpanContextFromSpanObject' "$sdk_dir/include/LogBrew.h"
 grep -q 'contextFromOpenTelemetrySpanObject' "$sdk_dir/include/LogBrew.h"
 grep -q 'spanAttributesFromOpenTelemetrySpanObject' "$sdk_dir/include/LogBrew.h"
 grep -q 'spanAttributesFromOpenTelemetrySpanContext' "$sdk_dir/include/LogBrew.h"
+
+installed_core_sources=(
+  "$sdk_dir/src/LogBrew.m"
+  "$sdk_dir/src/LBWDeliveryEngine.m"
+  "$sdk_dir/src/LBWDeliveryEngineDurable.m"
+  "$sdk_dir/src/LBWDurableDeliveryStore.m"
+  "$sdk_dir/src/LogBrewTrace.m"
+  "$sdk_dir/src/LogBrewNetworkValidation.m"
+  "$sdk_dir/src/LogBrewURLSession.m"
+  "$sdk_dir/src/LogBrewLifecycle.m"
+)
 
 cat > "$app_dir/main.m" <<'EOF'
 #import "LogBrew.h"
@@ -431,11 +464,7 @@ EOF
 
 "$objc_command" -fobjc-arc -Wall -Wextra -Wpedantic -Werror \
   -I"$sdk_dir/include" \
-  "$sdk_dir/src/LogBrew.m" \
-  "$sdk_dir/src/LogBrewTrace.m" \
-  "$sdk_dir/src/LogBrewNetworkValidation.m" \
-  "$sdk_dir/src/LogBrewURLSession.m" \
-  "$sdk_dir/src/LogBrewLifecycle.m" \
+  "${installed_core_sources[@]}" \
   "$app_dir/main.m" \
   -framework Foundation \
   -o "$app_dir/native_objc_app"
@@ -463,6 +492,21 @@ int main(void) {
     if (client == nil) {
       LBWDie([error localizedDescription]);
     }
+    LBWHTTPTransport *transport = [[LBWHTTPTransport alloc] initWithEndpoint:endpoint
+                                                                    headers:@{@"x-logbrew-source": @"objc-consumer"}
+                                                                    timeout:5.0
+                                                                      error:&error];
+    if (transport == nil) {
+      LBWDie([error localizedDescription]);
+    }
+    LBWAutomaticDeliveryOptions *options = [[LBWAutomaticDeliveryOptions alloc] init];
+    options.interval = 30.0;
+    options.threshold = 1U;
+    options.retryBaseDelay = 0.01;
+    options.maxRetryDelay = 0.01;
+    if (![client startAutomaticDeliveryWithTransport:transport options:options error:&error]) {
+      LBWDie([error localizedDescription]);
+    }
     if (![client logWithID:@"evt_objc_http_transport"
                  timestamp:@"2026-06-02T10:00:06Z"
                 attributes:@{
@@ -473,24 +517,24 @@ int main(void) {
                      error:&error]) {
       LBWDie([error localizedDescription]);
     }
-    LBWHTTPTransport *transport = [[LBWHTTPTransport alloc] initWithEndpoint:endpoint
-                                                                    headers:@{@"x-logbrew-source": @"objc-consumer"}
-                                                                    timeout:5.0
-                                                                      error:&error];
-    if (transport == nil) {
-      LBWDie([error localizedDescription]);
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5.0];
+    while (client.pendingEvents > 0U && [[NSDate date] compare:deadline] == NSOrderedAscending) {
+      [NSThread sleepForTimeInterval:0.01];
     }
-    LBWTransportResponse *response = [client flushWithTransport:transport error:&error];
-    if (response == nil) {
-      LBWDie([error localizedDescription]);
-    }
-    if (response.statusCode != 202 || response.attempts != 2U || client.pendingEvents != 0U) {
-      LBWDie([NSString stringWithFormat:@"unexpected HTTP response status=%ld attempts=%lu pending=%lu",
-                                        (long)response.statusCode,
-                                        (unsigned long)response.attempts,
+    LBWDeliveryHealth *health = client.deliveryHealth;
+    if (client.pendingEvents != 0U || health.acceptedEvents != 1U || health.deliveryAttempts != 2U ||
+        health.lastOutcome != LBWDeliveryOutcomeAccepted) {
+      LBWDie([NSString stringWithFormat:@"unexpected automatic HTTP state attempts=%lu accepted=%lu pending=%lu",
+                                        (unsigned long)health.deliveryAttempts,
+                                        (unsigned long)health.acceptedEvents,
                                         (unsigned long)client.pendingEvents]);
     }
-    fprintf(stderr, "{\"ok\":true,\"httpAttempts\":%lu}\n", (unsigned long)response.attempts);
+    LBWTransportResponse *shutdownResponse = [client shutdownOwnedTransportWithError:&error];
+    if (shutdownResponse == nil || shutdownResponse.statusCode != 204 ||
+        client.deliveryHealth.state != LBWDeliveryStateClosed) {
+      LBWDie(error != nil ? [error localizedDescription] : @"automatic shutdown failed");
+    }
+    fprintf(stderr, "{\"ok\":true,\"httpAttempts\":%lu}\n", (unsigned long)health.deliveryAttempts);
   }
   return 0;
 }
@@ -567,11 +611,7 @@ fi
 
 "$objc_command" -fobjc-arc -Wall -Wextra -Wpedantic -Werror \
   -I"$sdk_dir/include" \
-  "$sdk_dir/src/LogBrew.m" \
-  "$sdk_dir/src/LogBrewTrace.m" \
-  "$sdk_dir/src/LogBrewNetworkValidation.m" \
-  "$sdk_dir/src/LogBrewURLSession.m" \
-  "$sdk_dir/src/LogBrewLifecycle.m" \
+  "${installed_core_sources[@]}" \
   "$sdk_dir/src/LBWHTTPTransport.m" \
   "$app_dir/http_app.m" \
   -framework Foundation \
@@ -600,6 +640,85 @@ for request in requests:
 if "evt_objc_http_transport" not in requests[1]["body"]:
     raise SystemExit("missing Objective-C HTTP transport event in final request body")
 PY
+
+cat > "$app_dir/durable_app.m" <<'EOF'
+#import "LogBrew.h"
+
+static void LBWFail(NSString *message) {
+  fprintf(stderr, "%s\n", [message UTF8String]);
+  exit(1);
+}
+
+int main(int argc, const char *argv[]) {
+  @autoreleasepool {
+    if (argc != 3) {
+      LBWFail(@"expected mode and storage parent");
+    }
+    NSString *mode = [NSString stringWithUTF8String:argv[1]];
+    NSURL *parent = [NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[2]] isDirectory:YES];
+    NSError *error = nil;
+    LBWConfig *config = [LBWConfig configWithAPIKey:@"LOGBREW_API_KEY"];
+    config.sdkName = @"objc-installed-durable-smoke";
+    config.maxRetries = 1U;
+    LBWClient *client = [[LBWClient alloc] initWithConfig:config error:&error];
+    LBWDurableDeliveryOptions *options = [[LBWDurableDeliveryOptions alloc] initWithDirectoryURL:parent];
+    if (client == nil || ![client enableDurableDeliveryWithOptions:options error:&error]) {
+      LBWFail(error != nil ? error.localizedDescription : @"durable enable failed");
+    }
+
+    LBWRecordingTransport *transport = nil;
+    if ([mode isEqualToString:@"write"]) {
+      if (![client logWithID:@"objc-installed-durable-event"
+                   timestamp:@"2026-06-02T10:00:00Z"
+                  attributes:@{ @"message": @"survives restart", @"level": @"error" }
+                       error:&error]) {
+        LBWFail(error != nil ? error.localizedDescription : @"durable capture failed");
+      }
+      transport = [[LBWRecordingTransport alloc] initWithSteps:@[
+        [LBWRecordingStep statusCodeStep:503],
+        [LBWRecordingStep statusCodeStep:503]
+      ]];
+      if ([client flushWithTransport:transport error:&error] != nil || transport.sentBodies.count != 2U ||
+          ![transport.sentBodies[0] isEqualToString:transport.sentBodies[1]]) {
+        LBWFail(@"retryable durable write did not remain queued");
+      }
+    } else if ([mode isEqualToString:@"recover"]) {
+      if (client.pendingEvents != 1U) {
+        LBWFail(@"durable event was not recovered");
+      }
+      transport = [[LBWRecordingTransport alloc] initWithSteps:@[[LBWRecordingStep statusCodeStep:202]]];
+      LBWTransportResponse *response = [client flushWithTransport:transport error:&error];
+      if (response == nil || response.statusCode != 202 || client.pendingEvents != 0U ||
+          transport.sentBodies.count != 1U) {
+        LBWFail(error != nil ? error.localizedDescription : @"durable recovery failed");
+      }
+    } else {
+      LBWFail(@"unknown durable smoke mode");
+    }
+    printf("%s\n", [transport.sentBodies.firstObject UTF8String]);
+  }
+  return 0;
+}
+EOF
+
+"$objc_command" -fobjc-arc -Wall -Wextra -Wpedantic -Werror \
+  -I"$sdk_dir/include" \
+  "${installed_core_sources[@]}" \
+  "$app_dir/durable_app.m" \
+  -framework Foundation \
+  -o "$app_dir/durable_app"
+durable_parent="$tmp_dir/objc-durable-parent"
+mkdir -m 700 "$durable_parent"
+"$app_dir/durable_app" write "$durable_parent" > "$tmp_dir/objc-durable-write.json"
+if grep -R -q 'LOGBREW_API_KEY' "$durable_parent/logbrew-delivery-v1"; then
+  echo "Objective-C durable storage contained an API key" >&2
+  exit 1
+fi
+"$app_dir/durable_app" recover "$durable_parent" > "$tmp_dir/objc-durable-recover.json"
+cmp -s "$tmp_dir/objc-durable-write.json" "$tmp_dir/objc-durable-recover.json"
+grep -q 'objc-installed-durable-event' "$tmp_dir/objc-durable-recover.json"
+test ! -e "$durable_parent/logbrew-delivery-v1/frozen-prefix.json"
+test -z "$(find "$durable_parent/logbrew-delivery-v1" -name 'event-*.json' -print -quit)"
 
 make -C "$sdk_dir/examples" OBJC="$objc_command" > "$tmp_dir/examples-help.txt"
 grep -qx 'run-readme-example -> make run-readme-example' "$tmp_dir/examples-help.txt"

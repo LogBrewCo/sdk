@@ -34,6 +34,13 @@ class ValidateFixturesTests(unittest.TestCase):
             },
         }
 
+    def issue_attributes(self, payload: dict) -> dict:
+        return next(
+            event["attributes"]
+            for event in payload["events"]
+            if event["type"] == "issue"
+        )
+
     def test_valid_fixture_passes(self) -> None:
         payload = self.load_valid_payload()
         validate_payload(payload)
@@ -93,6 +100,45 @@ class ValidateFixturesTests(unittest.TestCase):
         with self.assertRaisesRegex(
             ValidationError,
             "event 4 attribute durationMs must be a non-negative number",
+        ):
+            validate_payload(payload)
+
+    def test_issue_stack_frames_pass_with_bounded_generated_positions(self) -> None:
+        payload = self.load_valid_payload()
+        self.issue_attributes(payload)["stackFrames"] = [
+            {
+                "filename": "/assets/app.js",
+                "line": 12,
+                "column": 34,
+                "debugId": "11111111-2222-4333-8444-555555555555",
+            },
+            {"filename": "/assets/vendor.js", "line": 1, "column": 2},
+        ]
+
+        validate_payload(payload)
+
+    def test_rejects_invalid_issue_stack_frame_shape(self) -> None:
+        payload = self.load_valid_payload()
+        self.issue_attributes(payload)["stackFrames"] = [
+            {"filename": "/assets/app.js?private=value", "line": 0, "column": 2}
+        ]
+
+        with self.assertRaisesRegex(
+            ValidationError,
+            "event 2 issue stack frame 0 filename is invalid",
+        ):
+            validate_payload(payload)
+
+    def test_rejects_too_many_issue_stack_frames(self) -> None:
+        payload = self.load_valid_payload()
+        self.issue_attributes(payload)["stackFrames"] = [
+            {"filename": f"frame-{index}.js", "line": index + 1, "column": 2}
+            for index in range(33)
+        ]
+
+        with self.assertRaisesRegex(
+            ValidationError,
+            "event 2 issue stackFrames must contain 1-32 entries",
         ):
             validate_payload(payload)
 
@@ -297,6 +343,50 @@ class ValidateFixturesTests(unittest.TestCase):
             ]
         )
         self.assertEqual(schema_temporalities, validator_temporalities)
+
+    def test_schema_describes_issue_stack_frames(self) -> None:
+        schema = self.load_schema()
+        issue_properties = schema["$defs"]["issueEvent"]["allOf"][1]["properties"]["attributes"][
+            "properties"
+        ]
+        self.assertIn("stackFrames", issue_properties)
+        self.assertEqual(
+            issue_properties["stackFrames"],
+            {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 32,
+                "items": {"$ref": "#/$defs/issueStackFrame"},
+            },
+        )
+
+    def test_schema_issue_stack_frame_bounds_match_validator(self) -> None:
+        schema = self.load_schema()
+        self.assertIn("issueStackFrame", schema["$defs"])
+        frame = schema["$defs"]["issueStackFrame"]
+        self.assertEqual(frame["type"], "object")
+        self.assertEqual(frame["additionalProperties"], False)
+        self.assertEqual(set(frame["required"]), {"filename", "line", "column"})
+        self.assertEqual(
+            frame["properties"],
+            {
+                "filename": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2048,
+                    "pattern": r"^[^?#\u0000-\u001f\u007f]+$",
+                },
+                "line": {"type": "integer", "minimum": 1, "maximum": 2_147_483_647},
+                "column": {"type": "integer", "minimum": 1, "maximum": 2_147_483_647},
+                "debugId": {
+                    "type": "string",
+                    "pattern": (
+                        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                    ),
+                },
+            },
+        )
 
 
 if __name__ == "__main__":

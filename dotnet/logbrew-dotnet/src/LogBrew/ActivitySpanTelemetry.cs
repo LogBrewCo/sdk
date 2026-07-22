@@ -112,16 +112,16 @@ namespace LogBrew
         private static bool IsUnsafeResourceValue(string value)
         {
             return value.Length > 120
-                || value.IndexOf("://", StringComparison.Ordinal) >= 0
-                || value.IndexOf("?", StringComparison.Ordinal) >= 0
-                || value.IndexOf("#", StringComparison.Ordinal) >= 0
-                || value.IndexOf("\r", StringComparison.Ordinal) >= 0
-                || value.IndexOf("\n", StringComparison.Ordinal) >= 0
-                || value.IndexOf("authorization", StringComparison.OrdinalIgnoreCase) >= 0
-                || value.IndexOf("cookie", StringComparison.OrdinalIgnoreCase) >= 0
-                || value.IndexOf("pass" + "word", StringComparison.OrdinalIgnoreCase) >= 0
-                || value.IndexOf("sec" + "ret", StringComparison.OrdinalIgnoreCase) >= 0
-                || value.IndexOf("tok" + "en", StringComparison.OrdinalIgnoreCase) >= 0;
+                || TextSearch.Contains(value, "://", StringComparison.Ordinal)
+                || TextSearch.Contains(value, '?')
+                || TextSearch.Contains(value, '#')
+                || TextSearch.Contains(value, '\r')
+                || TextSearch.Contains(value, '\n')
+                || TextSearch.Contains(value, "authorization", StringComparison.OrdinalIgnoreCase)
+                || TextSearch.Contains(value, "cookie", StringComparison.OrdinalIgnoreCase)
+                || TextSearch.Contains(value, "pass" + "word", StringComparison.OrdinalIgnoreCase)
+                || TextSearch.Contains(value, "sec" + "ret", StringComparison.OrdinalIgnoreCase)
+                || TextSearch.Contains(value, "tok" + "en", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string DefaultTimestamp()
@@ -139,10 +139,7 @@ namespace LogBrew
             Activity? activity,
             LogBrewActivitySpanOptions? options = null)
         {
-            if (client == null)
-            {
-                throw new ArgumentNullException(nameof(client));
-            }
+            ExceptionContract.ThrowIfNull(client, nameof(client));
 
             if (!TryCreateSpanContext(activity, out var context))
             {
@@ -188,7 +185,7 @@ namespace LogBrew
             }
         }
 
-        private static IDictionary<string, object?> ActivityMetadata(
+        private static Dictionary<string, object?> ActivityMetadata(
             Activity activity,
             CapturedActivityContext context,
             LogBrewActivitySpanOptions options)
@@ -213,7 +210,7 @@ namespace LogBrew
             return metadata;
         }
 
-        private static IReadOnlyList<SpanEventSummary> ActivityEventSummaries(Activity activity, IDictionary<string, object?> spanMetadata)
+        private static List<SpanEventSummary> ActivityEventSummaries(Activity activity, Dictionary<string, object?> spanMetadata)
         {
             var summaries = new List<SpanEventSummary>();
             var exceptionTypes = new List<string>();
@@ -272,7 +269,7 @@ namespace LogBrew
             return summaries;
         }
 
-        private static IReadOnlyList<SpanLinkSummary> ActivityLinkSummaries(Activity activity, IDictionary<string, object?> spanMetadata)
+        private static List<SpanLinkSummary> ActivityLinkSummaries(Activity activity, Dictionary<string, object?> spanMetadata)
         {
             var summaries = new List<SpanLinkSummary>();
             var dropped = 0;
@@ -313,7 +310,7 @@ namespace LogBrew
             return summaries;
         }
 
-        private static IDictionary<string, object?> ActivityEventMetadata(ActivityEvent activityEvent)
+        private static Dictionary<string, object?> ActivityEventMetadata(ActivityEvent activityEvent)
         {
             var metadata = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var tag in activityEvent.Tags)
@@ -324,7 +321,7 @@ namespace LogBrew
             return metadata;
         }
 
-        private static IDictionary<string, object?> ActivityLinkMetadata(ActivityLink link)
+        private static Dictionary<string, object?> ActivityLinkMetadata(ActivityLink link)
         {
             var metadata = new Dictionary<string, object?>(StringComparer.Ordinal);
             if (link.Tags == null)
@@ -418,7 +415,7 @@ namespace LogBrew
             }
         }
 
-        private static void CopyKnownSafeEventTag(IDictionary<string, object?> metadata, string key, object? value)
+        private static void CopyKnownSafeEventTag(Dictionary<string, object?> metadata, string key, object? value)
         {
             if (string.Equals(key, "exception.type", StringComparison.Ordinal))
             {
@@ -448,10 +445,10 @@ namespace LogBrew
             }
 
             return text.IndexOf("://", StringComparison.Ordinal) < 0
-                && text.IndexOf("?", StringComparison.Ordinal) < 0
-                && text.IndexOf("#", StringComparison.Ordinal) < 0
-                && text.IndexOf("\r", StringComparison.Ordinal) < 0
-                && text.IndexOf("\n", StringComparison.Ordinal) < 0
+                && text.IndexOf('?') < 0
+                && text.IndexOf('#') < 0
+                && text.IndexOf('\r') < 0
+                && text.IndexOf('\n') < 0
                 && text.IndexOf("authorization", StringComparison.OrdinalIgnoreCase) < 0
                 && text.IndexOf("cookie", StringComparison.OrdinalIgnoreCase) < 0
                 && text.IndexOf("pass" + "word", StringComparison.OrdinalIgnoreCase) < 0
@@ -466,7 +463,7 @@ namespace LogBrew
             return string.Equals(activityEvent.Name, "exception", StringComparison.Ordinal);
         }
 
-        private static void AddExceptionType(ICollection<string> exceptionTypes, IDictionary<string, object?> metadata)
+        private static void AddExceptionType(List<string> exceptionTypes, Dictionary<string, object?> metadata)
         {
             if (exceptionTypes.Count >= SpanEventSummary.MaxEvents)
             {
@@ -487,7 +484,7 @@ namespace LogBrew
             exceptionTypes.Add(text);
         }
 
-        private static bool TryExceptionEscaped(IDictionary<string, object?> metadata, out bool escaped)
+        private static bool TryExceptionEscaped(Dictionary<string, object?> metadata, out bool escaped)
         {
             escaped = false;
             return metadata.TryGetValue("exceptionEscaped", out var value) && TryBoolean(value, out escaped);
@@ -511,7 +508,7 @@ namespace LogBrew
             return false;
         }
 
-        private static string StatusFromActivity(Activity activity, IDictionary<string, object?> spanMetadata)
+        private static string StatusFromActivity(Activity activity, Dictionary<string, object?> spanMetadata)
         {
             var explicitOtelOk = false;
             foreach (var tag in activity.TagObjects)

@@ -14,8 +14,13 @@ export type CreateLogBrewBrowserClientConfig = {
   clientKey?: string;
   sdkName?: string;
   sdkVersion?: string;
+  /** Retry attempts after the first send. Must be a non-negative integer. */
   maxRetries?: number;
+  maxQueueBytes?: number;
   maxQueueSize?: number;
+  maxBatchEvents?: number;
+  /** Maximum UTF-8 request bytes. Defaults to the 64 KiB keepalive transport limit. */
+  maxBatchBytes?: number;
   onEventDropped?: (drop: DroppedEvent) => void;
 };
 
@@ -23,7 +28,9 @@ export type FetchTransportConfig = {
   endpoint?: string;
   fetchImpl?: typeof fetch;
   headers?: Record<string, string>;
+  /** Use bounded fetch keepalive. Defaults to true and is required for page-exit lifecycle delivery. */
   keepalive?: boolean;
+  /** Maximum UTF-8 body bytes accepted by keepalive delivery. Defaults to 64 KiB. */
   maxKeepaliveBodyBytes?: number;
 };
 
@@ -67,6 +74,14 @@ export type BrowserPersistedReplayOptions = {
   skipOwnBatches?: boolean;
 };
 
+export type BrowserPersistenceLockManager = {
+  request<T>(
+    name: string,
+    options: { mode: "exclusive" },
+    callback: () => Promise<T> | T
+  ): Promise<T>;
+};
+
 export type PersistentBrowserTransport = Transport & {
   clearStoredBatches(): void;
   pendingStoredBatches(): number;
@@ -74,6 +89,7 @@ export type PersistentBrowserTransport = Transport & {
 };
 
 export type PersistentBrowserTransportConfig = {
+  lockManager?: BrowserPersistenceLockManager;
   maxStoredBatches?: number;
   maxStoredBytes?: number;
   onPersistError?: (error: BrowserPersistError) => void;
@@ -383,13 +399,16 @@ export type BrowserFlushDetails = {
 export type LogBrewBrowserOptions = CreateLogBrewBrowserClientConfig & FetchTransportConfig & {
   browserWindow?: Window;
   client?: LogBrewClient;
+  /** App-owned transports remain available to explicit flush, but are not invoked by page-exit lifecycle signals. */
   transport?: Transport;
   captureGlobalErrors?: boolean;
   captureUnhandledRejections?: boolean;
   capturePageViews?: boolean;
   flushOnCapture?: boolean;
   flushOnOnline?: boolean;
+  /** Allow the built-in bounded keepalive transport to deliver on pagehide. Defaults to true. */
   flushOnPageHide?: boolean;
+  /** Allow the built-in bounded keepalive transport to deliver when visibility becomes hidden. Defaults to true. */
   flushOnVisibilityHidden?: boolean;
   /** Map of sanitized browser frame paths or minified URLs to release-artifact Debug IDs. */
   debugIdMap?: Record<string, string>;

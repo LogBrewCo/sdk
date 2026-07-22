@@ -99,6 +99,7 @@ fwrite(STDERR, json_encode([
     'ok' => true,
     'status' => $response->statusCode,
     'attempts' => $response->attempts,
+    'batches' => $response->batches,
     'events' => 6,
 ], JSON_THROW_ON_ERROR) . PHP_EOL);
 ```
@@ -318,6 +319,48 @@ try {
 
 `databaseOperation`, `cacheOperation`, and `queueOperation` keep instrumentation explicit and dependency-free. They do not patch PDO, Doctrine, Redis, Laravel queues, or global PHP runtime hooks; they avoid SQL text, connection strings, network locations, login fields, cache identifiers, message bodies, arbitrary headers, baggage, and tracestate. Metadata is primitive-only and sensitive-looking keys are dropped before enqueue.
 
+## Outbound HTTP Tracing
+
+Use `LogBrewHttpClientTracing` when your application owns a PSR-18 or Guzzle 7 client and wants each actual HTTP send to become a child of the active LogBrew trace:
+
+```shell
+composer require logbrew/sdk guzzlehttp/guzzle
+```
+
+```php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use GuzzleHttp\Client;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Psr7\Request;
+use LogBrew\LogBrewClient;
+use LogBrew\LogBrewHttpClientTracing;
+use LogBrew\LogBrewTrace;
+use LogBrew\LogBrewTraceContext;
+
+$logBrew = LogBrewClient::create('LOGBREW_API_KEY', 'checkout-php-service', '1.4.2');
+$stack = HandlerStack::create();
+$stack->push(LogBrewHttpClientTracing::guzzleMiddleware($logBrew), 'logbrew-tracing');
+$guzzle = new Client(['handler' => $stack]);
+$psr18 = LogBrewHttpClientTracing::wrapPsr18(new Client(), $logBrew);
+$parent = LogBrewTraceContext::fromIncomingTraceparentOrCreateRoot($_SERVER['HTTP_TRACEPARENT'] ?? null);
+
+$scope = LogBrewTrace::activate($parent);
+try {
+    $response = $psr18->sendRequest(new Request('GET', 'https://inventory.example/check'));
+    $promise = $guzzle->requestAsync('POST', 'https://inventory.example/check');
+} finally {
+    $scope->close();
+}
+$asyncResponse = $promise->wait();
+```
+
+When a LogBrew trace is active, both adapters replace only `traceparent` on the immutable outgoing request, reinstate the caller's active trace before returning control, and preserve the original response, exception, rejection, and cancellation behavior. Without an active LogBrew trace, they pass the original request through without propagation, span capture, or capture callbacks. Rewrapping a LogBrew PSR-18 client or installing the middleware more than once still emits one span per actual send. Capture failures are advisory and may be observed through the optional `onCaptureError` callback.
+
+Outbound spans contain only method, normalized host, status code when available, duration, fixed client source, sampled state, and exception type. They never contain the URL path, query, fragment, arbitrary headers, request or response bodies, exception messages, authorization values, baggage, or tracestate. Instrumentation is explicit and app-owned; the SDK does not patch global clients or install runtime hooks.
+
 ## HTTP Delivery
 
 Use `HttpTransport` when you want the SDK to POST queued batches to LogBrew:
@@ -345,7 +388,150 @@ $transport = new HttpTransport(
 $response = $client->shutdown($transport);
 ```
 
-`HttpTransport` uses PHP's standard stream context HTTP support, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint, header, timeout, and requester settings, maps HTTP statuses through the client's retry rules, and converts request failures into retryable transport errors.
+`HttpTransport` uses PHP's standard stream context HTTP support, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint, header, timeout, and requester settings, maps HTTP statuses through the client's retry rules, and converts request failures into retryable transport errors. Public transport failures contain only a stable code and generic message; callback and request details are never propagated by the SDK.
+
+## Bounded Delivery
+
+The client bounds its in-memory queue to 1,000 events and 4 MiB of compact serialized event data by default. Each HTTP request is also limited to 100 events and 256 KiB of exact UTF-8 JSON. Queue pressure rejects the new event so earlier release, environment, and trace context stays available for the next flush. Request pressure splits retained events into another ordered batch; only a single event that cannot fit one request is rejected. Pressure never blocks the application or changes the result of a logger or instrumentation callback.
+
+Tune both limits and observe local loss without exposing event attributes:
+
+```php
+<?php
+
+use LogBrew\DroppedEvent;
+use LogBrew\LogBrewClient;
+
+$client = LogBrewClient::create(
+    apiKey: 'LOGBREW_API_KEY',
+    sdkName: 'my-php-app',
+    sdkVersion: '1.0.0',
+    maxQueueSize: 2_000,
+    maxQueueBytes: 8 * 1024 * 1024,
+    maxBatchEvents: 100,
+    maxBatchBytes: 256 * 1024,
+    onEventDropped: static function (DroppedEvent $drop): void {
+        error_log(sprintf(
+            'LogBrew dropped %s telemetry (%s); total=%d pending=%d bytes=%d',
+            $drop->eventType,
+            $drop->reason,
+            $drop->droppedEvents,
+            $drop->pendingEvents,
+            $drop->pendingEventBytes
+        ));
+    }
+);
+```
+
+`DroppedEvent` contains only the rejected event ID/type, stable reason, cumulative drop count, and retained queue count/bytes. It never contains attributes, log messages, exception details, headers, bodies, query text, or trace state. Exceptions from `onEventDropped` are ignored so application behavior remains isolated. Use `pendingEvents()`, `pendingEventBytes()`, and `droppedEvents()` for explicit health checks.
+
+`flush()` and `shutdown()` snapshot the queue, send compact ordered batches, retry each failed batch with byte-identical JSON, and acknowledge only a 2xx prefix. A failed request body stays frozen across later flush/shutdown calls; newly appended events are sent only after that exact prefix succeeds. If a later batch fails, accepted earlier batches stay removed while the failed batch and everything after it remain queued. Events captured by app-owned transport code during `flush()` remain for the next call. `shutdown()` rejects new capture while delivery is running, closes only after every snapshot batch succeeds, and reopens the intact queue after failure. `TransportResponse::attempts` counts all requests including retries, while `TransportResponse::batches` counts accepted batches.
+
+Applications that intentionally queued events larger than 256 KiB can temporarily raise `maxBatchBytes` enough to include the compact event plus its SDK envelope while reducing those payloads; `maxQueueBytes` continues to bound queued event data. The safer long-term contract is small telemetry with identifiers and primitive metadata rather than request bodies, full documents, stack archives, or other large content.
+
+## Long-Running Workers
+
+Use `LogBrewWorkerLifecycle` when a RoadRunner, queue, or other serialized long-running PHP worker needs one explicit telemetry boundary per work item:
+
+```php
+<?php
+
+use LogBrew\HttpTransport;
+use LogBrew\LogBrewClient;
+use LogBrew\LogBrewWorkerLifecycle;
+use LogBrew\WorkerDeliveryFailure;
+
+$client = LogBrewClient::create('LOGBREW_API_KEY', 'checkout-worker', '1.0.0');
+$lifecycle = LogBrewWorkerLifecycle::create(
+    $client,
+    new HttpTransport(),
+    static function (WorkerDeliveryFailure $failure): void {
+        error_log(sprintf(
+            'LogBrew %s failed (%s); pending=%d bytes=%d',
+            $failure->stage,
+            $failure->codeName,
+            $failure->pendingEvents,
+            $failure->pendingEventBytes
+        ));
+    }
+);
+
+while (($job = nextJob()) !== null) {
+    $lifecycle->run(static function () use ($client, $job): void {
+        processJob($job);
+        $client->log($job->telemetryId(), gmdate(DATE_ATOM), [
+            'message' => 'job completed',
+            'level' => 'info',
+            'logger' => 'checkout-worker',
+        ]);
+    });
+}
+
+$lifecycle->shutdown();
+```
+
+`run()` always attempts a bounded flush after the callback, including when the callback throws. A delivery failure retains the queue for the next boundary and cannot replace the callback result or original exception. `WorkerDeliveryFailure` contains only stage, stable code, retained count, and retained bytes; it never contains event attributes, messages, credentials, URLs, headers, bodies, exception text, stack traces, or process identifiers. Exceptions from the diagnostic callback are ignored.
+
+Create the client and lifecycle inside each child after `pcntl_fork()`. An inherited pre-fork lifecycle rejects `run()` and `shutdown()` with `process_ownership_error` before work or delivery, preventing a child from replaying the parent's copied queue. Successful `shutdown()` is terminal-idempotent; failed shutdown reports and rethrows the delivery error so the same retained batch can be retried.
+
+The lifecycle is opt-in and app-scoped. It does not register a PHP shutdown function, flush from a destructor, install a timer, patch a framework, or intercept `pcntl_fork()`. Existing applications can keep calling `LogBrewClient::flush()` and `shutdown()` directly. Migrate a long-running worker by wrapping one existing job callback at a time, creating the lifecycle after any fork, then replacing its final direct client shutdown with `$lifecycle->shutdown()`.
+
+One lifecycle is deliberately single-flight. Do not share it across overlapping Swoole coroutine handlers or other concurrent callbacks: reentrant `run()` and `shutdown()` calls fail before invoking inner work. Use one client/lifecycle per serialized execution context, or keep explicit direct client boundaries until the application can guarantee serialization.
+
+## Encrypted Restart Delivery
+
+Long-running POSIX workers can opt into an encrypted file queue when process restarts must not discard accepted telemetry. Decode a stable application-managed key to exactly 32 raw bytes, use one dedicated owner-only directory per serialized worker slot, and create the store after any fork:
+
+```php
+<?php
+
+use LogBrew\EncryptedFileEventStore;
+use LogBrew\HttpTransport;
+use LogBrew\LogBrewClient;
+use LogBrew\LogBrewWorkerLifecycle;
+
+$encodedKey = $_ENV['LOGBREW_PERSISTENCE_KEY'] ?? '';
+$key = base64_decode($encodedKey, true);
+if (!is_string($key) || strlen($key) !== 32) {
+    throw new RuntimeException('LogBrew persistence key is unavailable');
+}
+
+$store = EncryptedFileEventStore::open(
+    '/var/lib/my-worker/logbrew/worker-0',
+    $key
+);
+$client = LogBrewClient::create(
+    apiKey: $_ENV['LOGBREW_API_KEY'],
+    sdkName: 'checkout-worker',
+    sdkVersion: '1.0.0',
+    eventStore: $store
+);
+$lifecycle = LogBrewWorkerLifecycle::create($client, new HttpTransport());
+
+while (($job = nextJob()) !== null) {
+    $lifecycle->run(static function () use ($client, $job): void {
+        processJob($job);
+        $client->log($job->telemetryId(), gmdate(DATE_ATOM), [
+            'message' => 'job completed',
+            'level' => 'info',
+        ]);
+    });
+}
+
+$lifecycle->shutdown();
+```
+
+`EncryptedFileEventStore` requires OpenSSL AES-256-GCM support and never stores its key. Each compact event and staged retry body is authenticated and encrypted with a fresh nonce. Records use owner-only permissions, full writes, file `fflush()`/`fsync()`, atomic publication, and containing-directory `fsync()`. If a new event's directory entry cannot be confirmed, admission removes it and durably syncs that rollback before returning an error. Recovery is oldest-first and fails closed on a wrong key, tampering, unsafe links, unexpected files, a replaced directory, a copied post-fork handle, or queue bounds that no longer fit. The queue never includes the API key.
+
+Before a transport call, the exact request body is staged. A later process retries those bytes before newer events. After a 2xx response, an accepted-sequence marker is committed before record removal, so interrupted compaction cannot reintroduce the accepted prefix. Backend event IDs remain the final duplicate-safety boundary if a process dies after the server accepts a request but before the local acknowledgement is durable.
+
+Persistence is explicit and synchronous: successful capture returns only after its encrypted record and directory entry are fsynced. The SDK does not add a shutdown hook, destructor flush, timer, signal handler, thread, or background sender. Normal clients remain memory-only when `eventStore` is omitted. Do not share one directory between active workers; assign a stable application worker-slot directory and let the exclusive lock reject accidental overlap.
+
+For PHP-FPM, keep the memory-only default and flush inside the request unless the application can assign a stable, serialized queue directory to each worker slot. Create and open any persistent client inside the worker process, never in a pre-fork master. A process cannot flush, purge, close, or otherwise manage another worker's queue; the SDK lock coordinates exclusive recovery after ownership ends but does not create cross-worker lifecycle control.
+
+Successful `shutdown()` drains the queue and releases the store lock. Failed shutdown leaves the exact retry body available to the same client or a later process. Use `$client->purgePersistedEvents()` only for an explicit local discard decision; it clears memory and commits the durable prefix without sending telemetry. To rotate the encryption key, drain or explicitly purge and close the old store, then switch the next client to a new empty owner-only directory with the new key. Do not reopen an existing directory under a different key.
+
+See `examples/persistent_worker_delivery.php` for a local usage sample with an ephemeral queue and `RecordingTransport`.
 
 ## PSR-3 Logger
 

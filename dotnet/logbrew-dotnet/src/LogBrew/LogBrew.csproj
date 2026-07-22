@@ -1,15 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <AnalysisMode>All</AnalysisMode>
+    <AnalysisMode Condition="'$(TargetFramework)' != 'net8.0'">All</AnalysisMode>
+    <AnalysisMode Condition="'$(TargetFramework)' == 'net8.0'">Recommended</AnalysisMode>
+    <AnalysisLevel Condition="'$(TargetFramework)' == 'net8.0'">8.0</AnalysisLevel>
+    <AllowUnsafeBlocks Condition="'$(TargetFramework)' == 'net8.0'">true</AllowUnsafeBlocks>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
     <PackageId>LogBrew</PackageId>
     <Version>0.1.4</Version>
+    <PackageVersion Condition="'$(LogBrewProjectReferenceVersion)' != ''">$(LogBrewProjectReferenceVersion)</PackageVersion>
     <Authors>LogBrew</Authors>
     <Company>LogBrew</Company>
     <Description>Public LogBrew .NET SDK for building, validating, and flushing event batches.</Description>
@@ -19,6 +23,12 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>logbrew-logo-transparent-128.png</PackageIcon>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <EnableStrictModeForCompatibleTfmsInPackage>true</EnableStrictModeForCompatibleTfmsInPackage>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(LogBrewTestHooks)' == 'true'">
+    <DefineConstants>$(DefineConstants);LOGBREW_TEST_HOOKS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -40,4 +50,5 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.9" />
   </ItemGroup>
+
 </Project>

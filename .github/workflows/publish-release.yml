@@ -60,6 +60,11 @@ on:
         required: true
         type: boolean
         default: false
+      maven_artifacts:
+        description: "Comma-separated Maven artifact ids passed to publish-packages.yml"
+        required: false
+        type: string
+        default: ""
       include_go_module:
         description: "Verify the Go module from public tags"
         required: true
@@ -99,6 +104,7 @@ jobs:
           INPUT_INCLUDE_CRATES_PUBLISH: ${{ inputs.include_crates_publish }}
           INPUT_INCLUDE_PACKAGIST_UPDATE: ${{ inputs.include_packagist_update }}
           INPUT_INCLUDE_MAVEN_PUBLISH: ${{ inputs.include_maven_publish }}
+          INPUT_MAVEN_ARTIFACTS: ${{ inputs.maven_artifacts }}
           INPUT_INCLUDE_GO_MODULE: ${{ inputs.include_go_module }}
         run: |
           set -Eeuo pipefail
@@ -148,6 +154,14 @@ jobs:
             include_go_module="$INPUT_INCLUDE_GO_MODULE"
           fi
 
+          if [[ "$publish_packages" == "true" ]]; then
+            maven_artifacts="$(python3 scripts/maven_release_plan.py canonicalize \
+              --root "$GITHUB_WORKSPACE" \
+              --artifacts-env INPUT_MAVEN_ARTIFACTS)"
+          else
+            maven_artifacts=""
+          fi
+
           {
             echo "publish_packages=$publish_packages"
             echo "release_kind=$release_kind"
@@ -160,6 +174,7 @@ jobs:
             echo "include_crates_publish=$include_crates_publish"
             echo "include_packagist_update=$include_packagist_update"
             echo "include_maven_publish=$include_maven_publish"
+            printf 'maven_artifacts=%s\n' "$maven_artifacts"
             echo "include_go_module=$include_go_module"
           } >> "$GITHUB_OUTPUT"
 
@@ -182,6 +197,7 @@ jobs:
           INCLUDE_CRATES_PUBLISH: ${{ steps.release.outputs.include_crates_publish }}
           INCLUDE_PACKAGIST_UPDATE: ${{ steps.release.outputs.include_packagist_update }}
           INCLUDE_MAVEN_PUBLISH: ${{ steps.release.outputs.include_maven_publish }}
+          MAVEN_ARTIFACTS: ${{ steps.release.outputs.maven_artifacts }}
           INCLUDE_GO_MODULE: ${{ steps.release.outputs.include_go_module }}
         run: |
           set -Eeuo pipefail
@@ -196,6 +212,7 @@ jobs:
             -f include_crates_publish="$INCLUDE_CRATES_PUBLISH" \
             -f include_packagist_update="$INCLUDE_PACKAGIST_UPDATE" \
             -f include_maven_publish="$INCLUDE_MAVEN_PUBLISH" \
+            -f maven_artifacts="$MAVEN_ARTIFACTS" \
             -f include_go_module="$INCLUDE_GO_MODULE"
 
       - name: Summarize release publish decision
@@ -211,6 +228,7 @@ jobs:
           INCLUDE_CRATES_PUBLISH: ${{ steps.release.outputs.include_crates_publish }}
           INCLUDE_PACKAGIST_UPDATE: ${{ steps.release.outputs.include_packagist_update }}
           INCLUDE_MAVEN_PUBLISH: ${{ steps.release.outputs.include_maven_publish }}
+          MAVEN_ARTIFACTS: ${{ steps.release.outputs.maven_artifacts }}
           INCLUDE_GO_MODULE: ${{ steps.release.outputs.include_go_module }}
         run: |
           set -Eeuo pipefail
@@ -231,5 +249,6 @@ jobs:
             echo "- include_crates_publish: \`$INCLUDE_CRATES_PUBLISH\`"
             echo "- include_packagist_update: \`$INCLUDE_PACKAGIST_UPDATE\`"
             echo "- include_maven_publish: \`$INCLUDE_MAVEN_PUBLISH\`"
+            echo "- maven_artifacts: \`$MAVEN_ARTIFACTS\`"
             echo "- include_go_module: \`$INCLUDE_GO_MODULE\`"
           } >> "$GITHUB_STEP_SUMMARY"

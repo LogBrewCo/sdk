@@ -17,7 +17,7 @@ pnpm add @logbrew/sdk @logbrew/next next react react-dom
 
 ## Release Artifacts
 
-For production Next.js builds, wrap `next.config.mjs` with the build-time release-artifact helper. It enables `productionBrowserSourceMaps` only when your config has not chosen a value, runs after the production compile, injects matching Debug IDs, strips embedded source text by default, and writes a privacy-bounded manifest next to `.next`:
+For production Next.js builds, wrap `next.config.mjs` with the build-time release-artifact helper. It enables `productionBrowserSourceMaps` only when your config has not chosen a value, runs after the production compile, injects matching Debug IDs, strips embedded source text by default, writes a privacy-bounded manifest next to `.next`, and can upload the prepared artifacts before the build completes:
 
 ```js
 // next.config.mjs
@@ -30,12 +30,18 @@ export default withLogBrewNextReleaseArtifacts(
   {
     release: "2026.06.18",
     environment: "production",
-    service: "checkout-next-web"
+    service: "checkout-next-web",
+    projectId: "550e8400-e29b-41d4-a716-446655440000",
+    upload: {
+      endpoint: "https://api.logbrew.com/api/release-artifacts",
+      allowHostedUpload: true,
+      maxRetries: 2
+    }
   }
 );
 ```
 
-The helper defaults minified URLs to `app:///_next/static/chunks/...`. Use `minifiedPathPrefix`, `manifestPath`, `repositoryUrl`, `commitSha`, or `stripSourcePrefix` when your deploy needs explicit paths or source-link metadata. This helper only prepares local build artifacts and a manifest. It does not upload files, open support tickets, use account/session API values, or claim backend symbolication support.
+The helper defaults minified URLs to `app:///_next/static/chunks/...`. Use `minifiedPathPrefix`, `manifestPath`, `repositoryUrl`, `commitSha`, or `stripSourcePrefix` when your deploy needs explicit paths or source-link metadata. Set `LOGBREW_RELEASE_ARTIFACT_TOKEN` in the build environment to a dedicated release-artifact token. Use `tokenEnv` for a different CI variable, or `dryRun: true` to prepare the complete build output without a network request. Existing `compiler.runAfterProductionCompile` work runs first. Upload is disabled when `upload` is omitted, and any unsafe preparation or upload result fails the production build without exposing response text or secret values.
 
 ## App Router Route Handler
 

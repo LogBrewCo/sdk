@@ -1,6 +1,7 @@
 #import "LogBrew.h"
 
 #import "LogBrewNetworkValidation.h"
+#import "LBWDeliveryEngine.h"
 
 #import <math.h>
 
@@ -32,9 +33,7 @@ NSString *const LBWErrorRetryableKey = @"LBWRetryable";
 @property(nonatomic, copy) NSString *apiKey;
 @property(nonatomic, copy) NSString *sdkName;
 @property(nonatomic, copy) NSString *sdkVersion;
-@property(nonatomic) NSUInteger maxRetries;
-@property(nonatomic) BOOL closed;
-@property(nonatomic) NSMutableArray<NSDictionary<NSString *, id> *> *events;
+@property(nonatomic) LBWDeliveryEngine *deliveryEngine;
 
 @end
 
@@ -287,6 +286,18 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
 
 @end
 
+@implementation LBWDurableDeliveryOptions
+
+- (instancetype)initWithDirectoryURL:(NSURL *)directoryURL {
+  self = [super init];
+  if (self != nil) {
+    _directoryURL = [directoryURL copy];
+  }
+  return self;
+}
+
+@end
+
 @implementation LBWTransportResponse
 
 - (instancetype)initWithStatusCode:(NSInteger)statusCode attempts:(NSUInteger)attempts {
@@ -342,22 +353,29 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
 }
 
 - (NSArray<NSString *> *)sentBodies {
-  return [self.mutableSentBodies copy];
+  @synchronized(self) {
+    return [self.mutableSentBodies copy];
+  }
 }
 
 - (NSString *)lastBody {
-  return [self.mutableSentBodies lastObject];
+  @synchronized(self) {
+    return [self.mutableSentBodies lastObject];
+  }
 }
 
 - (LBWTransportResponse *)sendWithAPIKey:(NSString *)apiKey body:(NSString *)body error:(NSError **)error {
   if (!LBWRequireNonEmpty(@"api_key", apiKey, error)) {
     return nil;
   }
-  [self.mutableSentBodies addObject:body];
-  LBWRecordingStep *step = [LBWRecordingStep statusCodeStep:202];
-  if (self.cursor < [self.steps count]) {
-    step = self.steps[self.cursor];
-    self.cursor += 1U;
+  LBWRecordingStep *step;
+  @synchronized(self) {
+    [self.mutableSentBodies addObject:body];
+    step = [LBWRecordingStep statusCodeStep:202];
+    if (self.cursor < [self.steps count]) {
+      step = self.steps[self.cursor];
+      self.cursor += 1U;
+    }
   }
   if (step.errorStep) {
     LBWSetError(error, LBWMakeError(LBWErrorKindTransport, step.stableCode, step.message, step.retryable));
@@ -383,53 +401,61 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
   _apiKey = [config.apiKey copy];
   _sdkName = [config.sdkName copy];
   _sdkVersion = [config.sdkVersion copy];
-  _maxRetries = config.maxRetries == 0U ? 2U : config.maxRetries;
-  _closed = NO;
-  _events = [NSMutableArray array];
+  _deliveryEngine = [[LBWDeliveryEngine alloc] initWithAPIKey:_apiKey
+                                                     sdkName:_sdkName
+                                                  sdkVersion:_sdkVersion
+                                                  maxRetries:config.maxRetries == 0U ? 2U : config.maxRetries];
   return self;
 }
 
 - (NSUInteger)pendingEvents {
-  return [self.events count];
+  return [self.deliveryEngine pendingEvents];
 }
 
 - (NSString *)previewJSONWithError:(NSError **)error {
-  NSDictionary<NSString *, id> *payload = @{
-    @"sdk": @{
-      @"name": self.sdkName,
-      @"language": @"objc",
-      @"version": self.sdkVersion
-    },
-    @"events": self.events
-  };
-  NSData *json = [NSJSONSerialization dataWithJSONObject:payload options:0 error:error];
-  if (json == nil) {
-    return nil;
-  }
-  return [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
+  return [self.deliveryEngine previewJSONWithError:error];
 }
 
 - (LBWTransportResponse *)flushWithTransport:(id<LBWTransport>)transport error:(NSError **)error {
-  if (self.closed) {
-    LBWSetError(error, LBWMakeError(
-        LBWErrorKindShutdown, @"shutdown_error", @"client is already shut down", NO));
-    return nil;
-  }
-  return [self flushInternalWithTransport:transport error:error];
+  return [self.deliveryEngine flushWithTransport:transport error:error];
 }
 
 - (LBWTransportResponse *)shutdownWithTransport:(id<LBWTransport>)transport error:(NSError **)error {
-  if (self.closed) {
-    LBWSetError(error, LBWMakeError(
-        LBWErrorKindShutdown, @"shutdown_error", @"client is already shut down", NO));
-    return nil;
-  }
-  LBWTransportResponse *response = [self flushInternalWithTransport:transport error:error];
-  if (response == nil) {
-    return nil;
-  }
-  self.closed = YES;
-  return response;
+  return [self.deliveryEngine shutdownWithTransport:transport error:error];
+}
+
+- (BOOL)startAutomaticDeliveryWithTransport:(id<LBWTransport>)transport
+                                    options:(LBWAutomaticDeliveryOptions *)options
+                                      error:(NSError **)error {
+  return [self.deliveryEngine startAutomaticDeliveryWithTransport:transport options:options error:error];
+}
+
+- (BOOL)recoverAutomaticDeliveryWithError:(NSError **)error {
+  return [self.deliveryEngine recoverAutomaticDeliveryWithError:error];
+}
+
+- (void)stopAutomaticDelivery {
+  [self.deliveryEngine stopAutomaticDelivery];
+}
+
+- (BOOL)enableDurableDeliveryWithOptions:(LBWDurableDeliveryOptions *)options error:(NSError **)error {
+  return [self.deliveryEngine enableDurableDeliveryWithOptions:options error:error];
+}
+
+- (BOOL)purgeDurableDeliveryWithError:(NSError **)error {
+  return [self.deliveryEngine purgeDurableDeliveryWithError:error];
+}
+
+- (LBWDeliveryHealth *)deliveryHealth {
+  return [self.deliveryEngine health];
+}
+
+- (LBWTransportResponse *)flushOwnedTransportWithError:(NSError **)error {
+  return [self.deliveryEngine flushOwnedTransportWithError:error];
+}
+
+- (LBWTransportResponse *)shutdownOwnedTransportWithError:(NSError **)error {
+  return [self.deliveryEngine shutdownOwnedTransportWithError:error];
 }
 
 - (BOOL)releaseWithID:(NSString *)eventID
@@ -725,71 +751,15 @@ static NSString *LBWStatusFromStatusCode(NSNumber *_Nullable statusCode) {
                 timestamp:(NSString *)timestamp
                attributes:(NSDictionary<NSString *, id> *)attributes
                     error:(NSError *_Nullable *_Nullable)error {
-  if (self.closed) {
-    LBWSetError(error, LBWMakeError(
-        LBWErrorKindShutdown, @"shutdown_error", @"client is already shut down", NO));
-    return NO;
-  }
   if (!LBWRequireNonEmpty(@"id", eventID, error) || !LBWRequireTimestamp(timestamp, error)) {
     return NO;
   }
-  [self.events addObject:@{
+  return [self.deliveryEngine enqueueEvent:@{
     @"type": type,
     @"timestamp": timestamp,
     @"id": eventID,
     @"attributes": attributes
-  }];
-  return YES;
-}
-
-- (LBWTransportResponse *)flushInternalWithTransport:(id<LBWTransport>)transport error:(NSError **)error {
-  if ([self.events count] == 0U) {
-    return [[LBWTransportResponse alloc] initWithStatusCode:204 attempts:0U];
-  }
-  NSString *body = [self previewJSONWithError:error];
-  if (body == nil) {
-    return nil;
-  }
-  NSUInteger maxAttempts = self.maxRetries + 1U;
-  for (NSUInteger attempt = 1U; attempt <= maxAttempts; attempt += 1U) {
-    NSError *transportError = nil;
-    LBWTransportResponse *response = [transport sendWithAPIKey:self.apiKey body:body error:&transportError];
-    if (response == nil) {
-      NSString *stableCode = transportError.userInfo[LBWErrorStableCodeKey];
-      if (stableCode == nil) {
-        stableCode = @"transport_error";
-      }
-      BOOL retryable = [transportError.userInfo[LBWErrorRetryableKey] boolValue];
-      if (retryable && attempt < maxAttempts) {
-        continue;
-      }
-      NSString *message = [transportError localizedDescription];
-      if (message == nil) {
-        message = @"transport failed";
-      }
-      LBWSetError(error, LBWMakeError(LBWErrorKindTransport, stableCode, message, retryable));
-      return nil;
-    }
-    response.attempts = attempt;
-    if (response.statusCode == 401) {
-      LBWSetError(error, LBWMakeError(
-          LBWErrorKindTransport, @"unauthenticated", @"transport rejected the API key", NO));
-      return nil;
-    }
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      [self.events removeAllObjects];
-      return response;
-    }
-    if (response.statusCode >= 500 && attempt < maxAttempts) {
-      continue;
-    }
-    LBWSetError(error, LBWMakeError(
-        LBWErrorKindTransport, @"transport_error", @"unexpected transport status", NO));
-    return nil;
-  }
-  LBWSetError(error, LBWMakeError(
-      LBWErrorKindTransport, @"transport_error", @"exhausted retry budget", NO));
-  return nil;
+  } error:error];
 }
 
 @end

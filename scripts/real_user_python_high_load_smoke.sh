@@ -55,6 +55,8 @@ from logbrew_sdk import (
 API_KEY = "lbw_ingest_python_high_load_fake"
 HIGH_VOLUME_LOGS = 1500
 MAX_QUEUE_SIZE = 1000
+MAX_BATCH_EVENTS = 100
+MAX_BATCH_BYTES = 256 * 1024
 TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736"
 PARENT_SPAN_ID = "00f067aa0ba902b7"
 
@@ -92,6 +94,8 @@ def main() -> None:
         sdk_version="0.1.0",
         max_retries=1,
         max_queue_size=MAX_QUEUE_SIZE,
+        max_batch_events=MAX_BATCH_EVENTS,
+        max_batch_bytes=MAX_BATCH_BYTES,
     )
     client.release(
         "evt_python_high_load_release",
@@ -167,6 +171,8 @@ def main() -> None:
     assert_equal(client.dropped_events(), expected_drops, "dropped event count")
 
     preview = json.loads(client.preview_json())
+    preview_ids = [event["id"] for event in preview["events"]]
+    assert_equal(len(preview_ids), MAX_QUEUE_SIZE, "preview event count")
     assert_equal(
         [event["id"] for event in preview["events"][:4]],
         [
@@ -196,16 +202,57 @@ def main() -> None:
         thread.join(timeout=5.0)
 
     assert_equal(response.status_code, 202, "flush status")
-    assert_equal(response.attempts, 2, "flush retry attempts")
-    assert_equal(len(IntakeState.bodies), 2, "fake intake retry count")
+    assert_equal(response.attempts, 11, "aggregate flush attempts")
+    assert_equal(response.batches, 10, "accepted flush batches")
+    assert_equal(response.accepted_events, MAX_QUEUE_SIZE, "accepted flush events")
+    assert_equal(len(IntakeState.bodies), 11, "fake intake request count")
+    assert_equal(IntakeState.bodies[0], IntakeState.bodies[1], "failed retry body")
     assert_equal(client.pending_events(), 0, "queue after flush")
+    assert_equal(len(IntakeState.authorizations), 11, "authorization header count")
     for authorization in IntakeState.authorizations:
         if authorization != f"Bearer {API_KEY}":
             raise AssertionError("fake intake authorization header mismatch")
+    assert_equal(len(IntakeState.sources), 11, "source header count")
     for source in IntakeState.sources:
         assert_equal(source, "python-high-load-smoke", "source header")
 
-    payload = json.loads(IntakeState.bodies[-1])
+    accepted_events: list[dict[str, Any]] = []
+    successful_payloads: list[dict[str, Any]] = []
+    for request_index, body_text in enumerate(IntakeState.bodies):
+        body_size = len(body_text.encode("utf-8"))
+        if body_size > MAX_BATCH_BYTES:
+            raise AssertionError(
+                f"request {request_index} exceeded byte bound: {body_size}"
+            )
+        request_payload = json.loads(body_text)
+        request_events = request_payload["events"]
+        if not isinstance(request_events, list):
+            raise AssertionError(f"request {request_index} events were not a list")
+        if len(request_events) > MAX_BATCH_EVENTS:
+            raise AssertionError(
+                f"request {request_index} exceeded event bound: {len(request_events)}"
+            )
+        assert_equal(
+            request_payload["sdk"]["name"],
+            "python-high-load-smoke",
+            f"request {request_index} sdk name",
+        )
+        for unsafe in [API_KEY, "coupon=private", "authorization", "unsafePayload"]:
+            if unsafe in body_text:
+                raise AssertionError(
+                    f"request {request_index} included unsafe content marker: {unsafe}"
+                )
+        if request_index > 0:
+            successful_payloads.append(request_payload)
+            accepted_events.extend(request_events)
+
+    assert_equal(len(successful_payloads), response.batches, "successful request count")
+    assert_equal(len(accepted_events), response.accepted_events, "accepted event count")
+    assert_equal(accepted_events, preview["events"], "accepted event sequence")
+    accepted_ids = [event["id"] for event in accepted_events]
+    assert_equal(accepted_ids, preview_ids, "accepted event order")
+
+    payload = {"sdk": successful_payloads[0]["sdk"], "events": accepted_events}
     assert_equal(payload["sdk"]["name"], "python-high-load-smoke", "sdk name")
     assert_equal(len(payload["events"]), MAX_QUEUE_SIZE, "flushed event count")
     assert_equal(count_events(payload, "log"), MAX_QUEUE_SIZE - 4, "flushed log count")
@@ -222,11 +269,6 @@ def main() -> None:
     assert_equal(log_metadata["release"], "checkout@1.2.3", "log release")
     assert_equal(log_metadata["sequence"], 0, "first log sequence")
     assert "unsafePayload" not in log_metadata
-
-    body_text = IntakeState.bodies[-1]
-    for unsafe in [API_KEY, "coupon=private", "authorization", "unsafePayload"]:
-        if unsafe in body_text:
-            raise AssertionError(f"payload included unsafe content marker: {unsafe}")
 
     shutdown_client = LogBrewClient.create(
         api_key=API_KEY,
@@ -285,6 +327,6 @@ grep -q '"ok": true' "$tmp_dir/high-load.stdout.json"
 grep -q '"highVolumeLogs": 1500' "$tmp_dir/high-load.stdout.json"
 grep -q '"flushedEvents": 1000' "$tmp_dir/high-load.stdout.json"
 grep -q '"droppedEvents": 504' "$tmp_dir/high-load.stdout.json"
-grep -q '"retryAttempts": 2' "$tmp_dir/high-load.stdout.json"
+grep -q '"retryAttempts": 11' "$tmp_dir/high-load.stdout.json"
 grep -q '"shutdownStatus": 202' "$tmp_dir/high-load.stdout.json"
 cat "$tmp_dir/high-load.stdout.json"

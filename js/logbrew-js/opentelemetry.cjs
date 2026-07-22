@@ -165,6 +165,7 @@ function buildOpenTelemetryHelpers({
       closed: false,
       flushInFlight: false,
       pendingFlush: Promise.resolve(null),
+      queuedFlush: null,
       traceSummaryCount: 0,
       traceSummaries: includeTraceSummary ? new Map() : null
     };
@@ -241,6 +242,7 @@ function buildOpenTelemetryHelpers({
       closed: false,
       flushInFlight: false,
       pendingFlush: Promise.resolve(null),
+      queuedFlush: null,
       traceSummaryCount: 0,
       traceSummaries: includeTraceSummary ? new Map() : null
     };
@@ -941,21 +943,13 @@ function buildOpenTelemetryHelpers({
       await state.pendingFlush;
       return;
     }
-    if (state.flushInFlight) {
-      await state.pendingFlush;
-      return;
-    }
-    state.flushInFlight = true;
-    state.pendingFlush = Promise.resolve(client.flush(transport))
-      .then(() => null)
-      .catch((error) => {
-        onError(error);
-        return null;
-      })
-      .finally(() => {
-        state.flushInFlight = false;
-      });
-    await state.pendingFlush;
+    await requestOpenTelemetryFlush({
+      client,
+      onError,
+      state,
+      swallowErrors: true,
+      transport
+    });
   }
 
   async function flushOpenTelemetryExporterQueue({
@@ -975,16 +969,68 @@ function buildOpenTelemetryHelpers({
       await state.pendingFlush;
       return;
     }
+    await requestOpenTelemetryFlush({
+      client,
+      onError,
+      state,
+      swallowErrors: false,
+      transport
+    });
+  }
+
+  function requestOpenTelemetryFlush({ client, onError, state, swallowErrors, transport }) {
     if (state.flushInFlight) {
-      await state.pendingFlush;
+      state.queuedFlush ??= createOpenTelemetryFlushRequest();
+      return state.queuedFlush.promise;
+    }
+
+    state.flushInFlight = true;
+    const rawFlush = Promise.resolve(client.flush(transport));
+    const visibleFlush = swallowErrors
+      ? rawFlush.catch((error) => {
+        onError(error);
+        return null;
+      })
+      : rawFlush;
+    state.pendingFlush = visibleFlush;
+
+    rawFlush.then(
+      () => finishOpenTelemetryFlush({ client, failed: false, onError, state, swallowErrors, transport }),
+      (error) => finishOpenTelemetryFlush({ error, failed: true, state, swallowErrors })
+    );
+    return visibleFlush;
+  }
+
+  function finishOpenTelemetryFlush({ client, error, failed, onError, state, swallowErrors, transport }) {
+    state.flushInFlight = false;
+    const queuedFlush = state.queuedFlush;
+    state.queuedFlush = null;
+    if (queuedFlush === null) {
       return;
     }
-    state.flushInFlight = true;
-    state.pendingFlush = Promise.resolve(client.flush(transport))
-      .finally(() => {
-        state.flushInFlight = false;
-      });
-    await state.pendingFlush;
+    if (failed) {
+      if (swallowErrors) {
+        queuedFlush.resolve(null);
+      } else {
+        queuedFlush.reject(error);
+      }
+      return;
+    }
+
+    requestOpenTelemetryFlush({ client, onError, state, swallowErrors, transport }).then(
+      queuedFlush.resolve,
+      queuedFlush.reject
+    );
+  }
+
+  function createOpenTelemetryFlushRequest() {
+    let resolve;
+    let reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    return { promise, reject, resolve };
   }
 
   function openTelemetryExportFailure(error) {

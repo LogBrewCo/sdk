@@ -25,6 +25,8 @@ Use scoped tags containing `/` for package-specific GitHub Release notes, for ex
 
 Important: GitHub evaluates `release` workflows from the release tag's commit, not just from current `main`. Do not create GitHub Releases for historical tags that point to commits before the scoped-release guard unless `publish-release.yml` is disabled or the workflow behavior has been audited first. Prefer creating future scoped release-note tags after the guard is present.
 
+For Maven Central, set `maven_artifacts` to the explicit artifact IDs being released. The workflow validates each selected POM version and exact dependency closure, rejects an immutable-version collision before packaging, records an exact bundle manifest with digests, and installs the selected bundle before upload. Post-publish checks use the same plan so unrelated coordinates are not treated as release evidence.
+
 ## Best practices
 
 - Keep default permissions minimal with `contents: read`

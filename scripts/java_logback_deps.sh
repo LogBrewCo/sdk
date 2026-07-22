@@ -127,6 +127,42 @@ fetch_java_spring_kafka_deps() {
     "$deps_dir/micrometer-observation-$micrometer_observation_version.jar"
 }
 
+fetch_java_spring_web_deps() {
+  local deps_dir="$1"
+  local spring_framework_version="${LOGBREW_SPRING_FRAMEWORK_VERSION:-7.0.8}"
+  local reactor_version="${LOGBREW_REACTOR_VERSION:-3.8.6}"
+  local reactive_streams_version="${LOGBREW_REACTIVE_STREAMS_VERSION:-1.0.4}"
+  local micrometer_version="${LOGBREW_MICROMETER_OBSERVATION_VERSION:-1.17.0}"
+
+  mkdir -p "$deps_dir"
+  fetch_maven_jar \
+    "org/springframework/spring-web/$spring_framework_version/spring-web-$spring_framework_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "org/springframework/spring-webflux/$spring_framework_version/spring-webflux-$spring_framework_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "org/springframework/spring-test/$spring_framework_version/spring-test-$spring_framework_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "io/projectreactor/reactor-core/$reactor_version/reactor-core-$reactor_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "org/reactivestreams/reactive-streams/$reactive_streams_version/reactive-streams-$reactive_streams_version" \
+    "$deps_dir"
+  fetch_maven_jar \
+    "io/micrometer/micrometer-commons/$micrometer_version/micrometer-commons-$micrometer_version" \
+    "$deps_dir"
+
+  printf '%s:%s:%s:%s:%s:%s\n' \
+    "$deps_dir/spring-web-$spring_framework_version.jar" \
+    "$deps_dir/spring-webflux-$spring_framework_version.jar" \
+    "$deps_dir/spring-test-$spring_framework_version.jar" \
+    "$deps_dir/reactor-core-$reactor_version.jar" \
+    "$deps_dir/reactive-streams-$reactive_streams_version.jar" \
+    "$deps_dir/micrometer-commons-$micrometer_version.jar"
+}
+
 fetch_maven_jar() {
   local artifact_path="$1"
   local deps_dir="$2"
@@ -136,12 +172,19 @@ fetch_maven_jar() {
   local jar_path="$deps_dir/$artifact_name.jar"
   local checksum_path="$jar_path.sha256"
 
-  curl --fail --silent --show-error --location --retry 3 --output "$jar_path" "$base_url.jar"
-  if curl --fail --silent --location --retry 3 --output "$checksum_path" "$base_url.jar.sha256"; then
+  if ! curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+    --output "$jar_path" "$base_url.jar"; then
+    return 1
+  fi
+  if curl --fail --silent --location --retry 3 --retry-all-errors \
+    --output "$checksum_path" "$base_url.jar.sha256"; then
     verify_java_logback_sha256 "$jar_path" "$checksum_path"
   else
     checksum_path="$jar_path.sha1"
-    curl --fail --silent --show-error --location --retry 3 --output "$checksum_path" "$base_url.jar.sha1"
+    if ! curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+      --output "$checksum_path" "$base_url.jar.sha1"; then
+      return 1
+    fi
     verify_java_logback_sha1 "$jar_path" "$checksum_path"
   fi
 }

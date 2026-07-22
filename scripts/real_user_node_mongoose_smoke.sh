@@ -83,6 +83,13 @@ function assert(condition, message) {
   }
 }
 
+function findAutomaticEvent(events, semanticPrefix) {
+  const idPattern = new RegExp(`^${semanticPrefix}_[a-f0-9]{32}$`);
+  const matches = events.filter((event) => idPattern.test(event.id));
+  assert(matches.length === 1, `expected one automatic event for ${semanticPrefix}, got ${matches.length}`);
+  return matches[0];
+}
+
 function assertEqual(actual, expected, message) {
   if (actual !== expected) {
     throw new Error(`${message}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
@@ -232,12 +239,12 @@ assert(Profile.prototype.updateOne === originalDocumentUpdateOne, "Mongoose docu
 assert(Profile.prototype.deleteOne === originalDocumentDeleteOne, "Mongoose document deleteOne was not restored");
 
 const payload = JSON.parse(client.previewJson());
-const findOneSpan = payload.events.find((event) => event.id === "evt_node_mongoose_findone_mongoose_query");
-const insertManySpan = payload.events.find((event) => event.id === "evt_node_mongoose_insertmany_mongoose_model");
-const updateErrorSpan = payload.events.find((event) => event.id === "evt_node_mongoose_updateone_error");
-const documentSaveSpan = payload.events.find((event) => event.id === "evt_node_mongoose_save_mongoose_document");
-const documentUpdateSpan = payload.events.find((event) => event.id === "evt_node_mongoose_updateone_mongoose_document");
-const documentDeleteSpan = payload.events.find((event) => event.id === "evt_node_mongoose_deleteone_mongoose_document");
+const findOneSpan = findAutomaticEvent(payload.events, "evt_node_mongoose_findone_mongoose_query");
+const insertManySpan = findAutomaticEvent(payload.events, "evt_node_mongoose_insertmany_mongoose_model");
+const updateErrorSpan = findAutomaticEvent(payload.events, "evt_node_mongoose_updateone_error");
+const documentSaveSpan = findAutomaticEvent(payload.events, "evt_node_mongoose_save_mongoose_document");
+const documentUpdateSpan = findAutomaticEvent(payload.events, "evt_node_mongoose_updateone_mongoose_document");
+const documentDeleteSpan = findAutomaticEvent(payload.events, "evt_node_mongoose_deleteone_mongoose_document");
 const preview = client.previewJson();
 assert(findOneSpan?.type === "span", `missing Mongoose findOne span: ${preview}`);
 assert(insertManySpan?.type === "span", `missing Mongoose insertMany span: ${preview}`);

@@ -165,10 +165,7 @@ namespace LogBrew
 
         private void ThrowIfDisposed()
         {
-            if (disposed)
-            {
-                throw new ObjectDisposedException(nameof(LogBrewLoggerProvider));
-            }
+            ExceptionContract.ThrowIfDisposed(disposed, nameof(LogBrewLoggerProvider));
         }
     }
 
@@ -179,10 +176,7 @@ namespace LogBrew
             LogBrewClient client,
             LogBrewLoggerOptions? options = null)
         {
-            if (builder == null)
-            {
-                throw new ArgumentNullException(nameof(builder));
-            }
+            ExceptionContract.ThrowIfNull(builder, nameof(builder));
 
             builder.AddProvider(new LogBrewLoggerProvider(client, options));
             return builder;
@@ -218,10 +212,7 @@ namespace LogBrew
             Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            if (formatter == null)
-            {
-                throw new ArgumentNullException(nameof(formatter));
-            }
+            ExceptionContract.ThrowIfNull(formatter, nameof(formatter));
 
             provider.Write(categoryName, logLevel, eventId, state, exception, formatter);
         }

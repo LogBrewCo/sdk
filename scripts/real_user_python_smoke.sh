@@ -1008,7 +1008,7 @@ if shutdown_doc != "Flush queued events, then mark the client closed so later wr
     raise SystemExit(f"unexpected LogBrewClient.shutdown docstring: {shutdown_doc!r}")
 
 pending_doc = inspect.getdoc(logbrew_sdk.LogBrewClient.pending_events)
-if pending_doc != "Return the queued event count currently buffered in memory.":
+if pending_doc != "Return the queued event count currently buffered locally.":
     raise SystemExit(f"unexpected LogBrewClient.pending_events docstring: {pending_doc!r}")
 
 always_accept_doc = inspect.getdoc(logbrew_sdk.RecordingTransport.always_accept)

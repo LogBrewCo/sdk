@@ -24,7 +24,8 @@ java_opentelemetry_classpath="$(fetch_java_opentelemetry_deps "$tmp_dir/java-ope
 java_servlet_classpath="$(fetch_java_servlet_deps "$tmp_dir/java-servlet-deps")"
 java_spring_boot_classpath="$(fetch_java_spring_boot_deps "$tmp_dir/java-spring-boot-deps")"
 java_spring_kafka_classpath="$(fetch_java_spring_kafka_deps "$tmp_dir/java-spring-kafka-deps")"
-java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath:$java_spring_kafka_classpath"
+java_spring_web_classpath="$(fetch_java_spring_web_deps "$tmp_dir/java-spring-web-deps")"
+java_optional_classpath="$java_logback_classpath:$java_opentelemetry_classpath:$java_servlet_classpath:$java_spring_boot_classpath:$java_spring_kafka_classpath:$java_spring_web_classpath"
 java_opentelemetry_api_classpath="$tmp_dir/java-opentelemetry-deps/opentelemetry-api-1.63.0.jar:$tmp_dir/java-opentelemetry-deps/opentelemetry-context-1.63.0.jar:$tmp_dir/java-opentelemetry-deps/opentelemetry-common-1.63.0.jar"
 
 javac -Xlint:all -Werror --release 11 -cp "$java_optional_classpath" -d "$tmp_dir/classes" @"$main_sources"

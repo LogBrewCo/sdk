@@ -67,10 +67,7 @@ namespace LogBrew
 
         public SpanAttributes WithEvents(IEnumerable<SpanEventSummary> summaries)
         {
-            if (summaries == null)
-            {
-                throw new ArgumentNullException(nameof(summaries));
-            }
+            ExceptionContract.ThrowIfNull(summaries, nameof(summaries));
 
             var copied = new List<SpanEventSummary>();
             foreach (var summary in summaries)
@@ -93,10 +90,7 @@ namespace LogBrew
 
         public SpanAttributes WithLinks(IEnumerable<SpanLinkSummary> summaries)
         {
-            if (summaries == null)
-            {
-                throw new ArgumentNullException(nameof(summaries));
-            }
+            ExceptionContract.ThrowIfNull(summaries, nameof(summaries));
 
             var copied = new List<SpanLinkSummary>();
             foreach (var summary in summaries)
@@ -119,10 +113,7 @@ namespace LogBrew
 
         public SpanAttributes WithLink(SpanLinkSummary summary)
         {
-            if (summary == null)
-            {
-                throw new ArgumentNullException(nameof(summary));
-            }
+            ExceptionContract.ThrowIfNull(summary, nameof(summary));
 
             var copied = links == null ? new List<SpanLinkSummary>() : new List<SpanLinkSummary>(links);
             copied.Add(summary);
@@ -137,10 +128,7 @@ namespace LogBrew
 
         public SpanAttributes WithEvent(SpanEventSummary summary)
         {
-            if (summary == null)
-            {
-                throw new ArgumentNullException(nameof(summary));
-            }
+            ExceptionContract.ThrowIfNull(summary, nameof(summary));
 
             var copied = events == null ? new List<SpanEventSummary>() : new List<SpanEventSummary>(events);
             copied.Add(summary);
@@ -308,10 +296,7 @@ namespace LogBrew
     {
         internal static Dictionary<string, object?> CopyMetadata(IDictionary<string, object?> metadata, string label)
         {
-            if (metadata == null)
-            {
-                throw new ArgumentNullException(nameof(metadata));
-            }
+            ExceptionContract.ThrowIfNull(metadata, nameof(metadata));
 
             var copied = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var item in metadata)

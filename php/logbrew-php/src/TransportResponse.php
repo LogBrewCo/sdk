@@ -13,7 +13,9 @@ final class TransportResponse
         /** Final HTTP-like status returned by the transport. */
         public readonly int $statusCode,
         /** Number of transport attempts used for the flush. */
-        public readonly int $attempts
+        public readonly int $attempts,
+        /** Number of accepted request batches completed by the flush. */
+        public readonly int $batches = 1
     ) {
     }
 }

@@ -14,7 +14,7 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
-from release_metadata_dotnet import validate_dotnet_packages
+from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES, validate_dotnet_packages
 
 
 PUBLIC_VERSION = "0.1.0"
@@ -23,6 +23,7 @@ RUBYGEMS_VERSION = "0.1.1"
 PACKAGIST_VERSION = "0.1.1"
 DOTNET_VERSION = "0.1.4"
 DOTNET_OTEL_VERSION = "0.1.1"
+DOTNET_HTTPCLIENT_VERSION = "0.1.0"
 UNITY_VERSION = "0.1.1"
 MAVEN_VERSION = "0.1.1"
 PUBLIC_LICENSE = "MIT"
@@ -51,13 +52,7 @@ JS_PACKAGES = {
     "js/logbrew-svelte": "@logbrew/svelte",
     "js/logbrew-vue": "@logbrew/vue",
 }
-NUGET_PACKAGES = {
-    "LogBrew",
-    "LogBrew.AspNetCore",
-    "LogBrew.EntityFrameworkCore",
-    "LogBrew.StackExchangeRedis",
-    "LogBrew.OpenTelemetry",
-}
+NUGET_PACKAGES = {package.package_id for package in DOTNET_RELEASE_PACKAGES}
 
 OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
 PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
@@ -610,12 +605,20 @@ def validate_objc(root: Path, failures: list[str]) -> None:
     require_path(root, "objc/logbrew-objc/README.md", failures)
     header_path = require_path(root, "objc/logbrew-objc/include/LogBrew.h", failures)
     source_path = require_path(root, "objc/logbrew-objc/src/LogBrew.m", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDeliveryEngine.h", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDeliveryEngine.m", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDeliveryEnginePrivate.h", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDeliveryEngineDurable.m", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDurableDeliveryStore.h", failures)
+    require_path(root, "objc/logbrew-objc/src/LBWDurableDeliveryStore.m", failures)
     require_path(root, "objc/logbrew-objc/src/LBWHTTPTransport.m", failures)
     require_path(root, "objc/logbrew-objc/Makefile", failures)
     require_path(root, "objc/logbrew-objc/examples/Makefile", failures)
     require_path(root, "objc/logbrew-objc/examples/readme_example.m", failures)
     require_path(root, "objc/logbrew-objc/examples/real_user_smoke.m", failures)
     require_path(root, "objc/logbrew-objc/tests/test_logbrew.m", failures)
+    require_path(root, "objc/logbrew-objc/tests/test_durable_delivery.m", failures)
+    require_path(root, "objc/logbrew-objc/tests/test_durable_delivery_recovery.m", failures)
     if not header_path.exists() or not source_path.exists():
         return
     header = header_path.read_text(encoding="utf-8")
@@ -631,6 +634,14 @@ def validate_objc(root: Path, failures: list[str]) -> None:
         "metricWithID",
         "captureProductActionWithID",
         "captureNetworkMilestoneWithID",
+        "LBWAutomaticDeliveryOptions",
+        "LBWDurableDeliveryOptions",
+        "LBWDeliveryHealth",
+        "startAutomaticDeliveryWithTransport",
+        "enableDurableDeliveryWithOptions",
+        "purgeDurableDeliveryWithError",
+        "recoverAutomaticDeliveryWithError",
+        "shutdownOwnedTransportWithError",
     ):
         require(needle in header, failures, f"{location}: missing public Objective-C SDK symbol {needle}")
     for needle in (
@@ -643,6 +654,10 @@ def validate_objc(root: Path, failures: list[str]) -> None:
         "LBWHTTPTransport",
         "flushWithTransport",
         "copyable source",
+        "startAutomaticDeliveryWithTransport",
+        "Durable Delivery (Opt-In)",
+        "enableDurableDeliveryWithOptions",
+        "deliveryHealth",
     ):
         require(needle in readme, failures, f"objc/logbrew-objc/README.md: missing guidance {needle}")
 
@@ -844,7 +859,32 @@ def validate_php(root: Path, failures: list[str]) -> None:
 
 
 def validate_swift(root: Path, failures: list[str]) -> None:
-    require_path(root, "swift/logbrew-swift/README.md", failures)
+    readme_path = require_path(root, "swift/logbrew-swift/README.md", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStore.swift", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DurableDeliveryStoreRecovery.swift", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngine.swift", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineDurable.swift", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineAutomatic.swift", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryEngineQueue.swift", failures)
+    require_path(root, "swift/logbrew-swift/Sources/LogBrew/DeliveryLifecycle.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryTests.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryLifecycleTests.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/AutomaticDeliveryTestSupport.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryFailureTests.swift", failures)
+    require_path(root, "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryRecoveryTests.swift", failures)
+    if readme_path.exists():
+        readme = readme_path.read_text(encoding="utf-8")
+        for needle in (
+            "startAutomaticDelivery",
+            "AutomaticDeliveryOptions",
+            "Durable Delivery (Opt-In)",
+            "DurableDeliveryOptions",
+            "enableDurableDelivery",
+            "purgeDurableDelivery",
+            "deliveryHealth",
+        ):
+            require(needle in readme, failures, f"swift/logbrew-swift/README.md: missing guidance {needle}")
     manifest_expectations = {
         "swift/logbrew-swift/Package.swift": (
             'name: "logbrew-swift"',
@@ -895,17 +935,58 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "repo-wide version guard": "python3 scripts/check_repo_wide_release_versions.py \"$REF\"",
             "publish dispatch output guard": "if: ${{ steps.release.outputs.publish_packages == 'true' }}",
             "scoped GitHub Release summary": "Skipped package publishing for scoped GitHub Release",
+            "Maven selected-artifact release input": "maven_artifacts:",
+            "Maven selected-artifact dispatch": '-f maven_artifacts="$MAVEN_ARTIFACTS"',
+            "Maven release selector environment binding": (
+                "INPUT_MAVEN_ARTIFACTS: ${{ inputs.maven_artifacts }}"
+            ),
+            "Maven release selector canonicalization": "maven_release_plan.py canonicalize",
+            "Maven release selector environment input": (
+                "--artifacts-env INPUT_MAVEN_ARTIFACTS"
+            ),
+            "Maven release canonical output": (
+                "printf 'maven_artifacts=%s\\n' \"$maven_artifacts\""
+            ),
         }
         for description, needle in required_needles.items():
             require(needle in text, failures, f"{PUBLISH_RELEASE_WORKFLOW}: missing {description}")
+        resolve_step = text.split("name: Resolve release publish inputs", 1)[-1]
+        resolve_script = resolve_step.split(
+            "- name: Guard repo-wide release package versions",
+            1,
+        )[0].split("run: |", 1)[-1]
+        require(
+            "${{ inputs.maven_artifacts }}" not in resolve_script,
+            failures,
+            f"{PUBLISH_RELEASE_WORKFLOW}: Maven selector must not be interpolated into shell",
+        )
+        require(
+            'maven_artifacts="$INPUT_MAVEN_ARTIFACTS"' not in resolve_script
+            and 'echo "maven_artifacts=$maven_artifacts"' not in resolve_script,
+            failures,
+            f"{PUBLISH_RELEASE_WORKFLOW}: Maven selector must be canonical before output",
+        )
     publish_packages_path = require_path(root, PUBLISH_PACKAGES_WORKFLOW, failures)
     if publish_packages_path.exists():
         publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
         required_publish_needles = {
             "NuGet package version output": "id: nuget-version",
+            "NuGet HttpClient pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
             "NuGet StackExchange.Redis pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj",
             "NuGet OpenTelemetry pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj",
+            "NuGet XML documentation pack": "-p:GenerateDocumentationFile=true",
+            "NuGet HttpClient documentation pack": "httpclient_pack_args=",
+            "NuGet symbol pack": "-p:SymbolPackageFormat=snupkg",
+            "NuGet source commit pack": "-p:RepositoryCommit=$source_commit",
+            "NuGet Source Link pack": "-p:EnableSourceLink=true",
+            "NuGet artifact validation": "python3 scripts/check_dotnet_release_artifacts.py",
+            "NuGet artifact digest receipt": "steps.nuget-artifacts.outputs.httpclient_content_sha256",
+            "NuGet collision preflight": "--expect-absent",
+            "NuGet bounded core dependency": "--dependency-range \"LogBrew.HttpClient:LogBrew=",
+            "NuGet HttpClient compatibility receipt": "real_user_dotnet_httpclient_package_compatibility_smoke.sh",
+            "NuGet one-package publish loop": "while IFS= read -r package_path",
             "NuGet duplicate-safe publish": "--skip-duplicate",
+            "NuGet symbol publish": "--symbol-source https://api.nuget.org/v3/index.json",
             "NuGet public install smoke": "bash scripts/real_user_dotnet_public_nuget_smoke.sh",
             "verify target exact version input": "verify_version:",
             "verify target exact version argument": 'verify_args+=(--version "$VERIFY_VERSION")',
@@ -940,19 +1021,38 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "Maven Central public install smoke": "bash scripts/real_user_maven_central_public_smoke.sh",
             "Maven Central generated publishing-values hint": "generated Central Portal publishing values",
             "Maven Central auth preflight": "bash scripts/check_maven_central_auth_preflight.sh",
+            "Maven selected-artifact input": "maven_artifacts:",
+            "Maven selected-artifact plan": "maven_release_plan.py create",
+            "Maven selected-artifact environment input": (
+                "MAVEN_ARTIFACTS_INPUT: ${{ inputs.maven_artifacts }}"
+            ),
+            "Maven selected-artifact parser input": (
+                "--artifacts-env MAVEN_ARTIFACTS_INPUT"
+            ),
+            "Maven selected-version collision preflight": "--maven-plan-scope selected",
+            "Maven exact dependency closure preflight": "--maven-plan-scope dependencies",
+            "Maven exact bundle manifest": "--manifest",
+            "Maven selected public install smoke": (
+                "real_user_maven_central_public_smoke.sh --plan"
+            ),
         }
-        nuget_output_versions = (
-            ("exact", "LogBrew", "core_version"),
-            ("ASP.NET Core", "LogBrew.AspNetCore", "aspnetcore_version"),
-            ("Entity Framework Core", "LogBrew.EntityFrameworkCore", "efcore_version"),
-            ("StackExchange.Redis", "LogBrew.StackExchangeRedis", "redis_version"),
-            ("OpenTelemetry", "LogBrew.OpenTelemetry", "otel_version"),
+        plan_step = publish_packages_text.split("- name: Plan selected Maven artifacts", 1)[-1]
+        plan_script = plan_step.split("- name: Check selected Maven version collisions", 1)[0]
+        require(
+            "${{ inputs.maven_artifacts }}" not in plan_script.split("run: |", 1)[-1],
+            failures,
+            f"{PUBLISH_PACKAGES_WORKFLOW}: Maven selector must not be interpolated into shell",
         )
-        for label, package, output_name in nuget_output_versions:
-            needle = f'--nuget-version "{package}=${{{{ steps.nuget-version.outputs.{output_name} }}}}"'
-            required_publish_needles[f"NuGet {label} version output"] = f"{output_name}="
-            required_publish_needles[f"NuGet {label} metadata version validation"] = needle
-            required_publish_needles[f"NuGet {label} public version verification"] = needle
+        for package in DOTNET_RELEASE_PACKAGES:
+            needle = (
+                f'--nuget-version "{package.package_id}='
+                f'${{{{ steps.nuget-version.outputs.{package.version_output} }}}}"'
+            )
+            required_publish_needles[f"NuGet {package.package_id} version output"] = (
+                f"{package.version_output}="
+            )
+            required_publish_needles[f"NuGet {package.package_id} metadata version validation"] = needle
+            required_publish_needles[f"NuGet {package.package_id} public version verification"] = needle
         for description, needle in required_publish_needles.items():
             require(needle in publish_packages_text, failures, f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}")
         for relative_dir in JS_PACKAGES:
@@ -1029,6 +1129,7 @@ def validate(
         nuget_versions.get("LogBrew.OpenTelemetry", DOTNET_OTEL_VERSION),
         PUBLIC_LICENSE,
         REPO_URL,
+        httpclient_version=nuget_versions.get("LogBrew.HttpClient", DOTNET_HTTPCLIENT_VERSION),
     )
     validate_unity(root, failures)
     validate_maven_pom(root, "kotlin/logbrew-kotlin/pom.xml", "logbrew-kotlin", "LogBrew Kotlin SDK", failures)

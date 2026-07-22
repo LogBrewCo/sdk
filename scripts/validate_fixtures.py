@@ -39,7 +39,7 @@ NON_NEGATIVE_METRIC_KINDS = {"counter", "histogram"}
 OPTIONAL_ATTRIBUTES = {
     "release": {"commit", "notes", "metadata"},
     "environment": {"region", "metadata"},
-    "issue": {"message", "metadata"},
+    "issue": {"message", "metadata", "stackFrames"},
     "log": {"logger", "metadata"},
     "span": {"parentSpanId", "durationMs", "metadata", "events", "links"},
     "action": {"metadata"},
@@ -59,6 +59,9 @@ OPTIONAL_STRING_ATTRIBUTES = {
 }
 TRACE_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{32}$")
 SPAN_ID_PATTERN = re.compile(r"^[0-9a-fA-F]{16}$")
+DEBUG_ID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 ZERO_TRACE_ID = "0" * 32
 ZERO_SPAN_ID = "0" * 16
 
@@ -178,6 +181,42 @@ def _validate_span_links(index: int, attributes: dict[str, Any]) -> None:
                 )
 
 
+def _validate_issue_stack_frames(index: int, attributes: dict[str, Any]) -> None:
+    frames = attributes.get("stackFrames")
+    if frames is None:
+        return
+    if not isinstance(frames, list) or not 1 <= len(frames) <= 32:
+        raise ValidationError(f"event {index} issue stackFrames must contain 1-32 entries")
+    for frame_index, frame in enumerate(frames):
+        label = f"event {index} issue stack frame {frame_index}"
+        if not isinstance(frame, dict):
+            raise ValidationError(f"{label} must be an object")
+        _reject_unknown_keys(frame, {"filename", "line", "column", "debugId"}, label)
+        filename = frame.get("filename")
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or len(filename) > 2_048
+            or "?" in filename
+            or "#" in filename
+            or any(ord(character) <= 31 or ord(character) == 127 for character in filename)
+        ):
+            raise ValidationError(f"{label} filename is invalid")
+        for coordinate in ("line", "column"):
+            value = frame.get(coordinate)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 1 <= value <= 2_147_483_647
+            ):
+                raise ValidationError(f"{label} {coordinate} must be a positive integer")
+        debug_id = frame.get("debugId")
+        if debug_id is not None and (
+            not isinstance(debug_id, str) or DEBUG_ID_PATTERN.fullmatch(debug_id) is None
+        ):
+            raise ValidationError(f"{label} debugId must be a UUID")
+
+
 def _validate_optional_attributes(index: int, event_type: str, attributes: dict[str, Any]) -> None:
     for (expected_type, key), require_non_empty in OPTIONAL_STRING_ATTRIBUTES.items():
         if expected_type != event_type or key not in attributes:
@@ -269,6 +308,9 @@ def validate_payload(payload: dict[str, Any]) -> None:
         if event_type == "span":
             _validate_span_events(index, attributes)
             _validate_span_links(index, attributes)
+
+        if event_type == "issue":
+            _validate_issue_stack_frames(index, attributes)
 
         if event_type == "metric":
             _validate_metric_attributes(index, attributes)

@@ -686,10 +686,13 @@ if (!declarations.includes("Return the queued event batch as stable, pretty-prin
 if (!declarations.includes("Return the queued event count currently buffered in memory.")) {
   throw new Error("missing installed pendingEvents declaration docs");
 }
-if (!declarations.includes("Flush queued events through a transport while preserving retry semantics.")) {
+if (!declarations.includes("Return compact serialized event bytes currently buffered in memory.")) {
+  throw new Error("missing installed pendingBytes declaration docs");
+}
+if (!declarations.includes("Flush one queue snapshot in bounded batches while preserving concurrent captures and retry bodies.")) {
   throw new Error("missing installed flush declaration docs");
 }
-if (!declarations.includes("Flush queued events, then mark the client closed so later writes fail.")) {
+if (!declarations.includes("Reject new capture, flush queued events, then close; a failed flush reopens the intact remainder.")) {
   throw new Error("missing installed shutdown declaration docs");
 }
 if (!declarations.includes("Install explicit console capture while preserving the target console's normal output behavior.")) {
@@ -1070,6 +1073,7 @@ grep -q '^package/package.json$' package-contents.txt
 grep -q '^package/README.md$' package-contents.txt
 grep -q '^package/index.d.ts$' package-contents.txt
 grep -q '^package/index.d.cts$' package-contents.txt
+grep -q '^package/issue-stack.cjs$' package-contents.txt
 grep -q '^package/support-ticket.cjs$' package-contents.txt
 grep -q '^package/examples/package.json$' package-contents.txt
 grep -q '^package/examples/agent-timeline.mjs$' package-contents.txt
@@ -1360,10 +1364,13 @@ if (!declarations.includes("Return the queued event batch as stable, pretty-prin
 if (!declarations.includes("Return the queued event count currently buffered in memory.")) {
   throw new Error("missing packed pendingEvents declaration docs");
 }
-if (!declarations.includes("Flush queued events through a transport while preserving retry semantics.")) {
+if (!declarations.includes("Return compact serialized event bytes currently buffered in memory.")) {
+  throw new Error("missing packed pendingBytes declaration docs");
+}
+if (!declarations.includes("Flush one queue snapshot in bounded batches while preserving concurrent captures and retry bodies.")) {
   throw new Error("missing packed flush declaration docs");
 }
-if (!declarations.includes("Flush queued events, then mark the client closed so later writes fail.")) {
+if (!declarations.includes("Reject new capture, flush queued events, then close; a failed flush reopens the intact remainder.")) {
   throw new Error("missing packed shutdown declaration docs");
 }
 if (!declarations.includes("Install explicit console capture while preserving the target console's normal output behavior.")) {
@@ -2207,6 +2214,19 @@ test("installed JavaScript error helper attaches bounded release-artifact metada
   assert.equal(attributes.title, "TypeError");
   assert.equal(attributes.level, "error");
   assert.equal(attributes.message, "Checkout exploded");
+  assert.deepEqual(attributes.stackFrames, [
+    {
+      filename: "https://cdn.example/assets/app.js",
+      line: 12,
+      column: 34,
+      debugId: "11111111-2222-4333-8444-555555555555"
+    },
+    {
+      filename: "https://cdn.example/assets/vendor.js",
+      line: 1,
+      column: 2
+    }
+  ]);
   assert.equal(attributes.metadata.errorFrameFile, "https://cdn.example/assets/app.js");
   assert.equal(attributes.metadata.errorFrameLine, 12);
   assert.equal(attributes.metadata.errorFrameColumn, 34);
@@ -2219,7 +2239,6 @@ test("installed JavaScript error helper attaches bounded release-artifact metada
   assert.equal(attributes.metadata.sampled, true);
   assert.equal(serialized.includes("debug=true"), false);
   assert.equal(serialized.includes("section"), false);
-  assert.equal(serialized.includes("vendor.js"), false);
   assert.equal(serialized.includes("ignoredObject"), false);
   assert.equal(serialized.includes("nested"), false);
   assert.equal(serialized.includes("errorStack"), false);

@@ -17,7 +17,6 @@ from logbrew_sdk import (
 
 from logbrew_fastapi import add_logbrew_middleware, get_active_logbrew_trace
 
-
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
     sdk_name="logbrew-fastapi",
@@ -36,7 +35,10 @@ queue: list[str] = []
 
 
 def select_inventory() -> sqlite3.Row | tuple[Any, ...] | None:
-    return database.execute("SELECT quantity FROM inventory WHERE sku = ?", ("sku_123",)).fetchone()
+    return cast(
+        sqlite3.Row | tuple[Any, ...] | None,
+        database.execute("SELECT quantity FROM inventory WHERE sku = ?", ("sku_123",)).fetchone(),
+    )
 
 
 def read_inventory_cache() -> int:

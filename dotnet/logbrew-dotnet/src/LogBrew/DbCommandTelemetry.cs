@@ -272,15 +272,8 @@ namespace LogBrew
 
         private static void ValidateInputs<T>(LogBrewClient client, DbCommand command, T execute)
         {
-            if (client == null)
-            {
-                throw new ArgumentNullException(nameof(client));
-            }
-
-            if (command == null)
-            {
-                throw new ArgumentNullException(nameof(command));
-            }
+            ExceptionContract.ThrowIfNull(client, nameof(client));
+            ExceptionContract.ThrowIfNull(command, nameof(command));
 
             if (execute == null)
             {
@@ -352,7 +345,7 @@ namespace LogBrew
             }
         }
 
-        private static IDictionary<string, object?> CommandMetadata(
+        private static Dictionary<string, object?> CommandMetadata(
             DbCommand command,
             LogBrewDbCommandOptions options,
             string operationName,
@@ -399,7 +392,7 @@ namespace LogBrew
             }
         }
 
-        private static void AddString(IDictionary<string, object?> metadata, string key, string? value)
+        private static void AddString(Dictionary<string, object?> metadata, string key, string? value)
         {
             if (!string.IsNullOrWhiteSpace(value))
             {

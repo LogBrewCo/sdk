@@ -110,6 +110,65 @@ must(err)
 
 `EventDrop` contains only `eventId`, `eventType`, `reason`, and the cumulative dropped count; it never includes event attributes, payloads, API keys, headers, or transport details. The advisory callback is panic-safe and cannot interrupt capture. `Flush` and `Shutdown` still preserve accepted events across retryable transport failures, and `DroppedEvents()` is not reset by a successful flush.
 
+## Automatic Delivery
+
+Keep the existing manual behavior by using `NewClient`. To let a client own delivery, use `NewAutomaticClient` with one app-scoped transport:
+
+```go
+transport, err := logbrew.NewHTTPTransport(logbrew.HTTPTransportConfig{})
+must(err)
+
+client, err := logbrew.NewAutomaticClient(logbrew.Config{
+  APIKey:     "LOGBREW_API_KEY",
+  SDKName:    "checkout-api",
+  SDKVersion: "0.1.0",
+}, logbrew.AutomaticDeliveryConfig{
+  Transport: transport,
+})
+must(err)
+defer func() {
+  _, _ = client.Shutdown(nil)
+}()
+```
+
+Automatic delivery starts lazily after the first accepted event. It flushes every two seconds or at 100 queued events by default, whichever happens first, while reusing the same bounded queue and serialized flush path. Override `FlushInterval` and `FlushThreshold` when needed. Retryable failures preserve one immutable failed prefix. Without a server directive, automatic delivery uses the existing immediate retry budget before capped equal-jitter scheduling from 100 milliseconds to five seconds. Later captures remain queued separately. For `408` and `5xx` responses, the standard HTTP transport honors one unambiguous RFC `Retry-After` delta-seconds or IMF-fixdate value without bypassing the client backoff floor, and clamps it to `RetryMaxDelay`. Malformed, duplicate, unsupported, or past values use the jittered client fallback instead of an immediate retry. Authentication (`401`/`403`), quota (`402`/`429`), and other non-retryable responses pause automatic delivery until the application fixes the cause and calls `ResumeDelivery`.
+
+`DeliveryHealth()` returns only fixed lifecycle state, queue/drop counts, in-flight/coalesced state, bounded backoff source/outcome/delay fields, and counters. Backoff diagnostics distinguish the selected client or server delay and invalid server directives, but never retain the header value or clock input. The snapshot never contains event content or identifiers, API keys, endpoints, headers, paths, hosts, response text, or arbitrary metadata. `Shutdown(nil)` stops scheduling and drains through the owned transport. If that final send fails, queued work remains available for a later explicit `Shutdown(nil)` retry, while new captures stay rejected. The client installs no signal, process, or exit hooks; the application remains responsible for calling shutdown and for configuring an HTTP timeout appropriate to its runtime.
+
+### Encrypted restart persistence
+
+`NewPersistentAutomaticClient` is an opt-in extension of the same automatic client. It durably encrypts the existing queue before capture returns, recovers events oldest first after restart, and stores the exact failed request prefix so a retry after restart uses byte-identical request data. Ordinary `NewClient` and `NewAutomaticClient` behavior remains memory-only.
+
+```go
+// Load the same 32-byte key from your application's secure configuration on every
+// restart. Do not generate a new key for an existing directory.
+persistenceKey := loadApplicationPersistenceKey()
+
+client, err := logbrew.NewPersistentAutomaticClient(logbrew.Config{
+  APIKey:       "LOGBREW_API_KEY",
+  SDKName:      "checkout-api",
+  SDKVersion:   "0.1.0",
+  MaxQueueSize: 1000,
+}, logbrew.AutomaticDeliveryConfig{
+  Transport: transport,
+}, logbrew.PersistentDeliveryConfig{
+  Directory:      "/var/lib/checkout-api/logbrew",
+  EncryptionKey:  persistenceKey,
+  MaxStoredBytes: 4 * 1024 * 1024,
+})
+must(err)
+```
+
+Persistence uses standard-library AES-256-GCM with a fresh nonce for every rewrite. The 32-byte key stays caller-owned and is never persisted or logged. Event count remains bounded by `Config.MaxQueueSize`; serialized event bytes default to 4 MiB and can be configured up to 16 MiB. Queue state, failed request bytes, event IDs, and the SDK identity inside a frozen request are authenticated, encrypted, and bound to the dedicated store's ownership marker. Outside that ciphertext, only fixed filenames, the content-free ownership marker, and a content-free transaction digest remain visible. API keys, transport authentication values, endpoints, headers, PIDs, hosts, and configured paths are not stored.
+
+The configured directory is canonicalized to a dedicated leaf and must support verifiable owner-only POSIX modes, regular-file identity, single-link checks, advisory exclusive locking, file sync, and directory sync. Unsupported filesystems fail with `persistence_unsupported`; there is no plaintext or weak-permission fallback. Symlinked store leaves, unexpected files, unsafe links, unauthenticated corruption, the wrong key, concurrent ownership, inherited post-fork ownership, and file replacement while a process owns the store fail closed before delivery. A clean `Shutdown(nil)` releases ownership. The client adds no process hooks, shutdown hooks, or extra delivery queue.
+
+Event content remains application-controlled sensitive data even when encrypted. Keep the directory private, protect and rotate the key using an app-owned migration, and use a different dedicated directory per logical client. `PurgePersistentDelivery` is an explicit destructive recovery operation: it acquires exclusive ownership, rejects unknown paths, removes only recognized persistence files, resets the content-free ownership marker, and synchronizes the directory. It accepts any valid 32-byte key value because purge must remain possible after the old key is lost.
+
+An accepted prefix is removed from restart recovery only after its replacement queue snapshot and parent directory are durable. A crash after the remote service accepts a request but before that local acknowledgement completes can still resend the encrypted prefix after restart; transports and event processing should therefore remain idempotent. No local design can atomically commit a remote response and a filesystem update.
+
+The app and its local filesystem owner remain inside the trust boundary. Without an external monotonic authority, the SDK cannot distinguish restoration of an entire older but internally valid persistence directory from a normal restart. Protect or back up the directory as one unit, and purge it if owner-driven rollback is suspected.
+
 ## First Useful Telemetry
 
 For a production Go service, the first useful LogBrew payload is usually a release marker, environment marker, one service log, one product action, one network milestone, one request duration metric, and one W3C-linked request span. That gives developers and AI assistants enough context to answer "what changed?", "where did this happen?", "what did the user do?", "which API call mattered?", and "which trace links the signals?" without installing a large instrumentation stack.
@@ -256,7 +315,7 @@ _ = provider
 
 `TraceContextFromContext` and `TraceContextFromSpanContext` copy only valid OTel trace ID, span ID, and sampled flags into LogBrew child trace context. `NewSpanExporter` queues ended OTel spans as LogBrew span events with safe method/route/status, database, messaging, RPC, exception-type, span-kind, instrumentation-scope, and span-link summaries. It does not install global providers, own exporters/processors, retry, flush, capture full URLs, headers, payloads, SQL statements, exception messages, stacks, baggage, tracestate, or raw propagation values. Keep using `client.Flush` or `client.Shutdown` with your app-owned transport.
 
-`NewHTTPHandler` wraps an app-owned `net/http` handler, reads only W3C `traceparent`, creates one request span, optionally emits `http.server.duration`, and passes the active `TraceContext` to downstream code through `context.Context`. If the handler panics, LogBrew records one failed request span with type-only panic metadata, then re-panics with the original value. `NewSlogHandler` wraps an app-owned `slog.Handler`, queues a LogBrew log, and adds `traceId` / `spanId` fields to the wrapped app log when the context contains a LogBrew trace:
+`NewHTTPHandler` wraps an app-owned `net/http` handler, accepts exactly one valid W3C `traceparent`, creates one request span, optionally emits `http.server.duration`, and passes the active `TraceContext` to downstream code through `context.Context`. It uses the matched `http.ServeMux` pattern or an explicit `RouteTemplate`; when neither is available it records `/` instead of the raw request path. The outermost LogBrew wrapper owns nested instrumentation so the same request is emitted once. If the handler panics, LogBrew records one failed request span and one generic correlated issue with type-only panic metadata, then re-panics with the original value. Ordinary 5xx responses remain span-only unless `NewHTTPHandlerWithOptions` receives `WithHTTPServerErrorIssues()`. `NewSlogHandler` wraps an app-owned `slog.Handler`, queues a LogBrew log, and adds `traceId` / `spanId` fields to the wrapped app log when the context contains a LogBrew trace:
 
 ```go
 slogHandler, err := logbrew.NewSlogHandler(logbrew.SlogHandlerConfig{
@@ -269,21 +328,21 @@ if err != nil {
 }
 logger := slog.New(slogHandler)
 
-handler, err := logbrew.NewHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+handler, err := logbrew.NewHTTPHandlerWithOptions(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
   logger.InfoContext(r.Context(), "checkout handler reached", slog.String("cartTier", "standard"))
   w.WriteHeader(http.StatusNoContent)
 }), logbrew.HTTPHandlerConfig{
   Client:               client,
   RouteTemplate:        "/checkout/:cart_id",
   CaptureRequestMetric: true,
-})
+}, logbrew.WithHTTPServerErrorIssues())
 if err != nil {
   panic(err)
 }
 http.Handle("/checkout/", handler)
 ```
 
-The HTTP and slog helpers are dependency-free and explicit. They do not patch global HTTP clients, do not capture request or response bodies, do not capture arbitrary headers, do not capture panic messages or stacks, and strip query/hash text from route metadata. Run `go run ./examples/http_trace_correlation` for a copyable local example where release, environment, slog, issue, request span, and request-duration metric events share the same W3C trace.
+The HTTP and slog helpers are dependency-free and explicit. The HTTP wrapper preserves cancellation/deadlines, `http.Flusher`, `http.Hijacker`, `http.Pusher`, `io.ReaderFrom`, and `http.ResponseController` unwrapping when the app writer supports them. It does not patch globals, add workers, buffer bodies, capture request or response bodies, capture arbitrary headers, capture panic messages or stacks, or use raw URLs, query strings, fragments, cookies, authentication values, IPs, user identity, hosts, or local paths. Custom or unknown HTTP methods are recorded as `OTHER`. Run `go run ./examples/http_trace_correlation` for a copyable local example where release, environment, slog, issue, request span, and request-duration metric events share the same W3C trace.
 
 ## Outbound `net/http` Client Spans
 
@@ -293,12 +352,7 @@ Use `NewHTTPClientTransport` when you want one outbound client span around app-o
 transport, err := logbrew.NewHTTPClientTransport(logbrew.HTTPClientTransportConfig{
   Client:        client,
   Base:          http.DefaultTransport,
-  RouteTemplate: "/payments/:payment_id",
   EventIDPrefix: "checkout_http",
-  Metadata:      map[string]any{"service": "checkout-api"},
-  // Optional: records DNS/connect/TLS/write/first-byte durations without
-  // storing hosts, IPs, URLs, headers, cookies, payloads, baggage, or tracestate.
-  CapturePhaseTimings: true,
   // Optional: finish successful spans when the response body reaches EOF or Close.
   // Always close response bodies in your app code.
   FinishSpanOnResponseBodyClose: true,
@@ -320,7 +374,9 @@ if err != nil {
 response, err := httpClient.Do(request)
 ```
 
-The transport clones the request before writing exactly one W3C `traceparent`, scopes the downstream call under a child `TraceContext`, queues one span with method, query-free route, status, duration, sampled flag, and primitive metadata, then returns the original response or error. HTTP 4xx/5xx responses and transport errors are marked as failed dependency spans. Malformed active trace state falls back to a local trace and reports through `OnError`; telemetry capture failures also report through `OnError` and do not replace the app-owned HTTP result. `CapturePhaseTimings` adds low-cardinality `dnsMs`, `connectMs`, `tlsMs`, `wroteRequestMs`, `timeToFirstByteMs`, `connectionReused`, and `connectionWasIdle` metadata when Go's `net/http/httptrace` reports those phases, while preserving caller-installed `httptrace` callbacks. `FinishSpanOnResponseBodyClose` defers successful span capture until the app reads the response body to EOF or closes it, adding only `responseBodyCompletion` (`eof`, `close`, or `error`) and type-only errors when reads or closes fail. It does not patch global clients, does not capture request or response payloads, does not store headers, cookies, hosts, IPs, full URLs, query strings, fragments, baggage, tracestate, raw propagation values, phase error messages, body bytes, or body error messages. Run `go run ./examples/http_client_trace` for a local example of downstream propagation, phase timing metadata, body completion timing, and span capture.
+The transport is an explicit app-owned wrapper; it never changes `http.DefaultTransport` or unrelated clients. A valid active LogBrew parent creates one child for each actual `RoundTrip`, and the request clone receives the matching W3C `traceparent`. With no valid parent, the original request goes directly to the selected transport without tracing work. Caller request headers and context remain unchanged, responses and errors keep their original identity, and capture failures are advisory. Direct duplicate registration returns the first wrapper; nested wrappers coalesce through the request context, and LogBrew delivery requests are excluded.
+
+Place retry or redirect middleware outside this wrapper when each actual attempt should have its own child span. The fixed span metadata contains only method, normalized non-IP host when safe, status, duration, source, sampled state, real cancellation, and a bounded error class. It never stores scheme, port, path, query, fragment, full URL, headers, bodies or sizes, authentication material, cookies, baggage, tracestate, IP addresses, arbitrary metadata, error messages, stacks, or transport internals. `RouteTemplate`, `Metadata`, and `CapturePhaseTimings` remain in the config for source compatibility but are ignored and not retained. `FinishSpanOnResponseBodyClose` can defer capture while preserving body reads, writes, EOF, close, and errors. Run `go run ./examples/http_client_trace` for a local propagation and span-capture example.
 
 ## Dependency Spans
 

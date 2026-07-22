@@ -15,6 +15,10 @@ remove_tmp_dir() {
   rm -rf "$tmp_dir"
 }
 
+check_json() {
+  python3 "$repo_root/scripts/check_python_package_json.py" "$@"
+}
+
 trap remove_tmp_dir EXIT
 
 python3 -m venv "$tmp_dir/build-venv"
@@ -213,14 +217,16 @@ grep -qx 'outbound-http -> python -m logbrew_flask.examples outbound-http' <(sed
 grep -qx 'dependency-spans -> python -m logbrew_flask.examples dependency-spans' <(sed -n '4p' "$tmp_dir/examples-list.txt")
 grep -qx 'default (real-user-smoke) -> python -m logbrew_flask.examples' <(sed -n '5p' "$tmp_dir/examples-list.txt")
 "$tmp_dir/app/bin/python" -m logbrew_flask.examples readme-example > "$tmp_dir/readme.stdout.json" 2> "$tmp_dir/readme.stderr.json"
-grep -q '"type": "span"' "$tmp_dir/readme.stdout.json"
+check_json event-kinds span "$tmp_dir/readme.stdout.json"
 "$tmp_dir/app/bin/python" -m logbrew_flask.examples real-user-smoke > "$tmp_dir/smoke.stdout.json" 2> "$tmp_dir/smoke.stderr.json"
-grep -q '"type": "issue"' "$tmp_dir/smoke.stdout.json"
-grep -q '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/smoke.stderr.json"
-grep -q '"parentSpanId": "00f067aa0ba902b7"' "$tmp_dir/smoke.stderr.json"
-grep -q '"spanId": "b7ad6b7169203331"' "$tmp_dir/smoke.stderr.json"
-grep -q '"path": "/health"' "$tmp_dir/smoke.stderr.json"
-grep -q '"events": 4' "$tmp_dir/smoke.stderr.json"
+check_json event-kinds span issue "$tmp_dir/smoke.stdout.json"
+check_json trailing-fields \
+  'traceId="4bf92f3577b34da6a3ce929d0e0e4736"' \
+  'parentSpanId="00f067aa0ba902b7"' \
+  'spanId="b7ad6b7169203331"' \
+  'path="/health"' \
+  'events=4' \
+  "$tmp_dir/smoke.stderr.json"
 "$tmp_dir/app/bin/python" -m logbrew_flask.examples outbound-http > "$tmp_dir/outbound.stdout.json" 2> "$tmp_dir/outbound.stderr.json"
 python3 - "$tmp_dir/outbound.stdout.json" "$tmp_dir/outbound.stderr.json" "$tmp_dir/outbound-body.json" <<'PY'
 import json
@@ -266,15 +272,20 @@ PY
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/outbound-body.json" >/dev/null
 
 "$tmp_dir/app/bin/python" -m logbrew_flask.examples dependency-spans > "$tmp_dir/dependency.stdout.json" 2> "$tmp_dir/dependency.stderr.json"
-grep -q '"name": "sqlite SELECT inventory"' "$tmp_dir/dependency.stdout.json"
-grep -q '"name": "memory-cache GET inventory"' "$tmp_dir/dependency.stdout.json"
-grep -q '"name": "memory-queue PUBLISH checkout.completed"' "$tmp_dir/dependency.stdout.json"
-grep -q '"databaseParentSpanId": "b7ad6b7169203331"' "$tmp_dir/dependency.stderr.json"
-grep -q '"databaseSpanId": "c8ad6b7169203332"' "$tmp_dir/dependency.stderr.json"
-grep -q '"cacheParentSpanId": "b7ad6b7169203331"' "$tmp_dir/dependency.stderr.json"
-grep -q '"cacheSpanId": "d9ad6b7169203333"' "$tmp_dir/dependency.stderr.json"
-grep -q '"queueParentSpanId": "b7ad6b7169203331"' "$tmp_dir/dependency.stderr.json"
-grep -q '"queueSpanId": "e0ad6b7169203334"' "$tmp_dir/dependency.stderr.json"
+check_json event-kinds span "$tmp_dir/dependency.stdout.json"
+check_json event-fields \
+  'attributes.name="sqlite SELECT inventory"' \
+  'attributes.name="memory-cache GET inventory"' \
+  'attributes.name="memory-queue PUBLISH checkout.completed"' \
+  "$tmp_dir/dependency.stdout.json"
+check_json fields \
+  'databaseParentSpanId="b7ad6b7169203331"' \
+  'databaseSpanId="c8ad6b7169203332"' \
+  'cacheParentSpanId="b7ad6b7169203331"' \
+  'cacheSpanId="d9ad6b7169203333"' \
+  'queueParentSpanId="b7ad6b7169203331"' \
+  'queueSpanId="e0ad6b7169203334"' \
+  "$tmp_dir/dependency.stderr.json"
 python3 "$repo_root/scripts/validate_fixtures.py" "$tmp_dir/dependency.stdout.json" >/dev/null
 
 printf 'flask real-user smoke passed with %s\n' "$("$tmp_dir/app/bin/python" - <<'PY'

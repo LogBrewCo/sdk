@@ -6,7 +6,9 @@ AGENTS.md
 CLAUDE.md
 .agents/
 skills-lock.json
+docs/competitor-research/
 docs/superpowers/
+memory.md
 plans/
 *plan*.md
 

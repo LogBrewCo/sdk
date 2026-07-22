@@ -6,6 +6,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -31,6 +32,7 @@ public final class HttpTransport implements Transport {
     private final Map<String, String> headers;
     private final HttpClient client;
     private final Duration requestTimeout;
+    private final Clock clock;
 
     /**
      * Creates a transport using the production endpoint and safe default timeout.
@@ -67,6 +69,7 @@ public final class HttpTransport implements Transport {
         this.client = builder.client == null
             ? defaultClient(this.requestTimeout)
             : builder.client;
+        this.clock = builder.clock;
     }
 
     /**
@@ -121,7 +124,14 @@ public final class HttpTransport implements Transport {
 
         try {
             HttpResponse<Void> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.discarding());
-            return new TransportResponse(response.statusCode(), 1);
+            RetryAfterDirective retryAfter = isRetryable(response.statusCode())
+                ? RetryAfterParser.parse(
+                    response.headers().allValues("retry-after"),
+                    clock.instant(),
+                    AutomaticDeliveryOptions.MAX_SCHEDULE_DELAY.toMillis()
+                )
+                : RetryAfterDirective.none();
+            return new TransportResponse(response.statusCode(), 1, retryAfter);
         } catch (IOException error) {
             throw TransportException.network("http transport failed: " + error.getMessage());
         } catch (InterruptedException error) {
@@ -146,6 +156,10 @@ public final class HttpTransport implements Transport {
             throw new SdkException("configuration_error", "HTTP transport endpoint must include an authority");
         }
         return resolved;
+    }
+
+    private static boolean isRetryable(int statusCode) {
+        return statusCode == 408 || statusCode >= 500;
     }
 
     private static Duration validateTimeout(Duration timeout) {
@@ -192,6 +206,7 @@ public final class HttpTransport implements Transport {
         private final Map<String, String> headers = new LinkedHashMap<>();
         private HttpClient client;
         private Duration requestTimeout = DEFAULT_TIMEOUT;
+        private Clock clock = Clock.systemUTC();
 
         private Builder() {
         }
@@ -235,6 +250,11 @@ public final class HttpTransport implements Transport {
          */
         public Builder timeout(Duration requestTimeout) {
             this.requestTimeout = requestTimeout;
+            return this;
+        }
+
+        Builder clock(Clock clock) {
+            this.clock = Objects.requireNonNull(clock, "clock");
             return this;
         }
 

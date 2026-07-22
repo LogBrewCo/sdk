@@ -148,6 +148,7 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
     public let level: IssueLevel
     public let message: String?
     public let metadata: Metadata?
+    @_spi(CrashReplay) public let nativeStackFrames: [NativeStackFrame]?
 
     public init(
         title: String,
@@ -159,6 +160,22 @@ public struct IssueAttributes: Codable, Equatable, Sendable {
         self.level = level
         self.message = message
         self.metadata = metadata
+        nativeStackFrames = nil
+    }
+
+    @_spi(CrashReplay)
+    public init(
+        title: String,
+        level: IssueLevel,
+        message: String? = nil,
+        metadata: Metadata? = nil,
+        nativeStackFrames: [NativeStackFrame]?,
+    ) {
+        self.title = title
+        self.level = level
+        self.message = message
+        self.metadata = metadata
+        self.nativeStackFrames = nativeStackFrames
     }
 }
 
