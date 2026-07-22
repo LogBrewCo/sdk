@@ -591,7 +591,11 @@ jobs:
             echo "Could not read NuGet package versions from .NET package projects" >&2
             exit 1
           fi
+          core_dependency_range="$(python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_metadata_dotnet import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' "$core_version")"
+          core_dependency_range_msbuild="${core_dependency_range/, /%2C}"
           echo "core_version=$core_version" >> "$GITHUB_OUTPUT"
+          echo "core_dependency_range=$core_dependency_range" >> "$GITHUB_OUTPUT"
+          echo "core_dependency_range_msbuild=$core_dependency_range_msbuild" >> "$GITHUB_OUTPUT"
           echo "aspnetcore_version=$aspnetcore_version" >> "$GITHUB_OUTPUT"
           echo "efcore_version=$efcore_version" >> "$GITHUB_OUTPUT"
           echo "httpclient_version=$httpclient_version" >> "$GITHUB_OUTPUT"
@@ -601,6 +605,17 @@ jobs:
       - name: Validate NuGet release metadata
         run: |
           python3 scripts/check_release_metadata.py \
+            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
+            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
+            --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
+            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \
+            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
+            --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}"
+
+      - name: Check NuGet version collision
+        if: ${{ ! inputs.dry_run }}
+        run: |
+          python3 scripts/check_registry_publication.py --target nuget --expect-absent \
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
             --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
@@ -619,20 +634,26 @@ jobs:
             --output dist/nuget
             --include-symbols
             -p:SymbolPackageFormat=snupkg
-            -p:GenerateDocumentationFile=true
-            -p:NoWarn=1591
             -p:PublishRepositoryUrl=true
             -p:EnableSourceLink=true
             "-p:RepositoryCommit=$source_commit"
             -p:ContinuousIntegrationBuild=true
             -p:EmbedUntrackedSources=true
           )
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj "${pack_args[@]}"
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj "${pack_args[@]}"
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj "${pack_args[@]}"
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj "${pack_args[@]}"
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj "${pack_args[@]}"
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj "${pack_args[@]}"
+          legacy_pack_args=("${pack_args[@]}" -p:GenerateDocumentationFile=true -p:NoWarn=1591)
+          httpclient_pack_args=(
+            "${pack_args[@]}"
+            -p:GenerateDocumentationFile=true
+            -p:BuildProjectReferences=false
+            "-p:LogBrewProjectReferenceVersion=${{ steps.nuget-version.outputs.core_dependency_range_msbuild }}"
+          )
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj "${legacy_pack_args[@]}"
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj "${legacy_pack_args[@]}"
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj "${legacy_pack_args[@]}"
+          dotnet restore dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --no-restore "${httpclient_pack_args[@]}"
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj "${legacy_pack_args[@]}"
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj "${legacy_pack_args[@]}"
           python3 scripts/check_dotnet_release_artifacts.py \
             --directory dist/nuget \
             --source-commit "$source_commit" \
@@ -642,6 +663,7 @@ jobs:
             --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \
             --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
             --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}" \
+            --dependency-range "LogBrew.HttpClient:LogBrew=${{ steps.nuget-version.outputs.core_dependency_range }}" \
             --manifest dist/nuget/release-artifacts.json
           httpclient_content_sha256="$(python3 -c 'import json, sys; payload = json.load(open(sys.argv[1], encoding="utf-8")); print(next(package["nupkgContentSha256"] for package in payload["packages"] if package["id"] == "LogBrew.HttpClient"))' dist/nuget/release-artifacts.json)"
           echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
@@ -696,6 +718,15 @@ jobs:
             "${{ steps.nuget-version.outputs.httpclient_version }}" \
             "${{ steps.nuget-version.outputs.redis_version }}" \
             "${{ steps.nuget-version.outputs.otel_version }}" \
+            "${{ steps.nuget-artifacts.outputs.source_commit }}" \
+            "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
+
+      - name: Verify public HttpClient package compatibility
+        if: ${{ ! inputs.dry_run }}
+        run: |
+          bash scripts/real_user_dotnet_httpclient_package_compatibility_smoke.sh \
+            "${{ steps.nuget-version.outputs.core_version }}" \
+            "${{ steps.nuget-version.outputs.httpclient_version }}" \
             "${{ steps.nuget-artifacts.outputs.source_commit }}" \
             "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
 

@@ -349,6 +349,33 @@ def validate_check(
     return last_failure
 
 
+def validate_absent_check(
+    check: RegistryCheck,
+    forbidden: set[str],
+    timeout: float,
+    fetcher: Callable[[str, float], Any] | None = None,
+) -> list[str]:
+    try:
+        if fetcher:
+            payload = fetcher(check.url, timeout)
+        else:
+            payload = fetch_payload(check.url, timeout, check.decoder)
+    except (urllib.error.HTTPError, OSError) as error:
+        if is_missing_registry_page_error(error):
+            return []
+        return [f"{check.label}: registry availability check failed"]
+    except (TimeoutError, UnicodeDecodeError, json.JSONDecodeError, ET.ParseError):
+        return [f"{check.label}: registry availability check failed"]
+
+    found = check.extractor(payload)
+    if not found:
+        return [f"{check.label}: registry availability check failed"]
+    existing = found.intersection(forbidden)
+    if existing:
+        return [f"{check.label}: immutable registry version already exists"]
+    return []
+
+
 def go_module_version(version: str) -> str:
     stripped = version.removeprefix("v")
     return f"v{stripped}"
@@ -393,7 +420,11 @@ def validate(args: argparse.Namespace) -> list[str]:
     for check in checks_for(args):
         default_version = DEFAULT_PACKAGE_VERSIONS.get(check.label, args.version)
         version = args.package_versions.get(check.label, default_version)
-        failures.extend(validate_check(check, expected_versions(version), args.timeout, args.retries, args.retry_delay))
+        expected = expected_versions(version)
+        if getattr(args, "expect_absent", False):
+            failures.extend(validate_absent_check(check, expected, args.timeout))
+        else:
+            failures.extend(validate_check(check, expected, args.timeout, args.retries, args.retry_delay))
     if "go" in args.target or ("all" in args.target and args.include_go):
         failures.extend(validate_go_module(args.version))
     return failures
@@ -459,7 +490,8 @@ def success_summary(args: argparse.Namespace) -> str:
         if formatted is not None
     ]
     suffix = f"; {'; '.join(overrides)}" if overrides else ""
-    return f"public registry versions ok for {targets} at {args.version}{suffix}"
+    state = "absent" if getattr(args, "expect_absent", False) else "ok"
+    return f"public registry versions {state} for {targets} at {args.version}{suffix}"
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -524,6 +556,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--retries", type=int, default=6)
     parser.add_argument("--retry-delay", type=float, default=10.0)
+    parser.add_argument(
+        "--expect-absent",
+        action="store_true",
+        help="Fail if any selected immutable package version already exists.",
+    )
     args = parser.parse_args(argv)
     if not args.target:
         args.target = ["all"]
@@ -533,6 +570,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--pypi-version requires --target pypi or --target all")
     if args.nuget_version and "nuget" not in args.target and "all" not in args.target:
         parser.error("--nuget-version requires --target nuget or --target all")
+    if args.expect_absent and args.target != ["nuget"]:
+        parser.error("--expect-absent requires exactly --target nuget")
     if args.maven_artifact and "maven" not in args.target and "all" not in args.target:
         parser.error("--maven-artifact requires --target maven or --target all")
     if args.maven_version and "maven" not in args.target and "all" not in args.target:

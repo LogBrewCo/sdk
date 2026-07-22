@@ -12,12 +12,13 @@ import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES
+from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES, compatible_dependency_range
 
 
 REPOSITORY_URL = "https://github.com/LogBrewCo/sdk"
 SOURCE_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 NUGET_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
+DEPENDENCY_RANGE_RE = re.compile(r"^\[([^,\s]+), ([^\)\s]+)\)$")
 
 
 def parse_versions(raw_versions: list[str]) -> dict[str, str]:
@@ -41,10 +42,38 @@ def parse_versions(raw_versions: list[str]) -> dict[str, str]:
     return versions
 
 
+def parse_dependency_ranges(raw_ranges: list[str]) -> dict[str, dict[str, str]]:
+    allowed = {package.package_id for package in DOTNET_RELEASE_PACKAGES}
+    ranges: dict[str, dict[str, str]] = {}
+    for raw_range in raw_ranges:
+        selection, separator, version_range = raw_range.partition("=")
+        package_id, dependency_separator, dependency_id = selection.partition(":")
+        package_id = package_id.strip()
+        dependency_id = dependency_id.strip()
+        version_range = version_range.strip()
+        match = DEPENDENCY_RANGE_RE.fullmatch(version_range)
+        if (
+            not separator
+            or not dependency_separator
+            or package_id not in allowed
+            or dependency_id not in allowed
+            or match is None
+            or NUGET_VERSION_RE.fullmatch(match.group(1)) is None
+            or NUGET_VERSION_RE.fullmatch(match.group(2)) is None
+        ):
+            raise ValueError("invalid NuGet dependency range selection")
+        package_ranges = ranges.setdefault(package_id, {})
+        if dependency_id in package_ranges:
+            raise ValueError("duplicate NuGet dependency range selection")
+        package_ranges[dependency_id] = version_range
+    return ranges
+
+
 def validate_artifacts(
     directory: Path,
     versions: dict[str, str],
     source_commit: str,
+    dependency_ranges: dict[str, dict[str, str]],
 ) -> tuple[list[str], list[dict[str, str]]]:
     failures: list[str] = []
     records: list[dict[str, str]] = []
@@ -61,8 +90,23 @@ def validate_artifacts(
     for package_id, version in sorted(versions.items()):
         main_path = directory / f"{package_id}.{version}.nupkg"
         symbol_path = directory / f"{package_id}.{version}.snupkg"
-        main_files = validate_archive(main_path, package_id, version, source_commit, failures)
-        symbol_files = validate_archive(symbol_path, package_id, version, source_commit, failures)
+        expected_dependencies = dependency_ranges.get(package_id, {})
+        main_files = validate_archive(
+            main_path,
+            package_id,
+            version,
+            source_commit,
+            expected_dependencies,
+            failures,
+        )
+        symbol_files = validate_archive(
+            symbol_path,
+            package_id,
+            version,
+            source_commit,
+            expected_dependencies,
+            failures,
+        )
         dll_files = {name[:-4] for name in main_files if name.endswith(".dll") and name.startswith("lib/")}
         xml_files = {name[:-4] for name in main_files if name.endswith(".xml") and name.startswith("lib/")}
         pdb_names = {name for name in symbol_files if name.endswith(".pdb") and name.startswith("lib/")}
@@ -108,6 +152,7 @@ def validate_archive(
     package_id: str,
     version: str,
     source_commit: str,
+    expected_dependencies: dict[str, str],
     failures: list[str],
 ) -> set[str]:
     try:
@@ -139,7 +184,40 @@ def validate_archive(
         failures.append(f"{package_id}: repository source mismatch")
     elif repository.attrib.get("commit") != source_commit:
         failures.append(f"{package_id}: source commit mismatch")
+    validate_dependencies(metadata, package_id, expected_dependencies, failures)
     return names
+
+
+def validate_dependencies(
+    metadata: ET.Element,
+    package_id: str,
+    expected: dict[str, str],
+    failures: list[str],
+) -> None:
+    if not expected:
+        return
+    dependencies = find_child(metadata, "dependencies")
+    if dependencies is None:
+        failures.append(f"{package_id}: missing dependency range metadata")
+        return
+    groups = [child for child in dependencies if strip_namespace(child.tag) == "group"]
+    containers = groups or [dependencies]
+    if not containers:
+        failures.append(f"{package_id}: missing dependency range metadata")
+        return
+    for dependency_id, expected_range in sorted(expected.items()):
+        for container in containers:
+            matches = [
+                child
+                for child in container
+                if strip_namespace(child.tag) == "dependency"
+                and child.attrib.get("id") == dependency_id
+            ]
+            if len(matches) != 1 or matches[0].attrib.get("version") != expected_range:
+                failures.append(
+                    f"{package_id}: {dependency_id} dependency range mismatch"
+                )
+                break
 
 
 def validate_source_link(
@@ -202,16 +280,33 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--nuget-version", action="append", default=[])
+    parser.add_argument("--dependency-range", action="append", default=[])
     parser.add_argument("--manifest", type=Path, required=True)
     args = parser.parse_args(argv)
     if not SOURCE_COMMIT_RE.fullmatch(args.source_commit):
         parser.error("--source-commit must be 40 lowercase hexadecimal characters")
     try:
         versions = parse_versions(args.nuget_version)
+        dependency_ranges = parse_dependency_ranges(args.dependency_range)
     except ValueError as error:
         parser.error(str(error))
+    if not set(dependency_ranges).issubset(versions):
+        parser.error("dependency range package must be selected for validation")
+    if "LogBrew.HttpClient" in versions:
+        httpclient_dependencies = dependency_ranges.get("LogBrew.HttpClient", {})
+        if set(httpclient_dependencies) != {"LogBrew"}:
+            parser.error("missing HttpClient core dependency range")
+        if "LogBrew" in versions and httpclient_dependencies["LogBrew"] != compatible_dependency_range(
+            versions["LogBrew"]
+        ):
+            parser.error("HttpClient core dependency range does not match selected core version")
 
-    failures, records = validate_artifacts(args.directory, versions, args.source_commit)
+    failures, records = validate_artifacts(
+        args.directory,
+        versions,
+        args.source_commit,
+        dependency_ranges,
+    )
     if failures:
         for failure in failures:
             print(failure, file=sys.stderr)

@@ -95,6 +95,8 @@ jobs:
         id: nuget-version
         run: |
           echo "core_version=0.1.2" >> "$GITHUB_OUTPUT"
+          echo "core_dependency_range=[0.1.2, 0.2.0)" >> "$GITHUB_OUTPUT"
+          echo "core_dependency_range_msbuild=[0.1.2%2C0.2.0)" >> "$GITHUB_OUTPUT"
           echo "aspnetcore_version=0.1.0" >> "$GITHUB_OUTPUT"
           echo "efcore_version=0.1.0" >> "$GITHUB_OUTPUT"
           echo "httpclient_version=0.1.0" >> "$GITHUB_OUTPUT"
@@ -109,16 +111,20 @@ jobs:
             --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \\
             --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \\
             --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}"
+      - name: Check NuGet version collision
+        run: python3 scripts/check_registry_publication.py --target nuget --expect-absent
       - name: Pack NuGet package
         id: nuget-artifacts
         run: |
           source_commit="$(git rev-parse HEAD)"
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --include-symbols -p:GenerateDocumentationFile=true -p:NoWarn=1591 -p:SymbolPackageFormat=snupkg -p:EnableSourceLink=true "-p:RepositoryCommit=$source_commit"
+          httpclient_pack_args=(--include-symbols -p:GenerateDocumentationFile=true -p:SymbolPackageFormat=snupkg -p:EnableSourceLink=true "-p:RepositoryCommit=$source_commit" "-p:LogBrewProjectReferenceVersion=${{ steps.nuget-version.outputs.core_dependency_range_msbuild }}")
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --no-restore "${httpclient_pack_args[@]}"
           dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj
           dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj
           python3 scripts/check_dotnet_release_artifacts.py \\
             --source-commit "$(git rev-parse HEAD)" \\
-            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}"
+            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \\
+            --dependency-range "LogBrew.HttpClient:LogBrew=${{ steps.nuget-version.outputs.core_dependency_range }}"
           echo "steps.nuget-artifacts.outputs.httpclient_content_sha256"
       - name: Publish NuGet package
         run: dotnet nuget push --symbol-source https://api.nuget.org/v3/index.json --skip-duplicate
@@ -142,6 +148,8 @@ jobs:
             "${{ steps.nuget-version.outputs.otel_version }}" \\
             "$(git rev-parse HEAD)" \\
             "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
+      - name: Verify public HttpClient package compatibility
+        run: bash scripts/real_user_dotnet_httpclient_package_compatibility_smoke.sh
   crates:
     steps:
       - name: Read Rust crate version
@@ -216,7 +224,6 @@ class ReleaseMetadataTests(unittest.TestCase):
             "src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
             'LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}',
             "python3 scripts/check_dotnet_release_artifacts.py",
-            "-p:NoWarn=1591",
             "-p:EnableSourceLink=true",
             "steps.nuget-artifacts.outputs.httpclient_content_sha256",
             "while IFS= read -r package_path",
@@ -224,6 +231,48 @@ class ReleaseMetadataTests(unittest.TestCase):
             '"$(git rev-parse HEAD)"',
         ):
             self.assertIn(expected, workflow)
+
+        httpclient_args = workflow.split("httpclient_pack_args=(", 1)[1].split(")", 1)[0]
+        self.assertNotIn("NoWarn", httpclient_args)
+        self.assertIn(
+            'dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --no-restore "${httpclient_pack_args[@]}"',
+            workflow,
+        )
+
+    def test_publish_packages_rejects_nuget_collisions_before_pack(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(encoding="utf-8")
+
+        collision_check = workflow.index("Check NuGet version collision")
+        pack = workflow.index("Pack NuGet package")
+
+        self.assertLess(collision_check, pack)
+        self.assertIn("--expect-absent", workflow[collision_check:pack])
+        self.assertIn(
+            'LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}',
+            workflow[collision_check:pack],
+        )
+
+    def test_publish_packages_runs_httpclient_compatibility_receipt(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "bash scripts/real_user_dotnet_httpclient_package_compatibility_smoke.sh",
+            workflow,
+        )
+
+    def test_httpclient_dependency_range_uses_the_pack_contract_not_ignored_reference_metadata(self) -> None:
+        project = (
+            ROOT
+            / "dotnet"
+            / "logbrew-dotnet"
+            / "src"
+            / "LogBrew.HttpClient"
+            / "LogBrew.HttpClient.csproj"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("<LogBrewCoreDependencyVersion>", project)
+        self.assertIn('<ProjectReference Include="../LogBrew/LogBrew.csproj" />', project)
+        self.assertNotIn('ProjectReference Include="../LogBrew/LogBrew.csproj" Version=', project)
 
     def test_rust_metadata_accepts_current_crate_release_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -842,6 +891,7 @@ jobs:
     <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
     <PackageId>LogBrew</PackageId>
     <Version>0.1.5</Version>
+    <PackageVersion Condition="'$(LogBrewProjectReferenceVersion)' != ''">$(LogBrewProjectReferenceVersion)</PackageVersion>
     <Authors>LogBrew</Authors>
     <Company>LogBrew</Company>
     <Description>Public LogBrew .NET SDK.</Description>
@@ -922,6 +972,9 @@ jobs:
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <SignAssembly>false</SignAssembly>
+    <LogBrewCoreDependencyVersion>[0.1.5, 0.2.0)</LogBrewCoreDependencyVersion>
     <PackageId>LogBrew.HttpClient</PackageId>
     <Version>0.1.0</Version>
     <Authors>LogBrew</Authors>

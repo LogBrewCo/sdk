@@ -42,6 +42,17 @@ DOTNET_RELEASE_PACKAGES = (
 )
 
 
+def compatible_dependency_range(version: str) -> str:
+    major_text, minor_text, _patch = version.split(".", 2)
+    major = int(major_text)
+    minor = int(minor_text)
+    if major == 0:
+        upper = f"0.{minor + 1}.0"
+    else:
+        upper = f"{major + 1}.0.0"
+    return f"[{version}, {upper})"
+
+
 def validate_dotnet_packages(
     root: Path,
     failures: list[str],
@@ -83,6 +94,10 @@ def validate_dotnet_packages(
             "PackageIcon": "logbrew-logo-transparent-128.png",
         },
         project_needles=(
+            (
+                "PackageVersion Condition=\"'$(LogBrewProjectReferenceVersion)' != ''\"",
+                "core package must expose the bounded project-reference pack seam",
+            ),
             ("examples/FirstUsefulTelemetry.cs", "package must include examples/FirstUsefulTelemetry.cs"),
             ("examples/ActivityTraceCorrelation.cs", "package must include examples/ActivityTraceCorrelation.cs"),
             ("examples/ActivitySourceListenerTelemetry.cs", "package must include examples/ActivitySourceListenerTelemetry.cs"),
@@ -103,6 +118,9 @@ def validate_dotnet_packages(
         ),
         expected={
             "TargetFrameworks": "netstandard2.0;net8.0",
+            "IsAotCompatible": "true",
+            "SignAssembly": "false",
+            "LogBrewCoreDependencyVersion": compatible_dependency_range(core_version),
             "PackageId": "LogBrew.HttpClient",
             "Version": httpclient_version,
             "Authors": "LogBrew",
@@ -114,7 +132,10 @@ def validate_dotnet_packages(
             "PackageIcon": "logbrew-logo-espresso-bg-128.png",
         },
         project_needles=(
-            ("ProjectReference Include=\"../LogBrew/LogBrew.csproj\"", "package must depend on the core LogBrew project"),
+            (
+                "ProjectReference Include=\"../LogBrew/LogBrew.csproj\"",
+                "package must depend on the core LogBrew project",
+            ),
             ("PackageReference Include=\"Microsoft.Extensions.Http\"", "package must depend on IHttpClientFactory APIs"),
             ("examples/HttpClientFactoryCorrelation.cs", "package must include its selected-client example"),
         ),

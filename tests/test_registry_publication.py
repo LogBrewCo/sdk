@@ -521,6 +521,75 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("404", failures[0])
 
+    def test_validate_absent_check_rejects_existing_exact_version(self) -> None:
+        check = check_registry_publication.RegistryCheck(
+            "LogBrew.HttpClient",
+            "https://example.test/package",
+            check_registry_publication.nuget_versions,
+        )
+
+        failures = check_registry_publication.validate_absent_check(
+            check,
+            {"0.1.0"},
+            timeout=1.0,
+            fetcher=lambda _url, _timeout: {"versions": ["0.1.0"]},
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("already exists", failures[0])
+
+    def test_validate_absent_check_accepts_other_versions(self) -> None:
+        check = check_registry_publication.RegistryCheck(
+            "LogBrew.HttpClient",
+            "https://example.test/package",
+            check_registry_publication.nuget_versions,
+        )
+
+        failures = check_registry_publication.validate_absent_check(
+            check,
+            {"0.1.0"},
+            timeout=1.0,
+            fetcher=lambda _url, _timeout: {"versions": ["0.0.9"]},
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_validate_absent_check_accepts_missing_package_page(self) -> None:
+        check = check_registry_publication.RegistryCheck(
+            "LogBrew.HttpClient",
+            "https://example.test/package",
+            check_registry_publication.nuget_versions,
+        )
+
+        def missing_fetcher(_url: str, _timeout: float) -> Any:
+            raise urllib.error.HTTPError("https://example.test/package", 404, "not found", {}, None)
+
+        failures = check_registry_publication.validate_absent_check(
+            check,
+            {"0.1.0"},
+            timeout=1.0,
+            fetcher=missing_fetcher,
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_validate_absent_check_rejects_malformed_registry_payload(self) -> None:
+        check = check_registry_publication.RegistryCheck(
+            "LogBrew.HttpClient",
+            "https://example.test/package",
+            check_registry_publication.nuget_versions,
+        )
+
+        failures = check_registry_publication.validate_absent_check(
+            check,
+            {"0.1.0"},
+            timeout=1.0,
+            fetcher=lambda _url, _timeout: {},
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("availability check failed", failures[0])
+
     def test_go_module_version_uses_go_semver_prefix(self) -> None:
         self.assertEqual(check_registry_publication.go_module_version("0.1.0"), "v0.1.0")
         self.assertEqual(check_registry_publication.go_module_version("v0.1.0"), "v0.1.0")

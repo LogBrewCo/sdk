@@ -106,6 +106,33 @@ class DotnetReleaseArtifactTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("source commit", result.stdout)
 
+    def test_checker_rejects_wrong_core_dependency_range(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            self.write_httpclient_artifacts(
+                directory,
+                core_dependency_range="[0.1.3, 0.2.0)",
+            )
+
+            result = self.run_checker(directory, directory / "manifest.json")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("dependency range", result.stdout)
+
+    def test_checker_rejects_missing_core_dependency_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            self.write_httpclient_artifacts(directory)
+
+            result = self.run_checker(
+                directory,
+                directory / "manifest.json",
+                include_dependency_range=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing HttpClient core dependency range", result.stdout)
+
     def test_checker_rejects_non_git_repository_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
@@ -135,6 +162,7 @@ class DotnetReleaseArtifactTests(unittest.TestCase):
         source_commit: str = "a" * 40,
         include_source_link: bool = True,
         repository_type: str = "git",
+        core_dependency_range: str = "[0.1.4, 0.2.0)",
     ) -> None:
         package = directory / "LogBrew.HttpClient.0.1.0.nupkg"
         symbols = directory / "LogBrew.HttpClient.0.1.0.snupkg"
@@ -144,6 +172,11 @@ class DotnetReleaseArtifactTests(unittest.TestCase):
     <id>LogBrew.HttpClient</id>
     <version>0.1.0</version>
     <repository type="{repository_type}" url="https://github.com/LogBrewCo/sdk" commit="{source_commit}" />
+    <dependencies>
+      <group targetFramework="net8.0">
+        <dependency id="LogBrew" version="{core_dependency_range}" />
+      </group>
+    </dependencies>
   </metadata>
 </package>
 """
@@ -167,20 +200,28 @@ class DotnetReleaseArtifactTests(unittest.TestCase):
         directory: Path,
         manifest: Path,
         package_version: str = "0.1.0",
+        include_dependency_range: bool = True,
     ) -> subprocess.CompletedProcess[str]:
+        command = [
+            sys.executable,
+            str(SCRIPT),
+            "--directory",
+            str(directory),
+            "--source-commit",
+            "a" * 40,
+            "--nuget-version",
+            f"LogBrew.HttpClient={package_version}",
+        ]
+        if include_dependency_range:
+            command.extend(
+                (
+                    "--dependency-range",
+                    "LogBrew.HttpClient:LogBrew=[0.1.4, 0.2.0)",
+                )
+            )
+        command.extend(("--manifest", str(manifest)))
         return subprocess.run(
-            [
-                sys.executable,
-                str(SCRIPT),
-                "--directory",
-                str(directory),
-                "--source-commit",
-                "a" * 40,
-                "--nuget-version",
-                f"LogBrew.HttpClient={package_version}",
-                "--manifest",
-                str(manifest),
-            ],
+            command,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
