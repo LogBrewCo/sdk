@@ -3,6 +3,13 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+next_package_version="$(
+  node -e '
+const version = require(process.argv[1]).version;
+if (typeof version !== "string" || version.length === 0) process.exit(1);
+process.stdout.write(version);
+' "$repo_root/js/logbrew-next/package.json"
+)"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -103,9 +110,9 @@ grep -q '"@logbrew/next"' package-lock.json
 grep -q '"@logbrew/sdk"' package-lock.json
 npm ls @logbrew/sdk @logbrew/next next react react-dom >/dev/null
 npm explain @logbrew/next > "$tmp_dir/npm-explain-next.txt"
-grep -q '@logbrew/next@0.1.0' "$tmp_dir/npm-explain-next.txt"
+grep -Fq "@logbrew/next@${next_package_version}" "$tmp_dir/npm-explain-next.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/next@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -Fq "@logbrew/next@${next_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'

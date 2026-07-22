@@ -143,6 +143,52 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             for expected in expected_values:
                 self.assertIn(expected, body, relative_path)
 
+    def test_local_npm_smokes_bind_assertions_to_package_manifests(self) -> None:
+        smoke_contracts = {
+            "scripts/real_user_browser_smoke.sh": (
+                "js/logbrew-browser/package.json",
+                "@logbrew/browser",
+                "browser_package_version",
+                2,
+            ),
+            "scripts/real_user_react_smoke.sh": (
+                "js/logbrew-browser/package.json",
+                "@logbrew/browser",
+                "browser_package_version",
+                1,
+            ),
+            "scripts/real_user_next_smoke.sh": (
+                "js/logbrew-next/package.json",
+                "@logbrew/next",
+                "next_package_version",
+                2,
+            ),
+            "scripts/real_user_react_native_smoke.sh": (
+                "js/logbrew-react-native/package.json",
+                "@logbrew/react-native",
+                "react_native_package_version",
+                2,
+            ),
+        }
+        stale_version = re.compile(r"@logbrew/(?:browser|next|react-native)@\d")
+
+        for script_path, (manifest_path, package_name, variable, assertions) in smoke_contracts.items():
+            with self.subTest(script=script_path):
+                manifest = json.loads((ROOT / manifest_path).read_text(encoding="utf-8"))
+                body = (ROOT / script_path).read_text(encoding="utf-8")
+
+                self.assertEqual(manifest["name"], package_name)
+                self.assertIsInstance(manifest["version"], str)
+                self.assertTrue(manifest["version"])
+                self.assertIn(f'{variable}="$(', body)
+                self.assertIn(f'"$repo_root/{manifest_path}"', body)
+                self.assertIn("const version = require(process.argv[1]).version;", body)
+                self.assertIn('typeof version !== "string" || version.length === 0', body)
+                self.assertIn("process.stdout.write(version);", body)
+                fixed_assertion = f'grep -Fq "{package_name}@${{{variable}}}"'
+                self.assertEqual(body.count(fixed_assertion), assertions)
+                self.assertIsNone(stale_version.search(body), script_path)
+
     def test_repo_wide_guard_includes_newly_publishable_flask_and_httpclient(self) -> None:
         labels = {
             manifest.label

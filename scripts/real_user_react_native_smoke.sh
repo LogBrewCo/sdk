@@ -3,6 +3,13 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+react_native_package_version="$(
+  node -e '
+const version = require(process.argv[1]).version;
+if (typeof version !== "string" || version.length === 0) process.exit(1);
+process.stdout.write(version);
+' "$repo_root/js/logbrew-react-native/package.json"
+)"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -128,9 +135,9 @@ grep -q '"./lifecycle"' node_modules/@logbrew/react-native/package.json
 grep -q '"./native-bridge"' node_modules/@logbrew/react-native/package.json
 npm ls @logbrew/sdk @logbrew/react-native react react-native react-test-renderer >/dev/null
 npm explain @logbrew/react-native > "$tmp_dir/npm-explain-native.txt"
-grep -q '@logbrew/react-native@0.1.0' "$tmp_dir/npm-explain-native.txt"
+grep -Fq "@logbrew/react-native@${react_native_package_version}" "$tmp_dir/npm-explain-native.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/react-native@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -Fq "@logbrew/react-native@${react_native_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'
