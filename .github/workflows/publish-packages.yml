@@ -255,7 +255,6 @@ jobs:
           npm_version="$(npm --version)"
           node_version="$(node --version)"
           echo "npm ${npm_version} on ${node_version}"
-          # shellcheck disable=SC2016
           node -e '
             const version = process.argv[1].split(/[.-]/).map(Number);
             const minimum = [11, 5, 1];
@@ -263,7 +262,7 @@ jobs:
               const actual = version[index] || 0;
               if (actual > minimum[index]) process.exit(0);
               if (actual < minimum[index]) {
-                console.error(`npm trusted publishing requires npm >= ${minimum.join(".")}; found ${process.argv[1]}`);
+                console.error("npm trusted publishing requires npm >= " + minimum.join(".") + "; found " + process.argv[1]);
                 process.exit(1);
               }
             }
