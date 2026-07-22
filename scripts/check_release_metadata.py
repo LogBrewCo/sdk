@@ -14,7 +14,7 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
-from release_metadata_dotnet import validate_dotnet_packages
+from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES, validate_dotnet_packages
 
 
 PUBLIC_VERSION = "0.1.0"
@@ -23,6 +23,7 @@ RUBYGEMS_VERSION = "0.1.1"
 PACKAGIST_VERSION = "0.1.1"
 DOTNET_VERSION = "0.1.4"
 DOTNET_OTEL_VERSION = "0.1.1"
+DOTNET_HTTPCLIENT_VERSION = "0.1.0"
 UNITY_VERSION = "0.1.1"
 MAVEN_VERSION = "0.1.1"
 PUBLIC_LICENSE = "MIT"
@@ -51,13 +52,7 @@ JS_PACKAGES = {
     "js/logbrew-svelte": "@logbrew/svelte",
     "js/logbrew-vue": "@logbrew/vue",
 }
-NUGET_PACKAGES = {
-    "LogBrew",
-    "LogBrew.AspNetCore",
-    "LogBrew.EntityFrameworkCore",
-    "LogBrew.StackExchangeRedis",
-    "LogBrew.OpenTelemetry",
-}
+NUGET_PACKAGES = {package.package_id for package in DOTNET_RELEASE_PACKAGES}
 
 OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
 PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
@@ -948,9 +943,19 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
         required_publish_needles = {
             "NuGet package version output": "id: nuget-version",
+            "NuGet HttpClient pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
             "NuGet StackExchange.Redis pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj",
             "NuGet OpenTelemetry pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj",
+            "NuGet XML documentation pack": "-p:GenerateDocumentationFile=true",
+            "NuGet XML documentation warning scope": "-p:NoWarn=1591",
+            "NuGet symbol pack": "-p:SymbolPackageFormat=snupkg",
+            "NuGet source commit pack": "-p:RepositoryCommit=$source_commit",
+            "NuGet Source Link pack": "-p:EnableSourceLink=true",
+            "NuGet artifact validation": "python3 scripts/check_dotnet_release_artifacts.py",
+            "NuGet artifact digest receipt": "steps.nuget-artifacts.outputs.httpclient_content_sha256",
+            "NuGet one-package publish loop": "while IFS= read -r package_path",
             "NuGet duplicate-safe publish": "--skip-duplicate",
+            "NuGet symbol publish": "--symbol-source https://api.nuget.org/v3/index.json",
             "NuGet public install smoke": "bash scripts/real_user_dotnet_public_nuget_smoke.sh",
             "verify target exact version input": "verify_version:",
             "verify target exact version argument": 'verify_args+=(--version "$VERIFY_VERSION")',
@@ -986,18 +991,16 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "Maven Central generated publishing-values hint": "generated Central Portal publishing values",
             "Maven Central auth preflight": "bash scripts/check_maven_central_auth_preflight.sh",
         }
-        nuget_output_versions = (
-            ("exact", "LogBrew", "core_version"),
-            ("ASP.NET Core", "LogBrew.AspNetCore", "aspnetcore_version"),
-            ("Entity Framework Core", "LogBrew.EntityFrameworkCore", "efcore_version"),
-            ("StackExchange.Redis", "LogBrew.StackExchangeRedis", "redis_version"),
-            ("OpenTelemetry", "LogBrew.OpenTelemetry", "otel_version"),
-        )
-        for label, package, output_name in nuget_output_versions:
-            needle = f'--nuget-version "{package}=${{{{ steps.nuget-version.outputs.{output_name} }}}}"'
-            required_publish_needles[f"NuGet {label} version output"] = f"{output_name}="
-            required_publish_needles[f"NuGet {label} metadata version validation"] = needle
-            required_publish_needles[f"NuGet {label} public version verification"] = needle
+        for package in DOTNET_RELEASE_PACKAGES:
+            needle = (
+                f'--nuget-version "{package.package_id}='
+                f'${{{{ steps.nuget-version.outputs.{package.version_output} }}}}"'
+            )
+            required_publish_needles[f"NuGet {package.package_id} version output"] = (
+                f"{package.version_output}="
+            )
+            required_publish_needles[f"NuGet {package.package_id} metadata version validation"] = needle
+            required_publish_needles[f"NuGet {package.package_id} public version verification"] = needle
         for description, needle in required_publish_needles.items():
             require(needle in publish_packages_text, failures, f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}")
         for relative_dir in JS_PACKAGES:
@@ -1074,6 +1077,7 @@ def validate(
         nuget_versions.get("LogBrew.OpenTelemetry", DOTNET_OTEL_VERSION),
         PUBLIC_LICENSE,
         REPO_URL,
+        httpclient_version=nuget_versions.get("LogBrew.HttpClient", DOTNET_HTTPCLIENT_VERSION),
     )
     validate_unity(root, failures)
     validate_maven_pom(root, "kotlin/logbrew-kotlin/pom.xml", "logbrew-kotlin", "LogBrew Kotlin SDK", failures)

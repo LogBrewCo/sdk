@@ -1,7 +1,45 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class DotnetReleasePackage:
+    package_id: str
+    project_path: str
+    version_output: str
+
+
+DOTNET_RELEASE_PACKAGES = (
+    DotnetReleasePackage("LogBrew", "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj", "core_version"),
+    DotnetReleasePackage(
+        "LogBrew.AspNetCore",
+        "dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj",
+        "aspnetcore_version",
+    ),
+    DotnetReleasePackage(
+        "LogBrew.EntityFrameworkCore",
+        "dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj",
+        "efcore_version",
+    ),
+    DotnetReleasePackage(
+        "LogBrew.HttpClient",
+        "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
+        "httpclient_version",
+    ),
+    DotnetReleasePackage(
+        "LogBrew.StackExchangeRedis",
+        "dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj",
+        "redis_version",
+    ),
+    DotnetReleasePackage(
+        "LogBrew.OpenTelemetry",
+        "dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj",
+        "otel_version",
+    ),
+)
 
 
 def validate_dotnet_packages(
@@ -14,7 +52,9 @@ def validate_dotnet_packages(
     otel_version: str,
     public_license: str,
     repo_url: str,
+    httpclient_version: str = "0.1.0",
 ) -> None:
+    _validate_release_catalog(root, failures)
     _validate_package(
         root,
         failures,
@@ -50,6 +90,33 @@ def validate_dotnet_packages(
             ("examples/DbCommandTelemetry.cs", "package must include examples/DbCommandTelemetry.cs"),
             ("examples/HttpClientOutboundTelemetry.cs", "package must include examples/HttpClientOutboundTelemetry.cs"),
             ("examples/AspNetCoreRequestTelemetry.cs", "package must include examples/AspNetCoreRequestTelemetry.cs"),
+        ),
+    )
+    _validate_package(
+        root,
+        failures,
+        "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
+        required_paths=(
+            "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/README.md",
+            "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/examples/HttpClientFactoryCorrelation.cs",
+            "assets/brand/logbrew-logo-espresso-bg-128.png",
+        ),
+        expected={
+            "TargetFrameworks": "netstandard2.0;net8.0",
+            "PackageId": "LogBrew.HttpClient",
+            "Version": httpclient_version,
+            "Authors": "LogBrew",
+            "Company": "LogBrew",
+            "PackageLicenseExpression": public_license,
+            "PackageProjectUrl": repo_url,
+            "RepositoryUrl": repo_url,
+            "PackageReadmeFile": "README.md",
+            "PackageIcon": "logbrew-logo-espresso-bg-128.png",
+        },
+        project_needles=(
+            ("ProjectReference Include=\"../LogBrew/LogBrew.csproj\"", "package must depend on the core LogBrew project"),
+            ("PackageReference Include=\"Microsoft.Extensions.Http\"", "package must depend on IHttpClientFactory APIs"),
+            ("examples/HttpClientFactoryCorrelation.cs", "package must include its selected-client example"),
         ),
     )
     _validate_package(
@@ -160,6 +227,36 @@ def validate_dotnet_packages(
             ("examples/OpenTelemetrySpanProcessorTelemetry.cs", "package must include examples/OpenTelemetrySpanProcessorTelemetry.cs"),
         ),
     )
+
+
+def _validate_release_catalog(root: Path, failures: list[str]) -> None:
+    source_root = root / "dotnet" / "logbrew-dotnet" / "src"
+    discovered: dict[str, str] = {}
+    if source_root.exists():
+        for project_path in sorted(source_root.glob("*/*.csproj")):
+            project = _parse_xml(project_path, failures)
+            if project is None:
+                continue
+            properties = (_direct_children(project, "PropertyGroup") or [ET.Element("PropertyGroup")])[0]
+            if (_child_text(properties, "IsPackable") or "").lower() == "false":
+                continue
+            package_id = _child_text(properties, "PackageId")
+            if not package_id:
+                failures.append(f"{project_path}: public package project must declare PackageId")
+                continue
+            discovered[package_id] = project_path.relative_to(root).as_posix()
+
+    expected = {package.package_id: package.project_path for package in DOTNET_RELEASE_PACKAGES}
+    for package_id in sorted(expected.keys() - discovered.keys()):
+        failures.append(f"NuGet release catalog package is missing from source: {package_id}")
+    for package_id in sorted(discovered.keys() - expected.keys()):
+        failures.append(f"NuGet release catalog is missing public package: {package_id}")
+    for package_id in sorted(expected.keys() & discovered.keys()):
+        if expected[package_id] != discovered[package_id]:
+            failures.append(
+                f"NuGet release catalog path mismatch for {package_id}: "
+                f"expected {expected[package_id]}, found {discovered[package_id]}"
+            )
 
 
 def _validate_package(

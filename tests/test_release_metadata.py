@@ -4,6 +4,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -96,6 +97,7 @@ jobs:
           echo "core_version=0.1.2" >> "$GITHUB_OUTPUT"
           echo "aspnetcore_version=0.1.0" >> "$GITHUB_OUTPUT"
           echo "efcore_version=0.1.0" >> "$GITHUB_OUTPUT"
+          echo "httpclient_version=0.1.0" >> "$GITHUB_OUTPUT"
           echo "redis_version=0.1.0" >> "$GITHUB_OUTPUT"
           echo "otel_version=0.1.0" >> "$GITHUB_OUTPUT"
       - name: Validate NuGet metadata
@@ -104,20 +106,29 @@ jobs:
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
             --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \\
+            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \\
             --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \\
             --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}"
       - name: Pack NuGet package
+        id: nuget-artifacts
         run: |
+          source_commit="$(git rev-parse HEAD)"
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --include-symbols -p:GenerateDocumentationFile=true -p:NoWarn=1591 -p:SymbolPackageFormat=snupkg -p:EnableSourceLink=true "-p:RepositoryCommit=$source_commit"
           dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj
           dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj
+          python3 scripts/check_dotnet_release_artifacts.py \\
+            --source-commit "$(git rev-parse HEAD)" \\
+            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}"
+          echo "steps.nuget-artifacts.outputs.httpclient_content_sha256"
       - name: Publish NuGet package
-        run: dotnet nuget push --skip-duplicate
+        run: dotnet nuget push --symbol-source https://api.nuget.org/v3/index.json --skip-duplicate
       - name: Verify public NuGet package
         run: |
           python3 scripts/check_registry_publication.py --target nuget \\
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \\
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
             --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \\
+            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \\
             --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \\
             --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}"
       - name: Verify public NuGet install
@@ -126,8 +137,11 @@ jobs:
             "${{ steps.nuget-version.outputs.core_version }}" \\
             "${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
             "${{ steps.nuget-version.outputs.efcore_version }}" \\
+            "${{ steps.nuget-version.outputs.httpclient_version }}" \\
             "${{ steps.nuget-version.outputs.redis_version }}" \\
-            "${{ steps.nuget-version.outputs.otel_version }}"
+            "${{ steps.nuget-version.outputs.otel_version }}" \\
+            "$(git rev-parse HEAD)" \\
+            "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
   crates:
     steps:
       - name: Read Rust crate version
@@ -183,6 +197,33 @@ jobs:
 class ReleaseMetadataTests(unittest.TestCase):
     def test_repo_release_metadata_passes(self) -> None:
         self.assertEqual(check_release_metadata.validate(ROOT), [])
+
+    def test_dotnet_release_catalog_covers_every_public_package_project(self) -> None:
+        package_ids = {
+            ET.parse(project).getroot().findtext("./PropertyGroup/PackageId")
+            for project in (ROOT / "dotnet" / "logbrew-dotnet" / "src").glob("*/*.csproj")
+        }
+
+        self.assertNotIn(None, package_ids)
+        self.assertEqual(package_ids, check_release_metadata.NUGET_PACKAGES)
+
+    def test_publish_packages_workflow_includes_httpclient_release_contract(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(encoding="utf-8")
+
+        for expected in (
+            "httpclient_version=",
+            "steps.nuget-version.outputs.httpclient_version",
+            "src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
+            'LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}',
+            "python3 scripts/check_dotnet_release_artifacts.py",
+            "-p:NoWarn=1591",
+            "-p:EnableSourceLink=true",
+            "steps.nuget-artifacts.outputs.httpclient_content_sha256",
+            "while IFS= read -r package_path",
+            '"${{ steps.nuget-version.outputs.httpclient_version }}"',
+            '"$(git rev-parse HEAD)"',
+        ):
+            self.assertIn(expected, workflow)
 
     def test_rust_metadata_accepts_current_crate_release_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -265,7 +306,7 @@ jobs:
             failures: list[str] = []
             check_release_metadata.validate_release_workflows(root, failures)
 
-        self.assertTrue(any("NuGet exact public version verification" in failure for failure in failures))
+        self.assertTrue(any("NuGet LogBrew public version verification" in failure for failure in failures))
 
     def test_publish_packages_workflow_requires_exact_crates_version_verification(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -317,7 +358,7 @@ jobs:
             failures: list[str] = []
             check_release_metadata.validate_release_workflows(root, failures)
 
-        self.assertTrue(any("NuGet exact metadata version validation" in failure for failure in failures))
+        self.assertTrue(any("NuGet LogBrew metadata version validation" in failure for failure in failures))
 
     def test_publish_packages_workflow_requires_public_nuget_install_smoke(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -325,17 +366,8 @@ jobs:
             workflow_dir = write_release_workflow_fixture(root)
             workflow = minimal_publish_packages_workflow(list(check_release_metadata.JS_PACKAGES))
             workflow = workflow.replace(
-                """
-      - name: Verify public NuGet install
-        run: |
-          bash scripts/real_user_dotnet_public_nuget_smoke.sh \\
-            "${{ steps.nuget-version.outputs.core_version }}" \\
-            "${{ steps.nuget-version.outputs.aspnetcore_version }}" \\
-            "${{ steps.nuget-version.outputs.efcore_version }}" \\
-            "${{ steps.nuget-version.outputs.redis_version }}" \\
-            "${{ steps.nuget-version.outputs.otel_version }}"
-""",
-                "",
+                "bash scripts/real_user_dotnet_public_nuget_smoke.sh",
+                "bash scripts/removed_dotnet_public_nuget_smoke.sh",
             )
             (workflow_dir / "publish-packages.yml").write_text(
                 workflow,
@@ -763,6 +795,7 @@ jobs:
             project_dir = package_dir / "src" / "LogBrew"
             aspnetcore_dir = package_dir / "src" / "LogBrew.AspNetCore"
             efcore_dir = package_dir / "src" / "LogBrew.EntityFrameworkCore"
+            httpclient_dir = package_dir / "src" / "LogBrew.HttpClient"
             redis_dir = package_dir / "src" / "LogBrew.StackExchangeRedis"
             otel_dir = package_dir / "src" / "LogBrew.OpenTelemetry"
             examples_dir = package_dir / "examples"
@@ -770,6 +803,7 @@ jobs:
             project_dir.mkdir(parents=True)
             aspnetcore_dir.mkdir(parents=True)
             efcore_dir.mkdir(parents=True)
+            httpclient_dir.mkdir(parents=True)
             redis_dir.mkdir(parents=True)
             otel_dir.mkdir(parents=True)
             examples_dir.mkdir(parents=True)
@@ -777,6 +811,12 @@ jobs:
             (package_dir / "README.md").write_text("# LogBrew .NET\n", encoding="utf-8")
             (aspnetcore_dir / "README.md").write_text("# LogBrew ASP.NET Core\n", encoding="utf-8")
             (efcore_dir / "README.md").write_text("# LogBrew Entity Framework Core\n", encoding="utf-8")
+            (httpclient_dir / "README.md").write_text("# LogBrew HttpClient\n", encoding="utf-8")
+            (httpclient_dir / "examples").mkdir()
+            (httpclient_dir / "examples" / "HttpClientFactoryCorrelation.cs").write_text(
+                "// example\n",
+                encoding="utf-8",
+            )
             (redis_dir / "README.md").write_text("# LogBrew StackExchange.Redis\n", encoding="utf-8")
             (otel_dir / "README.md").write_text("# LogBrew OpenTelemetry\n", encoding="utf-8")
             for example in (
@@ -871,6 +911,32 @@ jobs:
     <ProjectReference Include="../LogBrew/LogBrew.csproj" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />
     <None Include="../../examples/EntityFrameworkCoreCommandTelemetry.cs" Pack="true" PackagePath="examples/" />
+  </ItemGroup>
+</Project>
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            (httpclient_dir / "LogBrew.HttpClient.csproj").write_text(
+                """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <PackageId>LogBrew.HttpClient</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>LogBrew</Authors>
+    <Company>LogBrew</Company>
+    <Description>Public LogBrew HttpClient integration.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/LogBrewCo/sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/LogBrewCo/sdk</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logbrew-logo-espresso-bg-128.png</PackageIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../LogBrew/LogBrew.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.9" />
+    <None Include="examples/HttpClientFactoryCorrelation.cs" Pack="true" PackagePath="examples/" />
   </ItemGroup>
 </Project>
 """.strip()

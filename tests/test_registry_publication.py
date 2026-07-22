@@ -29,6 +29,23 @@ check_registry_publication = load_module("check_registry_publication", MODULE_PA
 
 
 class RegistryPublicationTests(unittest.TestCase):
+    def test_nuget_catalog_includes_httpclient(self) -> None:
+        self.assertIn("LogBrew.HttpClient", check_registry_publication.NUGET_PACKAGES)
+        args = argparse.Namespace(
+            target=["nuget"],
+            npm_package=[],
+            include_unity_npm=False,
+            include_pypi_extras=False,
+            include_crates=False,
+            include_packagist=False,
+            include_maven=False,
+            include_openupm=False,
+        )
+
+        labels = {check.label for check in check_registry_publication.checks_for(args)}
+
+        self.assertIn("LogBrew.HttpClient", labels)
+
     def test_extracts_versions_from_supported_registry_shapes(self) -> None:
         self.assertIn("0.1.0", check_registry_publication.npm_versions({"dist-tags": {"latest": "0.1.0"}}))
         self.assertIn("0.1.0", check_registry_publication.pypi_versions({"info": {"version": "0.1.0"}}))

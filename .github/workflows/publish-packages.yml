@@ -584,15 +584,17 @@ jobs:
           core_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           aspnetcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           efcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          httpclient_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           redis_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
           otel_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
-          if [[ -z "$core_version" || -z "$aspnetcore_version" || -z "$efcore_version" || -z "$redis_version" || -z "$otel_version" ]]; then
+          if [[ -z "$core_version" || -z "$aspnetcore_version" || -z "$efcore_version" || -z "$httpclient_version" || -z "$redis_version" || -z "$otel_version" ]]; then
             echo "Could not read NuGet package versions from .NET package projects" >&2
             exit 1
           fi
           echo "core_version=$core_version" >> "$GITHUB_OUTPUT"
           echo "aspnetcore_version=$aspnetcore_version" >> "$GITHUB_OUTPUT"
           echo "efcore_version=$efcore_version" >> "$GITHUB_OUTPUT"
+          echo "httpclient_version=$httpclient_version" >> "$GITHUB_OUTPUT"
           echo "redis_version=$redis_version" >> "$GITHUB_OUTPUT"
           echo "otel_version=$otel_version" >> "$GITHUB_OUTPUT"
 
@@ -602,16 +604,48 @@ jobs:
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
             --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
+            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \
             --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
             --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}"
 
       - name: Pack NuGet package
+        id: nuget-artifacts
+        shell: bash
         run: |
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj --configuration Release --output dist/nuget
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj --configuration Release --output dist/nuget
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj --configuration Release --output dist/nuget
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj --configuration Release --output dist/nuget
-          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj --configuration Release --output dist/nuget
+          set -Eeuo pipefail
+          source_commit="$(git rev-parse HEAD)"
+          pack_args=(
+            --configuration Release
+            --output dist/nuget
+            --include-symbols
+            -p:SymbolPackageFormat=snupkg
+            -p:GenerateDocumentationFile=true
+            -p:NoWarn=1591
+            -p:PublishRepositoryUrl=true
+            -p:EnableSourceLink=true
+            "-p:RepositoryCommit=$source_commit"
+            -p:ContinuousIntegrationBuild=true
+            -p:EmbedUntrackedSources=true
+          )
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj "${pack_args[@]}"
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj "${pack_args[@]}"
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj "${pack_args[@]}"
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj "${pack_args[@]}"
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj "${pack_args[@]}"
+          dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj "${pack_args[@]}"
+          python3 scripts/check_dotnet_release_artifacts.py \
+            --directory dist/nuget \
+            --source-commit "$source_commit" \
+            --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
+            --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
+            --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
+            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \
+            --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
+            --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}" \
+            --manifest dist/nuget/release-artifacts.json
+          httpclient_content_sha256="$(python3 -c 'import json, sys; payload = json.load(open(sys.argv[1], encoding="utf-8")); print(next(package["nupkgContentSha256"] for package in payload["packages"] if package["id"] == "LogBrew.HttpClient"))' dist/nuget/release-artifacts.json)"
+          echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
+          echo "httpclient_content_sha256=$httpclient_content_sha256" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to NuGet
         if: ${{ ! inputs.dry_run }}
@@ -622,7 +656,17 @@ jobs:
 
       - name: Publish NuGet package
         if: ${{ ! inputs.dry_run }}
-        run: dotnet nuget push dist/nuget/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          while IFS= read -r package_path; do
+            dotnet nuget push "$package_path" \
+              --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+              --source https://api.nuget.org/v3/index.json \
+              --symbol-source https://api.nuget.org/v3/index.json \
+              --symbol-api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+              --skip-duplicate
+          done < <(find dist/nuget -maxdepth 1 -type f -name '*.nupkg' -print | sort)
 
       - name: Set up Python for registry verification
         if: ${{ ! inputs.dry_run }}
@@ -637,6 +681,7 @@ jobs:
             --nuget-version "LogBrew=${{ steps.nuget-version.outputs.core_version }}" \
             --nuget-version "LogBrew.AspNetCore=${{ steps.nuget-version.outputs.aspnetcore_version }}" \
             --nuget-version "LogBrew.EntityFrameworkCore=${{ steps.nuget-version.outputs.efcore_version }}" \
+            --nuget-version "LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}" \
             --nuget-version "LogBrew.StackExchangeRedis=${{ steps.nuget-version.outputs.redis_version }}" \
             --nuget-version "LogBrew.OpenTelemetry=${{ steps.nuget-version.outputs.otel_version }}" \
             --retries 20 --retry-delay 30
@@ -648,8 +693,11 @@ jobs:
             "${{ steps.nuget-version.outputs.core_version }}" \
             "${{ steps.nuget-version.outputs.aspnetcore_version }}" \
             "${{ steps.nuget-version.outputs.efcore_version }}" \
+            "${{ steps.nuget-version.outputs.httpclient_version }}" \
             "${{ steps.nuget-version.outputs.redis_version }}" \
-            "${{ steps.nuget-version.outputs.otel_version }}"
+            "${{ steps.nuget-version.outputs.otel_version }}" \
+            "${{ steps.nuget-artifacts.outputs.source_commit }}" \
+            "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
 
   packagist:
     name: Packagist package

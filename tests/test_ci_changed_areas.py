@@ -91,6 +91,34 @@ class CiChangedAreasTests(unittest.TestCase):
         self.assertIn("needs.changed-areas.outputs.kotlin == 'true'", workflow)
         self.assertNotIn("hashFiles(", workflow)
 
+    def test_contract_checks_budget_preserves_changed_area_gates(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        contract_job = workflow.split("\n  contract-checks:\n", 1)[1].split(
+            "\n  dotnet-durability:\n", 1
+        )[0]
+
+        self.assertIn("timeout-minutes: 60", contract_job)
+        for area in (
+            "release_artifacts",
+            "rust",
+            "javascript",
+            "python",
+            "go",
+            "c",
+            "cpp",
+            "java",
+            "dotnet",
+            "unity",
+            "ruby",
+            "php",
+            "kotlin",
+            "maven",
+        ):
+            with self.subTest(area=area):
+                self.assertIn(f"needs.changed-areas.outputs.{area}", contract_job)
+
 
 if __name__ == "__main__":
     unittest.main()
