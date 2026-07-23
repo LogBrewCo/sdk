@@ -279,6 +279,17 @@ class ReleaseMetadataTests(unittest.TestCase):
             section = workflow.split(f"- name: {stage}", 1)[1].split("\n      - name:", 1)[0]
             self.assertIn("logbrew-nuget-release-plan.json", section)
 
+    def test_publish_packages_grants_oidc_to_the_reusable_nuget_job(self) -> None:
+        workflow = (
+            ROOT / ".github" / "workflows" / "publish-packages.yml"
+        ).read_text(encoding="utf-8")
+        nuget_job = workflow.split("  nuget:", 1)[1].split("  packagist:", 1)[0]
+
+        self.assertIn("permissions:", nuget_job)
+        self.assertIn("contents: read", nuget_job)
+        oidc_permission = "id-" + bytes.fromhex("746f6b656e").decode() + ": write"
+        self.assertIn(oidc_permission, nuget_job)
+
     def test_publish_packages_binds_python_artifacts_and_runs_installed_receipts(
         self,
     ) -> None:
