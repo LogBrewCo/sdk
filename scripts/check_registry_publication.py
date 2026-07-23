@@ -262,7 +262,8 @@ def checks_for(args: argparse.Namespace) -> list[RegistryCheck]:
     if "rubygems" in requested:
         checks.extend(rubygems_check(package_name) for package_name in RUBYGEMS_PACKAGES)
     if "nuget" in requested:
-        checks.extend(nuget_check(package_name) for package_name in NUGET_PACKAGES)
+        nuget_packages = tuple(getattr(args, "nuget_versions", {})) or NUGET_PACKAGES
+        checks.extend(nuget_check(package_name) for package_name in nuget_packages)
     if "packagist" in requested:
         checks.extend(packagist_check(package_name) for package_name in PACKAGIST_PACKAGES)
     if "crates" in requested:
@@ -460,6 +461,8 @@ def parse_package_versions(
             )
         if package_name not in allowed_packages:
             raise argparse.ArgumentTypeError(f"unknown {package_family} package: {package_name}")
+        if package_name in versions:
+            raise argparse.ArgumentTypeError(f"duplicate {package_family} package: {package_name}")
         versions[package_name] = version
     return versions
 
