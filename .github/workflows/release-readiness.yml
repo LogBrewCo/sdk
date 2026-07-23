@@ -576,7 +576,7 @@ jobs:
       - detect-ecosystems
       - contract-checks
     if: needs.detect-ecosystems.outputs.has_java == 'true'
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
