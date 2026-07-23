@@ -50,6 +50,55 @@ class RegistryPublicationTests(unittest.TestCase):
 
         self.assertIn("LogBrew.HttpClient", labels)
 
+    def test_nuget_version_overrides_restrict_collision_preflight(self) -> None:
+        args = check_registry_publication.parse_args(
+            [
+                "--target",
+                "nuget",
+                "--expect-absent",
+                "--nuget-version",
+                "LogBrew=0.1.5",
+                "--nuget-version",
+                "LogBrew.HttpClient=0.1.0",
+            ]
+        )
+        observed: list[str] = []
+        original_validate_absent_check = check_registry_publication.validate_absent_check
+
+        def fake_validate_absent_check(check, forbidden, timeout, fetcher=None):  # type: ignore[no-untyped-def]
+            observed.append(check.label)
+            return []
+
+        try:
+            check_registry_publication.validate_absent_check = fake_validate_absent_check
+            failures = check_registry_publication.validate(args)
+        finally:
+            check_registry_publication.validate_absent_check = original_validate_absent_check
+
+        self.assertEqual(failures, [])
+        self.assertEqual(observed, ["LogBrew", "LogBrew.HttpClient"])
+
+    def test_nuget_without_version_overrides_checks_the_full_catalog(self) -> None:
+        args = check_registry_publication.parse_args(["--target", "nuget"])
+
+        labels = [check.label for check in check_registry_publication.checks_for(args)]
+
+        self.assertEqual(labels, list(check_registry_publication.NUGET_PACKAGES))
+
+    def test_nuget_version_overrides_reject_unknown_and_duplicate_packages(self) -> None:
+        invalid_versions = (
+            ["Unknown.Package=0.1.0"],
+            ["LogBrew=0.1.5", "LogBrew=0.1.5"],
+        )
+        for versions in invalid_versions:
+            arguments = ["--target", "nuget"]
+            for version in versions:
+                arguments.extend(("--nuget-version", version))
+            with self.subTest(versions=versions):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        check_registry_publication.parse_args(arguments)
+
     def test_extracts_versions_from_supported_registry_shapes(self) -> None:
         self.assertIn("0.1.0", check_registry_publication.npm_versions({"dist-tags": {"latest": "0.1.0"}}))
         self.assertIn("0.1.0", check_registry_publication.pypi_versions({"info": {"version": "0.1.0"}}))
