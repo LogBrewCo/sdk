@@ -6,6 +6,7 @@ requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.3}}"
 module_version="v${requested_version#v}"
 module_path="github.com/LogBrewCo/sdk/go/logbrew"
 tmp_dir="$(mktemp -d)"
+receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 
 cleanup() {
   chmod -R u+w "$tmp_dir" 2>/dev/null || true
@@ -14,6 +15,10 @@ cleanup() {
 
 on_error() {
   local status=$?
+  if [[ "$receipt_mode" == "1" ]]; then
+    echo "Go release receipt failed" >&2
+    exit "$status"
+  fi
   echo "real_user_go_public_module_smoke failed near line $LINENO" >&2
   for diagnostic in \
     "$tmp_dir/go.mod" \
@@ -34,6 +39,70 @@ on_error() {
 
 trap cleanup EXIT
 trap on_error ERR
+
+run_receipt_smoke() {
+  local bound="$tmp_dir/receipt-artifacts"
+  local metadata="$tmp_dir/receipt-metadata.json"
+  local extracted="$tmp_dir/receipt-source"
+  python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+    --family "go" --output-dir "$bound" --metadata "$metadata" \
+    >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
+  python3 "$repo_root/scripts/release_artifact_receipt.py" extract \
+    --family "go" --metadata "$metadata" --index 0 --output-dir "$extracted" \
+    >"$tmp_dir/receipt-extract.out" 2>"$tmp_dir/receipt-extract.err"
+  local package_root
+  package_root="$(RECEIPT_MODULE_VERSION="$module_version" python3 - "$extracted" "$module_path" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+expected = "module " + sys.argv[2]
+version = os.environ["RECEIPT_MODULE_VERSION"]
+matches = [
+    path.parent
+    for path in root.rglob("go.mod")
+    if path.read_text(encoding="utf-8").splitlines()[0] == expected
+    and path.parent.name.endswith("@" + version)
+]
+if len(matches) != 1:
+    raise SystemExit(1)
+print(matches[0])
+PY
+)"
+  local app="$tmp_dir/receipt-app"
+  mkdir -p "$app"
+  cd "$app"
+  go mod init logbrew.release.receipt >"$tmp_dir/receipt-mod-init.out" 2>"$tmp_dir/receipt-mod-init.err"
+  go mod edit -require="${module_path}@${module_version}" -replace="${module_path}=${package_root}"
+  cat > main.go <<'GO'
+package main
+
+import "github.com/LogBrewCo/sdk/go/logbrew"
+
+func main() {
+	client, err := logbrew.NewClient(logbrew.Config{APIKey: "key", SDKName: "receipt", SDKVersion: "0.1.0"})
+	if err != nil {
+		panic(err)
+	}
+	if err := client.Log("event", "2026-01-01T00:00:00Z", logbrew.LogAttributes{Message: "ok", Level: "info"}); err != nil {
+		panic(err)
+	}
+	response, err := client.Shutdown(logbrew.AlwaysAcceptTransport())
+	if err != nil || response.StatusCode != 202 {
+		panic("receipt execution failed")
+	}
+}
+GO
+  go run . >"$tmp_dir/receipt-run.out" 2>"$tmp_dir/receipt-run.err"
+  python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+    --family "go" --metadata "$metadata"
+}
+
+if [[ "$receipt_mode" == "1" ]]; then
+  run_receipt_smoke
+  exit 0
+fi
 
 export GOPATH="$tmp_dir/gopath"
 export GOMODCACHE="$tmp_dir/mod"

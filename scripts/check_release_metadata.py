@@ -18,14 +18,15 @@ from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES, validate_dotnet_pac
 
 
 PUBLIC_VERSION = "0.1.0"
-RUST_VERSION = "0.1.1"
-RUBYGEMS_VERSION = "0.1.1"
-PACKAGIST_VERSION = "0.1.1"
-DOTNET_VERSION = "0.1.4"
+RUST_VERSION = "0.1.2"
+RUBYGEMS_VERSION = "0.1.2"
+PACKAGIST_VERSION = "0.1.2"
+DOTNET_VERSION = "0.1.5"
 DOTNET_OTEL_VERSION = "0.1.1"
 DOTNET_HTTPCLIENT_VERSION = "0.1.0"
 UNITY_VERSION = "0.1.1"
 MAVEN_VERSION = "0.1.1"
+JAVA_MAVEN_VERSION = "0.1.2"
 PUBLIC_LICENSE = "MIT"
 REPO_URL = "https://github.com/LogBrewCo/sdk"
 NPM_REPO_URL = "git+https://github.com/LogBrewCo/sdk.git"
@@ -57,6 +58,7 @@ NUGET_PACKAGES = {package.package_id for package in DOTNET_RELEASE_PACKAGES}
 OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
 PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
 PUBLISH_PACKAGES_WORKFLOW = ".github/workflows/publish-packages.yml"
+PUBLISH_NUGET_WORKFLOW = ".github/workflows/publish-nuget.yml"
 RELEASE_SAFETY_DOCS = (
     "docs/github-actions.md",
     ".github/publishing/trusted-publishers.md",
@@ -68,28 +70,28 @@ PYTHON_PACKAGES = {
         "description": "Django integration",
         "dependencies": {"Django>=5.2", "logbrew-sdk>=0.1.1,<0.2.0"},
         "package": "logbrew_django",
-        "version": "0.1.2",
+        "version": "0.1.3",
     },
     "python/logbrew_fastapi": {
         "name": "logbrew-fastapi",
         "description": "FastAPI integration",
         "dependencies": {"fastapi>=0.115", "httpx2>=2.3", "logbrew-sdk>=0.1.1,<0.2.0"},
         "package": "logbrew_fastapi",
-        "version": "0.1.2",
+        "version": "0.1.3",
     },
     "python/logbrew_flask": {
         "name": "logbrew-flask",
         "description": "Flask integration",
         "dependencies": {"Flask>=3.1", "logbrew-sdk>=0.1.1,<0.2.0"},
         "package": "logbrew_flask",
-        "version": "0.1.0",
+        "version": "0.1.1",
     },
     "python/logbrew_py": {
         "name": "logbrew-sdk",
         "description": "Public LogBrew Python SDK",
         "dependencies": set(),
         "package": "logbrew_sdk",
-        "version": "0.1.3",
+        "version": "0.1.4",
     },
 }
 
@@ -669,6 +671,7 @@ def validate_maven_pom(
     expected_name: str,
     failures: list[str],
     require_compiler_release: bool = False,
+    expected_version: str = MAVEN_VERSION,
 ) -> None:
     pom_path = require_path(root, relative_path, failures)
     require_path(root, str(Path(relative_path).parent / "README.md"), failures)
@@ -680,7 +683,7 @@ def validate_maven_pom(
 
     require_equal(failures, relative_path, "groupId", child_text(project, "groupId"), "co.logbrew")
     require_equal(failures, relative_path, "artifactId", child_text(project, "artifactId"), expected_artifact)
-    require_equal(failures, relative_path, "version", child_text(project, "version"), MAVEN_VERSION)
+    require_equal(failures, relative_path, "version", child_text(project, "version"), expected_version)
     require_equal(failures, relative_path, "packaging", child_text(project, "packaging"), "jar")
     require_equal(failures, relative_path, "name", child_text(project, "name"), expected_name)
     require_equal(failures, relative_path, "url", child_text(project, "url"), REPO_URL)
@@ -901,8 +904,11 @@ def validate_swift(root: Path, failures: list[str]) -> None:
             '.macOS(.v13)',
             '.iOS(.v15)',
             '.library(name: "LogBrew", targets: ["LogBrew"])',
+            '.library(name: "LogBrewCrash", targets: ["LogBrewCrash"])',
             'path: "swift/logbrew-swift/Sources/LogBrew"',
+            'path: "swift/logbrew-swift/Sources/LogBrewCrash"',
             'path: "swift/logbrew-swift/Tests/LogBrewTests"',
+            'path: "swift/logbrew-swift/Tests/LogBrewCrashTests"',
         ),
     }
     for relative_path, required_entries in manifest_expectations.items():
@@ -947,6 +953,15 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "Maven release canonical output": (
                 "printf 'maven_artifacts=%s\\n' \"$maven_artifacts\""
             ),
+            "NuGet selected-package release input": "nuget_packages:",
+            "NuGet selected-package dispatch": '-f nuget_packages="$NUGET_PACKAGES"',
+            "NuGet release selector environment binding": (
+                "INPUT_NUGET_PACKAGES: ${{ inputs.nuget_packages }}"
+            ),
+            "NuGet release selector canonicalization": "nuget_release_plan.py canonicalize",
+            "NuGet release canonical output": (
+                "printf 'nuget_packages=%s\\n' \"$nuget_packages\""
+            ),
         }
         for description, needle in required_needles.items():
             require(needle in text, failures, f"{PUBLISH_RELEASE_WORKFLOW}: missing {description}")
@@ -966,14 +981,29 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             failures,
             f"{PUBLISH_RELEASE_WORKFLOW}: Maven selector must be canonical before output",
         )
+        require(
+            "${{ inputs.nuget_packages }}" not in resolve_script,
+            failures,
+            f"{PUBLISH_RELEASE_WORKFLOW}: NuGet selector must not be interpolated into shell",
+        )
+        require(
+            'nuget_packages="$INPUT_NUGET_PACKAGES"' not in resolve_script
+            and 'echo "nuget_packages=$nuget_packages"' not in resolve_script,
+            failures,
+            f"{PUBLISH_RELEASE_WORKFLOW}: NuGet selector must be canonical before output",
+        )
     publish_packages_path = require_path(root, PUBLISH_PACKAGES_WORKFLOW, failures)
     if publish_packages_path.exists():
         publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
+        publish_nuget_path = require_path(root, PUBLISH_NUGET_WORKFLOW, failures)
+        if publish_nuget_path.exists():
+            publish_packages_text += "\n" + publish_nuget_path.read_text(encoding="utf-8")
         required_publish_needles = {
             "NuGet package version output": "id: nuget-version",
             "NuGet HttpClient pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
-            "NuGet StackExchange.Redis pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj",
-            "NuGet OpenTelemetry pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj",
+            "NuGet selected package plan": "nuget_release_plan.py create",
+            "NuGet selected package plan validation": "nuget_release_plan.py validate",
+            "NuGet selected package iteration": '--format projects',
             "NuGet XML documentation pack": "-p:GenerateDocumentationFile=true",
             "NuGet HttpClient documentation pack": "httpclient_pack_args=",
             "NuGet symbol pack": "-p:SymbolPackageFormat=snupkg",
@@ -987,7 +1017,20 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "NuGet one-package publish loop": "while IFS= read -r package_path",
             "NuGet duplicate-safe publish": "--skip-duplicate",
             "NuGet symbol publish": "--symbol-source https://api.nuget.org/v3/index.json",
-            "NuGet public install smoke": "bash scripts/real_user_dotnet_public_nuget_smoke.sh",
+            "NuGet public install smoke": "bash scripts/real_user_dotnet_selected_public_nuget_smoke.sh",
+            "Python artifact manifest": "check_python_release_artifacts.py create",
+            "Python packed install receipt": (
+                "real_user_python_public_pypi_smoke.sh --manifest"
+            ),
+            "Python packed artifact root": "--artifact-root dist/pypi",
+            "Python manifest receipt upload": "Upload Python release manifest",
+            "Python public install receipt": "Verify public PyPI installs",
+            "Python Flask exact release version": (
+                "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}"
+            ),
+            "SwiftPM exact revision receipt": "LOGBREW_SWIFTPM_EXPECTED_REVISION",
+            "SwiftPM exact source digest receipt": "LOGBREW_SWIFTPM_EXPECTED_SOURCE_SHA256",
+            "SwiftPM installed products receipt": "real_user_swiftpm_public_smoke.sh",
             "verify target exact version input": "verify_version:",
             "verify target exact version argument": 'verify_args+=(--version "$VERIFY_VERSION")',
             "verify target npm version override": 'append_values --npm-version "$VERIFY_NPM_VERSIONS"',
@@ -1044,17 +1087,19 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             f"{PUBLISH_PACKAGES_WORKFLOW}: Maven selector must not be interpolated into shell",
         )
         for package in DOTNET_RELEASE_PACKAGES:
-            needle = (
-                f'--nuget-version "{package.package_id}='
-                f'${{{{ steps.nuget-version.outputs.{package.version_output} }}}}"'
-            )
             required_publish_needles[f"NuGet {package.package_id} version output"] = (
                 f"{package.version_output}="
             )
-            required_publish_needles[f"NuGet {package.package_id} metadata version validation"] = needle
-            required_publish_needles[f"NuGet {package.package_id} public version verification"] = needle
         for description, needle in required_publish_needles.items():
             require(needle in publish_packages_text, failures, f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}")
+        nuget_plan_path = require_path(root, "scripts/nuget_release_plan.py", failures)
+        if nuget_plan_path.exists():
+            nuget_plan_text = nuget_plan_path.read_text(encoding="utf-8")
+            require(
+                "DOTNET_RELEASE_PACKAGES" in nuget_plan_text,
+                failures,
+                "scripts/nuget_release_plan.py: must use the canonical NuGet release catalog",
+            )
         for relative_dir in JS_PACKAGES:
             require(
                 relative_dir in publish_packages_text,
@@ -1118,6 +1163,7 @@ def validate(
         "LogBrew Java SDK",
         failures,
         require_compiler_release=True,
+        expected_version=JAVA_MAVEN_VERSION,
     )
     validate_dotnet_packages(
         root,

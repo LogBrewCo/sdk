@@ -213,6 +213,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_go_structured_url_hostname_reference(relative_text, line, terms):
         return True
 
+    if is_python_public_registry_hostname_reference(relative_text, line, terms):
+        return True
+
     if is_apple_durable_storage_reference(relative_text, terms):
         return True
 
@@ -396,6 +399,12 @@ def is_maven_central_preflight_secret_name_reference(relative_text: str, line: s
 def is_github_actions_oidc_or_secret_placeholder(relative_text: str, line: str) -> bool:
     if not relative_text.startswith(".github/workflows/"):
         return False
+
+    if (
+        relative_text == ".github/workflows/publish-packages.yml"
+        and line.strip() == "secrets: inherit"
+    ):
+        return True
 
     lower_line = line.lower()
     allowed_fragments = (
@@ -981,6 +990,22 @@ def is_go_structured_url_hostname_reference(
     )
 
 
+def is_python_public_registry_hostname_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    if (
+        relative_text != "scripts/real_user_python_public_pypi_smoke.sh"
+        or terms != {"hostname"}
+    ):
+        return False
+    return line.strip() in {
+        'if parsed.scheme != "https" or parsed.hostname != "files.pythonhosted.org":',
+        'if final_url.scheme != "https" or final_url.hostname != "files.pythonhosted.org":',
+    }
+
+
 def is_kotlin_coroutine_context_reference(
     relative_text: str,
     line: str,
@@ -1030,7 +1055,7 @@ def is_dotnet_release_compatibility_reference(
 ) -> bool:
     httpclient_project = "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj"
     if terms == {"restore"} and relative_text in {
-        ".github/workflows/publish-packages.yml",
+        ".github/workflows/publish-nuget.yml",
         "tests/test_release_metadata.py",
     }:
         return (

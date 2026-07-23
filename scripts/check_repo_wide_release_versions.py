@@ -53,6 +53,12 @@ REPO_WIDE_RELEASE_MANIFESTS = (
     ),
     PackageManifest(
         "pypi",
+        "logbrew-flask",
+        "python/logbrew_flask/pyproject.toml",
+        "pyproject-version",
+    ),
+    PackageManifest(
+        "pypi",
         "logbrew-django",
         "python/logbrew_django/pyproject.toml",
         "pyproject-version",
@@ -63,6 +69,12 @@ REPO_WIDE_RELEASE_MANIFESTS = (
         "nuget",
         "LogBrew",
         "dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj",
+        "xml-version",
+    ),
+    PackageManifest(
+        "nuget",
+        "LogBrew.HttpClient",
+        "dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
         "xml-version",
     ),
     PackageManifest("maven", "co.logbrew:logbrew-sdk", "java/logbrew-java/pom.xml", "maven-version"),

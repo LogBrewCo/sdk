@@ -3,6 +3,13 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk_package_version="$(node -p "require('${repo_root}/js/logbrew-js/package.json').version")"
+browser_package_version="$(
+  node -e '
+const version = require(process.argv[1]).version;
+if (typeof version !== "string" || version.length === 0) process.exit(1);
+process.stdout.write(version);
+' "$repo_root/js/logbrew-browser/package.json"
+)"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -113,7 +120,7 @@ npm explain @logbrew/react > "$tmp_dir/npm-explain-react.txt"
 grep -q '@logbrew/react@0.1.0' "$tmp_dir/npm-explain-react.txt"
 npm list --depth=0 > "$tmp_dir/npm-list-depth0.txt"
 grep -q '@logbrew/react@0.1.0' "$tmp_dir/npm-list-depth0.txt"
-grep -q '@logbrew/browser@0.1.0' "$tmp_dir/npm-list-depth0.txt"
+grep -Fq "@logbrew/browser@${browser_package_version}" "$tmp_dir/npm-list-depth0.txt"
 grep -q "@logbrew/sdk@${sdk_package_version}" "$tmp_dir/npm-list-depth0.txt"
 npm list --json --depth=0 > "$tmp_dir/npm-list-depth0.json"
 python3 - "$tmp_dir/npm-list-depth0.json" <<'PY'

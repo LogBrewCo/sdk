@@ -1,14 +1,106 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.1}}"
 tmp_dir="$(mktemp -d)"
+receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 trap 'rm -rf "$tmp_dir"' EXIT
+
+receipt_failure() {
+  echo "Packagist release receipt failed" >&2
+}
 
 export COMPOSER_HOME="$tmp_dir/composer-home"
 export COMPOSER_CACHE_DIR="$tmp_dir/composer-cache"
 export COMPOSER_ROOT_VERSION="1.0.0"
 export LOGBREW_PACKAGIST_INSTALLED_VERSION="$version"
+
+run_receipt_smoke() {
+  local bound="$tmp_dir/receipt-artifacts"
+  local extracted="$tmp_dir/receipt-source"
+  local metadata="$tmp_dir/receipt-metadata.json"
+  python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
+    --family "packagist" --output-dir "$bound" --metadata "$metadata" \
+    >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
+  python3 "$repo_root/scripts/release_artifact_receipt.py" extract \
+    --family "packagist" --metadata "$metadata" --index 0 --output-dir "$extracted" \
+    >"$tmp_dir/receipt-extract.out" 2>"$tmp_dir/receipt-extract.err"
+  local package_root
+  package_root="$(python3 - "$extracted" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+extracted = Path(sys.argv[1])
+roots = list(extracted.iterdir())
+if len(roots) != 1 or not roots[0].is_dir():
+    raise SystemExit(1)
+package_root = roots[0]
+manifest = package_root / "composer.json"
+try:
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+if payload.get("name") != "logbrew/sdk" or payload.get("type") != "library":
+    raise SystemExit(1)
+if payload.get("autoload") != {"psr-4": {"LogBrew\\": "php/logbrew-php/src/"}}:
+    raise SystemExit(1)
+source = package_root / "php" / "logbrew-php" / "src"
+if not source.is_dir() or not (source / "LogBrewClient.php").is_file():
+    raise SystemExit(1)
+print(package_root)
+PY
+)"
+  mkdir -p "$tmp_dir/receipt-app"
+  cd "$tmp_dir/receipt-app"
+  composer init --name logbrew/release-receipt --type project --no-interaction --quiet
+  RECEIPT_PACKAGE_ROOT="$package_root" RECEIPT_VERSION="$version" python3 \
+    > "$tmp_dir/receipt-package.json" <<'PY'
+import json
+import os
+
+version = os.environ["RECEIPT_VERSION"]
+print(json.dumps({
+    "type": "path",
+    "url": os.environ["RECEIPT_PACKAGE_ROOT"],
+    "options": {
+        "symlink": False,
+        "versions": {"logbrew/sdk": version},
+    },
+}, separators=(",", ":")))
+PY
+  composer config --json repositories.receipt "$(cat "$tmp_dir/receipt-package.json")"
+  composer require "logbrew/sdk:${version}" --no-interaction --prefer-dist --no-progress \
+    >"$tmp_dir/receipt-install.out" 2>"$tmp_dir/receipt-install.err"
+  [[ ! -L vendor/logbrew/sdk ]]
+  cmp "$package_root/composer.json" "vendor/logbrew/sdk/composer.json"
+  cmp "$package_root/php/logbrew-php/src/LogBrewClient.php" \
+    "vendor/logbrew/sdk/php/logbrew-php/src/LogBrewClient.php"
+  php >"$tmp_dir/receipt-run.out" 2>"$tmp_dir/receipt-run.err" <<'PHP'
+<?php
+declare(strict_types=1);
+
+require __DIR__ . '/vendor/autoload.php';
+use LogBrew\LogBrewClient;
+use LogBrew\RecordingTransport;
+
+$client = LogBrewClient::create('key', 'receipt', '0.1.0');
+$client->log('event', '2026-01-01T00:00:00Z', ['message' => 'ok', 'level' => 'info']);
+$response = $client->shutdown(RecordingTransport::alwaysAccept());
+if ($response->statusCode !== 202) {
+    exit(1);
+}
+PHP
+  python3 "$repo_root/scripts/release_artifact_receipt.py" attest \
+    --family "packagist" --metadata "$metadata"
+}
+
+if [[ "$receipt_mode" == "1" ]]; then
+  trap receipt_failure ERR
+  run_receipt_smoke
+  exit 0
+fi
 
 cd "$tmp_dir"
 
@@ -50,7 +142,7 @@ use LogBrew\TransportResponse;
 use Monolog\Logger;
 use Psr\Log\LogLevel;
 
-$version = getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.1';
+$version = getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.2';
 $installedVersion = Composer\InstalledVersions::getPrettyVersion('logbrew/sdk');
 if (!Composer\InstalledVersions::isInstalled('logbrew/sdk')) {
     fwrite(STDERR, "logbrew/sdk is not installed according to Composer\n");

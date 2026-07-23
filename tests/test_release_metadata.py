@@ -57,6 +57,14 @@ def write_release_workflow_fixture(root: Path) -> Path:
     return workflow_dir
 
 
+def read_publish_workflows() -> str:
+    workflow_dir = ROOT / ".github" / "workflows"
+    return "\n".join(
+        (workflow_dir / name).read_text(encoding="utf-8")
+        for name in ("publish-packages.yml", "publish-nuget.yml")
+    )
+
+
 def minimal_publish_packages_workflow(package_dirs: list[str]) -> str:
     package_dir_lines = "\n".join(f"            {package_dir}" for package_dir in package_dirs)
     return (
@@ -216,13 +224,13 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(package_ids, check_release_metadata.NUGET_PACKAGES)
 
     def test_publish_packages_workflow_includes_httpclient_release_contract(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(encoding="utf-8")
+        workflow = read_publish_workflows()
 
         for expected in (
             "httpclient_version=",
             "steps.nuget-version.outputs.httpclient_version",
             "src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",
-            'LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}',
+            "nuget_release_plan.py entries",
             "python3 scripts/check_dotnet_release_artifacts.py",
             "-p:EnableSourceLink=true",
             "steps.nuget-artifacts.outputs.httpclient_content_sha256",
@@ -240,20 +248,94 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
 
     def test_publish_packages_rejects_nuget_collisions_before_pack(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(encoding="utf-8")
+        workflow = read_publish_workflows()
 
         collision_check = workflow.index("Check NuGet version collision")
         pack = workflow.index("Pack NuGet package")
 
         self.assertLess(collision_check, pack)
         self.assertIn("--expect-absent", workflow[collision_check:pack])
-        self.assertIn(
-            'LogBrew.HttpClient=${{ steps.nuget-version.outputs.httpclient_version }}',
-            workflow[collision_check:pack],
+        self.assertIn("logbrew-nuget-release-plan.json", workflow[collision_check:pack])
+        self.assertIn("--format versions", workflow[collision_check:pack])
+
+    def test_publish_packages_uses_a_typed_nuget_plan_for_every_release_stage(self) -> None:
+        workflow = read_publish_workflows()
+
+        self.assertIn("nuget_packages:", workflow)
+        self.assertIn("NUGET_PACKAGES_INPUT: ${{ inputs.nuget_packages }}", workflow)
+        self.assertIn("nuget_release_plan.py create", workflow)
+        plan_step = workflow.split("- name: Plan selected NuGet packages", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+        self.assertIn("NUGET_PACKAGES_INPUT: ${{ inputs.nuget_packages }}", plan_step)
+        self.assertNotIn("${{ inputs.nuget_packages }}", plan_step.split("run: |", 1)[1])
+        for stage in (
+            "Check NuGet version collision",
+            "Pack NuGet package",
+            "Publish NuGet package",
+            "Verify public NuGet package",
+            "Verify public NuGet install",
+        ):
+            section = workflow.split(f"- name: {stage}", 1)[1].split("\n      - name:", 1)[0]
+            self.assertIn("logbrew-nuget-release-plan.json", section)
+
+    def test_publish_packages_binds_python_artifacts_and_runs_installed_receipts(
+        self,
+    ) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(
+            encoding="utf-8"
         )
 
+        build = workflow.index("Build Python distributions")
+        local_receipt = workflow.index("Verify packed Python distributions")
+        publish = workflow.index("Publish logbrew-sdk to PyPI")
+        registry = workflow.index("Verify public PyPI packages")
+        public_receipt = workflow.index("Verify public PyPI installs")
+
+        for expected in (
+            "check_python_release_artifacts.py create",
+            "--source-commit",
+            "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}",
+            "python-release-artifacts.json",
+            "real_user_python_public_pypi_smoke.sh --manifest",
+            "--artifact-root dist/pypi",
+            "Upload Python release manifest",
+        ):
+            self.assertIn(expected, workflow)
+        self.assertLess(build, local_receipt)
+        self.assertLess(local_receipt, publish)
+        self.assertLess(publish, registry)
+        self.assertLess(registry, public_receipt)
+
+    def test_publish_packages_binds_swiftpm_receipt_to_exact_source(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(
+            encoding="utf-8"
+        )
+
+        for expected in (
+            "include_swiftpm:",
+            "verify_swiftpm_version:",
+            "Public SwiftPM verification",
+            "LOGBREW_SWIFTPM_EXPECTED_REVISION",
+            "LOGBREW_SWIFTPM_EXPECTED_SOURCE_SHA256",
+            "real_user_swiftpm_public_smoke.sh",
+        ):
+            self.assertIn(expected, workflow)
+
+    def test_publish_release_canonicalizes_nuget_selection_before_dispatch(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "publish-release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("INPUT_NUGET_PACKAGES: ${{ inputs.nuget_packages }}", workflow)
+        self.assertIn("nuget_release_plan.py canonicalize", workflow)
+        self.assertIn("printf 'nuget_packages=%s\\n' \"$nuget_packages\"", workflow)
+        self.assertIn('-f nuget_packages="$NUGET_PACKAGES"', workflow)
+        self.assertIn('-f include_swiftpm="$INCLUDE_SWIFTPM"', workflow)
+        self.assertIn('-f verify_swiftpm_version="$VERIFY_SWIFTPM_VERSION"', workflow)
+
     def test_publish_packages_runs_httpclient_compatibility_receipt(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(encoding="utf-8")
+        workflow = read_publish_workflows()
 
         self.assertIn(
             "bash scripts/real_user_dotnet_httpclient_package_compatibility_smoke.sh",
@@ -283,7 +365,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                 """
 [package]
 name = "logbrew"
-version = "0.1.1"
+version = "0.1.2"
 license = "MIT"
 repository = "https://github.com/LogBrewCo/sdk"
 readme = "README.md"
@@ -303,19 +385,16 @@ keywords = ["logbrew"]
 
         self.assertEqual(failures, [])
 
-    def test_maven_metadata_requires_current_maven_release_version(self) -> None:
-        pom_paths = (
-            ROOT / "java" / "logbrew-java" / "pom.xml",
+    def test_maven_metadata_advances_only_the_java_sdk(self) -> None:
+        self.assertIn(
+            "<version>0.1.2</version>",
+            (ROOT / "java" / "logbrew-java" / "pom.xml").read_text(encoding="utf-8"),
+        )
+        for pom_path in (
             ROOT / "kotlin" / "logbrew-kotlin" / "pom.xml",
             ROOT / "kotlin" / "logbrew-kotlin-okhttp" / "pom.xml",
-        )
-
-        for pom_path in pom_paths:
-            self.assertIn(
-                "<version>0.1.1</version>",
-                pom_path.read_text(encoding="utf-8"),
-                f"{pom_path.relative_to(ROOT)} must use the current Maven release version",
-            )
+        ):
+            self.assertIn("<version>0.1.1</version>", pom_path.read_text(encoding="utf-8"))
 
     def test_maven_central_public_smoke_covers_kotlin_okhttp_artifact(self) -> None:
         smoke = (ROOT / "scripts" / "real_user_maven_central_public_smoke.sh").read_text(encoding="utf-8")
@@ -332,10 +411,13 @@ keywords = ["logbrew"]
         manifest = manifest_path.read_text(encoding="utf-8")
         self.assertIn('name: "logbrew-swift"', manifest)
         self.assertIn('.library(name: "LogBrew", targets: ["LogBrew"])', manifest)
+        self.assertIn('.library(name: "LogBrewCrash", targets: ["LogBrewCrash"])', manifest)
         self.assertIn('path: "swift/logbrew-swift/Sources/LogBrew"', manifest)
+        self.assertIn('path: "swift/logbrew-swift/Sources/LogBrewCrash"', manifest)
         self.assertIn('path: "swift/logbrew-swift/Tests/LogBrewTests"', manifest)
+        self.assertIn('path: "swift/logbrew-swift/Tests/LogBrewCrashTests"', manifest)
 
-    def test_publish_packages_workflow_requires_exact_nuget_version_verification(self) -> None:
+    def test_publish_packages_workflow_requires_typed_nuget_version_plan(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             workflow_dir = write_release_workflow_fixture(root)
@@ -355,7 +437,7 @@ jobs:
             failures: list[str] = []
             check_release_metadata.validate_release_workflows(root, failures)
 
-        self.assertTrue(any("NuGet LogBrew public version verification" in failure for failure in failures))
+        self.assertTrue(any("NuGet selected package plan" in failure for failure in failures))
 
     def test_publish_packages_workflow_requires_exact_crates_version_verification(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -384,7 +466,7 @@ jobs:
 
         self.assertTrue(any("crates.io exact public version verification" in failure for failure in failures))
 
-    def test_publish_packages_workflow_requires_exact_nuget_metadata_version_validation(self) -> None:
+    def test_publish_packages_workflow_requires_nuget_plan_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             workflow_dir = write_release_workflow_fixture(root)
@@ -407,7 +489,7 @@ jobs:
             failures: list[str] = []
             check_release_metadata.validate_release_workflows(root, failures)
 
-        self.assertTrue(any("NuGet LogBrew metadata version validation" in failure for failure in failures))
+        self.assertTrue(any("NuGet selected package plan validation" in failure for failure in failures))
 
     def test_publish_packages_workflow_requires_public_nuget_install_smoke(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1133,7 +1215,7 @@ jobs:
             check_release_metadata.validate_dotnet_packages(
                 root,
                 default_failures,
-                check_release_metadata.DOTNET_VERSION,
+                "0.1.4",
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
                 check_release_metadata.PUBLIC_VERSION,
@@ -1167,7 +1249,7 @@ jobs:
                 """
 Gem::Specification.new do |spec|
   spec.name = "logbrew-sdk"
-  spec.version = "0.1.1"
+  spec.version = "0.1.2"
   spec.summary = "Public LogBrew Ruby SDK"
   spec.description = "Public LogBrew Ruby SDK for building, validating, and flushing event batches."
   spec.authors = ["LogBrew"]

@@ -993,6 +993,64 @@ class DotnetDurableDeliveryWorkflowGateTests(unittest.TestCase):
                     "admission witness invalid: publication",
                 )
 
+    def test_atomic_publication_allows_delayed_final_marker_visibility(self) -> None:
+        self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
+        verifier = load_verifier()
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            witness = root / "witness"
+            request = root / "request"
+            write_test_witness(witness, APP_WITNESS_STAGES[:2])
+            temporary = witness / verifier.WITNESS_TEMPORARY_NAME
+            elapsed = 0.0
+            snapshots = 0
+            original_iterdir = Path.iterdir
+
+            def delayed_publication(path: Path):
+                nonlocal snapshots
+                if path != witness:
+                    return original_iterdir(path)
+                snapshots += 1
+                entries = [witness / APP_WITNESS_STAGES[0]]
+                if snapshots == 1:
+                    entries.append(temporary)
+                elif elapsed >= 0.02:
+                    entries.append(witness / APP_WITNESS_STAGES[1])
+                return iter(entries)
+
+            def monotonic() -> float:
+                return elapsed
+
+            def sleep(seconds: float) -> None:
+                nonlocal elapsed
+                elapsed += seconds
+
+            with (
+                mock.patch.object(Path, "iterdir", new=delayed_publication),
+                mock.patch.object(
+                    verifier,
+                    "_temporary_witness_validity",
+                    return_value=None,
+                ),
+                mock.patch.object(verifier.time, "monotonic", side_effect=monotonic),
+                mock.patch.object(verifier.time, "sleep", side_effect=sleep),
+            ):
+                self.assertEqual(
+                    verifier.inspect_admission_witness(witness, request),
+                    (
+                        verifier.AdmissionOutcome.FIRST_ADMISSION_TIMEOUT,
+                        "durable-client-created",
+                        False,
+                    ),
+                )
+
+            self.assertGreater(snapshots, 2)
+            self.assertLessEqual(
+                elapsed,
+                verifier.WITNESS_PUBLICATION_DEADLINE_SECONDS,
+            )
+
     def test_completed_publication_allows_bounded_visibility_resnapshots(self) -> None:
         self.assertTrue(VERIFIER.is_file(), "durability verifier helper is missing")
         verifier = load_verifier()

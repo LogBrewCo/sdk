@@ -5,7 +5,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>co.logbrew</groupId>
   <artifactId>logbrew-sdk</artifactId>
-  <version>0.1.1</version>
+  <version>0.1.2</version>
   <packaging>jar</packaging>
   <name>LogBrew Java SDK</name>
   <description>Public LogBrew Java SDK for building, validating, and flushing event batches.</description>

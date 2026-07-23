@@ -15,20 +15,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "real_user_npm_public_registry_smoke.sh"
 RECEIPT_ARTIFACTS = (
-    ("npm:@logbrew/sdk", "@logbrew/sdk", "0.1.3", "RecordingTransport", "."),
-    ("npm:@logbrew/browser", "@logbrew/browser", "0.1.0", "createLogBrewBrowserClient", "."),
-    ("npm:@logbrew/node", "@logbrew/node", "0.1.1", "createLogBrewNodeClient", "."),
+    ("npm:@logbrew/sdk", "@logbrew/sdk", "0.1.4", "RecordingTransport", "."),
+    ("npm:@logbrew/browser", "@logbrew/browser", "0.1.1", "createLogBrewBrowserClient", "."),
+    ("npm:@logbrew/node", "@logbrew/node", "0.1.2", "createLogBrewNodeClient", "."),
     (
         "npm:@logbrew/next",
         "@logbrew/next",
-        "0.1.0",
+        "0.1.1",
         "withLogBrewNextReleaseArtifacts",
         "./release-artifacts",
     ),
     (
         "npm:@logbrew/react-native",
         "@logbrew/react-native",
-        "0.1.0",
+        "0.1.1",
         "prepareLogBrewReactNativeReleaseArtifacts",
         "./release-artifacts",
     ),
@@ -100,7 +100,7 @@ class NpmPublicRegistrySmokeTests(unittest.TestCase):
         artifact_files: dict[str, str],
         *,
         omit_version: str | None = None,
-        sdk_version: str = "0.1.3",
+        sdk_version: str = "0.1.4",
     ) -> subprocess.CompletedProcess[str]:
         env = {
             **os.environ,

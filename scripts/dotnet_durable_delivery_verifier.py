@@ -316,6 +316,32 @@ def _wait_for_publication_resnapshot(deadline: float) -> bool:
     return True
 
 
+def _resnapshot_expected_publication(
+    witness_directory: Path,
+    request_path: Path,
+    temporary: Path | None,
+    minimum_committed_stages: int,
+    deadline: float | None,
+    *,
+    allow_new_deadline: bool,
+) -> tuple[AdmissionOutcome | None, str | None, bool]:
+    wait_before_resnapshot = deadline is not None
+    if temporary is not None and _temporary_witness_validity(temporary) is False:
+        return AdmissionOutcome.WITNESS_INVALID_PUBLICATION, None, False
+    if deadline is None:
+        if not allow_new_deadline:
+            return AdmissionOutcome.WITNESS_INVALID_PUBLICATION, None, False
+        deadline = time.monotonic() + WITNESS_PUBLICATION_DEADLINE_SECONDS
+    if wait_before_resnapshot and not _wait_for_publication_resnapshot(deadline):
+        return AdmissionOutcome.WITNESS_INVALID_PUBLICATION, None, False
+    return inspect_admission_witness(
+        witness_directory,
+        request_path,
+        _minimum_committed_stages=minimum_committed_stages,
+        _publication_deadline=deadline,
+    )
+
+
 def inspect_recovery_witness(witness_directory: Path) -> str:
     try:
         if not witness_directory.is_dir():
@@ -483,10 +509,17 @@ def inspect_admission_witness(
         last_stage = stage
         committed_stages += 1
 
-    if committed_stages < _minimum_committed_stages:
-        return AdmissionOutcome.WITNESS_INVALID_PUBLICATION, None, False
-
     temporary = entries.get(WITNESS_TEMPORARY_NAME)
+    if committed_stages < _minimum_committed_stages:
+        return _resnapshot_expected_publication(
+            witness_directory,
+            request_path,
+            temporary,
+            _minimum_committed_stages,
+            _publication_deadline,
+            allow_new_deadline=False,
+        )
+
     if preflight_failures:
         if temporary is not None:
             return AdmissionOutcome.WITNESS_INVALID_PUBLICATION, None, False
@@ -522,11 +555,13 @@ def inspect_admission_witness(
         if temporary_validity is None:
             if not _publication_retry_allowed:
                 return AdmissionOutcome.WITNESS_INVALID_PUBLICATION, None, False
-            return inspect_admission_witness(
+            return _resnapshot_expected_publication(
                 witness_directory,
                 request_path,
-                _minimum_committed_stages=committed_stages + 1,
-                _publication_retry_allowed=False,
+                None,
+                committed_stages + 1,
+                _publication_deadline,
+                allow_new_deadline=True,
             )
         if not temporary_validity:
             return AdmissionOutcome.WITNESS_INVALID_PUBLICATION, None, False

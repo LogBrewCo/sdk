@@ -1,0 +1,246 @@
+name: Publish NuGet Packages
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      dry_run:
+        required: true
+        type: boolean
+      nuget_packages:
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  nuget:
+    name: NuGet package
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Plan selected NuGet packages
+        env:
+          NUGET_PACKAGES_INPUT: ${{ inputs.nuget_packages }}
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/nuget_release_plan.py create --root "$GITHUB_WORKSPACE" \
+            --packages-env NUGET_PACKAGES_INPUT \
+            --output "$RUNNER_TEMP/logbrew-nuget-release-plan.json"
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Read NuGet package version
+        id: nuget-version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          core_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew/LogBrew.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          aspnetcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.AspNetCore/LogBrew.AspNetCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          efcore_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.EntityFrameworkCore/LogBrew.EntityFrameworkCore.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          httpclient_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          redis_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.StackExchangeRedis/LogBrew.StackExchangeRedis.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          otel_version="$(dotnet msbuild dotnet/logbrew-dotnet/src/LogBrew.OpenTelemetry/LogBrew.OpenTelemetry.csproj -nologo -getProperty:Version | tail -n 1 | xargs)"
+          if [[ -z "$core_version" || -z "$aspnetcore_version" || -z "$efcore_version" || -z "$httpclient_version" || -z "$redis_version" || -z "$otel_version" ]]; then
+            echo "Could not read NuGet package versions from .NET package projects" >&2
+            exit 1
+          fi
+          core_dependency_range="$(python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_metadata_dotnet import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' "$core_version")"
+          core_dependency_range_msbuild="${core_dependency_range/, /%2C}"
+          {
+            echo "core_version=$core_version"
+            echo "core_dependency_range=$core_dependency_range"
+            echo "core_dependency_range_msbuild=$core_dependency_range_msbuild"
+            echo "aspnetcore_version=$aspnetcore_version"
+            echo "efcore_version=$efcore_version"
+            echo "httpclient_version=$httpclient_version"
+            echo "redis_version=$redis_version"
+            echo "otel_version=$otel_version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Validate NuGet release metadata
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
+          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          version_args=()
+          while IFS= read -r package_version; do
+            version_args+=(--nuget-version "$package_version")
+          done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
+          python3 scripts/check_release_metadata.py "${version_args[@]}"
+
+      - name: Check NuGet version collision
+        if: ${{ ! inputs.dry_run }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
+          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          version_args=()
+          while IFS= read -r package_version; do
+            version_args+=(--nuget-version "$package_version")
+          done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
+          python3 scripts/check_registry_publication.py --target nuget --expect-absent "${version_args[@]}"
+
+      - name: Pack NuGet package
+        id: nuget-artifacts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
+          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          source_commit="$(git rev-parse HEAD)"
+          pack_args=(
+            --configuration Release
+            --output dist/nuget
+            --include-symbols
+            -p:SymbolPackageFormat=snupkg
+            -p:PublishRepositoryUrl=true
+            -p:EnableSourceLink=true
+            "-p:RepositoryCommit=$source_commit"
+            -p:ContinuousIntegrationBuild=true
+            -p:EmbedUntrackedSources=true
+          )
+          legacy_pack_args=("${pack_args[@]}" -p:GenerateDocumentationFile=true -p:NoWarn=1591)
+          httpclient_pack_args=(
+            "${pack_args[@]}"
+            -p:GenerateDocumentationFile=true
+            -p:BuildProjectReferences=false
+            "-p:LogBrewProjectReferenceVersion=${{ steps.nuget-version.outputs.core_dependency_range_msbuild }}"
+          )
+          while IFS=$'\t' read -r package_id project_path package_version; do
+            if [[ "$package_id" == "LogBrew.HttpClient" ]]; then
+              dotnet restore dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj
+              dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj --no-restore "${httpclient_pack_args[@]}"
+            else
+              dotnet pack "$project_path" "${legacy_pack_args[@]}"
+            fi
+          done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format projects)
+
+          artifact_args=(
+            --directory dist/nuget
+            --source-commit "$source_commit"
+            --manifest dist/nuget/release-artifacts.json
+          )
+          selected_httpclient=false
+          while IFS= read -r package_version; do
+            artifact_args+=(--nuget-version "$package_version")
+            if [[ "$package_version" == LogBrew.HttpClient=* ]]; then
+              selected_httpclient=true
+            fi
+          done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
+          if [[ "$selected_httpclient" == "true" ]]; then
+            artifact_args+=(--dependency-range "LogBrew.HttpClient:LogBrew=${{ steps.nuget-version.outputs.core_dependency_range }}")
+          fi
+          python3 scripts/check_dotnet_release_artifacts.py "${artifact_args[@]}"
+
+          httpclient_content_sha256=""
+          if [[ "$selected_httpclient" == "true" ]]; then
+            httpclient_content_sha256="$(python3 -c 'import json, sys; payload = json.load(open(sys.argv[1], encoding="utf-8")); print(next(package["nupkgContentSha256"] for package in payload["packages"] if package["id"] == "LogBrew.HttpClient"))' dist/nuget/release-artifacts.json)"
+          fi
+          {
+            echo "source_commit=$source_commit"
+            echo "httpclient_content_sha256=$httpclient_content_sha256"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to NuGet
+        if: ${{ ! inputs.dry_run }}
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Publish NuGet package
+        if: ${{ ! inputs.dry_run }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
+          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          while IFS= read -r package_path; do
+            dotnet nuget push "$package_path" \
+              --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+              --source https://api.nuget.org/v3/index.json \
+              --symbol-source https://api.nuget.org/v3/index.json \
+              --symbol-api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+              --skip-duplicate
+          done < <(find dist/nuget -maxdepth 1 -type f -name '*.nupkg' -print | sort)
+
+      - name: Set up Python for registry verification
+        if: ${{ ! inputs.dry_run }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Verify public NuGet package
+        if: ${{ ! inputs.dry_run }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
+          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          version_args=()
+          while IFS= read -r package_version; do
+            version_args+=(--nuget-version "$package_version")
+          done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
+          python3 scripts/check_registry_publication.py --target nuget "${version_args[@]}" --retries 20 --retry-delay 30
+
+      - name: Verify public NuGet install
+        if: ${{ ! inputs.dry_run }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
+          python3 scripts/nuget_release_plan.py validate --root "$GITHUB_WORKSPACE" --plan "$plan"
+          selection_mode="$(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format mode)"
+          if [[ "$selection_mode" == "all" ]]; then
+            bash scripts/real_user_dotnet_public_nuget_smoke.sh \
+              "${{ steps.nuget-version.outputs.core_version }}" \
+              "${{ steps.nuget-version.outputs.aspnetcore_version }}" \
+              "${{ steps.nuget-version.outputs.efcore_version }}" \
+              "${{ steps.nuget-version.outputs.httpclient_version }}" \
+              "${{ steps.nuget-version.outputs.redis_version }}" \
+              "${{ steps.nuget-version.outputs.otel_version }}" \
+              "${{ steps.nuget-artifacts.outputs.source_commit }}" \
+              "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
+          else
+            bash scripts/real_user_dotnet_selected_public_nuget_smoke.sh "$plan"
+          fi
+
+      - name: Verify public HttpClient package compatibility
+        if: ${{ ! inputs.dry_run }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          plan="$RUNNER_TEMP/logbrew-nuget-release-plan.json"
+          mapfile -t selected_ids < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format ids)
+          has_core=false
+          has_httpclient=false
+          for package_id in "${selected_ids[@]}"; do
+            [[ "$package_id" == "LogBrew" ]] && has_core=true
+            [[ "$package_id" == "LogBrew.HttpClient" ]] && has_httpclient=true
+          done
+          if [[ "$has_core" == "true" && "$has_httpclient" == "true" ]]; then
+            bash scripts/real_user_dotnet_httpclient_package_compatibility_smoke.sh \
+              "${{ steps.nuget-version.outputs.core_version }}" \
+              "${{ steps.nuget-version.outputs.httpclient_version }}" \
+              "${{ steps.nuget-artifacts.outputs.source_commit }}" \
+              "${{ steps.nuget-artifacts.outputs.httpclient_content_sha256 }}"
+          fi

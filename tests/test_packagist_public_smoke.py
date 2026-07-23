@@ -9,6 +9,21 @@ SCRIPT = ROOT / "scripts" / "real_user_packagist_public_smoke.sh"
 
 
 class PackagistPublicSmokeTests(unittest.TestCase):
+    def test_receipt_installs_the_validated_repository_root_archive(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        for expected in (
+            'release_artifact_receipt.py" extract',
+            'payload.get("name") != "logbrew/sdk"',
+            '"LogBrew\\\\": "php/logbrew-php/src/"',
+            '"type": "path"',
+            '"symlink": False',
+            '"versions": {"logbrew/sdk": version}',
+            'cmp "$package_root/composer.json" "vendor/logbrew/sdk/composer.json"',
+            'cmp "$package_root/php/logbrew-php/src/LogBrewClient.php"',
+        ):
+            self.assertIn(expected, body)
+
     def test_script_proves_current_public_packagist_package_installs(self) -> None:
         body = SCRIPT.read_text(encoding="utf-8")
 
