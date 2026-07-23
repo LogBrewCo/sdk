@@ -1,4 +1,5 @@
 name: Publish Packages
+run-name: Publish ${{ inputs.target }} from ${{ inputs.ref }}
 
 on:
   workflow_dispatch:
