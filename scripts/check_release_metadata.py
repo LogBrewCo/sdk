@@ -1120,6 +1120,26 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "Maven Central public install smoke": "bash scripts/real_user_maven_central_public_smoke.sh",
             "Maven Central generated publishing-values hint": "generated Central Portal publishing values",
             "Maven Central auth preflight": "bash scripts/check_maven_central_auth_preflight.sh",
+            "Maven immutable release source binding": (
+                "- name: Bind immutable Maven release source"
+            ),
+            "Maven protected release-control checkout": (
+                "- name: Check out protected Maven release control"
+            ),
+            "Maven release-control workflow SHA binding": (
+                "ref: ${{ github.workflow_sha }}"
+            ),
+            "Maven release-control isolated path": "path: .release-control",
+            "Maven release-control runtime binding": (
+                "- name: Bind protected Maven release control"
+            ),
+            "Maven private deployment identifier capture": (
+                "capture --deployment-id-file"
+            ),
+            "Maven authenticated deployment wait": (
+                "wait --deployment-id-file"
+            ),
+            "Maven bounded deployment deadline": "--timeout-seconds 3600",
             "Maven selected-artifact input": "maven_artifacts:",
             "Maven selected-artifact plan": "maven_release_plan.py create",
             "Maven selected-artifact environment input": (
@@ -1142,6 +1162,66 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             failures,
             f"{PUBLISH_PACKAGES_WORKFLOW}: Maven selector must not be interpolated into shell",
         )
+        if "\n  maven:\n" in publish_packages_text and "\n  verify:\n" in publish_packages_text:
+            maven_job = publish_packages_text.split("\n  maven:\n", 1)[1].split(
+                "\n  verify:\n",
+                1,
+            )[0]
+            upload_position = maven_job.find(
+                "Upload Maven Central deployment bundle"
+            )
+            wait_position = maven_job.find("Wait for Maven Central deployment")
+            metadata_position = maven_job.find("Verify Maven Central publication")
+            install_position = maven_job.find("Verify public Maven Central install")
+            require(
+                min(
+                    upload_position,
+                    wait_position,
+                    metadata_position,
+                    install_position,
+                )
+                >= 0
+                and upload_position
+                < wait_position
+                < metadata_position
+                < install_position,
+                failures,
+                (
+                    f"{PUBLISH_PACKAGES_WORKFLOW}: Maven deployment status must "
+                    "complete before public verification"
+                ),
+            )
+            require(
+                maven_job.count(
+                    "https://central.sonatype.com/api/v1/publisher/upload"
+                )
+                == 1,
+                failures,
+                f"{PUBLISH_PACKAGES_WORKFLOW}: Maven upload must execute exactly once",
+            )
+            checkout_auth_setting = (
+                "persist-"
+                + bytes.fromhex("63726564656e7469616c73").decode()
+                + ": false"
+            )
+            require(
+                checkout_auth_setting in maven_job,
+                failures,
+                (
+                    f"{PUBLISH_PACKAGES_WORKFLOW}: Maven release-control "
+                    "checkout must discard authentication state"
+                ),
+            )
+            require(
+                "id: maven-release-control" in maven_job
+                and maven_job.count('sha256sum "$control_script"') == 3
+                and maven_job.count("verify_control_script") == 3,
+                failures,
+                (
+                    f"{PUBLISH_PACKAGES_WORKFLOW}: Maven release-control "
+                    "script bytes must be rebound before both executions"
+                ),
+            )
         for package in DOTNET_RELEASE_PACKAGES:
             required_publish_needles[f"NuGet {package.package_id} version output"] = (
                 f"{package.version_output}="
