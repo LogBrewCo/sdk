@@ -8,6 +8,14 @@ RELEASE_READINESS = REPO_ROOT / ".github" / "workflows" / "release-readiness.yml
 
 
 class JavaOpenTelemetrySmokeTests(unittest.TestCase):
+    def test_release_readiness_allows_java_framework_smokes_to_finish(self) -> None:
+        workflow = RELEASE_READINESS.read_text()
+        java_job = workflow.split("  java-dry-run:", maxsplit=1)[1].split(
+            "  dotnet-dry-run:", maxsplit=1
+        )[0]
+
+        self.assertIn("timeout-minutes: 20", java_job)
+
     def test_java_opentelemetry_smoke_exercises_installed_artifact_flow(self) -> None:
         script = SMOKE.read_text()
 
