@@ -289,6 +289,142 @@ class ReleaseMetadataTests(unittest.TestCase):
             section = workflow.split(f"- name: {stage}", 1)[1].split("\n      - name:", 1)[0]
             self.assertIn("logbrew-nuget-release-plan.json", section)
 
+    def test_publish_nuget_binds_registry_checks_to_protected_workflow_source(
+        self,
+    ) -> None:
+        workflow = (
+            ROOT / ".github" / "workflows" / "publish-nuget.yml"
+        ).read_text(encoding="utf-8")
+        release_checkout = workflow.split("- name: Check out release ref", 1)[1].split(
+            "\n      - name:",
+            1,
+        )[0]
+        checkout_auth_setting = (
+            "persist-" + bytes.fromhex("63726564656e7469616c73").decode() + ": false"
+        )
+
+        self.assertIn("ref: ${{ inputs.ref }}", release_checkout)
+        self.assertIn(checkout_auth_setting, release_checkout)
+        self.assertNotIn("path:", release_checkout)
+
+        control_checkout = workflow.split(
+            "- name: Check out protected release control",
+            1,
+        )[1].split("\n      - name:", 1)[0]
+        self.assertIn("repository: ${{ github.repository }}", control_checkout)
+        self.assertIn("ref: ${{ github.workflow_sha }}", control_checkout)
+        self.assertIn("path: .release-control", control_checkout)
+        self.assertIn(checkout_auth_setting, control_checkout)
+
+        binding = workflow.split(
+            "- name: Bind protected release control",
+            1,
+        )[1].split("\n      - name:", 1)[0]
+        self.assertIn("RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}", binding)
+        self.assertIn(
+            "RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}",
+            binding,
+        )
+        self.assertIn(
+            "git -C \"$GITHUB_WORKSPACE\" rev-parse --verify 'HEAD^{commit}'",
+            binding,
+        )
+        self.assertIn(
+            "git -C \"$control_root\" rev-parse --verify 'HEAD^{commit}'",
+            binding,
+        )
+
+        protected_checker = (
+            '"$GITHUB_WORKSPACE/.release-control/scripts/'
+            'check_registry_publication.py"'
+        )
+        self.assertEqual(workflow.count(protected_checker), 2)
+        for stage in (
+            "Plan selected NuGet packages",
+            "Validate NuGet release metadata",
+            "Check NuGet version collision",
+            "Pack NuGet package",
+            "Publish NuGet package",
+            "Verify public NuGet package",
+            "Verify public NuGet install",
+        ):
+            section = workflow.split(f"- name: {stage}", 1)[1].split(
+                "\n      - name:",
+                1,
+            )[0]
+            self.assertIn("python3 scripts/nuget_release_plan.py", section)
+            self.assertNotIn(".release-control/scripts/nuget_release_plan.py", section)
+
+    def test_release_validation_rejects_unsafe_nuget_control_checkouts(self) -> None:
+        workflow_dir = ROOT / ".github" / "workflows"
+        publish_release = (workflow_dir / "publish-release.yml").read_text(
+            encoding="utf-8"
+        )
+        publish_packages = (workflow_dir / "publish-packages.yml").read_text(
+            encoding="utf-8"
+        )
+        publish_nuget = (workflow_dir / "publish-nuget.yml").read_text(
+            encoding="utf-8"
+        )
+        checkout_auth_setting = (
+            "persist-" + bytes.fromhex("63726564656e7469616c73").decode() + ": false"
+        )
+        mutations = (
+            (
+                "ref: ${{ github.workflow_sha }}",
+                "ref: ${{ inputs.ref }}",
+                "release-control workflow SHA binding",
+            ),
+            (
+                "path: .release-control",
+                "path: .",
+                "release-control isolated path",
+            ),
+            (
+                f"{checkout_auth_setting}\n          sparse-checkout:",
+                f"{checkout_auth_setting.removesuffix(': false')}: true\n"
+                "          sparse-checkout:",
+                "both checkouts must discard authentication state",
+            ),
+            (
+                "git -C \"$control_root\" rev-parse --verify 'HEAD^{commit}'",
+                "git -C \"$GITHUB_WORKSPACE\" rev-parse --verify 'HEAD^{commit}'",
+                "release-control runtime verification",
+            ),
+            (
+                '"$GITHUB_WORKSPACE/.release-control/scripts/'
+                'check_registry_publication.py"',
+                "scripts/check_registry_publication.py",
+                "both NuGet registry checks must use protected release control",
+            ),
+        )
+
+        for original, replacement, expected_failure in mutations:
+            with self.subTest(expected_failure=expected_failure):
+                self.assertIn(original, publish_nuget)
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    fixture_dir = write_release_workflow_fixture(root)
+                    (fixture_dir / "publish-release.yml").write_text(
+                        publish_release,
+                        encoding="utf-8",
+                    )
+                    (fixture_dir / "publish-packages.yml").write_text(
+                        publish_packages,
+                        encoding="utf-8",
+                    )
+                    (fixture_dir / "publish-nuget.yml").write_text(
+                        publish_nuget.replace(original, replacement, 1),
+                        encoding="utf-8",
+                    )
+                    failures: list[str] = []
+                    check_release_metadata.validate_release_workflows(root, failures)
+
+                self.assertTrue(
+                    any(expected_failure in failure for failure in failures),
+                    failures,
+                )
+
     def test_publish_packages_grants_oidc_to_the_reusable_nuget_job(self) -> None:
         workflow = (
             ROOT / ".github" / "workflows" / "publish-packages.yml"
