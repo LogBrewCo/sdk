@@ -997,7 +997,63 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
         publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
         publish_nuget_path = require_path(root, PUBLISH_NUGET_WORKFLOW, failures)
         if publish_nuget_path.exists():
-            publish_packages_text += "\n" + publish_nuget_path.read_text(encoding="utf-8")
+            publish_nuget_text = publish_nuget_path.read_text(encoding="utf-8")
+            publish_packages_text += "\n" + publish_nuget_text
+            nuget_control_requirements = {
+                "release source binding": "id: release-source",
+                "protected release-control checkout": (
+                    "- name: Check out protected release control"
+                ),
+                "release-control repository binding": (
+                    "repository: ${{ github.repository }}"
+                ),
+                "release-control workflow SHA binding": (
+                    "ref: ${{ github.workflow_sha }}"
+                ),
+                "release-control isolated path": "path: .release-control",
+                "release-control runtime binding": (
+                    "- name: Bind protected release control"
+                ),
+                "release-control expected SHA": (
+                    "RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}"
+                ),
+                "release source expected SHA": (
+                    "RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}"
+                ),
+                "release source runtime verification": (
+                    "git -C \"$GITHUB_WORKSPACE\" rev-parse --verify 'HEAD^{commit}'"
+                ),
+                "release-control runtime verification": (
+                    "git -C \"$control_root\" rev-parse --verify 'HEAD^{commit}'"
+                ),
+                "protected registry checker execution": (
+                    '"$GITHUB_WORKSPACE/.release-control/scripts/'
+                    'check_registry_publication.py"'
+                ),
+            }
+            for description, needle in nuget_control_requirements.items():
+                require(
+                    needle in publish_nuget_text,
+                    failures,
+                    f"{PUBLISH_NUGET_WORKFLOW}: missing {description}",
+                )
+            checkout_auth_setting = (
+                "persist-" + bytes.fromhex("63726564656e7469616c73").decode() + ": false"
+            )
+            require(
+                publish_nuget_text.count(checkout_auth_setting) >= 2,
+                failures,
+                f"{PUBLISH_NUGET_WORKFLOW}: both checkouts must discard authentication state",
+            )
+            require(
+                publish_nuget_text.count(
+                    '"$GITHUB_WORKSPACE/.release-control/scripts/'
+                    'check_registry_publication.py"'
+                )
+                == 2,
+                failures,
+                f"{PUBLISH_NUGET_WORKFLOW}: both NuGet registry checks must use protected release control",
+            )
         required_publish_needles = {
             "NuGet package version output": "id: nuget-version",
             "NuGet HttpClient pack": "dotnet pack dotnet/logbrew-dotnet/src/LogBrew.HttpClient/LogBrew.HttpClient.csproj",

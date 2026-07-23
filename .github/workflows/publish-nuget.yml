@@ -32,6 +32,66 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      - name: Bind immutable release source
+        id: release-source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          if [[ ! "$source_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid release source checkout." >&2
+            exit 1
+          fi
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out protected release control
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/check_registry_publication.py
+            scripts/check_release_metadata.py
+            scripts/release_metadata_dotnet.py
+          sparse-checkout-cone-mode: false
+
+      - name: Bind protected release control
+        shell: bash
+        env:
+          RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}
+          RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          if [[ ! "$RELEASE_CONTROL_SHA" =~ ^[0-9a-f]{40}$ || ! "$RELEASE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid release checkout binding." >&2
+            exit 1
+          fi
+          if [[ ! -d "$control_root" || -L "$control_root" ]]; then
+            echo "Protected release control is unavailable." >&2
+            exit 1
+          fi
+          actual_source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          actual_control_sha="$(git -C "$control_root" rev-parse --verify 'HEAD^{commit}')"
+          if [[ "$actual_source_sha" != "$RELEASE_SOURCE_SHA" || "$actual_control_sha" != "$RELEASE_CONTROL_SHA" ]]; then
+            echo "Release checkout binding mismatch." >&2
+            exit 1
+          fi
+          control_files=(
+            scripts/check_registry_publication.py
+            scripts/check_release_metadata.py
+            scripts/release_metadata_dotnet.py
+          )
+          for relative_path in "${control_files[@]}"; do
+            control_path="$control_root/$relative_path"
+            if [[ ! -f "$control_path" || -L "$control_path" ]]; then
+              echo "Protected release control is incomplete." >&2
+              exit 1
+            fi
+          done
+
       - name: Plan selected NuGet packages
         env:
           NUGET_PACKAGES_INPUT: ${{ inputs.nuget_packages }}
@@ -97,7 +157,8 @@ jobs:
           while IFS= read -r package_version; do
             version_args+=(--nuget-version "$package_version")
           done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
-          python3 scripts/check_registry_publication.py --target nuget --expect-absent "${version_args[@]}"
+          python3 "$GITHUB_WORKSPACE/.release-control/scripts/check_registry_publication.py" \
+            --target nuget --expect-absent "${version_args[@]}"
 
       - name: Pack NuGet package
         id: nuget-artifacts
@@ -200,7 +261,8 @@ jobs:
           while IFS= read -r package_version; do
             version_args+=(--nuget-version "$package_version")
           done < <(python3 scripts/nuget_release_plan.py entries --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions)
-          python3 scripts/check_registry_publication.py --target nuget "${version_args[@]}" --retries 20 --retry-delay 30
+          python3 "$GITHUB_WORKSPACE/.release-control/scripts/check_registry_publication.py" \
+            --target nuget "${version_args[@]}" --retries 20 --retry-delay 30
 
       - name: Verify public NuGet install
         if: ${{ ! inputs.dry_run }}
