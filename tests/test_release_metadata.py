@@ -211,6 +211,16 @@ jobs:
 
 
 class ReleaseMetadataTests(unittest.TestCase):
+    def test_publish_packages_names_the_exact_release_source(self) -> None:
+        workflow = (
+            ROOT / ".github" / "workflows" / "publish-packages.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "run-name: Publish ${{ inputs.target }} from ${{ inputs.ref }}",
+            workflow,
+        )
+
     def test_repo_release_metadata_passes(self) -> None:
         self.assertEqual(check_release_metadata.validate(ROOT), [])
 
