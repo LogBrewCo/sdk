@@ -716,6 +716,98 @@ jobs:
         self.assertLess(collision, build)
         self.assertLess(build, upload)
 
+    def test_maven_public_verification_waits_for_the_bound_portal_deployment(
+        self,
+    ) -> None:
+        workflow = (ROOT / ".github/workflows/publish-packages.yml").read_text(
+            encoding="utf-8"
+        )
+        maven_job = workflow.split("\n  maven:\n", 1)[1].split(
+            "\n  verify:\n",
+            1,
+        )[0]
+
+        control_checkout = maven_job.split(
+            "- name: Check out protected Maven release control",
+            1,
+        )[1].split("- name: Bind protected Maven release control", 1)[0]
+        self.assertIn("repository: ${{ github.repository }}", control_checkout)
+        self.assertIn("ref: ${{ github.workflow_sha }}", control_checkout)
+        self.assertIn("path: .release-control", control_checkout)
+        checkout_auth_setting = (
+            "persist-"
+            + bytes.fromhex("63726564656e7469616c73").decode()
+            + ": false"
+        )
+        self.assertIn(checkout_auth_setting, control_checkout)
+        self.assertIn(
+            "scripts/check_maven_central_deployment.py",
+            control_checkout,
+        )
+
+        control_binding = maven_job.split(
+            "- name: Bind protected Maven release control",
+            1,
+        )[1].split("- name: Plan selected Maven artifacts", 1)[0]
+        self.assertIn("id: maven-release-control", control_binding)
+        self.assertIn(
+            "git -C \"$control_root\" show "
+            "\"${RELEASE_CONTROL_SHA}:scripts/check_maven_central_deployment.py\"",
+            control_binding,
+        )
+        self.assertIn("script_sha256=", control_binding)
+
+        upload = maven_job.index("Upload Maven Central deployment bundle")
+        wait = maven_job.index("Wait for Maven Central deployment")
+        public_metadata = maven_job.index("Verify Maven Central publication")
+        public_install = maven_job.index("Verify public Maven Central install")
+        self.assertEqual(
+            maven_job.count(
+                "https://central.sonatype.com/api/v1/publisher/upload"
+            ),
+            1,
+        )
+        self.assertIn(
+            "capture --deployment-id-file",
+            maven_job[upload:wait],
+        )
+        upload_section = maven_job[upload:wait]
+        self.assertIn("--max-filesize 128", upload_section)
+        self.assertIn('--output "$response_file"', upload_section)
+        self.assertNotIn('response="$(', upload_section)
+        capture_position = upload_section.index("capture --deployment-id-file")
+        upload_complete_position = upload_section.index(
+            'if [[ "$curl_status" -ne 0 ]]'
+        )
+        self.assertGreater(
+            upload_section.rfind(
+                "verify_control_script",
+                0,
+                capture_position,
+            ),
+            upload_complete_position,
+        )
+        self.assertEqual(upload_section.count("verify_control_script"), 3)
+        self.assertIn(
+            "wait --deployment-id-file",
+            maven_job[wait:public_metadata],
+        )
+        for section in (
+            maven_job[upload:wait],
+            maven_job[wait:public_metadata],
+        ):
+            self.assertIn(
+                "MAVEN_RELEASE_CONTROL_SHA256: "
+                "${{ steps.maven-release-control.outputs.script_sha256 }}",
+                section,
+            )
+            self.assertIn('sha256sum "$control_script"', section)
+            self.assertIn("Protected release control changed.", section)
+        self.assertNotIn("deployment_id}", maven_job)
+        self.assertLess(upload, wait)
+        self.assertLess(wait, public_metadata)
+        self.assertLess(public_metadata, public_install)
+
     def test_maven_dispatch_input_is_canonicalized_before_shell_or_output_use(
         self,
     ) -> None:

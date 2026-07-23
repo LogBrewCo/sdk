@@ -687,6 +687,70 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      - name: Bind immutable Maven release source
+        if: ${{ ! inputs.dry_run }}
+        id: maven-release-source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          if [[ ! "$source_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid release source checkout." >&2
+            exit 1
+          fi
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out protected Maven release control
+        if: ${{ ! inputs.dry_run }}
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: scripts/check_maven_central_deployment.py
+          sparse-checkout-cone-mode: false
+
+      - name: Bind protected Maven release control
+        if: ${{ ! inputs.dry_run }}
+        id: maven-release-control
+        shell: bash
+        env:
+          RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}
+          RELEASE_SOURCE_SHA: ${{ steps.maven-release-source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          if [[ ! "$RELEASE_CONTROL_SHA" =~ ^[0-9a-f]{40}$ || ! "$RELEASE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid release checkout binding." >&2
+            exit 1
+          fi
+          if [[ ! -d "$control_root" || -L "$control_root" ]]; then
+            echo "Protected release control is unavailable." >&2
+            exit 1
+          fi
+          actual_source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          actual_control_sha="$(git -C "$control_root" rev-parse --verify 'HEAD^{commit}')"
+          if [[ "$actual_source_sha" != "$RELEASE_SOURCE_SHA" || "$actual_control_sha" != "$RELEASE_CONTROL_SHA" ]]; then
+            echo "Release checkout binding mismatch." >&2
+            exit 1
+          fi
+          control_script="$control_root/scripts/check_maven_central_deployment.py"
+          if [[ ! -f "$control_script" || -L "$control_script" ]]; then
+            echo "Protected release control is incomplete." >&2
+            exit 1
+          fi
+          expected_control_sha256="$(
+            git -C "$control_root" show "${RELEASE_CONTROL_SHA}:scripts/check_maven_central_deployment.py" |
+              sha256sum | awk '{print $1}'
+          )"
+          actual_control_sha256="$(sha256sum "$control_script" | awk '{print $1}')"
+          if [[ ! "$expected_control_sha256" =~ ^[0-9a-f]{64}$ || "$actual_control_sha256" != "$expected_control_sha256" ]]; then
+            echo "Protected release control changed." >&2
+            exit 1
+          fi
+          printf 'script_sha256=%s\n' "$expected_control_sha256" >> "$GITHUB_OUTPUT"
+
       - name: Plan selected Maven artifacts
         env:
           MAVEN_ARTIFACTS_INPUT: ${{ inputs.maven_artifacts }}
@@ -757,10 +821,20 @@ jobs:
         env:
           CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}
           CENTRAL_PORTAL_PASSWORD: ${{ secrets.CENTRAL_PORTAL_PASSWORD }}
+          MAVEN_RELEASE_CONTROL_SHA256: ${{ steps.maven-release-control.outputs.script_sha256 }}
         run: |
           set -Eeuo pipefail
           : "${CENTRAL_PORTAL_USERNAME:?Set CENTRAL_PORTAL_USERNAME as a release environment secret.}"
           : "${CENTRAL_PORTAL_PASSWORD:?Set CENTRAL_PORTAL_PASSWORD as a release environment secret.}"
+          control_script="$GITHUB_WORKSPACE/.release-control/scripts/check_maven_central_deployment.py"
+          verify_control_script() {
+            actual_control_sha256="$(sha256sum "$control_script" | awk '{print $1}')"
+            if [[ ! "$MAVEN_RELEASE_CONTROL_SHA256" =~ ^[0-9a-f]{64}$ || "$actual_control_sha256" != "$MAVEN_RELEASE_CONTROL_SHA256" ]]; then
+              echo "Protected release control changed." >&2
+              exit 1
+            fi
+          }
+          verify_control_script
           central_bearer="$(
             python3 - <<'PY'
           import base64
@@ -770,32 +844,51 @@ jobs:
           print(base64.b64encode(raw).decode())
           PY
           )"
-          curl_stderr="$RUNNER_TEMP/maven-central-upload.stderr"
+          response_file="$RUNNER_TEMP/logbrew-maven-central-upload-response"
+          if [[ -e "$response_file" || -L "$response_file" ]]; then
+            echo "Maven Central upload response is unavailable." >&2
+            exit 1
+          fi
+          trap 'rm -f "$response_file"' EXIT
+          umask 077
           set +e
-          response="$(
-            curl --fail-with-body --silent --show-error \
-              --request POST \
-              --header "Authorization: Bearer ${central_bearer}" \
-              --form "bundle=@${RUNNER_TEMP}/logbrew-maven-central-bundle.zip" \
-              "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC" \
-              2>"$curl_stderr"
-          )"
+          curl --fail-with-body --silent \
+            --request POST \
+            --header "Authorization: Bearer ${central_bearer}" \
+            --form "bundle=@${RUNNER_TEMP}/logbrew-maven-central-bundle.zip" \
+            --max-filesize 128 \
+            --output "$response_file" \
+            "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC" \
+            2>/dev/null
           curl_status=$?
           set -e
           if [[ "$curl_status" -ne 0 ]]; then
-            cat "$curl_stderr" >&2
             echo "Maven Central upload failed." >&2
             echo "For HTTP 401, verify the Central Portal release env pair uses generated Central Portal publishing values with co.logbrew namespace publish access, not Central account login values." >&2
             exit "$curl_status"
           fi
-          python3 - "$response" <<'PY'
-          import sys
+          verify_control_script
+          python3 "$control_script" \
+            capture --deployment-id-file "$RUNNER_TEMP/logbrew-maven-central-deployment-id" \
+            < "$response_file"
 
-          deployment_id = sys.argv[1].strip()
-          if not deployment_id:
-              raise SystemExit("Maven Central upload did not return a deployment id")
-          print(f"Maven Central deployment submitted: {deployment_id}")
-          PY
+      - name: Wait for Maven Central deployment
+        if: ${{ ! inputs.dry_run }}
+        env:
+          CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}
+          CENTRAL_PORTAL_PASSWORD: ${{ secrets.CENTRAL_PORTAL_PASSWORD }}
+          MAVEN_RELEASE_CONTROL_SHA256: ${{ steps.maven-release-control.outputs.script_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          control_script="$GITHUB_WORKSPACE/.release-control/scripts/check_maven_central_deployment.py"
+          actual_control_sha256="$(sha256sum "$control_script" | awk '{print $1}')"
+          if [[ ! "$MAVEN_RELEASE_CONTROL_SHA256" =~ ^[0-9a-f]{64}$ || "$actual_control_sha256" != "$MAVEN_RELEASE_CONTROL_SHA256" ]]; then
+            echo "Protected release control changed." >&2
+            exit 1
+          fi
+          python3 "$control_script" \
+            wait --deployment-id-file "$RUNNER_TEMP/logbrew-maven-central-deployment-id" \
+            --timeout-seconds 3600 --poll-interval-seconds 30
 
       - name: Verify Maven Central publication
         if: ${{ ! inputs.dry_run }}
