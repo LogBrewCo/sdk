@@ -91,9 +91,8 @@ run_receipt_smoke() {
     python3 "$repo_root/scripts/release_artifact_receipt.py" bind \
         --family "maven" --output-dir "$bound" --metadata "$metadata" \
         >"$tmp_dir/receipt-bind.out" 2>"$tmp_dir/receipt-bind.err"
-    unzip -p "$bound/0.jar" META-INF/maven/co.logbrew/logbrew-sdk/pom.properties \
-        >"$tmp_dir/receipt-pom.properties"
-    grep -qx "version=$java_version" "$tmp_dir/receipt-pom.properties"
+    python3 "$repo_root/scripts/check_maven_jar_metadata.py" \
+        "$bound/0.jar" "$java_version"
     mkdir -p "$tmp_dir/receipt-app/classes"
     cat > "$tmp_dir/receipt-app/Receipt.java" <<'JAVA'
 import co.logbrew.sdk.LogAttributes;
