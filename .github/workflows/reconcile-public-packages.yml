@@ -316,6 +316,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/check_nuget_public_artifacts.py
+            scripts/check_nuget_release_receipt_provenance.py
             scripts/check_publication_run.py
             scripts/real_user_dotnet_selected_public_nuget_smoke.sh
           sparse-checkout-cone-mode: false
@@ -341,6 +342,7 @@ jobs:
           fi
           control_files=(
             scripts/check_nuget_public_artifacts.py
+            scripts/check_nuget_release_receipt_provenance.py
             scripts/check_publication_run.py
             scripts/real_user_dotnet_selected_public_nuget_smoke.sh
           )
