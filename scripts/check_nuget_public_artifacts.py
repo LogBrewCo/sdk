@@ -51,7 +51,7 @@ MAX_NUSPEC_BYTES = 512 * 1024
 MAX_PROJECT_BYTES = 512 * 1024
 MAX_ZIP_TAIL_BYTES = 65_557
 CATALOG_TIMESTAMP = re.compile(r"[0-9]{4}(?:\.[0-9]{2}){5}")
-CATALOG_FRAMEWORK_ALIASES = {".NETStandard2.0": "netstandard2.0"}
+NUGET_FRAMEWORK_ALIASES = {".NETStandard2.0": "netstandard2.0"}
 
 
 class RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -529,7 +529,7 @@ def fetch_registry_record(
         dependency_contract,
         dependency_key="range",
         framework_key="targetFramework",
-        framework_aliases=CATALOG_FRAMEWORK_ALIASES,
+        framework_aliases=NUGET_FRAMEWORK_ALIASES,
     )
     digest = decode_registry_digest(catalog.get("packageHash"))
     return expected_package_url, digest
@@ -600,6 +600,7 @@ def validate_nuspec_dependencies(
         dependency_contract,
         dependency_key="version",
         framework_key="targetFramework",
+        framework_aliases=NUGET_FRAMEWORK_ALIASES,
     )
 
 
