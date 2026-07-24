@@ -49,11 +49,18 @@ run_receipt_smoke() {
   python3 "$repo_root/scripts/release_artifact_receipt.py" extract \
     --family "swiftpm" --metadata "$metadata" --index 0 --output-dir "$extracted" \
     >"$tmp_dir/receipt-extract.out" 2>"$tmp_dir/receipt-extract.err"
-  local source_root
-  source_root="$(find "$extracted" -name Package.swift -type f -print)"
-  [[ -n "$source_root" && "$(printf '%s\n' "$source_root" | wc -l | tr -d ' ')" == "1" ]]
-  source_root="${source_root%/Package.swift}"
-  mv "$source_root" "$tmp_dir/sdk"
+  local source_entry
+  local source_root=""
+  local source_root_count=0
+  while IFS= read -r -d '' source_entry; do
+    source_root="$source_entry"
+    ((source_root_count += 1))
+  done < <(find "$extracted" -mindepth 1 -maxdepth 1 -print0)
+  [[ "$source_root_count" -eq 1 ]] || exit 1
+  [[ -d "$source_root" && ! -L "$source_root" ]] || exit 1
+  [[ -f "$source_root/Package.swift" && ! -L "$source_root/Package.swift" ]] || exit 1
+  mv -- "$source_root" "$tmp_dir/sdk" \
+    >"$tmp_dir/receipt-root.out" 2>"$tmp_dir/receipt-root.err" || exit 1
 
   local app="$tmp_dir/receipt-app"
   mkdir -p "$app/Sources/Receipt"
