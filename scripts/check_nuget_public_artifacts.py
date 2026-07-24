@@ -7,6 +7,7 @@ import argparse
 import base64
 import binascii
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -125,6 +126,7 @@ def open_bounded(
             else:
                 fail()
     except (
+        http.client.HTTPException,
         OSError,
         urllib.error.HTTPError,
         urllib.error.URLError,

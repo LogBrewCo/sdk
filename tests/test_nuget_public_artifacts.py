@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import gzip
 import hashlib
+import http.client
 import importlib.util
 import json
 import stat
@@ -13,6 +14,7 @@ import zipfile
 from email.message import Message
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +44,7 @@ class FakeResponse:
         *,
         final_url: str | None = None,
         headers: tuple[tuple[str, str], ...] = (),
+        read_error: Exception | None = None,
     ) -> None:
         self.body = body
         self.url = url
@@ -50,6 +53,7 @@ class FakeResponse:
         for name, value in headers:
             self.headers.add_header(name, value)
         self.offset = 0
+        self.read_error = read_error
 
     def __enter__(self) -> FakeResponse:
         self.offset = 0
@@ -59,6 +63,8 @@ class FakeResponse:
         return None
 
     def read(self, amount: int) -> bytes:
+        if self.read_error is not None:
+            raise self.read_error
         chunk = self.body[self.offset : self.offset + amount]
         self.offset += len(chunk)
         return chunk
@@ -81,12 +87,14 @@ class FakeRegistry:
         *,
         final_url: str | None = None,
         headers: tuple[tuple[str, str], ...] = (),
+        read_error: Exception | None = None,
     ) -> None:
         self.responses[url] = FakeResponse(
             body,
             url,
             final_url=final_url,
             headers=headers,
+            read_error=read_error,
         )
 
     def open(self, request: Any, *, timeout: int) -> FakeResponse:
@@ -95,6 +103,79 @@ class FakeRegistry:
 
 
 class NuGetPublicArtifactTests(unittest.TestCase):
+    def test_rejects_truncated_http_transfer_with_generic_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            registry = self.registry()
+            metadata_url, _ = self.urls("LogBrew", VERSIONS["LogBrew"])
+            registry.add(
+                metadata_url,
+                b"",
+                read_error=http.client.IncompleteRead(b"sensitive-url-fragment", 10),
+            )
+
+            with self.assertRaises(ValueError) as raised:
+                check_nuget_public_artifacts.resolve_public_artifacts(
+                    VERSIONS,
+                    SOURCE_SHA,
+                    DEPENDENCY_RANGE,
+                    ROOT,
+                    root / "packages",
+                    root / "reconciliation.json",
+                    opener=registry.open,
+                )
+
+            self.assertEqual(
+                str(raised.exception),
+                "NuGet public artifact verification failed",
+            )
+            self.assertFalse((root / "packages").exists())
+            self.assertFalse((root / "reconciliation.json").exists())
+
+    def test_enforces_exact_compressed_metadata_boundary(self) -> None:
+        registry = FakeRegistry()
+        url = "https://api.nuget.org/v3/registration5-gz-semver2/example/1.0.0.json"
+        document = b'{"bounded":"metadata"}'
+        encoded = gzip.compress(document, mtime=0)
+        registry.add(
+            url,
+            encoded,
+            headers=(("Content-Encoding", "gzip"),),
+        )
+
+        with mock.patch.object(
+            check_nuget_public_artifacts,
+            "MAX_METADATA_COMPRESSED_BYTES",
+            len(encoded),
+        ):
+            self.assertEqual(
+                check_nuget_public_artifacts.open_bounded(
+                    url,
+                    len(document),
+                    30,
+                    registry.open,
+                    allow_metadata_encoding=True,
+                ),
+                document,
+            )
+
+        with mock.patch.object(
+            check_nuget_public_artifacts,
+            "MAX_METADATA_COMPRESSED_BYTES",
+            len(encoded) - 1,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "^NuGet public artifact verification failed$",
+            ):
+                check_nuget_public_artifacts.open_bounded(
+                    url,
+                    len(document),
+                    30,
+                    registry.open,
+                    allow_metadata_encoding=True,
+                )
+
     def test_accepts_single_gzip_registration_and_catalog_documents(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
