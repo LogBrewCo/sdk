@@ -88,6 +88,9 @@ PATH_TARGETS = {
     "scripts/real_user_node_ingest_contract_smoke.sh": (
         "tests.test_default_ingest_endpoints",
     ),
+    "scripts/real_user_react_native_smoke.sh": (
+        "tests.test_react_native_global_errors",
+    ),
     "scripts/real_user_go_persistence_smoke.sh": (
         "tests.test_go_persistence_smoke",
     ),

@@ -64,6 +64,14 @@ class CiUnitTestTargetsTests(unittest.TestCase):
         self.assertFalse(targets.run_all)
         self.assertEqual(targets.modules, ("tests.test_default_ingest_endpoints",))
 
+    def test_react_native_smoke_change_runs_only_its_global_error_contract(self) -> None:
+        targets = ci_unit_test_targets.select_targets(
+            ["scripts/real_user_react_native_smoke.sh"]
+        )
+
+        self.assertFalse(targets.run_all)
+        self.assertEqual(targets.modules, ("tests.test_react_native_global_errors",))
+
     def test_public_reconciliation_changes_select_only_focused_contracts(self) -> None:
         targets = ci_unit_test_targets.select_targets(
             [
