@@ -103,6 +103,80 @@ class FakeRegistry:
 
 
 class NuGetPublicArtifactTests(unittest.TestCase):
+    def test_accepts_exact_catalog_urls_for_selected_packages(self) -> None:
+        expected = {
+            "LogBrew": (
+                "https://api.nuget.org/v3/catalog0/data/2026.07.24.11.22.33/"
+                "logbrew.0.1.5.json"
+            ),
+            "LogBrew.HttpClient": (
+                "https://api.nuget.org/v3/catalog0/data/2026.07.24.11.22.34/"
+                "logbrew.httpclient.0.1.0.json"
+            ),
+        }
+        for package_id, url in expected.items():
+            with self.subTest(package_id=package_id):
+                self.assertEqual(
+                    check_nuget_public_artifacts.validate_catalog_url(
+                        url,
+                        package_id,
+                        VERSIONS[package_id],
+                    ),
+                    url,
+                )
+        leap_day = expected["LogBrew"].replace(
+            "2026.07.24.11.22.33",
+            "2024.02.29.23.59.59",
+        )
+        self.assertEqual(
+            check_nuget_public_artifacts.validate_catalog_url(
+                leap_day,
+                "LogBrew",
+                VERSIONS["LogBrew"],
+            ),
+            leap_day,
+        )
+
+    def test_rejects_noncanonical_catalog_urls(self) -> None:
+        valid = (
+            "https://api.nuget.org/v3/catalog0/data/2026.07.24.11.22.33/"
+            "logbrew.0.1.5.json"
+        )
+        invalid = (
+            valid.replace("logbrew.0.1.5", "other.0.1.5"),
+            valid.replace("0.1.5.json", "0.1.4.json"),
+            valid.replace("logbrew", "LogBrew"),
+            valid.replace("2026.07.24.11.22.33", "2026.07.24.11.22"),
+            valid.replace("2026.07.24.11.22.33", "2026.07.24.11.2a.33"),
+            valid.replace("2026.07.24.11.22.33", "2026.7.24.11.22.33"),
+            valid.replace("2026.07.24.11.22.33", "2026.13.24.11.22.33"),
+            valid.replace("2026.07.24.11.22.33", "2026.02.30.11.22.33"),
+            valid.replace("2026.07.24.11.22.33", "2025.02.29.11.22.33"),
+            valid.replace("2026.07.24.11.22.33", "2026.07.24.24.22.33"),
+            valid.replace("2026.07.24.11.22.33", "2026.07.24.11.60.33"),
+            valid.replace("2026.07.24.11.22.33", "2026.07.24.11.22.60"),
+            valid.replace("/logbrew", "/../logbrew"),
+            valid.replace("/logbrew", "/%2Flogbrew"),
+            valid.replace("logbrew.0", "logbrew%2e0"),
+            valid.replace("/logbrew", "/extra/logbrew"),
+            valid + "?download=true",
+            valid + "#catalog",
+            valid.replace("api.nuget.org", "api.nuget.org:443"),
+            valid.replace("api.nuget.org", "user@api.nuget.org"),
+        )
+        for url in invalid:
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError) as raised:
+                    check_nuget_public_artifacts.validate_catalog_url(
+                        url,
+                        "LogBrew",
+                        VERSIONS["LogBrew"],
+                    )
+                self.assertEqual(
+                    str(raised.exception),
+                    "NuGet public artifact verification failed",
+                )
+
     def test_rejects_truncated_http_transfer_with_generic_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -566,12 +640,16 @@ class NuGetPublicArtifactTests(unittest.TestCase):
 
     @staticmethod
     def catalog_url(package_id: str) -> str:
-        suffix = (
-            "11111111-1111-1111-1111-111111111111"
+        timestamp = (
+            "2026.07.24.11.22.33"
             if package_id == "LogBrew"
-            else "22222222-2222-2222-2222-222222222222"
+            else "2026.07.24.11.22.34"
         )
-        return f"https://api.nuget.org/v3/catalog0/data/2026.07.24/{suffix}.json"
+        version = VERSIONS[package_id]
+        return (
+            f"https://api.nuget.org/v3/catalog0/data/{timestamp}/"
+            f"{package_id.lower()}.{version}.json"
+        )
 
     @staticmethod
     def package(

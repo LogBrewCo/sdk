@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import datetime
 import hashlib
 import http.client
 import json
@@ -49,10 +50,7 @@ MAX_ARCHIVE_UNCOMPRESSED_BYTES = 32 * 1024 * 1024
 MAX_NUSPEC_BYTES = 512 * 1024
 MAX_PROJECT_BYTES = 512 * 1024
 MAX_ZIP_TAIL_BYTES = 65_557
-CATALOG_PATH = re.compile(
-    r"/v3/catalog0/data/[0-9]{4}\.[0-9]{2}\.[0-9]{2}/"
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json"
-)
+CATALOG_TIMESTAMP = re.compile(r"[0-9]{4}(?:\.[0-9]{2}){5}")
 
 
 class RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -436,19 +434,43 @@ def validate_dependency_groups(
         fail()
 
 
-def validate_catalog_url(raw: Any) -> str:
-    if not isinstance(raw, str):
-        fail()
-    parsed = urllib.parse.urlsplit(raw)
+def validate_catalog_url(raw: Any, package_id: str, version: str) -> str:
     if (
-        parsed.scheme != "https"
+        not isinstance(raw, str)
+        or not isinstance(package_id, str)
+        or not isinstance(version, str)
+    ):
+        fail()
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+    except ValueError:
+        fail()
+    segments = parsed.path.split("/")
+    expected_filename = f"{package_id.lower()}.{version}.json"
+    if (
+        raw != parsed.geturl()
+        or parsed.scheme != "https"
         or parsed.netloc != "api.nuget.org"
         or parsed.query
         or parsed.fragment
-        or CATALOG_PATH.fullmatch(parsed.path) is None
+        or len(segments) != 6
+        or segments[:4] != ["", "v3", "catalog0", "data"]
+        or not valid_catalog_timestamp(segments[4])
+        or segments[5] != expected_filename
+        or urllib.parse.quote(parsed.path, safe="/.-") != parsed.path
     ):
         fail()
     return raw
+
+
+def valid_catalog_timestamp(raw: str) -> bool:
+    if CATALOG_TIMESTAMP.fullmatch(raw) is None:
+        return False
+    try:
+        datetime.datetime.strptime(raw, "%Y.%m.%d.%H.%M.%S")
+    except ValueError:
+        return False
+    return True
 
 
 def fetch_registry_record(
@@ -474,7 +496,11 @@ def fetch_registry_record(
         or payload.get("packageContent") != expected_package_url
     ):
         fail()
-    catalog_url = validate_catalog_url(payload.get("catalogEntry"))
+    catalog_url = validate_catalog_url(
+        payload.get("catalogEntry"),
+        package_id,
+        version,
+    )
     raw_catalog = open_bounded(
         catalog_url,
         MAX_METADATA_BYTES,
