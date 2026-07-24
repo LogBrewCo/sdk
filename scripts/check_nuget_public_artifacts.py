@@ -20,6 +20,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
 
@@ -39,6 +40,7 @@ REPOSITORY_URL = "https://github.com/LogBrewCo/sdk"
 REGISTRATION_ROOT = "https://api.nuget.org/v3/registration5-gz-semver2"
 PACKAGE_ROOT = "https://api.nuget.org/v3-flatcontainer"
 MAX_METADATA_BYTES = 2 * 1024 * 1024
+MAX_METADATA_COMPRESSED_BYTES = 1024 * 1024
 MAX_PACKAGE_BYTES = 50 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 1024
 MAX_ARCHIVE_MEMBER_BYTES = 8 * 1024 * 1024
@@ -96,17 +98,32 @@ def open_bounded(
     limit: int,
     timeout: int,
     opener: Any | None,
+    *,
+    allow_metadata_encoding: bool = False,
 ) -> bytes:
+    headers = {"User-Agent": "LogBrew public package reconciliation"}
+    if allow_metadata_encoding:
+        headers["Accept-Encoding"] = "gzip"
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "LogBrew public package reconciliation"},
+        headers=headers,
     )
     open_request = opener or urllib.request.build_opener(RejectRedirects()).open
     try:
         with open_request(request, timeout=timeout) as response:
             if response.getcode() != 200 or response.geturl() != request.full_url:
                 fail()
-            body = response.read(limit + 1)
+            encoding = content_encoding(response)
+            if encoding is None or (allow_metadata_encoding and encoding == "identity"):
+                body = read_bounded(response, limit)
+            elif allow_metadata_encoding and encoding == "gzip":
+                body = read_gzip_bounded(
+                    response,
+                    MAX_METADATA_COMPRESSED_BYTES,
+                    limit,
+                )
+            else:
+                fail()
     except (
         OSError,
         urllib.error.HTTPError,
@@ -114,9 +131,71 @@ def open_bounded(
         ValueError,
     ):
         fail()
-    if len(body) > limit:
-        fail()
     return body
+
+
+def content_encoding(response: Any) -> str | None:
+    try:
+        values = response.headers.get_all("Content-Encoding")
+    except (AttributeError, TypeError, ValueError):
+        fail()
+    if values is None:
+        return None
+    if (
+        not isinstance(values, list)
+        or len(values) != 1
+        or values[0] not in {"gzip", "identity"}
+    ):
+        fail()
+    return values[0]
+
+
+def read_bounded(response: Any, limit: int) -> bytes:
+    body = bytearray()
+    while chunk := response.read(min(64 * 1024, limit + 1 - len(body))):
+        if not isinstance(chunk, bytes):
+            fail()
+        body.extend(chunk)
+        if len(body) > limit:
+            fail()
+    return bytes(body)
+
+
+def read_gzip_bounded(
+    response: Any,
+    compressed_limit: int,
+    decompressed_limit: int,
+) -> bytes:
+    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    body = bytearray()
+    compressed = 0
+    try:
+        while chunk := response.read(64 * 1024):
+            if not isinstance(chunk, bytes):
+                fail()
+            compressed += len(chunk)
+            if compressed > compressed_limit:
+                fail()
+            pending = chunk
+            while pending:
+                available = decompressed_limit + 1 - len(body)
+                if available <= 0:
+                    fail()
+                body.extend(decoder.decompress(pending, available))
+                if len(body) > decompressed_limit or decoder.unused_data:
+                    fail()
+                pending = decoder.unconsumed_tail
+        body.extend(decoder.flush(max(1, decompressed_limit + 1 - len(body))))
+    except zlib.error:
+        fail()
+    if (
+        len(body) > decompressed_limit
+        or not decoder.eof
+        or decoder.unused_data
+        or decoder.unconsumed_tail
+    ):
+        fail()
+    return bytes(body)
 
 
 def registry_urls(package_id: str, version: str) -> tuple[str, str]:
@@ -377,10 +456,16 @@ def fetch_registry_record(
     opener: Any | None,
 ) -> tuple[str, bytes]:
     metadata_url, expected_package_url = registry_urls(package_id, version)
-    raw = open_bounded(metadata_url, MAX_METADATA_BYTES, 30, opener)
+    raw = open_bounded(
+        metadata_url,
+        MAX_METADATA_BYTES,
+        30,
+        opener,
+        allow_metadata_encoding=True,
+    )
     try:
         payload = json.loads(raw)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         fail()
     if (
         not isinstance(payload, dict)
@@ -388,10 +473,16 @@ def fetch_registry_record(
     ):
         fail()
     catalog_url = validate_catalog_url(payload.get("catalogEntry"))
-    raw_catalog = open_bounded(catalog_url, MAX_METADATA_BYTES, 30, opener)
+    raw_catalog = open_bounded(
+        catalog_url,
+        MAX_METADATA_BYTES,
+        30,
+        opener,
+        allow_metadata_encoding=True,
+    )
     try:
         catalog = json.loads(raw_catalog)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         fail()
     if (
         not isinstance(catalog, dict)

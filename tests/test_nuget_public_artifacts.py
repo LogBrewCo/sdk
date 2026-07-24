@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import hashlib
 import importlib.util
 import json
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from email.message import Message
 from pathlib import Path
 from typing import Any
 
@@ -33,19 +35,33 @@ DEPENDENCY_RANGE = "[0.1.5, 0.2.0)"
 
 
 class FakeResponse:
-    def __init__(self, body: bytes, url: str, *, final_url: str | None = None) -> None:
+    def __init__(
+        self,
+        body: bytes,
+        url: str,
+        *,
+        final_url: str | None = None,
+        headers: tuple[tuple[str, str], ...] = (),
+    ) -> None:
         self.body = body
         self.url = url
         self.final_url = final_url or url
+        self.headers = Message()
+        for name, value in headers:
+            self.headers.add_header(name, value)
+        self.offset = 0
 
     def __enter__(self) -> FakeResponse:
+        self.offset = 0
         return self
 
     def __exit__(self, *_args: object) -> None:
         return None
 
     def read(self, amount: int) -> bytes:
-        return self.body[:amount]
+        chunk = self.body[self.offset : self.offset + amount]
+        self.offset += len(chunk)
+        return chunk
 
     def getcode(self) -> int:
         return 200
@@ -58,8 +74,20 @@ class FakeRegistry:
     def __init__(self) -> None:
         self.responses: dict[str, FakeResponse] = {}
 
-    def add(self, url: str, body: bytes, *, final_url: str | None = None) -> None:
-        self.responses[url] = FakeResponse(body, url, final_url=final_url)
+    def add(
+        self,
+        url: str,
+        body: bytes,
+        *,
+        final_url: str | None = None,
+        headers: tuple[tuple[str, str], ...] = (),
+    ) -> None:
+        self.responses[url] = FakeResponse(
+            body,
+            url,
+            final_url=final_url,
+            headers=headers,
+        )
 
     def open(self, request: Any, *, timeout: int) -> FakeResponse:
         del timeout
@@ -67,6 +95,106 @@ class FakeRegistry:
 
 
 class NuGetPublicArtifactTests(unittest.TestCase):
+    def test_accepts_single_gzip_registration_and_catalog_documents(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            registry = self.registry()
+            for package_id, version in VERSIONS.items():
+                metadata_url, _ = self.urls(package_id, version)
+                self.gzip_response(registry, metadata_url)
+                self.gzip_response(registry, self.catalog_url(package_id))
+
+            check_nuget_public_artifacts.resolve_public_artifacts(
+                VERSIONS,
+                SOURCE_SHA,
+                DEPENDENCY_RANGE,
+                ROOT,
+                root / "packages",
+                root / "reconciliation.json",
+                opener=registry.open,
+            )
+
+            self.assertTrue((root / "reconciliation.json").is_file())
+
+    def test_rejects_unsafe_content_encoding_without_outputs(self) -> None:
+        cases = (
+            "unknown",
+            "multiple",
+            "combined",
+            "trailing",
+            "concatenated",
+            "truncated",
+            "crc",
+            "decompressed-limit",
+            "compressed-limit",
+            "encoded-package",
+        )
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                registry = self.registry()
+                metadata_url, package_url = self.urls("LogBrew", VERSIONS["LogBrew"])
+                response = registry.responses[metadata_url]
+                document = response.body
+                encoded = gzip.compress(document, mtime=0)
+                headers = (("Content-Encoding", "gzip"),)
+                if case == "unknown":
+                    headers = (("Content-Encoding", "br"),)
+                    encoded = document
+                elif case == "multiple":
+                    headers = (
+                        ("Content-Encoding", "gzip"),
+                        ("Content-Encoding", "identity"),
+                    )
+                elif case == "combined":
+                    headers = (("Content-Encoding", "gzip, identity"),)
+                elif case == "trailing":
+                    encoded += b"trailing"
+                elif case == "concatenated":
+                    encoded += gzip.compress(document, mtime=0)
+                elif case == "truncated":
+                    encoded = encoded[:-8]
+                elif case == "crc":
+                    encoded = encoded[:-8] + bytes([encoded[-8] ^ 1]) + encoded[-7:]
+                elif case == "decompressed-limit":
+                    encoded = gzip.compress(
+                        b"x" * (check_nuget_public_artifacts.MAX_METADATA_BYTES + 1),
+                        mtime=0,
+                    )
+                elif case == "compressed-limit":
+                    encoded = b"x" * (
+                        check_nuget_public_artifacts.MAX_METADATA_COMPRESSED_BYTES + 1
+                    )
+                elif case == "encoded-package":
+                    package = registry.responses[package_url]
+                    registry.add(
+                        package_url,
+                        package.body,
+                        headers=(("Content-Encoding", "gzip"),),
+                    )
+                    encoded = document
+                    headers = ()
+                registry.add(metadata_url, encoded, headers=headers)
+                output = root / "packages"
+                manifest = root / "reconciliation.json"
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "NuGet public artifact verification failed",
+                ):
+                    check_nuget_public_artifacts.resolve_public_artifacts(
+                        VERSIONS,
+                        SOURCE_SHA,
+                        DEPENDENCY_RANGE,
+                        ROOT,
+                        output,
+                        manifest,
+                        opener=registry.open,
+                    )
+
+                self.assertFalse(output.exists())
+                self.assertFalse(manifest.exists())
+
     def test_resolves_exact_registry_bytes_source_and_dependency_range(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -335,6 +463,15 @@ class NuGetPublicArtifactTests(unittest.TestCase):
                 ).encode(),
             )
         return registry
+
+    @staticmethod
+    def gzip_response(registry: FakeRegistry, url: str) -> None:
+        response = registry.responses[url]
+        registry.add(
+            url,
+            gzip.compress(response.body, mtime=0),
+            headers=(("Content-Encoding", "gzip"),),
+        )
 
     @staticmethod
     def urls(package_id: str, version: str) -> tuple[str, str]:
