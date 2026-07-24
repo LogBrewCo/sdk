@@ -56,6 +56,10 @@ grep -q '^package/lifecycle.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/lifecycle.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/lifecycle.d.ts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/lifecycle.d.cts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/global-errors.js$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/global-errors.cjs$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/global-errors.d.ts$' "$tmp_dir/native-tarball.txt"
+grep -q '^package/global-errors.d.cts$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/metadata.js$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/metadata.cjs$' "$tmp_dir/native-tarball.txt"
 grep -q '^package/native-bridge.js$' "$tmp_dir/native-tarball.txt"
@@ -103,6 +107,9 @@ grep -q '@logbrew/react-native/instrumentation' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/native-bridge' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/resource-fetch' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/lifecycle' "$tmp_dir/native-readme.md"
+grep -q '@logbrew/react-native/global-errors' "$tmp_dir/native-readme.md"
+grep -q 'Fatal JavaScript errors are chained without capture' "$tmp_dir/native-readme.md"
+grep -q 'Unhandled Promise rejections are not installed or patched' "$tmp_dir/native-readme.md"
 
 app_dir="$tmp_dir/react-native-smoke-app"
 mkdir -p "$app_dir"
@@ -132,6 +139,7 @@ grep -q '"@logbrew/sdk"' package-lock.json
 grep -q '"react-native": "./index.native.js"' node_modules/@logbrew/react-native/package.json
 grep -q '"./instrumentation"' node_modules/@logbrew/react-native/package.json
 grep -q '"./lifecycle"' node_modules/@logbrew/react-native/package.json
+grep -q '"./global-errors"' node_modules/@logbrew/react-native/package.json
 grep -q '"./native-bridge"' node_modules/@logbrew/react-native/package.json
 npm ls @logbrew/sdk @logbrew/react-native react react-native react-test-renderer >/dev/null
 npm explain @logbrew/react-native > "$tmp_dir/npm-explain-native.txt"
@@ -156,6 +164,8 @@ node --check node_modules/@logbrew/react-native/instrumentation.js
 node --check node_modules/@logbrew/react-native/instrumentation.cjs
 node --check node_modules/@logbrew/react-native/lifecycle.js
 node --check node_modules/@logbrew/react-native/lifecycle.cjs
+node --check node_modules/@logbrew/react-native/global-errors.js
+node --check node_modules/@logbrew/react-native/global-errors.cjs
 node --check node_modules/@logbrew/react-native/metadata.js
 node --check node_modules/@logbrew/react-native/metadata.cjs
 node --check node_modules/@logbrew/react-native/native-bridge.js
@@ -165,6 +175,7 @@ node --check node_modules/@logbrew/react-native/resource-fetch.cjs
 node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.captureReactNativeNavigationSpan !== "function" || typeof native.captureReactNativeResourceSpan !== "function" || typeof native.createReactNavigationSpanListener !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.createReactNativeNavigationSpanEvent !== "function" || typeof native.createReactNativeResourceSpanEvent !== "function" || typeof native.default !== "object") process.exit(1)'
 node -e 'const instrumentation = require("@logbrew/react-native/instrumentation"); if (typeof instrumentation.createLogBrewReactNativeInstrumentation !== "function" || typeof instrumentation.default !== "object") process.exit(1)'
 node -e 'const lifecycle = require("@logbrew/react-native/lifecycle"); if (typeof lifecycle.createAppStateLifecycleSpanListener !== "function" || typeof lifecycle.captureReactNativeLifecycleSpan !== "function" || typeof lifecycle.createReactNativeLifecycleSpanEvent !== "function") process.exit(1)'
+node -e 'const globalErrors = require("@logbrew/react-native/global-errors"); if (typeof globalErrors.installLogBrewReactNativeGlobalErrorHandler !== "function" || typeof globalErrors.default !== "object") process.exit(1)'
 node -e 'const bridge = require("@logbrew/react-native/native-bridge"); if (typeof bridge.createLogBrewNativeBridgeScope !== "function" || typeof bridge.syncLogBrewNativeBridgeScope !== "function" || typeof bridge.clearLogBrewNativeBridgeScope !== "function" || typeof bridge.withLogBrewNativeBridgeScope !== "function" || typeof bridge.default !== "object") process.exit(1)'
 node -e 'const nativeResourceFetch = require("@logbrew/react-native/resource-fetch"); if (typeof nativeResourceFetch.createReactNativeGraphQLMetadataFactory !== "function" || typeof nativeResourceFetch.createReactNativeResourceFetch !== "function") process.exit(1)'
 
@@ -203,6 +214,9 @@ import {
   createLogBrewReactNativeInstrumentation
 } from "@logbrew/react-native/instrumentation";
 import {
+  installLogBrewReactNativeGlobalErrorHandler
+} from "@logbrew/react-native/global-errors";
+import {
   createReactNativeGraphQLMetadataFactory,
   createReactNativeResourceFetch
 } from "@logbrew/react-native/resource-fetch";
@@ -237,6 +251,48 @@ const client = createLogBrewReactNativeClient({
   sdkVersion: "0.1.0",
   maxRetries: 1
 });
+const globalErrorClient = createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkName: "react-native-global-error-smoke",
+  sdkVersion: "0.1.0",
+  maxRetries: 1
+});
+const globalDiagnostics = [];
+let currentGlobalHandler;
+let previousGlobalHandlerCalls = 0;
+let reenteringGlobalHandler = false;
+function previousGlobalHandler(error, isFatal) {
+  previousGlobalHandlerCalls += 1;
+  if (isFatal !== true && !reenteringGlobalHandler) {
+    reenteringGlobalHandler = true;
+    try {
+      currentGlobalHandler(error, isFatal);
+    } finally {
+      reenteringGlobalHandler = false;
+    }
+  }
+}
+currentGlobalHandler = previousGlobalHandler;
+const errorUtils = {
+  getGlobalHandler() {
+    return currentGlobalHandler;
+  },
+  setGlobalHandler(handler) {
+    currentGlobalHandler = handler;
+  }
+};
+const globalErrorInstallation = installLogBrewReactNativeGlobalErrorHandler({
+  client: globalErrorClient,
+  errorUtils,
+  onDiagnostic(diagnostic) {
+    globalDiagnostics.push(diagnostic);
+  }
+});
+const sensitiveKey = ["to", "ken"].join("");
+const sensitivePair = `${sensitiveKey}=hidden`;
+const preRootError = new Error(`pre-root value hidden@example.test ${sensitivePair}`);
+preRootError.stack = `Error: pre-root value hidden@example.test ${sensitivePair}\n    at preRoot (https://sensitive.example.test/index.android.bundle?${sensitivePair}:12:34)`;
+currentGlobalHandler(preRootError, false);
 const providerTrace = createReactNativeTraceContext({
   traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
   spanId: "b7ad6b7169203331"
@@ -299,6 +355,36 @@ await act(async () => {
     )
   );
 });
+const postMountError = new Error(`post-mount ${sensitivePair}`);
+postMountError.stack = `Error: post-mount ${sensitivePair}\n    at postMount (/workspace/account-data/App.js:56:78)`;
+currentGlobalHandler(postMountError, false);
+currentGlobalHandler(new Error("fatal content must not queue"), true);
+const globalErrorEvents = JSON.parse(globalErrorClient.previewJson()).events;
+const globalErrorSerialized = JSON.stringify(globalErrorEvents);
+if (
+  globalErrorEvents.length !== 2 ||
+  globalErrorEvents.some(event => event.attributes.metadata.source !== "react-native.global_error") ||
+  globalErrorEvents.some(event => event.attributes.metadata.mechanism !== "react_native_error_utils") ||
+  globalErrorEvents.some(event => event.attributes.metadata.handled !== true)
+) {
+  throw new Error("unexpected global nonfatal report contract");
+}
+for (const forbidden of ["hidden@example.test", sensitivePair, "sensitive.example.test", "/workspace/account-data"]) {
+  if (globalErrorSerialized.includes(forbidden)) {
+    throw new Error("global nonfatal report leaked private content");
+  }
+}
+if (
+  previousGlobalHandlerCalls !== 3 ||
+  globalErrorInstallation.health().capturedEvents !== 2 ||
+  globalErrorInstallation.health().suppressedEvents !== 2 ||
+  globalDiagnostics.filter(({ code }) => code === "fatal_capture_requires_sync_store").length !== 1
+) {
+  throw new Error("unexpected global handler lifecycle contract");
+}
+if (!globalErrorInstallation.remove() || currentGlobalHandler !== previousGlobalHandler) {
+  throw new Error("global handler rollback failed");
+}
 
 const stopListening = createAppStateListener(client, appState, {
   id: "evt_action_background",
@@ -873,6 +959,8 @@ console.error(JSON.stringify({
   timelineEvents: timelineEvents.length,
   networkAction: timelineNetwork.name,
   listenerRemoved: appStateListener === null,
+  globalHandlerRemoved: currentGlobalHandler === previousGlobalHandler,
+  globalReports: globalErrorEvents.length,
   propagatedTraceparent
 }));
 
@@ -925,6 +1013,8 @@ PY
 grep -q '"ok":true' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"attempts":2' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"listenerRemoved":true' "$tmp_dir/native-smoke.stderr.json"
+grep -q '"globalHandlerRemoved":true' "$tmp_dir/native-smoke.stderr.json"
+grep -q '"globalReports":2' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"lifecycleEvents":3' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"lifecycleSpan":"app_state:inactive->background"' "$tmp_dir/native-smoke.stderr.json"
 grep -q '"timelineEvents":6' "$tmp_dir/native-smoke.stderr.json"
@@ -979,6 +1069,12 @@ import {
   type ReactNativeInstrumentation
 } from "@logbrew/react-native/instrumentation";
 import {
+  installLogBrewReactNativeGlobalErrorHandler,
+  type ReactNativeErrorUtilsLike,
+  type ReactNativeGlobalErrorDiagnostic,
+  type LogBrewReactNativeGlobalErrorHandlerInstallation
+} from "@logbrew/react-native/global-errors";
+import {
   captureReactNativeLifecycleSpan,
   createAppStateLifecycleSpanListener,
   createReactNativeLifecycleSpanEvent
@@ -1014,6 +1110,26 @@ const client = createLogBrewReactNativeClient({
   sdkName: "typed-native-smoke",
   sdkVersion: "0.1.0"
 });
+let typedGlobalHandler = (_error: unknown, _isFatal?: boolean): void => {};
+const typedErrorUtils: ReactNativeErrorUtilsLike = {
+  getGlobalHandler() {
+    return typedGlobalHandler;
+  },
+  setGlobalHandler(handler) {
+    typedGlobalHandler = handler ?? typedGlobalHandler;
+  }
+};
+const typedGlobalDiagnostics: ReactNativeGlobalErrorDiagnostic[] = [];
+const typedGlobalInstallation: LogBrewReactNativeGlobalErrorHandlerInstallation =
+  installLogBrewReactNativeGlobalErrorHandler({
+    client,
+    errorUtils: typedErrorUtils,
+    onDiagnostic(diagnostic) {
+      typedGlobalDiagnostics.push(diagnostic);
+    }
+  });
+typedGlobalHandler(new Error("typed global report"), false);
+typedGlobalInstallation.remove();
 const trace: ReactNativeTraceContext = createReactNativeTraceContext({
   traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
   spanId: "b7ad6b7169203331"

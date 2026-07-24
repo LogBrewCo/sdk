@@ -106,6 +106,30 @@ try {
 
 Set `includeStack: true` only when your app has decided stack text is safe to send. Non-`Error` thrown values are accepted and converted into issue messages so app error handlers do not need custom guards.
 
+### Reversible nonfatal global reports
+
+Install the optional global JavaScript handler before root registration when you want supported nonfatal `ErrorUtils` failures captured without an app-owned capture call:
+
+```js
+import { installLogBrewReactNativeGlobalErrorHandler } from "@logbrew/react-native/global-errors";
+
+const errorHandler = installLogBrewReactNativeGlobalErrorHandler({
+  client,
+  onDiagnostic({ code }) {
+    console.warn(`LogBrew error handler: ${code}`);
+  }
+});
+
+// Roll back during teardown or when disabling the integration.
+errorHandler.remove();
+```
+
+Installation is idempotent for the active React Native `ErrorUtils` object. The wrapper captures a fixed-content, path-bounded issue for nonfatal global JavaScript errors and then calls the handler that was installed before it. Capture and diagnostic callback failures cannot prevent that prior handler from running. `remove()` reinstates the previous handler only while LogBrew still owns the global slot, so a later integration is not overwritten.
+
+Fatal JavaScript errors are chained without capture. The JavaScript package has no synchronous native durable handoff and does not retain fatal events across process termination. Fatal replay requires a bounded synchronous native store plus next-launch delivery acknowledgement. Unhandled Promise rejections are not installed or patched because React Native does not expose one stable supported ownership seam across its runtimes.
+
+Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, and local absolute paths. `onDiagnostic` receives only a fixed code. This integration does not provide native crash capture, ANR/watchdog capture, fatal persistence, or exactly-once fatal replay.
+
 When you prepare React Native release artifacts, wrap the app-owned Metro config once. Production bundles and source maps receive one matching Debug ID, while development and hot-reload serialization remain unchanged:
 
 ```js
