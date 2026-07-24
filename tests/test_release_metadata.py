@@ -485,6 +485,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             "check_python_release_artifacts.py",
             'python3 "$control_script" create',
             "check_nuget_public_artifacts.py",
+            "check_nuget_release_receipt_provenance.py",
             '--source-root "$GITHUB_WORKSPACE"',
             "real_user_python_public_pypi_smoke.sh",
             "real_user_dotnet_selected_public_nuget_smoke.sh",

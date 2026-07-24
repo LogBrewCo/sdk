@@ -70,6 +70,7 @@ class CiUnitTestTargetsTests(unittest.TestCase):
                 ".github/workflows/reconcile-public-packages.yml",
                 "scripts/check_confidentiality_scan.py",
                 "scripts/check_nuget_public_artifacts.py",
+                "scripts/check_nuget_release_receipt_provenance.py",
                 "scripts/check_publication_run.py",
                 "scripts/check_python_release_artifacts.py",
                 "scripts/check_release_metadata.py",

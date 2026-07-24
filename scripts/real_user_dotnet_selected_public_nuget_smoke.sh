@@ -2,7 +2,9 @@
 set -Eeuo pipefail
 
 repo_root="${LOGBREW_RELEASE_SOURCE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-if [[ "$repo_root" != /* || -L "$repo_root" || ! -d "$repo_root" ]]; then
+control_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "$repo_root" != /* || -L "$repo_root" || ! -d "$repo_root" ||
+  "$control_root" != /* || -L "$control_root" || ! -d "$control_root" ]]; then
   echo "NuGet release source root is invalid" >&2
   exit 1
 fi
@@ -40,6 +42,23 @@ cleanup() {
 }
 trap cleanup EXIT
 
+fail_stage() {
+  case "$1" in
+    project-create | core-reference | httpclient-reference | package-resolution | consumer-execution | provenance-verification) ;;
+    *) return 1 ;;
+  esac
+  printf 'NuGet public artifact execution failed: %s\n' "$1" >&2
+  exit 1
+}
+
+run_stage() {
+  local stage="$1"
+  shift
+  if ! "$@" >"$tmp_dir/${stage}.out" 2>"$tmp_dir/${stage}.err"; then
+    fail_stage "$stage"
+  fi
+}
+
 run_exact_package_smoke() {
   local bound="$1"
   local core_version="$2"
@@ -73,17 +92,17 @@ run_exact_package_smoke() {
   </packageSourceMapping>
 </configuration>
 EOF
-  dotnet new console --framework net10.0 --output "$tmp_dir/exact-app" \
-    >"$tmp_dir/exact-new.out" 2>"$tmp_dir/exact-new.err"
-  dotnet add "$tmp_dir/exact-app/exact-app.csproj" package LogBrew \
-    --version "$core_version" --no-restore \
-    >"$tmp_dir/exact-add-core.out" 2>"$tmp_dir/exact-add-core.err"
-  dotnet add "$tmp_dir/exact-app/exact-app.csproj" package LogBrew.HttpClient \
-    --version "$httpclient_version" --no-restore \
-    >"$tmp_dir/exact-add-client.out" 2>"$tmp_dir/exact-add-client.err"
-  dotnet restore "$tmp_dir/exact-app/exact-app.csproj" \
-    --configfile "$tmp_dir/NuGet.Config" --packages "$NUGET_PACKAGES" \
-    >"$tmp_dir/exact-restore.out" 2>"$tmp_dir/exact-restore.err"
+  run_stage project-create \
+    dotnet new console --framework net10.0 --output "$tmp_dir/exact-app"
+  run_stage core-reference \
+    dotnet add "$tmp_dir/exact-app/exact-app.csproj" package LogBrew \
+      --version "$core_version" --no-restore
+  run_stage httpclient-reference \
+    dotnet add "$tmp_dir/exact-app/exact-app.csproj" package LogBrew.HttpClient \
+      --version "$httpclient_version" --no-restore
+  run_stage package-resolution \
+    dotnet restore "$tmp_dir/exact-app/exact-app.csproj" \
+      --configfile "$tmp_dir/NuGet.Config" --packages "$NUGET_PACKAGES"
   cat > "$tmp_dir/exact-app/Program.cs" <<'CS'
 using System.Reflection;
 
@@ -97,14 +116,14 @@ foreach (var packageId in new[] { "LogBrew", "LogBrew.HttpClient" })
 }
 return 0;
 CS
-  dotnet run --project "$tmp_dir/exact-app/exact-app.csproj" --no-restore \
-    >"$tmp_dir/exact-run.out" 2>"$tmp_dir/exact-run.err"
-  python3 "$repo_root/scripts/check_nuget_release_receipt_provenance.py" \
-    --bound-dir "$bound" --source-dir "$source_dir" \
-    --packages-dir "$NUGET_PACKAGES" \
-    --assets "$tmp_dir/exact-app/obj/project.assets.json" \
-    --core-version "$core_version" --httpclient-version "$httpclient_version" \
-    >"$tmp_dir/exact-provenance.out" 2>"$tmp_dir/exact-provenance.err"
+  run_stage consumer-execution \
+    dotnet run --project "$tmp_dir/exact-app/exact-app.csproj" --no-restore
+  run_stage provenance-verification \
+    python3 "$control_root/scripts/check_nuget_release_receipt_provenance.py" \
+      --bound-dir "$bound" --source-dir "$source_dir" \
+      --packages-dir "$NUGET_PACKAGES" \
+      --assets "$tmp_dir/exact-app/obj/project.assets.json" \
+      --core-version "$core_version" --httpclient-version "$httpclient_version"
 }
 
 run_receipt_smoke() {

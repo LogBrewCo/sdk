@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import hashlib
 import json
 import sys
@@ -22,6 +23,20 @@ def package_hash(path: Path) -> str:
         return base64.b64encode(hashlib.sha512(path.read_bytes()).digest()).decode("ascii")
     except OSError as error:
         raise VerificationError from error
+
+
+def validated_sha512(value: object) -> str:
+    if not isinstance(value, str):
+        raise VerificationError
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise VerificationError from error
+    if len(decoded) != hashlib.sha512().digest_size:
+        raise VerificationError
+    if base64.b64encode(decoded).decode("ascii") != value:
+        raise VerificationError
+    return value
 
 
 def load_json(path: Path) -> dict[str, object]:
@@ -45,23 +60,21 @@ def verify_package(
 ) -> None:
     expected_hash = package_hash(bound_dir / filename)
     library = libraries.get(f"{package_id}/{version}")
-    if (
-        not isinstance(library, dict)
-        or library.get("type") != "package"
-        or library.get("sha512") != expected_hash
-    ):
+    if not isinstance(library, dict) or library.get("type") != "package":
         raise VerificationError
+    installed_content_hash = validated_sha512(library.get("sha512"))
     package_name = package_id.lower()
     package_dir = packages_dir / package_name / version
     hash_path = package_dir / f"{package_name}.{version}.nupkg.sha512"
     metadata = load_json(package_dir / ".nupkg.metadata")
     try:
-        installed_hash = hash_path.read_text(encoding="utf-8").strip()
+        installed_hash = validated_sha512(hash_path.read_text(encoding="utf-8").strip())
+        metadata_hash = validated_sha512(metadata.get("contentHash"))
         source = metadata.get("source")
         source_path = Path(source) if isinstance(source, str) else None
         if (
             installed_hash != expected_hash
-            or metadata.get("contentHash") != expected_hash
+            or metadata_hash != installed_content_hash
             or source_path is None
             or not source_path.is_absolute()
             or source_path.resolve(strict=True) != source_dir.resolve(strict=True)

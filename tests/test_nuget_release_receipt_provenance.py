@@ -18,7 +18,13 @@ def content_hash(body: bytes) -> str:
 
 
 class NugetReleaseReceiptProvenanceTests(unittest.TestCase):
-    def fixture(self, root: Path, *, wrong_core: bool = False) -> list[str]:
+    def fixture(
+        self,
+        root: Path,
+        *,
+        wrong_core: bool = False,
+        wrong_installed_content_hash: bool = False,
+    ) -> list[str]:
         bound = root / "bound"
         source = root / "source"
         packages = root / "packages"
@@ -31,20 +37,34 @@ class NugetReleaseReceiptProvenanceTests(unittest.TestCase):
         (bound / "1.nupkg").write_bytes(client)
         (source / "LogBrew.0.1.5.nupkg").hardlink_to(bound / "0.nupkg")
         (source / "LogBrew.HttpClient.0.1.0.nupkg").hardlink_to(bound / "1.nupkg")
-        hashes = {
+        archive_hashes = {
             "logbrew/0.1.5": content_hash(b"other-core" if wrong_core else core),
             "logbrew.httpclient/0.1.0": content_hash(client),
         }
-        for identity, digest in hashes.items():
+        installed_content_hashes = {
+            "logbrew/0.1.5": content_hash(
+                b"other-installed-content"
+                if wrong_installed_content_hash
+                else b"core-installed-content"
+            ),
+            "logbrew.httpclient/0.1.0": content_hash(b"client-installed-content"),
+        }
+        for identity, archive_digest in archive_hashes.items():
             package_id, version = identity.split("/")
             directory = packages / package_id / version
             directory.mkdir(parents=True)
             (directory / f"{package_id}.{version}.nupkg.sha512").write_text(
-                digest,
+                archive_digest,
                 encoding="utf-8",
             )
             (directory / ".nupkg.metadata").write_text(
-                json.dumps({"version": 2, "contentHash": digest, "source": str(source.resolve())}),
+                json.dumps(
+                    {
+                        "version": 2,
+                        "contentHash": installed_content_hashes[identity],
+                        "source": str(source.resolve()),
+                    }
+                ),
                 encoding="utf-8",
             )
         assets = root / "project.assets.json"
@@ -52,10 +72,19 @@ class NugetReleaseReceiptProvenanceTests(unittest.TestCase):
             json.dumps(
                 {
                     "libraries": {
-                        "LogBrew/0.1.5": {"type": "package", "sha512": hashes["logbrew/0.1.5"]},
+                        "LogBrew/0.1.5": {
+                            "type": "package",
+                            "sha512": (
+                                content_hash(b"different-installed-content")
+                                if wrong_installed_content_hash
+                                else installed_content_hashes["logbrew/0.1.5"]
+                            ),
+                        },
                         "LogBrew.HttpClient/0.1.0": {
                             "type": "package",
-                            "sha512": hashes["logbrew.httpclient/0.1.0"],
+                            "sha512": installed_content_hashes[
+                                "logbrew.httpclient/0.1.0"
+                            ],
                         },
                     }
                 }
@@ -91,6 +120,18 @@ class NugetReleaseReceiptProvenanceTests(unittest.TestCase):
     def test_rejects_same_version_installed_from_different_core_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             command = self.fixture(Path(raw_tmp), wrong_core=True)
+            result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "NuGet receipt provenance verification failed\n")
+
+    def test_rejects_mismatched_installed_content_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            command = self.fixture(
+                Path(raw_tmp),
+                wrong_installed_content_hash=True,
+            )
             result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
 
         self.assertNotEqual(result.returncode, 0)

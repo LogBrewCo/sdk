@@ -945,6 +945,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "Python artifact reconciliation": "check_python_release_artifacts.py",
             "protected Python artifact creation": 'python3 "$control_script" create',
             "NuGet artifact reconciliation": "check_nuget_public_artifacts.py",
+            "NuGet provenance verification": (
+                "check_nuget_release_receipt_provenance.py"
+            ),
             "NuGet immutable source binding": '--source-root "$GITHUB_WORKSPACE"',
             "Python exact-byte install": "real_user_python_public_pypi_smoke.sh",
             "NuGet exact-byte install": (
