@@ -44,6 +44,13 @@ class SwiftPmPublicSmokeTests(unittest.TestCase):
 
         self.assertNotIn("api.logbrew", body)
 
+    def test_script_evaluates_throwing_status_before_precondition(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn("let crashStatus = try crashCapture.status()", body)
+        self.assertIn("precondition(crashStatus.lifecycle == .idle)", body)
+        self.assertNotIn("precondition(try crashCapture.status()", body)
+
     def test_swift_readme_uses_the_current_public_swiftpm_tag(self) -> None:
         readme = SWIFT_README.read_text(encoding="utf-8")
 

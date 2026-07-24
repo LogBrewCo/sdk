@@ -27,6 +27,16 @@ PUBLIC_RECONCILIATION_TARGETS = (
     "tests.test_release_metadata",
 )
 
+PUBLIC_VERIFY_TARGETS = (
+    "tests.test_ci_changed_areas",
+    "tests.test_ci_duplicate_static_checks",
+    "tests.test_confidentiality_scan",
+    "tests.test_publication_run",
+    "tests.test_registry_publication",
+    "tests.test_release_metadata",
+    "tests.test_swiftpm_public_smoke",
+)
+
 
 PATH_TARGETS = {
     ".github/workflows/ci.yml": (
@@ -43,6 +53,7 @@ PATH_TARGETS = {
         "tests.test_github_release_safety_gates",
         "tests.test_js_installed_artifact_workflow_gates",
     ),
+    ".github/workflows/publish-packages.yml": PUBLIC_VERIFY_TARGETS,
     ".github/workflows/reconcile-public-packages.yml": PUBLIC_RECONCILIATION_TARGETS,
     "scripts/ci_changed_areas.py": ("tests.test_ci_changed_areas",),
     "scripts/ci_unit_test_targets.py": ("tests.test_ci_unit_test_targets",),
@@ -51,6 +62,9 @@ PATH_TARGETS = {
     ),
     "scripts/real_user_maven_central_public_smoke.sh": (
         "tests.test_maven_central_public_smoke",
+    ),
+    "scripts/real_user_swiftpm_public_smoke.sh": (
+        "tests.test_swiftpm_public_smoke",
     ),
     "scripts/real_user_native_release_public_smoke.sh": (
         "tests.test_native_release_public_smoke",
@@ -64,6 +78,7 @@ PATH_TARGETS = {
         "tests.test_release_metadata",
     ),
     "scripts/check_publication_run.py": ("tests.test_publication_run",),
+    "scripts/check_registry_publication.py": ("tests.test_registry_publication",),
     "scripts/check_python_release_artifacts.py": (
         "tests.test_python_release_artifacts",
     ),

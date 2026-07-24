@@ -101,6 +101,36 @@ class CiUnitTestTargetsTests(unittest.TestCase):
             ),
         )
 
+    def test_public_verify_changes_select_only_focused_contracts(self) -> None:
+        targets = ci_unit_test_targets.select_targets(
+            [
+                ".github/workflows/publish-packages.yml",
+                "scripts/check_registry_publication.py",
+                "scripts/check_release_metadata.py",
+                "scripts/ci_unit_test_targets.py",
+                "scripts/real_user_swiftpm_public_smoke.sh",
+                "tests/test_ci_unit_test_targets.py",
+                "tests/test_registry_publication.py",
+                "tests/test_release_metadata.py",
+                "tests/test_swiftpm_public_smoke.py",
+            ]
+        )
+
+        self.assertFalse(targets.run_all)
+        self.assertEqual(
+            targets.modules,
+            (
+                "tests.test_ci_changed_areas",
+                "tests.test_ci_duplicate_static_checks",
+                "tests.test_ci_unit_test_targets",
+                "tests.test_confidentiality_scan",
+                "tests.test_publication_run",
+                "tests.test_registry_publication",
+                "tests.test_release_metadata",
+                "tests.test_swiftpm_public_smoke",
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -89,6 +89,7 @@ class RegistryPublicationTests(unittest.TestCase):
         invalid_versions = (
             ["Unknown.Package=0.1.0"],
             ["LogBrew=0.1.5", "LogBrew=0.1.5"],
+            ["LogBrew.OpenTelemetry=0.1.1"],
         )
         for versions in invalid_versions:
             arguments = ["--target", "nuget"]
@@ -136,7 +137,7 @@ class RegistryPublicationTests(unittest.TestCase):
             ),
         )
 
-    def test_default_all_target_verifies_only_publishable_oidc_registries(self) -> None:
+    def test_default_all_target_verifies_only_released_packages(self) -> None:
         args = argparse.Namespace(
             target=["all"],
             include_unity_npm=False,
@@ -160,17 +161,24 @@ class RegistryPublicationTests(unittest.TestCase):
         self.assertIn("logbrew-sdk", labels)
         self.assertIn("LogBrew", labels)
         self.assertIn("LogBrew.StackExchangeRedis", labels)
-        self.assertIn("LogBrew.OpenTelemetry", labels)
+        self.assertNotIn("@logbrew/prisma", labels)
+        self.assertNotIn("LogBrew.OpenTelemetry", labels)
         self.assertNotIn("logbrew-fastapi", labels)
         self.assertNotIn("logbrew", labels)
         self.assertNotIn("logbrew/sdk", labels)
         self.assertNotIn("co.logbrew:logbrew-sdk", labels)
         self.assertNotIn("co.logbrew.unity", labels)
 
-    def test_default_npm_packages_match_release_metadata(self) -> None:
+    def test_released_package_sets_exclude_unpublished_packages(self) -> None:
         self.assertEqual(
-            set(check_release_metadata.JS_PACKAGES.values()),
+            set(check_release_metadata.JS_PACKAGES.values())
+            - {"@logbrew/prisma"},
             set(check_registry_publication.NPM_PACKAGES),
+        )
+        self.assertEqual(
+            check_release_metadata.NUGET_PACKAGES
+            - {"LogBrew.OpenTelemetry"},
+            set(check_registry_publication.NUGET_PACKAGES),
         )
 
     def test_include_flags_add_guarded_registries(self) -> None:
@@ -286,6 +294,25 @@ class RegistryPublicationTests(unittest.TestCase):
         labels = {check.label for check in check_registry_publication.checks_for(args)}
 
         self.assertEqual({"@logbrew/nestjs"}, labels)
+
+    def test_npm_version_overrides_limit_npm_registry_checks(self) -> None:
+        args = check_registry_publication.parse_args(
+            [
+                "--target",
+                "all",
+                "--npm-version",
+                "@logbrew/sdk=0.1.4",
+                "--npm-version",
+                "@logbrew/browser=0.1.1",
+            ]
+        )
+
+        labels = {check.label for check in check_registry_publication.checks_for(args)}
+
+        self.assertIn("@logbrew/sdk", labels)
+        self.assertIn("@logbrew/browser", labels)
+        self.assertNotIn("@logbrew/angular", labels)
+        self.assertNotIn("@logbrew/prisma", labels)
 
     def test_maven_artifact_filter_limits_maven_registry_checks(self) -> None:
         args = argparse.Namespace(
@@ -547,6 +574,155 @@ class RegistryPublicationTests(unittest.TestCase):
                 "co.logbrew:logbrew-sdk": "0.1.0",
             },
         )
+
+    def test_same_named_packages_use_family_scoped_versions(self) -> None:
+        args = check_registry_publication.parse_args(
+            [
+                "--target",
+                "all",
+                "--version",
+                "0.1.4",
+                "--pypi-version",
+                "logbrew-sdk=0.1.4",
+                "--include-packagist",
+            ]
+        )
+        observed: dict[tuple[str, str], set[str]] = {}
+        original_validate_check = check_registry_publication.validate_check
+
+        def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None):  # type: ignore[no-untyped-def]
+            observed[(getattr(check, "family", ""), check.label)] = expected
+            return []
+
+        try:
+            check_registry_publication.validate_check = fake_validate_check
+            failures = check_registry_publication.validate(args)
+        finally:
+            check_registry_publication.validate_check = original_validate_check
+
+        self.assertEqual(failures, [])
+        self.assertEqual(observed[("pypi", "logbrew-sdk")], {"0.1.4", "v0.1.4"})
+        self.assertEqual(
+            observed[("rubygems", "logbrew-sdk")],
+            check_registry_publication.expected_versions(check_release_metadata.RUBYGEMS_VERSION),
+        )
+        self.assertEqual(
+            observed[("packagist", "logbrew/sdk")],
+            check_registry_publication.expected_versions(check_release_metadata.PACKAGIST_VERSION),
+        )
+
+    def test_same_named_packages_use_family_scoped_defaults(self) -> None:
+        args = check_registry_publication.parse_args(
+            [
+                "--target",
+                "all",
+                "--version",
+                "0.1.4",
+                "--include-packagist",
+            ]
+        )
+        observed: dict[tuple[str, str], set[str]] = {}
+        original_validate_check = check_registry_publication.validate_check
+
+        def fake_validate_check(check, expected, timeout, retries=0, retry_delay=5.0, fetcher=None):  # type: ignore[no-untyped-def]
+            observed[(getattr(check, "family", ""), check.label)] = expected
+            return []
+
+        try:
+            check_registry_publication.validate_check = fake_validate_check
+            failures = check_registry_publication.validate(args)
+        finally:
+            check_registry_publication.validate_check = original_validate_check
+
+        self.assertEqual(failures, [])
+        self.assertEqual(observed[("pypi", "logbrew-sdk")], {"0.1.4", "v0.1.4"})
+        self.assertEqual(
+            observed[("rubygems", "logbrew-sdk")],
+            check_registry_publication.expected_versions(check_release_metadata.RUBYGEMS_VERSION),
+        )
+        self.assertEqual(
+            observed[("packagist", "logbrew/sdk")],
+            check_registry_publication.expected_versions(check_release_metadata.PACKAGIST_VERSION),
+        )
+
+    def test_cross_family_verify_requires_exact_released_package_sets(self) -> None:
+        npm_versions = [
+            f"{package_name}=0.1.0"
+            for package_name in check_registry_publication.NPM_PACKAGES
+        ]
+        nuget_versions = [
+            f"{package_name}=0.1.0"
+            for package_name in check_registry_publication.NUGET_PACKAGES
+        ]
+
+        def arguments(
+            npm: list[str],
+            nuget: list[str],
+        ) -> list[str]:
+            values = [
+                "--target",
+                "all",
+                "--require-released-package-set",
+            ]
+            for package_version in npm:
+                values.extend(("--npm-version", package_version))
+            for package_version in nuget:
+                values.extend(("--nuget-version", package_version))
+            return values
+
+        parsed = check_registry_publication.parse_args(
+            arguments(npm_versions, nuget_versions)
+        )
+        self.assertEqual(set(parsed.npm_versions), set(check_registry_publication.NPM_PACKAGES))
+        self.assertEqual(
+            set(parsed.nuget_versions),
+            set(check_registry_publication.NUGET_PACKAGES),
+        )
+
+        for invalid in (
+            arguments(npm_versions[:-1], nuget_versions),
+            arguments(npm_versions, nuget_versions[:-1]),
+            ["--target", "all", "--require-released-package-set"],
+        ):
+            with self.subTest(invalid=invalid):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        check_registry_publication.parse_args(invalid)
+
+    def test_cross_family_verify_requires_selected_unity_exactly_once(self) -> None:
+        arguments = [
+            "--target",
+            "all",
+            "--require-released-package-set",
+            "--include-unity-npm",
+        ]
+        for package_name in check_registry_publication.NPM_VERSION_PACKAGES:
+            arguments.extend(("--npm-version", f"{package_name}=0.1.0"))
+        for package_name in check_registry_publication.NUGET_PACKAGES:
+            arguments.extend(("--nuget-version", f"{package_name}=0.1.0"))
+
+        parsed = check_registry_publication.parse_args(arguments)
+        labels = [
+            check.label
+            for check in check_registry_publication.checks_for(parsed)
+            if check.family == "npm"
+        ]
+
+        self.assertEqual(labels.count("co.logbrew.unity"), 1)
+
+        missing_unity = [
+            argument
+            for index, argument in enumerate(arguments)
+            if argument != "co.logbrew.unity=0.1.0"
+            and not (
+                argument == "--npm-version"
+                and index + 1 < len(arguments)
+                and arguments[index + 1] == "co.logbrew.unity=0.1.0"
+            )
+        ]
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                check_registry_publication.parse_args(missing_unity)
 
     def test_validate_check_passes_when_expected_version_is_found(self) -> None:
         check = check_registry_publication.RegistryCheck(
