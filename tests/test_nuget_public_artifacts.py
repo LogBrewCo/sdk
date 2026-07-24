@@ -6,6 +6,7 @@ import hashlib
 import http.client
 import importlib.util
 import json
+import shutil
 import stat
 import sys
 import tempfile
@@ -103,6 +104,49 @@ class FakeRegistry:
 
 
 class NuGetPublicArtifactTests(unittest.TestCase):
+    def test_rejects_wire_alias_in_source_project_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_root = root / "source"
+            for relative in check_nuget_public_artifacts.SOURCE_PROJECTS.values():
+                source = ROOT / relative
+                destination = source_root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+            core_project = (
+                source_root
+                / check_nuget_public_artifacts.SOURCE_PROJECTS["LogBrew"]
+            )
+            document = core_project.read_text(encoding="utf-8")
+            replaced = document.replace(
+                "netstandard2.0;net8.0",
+                ".NETStandard2.0;net8.0",
+            )
+            self.assertNotEqual(document, replaced)
+            core_project.write_text(replaced, encoding="utf-8")
+            self.assertEqual(
+                check_nuget_public_artifacts.source_dependency_contract(
+                    source_root,
+                    "LogBrew",
+                    DEPENDENCY_RANGE,
+                )[0],
+                (".NETStandard2.0", "net8.0"),
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "^NuGet public artifact verification failed$",
+            ):
+                check_nuget_public_artifacts.resolve_public_artifacts(
+                    VERSIONS,
+                    SOURCE_SHA,
+                    DEPENDENCY_RANGE,
+                    source_root,
+                    root / "packages",
+                    root / "reconciliation.json",
+                    opener=self.registry().open,
+                )
+
     def test_accepts_exact_catalog_urls_for_selected_packages(self) -> None:
         expected = {
             "LogBrew": (
@@ -406,9 +450,14 @@ class NuGetPublicArtifactTests(unittest.TestCase):
             "catalog-framework",
             "catalog-framework-case",
             "catalog-framework-alias",
+            "catalog-framework-net8-case",
             "catalog-framework-duplicate",
             "nuspec-extra-dependency",
             "nuspec-framework",
+            "nuspec-framework-case",
+            "nuspec-framework-alias",
+            "nuspec-framework-net8-case",
+            "nuspec-framework-duplicate",
         ):
             with self.subTest(case=case):
                 with tempfile.TemporaryDirectory() as tmp:
@@ -478,20 +527,37 @@ class NuGetPublicArtifactTests(unittest.TestCase):
                             ".NETStandard2.1"
                         )
                         registry.add(catalog_url, json.dumps(catalog).encode())
+                    elif case == "catalog-framework-net8-case":
+                        catalog = json.loads(registry.responses[catalog_url].body)
+                        catalog["dependencyGroups"][1]["targetFramework"] = "NET8.0"
+                        registry.add(catalog_url, json.dumps(catalog).encode())
                     elif case == "catalog-framework-duplicate":
                         catalog = json.loads(registry.responses[catalog_url].body)
                         catalog["dependencyGroups"][1]["targetFramework"] = (
                             "netstandard2.0"
                         )
                         registry.add(catalog_url, json.dumps(catalog).encode())
-                    elif case in {"nuspec-extra-dependency", "nuspec-framework"}:
+                    elif case.startswith("nuspec-"):
+                        frameworks = {
+                            "nuspec-framework": ("net9.0", "net8.0"),
+                            "nuspec-framework-case": (".NetStandard2.0", "net8.0"),
+                            "nuspec-framework-alias": (".NETStandard2.1", "net8.0"),
+                            "nuspec-framework-net8-case": (
+                                ".NETStandard2.0",
+                                "NET8.0",
+                            ),
+                            "nuspec-framework-duplicate": (
+                                ".NETStandard2.0",
+                                "netstandard2.0",
+                            ),
+                        }.get(case)
                         body = self.package(
                             package_id,
                             version,
                             SOURCE_SHA,
                             DEPENDENCY_RANGE,
                             extra_dependency=case == "nuspec-extra-dependency",
-                            wrong_framework=case == "nuspec-framework",
+                            frameworks=frameworks,
                         )
                         registry.add(package_url, body)
                         catalog = json.loads(registry.responses[catalog_url].body)
@@ -680,7 +746,7 @@ class NuGetPublicArtifactTests(unittest.TestCase):
         dependency_range: str,
         *,
         extra_dependency: bool = False,
-        wrong_framework: bool = False,
+        frameworks: tuple[str, str] | None = None,
     ) -> bytes:
         dependencies = (
             [
@@ -698,11 +764,7 @@ class NuGetPublicArtifactTests(unittest.TestCase):
         )
         groups = "".join(
             f'<group targetFramework="{framework}">{dependency_xml}</group>'
-            for framework in (
-                ("net9.0", "net8.0")
-                if wrong_framework
-                else ("netstandard2.0", "net8.0")
-            )
+            for framework in (frameworks or (".NETStandard2.0", "net8.0"))
         )
         dependency = f"<dependencies>{groups}</dependencies>"
         nuspec = f"""<?xml version="1.0"?>
