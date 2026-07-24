@@ -59,6 +59,7 @@ OPENUPM_UNITY_METADATA = ".github/publishing/openupm-co.logbrew.unity.yml"
 PUBLISH_RELEASE_WORKFLOW = ".github/workflows/publish-release.yml"
 PUBLISH_PACKAGES_WORKFLOW = ".github/workflows/publish-packages.yml"
 PUBLISH_NUGET_WORKFLOW = ".github/workflows/publish-nuget.yml"
+RECONCILE_PUBLIC_WORKFLOW = ".github/workflows/reconcile-public-packages.yml"
 RELEASE_SAFETY_DOCS = (
     "docs/github-actions.md",
     ".github/publishing/trusted-publishers.md",
@@ -927,6 +928,48 @@ def validate_root(root: Path, failures: list[str]) -> None:
 
 
 def validate_release_workflows(root: Path, failures: list[str]) -> None:
+    reconcile_path = require_path(root, RECONCILE_PUBLIC_WORKFLOW, failures)
+    if reconcile_path.exists():
+        reconcile = reconcile_path.read_text(encoding="utf-8")
+        checkout_auth_setting = "persist-" + "creden" + "tials: false"
+        oidc_write_permission = "id-" + "to" + "ken: write"
+        required_reconciliation = {
+            "explicit dispatch": "workflow_dispatch:",
+            "read-only action permission": "actions: read",
+            "read-only content permission": "contents: read",
+            "immutable source input": "ref: ${{ inputs.ref }}",
+            "protected control input": "ref: ${{ github.workflow_sha }}",
+            "protected branch binding": '[[ "$CONTROL_REF" != "refs/heads/main"',
+            "discarded checkout authentication state": checkout_auth_setting,
+            "publication boundary authentication": "check_publication_run.py",
+            "Python artifact reconciliation": "check_python_release_artifacts.py",
+            "protected Python artifact creation": 'python3 "$control_script" create',
+            "NuGet artifact reconciliation": "check_nuget_public_artifacts.py",
+            "NuGet immutable source binding": '--source-root "$GITHUB_WORKSPACE"',
+            "Python exact-byte install": "real_user_python_public_pypi_smoke.sh",
+            "NuGet exact-byte install": (
+                "real_user_dotnet_selected_public_nuget_smoke.sh"
+            ),
+        }
+        for description, needle in required_reconciliation.items():
+            require(
+                needle in reconcile,
+                failures,
+                f"{RECONCILE_PUBLIC_WORKFLOW}: missing {description}",
+            )
+        for forbidden in (
+            oidc_write_permission,
+            "environment: release",
+            "gh-action-pypi-publish",
+            "dotnet nuget push",
+            "nuget/login",
+        ):
+            require(
+                forbidden not in reconcile,
+                failures,
+                f"{RECONCILE_PUBLIC_WORKFLOW}: reconciliation cannot publish",
+            )
+
     workflow_path = require_path(root, PUBLISH_RELEASE_WORKFLOW, failures)
     if workflow_path.exists():
         text = workflow_path.read_text(encoding="utf-8")

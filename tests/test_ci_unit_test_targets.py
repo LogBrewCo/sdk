@@ -64,6 +64,42 @@ class CiUnitTestTargetsTests(unittest.TestCase):
         self.assertFalse(targets.run_all)
         self.assertEqual(targets.modules, ("tests.test_default_ingest_endpoints",))
 
+    def test_public_reconciliation_changes_select_only_focused_contracts(self) -> None:
+        targets = ci_unit_test_targets.select_targets(
+            [
+                ".github/workflows/reconcile-public-packages.yml",
+                "scripts/check_confidentiality_scan.py",
+                "scripts/check_nuget_public_artifacts.py",
+                "scripts/check_publication_run.py",
+                "scripts/check_python_release_artifacts.py",
+                "scripts/check_release_metadata.py",
+                "scripts/ci_unit_test_targets.py",
+                "scripts/real_user_dotnet_selected_public_nuget_smoke.sh",
+                "tests/test_ci_unit_test_targets.py",
+                "tests/test_confidentiality_scan.py",
+                "tests/test_nuget_public_artifacts.py",
+                "tests/test_publication_run.py",
+                "tests/test_python_release_artifacts.py",
+                "tests/test_release_metadata.py",
+            ]
+        )
+
+        self.assertFalse(targets.run_all)
+        self.assertEqual(
+            targets.modules,
+            (
+                "tests.test_ci_unit_test_targets",
+                "tests.test_confidentiality_scan",
+                "tests.test_nuget_public_artifacts",
+                "tests.test_nuget_release_receipt_provenance",
+                "tests.test_publication_run",
+                "tests.test_python_public_pypi_smoke",
+                "tests.test_python_release_artifacts",
+                "tests.test_release_artifact_receipt_modes",
+                "tests.test_release_metadata",
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

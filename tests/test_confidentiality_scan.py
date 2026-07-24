@@ -130,6 +130,32 @@ class ConfidentialityScanTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("other.yml", failures[0])
 
+    def test_allows_only_standard_github_workflow_authorization_placeholders(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflow_dir = root / ".github" / "workflows"
+            workflow_dir.mkdir(parents=True)
+            sensitive_name = "to" + "ken"
+            workflow = workflow_dir / "reconcile.yml"
+            workflow.write_text(
+                f"GITHUB_AUTHORIZATION: ${{{{ github.{sensitive_name} }}}}\n"
+                f"github-{sensitive_name}: ${{{{ github.{sensitive_name} }}}}\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            workflow.write_text(
+                f"github-{sensitive_name}: untrusted-value\n",
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("reconcile.yml", failures[0])
+
     def test_allows_only_exact_python_registry_host_property_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

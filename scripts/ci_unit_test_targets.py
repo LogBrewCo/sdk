@@ -17,6 +17,17 @@ class UnitTestTargets(NamedTuple):
     modules: tuple[str, ...]
 
 
+PUBLIC_RECONCILIATION_TARGETS = (
+    "tests.test_nuget_public_artifacts",
+    "tests.test_nuget_release_receipt_provenance",
+    "tests.test_publication_run",
+    "tests.test_python_public_pypi_smoke",
+    "tests.test_python_release_artifacts",
+    "tests.test_release_artifact_receipt_modes",
+    "tests.test_release_metadata",
+)
+
+
 PATH_TARGETS = {
     ".github/workflows/ci.yml": (
         "tests.test_ci_changed_areas",
@@ -32,6 +43,7 @@ PATH_TARGETS = {
         "tests.test_github_release_safety_gates",
         "tests.test_js_installed_artifact_workflow_gates",
     ),
+    ".github/workflows/reconcile-public-packages.yml": PUBLIC_RECONCILIATION_TARGETS,
     "scripts/ci_changed_areas.py": ("tests.test_ci_changed_areas",),
     "scripts/ci_unit_test_targets.py": ("tests.test_ci_unit_test_targets",),
     "scripts/check_ci_no_duplicate_static_checks.py": (
@@ -45,6 +57,11 @@ PATH_TARGETS = {
     ),
     "scripts/check_github_release_safety.py": ("tests.test_github_release_safety",),
     "scripts/check_backend_contract_reports.py": ("tests.test_backend_contract_reports",),
+    "scripts/check_nuget_public_artifacts.py": ("tests.test_nuget_public_artifacts",),
+    "scripts/check_publication_run.py": ("tests.test_publication_run",),
+    "scripts/check_python_release_artifacts.py": (
+        "tests.test_python_release_artifacts",
+    ),
     "scripts/check_release_metadata.py": ("tests.test_release_metadata",),
     "scripts/validate_fixtures.py": ("tests.test_validate_fixtures",),
     "scripts/check_confidentiality_scan.py": ("tests.test_confidentiality_scan",),
@@ -53,6 +70,11 @@ PATH_TARGETS = {
     ),
     "scripts/real_user_go_persistence_smoke.sh": (
         "tests.test_go_persistence_smoke",
+    ),
+    "scripts/real_user_dotnet_selected_public_nuget_smoke.sh": (
+        "tests.test_nuget_release_receipt_provenance",
+        "tests.test_release_artifact_receipt_modes",
+        "tests.test_release_metadata",
     ),
 }
 
