@@ -431,6 +431,8 @@ def is_github_actions_oidc_or_secret_placeholder(relative_text: str, line: str) 
         "os.environ['central_portal_password']",
         "signing keys",
         "gh_token: ${{ github.token }}",
+        "github_authorization: ${{ github.token }}",
+        "github-token: ${{ github.token }}",
     )
     return any(fragment in lower_line for fragment in allowed_fragments)
 

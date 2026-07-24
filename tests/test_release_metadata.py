@@ -464,6 +464,57 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertLess(publish, registry)
         self.assertLess(registry, public_receipt)
 
+    def test_public_reconciliation_is_source_bound_and_cannot_publish(self) -> None:
+        workflow = (
+            ROOT / ".github" / "workflows" / "reconcile-public-packages.yml"
+        ).read_text(encoding="utf-8")
+        checkout_auth_setting = "persist-" + "creden" + "tials: false"
+        oidc_write_permission = "id-" + "to" + "ken: write"
+
+        for expected in (
+            "workflow_dispatch:",
+            "actions: read",
+            "contents: read",
+            "ref: ${{ inputs.ref }}",
+            "ref: ${{ github.workflow_sha }}",
+            "CONTROL_REF: ${{ github.ref }}",
+            '[[ "$CONTROL_REF" != "refs/heads/main"',
+            "path: .release-control",
+            checkout_auth_setting,
+            "check_publication_run.py",
+            "check_python_release_artifacts.py",
+            'python3 "$control_script" create',
+            "check_nuget_public_artifacts.py",
+            '--source-root "$GITHUB_WORKSPACE"',
+            "real_user_python_public_pypi_smoke.sh",
+            "real_user_dotnet_selected_public_nuget_smoke.sh",
+            "python-public-reconciliation.json",
+            "nuget-public-reconciliation.json",
+            '"$RUNNER_TEMP/python-public-smoke.out"',
+            '"Python public artifact execution failed."',
+        ):
+            self.assertIn(expected, workflow)
+        for forbidden in (
+            oidc_write_permission,
+            "environment: release",
+            "gh-action-pypi-publish",
+            "dotnet nuget push",
+            "nuget/login",
+        ):
+            self.assertNotIn(forbidden, workflow)
+        self.assertIn(
+            "RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}",
+            workflow,
+        )
+        self.assertIn(
+            "RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}",
+            workflow,
+        )
+        self.assertIn(
+            "git -C \"$control_root\" rev-parse --verify 'HEAD^{commit}'",
+            workflow,
+        )
+
     def test_publish_packages_binds_swiftpm_receipt_to_exact_source(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "publish-packages.yml").read_text(
             encoding="utf-8"

@@ -1,0 +1,466 @@
+name: Reconcile Public Packages
+run-name: Reconcile ${{ inputs.target }} from ${{ inputs.ref }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Public package family to reconcile"
+        required: true
+        type: choice
+        options:
+          - pypi
+          - nuget
+          - all
+      ref:
+        description: "Exact immutable 40-character release source commit"
+        required: true
+        type: string
+      publication_workflow_sha:
+        description: "Exact workflow commit of the authenticated publication run"
+        required: true
+        type: string
+      pypi_publication_run_id:
+        description: "Authenticated PyPI publication run"
+        required: false
+        type: string
+      pypi_sdk_version:
+        description: "Exact logbrew-sdk version"
+        required: false
+        type: string
+      pypi_fastapi_version:
+        description: "Exact logbrew-fastapi version"
+        required: false
+        type: string
+      pypi_flask_version:
+        description: "Exact logbrew-flask version"
+        required: false
+        type: string
+      pypi_django_version:
+        description: "Exact logbrew-django version"
+        required: false
+        type: string
+      nuget_publication_run_id:
+        description: "Authenticated NuGet publication run"
+        required: false
+        type: string
+      nuget_core_version:
+        description: "Exact LogBrew version"
+        required: false
+        type: string
+      nuget_httpclient_version:
+        description: "Exact LogBrew.HttpClient version"
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: reconcile-public-${{ inputs.ref }}-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  pypi:
+    name: Reconcile PyPI artifacts
+    if: ${{ inputs.target == 'pypi' || inputs.target == 'all' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out immutable release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Bind immutable release source
+        id: release-source
+        shell: bash
+        env:
+          CONTROL_REF: ${{ github.ref }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.ref }}
+        run: |
+          set -Eeuo pipefail
+          source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          if [[ "$CONTROL_REF" != "refs/heads/main" ||
+            ! "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ||
+            "$source_sha" != "$EXPECTED_SOURCE_SHA" ]]; then
+            echo "Invalid release source checkout." >&2
+            exit 1
+          fi
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out protected release control
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/check_publication_run.py
+            scripts/check_python_release_artifacts.py
+          sparse-checkout-cone-mode: false
+
+      - name: Bind protected release control
+        id: release-control
+        shell: bash
+        env:
+          RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}
+          RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          if [[ ! "$RELEASE_CONTROL_SHA" =~ ^[0-9a-f]{40}$ || ! "$RELEASE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid release checkout binding." >&2
+            exit 1
+          fi
+          actual_source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          actual_control_sha="$(git -C "$control_root" rev-parse --verify 'HEAD^{commit}')"
+          if [[ "$actual_source_sha" != "$RELEASE_SOURCE_SHA" || "$actual_control_sha" != "$RELEASE_CONTROL_SHA" ]]; then
+            echo "Release checkout binding mismatch." >&2
+            exit 1
+          fi
+          for name in check_publication_run.py check_python_release_artifacts.py; do
+            path="$control_root/scripts/$name"
+            expected="$(
+              git -C "$control_root" show "${RELEASE_CONTROL_SHA}:scripts/$name" |
+                sha256sum | awk '{print $1}'
+            )"
+            actual="$(sha256sum "$path" | awk '{print $1}')"
+            if [[ ! -f "$path" || -L "$path" || ! "$expected" =~ ^[0-9a-f]{64}$ || "$actual" != "$expected" ]]; then
+              echo "Protected release control changed." >&2
+              exit 1
+            fi
+            printf '%s_sha256=%s\n' "${name%.py}" "$expected" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Authenticate PyPI publication boundary
+        shell: bash
+        env:
+          GITHUB_AUTHORIZATION: ${{ github.token }}
+          PUBLICATION_RUN_ID: ${{ inputs.pypi_publication_run_id }}
+          PUBLICATION_WORKFLOW_SHA: ${{ inputs.publication_workflow_sha }}
+          RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$PUBLICATION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          control_script="$control_root/scripts/check_publication_run.py"
+          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
+            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_publication_run.py; then
+            echo "Protected release control changed." >&2
+            exit 1
+          fi
+          python3 "$control_script" \
+            --repository "$GITHUB_REPOSITORY" \
+            --run-id "$PUBLICATION_RUN_ID" \
+            --family pypi \
+            --workflow-sha "$PUBLICATION_WORKFLOW_SHA" \
+            --source-sha "$RELEASE_SOURCE_SHA"
+
+      - name: Download authenticated Python release manifest
+        uses: actions/download-artifact@v6
+        with:
+          name: python-release-manifest
+          path: ${{ runner.temp }}/python-publication
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.pypi_publication_run_id }}
+
+      - name: Validate authenticated Python release manifest
+        shell: bash
+        env:
+          SDK_VERSION: ${{ inputs.pypi_sdk_version }}
+          FASTAPI_VERSION: ${{ inputs.pypi_fastapi_version }}
+          FLASK_VERSION: ${{ inputs.pypi_flask_version }}
+          DJANGO_VERSION: ${{ inputs.pypi_django_version }}
+          RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          manifest_root="$RUNNER_TEMP/python-publication"
+          mapfile -t entries < <(find "$manifest_root" -mindepth 1 -print)
+          if [[ -L "$manifest_root" || ${#entries[@]} -ne 1 || ! -f "${entries[0]}" || -L "${entries[0]}" || "$(basename "${entries[0]}")" != "python-release-artifacts.json" ]]; then
+            echo "Authenticated Python release manifest is invalid." >&2
+            exit 1
+          fi
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          control_script="$control_root/scripts/check_python_release_artifacts.py"
+          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
+            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_python_release_artifacts.py; then
+            echo "Protected release control changed." >&2
+            exit 1
+          fi
+          python3 "$control_script" \
+            check-manifest --manifest "${entries[0]}" \
+            --source-commit "$RELEASE_SOURCE_SHA" \
+            --python-version "logbrew-sdk=$SDK_VERSION" \
+            --python-version "logbrew-fastapi=$FASTAPI_VERSION" \
+            --python-version "logbrew-flask=$FLASK_VERSION" \
+            --python-version "logbrew-django=$DJANGO_VERSION"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Build exact-source Python distributions
+        run: |
+          set -Eeuo pipefail
+          python -m pip install --disable-pip-version-check build==1.3.0
+          for package_dir in python/logbrew_py python/logbrew_fastapi python/logbrew_flask python/logbrew_django; do
+            output_dir="$RUNNER_TEMP/python-source-build/$(basename "$package_dir")"
+            python -m build --sdist --wheel --outdir "$output_dir" "$package_dir"
+          done
+
+      - name: Bind exact-source Python distributions
+        shell: bash
+        env:
+          SDK_VERSION: ${{ inputs.pypi_sdk_version }}
+          FASTAPI_VERSION: ${{ inputs.pypi_fastapi_version }}
+          FLASK_VERSION: ${{ inputs.pypi_flask_version }}
+          DJANGO_VERSION: ${{ inputs.pypi_django_version }}
+          RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          control_script="$control_root/scripts/check_python_release_artifacts.py"
+          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
+            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_python_release_artifacts.py; then
+            echo "Protected release control changed." >&2
+            exit 1
+          fi
+          python3 "$control_script" create \
+            --directory "$RUNNER_TEMP/python-source-build" \
+            --source-commit "$RELEASE_SOURCE_SHA" \
+            --python-version "logbrew-sdk=$SDK_VERSION" \
+            --python-version "logbrew-fastapi=$FASTAPI_VERSION" \
+            --python-version "logbrew-flask=$FLASK_VERSION" \
+            --python-version "logbrew-django=$DJANGO_VERSION" \
+            --manifest "$RUNNER_TEMP/python-source-build.json"
+
+      - name: Reconcile public Python artifacts
+        run: |
+          set -Eeuo pipefail
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          control_script="$control_root/scripts/check_python_release_artifacts.py"
+          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
+            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_python_release_artifacts.py; then
+            echo "Protected release control changed." >&2
+            exit 1
+          fi
+          python3 "$control_script" \
+            resolve-public \
+            --directory "$RUNNER_TEMP/python-source-build" \
+            --manifest "$RUNNER_TEMP/python-source-build.json" \
+            --output-directory "$RUNNER_TEMP/python-public-artifacts" \
+            --public-manifest "$RUNNER_TEMP/python-public-release-artifacts.json" \
+            --reconciliation "$RUNNER_TEMP/python-public-reconciliation.json"
+
+      - name: Execute exact public Python artifacts
+        run: |
+          set -Eeuo pipefail
+          if ! bash scripts/real_user_python_public_pypi_smoke.sh \
+            --manifest "$RUNNER_TEMP/python-public-release-artifacts.json" \
+            --artifact-root "$RUNNER_TEMP/python-public-artifacts" \
+            >"$RUNNER_TEMP/python-public-smoke.out" \
+            2>"$RUNNER_TEMP/python-public-smoke.err"; then
+            echo "Python public artifact execution failed." >&2
+            exit 1
+          fi
+          echo "Python public artifact execution ok"
+
+      - name: Upload Python reconciliation receipt
+        uses: actions/upload-artifact@v6
+        with:
+          name: python-public-reconciliation
+          path: |
+            ${{ runner.temp }}/python-public-release-artifacts.json
+            ${{ runner.temp }}/python-public-reconciliation.json
+          if-no-files-found: error
+          retention-days: 14
+
+  nuget:
+    name: Reconcile NuGet artifacts
+    if: ${{ inputs.target == 'nuget' || inputs.target == 'all' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out immutable release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Bind immutable release source
+        id: release-source
+        shell: bash
+        env:
+          CONTROL_REF: ${{ github.ref }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.ref }}
+        run: |
+          set -Eeuo pipefail
+          source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          if [[ "$CONTROL_REF" != "refs/heads/main" ||
+            ! "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ||
+            "$source_sha" != "$EXPECTED_SOURCE_SHA" ]]; then
+            echo "Invalid release source checkout." >&2
+            exit 1
+          fi
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out protected release control
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/check_nuget_public_artifacts.py
+            scripts/check_publication_run.py
+            scripts/real_user_dotnet_selected_public_nuget_smoke.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Bind protected release control
+        id: release-control
+        shell: bash
+        env:
+          RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}
+          RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          if [[ ! "$RELEASE_CONTROL_SHA" =~ ^[0-9a-f]{40}$ || ! "$RELEASE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid release checkout binding." >&2
+            exit 1
+          fi
+          actual_source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          actual_control_sha="$(git -C "$control_root" rev-parse --verify 'HEAD^{commit}')"
+          if [[ "$actual_source_sha" != "$RELEASE_SOURCE_SHA" || "$actual_control_sha" != "$RELEASE_CONTROL_SHA" ]]; then
+            echo "Release checkout binding mismatch." >&2
+            exit 1
+          fi
+          control_files=(
+            scripts/check_nuget_public_artifacts.py
+            scripts/check_publication_run.py
+            scripts/real_user_dotnet_selected_public_nuget_smoke.sh
+          )
+          for relative_path in "${control_files[@]}"; do
+            path="$control_root/$relative_path"
+            expected="$(
+              git -C "$control_root" show "${RELEASE_CONTROL_SHA}:$relative_path" |
+                sha256sum | awk '{print $1}'
+            )"
+            actual="$(sha256sum "$path" | awk '{print $1}')"
+            if [[ ! -f "$path" || -L "$path" || ! "$expected" =~ ^[0-9a-f]{64}$ || "$actual" != "$expected" ]]; then
+              echo "Protected release control changed." >&2
+              exit 1
+            fi
+            printf '%s_sha256=%s\n' "$(basename "${relative_path%.*}")" "$expected" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Authenticate NuGet publication boundary
+        shell: bash
+        env:
+          GITHUB_AUTHORIZATION: ${{ github.token }}
+          PUBLICATION_RUN_ID: ${{ inputs.nuget_publication_run_id }}
+          PUBLICATION_WORKFLOW_SHA: ${{ inputs.publication_workflow_sha }}
+          RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$PUBLICATION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          control_script="$control_root/scripts/check_publication_run.py"
+          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
+            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_publication_run.py; then
+            echo "Protected release control changed." >&2
+            exit 1
+          fi
+          python3 "$control_script" \
+            --repository "$GITHUB_REPOSITORY" \
+            --run-id "$PUBLICATION_RUN_ID" \
+            --family nuget \
+            --workflow-sha "$PUBLICATION_WORKFLOW_SHA" \
+            --source-sha "$RELEASE_SOURCE_SHA"
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Bind selected NuGet package plan
+        shell: bash
+        env:
+          NUGET_PACKAGES_INPUT: LogBrew,LogBrew.HttpClient
+          CORE_VERSION: ${{ inputs.nuget_core_version }}
+          HTTPCLIENT_VERSION: ${{ inputs.nuget_httpclient_version }}
+        run: |
+          set -Eeuo pipefail
+          plan="$RUNNER_TEMP/logbrew-nuget-reconciliation-plan.json"
+          python3 scripts/nuget_release_plan.py create --root "$GITHUB_WORKSPACE" \
+            --packages-env NUGET_PACKAGES_INPUT --output "$plan"
+          mapfile -t versions < <(
+            python3 scripts/nuget_release_plan.py entries \
+              --root "$GITHUB_WORKSPACE" --plan "$plan" --format versions
+          )
+          expected=("LogBrew=$CORE_VERSION" "LogBrew.HttpClient=$HTTPCLIENT_VERSION")
+          if [[ ${#versions[@]} -ne 2 || "${versions[*]}" != "${expected[*]}" ]]; then
+            echo "NuGet reconciliation package selection is invalid." >&2
+            exit 1
+          fi
+
+      - name: Reconcile public NuGet artifacts
+        shell: bash
+        env:
+          CORE_VERSION: ${{ inputs.nuget_core_version }}
+          HTTPCLIENT_VERSION: ${{ inputs.nuget_httpclient_version }}
+          RELEASE_SOURCE_SHA: ${{ steps.release-source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          control_script="$control_root/scripts/check_nuget_public_artifacts.py"
+          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
+            ! git -C "$control_root" diff --quiet HEAD -- scripts/check_nuget_public_artifacts.py; then
+            echo "Protected release control changed." >&2
+            exit 1
+          fi
+          dependency_range="$(
+            python3 -c 'import sys; sys.path.insert(0, "scripts"); from release_metadata_dotnet import compatible_dependency_range; print(compatible_dependency_range(sys.argv[1]))' \
+              "$CORE_VERSION"
+          )"
+          python3 "$control_script" \
+            --nuget-version "LogBrew=$CORE_VERSION" \
+            --nuget-version "LogBrew.HttpClient=$HTTPCLIENT_VERSION" \
+            --source-commit "$RELEASE_SOURCE_SHA" \
+            --dependency-range "$dependency_range" \
+            --source-root "$GITHUB_WORKSPACE" \
+            --output-directory "$RUNNER_TEMP/nuget-public-artifacts" \
+            --manifest "$RUNNER_TEMP/nuget-public-reconciliation.json"
+
+      - name: Execute exact public NuGet artifacts
+        env:
+          LOGBREW_RELEASE_SOURCE_ROOT: ${{ github.workspace }}
+        run: |
+          set -Eeuo pipefail
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          control_script="$control_root/scripts/real_user_dotnet_selected_public_nuget_smoke.sh"
+          if [[ ! -f "$control_script" || -L "$control_script" ]] ||
+            ! git -C "$control_root" diff --quiet HEAD -- scripts/real_user_dotnet_selected_public_nuget_smoke.sh; then
+            echo "Protected release control changed." >&2
+            exit 1
+          fi
+          bash "$control_script" \
+            --plan "$RUNNER_TEMP/logbrew-nuget-reconciliation-plan.json" \
+            --artifact-root "$RUNNER_TEMP/nuget-public-artifacts"
+
+      - name: Upload NuGet reconciliation receipt
+        uses: actions/upload-artifact@v6
+        with:
+          name: nuget-public-reconciliation
+          path: ${{ runner.temp }}/nuget-public-reconciliation.json
+          if-no-files-found: error
+          retention-days: 14
