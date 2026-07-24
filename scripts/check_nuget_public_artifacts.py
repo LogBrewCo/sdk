@@ -51,6 +51,7 @@ MAX_NUSPEC_BYTES = 512 * 1024
 MAX_PROJECT_BYTES = 512 * 1024
 MAX_ZIP_TAIL_BYTES = 65_557
 CATALOG_TIMESTAMP = re.compile(r"[0-9]{4}(?:\.[0-9]{2}){5}")
+CATALOG_FRAMEWORK_ALIASES = {".NETStandard2.0": "netstandard2.0"}
 
 
 class RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -399,6 +400,7 @@ def validate_dependency_groups(
     *,
     dependency_key: str,
     framework_key: str,
+    framework_aliases: dict[str, str] | None = None,
 ) -> None:
     expected_frameworks, expected_dependencies = contract
     if not isinstance(groups, list) or len(groups) != len(expected_frameworks):
@@ -412,9 +414,12 @@ def validate_dependency_groups(
         if (
             not isinstance(framework, str)
             or not framework
-            or framework in frameworks
             or not isinstance(dependencies, list)
         ):
+            fail()
+        if framework_aliases is not None:
+            framework = framework_aliases.get(framework, framework)
+        if framework in frameworks:
             fail()
         frameworks.add(framework)
         actual: dict[str, str] = {}
@@ -524,6 +529,7 @@ def fetch_registry_record(
         dependency_contract,
         dependency_key="range",
         framework_key="targetFramework",
+        framework_aliases=CATALOG_FRAMEWORK_ALIASES,
     )
     digest = decode_registry_digest(catalog.get("packageHash"))
     return expected_package_url, digest

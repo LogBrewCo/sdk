@@ -404,6 +404,9 @@ class NuGetPublicArtifactTests(unittest.TestCase):
             "catalog-malformed",
             "catalog-extra-dependency",
             "catalog-framework",
+            "catalog-framework-case",
+            "catalog-framework-alias",
+            "catalog-framework-duplicate",
             "nuspec-extra-dependency",
             "nuspec-framework",
         ):
@@ -462,6 +465,24 @@ class NuGetPublicArtifactTests(unittest.TestCase):
                     elif case == "catalog-framework":
                         catalog = json.loads(registry.responses[catalog_url].body)
                         catalog["dependencyGroups"][0]["targetFramework"] = "net9.0"
+                        registry.add(catalog_url, json.dumps(catalog).encode())
+                    elif case == "catalog-framework-case":
+                        catalog = json.loads(registry.responses[catalog_url].body)
+                        catalog["dependencyGroups"][0]["targetFramework"] = (
+                            ".NetStandard2.0"
+                        )
+                        registry.add(catalog_url, json.dumps(catalog).encode())
+                    elif case == "catalog-framework-alias":
+                        catalog = json.loads(registry.responses[catalog_url].body)
+                        catalog["dependencyGroups"][0]["targetFramework"] = (
+                            ".NETStandard2.1"
+                        )
+                        registry.add(catalog_url, json.dumps(catalog).encode())
+                    elif case == "catalog-framework-duplicate":
+                        catalog = json.loads(registry.responses[catalog_url].body)
+                        catalog["dependencyGroups"][1]["targetFramework"] = (
+                            "netstandard2.0"
+                        )
                         registry.add(catalog_url, json.dumps(catalog).encode())
                     elif case in {"nuspec-extra-dependency", "nuspec-framework"}:
                         body = self.package(
@@ -603,7 +624,7 @@ class NuGetPublicArtifactTests(unittest.TestCase):
                                 "targetFramework": framework,
                                 "dependencies": dependencies,
                             }
-                            for framework in ("netstandard2.0", "net8.0")
+                            for framework in (".NETStandard2.0", "net8.0")
                         ],
                     }
                 ).encode(),
