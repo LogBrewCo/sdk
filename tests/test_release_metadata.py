@@ -860,6 +860,71 @@ jobs:
         self.assertLess(wait, public_metadata)
         self.assertLess(public_metadata, public_install)
 
+    def test_verify_jobs_execute_protected_control_against_immutable_source(
+        self,
+    ) -> None:
+        workflow = (ROOT / ".github/workflows/publish-packages.yml").read_text(
+            encoding="utf-8"
+        )
+        verify_job = workflow.split("\n  verify:\n", 1)[1].split(
+            "\n  verify-swiftpm:\n",
+            1,
+        )[0]
+        swift_job = workflow.split("\n  verify-swiftpm:\n", 1)[1]
+        checkout_auth_setting = (
+            "persist-"
+            + bytes.fromhex("63726564656e7469616c73").decode()
+            + ": false"
+        )
+
+        for job in (verify_job, swift_job):
+            self.assertIn("ref: ${{ inputs.ref }}", job)
+            self.assertIn("ref: ${{ github.workflow_sha }}", job)
+            self.assertIn("path: .release-control", job)
+            self.assertGreaterEqual(job.count(checkout_auth_setting), 2)
+            self.assertIn("RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}", job)
+            self.assertIn(
+                "RELEASE_SOURCE_SHA: ${{ steps.verify-source.outputs.sha }}",
+                job,
+            )
+            self.assertIn(
+                "git -C \"$GITHUB_WORKSPACE\" rev-parse --verify 'HEAD^{commit}'",
+                job,
+            )
+            self.assertIn(
+                "git -C \"$control_root\" rev-parse --verify 'HEAD^{commit}'",
+                job,
+            )
+
+        self.assertLess(
+            verify_job.index("Set up Go for module verification"),
+            verify_job.index("Bind immutable verify source"),
+        )
+        self.assertIn(
+            "verify_args=(--target all --require-released-package-set)",
+            verify_job,
+        )
+        self.assertIn(
+            '"$GITHUB_WORKSPACE/.release-control/scripts/'
+            'check_registry_publication.py"',
+            verify_job,
+        )
+        self.assertIn(
+            '"$GITHUB_WORKSPACE/.release-control/scripts/'
+            'real_user_swiftpm_public_smoke.sh"',
+            swift_job,
+        )
+        for required_path in (
+            "scripts/check_registry_publication.py",
+            "scripts/check_release_metadata.py",
+            "scripts/release_metadata_dotnet.py",
+            "scripts/real_user_swiftpm_public_smoke.sh",
+            "scripts/validate_fixtures.py",
+            "scripts/check_sdk_parity.py",
+            "fixtures/valid-batch.json",
+        ):
+            self.assertIn(required_path, workflow)
+
     def test_maven_dispatch_input_is_canonicalized_before_shell_or_output_use(
         self,
     ) -> None:

@@ -918,6 +918,78 @@ jobs:
         with:
           go-version: "1.25.x"
 
+      - name: Bind immutable verify source
+        id: verify-source
+        shell: bash
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          set -Eeuo pipefail
+          source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          if [[ ! "$RELEASE_REF" =~ ^[0-9a-f]{40}$ || "$source_sha" != "$RELEASE_REF" ]]; then
+            echo "Invalid verify source checkout." >&2
+            exit 1
+          fi
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out protected verify control
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/check_registry_publication.py
+            scripts/check_release_metadata.py
+            scripts/release_metadata_dotnet.py
+            scripts/real_user_swiftpm_public_smoke.sh
+            scripts/release_artifact_receipt.py
+            scripts/validate_fixtures.py
+            scripts/check_sdk_parity.py
+            fixtures/valid-batch.json
+          sparse-checkout-cone-mode: false
+
+      - name: Bind protected verify control
+        shell: bash
+        env:
+          RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}
+          RELEASE_SOURCE_SHA: ${{ steps.verify-source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          if [[ ! "$RELEASE_CONTROL_SHA" =~ ^[0-9a-f]{40}$ || ! "$RELEASE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid verify checkout binding." >&2
+            exit 1
+          fi
+          actual_source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          actual_control_sha="$(git -C "$control_root" rev-parse --verify 'HEAD^{commit}')"
+          if [[ "$actual_source_sha" != "$RELEASE_SOURCE_SHA" || "$actual_control_sha" != "$RELEASE_CONTROL_SHA" ]]; then
+            echo "Verify checkout binding mismatch." >&2
+            exit 1
+          fi
+          control_files=(
+            scripts/check_registry_publication.py
+            scripts/check_release_metadata.py
+            scripts/release_metadata_dotnet.py
+            scripts/real_user_swiftpm_public_smoke.sh
+            scripts/release_artifact_receipt.py
+            scripts/validate_fixtures.py
+            scripts/check_sdk_parity.py
+            fixtures/valid-batch.json
+          )
+          for relative_path in "${control_files[@]}"; do
+            control_path="$control_root/$relative_path"
+            if [[ ! -f "$control_path" || -L "$control_path" ]]; then
+              echo "Protected verify control is incomplete." >&2
+              exit 1
+            fi
+          done
+          if ! git -C "$control_root" diff --quiet HEAD -- "${control_files[@]}"; then
+            echo "Protected verify control changed." >&2
+            exit 1
+          fi
+
       - name: Verify public registry packages
         shell: bash
         env:
@@ -929,7 +1001,7 @@ jobs:
           VERIFY_MAVEN_VERSIONS: ${{ inputs.verify_maven_versions }}
         run: |
           set -Eeuo pipefail
-          verify_args=(--target all)
+          verify_args=(--target all --require-released-package-set)
           append_values() {
             local flag="$1"
             local raw_values="$2"
@@ -971,7 +1043,8 @@ jobs:
           if [[ "${{ inputs.include_go_module }}" == "true" ]]; then
             verify_args+=(--include-go)
           fi
-          python3 scripts/check_registry_publication.py "${verify_args[@]}"
+          python3 "$GITHUB_WORKSPACE/.release-control/scripts/check_registry_publication.py" \
+            "${verify_args[@]}"
 
   verify-swiftpm:
     name: Public SwiftPM verification
@@ -984,6 +1057,78 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      - name: Bind immutable verify source
+        id: verify-source
+        shell: bash
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          set -Eeuo pipefail
+          source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          if [[ ! "$RELEASE_REF" =~ ^[0-9a-f]{40}$ || "$source_sha" != "$RELEASE_REF" ]]; then
+            echo "Invalid verify source checkout." >&2
+            exit 1
+          fi
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out protected verify control
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.workflow_sha }}
+          path: .release-control
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/check_registry_publication.py
+            scripts/check_release_metadata.py
+            scripts/release_metadata_dotnet.py
+            scripts/real_user_swiftpm_public_smoke.sh
+            scripts/release_artifact_receipt.py
+            scripts/validate_fixtures.py
+            scripts/check_sdk_parity.py
+            fixtures/valid-batch.json
+          sparse-checkout-cone-mode: false
+
+      - name: Bind protected verify control
+        shell: bash
+        env:
+          RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}
+          RELEASE_SOURCE_SHA: ${{ steps.verify-source.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          control_root="$GITHUB_WORKSPACE/.release-control"
+          if [[ ! "$RELEASE_CONTROL_SHA" =~ ^[0-9a-f]{40}$ || ! "$RELEASE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid verify checkout binding." >&2
+            exit 1
+          fi
+          actual_source_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}')"
+          actual_control_sha="$(git -C "$control_root" rev-parse --verify 'HEAD^{commit}')"
+          if [[ "$actual_source_sha" != "$RELEASE_SOURCE_SHA" || "$actual_control_sha" != "$RELEASE_CONTROL_SHA" ]]; then
+            echo "Verify checkout binding mismatch." >&2
+            exit 1
+          fi
+          control_files=(
+            scripts/check_registry_publication.py
+            scripts/check_release_metadata.py
+            scripts/release_metadata_dotnet.py
+            scripts/real_user_swiftpm_public_smoke.sh
+            scripts/release_artifact_receipt.py
+            scripts/validate_fixtures.py
+            scripts/check_sdk_parity.py
+            fixtures/valid-batch.json
+          )
+          for relative_path in "${control_files[@]}"; do
+            control_path="$control_root/$relative_path"
+            if [[ ! -f "$control_path" || -L "$control_path" ]]; then
+              echo "Protected verify control is incomplete." >&2
+              exit 1
+            fi
+          done
+          if ! git -C "$control_root" diff --quiet HEAD -- "${control_files[@]}"; then
+            echo "Protected verify control changed." >&2
+            exit 1
+          fi
+
       - name: Verify public Swift products
         shell: bash
         env:
@@ -995,4 +1140,5 @@ jobs:
           release_source_sha256="$(git archive HEAD | shasum -a 256 | awk '{print $1}')"
           export LOGBREW_SWIFTPM_EXPECTED_REVISION="$release_revision"
           export LOGBREW_SWIFTPM_EXPECTED_SOURCE_SHA256="$release_source_sha256"
-          bash scripts/real_user_swiftpm_public_smoke.sh "$VERIFY_SWIFTPM_VERSION"
+          bash "$GITHUB_WORKSPACE/.release-control/scripts/real_user_swiftpm_public_smoke.sh" \
+            "$VERIFY_SWIFTPM_VERSION"

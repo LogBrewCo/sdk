@@ -156,7 +156,8 @@ let crashStorage = URL(fileURLWithPath: NSTemporaryDirectory())
     .appendingPathComponent("logbrew-swiftpm-crash-receipt", isDirectory: true)
 let crashConfiguration = try NativeCrashConfiguration(storageDirectory: crashStorage)
 let crashCapture = NativeCrashCapture(configuration: crashConfiguration)
-precondition(try crashCapture.status().lifecycle == .idle)
+let crashStatus = try crashCapture.status()
+precondition(crashStatus.lifecycle == .idle)
 
 let client = try LogBrewClient.create(
     apiKey: "LOGBREW_API_KEY",

@@ -19,17 +19,32 @@ from pathlib import Path
 from typing import Any, Callable
 
 from check_release_metadata import (
-    JS_PACKAGES,
     MAVEN_VERSION,
     PACKAGIST_VERSION,
     PUBLIC_VERSION,
     RUBYGEMS_VERSION,
     RUST_VERSION,
 )
-from release_metadata_dotnet import DOTNET_RELEASE_PACKAGES
 
 
-NPM_PACKAGES = tuple(sorted(JS_PACKAGES.values()))
+NPM_PACKAGES = (
+    "@logbrew/amqplib",
+    "@logbrew/angular",
+    "@logbrew/aws-sqs",
+    "@logbrew/browser",
+    "@logbrew/bullmq",
+    "@logbrew/express",
+    "@logbrew/fastify",
+    "@logbrew/kafkajs",
+    "@logbrew/nestjs",
+    "@logbrew/next",
+    "@logbrew/node",
+    "@logbrew/react",
+    "@logbrew/react-native",
+    "@logbrew/sdk",
+    "@logbrew/svelte",
+    "@logbrew/vue",
+)
 NPM_VERSION_PACKAGES = NPM_PACKAGES + ("co.logbrew.unity",)
 PYPI_PACKAGES = ("logbrew-sdk",)
 PYPI_EXTRA_PACKAGES = ("logbrew-fastapi", "logbrew-flask", "logbrew-django")
@@ -39,12 +54,27 @@ CRATES = ("logbrew",)
 MAVEN_ARTIFACTS = ("logbrew-sdk", "logbrew-kotlin", "logbrew-kotlin-okhttp")
 MAVEN_PACKAGE_LABELS = tuple(f"co.logbrew:{artifact_id}" for artifact_id in MAVEN_ARTIFACTS)
 DEFAULT_PACKAGE_VERSIONS = {
-    **{package_name: RUBYGEMS_VERSION for package_name in RUBYGEMS_PACKAGES},
-    **{package_name: PACKAGIST_VERSION for package_name in PACKAGIST_PACKAGES},
-    **{package_name: RUST_VERSION for package_name in CRATES},
-    **{package_name: MAVEN_VERSION for package_name in MAVEN_PACKAGE_LABELS},
+    **{
+        ("rubygems", package_name): RUBYGEMS_VERSION
+        for package_name in RUBYGEMS_PACKAGES
+    },
+    **{
+        ("packagist", package_name): PACKAGIST_VERSION
+        for package_name in PACKAGIST_PACKAGES
+    },
+    **{("crates", package_name): RUST_VERSION for package_name in CRATES},
+    **{
+        ("maven", package_name): MAVEN_VERSION
+        for package_name in MAVEN_PACKAGE_LABELS
+    },
 }
-NUGET_PACKAGES = tuple(package.package_id for package in DOTNET_RELEASE_PACKAGES)
+NUGET_PACKAGES = (
+    "LogBrew",
+    "LogBrew.AspNetCore",
+    "LogBrew.EntityFrameworkCore",
+    "LogBrew.HttpClient",
+    "LogBrew.StackExchangeRedis",
+)
 OPENUPM_PACKAGES = ("co.logbrew.unity",)
 
 def decode_json(raw: bytes) -> Any:
@@ -61,6 +91,7 @@ class RegistryCheck:
     url: str
     extractor: Callable[[Any], set[str]]
     decoder: Callable[[bytes], Any] = decode_json
+    family: str = ""
 
 
 def maybe_string(value: Any) -> set[str]:
@@ -181,11 +212,21 @@ def maven_versions(payload: Any) -> set[str]:
 
 def npm_check(package_name: str) -> RegistryCheck:
     encoded = urllib.parse.quote(package_name, safe="")
-    return RegistryCheck(package_name, f"https://registry.npmjs.org/{encoded}", npm_versions)
+    return RegistryCheck(
+        package_name,
+        f"https://registry.npmjs.org/{encoded}",
+        npm_versions,
+        family="npm",
+    )
 
 
 def pypi_check(package_name: str) -> RegistryCheck:
-    return RegistryCheck(package_name, f"https://pypi.org/pypi/{package_name}/json", pypi_versions)
+    return RegistryCheck(
+        package_name,
+        f"https://pypi.org/pypi/{package_name}/json",
+        pypi_versions,
+        family="pypi",
+    )
 
 
 def rubygems_check(package_name: str) -> RegistryCheck:
@@ -193,6 +234,7 @@ def rubygems_check(package_name: str) -> RegistryCheck:
         package_name,
         f"https://rubygems.org/api/v1/gems/{package_name}.json",
         rubygems_versions,
+        family="rubygems",
     )
 
 
@@ -202,6 +244,7 @@ def nuget_check(package_name: str) -> RegistryCheck:
         package_name,
         f"https://api.nuget.org/v3-flatcontainer/{lowered}/index.json",
         nuget_versions,
+        family="nuget",
     )
 
 
@@ -210,6 +253,7 @@ def packagist_check(package_name: str) -> RegistryCheck:
         package_name,
         f"https://repo.packagist.org/p2/{package_name}.json",
         packagist_versions(package_name),
+        family="packagist",
     )
 
 
@@ -219,6 +263,7 @@ def crates_check(crate_name: str) -> RegistryCheck:
         f"https://index.crates.io/{crates_index_path(crate_name)}",
         crates_versions,
         decode_text,
+        family="crates",
     )
 
 
@@ -228,12 +273,18 @@ def maven_check(artifact_id: str) -> RegistryCheck:
         f"https://repo1.maven.org/maven2/co/logbrew/{artifact_id}/maven-metadata.xml",
         maven_versions,
         decode_text,
+        family="maven",
     )
 
 
 def openupm_check(package_name: str) -> RegistryCheck:
     encoded = urllib.parse.quote(package_name, safe="")
-    return RegistryCheck(package_name, f"https://package.openupm.com/{encoded}", npm_versions)
+    return RegistryCheck(
+        package_name,
+        f"https://package.openupm.com/{encoded}",
+        npm_versions,
+        family="openupm",
+    )
 
 
 def checks_for(args: argparse.Namespace) -> list[RegistryCheck]:
@@ -251,9 +302,13 @@ def checks_for(args: argparse.Namespace) -> list[RegistryCheck]:
 
     checks: list[RegistryCheck] = []
     if "npm" in requested:
-        npm_packages = tuple(args.npm_package) if args.npm_package else NPM_PACKAGES
+        npm_packages = (
+            tuple(args.npm_package)
+            or tuple(getattr(args, "npm_versions", {}))
+            or NPM_PACKAGES
+        )
         checks.extend(npm_check(package_name) for package_name in npm_packages)
-        if args.include_unity_npm:
+        if args.include_unity_npm and "co.logbrew.unity" not in npm_packages:
             checks.append(npm_check("co.logbrew.unity"))
     if "pypi" in requested:
         checks.extend(pypi_check(package_name) for package_name in PYPI_PACKAGES)
@@ -431,9 +486,18 @@ def validate_go_module(version: str) -> list[str]:
 
 def validate(args: argparse.Namespace) -> list[str]:
     failures: list[str] = []
+    family_versions = {
+        "npm": getattr(args, "npm_versions", {}),
+        "pypi": getattr(args, "pypi_versions", {}),
+        "nuget": getattr(args, "nuget_versions", {}),
+        "maven": getattr(args, "maven_versions", {}),
+    }
     for check in checks_for(args):
-        default_version = DEFAULT_PACKAGE_VERSIONS.get(check.label, args.version)
-        version = args.package_versions.get(check.label, default_version)
+        default_version = DEFAULT_PACKAGE_VERSIONS.get(
+            (check.family, check.label),
+            args.version,
+        )
+        version = family_versions.get(check.family, {}).get(check.label, default_version)
         expected = registry_expected_versions(check, version)
         if getattr(args, "expect_absent", False):
             failures.extend(validate_absent_check(check, expected, args.timeout))
@@ -515,17 +579,26 @@ def success_summary(args: argparse.Namespace) -> str:
     targets = ", ".join(args.target)
     requested_targets = set(args.target)
     rubygems_versions = (
-        {package_name: DEFAULT_PACKAGE_VERSIONS[package_name] for package_name in RUBYGEMS_PACKAGES}
+        {
+            package_name: DEFAULT_PACKAGE_VERSIONS[("rubygems", package_name)]
+            for package_name in RUBYGEMS_PACKAGES
+        }
         if "rubygems" in requested_targets or "all" in requested_targets
         else {}
     )
     packagist_versions = (
-        {package_name: DEFAULT_PACKAGE_VERSIONS[package_name] for package_name in PACKAGIST_PACKAGES}
+        {
+            package_name: DEFAULT_PACKAGE_VERSIONS[("packagist", package_name)]
+            for package_name in PACKAGIST_PACKAGES
+        }
         if "packagist" in requested_targets or "all" in requested_targets
         else {}
     )
     crate_versions = (
-        {package_name: DEFAULT_PACKAGE_VERSIONS[package_name] for package_name in CRATES}
+        {
+            package_name: DEFAULT_PACKAGE_VERSIONS[("crates", package_name)]
+            for package_name in CRATES
+        }
         if "crates" in requested_targets or "all" in requested_targets
         else {}
     )
@@ -616,6 +689,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--include-maven", action="store_true")
     parser.add_argument("--include-openupm", action="store_true")
     parser.add_argument("--include-go", action="store_true")
+    parser.add_argument(
+        "--require-released-package-set",
+        action="store_true",
+        help="Require exact released npm and NuGet package version maps.",
+    )
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--retries", type=int, default=6)
     parser.add_argument("--retry-delay", type=float, default=10.0)
@@ -668,6 +746,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             allowed_packages=MAVEN_PACKAGE_LABELS,
             package_family="Maven",
         )
+        if args.require_released_package_set:
+            required_npm_packages = (
+                NPM_VERSION_PACKAGES if args.include_unity_npm else NPM_PACKAGES
+            )
+            if (
+                "all" not in args.target
+                or args.npm_package
+                or set(args.npm_versions) != set(required_npm_packages)
+                or set(args.nuget_versions) != set(NUGET_PACKAGES)
+            ):
+                raise argparse.ArgumentTypeError(
+                    "released package verification requires exact npm and NuGet maps"
+                )
         if args.maven_plan:
             args.maven_artifact, args.maven_versions = maven_plan_entries(
                 args.maven_plan,

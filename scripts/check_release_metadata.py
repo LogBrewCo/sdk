@@ -1041,6 +1041,42 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
     publish_packages_path = require_path(root, PUBLISH_PACKAGES_WORKFLOW, failures)
     if publish_packages_path.exists():
         publish_packages_text = publish_packages_path.read_text(encoding="utf-8")
+        verify_control_requirements = {
+            "immutable verify source binding": "id: verify-source",
+            "protected verify-control checkout": (
+                "- name: Check out protected verify control"
+            ),
+            "verify-control repository binding": (
+                "repository: ${{ github.repository }}"
+            ),
+            "verify-control workflow SHA binding": (
+                "ref: ${{ github.workflow_sha }}"
+            ),
+            "verify-control isolated path": "path: .release-control",
+            "verify-control runtime binding": (
+                "- name: Bind protected verify control"
+            ),
+            "verify-control expected SHA": (
+                "RELEASE_CONTROL_SHA: ${{ github.workflow_sha }}"
+            ),
+            "verify source expected SHA": (
+                "RELEASE_SOURCE_SHA: ${{ steps.verify-source.outputs.sha }}"
+            ),
+            "protected registry verifier execution": (
+                '"$GITHUB_WORKSPACE/.release-control/scripts/'
+                'check_registry_publication.py"'
+            ),
+            "protected Swift verifier execution": (
+                '"$GITHUB_WORKSPACE/.release-control/scripts/'
+                'real_user_swiftpm_public_smoke.sh"'
+            ),
+        }
+        for description, needle in verify_control_requirements.items():
+            require(
+                needle in publish_packages_text,
+                failures,
+                f"{PUBLISH_PACKAGES_WORKFLOW}: missing {description}",
+            )
         publish_nuget_path = require_path(root, PUBLISH_NUGET_WORKFLOW, failures)
         if publish_nuget_path.exists():
             publish_nuget_text = publish_nuget_path.read_text(encoding="utf-8")
@@ -1135,6 +1171,9 @@ def validate_release_workflows(root: Path, failures: list[str]) -> None:
             "SwiftPM installed products receipt": "real_user_swiftpm_public_smoke.sh",
             "verify target exact version input": "verify_version:",
             "verify target exact version argument": 'verify_args+=(--version "$VERIFY_VERSION")',
+            "verify target exact released package set": (
+                "verify_args=(--target all --require-released-package-set)"
+            ),
             "verify target npm version override": 'append_values --npm-version "$VERIFY_NPM_VERSIONS"',
             "verify target PyPI version override": 'append_values --pypi-version "$VERIFY_PYPI_VERSIONS"',
             "verify target NuGet version override": (
