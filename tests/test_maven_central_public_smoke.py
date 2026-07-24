@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -140,6 +141,53 @@ class MavenCentralPublicSmokeTests(unittest.TestCase):
                         result.stderr,
                         "Maven JAR metadata validation failed\n",
                     )
+
+    def test_receipt_mode_rejects_xml_declarations_before_java_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            fake_bin = tmp / "bin"
+            fake_bin.mkdir()
+            marker_text = "expanded-content-must-not-leak"
+            declarations = {
+                "doctype": "<!DOCTYPE project>",
+                "entity": (
+                    '<!DOCTYPE project [<!ENTITY expansion "'
+                    f'{marker_text}">]>'
+                ),
+            }
+
+            for name, declaration in declarations.items():
+                with self.subTest(name=name):
+                    execution_marker = tmp / f"{name}-executed"
+                    for command_name in ("javac", "java"):
+                        command = fake_bin / command_name
+                        command.write_text(
+                            "#!/bin/sh\n"
+                            f"printf executed >> {shlex.quote(str(execution_marker))}\n"
+                            "exit 0\n",
+                            encoding="utf-8",
+                        )
+                        command.chmod(0o700)
+                    pom = self._pom().replace(
+                        '<project xmlns="http://maven.apache.org/POM/4.0.0">',
+                        f'{declaration}\n'
+                        '<project xmlns="http://maven.apache.org/POM/4.0.0">',
+                    )
+                    if name == "entity":
+                        pom = pom.replace("</project>", f"<description>&expansion;</description></project>")
+                    artifact = tmp / f"{name}.jar"
+                    self._write_jar(artifact, [(POM_PATH, pom)])
+
+                    result = self._run_receipt(artifact, fake_bin)
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(
+                        result.stderr,
+                        "Maven JAR metadata validation failed\n",
+                    )
+                    self.assertFalse(execution_marker.exists())
+                    self.assertNotIn(marker_text, result.stdout)
+                    self.assertNotIn(marker_text, result.stderr)
 
     def test_script_proves_current_public_maven_artifact_installs(self) -> None:
         body = SCRIPT.read_text(encoding="utf-8")

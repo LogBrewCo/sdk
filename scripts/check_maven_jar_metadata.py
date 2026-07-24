@@ -66,7 +66,14 @@ def validate(jar_path: Path, expected_version: str) -> None:
         if len(document) > MAX_POM_BYTES:
             fail()
 
-    project = ET.fromstring(document)
+    try:
+        pom_text = document.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        fail()
+    if "<!DOCTYPE" in pom_text or "<!ENTITY" in pom_text:
+        fail()
+
+    project = ET.fromstring(pom_text)
     if project.tag != f"{{{POM_NAMESPACE}}}project":
         fail()
     if coordinate(project, "groupId") != GROUP_ID:
