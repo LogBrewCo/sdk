@@ -80,6 +80,7 @@ class ReactNativeFatalHandoffContractTests(unittest.TestCase):
             "ios/LBRNFatalStoreModule.mm",
             "android/build.gradle",
             "android/src/main/AndroidManifest.xml",
+            "android/src/main/java/co/logbrew/reactnative/AndroidParentDirectorySync.java",
             "android/src/main/java/co/logbrew/reactnative/FatalRecordStore.java",
             "android/src/main/java/co/logbrew/reactnative/FatalStoreModuleImpl.java",
             "android/src/main/java/co/logbrew/reactnative/LogBrewReactNativePackage.java",
@@ -110,6 +111,7 @@ class ReactNativeFatalHandoffContractTests(unittest.TestCase):
             "ios/LBRNFatalStoreModule.mm",
             "android/build.gradle",
             "android/src/main/AndroidManifest.xml",
+            "android/src/main/java/co/logbrew/reactnative/AndroidParentDirectorySync.java",
             "android/src/main/java/co/logbrew/reactnative/FatalRecordStore.java",
             "android/src/main/java/co/logbrew/reactnative/FatalStoreModuleImpl.java",
             "android/src/main/java/co/logbrew/reactnative/LogBrewReactNativePackage.java",
@@ -349,6 +351,56 @@ if (typeof root.installLogBrewReactNativeGlobalErrorHandler!=="function") {
                 old_arch,
             )
             self.assertIn(f"public WritableMap {method_name}", new_arch)
+
+    def test_android_parent_sync_uses_public_no_follow_platform_apis(self) -> None:
+        store = (
+            PACKAGE_ROOT
+            / "android"
+            / "src"
+            / "main"
+            / "java"
+            / "co"
+            / "logbrew"
+            / "reactnative"
+            / "FatalRecordStore.java"
+        ).read_text(encoding="utf-8")
+        module = (
+            PACKAGE_ROOT
+            / "android"
+            / "src"
+            / "main"
+            / "java"
+            / "co"
+            / "logbrew"
+            / "reactnative"
+            / "FatalStoreModuleImpl.java"
+        ).read_text(encoding="utf-8")
+        sync_path = (
+            PACKAGE_ROOT
+            / "android"
+            / "src"
+            / "main"
+            / "java"
+            / "co"
+            / "logbrew"
+            / "reactnative"
+            / "AndroidParentDirectorySync.java"
+        )
+
+        self.assertTrue(sync_path.is_file())
+        sync = sync_path.read_text(encoding="utf-8")
+        self.assertNotIn("java.lang.reflect", store)
+        self.assertNotIn("Class.forName", store)
+        self.assertIn("new AndroidParentDirectorySync()", module)
+        for platform_api in (
+            "Os.open",
+            "Os.fstat",
+            "OsConstants.O_NOFOLLOW",
+            "OsConstants.S_ISDIR",
+            "Os.fsync",
+            "Os.close",
+        ):
+            self.assertIn(platform_api, sync)
 
     def test_esm_cjs_and_typescript_publish_the_same_additive_api(self) -> None:
         esm = (PACKAGE_ROOT / "global-errors.js").read_text(encoding="utf-8")

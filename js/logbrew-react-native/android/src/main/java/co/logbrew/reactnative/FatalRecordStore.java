@@ -6,12 +6,9 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.File;
-import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -49,15 +46,23 @@ final class FatalRecordStore {
                   "SyntaxError",
                   "TypeError",
                   "URIError")));
+  private static final ParentDirectorySync UNSUPPORTED_PARENT_DIRECTORY_SYNC =
+      directory -> ParentDirectorySyncResult.UNSUPPORTED;
 
   private final File directory;
   private final File recordFile;
   private final File temporaryFile;
+  private final ParentDirectorySync parentDirectorySync;
 
   FatalRecordStore(File directory) {
+    this(directory, UNSUPPORTED_PARENT_DIRECTORY_SYNC);
+  }
+
+  FatalRecordStore(File directory, ParentDirectorySync parentDirectorySync) {
     this.directory = resolveCanonicalParent(directory);
     this.recordFile = new File(this.directory, RECORD_FILE_NAME);
     this.temporaryFile = new File(this.directory, TEMP_FILE_NAME);
+    this.parentDirectorySync = parentDirectorySync;
   }
 
   synchronized Result write(Record incoming) {
@@ -525,35 +530,17 @@ final class FatalRecordStore {
   }
 
   private boolean syncParentDirectory() {
-    try {
-      Class<?> constants = Class.forName("android.system.OsConstants");
-      int flags =
-          intField(constants, "O_RDONLY")
-              | intField(constants, "O_DIRECTORY")
-              | intField(constants, "O_CLOEXEC");
-      Class<?> os = Class.forName("android.system.Os");
-      Method open = os.getMethod("open", String.class, int.class, int.class);
-      Method fsync = os.getMethod("fsync", FileDescriptor.class);
-      Method close = os.getMethod("close", FileDescriptor.class);
-      FileDescriptor descriptor =
-          (FileDescriptor) open.invoke(null, directory.getAbsolutePath(), flags, 0);
-      try {
-        fsync.invoke(null, descriptor);
-      } finally {
-        close.invoke(null, descriptor);
-      }
-      return true;
-    } catch (ClassNotFoundException unavailableOutsideAndroid) {
-      return true;
-    } catch (ReflectiveOperationException | RuntimeException error) {
-      return false;
-    }
+    return parentDirectorySync.sync(directory) != ParentDirectorySyncResult.FAILED;
   }
 
-  private static int intField(Class<?> owner, String name)
-      throws ReflectiveOperationException {
-    Field field = owner.getField(name);
-    return field.getInt(null);
+  interface ParentDirectorySync {
+    ParentDirectorySyncResult sync(File directory);
+  }
+
+  enum ParentDirectorySyncResult {
+    SYNCHRONIZED,
+    UNSUPPORTED,
+    FAILED
   }
 
   static final class Frame {

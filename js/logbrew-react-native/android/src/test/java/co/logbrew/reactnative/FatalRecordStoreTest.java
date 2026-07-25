@@ -25,6 +25,8 @@ public final class FatalRecordStoreTest {
     suite.ignoresInterruptedTemporaryWrite();
     suite.rejectsSymlinkReplacementAndUsesPrivateModes();
     suite.discardSupportsRollback();
+    suite.unsupportedParentDirectorySyncPreservesCommittedStatuses();
+    suite.realParentDirectorySyncFailureRemainsFailClosed();
     System.out.println("android fatal record store tests: " + suite.passed + " passed");
   }
 
@@ -209,6 +211,48 @@ public final class FatalRecordStoreTest {
     passed += 1;
   }
 
+  private void unsupportedParentDirectorySyncPreservesCommittedStatuses() throws Exception {
+    withDirectory(
+        directory -> {
+          RecordingParentDirectorySync parentSync =
+              new RecordingParentDirectorySync(
+                  FatalRecordStore.ParentDirectorySyncResult.UNSUPPORTED);
+          FatalRecordStore store = new FatalRecordStore(directory, parentSync);
+
+          assertStatus(
+              "stored",
+              store.write(record("evt_rn_fatal_unsupported_sync", "main.jsbundle")));
+          assertStatus("pending", new FatalRecordStore(directory, parentSync).read());
+          assertStatus(
+              "acknowledged",
+              store.acknowledge("evt_rn_fatal_unsupported_sync"));
+          assertStatus("empty", new FatalRecordStore(directory, parentSync).read());
+          assertEquals(2, parentSync.calls);
+        });
+    passed += 1;
+  }
+
+  private void realParentDirectorySyncFailureRemainsFailClosed() throws Exception {
+    withDirectory(
+        directory -> {
+          RecordingParentDirectorySync failedSync =
+              new RecordingParentDirectorySync(
+                  FatalRecordStore.ParentDirectorySyncResult.FAILED);
+          FatalRecordStore store = new FatalRecordStore(directory, failedSync);
+
+          assertStatus(
+              "storage_error",
+              store.write(record("evt_rn_fatal_sync_failed", "main.jsbundle")));
+          assertStatus("pending", new FatalRecordStore(directory).read());
+          assertStatus(
+              "storage_error",
+              store.acknowledge("evt_rn_fatal_sync_failed"));
+          assertStatus("empty", new FatalRecordStore(directory).read());
+          assertEquals(2, failedSync.calls);
+        });
+    passed += 1;
+  }
+
   private void rejectsSymlinkReplacementAndUsesPrivateModes() throws Exception {
     withDirectory(
         directory -> {
@@ -303,5 +347,21 @@ public final class FatalRecordStoreTest {
 
   private interface DirectoryTest {
     void run(File directory) throws Exception;
+  }
+
+  private static final class RecordingParentDirectorySync
+      implements FatalRecordStore.ParentDirectorySync {
+    private final FatalRecordStore.ParentDirectorySyncResult result;
+    private int calls;
+
+    RecordingParentDirectorySync(FatalRecordStore.ParentDirectorySyncResult result) {
+      this.result = result;
+    }
+
+    @Override
+    public FatalRecordStore.ParentDirectorySyncResult sync(File directory) {
+      calls += 1;
+      return result;
+    }
   }
 }
