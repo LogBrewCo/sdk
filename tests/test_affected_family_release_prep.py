@@ -79,6 +79,24 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "^0.1.5",
         )
 
+    def test_react_native_bundle_smoke_matches_package_version(self) -> None:
+        manifest = json.loads(
+            (ROOT / "js/logbrew-react-native/package.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        smoke = (
+            ROOT / "scripts/real_user_react_native_bundle_smoke.sh"
+        ).read_text(encoding="utf-8")
+        expected_version = re.search(
+            r'^expected_react_native_package_version="([^"]+)"$',
+            smoke,
+            re.MULTILINE,
+        )
+
+        self.assertIsNotNone(expected_version)
+        self.assertEqual(expected_version.group(1), manifest["version"])
+
     def test_react_native_release_selector_accepts_name_and_package_directory(
         self,
     ) -> None:
