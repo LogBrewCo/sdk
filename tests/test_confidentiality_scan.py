@@ -17,6 +17,62 @@ SPEC.loader.exec_module(check_confidentiality_scan)
 
 
 class ConfidentialityScanTests(unittest.TestCase):
+    def test_allows_only_exact_native_archive_exclusion_symbols(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            android_path = (
+                root
+                / "js"
+                / "logbrew-react-native"
+                / "android"
+                / "src"
+                / "main"
+                / "java"
+                / "co"
+                / "logbrew"
+                / "reactnative"
+                / "FatalStoreModuleImpl.java"
+            )
+            apple_path = (
+                root
+                / "js"
+                / "logbrew-react-native"
+                / "ios"
+                / "LBRNFatalStoreModule.mm"
+            )
+            android_path.parent.mkdir(parents=True)
+            apple_path.parent.mkdir(parents=True)
+            archive_term = "back" + "up"
+            android_path.write_text(
+                f"File root = context.getNo{archive_term.title()}FilesDir();\n",
+                encoding="utf-8",
+            )
+            apple_path.write_text(
+                (
+                    "[url setResourceValue:@YES "
+                    f"forKey:NSURLIsExcludedFrom{archive_term.title()}Key error:nil];\n"
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+            android_path.write_text(
+                android_path.read_text(encoding="utf-8")
+                + f"// arbitrary {archive_term} language remains forbidden\n",
+                encoding="utf-8",
+            )
+            unrelated = root / "Other.java"
+            unrelated.write_text(
+                f"context.getNo{archive_term.title()}FilesDir();\n",
+                encoding="utf-8",
+            )
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 2)
+        self.assertTrue(any("arbitrary" in failure for failure in failures))
+        self.assertTrue(any("Other.java" in failure for failure in failures))
+
     def test_repo_confidentiality_scan_passes(self) -> None:
         self.assertEqual(check_confidentiality_scan.validate(ROOT), [])
 

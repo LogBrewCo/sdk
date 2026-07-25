@@ -1,0 +1,42 @@
+def newArchitectureEnabled() {
+  return project.hasProperty("newArchEnabled") && project.newArchEnabled == "true"
+}
+
+apply plugin: "com.android.library"
+
+if (newArchitectureEnabled()) {
+  apply plugin: "com.facebook.react"
+  react {
+    jsRootDir = file("../src")
+    libraryName = "LogBrewReactNativeSpec"
+    codegenJavaPackageName = "co.logbrew.reactnative"
+  }
+}
+
+android {
+  namespace "co.logbrew.reactnative"
+  compileSdkVersion rootProject.ext.has("compileSdkVersion")
+      ? rootProject.ext.get("compileSdkVersion")
+      : 35
+
+  defaultConfig {
+    minSdkVersion rootProject.ext.has("minSdkVersion")
+        ? rootProject.ext.get("minSdkVersion")
+        : 24
+    targetSdkVersion rootProject.ext.has("targetSdkVersion")
+        ? rootProject.ext.get("targetSdkVersion")
+        : 35
+  }
+
+  sourceSets {
+    main {
+      java.srcDirs += newArchitectureEnabled()
+          ? ["src/newarch/java"]
+          : ["src/oldarch/java"]
+    }
+  }
+}
+
+dependencies {
+  implementation "com.facebook.react:react-android"
+}

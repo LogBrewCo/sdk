@@ -108,7 +108,7 @@ grep -q '@logbrew/react-native/native-bridge' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/resource-fetch' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/lifecycle' "$tmp_dir/native-readme.md"
 grep -q '@logbrew/react-native/global-errors' "$tmp_dir/native-readme.md"
-grep -q 'Fatal JavaScript errors are chained without capture' "$tmp_dir/native-readme.md"
+grep -q 'stable-ID at-least-once replay' "$tmp_dir/native-readme.md"
 grep -q 'Unhandled Promise rejections are not installed or patched' "$tmp_dir/native-readme.md"
 
 app_dir="$tmp_dir/react-native-smoke-app"

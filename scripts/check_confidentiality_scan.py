@@ -216,6 +216,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_python_public_registry_hostname_reference(relative_text, line, terms):
         return True
 
+    if is_react_native_native_storage_reference(relative_text, line, terms):
+        return True
+
     if is_apple_durable_storage_reference(relative_text, terms):
         return True
 
@@ -299,6 +302,26 @@ def is_apple_durable_storage_reference(relative_text: str, terms: set[str]) -> b
         "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift",
     }
     return relative_text in durable_paths and terms.issubset({"backup", "cleanup"})
+
+
+def is_react_native_native_storage_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    symbol_by_path = {
+        (
+            "js/logbrew-react-native/android/src/main/java/co/logbrew/reactnative/"
+            "FatalStoreModuleImpl.java"
+        ): "getNoBackupFilesDir",
+        (
+            "js/logbrew-react-native/ios/LBRNFatalStoreModule.mm"
+        ): "NSURLIsExcludedFromBackupKey",
+    }
+    symbol = symbol_by_path.get(relative_text)
+    if symbol is None or terms != {"backup"} or symbol not in line:
+        return False
+    return SENSITIVE_RE.search(line.replace(symbol, "")) is None
 
 
 def is_public_publishing_guidance(relative_text: str, line: str) -> bool:

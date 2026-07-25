@@ -9,7 +9,10 @@
   "types": "./index.d.ts",
   "exports": {
     ".": {
-      "react-native": "./index.native.js",
+      "react-native": {
+        "types": "./index.native.d.ts",
+        "default": "./index.native.js"
+      },
       "import": {
         "types": "./index.d.ts",
         "default": "./index.js"
@@ -32,6 +35,10 @@
       "default": "./lifecycle.js"
     },
     "./global-errors": {
+      "react-native": {
+        "types": "./global-errors.d.ts",
+        "default": "./global-errors.native.js"
+      },
       "import": {
         "types": "./global-errors.d.ts",
         "default": "./global-errors.js"
@@ -113,6 +120,7 @@
     "index.cjs",
     "index.js",
     "index.native.js",
+    "index.native.d.ts",
     "index.d.ts",
     "index.d.cts",
     "apollo.cjs",
@@ -128,7 +136,9 @@
     "lifecycle.d.ts",
     "lifecycle.d.cts",
     "global-errors.cjs",
+    "fatal-replay.cjs",
     "global-errors.js",
+    "global-errors.native.js",
     "global-errors.d.ts",
     "global-errors.d.cts",
     "metadata.cjs",
@@ -149,6 +159,17 @@
     "metro.js",
     "metro.d.ts",
     "metro.d.cts",
+    "LogBrewReactNative.podspec",
+    "android/build.gradle",
+    "android/src/main",
+    "android/src/oldarch",
+    "android/src/newarch",
+    "ios/LBRNFatalRecordStore.h",
+    "ios/LBRNFatalRecordStore.m",
+    "ios/LBRNFatalStoreModule.h",
+    "ios/LBRNFatalStoreModule.mm",
+    "react-native.config.js",
+    "src",
     "README.md",
     "examples"
   ],
@@ -164,6 +185,14 @@
     "source-maps"
   ],
   "sideEffects": false,
+  "codegenConfig": {
+    "name": "LogBrewReactNativeSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "co.logbrew.reactnative"
+    }
+  },
   "engines": {
     "node": ">=18"
   },
@@ -178,6 +207,6 @@
     "react-native": ">=0.72"
   },
   "scripts": {
-    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check apollo.js && node --check apollo.cjs && node --check instrumentation.js && node --check instrumentation.cjs && node --check lifecycle.js && node --check lifecycle.cjs && node --check global-errors.js && node --check global-errors.cjs && node --check metadata.js && node --check metadata.cjs && node --check native-bridge.js && node --check native-bridge.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check metro.js && node --check metro.cjs && node --check examples/index.mjs && node --check examples/apollo-link-spans.mjs && node --check examples/instrumentation-kit.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/native-bridge-scope.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs && node --test"
+    "test": "node --check index.js && node --check index.cjs && node --check index.native.js && node --check apollo.js && node --check apollo.cjs && node --check instrumentation.js && node --check instrumentation.cjs && node --check lifecycle.js && node --check lifecycle.cjs && node --check global-errors.js && node --check global-errors.native.js && node --check global-errors.cjs && node --check fatal-replay.cjs && node --check metadata.js && node --check metadata.cjs && node --check native-bridge.js && node --check native-bridge.cjs && node --check resource-fetch.js && node --check resource-fetch.cjs && node --check release-artifacts.js && node --check release-artifacts.cjs && node --check metro.js && node --check metro.cjs && node --check examples/index.mjs && node --check examples/apollo-link-spans.mjs && node --check examples/instrumentation-kit.mjs && node --check examples/lifecycle-spans.mjs && node --check examples/native-bridge-scope.mjs && node --check examples/navigation-resource-spans.mjs && node --check examples/readme-example.mjs && node --check examples/real-user-smoke.mjs && node --check examples/resource-fetch-spans.mjs && node --check examples/trace-correlation.mjs && node --test"
   }
 }

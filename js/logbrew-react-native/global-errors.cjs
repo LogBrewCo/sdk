@@ -1,6 +1,7 @@
 "use strict";
 
 const { createReactNativeErrorEvent } = require("./index.cjs");
+const { createFatalController } = require("./fatal-replay.cjs");
 
 const AUTOMATIC_ERROR_MESSAGE = "React Native global JavaScript report";
 const MAX_STACK_BYTES = 16 * 1024;
@@ -14,12 +15,18 @@ const SAFE_ERROR_NAMES = new Set([
   "TypeError",
   "URIError"
 ]);
+const FATAL_SANITIZERS = Object.freeze({
+  errorName: safeErrorName,
+  isErrorName: (value) => SAFE_ERROR_NAMES.has(value),
+  stackFrame: safeStackFrameParts
+});
 const installations = new WeakMap();
 let nextEventSequence = 0;
 
 function installLogBrewReactNativeGlobalErrorHandler({
   client,
   errorUtils = globalThis?.ErrorUtils,
+  fatalStore,
   onDiagnostic
 } = {}) {
   const issue = safeFunction(client, "issue");
@@ -54,6 +61,14 @@ function installLogBrewReactNativeGlobalErrorHandler({
     lastOutcome: "idle",
     suppressedEvents: 0
   };
+  const fatal = createFatalController({
+    client,
+    eventMessage: AUTOMATIC_ERROR_MESSAGE,
+    fatalStore,
+    issue,
+    onDiagnostic,
+    sanitizers: FATAL_SANITIZERS
+  });
   const capturedErrors = new WeakSet();
   const handler = (error, isFatal) => {
     if (!state.active) {
@@ -67,8 +82,12 @@ function installLogBrewReactNativeGlobalErrorHandler({
     state.handling = true;
     try {
       if (isFatal === true) {
-        state.lastOutcome = "fatal_unsupported";
-        emitDiagnostic(onDiagnostic, "fatal_capture_requires_sync_store");
+        if (fatal.available) {
+          state.lastOutcome = fatal.store(error) ? "fatal_stored" : "fatal_store_failed";
+        } else {
+          state.lastOutcome = "fatal_unsupported";
+          emitDiagnostic(onDiagnostic, "fatal_capture_requires_sync_store");
+        }
       } else if (isObjectLike(error) && capturedErrors.has(error)) {
         recordSuppression(state, onDiagnostic, "duplicate_capture_suppressed");
       } else {
@@ -86,6 +105,12 @@ function installLogBrewReactNativeGlobalErrorHandler({
   };
 
   const installation = Object.freeze({
+    discardPendingFatalRecord() {
+      return fatal.discard();
+    },
+    fatalHealth() {
+      return fatal.health();
+    },
     health() {
       return healthSnapshot(state);
     },
@@ -133,6 +158,7 @@ function installLogBrewReactNativeGlobalErrorHandler({
     return inactiveInstallation();
   }
   installations.set(errorUtils, installation);
+  fatal.replay();
   return installation;
 }
 
@@ -207,6 +233,13 @@ function safeStack(error) {
 }
 
 function safeStackFrame(line) {
+  const frame = safeStackFrameParts(line);
+  return frame
+    ? `${frame.filename}:${frame.line}:${frame.column}`
+    : undefined;
+}
+
+function safeStackFrameParts(line) {
   let location = typeof line === "string" ? line.trim() : "";
   if (!location) {
     return undefined;
@@ -229,7 +262,11 @@ function safeStackFrame(line) {
   if (!filename || lineNumber === undefined || column === undefined) {
     return undefined;
   }
-  return `${filename}:${lineNumber}:${column}`;
+  return {
+    column,
+    filename,
+    line: lineNumber
+  };
 }
 
 function safeStackFilename(value) {
@@ -340,7 +377,18 @@ function inactiveInstallation() {
     lastOutcome: "unavailable",
     suppressedEvents: 0
   });
+  const fatalSnapshot = Object.freeze({
+    acknowledgedRecords: 0,
+    available: false,
+    corruptRecords: 0,
+    droppedRecords: 0,
+    lastOutcome: "unavailable",
+    replayedRecords: 0,
+    storedRecords: 0
+  });
   return Object.freeze({
+    discardPendingFatalRecord: () => false,
+    fatalHealth: () => fatalSnapshot,
     health: () => snapshot,
     remove: () => false
   });

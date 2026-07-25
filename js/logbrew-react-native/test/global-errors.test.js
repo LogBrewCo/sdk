@@ -1,73 +1,12 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import { createRequire } from "node:module";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const sdkRoot = path.resolve(packageRoot, "../logbrew-js");
-
-async function withInstalledPackage(callback) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "logbrew-rn-global-errors-"));
-  const nodeModules = path.join(root, "node_modules");
-  const packageDir = path.join(nodeModules, "@logbrew", "react-native");
-  try {
-    fs.mkdirSync(path.dirname(packageDir), { recursive: true });
-    fs.cpSync(packageRoot, packageDir, {
-      recursive: true,
-      filter: (source) => !source.includes(`${path.sep}node_modules${path.sep}`)
-    });
-    fs.symlinkSync(sdkRoot, path.join(nodeModules, "@logbrew", "sdk"), "dir");
-    const reactDir = path.join(nodeModules, "react");
-    fs.mkdirSync(reactDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(reactDir, "package.json"),
-      JSON.stringify({ name: "react", version: "18.0.0", main: "index.cjs" }),
-      "utf8"
-    );
-    fs.writeFileSync(
-      path.join(reactDir, "index.cjs"),
-      "module.exports={createContext(value){return {_currentValue:value,Provider(){},Consumer(){}}},createElement(type,props,...children){return {type,props:{...(props||{}),children}}}};\n",
-      "utf8"
-    );
-    return await callback(
-      await import(pathToFileURL(path.join(packageDir, "global-errors.js"))),
-      packageDir
-    );
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-}
-
-function createErrorUtils(previousHandler = () => {}) {
-  let currentHandler = previousHandler;
-  return {
-    getGlobalHandler() {
-      return currentHandler;
-    },
-    setGlobalHandler(handler) {
-      currentHandler = handler;
-    },
-    currentHandler() {
-      return currentHandler;
-    }
-  };
-}
-
-function createClient({ fail = false } = {}) {
-  const issues = [];
-  return {
-    issue(id, timestamp, attributes) {
-      if (fail) {
-        throw new Error("private capture failure");
-      }
-      issues.push({ attributes, id, timestamp });
-    },
-    issues
-  };
-}
+import {
+  createClient,
+  createErrorUtils,
+  withInstalledPackage
+} from "./global-errors-test-support.js";
 
 test("captures nonfatal global reports before root registration and after mount", async () => {
   await withInstalledPackage(async ({ installLogBrewReactNativeGlobalErrorHandler }) => {
@@ -441,12 +380,4 @@ test("captured reports receive distinct content-independent IDs", async () => {
     assert.match(client.issues[0].id, /^evt_rn_global_[a-z0-9]+_[a-z0-9]+$/u);
     assert.match(client.issues[1].id, /^evt_rn_global_[a-z0-9]+_[a-z0-9]+$/u);
   });
-});
-
-test("public documentation excludes Promise and durable fatal capture claims", () => {
-  const readme = fs.readFileSync(path.join(packageRoot, "README.md"), "utf8");
-  assert.match(readme, /Unhandled Promise rejections are not installed or patched/u);
-  assert.match(readme, /Fatal JavaScript errors are chained without capture/u);
-  assert.match(readme, /synchronous native durable handoff/u);
-  assert.doesNotMatch(readme, /exactly-once fatal replay is supported/u);
 });
