@@ -31,7 +31,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.1"),
             "js/logbrew-node/package.json": ("@logbrew/node", "0.1.2"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.1"),
-            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.4"),
+            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.5"),
         }
         for relative_path, expected in npm_versions.items():
             manifest = json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
@@ -77,6 +77,50 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         self.assertEqual(
             manifest["peerDependencies"]["@logbrew/sdk"],
             "^0.1.5",
+        )
+
+    def test_react_native_bundle_smoke_matches_package_version(self) -> None:
+        manifest = json.loads(
+            (ROOT / "js/logbrew-react-native/package.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        smoke = (
+            ROOT / "scripts/real_user_react_native_bundle_smoke.sh"
+        ).read_text(encoding="utf-8")
+        expected_version = re.search(
+            r'^expected_react_native_package_version="([^"]+)"$',
+            smoke,
+            re.MULTILINE,
+        )
+
+        self.assertIsNotNone(expected_version)
+        self.assertEqual(expected_version.group(1), manifest["version"])
+
+    def test_react_native_release_selector_accepts_name_and_package_directory(
+        self,
+    ) -> None:
+        workflow = (
+            ROOT / ".github/workflows/publish-packages.yml"
+        ).read_text(encoding="utf-8")
+        package_dirs = workflow.split("package_dirs=(", 1)[1].split("\n          )", 1)[0]
+        selector = workflow.split("select_npm_package_dirs() {", 1)[1].split(
+            "\n          mapfile -t package_dirs",
+            1,
+        )[0]
+
+        self.assertRegex(package_dirs, r"(?m)^\s+js/logbrew-react-native$")
+        self.assertIn(
+            'package_name="$(node -p "require(\'./${package_dir}/package.json\').name")"',
+            selector,
+        )
+        self.assertIn(
+            '"$requested_package" != "$package_dir"',
+            selector,
+        )
+        self.assertIn(
+            '"$requested_package" != "$package_name"',
+            selector,
         )
 
     def test_unaffected_maven_and_nuget_packages_remain_unchanged(self) -> None:
