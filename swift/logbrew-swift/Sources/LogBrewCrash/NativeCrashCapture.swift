@@ -5,21 +5,23 @@ import LogBrew
 @objc(LBWNativeCrashCapture)
 @objcMembers
 public final class NativeCrashCapture: NSObject, @unchecked Sendable {
-    private let configuration: NativeCrashConfiguration
-    private let driver: any CrashEngineDriving
-    private let ownership: ProcessCrashCaptureOwnership
-    private let processIDProvider: @Sendable () -> Int32
-    private let ownerProcessID: Int32
-    private let ownerNonce = UUID()
-    private let lock = NSLock()
+    let configuration: NativeCrashConfiguration
+    let driver: any CrashEngineDriving
+    let ownership: ProcessCrashCaptureOwnership
+    let processIDProvider: @Sendable () -> Int32
+    let ownerProcessID: Int32
+    let ownerNonce = UUID()
+    let lock = NSLock()
 
-    private var store: (any CrashReportStoring)?
-    private var storageLease: CrashStorageLease?
-    private var lifecycle: NativeCrashLifecycleState = .idle
-    private var lastOutcome: NativeCrashOutcome = .none
-    private var acknowledged = 0
-    private var discarded = 0
-    private var replaying = false
+    var store: (any CrashReportStoring)?
+    var hangStore: (any HangIncidentStoring)?
+    var hangRuntime: NativeHangWatchdogRuntime?
+    var storageLease: CrashStorageLease?
+    var lifecycle: NativeCrashLifecycleState = .idle
+    var lastOutcome: NativeCrashOutcome = .none
+    var acknowledged = 0
+    var discarded = 0
+    var replaying = false
 
     public init(configuration: NativeCrashConfiguration) {
         let processIDProvider: @Sendable () -> Int32 = { getpid() }
@@ -63,6 +65,7 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
 
         do {
             let storageLease = try CrashStorageDirectory.prepare(configuration.storageDirectory)
+            let preparedHang = try prepareHangWatchdog()
             try ownership.claim(self)
             try storageLease.verify()
             self.storageLease = storageLease
@@ -74,12 +77,15 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
                     includesMemory: false,
                     includesQueueNames: false,
                     includesConsoleLog: false,
-                    includesUserContext: false,
+                    artifactIdentity: configuration.artifactIdentity.map(NativeArtifactIdentityValue.init),
                     deletionIsExplicit: true,
                 ),
             )
             try storageLease.verify()
             store = installedStore
+            hangStore = preparedHang?.store
+            hangRuntime = preparedHang?.runtime
+            preparedHang?.runtime.start()
             lifecycle = .installed
         } catch let error as NativeCrashError {
             lifecycle = .failed
@@ -140,6 +146,7 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
         guard !replaying else {
             throw NativeCrashError(.replayBusy)
         }
+        hangRuntime?.stop()
         lifecycle = .stopped
     }
 
@@ -160,6 +167,7 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
             lastOutcome = .failed
             throw NativeCrashError(.reportDeletionFailed)
         }
+        try hangStore?.purge()
         lastOutcome = .purged
     }
 
@@ -178,185 +186,7 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
     }
 }
 
-private extension NativeCrashCapture {
-    func beginReplay() throws {
-        lock.lock()
-        defer { lock.unlock() }
-        try verifyProcessLocked()
-        guard store != nil, lifecycle != .stopped else {
-            throw NativeCrashError(.notInstalled)
-        }
-        guard !replaying else {
-            throw NativeCrashError(.replayBusy)
-        }
-        replaying = true
-        lifecycle = .replaying
-    }
-
-    func performReplay(_ handler: (NativeCrashRecord) -> Bool) throws -> NativeCrashReplayResult {
-        var attempted = 0
-        var accepted = 0
-        var discardedDuringReplay = 0
-        replayLoop: while true {
-            switch try nextReplayItem() {
-            case .none:
-                break replayLoop
-            case .discarded:
-                discardedDuringReplay += 1
-            case let .record(record):
-                attempted += 1
-                guard handler(record) else {
-                    recordRetained()
-                    break replayLoop
-                }
-                try acknowledge(record)
-                accepted += 1
-            }
-        }
-
-        return try NativeCrashReplayResult(
-            attempted: attempted,
-            acknowledged: accepted,
-            discarded: discardedDuringReplay,
-            pending: finishReplay(),
-        )
-    }
-
-    func recordRetained() {
-        lock.lock()
-        lastOutcome = .retained
-        lock.unlock()
-    }
-
-    func finishReplay() throws -> Int {
-        lock.lock()
-        defer { lock.unlock() }
-        let pending = try pendingCountLocked()
-        replaying = false
-        lifecycle = .installed
-        return pending
-    }
-
-    func failReplay() {
-        lock.lock()
-        replaying = false
-        lifecycle = .installed
-        lastOutcome = .failed
-        lock.unlock()
-    }
-
-    func nextReplayItem() throws -> ReplayItem {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let store else {
-            throw NativeCrashError(.notInstalled)
-        }
-        try verifyStorageLocked()
-        let ids = store.reportIDs.sorted()
-        guard ids.count <= configuration.maxStoredReports,
-              Set(ids).count == ids.count,
-              ids.allSatisfy({ $0 > 0 })
-        else {
-            throw NativeCrashError(.reportCorrupt)
-        }
-        guard let id = ids.first else {
-            return .none
-        }
-        guard let rawReport = store.report(for: id) else {
-            throw NativeCrashError(.reportChanged)
-        }
-
-        do {
-            let record = try sanitizer.makeRecord(reportID: id, rawReport: rawReport)
-            guard store.reportIDs.sorted() == ids else {
-                throw NativeCrashError(.reportChanged)
-            }
-            return .record(record)
-        } catch let error as NativeCrashError where error.code == .reportCorrupt {
-            guard store.reportIDs.sorted() == ids else {
-                throw NativeCrashError(.reportChanged)
-            }
-            store.deleteReport(with: id)
-            guard !store.reportIDs.contains(id) else {
-                throw NativeCrashError(.reportDeletionFailed)
-            }
-            if discarded < Int.max {
-                discarded += 1
-            }
-            lastOutcome = .discarded
-            return .discarded
-        }
-    }
-
-    func acknowledge(_ record: NativeCrashRecord) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        guard record.ownerNonce == ownerNonce, let store else {
-            throw NativeCrashError(.reportChanged)
-        }
-        try verifyStorageLocked()
-        guard store.reportIDs.contains(record.reportID),
-              let rawReport = store.report(for: record.reportID),
-              try sanitizer.digest(rawReport) == record.digest
-        else {
-            throw NativeCrashError(.reportChanged)
-        }
-
-        store.deleteReport(with: record.reportID)
-        guard !store.reportIDs.contains(record.reportID) else {
-            throw NativeCrashError(.reportDeletionFailed)
-        }
-        acknowledged += 1
-        lastOutcome = .acknowledged
-    }
-
-    func pendingReportsLocked() throws -> [NativeCrashRecord] {
-        guard let store else {
-            throw NativeCrashError(.notInstalled)
-        }
-        try verifyStorageLocked()
-        let ids = store.reportIDs.sorted()
-        guard ids.count <= configuration.maxStoredReports,
-              Set(ids).count == ids.count,
-              ids.allSatisfy({ $0 > 0 })
-        else {
-            throw NativeCrashError(.reportCorrupt)
-        }
-
-        let records = try ids.map { id in
-            guard let rawReport = store.report(for: id) else {
-                throw NativeCrashError(.reportChanged)
-            }
-            return try sanitizer.makeRecord(reportID: id, rawReport: rawReport)
-        }
-        guard store.reportIDs.sorted() == ids else {
-            throw NativeCrashError(.reportChanged)
-        }
-        return records
-    }
-
-    func pendingCountLocked() throws -> Int {
-        guard let store else {
-            throw NativeCrashError(.notInstalled)
-        }
-        try verifyStorageLocked()
-        let ids = store.reportIDs
-        guard ids.count <= configuration.maxStoredReports,
-              Set(ids).count == ids.count,
-              ids.allSatisfy({ $0 > 0 })
-        else {
-            throw NativeCrashError(.reportCorrupt)
-        }
-        return ids.count
-    }
-
-    var sanitizer: CrashReportSanitizer {
-        CrashReportSanitizer(
-            maxReplayBytes: configuration.maxReplayBytes,
-            ownerNonce: ownerNonce,
-        )
-    }
-
+extension NativeCrashCapture {
     func verifyStorageLocked() throws {
         guard let storageLease else {
             throw NativeCrashError(.notInstalled)
@@ -371,8 +201,26 @@ private extension NativeCrashCapture {
     }
 }
 
-private enum ReplayItem {
-    case none
-    case discarded
-    case record(NativeCrashRecord)
+private extension NativeCrashCapture {
+    func prepareHangWatchdog() throws -> PreparedHangWatchdog? {
+        guard let watchdog = configuration.hangWatchdog,
+              let identity = configuration.artifactIdentity
+        else {
+            return nil
+        }
+        let directory = configuration.storageDirectory
+            .appendingPathComponent("hang-watchdog-v1", isDirectory: true)
+        let store = try NativeHangIncidentFileStore(directory: directory)
+        let runtime = try NativeHangWatchdogRuntime(
+            configuration: watchdog,
+            identity: identity,
+            store: store,
+        )
+        return PreparedHangWatchdog(store: store, runtime: runtime)
+    }
+}
+
+private struct PreparedHangWatchdog {
+    let store: any HangIncidentStoring
+    let runtime: NativeHangWatchdogRuntime
 }

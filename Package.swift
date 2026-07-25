@@ -20,12 +20,12 @@ let package = Package(
     targets: [
         .target(
             name: "LogBrew",
-            path: "swift/logbrew-swift/Sources/LogBrew"
+            path: "swift/logbrew-swift/Sources/LogBrew",
         ),
         .testTarget(
             name: "LogBrewTests",
             dependencies: ["LogBrew"],
-            path: "swift/logbrew-swift/Tests/LogBrewTests"
+            path: "swift/logbrew-swift/Tests/LogBrewTests",
         ),
         .target(
             name: "LogBrewCrash",
@@ -33,12 +33,21 @@ let package = Package(
                 "LogBrew",
                 .product(name: "Recording", package: "KSCrash"),
             ],
-            path: "swift/logbrew-swift/Sources/LogBrewCrash"
+            path: "swift/logbrew-swift/Sources/LogBrewCrash",
+        ),
+        .executableTarget(
+            name: "LogBrewHangStoreProcessHelper",
+            dependencies: ["LogBrew", "LogBrewCrash"],
+            path: "swift/logbrew-swift/Tests/LogBrewHangStoreProcessHelper",
         ),
         .testTarget(
             name: "LogBrewCrashTests",
-            dependencies: ["LogBrew", "LogBrewCrash"],
-            path: "swift/logbrew-swift/Tests/LogBrewCrashTests"
+            dependencies: [
+                "LogBrew",
+                "LogBrewCrash",
+                "LogBrewHangStoreProcessHelper",
+            ],
+            path: "swift/logbrew-swift/Tests/LogBrewCrashTests",
         ),
     ],
 )

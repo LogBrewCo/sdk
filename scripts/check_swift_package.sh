@@ -7,6 +7,24 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 swift build --package-path "$package_dir" --scratch-path "$tmp_dir/build" >/dev/null
+if ! swift build \
+  --package-path "$package_dir" \
+  --scratch-path "$tmp_dir/release" \
+  --configuration release \
+  --target LogBrewCrash \
+  >"$tmp_dir/release.log" 2>&1; then
+  cat "$tmp_dir/release.log"
+  exit 1
+fi
+if ! swift build \
+  --package-path "$repo_root" \
+  --scratch-path "$tmp_dir/root-release" \
+  --configuration release \
+  --target LogBrewCrash \
+  >"$tmp_dir/root-release.log" 2>&1; then
+  cat "$tmp_dir/root-release.log"
+  exit 1
+fi
 if ! swift test --package-path "$package_dir" --scratch-path "$tmp_dir/test" >"$tmp_dir/test.log" 2>&1; then
   cat "$tmp_dir/test.log"
   exit 1
@@ -44,6 +62,10 @@ grep -q '/Sources/LogBrewCrash/CrashReportSanitizer.swift$' "$tmp_dir/archive-co
 grep -q '/Sources/LogBrewCrash/CrashStorageDirectory.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrewCrash/NativeCrashCapture.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrewCrash/NativeCrashPublic.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrewCrash/NativeArtifactIdentity.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrewCrash/NativeHangIncidentStore.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrewCrash/NativeHangWatchdog.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Sources/LogBrewCrash/NativeMainThreadStackCapture.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/LogBrewCrash/NativeStackFrameSanitizer.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/ReadmeExample/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Sources/RealUserSmoke/main.swift$' "$tmp_dir/archive-contents.txt"
@@ -63,6 +85,11 @@ grep -q '/Tests/LogBrewCrashTests/NativeCrashFrameCaptureAmbiguityTests.swift$' 
 grep -q '/Tests/LogBrewCrashTests/NativeCrashFrameCaptureValidationTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewCrashTests/NativeCrashFrameCaptureTestSupport.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewCrashTests/CrashTestSupport.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewCrashTests/NativeArtifactIdentityTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewCrashTests/NativeHangIncidentStoreTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewCrashTests/NativeHangWatchdogTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewCrashTests/NativeHangWatchdogRuntimeTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewHangStoreProcessHelper/main.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/LifecycleTraceTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/OpenTelemetryTraceContextTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewTests/TraceContextTests.swift$' "$tmp_dir/archive-contents.txt"
@@ -80,6 +107,8 @@ grep -q 'startURLSessionSpan' "$tmp_dir/archive-readme.md"
 grep -q 'LOGBREW_API_KEY' "$tmp_dir/archive-readme.md"
 grep -q 'LogBrewCrash' "$tmp_dir/archive-readme.md"
 grep -q 'NativeCrashCapture' "$tmp_dir/archive-readme.md"
+grep -q 'NativeHangWatchdogConfiguration' "$tmp_dir/archive-readme.md"
+grep -q 'NativeArtifactIdentity' "$tmp_dir/archive-readme.md"
 grep -q 'replayPendingReports(in: client, transport: transport)' "$tmp_dir/archive-readme.md"
 grep -q 'stopReplay()' "$tmp_dir/archive-readme.md"
 grep -q 'These frames are capture-only metadata' "$tmp_dir/archive-readme.md"

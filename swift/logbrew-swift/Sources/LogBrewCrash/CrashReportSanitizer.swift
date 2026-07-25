@@ -11,7 +11,7 @@ struct CrashReportSanitizer {
               let rawID = report["id"] as? String,
               let uuid = UUID(uuidString: rawID),
               let rawTimestamp = report["timestamp"] as? String,
-              let timestamp = normalizedTimestamp(rawTimestamp)
+              let timestamp = NativeCrashTimestamp(rawTimestamp)
         else {
             throw NativeCrashError(.reportCorrupt)
         }
@@ -19,12 +19,15 @@ struct CrashReportSanitizer {
         let crash = rawReport["crash"] as? [String: Any]
         let error = crash?["error"] as? [String: Any]
         let nativeStackFrames = NativeStackFrameSanitizer().frames(from: rawReport)
+        let artifactIdentity = try NativeArtifactIdentityValue.persistedIdentity(in: rawReport)
         return NativeCrashRecord(
             eventID: uuid.uuidString.lowercased(),
-            timestamp: timestamp,
+            timestamp: timestamp.normalized,
             mechanism: mechanism(error?["type"] as? String),
             nativeStackFrames: nativeStackFrames,
-            reportID: reportID,
+            artifactIdentity: artifactIdentity,
+            hangState: nil,
+            source: .engine(reportID: reportID),
             digest: Data(SHA256.hash(data: data)),
             ownerNonce: ownerNonce,
         )
@@ -51,20 +54,6 @@ struct CrashReportSanitizer {
         }
     }
 
-    private func normalizedTimestamp(_ raw: String) -> String? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        if let date = formatter.date(from: raw) {
-            return formatter.string(from: date)
-        }
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: raw) else {
-            return nil
-        }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: date)
-    }
-
     private func mechanism(_ rawValue: String?) -> NativeCrashMechanism {
         switch rawValue {
         case "signal": .signal
@@ -75,5 +64,76 @@ struct CrashReportSanitizer {
         case "deadlock": .deadlock
         default: .unknown
         }
+    }
+}
+
+struct NativeCrashTimestamp: Comparable {
+    let normalized: String
+    private let wholeSecond: String
+    private let fractionalNanoseconds: String
+
+    init?(_ raw: String) {
+        guard raw.utf8.count <= 64,
+              !raw.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              let components = Self.components(in: raw)
+        else {
+            return nil
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        guard let date = formatter.date(from: components.wholeSecond) else {
+            return nil
+        }
+        wholeSecond = formatter.string(from: date)
+        fractionalNanoseconds = components.fractional
+            .padding(toLength: 9, withPad: "0", startingAt: 0)
+        if components.fractional.isEmpty {
+            normalized = wholeSecond
+        } else {
+            normalized = "\(wholeSecond.dropLast()).\(components.fractional)Z"
+        }
+    }
+
+    static func < (lhs: NativeCrashTimestamp, rhs: NativeCrashTimestamp) -> Bool {
+        if lhs.wholeSecond != rhs.wholeSecond {
+            return lhs.wholeSecond < rhs.wholeSecond
+        }
+        return lhs.fractionalNanoseconds < rhs.fractionalNanoseconds
+    }
+
+    static func == (lhs: NativeCrashTimestamp, rhs: NativeCrashTimestamp) -> Bool {
+        lhs.wholeSecond == rhs.wholeSecond
+            && lhs.fractionalNanoseconds == rhs.fractionalNanoseconds
+    }
+
+    private static func components(in timestamp: String) -> (
+        wholeSecond: String,
+        fractional: String,
+    )? {
+        guard let timeStart = timestamp.firstIndex(of: "T") else {
+            return nil
+        }
+        guard let separator = timestamp[timeStart...].firstIndex(of: ".") else {
+            return (timestamp, "")
+        }
+        let fractionalStart = timestamp.index(after: separator)
+        let suffix = timestamp[fractionalStart...]
+        let digits = suffix.prefix {
+            $0 >= "0" && $0 <= "9"
+        }
+        guard (1 ... 9).contains(digits.count),
+              let timezoneStart = timestamp.index(
+                  fractionalStart,
+                  offsetBy: digits.count,
+                  limitedBy: timestamp.endIndex,
+              )
+        else {
+            return nil
+        }
+        return (
+            String(timestamp[..<separator] + timestamp[timezoneStart...]),
+            String(digits),
+        )
     }
 }

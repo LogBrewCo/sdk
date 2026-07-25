@@ -219,6 +219,9 @@ def is_allowed_match(relative: Path, line: str) -> bool:
     if is_react_native_native_storage_reference(relative_text, line, terms):
         return True
 
+    if is_apple_crash_storage_reference(relative_text, line, terms):
+        return True
+
     if is_apple_durable_storage_reference(relative_text, terms):
         return True
 
@@ -302,6 +305,27 @@ def is_apple_durable_storage_reference(relative_text: str, terms: set[str]) -> b
         "swift/logbrew-swift/Tests/LogBrewTests/DurableDeliveryPublicContractTests.swift",
     }
     return relative_text in durable_paths and terms.issubset({"backup", "cleanup"})
+
+
+def is_apple_crash_storage_reference(
+    relative_text: str,
+    line: str,
+    terms: set[str],
+) -> bool:
+    symbol = "isExcludedFromBackup"
+    allowed_paths = {
+        "swift/logbrew-swift/Sources/LogBrewCrash/CrashStorageDirectory.swift",
+        (
+            "swift/logbrew-swift/Tests/LogBrewCrashTests/"
+            "NativeHangIncidentStoreTests.swift"
+        ),
+    }
+    return (
+        relative_text in allowed_paths
+        and terms == {"backup"}
+        and symbol in line
+        and SENSITIVE_RE.search(line.replace(symbol, "")) is None
+    )
 
 
 def is_react_native_native_storage_reference(

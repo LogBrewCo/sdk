@@ -40,8 +40,26 @@ class ConfidentialityScanTests(unittest.TestCase):
                 / "ios"
                 / "LBRNFatalStoreModule.mm"
             )
+            swift_path = (
+                root
+                / "swift"
+                / "logbrew-swift"
+                / "Sources"
+                / "LogBrewCrash"
+                / "CrashStorageDirectory.swift"
+            )
+            swift_test_path = (
+                root
+                / "swift"
+                / "logbrew-swift"
+                / "Tests"
+                / "LogBrewCrashTests"
+                / "NativeHangIncidentStoreTests.swift"
+            )
             android_path.parent.mkdir(parents=True)
             apple_path.parent.mkdir(parents=True)
+            swift_path.parent.mkdir(parents=True)
+            swift_test_path.parent.mkdir(parents=True)
             archive_term = "back" + "up"
             android_path.write_text(
                 f"File root = context.getNo{archive_term.title()}FilesDir();\n",
@@ -54,11 +72,29 @@ class ConfidentialityScanTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            swift_path.write_text(
+                f"values.isExcludedFrom{archive_term.title()} = true\n",
+                encoding="utf-8",
+            )
+            swift_test_path.write_text(
+                f"#expect(values.isExcludedFrom{archive_term.title()} == true)\n",
+                encoding="utf-8",
+            )
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
             android_path.write_text(
                 android_path.read_text(encoding="utf-8")
+                + f"// arbitrary {archive_term} language remains forbidden\n",
+                encoding="utf-8",
+            )
+            swift_path.write_text(
+                swift_path.read_text(encoding="utf-8")
+                + f"// arbitrary {archive_term} language remains forbidden\n",
+                encoding="utf-8",
+            )
+            swift_test_path.write_text(
+                swift_test_path.read_text(encoding="utf-8")
                 + f"// arbitrary {archive_term} language remains forbidden\n",
                 encoding="utf-8",
             )
@@ -69,9 +105,11 @@ class ConfidentialityScanTests(unittest.TestCase):
             )
             failures = check_confidentiality_scan.validate(root)
 
-        self.assertEqual(len(failures), 2)
+        self.assertEqual(len(failures), 4)
         self.assertTrue(any("arbitrary" in failure for failure in failures))
         self.assertTrue(any("Other.java" in failure for failure in failures))
+        self.assertTrue(any("CrashStorageDirectory.swift" in failure for failure in failures))
+        self.assertTrue(any("NativeHangIncidentStoreTests.swift" in failure for failure in failures))
 
     def test_repo_confidentiality_scan_passes(self) -> None:
         self.assertEqual(check_confidentiality_scan.validate(ROOT), [])
