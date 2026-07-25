@@ -107,10 +107,7 @@ struct NativeCrashTimestamp: Comparable {
             && lhs.fractionalNanoseconds == rhs.fractionalNanoseconds
     }
 
-    private static func components(in timestamp: String) -> (
-        wholeSecond: String,
-        fractional: String,
-    )? {
+    private static func components(in timestamp: String) -> (wholeSecond: String, fractional: String)? {
         guard let timeStart = timestamp.firstIndex(of: "T") else {
             return nil
         }

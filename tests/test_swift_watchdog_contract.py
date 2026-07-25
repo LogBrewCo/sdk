@@ -17,6 +17,7 @@ SOURCE = ROOT / "swift" / "logbrew-swift" / "Sources" / "LogBrewCrash"
 TESTS = ROOT / "swift" / "logbrew-swift" / "Tests" / "LogBrewCrashTests"
 PACKAGE = ROOT / "swift" / "logbrew-swift" / "Package.swift"
 ROOT_PACKAGE = ROOT / "Package.swift"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 PROCESS_HELPER = (
     ROOT
     / "swift"
@@ -28,6 +29,17 @@ PROCESS_HELPER = (
 
 
 class SwiftWatchdogContractTests(unittest.TestCase):
+    def test_swift_pr_checks_compile_on_public_macos_runner(self) -> None:
+        workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+        swift_job = workflow[
+            workflow.index("  swift-checks:") : workflow.index("  objc-checks:")
+        ]
+
+        self.assertIn("name: Swift SDK checks", swift_job)
+        self.assertIn("runs-on: macos-15", swift_job)
+        self.assertNotIn("macos-latest", swift_job)
+        self.assertIn("run: bash scripts/check_swift_package.sh", swift_job)
+
     def test_package_owns_bounded_watchdog_components(self) -> None:
         expected_sources = {
             "NativeArtifactIdentity.swift",

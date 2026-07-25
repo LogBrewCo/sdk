@@ -572,7 +572,7 @@ jobs:
     name: Swift SDK checks
     needs: changed-areas
     if: ${{ needs.changed-areas.outputs.swift == 'true' }}
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 15
 
     steps:
