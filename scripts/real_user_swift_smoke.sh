@@ -830,14 +830,20 @@ EOF
 
 durable_parent="$tmp_dir/swift-durable-parent"
 mkdir -m 700 "$durable_parent"
-swift run --package-path "$durable_consumer_dir" --scratch-path "$tmp_dir/durable-consumer-build" DurableSmoke \
-  write "$durable_parent" > "$tmp_dir/swift-durable-write.json" 2> "$tmp_dir/swift-durable-write.stderr"
+durable_binary="$(
+  bash "$repo_root/scripts/real_user_swift_build_executable.sh" \
+    "$durable_consumer_dir" \
+    "$tmp_dir/durable-consumer-build" \
+    DurableSmoke
+)"
+"$durable_binary" write "$durable_parent" \
+  > "$tmp_dir/swift-durable-write.json" 2> "$tmp_dir/swift-durable-write.stderr"
 if grep -R -q 'LOGBREW_API_KEY' "$durable_parent/logbrew-delivery-v1"; then
   echo "Swift durable storage contained an API key" >&2
   exit 1
 fi
-swift run --package-path "$durable_consumer_dir" --scratch-path "$tmp_dir/durable-consumer-build" DurableSmoke \
-  recover "$durable_parent" > "$tmp_dir/swift-durable-recover.json" 2> "$tmp_dir/swift-durable-recover.stderr"
+"$durable_binary" recover "$durable_parent" \
+  > "$tmp_dir/swift-durable-recover.json" 2> "$tmp_dir/swift-durable-recover.stderr"
 cmp -s "$tmp_dir/swift-durable-write.json" "$tmp_dir/swift-durable-recover.json"
 grep -q 'swift-installed-durable-event' "$tmp_dir/swift-durable-recover.json"
 test ! -e "$durable_parent/logbrew-delivery-v1/frozen-prefix.json"
