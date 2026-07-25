@@ -27,7 +27,7 @@ class ReactNativeGlobalErrorsTests(unittest.TestCase):
             self.assertIn(filename, manifest["files"])
         self.assertNotIn("./unhandled-errors", manifest["exports"])
 
-    def test_packed_smoke_proves_pre_root_post_mount_privacy_and_rollback(self) -> None:
+    def test_packed_smoke_proves_nonfatal_contract_without_promise_ownership(self) -> None:
         smoke = (ROOT / "scripts" / "real_user_react_native_smoke.sh").read_text(
             encoding="utf-8"
         )
@@ -37,20 +37,26 @@ class ReactNativeGlobalErrorsTests(unittest.TestCase):
             "installLogBrewReactNativeGlobalErrorHandler",
             "preRootError",
             "postMountError",
-            "fatal_capture_requires_sync_store",
             "globalErrorInstallation.remove()",
             '"globalHandlerRemoved":true',
             '"globalReports":2',
         ):
             self.assertIn(expected, smoke)
 
-    def test_documentation_keeps_fatal_and_promise_limits_explicit(self) -> None:
+    def test_documentation_states_stable_id_at_least_once_and_excluded_boundaries(self) -> None:
         readme = (PACKAGE_ROOT / "README.md").read_text(encoding="utf-8")
 
-        self.assertIn("Fatal JavaScript errors are chained without capture", readme)
-        self.assertIn("synchronous native durable handoff", readme)
+        self.assertIn("stable-ID at-least-once replay", readme)
+        self.assertIn("acknowledgement happens only after local queue admission", readme)
+        self.assertIn("does not claim mathematically exactly-once delivery", readme)
         self.assertIn("Unhandled Promise rejections are not installed or patched", readme)
-        self.assertNotIn("exactly-once fatal replay is supported", readme)
+        for excluded in (
+            "native crash capture",
+            "ANR or hang detection",
+            "general offline queueing",
+            "symbolication",
+        ):
+            self.assertIn(excluded, readme)
 
 
 if __name__ == "__main__":

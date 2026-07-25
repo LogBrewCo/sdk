@@ -9,6 +9,9 @@ import {
   createLogBrewReactNativeClient,
   getReactNativeContext
 } from "./index.js";
+export {
+  installLogBrewReactNativeGlobalErrorHandler
+} from "./global-errors.native.js";
 
 export * from "./index.js";
 

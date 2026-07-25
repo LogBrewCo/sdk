@@ -106,7 +106,7 @@ try {
 
 Set `includeStack: true` only when your app has decided stack text is safe to send. Non-`Error` thrown values are accepted and converted into issue messages so app error handlers do not need custom guards.
 
-### Reversible nonfatal global reports
+### Reversible global JavaScript reports
 
 Install the optional global JavaScript handler before root registration when you want supported nonfatal `ErrorUtils` failures captured without an app-owned capture call:
 
@@ -126,9 +126,9 @@ errorHandler.remove();
 
 Installation is idempotent for the active React Native `ErrorUtils` object. The wrapper captures a fixed-content, path-bounded issue for nonfatal global JavaScript errors and then calls the handler that was installed before it. Capture and diagnostic callback failures cannot prevent that prior handler from running. `remove()` reinstates the previous handler only while LogBrew still owns the global slot, so a later integration is not overwritten.
 
-Fatal JavaScript errors are chained without capture. The JavaScript package has no synchronous native durable handoff and does not retain fatal events across process termination. Fatal replay requires a bounded synchronous native store plus next-launch delivery acknowledgement. Unhandled Promise rejections are not installed or patched because React Native does not expose one stable supported ownership seam across its runtimes.
+The React Native conditional export obtains LogBrew's synchronous native fatal store through the supported TurboModule or `NativeModules` seam. Before chaining a fatal report, it writes one bounded record to app-private storage that is excluded from operating-system archives. On a later installation it performs stable-ID at-least-once replay, and acknowledgement happens only after local queue admission is observable through the SDK queue counters. Filtered, dropped, unknown-admission, persistence-failed, and acknowledgement-failed records are retained. A failed acknowledgement is retried without admitting the same ID twice in one JavaScript runtime. Use `fatalHealth()` for frozen bounded counters and status, or `discardPendingFatalRecord()` for an explicit rollback discard. The Node ESM and CommonJS entries never import React Native; non-React-Native callers must inject `fatalStore` explicitly.
 
-Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, and local absolute paths. `onDiagnostic` receives only a fixed code. This integration does not provide native crash capture, ANR/watchdog capture, fatal persistence, or exactly-once fatal replay.
+Automatic events exclude the original error message, raw stack, arbitrary metadata, full URLs, hosts, query strings, local absolute paths, payloads, and native error text. `onDiagnostic` receives only a fixed code. This integration does not claim mathematically exactly-once delivery, backend-visible deduplication, native crash capture, Promise rejection ownership, ANR or hang detection, general offline queueing, or symbolication. Unhandled Promise rejections are not installed or patched because React Native does not expose one stable supported ownership seam across its runtimes.
 
 When you prepare React Native release artifacts, wrap the app-owned Metro config once. Production bundles and source maps receive one matching Debug ID, while development and hot-reload serialization remain unchanged:
 
