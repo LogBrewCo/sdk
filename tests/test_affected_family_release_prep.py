@@ -27,11 +27,11 @@ def maven_version(path: Path) -> str | None:
 class AffectedFamilyReleasePrepTests(unittest.TestCase):
     def test_exact_affected_package_versions_advance(self) -> None:
         npm_versions = {
-            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.4"),
+            "js/logbrew-js/package.json": ("@logbrew/sdk", "0.1.5"),
             "js/logbrew-browser/package.json": ("@logbrew/browser", "0.1.1"),
             "js/logbrew-node/package.json": ("@logbrew/node", "0.1.2"),
             "js/logbrew-next/package.json": ("@logbrew/next", "0.1.1"),
-            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.3"),
+            "js/logbrew-react-native/package.json": ("@logbrew/react-native", "0.1.4"),
         }
         for relative_path, expected in npm_versions.items():
             manifest = json.loads((ROOT / relative_path).read_text(encoding="utf-8"))
@@ -65,6 +65,18 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 "Version",
             ),
             "0.1.0",
+        )
+
+    def test_react_native_release_requires_the_fixed_mobile_core(self) -> None:
+        manifest = json.loads(
+            (ROOT / "js/logbrew-react-native/package.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.assertEqual(
+            manifest["peerDependencies"]["@logbrew/sdk"],
+            "^0.1.5",
         )
 
     def test_unaffected_maven_and_nuget_packages_remain_unchanged(self) -> None:
