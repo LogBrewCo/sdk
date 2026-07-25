@@ -9,6 +9,12 @@ enum CrashStorageDirectory {
 
     static func prepare(_ url: URL) throws -> CrashStorageLease {
         let path = url.path
+        try ensurePrivateDirectory(at: url, path: path)
+        try protectDirectory(at: url, path: path)
+        return try openLease(path: path)
+    }
+
+    private static func ensurePrivateDirectory(at url: URL, path: String) throws {
         var info = stat()
         if lstat(path, &info) == 0 {
             guard info.st_mode & S_IFMT == S_IFDIR,
@@ -29,12 +35,31 @@ enum CrashStorageDirectory {
         } else {
             throw NativeCrashError(.storageUnsupported)
         }
+    }
 
+    private static func protectDirectory(at url: URL, path: String) throws {
+        do {
+            var attributes: [FileAttributeKey: Any] = [.posixPermissions: NSNumber(value: 0o700)]
+            #if os(iOS) || os(tvOS) || os(watchOS)
+                attributes[.protectionKey] = FileProtectionType.completeUntilFirstUserAuthentication
+            #endif
+            try FileManager.default.setAttributes(attributes, ofItemAtPath: path)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var mutableURL = url
+            try mutableURL.setResourceValues(values)
+        } catch {
+            throw NativeCrashError(.storageUnsupported)
+        }
+    }
+
+    private static func openLease(path: String) throws -> CrashStorageLease {
         let descriptor = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard descriptor >= 0 else {
             throw NativeCrashError(.storageUnsupported)
         }
         var opened = stat()
+        var info = stat()
         guard fchmod(descriptor, S_IRWXU) == 0,
               fstat(descriptor, &opened) == 0,
               lstat(path, &info) == 0,
@@ -84,6 +109,13 @@ final class CrashStorageLease: @unchecked Sendable {
               current.st_dev == device,
               current.st_ino == inode
         else {
+            throw NativeCrashError(.storageUnsupported)
+        }
+    }
+
+    func synchronize() throws {
+        try verify()
+        guard fsync(descriptor) == 0 else {
             throw NativeCrashError(.storageUnsupported)
         }
     }

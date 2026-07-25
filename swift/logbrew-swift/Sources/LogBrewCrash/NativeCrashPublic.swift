@@ -104,17 +104,37 @@ public final class NativeCrashConfiguration: NSObject, @unchecked Sendable {
     public let storageDirectory: URL
     public let maxStoredReports: Int
     public let maxReplayBytes: Int
+    public let artifactIdentity: NativeArtifactIdentity?
+    @nonobjc public let hangWatchdog: NativeHangWatchdogConfiguration?
 
+    public convenience init(
+        storageDirectory: URL,
+        maxStoredReports: Int = 5,
+        maxReplayBytes: Int = 4 * 1024 * 1024,
+    ) throws {
+        try self.init(
+            storageDirectory: storageDirectory,
+            maxStoredReports: maxStoredReports,
+            maxReplayBytes: maxReplayBytes,
+            artifactIdentity: nil,
+            hangWatchdog: nil,
+        )
+    }
+
+    @nonobjc
     public init(
         storageDirectory: URL,
         maxStoredReports: Int = 5,
         maxReplayBytes: Int = 4 * 1024 * 1024,
+        artifactIdentity: NativeArtifactIdentity?,
+        hangWatchdog: NativeHangWatchdogConfiguration?,
     ) throws {
         guard storageDirectory.isFileURL,
               !storageDirectory.path.isEmpty,
               storageDirectory.path != "/",
               (1 ... 32).contains(maxStoredReports),
-              (1024 ... 16 * 1024 * 1024).contains(maxReplayBytes)
+              (1024 ... 16 * 1024 * 1024).contains(maxReplayBytes),
+              hangWatchdog == nil || artifactIdentity != nil
         else {
             throw NativeCrashError(.invalidConfiguration)
         }
@@ -128,6 +148,8 @@ public final class NativeCrashConfiguration: NSObject, @unchecked Sendable {
         self.storageDirectory = normalizedDirectory
         self.maxStoredReports = maxStoredReports
         self.maxReplayBytes = maxReplayBytes
+        self.artifactIdentity = artifactIdentity
+        self.hangWatchdog = hangWatchdog
     }
 }
 
@@ -139,7 +161,9 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
     public let mechanism: NativeCrashMechanism
 
     private let nativeStackFrames: [NativeStackFrame]?
-    let reportID: Int64
+    private let artifactIdentity: NativeArtifactIdentity?
+    private let hangState: NativeHangIncidentState?
+    let source: NativeCrashRecordSource
     let digest: Data
     let ownerNonce: UUID
 
@@ -148,7 +172,9 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         timestamp: String,
         mechanism: NativeCrashMechanism,
         nativeStackFrames: [NativeStackFrame]?,
-        reportID: Int64,
+        artifactIdentity: NativeArtifactIdentity?,
+        hangState: NativeHangIncidentState?,
+        source: NativeCrashRecordSource,
         digest: Data,
         ownerNonce: UUID,
     ) {
@@ -156,7 +182,9 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         self.timestamp = timestamp
         self.mechanism = mechanism
         self.nativeStackFrames = nativeStackFrames
-        self.reportID = reportID
+        self.artifactIdentity = artifactIdentity
+        self.hangState = hangState
+        self.source = source
         self.digest = digest
         self.ownerNonce = ownerNonce
     }
@@ -179,17 +207,27 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
     }
 
     override public var description: String {
-        "NativeCrashRecord(mechanism: \(mechanism.name))"
+        "NativeCrashRecord(mechanism: \(mechanism.name), configuredIdentity: \(artifactIdentity != nil))"
     }
 
     private var issueAttributes: IssueAttributes {
-        IssueAttributes(
-            title: "Native application crash",
-            level: .fatal,
-            metadata: [
-                "crash.mechanism": .string(mechanism.name),
-                "crash.replayed": .bool(true),
-            ],
+        var metadata: Metadata = [
+            "crash.mechanism": .string(mechanism.name),
+            "crash.replayed": .bool(true),
+        ]
+        if let artifactIdentity {
+            metadata["projectId"] = .string(artifactIdentity.projectId)
+            metadata["release"] = .string(artifactIdentity.release)
+            metadata["environment"] = .string(artifactIdentity.environment)
+            metadata["service"] = .string(artifactIdentity.service)
+        }
+        if let hangState {
+            metadata["crash.handled"] = .bool(hangState == .recovered)
+        }
+        return IssueAttributes(
+            title: hangState == nil ? "Native application crash" : "Native application hang",
+            level: hangState == .recovered ? .error : .fatal,
+            metadata: metadata,
             nativeStackFrames: nativeStackFrames,
         )
     }
@@ -207,19 +245,33 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         guard event["type"] as? String == "issue",
               event["timestamp"] as? String == timestamp,
               let attributes = event["attributes"] as? [String: Any],
-              attributes["title"] as? String == "Native application crash",
-              attributes["level"] as? String == "critical",
+              attributes["title"] as? String == issueAttributes.title,
+              attributes["level"] as? String == issueAttributes.level.canonicalValue,
               attributes["message"] == nil,
               let metadata = attributes["metadata"] as? [String: Any],
-              metadata as NSDictionary == [
-                  "crash.mechanism": mechanism.name,
-                  "crash.replayed": true,
-              ],
+              metadata as NSDictionary == expectedMetadata,
               nativeStackFramesMatch(attributes["nativeStackFrames"])
         else {
             return .collision
         }
         return .matching
+    }
+
+    private var expectedMetadata: NSDictionary {
+        var metadata: [String: Any] = [
+            "crash.mechanism": mechanism.name,
+            "crash.replayed": true,
+        ]
+        if let artifactIdentity {
+            metadata["projectId"] = artifactIdentity.projectId
+            metadata["release"] = artifactIdentity.release
+            metadata["environment"] = artifactIdentity.environment
+            metadata["service"] = artifactIdentity.service
+        }
+        if let hangState {
+            metadata["crash.handled"] = hangState == .recovered
+        }
+        return metadata as NSDictionary
     }
 
     private func nativeStackFramesMatch(_ value: Any?) -> Bool {
@@ -237,6 +289,11 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
             ] as NSDictionary
         }
     }
+}
+
+enum NativeCrashRecordSource: Equatable {
+    case engine(reportID: Int64)
+    case hang(eventID: String)
 }
 
 private enum ExistingEvent {

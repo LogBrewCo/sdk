@@ -17,7 +17,7 @@ struct NativeCrashCaptureTests {
         #expect(configuration.includesMemory == false)
         #expect(configuration.includesQueueNames == false)
         #expect(configuration.includesConsoleLog == false)
-        #expect(configuration.includesUserContext == false)
+        #expect(configuration.artifactIdentity == nil)
         #expect(configuration.deletionIsExplicit == true)
     }
 

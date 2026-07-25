@@ -32,10 +32,19 @@ let package = Package(
         .executableTarget(name: "ReadmeExample", dependencies: ["LogBrew"]),
         .executableTarget(name: "RealUserSmoke", dependencies: ["LogBrew"]),
         .executableTarget(name: "TraceCorrelationExample", dependencies: ["LogBrew"]),
+        .executableTarget(
+            name: "LogBrewHangStoreProcessHelper",
+            dependencies: ["LogBrew", "LogBrewCrash"],
+            path: "Tests/LogBrewHangStoreProcessHelper",
+        ),
         .testTarget(name: "LogBrewTests", dependencies: ["LogBrew"]),
         .testTarget(
             name: "LogBrewCrashTests",
-            dependencies: ["LogBrew", "LogBrewCrash"],
+            dependencies: [
+                "LogBrew",
+                "LogBrewCrash",
+                "LogBrewHangStoreProcessHelper",
+            ],
         ),
     ],
 )

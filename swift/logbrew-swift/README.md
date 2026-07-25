@@ -343,6 +343,59 @@ Capture is process-wide and intentionally single-owner because fatal signal and 
 
 Only fixed title, critical severity, replay marker, allowlisted crash mechanism, and privacy-bounded native frame identities and offsets are added to the LogBrew issue. Raw reports, exception reasons, messages, stack memory, thread names, console logs, paths, process data, user data, headers, authentication data, and device identity are not uploaded by this integration. These frames are capture-only metadata; native artifact upload and user-visible hosted symbolication are not part of this feature.
 
+To bind native frames to an uploaded Apple debug object, configure the exact
+project, release, environment, and active project service name used by the
+artifact pipeline. LogBrew does not derive or substitute any of these values.
+Each runtime frame retains its canonical Mach-O UUID and one supported
+architecture (`arm64`, `arm64e`, or `x86_64`) alongside that identity.
+Fatal reports persist that exact capture-time identity in one SDK-owned,
+validated report field. Reports created by older LogBrew versions replay
+without artifact identity rather than borrowing identity from a newer launch.
+
+App-hang capture is a separate, explicit opt-in on the same capture owner:
+
+```swift
+let identity = try NativeArtifactIdentity(
+    projectId: "550e8400-e29b-41d4-a716-446655440000",
+    release: "com.example.app@1.2.3+45",
+    environment: "production",
+    service: "ios-app"
+)
+let watchdog = try NativeHangWatchdogConfiguration(
+    threshold: 2,
+    diagnosticsHandler: { diagnostic in
+        // Fixed diagnostic code only; no stack, payload, path, or error text.
+        print(diagnostic.code.rawValue)
+    }
+)
+let crashCapture = NativeCrashCapture(
+    configuration: try NativeCrashConfiguration(
+        storageDirectory: applicationSupport.appendingPathComponent("LogBrewCrash", isDirectory: true),
+        artifactIdentity: identity,
+        hangWatchdog: watchdog
+    )
+)
+try crashCapture.install()
+```
+
+Install on the main thread before root UI registration. The watchdog observes
+standard UIKit active-state notifications without swizzling, pings the main
+queue from a private timer, and captures at most 32 native UUID/architecture/
+offset tuples after the configured threshold. It suppresses capture while the
+app is inactive, under a debugger, during serious or critical thermal state, or
+when the watchdog timer itself resumes too late to distinguish a scheduler
+stall. A recovered hang is durably marked handled before it can be replayed;
+an ongoing record left by process termination replays as an unhandled critical
+hang. Both use a stable event ID, retain the record after rejected admission,
+and delete it only after accepted delivery.
+
+The watchdog stores no raw message, symbols, image names, all-thread snapshot,
+breadcrumbs, URL, payload, or user context. It is supported for UIKit
+applications and is disabled by default. `stopReplay()` also stops its timer
+and observers, marks an in-flight hang recovered, and retains pending work.
+Watchdog capture does not guarantee operating-system termination, upload debug
+objects, or provide runtime symbolication on its own.
+
 The same product exposes Objective-C names through its generated module header for mixed and Objective-C SwiftPM targets:
 
 ```objective-c

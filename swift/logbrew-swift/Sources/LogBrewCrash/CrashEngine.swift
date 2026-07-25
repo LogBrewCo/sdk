@@ -15,7 +15,7 @@ struct CrashEngineConfiguration: Equatable {
     let includesMemory: Bool
     let includesQueueNames: Bool
     let includesConsoleLog: Bool
-    let includesUserContext: Bool
+    let artifactIdentity: NativeArtifactIdentityValue?
     let deletionIsExplicit: Bool
 }
 
@@ -78,7 +78,7 @@ final class KSCrashEngineDriver: CrashEngineDriving {
             monitors.insert(.nsException)
         }
         engineConfiguration.monitors = monitors
-        engineConfiguration.userInfoJSON = configuration.includesUserContext ? [:] : nil
+        engineConfiguration.userInfoJSON = configuration.artifactIdentity?.crashUserInfoJSON
         engineConfiguration.deadlockWatchdogInterval = 0
         engineConfiguration.enableQueueNameSearch = configuration.includesQueueNames
         engineConfiguration.enableMemoryIntrospection = configuration.includesMemory
