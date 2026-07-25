@@ -4,12 +4,17 @@
   "description": "Public LogBrew JavaScript SDK for building, validating, and flushing event batches.",
   "type": "module",
   "main": "./index.cjs",
+  "react-native": "./react-native.js",
   "types": "./index.d.ts",
   "bin": {
     "logbrew-release-artifacts": "./release-artifacts.js"
   },
   "exports": {
     ".": {
+      "react-native": {
+        "types": "./react-native.d.ts",
+        "default": "./react-native.js"
+      },
       "import": {
         "types": "./index.d.ts",
         "default": "./index.js"
@@ -34,13 +39,18 @@
   },
   "files": [
     "index.cjs",
+    "core.cjs",
     "index.js",
     "index.d.ts",
     "index.d.cts",
     "issue-stack.cjs",
+    "log-context.cjs",
     "opentelemetry.cjs",
+    "react-native.js",
+    "react-native.d.ts",
     "support-ticket.cjs",
     "trace-context.cjs",
+    "winston.cjs",
     "release-artifacts-common.js",
     "release-artifacts-build.cjs",
     "release-artifacts.js",

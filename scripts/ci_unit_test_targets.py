@@ -91,6 +91,9 @@ PATH_TARGETS = {
     "scripts/real_user_react_native_smoke.sh": (
         "tests.test_react_native_global_errors",
     ),
+    "scripts/real_user_react_native_bundle_smoke.sh": (
+        "tests.test_react_native_mobile_core",
+    ),
     "scripts/real_user_go_persistence_smoke.sh": (
         "tests.test_go_persistence_smoke",
     ),
