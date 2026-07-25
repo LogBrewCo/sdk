@@ -35,7 +35,12 @@ final class FatalStoreModuleImpl {
 
   FatalStoreModuleImpl(ReactApplicationContext context) {
     File root = context.getNoBackupFilesDir();
-    store = root == null ? null : new FatalRecordStore(new File(root, "logbrew-fatal-js"));
+    store =
+        root == null
+            ? null
+            : new FatalRecordStore(
+                new File(root, "logbrew-fatal-js"),
+                new AndroidParentDirectorySync());
   }
 
   WritableMap writeFatalRecord(ReadableMap input) {
