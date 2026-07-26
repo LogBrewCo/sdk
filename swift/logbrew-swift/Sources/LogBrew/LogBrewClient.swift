@@ -75,6 +75,15 @@ public final class LogBrewClient: @unchecked Sendable {
         try engine.flush(transport: transport)
     }
 
+    @_spi(CrashReplay)
+    public func flushEvent(
+        _ eventID: String,
+        transport: any Transport,
+    ) throws -> Bool {
+        try requireNonEmpty("event id", eventID)
+        return try engine.flushEvent(eventID, transport: transport)
+    }
+
     public func shutdown(transport: any Transport) throws -> TransportResponse {
         try engine.shutdown(transport: transport)
     }

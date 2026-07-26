@@ -87,6 +87,7 @@ extension DeliveryEngine {
             count: count,
             bytes: recovered.encodedBytes,
             body: recovered.body,
+            eventIDs: Array(queue.prefix(count)).map(\.event.id),
             durableRecordNames: recovered.eventRecordNames,
         )
     }
