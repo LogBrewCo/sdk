@@ -75,10 +75,10 @@ final class HangWatchdogController: @unchecked Sendable {
                 return
             }
             self.active = false
-            let eventID = heartbeat.capturedEventID
+            let captured = heartbeat.captured
             heartbeat = .idle
             lock.unlock()
-            markRecovered(eventID)
+            markRecovered(captured)
             return
         }
 
@@ -107,23 +107,34 @@ final class HangWatchdogController: @unchecked Sendable {
             suppress(suppression, sentAt: sentAt)
             return
         }
+        guard let durationMs = NativeHangDuration.milliseconds(
+            from: sentAt,
+            through: sentAt + elapsed,
+        ) else {
+            suppress(.storageFailed, sentAt: sentAt)
+            return
+        }
 
         let frames = stackCapture.capture()
         guard !frames.isEmpty else {
             suppress(.stackUnavailable, sentAt: sentAt)
             return
         }
-        captureIncident(frames: frames, sentAt: sentAt)
+        captureIncident(
+            frames: frames,
+            sentAt: sentAt,
+            durationMs: durationMs,
+        )
     }
 
     func stop() {
         lock.lock()
-        let eventID = heartbeat.capturedEventID
+        let captured = heartbeat.captured
         running = false
         active = false
         heartbeat = .idle
         lock.unlock()
-        markRecovered(eventID)
+        markRecovered(captured)
     }
 
     private func suppressionCode(elapsed: TimeInterval) -> NativeHangDiagnosticCode? {
@@ -164,7 +175,11 @@ final class HangWatchdogController: @unchecked Sendable {
         return sentAt
     }
 
-    private func captureIncident(frames: [NativeStackFrame], sentAt: TimeInterval) {
+    private func captureIncident(
+        frames: [NativeStackFrame],
+        sentAt: TimeInterval,
+        durationMs: Double,
+    ) {
         let eventID = UUID().uuidString.lowercased()
         let incident = NativeHangIncident(
             eventID: eventID,
@@ -172,6 +187,7 @@ final class HangWatchdogController: @unchecked Sendable {
             state: .ongoing,
             identity: identity,
             nativeStackFrames: frames,
+            durationMs: durationMs,
         )
         do {
             lock.lock()
@@ -180,13 +196,13 @@ final class HangWatchdogController: @unchecked Sendable {
                 return
             }
             try store.write(incident)
-            heartbeat = .captured(eventID: eventID)
+            heartbeat = .captured(eventID: eventID, sentAt: sentAt)
             diagnosticDelivery.enqueue(NativeHangDiagnostic(.captured))
             lock.unlock()
         } catch {
             let persisted = try? store.read()
             heartbeat = persisted == incident
-                ? .captured(eventID: eventID)
+                ? .captured(eventID: eventID, sentAt: sentAt)
                 : .suppressed
             diagnosticDelivery.enqueue(NativeHangDiagnostic(.storageFailed))
             lock.unlock()
@@ -209,18 +225,30 @@ final class HangWatchdogController: @unchecked Sendable {
 
     private func mainDidRespond() {
         lock.lock()
-        let eventID = heartbeat.capturedEventID
+        let captured = heartbeat.captured
         heartbeat = .idle
         lock.unlock()
-        markRecovered(eventID)
+        markRecovered(captured)
     }
 
-    private func markRecovered(_ eventID: String?) {
-        guard let eventID else {
+    private func markRecovered(
+        _ captured: (eventID: String, sentAt: TimeInterval)?,
+    ) {
+        guard let captured else {
+            return
+        }
+        guard let durationMs = NativeHangDuration.milliseconds(
+            from: captured.sentAt,
+            through: clock.monotonicNow(),
+        ) else {
+            emit(.storageFailed)
             return
         }
         do {
-            try store.markRecovered(eventID: eventID)
+            try store.markRecovered(
+                eventID: captured.eventID,
+                durationMs: durationMs,
+            )
             emit(.recovered)
         } catch {
             emit(.storageFailed)
@@ -248,14 +276,14 @@ extension HangWatchdogController: HangWatchdogControlling {}
 private enum HangHeartbeatState: Equatable {
     case idle
     case waiting(sentAt: TimeInterval)
-    case captured(eventID: String)
+    case captured(eventID: String, sentAt: TimeInterval)
     case suppressed
 
-    var capturedEventID: String? {
-        guard case let .captured(eventID) = self else {
+    var captured: (eventID: String, sentAt: TimeInterval)? {
+        guard case let .captured(eventID, sentAt) = self else {
             return nil
         }
-        return eventID
+        return (eventID, sentAt)
     }
 }
 

@@ -18,7 +18,7 @@ struct NativeHangIncidentStoreTests {
 
         for (phase, expected) in [
             ("write", "stored"),
-            ("read", fixture.incident.eventID),
+            ("read", "\(fixture.incident.eventID)|ongoing|2100.0"),
             ("ack", "acknowledged"),
             ("empty", "empty"),
         ] {
@@ -125,7 +125,10 @@ struct NativeHangIncidentStoreTests {
         let store = try NativeHangIncidentFileStore(directory: fixture.directory)
         try store.write(fixture.incident)
 
-        try store.markRecovered(eventID: fixture.incident.eventID)
+        try store.markRecovered(
+            eventID: fixture.incident.eventID,
+            durationMs: 4250,
+        )
         let recovered = try #require(try store.read())
 
         #expect(recovered.eventID == fixture.incident.eventID)
@@ -133,6 +136,7 @@ struct NativeHangIncidentStoreTests {
         #expect(recovered.artifactIdentity == fixture.incident.artifactIdentity)
         #expect(recovered.nativeStackFrames == fixture.incident.nativeStackFrames)
         #expect(recovered.state == .recovered)
+        #expect(recovered.durationMs == 4250)
     }
 
     @Test("one owned interrupted temporary is removed while a replacement link fails closed")
@@ -242,6 +246,7 @@ private struct StoreFixture {
                     instructionOffset: "0000000000000040",
                 ),
             ],
+            durationMs: 2100,
         )
     }
 }

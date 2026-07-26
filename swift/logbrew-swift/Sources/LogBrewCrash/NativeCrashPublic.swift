@@ -163,6 +163,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
     private let nativeStackFrames: [NativeStackFrame]?
     private let artifactIdentity: NativeArtifactIdentity?
     private let hangState: NativeHangIncidentState?
+    private let hangDurationMs: Double?
     let source: NativeCrashRecordSource
     let digest: Data
     let ownerNonce: UUID
@@ -174,6 +175,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         nativeStackFrames: [NativeStackFrame]?,
         artifactIdentity: NativeArtifactIdentity?,
         hangState: NativeHangIncidentState?,
+        hangDurationMs: Double? = nil,
         source: NativeCrashRecordSource,
         digest: Data,
         ownerNonce: UUID,
@@ -184,6 +186,7 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         self.nativeStackFrames = nativeStackFrames
         self.artifactIdentity = artifactIdentity
         self.hangState = hangState
+        self.hangDurationMs = hangDurationMs
         self.source = source
         self.digest = digest
         self.ownerNonce = ownerNonce
@@ -223,6 +226,9 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         }
         if let hangState {
             metadata["crash.handled"] = .bool(hangState == .recovered)
+        }
+        if let hangDurationMs {
+            metadata["durationMs"] = .double(hangDurationMs)
         }
         return IssueAttributes(
             title: hangState == nil ? "Native application crash" : "Native application hang",
@@ -270,6 +276,9 @@ public final class NativeCrashRecord: NSObject, @unchecked Sendable {
         }
         if let hangState {
             metadata["crash.handled"] = hangState == .recovered
+        }
+        if let hangDurationMs {
+            metadata["durationMs"] = hangDurationMs
         }
         return metadata as NSDictionary
     }

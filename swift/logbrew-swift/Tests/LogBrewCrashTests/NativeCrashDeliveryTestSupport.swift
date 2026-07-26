@@ -118,6 +118,7 @@ final class MixedReplayFixture {
                     instructionOffset: "0000000000000010",
                 ),
             ],
+            durationMs: 2000,
         ))
         installedCapture.hangStore = installedHangStore
         capture = installedCapture
@@ -135,6 +136,19 @@ final class MixedReplayFixture {
         var identity = try #require(record["artifactIdentity"] as? [String: Any])
         identity["projectId"] = "not-a-uuid"
         record["artifactIdentity"] = identity
+        try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+            .write(to: recordURL)
+    }
+
+    func invalidateStoredHangDuration() throws {
+        let recordURL = directory
+            .appendingPathComponent("mixed-hang", isDirectory: true)
+            .appendingPathComponent(NativeHangIncidentFileStore.recordName)
+        let data = try Data(contentsOf: recordURL)
+        var record = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any],
+        )
+        record["durationMs"] = "invalid"
         try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
             .write(to: recordURL)
     }

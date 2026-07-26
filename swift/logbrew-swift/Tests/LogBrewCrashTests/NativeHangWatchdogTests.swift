@@ -16,13 +16,16 @@ struct NativeHangWatchdogTests {
 
         let ongoing = try #require(fixture.store.incident)
         #expect(ongoing.state == .ongoing)
+        #expect(abs((ongoing.durationMs ?? 0) - 2100) < 0.001)
         #expect(ongoing.artifactIdentity == NativeArtifactIdentityValue(fixture.identity))
         #expect(ongoing.nativeStackFrames == fixture.frames)
         #expect(fixture.store.writeCount == 1)
 
+        fixture.clock.now = 4.25
         fixture.mainPinger.respond()
 
         #expect(fixture.store.incident?.state == .recovered)
+        #expect(fixture.store.incident?.durationMs == 4250)
         #expect(fixture.store.recoveryCount == 1)
         #expect(fixture.diagnostics.codes == [.captured, .recovered])
     }
@@ -100,11 +103,13 @@ struct NativeHangWatchdogTests {
         fixture.controller.poll()
         #expect(fixture.store.incident?.state == .ongoing)
 
+        fixture.clock.now = 3.2
         fixture.controller.stop()
         fixture.clock.now = 10
         fixture.controller.poll()
 
         #expect(fixture.store.incident?.state == .recovered)
+        #expect(fixture.store.incident?.durationMs == 3200)
         #expect(fixture.store.recoveryCount == 1)
         #expect(fixture.store.writeCount == 1)
     }
@@ -297,11 +302,12 @@ private final class FakeHangIncidentStore: HangIncidentStoring, @unchecked Senda
         }
     }
 
-    func markRecovered(eventID: String) throws {
+    func markRecovered(eventID: String, durationMs: Double) throws {
         guard var incident, incident.eventID == eventID else {
             throw NativeCrashError(.reportChanged)
         }
         incident.state = .recovered
+        incident.durationMs = durationMs
         self.incident = incident
         recoveryCount += 1
     }

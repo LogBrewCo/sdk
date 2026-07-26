@@ -116,6 +116,7 @@ extension NativeCrashDeliveryTests {
                     instructionOffset: "0000000000000010",
                 ),
             ],
+            durationMs: 4250,
         )
         let record = try incident.makeRecord(ownerNonce: UUID())
         let client = try makeClient(name: "hang-privacy-test")
@@ -131,10 +132,13 @@ extension NativeCrashDeliveryTests {
         #expect(metadata["crash.mechanism"] as? String == "deadlock")
         #expect(metadata["crash.replayed"] as? Bool == true)
         #expect(metadata["crash.handled"] as? Bool == true)
+        #expect(metadata["durationMs"] as? Double == 4250)
         #expect(Set(metadata.keys) == [
             "crash.handled", "crash.mechanism", "crash.replayed",
-            "environment", "projectId", "release", "service",
+            "durationMs", "environment", "projectId", "release", "service",
         ])
+        try record.enqueue(in: client)
+        #expect(client.pendingEvents() == 1)
         let payload = try client.previewJSON()
         for forbidden in ["symbolName", "imageName", "thread", "reason", "console", "/private/"] {
             #expect(!payload.contains(forbidden))

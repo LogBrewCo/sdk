@@ -49,6 +49,7 @@ class SwiftWatchdogContractTests(unittest.TestCase):
         }
         expected_tests = {
             "NativeArtifactIdentityTests.swift",
+            "NativeHangDurationTests.swift",
             "NativeHangIncidentStoreTests.swift",
             "NativeHangWatchdogTests.swift",
             "NativeHangWatchdogRuntimeTests.swift",
@@ -106,7 +107,10 @@ class SwiftWatchdogContractTests(unittest.TestCase):
 
         self.assertIn("private enum HangHeartbeatState", watchdog)
         self.assertIn("case suppressed", watchdog)
-        self.assertIn("case captured(eventID: String)", watchdog)
+        self.assertIn(
+            "case captured(eventID: String, sentAt: TimeInterval)",
+            watchdog,
+        )
         for scattered_state in ("heartbeatSentAt", "capturedEventID =", "reportedFailure"):
             self.assertNotIn(scattered_state, watchdog)
 
@@ -117,6 +121,16 @@ class SwiftWatchdogContractTests(unittest.TestCase):
         self.assertIn("guard try readLocked() == nil", store)
         self.assertIn("let persisted = try? store.read()", watchdog)
         self.assertIn("persisted == incident", watchdog)
+
+    def test_hang_duration_uses_the_public_typed_millisecond_contract(self) -> None:
+        store = (SOURCE / "NativeHangIncidentStore.swift").read_text(encoding="utf-8")
+        watchdog = (SOURCE / "NativeHangWatchdog.swift").read_text(encoding="utf-8")
+        record = (SOURCE / "NativeCrashPublic.swift").read_text(encoding="utf-8")
+
+        self.assertIn("durationMs", store)
+        self.assertIn("clock.monotonicNow()", watchdog)
+        self.assertIn('metadata["durationMs"] = .double', record)
+        self.assertNotIn("Date().timeIntervalSince", watchdog)
 
     def test_process_helper_is_test_only_and_cli_is_explicitly_owned(self) -> None:
         package_description = json.loads(
@@ -183,6 +197,8 @@ class SwiftWatchdogContractTests(unittest.TestCase):
         self.assertNotIn("--testing-library", store_tests)
         for flag in ("--phase", "--directory", "--result"):
             self.assertIn(f'"{flag}"', helper)
+        self.assertIn("incident.makeRecord(ownerNonce: UUID()).enqueue", helper)
+        self.assertIn('metadata["durationMs"] as? Double', helper)
 
     def test_timer_and_app_callback_lifecycles_have_single_safe_owners(self) -> None:
         watchdog = (SOURCE / "NativeHangWatchdog.swift").read_text(encoding="utf-8")
