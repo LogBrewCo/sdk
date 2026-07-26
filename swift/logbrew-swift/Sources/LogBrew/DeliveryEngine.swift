@@ -17,6 +17,7 @@ final class DeliveryEngine: @unchecked Sendable {
         let count: Int
         let bytes: Int
         let body: Data
+        let eventIDs: [String]
         let durableRecordNames: [String]
     }
 
@@ -207,13 +208,27 @@ final class DeliveryEngine: @unchecked Sendable {
     }
 
     func flush(transport: any Transport) throws -> TransportResponse {
+        try withManualDelivery {
+            try flushAll(transport: transport)
+        }
+    }
+
+    func flushEvent(_ eventID: String, transport: any Transport) throws -> Bool {
+        try withManualDelivery {
+            try flushThroughEvent(eventID, transport: transport)
+        }
+    }
+
+    private func withManualDelivery<Result>(
+        _ operation: () throws -> Result,
+    ) throws -> Result {
         try prepareManualOperation()
         flushLock.lock()
         defer {
             flushLock.unlock()
             rescheduleAfterManualOperation()
         }
-        return try flushAll(transport: transport)
+        return try operation()
     }
 
     func flushOwnedTransport() throws -> TransportResponse {

@@ -1,6 +1,6 @@
 import Darwin
 import Foundation
-import LogBrew
+@_spi(CrashReplay) import LogBrew
 
 @objc(LBWNativeCrashCapture)
 @objcMembers
@@ -127,8 +127,10 @@ public final class NativeCrashCapture: NSObject, @unchecked Sendable {
         try replayPendingReports { record in
             do {
                 try record.enqueue(in: client)
-                let response = try client.flush(transport: transport)
-                return (200 ..< 300).contains(response.statusCode)
+                return try client.flushEvent(
+                    record.eventID,
+                    transport: transport,
+                )
             } catch {
                 return false
             }

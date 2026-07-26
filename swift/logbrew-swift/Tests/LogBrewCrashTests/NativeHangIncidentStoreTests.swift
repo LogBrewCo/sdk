@@ -37,6 +37,44 @@ struct NativeHangIncidentStoreTests {
         }
     }
 
+    @Test("durable delivery retry and native acknowledgement survive a process restart")
+    func separateProcessDeliveryLifecycle() throws {
+        let fixture = try StoreFixture()
+        let deliveryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let resultURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).result")
+        try FileManager.default.createDirectory(
+            at: deliveryDirectory,
+            withIntermediateDirectories: false,
+        )
+        defer {
+            try? FileManager.default.removeItem(at: fixture.directory)
+            try? FileManager.default.removeItem(at: deliveryDirectory)
+            try? FileManager.default.removeItem(at: resultURL)
+        }
+
+        for (phase, expected) in [
+            ("delivery-seed", "retained|\(fixture.incident.eventID)"),
+            ("delivery-replay", "acknowledged|\(fixture.incident.eventID)"),
+            ("empty", "empty"),
+        ] {
+            let process = Process()
+            process.executableURL = try NativeHangIncidentProcessHarness.executableURL()
+            process.arguments = NativeHangIncidentProcessHarness.arguments(
+                phase: phase,
+                directory: fixture.directory,
+                deliveryDirectory: deliveryDirectory,
+                result: resultURL,
+            )
+            try process.run()
+            process.waitUntilExit()
+
+            #expect(process.terminationStatus == 0)
+            #expect(try String(contentsOf: resultURL, encoding: .utf8) == expected)
+        }
+    }
+
     @Test("a bounded record survives a fresh store instance and exact acknowledgement removes it")
     func freshInstanceReadsAndAcknowledgesExactRecord() throws {
         let fixture = try StoreFixture()
@@ -189,6 +227,17 @@ struct NativeHangIncidentProcessHarnessTests {
             "--directory", directory.path,
             "--result", result.path,
         ])
+        #expect(NativeHangIncidentProcessHarness.arguments(
+            phase: "delivery-replay",
+            directory: directory,
+            deliveryDirectory: directory.appendingPathComponent("delivery", isDirectory: true),
+            result: result,
+        ) == [
+            "--phase", "delivery-replay",
+            "--directory", directory.path,
+            "--delivery-directory", directory.appendingPathComponent("delivery", isDirectory: true).path,
+            "--result", result.path,
+        ])
     }
 }
 
@@ -215,6 +264,20 @@ private enum NativeHangIncidentProcessHarness {
         [
             "--phase", phase,
             "--directory", directory.path,
+            "--result", result.path,
+        ]
+    }
+
+    static func arguments(
+        phase: String,
+        directory: URL,
+        deliveryDirectory: URL,
+        result: URL,
+    ) -> [String] {
+        [
+            "--phase", phase,
+            "--directory", directory.path,
+            "--delivery-directory", deliveryDirectory.path,
             "--result", result.path,
         ]
     }

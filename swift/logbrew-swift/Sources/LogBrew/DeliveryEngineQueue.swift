@@ -61,33 +61,55 @@ extension DeliveryEngine {
         var statusCode = 204
 
         while let prefix = try freezePrefix() {
-            var accepted = false
-            for attemptIndex in 0 ... maxRetries {
-                let result = attempt(transport: transport, prefix: prefix)
-                totalAttempts += result.attempts
-                recordManualAttempts(result.attempts)
-                switch result {
-                case let .accepted(status, _):
-                    try acknowledge(prefix)
-                    statusCode = status
-                    accepted = true
-                case .retryable where attemptIndex < maxRetries:
-                    continue
-                case let .retryable(_, error):
-                    recordManualFailure(outcome: .retryableFailure, pauseReason: .retryExhausted)
-                    throw error
-                case let .terminal(reason, _, error):
-                    recordManualFailure(outcome: .terminalFailure, pauseReason: reason)
-                    throw error
-                }
-                break
-            }
-            if !accepted {
-                throw SdkError(code: "transport_error", message: "exhausted retries")
-            }
+            let response = try deliver(prefix, transport: transport)
+            totalAttempts += response.attempts
+            statusCode = response.statusCode
         }
 
         return TransportResponse(statusCode: statusCode, attempts: totalAttempts)
+    }
+
+    func flushThroughEvent(
+        _ eventID: String,
+        transport: any Transport,
+    ) throws -> Bool {
+        guard withStateLock({ queue.contains { $0.event.id == eventID } }) else {
+            return false
+        }
+        while let prefix = try freezePrefix() {
+            let containsEvent = prefix.eventIDs.contains(eventID)
+            _ = try deliver(prefix, transport: transport)
+            if containsEvent {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func deliver(
+        _ prefix: FrozenPrefix,
+        transport: any Transport,
+    ) throws -> TransportResponse {
+        var totalAttempts = 0
+        for attemptIndex in 0 ... maxRetries {
+            let result = attempt(transport: transport, prefix: prefix)
+            totalAttempts += result.attempts
+            recordManualAttempts(result.attempts)
+            switch result {
+            case let .accepted(status, _):
+                try acknowledge(prefix)
+                return TransportResponse(statusCode: status, attempts: totalAttempts)
+            case .retryable where attemptIndex < maxRetries:
+                continue
+            case let .retryable(_, error):
+                recordManualFailure(outcome: .retryableFailure, pauseReason: .retryExhausted)
+                throw error
+            case let .terminal(reason, _, error):
+                recordManualFailure(outcome: .terminalFailure, pauseReason: reason)
+                throw error
+            }
+        }
+        throw SdkError(code: "transport_error", message: "exhausted retries")
     }
 
     func freezePrefix() throws -> FrozenPrefix? {
@@ -153,6 +175,7 @@ extension DeliveryEngine {
             count: selected.count,
             bytes: prefixBytes,
             body: body,
+            eventIDs: selected.map(\.id),
             durableRecordNames: recordNames,
         )
     }
@@ -217,6 +240,13 @@ extension DeliveryEngine {
     }
 
     private func classify(_ response: TransportResponse) -> AttemptResult {
+        guard response.attempts > 0 else {
+            return .terminal(
+                reason: .nonRetryable,
+                attempts: 1,
+                error: SdkError(code: "transport_error", message: "unexpected transport response"),
+            )
+        }
         let attempts = max(1, response.attempts)
         if (200 ..< 300).contains(response.statusCode) {
             return .accepted(statusCode: response.statusCode, attempts: attempts)
