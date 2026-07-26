@@ -903,7 +903,25 @@ jobs:
 
   verify:
     name: Public registry verification
-    if: ${{ inputs.target == 'verify' }}
+    if: >-
+      ${{
+        inputs.target == 'verify' &&
+        (
+          ! inputs.include_swiftpm ||
+          inputs.include_unity_npm ||
+          inputs.include_pypi_extras ||
+          inputs.include_crates_publish ||
+          inputs.include_packagist_update ||
+          inputs.include_maven_publish ||
+          inputs.include_go_module ||
+          inputs.verify_version != '' ||
+          inputs.verify_npm_versions != '' ||
+          inputs.verify_pypi_versions != '' ||
+          inputs.verify_nuget_versions != '' ||
+          inputs.verify_maven_artifacts != '' ||
+          inputs.verify_maven_versions != ''
+        )
+      }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out release ref

@@ -925,6 +925,40 @@ jobs:
         ):
             self.assertIn(required_path, workflow)
 
+    def test_registry_verify_job_skips_only_swiftpm_only_selection(self) -> None:
+        workflow = (ROOT / ".github/workflows/publish-packages.yml").read_text(
+            encoding="utf-8"
+        )
+        verify_job = workflow.split("\n  verify:\n", 1)[1].split(
+            "\n  verify-swiftpm:\n",
+            1,
+        )[0]
+        condition_source = " ".join(
+            verify_job.split("runs-on:", 1)[0].split("if:", 1)[1].split()
+        )
+        expected_condition = """
+        >- ${{
+          inputs.target == 'verify' &&
+          (
+            ! inputs.include_swiftpm ||
+            inputs.include_unity_npm ||
+            inputs.include_pypi_extras ||
+            inputs.include_crates_publish ||
+            inputs.include_packagist_update ||
+            inputs.include_maven_publish ||
+            inputs.include_go_module ||
+            inputs.verify_version != '' ||
+            inputs.verify_npm_versions != '' ||
+            inputs.verify_pypi_versions != '' ||
+            inputs.verify_nuget_versions != '' ||
+            inputs.verify_maven_artifacts != '' ||
+            inputs.verify_maven_versions != ''
+          )
+        }}
+        """
+
+        self.assertEqual(condition_source, " ".join(expected_condition.split()))
+
     def test_maven_dispatch_input_is_canonicalized_before_shell_or_output_use(
         self,
     ) -> None:
