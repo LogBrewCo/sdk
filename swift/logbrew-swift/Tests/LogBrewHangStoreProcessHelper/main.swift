@@ -18,7 +18,16 @@ enum LogBrewHangStoreProcessHelper {
             guard let stored = try store.read() else {
                 throw NativeCrashError(.reportChanged)
             }
-            result = stored.eventID
+            guard let durationMs = stored.durationMs else {
+                throw NativeCrashError(.reportChanged)
+            }
+            let replayed = try replay(stored)
+            guard replayed.eventID == stored.eventID,
+                  replayed.durationMs == durationMs
+            else {
+                throw NativeCrashError(.reportChanged)
+            }
+            result = "\(stored.eventID)|\(stored.state.rawValue)|\(durationMs)"
         case "ack":
             try store.delete(eventID: incident.eventID)
             result = "acknowledged"
@@ -52,7 +61,30 @@ enum LogBrewHangStoreProcessHelper {
                     instructionOffset: "0000000000000040",
                 ),
             ],
+            durationMs: 2100,
         )
+    }
+
+    private static func replay(
+        _ incident: NativeHangIncident,
+    ) throws -> (eventID: String, durationMs: Double) {
+        let client = try LogBrewClient.create(
+            apiKey: "LOGBREW_API_KEY",
+            sdkName: "hang-store-process-helper",
+            sdkVersion: "0.1.0",
+        )
+        try incident.makeRecord(ownerNonce: UUID()).enqueue(in: client)
+        guard let data = try client.previewJSON().data(using: .utf8),
+              let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let event = (payload["events"] as? [[String: Any]])?.first,
+              let eventID = event["id"] as? String,
+              let attributes = event["attributes"] as? [String: Any],
+              let metadata = attributes["metadata"] as? [String: Any],
+              let durationMs = metadata["durationMs"] as? Double
+        else {
+            throw NativeCrashError(.reportChanged)
+        }
+        return (eventID, durationMs)
     }
 }
 

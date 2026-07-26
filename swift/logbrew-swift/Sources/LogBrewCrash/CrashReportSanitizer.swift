@@ -27,6 +27,7 @@ struct CrashReportSanitizer {
             nativeStackFrames: nativeStackFrames,
             artifactIdentity: artifactIdentity,
             hangState: nil,
+            hangDurationMs: nil,
             source: .engine(reportID: reportID),
             digest: Data(SHA256.hash(data: data)),
             ownerNonce: ownerNonce,

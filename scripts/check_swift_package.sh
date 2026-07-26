@@ -86,6 +86,7 @@ grep -q '/Tests/LogBrewCrashTests/NativeCrashFrameCaptureValidationTests.swift$'
 grep -q '/Tests/LogBrewCrashTests/NativeCrashFrameCaptureTestSupport.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewCrashTests/CrashTestSupport.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewCrashTests/NativeArtifactIdentityTests.swift$' "$tmp_dir/archive-contents.txt"
+grep -q '/Tests/LogBrewCrashTests/NativeHangDurationTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewCrashTests/NativeHangIncidentStoreTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewCrashTests/NativeHangWatchdogTests.swift$' "$tmp_dir/archive-contents.txt"
 grep -q '/Tests/LogBrewCrashTests/NativeHangWatchdogRuntimeTests.swift$' "$tmp_dir/archive-contents.txt"

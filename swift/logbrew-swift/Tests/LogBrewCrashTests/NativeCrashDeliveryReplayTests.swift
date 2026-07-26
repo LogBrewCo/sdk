@@ -110,6 +110,27 @@ extension NativeCrashDeliveryTests {
         #expect(try fixture.hangStore.read() == nil)
     }
 
+    @Test("malformed hang duration is discarded without blocking valid crash replay")
+    func malformedHangDurationIsDiscardedWithoutBlockingCrashReplay() throws {
+        let fixture = try MixedReplayFixture()
+        defer { fixture.removeStorage() }
+        try fixture.invalidateStoredHangDuration()
+
+        var accepted: [String] = []
+        let result = try fixture.capture.replayPendingReports { record in
+            accepted.append(record.eventID)
+            return true
+        }
+
+        #expect(accepted == [fixture.crashID])
+        #expect(result.attempted == 1)
+        #expect(result.acknowledged == 1)
+        #expect(result.discarded == 1)
+        #expect(result.pending == 0)
+        #expect(fixture.crashStore.deletedIDs == [7])
+        #expect(try fixture.hangStore.read() == nil)
+    }
+
     @Test("enqueue is idempotent for a retained crash event")
     func enqueueIsIdempotentForRetry() throws {
         let record = try makeRecord()

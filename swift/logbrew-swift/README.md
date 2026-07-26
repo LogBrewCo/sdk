@@ -387,7 +387,12 @@ when the watchdog timer itself resumes too late to distinguish a scheduler
 stall. A recovered hang is durably marked handled before it can be replayed;
 an ongoing record left by process termination replays as an unhandled critical
 hang. Both use a stable event ID, retain the record after rejected admission,
-and delete it only after accepted delivery.
+and delete it only after accepted delivery. Hang issues include one numeric
+`durationMs` metadata value measured from the watchdog's monotonic clock. For
+an ongoing incident it is the elapsed duration at capture; for a recovered
+incident it is the elapsed duration when the main thread responds or the active
+lifecycle ends. Older records without duration continue to replay without
+inventing one.
 
 The watchdog stores no raw message, symbols, image names, all-thread snapshot,
 breadcrumbs, URL, payload, or user context. It is supported for UIKit

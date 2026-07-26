@@ -8,6 +8,33 @@ enum NativeHangIncidentState: String, Codable {
     case recovered
 }
 
+enum NativeHangDuration {
+    static let maxMilliseconds = 24 * 60 * 60 * 1000.0
+
+    static func validated(_ milliseconds: Double) throws -> Double {
+        guard milliseconds.isFinite,
+              milliseconds >= 0,
+              milliseconds <= maxMilliseconds
+        else {
+            throw NativeCrashError(.reportCorrupt)
+        }
+        return milliseconds
+    }
+
+    static func milliseconds(
+        from monotonicStart: TimeInterval,
+        through monotonicEnd: TimeInterval,
+    ) -> Double? {
+        guard monotonicStart.isFinite,
+              monotonicEnd.isFinite,
+              monotonicEnd >= monotonicStart
+        else {
+            return nil
+        }
+        return try? validated((monotonicEnd - monotonicStart) * 1000)
+    }
+}
+
 struct NativeHangIncident: Codable, Equatable {
     private let version: Int
     let eventID: String
@@ -15,6 +42,7 @@ struct NativeHangIncident: Codable, Equatable {
     var state: NativeHangIncidentState
     let artifactIdentity: NativeArtifactIdentityValue
     let nativeStackFrames: [NativeStackFrame]
+    var durationMs: Double?
 
     init(
         eventID: String,
@@ -22,6 +50,7 @@ struct NativeHangIncident: Codable, Equatable {
         state: NativeHangIncidentState,
         identity: NativeArtifactIdentity,
         nativeStackFrames: [NativeStackFrame],
+        durationMs: Double? = nil,
     ) {
         version = 1
         self.eventID = eventID
@@ -29,6 +58,7 @@ struct NativeHangIncident: Codable, Equatable {
         self.state = state
         artifactIdentity = NativeArtifactIdentityValue(identity)
         self.nativeStackFrames = nativeStackFrames
+        self.durationMs = durationMs
     }
 
     func validated() throws -> NativeHangIncident {
@@ -42,6 +72,9 @@ struct NativeHangIncident: Codable, Equatable {
         }
         do {
             _ = try artifactIdentity.validatedIdentity()
+            if let durationMs {
+                _ = try NativeHangDuration.validated(durationMs)
+            }
         } catch {
             throw NativeCrashError(.reportCorrupt)
         }
@@ -60,6 +93,7 @@ struct NativeHangIncident: Codable, Equatable {
             nativeStackFrames: nativeStackFrames,
             artifactIdentity: artifactIdentity.validatedIdentity(),
             hangState: state,
+            hangDurationMs: durationMs,
             source: .hang(eventID: eventID),
             digest: digest(),
             ownerNonce: ownerNonce,
@@ -97,7 +131,7 @@ struct NativeHangIncident: Codable, Equatable {
 protocol HangIncidentStoring: AnyObject, Sendable {
     func read() throws -> NativeHangIncident?
     func write(_ incident: NativeHangIncident) throws
-    func markRecovered(eventID: String) throws
+    func markRecovered(eventID: String, durationMs: Double) throws
     func delete(eventID: String) throws
     func purge() throws
 }
@@ -135,14 +169,19 @@ final class NativeHangIncidentFileStore: HangIncidentStoring, @unchecked Sendabl
         try writeLocked(incident.validated())
     }
 
-    func markRecovered(eventID: String) throws {
+    func markRecovered(eventID: String, durationMs: Double) throws {
         lock.lock()
         defer { lock.unlock() }
         guard var incident = try readLocked(), incident.eventID == eventID else {
             throw NativeCrashError(.reportChanged)
         }
+        let recoveredDuration = try NativeHangDuration.validated(durationMs)
+        guard incident.durationMs.map({ recoveredDuration >= $0 }) ?? true else {
+            throw NativeCrashError(.reportChanged)
+        }
         incident.state = .recovered
-        try writeLocked(incident)
+        incident.durationMs = recoveredDuration
+        try writeLocked(incident.validated())
     }
 
     func delete(eventID: String) throws {
