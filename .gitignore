@@ -1,13 +1,12 @@
 __pycache__/
 *.pyc
 
-# Local-only agent guidance and planning artifacts.
-AGENTS.md
+# Assistant-local planning artifacts.
 CLAUDE.md
 .agents/
 skills-lock.json
 docs/competitor-research/
-docs/superpowers/
+docs/private-plans/
 memory.md
 plans/
 *plan*.md
