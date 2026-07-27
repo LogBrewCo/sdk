@@ -20,6 +20,9 @@ PUBLIC_README_FORBIDDEN_RE = re.compile(
     r"automation agents?|for automation agents|agent-facing)",
     re.IGNORECASE,
 )
+USER_HOME_PATH_RE = re.compile(
+    r"(?:/Users/[^/\s`]+/|/home/[^/\s`]+/|[A-Za-z]:\\Users\\[^\\\s`]+\\)"
+)
 
 SKIPPED_DIRS = {
     ".agents",
@@ -48,12 +51,12 @@ SKIPPED_EXTENSIONS = {
 }
 
 SELF_PATH = Path("scripts/check_confidentiality_scan.py")
+PUBLIC_AGENT_GUIDE_PATH = Path("AGENTS.md")
 FORBIDDEN_PUBLIC_PLANNING_PATHS = (
     Path(".agents"),
-    Path("AGENTS.md"),
     Path("CLAUDE.md"),
     Path("docs/competitor-research"),
-    Path("docs/superpowers"),
+    Path("docs/private-plans"),
     Path("memory.md"),
     Path("plans"),
     Path("skills-lock.json"),
@@ -100,8 +103,10 @@ def is_git_ignored(root: Path, relative: Path) -> bool:
 
 def validate(root: Path) -> list[str]:
     failures: list[str] = []
+    scanned_files = iter_scanned_files(root)
     failures.extend(validate_forbidden_public_planning_paths(root))
-    for path in iter_scanned_files(root):
+    failures.extend(validate_agent_guidance_paths(root, scanned_files))
+    for path in scanned_files:
         relative = path.relative_to(root)
         try:
             content = path.read_text(encoding="utf-8")
@@ -109,6 +114,9 @@ def validate(root: Path) -> list[str]:
             content = path.read_text(encoding="utf-8", errors="ignore")
 
         for line_number, line in enumerate(content.splitlines(), start=1):
+            if relative == PUBLIC_AGENT_GUIDE_PATH and USER_HOME_PATH_RE.search(line):
+                failures.append(f"./{relative.as_posix()}:{line_number}:{line}")
+                continue
             if not SENSITIVE_RE.search(line):
                 continue
             if is_brand_svg_asset(relative):
@@ -129,8 +137,21 @@ def validate_forbidden_public_planning_paths(root: Path) -> list[str]:
         if is_git_ignored(root, relative):
             continue
         failures.append(
-            f"./{relative.as_posix()}: forbidden public planning file; keep agent guidance and "
-            "private plans in private coordination, not public SDK repos"
+            f"./{relative.as_posix()}: forbidden public planning file; keep assistant-local "
+            "plans and task state out of public SDK repos"
+        )
+    return failures
+
+
+def validate_agent_guidance_paths(root: Path, scanned_files: list[Path]) -> list[str]:
+    failures: list[str] = []
+    for path in scanned_files:
+        relative = path.relative_to(root)
+        if relative.name != "AGENTS.md" or relative == PUBLIC_AGENT_GUIDE_PATH:
+            continue
+        failures.append(
+            f"./{relative.as_posix()}: only the repository-root AGENTS.md may contain "
+            "public agent guidance"
         )
     return failures
 

@@ -470,18 +470,81 @@ class ConfidentialityScanTests(unittest.TestCase):
         self.assertIn("skills-lock.json", failures[0])
         self.assertIn("forbidden public planning file", failures[0])
 
-    def test_reports_public_research_and_memory_paths(self) -> None:
+    def test_allows_public_safe_root_agent_guide(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+            (root / "AGENTS.md").write_text(
+                "# SDK contributor guidance\n\n"
+                "Run the focused package checks before repository-wide checks.\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+    def test_reports_tracked_agent_guide_outside_repository_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+            nested = root / "js" / "AGENTS.md"
+            nested.parent.mkdir()
+            nested.write_text(
+                "# Package contributor guidance\n",
+                encoding="utf-8",
+            )
+
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("js/AGENTS.md", failures[0])
+        self.assertIn("only the repository-root AGENTS.md", failures[0])
+
+    def test_scans_root_agent_guide_content_normally(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+            sensitive_term = "pass" + "word"
+            (root / "AGENTS.md").write_text(
+                f"Use the production {sensitive_term} from a local file.\n",
+                encoding="utf-8",
+            )
+
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn(sensitive_term, failures[0])
+
+    def test_reports_user_home_path_in_root_agent_guide(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+            home_path = "/Users/" + "example/work/sdk"
+            (root / "AGENTS.md").write_text(
+                f"Read additional guidance from {home_path}.\n",
+                encoding="utf-8",
+            )
+
+            failures = check_confidentiality_scan.validate(root)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn(home_path, failures[0])
+
+    def test_reports_public_research_memory_and_private_plan_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             research = root / "docs" / "competitor-research"
+            private_plans = root / "docs" / "private-plans"
             research.mkdir(parents=True)
+            private_plans.mkdir(parents=True)
             (research / "transport.md").write_text("Public source notes\n", encoding="utf-8")
+            (private_plans / "task.md").write_text("Local task notes\n", encoding="utf-8")
             (root / "memory.md").write_text("SDK lane memory\n", encoding="utf-8")
 
             failures = check_confidentiality_scan.validate(root)
 
-        self.assertEqual(len(failures), 2)
+        self.assertEqual(len(failures), 3)
         self.assertTrue(any("docs/competitor-research" in failure for failure in failures))
+        self.assertTrue(any("docs/private-plans" in failure for failure in failures))
         self.assertTrue(any("memory.md" in failure for failure in failures))
 
     def test_allows_local_ignored_agent_redirect_and_plans(self) -> None:
