@@ -482,22 +482,37 @@ class ConfidentialityScanTests(unittest.TestCase):
 
             self.assertEqual(check_confidentiality_scan.validate(root), [])
 
-    def test_reports_tracked_agent_guide_outside_repository_root(self) -> None:
+    def test_allows_public_safe_nested_agent_guides(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
-            nested = root / "js" / "AGENTS.md"
-            nested.parent.mkdir()
-            nested.write_text(
-                "# Package contributor guidance\n",
-                encoding="utf-8",
-            )
+            nested_root = root / "js"
+            nested_root.mkdir()
+            for filename in ("AGENTS.md", "AGENTS.override.md"):
+                (nested_root / filename).write_text(
+                    "# Package contributor guidance\n",
+                    encoding="utf-8",
+                )
+
+            self.assertEqual(check_confidentiality_scan.validate(root), [])
+
+    def test_scans_nested_agent_guides_normally(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
+            nested_root = root / "js"
+            nested_root.mkdir()
+            sensitive_term = "pass" + "word"
+            for filename in ("AGENTS.md", "AGENTS.override.md"):
+                (nested_root / filename).write_text(
+                    f"Use the production {sensitive_term} from a local file.\n",
+                    encoding="utf-8",
+                )
 
             failures = check_confidentiality_scan.validate(root)
 
-        self.assertEqual(len(failures), 1)
-        self.assertIn("js/AGENTS.md", failures[0])
-        self.assertIn("only the repository-root AGENTS.md", failures[0])
+        self.assertEqual(len(failures), 2)
+        self.assertTrue(all(sensitive_term in failure for failure in failures))
 
     def test_scans_root_agent_guide_content_normally(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

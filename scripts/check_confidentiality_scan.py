@@ -105,7 +105,6 @@ def validate(root: Path) -> list[str]:
     failures: list[str] = []
     scanned_files = iter_scanned_files(root)
     failures.extend(validate_forbidden_public_planning_paths(root))
-    failures.extend(validate_agent_guidance_paths(root, scanned_files))
     for path in scanned_files:
         relative = path.relative_to(root)
         try:
@@ -139,19 +138,6 @@ def validate_forbidden_public_planning_paths(root: Path) -> list[str]:
         failures.append(
             f"./{relative.as_posix()}: forbidden public planning file; keep assistant-local "
             "plans and task state out of public SDK repos"
-        )
-    return failures
-
-
-def validate_agent_guidance_paths(root: Path, scanned_files: list[Path]) -> list[str]:
-    failures: list[str] = []
-    for path in scanned_files:
-        relative = path.relative_to(root)
-        if relative.name != "AGENTS.md" or relative == PUBLIC_AGENT_GUIDE_PATH:
-            continue
-        failures.append(
-            f"./{relative.as_posix()}: only the repository-root AGENTS.md may contain "
-            "public agent guidance"
         )
     return failures
 
