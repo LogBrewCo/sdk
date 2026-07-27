@@ -529,20 +529,37 @@ class ConfidentialityScanTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn(sensitive_term, failures[0])
 
-    def test_reports_user_home_path_in_root_agent_guide(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            subprocess.run(["git", "init"], cwd=root, check=True, stdout=subprocess.DEVNULL)
-            home_path = "/Users/" + "example/work/sdk"
-            (root / "AGENTS.md").write_text(
-                f"Read additional guidance from {home_path}.\n",
-                encoding="utf-8",
-            )
+    def test_reports_user_home_paths_only_in_canonical_agent_guides(self) -> None:
+        cases = (
+            ("AGENTS.md", "/Users/example/work/sdk", True),
+            ("js/AGENTS.md", "/home/example/work/sdk", True),
+            ("js/AGENTS.override.md", r"C:\Users\example\work\sdk", True),
+            ("js/CONTRIBUTING.md", "/Users/example/work/sdk", False),
+        )
+        for relative_path, home_path, should_report in cases:
+            with self.subTest(relative_path=relative_path):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    subprocess.run(
+                        ["git", "init"],
+                        cwd=root,
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                    )
+                    guide = root / relative_path
+                    guide.parent.mkdir(parents=True, exist_ok=True)
+                    guide.write_text(
+                        f"Read additional guidance from {home_path}.\n",
+                        encoding="utf-8",
+                    )
 
-            failures = check_confidentiality_scan.validate(root)
+                    failures = check_confidentiality_scan.validate(root)
 
-        self.assertEqual(len(failures), 1)
-        self.assertIn(home_path, failures[0])
+                if should_report:
+                    self.assertEqual(len(failures), 1)
+                    self.assertIn(home_path, failures[0])
+                else:
+                    self.assertEqual(failures, [])
 
     def test_reports_public_research_memory_and_private_plan_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

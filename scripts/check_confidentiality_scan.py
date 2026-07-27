@@ -51,7 +51,6 @@ SKIPPED_EXTENSIONS = {
 }
 
 SELF_PATH = Path("scripts/check_confidentiality_scan.py")
-PUBLIC_AGENT_GUIDE_PATH = Path("AGENTS.md")
 FORBIDDEN_PUBLIC_PLANNING_PATHS = (
     Path(".agents"),
     Path("CLAUDE.md"),
@@ -101,6 +100,10 @@ def is_git_ignored(root: Path, relative: Path) -> bool:
     return result.returncode == 0
 
 
+def is_agent_guidance_path(relative: Path) -> bool:
+    return relative.name in {"AGENTS.md", "AGENTS.override.md"}
+
+
 def validate(root: Path) -> list[str]:
     failures: list[str] = []
     scanned_files = iter_scanned_files(root)
@@ -113,7 +116,7 @@ def validate(root: Path) -> list[str]:
             content = path.read_text(encoding="utf-8", errors="ignore")
 
         for line_number, line in enumerate(content.splitlines(), start=1):
-            if relative == PUBLIC_AGENT_GUIDE_PATH and USER_HOME_PATH_RE.search(line):
+            if is_agent_guidance_path(relative) and USER_HOME_PATH_RE.search(line):
                 failures.append(f"./{relative.as_posix()}:{line_number}:{line}")
                 continue
             if not SENSITIVE_RE.search(line):
