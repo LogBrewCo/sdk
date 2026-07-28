@@ -90,9 +90,9 @@ PYTHON_PACKAGES = {
     "python/logbrew_py": {
         "name": "logbrew-sdk",
         "description": "Public LogBrew Python SDK",
-        "dependencies": set(),
+        "dependencies": {"certifi>=2026.7.22", "truststore>=0.10.4,<1"},
         "package": "logbrew_sdk",
-        "version": "0.1.4",
+        "version": "0.1.5",
     },
 }
 

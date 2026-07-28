@@ -641,7 +641,8 @@ run_reinstall_from_direct_requirement() {
     python -m pip install --upgrade pip >/dev/null
     python -m pip install mypy >/dev/null
     python -m pip install aiohttp >/dev/null
-    python -m pip install --require-hashes --report "$report_path" -r "$requirements_file" >/dev/null
+    python -m pip install certifi==2026.7.22 truststore==0.10.4 >/dev/null
+    python -m pip install --no-deps --require-hashes --report "$report_path" -r "$requirements_file" >/dev/null
     python -m pip check >/dev/null
     python -m pip show logbrew-sdk > "$pip_show_path"
     python -m pip show -f logbrew-sdk > "$pip_show_files_path"
@@ -759,6 +760,8 @@ with zipfile.ZipFile(wheel_path) as archive:
 for needle in (
     "Name: logbrew-sdk",
     f"Version: {package_version}",
+    "Requires-Dist: certifi>=2026.7.22",
+    "Requires-Dist: truststore<1,>=0.10.4",
     "python3 -m pip install logbrew-sdk",
     "LOGBREW_API_KEY",
     "preview_json()",
@@ -988,7 +991,7 @@ if transport_doc != "Scripted transport for previewing, accepting, or failing qu
     raise SystemExit(f"unexpected RecordingTransport docstring: {transport_doc!r}")
 
 http_transport_doc = inspect.getdoc(logbrew_sdk.HttpTransport)
-if http_transport_doc != "Dependency-free HTTP transport for sending queued batches to LogBrew.":
+if http_transport_doc != "HTTP transport for sending queued batches with portable TLS verification.":
     raise SystemExit(f"unexpected HttpTransport docstring: {http_transport_doc!r}")
 
 http_transport_send_doc = inspect.getdoc(logbrew_sdk.HttpTransport.send)
@@ -1312,7 +1315,7 @@ support_ticket: SupportTicketDraft = create_support_ticket_draft(
     diagnostics={
         "endpoint": "https://api.example.test/v1/events?debug=true",
         "authorization": "Bearer hidden",
-        "local_path": "/Users/example/service/app.py",
+        "local_path": "/workspace/service/app.py",
         "error": RuntimeError("private failure message"),
     },
 )
@@ -1782,14 +1785,14 @@ class InstalledUserTest(unittest.TestCase):
             diagnostics={
                 "endpoint": "https://api.example.test/v1/events?debug=true",
                 "authorization": "Bearer hidden",
-                "local_path": "/Users/example/service/app.py",
+                "local_path": "/workspace/service/app.py",
                 "error": RuntimeError("private failure message"),
             },
         )
         self.assertEqual(draft["diagnostics"]["endpoint"], "[redacted-url]/v1/events")
         serialized = str(draft)
         self.assertNotIn("api.example.test", serialized)
-        self.assertNotIn("/Users/example", serialized)
+        self.assertNotIn("/workspace/service", serialized)
         self.assertNotIn("private failure", serialized)
         self.assertNotIn("Bearer hidden", serialized)
 
@@ -1936,6 +1939,7 @@ from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 import threading
 
 from logbrew_sdk import HttpTransport, LogBrewClient
@@ -1955,6 +1959,7 @@ class IntakeHandler(BaseHTTPRequestHandler):
                 "method": self.command,
                 "path": self.path,
                 "source": self.headers.get("x-logbrew-source", ""),
+                "userAgent": self.headers.get("user-agent", ""),
             }
         )
         self.send_response(503 if len(requests) == 1 else 202)
@@ -2011,6 +2016,14 @@ if last["path"] != "/v1/events":
     raise SystemExit("expected intake path")
 if last["source"] != "python-smoke":
     raise SystemExit("expected custom source header")
+expected_user_agent = (
+    f"logbrew-sdk-python/{os.environ['LOGBREW_PYTHON_PACKAGE_VERSION']}"
+)
+if last["userAgent"] != expected_user_agent:
+    raise SystemExit(
+        f"expected installed package user agent {expected_user_agent!r}, "
+        f"got {last['userAgent']!r}"
+    )
 if events[0]["id"] != "evt_python_http_transport":
     raise SystemExit("expected HTTP transport event id")
 
@@ -2025,6 +2038,7 @@ print(
             "requestCount": len(requests),
             "source": last["source"],
             "status": response.status_code,
+            "userAgent": last["userAgent"],
         },
         sort_keys=True,
     )
@@ -2894,7 +2908,18 @@ missing = sorted(required - package_files)
 if missing:
     raise SystemExit(f"missing installed package files: {missing}")
 
-description = metadata("logbrew-sdk").get_payload()
+package_metadata = metadata("logbrew-sdk")
+description = package_metadata.get_payload()
+requires_dist = set(package_metadata.get_all("Requires-Dist") or [])
+required_transport_dependencies = {
+    "certifi>=2026.7.22",
+    "truststore<1,>=0.10.4",
+}
+if not required_transport_dependencies.issubset(requires_dist):
+    raise SystemExit(
+        "missing installed transport dependencies: "
+        f"{sorted(required_transport_dependencies - requires_dist)}"
+    )
 for needle in (
     "python3 -m pip install logbrew-sdk",
     "LOGBREW_API_KEY",
@@ -3045,8 +3070,13 @@ if show_pairs.get("License-Expression") != "MIT":
 location = show_pairs.get("Location", "")
 if not location.endswith("/site-packages"):
     raise SystemExit(f"unexpected pip show location: {location!r}")
-if show_pairs.get("Requires") != "":
-    raise SystemExit(f"unexpected pip show requirements: {show_pairs.get('Requires')!r}")
+show_requirements = {
+    value.strip()
+    for value in show_pairs.get("Requires", "").split(",")
+    if value.strip()
+}
+if show_requirements != {"certifi", "truststore"}:
+    raise SystemExit(f"unexpected pip show requirements: {sorted(show_requirements)!r}")
 if show_pairs.get("Required-by") != "":
     raise SystemExit(f"unexpected pip show required-by value: {show_pairs.get('Required-by')!r}")
 

@@ -21,6 +21,9 @@ python3 -m venv "$tmp_dir/venv"
   --disable-pip-version-check \
   ruff==0.15.15 \
   mypy==2.1.0 \
+  certifi==2026.7.22 \
+  truststore==0.10.4 \
+  celery==5.6.3 \
   django==6.0.6 \
   django-stubs==6.0.5 \
   fastapi==0.136.3 \

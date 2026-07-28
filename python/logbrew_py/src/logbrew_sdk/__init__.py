@@ -7,14 +7,21 @@ import logging
 import math
 import os
 import re
+import ssl
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import partial
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as distribution_version
 from threading import Lock, RLock, get_ident
 from typing import Annotated, Any, Literal, NotRequired, Protocol, TypeAlias, TypedDict
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
+
+import certifi
+import truststore
 
 from logbrew_sdk._automatic_delivery import (
     DEFAULT_DELIVERY_INTERVAL_SECONDS,
@@ -144,6 +151,7 @@ METRIC_TEMPORALITIES_BY_KIND = {
 METRIC_KINDS = set(METRIC_TEMPORALITIES_BY_KIND)
 NON_NEGATIVE_METRIC_KINDS = {"counter", "histogram"}
 DEFAULT_HTTP_ENDPOINT = "https://api.logbrew.co/v1/events"
+_HTTP_USER_AGENT_PRODUCT = "logbrew-sdk-python"
 DEFAULT_MAX_QUEUE_SIZE = 10_000
 DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024
 DEFAULT_MAX_BATCH_EVENTS = 100
@@ -247,7 +255,7 @@ class RecordingTransport:
 
 
 class HttpTransport:
-    """Dependency-free HTTP transport for sending queued batches to LogBrew."""
+    """HTTP transport for sending queued batches with portable TLS verification."""
 
     def __init__(
         self,
@@ -262,20 +270,31 @@ class HttpTransport:
             raise SdkError("configuration_error", "HttpTransport timeout must be positive")
         self.endpoint = endpoint
         self.headers = validate_headers(headers)
+        self._default_user_agent = (
+            None
+            if any(name.lower() == "user-agent" for name in self.headers)
+            else _default_http_user_agent()
+        )
         self.timeout = float(timeout)
-        self.open_url = open_url or urlopen
+        self.open_url = open_url or partial(
+            urlopen,
+            context=_default_http_ssl_context(),
+        )
 
     def send(self, api_key: str, body: str) -> TransportResponse:
         """POST one serialized event batch and return the HTTP status."""
         require_non_empty("api_key", api_key)
+        request_headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {api_key}",
+            **self.headers,
+        }
+        if self._default_user_agent is not None:
+            request_headers["user-agent"] = self._default_user_agent
         request = Request(
             self.endpoint,
             data=body.encode("utf-8"),
-            headers={
-                "content-type": "application/json",
-                "authorization": f"Bearer {api_key}",
-                **self.headers,
-            },
+            headers=request_headers,
             method="POST",
         )
         try:
@@ -1200,6 +1219,20 @@ def validate_headers(headers: Mapping[str, str] | None) -> dict[str, str]:
             raise SdkError("configuration_error", "HttpTransport header values must be strings")
         safe_headers[name] = value
     return safe_headers
+
+
+def _default_http_user_agent() -> str:
+    try:
+        package_version = distribution_version("logbrew-sdk")
+    except PackageNotFoundError:
+        return _HTTP_USER_AGENT_PRODUCT
+    return f"{_HTTP_USER_AGENT_PRODUCT}/{package_version}"
+
+
+def _default_http_ssl_context() -> ssl.SSLContext:
+    context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.load_verify_locations(certifi.where())
+    return context
 
 
 def require_non_empty(label: str, value: Any) -> None:
