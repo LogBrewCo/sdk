@@ -1315,7 +1315,7 @@ support_ticket: SupportTicketDraft = create_support_ticket_draft(
     diagnostics={
         "endpoint": "https://api.example.test/v1/events?debug=true",
         "authorization": "Bearer hidden",
-        "local_path": "/workspace/service/app.py",
+        "local_path": "/tmp/logbrew-example/service/app.py",
         "error": RuntimeError("private failure message"),
     },
 )
@@ -1785,14 +1785,14 @@ class InstalledUserTest(unittest.TestCase):
             diagnostics={
                 "endpoint": "https://api.example.test/v1/events?debug=true",
                 "authorization": "Bearer hidden",
-                "local_path": "/workspace/service/app.py",
+                "local_path": "/tmp/logbrew-example/service/app.py",
                 "error": RuntimeError("private failure message"),
             },
         )
         self.assertEqual(draft["diagnostics"]["endpoint"], "[redacted-url]/v1/events")
         serialized = str(draft)
         self.assertNotIn("api.example.test", serialized)
-        self.assertNotIn("/workspace/service", serialized)
+        self.assertNotIn("/tmp/logbrew-example", serialized)
         self.assertNotIn("private failure", serialized)
         self.assertNotIn("Bearer hidden", serialized)
 

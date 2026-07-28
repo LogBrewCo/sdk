@@ -268,7 +268,7 @@ draft = create_support_ticket_draft(
         "install_command": "python3 -m pip install logbrew-sdk",
         "endpoint": "https://api.example.com/v1/events?debug=true",
         "authorization": "Bearer hidden",
-        "local_path": "/workspace/service/app.py",
+        "local_path": "/tmp/logbrew-example/service/app.py",
         "error": RuntimeError("private failure message"),
     },
 )
