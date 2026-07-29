@@ -43,10 +43,12 @@ if [[ -z "$wheel_path" ]]; then
 fi
 
 python3 -m venv "$tmp_dir/consumer-venv"
+"$tmp_dir/consumer-venv/bin/python" -m pip install --disable-pip-version-check --quiet certifi==2026.7.22 truststore==0.10.4
 if ! "$tmp_dir/consumer-venv/bin/python" -m pip install \
   --disable-pip-version-check \
   --quiet \
   --no-index \
+  --no-deps \
   "$wheel_path" \
   >"$tmp_dir/consumer-install.log" 2>&1; then
   printf '%s\n' "python automatic delivery smoke failed"

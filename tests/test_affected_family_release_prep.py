@@ -38,7 +38,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             self.assertEqual((manifest["name"], manifest["version"]), expected)
 
         pypi_versions = {
-            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.4"),
+            "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.5"),
             "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.3"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.1"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.3"),
@@ -78,6 +78,25 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             manifest["peerDependencies"]["@logbrew/sdk"],
             "^0.1.5",
         )
+
+    def test_python_core_declares_and_ci_installs_tls_trust_dependencies(self) -> None:
+        project = tomllib.loads(
+            (ROOT / "python/logbrew_py/pyproject.toml").read_text(encoding="utf-8")
+        )["project"]
+        self.assertEqual(
+            set(project["dependencies"]),
+            {"certifi>=2026.7.22", "truststore>=0.10.4,<1"},
+        )
+
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        install = "python3 -m pip install certifi==2026.7.22 truststore==0.10.4"
+        source_tests = (
+            "PYTHONPATH=python/logbrew_py/src python3 -m unittest discover "
+            "-s python/logbrew_py/tests -p 'test_*.py'"
+        )
+        self.assertIn(install, workflow)
+        self.assertIn(source_tests, workflow)
+        self.assertLess(workflow.index(install), workflow.index(source_tests))
 
     def test_react_native_bundle_smoke_matches_package_version(self) -> None:
         manifest = json.loads(
@@ -151,7 +170,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
                 for value in check_release_metadata.PYTHON_PACKAGES.values()
             },
             {
-                "logbrew-sdk": "0.1.4",
+                "logbrew-sdk": "0.1.5",
                 "logbrew-fastapi": "0.1.3",
                 "logbrew-flask": "0.1.1",
                 "logbrew-django": "0.1.3",

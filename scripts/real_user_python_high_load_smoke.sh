@@ -23,14 +23,15 @@ python3 -m venv "$tmp_dir/venv"
 python_bin="$tmp_dir/venv/bin/python"
 pip_bin="$tmp_dir/venv/bin/pip"
 
-"$pip_bin" install --disable-pip-version-check --no-index "$wheel_path" >/dev/null
+"$pip_bin" install --disable-pip-version-check certifi==2026.7.22 truststore==0.10.4 >/dev/null
+"$pip_bin" install --disable-pip-version-check --no-index --no-deps "$wheel_path" >/dev/null
 "$python_bin" -c 'import logbrew_sdk' >/dev/null
 "$pip_bin" uninstall --yes logbrew-sdk >/dev/null
 if "$python_bin" -c 'import logbrew_sdk' >/dev/null 2>&1; then
   echo "logbrew-sdk import survived uninstall" >&2
   exit 1
 fi
-"$pip_bin" install --disable-pip-version-check --no-index "$wheel_path" >/dev/null
+"$pip_bin" install --disable-pip-version-check --no-index --no-deps "$wheel_path" >/dev/null
 
 cat > "$tmp_dir/high_load_smoke.py" <<'PY'
 from __future__ import annotations

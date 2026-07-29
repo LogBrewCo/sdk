@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 import unittest
 from email.message import Message
+from importlib.metadata import PackageNotFoundError
 from typing import Any
+from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
@@ -695,14 +698,14 @@ class LogBrewSdkTests(unittest.TestCase):
             requests.append((request, timeout))
             return response
 
-        transport = HttpTransport(
-            endpoint="http://127.0.0.1:9/v1/events",
-            headers={"x-logbrew-source": "unit-test"},
-            timeout=2.5,
-            open_url=open_url,
-        )
-
-        result = transport.send("LOGBREW_API_KEY", '{"events":[]}')
+        with patch("logbrew_sdk.distribution_version", return_value="9.8.7"):
+            transport = HttpTransport(
+                endpoint="http://127.0.0.1:9/v1/events",
+                headers={"x-logbrew-source": "unit-test"},
+                timeout=2.5,
+                open_url=open_url,
+            )
+            result = transport.send("LOGBREW_API_KEY", '{"events":[]}')
 
         self.assertEqual(result.status_code, 202)
         self.assertEqual(result.attempts, 1)
@@ -715,7 +718,122 @@ class LogBrewSdkTests(unittest.TestCase):
         headers = {key.lower(): value for key, value in request.header_items()}
         self.assertEqual(headers["content-type"], "application/json")
         self.assertEqual(headers["authorization"], "Bearer LOGBREW_API_KEY")
+        self.assertEqual(headers["user-agent"], "logbrew-sdk-python/9.8.7")
         self.assertEqual(headers["x-logbrew-source"], "unit-test")
+
+    def test_http_transport_preserves_custom_user_agent_case_insensitively(self) -> None:
+        requests: list[Request] = []
+
+        def open_url(request: Request, *, timeout: float) -> StubHttpResponse:
+            requests.append(request)
+            return StubHttpResponse(202)
+
+        with (
+            patch(
+                "logbrew_sdk.distribution_version",
+                side_effect=AssertionError("custom user agent must skip package lookup"),
+            ),
+            patch(
+                "logbrew_sdk._default_http_ssl_context",
+                side_effect=AssertionError("custom opener must skip default TLS setup"),
+            ),
+        ):
+            transport = HttpTransport(
+                endpoint="http://127.0.0.1:9/v1/events",
+                headers={"User-Agent": "checkout-api/2.0"},
+                open_url=open_url,
+            )
+            transport.send("LOGBREW_API_KEY", '{"events":[]}')
+
+        headers = {key.lower(): value for key, value in requests[0].header_items()}
+        self.assertEqual(headers["user-agent"], "checkout-api/2.0")
+
+    def test_http_transport_uses_stable_user_agent_without_package_metadata(self) -> None:
+        requests: list[Request] = []
+
+        def open_url(request: Request, *, timeout: float) -> StubHttpResponse:
+            requests.append(request)
+            return StubHttpResponse(202)
+
+        with patch(
+            "logbrew_sdk.distribution_version",
+            side_effect=PackageNotFoundError,
+        ):
+            transport = HttpTransport(
+                endpoint="http://127.0.0.1:9/v1/events",
+                open_url=open_url,
+            )
+            transport.send("LOGBREW_API_KEY", '{"events":[]}')
+
+        headers = {key.lower(): value for key, value in requests[0].header_items()}
+        self.assertEqual(headers["user-agent"], "logbrew-sdk-python")
+
+    def test_http_transport_uses_native_and_portable_trust_by_default(self) -> None:
+        requests: list[tuple[Request, float, object]] = []
+        tls_context = object()
+
+        def open_url(
+            request: Request,
+            *,
+            timeout: float,
+            context: object,
+        ) -> StubHttpResponse:
+            requests.append((request, timeout, context))
+            return StubHttpResponse(202)
+
+        with (
+            patch("logbrew_sdk.urlopen", side_effect=open_url),
+            patch(
+                "logbrew_sdk._default_http_ssl_context",
+                return_value=tls_context,
+            ) as create_context,
+        ):
+            transport = HttpTransport(
+                endpoint="https://api.example.test/v1/events",
+                timeout=2.5,
+            )
+            response = transport.send("LOGBREW_API_KEY", '{"events":[]}')
+
+        self.assertEqual(response.status_code, 202)
+        create_context.assert_called_once_with()
+        self.assertEqual(len(requests), 1)
+        request, timeout, context = requests[0]
+        self.assertEqual(request.full_url, "https://api.example.test/v1/events")
+        self.assertEqual(timeout, 2.5)
+        self.assertIs(context, tls_context)
+
+    def test_http_transport_combines_native_and_portable_trust_roots(self) -> None:
+        tls_context = MagicMock()
+
+        def open_url(
+            _request: Request,
+            *,
+            timeout: float,
+            context: object,
+        ) -> StubHttpResponse:
+            self.assertEqual(timeout, 10.0)
+            self.assertIs(context, tls_context)
+            return StubHttpResponse(202)
+
+        with (
+            patch("logbrew_sdk.urlopen", side_effect=open_url),
+            patch(
+                "logbrew_sdk.truststore.SSLContext",
+                return_value=tls_context,
+            ) as create_native_context,
+            patch(
+                "logbrew_sdk.certifi.where",
+                return_value="CERTIFI_CA_BUNDLE",
+            ) as certifi_bundle,
+        ):
+            response = HttpTransport(
+                endpoint="https://api.example.test/v1/events",
+            ).send("LOGBREW_API_KEY", '{"events":[]}')
+
+        self.assertEqual(response.status_code, 202)
+        create_native_context.assert_called_once_with(ssl.PROTOCOL_TLS_CLIENT)
+        certifi_bundle.assert_called_once_with()
+        tls_context.load_verify_locations.assert_called_once_with("CERTIFI_CA_BUNDLE")
 
     def test_http_transport_returns_error_status_for_client_retry_logic(self) -> None:
         calls = 0

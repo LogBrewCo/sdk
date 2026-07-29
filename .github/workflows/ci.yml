@@ -350,7 +350,9 @@ jobs:
 
       - name: Run Python SDK tests
         if: ${{ needs.changed-areas.outputs.python == 'true' }}
-        run: PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
+        run: |
+          python3 -m pip install certifi==2026.7.22 truststore==0.10.4
+          PYTHONPATH=python/logbrew_py/src python3 -m unittest discover -s python/logbrew_py/tests -p 'test_*.py'
 
       - name: Run FastAPI package checks
         if: ${{ needs.changed-areas.outputs.python == 'true' }}

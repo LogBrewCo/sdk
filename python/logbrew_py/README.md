@@ -268,7 +268,7 @@ draft = create_support_ticket_draft(
         "install_command": "python3 -m pip install logbrew-sdk",
         "endpoint": "https://api.example.com/v1/events?debug=true",
         "authorization": "Bearer hidden",
-        "local_path": "/Users/example/service/app.py",
+        "local_path": "/tmp/logbrew-example/service/app.py",
         "error": RuntimeError("private failure message"),
     },
 )
@@ -1146,7 +1146,7 @@ client.log(
 client.flush(transport)
 ```
 
-`HttpTransport` uses Python's standard-library HTTP stack, posts JSON, passes the SDK key through the `authorization` header, supports custom endpoint/header/timeout settings, and maps connection failures into retryable `TransportError.network(...)` failures so `LogBrewClient.flush()` can preserve queued events and retry.
+`HttpTransport` uses Python's standard-library HTTP stack, posts JSON, and passes the SDK key through the `authorization` header. It authenticates HTTPS peers with the native operating-system trust store plus Certifi's Mozilla CA bundle; TLS peer and server-name validation remain enabled. Installed packages send `logbrew-sdk-python/<package-version>` as the HTTP `User-Agent`; source-only runs without package metadata send `logbrew-sdk-python`. Set a `User-Agent` entry in `headers` to override this identity. The transport supports custom endpoint/header/timeout settings and maps connection failures into retryable `TransportError.network(...)` failures so `LogBrewClient.flush()` can preserve queued events and retry.
 
 ## Standard Logging
 

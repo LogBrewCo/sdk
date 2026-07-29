@@ -48,7 +48,8 @@ source "$tmp_dir/venv/bin/activate"
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 export PIP_CACHE_DIR="$tmp_dir/pip-cache"
 
-python -m pip install --no-index "$tmp_dir/dist/$wheel_artifact" >/dev/null
+python -m pip install certifi==2026.7.22 truststore==0.10.4 >/dev/null
+python -m pip install --no-index --no-deps "$tmp_dir/dist/$wheel_artifact" >/dev/null
 python -m pip install "opentelemetry-sdk>=1,<2" >/dev/null
 
 python - <<'PY' > "$tmp_dir/high-load.stdout.json"
@@ -166,7 +167,7 @@ with use_span(parent, end_on_exit=False):
                 "db.system": "postgresql",
                 "db.operation.name": "SELECT",
                 "db.statement": f"SELECT * FROM users WHERE id = {index}",
-                "http.url": f"https://api.example.test/users/{index}?marker=blocked",
+                "http.url": f"https://api.example.test/records/{index}?marker=blocked",
             },
         ) as span:
             if index == 0:
@@ -232,17 +233,22 @@ finally:
     thread.join(timeout=5.0)
 
 assert_equal(response.status_code, 202, "flush status")
-assert_equal(response.attempts, 2, "retryAttempts")
-assert_equal(len(IntakeState.bodies), 2, "fake intake retry count")
+assert_equal(response.attempts, 11, "retryAttempts")
+assert_equal(len(IntakeState.bodies), 11, "fake intake request count")
+assert_equal(IntakeState.bodies[0], IntakeState.bodies[1], "failed retry body")
 assert_equal(client.pending_events(), 0, "queue after flush")
 for authorization in IntakeState.authorizations:
     assert_equal(authorization, f"Bearer {API_KEY}", "authorization header")
 for source in IntakeState.sources:
     assert_equal(source, "python-otel-high-load-smoke", "source header")
 
-flushed_payload = json.loads(IntakeState.bodies[-1])
-assert_equal(flushed_payload["sdk"]["name"], "python-opentelemetry-high-load-smoke", "sdk name")
-assert_equal(len(flushed_payload["events"]), MAX_QUEUE_SIZE, "flushed event count")
+flushed_payloads = [json.loads(body) for body in IntakeState.bodies[1:]]
+flushed_events = []
+for payload in flushed_payloads:
+    assert_equal(payload["sdk"]["name"], "python-opentelemetry-high-load-smoke", "sdk name")
+    flushed_events.extend(payload["events"])
+assert_equal(len(flushed_events), MAX_QUEUE_SIZE, "flushed event count")
+assert_equal(flushed_events, preview["events"], "flushed event sequence")
 
 provider.shutdown()
 after_shutdown_result = exporter.export(())
@@ -253,7 +259,7 @@ print(
         {
             "ok": True,
             "droppedEvents": client.dropped_events(),
-            "flushedEvents": len(flushed_payload["events"]),
+            "flushedEvents": len(flushed_events),
             "highVolumeOtelSpans": HIGH_VOLUME_OTEL_SPANS,
             "maxQueueSize": MAX_QUEUE_SIZE,
             "retryAttempts": response.attempts,
@@ -273,7 +279,7 @@ grep -q '"highVolumeOtelSpans": 1500' "$tmp_dir/high-load.stdout.json"
 grep -q '"maxQueueSize": 1000' "$tmp_dir/high-load.stdout.json"
 grep -q '"droppedEvents": 500' "$tmp_dir/high-load.stdout.json"
 grep -q '"flushedEvents": 1000' "$tmp_dir/high-load.stdout.json"
-grep -q '"retryAttempts": 2' "$tmp_dir/high-load.stdout.json"
+grep -q '"retryAttempts": 11' "$tmp_dir/high-load.stdout.json"
 grep -q '"shutdownExportResult": "FAILURE"' "$tmp_dir/high-load.stdout.json"
 grep -q '"traceId": "4bf92f3577b34da6a3ce929d0e0e4736"' "$tmp_dir/high-load.stdout.json"
 
