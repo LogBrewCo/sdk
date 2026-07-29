@@ -464,6 +464,45 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertLess(publish, registry)
         self.assertLess(registry, public_receipt)
 
+    def test_python_release_builds_are_byte_reproducible(self) -> None:
+        publish = (
+            ROOT / ".github" / "workflows" / "publish-packages.yml"
+        ).read_text(encoding="utf-8")
+        reconcile = (
+            ROOT / ".github" / "workflows" / "reconcile-public-packages.yml"
+        ).read_text(encoding="utf-8")
+        tools = (ROOT / "scripts" / "python_release_tools.txt").read_text(
+            encoding="utf-8"
+        )
+
+        for expected in (
+            "build==1.5.0",
+            "setuptools==83.0.0",
+            "twine==7.0.0",
+            "wheel==0.47.0",
+        ):
+            self.assertIn(expected, tools)
+        for workflow in (publish, reconcile):
+            for expected in (
+                "scripts/python_release_tools.txt",
+                "SOURCE_DATE_EPOCH",
+                "PYTHONHASHSEED=0",
+                "TZ=UTC",
+                "--no-isolation",
+                "normalize-sdist",
+                "--source-date-epoch",
+            ):
+                self.assertIn(expected, workflow)
+
+        manifest = publish.index("Create Python release manifest")
+        reproducibility = publish.index("Verify reproducible Python distributions")
+        packed_receipt = publish.index("Verify packed Python distributions")
+        self.assertIn('git show -s --format=%ct HEAD', publish)
+        self.assertIn("$RUNNER_TEMP/python-reproducibility", publish)
+        self.assertIn("check_python_release_artifacts.py verify", publish)
+        self.assertLess(manifest, reproducibility)
+        self.assertLess(reproducibility, packed_receipt)
+
     def test_public_reconciliation_is_source_bound_and_cannot_publish(self) -> None:
         workflow = (
             ROOT / ".github" / "workflows" / "reconcile-public-packages.yml"

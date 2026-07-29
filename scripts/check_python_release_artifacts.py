@@ -366,6 +366,66 @@ def validate_sdist(path: Path, package_id: str, version: str) -> None:
         fail(f"{package_id}: invalid source archive")
 
 
+def normalize_sdist(path: Path, source_date_epoch: int) -> None:
+    if not 0 <= source_date_epoch <= 0xFFFFFFFF:
+        fail("invalid source date epoch")
+    preflight_sdist(path, "invalid source archive")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tar.gz",
+        dir=path.parent,
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with (
+            os.fdopen(descriptor, "wb") as raw_output,
+            tarfile.open(path, "r:gz") as source_archive,
+        ):
+            members = bounded_tar_members(source_archive, "invalid source archive entries")
+            with (
+                gzip.GzipFile(
+                    filename="",
+                    mode="wb",
+                    compresslevel=9,
+                    fileobj=raw_output,
+                    mtime=source_date_epoch,
+                ) as compressed_output,
+                tarfile.open(
+                    fileobj=compressed_output,
+                    mode="w",
+                    format=tarfile.PAX_FORMAT,
+                ) as normalized_archive,
+            ):
+                for member in sorted(members, key=lambda candidate: candidate.name):
+                    normalized = tarfile.TarInfo(member.name)
+                    normalized.type = (
+                        tarfile.DIRTYPE if member.isdir() else tarfile.REGTYPE
+                    )
+                    normalized.mode = member.mode & 0o777
+                    normalized.size = member.size if member.isfile() else 0
+                    normalized.mtime = source_date_epoch
+                    normalized.uid = 0
+                    normalized.gid = 0
+                    normalized.uname = ""
+                    normalized.gname = ""
+                    source = source_archive.extractfile(member) if member.isfile() else None
+                    if member.isfile() and source is None:
+                        fail("invalid source archive entries")
+                    normalized_archive.addfile(normalized, source)
+            raw_output.flush()
+            os.fsync(raw_output.fileno())
+        preflight_sdist(temporary_path, "invalid normalized source archive")
+        os.chmod(temporary_path, 0o644)
+        os.replace(temporary_path, path)
+    except (EOFError, OSError, tarfile.TarError):
+        fail("invalid source archive")
+    finally:
+        try:
+            temporary_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def expected_artifacts(
     directory: Path,
     package: PackageSpec,
@@ -810,6 +870,9 @@ def parser() -> argparse.ArgumentParser:
     check_manifest.add_argument("--manifest", type=Path, required=True)
     check_manifest.add_argument("--source-commit", required=True)
     check_manifest.add_argument("--python-version", action="append", default=[])
+    normalize = commands.add_parser("normalize-sdist")
+    normalize.add_argument("--source-date-epoch", type=int, required=True)
+    normalize.add_argument("sdist", nargs="+", type=Path)
     resolve = commands.add_parser("resolve-public")
     resolve.add_argument("--directory", type=Path, required=True)
     resolve.add_argument("--manifest", type=Path, required=True)
@@ -837,6 +900,9 @@ def main(argv: list[str] | None = None) -> int:
                 parse_versions(args.python_version),
                 args.source_commit,
             )
+        elif args.command == "normalize-sdist":
+            for sdist in args.sdist:
+                normalize_sdist(sdist, args.source_date_epoch)
         else:
             resolve_public_artifacts(
                 args.manifest,
