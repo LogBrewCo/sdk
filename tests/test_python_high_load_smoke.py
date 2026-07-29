@@ -5,6 +5,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SMOKE = REPO_ROOT / "scripts" / "real_user_python_high_load_smoke.sh"
 OTEL_SMOKE = REPO_ROOT / "scripts" / "real_user_python_opentelemetry_high_load_smoke.sh"
+AUTOMATIC_SMOKE = REPO_ROOT / "scripts" / "real_user_python_automatic_delivery_smoke.sh"
 FLASK_SMOKE = REPO_ROOT / "scripts" / "real_user_flask_high_load_smoke.sh"
 
 
@@ -33,6 +34,17 @@ class PythonHighLoadSmokeTests(unittest.TestCase):
         self.assertIn("127.0.0.1", script)
         self.assertIn("retryAttempts", script)
         self.assertIn("shutdown", script)
+
+    def test_offline_core_installs_preinstall_transport_dependencies(self) -> None:
+        for smoke in (SMOKE, OTEL_SMOKE, AUTOMATIC_SMOKE):
+            with self.subTest(smoke=smoke.name):
+                script = smoke.read_text(encoding="utf-8")
+                self.assertIn(
+                    "certifi==2026.7.22 truststore==0.10.4",
+                    script,
+                )
+                self.assertIn("--no-deps", script)
+                self.assertIn("--no-index", script)
 
     def test_flask_high_load_smoke_exercises_installed_artifact_flow(self) -> None:
         self.assertTrue(FLASK_SMOKE.exists(), "Flask high-load installed-artifact smoke is missing")
