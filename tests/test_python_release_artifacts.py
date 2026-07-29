@@ -28,7 +28,7 @@ sys.modules[MODULE_SPEC.name] = check_python_release_artifacts
 MODULE_SPEC.loader.exec_module(check_python_release_artifacts)
 PACKAGES = (
     ("logbrew-sdk", "logbrew_py", "logbrew_sdk", "0.1.5"),
-    ("logbrew-fastapi", "logbrew_fastapi", "logbrew_fastapi", "0.1.5"),
+    ("logbrew-fastapi", "logbrew_fastapi", "logbrew_fastapi", "0.1.6"),
     ("logbrew-flask", "logbrew_flask", "logbrew_flask", "0.1.1"),
     ("logbrew-django", "logbrew_django", "logbrew_django", "0.1.3"),
 )

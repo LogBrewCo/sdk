@@ -387,9 +387,10 @@ jobs:
       - name: Run Python OpenTelemetry installed-artifact smoke test
         run: bash scripts/real_user_python_opentelemetry_smoke.sh
 
-      - name: Run FastAPI minimum-version real-user smoke test
+      - name: Run FastAPI minimum-version and legacy-httpx real-user smoke test
         env:
           LOGBREW_FASTAPI_FRAMEWORK_VERSION: 0.111.1
+          LOGBREW_FASTAPI_HTTPX_VERSION: 0.23.3
         run: bash scripts/real_user_fastapi_smoke.sh
 
       - name: Run FastAPI real-user smoke test
