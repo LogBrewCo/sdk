@@ -535,11 +535,35 @@ jobs:
           verify_args+=(--version "${{ steps.pypi-version.outputs.version }}")
           python3 scripts/check_registry_publication.py "${verify_args[@]}"
 
+      - name: Resolve public PyPI artifacts
+        if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/check_python_release_artifacts.py resolve-public \
+            --directory dist/pypi \
+            --manifest dist/pypi/python-release-artifacts.json \
+            --output-directory "$RUNNER_TEMP/python-public-artifacts" \
+            --public-manifest "$RUNNER_TEMP/python-public-release-artifacts.json" \
+            --reconciliation "$RUNNER_TEMP/python-public-reconciliation.json"
+
+      - name: Upload Python public reconciliation
+        if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: python-public-reconciliation
+          path: |
+            ${{ runner.temp }}/python-public-release-artifacts.json
+            ${{ runner.temp }}/python-public-reconciliation.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Verify public PyPI installs
         if: ${{ ! inputs.dry_run && inputs.include_pypi_extras }}
         run: |
           bash scripts/real_user_python_public_pypi_smoke.sh --manifest \
-            dist/pypi/python-release-artifacts.json
+            "$RUNNER_TEMP/python-public-release-artifacts.json" \
+            --artifact-root "$RUNNER_TEMP/python-public-artifacts"
 
   crates:
     name: crates.io package
