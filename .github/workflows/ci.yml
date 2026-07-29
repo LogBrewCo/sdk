@@ -382,6 +382,12 @@ jobs:
         if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/real_user_python_celery_smoke.sh
 
+      - name: Run FastAPI minimum-version real-user smoke test
+        if: ${{ needs.changed-areas.outputs.python == 'true' }}
+        env:
+          LOGBREW_FASTAPI_FRAMEWORK_VERSION: 0.111.1
+        run: bash scripts/real_user_fastapi_smoke.sh
+
       - name: Run FastAPI real-user smoke test
         if: ${{ needs.changed-areas.outputs.python == 'true' }}
         run: bash scripts/real_user_fastapi_smoke.sh

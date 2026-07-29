@@ -1857,7 +1857,7 @@ authors = [
 ]
 keywords = ["logbrew", "fastapi"]
 dependencies = [
-  "fastapi>=0.115",
+  "fastapi>=0.111.1",
   "logbrew-sdk==0.1.0"
 ]
 

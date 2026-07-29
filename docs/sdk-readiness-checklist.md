@@ -142,7 +142,7 @@ For PHP packages specifically, prefer a smoke path that creates a fresh Composer
 - Shared Markdown docs: `python3 scripts/check_markdown_links.py`
 - Shared shell smoke/package scripts: `bash scripts/check_shell_static.sh`
 - JavaScript, Browser, Node.js, Express, Fastify, NestJS, Angular, Vue, Svelte, React, React Native, or Next.js: `python3 scripts/check_js_sources.py`, `bash scripts/check_js_lint.sh`, `bash scripts/check_js_package.sh`, package `npm test`, framework smoke scripts, and `npm pack --dry-run`
-- Python, FastAPI, Flask, and Django: `python3 scripts/check_python_sources.py`, `bash scripts/check_python_static.sh`, `bash scripts/check_fastapi_package.sh`, `bash scripts/check_flask_package.sh`, `bash scripts/check_django_package.sh`, `bash scripts/real_user_fastapi_smoke.sh`, `bash scripts/real_user_flask_smoke.sh`, `bash scripts/real_user_django_smoke.sh`, `python -m build`, and `twine check dist/*`
+- Python, FastAPI, Flask, and Django: `python3 scripts/check_python_sources.py`, `bash scripts/check_python_static.sh`, `bash scripts/check_fastapi_package.sh`, `bash scripts/check_flask_package.sh`, `bash scripts/check_django_package.sh`, `LOGBREW_FASTAPI_FRAMEWORK_VERSION=0.111.1 bash scripts/real_user_fastapi_smoke.sh`, `bash scripts/real_user_fastapi_smoke.sh`, `bash scripts/real_user_flask_smoke.sh`, `bash scripts/real_user_django_smoke.sh`, `python -m build`, and `twine check dist/*`
 - Rust: `cargo publish --dry-run`
 - Go: `test -z "$(gofmt -l .)"`, `go vet ./...`, `go test ./...`, and `bash scripts/check_go_static.sh`
 - C: `bash scripts/check_c_package.sh` and `bash scripts/real_user_c_smoke.sh`

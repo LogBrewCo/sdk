@@ -76,9 +76,9 @@ PYTHON_PACKAGES = {
     "python/logbrew_fastapi": {
         "name": "logbrew-fastapi",
         "description": "FastAPI integration",
-        "dependencies": {"fastapi>=0.115", "httpx2>=2.3", "logbrew-sdk>=0.1.5,<0.2.0"},
+        "dependencies": {"fastapi>=0.111.1", "httpx2>=2.3", "logbrew-sdk>=0.1.5,<0.2.0"},
         "package": "logbrew_fastapi",
-        "version": "0.1.4",
+        "version": "0.1.5",
     },
     "python/logbrew_flask": {
         "name": "logbrew-flask",
