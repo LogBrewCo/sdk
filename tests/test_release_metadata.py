@@ -503,6 +503,30 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertLess(manifest, reproducibility)
         self.assertLess(reproducibility, packed_receipt)
 
+    def test_pypi_public_install_resolves_skip_existing_artifacts(self) -> None:
+        workflow = (
+            ROOT / ".github" / "workflows" / "publish-packages.yml"
+        ).read_text(encoding="utf-8")
+
+        registry = workflow.index("Verify public PyPI packages")
+        resolve = workflow.index("Resolve public PyPI artifacts")
+        upload = workflow.index("Upload Python public reconciliation")
+        install = workflow.index("Verify public PyPI installs")
+        for expected in (
+            "check_python_release_artifacts.py resolve-public",
+            "--directory dist/pypi",
+            "--manifest dist/pypi/python-release-artifacts.json",
+            '--output-directory "$RUNNER_TEMP/python-public-artifacts"',
+            '--public-manifest "$RUNNER_TEMP/python-public-release-artifacts.json"',
+            '--reconciliation "$RUNNER_TEMP/python-public-reconciliation.json"',
+            "name: python-public-reconciliation",
+            '--artifact-root "$RUNNER_TEMP/python-public-artifacts"',
+        ):
+            self.assertIn(expected, workflow)
+        self.assertLess(registry, resolve)
+        self.assertLess(resolve, upload)
+        self.assertLess(upload, install)
+
     def test_public_reconciliation_is_source_bound_and_cannot_publish(self) -> None:
         workflow = (
             ROOT / ".github" / "workflows" / "reconcile-public-packages.yml"
