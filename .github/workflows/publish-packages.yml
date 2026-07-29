@@ -409,10 +409,33 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          python -m pip install --upgrade build twine
+          python -m pip install \
+            --disable-pip-version-check \
+            --requirement scripts/python_release_tools.txt
+          source_date_epoch="$(git show -s --format=%ct HEAD)"
+          if [[ ! "$source_date_epoch" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Release source timestamp is invalid." >&2
+            exit 1
+          fi
+          export SOURCE_DATE_EPOCH="$source_date_epoch"
+          export PYTHONHASHSEED=0
+          export TZ=UTC
+          {
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+            echo "PYTHONHASHSEED=$PYTHONHASHSEED"
+            echo "TZ=$TZ"
+          } >> "$GITHUB_ENV"
           for package_dir in python/logbrew_py python/logbrew_fastapi python/logbrew_flask python/logbrew_django; do
             output_dir="dist/pypi/$(basename "$package_dir")"
-            python -m build --sdist --wheel --outdir "$output_dir" "$package_dir"
+            python -m build \
+              --no-isolation \
+              --sdist \
+              --wheel \
+              --outdir "$output_dir" \
+              "$package_dir"
+            python3 scripts/check_python_release_artifacts.py normalize-sdist \
+              --source-date-epoch "$SOURCE_DATE_EPOCH" \
+              "$output_dir"/*.tar.gz
             python -m twine check "$output_dir"/*
           done
 
@@ -427,6 +450,26 @@ jobs:
             --python-version "logbrew-fastapi=${{ steps.pypi-version.outputs.fastapi_version }}" \
             --python-version "logbrew-flask=${{ steps.pypi-version.outputs.flask_version }}" \
             --python-version "logbrew-django=${{ steps.pypi-version.outputs.django_version }}" \
+            --manifest dist/pypi/python-release-artifacts.json
+
+      - name: Verify reproducible Python distributions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for package_dir in python/logbrew_py python/logbrew_fastapi python/logbrew_flask python/logbrew_django; do
+            output_dir="$RUNNER_TEMP/python-reproducibility/$(basename "$package_dir")"
+            python -m build \
+              --no-isolation \
+              --sdist \
+              --wheel \
+              --outdir "$output_dir" \
+              "$package_dir"
+            python3 scripts/check_python_release_artifacts.py normalize-sdist \
+              --source-date-epoch "$SOURCE_DATE_EPOCH" \
+              "$output_dir"/*.tar.gz
+          done
+          python3 scripts/check_python_release_artifacts.py verify \
+            --directory "$RUNNER_TEMP/python-reproducibility" \
             --manifest dist/pypi/python-release-artifacts.json
 
       - name: Verify packed Python distributions

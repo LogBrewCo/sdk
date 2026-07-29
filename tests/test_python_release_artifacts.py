@@ -370,6 +370,41 @@ class PythonReleaseArtifactTests(unittest.TestCase):
 
                 self.assertEqual(list(root.glob("*.json")), [])
 
+    def test_sdist_normalization_is_byte_reproducible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first.tar.gz"
+            second = root / "second.tar.gz"
+            release_epoch = 1_700_000_000
+            self.write_variant_sdist(first, mtime=1_800_000_000, reverse=False)
+            self.write_variant_sdist(second, mtime=1_900_000_000, reverse=True)
+
+            check_python_release_artifacts.normalize_sdist(first, release_epoch)
+            check_python_release_artifacts.normalize_sdist(second, release_epoch)
+
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            with tarfile.open(first, "r:gz") as archive:
+                members = archive.getmembers()
+                self.assertEqual(
+                    [member.name for member in members],
+                    sorted(member.name for member in members),
+                )
+                self.assertTrue(members)
+                for member in members:
+                    self.assertEqual(member.mtime, release_epoch)
+                    self.assertEqual(member.uid, 0)
+                    self.assertEqual(member.gid, 0)
+                    self.assertEqual(member.uname, "")
+                    self.assertEqual(member.gname, "")
+
+    def test_sdist_normalization_rejects_special_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "special.tar.gz"
+            self.write_hostile_sdist(path, "special-sdist")
+
+            with self.assertRaises(ValueError):
+                check_python_release_artifacts.normalize_sdist(path, 1_700_000_000)
+
     def test_public_resolution_removes_outputs_for_compressed_bomb(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -474,6 +509,33 @@ class PythonReleaseArtifactTests(unittest.TestCase):
                 )
                 extra.size = len(marker)
                 archive.addfile(extra, io.BytesIO(marker))
+
+    @staticmethod
+    def write_variant_sdist(path: Path, *, mtime: int, reverse: bool) -> None:
+        entries = (
+            ("logbrew_fastapi-0.1.4/", b"", tarfile.DIRTYPE),
+            ("logbrew_fastapi-0.1.4/PKG-INFO", b"metadata", tarfile.REGTYPE),
+            (
+                "logbrew_fastapi-0.1.4/src/logbrew_fastapi/__init__.py",
+                b"package",
+                tarfile.REGTYPE,
+            ),
+        )
+        ordered = tuple(reversed(entries)) if reverse else entries
+        with tarfile.open(path, "w:gz", format=tarfile.PAX_FORMAT) as archive:
+            for name, payload, entry_type in ordered:
+                member = tarfile.TarInfo(name)
+                member.type = entry_type
+                member.size = len(payload)
+                member.mtime = mtime
+                member.uid = 501
+                member.gid = 20
+                member.uname = "builder"
+                member.gname = "staff"
+                archive.addfile(
+                    member,
+                    io.BytesIO(payload) if member.isfile() else None,
+                )
 
     @staticmethod
     def write_hostile_wheel(path: Path, case: str) -> None:

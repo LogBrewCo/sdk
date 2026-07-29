@@ -206,10 +206,28 @@ jobs:
       - name: Build exact-source Python distributions
         run: |
           set -Eeuo pipefail
-          python -m pip install --disable-pip-version-check build==1.3.0
+          python -m pip install \
+            --disable-pip-version-check \
+            --requirement scripts/python_release_tools.txt
+          source_date_epoch="$(git show -s --format=%ct HEAD)"
+          if [[ ! "$source_date_epoch" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Release source timestamp is invalid." >&2
+            exit 1
+          fi
+          export SOURCE_DATE_EPOCH="$source_date_epoch"
+          export PYTHONHASHSEED=0
+          export TZ=UTC
           for package_dir in python/logbrew_py python/logbrew_fastapi python/logbrew_flask python/logbrew_django; do
             output_dir="$RUNNER_TEMP/python-source-build/$(basename "$package_dir")"
-            python -m build --sdist --wheel --outdir "$output_dir" "$package_dir"
+            python -m build \
+              --no-isolation \
+              --sdist \
+              --wheel \
+              --outdir "$output_dir" \
+              "$package_dir"
+            python3 scripts/check_python_release_artifacts.py normalize-sdist \
+              --source-date-epoch "$SOURCE_DATE_EPOCH" \
+              "$output_dir"/*.tar.gz
           done
 
       - name: Bind exact-source Python distributions
