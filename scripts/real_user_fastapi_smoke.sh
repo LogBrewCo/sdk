@@ -68,22 +68,24 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from logbrew_fastapi import add_logbrew_middleware, get_active_logbrew_trace
-from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport
+from logbrew_fastapi import get_active_logbrew_trace, init_logbrew
+from logbrew_sdk import RecordingTransport
 
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-fastapi",
-    sdk_version="0.1.0",
-)
 transport = RecordingTransport.always_accept()
+app = FastAPI()
+runtime = init_logbrew(
+    app,
+    api_key="LOGBREW_API_KEY",
+    service_name="checkout",
+    transport=transport,
+    automatic_delivery=False,
+    span_id_factory=lambda: "b7ad6b7169203331",
+)
 logger = logging.getLogger("fastapi.checkout")
 logger.handlers = []
 logger.propagate = False
 logger.setLevel(logging.INFO)
-logger.addHandler(LogBrewLoggingHandler(client, metadata={"service": "checkout"}))
-app = FastAPI()
-add_logbrew_middleware(app, client=client, transport=transport, span_id_factory=lambda: "b7ad6b7169203331")
+logger.addHandler(runtime.logging_handler)
 
 
 @app.get("/health")
@@ -122,7 +124,7 @@ print(
             "healthStatus": health_response.status_code,
             "boomStatus": boom_response.status_code,
             "sentBodies": len(transport.sent_bodies),
-            "pending": client.pending_events(),
+            "pending": runtime.client.pending_events(),
             "eventTypes": [event["type"] for event in events],
             "spanNames": [event["attributes"]["name"] for event in events if event["type"] == "span"],
             "issueTitles": [event["attributes"]["title"] for event in events if event["type"] == "issue"],
@@ -134,7 +136,7 @@ print(
             "parentSpanId": first_span["parentSpanId"],
             "spanId": first_span["spanId"],
             "path": first_span["metadata"]["path"],
-            "body": {"sdk": client.sdk, "events": events},
+            "body": {"sdk": runtime.client.sdk, "events": events},
         },
         indent=2,
     )
@@ -152,8 +154,8 @@ if payload["ok"] is not True:
     raise SystemExit(f"unexpected smoke status: {payload}")
 if payload["healthStatus"] != 200 or payload["boomStatus"] != 500:
     raise SystemExit(f"unexpected HTTP statuses: {payload}")
-if payload["sentBodies"] != 2:
-    raise SystemExit(f"expected two flushed bodies, got {payload['sentBodies']}")
+if payload["sentBodies"] != 1:
+    raise SystemExit(f"expected one final flushed body, got {payload['sentBodies']}")
 if payload["pending"] != 0:
     raise SystemExit(f"expected empty queue, got {payload['pending']}")
 if payload["eventTypes"] != ["log", "span", "issue", "span"]:
@@ -182,25 +184,26 @@ cat > "$app_dir/typecheck.py" <<'PY'
 from __future__ import annotations
 
 from fastapi import FastAPI
-from logbrew_fastapi import add_logbrew_middleware, get_active_logbrew_trace
-from logbrew_sdk import LogBrewClient, RecordingTransport
+from logbrew_fastapi import add_logbrew_middleware, get_active_logbrew_trace, init_logbrew
+from logbrew_sdk import HttpTransport, LogBrewClient, RecordingTransport
 
-client: LogBrewClient = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="typed-fastapi-consumer",
-    sdk_version="0.1.0",
-)
 transport: RecordingTransport = RecordingTransport.always_accept()
 app: FastAPI = FastAPI()
-active_trace = get_active_logbrew_trace()
-trace_id: str | None = active_trace.trace_id if active_trace else None
-add_logbrew_middleware(
+runtime = init_logbrew(
     app,
-    client=client,
+    api_key="LOGBREW_API_KEY",
+    service_name="typed-fastapi-consumer",
     transport=transport,
-    raise_flush_errors=True,
+    automatic_delivery=False,
     span_id_factory=lambda: "b7ad6b7169203331",
 )
+client: LogBrewClient = runtime.client
+active_trace = get_active_logbrew_trace()
+trace_id: str | None = active_trace.trace_id if active_trace else None
+pending_events: int = runtime.delivery_health().pending_events
+low_level_app: FastAPI = FastAPI()
+http_transport: HttpTransport = HttpTransport()
+add_logbrew_middleware(low_level_app, client=client, transport=http_transport)
 PY
 
 cat > "$app_dir/pyproject.toml" <<'TOML'

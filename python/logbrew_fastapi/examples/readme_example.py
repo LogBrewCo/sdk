@@ -5,17 +5,17 @@ import sys
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from logbrew_fastapi import add_logbrew_middleware
-from logbrew_sdk import LogBrewClient, RecordingTransport
+from logbrew_fastapi import init_logbrew
+from logbrew_sdk import RecordingTransport
 
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-fastapi",
-    sdk_version="0.1.0",
-)
 transport = RecordingTransport.always_accept()
 app = FastAPI()
-add_logbrew_middleware(app, client=client, transport=transport)
+init_logbrew(
+    app,
+    api_key="LOGBREW_API_KEY",
+    transport=transport,
+    automatic_delivery=False,
+)
 
 
 @app.get("/health")

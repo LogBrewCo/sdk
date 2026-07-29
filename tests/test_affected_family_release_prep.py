@@ -39,7 +39,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
 
         pypi_versions = {
             "python/logbrew_py/pyproject.toml": ("logbrew-sdk", "0.1.5"),
-            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.3"),
+            "python/logbrew_fastapi/pyproject.toml": ("logbrew-fastapi", "0.1.4"),
             "python/logbrew_flask/pyproject.toml": ("logbrew-flask", "0.1.1"),
             "python/logbrew_django/pyproject.toml": ("logbrew-django", "0.1.3"),
         }
@@ -171,7 +171,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
             },
             {
                 "logbrew-sdk": "0.1.5",
-                "logbrew-fastapi": "0.1.3",
+                "logbrew-fastapi": "0.1.4",
                 "logbrew-flask": "0.1.1",
                 "logbrew-django": "0.1.3",
             },

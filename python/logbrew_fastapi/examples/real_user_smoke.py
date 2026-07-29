@@ -5,17 +5,18 @@ import sys
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from logbrew_fastapi import add_logbrew_middleware
-from logbrew_sdk import LogBrewClient, RecordingTransport
+from logbrew_fastapi import init_logbrew
+from logbrew_sdk import RecordingTransport
 
-client = LogBrewClient.create(
-    api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-fastapi",
-    sdk_version="0.1.0",
-)
 transport = RecordingTransport.always_accept()
 app = FastAPI()
-add_logbrew_middleware(app, client=client, transport=transport, span_id_factory=lambda: "b7ad6b7169203331")
+runtime = init_logbrew(
+    app,
+    api_key="LOGBREW_API_KEY",
+    transport=transport,
+    automatic_delivery=False,
+    span_id_factory=lambda: "b7ad6b7169203331",
+)
 
 
 @app.get("/health")
@@ -40,7 +41,7 @@ for body in transport.sent_bodies:
     events.extend(json.loads(body)["events"])
 first_span = events[0]["attributes"]
 
-print(json.dumps({"sdk": client.sdk, "events": events}, indent=2))
+print(json.dumps({"sdk": runtime.client.sdk, "events": events}, indent=2))
 print(
     json.dumps(
         {
@@ -48,7 +49,7 @@ print(
             "requests": 2,
             "sentBodies": len(transport.sent_bodies),
             "events": len(events),
-            "pending": client.pending_events(),
+            "pending": runtime.client.pending_events(),
             "traceId": first_span["traceId"],
             "parentSpanId": first_span["parentSpanId"],
             "spanId": first_span["spanId"],
