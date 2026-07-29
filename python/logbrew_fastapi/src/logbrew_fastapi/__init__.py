@@ -7,17 +7,23 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as distribution_version
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from logbrew_sdk import (
+    DeliveryHealthSnapshot,
+    HttpTransport,
     LogBrewClient,
+    LogBrewLoggingHandler,
     LogBrewTraceContext,
     MetricAttributes,
-    RecordingTransport,
     SdkError,
     SpanAttributes,
+    Transport,
     TransportError,
+    TransportResponse,
     create_logbrew_trace_context,
     get_active_logbrew_trace,
     parse_traceparent,
@@ -26,7 +32,7 @@ from logbrew_sdk import (
     use_logbrew_trace,
 )
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
 @dataclass(slots=True)
@@ -34,7 +40,7 @@ class LogBrewFastAPIConfig:
     """Runtime options used by the LogBrew FastAPI middleware."""
 
     client: LogBrewClient
-    transport: RecordingTransport | None = None
+    transport: Transport | None = None
     capture_successful_requests: bool = True
     capture_request_metrics: bool = False
     capture_exceptions: bool = True
@@ -43,6 +49,196 @@ class LogBrewFastAPIConfig:
     service_name: str = "fastapi"
     request_metric_name: str = "http.server.duration"
     span_id_factory: Callable[[], str] | None = None
+
+
+class LogBrewFastAPIRuntime:
+    """Owned production client, transport, logging handler, and shutdown state."""
+
+    __slots__ = (
+        "_raise_shutdown_errors",
+        "_shutdown_error_code",
+        "_shutdown_response",
+        "client",
+        "logging_handler",
+        "service_name",
+        "transport",
+    )
+
+    def __init__(
+        self,
+        *,
+        client: LogBrewClient,
+        transport: Transport,
+        service_name: str,
+        raise_shutdown_errors: bool,
+    ) -> None:
+        self.client = client
+        self.transport = transport
+        self.service_name = service_name
+        self.logging_handler = LogBrewLoggingHandler(
+            client,
+            metadata={"service": service_name},
+        )
+        self._raise_shutdown_errors = raise_shutdown_errors
+        self._shutdown_response: TransportResponse | None = None
+        self._shutdown_error_code: str | None = None
+
+    def __repr__(self) -> str:
+        """Return content-free runtime state without API keys or transport configuration."""
+
+        return (
+            "LogBrewFastAPIRuntime("
+            f"service_name={self.service_name!r}, "
+            f"closed={self.client.closed}, "
+            f"shutdown_error_code={self._shutdown_error_code!r}"
+            ")"
+        )
+
+    @property
+    def shutdown_response(self) -> TransportResponse:
+        """Return the successful final delivery response."""
+
+        if self._shutdown_response is None:
+            raise SdkError("shutdown_error", "LogBrew FastAPI runtime has not shut down successfully")
+        return self._shutdown_response
+
+    @property
+    def shutdown_error_code(self) -> str | None:
+        """Return a content-free final delivery error code, when shutdown failed."""
+
+        return self._shutdown_error_code
+
+    def delivery_health(self) -> DeliveryHealthSnapshot:
+        """Return the core SDK's content-free delivery health snapshot."""
+
+        return self.client.delivery_health()
+
+    def shutdown(self) -> TransportResponse:
+        """Flush all retained telemetry once and close the owned client."""
+
+        if self._shutdown_response is not None:
+            return self._shutdown_response
+        try:
+            response = self.client.shutdown()
+        except Exception as error:
+            self._shutdown_error_code = _delivery_error_code(error)
+            raise
+        self._shutdown_error_code = None
+        self._shutdown_response = response
+        return response
+
+    def _on_app_shutdown(self) -> None:
+        try:
+            self.shutdown()
+        except Exception:
+            if self._raise_shutdown_errors:
+                raise
+
+
+class _LogBrewFastAPILifecycleMiddleware:
+    """Finalize owned delivery after either default or custom FastAPI lifespan teardown."""
+
+    def __init__(self, app: ASGIApp, *, runtime: LogBrewFastAPIRuntime) -> None:
+        self.app = app
+        self.runtime = runtime
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "lifespan":
+            await self.app(scope, receive, send)
+            return
+
+        finalized = False
+
+        async def send_with_final_delivery(message: Message) -> None:
+            nonlocal finalized
+            if not finalized and message["type"] in {
+                "lifespan.startup.failed",
+                "lifespan.shutdown.complete",
+                "lifespan.shutdown.failed",
+            }:
+                finalized = True
+                self.runtime._on_app_shutdown()
+            await send(message)
+
+        await self.app(scope, receive, send_with_final_delivery)
+
+
+_RUNTIME_STATE_ATTRIBUTE = "_logbrew_fastapi_runtime"
+
+
+def init_logbrew(
+    app: FastAPI,
+    *,
+    api_key: str,
+    service_name: str = "fastapi",
+    transport: Transport | None = None,
+    automatic_delivery: bool = True,
+    delivery_interval_seconds: float = 1.0,
+    delivery_queue_threshold: int | None = None,
+    max_retries: int = 2,
+    capture_successful_requests: bool = True,
+    capture_request_metrics: bool = False,
+    capture_exceptions: bool = True,
+    request_metric_name: str = "http.server.duration",
+    span_id_factory: Callable[[], str] | None = None,
+    raise_shutdown_errors: bool = True,
+) -> LogBrewFastAPIRuntime:
+    """Initialize production-safe LogBrew capture and delivery for one FastAPI app."""
+
+    if getattr(app.state, _RUNTIME_STATE_ATTRIBUTE, None) is not None:
+        raise SdkError("configuration_error", "LogBrew is already initialized for this FastAPI app")
+    if not isinstance(service_name, str) or not service_name.strip():
+        raise SdkError("configuration_error", "service_name must be a non-empty string")
+    if not isinstance(raise_shutdown_errors, bool):
+        raise SdkError("configuration_error", "raise_shutdown_errors must be a boolean")
+
+    selected_transport = transport if transport is not None else HttpTransport()
+    client = LogBrewClient.create(
+        api_key=api_key,
+        sdk_name="logbrew-fastapi",
+        sdk_version=_package_version(),
+        transport=selected_transport,
+        automatic_delivery=automatic_delivery,
+        delivery_interval_seconds=delivery_interval_seconds,
+        delivery_queue_threshold=delivery_queue_threshold,
+        max_retries=max_retries,
+    )
+    runtime = LogBrewFastAPIRuntime(
+        client=client,
+        transport=selected_transport,
+        service_name=service_name.strip(),
+        raise_shutdown_errors=raise_shutdown_errors,
+    )
+    try:
+        add_logbrew_middleware(
+            app,
+            client=client,
+            capture_successful_requests=capture_successful_requests,
+            capture_request_metrics=capture_request_metrics,
+            capture_exceptions=capture_exceptions,
+            flush_on_response=False,
+            service_name=runtime.service_name,
+            request_metric_name=request_metric_name,
+            span_id_factory=span_id_factory,
+        )
+        app.add_middleware(_LogBrewFastAPILifecycleMiddleware, runtime=runtime)
+    except Exception:
+        client.shutdown()
+        raise
+    setattr(app.state, _RUNTIME_STATE_ATTRIBUTE, runtime)
+    return runtime
+
+
+def _package_version() -> str:
+    try:
+        return distribution_version("logbrew-fastapi")
+    except PackageNotFoundError:
+        return "0+unknown"
+
+
+def _delivery_error_code(error: Exception) -> str:
+    code = getattr(error, "code", None)
+    return code if isinstance(code, str) and code else "delivery_error"
 
 
 def utc_timestamp() -> str:
@@ -62,6 +258,7 @@ def request_metadata(
     *,
     status_code: int | None = None,
     duration_ms: float | None = None,
+    service_name: str | None = None,
 ) -> dict[str, Any]:
     """Return metadata that is useful for request-level troubleshooting without including query strings."""
 
@@ -71,6 +268,8 @@ def request_metadata(
         "method": request.method,
         "routeTemplate": route_template,
     }
+    if service_name:
+        metadata["service"] = service_name
     if route_template == request.url.path:
         metadata["path"] = request.url.path
     route = request.scope.get("route")
@@ -112,6 +311,7 @@ def create_request_metric_attributes(
     status_code: int,
     duration_ms: float,
     metric_name: str = "http.server.duration",
+    service_name: str | None = None,
 ) -> MetricAttributes:
     """Create privacy-safe request duration metric attributes for a completed FastAPI request."""
 
@@ -130,6 +330,7 @@ def create_request_metric_attributes(
             "routeTemplate": request_route_template(request),
             "statusCode": status_code,
             "statusCodeClass": status_code_class(status_code),
+            **({"service": service_name} if service_name else {}),
         },
     }
 
@@ -143,6 +344,7 @@ def capture_request_metric(
     event_id: str | None = None,
     timestamp: str | None = None,
     metric_name: str = "http.server.duration",
+    service_name: str | None = None,
 ) -> str:
     """Capture a FastAPI request duration metric and return its event id."""
 
@@ -155,6 +357,7 @@ def capture_request_metric(
             status_code=status_code,
             duration_ms=duration_ms,
             metric_name=metric_name,
+            service_name=service_name,
         ),
     )
     return metric_event_id
@@ -170,6 +373,7 @@ def capture_request_span(
     timestamp: str | None = None,
     span_id_factory: Callable[[], str] | None = None,
     trace: LogBrewTraceContext | None = None,
+    service_name: str | None = None,
 ) -> str:
     """Capture a FastAPI request as a LogBrew span event and return its event id."""
 
@@ -183,7 +387,12 @@ def capture_request_span(
         name=request_name(request),
         status="ok" if status_code < 500 else "error",
         duration_ms=duration_ms,
-        metadata=request_metadata(request, status_code=status_code, duration_ms=duration_ms),
+        metadata=request_metadata(
+            request,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            service_name=service_name,
+        ),
     )
     client.span(
         span_event_id,
@@ -201,6 +410,7 @@ def capture_exception(
     event_id: str | None = None,
     timestamp: str | None = None,
     trace: LogBrewTraceContext | None = None,
+    service_name: str | None = None,
 ) -> str:
     """Capture an exception raised while handling a FastAPI request and return its event id."""
 
@@ -214,7 +424,7 @@ def capture_exception(
             "level": "error",
             "message": str(exc) or exc.__class__.__name__,
             "metadata": {
-                **request_metadata(request, status_code=500),
+                **request_metadata(request, status_code=500, service_name=service_name),
                 "exception_type": exc.__class__.__name__,
                 **trace_metadata(trace_context),
             },
@@ -231,7 +441,7 @@ class LogBrewFastAPIMiddleware(BaseHTTPMiddleware):
         app: ASGIApp,
         *,
         client: LogBrewClient,
-        transport: RecordingTransport | None = None,
+        transport: Transport | None = None,
         capture_successful_requests: bool = True,
         capture_request_metrics: bool = False,
         capture_exceptions: bool = True,
@@ -266,7 +476,13 @@ class LogBrewFastAPIMiddleware(BaseHTTPMiddleware):
             duration_ms = (time.perf_counter() - start) * 1000
             should_capture_exception = self.config.capture_exceptions
             if should_capture_exception:
-                capture_exception(self.config.client, request, exc, trace=trace_context)
+                capture_exception(
+                    self.config.client,
+                    request,
+                    exc,
+                    trace=trace_context,
+                    service_name=self.config.service_name,
+                )
                 capture_request_span(
                     self.config.client,
                     request,
@@ -274,6 +490,7 @@ class LogBrewFastAPIMiddleware(BaseHTTPMiddleware):
                     duration_ms=duration_ms,
                     span_id_factory=self.config.span_id_factory,
                     trace=trace_context,
+                    service_name=self.config.service_name,
                 )
             if self.config.capture_request_metrics:
                 capture_request_metric(
@@ -282,6 +499,7 @@ class LogBrewFastAPIMiddleware(BaseHTTPMiddleware):
                     status_code=500,
                     duration_ms=duration_ms,
                     metric_name=self.config.request_metric_name,
+                    service_name=self.config.service_name,
                 )
             if should_capture_exception or self.config.capture_request_metrics:
                 self._flush_if_configured()
@@ -297,6 +515,7 @@ class LogBrewFastAPIMiddleware(BaseHTTPMiddleware):
                 duration_ms=duration_ms,
                 span_id_factory=self.config.span_id_factory,
                 trace=trace_context,
+                service_name=self.config.service_name,
             )
         if self.config.capture_request_metrics:
             capture_request_metric(
@@ -305,6 +524,7 @@ class LogBrewFastAPIMiddleware(BaseHTTPMiddleware):
                 status_code=response.status_code,
                 duration_ms=duration_ms,
                 metric_name=self.config.request_metric_name,
+                service_name=self.config.service_name,
             )
         if should_capture_request_span or self.config.capture_request_metrics:
             self._flush_if_configured()
@@ -324,7 +544,7 @@ def add_logbrew_middleware(
     app: FastAPI,
     *,
     client: LogBrewClient,
-    transport: RecordingTransport | None = None,
+    transport: Transport | None = None,
     capture_successful_requests: bool = True,
     capture_request_metrics: bool = False,
     capture_exceptions: bool = True,
@@ -385,6 +605,7 @@ def request_logbrew_trace(request: Request) -> LogBrewTraceContext | None:
 __all__ = [
     "LogBrewFastAPIConfig",
     "LogBrewFastAPIMiddleware",
+    "LogBrewFastAPIRuntime",
     "add_logbrew_middleware",
     "capture_exception",
     "capture_request_metric",
@@ -392,6 +613,7 @@ __all__ = [
     "create_request_metric_attributes",
     "create_request_trace_context",
     "get_active_logbrew_trace",
+    "init_logbrew",
     "request_logbrew_trace",
     "request_metadata",
     "request_name",

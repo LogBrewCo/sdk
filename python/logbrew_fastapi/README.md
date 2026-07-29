@@ -9,49 +9,84 @@ FastAPI integration for capturing LogBrew request spans and exceptions with the 
 ## Install
 
 ```bash
-python3 -m pip install logbrew-sdk logbrew-fastapi
+python3 -m pip install logbrew-fastapi
 ```
 
-The package is typed, ships `py.typed`, depends on the core `logbrew-sdk`, and keeps FastAPI as a normal framework dependency instead of bundling or monkeypatching the user's app.
+The package is typed, ships `py.typed`, and installs the compatible core `logbrew-sdk`. Keep the real project key in application configuration rather than source control.
 
-## Example
+## Production setup
 
 ```python
 import logging
+import os
 
 from fastapi import FastAPI
-from logbrew_fastapi import add_logbrew_middleware, get_active_logbrew_trace
-from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport
+from logbrew_fastapi import init_logbrew
+
+app = FastAPI()
+logbrew = init_logbrew(
+    app,
+    api_key=os.environ["LOGBREW_API_KEY"],
+    service_name="checkout-api",
+)
+client = logbrew.client
+logger = logging.getLogger("checkout-api")
+logger.addHandler(logbrew.logging_handler)
+
+
+@app.get("/health")
+def health() -> dict[str, bool]:
+    logger.info("health request")
+    return {"ok": True}
+```
+
+`init_logbrew()` records successful requests as spans and unhandled handler exceptions as issues plus error spans. It owns a real `HttpTransport`, uses the core SDK's bounded background delivery, and performs a final exact flush after the app's own default or custom FastAPI lifespan teardown. Network delivery never blocks the request path.
+
+The returned runtime exposes content-free delivery diagnostics:
+
+```python
+health = logbrew.delivery_health()
+print(
+    {
+        "state": health.lifecycle,
+        "pending": health.pending_events,
+        "dropped": health.dropped_events,
+        "pauseReason": health.pause_reason,
+    }
+)
+```
+
+Final delivery failures surface during lifespan shutdown by default, after requests have stopped serving. Set `raise_shutdown_errors=False` only when the application must preserve shutdown despite a telemetry failure; `logbrew.shutdown_error_code` and `delivery_health()` remain available without event content, API keys, endpoint configuration, or exception text.
+
+The logging handler is returned but never attached globally. Add it only to the logger whose records you intend to capture. It automatically correlates logs emitted during a request with that request's `traceId`, `spanId`, `parentSpanId`, and sampled state.
+
+When an incoming request has a valid W3C `traceparent` header, request capture continues that trace by using the incoming trace ID and parent span ID while creating a fresh child span ID. The same request-local trace is available from `get_active_logbrew_trace()` while a handler runs. Missing or malformed headers start a fresh W3C-shaped local trace so bad client headers do not break the app.
+
+Request spans use the FastAPI route template, such as `GET /orders/{order_id}`, for low-noise grouping. Span metadata includes `routeTemplate`; concrete dynamic paths are not emitted when a route template is available. The trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
+
+## Caller-owned delivery
+
+Use `add_logbrew_middleware()` when the application already owns its `LogBrewClient` and transport lifecycle, or when a deterministic local preview needs `RecordingTransport`. This low-level API accepts any object implementing the public `Transport` protocol:
+
+```python
+from logbrew_fastapi import add_logbrew_middleware
+from logbrew_sdk import LogBrewClient, RecordingTransport
 
 client = LogBrewClient.create(
     api_key="LOGBREW_API_KEY",
-    sdk_name="logbrew-fastapi",
-    sdk_version="0.1.0",
+    sdk_name="checkout-api",
+    sdk_version="1.0.0",
 )
 transport = RecordingTransport.always_accept()
-logger = logging.getLogger("checkout-api")
-logger.addHandler(LogBrewLoggingHandler(client, metadata={"service": "checkout-api"}))
-app = FastAPI()
 add_logbrew_middleware(
     app,
     client=client,
     transport=transport,
     span_id_factory=lambda: "b7ad6b7169203331",
 )
-
-
-@app.get("/health")
-def health() -> dict[str, bool]:
-    trace = get_active_logbrew_trace()
-    logger.info("health request", extra={"traceId": trace.trace_id if trace else None})
-    return {"ok": True}
 ```
 
-`add_logbrew_middleware()` records successful requests as span events, records unhandled handler exceptions as issue plus error-span events, and flushes through the provided transport after each response. If no transport is provided, events stay queued on the core client so the app can flush them itself.
-
-When an incoming request has a valid W3C `traceparent` header, request capture continues that trace by using the incoming `traceId` and parent span id while creating a fresh child span id. The same request-local trace is available from `get_active_logbrew_trace()` while your handler runs, and `LogBrewLoggingHandler` automatically adds `traceId`, `spanId`, `parentSpanId`, and `sampled` metadata to standard-library logs emitted inside that context. Missing or malformed `traceparent` headers start a fresh W3C-shaped local trace so bad client headers do not break the app.
-
-Request spans use the FastAPI route template, such as `GET /orders/{order_id}`, for low-noise grouping. Span metadata includes `routeTemplate`; concrete dynamic paths are not emitted when a route template is available. The trace helper never exposes the raw header, request headers, body, cookies, query strings, or response body.
+The low-level middleware flushes through the provided transport after each response by default. If no transport is provided, events remain queued for the application to flush. Transport failures do not break the request path unless `raise_flush_errors=True`.
 
 ## Outbound HTTP child spans
 
@@ -129,16 +164,14 @@ Run `python -m logbrew_fastapi.examples dependency-spans` to see a local request
 Request duration metrics are opt-in. Set `capture_request_metrics=True` to emit an explicit `http.server.duration` histogram for completed requests:
 
 ```python
-add_logbrew_middleware(
+logbrew = init_logbrew(
     app,
-    client=client,
-    transport=transport,
+    api_key=os.environ["LOGBREW_API_KEY"],
+    service_name="checkout-api",
     capture_request_metrics=True,
 )
 ```
 
-The metric includes primitive, low-cardinality metadata: `framework`, `method`, `routeTemplate`, `statusCode`, and `statusCodeClass`. Query strings and URL hashes are omitted. Set `capture_successful_requests=False` with `capture_request_metrics=True` when you only want duration metrics and not successful request spans. Avoid user IDs, request payloads, headers, or free-form text in custom metric metadata.
-
-By default, transport failures do not break the FastAPI response path. Set `raise_flush_errors=True` only when your app wants delivery failures to surface as request errors.
+The metric includes primitive, low-cardinality metadata: `service`, `framework`, `method`, `routeTemplate`, `statusCode`, and `statusCodeClass`. Query strings and URL hashes are omitted. Set `capture_successful_requests=False` with `capture_request_metrics=True` when you only want duration metrics and not successful request spans. Avoid user IDs, request payloads, headers, or free-form text in custom metric metadata.
 
 Use a clearly fake placeholder like `LOGBREW_API_KEY` in examples.

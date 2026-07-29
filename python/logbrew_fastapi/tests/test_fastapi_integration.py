@@ -4,11 +4,23 @@ import json
 import logging
 import re
 import unittest
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from logbrew_fastapi import add_logbrew_middleware, get_active_logbrew_trace
-from logbrew_sdk import LogBrewClient, LogBrewLoggingHandler, RecordingTransport, SdkError
+from logbrew_fastapi import (
+    add_logbrew_middleware,
+    get_active_logbrew_trace,
+    init_logbrew,
+)
+from logbrew_sdk import (
+    HttpTransport,
+    LogBrewClient,
+    LogBrewLoggingHandler,
+    RecordingTransport,
+    SdkError,
+)
 
 
 def make_client() -> LogBrewClient:
@@ -20,6 +32,159 @@ def make_client() -> LogBrewClient:
 
 
 class FastAPIIntegrationTests(unittest.TestCase):
+    def test_init_logbrew_owns_capture_logging_and_shutdown_delivery(self) -> None:
+        api_key = "project-key-must-not-appear"
+        transport = RecordingTransport.always_accept()
+        app = FastAPI()
+        runtime = init_logbrew(
+            app,
+            api_key=api_key,
+            service_name="checkout-api",
+            transport=transport,
+            automatic_delivery=False,
+            span_id_factory=lambda: "b7ad6b7169203331",
+        )
+        logger = logging.getLogger("fastapi.bootstrap")
+        logger.handlers = []
+        logger.propagate = False
+        logger.setLevel(logging.INFO)
+        logger.addHandler(runtime.logging_handler)
+
+        @app.get("/health")
+        def health() -> dict[str, bool]:
+            logger.info("health request")
+            return {"ok": True}
+
+        try:
+            with TestClient(app) as http:
+                response = http.get("/health")
+        finally:
+            logger.removeHandler(runtime.logging_handler)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(runtime.client.closed)
+        self.assertEqual(runtime.delivery_health().lifecycle, "closed")
+        self.assertEqual(runtime.shutdown_response.status_code, 202)
+        self.assertEqual(runtime.shutdown_response.accepted_events, 2)
+        self.assertEqual(len(transport.sent_bodies), 1)
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["log", "span"])
+        for event in payload["events"]:
+            self.assertEqual(event["attributes"]["metadata"]["service"], "checkout-api")
+        self.assertNotIn(api_key, repr(runtime))
+        self.assertNotIn(api_key, json.dumps(payload))
+
+    def test_init_logbrew_flushes_after_custom_lifespan_teardown(self) -> None:
+        logger = logging.getLogger("fastapi.custom-lifespan")
+        logger.handlers = []
+        logger.propagate = False
+        logger.setLevel(logging.INFO)
+
+        @asynccontextmanager
+        async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+            yield
+            logger.info("custom lifespan stopped")
+
+        transport = RecordingTransport.always_accept()
+        app = FastAPI(lifespan=lifespan)
+        runtime = init_logbrew(
+            app,
+            api_key="LOGBREW_API_KEY",
+            service_name="lifespan-api",
+            transport=transport,
+            automatic_delivery=False,
+        )
+        logger.addHandler(runtime.logging_handler)
+
+        @app.get("/health")
+        def health() -> dict[str, bool]:
+            return {"ok": True}
+
+        try:
+            with TestClient(app) as http:
+                self.assertEqual(http.get("/health").status_code, 200)
+        finally:
+            logger.removeHandler(runtime.logging_handler)
+
+        self.assertTrue(runtime.client.closed)
+        payload = json.loads(transport.sent_bodies[0])
+        self.assertEqual([event["type"] for event in payload["events"]], ["span", "log"])
+        self.assertEqual(payload["events"][1]["attributes"]["message"], "custom lifespan stopped")
+
+    def test_init_logbrew_defaults_to_http_background_delivery(self) -> None:
+        app = FastAPI()
+        runtime = init_logbrew(app, api_key="LOGBREW_API_KEY")
+
+        self.assertIsInstance(runtime.transport, HttpTransport)
+        self.assertTrue(runtime.delivery_health().automatic_delivery)
+        self.assertEqual(runtime.delivery_health().lifecycle, "idle")
+        self.assertEqual(runtime.shutdown().status_code, 204)
+        self.assertEqual(runtime.shutdown().status_code, 204)
+
+    def test_init_logbrew_rejects_duplicate_app_ownership(self) -> None:
+        app = FastAPI()
+        runtime = init_logbrew(
+            app,
+            api_key="LOGBREW_API_KEY",
+            transport=RecordingTransport.always_accept(),
+            automatic_delivery=False,
+        )
+
+        with self.assertRaisesRegex(SdkError, "already initialized"):
+            init_logbrew(
+                app,
+                api_key="different-project-key",
+                transport=RecordingTransport.always_accept(),
+            )
+
+        self.assertEqual(runtime.shutdown().status_code, 204)
+
+    def test_shutdown_delivery_failure_is_visible_without_leaking_the_key(self) -> None:
+        api_key = "project-key-must-not-appear"
+        app = FastAPI()
+        runtime = init_logbrew(
+            app,
+            api_key=api_key,
+            transport=RecordingTransport([{"status_code": 401}]),
+            automatic_delivery=False,
+        )
+
+        @app.get("/health")
+        def health() -> dict[str, bool]:
+            return {"ok": True}
+
+        with self.assertRaises(SdkError) as raised, TestClient(app) as http:
+            self.assertEqual(http.get("/health").status_code, 200)
+
+        self.assertEqual(raised.exception.code, "unauthenticated")
+        self.assertEqual(runtime.shutdown_error_code, "unauthenticated")
+        self.assertEqual(runtime.client.pending_events(), 1)
+        self.assertNotIn(api_key, str(raised.exception))
+        self.assertNotIn(api_key, repr(runtime))
+
+    def test_shutdown_error_opt_out_retains_events_for_explicit_retry(self) -> None:
+        app = FastAPI()
+        runtime = init_logbrew(
+            app,
+            api_key="LOGBREW_API_KEY",
+            transport=RecordingTransport([{"status_code": 401}, {"status_code": 202}]),
+            automatic_delivery=False,
+            raise_shutdown_errors=False,
+        )
+
+        @app.get("/health")
+        def health() -> dict[str, bool]:
+            return {"ok": True}
+
+        with TestClient(app) as http:
+            self.assertEqual(http.get("/health").status_code, 200)
+
+        self.assertFalse(runtime.client.closed)
+        self.assertEqual(runtime.client.pending_events(), 1)
+        self.assertEqual(runtime.shutdown_error_code, "unauthenticated")
+        self.assertEqual(runtime.shutdown().status_code, 202)
+        self.assertTrue(runtime.client.closed)
+
     def test_successful_request_captures_and_flushes_span(self) -> None:
         sdk_client = make_client()
         transport = RecordingTransport.always_accept()
