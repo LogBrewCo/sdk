@@ -54,7 +54,8 @@ grep -q 'init_logbrew' "$tmp_dir/sdist-README.md"
 grep -q 'HttpTransport' "$tmp_dir/sdist-README.md"
 grep -q 'custom FastAPI lifespan' "$tmp_dir/sdist-README.md"
 
-"$tmp_dir/venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check "$core_wheel" "$fastapi_wheel" >/dev/null
+"$tmp_dir/venv/bin/python" -m pip install --no-cache-dir --disable-pip-version-check \
+  "$core_wheel" "$fastapi_wheel" httpx2==2.3.0 >/dev/null
 "$tmp_dir/venv/bin/python" -m pip check >/dev/null
 
 PYTHONPATH="" "$tmp_dir/venv/bin/python" -m unittest discover -s "$package_dir/tests" -p 'test_*.py'

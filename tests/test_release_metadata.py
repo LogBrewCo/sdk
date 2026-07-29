@@ -1832,7 +1832,7 @@ end
 
         self.assertTrue(any("dependencies" in failure and "kotlin-stdlib" in failure for failure in failures))
 
-    def test_python_integration_requires_declared_dependencies(self) -> None:
+    def test_python_integration_requires_framework_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             package_dir = root / "python" / "logbrew_fastapi"
@@ -1857,7 +1857,6 @@ authors = [
 ]
 keywords = ["logbrew", "fastapi"]
 dependencies = [
-  "fastapi>=0.111.1",
   "logbrew-sdk==0.1.0"
 ]
 
@@ -1876,7 +1875,7 @@ Repository = "https://github.com/LogBrewCo/sdk"
                 failures,
             )
 
-        self.assertTrue(any("project.dependencies" in failure and "httpx2" in failure for failure in failures))
+        self.assertTrue(any("project.dependencies" in failure and "fastapi" in failure for failure in failures))
 
     def test_django_integration_requires_framework_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

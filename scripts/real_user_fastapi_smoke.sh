@@ -11,10 +11,20 @@ core_package_version="$(python_package_version "$core_dir/pyproject.toml")"
 fastapi_package_version="$(python_package_version "$package_dir/pyproject.toml")"
 export LOGBREW_FASTAPI_PACKAGE_VERSION="$fastapi_package_version"
 export LOGBREW_FASTAPI_FRAMEWORK_VERSION="${LOGBREW_FASTAPI_FRAMEWORK_VERSION:-}"
+export LOGBREW_FASTAPI_HTTPX_VERSION="${LOGBREW_FASTAPI_HTTPX_VERSION:-}"
 
 if [[ -n "$LOGBREW_FASTAPI_FRAMEWORK_VERSION" ]] &&
   [[ ! "$LOGBREW_FASTAPI_FRAMEWORK_VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
   printf 'LOGBREW_FASTAPI_FRAMEWORK_VERSION must be a numeric release version\n' >&2
+  exit 2
+fi
+if [[ -n "$LOGBREW_FASTAPI_HTTPX_VERSION" ]] &&
+  [[ ! "$LOGBREW_FASTAPI_HTTPX_VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+  printf 'LOGBREW_FASTAPI_HTTPX_VERSION must be a numeric release version\n' >&2
+  exit 2
+fi
+if [[ -n "$LOGBREW_FASTAPI_HTTPX_VERSION" && -z "$LOGBREW_FASTAPI_FRAMEWORK_VERSION" ]]; then
+  printf 'LOGBREW_FASTAPI_HTTPX_VERSION requires LOGBREW_FASTAPI_FRAMEWORK_VERSION\n' >&2
   exit 2
 fi
 
@@ -43,13 +53,16 @@ test -f "$fastapi_sdist"
 
 python3 -m venv "$tmp_dir/app"
 "$tmp_dir/app/bin/python" -m pip install --upgrade --disable-pip-version-check pip >/dev/null
-if [[ -n "$LOGBREW_FASTAPI_FRAMEWORK_VERSION" ]]; then
-  "$tmp_dir/app/bin/python" -m pip install --no-cache-dir --disable-pip-version-check \
-    "fastapi==${LOGBREW_FASTAPI_FRAMEWORK_VERSION}" "$core_wheel" "$fastapi_wheel" mypy >/dev/null
-else
-  "$tmp_dir/app/bin/python" -m pip install --no-cache-dir --disable-pip-version-check \
-    "$core_wheel" "$fastapi_wheel" mypy >/dev/null
+test_client_requirement="httpx2==2.3.0"
+if [[ -n "$LOGBREW_FASTAPI_HTTPX_VERSION" ]]; then
+  test_client_requirement="httpx==${LOGBREW_FASTAPI_HTTPX_VERSION}"
 fi
+app_dependencies=("$core_wheel" "$fastapi_wheel" mypy "$test_client_requirement")
+if [[ -n "$LOGBREW_FASTAPI_FRAMEWORK_VERSION" ]]; then
+  app_dependencies=("fastapi==${LOGBREW_FASTAPI_FRAMEWORK_VERSION}" "${app_dependencies[@]}")
+fi
+"$tmp_dir/app/bin/python" -m pip install --no-cache-dir --disable-pip-version-check \
+  "${app_dependencies[@]}" >/dev/null
 "$tmp_dir/app/bin/python" -m pip check >/dev/null
 "$tmp_dir/app/bin/python" -m pip show logbrew-fastapi > "$tmp_dir/pip-show-fastapi.txt"
 grep -q '^Name: logbrew-fastapi$' "$tmp_dir/pip-show-fastapi.txt"
@@ -72,6 +85,14 @@ if packages["logbrew-fastapi"] != expected_fastapi_version:
 expected_framework_version = os.environ["LOGBREW_FASTAPI_FRAMEWORK_VERSION"]
 if expected_framework_version and packages["fastapi"] != expected_framework_version:
     raise SystemExit(f"unexpected FastAPI version: {packages['fastapi']}")
+expected_httpx_version = os.environ["LOGBREW_FASTAPI_HTTPX_VERSION"]
+if expected_httpx_version:
+    if packages.get("httpx") != expected_httpx_version:
+        raise SystemExit(f"unexpected httpx version: {packages.get('httpx')}")
+    if "httpx2" in packages:
+        raise SystemExit("legacy httpx compatibility lane unexpectedly installed httpx2")
+elif packages.get("httpx2") != "2.3.0":
+    raise SystemExit(f"unexpected httpx2 version: {packages.get('httpx2')}")
 PY
 
 app_dir="$tmp_dir/consumer"
