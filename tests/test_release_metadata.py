@@ -603,6 +603,14 @@ class ReleaseMetadataTests(unittest.TestCase):
         ):
             self.assertIn(expected, workflow)
 
+    def test_publish_release_uses_current_checkout_runtime(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "publish-release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("uses: actions/checkout@v6", workflow)
+        self.assertNotIn("uses: actions/checkout@v4", workflow)
+
     def test_publish_release_canonicalizes_nuget_selection_before_dispatch(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "publish-release.yml").read_text(
             encoding="utf-8"
