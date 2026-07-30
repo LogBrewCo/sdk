@@ -65,7 +65,7 @@ function createLogBrewReactNativePromiseRejectionHandlers(options = {}) {
       state.handledLaterEvents = incrementBounded(state.handledLaterEvents);
       state.lastOutcome = "handled_later";
     },
-    onUnhandled(runtimeRejectionId, _rejection) {
+    onUnhandled(runtimeRejectionId) {
       if (state.handling) {
         recordSuppression(
           state,
