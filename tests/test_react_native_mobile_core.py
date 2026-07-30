@@ -113,6 +113,13 @@ if (mobile !== core) {
         self.assertIn("createLogBrewReactNativeClient", script)
         self.assertIn("--conditions=react-native", script)
         self.assertIn("nodeBuiltinReferences", script)
+        self.assertIn('expo_version="57.0.8"', script)
+        self.assertIn('worklets_version="0.10.0"', script)
+        self.assertIn("getLogBrewExpoConfig", script)
+        self.assertIn("getBundleModeMetroConfig", script)
+        self.assertIn("--source-maps external", script)
+        self.assertIn("Expo Hermes bytecode is missing the source-map Debug ID", script)
+        self.assertIn("Expo Hermes bytecode is missing the LogBrew Debug ID registry", script)
         self.assertIn("Run React Native release bundle smoke test", workflow)
         self.assertIn(
             "bash scripts/real_user_react_native_bundle_smoke.sh",

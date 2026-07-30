@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createLogBrewMetroSerializer,
+  getLogBrewExpoConfig,
   withLogBrewMetroConfig,
 } from "../metro.js";
 
@@ -169,4 +170,67 @@ test("Metro wrapper derives each reused production build from its current serial
   assert.match(second.code, new RegExp(`debugId=${secondMap.debug_id}`, "u"));
   assert.doesNotMatch(second.code, new RegExp(firstMap.debug_id, "u"));
   assert.equal(secondMap.file, "index-2.android.bundle");
+});
+
+test("Expo config helper preserves existing pre-serialization plugins and options", () => {
+  const existingPlugin = ({ premodules }) => premodules;
+  const expectedConfig = { serializer: {} };
+  let receivedProjectRoot;
+  let receivedOptions;
+  const getDefaultConfig = (projectRoot, options) => {
+    receivedProjectRoot = projectRoot;
+    receivedOptions = options;
+    return expectedConfig;
+  };
+
+  const result = getLogBrewExpoConfig("/app", {
+    getDefaultConfig,
+    isCSSEnabled: true,
+    unstable_beforeAssetSerializationPlugins: [existingPlugin],
+  });
+
+  assert.equal(result, expectedConfig);
+  assert.equal(receivedProjectRoot, "/app");
+  assert.equal(receivedOptions.isCSSEnabled, true);
+  assert.equal("getDefaultConfig" in receivedOptions, false);
+  assert.equal(receivedOptions.unstable_beforeAssetSerializationPlugins.length, 2);
+  assert.equal(receivedOptions.unstable_beforeAssetSerializationPlugins[0], existingPlugin);
+
+  const injectedModules = receivedOptions.unstable_beforeAssetSerializationPlugins[1]({
+    debugId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    graph: graph(),
+    premodules: [{ path: "__prelude__", output: [] }],
+  });
+  assert.deepEqual(injectedModules.map((module) => module.path), ["__prelude__", "__logbrew_debug_id__"]);
+  assert.match(moduleCode(injectedModules[1]), /aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/u);
+  assert.match(moduleCode(injectedModules[1]), /@logbrew\/react-native\/debug-ids/u);
+  assert.doesNotMatch(moduleCode(injectedModules[1]), /__LOGBREW_REACT_NATIVE_DEBUG_ID__/u);
+});
+
+test("Expo plugin leaves serialization unchanged without a Debug ID and rejects malformed IDs", () => {
+  const preModules = [{ path: "__prelude__", output: [] }];
+  let plugin;
+  getLogBrewExpoConfig("/app", {
+    getDefaultConfig: (_projectRoot, options) => {
+      plugin = options.unstable_beforeAssetSerializationPlugins[0];
+      return { serializer: {} };
+    },
+  });
+
+  assert.equal(plugin({ graph: graph({ dev: true }), premodules: preModules }), preModules);
+  assert.throws(
+    () => plugin({ debugId: "not-a-debug-id", graph: graph(), premodules: preModules }),
+    (error) => error?.code === "configuration_error" && /valid Expo Debug ID/u.test(error.message),
+  );
+});
+
+test("Metro wrapper gives Expo static serialization an actionable recovery path", async () => {
+  const serializer = createLogBrewMetroSerializer(() => []);
+
+  await assert.rejects(
+    serializer("index.js", [], graph(), serializerOptions()),
+    (error) =>
+      error?.code === "configuration_error" &&
+      /getLogBrewExpoConfig/u.test(error.message),
+  );
 });

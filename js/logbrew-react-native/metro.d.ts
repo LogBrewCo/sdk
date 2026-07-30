@@ -14,13 +14,28 @@ export type LogBrewMetroSerializer<TModule = unknown, TGraph = unknown, TOptions
 export type LogBrewMetroConfig = {
   serializer?: {
     customSerializer?: unknown;
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
-};
+  } | Record<string, unknown>;
+} | Record<string, unknown>;
 
 export type LogBrewMetroConfigOptions = {
   enabled?: boolean;
+};
+
+export type LogBrewExpoSerializationInput<TModule = unknown, TGraph = unknown> = {
+  debugId?: string;
+  graph: TGraph;
+  premodules: TModule[];
+};
+
+export type LogBrewExpoDebugIdPlugin<TModule = unknown, TGraph = unknown> = (
+  input: LogBrewExpoSerializationInput<TModule, TGraph>,
+) => TModule[];
+
+export type LogBrewExpoConfigOptions<TConfig extends LogBrewMetroConfig = LogBrewMetroConfig> = {
+  enabled?: boolean;
+  getDefaultConfig?: (...args: never[]) => TConfig;
+  unstable_beforeAssetSerializationPlugins?: LogBrewExpoDebugIdPlugin[];
+  [key: string]: unknown;
 };
 
 export declare function createLogBrewMetroSerializer<TModule, TGraph, TOptions>(
@@ -28,6 +43,11 @@ export declare function createLogBrewMetroSerializer<TModule, TGraph, TOptions>(
 ): LogBrewMetroSerializer<TModule, TGraph, TOptions>;
 
 export declare function createLogBrewMetroSerializer(customSerializer?: null): LogBrewMetroSerializer;
+
+export declare function getLogBrewExpoConfig<TConfig extends LogBrewMetroConfig = LogBrewMetroConfig>(
+  projectRoot: string,
+  options?: LogBrewExpoConfigOptions<TConfig>,
+): TConfig;
 
 export declare function withLogBrewMetroConfig<T extends LogBrewMetroConfig>(
   config: T,

@@ -176,7 +176,11 @@ JS
 import assert from "node:assert/strict";
 import { prepareLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
 import { uploadLogBrewReactNativeReleaseArtifacts } from "@logbrew/react-native/release-artifacts";
-import { createLogBrewMetroSerializer, withLogBrewMetroConfig } from "@logbrew/react-native/metro";
+import {
+  createLogBrewMetroSerializer,
+  getLogBrewExpoConfig,
+  withLogBrewMetroConfig,
+} from "@logbrew/react-native/metro";
 
 if (typeof prepareLogBrewReactNativeReleaseArtifacts !== "function") {
   throw new Error("expected React Native release-artifact helper export");
@@ -184,7 +188,11 @@ if (typeof prepareLogBrewReactNativeReleaseArtifacts !== "function") {
 if (typeof uploadLogBrewReactNativeReleaseArtifacts !== "function") {
   throw new Error("expected React Native release-artifact upload helper export");
 }
-if (typeof createLogBrewMetroSerializer !== "function" || typeof withLogBrewMetroConfig !== "function") {
+if (
+  typeof createLogBrewMetroSerializer !== "function" ||
+  typeof getLogBrewExpoConfig !== "function" ||
+  typeof withLogBrewMetroConfig !== "function"
+) {
   throw new Error("expected React Native Metro helper exports");
 }
 
@@ -205,6 +213,11 @@ const developmentResult = await developmentSerializer(
 assert.equal(developmentResult, "development-bundle");
 assert.equal(developmentCalls, 1);
 assert.equal(receivedPreModules, originalPreModules);
+
+const expoConfig = getLogBrewExpoConfig(".", {
+  getDefaultConfig: (_projectRoot, options) => ({ options }),
+});
+assert.equal(expoConfig.options.unstable_beforeAssetSerializationPlugins.length, 1);
 JS
   node - <<'JS'
 const {
@@ -214,6 +227,7 @@ const {
 } = require("@logbrew/react-native/release-artifacts");
 const {
   createLogBrewMetroSerializer,
+  getLogBrewExpoConfig,
   withLogBrewMetroConfig,
   default: defaultMetroExport,
 } = require("@logbrew/react-native/metro");
@@ -223,6 +237,7 @@ if (
   typeof uploadLogBrewReactNativeReleaseArtifacts !== "function" ||
   defaultExport !== prepareLogBrewReactNativeReleaseArtifacts ||
   typeof createLogBrewMetroSerializer !== "function" ||
+  typeof getLogBrewExpoConfig !== "function" ||
   defaultMetroExport !== withLogBrewMetroConfig
 ) {
   throw new Error("expected CommonJS React Native release-artifact and Metro helper exports");
@@ -231,7 +246,10 @@ JS
   cat > metro-consumer.ts <<'TS'
 import {
   createLogBrewMetroSerializer,
+  getLogBrewExpoConfig,
   withLogBrewMetroConfig,
+  type LogBrewExpoConfigOptions,
+  type LogBrewExpoDebugIdPlugin,
   type LogBrewMetroConfig,
   type LogBrewMetroSerializer,
 } from "@logbrew/react-native/metro";
@@ -252,6 +270,19 @@ const wrappedDefault: LogBrewMetroConfig = withLogBrewMetroConfig(defaultConfig)
 const wrappedCustom: LogBrewMetroConfig = withLogBrewMetroConfig(customConfig);
 const serializer: LogBrewMetroSerializer = createLogBrewMetroSerializer(appSerializer);
 const defaultSerializer: LogBrewMetroSerializer = createLogBrewMetroSerializer(null);
+type ExpoDefaultOptions = {
+  isCSSEnabled?: boolean;
+  unstable_beforeAssetSerializationPlugins?: LogBrewExpoDebugIdPlugin[];
+};
+const expoGetDefaultConfig = (
+  _projectRoot: string,
+  _options?: ExpoDefaultOptions,
+): LogBrewMetroConfig => ({ serializer: {} });
+const expoOptions: LogBrewExpoConfigOptions = {
+  getDefaultConfig: expoGetDefaultConfig,
+  isCSSEnabled: true,
+};
+const expoConfig: LogBrewMetroConfig = getLogBrewExpoConfig(".", expoOptions);
 const releaseArtifacts: LogBrewReactNativeReleaseArtifactsOptions = {
   bundle: "dist/index.android.bundle",
   platform: "android",
@@ -265,6 +296,7 @@ void wrappedDefault;
 void wrappedCustom;
 void serializer;
 void defaultSerializer;
+void expoConfig;
 void releaseArtifacts;
 TS
   cat > metro-tsconfig.json <<'JSON'
