@@ -6,7 +6,7 @@ react_native_version="0.86.0"
 react_version="19.2.3"
 react_native_cli_version="20.1.0"
 expected_sdk_version="0.1.5"
-expected_react_native_package_version="0.1.5"
+expected_react_native_package_version="0.1.6"
 expected_sdk_peer="^0.1.5"
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/logbrew-rn-bundle.XXXXXX")"
 
