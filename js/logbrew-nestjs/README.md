@@ -11,28 +11,37 @@ This package is intentionally thin. It adds NestJS HTTP interceptor UX while kee
 ## Install
 
 ```bash
-npm install @logbrew/sdk @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs
-pnpm add @logbrew/sdk @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs
+npm install @logbrew/sdk @logbrew/node @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs
+pnpm add @logbrew/sdk @logbrew/node @logbrew/nestjs @nestjs/common @nestjs/core @nestjs/platform-express reflect-metadata rxjs
 ```
+
+Set `LOGBREW_SERVER_API_KEY` to a project-scoped server ingest key before starting
+the app.
 
 ## Global Interceptor
 
 ```ts
 import { NestFactory } from "@nestjs/core";
-import { RecordingTransport } from "@logbrew/sdk";
 import { LogBrewInterceptor } from "@logbrew/nestjs";
 import { AppModule } from "./app.module";
 
 const app = await NestFactory.create(AppModule);
 
 app.useGlobalInterceptors(new LogBrewInterceptor({
-  serverApiKey: "LOGBREW_SERVER_API_KEY",
-  spanIdFactory: () => "b7ad6b7169203331",
-  transport: RecordingTransport.alwaysAccept()
+  serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
+  onCaptureError(error) {
+    console.error("LogBrew request capture failed", error);
+  }
 }));
 
 await app.listen(3000);
 ```
+
+With no `transport` option, the interceptor sends to the LogBrew ingest API by default
+through `@logbrew/node`. You can pass `endpoint`, `fetchImpl`, or `headers` to
+configure that fetch transport, or pass an explicit LogBrew `Transport`.
+Delivery failures call `onCaptureError`; they are never converted into a
+simulated successful response.
 
 Inside a controller, the Express request object exposes `request.logbrew`:
 
@@ -57,6 +66,20 @@ export class AppController {
 The interceptor uses Nest's HTTP `ExecutionContext`, adds `request.logbrew` before the route handler runs, captures successful request completion, and captures thrown route errors with RxJS `catchError` before rethrowing them to Nest's normal exception handling path.
 
 Use `serverApiKey` directly for local server examples, or set `LOGBREW_SERVER_API_KEY` in your server environment and omit it. `apiKey` and `LOGBREW_API_KEY` are still accepted for compatibility with the lower-level JavaScript SDK.
+
+`RecordingTransport` remains available from `@logbrew/sdk` when you want to
+inspect serialized events locally. It does not send data to LogBrew; use the
+default Node fetch transport for production telemetry:
+
+```ts
+import { RecordingTransport } from "@logbrew/sdk";
+
+const previewTransport = RecordingTransport.alwaysAccept();
+app.useGlobalInterceptors(new LogBrewInterceptor({
+  serverApiKey: "local-preview-key",
+  transport: previewTransport
+}));
+```
 
 When an incoming HTTP request has a valid W3C `traceparent` header, the interceptor attaches `request.logbrew.trace` and default request capture records the request as a LogBrew `span` that continues the incoming trace. The active trace is also available from `getActiveLogBrewTrace()` inside asynchronous controller work started after the interceptor runs. Requests without `traceparent`, or with a malformed header, fall back to the existing request `log` event so bad client headers do not break the controller. Automatic request metadata uses the path without query text by default. Use `captureRequests: false` when a controller should only flush manual events, and use `spanIdFactory` when your runtime needs app-provided child span IDs.
 
@@ -110,7 +133,7 @@ Use `createLogBrewNestLogger` when you want Nest's own logger calls to share the
 ```ts
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { RecordingTransport } from "@logbrew/sdk";
+import { createNodeFetchTransport } from "@logbrew/node";
 import {
   createLogBrewNestClient,
   createLogBrewNestLogger,
@@ -119,11 +142,11 @@ import {
 import { AppModule } from "./app.module";
 
 const app = await NestFactory.create(AppModule, { logger: false });
-const transport = RecordingTransport.alwaysAccept();
+const transport = createNodeFetchTransport();
 const client = createLogBrewNestClient({
-  serverApiKey: "LOGBREW_SERVER_API_KEY",
+  serverApiKey: process.env.LOGBREW_SERVER_API_KEY,
   sdkName: "logbrew-nestjs",
-  sdkVersion: "0.1.1"
+  sdkVersion: "0.1.2"
 });
 
 const logger = createLogBrewNestLogger({
@@ -143,8 +166,8 @@ await app.listen(3000);
 
 The logger implements the Nest logger shape (`log`, `warn`, `error`, `debug`, `verbose`, `fatal`, and `setLogLevels`). It forwards to `baseLogger` first so existing console/file behavior stays app-owned, then captures LogBrew `log` events for `log`/`warn`/`debug`/`verbose` and `issue` events for `error`/`fatal`. Error and fatal calls keep the message and error type when available, but omit stack text, request headers, query strings, bodies, raw `traceparent`, and arbitrary object payloads.
 
-When the logger shares a client with `LogBrewInterceptor`, request completion flushes captured logger events without shutting down the shared app-owned client. If you use the logger outside a request path, call `await logger.flush()` during graceful shutdown or set `flushOnCapture: true` with an explicit transport for small standalone scripts.
+When the logger shares a client with `LogBrewInterceptor`, request completion flushes captured logger events without shutting down the shared app-owned client. If you use the logger outside a request path, call `await logger.flush()` during graceful shutdown or set `flushOnCapture: true` for small standalone scripts. The logger also uses the Node fetch transport by default when `transport` is omitted.
 
 ## Packaged Examples
 
-The package includes example source for the interceptor, controller access, and app-owned response handling. Use the snippets above as the starting point for wiring LogBrew into your NestJS application.
+The package includes example source for the interceptor, controller access, and app-owned response handling. The packaged examples use an explicit `RecordingTransport` so they can run locally and print serialized event batches without sending them. Use the network-delivery snippets above as the starting point for wiring LogBrew into your NestJS application.

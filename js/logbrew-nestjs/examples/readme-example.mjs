@@ -36,6 +36,7 @@ console.log(payload);
 console.error(JSON.stringify({
   ok: true,
   attempts: transport.sentBodies.length,
+  mode: "local-preview",
   status: response.status
 }));
 
