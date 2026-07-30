@@ -2,11 +2,11 @@
 
 Flask integration for capturing LogBrew request spans and exceptions with the public Python SDK.
 
-This package is source-only until its first PyPI release. The pip command below requires the package to be available on PyPI; use a local checkout or local wheel when evaluating it before release.
-
 ```bash
 python3 -m pip install logbrew-sdk logbrew-flask
 ```
+
+`logbrew-flask` requires Python 3.10 or newer.
 
 The package is typed, ships `py.typed`, depends on the core `logbrew-sdk`, and keeps Flask as a normal framework dependency instead of monkeypatching Flask globally.
 

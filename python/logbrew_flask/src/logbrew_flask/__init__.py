@@ -6,7 +6,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from flask import Flask, Response, g, request
@@ -47,7 +47,7 @@ class LogBrewFlaskConfig:
 def utc_timestamp() -> str:
     """Return a LogBrew-compatible UTC timestamp."""
 
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def request_name() -> str:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import tempfile
+import tomllib
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -1929,6 +1930,31 @@ Repository = "https://github.com/LogBrewCo/sdk"
             )
 
         self.assertTrue(any("project.dependencies" in failure and "Django" in failure for failure in failures))
+
+    def test_python_packages_publish_python_310_compatibility(self) -> None:
+        projects = {
+            package: tomllib.loads(
+                (ROOT / f"python/{package}/pyproject.toml").read_text(encoding="utf-8")
+            )["project"]
+            for package in ("logbrew_py", "logbrew_fastapi", "logbrew_flask", "logbrew_django")
+        }
+
+        for project in projects.values():
+            self.assertEqual(project["requires-python"], ">=3.10")
+            self.assertIn("Programming Language :: Python :: 3.10", project["classifiers"])
+        self.assertIn(
+            "typing-extensions>=4.1; python_version < '3.11'",
+            projects["logbrew_py"]["dependencies"],
+        )
+        self.assertIn("Django>=4.2.30,<6", projects["logbrew_django"]["dependencies"])
+
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("python-version: \"3.10\"", workflow)
+        self.assertIn('LOGBREW_DJANGO_FRAMEWORK_VERSION: ${{ matrix.django_version }}', workflow)
+        self.assertIn('- "4.2.30"', workflow)
+        self.assertIn('- "5.2.16"', workflow)
+        self.assertIn("bash scripts/check_fastapi_package.sh", workflow)
+        self.assertIn("bash scripts/check_flask_package.sh", workflow)
 
 
 if __name__ == "__main__":

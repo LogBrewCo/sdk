@@ -8,14 +8,20 @@ import math
 import os
 import re
 import ssl
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from functools import partial
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from threading import Lock, RLock, get_ident
-from typing import Annotated, Any, Literal, NotRequired, Protocol, TypeAlias, TypedDict
+from typing import Annotated, Any, Literal, Protocol, TypeAlias, TypedDict
+
+if sys.version_info >= (3, 11):
+    from typing import NotRequired
+else:  # pragma: no cover - exercised by the Python 3.10 CI lane
+    from typing_extensions import NotRequired
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
@@ -941,7 +947,11 @@ def extra_metadata_from_log_record(record: logging.LogRecord) -> Metadata:
 
 def timestamp_from_log_record(record: logging.LogRecord) -> str:
     """Return a UTC ISO-8601 timestamp for a standard-library log record."""
-    return datetime.fromtimestamp(record.created, tz=UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return (
+        datetime.fromtimestamp(record.created, tz=timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def default_log_record_event_id(record: logging.LogRecord) -> str:

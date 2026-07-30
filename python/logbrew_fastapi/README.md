@@ -12,6 +12,8 @@ FastAPI integration for capturing LogBrew request spans and exceptions with the 
 python3 -m pip install logbrew-fastapi
 ```
 
+`logbrew-fastapi` requires Python 3.10 or newer.
+
 The package is typed, ships `py.typed`, and installs the compatible core `logbrew-sdk`. It supports FastAPI 0.111.1 and later. It does not install or replace application-owned HTTP clients such as `httpx` or `httpx2`. Keep the real project key in application configuration rather than source control.
 
 ## Production setup

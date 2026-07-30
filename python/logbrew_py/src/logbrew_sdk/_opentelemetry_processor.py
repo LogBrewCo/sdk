@@ -6,7 +6,7 @@ import importlib
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, TypeAlias, cast
 
@@ -300,15 +300,18 @@ class LogBrewOpenTelemetrySpanProcessor:
         summaries = list(self._trace_summaries.values())
         self._trace_summaries.clear()
         for summary in summaries:
-            try:
-                self._captured_summaries += 1
-                self._client.span(
-                    f"{self._event_id_prefix}_trace_{self._captured_summaries}",
-                    _timestamp_from_open_telemetry_trace_summary(summary, self._timestamp_factory),
-                    _open_telemetry_trace_summary_attributes(summary),
-                )
-            except Exception as error:
-                _notify_capture_error(self._on_capture_error, error)
+            self._enqueue_trace_summary(summary)
+
+    def _enqueue_trace_summary(self, summary: _TraceSummary) -> None:
+        try:
+            self._captured_summaries += 1
+            self._client.span(
+                f"{self._event_id_prefix}_trace_{self._captured_summaries}",
+                _timestamp_from_open_telemetry_trace_summary(summary, self._timestamp_factory),
+                _open_telemetry_trace_summary_attributes(summary),
+            )
+        except Exception as error:
+            _notify_capture_error(self._on_capture_error, error)
 
 
 class LogBrewOpenTelemetrySpanExporter:
@@ -893,7 +896,7 @@ def _timestamp_from_open_telemetry_time(
     milliseconds = _open_telemetry_time_ms(value)
     if milliseconds is not None:
         return (
-            datetime.fromtimestamp(milliseconds / 1000, tz=UTC)
+            datetime.fromtimestamp(milliseconds / 1000, tz=timezone.utc)
             .isoformat(timespec="milliseconds")
             .replace("+00:00", "Z")
         )
