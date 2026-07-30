@@ -156,6 +156,7 @@ class ReleaseArtifactSmokeGateTests(unittest.TestCase):
         self.assertIn('"@logbrew/react-native": "file:../logbrew-react-native.tgz"', smoke)
         self.assertIn('require("@logbrew/react-native/metro")', smoke)
         self.assertIn("withLogBrewMetroConfig", smoke)
+        self.assertIn("getLogBrewExpoConfig", smoke)
         self.assertIn("metro-string.config.js", smoke)
         self.assertIn("metro-mutating-string.config.js", smoke)
         self.assertIn("custom-dist/index.android.bundle", smoke)

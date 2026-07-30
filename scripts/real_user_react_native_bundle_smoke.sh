@@ -5,6 +5,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 react_native_version="0.86.0"
 react_version="19.2.3"
 react_native_cli_version="20.1.0"
+expo_version="57.0.8"
+worklets_version="0.10.0"
 expected_sdk_version="0.1.5"
 expected_react_native_package_version="0.1.7"
 expected_sdk_peer="^0.1.5"
@@ -51,8 +53,10 @@ mkdir "$app_root"
     "@react-native-community/cli-platform-android@$react_native_cli_version" \
     "@react-native/babel-preset@$react_native_version" \
     "@react-native/metro-config@$react_native_version" \
+    "expo@$expo_version" \
     "react@$react_version" \
-    "react-native@$react_native_version"
+    "react-native@$react_native_version" \
+    "react-native-worklets@$worklets_version"
 
   installed_react_native="$(
     node -p "require('react-native/package.json').version"
@@ -133,7 +137,14 @@ for (const relativePath of [
 ]) {
   requirePackedFile("@logbrew/sdk", relativePath);
 }
-for (const relativePath of ["index.native.d.ts", "index.native.js"]) {
+for (const relativePath of [
+  "index.native.d.ts",
+  "index.native.js",
+  "metro.cjs",
+  "metro.d.cts",
+  "metro.d.ts",
+  "metro.js"
+]) {
   requirePackedFile("@logbrew/react-native", relativePath);
 }
 NODE
@@ -261,6 +272,82 @@ process.stdout.write(JSON.stringify({
   legacyMainField,
   packageExports,
   reactNative: "0.86.0"
+}) + "\n");
+NODE
+
+  cat > App.js <<'JS'
+import React from "react";
+import { View } from "react-native";
+import { createLogBrewReactNativeClient } from "@logbrew/react-native";
+
+const client = createLogBrewReactNativeClient({
+  clientKey: "LOGBREW_CLIENT_KEY",
+  sdkVersion: "0.0.0-test"
+});
+client.log("evt_rn_expo_bundle", "2026-07-30T12:00:00.000Z", {
+  level: "info",
+  message: "bounded Expo bundle smoke"
+});
+
+export default function App() {
+  return React.createElement(View);
+}
+JS
+  cat > app.json <<'JSON'
+{
+  "expo": {
+    "name": "LogBrew Expo bundle smoke",
+    "slug": "logbrew-expo-bundle-smoke",
+    "version": "1.0.0",
+    "jsEngine": "hermes"
+  }
+}
+JSON
+  cat > metro.config.js <<'JS'
+const { getLogBrewExpoConfig } = require("@logbrew/react-native/metro");
+const { getBundleModeMetroConfig } = require("react-native-worklets/bundleMode");
+
+module.exports = getBundleModeMetroConfig(getLogBrewExpoConfig(__dirname));
+JS
+
+  ./node_modules/.bin/expo export \
+    --output-dir "$fixture_root/expo-dist" \
+    --platform android \
+    --source-maps external \
+    >/dev/null
+
+  node --input-type=module - "$fixture_root/expo-dist" <<'NODE'
+import fs from "node:fs";
+import path from "node:path";
+
+const outputRoot = process.argv[2];
+const metadata = JSON.parse(
+  fs.readFileSync(path.join(outputRoot, "metadata.json"), "utf8")
+);
+const bundlePath = path.join(outputRoot, metadata.fileMetadata.android.bundle);
+const mapPath = `${bundlePath}.map`;
+const bytecode = fs.readFileSync(bundlePath);
+const sourceMap = JSON.parse(fs.readFileSync(mapPath, "utf8"));
+const debugId = sourceMap.debugId;
+
+if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(debugId)) {
+  throw new Error("Expo source map is missing a valid Debug ID");
+}
+if (!bytecode.includes(Buffer.from(debugId))) {
+  throw new Error("Expo Hermes bytecode is missing the source-map Debug ID");
+}
+if (!bytecode.includes(Buffer.from("@logbrew/react-native/debug-ids"))) {
+  throw new Error("Expo Hermes bytecode is missing the LogBrew Debug ID registry");
+}
+if (bytecode.includes(Buffer.from("__LOGBREW_REACT_NATIVE_DEBUG_ID__"))) {
+  throw new Error("Expo Hermes bytecode contains the unresolved LogBrew Debug ID placeholder");
+}
+
+process.stdout.write(JSON.stringify({
+  expo: "57.0.8",
+  expoDebugId: debugId,
+  expoHermesRegistry: true,
+  worklets: "0.10.0"
 }) + "\n");
 NODE
 )

@@ -2,12 +2,15 @@
 
 const crypto = require("node:crypto");
 const { Buffer } = require("node:buffer");
+const { createRequire } = require("node:module");
+const path = require("node:path");
 
 const DEBUG_ID_PLACEHOLDER = "__LOGBREW_REACT_NATIVE_DEBUG_ID__";
 const DEBUG_ID_MODULE_PATH = "__logbrew_debug_id__";
 const DEBUG_ID_REGISTRY_NAME = "@logbrew/react-native/debug-ids";
 const DEBUG_ID_KEYS = ["debug_id", "debugId", "debugID", "x_debug_id"];
 const DEBUG_ID_COMMENT_RE = /(?:\/\/[#@]|\/\*[#@])\s*debugId=[^\r\n]*/iu;
+const DEBUG_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SOURCE_MAPPING_COMMENT_RE = /(?:\/\/[#@]|\/\*[#@])\s*sourceMappingURL=[^\r\n]*/giu;
 const WRAPPED_SERIALIZER = Symbol.for("@logbrew/react-native/metro-serializer");
 
@@ -35,8 +38,8 @@ function countLines(source) {
   return source === "" ? 0 : source.split("\n").length;
 }
 
-function createDebugIdModule() {
-  const code = runtimeDebugIdSnippet(DEBUG_ID_PLACEHOLDER);
+function createDebugIdModule(debugId = DEBUG_ID_PLACEHOLDER) {
+  const code = runtimeDebugIdSnippet(debugId);
   return {
     dependencies: new Map(),
     getSource: () => Buffer.from(code),
@@ -55,14 +58,14 @@ function createDebugIdModule() {
   };
 }
 
-function prependDebugIdModule(preModules) {
+function prependDebugIdModule(preModules, debugId = DEBUG_ID_PLACEHOLDER) {
   if (!Array.isArray(preModules)) {
     throw configurationError("LogBrew Metro serializer expected preModules to be an array");
   }
   if (preModules.some((module) => module?.path === DEBUG_ID_MODULE_PATH)) {
     return preModules;
   }
-  const debugIdModule = createDebugIdModule();
+  const debugIdModule = createDebugIdModule(debugId);
   if (preModules[0]?.path === "__prelude__") {
     return [preModules[0], debugIdModule, ...preModules.slice(1)];
   }
@@ -130,7 +133,12 @@ function sourceWithDebugId(source, debugId) {
 }
 
 function productionResult(result) {
-  if (!result || Array.isArray(result) || typeof result !== "object") {
+  if (Array.isArray(result)) {
+    throw configurationError(
+      "LogBrew Metro received Expo static assets; use getLogBrewExpoConfig instead of withLogBrewMetroConfig for Expo projects",
+    );
+  }
+  if (!result || typeof result !== "object") {
     throw configurationError("LogBrew Metro production serializer must return { code, map }");
   }
   if (typeof result.code !== "string") {
@@ -154,6 +162,81 @@ function productionResult(result) {
     code: sourceWithDebugId(result.code, debugId),
     map: JSON.stringify(sourceMap),
   };
+}
+
+function requireExpoPluginOptions(options) {
+  requireOptions(options);
+  if (
+    options.unstable_beforeAssetSerializationPlugins !== undefined &&
+    (!Array.isArray(options.unstable_beforeAssetSerializationPlugins) ||
+      options.unstable_beforeAssetSerializationPlugins.some((plugin) => typeof plugin !== "function"))
+  ) {
+    throw configurationError(
+      "LogBrew Expo option unstable_beforeAssetSerializationPlugins must be an array of functions",
+    );
+  }
+  if (options.getDefaultConfig !== undefined && typeof options.getDefaultConfig !== "function") {
+    throw configurationError("LogBrew Expo option getDefaultConfig must be a function");
+  }
+  return options;
+}
+
+function createLogBrewExpoDebugIdPlugin(options = {}) {
+  requireOptions(options);
+  return (input) => {
+    if (!input || Array.isArray(input) || typeof input !== "object") {
+      throw configurationError("LogBrew Expo Debug ID plugin requires a serialization input object");
+    }
+    const preModules = input.premodules;
+    if (!Array.isArray(preModules)) {
+      throw configurationError("LogBrew Expo Debug ID plugin expected premodules to be an array");
+    }
+    if (options.enabled === false || input.debugId === undefined || input.debugId === null) {
+      return preModules;
+    }
+    if (typeof input.debugId !== "string" || !DEBUG_ID_RE.test(input.debugId)) {
+      throw configurationError("LogBrew Expo Debug ID plugin requires a valid Expo Debug ID");
+    }
+    return prependDebugIdModule(preModules, input.debugId.toLowerCase());
+  };
+}
+
+function loadExpoGetDefaultConfig(projectRoot) {
+  let expoMetroConfig;
+  try {
+    const projectRequire = createRequire(path.join(projectRoot, "package.json"));
+    expoMetroConfig = projectRequire("expo/metro-config");
+  } catch (error) {
+    throw configurationError(
+      "LogBrew could not load expo/metro-config from the app; install a supported Expo SDK or pass getDefaultConfig",
+      { cause: error },
+    );
+  }
+  if (typeof expoMetroConfig?.getDefaultConfig !== "function") {
+    throw configurationError("LogBrew could not resolve getDefaultConfig from expo/metro-config");
+  }
+  return expoMetroConfig.getDefaultConfig;
+}
+
+function getLogBrewExpoConfig(projectRoot, options = {}) {
+  if (typeof projectRoot !== "string" || projectRoot.trim() === "") {
+    throw configurationError("getLogBrewExpoConfig requires a non-empty Expo project root");
+  }
+  requireExpoPluginOptions(options);
+  const root = path.resolve(projectRoot);
+  const {
+    enabled = true,
+    getDefaultConfig = loadExpoGetDefaultConfig(root),
+    unstable_beforeAssetSerializationPlugins = [],
+    ...expoOptions
+  } = options;
+  const plugins = enabled
+    ? [...unstable_beforeAssetSerializationPlugins, createLogBrewExpoDebugIdPlugin()]
+    : [...unstable_beforeAssetSerializationPlugins];
+  return getDefaultConfig(root, {
+    ...expoOptions,
+    unstable_beforeAssetSerializationPlugins: plugins,
+  });
 }
 
 function requireMetroModule(privatePath, sourcePath) {
@@ -305,6 +388,7 @@ function withLogBrewMetroConfig(config, options = {}) {
 
 module.exports = {
   createLogBrewMetroSerializer,
+  getLogBrewExpoConfig,
   withLogBrewMetroConfig,
   default: withLogBrewMetroConfig,
 };
