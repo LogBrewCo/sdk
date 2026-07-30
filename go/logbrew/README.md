@@ -9,8 +9,12 @@ Public Go SDK for creating LogBrew event batches, validating them locally, and f
 ## Install
 
 ```bash
-go get github.com/LogBrewCo/sdk/go/logbrew
+go get github.com/LogBrewCo/sdk/go/logbrew@latest
 ```
+
+The explicit `@latest` query keeps copied setup snippets on the current public
+module release. Run the same command to upgrade an existing requirement before
+debugging an endpoint or transport failure.
 
 ## Example
 

@@ -224,6 +224,14 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_repo_release_metadata_passes(self) -> None:
         self.assertEqual(check_release_metadata.validate(ROOT), [])
 
+    def test_go_install_command_tracks_latest_public_module(self) -> None:
+        readme = (ROOT / "go" / "logbrew" / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "go get github.com/LogBrewCo/sdk/go/logbrew@latest",
+            readme,
+        )
+
     def test_dotnet_release_catalog_covers_every_public_package_project(self) -> None:
         package_ids = {
             ET.parse(project).getroot().findtext("./PropertyGroup/PackageId")

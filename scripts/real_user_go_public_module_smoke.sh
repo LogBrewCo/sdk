@@ -2,8 +2,9 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.3}}"
+requested_version="${1:-${LOGBREW_GO_MODULE_VERSION:-v0.1.4}}"
 module_version="v${requested_version#v}"
+export LOGBREW_GO_MODULE_VERSION="$module_version"
 module_path="github.com/LogBrewCo/sdk/go/logbrew"
 tmp_dir="$(mktemp -d)"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
@@ -126,17 +127,30 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 
 	"github.com/LogBrewCo/sdk/go/logbrew"
 )
 
+var installedSDKVersion = strings.TrimPrefix(os.Getenv("LOGBREW_GO_MODULE_VERSION"), "v")
+
 func main() {
+	endpoint, err := url.Parse(logbrew.DefaultHTTPEndpoint)
+	must(err)
+	if endpoint.Scheme != "https" ||
+		endpoint.Hostname() != strings.Join([]string{"api", "logbrew", "co"}, ".") ||
+		endpoint.Path != "/v1/events" ||
+		endpoint.RawQuery != "" ||
+		endpoint.Fragment != "" {
+		panic("unexpected default HTTP endpoint")
+	}
+
 	client, err := logbrew.NewClient(logbrew.Config{
 		APIKey:     "LOGBREW_API_KEY",
 		SDKName:    "go-public-module-smoke",
-		SDKVersion: "0.1.3",
+		SDKVersion: installedSDKVersion,
 	})
 	must(err)
 
@@ -251,7 +265,7 @@ func main() {
 	httpClient, err := logbrew.NewClient(logbrew.Config{
 		APIKey:     "LOGBREW_API_KEY",
 		SDKName:    "go-public-module-http-smoke",
-		SDKVersion: "0.1.3",
+		SDKVersion: installedSDKVersion,
 		MaxRetries: 1,
 	})
 	must(err)
@@ -301,7 +315,7 @@ func TestPublicModuleBoundedQueueDrops(t *testing.T) {
 	client, err := logbrew.NewClient(logbrew.Config{
 		APIKey:       "LOGBREW_API_KEY",
 		SDKName:      "go-public-module-rich-smoke",
-		SDKVersion:   "0.1.3",
+		SDKVersion:   installedSDKVersion,
 		MaxQueueSize: 1,
 		OnEventDropped: func(drop logbrew.EventDrop) {
 			drops = append(drops, drop)
@@ -345,7 +359,7 @@ func TestPublicModuleQueuePropagationAndLinks(t *testing.T) {
 	client, err := logbrew.NewClient(logbrew.Config{
 		APIKey:     "LOGBREW_API_KEY",
 		SDKName:    "go-public-module-rich-smoke",
-		SDKVersion: "0.1.3",
+		SDKVersion: installedSDKVersion,
 	})
 	if err != nil {
 		t.Fatalf("create queue client: %v", err)
@@ -476,7 +490,7 @@ func TestPublicModuleSQLHelpers(t *testing.T) {
 	client, err := logbrew.NewClient(logbrew.Config{
 		APIKey:     "LOGBREW_API_KEY",
 		SDKName:    "go-public-module-rich-smoke",
-		SDKVersion: "0.1.3",
+		SDKVersion: installedSDKVersion,
 	})
 	if err != nil {
 		t.Fatalf("create SQL client: %v", err)

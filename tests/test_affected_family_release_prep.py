@@ -182,7 +182,7 @@ class AffectedFamilyReleasePrepTests(unittest.TestCase):
         swift_smoke = (ROOT / "scripts/real_user_swiftpm_public_smoke.sh").read_text(encoding="utf-8")
         swift_readme = (ROOT / "swift/logbrew-swift/README.md").read_text(encoding="utf-8")
 
-        self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.3', go_smoke)
+        self.assertIn('LOGBREW_GO_MODULE_VERSION:-v0.1.4', go_smoke)
         self.assertIn('LOGBREW_SWIFTPM_VERSION:-0.1.1', swift_smoke)
         self.assertIn('from: "0.1.2"', swift_readme)
 
