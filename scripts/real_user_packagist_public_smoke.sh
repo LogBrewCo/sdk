@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.1}}"
+version="${1:-${LOGBREW_PACKAGIST_VERSION:-0.1.6}}"
 tmp_dir="$(mktemp -d)"
 receipt_mode="${LOGBREW_RELEASE_RECEIPT_MODE:-0}"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -142,7 +142,7 @@ use LogBrew\TransportResponse;
 use Monolog\Logger;
 use Psr\Log\LogLevel;
 
-$version = getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.2';
+$version = getenv('LOGBREW_PACKAGIST_INSTALLED_VERSION') ?: '0.1.6';
 $installedVersion = Composer\InstalledVersions::getPrettyVersion('logbrew/sdk');
 if (!Composer\InstalledVersions::isInstalled('logbrew/sdk')) {
     fwrite(STDERR, "logbrew/sdk is not installed according to Composer\n");
@@ -301,8 +301,8 @@ $supportDraft = SupportTicketDraft::create(
     diagnostics: [
         'author' . 'ization' => 'local-example-auth-value',
         'endpoint' => 'https://api.example.com/v1/events?sample=1#fragment',
-        'localPath' => '/Users/example/project/.env',
-        'debugNote' => 'failed at https://api.example.com/v1/events?sample=1 from /Users/example/project/.env',
+        'localPath' => '/home/example/project/.env',
+        'debugNote' => 'failed at https://api.example.com/v1/events?sample=1 from /home/example/project/.env',
         'safe' => 'kept',
     ]
 );
@@ -324,7 +324,7 @@ foreach ([
     'local-example-auth-value',
     'api.example.com',
     'sample=1',
-    '/Users/example/project',
+    '/home/example/project',
 ] as $needle) {
     if (str_contains($supportJson, $needle)) {
         fwrite(STDERR, "support ticket draft leaked {$needle}\n");
