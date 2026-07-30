@@ -127,6 +127,7 @@ class ReleaseArtifactReceiptTests(unittest.TestCase):
             "crates": ["crates:logbrew"],
             "go": ["go:github.com/LogBrewCo/sdk/go/logbrew"],
             "maven": ["maven:co.logbrew:logbrew-sdk"],
+            "npm-nestjs": ["npm:@logbrew/nestjs"],
             "nuget": ["nuget:LogBrew", "nuget:LogBrew.HttpClient"],
             "packagist": ["packagist:logbrew/sdk"],
             "pypi": [

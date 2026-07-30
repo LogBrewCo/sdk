@@ -34,6 +34,7 @@ FAMILIES = {
     "crates": (Artifact("crates:logbrew", "0.crate"),),
     "go": (Artifact("go:github.com/LogBrewCo/sdk/go/logbrew", "0.zip"),),
     "maven": (Artifact("maven:co.logbrew:logbrew-sdk", "0.jar"),),
+    "npm-nestjs": (Artifact("npm:@logbrew/nestjs", "0.tgz"),),
     "nuget": (
         Artifact("nuget:LogBrew", "0.nupkg"),
         Artifact("nuget:LogBrew.HttpClient", "1.nupkg"),
