@@ -179,6 +179,7 @@ node --check node_modules/@logbrew/react-native/native-bridge.cjs
 node --check node_modules/@logbrew/react-native/resource-fetch.js
 node --check node_modules/@logbrew/react-native/resource-fetch.cjs
 node -e 'const native = require("@logbrew/react-native"); if (typeof native.createLogBrewReactNativeClient !== "function" || typeof native.createReactNativeFetchTransport !== "function" || typeof native.createTraceparentFetch !== "function" || typeof native.createReactNativeTraceparent !== "function" || typeof native.createReactNativeTraceContext !== "function" || typeof native.getActiveLogBrewTrace !== "function" || typeof native.withLogBrewTrace !== "function" || typeof native.createReactNativeTraceHeaders !== "function" || typeof native.captureReactNativeError !== "function" || typeof native.captureReactNativeAction !== "function" || typeof native.captureReactNativeNetwork !== "function" || typeof native.captureReactNativeNavigationSpan !== "function" || typeof native.captureReactNativeResourceSpan !== "function" || typeof native.createReactNavigationSpanListener !== "function" || typeof native.createReactNativeErrorEvent !== "function" || typeof native.createReactNativeActionEvent !== "function" || typeof native.createReactNativeNetworkEvent !== "function" || typeof native.createReactNativeNavigationSpanEvent !== "function" || typeof native.createReactNativeResourceSpanEvent !== "function" || typeof native.default !== "object" || typeof native.default.createReactNativeFetchTransport !== "function") process.exit(1)'
+node -e 'const native = require("@logbrew/react-native"); const client = native.createLogBrewReactNativeClient({ clientKey: "LOGBREW_CLIENT_KEY" }); native.captureScreenView(client, "Checkout Complete", { timestamp: "2026-06-02T10:00:00Z" }); const [event] = JSON.parse(client.previewJson()).events; if (event.attributes.name !== "screen:checkout_complete" || event.attributes.metadata.screen !== "Checkout Complete") process.exit(1)'
 node -e 'const instrumentation = require("@logbrew/react-native/instrumentation"); if (typeof instrumentation.createLogBrewReactNativeInstrumentation !== "function" || typeof instrumentation.default !== "object") process.exit(1)'
 node -e 'const lifecycle = require("@logbrew/react-native/lifecycle"); if (typeof lifecycle.createAppStateLifecycleSpanListener !== "function" || typeof lifecycle.captureReactNativeLifecycleSpan !== "function" || typeof lifecycle.createReactNativeLifecycleSpanEvent !== "function") process.exit(1)'
 node -e 'const globalErrors = require("@logbrew/react-native/global-errors"); if (typeof globalErrors.createLogBrewReactNativePromiseRejectionHandlers !== "function" || typeof globalErrors.installLogBrewReactNativeGlobalErrorHandler !== "function" || typeof globalErrors.default !== "object") process.exit(1)'
@@ -1092,6 +1093,16 @@ for index in (2, 3, 5, 6, 7, 8, 9, 10, 11):
 screen = events[5]["attributes"]
 if screen["name"] != "screen:Checkout" or screen["metadata"]["platform"] != "ios":
     raise SystemExit(f"unexpected screen event: {screen}")
+screen_with_spaces = next(
+    (event["attributes"] for event in events if event["id"] == "evt_action_checkout_complete"),
+    None,
+)
+if (
+    screen_with_spaces is None
+    or screen_with_spaces["name"] != "screen:checkout_complete"
+    or screen_with_spaces["metadata"]["screen"] != "Checkout Complete"
+):
+    raise SystemExit(f"unexpected spaced screen event: {screen_with_spaces}")
 if events[6]["attributes"]["metadata"]["appState"] != "background":
     raise SystemExit("missing background app-state event")
 handled = events[9]["attributes"]

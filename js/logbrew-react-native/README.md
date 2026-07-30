@@ -71,6 +71,11 @@ export async function verifyLogBrewSetup() {
 }
 ```
 
+Screen labels remain available as the original `metadata.screen` value. The
+helper preserves an already machine-safe action name and otherwise normalizes
+and bounds it for hosted ingestion, so labels such as `Checkout Complete` do
+not cause a rejected batch.
+
 For mobile apps, prefer an app-scoped public key through `clientKey`. Expo
 inlines `EXPO_PUBLIC_*` values into the app, so never use a server key there.
 `apiKey` is still accepted for compatibility with lower-level SDK examples.

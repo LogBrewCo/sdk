@@ -16,6 +16,8 @@ import {
 const DEFAULT_SDK_NAME = "logbrew-react-native";
 const DEFAULT_SDK_VERSION = "0.1.0";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
+const MAX_ACTION_NAME_LENGTH = 64;
+const SCREEN_ACTION_PREFIX = "screen:";
 const BACKGROUND_APP_STATES = new Set(["background", "inactive"]);
 const LogBrewNativeContext = React.createContext(null);
 const activeTraceScopes = [];
@@ -294,7 +296,7 @@ export function captureScreenView(client, screenName, {
   requireClient(client);
   requireNonEmpty("screen name", screenName);
   client.action(id, timestamp, {
-    name: `screen:${screenName}`,
+    name: screenActionName(screenName),
     status,
     metadata: {
       ...getReactNativeContext({ platform, appState }),
@@ -1010,6 +1012,22 @@ function slugify(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "") || "event";
+}
+
+function screenActionName(screenName) {
+  const directName = `${SCREEN_ACTION_PREFIX}${screenName}`;
+  if (
+    directName.length <= MAX_ACTION_NAME_LENGTH
+    && /^[a-z0-9_.:-]+$/i.test(directName)
+  ) {
+    return directName;
+  }
+
+  const maxScreenSegmentLength = MAX_ACTION_NAME_LENGTH - SCREEN_ACTION_PREFIX.length;
+  const screenSegment = slugify(screenName)
+    .slice(0, maxScreenSegmentLength)
+    .replace(/_+$/g, "") || "event";
+  return `${SCREEN_ACTION_PREFIX}${screenSegment}`;
 }
 
 function statusFromStatusCode(statusCode) {
